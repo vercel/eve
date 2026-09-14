@@ -3,11 +3,11 @@ import type { ModelMessage } from "ai";
 import { buildResolveContext } from "#context/dynamic-resolve-context.js";
 import type { AlsContext } from "#context/container.js";
 import type { ContextKey } from "#context/key.js";
+import { isMockModel } from "#internal/mock-model-identity.js";
 import {
   LiveStepDynamicModelSelectionKey,
   SessionDynamicModelReferenceKey,
   TurnDynamicModelReferenceKey,
-  type LiveDynamicModelSelection,
 } from "#context/keys.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import type {
@@ -21,7 +21,7 @@ import {
   type ResolvedRuntimeModelSelection,
   type RuntimeModelResolutionScope,
 } from "#runtime/agent/resolve-model.js";
-import type { DynamicToolEventName } from "#shared/dynamic-tool-definition.js";
+import type { DynamicToolEventName } from "#dynamic/definition.js";
 import { toErrorMessage } from "#shared/errors.js";
 
 const ALLOWED_DYNAMIC_MODEL_EVENTS = new Set<DynamicToolEventName>([
@@ -29,8 +29,6 @@ const ALLOWED_DYNAMIC_MODEL_EVENTS = new Set<DynamicToolEventName>([
   "turn.started",
   "step.started",
 ]);
-
-export type ActiveDynamicModelSelection = LiveDynamicModelSelection;
 
 const DYNAMIC_MODEL_SELECTION_ERROR_CODE = "EVE_DYNAMIC_MODEL_SELECTION_FAILED";
 
@@ -67,27 +65,6 @@ function durableKeyForEvent(
     case "step.started":
       return undefined;
   }
-}
-
-export function getActiveDynamicModelSelection(ctx: {
-  get<T>(key: ContextKey<T>): T | undefined;
-}): ActiveDynamicModelSelection | null {
-  const step = ctx.get(LiveStepDynamicModelSelectionKey);
-  if (step !== undefined && step !== null) {
-    return step;
-  }
-
-  const turn = ctx.get(TurnDynamicModelReferenceKey);
-  if (turn !== undefined && turn !== null) {
-    return { reference: turn };
-  }
-
-  const session = ctx.get(SessionDynamicModelReferenceKey);
-  if (session !== undefined && session !== null) {
-    return { reference: session };
-  }
-
-  return null;
 }
 
 export async function dispatchDynamicModelEvent(input: {
@@ -134,9 +111,12 @@ function setSelectionForEvent(
   selection: ResolvedRuntimeModelSelection | null,
 ): void {
   if (eventType === "step.started") {
-    // In mock mode drop the live instance so the mock adapter keeps precedence.
+    // Replace real providers in mock mode, but keep explicitly scripted responders.
     const stored =
-      selection !== null && selection.model !== undefined && shouldMockAuthoredRuntimeModels()
+      selection !== null &&
+      selection.model !== undefined &&
+      !isMockModel(selection.model) &&
+      shouldMockAuthoredRuntimeModels()
         ? { reference: selection.reference }
         : selection;
     ctx.setVirtualContext(LiveStepDynamicModelSelectionKey, stored);

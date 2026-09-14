@@ -7,8 +7,9 @@ import type { ClearStatus } from "#protocol/clear-session.js";
 import type { CompactStatus } from "#protocol/compact-session.js";
 import type { ResetStatus } from "#protocol/reset-session.js";
 import type { TurnPolicy } from "#channel/types.js";
-import type { InputRequest, InputResponse } from "#runtime/input/types.js";
+import type { InputRequest, InputResponse } from "#shared/input.js";
 import type { JsonObject } from "#shared/json.js";
+export type { HealthResult } from "#client/health-schema.js";
 
 export type {
   AgentInfoChannelEntry,
@@ -16,12 +17,12 @@ export type {
   AgentInfoConnectionEntry,
   AgentInfoDynamicResolverEntry,
   AgentInfoEntry,
-  AgentInfoFrameworkChannelEntry,
-  AgentInfoFrameworkToolEntry,
   AgentInfoHookEntry,
   AgentInfoInstructions,
   AgentInfoInstructionsEntry,
+  AgentInfoMemoryEntry,
   AgentInfoResult,
+  AgentInfoRemoteAgentEntry,
   AgentInfoSandboxEntry,
   AgentInfoScheduleEntry,
   AgentInfoSkillEntry,
@@ -113,12 +114,13 @@ export interface SendTurnOptions<TOutput = unknown> {
   readonly turnPolicy?: TurnPolicy;
 
   /**
-   * Ephemeral client/page context for the next model call only.
+   * Ephemeral client/page context for the current turn.
    *
    * Strings are rendered as user-role model context messages. Objects are
    * JSON-serialized into one user-role model context message. Client context
    * rides along with a message or HITL response; it does not dispatch a turn by
-   * itself and is never persisted to durable session history.
+   * itself, remains available to every model call in the turn, and is never
+   * persisted to durable session history or exposed to later turns.
    */
   readonly clientContext?: string | readonly string[] | JsonObject;
 
@@ -308,12 +310,6 @@ export interface MessageResult<TOutput = unknown> {
 /**
  * Response from the health endpoint.
  */
-export interface HealthResult {
-  readonly ok: true;
-  readonly status: "ready";
-  readonly workflowId: string;
-}
-
 /**
  * Serializable cursor for one fixed, ID-addressed client session.
  */

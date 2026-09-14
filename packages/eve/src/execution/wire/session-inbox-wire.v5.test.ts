@@ -1,0 +1,230 @@
+import { describe, expect, it } from "vitest";
+import { z } from "#compiled/zod/index.js";
+
+import { sessionInboxWire } from "#execution/wire/session-inbox-encoder.js";
+import { sessionInboxWire as sessionInboxWireDecoder } from "#execution/wire/session-inbox-wire.js";
+import { sessionInboxWireV5Schema } from "#execution/wire/session-inbox-wire.v5.js";
+
+const agentRequest = {
+  replyTo: "agent-reply",
+  request: {
+    input: { message: "Find it", target: "research" },
+    invocationId: "call-1:research",
+    kind: "agent-invoke" as const,
+  },
+  taskId: "task-1",
+};
+const authorizationEvent = {
+  hookPayload: {
+    callId: "call-1",
+    childSessionId: "child-1",
+    event: {
+      data: {
+        description: "Authorize Linear",
+        name: "linear",
+        sequence: 1,
+        stepIndex: 2,
+        turnId: "turn-child",
+      },
+      type: "authorization.required" as const,
+    },
+    kind: "subagent-authorization-event" as const,
+    subagentName: "research",
+  },
+  taskId: "task-1",
+};
+const inputRequest = {
+  replyTo: "answer-hook",
+  request: { kind: "question", prompt: "Continue?", requestId: "request-1" },
+  sequence: 2,
+  stepIndex: 3,
+  taskId: "task-1",
+  turnId: "turn-1",
+};
+
+describe("session inbox wire v5", () => {
+  it("round-trips task-owned agent requests, authorization events, and input requests", () => {
+    const task = {
+      agentRequests: [
+        agentRequest,
+        {
+          replyTo: "agent-reply",
+          request: {
+            kind: "agent-settled" as const,
+            result: {
+              callId: "call-1",
+              kind: "subagent-result" as const,
+              origin: "child" as const,
+              outcome: {
+                kind: "terminal" as const,
+                result: { kind: "succeeded" as const, output: "done" },
+                usageDelta: {
+                  cacheReadTokens: 0,
+                  cacheWriteTokens: 0,
+                  costUsd: 0.25,
+                  inputTokens: 10,
+                  outputTokens: 2,
+                },
+              },
+              output: "done",
+              subagentName: "research",
+            },
+          },
+          taskId: "task-1",
+        },
+      ],
+      authorizationEvents: [authorizationEvent],
+      inputRequests: [inputRequest],
+    };
+    const wire = sessionInboxWire.encode({ kind: "send", payload: { task } }, { version: 5 });
+
+    expect(sessionInboxWireDecoder.decode(wire)).toMatchObject({
+      kind: "deliver",
+      payloads: [{ task }],
+    });
+  });
+
+  it("rejects malformed task authorization events", () => {
+    expect(() =>
+      sessionInboxWire.encode(
+        {
+          kind: "send",
+          payload: {
+            task: { authorizationEvents: [{ hookPayload: { kind: "other" }, taskId: "task-1" }] },
+          } as never,
+        },
+        { version: 5 },
+      ),
+    ).toThrow(/wire version 5/);
+  });
+
+  it.each([1, 2, 3, 4] as const)("omits token cost for v%i consumers", (version) => {
+    const wire = sessionInboxWire.encode(
+      {
+        kind: "send",
+        payload: {
+          task: {
+            views: [
+              {
+                metadata: { kind: "subagent", name: "research" },
+                status: "working",
+                taskId: "task-1",
+                usage: {
+                  cacheReadTokens: 0,
+                  cacheWriteTokens: 0,
+                  costUsd: 0.25,
+                  inputTokens: 10,
+                  outputTokens: 2,
+                },
+              },
+            ],
+          },
+        },
+      } as never,
+      { version },
+    ) as { payload: { task: { views: Array<{ usage: object }> } } };
+
+    expect(wire.payload.task.views[0]?.usage).not.toHaveProperty("costUsd");
+  });
+
+  it.each([1, 2, 3] as const)(
+    "rejects v5 task agent requests falsely declared as immutable v%i",
+    (version) => {
+      expect(() =>
+        sessionInboxWireDecoder.decode({
+          kind: "deliver",
+          payload: { task: { agentRequests: [agentRequest] } },
+          payloads: [{ task: { agentRequests: [agentRequest] } }],
+          version,
+        }),
+      ).toThrow(new RegExp(`does not match wire version ${version}`));
+    },
+  );
+
+  it.each([1, 2, 3] as const)(
+    "rejects v5 task input requests falsely declared as immutable v%i",
+    (version) => {
+      const { request: _request, ...inputRequestBase } = inputRequest;
+      for (const request of [inputRequest, { ...inputRequestBase, requests: [] }]) {
+        expect(() =>
+          sessionInboxWireDecoder.decode({
+            kind: "deliver",
+            payload: { task: { inputRequests: [request] } },
+            payloads: [{ task: { inputRequests: [request] } }],
+            version,
+          }),
+        ).toThrow(new RegExp(`does not match wire version ${version}`));
+      }
+    },
+  );
+
+  it("round-trips batched task input requests", () => {
+    const { request: _request, ...batch } = inputRequest;
+    const batchedRequest = { ...batch, requests: [inputRequest.request] };
+
+    expect(
+      sessionInboxWireDecoder.decode({
+        kind: "deliver",
+        payload: { task: { inputRequests: [batchedRequest] } },
+        payloads: [{ task: { inputRequests: [batchedRequest] } }],
+        version: 5,
+      }),
+    ).toMatchObject({
+      payloads: [{ task: { inputRequests: [batchedRequest] } }],
+    });
+  });
+
+  it("carries current task messages through the stable raw-send fast path", () => {
+    const wire = sessionInboxWire.encode(
+      {
+        kind: "send",
+        payload: { task: { agentRequests: [agentRequest], inputRequests: [inputRequest] } },
+      },
+      { variant: "send", version: 0 },
+    );
+
+    expect(wire).toMatchObject({
+      kind: "send",
+      payload: { task: { agentRequests: [agentRequest], inputRequests: [inputRequest] } },
+    });
+    expect(sessionInboxWireDecoder.decode(wire)).toMatchObject({
+      kind: "deliver",
+      payloads: [{ task: { agentRequests: [agentRequest], inputRequests: [inputRequest] } }],
+    });
+  });
+
+  it("round-trips accepted deployment provenance", () => {
+    const delivery = {
+      acceptedDeploymentId: "dpl_current",
+      channelKind: "channel:webhook",
+      channelName: "webhook",
+      deliveryId: "delivery-1",
+    };
+    const wire = sessionInboxWire.encode(
+      { delivery, kind: "send", payload: { message: "hello" } },
+      { version: 5 },
+    );
+
+    expect(sessionInboxWireDecoder.decode(wire)).toMatchObject({
+      deliveryMetadata: [{ ...delivery, payloadIndex: 0 }],
+      kind: "deliver",
+    });
+  });
+
+  it("pins the complete schema byte for byte", () => {
+    expect(
+      stableStringify(
+        z.toJSONSchema(sessionInboxWireV5Schema, { io: "input", unrepresentable: "any" }),
+      ),
+    ).toMatchSnapshot();
+  });
+});
+
+function stableStringify(value: unknown): string {
+  return JSON.stringify(value, (_key, item) => {
+    if (item === null || typeof item !== "object" || Array.isArray(item)) return item;
+    return Object.fromEntries(
+      Object.entries(item).sort(([left], [right]) => left.localeCompare(right)),
+    );
+  });
+}

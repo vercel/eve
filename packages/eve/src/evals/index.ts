@@ -11,8 +11,8 @@ export { mockModel } from "#evals/mock-model.js";
 // Types
 // ---------------------------------------------------------------------------
 
-export type { RuntimeIdentity } from "#protocol/message.js";
-export type { InputRequest } from "#runtime/input/types.js";
+export type { RuntimeIdentity, RuntimeTraceContext } from "#protocol/message.js";
+export type { InputRequest } from "#shared/input.js";
 export type { CancelSessionResult } from "#client/types.js";
 
 export type {
@@ -53,6 +53,7 @@ export type {
   EveEvalTargetCapabilities,
   EveEvalTargetHandle,
   EveEvalTaskResult,
+  EveEvalTraceContext,
   EveEvalToolCall,
   EveEvalTurn,
   EveEvalStreamEvent,

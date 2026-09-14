@@ -5,11 +5,8 @@ import { describe, expect, it } from "vitest";
 import { getPendingInputRequestIds } from "#harness/input-requests.js";
 import { createToolLoopHarness } from "#harness/tool-loop.js";
 import type { HarnessSession, ToolLoopHarnessConfig } from "#harness/types.js";
-import {
-  ASK_QUESTION_INPUT_SCHEMA,
-  ASK_QUESTION_TOOL_DEFINITION,
-} from "#runtime/framework-tools/ask-question.js";
-import { serializeInputSchema } from "#shared/tool-schema.js";
+import { ASK_QUESTION_INPUT_SCHEMA, askQuestion } from "#tools/framework/ask-question.js";
+import { serializeInputSchema } from "#tools/schema.js";
 
 const usage = {
   inputTokens: {
@@ -90,7 +87,11 @@ describe("framework tool input validation (real AI SDK)", () => {
       [
         "ask_question",
         {
-          description: ASK_QUESTION_TOOL_DEFINITION.description,
+          behavior: {
+            availability: ["requires-request-input"],
+            handling: { kind: "request-input", request: "question" },
+          },
+          description: askQuestion.description,
           inputSchema: ASK_QUESTION_INPUT_SCHEMA,
           name: "ask_question",
         },
@@ -108,7 +109,7 @@ describe("framework tool input validation (real AI SDK)", () => {
         system: "You are a test assistant.",
         tools: [
           {
-            description: ASK_QUESTION_TOOL_DEFINITION.description,
+            description: askQuestion.description,
             inputSchema: serializeInputSchema(ASK_QUESTION_INPUT_SCHEMA),
             name: "ask_question",
           },

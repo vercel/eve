@@ -6,6 +6,19 @@ import type { RemoteAuthCompletion, RemoteConnectionController } from "./remote-
 import type { AgentTUIRenderer, PromptCommandHandlerContext } from "./runner.js";
 import type { SetupFlowRenderer } from "./setup-flow.js";
 
+vi.mock("#setup/flows/model.js", () => ({
+  modelChangeRefusalForUneditableModel: vi.fn(),
+}));
+vi.mock("#compiler/model-catalog.js", () => ({
+  createCompiledRuntimeModelCatalogLoader: vi.fn(),
+}));
+vi.mock("#discover/discover-agent.js", () => ({
+  discoverAgent: vi.fn(),
+}));
+vi.mock("#source-change/static-source-change.js", () => ({
+  createStaticSourceChange: vi.fn(),
+}));
+
 const APP_ROOT = "/tmp/weather-agent";
 const LOCAL_TARGET = {
   kind: "local",
@@ -44,7 +57,7 @@ function setupFlowRenderer() {
     renderOutput: vi.fn(),
     withInheritedStdio: (task) => task(),
     waitForInterrupt: () => ({
-      promise: new Promise<void>(() => {}),
+      promise: new Promise<"escape" | "ctrl-c">(() => {}),
       dispose: vi.fn(),
     }),
   } satisfies SetupFlowRenderer;
@@ -129,7 +142,7 @@ describe("createPromptCommandHandler", () => {
 
   it("forwards automatic provider entry and model-access changes", async () => {
     const runTuiSetupCommand = vi.fn(async () => ({
-      message: "Connected to AI Gateway via AI_GATEWAY_API_KEY in .env.local.",
+      message: "AI Gateway via API key selected.",
       preserveFlowDiagnostics: false,
       effect: { kind: "model-access-changed" } as const,
     }));
@@ -150,7 +163,7 @@ describe("createPromptCommandHandler", () => {
           { ...context({ setupFlow }), initialModelStep: "provider" },
         ),
       ).resolves.toEqual({
-        message: "Connected to AI Gateway via AI_GATEWAY_API_KEY in .env.local.",
+        message: "AI Gateway via API key selected.",
         effect: { kind: "model-access-changed" },
       });
       expect(runTuiSetupCommand).toHaveBeenCalledWith(
@@ -158,6 +171,43 @@ describe("createPromptCommandHandler", () => {
       );
       expect(setupFlow.begin).toHaveBeenCalledWith("Configure the agent model", "pulse");
       expect(setupFlow.end).toHaveBeenCalledWith({ preserveDiagnostics: false });
+    } finally {
+      vi.doUnmock("./setup-commands.js");
+      vi.resetModules();
+    }
+  });
+
+  it("routes a /add argument to the registry flow's initial address", async () => {
+    const runTuiSetupCommand = vi.fn(async () => ({
+      message: "Added Slack",
+      preserveFlowDiagnostics: true,
+    }));
+    vi.doMock("./setup-commands.js", () => ({
+      SETUP_FLOW_CONFIG: { add: { title: "Add to your agent", indicator: "pulse" } },
+      runTuiSetupCommand,
+    }));
+
+    try {
+      const setupFlow = setupFlowRenderer();
+      const handler = createPromptCommandHandler({ target: LOCAL_TARGET });
+
+      await handler.handle(
+        { type: "extension", name: "add", argument: "channel/slack" },
+        context({ setupFlow }),
+      );
+      await handler.handle(
+        { type: "extension", name: "add", argument: "" },
+        context({ setupFlow }),
+      );
+
+      expect(runTuiSetupCommand).toHaveBeenNthCalledWith(
+        1,
+        expect.objectContaining({ command: "add", initialRegistryAddress: "channel/slack" }),
+      );
+      expect(runTuiSetupCommand).toHaveBeenNthCalledWith(
+        2,
+        expect.not.objectContaining({ initialRegistryAddress: expect.anything() }),
+      );
     } finally {
       vi.doUnmock("./setup-commands.js");
       vi.resetModules();
@@ -239,7 +289,7 @@ describe("createPromptCommandHandler", () => {
   it("reports mutations that completed before remote /vc:login was interrupted", async () => {
     const setupFlow = {
       ...setupFlowRenderer(),
-      waitForInterrupt: () => ({ promise: Promise.resolve(), dispose: vi.fn() }),
+      waitForInterrupt: () => ({ promise: Promise.resolve("ctrl-c" as const), dispose: vi.fn() }),
     } satisfies SetupFlowRenderer;
     const runLoginFlow = vi.fn(async () => ({ kind: "cancelled" as const }));
     const remoteConnection: RemoteConnectionController = {

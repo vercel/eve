@@ -10,20 +10,245 @@ import {
   createAuthorizationCompletedEvent,
   createAuthorizationRequiredEvent,
   createContextClearedEvent,
+  createInputResolvedEvent,
+  createMessageAppendedEvent,
   createMessageReceivedEvent,
+  createReasoningAppendedEvent,
   createResultCompletedEvent,
   createSessionWaitingEvent,
   createStepStartedEvent,
+  createSubagentCalledEvent,
   createTurnCancelledEvent,
   encodeMessageStreamEvent,
   stampMessageStreamEvent,
 } from "#protocol/message.js";
+import {
+  normalizeMessageStreamEvent,
+  normalizePersistedMessageStreamEvent,
+  type MessageStreamEventForVersion,
+} from "#protocol/message-version.js";
 import { isEventId } from "#protocol/event-id.js";
 import { createEveConnectionCallbackRoutePath } from "#protocol/routes.js";
 
 describe("message stream protocol", () => {
   it("pins the stream version for timed session events", () => {
-    expect(EVE_MESSAGE_STREAM_VERSION).toBe("21");
+    expect(EVE_MESSAGE_STREAM_VERSION).toBe("25");
+  });
+
+  it.each(["21", "22", "23", "24"] as const)(
+    "normalizes v%s cumulative appends into the v25 delta contract",
+    (version) => {
+      const legacyMessage = {
+        data: {
+          messageDelta: "lo",
+          messageSoFar: "Hello",
+          sequence: 3,
+          stepIndex: 0,
+          turnId: "turn_1",
+        },
+        meta: { at: "2026-09-02T00:00:00.000Z", id: "evt_legacy_message" },
+        type: "message.appended",
+      } satisfies MessageStreamEventForVersion<typeof version>;
+      const legacyReasoning = {
+        data: {
+          reasoningDelta: "ink",
+          reasoningSoFar: "think",
+          sequence: 4,
+          stepIndex: 0,
+          turnId: "turn_1",
+        },
+        meta: { at: "2026-09-02T00:00:00.001Z", id: "evt_legacy_reasoning" },
+        type: "reasoning.appended",
+      } satisfies MessageStreamEventForVersion<typeof version>;
+
+      expect(normalizeMessageStreamEvent(version, legacyMessage)).toEqual({
+        data: {
+          messageDelta: "lo",
+          sequence: 3,
+          stepIndex: 0,
+          turnId: "turn_1",
+        },
+        meta: legacyMessage.meta,
+        type: "message.appended",
+      });
+      expect(normalizePersistedMessageStreamEvent(legacyReasoning)).toEqual({
+        data: {
+          reasoningDelta: "ink",
+          sequence: 4,
+          stepIndex: 0,
+          turnId: "turn_1",
+        },
+        meta: legacyReasoning.meta,
+        type: "reasoning.appended",
+      });
+    },
+  );
+
+  it("normalizes v24 tool-input appends into plain deltas", () => {
+    const legacy = {
+      data: {
+        callId: "call_1",
+        inputTextDelta: "lo",
+        inputTextOffset: 3,
+        sequence: 4,
+        stepIndex: 0,
+        toolName: "render",
+        turnId: "turn_1",
+      },
+      meta: { at: "2026-09-02T00:00:00.001Z", id: "evt_legacy_input" },
+      type: "action.input.appended",
+    } satisfies MessageStreamEventForVersion<"24">;
+
+    expect(normalizeMessageStreamEvent("24", legacy)).toEqual({
+      data: {
+        callId: "call_1",
+        inputTextDelta: "lo",
+        sequence: 4,
+        stepIndex: 0,
+        toolName: "render",
+        turnId: "turn_1",
+      },
+      meta: legacy.meta,
+      type: "action.input.appended",
+    });
+  });
+
+  it("strips repeated v24 zero offsets without adding stream markers", () => {
+    const normalize = (inputTextDelta: string) => {
+      const event = normalizeMessageStreamEvent("24", {
+        data: {
+          callId: "call_1",
+          inputTextDelta,
+          inputTextOffset: 0,
+          sequence: 4,
+          stepIndex: 0,
+          toolName: "render",
+          turnId: "turn_1",
+        },
+        meta: { at: "2026-09-02T00:00:00.001Z", id: `evt_${inputTextDelta.length}` },
+        type: "action.input.appended",
+      });
+      if (event.type !== "action.input.appended") {
+        throw new TypeError(`Expected an action input append, received ${event.type}.`);
+      }
+      return event;
+    };
+
+    expect(normalize("").data).toEqual({
+      callId: "call_1",
+      inputTextDelta: "",
+      sequence: 4,
+      stepIndex: 0,
+      toolName: "render",
+      turnId: "turn_1",
+    });
+    expect(normalize("{").data).toEqual({
+      callId: "call_1",
+      inputTextDelta: "{",
+      sequence: 4,
+      stepIndex: 0,
+      toolName: "render",
+      turnId: "turn_1",
+    });
+  });
+
+  it("rejects append variants that contradict their declared stream version", () => {
+    const v24ToolInput = {
+      data: {
+        callId: "call_1",
+        inputTextDelta: "{",
+        inputTextOffset: 0,
+        sequence: 4,
+        stepIndex: 0,
+        toolName: "render",
+        turnId: "turn_1",
+      },
+      meta: { at: "2026-09-02T00:00:00.001Z", id: "evt_v24_input" },
+      type: "action.input.appended",
+    } satisfies MessageStreamEventForVersion<"24">;
+    const hybridV25 = {
+      data: {
+        messageDelta: "Hel",
+        messageSoFar: "Hel",
+        sequence: 1,
+        stepIndex: 0,
+        turnId: "turn_1",
+      },
+      meta: { at: "2026-09-02T00:00:00.000Z", id: "evt_hybrid" },
+      type: "message.appended",
+    };
+    const parseWireEvent = <Version extends "23" | "25">(
+      event: object,
+    ): MessageStreamEventForVersion<Version> =>
+      JSON.parse(JSON.stringify(event)) as MessageStreamEventForVersion<Version>;
+
+    expect(() => normalizeMessageStreamEvent("23", parseWireEvent<"23">(v24ToolInput))).toThrow(
+      "Invalid action input append for stream version 23.",
+    );
+    expect(() => normalizeMessageStreamEvent("25", parseWireEvent<"25">(hybridV25))).toThrow(
+      "Invalid message append shape for stream version 25.",
+    );
+  });
+
+  it("rejects a v25 append without its delta", () => {
+    const malformed = JSON.parse(
+      JSON.stringify({
+        data: {
+          sequence: 1,
+          stepIndex: 0,
+          turnId: "turn_1",
+        },
+        meta: { at: "2026-09-02T00:00:00.000Z", id: "evt_malformed" },
+        type: "message.appended",
+      }),
+    ) as MessageStreamEventForVersion<"25">;
+
+    expect(() => normalizeMessageStreamEvent("25", malformed)).toThrow(
+      "Invalid message append delta for stream version 25.",
+    );
+  });
+
+  it("creates authoritative input resolution batches", () => {
+    expect(
+      createInputResolvedEvent({
+        resolutions: [
+          {
+            kind: "question",
+            outcome: "answered",
+            requestId: "request-1",
+            response: { requestId: "request-1", text: "Ship it" },
+          },
+          {
+            kind: "tool-approval",
+            outcome: "ignored",
+            requestId: "request-2",
+          },
+        ],
+        sequence: 1,
+        stepIndex: 2,
+        turnId: "turn-1",
+      }),
+    ).toEqual({
+      data: {
+        resolutions: [
+          {
+            kind: "question",
+            outcome: "answered",
+            requestId: "request-1",
+            response: { requestId: "request-1", text: "Ship it" },
+          },
+          {
+            kind: "tool-approval",
+            outcome: "ignored",
+            requestId: "request-2",
+          },
+        ],
+        sequence: 1,
+        stepIndex: 2,
+        turnId: "turn-1",
+      },
+      type: "input.resolved",
+    });
   });
 
   it("creates preliminary tool-result snapshots", () => {
@@ -52,6 +277,32 @@ describe("message stream protocol", () => {
         turnId: "turn_1",
       },
       type: "action.partial",
+    });
+  });
+
+  it("authors local and remote child stream paths", () => {
+    const input = {
+      callId: "call/1",
+      childSessionId: "child/1",
+      name: "research",
+      sequence: 1,
+      sessionId: "parent/1",
+      toolName: "research",
+      turnId: "turn_1",
+      workflowId: "workflow_1",
+    };
+
+    expect(createSubagentCalledEvent(input).data.childStreamPath).toBe(
+      "/eve/v1/session/child%2F1/stream",
+    );
+    expect(
+      createSubagentCalledEvent({
+        ...input,
+        remote: { resolverId: "remote/research", url: "https://remote.example" },
+      }).data,
+    ).toMatchObject({
+      childStreamPath: "/eve/v1/session/parent%2F1/subagents/call%2F1/child%2F1/stream",
+      remote: { resolverId: "remote/research", url: "https://remote.example" },
     });
   });
 
@@ -117,6 +368,41 @@ describe("message stream protocol", () => {
     const decoded = JSON.parse(new TextDecoder().decode(encoded).trim()) as typeof stamped;
 
     expect(decoded).toEqual(stamped);
+  });
+
+  it("keeps encoded text append bytes linear as streams grow", () => {
+    const encodedBytes = (chunkCount: number): number => {
+      const delta = "x".repeat(40);
+      let bytes = 0;
+
+      for (let index = 0; index < chunkCount; index += 1) {
+        const events = [
+          createMessageAppendedEvent({
+            messageDelta: delta,
+            sequence: 0,
+            stepIndex: 0,
+            turnId: "turn_0",
+          }),
+          createReasoningAppendedEvent({
+            reasoningDelta: delta,
+            sequence: 0,
+            stepIndex: 0,
+            turnId: "turn_0",
+          }),
+        ];
+
+        for (const event of events) {
+          bytes += encodeMessageStreamEvent(stampMessageStreamEvent(event)).byteLength;
+        }
+      }
+
+      return bytes;
+    };
+
+    const halfStreamBytes = encodedBytes(250);
+    const fullStreamBytes = encodedBytes(500);
+
+    expect(fullStreamBytes / halfStreamBytes).toBeLessThan(2.1);
   });
 
   it("mints a distinct id for each emission of an identical payload", () => {

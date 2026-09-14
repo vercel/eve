@@ -16,7 +16,7 @@ import {
   collectWorkflowInputFiles,
   type WorkflowBundleDiscoveredEntries,
 } from "#internal/workflow-bundle/builder-support.js";
-import { detectWorkflowPatterns } from "#internal/workflow-bundle/workflow-builders.js";
+import { findWorkflowPatterns } from "#internal/workflow-bundle/workflow-builders.js";
 import { installEveWorkflowQueueNamespace } from "#internal/workflow/queue-namespace.js";
 import { resolveLocalWorkflowWorldDataDirectory } from "#internal/workflow/local-world-data-directory.js";
 
@@ -56,6 +56,10 @@ async function discoverWorkflowEntries(): Promise<WorkflowBundleDiscoveredEntrie
   const inputFiles = [
     ...(await collectWorkflowInputFiles(resolvePackageSourceDirectoryPath("src/execution"))),
     ...(await collectWorkflowInputFiles(resolvePackageSourceDirectoryPath("src/internal/testing"))),
+    ...(await collectWorkflowInputFiles(
+      resolvePackageSourceDirectoryPath("src/runtime/subagents"),
+    )),
+    ...(await collectWorkflowInputFiles(resolvePackageSourceDirectoryPath("src/subagents"))),
     resolvePackageSourceFilePath("test/setup/compiled-artifacts-bootstrap.mjs"),
   ];
   const discovered: WorkflowBundleDiscoveredEntries = {
@@ -66,7 +70,7 @@ async function discoverWorkflowEntries(): Promise<WorkflowBundleDiscoveredEntrie
 
   for (const filePath of inputFiles) {
     const source = await readFile(filePath, "utf8");
-    const patterns = detectWorkflowPatterns(source);
+    const patterns = await findWorkflowPatterns(filePath, source);
 
     if (patterns.hasUseStep) {
       discovered.discoveredSteps.push(filePath);

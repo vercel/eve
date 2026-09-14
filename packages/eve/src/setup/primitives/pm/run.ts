@@ -5,6 +5,12 @@ import { armProcessAbort } from "../process-abort.js";
 import { createProcessOutputBuffer, type ProcessOutputHandler } from "../process-output.js";
 import { getPackageManagerStrategy } from "./index.js";
 import {
+  createPackageProcessStdoutCollector,
+  type PackageManagerProcessResult,
+  type PackageManagerProcessTermination,
+  resultSucceeded,
+} from "./process-result.js";
+import {
   hasAncestorPnpmWorkspace,
   PNPM_WORKSPACE_MEMBERSHIP_ARGUMENTS,
   pnpmWorkspaceClaimsProject,
@@ -13,189 +19,138 @@ import type { PackageManagerInstallOptions } from "./types.js";
 
 /** Output routing options for setup-owned package manager commands. */
 export interface RunPackageManagerOptions {
-  /** Streams command output to a parent-owned renderer instead of writing outside it. */
+  /** Streams raw command output to a parent-owned local renderer. */
   onOutput?: ProcessOutputHandler;
   /** Aborts the package-manager subprocess when setup is interrupted. */
   signal?: AbortSignal;
-  /**
-   * Closes stdin so the child cannot prompt — required when a repainting TUI
-   * owns the terminal in raw mode, where an inherited stdin would let the child
-   * contend for keystrokes.
-   */
+  /** Retains bounded stdout for a caller that must interpret a command's output. */
+  captureStdout?: boolean;
+  /** Closes stdin so the child cannot contend with a parent-owned TUI. */
   nonInteractive?: boolean;
-}
-
-/**
- * stdin is closed under {@link RunPackageManagerOptions.nonInteractive}; stdout
- * and stderr pipe to `onOutput` when present, else inherit the terminal. The
- * fully-inherited default keeps its `"inherit"` shorthand so it stays identical
- * to the prior behavior.
- */
-function stdioForRun(
-  options: RunPackageManagerOptions,
-): "inherit" | ["ignore" | "inherit", "pipe" | "inherit", "pipe" | "inherit"] {
-  if (options.onOutput) {
-    return [options.nonInteractive ? "ignore" : "inherit", "pipe", "pipe"];
-  }
-  return options.nonInteractive ? ["ignore", "inherit", "inherit"] : "inherit";
 }
 
 /** @deprecated Use {@link RunPackageManagerOptions}. */
 export type RunPnpmOptions = RunPackageManagerOptions;
 
-/** Runs the selected package manager in `projectRoot`. */
+function abortedTermination(signal: AbortSignal | undefined): PackageManagerProcessTermination {
+  const reason = signal?.reason;
+  return reason === undefined
+    ? { kind: "aborted" }
+    : { kind: "aborted", reason: reason instanceof Error ? reason.message : String(reason) };
+}
+
+/** Runs one package-manager command and returns its complete process evidence. */
 export function spawnPackageManager(
   kind: PackageManagerKind,
   projectRoot: string,
   args: readonly string[],
   options: RunPackageManagerOptions = {},
-): Promise<boolean> {
-  if (options.signal?.aborted === true) return Promise.resolve(false);
-  return new Promise<boolean>((resolvePromise) => {
-    const strategy = getPackageManagerStrategy(kind);
-    const managerArgs = strategy.prepareArguments(projectRoot, args);
-    const invocation = strategy.resolveInvocation(managerArgs);
-    const outputBuffer = options.onOutput && createProcessOutputBuffer(options.onOutput);
-    const child = spawn(invocation.command, [...invocation.args], {
-      cwd: projectRoot,
-      stdio: stdioForRun(options),
-      shell: invocation.shell,
-      signal: options.signal,
+): Promise<PackageManagerProcessResult> {
+  const strategy = getPackageManagerStrategy(kind);
+  const managerArgs = strategy.prepareArguments(projectRoot, args);
+  const invocation = strategy.resolveInvocation(managerArgs);
+  const command = {
+    executable: invocation.command,
+    args: [...invocation.args],
+    cwd: projectRoot,
+  };
+  if (options.signal?.aborted === true) {
+    return Promise.resolve({
+      command,
+      termination: abortedTermination(options.signal),
+      stdout: "",
     });
+  }
+
+  return new Promise((resolvePromise) => {
+    const captureOutput = options.onOutput !== undefined || options.nonInteractive === true;
+    const lineBuffer = options.onOutput && createProcessOutputBuffer(options.onOutput);
+    const stdoutCollector =
+      options.captureStdout === true ? createPackageProcessStdoutCollector({ command }) : undefined;
+    let child;
+    try {
+      child = spawn(invocation.command, [...invocation.args], {
+        cwd: projectRoot,
+        stdio: captureOutput
+          ? [options.nonInteractive ? "ignore" : "inherit", "pipe", "pipe"]
+          : "inherit",
+        shell: invocation.shell,
+        signal: options.signal,
+      });
+    } catch (error) {
+      lineBuffer?.flush();
+      const failure = error as NodeJS.ErrnoException;
+      resolvePromise({
+        command,
+        termination: { kind: "spawn-error", code: failure.code, message: failure.message },
+        stdout: "",
+      });
+      return;
+    }
     const disarmAbort = armProcessAbort(child, options.signal);
-    child.stdout?.on("data", (chunk: Buffer) => outputBuffer?.write("stdout", chunk));
-    child.stderr?.on("data", (chunk: Buffer) => outputBuffer?.write("stderr", chunk));
+    child.stdout?.on("data", (chunk: Buffer) => {
+      stdoutCollector?.write(chunk);
+      lineBuffer?.write("stdout", chunk);
+    });
+    child.stderr?.on("data", (chunk: Buffer) => lineBuffer?.write("stderr", chunk));
 
     let settled = false;
-    function settle(ok: boolean): void {
+    function settle(termination: PackageManagerProcessTermination): void {
       if (settled) return;
       settled = true;
-      outputBuffer?.flush();
-      resolvePromise(ok);
-    }
-    function reportFailure(message: string): void {
-      if (options.onOutput) {
-        options.onOutput({ stream: "stderr", text: message });
-      } else {
-        process.stderr.write(`\n${message}\n`);
-      }
+      disarmAbort();
+      stdoutCollector?.end();
+      lineBuffer?.flush();
+      resolvePromise(stdoutCollector?.result(termination) ?? { command, termination, stdout: "" });
     }
 
     child.on("error", (error: NodeJS.ErrnoException) => {
       if (options.signal?.aborted === true || error.name === "AbortError") {
-        return;
-      } else if (error.code === "ENOENT") {
-        disarmAbort();
-        reportFailure(`${kind} not found. Install it before running this step.`);
-        settle(false);
+        settle(abortedTermination(options.signal));
       } else {
-        disarmAbort();
-        reportFailure(`${kind} ${args.join(" ")} failed: ${error.message}`);
-        settle(false);
+        settle({ kind: "spawn-error", code: error.code, message: error.message });
       }
     });
-    child.on("close", (code) => {
-      disarmAbort();
-      settle(options.signal?.aborted === true ? false : code === 0);
+    child.on("close", (code, signal) => {
+      if (options.signal?.aborted === true) settle(abortedTermination(options.signal));
+      else if (typeof signal === "string") settle({ kind: "signal", signal });
+      else settle({ kind: "exit", code: code ?? 1 });
     });
   });
 }
 
 export interface RunInstallOptions extends RunPackageManagerOptions, PackageManagerInstallOptions {}
 
-interface PackageManagerCaptureResult {
-  ok: boolean;
-  stdout: string;
+export type PackageManagerInstallResult =
+  | { kind: "installed"; result: PackageManagerProcessResult }
+  | { kind: "workspace-probe-failed"; result: PackageManagerProcessResult }
+  | { kind: "workspace-probe-unrecognized"; result: PackageManagerProcessResult };
+
+export function packageManagerInstallSucceeded(result: PackageManagerInstallResult): boolean {
+  return result.kind === "installed" && resultSucceeded(result.result);
 }
 
-function capturePackageManager(
-  kind: PackageManagerKind,
-  projectRoot: string,
-  args: readonly string[],
-  options: RunPackageManagerOptions,
-): Promise<PackageManagerCaptureResult> {
-  if (options.signal?.aborted === true) {
-    return Promise.resolve({ ok: false, stdout: "" });
+/** Returns an actionable explanation when a package-manager command produced no output. */
+export function packageManagerInstallFailureMessage(
+  result: PackageManagerInstallResult,
+): string | undefined {
+  if (result.result.termination.kind === "spawn-error") {
+    return result.result.termination.code === "ENOENT"
+      ? `${result.result.command.executable} was not found. Install it before running this step.`
+      : `Could not start ${result.result.command.executable}: ${result.result.termination.message}`;
   }
-  return new Promise<PackageManagerCaptureResult>((resolvePromise) => {
-    const strategy = getPackageManagerStrategy(kind);
-    const managerArgs = strategy.prepareArguments(projectRoot, args);
-    const invocation = strategy.resolveInvocation(managerArgs);
-    const child = spawn(invocation.command, [...invocation.args], {
-      cwd: projectRoot,
-      stdio: ["ignore", "pipe", "pipe"],
-      shell: invocation.shell,
-      signal: options.signal,
-    });
-    const disarmAbort = armProcessAbort(child, options.signal);
-    const stdout: Buffer[] = [];
-    const outputBuffer = options.onOutput && createProcessOutputBuffer(options.onOutput);
-    child.stdout?.on("data", (chunk: Buffer) => stdout.push(chunk));
-    child.stderr?.on("data", (chunk: Buffer) => outputBuffer?.write("stderr", chunk));
-
-    let settled = false;
-    function settle(ok: boolean): void {
-      if (settled) return;
-      settled = true;
-      outputBuffer?.flush();
-      resolvePromise({ ok, stdout: Buffer.concat(stdout).toString("utf8") });
-    }
-    function reportFailure(message: string): void {
-      if (options.onOutput) {
-        options.onOutput({ stream: "stderr", text: message });
-      } else {
-        process.stderr.write(`\n${message}\n`);
-      }
-    }
-    function replayCapturedStdout(): void {
-      const captured = Buffer.concat(stdout);
-      if (captured.length === 0) return;
-      if (outputBuffer) {
-        outputBuffer.write("stdout", captured);
-        outputBuffer.flush();
-      } else {
-        process.stdout.write(captured);
-      }
-    }
-
-    child.on("error", (error: NodeJS.ErrnoException) => {
-      if (options.signal?.aborted === true || error.name === "AbortError") {
-        return;
-      } else {
-        disarmAbort();
-        replayCapturedStdout();
-        reportFailure(
-          error.code === "ENOENT"
-            ? `${kind} not found. Install it before running this step.`
-            : `${kind} ${args.join(" ")} failed: ${error.message}`,
-        );
-        settle(false);
-      }
-    });
-    child.on("close", (code) => {
-      disarmAbort();
-      if (!settled && code !== 0 && options.signal?.aborted !== true) {
-        replayCapturedStdout();
-        reportFailure(`${kind} ${args.join(" ")} exited with code ${code ?? "unknown"}.`);
-      }
-      settle(options.signal?.aborted === true ? false : code === 0);
-    });
-  });
+  if (result.kind === "workspace-probe-unrecognized") {
+    return "Could not determine whether the ancestor pnpm workspace includes this project.";
+  }
+  return undefined;
 }
 
-/**
- * Installs project dependencies using the selected package-manager strategy.
- *
- * pnpm resolves an unclaimed nested project as part of an ancestor workspace,
- * where `install` can exit successfully without touching the project and can
- * run the ancestor's lifecycle scripts. Membership is therefore established
- * before installation, so exactly one correctly scoped install runs.
- */
+/** Installs project dependencies and keeps workspace-probe evidence distinct. */
 export async function runPackageManagerInstall(
   kind: PackageManagerKind,
   projectRoot: string,
   options: RunInstallOptions = {},
-): Promise<boolean> {
+): Promise<PackageManagerInstallResult> {
   const strategy = getPackageManagerStrategy(kind);
   let installOptions = options;
   if (
@@ -203,26 +158,26 @@ export async function runPackageManagerInstall(
     options.ignoreWorkspace !== true &&
     hasAncestorPnpmWorkspace(projectRoot)
   ) {
-    const membership = await capturePackageManager(
+    const probe = await spawnPackageManager(
       kind,
       projectRoot,
       PNPM_WORKSPACE_MEMBERSHIP_ARGUMENTS,
-      options,
+      { ...options, captureStdout: true, nonInteractive: true },
     );
-    if (!membership.ok) return false;
-    const claimed = pnpmWorkspaceClaimsProject(membership.stdout, projectRoot);
-    if (claimed === undefined) {
-      options.onOutput?.({
-        stream: "stderr",
-        text: "Could not determine whether the ancestor pnpm workspace includes this project.",
-      });
-      return false;
-    }
-    if (!claimed) {
-      installOptions = { ...options, ignoreWorkspace: true };
-    }
+    if (!resultSucceeded(probe)) return { kind: "workspace-probe-failed", result: probe };
+    const claimed = pnpmWorkspaceClaimsProject(probe.stdout, projectRoot);
+    if (claimed === undefined) return { kind: "workspace-probe-unrecognized", result: probe };
+    if (!claimed) installOptions = { ...options, ignoreWorkspace: true };
   }
-  return spawnPackageManager(kind, projectRoot, strategy.installArguments(installOptions), options);
+  return {
+    kind: "installed",
+    result: await spawnPackageManager(
+      kind,
+      projectRoot,
+      strategy.installArguments(installOptions),
+      options,
+    ),
+  };
 }
 
 /** The argv that runs the locally installed eve binary's `dev` command. */
@@ -230,19 +185,17 @@ export function eveDevArguments(kind: PackageManagerKind): readonly string[] {
   return getPackageManagerStrategy(kind).devArguments();
 }
 
-/** Compatibility wrapper for callers that still explicitly require pnpm. */
 export function spawnPnpm(
   projectRoot: string,
   args: readonly string[],
   options: RunPackageManagerOptions = {},
-): Promise<boolean> {
+): Promise<PackageManagerProcessResult> {
   return spawnPackageManager("pnpm", projectRoot, args, options);
 }
 
-/** Compatibility wrapper for callers that still explicitly require pnpm. */
 export function runPnpmInstall(
   projectRoot: string,
   options: RunPackageManagerOptions = {},
-): Promise<boolean> {
+): Promise<PackageManagerInstallResult> {
   return runPackageManagerInstall("pnpm", projectRoot, options);
 }

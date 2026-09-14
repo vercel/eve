@@ -5,8 +5,8 @@ import { AuthKey, SessionKey, type SessionAuthContext } from "#context/keys.js";
 import {
   isConnectionAuthorizationFailedError,
   isConnectionAuthorizationRequiredError,
-} from "#public/connections/errors.js";
-import type { SessionContext } from "#public/definitions/callback-context.js";
+} from "#connections/errors.js";
+import type { SessionContext } from "#context/session-context.js";
 import type { ResolvedConnectionDefinition } from "#runtime/types.js";
 import { ConnectionAuthorizationTokensKey } from "#runtime/connections/authorization-tokens.js";
 import {
@@ -99,7 +99,8 @@ describe("McpConnectionClient", () => {
     };
     createMCPClient.mockResolvedValue(client);
 
-    const resolver = vi.fn(({ session, toolName }) => ({
+    const resolver = vi.fn(({ callId, session, toolName }) => ({
+      callId,
       sessionId: session.id,
       toolName,
     }));
@@ -121,7 +122,11 @@ describe("McpConnectionClient", () => {
         }),
       ]);
       await expect(
-        mcpClient.executeTool("lookup", { context: { from: "model" }, query: "boots" }),
+        mcpClient.executeTool(
+          "lookup",
+          { context: { from: "model" }, query: "boots" },
+          { callId: "call-1" },
+        ),
       ).resolves.toEqual({ ok: true });
     });
 
@@ -139,6 +144,7 @@ describe("McpConnectionClient", () => {
     expect(execute).toHaveBeenCalledWith(
       {
         context: {
+          callId: "call-1",
           sessionId: "session-1",
           toolName: "lookup",
         },
@@ -389,7 +395,7 @@ describe("McpConnectionClient authorization recovery", () => {
     createMCPClient.mockResolvedValue(client);
 
     const mcpClient = new McpConnectionClient(makeConnection());
-    const err = await mcpClient.executeTool("do_thing", {}).catch((e) => e);
+    const err = await mcpClient.executeTool("do_thing", {}, { callId: "call-1" }).catch((e) => e);
 
     expect(isConnectionAuthorizationRequiredError(err)).toBe(true);
   });
@@ -756,6 +762,30 @@ describe("resolveHeaders with an active context (principal resolution + cache)",
 
     const cached = ctx.get(ConnectionAuthorizationTokensKey);
     expect(cached).toEqual({ linear: { "user:idp:alice": { token: "t-1" } } });
+  });
+
+  it("isolates cached tokens for same-named resolved connection instances", async () => {
+    const ctx = ctxWithAuth(userAuth("alice"));
+    const instanceA = makeConnection({
+      authorization: staticToken("token-a"),
+      connectionName: "linear",
+      instanceId: "instance-a",
+    });
+    const instanceB = makeConnection({
+      authorization: staticToken("token-b"),
+      connectionName: "linear",
+      instanceId: "instance-b",
+    });
+
+    await contextStorage.run(ctx, async () => {
+      await expect(resolveHeaders(instanceA)).resolves.toEqual({ Authorization: "Bearer token-a" });
+      await expect(resolveHeaders(instanceB)).resolves.toEqual({ Authorization: "Bearer token-b" });
+    });
+
+    expect(ctx.get(ConnectionAuthorizationTokensKey)).toEqual({
+      "instance-a": { app: { token: "token-a" } },
+      "instance-b": { app: { token: "token-b" } },
+    });
   });
 
   it("uses separate cache slots for two users on the same connection", async () => {

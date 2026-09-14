@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { ChannelAdapter, ChannelAdapterContext, FetchFileResult } from "#channel/adapter.js";
 import { callAdapterEventHandler, defaultDeliverResult, getAdapterKind } from "#channel/adapter.js";
+import { attachClientContext, readClientContext } from "#internal/client-context.js";
 import { createSessionWaitingEvent } from "#protocol/message.js";
 
 describe("ChannelAdapter (fetchFile field)", () => {
@@ -79,6 +80,18 @@ describe("ChannelAdapter helpers", () => {
       message: "hi",
       context,
     });
+  });
+
+  it("defaultDeliverResult forwards ephemeral context separately", () => {
+    const ephemeralContext = ["Client context:\ncurrent page"];
+    const result = defaultDeliverResult(attachClientContext({ message: "hi" }, ephemeralContext));
+
+    expect(result).toMatchObject({
+      inputResponses: undefined,
+      message: "hi",
+      context: undefined,
+    });
+    expect(readClientContext(result)).toEqual(ephemeralContext);
   });
 
   it("defaultDeliverResult forwards context with inputResponses payloads", () => {

@@ -18,6 +18,27 @@
       "isIgnored": true
     },
     {
+      "label": "Separately published eve packages accept compatible eve patch releases",
+      "dependencies": ["eve"],
+      "packages": ["@eve/buzz-acp-adapter", "@eve/self-modification"],
+      "dependencyTypes": ["prod"],
+      "pinVersion": "workspace:^"
+    },
+    {
+      "label": "Compatibility shim accepts every newer eve release",
+      "dependencies": ["eve"],
+      "packages": ["@eve/self-modification"],
+      "dependencyTypes": ["peer"],
+      "pinVersion": "workspace:>=0.54.0"
+    },
+    {
+      "label": "Blooio is an externally published integration",
+      "dependencies": ["eve-channel-blooio"],
+      "packages": ["eve-docs"],
+      "dependencyTypes": ["dev"],
+      "isIgnored": true
+    },
+    {
       "label": "Workspace packages must use the workspace: protocol",
       "dependencies": ["eve-*", "eve"],
       "dependencyTypes": ["dev", "prod", "peer"],
@@ -48,7 +69,7 @@
       "dependencies": ["zod"],
       "packages": ["gadget-extension", "gizmo-extension"],
       "dependencyTypes": ["prod"],
-      "pinVersion": "4.4.3"
+      "pinVersion": "4.5.4"
     },
     {
       "label": "Shared third-party deps must use the catalog: protocol",

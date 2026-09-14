@@ -444,7 +444,6 @@ describe("grep-heavy coding session", () => {
     for (const turn of usage) {
       expect(turn.input).toBe(0);
     }
-    // Mirrors the agent-prompt-cache e2e gate.
     expect(inputCacheRate(usage)).toBeGreaterThan(0.99);
   });
 

@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   classifySkillsDirectoryEntry,
   getSupportedModuleBaseName,
+  isGeneratedSourceMapFileName,
   isTypeScriptDeclarationFileName,
 } from "./filesystem.js";
 
@@ -15,8 +16,12 @@ describe("getSupportedModuleBaseName", () => {
     expect(isTypeScriptDeclarationFileName("echo.ts")).toBe(false);
   });
 
-  it("ignores generated declarations at the top level of a skills directory", () => {
+  it("ignores generated declarations and source maps at the top level of a skills directory", () => {
     expect(classifySkillsDirectoryEntry("notes.d.ts", "file")).toBe("ignored-declaration");
+    expect(classifySkillsDirectoryEntry("notes.d.ts.map", "file")).toBe("ignored-source-map");
+    expect(classifySkillsDirectoryEntry("notes.mjs.map", "file")).toBe("ignored-source-map");
     expect(classifySkillsDirectoryEntry("notes.mjs", "file")).toBe("flat-skill-module");
+    expect(isGeneratedSourceMapFileName("notes.js.map")).toBe(true);
+    expect(isGeneratedSourceMapFileName("notes.md.map")).toBe(false);
   });
 });

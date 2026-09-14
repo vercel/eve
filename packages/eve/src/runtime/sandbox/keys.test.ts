@@ -6,7 +6,7 @@ import {
   COMPILE_METADATA_VERSION,
   type CompileMetadata,
 } from "#compiler/artifacts.js";
-import { createCompiledAgentManifest } from "#compiler/manifest.js";
+import { compileFromMemory } from "#compiler/compile-from-memory.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import { createFakeVercelOidcToken } from "#internal/testing/vercel-oidc-token.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
@@ -15,6 +15,7 @@ import {
   createRuntimeSandboxKeys,
   createRuntimeSandboxTemplateKey,
 } from "#runtime/sandbox/keys.js";
+import type { RuntimeSandboxTemplatePlan } from "#runtime/sandbox/template-plan.js";
 
 const RUNTIME_SANDBOX_CONTRACT_VERSION = 7;
 
@@ -23,6 +24,7 @@ const CONTENT_HASH = "a".repeat(64);
 function createMetadataFixture(generatorVersion: string): CompileMetadata {
   return {
     compile: {
+      manifest: { path: ".eve/compile/agent-manifest.json", sha256: "a".repeat(64) },
       moduleMap: { path: ".eve/compile/module-map.mjs", sha256: "b".repeat(64) },
     },
     discovery: {
@@ -61,20 +63,18 @@ async function deriveTemplateKey(): Promise<string | null> {
   });
 }
 
-function withBundledMetadata<T>(
+async function withBundledMetadata<T>(
   metadata: CompileMetadata | undefined,
   fn: () => Promise<T>,
 ): Promise<T> {
-  const manifest = createCompiledAgentManifest({
+  const { manifest, moduleMap } = await compileFromMemory({
     agentRoot: "/virtual/app/agent",
     appRoot: "/virtual/app",
-    config: {
-      model: { id: "openai/gpt-5-mini", routing: { kind: "gateway", target: "openai" } },
-      name: "keys-test-agent",
-    },
+    model: "openai/gpt-5.4",
+    name: "keys-test-agent",
   });
 
-  return withBundledCompiledArtifacts({ manifest, metadata, moduleMap: { nodes: {} } }, fn);
+  return await withBundledCompiledArtifacts({ manifest, metadata, moduleMap }, fn);
 }
 
 async function deriveSessionKey(input?: {
@@ -93,6 +93,22 @@ async function deriveSessionKey(input?: {
     },
   });
   return keys.sessionKey;
+}
+
+async function deriveBootstrapKeys(
+  templatePlan: Extract<RuntimeSandboxTemplatePlan, { kind: "bootstrap" }> = {
+    kind: "bootstrap",
+    sourceHash: "sandbox-source-v1",
+  },
+) {
+  return await createRuntimeSandboxKeys({
+    backendName: "vercel",
+    compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
+    nodeId: "__root__",
+    sessionId: "session_1",
+    sourceId: "sandbox.ts",
+    templatePlan,
+  });
 }
 
 /**
@@ -178,6 +194,50 @@ describe("createRuntimeSandboxKeys", () => {
     );
 
     expect(first).not.toBe(second);
+  });
+
+  it("keeps unseeded bootstrap template and session keys stable across unrelated source changes", async () => {
+    vi.stubEnv("VERCEL_PROJECT_ID", "prj_123");
+    const metadata = createMetadataFixture("1.0.0");
+    const first = await withBundledMetadata(metadata, () => deriveBootstrapKeys());
+    const second = await withBundledMetadata(
+      {
+        ...metadata,
+        discovery: { ...metadata.discovery, sourceGraphHash: "f".repeat(64) },
+      },
+      () => deriveBootstrapKeys(),
+    );
+
+    expect(first.templateKey).not.toBeNull();
+    expect(second).toEqual(first);
+  });
+
+  it("does not use missing compile metadata as unseeded bootstrap content", async () => {
+    vi.stubEnv("VERCEL_PROJECT_ID", "prj_123");
+    const metadata = createMetadataFixture(resolveInstalledPackageInfo().version);
+    const withMetadata = await withBundledMetadata(metadata, () => deriveBootstrapKeys());
+    const withoutMetadata = await withBundledMetadata(undefined, () => deriveBootstrapKeys());
+
+    expect(withoutMetadata).toEqual(withMetadata);
+  });
+
+  it.each([
+    { sourceHash: "sandbox-source-v2" },
+    { revalidationKey: "bootstrap-v2" },
+    { contentHash: CONTENT_HASH },
+  ])("rotates both bootstrap keys when sandbox inputs change: %j", async (change) => {
+    vi.stubEnv("VERCEL_PROJECT_ID", "prj_123");
+    await withBundledMetadata(createMetadataFixture("1.0.0"), async () => {
+      const first = await deriveBootstrapKeys();
+      const second = await deriveBootstrapKeys({
+        kind: "bootstrap",
+        sourceHash: "sandbox-source-v1",
+        ...change,
+      });
+
+      expect(second.templateKey).not.toBe(first.templateKey);
+      expect(second.sessionKey).not.toBe(first.sessionKey);
+    });
   });
 });
 

@@ -25,7 +25,7 @@ function span(overrides: Partial<LocalTraceSpan> = {}): LocalTraceSpan {
 }
 
 describe("spanMetricChips", () => {
-  it("emits token, cost, and tool chips only when present", () => {
+  it("emits token and cost chips only when present", () => {
     expect(
       spanMetricChips(
         span({
@@ -39,11 +39,7 @@ describe("spanMetricChips", () => {
     ).toEqual(["↑1.4K", "↓213", "$0.0031"]);
 
     expect(spanMetricChips(span())).toEqual([]);
-    expect(
-      spanMetricChips(
-        span({ name: "ai.toolCall", attributes: { "gen_ai.tool.name": "get_weather" } }),
-      ),
-    ).toEqual(["get_weather"]);
+    expect(spanMetricChips(span({ name: "ai.toolCall" }))).toEqual([]);
   });
 
   it("prefers gateway cost over provider cost and parses string ints", () => {
@@ -63,7 +59,7 @@ describe("summarizeLocalTrace", () => {
           "agent.model.id": "gpt-5",
           "agent.usage.input_tokens": 1000,
           "agent.usage.output_tokens": 100,
-          "gen_ai.usage.cache_read.input_tokens": 800,
+          "agent.usage.cache_read_tokens": 800,
           "gen_ai.usage.cost": 0.01,
         },
       }),

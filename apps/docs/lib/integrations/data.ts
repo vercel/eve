@@ -6,6 +6,7 @@ import {
   connectionProtocols as protocolsForIdentity,
   extensionEntries,
   instrumentationEntries,
+  memoryEntries,
 } from "@eve/catalog";
 import type { LogoKey } from "./logos";
 
@@ -18,7 +19,7 @@ import type { LogoKey } from "./logos";
  * keyed by slug.
  */
 
-export type IntegrationType = "channel" | "connection" | "extension" | "instrumentation";
+export type IntegrationType = "channel" | "connection" | "extension" | "instrumentation" | "memory";
 
 /** Wire protocol and transport identity types are owned by the shared catalog. */
 export type { ConnectionProtocol, McpTransport, OpenApiTransport } from "@eve/catalog";
@@ -37,33 +38,46 @@ export interface ApiKeySpec {
   header: string;
 }
 
+interface ConnectorSpec {
+  /** Vercel Connect connector UID; defaults to the integration slug. */
+  uid?: string;
+  /** Service passed to `vercel connect create`; defaults to the connector UID. */
+  service?: string;
+  /** Optional `--name` value passed to `vercel connect create`. */
+  name?: string;
+}
+
+interface ConnectionSetupSpec {
+  /** Supported auth modes in display order; the first is the default. */
+  authModes: AuthMode[];
+  /** API-key wiring when `authModes` includes `apiKey`. */
+  apiKey?: ApiKeySpec;
+  /** Auth-mode-specific connector references and creation arguments. */
+  connectors?: Partial<Record<Exclude<AuthMode, "apiKey">, ConnectorSpec>>;
+  /** Optional provider-specific configure guidance, rendered as markdown. */
+  configureNote?: string;
+  /** Auth-mode-specific configure guidance, rendered as markdown. */
+  configureNotes?: Partial<Record<AuthMode, string>>;
+}
+
 /**
  * Structured description of a connection consumed by the detail page to
  * generate Install, Quick start, and Configure content. Transport (`mcp`,
  * `openapi`) and `description` are filled from the shared catalog identity;
  * Auth modes, connectors, and configure notes are the docs-only overlay.
  */
-export interface ConnectionSpec {
-  /** Vercel Connect connector UID; defaults to the integration slug. */
-  connector?: string;
-  /** Auth-mode-specific connector UIDs when one service needs separate connectors. */
-  connectors?: Partial<Record<AuthMode, string>>;
-  /** Service passed to `vercel connect create` when it differs from the connector UID. */
-  connectorService?: string;
-  /** Auth-mode-specific services passed to `vercel connect create`. */
-  connectorServices?: Partial<Record<AuthMode, string>>;
-  /** Supported auth modes in display order; the first is the default. */
-  authModes: AuthMode[];
-  /** API-key wiring when `authModes` includes `apiKey`. */
-  apiKey?: ApiKeySpec;
+export interface ConnectionSpec extends ConnectionSetupSpec {
   /** Model-facing description; defaults to the integration tagline. */
   description?: string;
   mcp?: ConnectionIdentity["mcp"];
   openapi?: ConnectionIdentity["openapi"];
-  /** Optional provider-specific configure guidance, rendered as markdown. */
-  configureNote?: string;
-  /** Auth-mode-specific configure guidance, rendered as markdown. */
-  configureNotes?: Partial<Record<AuthMode, string>>;
+}
+
+/** A guide, package, or reference linked from an integration's Related resources section. */
+export interface RelatedResource {
+  title: string;
+  description: string;
+  href: string;
 }
 
 export interface Integration {
@@ -84,15 +98,41 @@ export interface Integration {
   /** Searchable keywords beyond the name. */
   keywords?: string[];
   /**
-   * Channels and extensions author their setup as markdown. Connections leave
-   * these unset and supply a `connection` spec, from which content is generated.
+   * Channels and extensions author their setup as markdown. Connections normally
+   * generate it from `connection`, but may override Quick start and Configure.
    */
   install?: string;
   quickStart?: string;
   configure?: string;
   /** Structured connection spec; present only for `type: "connection"`. */
   connection?: ConnectionSpec;
+  /** Guides and references shown after Configure; omitted when empty. */
+  relatedResources?: RelatedResource[];
 }
+
+/** Shared by the GitHub, Linear, and GitHub Tools integrations Foreman builds on. */
+const softwareFactoryGuide: RelatedResource = {
+  title: "Build a software factory with eve",
+  description:
+    "Deploy Foreman, an eve agent system that turns GitHub issues or Linear tickets into reviewed draft pull requests while leaving merge decisions to humans.",
+  href: "https://vercel.com/kb/guide/eve-software-factory",
+};
+
+/** Shared by the Slack, GitHub, Datadog, and Vercel integrations the incident response agent uses. */
+const incidentResponseGuide: RelatedResource = {
+  title: "Build an incident response SRE agent with eve",
+  description:
+    "Deploy a Slack-based investigation agent that connects to Datadog, GitHub, and Vercel, tests root-cause hypotheses, and posts evidence-linked findings in threads.",
+  href: "https://vercel.com/kb/guide/eve-incident-sre-agent",
+};
+
+/** Shared by the Slack and Notion integrations the marketing team template publishes through. */
+const marketingTeamGuide: RelatedResource = {
+  title: "Run a marketing team from Slack with eve",
+  description:
+    "Deploy a Slack-facing lead agent that routes requests to marketing specialists who publish to Notion, Typefully, and Resend, with approval gates on irreversible actions.",
+  href: "https://vercel.com/kb/guide/marketing-team-eve",
+};
 
 /** Docs presentation overlay shared by every integration kind. */
 interface Presentation {
@@ -101,6 +141,8 @@ interface Presentation {
   keywords?: string[];
   /** Optional gallery pill (e.g. "Chat SDK") shown next to the type label. */
   badge?: string;
+  /** Guides and references shown after Configure. */
+  relatedResources?: RelatedResource[];
 }
 
 /** Channel overlay: presentation plus hand-authored setup markdown. */
@@ -110,23 +152,20 @@ interface ChannelPresentation extends Presentation {
   configure: string;
 }
 
-/** Extension overlay with hand-authored package setup. */
-interface ExtensionPresentation extends Presentation {
+/** Extension and memory overlays with hand-authored package setup. */
+interface PackagePresentation extends Presentation {
   install: string;
   quickStart: string;
   configure: string;
 }
 
+type ExtensionPresentation = PackagePresentation;
+type MemoryPresentation = PackagePresentation;
+
 /** Connection overlay: presentation plus Connect auth/config details. */
-interface ConnectionPresentation extends Presentation {
-  authModes: AuthMode[];
-  apiKey?: ApiKeySpec;
-  connector?: string;
-  connectors?: Partial<Record<AuthMode, string>>;
-  connectorService?: string;
-  connectorServices?: Partial<Record<AuthMode, string>>;
-  configureNote?: string;
-  configureNotes?: Partial<Record<AuthMode, string>>;
+interface ConnectionPresentation extends Omit<Presentation, "badge">, ConnectionSetupSpec {
+  quickStart?: string;
+  configure?: string;
 }
 
 const channelPresentations: Record<string, ChannelPresentation> = {
@@ -170,6 +209,7 @@ vercel connect create slack --triggers
 \`\`\`
 
 The channel handles mentions, DMs, typing indicators, delivery, and human-in-the-loop consent with sensible defaults. See the [Slack channel docs](/docs/channels/slack) for customizing each behavior.`,
+    relatedResources: [marketingTeamGuide, incidentResponseGuide],
   },
   discord: {
     logo: "discord",
@@ -267,6 +307,47 @@ TWILIO_AUTH_TOKEN=...      # required for inbound signature verification
 \`\`\``,
     configure: `In the Twilio console, point your number's Messaging webhook at \`/eve/v1/twilio/messages\` and its Voice webhook at \`/eve/v1/twilio/voice\`. Inbound calls are answered with speech gathering, and the transcript feeds the same session SMS uses. See the [Twilio channel docs](/docs/channels/twilio) for dispatch, streaming, and voice specifics.`,
   },
+  blooio: {
+    logo: "blooio",
+    docsHref: "https://github.com/Blooio/eve-channel-blooio#readme",
+    badge: "Provider official",
+    keywords: [
+      "imessage",
+      "rcs",
+      "sms",
+      "blooio",
+      "tapback",
+      "typing",
+      "read receipt",
+      "poll",
+      "group",
+    ],
+    install: `Add this channel from eve's registry. This writes \`agent/channels/blooio.ts\` and installs the \`eve-channel-blooio\` package:
+
+\`\`\`bash
+eve add channel/blooio
+\`\`\``,
+    quickStart: `Create \`agent/channels/blooio.ts\`:
+
+\`\`\`ts
+// agent/channels/blooio.ts
+import { blooioChannel } from "eve-channel-blooio";
+
+export default blooioChannel();
+\`\`\`
+
+Blooio is a native eve channel built on \`defineChannel\` (not a Chat SDK adapter), so eve owns session dispatch, streaming, and human-in-the-loop directly. See the [eve-channel-blooio README](https://github.com/Blooio/eve-channel-blooio#readme) for the full \`BlooioHandle\` surface: reactions, typing indicators, read receipts, polls, groups, capability checks, and history.`,
+    configure: `Set \`BLOOIO_API_KEY\` (a \`bl_live_...\` key) and \`BLOOIO_WEBHOOK_SECRET\` (\`whsec_...\`), then point a Blooio webhook at \`/eve/v1/blooio\`:
+
+\`\`\`bash
+curl -X POST https://api.blooio.com/v4/webhooks \\
+  -H "Authorization: Bearer $BLOOIO_API_KEY" \\
+  -H "Content-Type: application/json" \\
+  -d '{ "url": "https://your-app.vercel.app/eve/v1/blooio", "event_types": ["*"] }'
+\`\`\`
+
+Blooio signs every delivery with \`X-Blooio-Signature: t=<unix>,v1=<hmac_sha256>\`; the channel verifies it and rejects timestamps older than 5 minutes. Inbound media is re-hosted at servable URLs and forwarded to the model as multimodal file parts.`,
+  },
   github: {
     logo: "github",
     docsHref: "/docs/channels/github",
@@ -288,6 +369,7 @@ export default githubChannel({
 });
 \`\`\``,
     configure: `Sign in to Vercel, then let the guided flow create or link a project, provision the GitHub App, and attach its verified webhook trigger to \`/eve/v1/github\`. Deploy, install the app from Vercel Connect, then add its \`@handle\` invocation token to a new issue, pull request, or review comment. GitHub may not autocomplete or render the token as a linked mention. See the [GitHub channel docs](/docs/channels/github) for permissions and events.`,
+    relatedResources: [softwareFactoryGuide, incidentResponseGuide],
   },
   "linear-agent": {
     logo: "linear",
@@ -310,6 +392,7 @@ export default linearChannel({
 });
 \`\`\``,
     configure: `Sign in to Vercel, then let the guided flow create or link a project, provision the Linear app, and attach its verified AgentSessionEvent trigger to \`/eve/v1/linear\`. Deploy, install the app in your Linear workspace from Vercel Connect, then delegate an issue or mention the agent. See the [Linear channel docs](/docs/channels/linear) for Agent Activity behavior.`,
+    relatedResources: [softwareFactoryGuide],
   },
   eve: {
     logo: "eve",
@@ -355,6 +438,42 @@ Point your frontend at the session routes eve serves (\`/eve/v1/session\`) and s
 
 On any other stack, wire it up by hand: run the agent as its own service and proxy \`/eve/v1/**\` to it, or pass its origin as \`host\` to \`useEveAgent()\` and enable \`cors\` on the channel. Server-side code and custom UIs can call the routes through \`Client\` from \`eve/client\`.`,
     configure: `The eve channel is the lowest-friction way to talk to your agent, with no third-party provisioning required. Layer in auth and route protection as needed, and enable \`cors\` only when a browser reaches the channel from another origin. See the [eve channel docs](/docs/channels/eve), the [Frontend guide](/docs/guides/frontend/overview), and the per-framework guides for [Next.js](/docs/guides/frontend/nextjs), [Nuxt](/docs/guides/frontend/nuxt), and [SvelteKit](/docs/guides/frontend/sveltekit).`,
+  },
+  buzz: {
+    logo: "buzz",
+    docsHref: "https://github.com/vercel/eve/tree/main/packages/eve-buzz-acp-adapter#readme",
+    badge: "ACP",
+    keywords: ["chat", "messaging", "desktop", "acp", "nostr", "agents"],
+    install: `Install [Buzz Desktop](https://buzz.xyz), then install eve's compatibility adapter globally:
+
+\`\`\`bash
+npm install --global @eve/buzz-acp-adapter
+\`\`\`
+
+The adapter must be installed globally because Buzz uses it whenever it interfaces with eve.`,
+    quickStart: `From an eve application directory, run the interactive installer:
+
+\`\`\`bash
+eve-buzz-acp-adapter install
+\`\`\`
+
+You can also provide a local application or deployed URL explicitly:
+
+\`\`\`bash
+eve-buzz-acp-adapter install ./path/to/eve-app
+eve-buzz-acp-adapter install https://agent.example.com
+\`\`\`
+
+The installer registers **eve** as a custom harness with Buzz.`,
+    configure: `Reopen Buzz, then create or edit an agent:
+
+1. Enter an **Agent name** and, optionally, **Agent instructions** for Buzz-specific behavior.
+2. Under **AI configuration**, choose **Customize for this agent**.
+3. Set **Agent harness** to **eve**. Buzz currently requires a **Model** value but does not prefill one for custom harnesses.
+4. Open **Advanced**. Leave **Who can talk to this agent** on its default owner-only selection. For a local application, set **Parallelism** to \`1\` and add any credentials that the application does not already load from an env file, such as \`AI_GATEWAY_API_KEY\`.
+5. Save the agent and start it.
+
+Accepted senders share one eve identity and its capabilities.`,
   },
   "chat-sdk-gchat": {
     logo: "googlechat",
@@ -459,10 +578,16 @@ export const { bot, channel, send } = chatSdkChannel({
   userName: "My Agent",
   adapters: { x: createXAdapter() },
   state: createMemoryState(),
+  // X buffers replies and posts once rather than editing a streamed message.
+  streaming: false,
 });
 
 bot.onNewMention(async (thread: Thread, message: Message) => {
   await thread.subscribe();
+  await send(message.text, { thread });
+});
+
+bot.onDirectMessage(async (thread: Thread, message: Message) => {
   await send(message.text, { thread });
 });
 
@@ -473,8 +598,8 @@ bot.onSubscribedMessage(async (thread: Thread, message: Message) => {
 export default channel;
 \`\`\`
 
-Credentials come from the \`createXAdapter\` config or the adapter's environment variables; see the [X adapter docs](https://chat-sdk.dev/adapters/official/x).`,
-    configure: `The adapter mounts its webhook at \`/eve/v1/x\`. Point your X account activity webhook at it. The adapter owns provider auth, verification, and delivery, while eve owns session dispatch, streaming, typing, and human-in-the-loop. See the [Chat SDK channel docs](/docs/channels/chat-sdk) for routes, streaming, and state options.`,
+For a DM-only agent, keep \`bot.onDirectMessage\` and remove the \`bot.onNewMention\` and \`bot.onSubscribedMessage\` handlers. Configure the app's credentials and webhook before deploying.`,
+    configure: `Follow the [X adapter documentation](https://chat-sdk.dev/adapters/official/x) to configure authentication, webhook verification, and Activity API subscriptions. Register the deployed agent's \`/eve/v1/x\` route as the X webhook URL. See the [Chat SDK channel docs](/docs/channels/chat-sdk) for eve route and state options.`,
   },
   "chat-sdk-messenger": {
     logo: "messenger",
@@ -774,50 +899,27 @@ export default channel;
 See the [Liveblocks adapter documentation](https://chat-sdk.dev/adapters/vendor-official/liveblocks) for supported events, capabilities, and credentials.`,
     configure: `Create a Liveblocks webhook, set \`LIVEBLOCKS_SECRET_KEY\` and \`LIVEBLOCKS_WEBHOOK_SECRET\`, and send comment events to \`/eve/v1/liveblocks\`. The adapter maps rooms to channels, comment threads to threads, and comments to messages. See the [Chat SDK channel docs](/docs/channels/chat-sdk) for eve session dispatch, state, streaming, and human-in-the-loop behavior.`,
   },
-  "chat-sdk-linq": {
+  linq: {
     logo: "linq",
-    docsHref: "/docs/channels/chat-sdk",
-    badge: "Provider official",
-    keywords: ["chat sdk", "linq", "imessage", "sms", "apple messages", "tapbacks", "phone"],
-    install: `Add this Chat SDK channel from eve's registry. This writes \`agent/channels/linq.ts\` and installs Chat SDK and its adapter dependencies:
+    docsHref: "/docs/channels/linq",
+    badge: "First-party",
+    keywords: ["linq", "imessage", "sms", "apple messages", "tapbacks", "phone"],
+    install: `Add Linq from eve's registry, then follow the guided Connect or portable credential setup:
 
 \`\`\`bash
-eve add channel/chat-sdk-linq
+eve add channel/linq
 \`\`\``,
     quickStart: `Create \`agent/channels/linq.ts\`:
 
 \`\`\`ts
-// agent/channels/linq.ts
-import { createLinqAdapter } from "@linqapp/chat-sdk-adapter";
-import { createMemoryState } from "@chat-adapter/state-memory";
-import type { Message, Thread } from "chat";
-import { chatSdkChannel } from "eve/channels/chat-sdk";
+import { connectLinqCredentials } from "@vercel/connect/eve";
+import { linqChannel } from "eve/channels/linq";
 
-export const { bot, channel, send } = chatSdkChannel({
-  userName: "My Agent",
-  adapters: {
-    linq: createLinqAdapter({
-      apiKey: process.env.LINQ_API_KEY!,
-      signingSecret: process.env.LINQ_WEBHOOK_SECRET!,
-    }),
-  },
-  state: createMemoryState(),
+export default linqChannel({
+  credentials: connectLinqCredentials("linq/my-agent"),
 });
-
-bot.onNewMention(async (thread: Thread, message: Message) => {
-  await thread.subscribe();
-  await send(message.text, { thread });
-});
-
-bot.onSubscribedMessage(async (thread: Thread, message: Message) => {
-  await send(message.text, { thread });
-});
-
-export default channel;
-\`\`\`
-
-See the [Linq adapter documentation](https://chat-sdk.dev/adapters/vendor-official/linq) for supported events, capabilities, and credentials.`,
-    configure: `Create a Linq account, set \`LINQ_API_KEY\` and \`LINQ_WEBHOOK_SECRET\`, then point its signed webhook at \`/eve/v1/linq\`. Linq supports iMessage and SMS DMs and group chats, media, buffered streaming, and tapbacks. See the [Chat SDK channel docs](/docs/channels/chat-sdk) for eve session dispatch, state, streaming, and human-in-the-loop behavior.`,
+\`\`\``,
+    configure: `The guided setup can provision a managed Linq line with Vercel Connect or collect portable credentials. Connect-backed setup creates a native Linq connector and routes verified triggers to \`/eve/v1/linq\`; with portable credentials, deploy first, then create a signed Linq webhook for that route.`,
   },
   "chat-sdk-kapso": {
     logo: "kapso",
@@ -1119,9 +1221,109 @@ export default channel;
 
 See the [Email (Resend) adapter documentation](https://chat-sdk.dev/adapters/vendor-official/resend) for all supported events and credentials.`,
     configure: `Verify a sending domain in Resend, set \`RESEND_API_KEY\`, \`RESEND_WEBHOOK_SECRET\`, and \`RESEND_FROM_ADDRESS\`, then point the Resend inbound webhook at \`/eve/v1/resend\`. This is a vendor-official Chat SDK adapter. See the [Chat SDK channel docs](/docs/channels/chat-sdk) for eve session dispatch, state, streaming, and human-in-the-loop behavior.`,
+    relatedResources: [
+      {
+        title: "Give your eve agent an email inbox with Resend",
+        description:
+          "Wire an eve agent to email through the Chat SDK channel and Resend adapter so it can hold threaded, multi-turn conversations, send proactive messages, and process attachments.",
+        href: "https://vercel.com/kb/guide/eve-agent-with-resend",
+      },
+    ],
   },
 };
-const extensionPresentations: Record<string, ExtensionPresentation> = {
+const baseExtensionPresentations: Record<string, ExtensionPresentation> = {
+  blitzreels: {
+    logo: "blitzreels",
+    docsHref: "https://www.npmjs.com/package/@blitzreels/eve",
+    keywords: [
+      "video editing",
+      "long form video",
+      "short clips",
+      "shorts",
+      "vertical video",
+      "visual qa",
+      "media generation",
+      "exports",
+    ],
+    install: `Install the BlitzReels extension for eve:
+
+\`\`\`bash
+eve add extension/blitzreels
+\`\`\`
+
+The extension requires Node.js 24 or later. It wraps the BlitzReels API with typed tools for clipping, project inspection, visual-QA repair, AI media generation, and exports.`,
+    quickStart: `Add a BlitzReels API key to the agent's environment:
+
+\`\`\`bash title=".env.local"
+BLITZREELS_API_KEY=br_live_...
+\`\`\`
+
+Then mount the extension under \`agent/extensions/\`:
+
+\`\`\`ts title="agent/extensions/blitzreels.ts"
+import blitzreels from "@blitzreels/eve";
+
+export default blitzreels({
+  apiKey: process.env.BLITZREELS_API_KEY!,
+});
+\`\`\`
+
+The filename supplies the \`blitzreels\` namespace. The extension adds project, media, clipping, repair, generation, snapshot, and export tools such as \`blitzreels__create_clip_batch\`, \`blitzreels__repair_clip\`, and \`blitzreels__start_export\`. It also ships a clipping skill that teaches the agent the long-form-to-shorts workflow and visual-QA repair loop.`,
+    configure: `Keep the API key in the environment rather than prompts or source control. Keys are environment-bounded: use \`br_live_...\` with the production API, and use \`br_test_...\` only with the matching local or development \`baseUrl\`.
+
+Source imports, clipping, generation, and exports call the configured BlitzReels API. Credit-spending, download, and render tools require eve approval by default, and durable retries reuse the original call receipt instead of spending twice. Override an individual tool from a directory mount when it needs stricter \`always()\` approval, or use \`disableTool()\` to remove it.
+
+See the [BlitzReels extension package](https://www.npmjs.com/package/@blitzreels/eve) for the complete tool list, configuration, approval defaults, error contract, and OAuth-backed MCP alternative.`,
+  },
+  "mux-video": {
+    logo: "mux",
+    docsHref: "https://github.com/muxinc/mux-video-agent/tree/main/packages/eve-video",
+    keywords: [
+      "video",
+      "video assets",
+      "clips",
+      "captions",
+      "subtitles",
+      "Mux Robots",
+      "summarization",
+      "moderation",
+      "translation",
+      "chapters",
+    ],
+    install: `The Mux Video extension currently ships from source with the Mux Video Agent template. Clone the repository and install its workspace dependencies:
+
+\`\`\`bash
+git clone https://github.com/muxinc/mux-video-agent.git
+cd mux-video-agent
+pnpm install
+\`\`\`
+
+The extension requires Node.js 24 or later. The reusable package lives at \`packages/eve-video\` and is mounted by the root agent.`,
+    quickStart: `Add your Mux access token to the template's environment:
+
+\`\`\`bash title=".env.local"
+MUX_TOKEN_ID=mux_token_id_here
+MUX_TOKEN_SECRET=mux_token_secret_here
+\`\`\`
+
+The template mounts the extension under \`agent/extensions/\`:
+
+\`\`\`ts title="agent/extensions/mux_video.ts"
+import muxVideo from "@mux/eve-video";
+
+export default muxVideo({
+  tokenId: process.env.MUX_TOKEN_ID,
+  tokenSecret: process.env.MUX_TOKEN_SECRET,
+});
+\`\`\`
+
+The filename supplies the \`mux_video\` namespace. The extension adds tools such as \`mux_video__get_asset\`, \`mux_video__create_asset\`, \`mux_video__create_clip\`, \`mux_video__run_workflow\`, and \`mux_video__get_workflow_job\`.`,
+    configure: `Use a Mux access token with Video access and access to the Mux Robots workflows you plan to run. Keep the token ID and secret in the environment rather than prompts, tool arguments, or source control.
+
+Asset creation, clip creation, and Mux Robots workflow creation require explicit human approval by default. Robots jobs are asynchronous, so start a workflow with \`mux_video__run_workflow\`, retain the returned job ID, and check it with \`mux_video__get_workflow_job\`.
+
+The extension supports creating and inspecting assets, exact-range clips, subtitles, captions, summaries, questions, chapters, scenes, key moments, thumbnails, moderation, and caption translation or editing. It intentionally excludes multimodal embeddings and semantic video search. See the [Mux Video Agent repository](https://github.com/muxinc/mux-video-agent) for the source, full capability list, deployment steps, and eval suite.`,
+  },
   browserbase: {
     logo: "browserbase",
     docsHref: "https://www.npmjs.com/package/@browserbasehq/eve",
@@ -1197,8 +1399,8 @@ The extension requires Node.js 24 or later and eve 0.25 or later. It mounts Kern
     quickStart: `Create and attach a Kernel connector with [Vercel Connect](https://vercel.com/connect):
 
 \`\`\`bash
-vercel connect create mcp.onkernel.com --name eve-extension
-vercel connect attach mcp.onkernel.com/eve-extension
+vercel connect create kernel --name kernel-mcp --connection-method mcp
+vercel connect attach kernel/kernel-mcp
 \`\`\`
 
 Then mount the extension under \`agent/extensions/\`:
@@ -1206,7 +1408,7 @@ Then mount the extension under \`agent/extensions/\`:
 \`\`\`ts title="agent/extensions/kernel.ts"
 import kernel from "@onkernel/eve-extension";
 
-export default kernel({ connect: "mcp.onkernel.com/eve-extension" });
+export default kernel({ connect: "kernel/kernel-mcp" });
 \`\`\`
 
 The filename supplies the \`kernel\` namespace. The extension adds browser management, Playwright, computer control, managed auth, profiles, proxies, and replay tools under \`kernel__browser__*\`, along with the \`browse\` skill.`,
@@ -1217,72 +1419,20 @@ export { default } from "@onkernel/eve-extension";
 \`\`\`
 
 The default mount can execute JavaScript in the browser VM and reuse authenticated browser sessions. For team or multi-tenant agents, prefer Vercel Connect so each user authenticates separately, and add an approval gate by overriding the extension's \`browser\` connection. See the [Kernel eve extension guide](https://www.kernel.sh/docs/integrations/vercel/eve-extension) for API-key configuration, connection overrides, the complete tool list, and security guidance.`,
-  },
-  "upstash-agentkit": {
-    logo: "upstash",
-    docsHref: "https://upstash.com/docs/redis/sdks/agentkit/eve",
-    keywords: [
-      "upstash",
-      "agentkit",
-      "redis",
-      "memory",
-      "long-term memory",
-      "chat history",
-      "search",
-      "rag",
-      "full-text search",
+    relatedResources: [
+      {
+        title: "How to build a browser agent that works behind a login",
+        description:
+          "Combine eve, Vercel Connect, and Kernel managed auth so a user signs in once and the agent drives the authenticated browser without handling credentials.",
+        href: "https://vercel.com/kb/guide/build-a-browser-agent",
+      },
+      {
+        title: "Give your software factory a browser",
+        description:
+          "Attach Kernel's cloud browser to the eve software factory so Foreman can reproduce flow bugs, verify fixes on preview deployments, and save what it learns.",
+        href: "https://vercel.com/kb/guide/software-factory-browser",
+      },
     ],
-    install: `Install the Upstash AgentKit extension for eve:
-
-\`\`\`bash
-eve add extension/upstash-agentkit
-\`\`\`
-
-The extension requires eve 0.25.2 or later. Add an Upstash Redis database's REST credentials to the agent's environment; the default Redis client reads them automatically:
-
-\`\`\`bash title=".env.local"
-UPSTASH_REDIS_REST_URL=https://...
-UPSTASH_REDIS_REST_TOKEN=...
-\`\`\``,
-    quickStart: `Mount the extension under \`agent/extensions/\`:
-
-\`\`\`ts title="agent/extensions/agentkit.ts"
-import agentkit from "@upstash/agentkit-eve-extension";
-
-export default agentkit({});
-\`\`\`
-
-The filename supplies the \`agentkit\` namespace. This minimal mount adds \`agentkit__recall_memory\` and \`agentkit__save_memory\`, plus instructions that teach the model when to use them. By default, memory is isolated by the authenticated principal when available and otherwise by the eve session ID.`,
-    configure: `Two further capabilities are opt-in, and they are independent of each other: chat history covers the agent's own past conversations, while search is retrieval over documents you seed into your own Redis Search index.
-
-Enable durable transcript capture with \`chatHistory: true\`. A hook writes every user and assistant message to Redis as the session streams, and the model gains \`agentkit__search_chat_history\` to find earlier conversations by what was said and \`agentkit__read_chat_history\` to read one back — so a user can ask about something settled in a previous session. Both tools take \`userId\` from the session rather than from model input, so they only ever reach the current user's own transcripts.
-
-To add RAG over your own data, install \`@upstash/redis\` and provide a Redis Search schema:
-
-\`\`\`bash
-pnpm add @upstash/redis
-\`\`\`
-
-\`\`\`ts title="agent/extensions/agentkit.ts"
-import { s } from "@upstash/redis";
-import agentkit from "@upstash/agentkit-eve-extension";
-
-export default agentkit({
-  chatHistory: true,
-  search: {
-    schema: s.object({
-      title: s.string(),
-      author: s.string().noTokenize(),
-      year: s.number(),
-    }),
-    indexName: "books",
-  },
-});
-\`\`\`
-
-Search configuration adds the dynamic \`agentkit__search\`, \`agentkit__search_aggregate\`, and \`agentkit__search_count\` tools over that index, whose documents you write yourself; it is separate from chat history, which keeps its own keyspace and index. Both tool groups resolve at session start, so an unconfigured capability contributes no tools at all.
-
-For multi-tenant agents, set \`userId\` to a stable tenant-scoped value or derive it from the request context, and never use a shared constant across tenants. You can also tune memory recall, search limits, chat-history keys and TTL, or supply an explicit Redis client. See the [Upstash AgentKit eve extension guide](https://upstash.com/docs/redis/sdks/agentkit/eve) for the complete configuration and override reference.`,
   },
   jetty: {
     logo: "jetty",
@@ -1404,64 +1554,7 @@ export default githubExtension({
 \`\`\`
 
 For local or non-Vercel deployments, omit \`connector\` and set \`GITHUB_TOKEN\`; the extension also accepts an explicit \`token\`. Prefer fine-grained credentials, expose only the presets the agent needs, and keep approval enabled for writes. See the [GitHub Tools eve documentation](https://github-tools.com/frameworks/eve#eve-extension) for token authentication, per-tool overrides, commit attribution, and the complete tool catalog.`,
-  },
-  arcana: {
-    logo: "arcana",
-    docsHref: "https://github.com/KybernesisAI/platform/tree/master/packages/arcana#readme",
-    keywords: [
-      "memory",
-      "long-term memory",
-      "mcp",
-      "semantic search",
-      "entity graph",
-      "timeline",
-      "brain notes",
-      "Kybernesis",
-    ],
-    install: `Install Kybernesis Arcana for eve:
-
-\`\`\`bash
-eve add extension/arcana
-\`\`\`
-
-This installs \`@kybernesis/arcana\` and writes an extension mount. The package requires Node.js 24 or later.`,
-    quickStart: `Create an Arcana workspace and workspace-scoped API key, then add both values to the agent's environment:
-
-\`\`\`bash title=".env.local"
-ARCANA_API_KEY=kb_your_api_key_here
-ARCANA_WORKSPACE=your-workspace
-\`\`\`
-
-The registry creates this mount:
-
-\`\`\`ts title="agent/extensions/arcana.ts"
-import arcana from "@kybernesis/arcana";
-
-export default arcana({
-  apiKey: process.env.ARCANA_API_KEY!,
-  workspace: process.env.ARCANA_WORKSPACE!,
-});
-\`\`\`
-
-The filename supplies the \`arcana\` namespace. The extension adds an MCP memory connection, recall, remember, and brain-note skills, and instructions that tell the model to search the workspace before it claims not to know something.`,
-    configure: `An Arcana key is scoped to a workspace. Keep the key in a sensitive environment variable and use a separate workspace and key when people or tenants must not share memory. The model can choose what to store and retrieve, but it cannot choose the configured key or default workspace.
-
-You can select a workspace per session with \`resolveWorkspace\`. Derive it only from verified session context, and only return workspaces that the configured key can access:
-
-\`\`\`ts title="agent/extensions/arcana.ts"
-import arcana from "@kybernesis/arcana";
-
-export default arcana({
-  apiKey: process.env.ARCANA_API_KEY!,
-  workspace: process.env.ARCANA_WORKSPACE!,
-  resolveWorkspace: (ctx) =>
-    ctx.session.auth.current?.attributes.surface === "dm"
-      ? process.env.ARCANA_DM_WORKSPACE
-      : undefined,
-});
-\`\`\`
-
-Arcana stores memories, embeddings, timeline entries, and brain notes in the selected workspace. The shipped instructions tell the model not to store passwords, access tokens, payment data, private keys, or one-time codes; add approval rules to memory-write tools when you need an enforced control. See the [Arcana package documentation](https://github.com/KybernesisAI/platform/tree/master/packages/arcana#readme) for the full configuration and tool reference.`,
+    relatedResources: [softwareFactoryGuide, incidentResponseGuide],
   },
   hindsight: {
     logo: "hindsight",
@@ -1522,6 +1615,190 @@ For a self-hosted server, set \`HINDSIGHT_API_URL\` and pass \`apiKey: null\` to
 
 A bank is one isolated memory store, and both files must use the same bank. Do not share the default bank across untrusted users; use separate agent deployments with distinct \`HINDSIGHT_BANK_ID\` values for separate users or tenants. See the [Hindsight eve integration guide](https://hindsight.vectorize.io/sdks/integrations/eve) for Cloud, self-hosted, and factory configuration.`,
   },
+};
+
+const memoryPresentations: Record<string, MemoryPresentation> = {
+  file: {
+    logo: "vercel",
+    docsHref: "/docs/memory/file",
+    keywords: [
+      "memory",
+      "file memory",
+      "Vercel Blob",
+      "private storage",
+      "long-term memory",
+      "per-principal memory",
+      "OIDC",
+    ],
+    install: `Install and provision file memory for eve:
+
+\`\`\`bash
+eve add memory/file
+\`\`\`
+
+After you approve setup, eve creates or reuses a dedicated private Vercel Blob store, connects it to production, preview, and development, and pulls the resulting environment variables. Vercel Blob usage may incur charges.`,
+    quickStart: `The registry writes this memory slot:
+
+\`\`\`ts title="agent/memory/file.ts"
+import { fileMemory } from "eve/memory/file";
+import { defineMemory } from "eve/memory";
+import { byPrincipal } from "eve/memory/scope";
+
+export default defineMemory({
+  description: "Remember stable facts and preferences about the caller.",
+  provider: fileMemory(),
+  scope: byPrincipal,
+});
+\`\`\`
+
+During \`eve dev\`, file memory stays in the local process. On Vercel, the default backend uses the private Blob store provisioned by setup.`,
+    configure: `Run \`eve integration setup file-memory\` to repair or re-run provisioning without reinstalling the registry item. Setup uses the first configured function region, preserves an existing eve-owned store if the project region later changes, and never adopts or changes an application store connected with \`BLOB_*\`.
+
+Provisioned bindings use the \`EVE_MEMORY_BLOB_*\` namespace. \`fileMemory()\` prefers \`EVE_MEMORY_BLOB_READ_WRITE_TOKEN\`, then \`EVE_MEMORY_BLOB_STORE_ID\` with Vercel OIDC from the environment or request context. Generic \`BLOB_*\` credentials remain a fallback for manually connected stores. See [File memory](/docs/memory/file) for backend behavior and manual configuration.`,
+  },
+  "upstash-agentkit": {
+    logo: "upstash",
+    docsHref: "https://upstash.com/docs/redis/sdks/agentkit/eve",
+    keywords: [
+      "upstash",
+      "agentkit",
+      "redis",
+      "memory",
+      "memory slots",
+      "file memory",
+      "long-term memory",
+      "ranked recall",
+      "conversation history",
+    ],
+    install: `Install the Upstash AgentKit memory provider for eve:
+
+\`\`\`bash
+eve add memory/upstash-agentkit
+\`\`\`
+
+This installs \`@upstash/agentkit-eve\` and \`@upstash/redis\`, then writes a memory slot. The \`@upstash/agentkit-eve/memory\` entry point requires eve 0.45.2 or later.`,
+    quickStart: `Add an Upstash Redis database's REST credentials to the agent's environment:
+
+\`\`\`bash title=".env.local"
+UPSTASH_REDIS_REST_URL=https://...
+UPSTASH_REDIS_REST_TOKEN=...
+\`\`\`
+
+The registry creates this memory slot:
+
+\`\`\`ts title="agent/memory/upstash-agentkit.ts"
+import { redisMemory } from "@upstash/agentkit-eve/memory";
+import { defineMemory } from "eve/memory";
+import { byPrincipal } from "eve/memory/scope";
+
+export default defineMemory({
+  description: "Recall and manage durable context for the current user.",
+  provider: redisMemory({ topK: 5 }),
+  scope: byPrincipal,
+});
+\`\`\`
+
+The filename creates the \`upstash-agentkit\` slot. It recalls matching curated facts before each turn, captures user messages after completed turns by default, and gives the model \`upstash-agentkit__save_memory\`, \`upstash-agentkit__search_memory\`, \`upstash-agentkit__read_session\`, and \`upstash-agentkit__forget_memory\` tools.`,
+    configure: `\`byPrincipal\` keeps memory disabled for anonymous and runtime principals, and shares the local-development scope while you run \`eve dev\`. For a multi-tenant agent, replace it with a scope resolver that derives both tenant and caller identity from verified session context. See [Multi-tenant memory](/docs/patterns/multi-tenant-memory).
+
+Use \`redisDocuments()\` with \`fileMemory({ backend: redisDocuments() })\` when you want eve's bounded, model-curated document and its \`save_memory\` and \`remove_memory\` tools, but want Redis rather than the default local or Vercel Blob backend. Use \`redisMemory()\` for relevance-ranked recall and automatic capture. Both partition Redis with eve's locked scope key.
+
+The provider stores memory content in your Upstash Redis database. Review its retention before enabling it for sensitive data. See the [Upstash AgentKit eve guide](https://upstash.com/docs/redis/sdks/agentkit/eve) for options including retention, recall limits, and automatic capture.
+
+AgentKit also ships \`@upstash/agentkit-eve-extension\`, an eve extension that adds Redis Search tools over your own documents and searchable chat history. Mount it separately under \`agent/extensions/\` when you need those capabilities; the memory slot does not depend on it.`,
+  },
+  arcana: {
+    logo: "arcana",
+    docsHref: "https://github.com/KybernesisAI/platform/tree/master/packages/arcana#readme",
+    keywords: ["memory", "long-term memory", "semantic search", "brain notes", "Kybernesis"],
+    install: `Install the Kybernesis Arcana provider for eve:
+
+\`\`\`bash
+eve add memory/arcana
+\`\`\`
+
+This installs \`@kybernesis/arcana\` and writes a memory slot. The provider requires Node.js 24 or later and eve 0.49 or later.`,
+    quickStart: `Create an Arcana workspace and workspace-scoped API key, then add both values to the agent's environment:
+
+\`\`\`bash title=".env.local"
+ARCANA_API_KEY=kb_your_api_key_here
+ARCANA_WORKSPACE=your-workspace
+\`\`\`
+
+The registry creates this memory slot:
+
+\`\`\`ts title="agent/memory/arcana.ts"
+import { arcanaMemory } from "@kybernesis/arcana/memory";
+import { defineMemory } from "eve/memory";
+import { byPrincipal } from "eve/memory/scope";
+
+export default defineMemory({
+  description: "Recall and manage durable context for the current user.",
+  provider: arcanaMemory({
+    apiKey: process.env.ARCANA_API_KEY!,
+    workspace: process.env.ARCANA_WORKSPACE!,
+  }),
+  scope: byPrincipal,
+});
+\`\`\`
+
+The filename creates the \`arcana\` memory slot. Before each turn with at least four words, Arcana searches memories and queries brain notes, then injects the result as one context message. The provider also gives the model \`arcana__remember\`, \`arcana__recall\`, and \`arcana__search\` tools.`,
+    configure: `Arcana does not capture turns automatically by default. The model stores memories deliberately with \`arcana__remember\`; set \`capture: { enabled: true }\` when you want it to capture completed turns automatically.
+
+An Arcana key is scoped to a workspace. Keep the key in a sensitive environment variable and use a separate workspace and key when people or tenants must not share memory. The provider records eve's scope as a tag, but Arcana isolates data by workspace rather than by eve scope. See the [Arcana package documentation](https://github.com/KybernesisAI/platform/tree/master/packages/arcana#readme) for the full configuration and tool reference.`,
+  },
+  supermemory: {
+    logo: "supermemory",
+    docsHref: "https://github.com/supermemoryai/eve-supermemory#readme",
+    keywords: [
+      "memory",
+      "long-term memory",
+      "semantic search",
+      "rag",
+      "conversation history",
+      "retrieval",
+      "Supermemory",
+    ],
+    install: `Install the Supermemory provider for eve:
+
+\`\`\`bash
+eve add memory/supermemory
+\`\`\`
+
+This installs \`@supermemory/eve\` and writes a memory slot. The provider requires Node.js 24 or later and eve 0.47.3 or later.`,
+    quickStart: `Create a Supermemory API key and add it to the agent's environment:
+
+\`\`\`bash title=".env.local"
+SUPERMEMORY_API_KEY=...
+\`\`\`
+
+The registry creates this memory slot:
+
+\`\`\`ts title="agent/memory/supermemory.ts"
+import supermemory from "@supermemory/eve";
+import { defineMemory } from "eve/memory";
+import { byPrincipal } from "eve/memory/scope";
+
+export default defineMemory({
+  description: "Recall and manage durable context for the current user.",
+  provider: supermemory({
+    apiKey: process.env.SUPERMEMORY_API_KEY!,
+  }),
+  scope: byPrincipal,
+});
+\`\`\`
+
+The filename creates the \`supermemory\` memory slot, so the provider's tools are named \`supermemory__search\`, \`supermemory__remember\`, and \`supermemory__forget\`. The provider uses eve's locked scope key to partition all reads and writes.`,
+    configure: `\`byPrincipal\` keeps memory disabled for anonymous and runtime principals, and shares the local-development scope while you run \`eve dev\`. For a multi-tenant agent, replace it with a scope resolver that derives both tenant and caller identity from verified session context. See [Multi-tenant memory](/docs/patterns/multi-tenant-memory).
+
+Supermemory automatically recalls relevant context before a turn and captures completed turns. It also provides tools to search, read sessions and documents, remember context, extract files, URLs, or text, and forget memories. The provider sends stored conversations and extracted sources to Supermemory; configure its retention and data handling for your application before enabling it for sensitive data.
+
+Keep \`SUPERMEMORY_API_KEY\` in the environment rather than prompts or source control. You can change the container-tag prefix, automatic search, capture policy, and profile-context time zone through \`supermemory(...)\`. See the [Supermemory eve provider documentation](https://github.com/supermemoryai/eve-supermemory#readme) for all options and tool behavior.`,
+  },
+};
+
+const extensionPresentations: Record<string, ExtensionPresentation> = {
+  ...baseExtensionPresentations,
   "agent-browser": {
     logo: "agent-browser",
     docsHref:
@@ -1569,6 +1846,14 @@ export default browser({
 Also configure the [sandbox network policy](/docs/sandbox#network-policy) for defense in depth. Treat saved browser state, cookies, screenshots, downloads, and recordings as sensitive data. Do not place passwords or session tokens in prompts. Use the extension's per-tool overrides to gate or disable actions your agent should not take unattended.
 
 The extension also supports inline screenshots, session naming, proxies, and production pre-installation. See the [agent-browser eve extension documentation](https://github.com/vercel-labs/agent-browser/tree/main/packages/%40agent-browser/eve) for the complete options and example app.`,
+    relatedResources: [
+      {
+        title: "Give your eve agent a browser",
+        description:
+          "Changelog introducing the agent-browser extension, which gives eve agents sandboxed tools to navigate, read, click, fill forms, take screenshots, and inspect network activity.",
+        href: "https://vercel.com/changelog/give-your-eve-agent-a-browser",
+      },
+    ],
   },
 };
 
@@ -1591,25 +1876,42 @@ const connectionPresentations: Record<string, ConnectionPresentation> = {
     configureNote:
       "Browser Use runs tasks in managed cloud browsers. Add approval gates or tool filters before allowing unattended browser actions.",
   },
+  agentcard: {
+    logo: "agentcard",
+    docsHref: "/docs/connections/mcp",
+    keywords: ["mcp", "shopping", "checkout", "payments", "virtual cards", "commerce", "connect"],
+    authModes: ["user"],
+  },
   vercel: {
     logo: "vercel",
     docsHref: "https://vercel.com/docs/agent-resources/vercel-mcp",
     keywords: ["mcp", "projects", "deployments", "logs", "oauth", "connect"],
     authModes: ["user", "app"],
-    connector: "vercel",
-    connectors: { app: "vercel/your-connector" },
-    connectorService: "vercel",
-    connectorServices: { app: "api-key" },
+    connectors: {
+      user: { name: "vercel" },
+      app: { uid: "vercel/your-connector", service: "api-key", name: "vercel" },
+    },
     configureNotes: {
       user: "Select None when prompted for a token authentication method. Each user completes OAuth when needed.",
       app: "Enter a team-scoped [Vercel token](https://vercel.com/kb/guide/how-do-i-use-a-vercel-api-access-token) when prompted, then copy the returned connector UID into the App example. This avoids per-user OAuth, though the Vercel token still belongs to the user who created it.",
     },
+    relatedResources: [
+      incidentResponseGuide,
+      softwareFactoryGuide,
+      {
+        title: "Manage Vercel projects with a software factory",
+        description:
+          "Add Vercel's hosted MCP server to the eve software factory so Foreman can read build logs, runtime errors, and deployment history through app-scoped Vercel Connect auth and a read-only tool allowlist.",
+        href: "https://vercel.com/kb/guide/software-factory-vercel-mcp",
+      },
+    ],
   },
   linear: {
     logo: "linear",
     docsHref: "/docs/connections/mcp",
     keywords: ["mcp", "issues", "project management", "oauth", "connect"],
     authModes: ["user", "app"],
+    relatedResources: [softwareFactoryGuide],
   },
   notion: {
     logo: "notion",
@@ -1618,6 +1920,7 @@ const connectionPresentations: Record<string, ConnectionPresentation> = {
     authModes: ["user", "app", "jwtBearer"],
     configureNote:
       "The OpenAPI setup sends the required `Notion-Version` header; bump it as Notion ships new API versions.",
+    relatedResources: [marketingTeamGuide],
   },
   datadog: {
     logo: "datadog",
@@ -1626,6 +1929,7 @@ const connectionPresentations: Record<string, ConnectionPresentation> = {
     authModes: ["jwtBearer"],
     configureNote:
       "Match the MCP `url` to your Datadog site (`datadoghq.com`, `datadoghq.eu`, and so on).",
+    relatedResources: [incidentResponseGuide],
   },
   honeycomb: {
     logo: "honeycomb",
@@ -1673,6 +1977,25 @@ const connectionPresentations: Record<string, ConnectionPresentation> = {
     logo: "coda",
     docsHref: "/docs/connections/mcp",
     keywords: ["mcp", "docs", "tables", "pages", "oauth", "connect"],
+    authModes: ["user"],
+  },
+  context: {
+    logo: "context",
+    docsHref: "https://docs.context.dev/install-mcp",
+    connectors: { user: { service: "mcp.context.dev", name: "context" } },
+    keywords: [
+      "mcp",
+      "web search",
+      "web scraping",
+      "crawl",
+      "extract",
+      "parse",
+      "brand intelligence",
+      "monitoring",
+      "batches",
+      "oauth",
+      "connect",
+    ],
     authModes: ["user"],
   },
   egnyte: {
@@ -1737,6 +2060,15 @@ const connectionPresentations: Record<string, ConnectionPresentation> = {
     configureNote:
       "Natural moves real money. Add an approval gate or tool filters before allowing unattended payment actions.",
   },
+  neon: {
+    logo: "neon",
+    docsHref: "https://neon.com/docs/ai/neon-mcp-server",
+    keywords: ["mcp", "postgres", "databases", "branches", "sql", "oauth", "connect"],
+    authModes: ["app"],
+    connectors: { app: { uid: "neon/neon", service: "neon" } },
+    configureNote:
+      "Neon's MCP server can modify projects and databases. Use a development or test project, review tool calls, and append `?readonly=true` or `?projectId=<project-id>` to scope access.",
+  },
   netlify: {
     logo: "netlify",
     docsHref: "/docs/connections/mcp",
@@ -1784,6 +2116,57 @@ const connectionPresentations: Record<string, ConnectionPresentation> = {
     docsHref: "/docs/connections/mcp",
     keywords: ["mcp", "traffic", "market data", "competitive intelligence", "oauth", "connect"],
     authModes: ["user"],
+  },
+  shopify: {
+    logo: "shopify",
+    docsHref: "https://shopify.dev/docs/apps/build/storefront-mcp",
+    keywords: ["mcp", "ucp", "commerce", "products", "carts", "checkouts"],
+    authModes: [],
+    quickStart: `Create \`agent/connections/shopify.ts\`:
+
+\`\`\`ts
+import { defineMcpClientConnection } from "eve/connections";
+
+const SHOPIFY_EXAMPLE_PROFILE =
+  "https://shopify.dev/ucp/agent-profiles/examples/2026-04-08/valid-with-capabilities.json";
+
+// Shopify cannot reach localhost. Use its public profile, or expose this route with a tool like ngrok.
+function agentProfileUrl(): string {
+  if (process.env.EVE_DEV === "1") return SHOPIFY_EXAMPLE_PROFILE;
+
+  return \`https://\${process.env.VERCEL_PROJECT_PRODUCTION_URL}/.well-known/ucp\`;
+}
+
+export default defineMcpClientConnection({
+  url: \`https://\${process.env.SHOPIFY_STORE_DOMAIN!}/api/ucp/mcp\`,
+  description: "Search products and build carts and checkouts on a Shopify storefront.",
+  toolCall: {
+    providedArguments: {
+      meta: ({ callId, session, toolName }) => ({
+        "ucp-agent": {
+          profile: agentProfileUrl(),
+        },
+
+        // Include callId so sibling calls are unique while durable replays reuse the same key.
+        ...(["cancel_cart", "complete_checkout", "cancel_checkout"].includes(toolName)
+          ? {
+              "idempotency-key": \`\${session.id}:\${session.turn.id}:\${toolName}:\${callId}\`,
+            }
+          : {}),
+      }),
+    },
+  },
+});
+\`\`\``,
+    configure: `Set your Shopify storefront domain:
+
+\`\`\`bash
+SHOPIFY_STORE_DOMAIN=your-store.myshopify.com
+\`\`\`
+
+During local development, the connection uses Shopify's public example because Shopify cannot reach localhost. To test your profile locally, expose \`/.well-known/ucp\` with [ngrok](https://ngrok.com/). In production, the connection uses the anonymous profile at \`/.well-known/ucp\`.
+
+See Shopify's [agent profile documentation](https://shopify.dev/docs/agents/profiles) for profile requirements.`,
   },
   stripe: {
     logo: "stripe",
@@ -2012,6 +2395,7 @@ export default defineInstrumentation({
 });
 \`\`\``,
     configure: `Datadog's direct OTLP trace intake is site-specific (for example \`datadoghq.com\` vs \`datadoghq.eu\`) and currently in Preview; look up the endpoint for your site in Datadog's OTLP intake docs. For production, Datadog recommends routing through an OpenTelemetry Collector with the Datadog exporter instead. See the [instrumentation guide](/docs/guides/instrumentation) for the trace hierarchy and the \`recordInputs\`/\`recordOutputs\` controls.`,
+    relatedResources: [incidentResponseGuide],
   },
   "honeycomb-instrumentation": {
     logo: "honeycomb",
@@ -2164,6 +2548,7 @@ function buildChannel(entry: IntegrationEntry): Integration {
     install: presentation.install,
     quickStart: presentation.quickStart,
     configure: presentation.configure,
+    relatedResources: presentation.relatedResources,
   };
 }
 
@@ -2178,33 +2563,27 @@ function buildConnection(entry: IntegrationEntry): Integration {
     throw new Error(`Catalog connection "${entry.slug}" is missing its connection identity.`);
   }
   const identity: ConnectionIdentity = entry.connection;
+  const { logo, docsHref, keywords, quickStart, configure, relatedResources, ...setup } =
+    presentation;
   const spec: ConnectionSpec = {
-    authModes: presentation.authModes,
+    ...setup,
     description: identity.description,
   };
-  if (presentation.apiKey !== undefined) spec.apiKey = presentation.apiKey;
-  if (presentation.connector !== undefined) spec.connector = presentation.connector;
-  if (presentation.connectors !== undefined) spec.connectors = presentation.connectors;
-  if (presentation.connectorService !== undefined) {
-    spec.connectorService = presentation.connectorService;
-  }
-  if (presentation.connectorServices !== undefined) {
-    spec.connectorServices = presentation.connectorServices;
-  }
   if (identity.mcp !== undefined) spec.mcp = identity.mcp;
   if (identity.openapi !== undefined) spec.openapi = identity.openapi;
-  if (presentation.configureNote !== undefined) spec.configureNote = presentation.configureNote;
-  if (presentation.configureNotes !== undefined) spec.configureNotes = presentation.configureNotes;
   return {
     slug: entry.slug,
     name: entry.name,
     type: "connection",
     tagline: entry.tagline,
     protocols: protocolsForIdentity(identity),
-    logo: presentation.logo,
-    docsHref: presentation.docsHref,
-    keywords: presentation.keywords,
+    logo,
+    docsHref,
+    keywords,
+    quickStart,
+    configure,
     connection: spec,
+    relatedResources,
   };
 }
 
@@ -2226,6 +2605,29 @@ function buildExtension(entry: IntegrationEntry): Integration {
     install: presentation.install,
     quickStart: presentation.quickStart,
     configure: presentation.configure,
+    relatedResources: presentation.relatedResources,
+  };
+}
+
+function buildMemory(entry: IntegrationEntry): Integration {
+  const presentation = memoryPresentations[entry.slug];
+  if (presentation === undefined) {
+    throw new Error(
+      `Memory provider "${entry.slug}" is in the catalog gallery but has no docs presentation.`,
+    );
+  }
+  return {
+    slug: entry.slug,
+    name: entry.name,
+    type: "memory",
+    tagline: entry.tagline,
+    logo: presentation.logo,
+    docsHref: presentation.docsHref,
+    keywords: presentation.keywords,
+    install: presentation.install,
+    quickStart: presentation.quickStart,
+    configure: presentation.configure,
+    relatedResources: presentation.relatedResources,
   };
 }
 
@@ -2247,6 +2649,7 @@ function buildInstrumentation(entry: IntegrationEntry): Integration {
     install: presentation.install,
     quickStart: presentation.quickStart,
     configure: presentation.configure,
+    relatedResources: presentation.relatedResources,
   };
 }
 
@@ -2261,6 +2664,10 @@ const connections: Integration[] = connectionEntries()
 const extensions: Integration[] = extensionEntries()
   .filter((entry) => entry.surfaces.gallery)
   .map(buildExtension);
+
+const memory: Integration[] = memoryEntries()
+  .filter((entry) => entry.surfaces.gallery)
+  .map(buildMemory);
 
 const instrumentation: Integration[] = instrumentationEntries()
   .filter((entry) => entry.surfaces.gallery)
@@ -2289,6 +2696,7 @@ export const authModeLabel: Record<AuthMode, string> = {
 export const integrations: Integration[] = [
   ...channels,
   ...extensions,
+  ...memory,
   ...connections,
   ...instrumentation,
 ];

@@ -1,6 +1,7 @@
 import { CodeBlock } from "@vercel/geistdocs/components/code-block";
 import { geistShikiTheme } from "@vercel/geistdocs/shiki-theme";
 import { highlight } from "fumadocs-core/highlight";
+import { cacheLife } from "next/cache";
 import type { ComponentProps, JSX } from "react";
 import {
   IconAgents,
@@ -203,6 +204,9 @@ export default defineEval({
 ];
 
 export async function FileTree() {
+  "use cache";
+  cacheLife("max");
+
   const rendered = await Promise.all(
     snippets.map((snippet) =>
       highlight(snippet.code, {

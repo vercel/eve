@@ -1,5 +1,5 @@
 import type { RunInput, SessionAuthContext } from "#channel/types.js";
-import { ContextContainer } from "#context/container.js";
+import { ContextContainer, contextStorage } from "#context/container.js";
 import { setChannelContext } from "#execution/channel-context.js";
 import {
   AuthKey,
@@ -8,16 +8,22 @@ import {
   ChannelDeliveryKey,
   ChannelRequestIdKey,
   ContinuationTokenKey,
+  ConversationIdKey,
   DynamicSubagentAgentConfigKey,
   InitiatorAuthKey,
   ModeKey,
   ParentSessionKey,
   ParentTraceContextKey,
+  ActivityObserverKey,
+  ScheduleIdKey,
   SessionCallbackKey,
-  SubagentDepthKey,
 } from "#context/keys.js";
 import { BundleKey, type CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
 import type { DynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agent-config.js";
+import { readConversationId } from "#tracing/conversation-context.js";
+import { buildConversationContext } from "#channel/conversation-context.js";
+import { ConversationContextKey } from "#shared/conversation-context.js";
+import { resolveInstrumentationEnvironment } from "#internal/application/dev-environment.js";
 
 /**
  * Builds the bootstrap {@link ContextContainer} for one run.
@@ -30,13 +36,20 @@ export function buildRunContext(input: {
   const { bundle, run } = input;
   const ctx = new ContextContainer();
   const auth: SessionAuthContext | null = run.auth;
+  const conversationId = readConversationId(run.conversationId);
+  if (conversationId !== undefined) ctx.set(ConversationIdKey, conversationId);
 
   ctx.set(BundleKey, bundle);
   setChannelContext(ctx, run.adapter, { channelName: run.channelName });
+  ctx.set(
+    ConversationContextKey,
+    buildConversationContext(run, resolveInstrumentationEnvironment()),
+  );
 
   if (run.channelMetadata !== undefined) {
     const existing = ctx.get(ChannelInstrumentationKey);
     ctx.set(ChannelInstrumentationKey, {
+      channelType: existing?.channelType ?? run.channelMetadata.channelType,
       kind: existing?.kind ?? run.channelMetadata.kind,
       metadata: run.channelMetadata.metadata,
     });
@@ -61,12 +74,20 @@ export function buildRunContext(input: {
     ctx.set(ChannelRequestIdKey, run.requestId);
   }
 
+  const scheduleId = contextStorage.getStore()?.get(ScheduleIdKey);
+  if (scheduleId !== undefined) {
+    ctx.set(ScheduleIdKey, scheduleId);
+  }
+
   if (run.delivery !== undefined) {
     ctx.set(ChannelDeliveryKey, run.delivery);
   }
 
   if (run.callback !== undefined) {
     ctx.set(SessionCallbackKey, run.callback);
+  }
+  if (run.activityObserver !== undefined) {
+    ctx.set(ActivityObserverKey, run.activityObserver);
   }
 
   if (run.parent !== undefined) {
@@ -75,10 +96,6 @@ export function buildRunContext(input: {
 
   if (run.parentTraceContext !== undefined) {
     ctx.set(ParentTraceContextKey, run.parentTraceContext);
-  }
-
-  if (run.subagentDepth !== undefined) {
-    ctx.set(SubagentDepthKey, run.subagentDepth);
   }
 
   // `run.limits` deliberately never enters the context: inherited limits ride

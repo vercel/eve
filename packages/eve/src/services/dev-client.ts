@@ -1,5 +1,5 @@
 import type { UserContent } from "ai";
-import type { InputResponse } from "#runtime/input/types.js";
+import type { InputResponse } from "#shared/input.js";
 import { isLocalDevelopmentServerUrl } from "#services/dev-client/local-host.js";
 import {
   readDevelopmentRuntimeArtifactsRevision,

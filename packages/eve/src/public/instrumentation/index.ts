@@ -92,9 +92,9 @@ export interface InstrumentationModelInput {
 }
 
 /**
- * Input passed to `events["step.started"]`. eve runs the callback after
- * building the final model input for this attempt and before constructing
- * the AI SDK model call.
+ * Input passed to `events["step.started"]` and to a provider's
+ * `runtimeContext` resolver. eve builds it after assembling the final model
+ * input for this attempt and before constructing the AI SDK model call.
  */
 export interface InstrumentationStepStartedEventInput {
   readonly channel: InstrumentationChannel;
@@ -103,6 +103,13 @@ export interface InstrumentationStepStartedEventInput {
   readonly step: InstrumentationStep;
   readonly turn: InstrumentationTurn;
 }
+
+/**
+ * Input passed to a provider's `runtimeContext` resolver. Same shape as
+ * {@link InstrumentationStepStartedEventInput}: channel, session, model input,
+ * step, and turn coordinates.
+ */
+export type InstrumentationRuntimeContextInput = InstrumentationStepStartedEventInput;
 
 /**
  * Result of a `step.started` callback. eve merges `runtimeContext` into the
@@ -149,20 +156,22 @@ export interface InstrumentationDefinition {
   readonly events?: InstrumentationEvents;
   /**
    * Whether to record full model inputs in telemetry spans. Defaults to
-   * `true` when `instrumentation.ts` is present. Set `false` for sensitive
-   * inputs or to reduce span payload size.
+   * `false`. Set `true` only when the destination is approved to receive
+   * input content.
    */
   readonly recordInputs?: boolean;
   /**
    * Whether to record full model outputs in telemetry spans. Defaults to
-   * `true` when `instrumentation.ts` is present.
+   * `false`. Set `true` only when the destination is approved to receive
+   * output content.
    */
   readonly recordOutputs?: boolean;
   /**
-   * Whether to emit the inbound HTTP `SERVER` span that wraps each channel
-   * request (the parent of the turn trace and any `hook.resume`/outgoing
-   * HTTP spans). Defaults to `false`. Set `true` to emit these request spans
-   * alongside the rest of the trace.
+   * Whether to emit an eve-owned HTTP `SERVER` span around each channel
+   * request. In the authored hierarchy, this span parents the turn trace. In
+   * the provider layout, a one-to-one activation remains a separate trace
+   * root and links to this span; when disabled, it links to any already-active
+   * upstream request or function span instead. Defaults to `false`.
    */
   readonly traceChannelRequests?: boolean;
   /**

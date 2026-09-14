@@ -7,18 +7,14 @@ import {
   DISCOVER_EXTENSION_AGENT_CONFIG_UNSUPPORTED,
   DISCOVER_EXTENSION_MOUNT_AMBIGUOUS,
   DISCOVER_EXTENSION_MOUNT_MISSING_DECLARATION,
+  DISCOVER_EXTENSION_INSTRUMENTATION_UNSUPPORTED,
+  DISCOVER_EXTENSION_MEMORY_UNSUPPORTED,
   DISCOVER_EXTENSION_NESTED_MOUNT_UNSUPPORTED,
-  DISCOVER_EXTENSION_OVERRIDE_OUTSIDE_MOUNT,
   DISCOVER_EXTENSION_SANDBOX_UNSUPPORTED,
-  DISCOVER_EXTENSION_SCHEDULE_UNSUPPORTED,
   locateExtensionMount,
   mountNamespace,
 } from "#discover/extensions.js";
-import {
-  classifyAgentRootEntry,
-  normalizeLogicalPath,
-  SUPPORTED_AUTHORED_MODULE_FILE_EXTENSIONS,
-} from "#discover/filesystem.js";
+import { classifyAgentRootEntry, normalizeLogicalPath } from "#discover/filesystem.js";
 import {
   createChannelNameDiagnostic,
   createExtensionNameDiagnostic,
@@ -35,6 +31,7 @@ import {
   readSortedDirectoryEntries,
 } from "#discover/grammar.js";
 import { discoverLibSources } from "#discover/lib.js";
+import { discoverMemorySources } from "#discover/memory.js";
 import {
   type AgentSourceManifest,
   type CreateAgentSourceManifestInput,
@@ -122,6 +119,13 @@ export async function discoverAgent(input: DiscoverAgentInput): Promise<Discover
   });
   diagnostics.push(...configModuleResult.diagnostics);
 
+  const instrumentationModuleResult = discoverFlatModuleSource({
+    rootEntries,
+    rootPath: agentRoot,
+    slotName: "instrumentation",
+  });
+  diagnostics.push(...instrumentationModuleResult.diagnostics);
+
   const channelsResult = await discoverNamedSourceDirectory({
     directoryName: "channels",
     invalidDirectoryCode: DISCOVER_CHANNELS_DIRECTORY_INVALID,
@@ -155,6 +159,13 @@ export async function discoverAgent(input: DiscoverAgentInput): Promise<Discover
   });
   diagnostics.push(...connectionsResult.diagnostics);
 
+  const memoryResult = await discoverMemorySources({
+    rootEntries,
+    rootPath: agentRoot,
+    source,
+  });
+  diagnostics.push(...memoryResult.diagnostics);
+
   const sandboxResult = await discoverSandboxSource({
     rootEntries,
     rootPath: agentRoot,
@@ -173,23 +184,33 @@ export async function discoverAgent(input: DiscoverAgentInput): Promise<Discover
         }),
       );
     }
+    if (instrumentationModuleResult.module !== undefined) {
+      diagnostics.push(
+        createDiscoverErrorDiagnostic({
+          code: DISCOVER_EXTENSION_INSTRUMENTATION_UNSUPPORTED,
+          message:
+            "An extension may not declare instrumentation — it is a singleton owned by the consuming agent.",
+          sourcePath: join(agentRoot, instrumentationModuleResult.module.logicalPath),
+        }),
+      );
+    }
+    const [firstMemory] = memoryResult.memories;
+    if (firstMemory !== undefined) {
+      diagnostics.push(
+        createDiscoverErrorDiagnostic({
+          code: DISCOVER_EXTENSION_MEMORY_UNSUPPORTED,
+          message:
+            "An extension may not declare memory — scope and lifecycle state belong to the consuming application.",
+          sourcePath: join(agentRoot, firstMemory.logicalPath),
+        }),
+      );
+    }
     if (sandboxResult.sandbox !== null) {
       diagnostics.push(
         createDiscoverErrorDiagnostic({
           code: DISCOVER_EXTENSION_SANDBOX_UNSUPPORTED,
           message: "An extension may not declare a sandbox — it is the consuming agent's to own.",
           sourcePath: join(agentRoot, sandboxResult.sandbox.logicalPath),
-        }),
-      );
-    }
-    const [firstSchedule] = schedulesResult.schedules;
-    if (firstSchedule !== undefined) {
-      diagnostics.push(
-        createDiscoverErrorDiagnostic({
-          code: DISCOVER_EXTENSION_SCHEDULE_UNSUPPORTED,
-          message:
-            "An extension may not declare schedules — background scheduling runs on the consuming agent's deployment under its limits, so it is the consuming agent's to own.",
-          sourcePath: join(agentRoot, firstSchedule.logicalPath),
         }),
       );
     }
@@ -252,22 +273,6 @@ export async function discoverAgent(input: DiscoverAgentInput): Promise<Discover
   });
   diagnostics.push(...mountCollection.diagnostics);
 
-  // Overrides must be co-located in the mount directory. An agent-root
-  // contribution using a mounted extension's `<ns>__` composed-name prefix would
-  // shadow that extension from outside its mount directory, so reject it.
-  diagnostics.push(
-    ...detectRootNamespaceCollisions({
-      agentRoot,
-      namespaces: mountCollection.mounts.map((descriptor) => descriptor.namespace),
-      sources: [
-        ...toolsResult.sources,
-        ...connectionsResult.connections,
-        ...skillsResult.skills,
-        ...schedulesResult.schedules,
-      ],
-    }),
-  );
-
   let resolvedExtensions: readonly ResolvedExtensionMount[] = [];
   if (role !== "agent") {
     // Extensions cannot mount other extensions yet. Fail loudly instead of
@@ -300,22 +305,29 @@ export async function discoverAgent(input: DiscoverAgentInput): Promise<Discover
     connections: connectionsResult.connections,
     packageName,
     diagnostics,
-    extensions: mountCollection.mounts.map((descriptor) => descriptor.mountRef),
+    extensions:
+      role === "extension" ? [] : mountCollection.mounts.map((descriptor) => descriptor.mountRef),
     resolvedExtensions,
     hooks: hooksResult.sources,
+    memories: role === "extension" ? [] : memoryResult.memories,
     lib: libResult.lib,
     instructions: instructionsResult.instructions,
-    sandbox: sandboxResult.sandbox,
+    sandbox: role === "extension" ? null : sandboxResult.sandbox,
     sandboxWorkspaces:
-      sandboxResult.sandboxWorkspace === null ? [] : [sandboxResult.sandboxWorkspace],
+      role === "extension" || sandboxResult.sandboxWorkspace === null
+        ? []
+        : [sandboxResult.sandboxWorkspace],
     schedules: schedulesResult.schedules,
     skills: skillsResult.skills,
     tools: toolsResult.sources,
     subagents: subagentsResult.subagents,
   };
 
-  if (configModuleResult.module !== undefined) {
+  if (role !== "extension" && configModuleResult.module !== undefined) {
     manifestInput.configModule = configModuleResult.module;
+  }
+  if (role !== "extension" && instrumentationModuleResult.module !== undefined) {
+    manifestInput.instrumentation = instrumentationModuleResult.module;
   }
 
   const manifest = createAgentSourceManifest(manifestInput);
@@ -382,6 +394,7 @@ export async function resolveExtensionMounts(input: {
       packageRoot: located.location.packageRoot,
       sourceRoot: located.location.sourceRoot,
       manifest: extensionResult.manifest,
+      externalDependencies: located.location.externalDependencies,
       overrides,
     });
   }
@@ -534,54 +547,6 @@ async function collectExtensionMounts(input: {
   );
 
   return { diagnostics, mounts };
-}
-
-/**
- * Flags agent-root contributions whose composed name uses a mounted extension's
- * `<ns>__` prefix. That prefix is reserved for the extension and its co-located
- * overrides, so a root-level `<ns>__…` file would override the extension from
- * outside its mount directory — rejected here.
- */
-export function detectRootNamespaceCollisions(input: {
-  readonly agentRoot: string;
-  readonly namespaces: readonly string[];
-  readonly sources: ReadonlyArray<{ readonly logicalPath: string }>;
-}): DiscoverDiagnostic[] {
-  if (input.namespaces.length === 0) {
-    return [];
-  }
-
-  const diagnostics: DiscoverDiagnostic[] = [];
-  for (const source of input.sources) {
-    const name = rootContributionName(source.logicalPath);
-    const namespace = input.namespaces.find((candidate) => name.startsWith(`${candidate}__`));
-    if (namespace !== undefined) {
-      diagnostics.push(
-        createDiscoverErrorDiagnostic({
-          code: DISCOVER_EXTENSION_OVERRIDE_OUTSIDE_MOUNT,
-          message: `"${source.logicalPath}" uses the "${namespace}__" prefix reserved for the mounted extension "${namespace}". Override an extension's contributions inside its mount directory ("extensions/${namespace}/…"), not at the agent root.`,
-          sourcePath: join(input.agentRoot, source.logicalPath),
-        }),
-      );
-    }
-  }
-  return diagnostics;
-}
-
-/**
- * Derives a contribution's composed name from its slot-relative logical path:
- * the first path segment below the slot directory, minus any module extension
- * (`tools/crm__x.ts` → `crm__x`; `skills/crm__x/SKILL.md` → `crm__x`).
- */
-function rootContributionName(logicalPath: string): string {
-  const afterSlot = logicalPath.slice(logicalPath.indexOf("/") + 1);
-  const firstSegment = afterSlot.split("/")[0] ?? afterSlot;
-  for (const extension of SUPPORTED_AUTHORED_MODULE_FILE_EXTENSIONS) {
-    if (firstSegment.toLowerCase().endsWith(extension)) {
-      return firstSegment.slice(0, firstSegment.length - extension.length);
-    }
-  }
-  return firstSegment;
 }
 
 /**

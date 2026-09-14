@@ -29,6 +29,8 @@ export interface PhotonInboundMessageContext {
 export type PhotonInboundResult = {
   readonly auth: SessionAuthContext | null;
   readonly context?: readonly string[];
+  /** Overrides the workflow run title without changing the message sent to the model. */
+  readonly title?: string;
 } | null;
 
 /** Sync or async {@link PhotonInboundResult}. */
@@ -40,7 +42,7 @@ export interface PhotonIMessageChannelConfig {
   readonly credentials: PhotonIMessageChannelCredentials;
   /** Per-event overrides for the underlying Chat SDK channel. */
   readonly events?: ChatSdkChannelEvents<{ imessage: iMessageAdapter }>;
-  /** Inbound message policy. Defaults to dispatching every message with no user auth. */
+  /** Inbound message policy. Defaults to dispatching with the Photon message author's user auth. */
   readonly onMessage?: (
     ctx: PhotonInboundMessageContext,
     message: Message,
@@ -105,8 +107,25 @@ export function photonIMessageChannel(config: PhotonIMessageChannelConfig): Phot
   return bridge.channel;
 }
 
-async function defaultOnMessage(): Promise<PhotonInboundResult> {
-  return { auth: null };
+/** Default Photon auth projection for inbound Chat SDK message authors. */
+export function defaultPhotonAuth(message: Message): SessionAuthContext {
+  const attributes: Record<string, string> = {};
+  if (message.author.userName !== undefined) attributes.user_name = message.author.userName;
+  return {
+    attributes,
+    authenticator: "photon-imessage",
+    issuer: "photon",
+    principalId: `photon:${message.author.userId}`,
+    principalType: message.author.isBot ? "service" : "user",
+    subject: message.author.userId,
+  };
+}
+
+async function defaultOnMessage(
+  _ctx: PhotonInboundMessageContext,
+  message: Message,
+): Promise<PhotonInboundResult> {
+  return { auth: defaultPhotonAuth(message) };
 }
 
 async function dispatchMessage(
@@ -125,7 +144,7 @@ async function dispatchMessage(
       context: [...(result.context ?? [])],
       message: content,
     },
-    { auth: result.auth, thread },
+    { auth: result.auth, thread, title: result.title },
   );
 }
 

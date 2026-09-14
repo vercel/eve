@@ -5,7 +5,7 @@ import { join } from "node:path";
 
 import { ROOT_CONTEXT, trace as apiTrace } from "@opentelemetry/api";
 import { BasicTracerProvider } from "@opentelemetry/sdk-trace-base";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 
 import {
   ROOT_CONTEXT as COMPILED_ROOT_CONTEXT,
@@ -13,20 +13,29 @@ import {
   trace as runtimeTrace,
 } from "#compiled/@opentelemetry/api/index.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
-import { createAiSdkHookBridge } from "#harness/ai-sdk-hook-bridge.js";
+import { createAiSdkHookBridge } from "#instrumentation/ai-sdk-hook-bridge.js";
 import { listLocalTraces } from "#tracing/local-trace-reader.js";
-import type { InstrumentationAttemptScope } from "#harness/instrumentation-lifecycle.js";
+import type { InstrumentationAttemptScope } from "#instrumentation/lifecycle.js";
 import {
   actionIdempotencyKey,
   attemptIdempotencyKey,
   sessionIdempotencyKey,
   turnIdempotencyKey,
-} from "#harness/instrumentation-lifecycle.js";
+} from "#instrumentation/lifecycle.js";
 import { installLocalInstrumentationRuntime } from "#tracing/local-instrumentation-runtime.js";
 import { LocalTraceSpanProcessor } from "#tracing/local-trace-span-processor.js";
 
 const temporaryDirectories: string[] = [];
 const require = createRequire(import.meta.url);
+
+const traceContext = (audience: "public" | "private" | "unknown") => ({
+  agentName: "weather",
+  audience,
+  channel: { kind: "http" as const },
+  environment: "production" as const,
+  mode: "conversation" as const,
+  principalType: "anonymous",
+});
 
 afterEach(async () => {
   await Promise.all(
@@ -35,18 +44,19 @@ afterEach(async () => {
 });
 
 describe("local instrumentation runtime", () => {
-  it("persists agent, AI, and user spans in one trace", async () => {
+  it("persists the agent trace hierarchy in OTLP segments", async () => {
     const appRoot = await mkdtemp(join(tmpdir(), "eve-local-traces-"));
     temporaryDirectories.push(appRoot);
+    // Resolve and cache the public API tracer before eve installs its vendored
+    // provider, matching an authored module's normal module-scope setup.
+    const authoredTracer = (
+      require("@opentelemetry/api") as typeof import("@opentelemetry/api")
+    ).trace.getTracer("test-user");
     const runtime = installLocalInstrumentationRuntime({
       appRoot,
       frameworkVersion: "test",
       serviceName: "test-agent",
     });
-    // Resolve the public API outside Vitest's transformed module graph, as an
-    // authored app does when it imports its own @opentelemetry/api dependency.
-    const authoredTrace = (require("@opentelemetry/api") as typeof import("@opentelemetry/api"))
-      .trace;
     const scope: InstrumentationAttemptScope = {
       attemptId: "session-1:turn-1:0:0",
       attemptIndex: 0,
@@ -58,17 +68,17 @@ describe("local instrumentation runtime", () => {
     };
     const delivery = runtimeTrace.getTracer("workflow").startSpan("workflow.delivery");
     const activeContext = runtimeTrace.setSpan(COMPILED_ROOT_CONTEXT, delivery);
-    const contextActive = vi.spyOn(runtimeContext, "active").mockReturnValue(activeContext);
+    const hooks = runtime.hooks.forTrace!(traceContext("unknown"));
 
-    await contextStorage.run(new ContextContainer(), async () => {
-      await runtime.hooks.publish({
+    const exerciseRuntime = async () => {
+      await hooks.publish({
         agentName: "weather",
         idempotencyKey: sessionIdempotencyKey("session-1"),
         rootSessionId: "session-1",
         sessionId: "session-1",
         type: "session.started",
       });
-      await runtime.hooks.publish({
+      await hooks.publish({
         idempotencyKey: turnIdempotencyKey("session-1", "turn-1"),
         rootSessionId: "session-1",
         sequence: 0,
@@ -76,7 +86,7 @@ describe("local instrumentation runtime", () => {
         turnId: "turn-1",
         type: "turn.started",
       });
-      const bridge = createAiSdkHookBridge(scope, runtime.hooks, runtime.runInContext);
+      const bridge = createAiSdkHookBridge(scope, hooks, runtime.runInContext);
       Reflect.apply(bridge.onStart!, bridge, [
         {
           callId: "call-1",
@@ -87,12 +97,18 @@ describe("local instrumentation runtime", () => {
       ]);
       await Reflect.apply(bridge.onStepStart!, bridge, [{ callId: "call-1", stepNumber: 0 }]);
       await Reflect.apply(bridge.onLanguageModelCallStart!, bridge, [
-        { callId: "call-1", messages: [], modelId: "model-1", provider: "test", tools: undefined },
+        {
+          callId: "call-1",
+          messages: [],
+          modelId: "model-1",
+          provider: "test",
+          tools: undefined,
+        },
       ]);
       await bridge.executeLanguageModelCall!({
         callId: "call-1",
         execute: async () => {
-          const span = authoredTrace.getTracer("test-user").startSpan("user.model-work");
+          const span = authoredTracer.startSpan("user.model-work");
           expect(span.isRecording()).toBe(true);
           await Promise.resolve();
           span.end();
@@ -109,7 +125,7 @@ describe("local instrumentation runtime", () => {
         },
       ]);
       const actionKey = actionIdempotencyKey("session-1", "turn-1", "tool-1");
-      await runtime.hooks.publish({
+      await hooks.publish({
         callId: "tool-1",
         idempotencyKey: actionKey,
         input: {},
@@ -127,7 +143,7 @@ describe("local instrumentation runtime", () => {
       await bridge.executeTool!({
         callId: "call-1",
         execute: async () => {
-          const span = authoredTrace.getTracer("test-user").startSpan("user.tool-work");
+          const span = authoredTracer.startSpan("user.tool-work");
           expect(span.isRecording()).toBe(true);
           await Promise.resolve();
           span.end();
@@ -143,33 +159,35 @@ describe("local instrumentation runtime", () => {
           toolOutput: { output: { temperature: 72 }, type: "tool-result" },
         },
       ]);
-      await runtime.hooks.publish({
+      await hooks.publish({
         idempotencyKey: actionKey,
         outcome: "completed",
         output: { output: { temperature: 72 }, type: "result" },
         scope,
         type: "action.completed",
       });
-      await runtime.hooks.publish({
+      await hooks.publish({
         idempotencyKey: attemptIdempotencyKey(scope),
         scope,
         type: "step.attempt.completed",
       });
-      await runtime.hooks.publish({
+      await hooks.publish({
         idempotencyKey: turnIdempotencyKey("session-1", "turn-1"),
         sessionId: "session-1",
         turnId: "turn-1",
         type: "turn.completed",
       });
       // Settling the turn emits the turn span with the pre-allocated id.
-      await runtime.hooks.publish({
+      await hooks.publish({
         idempotencyKey: sessionIdempotencyKey("session-1"),
         sessionId: "session-1",
         turnId: "turn-1",
         type: "session.waiting",
       });
-    });
-    contextActive.mockRestore();
+    };
+    await runtimeContext.with(activeContext, () =>
+      contextStorage.run(new ContextContainer(), exerciseRuntime),
+    );
     delivery.end();
     await runtime.forceFlush();
 
@@ -187,19 +205,34 @@ describe("local instrumentation runtime", () => {
       }),
     );
     const spans = spanGroups.flat();
-    expect(spans.map((span) => span.name)).toEqual(
-      expect.arrayContaining([
-        "agent.turn",
-        "agent.step",
-        "ai.streamText",
-        "chat model-1",
-        "agent.action",
-        "ai.toolCall",
-        "user.model-work",
-        "user.tool-work",
-      ]),
-    );
-    expect(span(spans, "agent.step").parentSpanId).toBe(span(spans, "agent.turn").spanId);
+    expect(formatTraceTree(spans)).toEqual([
+      "invoke_agent weather",
+      "  agent.step",
+      "    agent.action",
+      "      execute_tool weather",
+      "        user.tool-work",
+      "    chat model-1",
+      "      user.model-work",
+    ]);
+    for (const exported of spans.filter((span) => !span.name.startsWith("user."))) {
+      expect(exported.attributes).toEqual(
+        expect.arrayContaining([
+          { key: "resource.name", value: { stringValue: exported.name } },
+          {
+            key: "operation.name",
+            value: {
+              stringValue: exported.name.startsWith("invoke_agent ")
+                ? "invoke_agent"
+                : exported.name.startsWith("execute_tool ")
+                  ? "execute_tool"
+                  : exported.name.startsWith("chat ")
+                    ? "chat"
+                    : exported.name,
+            },
+          },
+        ]),
+      );
+    }
     expect(span(spans, "agent.step").links).toEqual([
       expect.objectContaining({
         attributes: expect.arrayContaining([
@@ -212,15 +245,9 @@ describe("local instrumentation runtime", () => {
         traceId: delivery.spanContext().traceId,
       }),
     ]);
-    expect(span(spans, "ai.streamText").parentSpanId).toBe(span(spans, "agent.step").spanId);
-    expect(span(spans, "chat model-1").parentSpanId).toBe(span(spans, "ai.streamText").spanId);
-    expect(span(spans, "user.model-work").parentSpanId).toBe(span(spans, "chat model-1").spanId);
-    expect(span(spans, "agent.action").parentSpanId).toBe(span(spans, "agent.turn").spanId);
-    expect(span(spans, "ai.toolCall").parentSpanId).toBe(span(spans, "agent.action").spanId);
-    expect(span(spans, "user.tool-work").parentSpanId).toBe(span(spans, "ai.toolCall").spanId);
     const listed = await listLocalTraces(appRoot);
     expect(listed).toHaveLength(1);
-    expect(listed[0]).toMatchObject({ sessionId: "session-1", traceId });
+    expect(listed[0]).toMatchObject({ conversationId: "session-1", traceId });
   });
 
   it("keeps segments from overlapping worker writers", async () => {
@@ -251,6 +278,7 @@ describe("local instrumentation runtime", () => {
 });
 
 interface OtlpSpan {
+  readonly attributes: ReadonlyArray<{ readonly key: string; readonly value: unknown }>;
   readonly links?: ReadonlyArray<{
     readonly attributes: ReadonlyArray<{ readonly key: string; readonly value: unknown }>;
     readonly spanId: string;
@@ -271,4 +299,30 @@ interface OtlpRequest {
 
 function span(spans: readonly OtlpSpan[], name: string): OtlpSpan {
   return spans.find((candidate) => candidate.name === name)!;
+}
+
+function formatTraceTree(spans: readonly OtlpSpan[]): string[] {
+  const children = Map.groupBy(spans, (candidate) => candidate.parentSpanId);
+  const lines: string[] = [];
+  const visited = new Set<string>();
+
+  const append = (current: OtlpSpan, depth: number): void => {
+    visited.add(current.spanId);
+    lines.push(`${"  ".repeat(depth)}${current.name}`);
+    for (const child of (children.get(current.spanId) ?? []).toSorted((a, b) =>
+      a.name.localeCompare(b.name),
+    )) {
+      append(child, depth + 1);
+    }
+  };
+
+  for (const root of (children.get(undefined) ?? []).toSorted((a, b) =>
+    a.name.localeCompare(b.name),
+  )) {
+    append(root, 0);
+  }
+  for (const orphan of spans.filter((candidate) => !visited.has(candidate.spanId))) {
+    lines.push(`[orphan parent=${orphan.parentSpanId ?? "none"}] ${orphan.name}`);
+  }
+  return lines;
 }

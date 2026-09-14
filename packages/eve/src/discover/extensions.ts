@@ -10,7 +10,10 @@ import { parseExtensionMountSpecifier } from "#discover/extension-specifier.js";
 import { SUPPORTED_AUTHORED_MODULE_FILE_EXTENSIONS } from "#discover/filesystem.js";
 import type { ExtensionSourceRef } from "#discover/manifest.js";
 import type { ProjectSource } from "#discover/project-source.js";
-import { parseExtensionPackageRoots } from "#shared/extension-package-contract.js";
+import {
+  parseBuiltInExtensionPackageRoots,
+  parseExtensionPackageRoots,
+} from "#shared/extension-package-contract.js";
 
 /**
  * Emitted when a mount file cannot be resolved to an extension package.
@@ -37,14 +40,6 @@ export const DISCOVER_EXTENSION_MOUNT_MISSING_DECLARATION =
  */
 export const DISCOVER_EXTENSION_NESTED_MOUNT_UNSUPPORTED =
   "discover/extension-nested-mount-unsupported";
-
-/**
- * Emitted when a consumer's agent-root contribution (e.g. `agent/tools/crm__x.ts`)
- * uses a mounted extension's `<ns>__` prefix. That prefix is reserved for the
- * extension and its co-located overrides, not the agent root.
- */
-export const DISCOVER_EXTENSION_OVERRIDE_OUTSIDE_MOUNT =
-  "discover/extension-override-outside-mount";
 
 /**
  * Emitted when a resolved package is not a valid eve extension.
@@ -76,13 +71,14 @@ export const DISCOVER_EXTENSION_AGENT_CONFIG_UNSUPPORTED =
  * consuming agent's to own.
  */
 export const DISCOVER_EXTENSION_SANDBOX_UNSUPPORTED = "discover/extension-sandbox-unsupported";
+export const DISCOVER_EXTENSION_MEMORY_UNSUPPORTED = "discover/extension-memory-unsupported";
 
 /**
- * Emitted when an extension source tree declares `schedules`. Background
- * scheduling runs sessions on the consuming agent's deployment under its limits,
- * so it is the consuming agent's to own, not an extension's.
+ * Emitted when an extension declares agent-level instrumentation. Instrumentation
+ * is a singleton owned by the consuming agent and cannot be namespace-scoped.
  */
-export const DISCOVER_EXTENSION_SCHEDULE_UNSUPPORTED = "discover/extension-schedule-unsupported";
+export const DISCOVER_EXTENSION_INSTRUMENTATION_UNSUPPORTED =
+  "discover/extension-instrumentation-unsupported";
 
 /**
  * Resolved on-disk location of one mounted extension package.
@@ -98,6 +94,8 @@ export interface ExtensionMountLocation {
   readonly packageRoot: string;
   /** Absolute path to the extension's agent-shaped distribution root. */
   readonly sourceRoot: string;
+  /** Runtime packages this extension requires the consuming application to externalize. */
+  readonly externalDependencies: readonly string[];
 }
 
 /**
@@ -118,6 +116,8 @@ export interface ExtensionMountPackageLocation {
   readonly authoredSourceRoot?: string;
   /** Absolute path to the agent-shaped distribution root. */
   readonly distRoot: string;
+  /** The distribution is shipped by the resolved eve package itself. */
+  readonly builtIn: boolean;
 }
 
 /**
@@ -185,6 +185,20 @@ export async function locateExtensionMount(input: {
   }
 
   const { location } = locatedPackage;
+  if (location.builtIn) {
+    return {
+      location: {
+        namespace: location.namespace,
+        specifier: location.specifier,
+        packageName: location.packageName,
+        packageRoot: location.packageRoot,
+        sourceRoot: location.distRoot,
+        externalDependencies: [],
+      },
+      diagnostics: [],
+    };
+  }
+
   const compatibilityPath = join(location.distRoot, EXTENSION_COMPATIBILITY_MANIFEST_FILENAME);
   let compatibility;
   try {
@@ -224,6 +238,7 @@ export async function locateExtensionMount(input: {
       packageName: location.packageName,
       packageRoot: location.packageRoot,
       sourceRoot: location.distRoot,
+      externalDependencies: compatibility.build?.externalDependencies ?? [],
     },
     diagnostics: [],
   };
@@ -295,7 +310,7 @@ export async function locateExtensionMountPackage(input: {
   }
 
   const manifestPath = join(packageRoot, "package.json");
-  let pkg: { name?: unknown; eve?: { extension?: unknown } };
+  let pkg: { name?: unknown; eve?: { extension?: unknown; builtInExtensions?: unknown } };
   try {
     pkg = JSON.parse(await input.source.readTextFile(manifestPath)) as typeof pkg;
   } catch {
@@ -310,7 +325,11 @@ export async function locateExtensionMountPackage(input: {
     };
   }
 
-  const extension = parseExtensionPackageRoots(pkg.eve?.extension);
+  const builtInExtension = parseBuiltInExtensionPackageRoots(
+    pkg.eve?.builtInExtensions,
+    packageSpecifierSubpath(specifier),
+  );
+  const extension = builtInExtension ?? parseExtensionPackageRoots(pkg.eve?.extension);
   if (extension === null) {
     return {
       diagnostics: [
@@ -334,6 +353,7 @@ export async function locateExtensionMountPackage(input: {
       ...(extension.source === undefined
         ? {}
         : { authoredSourceRoot: resolve(packageRoot, extension.source) }),
+      builtIn: builtInExtension !== null,
       distRoot: resolve(packageRoot, extension.dist),
     },
     diagnostics: [],
@@ -374,6 +394,12 @@ async function resolvePackageRoot(input: {
     }
     current = parent;
   }
+}
+
+/** Returns the export subpath of a bare package specifier. */
+function packageSpecifierSubpath(specifier: string): string {
+  const subpath = specifier.slice(bareSpecifierPackagePath(specifier).length);
+  return subpath.length === 0 ? "." : `.${subpath}`;
 }
 
 /**

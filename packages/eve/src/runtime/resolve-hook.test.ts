@@ -23,6 +23,7 @@ function buildModuleMap(sourceId: string, moduleNamespace: unknown): CompiledMod
 
 function buildDefinition(input: { readonly slug: string }): CompiledHookDefinition {
   return {
+    eventNames: [],
     exportName: undefined,
     logicalPath: `agent/hooks/${input.slug}.ts`,
     slug: input.slug,

@@ -13,7 +13,7 @@ import {
  */
 describe("durableSessionStore integration", () => {
   it("each step's readDurableSession returns the immediately-preceding write", async () => {
-    const runtime = createTestRuntime({ agent: { name: "durable-session-store-fixture" } });
+    const runtime = await createTestRuntime({ agent: { name: "durable-session-store-fixture" } });
 
     await runtime.run(async () => {
       const run = await start(durableSessionStoreFixtureWorkflow, [
@@ -37,7 +37,9 @@ describe("durableSessionStore integration", () => {
   });
 
   it("a standalone read step after several writes returns the latest returned state", async () => {
-    const runtime = createTestRuntime({ agent: { name: "durable-session-store-fixture-tail" } });
+    const runtime = await createTestRuntime({
+      agent: { name: "durable-session-store-fixture-tail" },
+    });
 
     await runtime.run(async () => {
       const run = await start(durableSessionStoreFixtureWorkflow, [
@@ -65,7 +67,9 @@ describe("durableSessionStore integration", () => {
   });
 
   it("a write-step retry's returned state is what the subsequent read returns", async () => {
-    const runtime = createTestRuntime({ agent: { name: "durable-session-store-fixture-retry" } });
+    const runtime = await createTestRuntime({
+      agent: { name: "durable-session-store-fixture-retry" },
+    });
 
     await runtime.run(async () => {
       const run = await start(durableSessionRetryFixtureWorkflow, []);

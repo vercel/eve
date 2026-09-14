@@ -18,6 +18,7 @@ export const IntegrationDocsLink = ({
     className="inline-flex w-fit items-center gap-1 text-gray-900 text-sm transition-colors hover:text-gray-1000"
     href={href}
     onClick={() => track(analyticsEvents.integrationDocsOpened, { integration, type })}
+    prefetch={href.startsWith("/")}
   >
     Read the full {type.toLowerCase()} docs
     <ArrowUpRightIcon className="size-3.5" />

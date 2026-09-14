@@ -15,7 +15,7 @@ const log = createLogger("channel.forwarded-principal");
 export const FORWARDED_BY_ATTRIBUTE = "eve:forwarded-by";
 
 /**
- * Wire shape of the create-session `forwardedPrincipal` body field: the
+ * Wire shape of the session-request `forwardedPrincipal` body field: the
  * dispatching turn's session principals, asserted by a trusted forwarder.
  * Only principal metadata crosses the wire — never tokens or credentials.
  */
@@ -43,7 +43,7 @@ export type ForwardedPrincipalParseResult =
     };
 
 /**
- * The create route's effective session principals after the forwarded
+ * A session route's effective principals after the forwarded
  * principal gate: the transport principal untouched when the body carries no
  * assertion, or the stamped forwarded contexts once a trusted forwarder's
  * assertion is accepted.
@@ -85,7 +85,7 @@ const forwardedPrincipalSchema = z
   .strict();
 
 /**
- * Gates the create-session `forwardedPrincipal` body field and resolves the
+ * Gates the `forwardedPrincipal` body field and resolves the
  * effective session principals. Returns the failure `Response` on rejection:
  * 403 when the channel accepts no forwarded principal or the predicate
  * refuses the forwarder, 400 on a malformed payload, 500 when the authored
@@ -141,7 +141,7 @@ export async function resolveForwardedPrincipal(input: {
 }
 
 /**
- * Parses the create-session `forwardedPrincipal` body field against the
+ * Parses the `forwardedPrincipal` body field against the
  * strict wire schema. Mirrors `parseSessionCallback` for `callback`: strict
  * keys, formatted error strings, and no exceptions.
  */

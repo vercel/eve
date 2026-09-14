@@ -13,7 +13,7 @@ describe("buildBaseToolContext – getSandbox abort binding", () => {
         return { exitCode: 0, stderr: "", stdout: "" };
       },
     });
-    const runtime = createTestRuntime();
+    const runtime = await createTestRuntime();
     const controller = new AbortController();
 
     await runtime.runAsSession({ sandbox }, async () => {
@@ -41,7 +41,7 @@ describe("buildBaseToolContext – getSandbox abort binding", () => {
         return { exitCode: 0, stderr: "", stdout: "" };
       },
     });
-    const runtime = createTestRuntime();
+    const runtime = await createTestRuntime();
 
     await runtime.runAsSession({ sandbox }, async () => {
       const ctx = buildBaseToolContext({

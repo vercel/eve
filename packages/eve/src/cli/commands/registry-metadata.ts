@@ -8,10 +8,27 @@ const RegistrySetupSchema = z.object({
   args: z.array(z.string()).default([]),
 });
 
+const ExactPackageNameSchema = z
+  .string()
+  .regex(/^(?:@[a-z0-9][a-z0-9._~-]*\/)?[a-z0-9][a-z0-9._~-]*$/u);
+
+const PnpmBuildScriptPolicySchema = z.object({
+  packages: z.array(ExactPackageNameSchema).min(1),
+  optional: z.literal(true),
+  recommendedAction: z.literal("ignore-optional"),
+  reason: z.string().min(1),
+});
+
 const EveRegistryMetadataSchema = z.object({
   requires: z.string().optional(),
   docs: z.string().min(1).optional(),
   implementation: z.enum(["native", "chat-sdk"]).optional(),
+  hidden: z.literal(true).optional(),
+  install: z
+    .object({
+      pnpm: z.object({ buildScripts: z.array(PnpmBuildScriptPolicySchema).min(1) }).optional(),
+    })
+    .optional(),
   setup: z
     .union([RegistrySetupSchema, z.array(RegistrySetupSchema).min(1)])
     .transform((setup) => (Array.isArray(setup) ? setup : [setup]))
@@ -41,7 +58,7 @@ const RegistryPresentationManifestSchema = EveRegistryItemMetadataSchema.extend(
 
 export type RegistrySearchMetadata = Pick<
   z.infer<typeof EveRegistryMetadataSchema>,
-  "docs" | "implementation"
+  "docs" | "hidden" | "implementation"
 >;
 
 /** Parses eve-owned metadata from a registry item manifest. */
@@ -56,9 +73,9 @@ export function parseOfficialRegistrySearchMetadata(
   const { items } = OfficialRegistryCatalogSchema.parse(input);
   const metadata = new Map<string, RegistrySearchMetadata>();
   for (const item of items) {
-    const { docs, implementation } = item.meta?.eve ?? {};
-    if (docs !== undefined || implementation !== undefined) {
-      metadata.set(item.name, { docs, implementation });
+    const { docs, hidden, implementation } = item.meta?.eve ?? {};
+    if (docs !== undefined || hidden !== undefined || implementation !== undefined) {
+      metadata.set(item.name, { docs, hidden, implementation });
     }
   }
   return metadata;

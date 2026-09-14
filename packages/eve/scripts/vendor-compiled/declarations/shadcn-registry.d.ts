@@ -20,6 +20,7 @@ export interface AddRegistryItemsOptions {
 export interface RegistrySearchItem {
   registry: string;
   name: string;
+  title?: string;
   addCommandArgument: string;
   type?: string;
   description?: string;

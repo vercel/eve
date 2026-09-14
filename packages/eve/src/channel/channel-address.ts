@@ -1,6 +1,7 @@
 import type { UserContent } from "ai";
 
 import type { ChannelAdapter } from "#channel/adapter.js";
+import { copyChannelActivityPresentation } from "#channel/activity-renderer.js";
 import {
   createChannelDeliveryMetadata,
   type ChannelDeliverySource,
@@ -21,7 +22,6 @@ import type {
   TurnPolicy,
 } from "#channel/types.js";
 import { DEFAULT_TURN_POLICY } from "#channel/types.js";
-import { isRuntimeSessionOwnershipConflictError } from "#execution/runtime-errors.js";
 import { isReservedSessionCommandToken } from "#execution/session-command-token.js";
 import type { RunMode } from "#shared/run-mode.js";
 
@@ -37,7 +37,7 @@ interface BaseChannelAddressDeliveryOptions {
 /** Delivery options for a channel address whose continuation token is already bound. */
 export type ChannelAddressDeliveryOptions<TState = undefined> = [TState] extends [undefined]
   ? BaseChannelAddressDeliveryOptions
-  : BaseChannelAddressDeliveryOptions & { readonly state?: TState };
+  : BaseChannelAddressDeliveryOptions & { readonly state?: Partial<TState> };
 
 /**
  * Dynamic handle for whichever durable session currently owns one channel-local address.
@@ -135,12 +135,16 @@ export function createChannelAddress<TState = undefined>(input: {
               ...input.adapter,
               state: { ...input.adapter.state, ...(state as Record<string, unknown>) },
             };
+      if (adapter !== input.adapter) copyChannelActivityPresentation(input.adapter, adapter);
+      const capabilities: RunInput["capabilities"] =
+        options.mode === "task" ? undefined : { requestInput: true };
       const runInput: RunInput = {
         adapter,
         auth: options.auth,
-        capabilities: options.mode === "task" ? undefined : { requestInput: true },
+        capabilities,
         callback: options.callback,
         channelName: input.channelName,
+        continuationConflictCommand: command,
         continuationToken: namespacedToken,
         delivery,
         initiatorAuth: options.initiatorAuth,
@@ -153,18 +157,11 @@ export function createChannelAddress<TState = undefined>(input: {
         requestId: metadata.requestId,
         title: options.title,
       };
-      try {
-        const handle = await input.runtime.createSession(runInput);
-        return createSession(handle.sessionId, input.runtime, {
-          ...metadata,
-          turnPolicy: input.turnPolicy,
-        });
-      } catch (error) {
-        if (!isRuntimeSessionOwnershipConflictError(error)) throw error;
-        const winner = await dispatch();
-        if (winner !== undefined) return winner;
-        throw error;
-      }
+      const handle = await input.runtime.createSession(runInput);
+      return createSession(handle.sessionId, input.runtime, {
+        ...metadata,
+        turnPolicy: input.turnPolicy,
+      });
     },
     async send(message, options) {
       return await this.deliver({ message }, options);

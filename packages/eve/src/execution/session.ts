@@ -1,5 +1,6 @@
 import type { DurableSession } from "#execution/durable-session-store.js";
 import { formatAvailableSkillsSection } from "#execution/skills/instructions.js";
+import { validateHarnessModelMessages } from "#harness/messages.js";
 import type {
   HarnessSession,
   SessionAgent,
@@ -21,6 +22,7 @@ export const DEFAULT_ROOT_MAX_INPUT_TOKENS_PER_SESSION = 40_000_000;
 export interface AuthoredSessionLimits {
   readonly maxInputTokensPerSession?: number | false;
   readonly maxOutputTokensPerSession?: number | false;
+  readonly maxTokenCostUsdPerSession?: number | false;
 }
 
 /**
@@ -72,7 +74,7 @@ export interface CreateSessionInput {
   readonly turnAgent: RuntimeTurnAgent;
   readonly limits?: AuthoredSessionLimits;
   readonly outputSchema?: HarnessSession["outputSchema"];
-  readonly subagentDepth?: number;
+  readonly taskId?: string;
   readonly workflowMaxSubagents?: number;
 }
 
@@ -84,13 +86,13 @@ export function createSession(input: CreateSessionInput): HarnessSession {
   const session: {
     -readonly [K in keyof HarnessSession]: HarnessSession[K];
   } = {
-    agent: createSessionAgent(turnAgent, createSessionSystemPrompt({ turnAgent }), tools),
+    agent: createSessionAgent(turnAgent, createSessionSystemPrompt(turnAgent), tools),
     compaction: createCompactionConfig({
       contextWindowTokens: turnAgent.model?.contextWindowTokens,
       thresholdPercent: input.compactionOverrides?.thresholdPercent,
     }),
     continuationToken: input.continuationToken,
-    history: [],
+    history: [...(turnAgent.initialMessages ?? [])],
     sessionId: input.sessionId,
   };
 
@@ -101,8 +103,8 @@ export function createSession(input: CreateSessionInput): HarnessSession {
   if (input.outputSchema !== undefined) {
     session.outputSchema = input.outputSchema;
   }
-  if (input.subagentDepth !== undefined) {
-    session.subagentDepth = input.subagentDepth;
+  if (input.taskId !== undefined) {
+    session.taskId = input.taskId;
   }
   if (input.workflowMaxSubagents !== undefined) {
     session.workflowMaxSubagents = input.workflowMaxSubagents;
@@ -148,7 +150,7 @@ export function refreshSessionFromTurnAgent(input: {
     ...input.session,
     agent: createSessionAgent(
       input.turnAgent,
-      createSessionSystemPrompt({ turnAgent: input.turnAgent }),
+      createSessionSystemPrompt(input.turnAgent),
       createSessionToolDefinitions(input.turnAgent),
     ),
     compaction: createCompactionConfig({
@@ -160,12 +162,10 @@ export function refreshSessionFromTurnAgent(input: {
   };
 }
 
-function createSessionSystemPrompt(input: { readonly turnAgent: RuntimeTurnAgent }): string {
-  const skillSection = formatAvailableSkillsSection(input.turnAgent.availableSkills ?? []);
+function createSessionSystemPrompt(turnAgent: RuntimeTurnAgent): string {
+  const skillSection = formatAvailableSkillsSection(turnAgent.availableSkills ?? []);
   const blocks =
-    skillSection === null
-      ? input.turnAgent.instructions
-      : [...input.turnAgent.instructions, skillSection];
+    skillSection === null ? turnAgent.instructions : [...turnAgent.instructions, skillSection];
   return blocks.join("\n\n");
 }
 
@@ -200,7 +200,7 @@ export function projectToDurableSession(session: HarnessSession): DurableSession
     sandboxState?: HarnessSession["sandboxState"];
     sessionId: string;
     state?: HarnessSession["state"];
-    subagentDepth?: number;
+    taskId?: string;
     workflowMaxSubagents?: number;
   } = {
     agent: { system: session.agent.system },
@@ -233,8 +233,8 @@ export function projectToDurableSession(session: HarnessSession): DurableSession
   if (session.state !== undefined) {
     durable.state = session.state;
   }
-  if (session.subagentDepth !== undefined) {
-    durable.subagentDepth = session.subagentDepth;
+  if (session.taskId !== undefined) {
+    durable.taskId = session.taskId;
   }
   if (session.workflowMaxSubagents !== undefined) {
     durable.workflowMaxSubagents = session.workflowMaxSubagents;
@@ -268,7 +268,7 @@ export function hydrateDurableSession(input: {
       thresholdPercent: input.compactionOverrides?.thresholdPercent,
     }),
     continuationToken: durable.continuationToken,
-    history: durable.history,
+    history: validateHarnessModelMessages(durable.history),
     sessionId: durable.sessionId,
   };
 
@@ -290,8 +290,8 @@ export function hydrateDurableSession(input: {
   if (durable.state !== undefined) {
     session.state = durable.state;
   }
-  if (durable.subagentDepth !== undefined) {
-    session.subagentDepth = durable.subagentDepth;
+  if (durable.taskId !== undefined) {
+    session.taskId = durable.taskId;
   }
   if (durable.workflowMaxSubagents !== undefined) {
     session.workflowMaxSubagents = durable.workflowMaxSubagents;
@@ -308,29 +308,36 @@ function createSessionToolDefinitions(turnAgent: RuntimeTurnAgent): SessionToolD
   }));
 }
 
-function resolveSessionLimits(input: {
-  readonly limits?: AuthoredSessionLimits;
-  readonly subagentDepth?: number;
-}): SessionLimits {
-  const isSubagent = input.subagentDepth !== undefined && input.subagentDepth > 0;
-
+function resolveSessionLimits(input: { readonly limits?: AuthoredSessionLimits }): SessionLimits {
   const maxInputTokensPerSession = resolveSessionTokenLimit({
     authored: input.limits?.maxInputTokensPerSession,
-    // Subagents have no fixed default: uncapped parents delegate uncapped
-    // children, capped parents delegate their remaining quota (inherited).
-    fallback: isSubagent ? undefined : DEFAULT_ROOT_MAX_INPUT_TOKENS_PER_SESSION,
+    // Local children carry an explicit inherited value, including `false` for
+    // an uncapped parent. Remote lineage alone must not remove this default.
+    fallback: DEFAULT_ROOT_MAX_INPUT_TOKENS_PER_SESSION,
   });
   const maxOutputTokensPerSession = resolveSessionTokenLimit({
     authored: input.limits?.maxOutputTokensPerSession,
     fallback: undefined,
   });
 
-  const limits: { maxInputTokensPerSession?: number; maxOutputTokensPerSession?: number } = {};
+  const maxTokenCostUsdPerSession = resolveSessionTokenLimit({
+    authored: input.limits?.maxTokenCostUsdPerSession,
+    fallback: undefined,
+  });
+
+  const limits: {
+    maxInputTokensPerSession?: number;
+    maxOutputTokensPerSession?: number;
+    maxTokenCostUsdPerSession?: number;
+  } = {};
   if (maxInputTokensPerSession !== undefined) {
     limits.maxInputTokensPerSession = maxInputTokensPerSession;
   }
   if (maxOutputTokensPerSession !== undefined) {
     limits.maxOutputTokensPerSession = maxOutputTokensPerSession;
+  }
+  if (maxTokenCostUsdPerSession !== undefined) {
+    limits.maxTokenCostUsdPerSession = maxTokenCostUsdPerSession;
   }
   return limits;
 }

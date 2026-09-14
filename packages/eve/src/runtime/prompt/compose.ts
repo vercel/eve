@@ -12,7 +12,7 @@ const PARALLEL_ACTION_INSTRUCTION =
   "Tool execution\nA single tool or subagent call runs as one serial action. If you call multiple independent tools or subagents in one response, eve treats that batch as parallel work. Only batch work that is independent and does not rely on another call in the same response.";
 
 const AGENT_MESSAGING_INSTRUCTION =
-  "Agent messaging\nAgents you have already delegated to stay available after they answer. eve injects the current `<agents>` list into the conversation as a note labeled `[Agents]`; it is added automatically by the framework, not written by the user, and never requires a reply. The list is only a record of those existing agents — their `agentId`, name, and latest status. It does not limit which subagent tools you can call: your tool list is the source of truth, and any subagent tool can always be called without `agentId` to start a new agent, including when the `<agents>` list is empty or absent. Pass `agentId` to the same subagent tool only to continue one of those existing agents' sessions.";
+  "Agent messaging\nSubagent calls start durable background tasks and return immediately with a task receipt. After delegating, continue helping the user or end your turn. The task will notify you when it completes, fails, needs input, or sends an update; completion and failure notifications include the task's result. Agents you have already delegated to remain visible in the framework-authored `<agents>` conversation note. To steer delegated work, send the updated instruction to the original subagent tool with that agentId. If availability=busy, this cancels its previous task and starts a new task in the same child session, preserving its history. Forward user steering to the affected child promptly; an acknowledgement alone does not update its work. Leave unrelated background work running. If availability=available, the same call continues the idle child. Calling a subagent without agentId starts a new agent session. Use task_cancel with its taskId to stop work without sending a replacement instruction.";
 
 /**
  * Input for composing the base authored instructions prompt for one
@@ -20,13 +20,7 @@ const AGENT_MESSAGING_INSTRUCTION =
  */
 interface ComposeRuntimeBasePromptInput {
   connections?: readonly ResolvedConnectionDefinition[];
-  instructions?: ResolvedInstructionsDefinition;
-  /**
-   * Whether the agent opted into `experimental.subagentPersistentSessions`.
-   * Gates the agent-messaging prompt block that documents `agentId`
-   * continuation and the `<agents>` listing.
-   */
-  persistentSubagentSessions?: boolean;
+  instructions?: readonly ResolvedInstructionsDefinition[];
   skills?: readonly ResolvedSkillDefinition[];
   subagentsAvailable?: boolean;
   toolsAvailable?: boolean;
@@ -42,28 +36,29 @@ export function composeRuntimeBasePrompt(input: ComposeRuntimeBasePromptInput): 
     ...createInstructionsPromptBlocks(input.instructions),
     ...createWorkspacePromptBlocks(input.workspaceSpec),
     ...(input.toolsAvailable ? [PARALLEL_ACTION_INSTRUCTION] : []),
-    ...(input.subagentsAvailable && input.persistentSubagentSessions
-      ? [AGENT_MESSAGING_INSTRUCTION]
-      : []),
+    ...(input.subagentsAvailable ? [AGENT_MESSAGING_INSTRUCTION] : []),
     ...createConnectionsPromptBlocks(input.connections),
     ...createSkillsPromptBlocks(input.skills),
   ];
 }
 
 function createInstructionsPromptBlocks(
-  instructions: ResolvedInstructionsDefinition | undefined,
+  instructions: readonly ResolvedInstructionsDefinition[] | undefined,
 ): readonly string[] {
-  if (instructions === undefined) {
+  const systemInstructions = (instructions ?? []).filter(
+    (entry) => entry.role === "system" && entry.content.trim().length > 0,
+  );
+  if (systemInstructions.length === 0) {
     return [];
   }
 
-  const markdown = instructions.markdown.trim();
-
-  if (markdown.length === 0) {
-    return [];
-  }
-
-  return [`Instructions (${instructions.name})\n${markdown}`];
+  const only = systemInstructions.length === 1 ? systemInstructions[0] : undefined;
+  const name = only !== undefined && only.owner.kind !== "extension" ? only.name : "instructions";
+  const content = systemInstructions
+    .map((entry) => entry.content)
+    .join("\n\n")
+    .trim();
+  return [`Instructions (${name})\n${content}`];
 }
 
 function createWorkspacePromptBlocks(

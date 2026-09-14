@@ -40,11 +40,9 @@ function fakeDeps(): ResolveProvisioningDeps {
   return {
     requireAuth: vi.fn(async () => {}),
     isVercelAuthenticated: vi.fn(async () => true),
-    detectProjectResolution: vi.fn(
-      async (): Promise<ProjectResolution> => ({
-        kind: "unresolved",
-      }),
-    ),
+    detectProjectResolution: vi.fn(async (): Promise<ProjectResolution> => ({
+      kind: "unresolved",
+    })),
     pathExists: vi.fn(async () => true),
     validateTeam: vi.fn(async () => {}),
     resolveTeam: vi.fn(async () => "team"),
@@ -347,9 +345,10 @@ describe("resolveProvisioning box", () => {
 
   it("adopts a detected on-disk link with a logged-in CLI, asking nothing", async () => {
     const deps = fakeDeps();
-    deps.detectProjectResolution = vi.fn(
-      async (): Promise<ProjectResolution> => ({ kind: "linked", projectId: "prj_demo" }),
-    );
+    deps.detectProjectResolution = vi.fn(async (): Promise<ProjectResolution> => ({
+      kind: "linked",
+      projectId: "prj_demo",
+    }));
     // A prompter with no configured answers: any select or password throws,
     // proving the adopted link resolves every provisioning question.
     const prompter = createPrompter();
@@ -383,9 +382,10 @@ describe("resolveProvisioning box", () => {
 
   it("asks the question tree when the linked directory has no CLI login", async () => {
     const deps = fakeDeps();
-    deps.detectProjectResolution = vi.fn(
-      async (): Promise<ProjectResolution> => ({ kind: "linked", projectId: "prj_demo" }),
-    );
+    deps.detectProjectResolution = vi.fn(async (): Promise<ProjectResolution> => ({
+      kind: "linked",
+      projectId: "prj_demo",
+    }));
     deps.isVercelAuthenticated = vi.fn(async () => false);
     const box = makeBox({
       prompter: createPrompter({ selectValues: ["vercel", "new"] }),

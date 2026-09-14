@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@source "../node_modules/streamdown/dist/*.js";
 
 :root {
   --background: #ffffff;
@@ -7,7 +8,13 @@
 
 @theme inline {
   --color-background: var(--background);
+  --color-border: var(--border);
   --color-foreground: var(--foreground);
+  --color-muted: var(--bg-hover);
+  --color-muted-foreground: var(--fg-muted);
+  --color-primary: var(--fg);
+  --color-primary-foreground: var(--fg-on-inverted);
+  --color-sidebar: var(--bg-subtle);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }

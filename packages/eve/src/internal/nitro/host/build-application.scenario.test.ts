@@ -4,7 +4,7 @@ import { join } from "node:path";
 import type { Nitro } from "nitro/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { createCompiledAgentManifest } from "#compiler/manifest.js";
+import { compileFromMemory } from "#compiler/compile-from-memory.js";
 import {
   APPLICATION_BUILD_PROFILE_SCHEMA_VERSION,
   type ApplicationBuildProfile,
@@ -120,15 +120,13 @@ vi.mock("./vercel-build-prewarm.js", () => ({
 const createScratchDirectory = useTemporaryDirectories();
 const DEPLOYABLE_BUILD_OPTIONS = { skipVercelSandboxPrewarm: false } as const;
 
-function createPreparedHost(appRoot: string): PreparedApplicationHost {
+async function createPreparedHost(appRoot: string): Promise<PreparedApplicationHost> {
   const agentRoot = join(appRoot, "agent");
-  const manifest = createCompiledAgentManifest({
+  const { manifest } = await compileFromMemory({
     agentRoot,
     appRoot,
-    config: {
-      model: { id: "openai/gpt-5.4", routing: { kind: "gateway", target: "openai" } },
-      name: "scenario-test-agent",
-    },
+    model: "openai/gpt-5.4",
+    name: "scenario-test-agent",
   });
   return {
     appRoot,
@@ -181,7 +179,7 @@ async function prepareHostBuildWorkspace(
   workspace: ApplicationBuildWorkspace,
 ): Promise<PreparedApplicationHost> {
   await mkdir(join(workspace.compiler.artifactsDir, "compile"), { recursive: true });
-  return createPreparedHost(workspace.appRoot);
+  return await createPreparedHost(workspace.appRoot);
 }
 
 describe("buildApplication", () => {
@@ -442,6 +440,7 @@ describe("buildApplication", () => {
       {
         buildDir: expect.stringContaining(join(appRoot, ".eve", "builds")),
         outputDir: expect.stringContaining(join(appRoot, ".eve", "builds")),
+        publicRoutePrefix: "/_eve_internal/eve",
       },
     );
     const nestedFunctionStats = await lstat(
@@ -716,51 +715,63 @@ describe("buildApplication", () => {
     });
   });
 
-  it("normalizes eve function output from legacy root service config", async () => {
-    vi.stubEnv("VERCEL", "1");
-    const appRoot = await createScratchDirectory("eve-build-application-vercel-root-config-");
+  it.each([
+    { routePrefix: "/_eve_internal/eve", publicRoutePrefix: "/_eve_internal/eve" },
+    { routePrefix: "/eve/v1", publicRoutePrefix: undefined },
+    { routePrefix: "/eve/v1/", publicRoutePrefix: undefined },
+  ])(
+    "normalizes legacy service $routePrefix without duplicating protocol routes",
+    async ({ routePrefix, publicRoutePrefix }) => {
+      vi.stubEnv("VERCEL", "1");
+      const appRoot = await createScratchDirectory("eve-build-application-vercel-root-config-");
 
-    prepareProductionApplicationHostMock.mockImplementationOnce(prepareHostBuildWorkspace);
-    createProductionApplicationNitroMock.mockImplementation(
-      async (_preparedHost: PreparedApplicationHost, options: { outputDir: string }) =>
-        createNitroStub(options.outputDir),
-    );
-    await writeFile(
-      join(appRoot, "vercel.json"),
-      `${JSON.stringify(
-        {
-          experimentalServices: {
-            eve: {
-              entrypoint: ".",
-              framework: "eve",
-              routePrefix: "/_eve_internal/eve",
-            },
-            web: {
-              entrypoint: ".",
-              framework: "nextjs",
-              routePrefix: "/",
+      prepareProductionApplicationHostMock.mockImplementationOnce(prepareHostBuildWorkspace);
+      createProductionApplicationNitroMock.mockImplementation(
+        async (_preparedHost: PreparedApplicationHost, options: { outputDir: string }) =>
+          createNitroStub(options.outputDir),
+      );
+      await writeFile(
+        join(appRoot, "vercel.json"),
+        `${JSON.stringify(
+          {
+            experimentalServices: {
+              eve: {
+                entrypoint: ".",
+                framework: "eve",
+                routePrefix,
+              },
+              web: {
+                entrypoint: ".",
+                framework: "nextjs",
+                routePrefix: "/",
+              },
             },
           },
-        },
-        null,
-        2,
-      )}\n`,
-    );
+          null,
+          2,
+        )}\n`,
+      );
 
-    const { buildApplication } = await import("#internal/nitro/host/build-application.js");
-    const outputDir = await buildApplication(appRoot, DEPLOYABLE_BUILD_OPTIONS);
+      const { buildApplication } = await import("#internal/nitro/host/build-application.js");
+      const outputDir = await buildApplication(appRoot, DEPLOYABLE_BUILD_OPTIONS);
 
-    expect(outputDir).toBe(join(appRoot, ".vercel", "output"));
-    const vercelConfig = JSON.parse(
-      await readFile(join(appRoot, ".vercel", "output", "config.json"), "utf8"),
-    ) as {
-      routes: unknown[];
-    };
-    expect(vercelConfig.routes).toContainEqual({
-      dest: "/eve/__server",
-      src: "/eve/v1/health",
-    });
-  });
+      expect(createProductionApplicationNitroMock).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ publicRoutePrefix }),
+      );
+
+      expect(outputDir).toBe(join(appRoot, ".vercel", "output"));
+      const vercelConfig = JSON.parse(
+        await readFile(join(appRoot, ".vercel", "output", "config.json"), "utf8"),
+      ) as {
+        routes: unknown[];
+      };
+      expect(vercelConfig.routes).toContainEqual({
+        dest: "/eve/__server",
+        src: "/eve/v1/health",
+      });
+    },
+  );
 
   it("leaves standalone Vercel Nitro output routable at the root", async () => {
     vi.stubEnv("VERCEL", "1");

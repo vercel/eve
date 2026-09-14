@@ -1,8 +1,10 @@
 import type { MessageStreamEvent } from "#protocol/message.js";
 import { EVE_STREAM_TAIL_INDEX_HEADER } from "#protocol/message.js";
+import type { MessageStreamVersion } from "#protocol/message-version.js";
 import { createEveSessionStreamRoutePath } from "#protocol/routes.js";
 import { ClientError } from "#client/client-error.js";
 import { isStreamDisconnectError, readNdjsonStream } from "#client/ndjson.js";
+import { readMessageStreamVersion } from "#client/stream-version.js";
 import type {
   ClientRedirectPolicy,
   ResolvedStreamReconnectPolicy as StreamReconnectPolicyOptions,
@@ -22,6 +24,8 @@ interface ResolvedStreamReconnectPolicy {
   readonly streamIdleReconnectPolicy: RetryPolicy;
   readonly streamOpenReconnectPolicy: RetryPolicy;
 }
+
+const DEFAULT_STREAM_READ_IDLE_TIMEOUT_MS = 15_000;
 
 const DEFAULT_STREAM_RECONNECT_POLICY: ResolvedStreamReconnectPolicy = {
   retryableErrorStatuses: new Set([404, 409, 425, 500, 502, 503, 504]),
@@ -76,7 +80,11 @@ function resolveStreamReconnectPolicy(
  */
 interface FollowStreamInput {
   readonly host: string;
+  /** Keep reconnecting after empty streams until the consumer aborts or stops iteration. */
+  readonly keepAlive?: boolean;
   readonly streamReconnectPolicy?: StreamReconnectPolicy;
+  /** @internal Test override for reconnecting an open stream that stops producing bytes. */
+  readonly streamReadIdleTimeoutMs?: number;
   readonly resolveHeaders: () => Promise<Headers>;
   readonly redirect?: ClientRedirectPolicy;
   readonly sessionId: string;
@@ -140,7 +148,7 @@ export async function* followStreamIterable(
     if (input.follow === false && tailIndex === undefined) {
       tailIndex = connection.tailIndex;
       if (tailIndex === undefined) {
-        await connection.body.cancel().catch(() => {});
+        connection.close();
         throw new Error(
           `stream({ follow: false }) requires the server to report the ${EVE_STREAM_TAIL_INDEX_HEADER} header. ` +
             "The agent may be running an older eve version.",
@@ -149,13 +157,16 @@ export async function* followStreamIterable(
     }
 
     if (tailIndex !== undefined && startIndex > tailIndex) {
-      await connection.body.cancel().catch(() => {});
+      connection.close();
       return;
     }
 
     let deliveredEvent = false;
     try {
-      for await (const event of readNdjsonStream(connection.body)) {
+      for await (const event of readNdjsonStream(connection.body, {
+        idleTimeoutMs: input.streamReadIdleTimeoutMs ?? DEFAULT_STREAM_READ_IDLE_TIMEOUT_MS,
+        streamVersion: connection.streamVersion,
+      })) {
         startIndex += 1;
         deliveredEvent = true;
         reconnectDelayMs = idleRetryPolicy.baseDelayMs;
@@ -167,9 +178,9 @@ export async function* followStreamIterable(
         }
       }
     } catch (error) {
-      if (!isStreamDisconnectError(error)) {
-        throw error;
-      }
+      if (!isStreamDisconnectError(error)) throw error;
+    } finally {
+      connection.close();
     }
 
     if (input.signal?.aborted || input.startIndex < 0 || idleRetryPolicy.maxAttempts === 0) {
@@ -177,6 +188,7 @@ export async function* followStreamIterable(
     }
 
     if (
+      input.keepAlive !== true &&
       !deliveredEvent &&
       !initialConnection &&
       (idleReconnects += 1) >= idleRetryPolicy.maxAttempts
@@ -196,6 +208,8 @@ export async function* followStreamIterable(
 /** An opened connection: the response body plus the tail index from the response header, if any. */
 interface OpenedStream {
   readonly body: ReadableStream<Uint8Array>;
+  close(): void;
+  readonly streamVersion: MessageStreamVersion;
   readonly tailIndex: number | undefined;
 }
 
@@ -231,13 +245,17 @@ export async function openStreamBody(
     );
 
     const headers = await input.resolveHeaders();
+    const connectionController = new AbortController();
+    const signal = input.signal
+      ? AbortSignal.any([input.signal, connectionController.signal])
+      : connectionController.signal;
     let response: Response;
     try {
       response = await fetch(url, {
         cache: "no-store",
         headers,
         redirect: input.redirect,
-        signal: input.signal ?? null,
+        signal,
       });
     } catch (error) {
       if (
@@ -256,7 +274,22 @@ export async function openStreamBody(
       if (!response.body) {
         throw new ClientError(response.status, "Response body is null.", response.headers);
       }
-      return { body: response.body, tailIndex: parseTailIndexHeader(response.headers) };
+      let closed = false;
+      return {
+        body: response.body,
+        close: () => {
+          if (closed) return;
+          closed = true;
+          // Aborting a fetch after its response has resolved does not reliably
+          // propagate cancellation through every local HTTP transport. Cancel
+          // the body as well so its server-side Workflow stream releases its
+          // live chunk and close listeners before a reconnect opens another.
+          response.body?.cancel().catch(() => {});
+          connectionController.abort();
+        },
+        streamVersion: readMessageStreamVersion(response.headers),
+        tailIndex: parseTailIndexHeader(response.headers),
+      };
     }
 
     lastStatus = response.status;
@@ -285,7 +318,7 @@ function parseTailIndexHeader(headers: Headers): number | undefined {
   return Number.isSafeInteger(parsed) ? parsed : undefined;
 }
 
-async function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+export async function sleep(ms: number, signal?: AbortSignal): Promise<void> {
   if (signal?.aborted) {
     return;
   }

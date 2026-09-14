@@ -8,9 +8,13 @@ import type {
   AgentModelSetting,
   AgentModelSettingsPatch,
 } from "#source-change/apply-agent-model-settings.js";
+import {
+  CHATGPT_MODEL_SELECTION_PREFIX,
+  parseChatGptModelSelection,
+} from "#shared/chatgpt-model.js";
 import { createStaticSourceChange } from "#source-change/static-source-change.js";
 
-import pc from "picocolors";
+import pc from "#compiled/picocolors/index.js";
 
 export type ApplyModelSettingsOutcome =
   | {
@@ -119,6 +123,10 @@ export async function changeAgentModel(input: {
 }
 
 export async function validateModelSlug(appRoot: string, slug: string): Promise<string | null> {
+  if (parseChatGptModelSelection(slug) !== undefined) return null;
+  if (slug.startsWith(CHATGPT_MODEL_SELECTION_PREFIX)) {
+    return "Choose a bare OpenAI model id after `chatgpt/`.";
+  }
   if (!slug.includes("/")) {
     return `\`${slug}\` isn't a provider/model id (e.g. anthropic/claude-sonnet-5).`;
   }

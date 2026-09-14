@@ -27,6 +27,8 @@ import type { SandboxAccess, SandboxSessionState, SandboxState } from "#sandbox/
 export interface EnsureSandboxAccessInput {
   readonly compiledArtifactsSource: RuntimeCompiledArtifactsSource;
   readonly nodeId: string;
+  /** Whether this durable session owns the sandbox lifecycle. */
+  readonly ownsSandbox?: boolean;
   readonly registry: RuntimeSandboxRegistry;
   readonly sessionId: string;
   readonly runOnSession?: (callback: () => Promise<void>) => Promise<void>;
@@ -68,17 +70,18 @@ export async function ensureSandboxAccess(input: EnsureSandboxAccessInput): Prom
     if (registered === null) {
       return null;
     }
-    const definition = registered.definition;
+    const inheritance = registered.inheritance;
+    const definition = inheritance?.definition ?? registered.definition;
     const backend = definition.backend;
     const templatePlan = createRuntimeSandboxTemplatePlan({
       definition,
-      workspaceResourceRoot: registered.workspaceResourceRoot,
+      workspaceResourceRoot: inheritance?.workspaceResourceRoot ?? registered.workspaceResourceRoot,
     });
 
     const keys = await createRuntimeSandboxKeys({
       backendName: backend.name,
       compiledArtifactsSource: input.compiledArtifactsSource,
-      nodeId: input.nodeId,
+      nodeId: inheritance?.nodeId ?? input.nodeId,
       sessionId: input.sessionId,
       sourceId: definition.sourceId,
       templatePlan,
@@ -146,7 +149,10 @@ export async function ensureSandboxAccess(input: EnsureSandboxAccessInput): Prom
 
     if (!initialized) {
       await runOnSession(async () => {
-        await definition.onSession?.({ ctx: buildCallbackContext(), use: handle.useSessionFn });
+        await definition.onSession?.({
+          ctx: { session: buildCallbackContext().session },
+          use: handle.useSessionFn,
+        });
       });
       initialized = true;
     }
@@ -176,9 +182,25 @@ export async function ensureSandboxAccess(input: EnsureSandboxAccessInput): Prom
         session: persistedSession,
       };
     },
+    async delete(options) {
+      if (input.ownsSandbox === false) {
+        throw new Error(
+          "Only the owning session can delete a shared sandbox. Delete it from the parent session instead.",
+        );
+      }
+      const handle = await getHandle();
+      if (handle === null) {
+        throw new Error("The sandbox is not available in the current authored runtime context.");
+      }
+      await handle.delete(options);
+      handlePromise = undefined;
+      initialized = false;
+      persistedSession = null;
+    },
     async get(): Promise<SandboxSession | null> {
       const handle = await getHandle();
-      return handle?.session ?? null;
+      if (handle === null) return null;
+      return handle.session;
     },
     async stop(): Promise<void> {
       const handle = await getHandle();

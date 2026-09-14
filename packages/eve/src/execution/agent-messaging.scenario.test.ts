@@ -15,9 +15,10 @@ const SCENARIO_TIMEOUT_MS = 360_000;
 const EVENT_TIMEOUT_MS = 30_000;
 const CODEWORD = "LANTERN-COMET-7319";
 const PARENT_RESULT = `PARENT_RECALLED=${CODEWORD}`;
+const REMOTE_MEMORY_TOKEN = "remote-memory-scenario-token";
 
 function createScriptedParentAgentSource(subagentName: string): string {
-  const agentIdPattern = `<agent id="([^"]+)" name="${subagentName}">`;
+  const agentIdPattern = `<agent id="([^"]+)" name="${subagentName}"(?: [^>]*)?>`;
 
   return `import { defineAgent } from "eve";
 import { mockModel } from "eve/evals";
@@ -27,7 +28,7 @@ const SUBAGENT_NAME = ${JSON.stringify(subagentName)};
 const AGENT_ID_PATTERN = new RegExp(${JSON.stringify(agentIdPattern)}, "u");
 
 const model = mockModel((request) => {
-  const childResults = request.toolResults.filter((result) => result.name === SUBAGENT_NAME);
+  const childResults = request.toolResults.filter((result) => result.name === "Workflow");
 
   if (childResults.length === 0) {
     return {
@@ -35,9 +36,9 @@ const model = mockModel((request) => {
         {
           id: "memory-exchange-1",
           input: {
-            message: \`Remember the codeword \${CODEWORD}. Confirm that you stored it.\`,
+            js: \`return await tools[\${JSON.stringify(SUBAGENT_NAME)}]({ message: \${JSON.stringify("Remember the codeword " + CODEWORD + ". Confirm that you stored it.")} });\`,
           },
-          name: SUBAGENT_NAME,
+          name: "Workflow",
         },
       ],
     };
@@ -57,10 +58,9 @@ const model = mockModel((request) => {
         {
           id: "memory-exchange-2",
           input: {
-            agentId,
-            message: "What codeword did I ask you to remember? Reply with the codeword.",
+            js: \`return await tools[\${JSON.stringify(SUBAGENT_NAME)}]({ agentId: \${JSON.stringify(agentId)}, message: "What codeword did I ask you to remember? Reply with the codeword." });\`,
           },
-          name: SUBAGENT_NAME,
+          name: "Workflow",
         },
       ],
     };
@@ -78,9 +78,6 @@ const model = mockModel((request) => {
 });
 
 export default defineAgent({
-  experimental: {
-    subagentPersistentSessions: true,
-  },
   model,
   modelContextWindowTokens: 32_000,
 });
@@ -91,6 +88,21 @@ const EVE_CHANNEL_SOURCE = `import { none } from "eve/channels/auth";
 import { eveChannel } from "eve/channels/eve";
 
 export default eveChannel({ auth: none() });
+`;
+
+const AUTHENTICATED_EVE_CHANNEL_SOURCE = `import { eveChannel } from "eve/channels/eve";
+
+export default eveChannel({
+  auth(request) {
+    if (request.headers.get("authorization") !== "Bearer ${REMOTE_MEMORY_TOKEN}") return null;
+    return {
+      attributes: {},
+      authenticator: "scenario-bearer",
+      principalId: "remote-memory-parent",
+      principalType: "service",
+    };
+  },
+});
 `;
 
 const MEMORY_AGENT_SOURCE = `import { defineAgent } from "eve";
@@ -126,6 +138,8 @@ const AGENT_MESSAGING_DESCRIPTOR: ScenarioAppDescriptor = {
     "agent/agent.ts": createScriptedParentAgentSource("memory-child"),
     "agent/channels/eve.ts": EVE_CHANNEL_SOURCE,
     "agent/instructions.md": "Run the scripted memory-child exchanges.\n",
+    "agent/tools/workflow.ts":
+      'import { experimental_workflow } from "eve/tools/workflow";\nexport default experimental_workflow();\n',
     "agent/subagents/memory-child/agent.ts": MEMORY_AGENT_SOURCE,
     "agent/subagents/memory-child/instructions.md":
       "Remember facts from earlier turns and answer follow-up questions from that history.\n",
@@ -137,7 +151,7 @@ const AGENT_MESSAGING_DESCRIPTOR: ScenarioAppDescriptor = {
 const REMOTE_MEMORY_AGENT_DESCRIPTOR: ScenarioAppDescriptor = {
   files: {
     "agent/agent.ts": MEMORY_AGENT_SOURCE,
-    "agent/channels/eve.ts": EVE_CHANNEL_SOURCE,
+    "agent/channels/eve.ts": AUTHENTICATED_EVE_CHANNEL_SOURCE,
     "agent/instructions.md":
       "Remember facts from earlier turns and answer follow-up questions from that history.\n",
   },
@@ -151,9 +165,13 @@ function createRemoteAgentMessagingDescriptor(remoteUrl: string): ScenarioAppDes
       "agent/agent.ts": createScriptedParentAgentSource("remote-memory-child"),
       "agent/channels/eve.ts": EVE_CHANNEL_SOURCE,
       "agent/instructions.md": "Run the scripted remote-memory-child exchanges.\n",
+      "agent/tools/workflow.ts":
+        'import { experimental_workflow } from "eve/tools/workflow";\nexport default experimental_workflow();\n',
       "agent/subagents/remote-memory-child.ts": `import { defineRemoteAgent } from "eve";
+import { bearer } from "eve/agents/auth";
 
 export default defineRemoteAgent({
+  auth: bearer(${JSON.stringify(REMOTE_MEMORY_TOKEN)}),
   description: "Remember a fact and recall it in a later agent exchange.",
   url: ${JSON.stringify(remoteUrl)},
 });
@@ -179,6 +197,7 @@ describe("agent messaging", () => {
         await expectRetainedChildConversation({
           childSessionId,
           client: new Client({ host: server.url }),
+          expectedCompletionCount: 0,
         });
         expect(await readWorkflowRunStatus(app.appRoot, childSessionId)).toBe("cancelled");
       } catch (error) {
@@ -211,7 +230,11 @@ describe("agent messaging", () => {
           });
           await expectRetainedChildConversation({
             childSessionId,
-            client: new Client({ host: remoteServer.url }),
+            client: new Client({
+              auth: { bearer: REMOTE_MEMORY_TOKEN },
+              host: remoteServer.url,
+            }),
+            expectedCompletionCount: 1,
           });
         } catch (error) {
           throw new Error(
@@ -292,6 +315,7 @@ async function runScriptedParentSession(input: {
 async function expectRetainedChildConversation(input: {
   readonly childSessionId: string;
   readonly client: Client;
+  readonly expectedCompletionCount: number;
 }): Promise<void> {
   const childEvents = await collectStreamToEnd({
     label: "persisted child events",
@@ -303,7 +327,9 @@ async function expectRetainedChildConversation(input: {
   expect(childTurnStarts).toHaveLength(2);
   expect(childWaits).toHaveLength(2);
   expect(childWaits[0]).toBeLessThan(childTurnStarts[1] ?? -1);
-  expect(filterEventsByType(childEvents, "session.completed")).toHaveLength(0);
+  expect(filterEventsByType(childEvents, "session.completed")).toHaveLength(
+    input.expectedCompletionCount,
+  );
   expect(filterEventsByType(childEvents, "session.failed")).toHaveLength(0);
   expect(
     filterEventsByType(childEvents, "message.completed").some(

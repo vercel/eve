@@ -1,6 +1,6 @@
 import type { Writable } from "node:stream";
 
-import { wrapTextWithPrefix } from "@clack/core";
+import { wrapTextWithPrefix } from "#compiled/@clack/core/index.js";
 
 import {
   renderCursorRow,

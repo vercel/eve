@@ -45,7 +45,6 @@ export class DevelopmentRuntimeSourceSnapshotError extends Error {
 export interface DevelopmentSourceSnapshotPlan {
   readonly appRoot: string;
   readonly copyFiles: readonly string[];
-  readonly copyRoots: readonly string[];
   readonly dependencyMounts: readonly DevelopmentSourceSnapshotDependencyMount[];
   readonly runtimeAppRoot: string;
   readonly snapshotRoot: string;
@@ -56,12 +55,6 @@ export interface DevelopmentSourceSnapshotPlan {
 }
 
 export interface DevelopmentSourceSnapshotDependencyMount {
-  /**
-   * Whether the mount target is copied into the snapshot. Copied mounts link
-   * to the in-snapshot copy; all other mounts link to the real source path so
-   * installed and workspace dependency code resolves in place.
-   */
-  readonly copied: boolean;
   readonly mountPath: string;
   readonly sourceKind: "installed" | "workspace";
   readonly sourcePath: string;
@@ -69,12 +62,8 @@ export interface DevelopmentSourceSnapshotDependencyMount {
 
 interface SnapshotPlanState {
   readonly appRoot: string;
-  readonly authoredLocalRoots: Set<string>;
   readonly copyFiles: Set<string>;
-  readonly dependencyMountsByPath: Map<
-    string,
-    Omit<DevelopmentSourceSnapshotDependencyMount, "copied">
-  >;
+  readonly dependencyMountsByPath: Map<string, DevelopmentSourceSnapshotDependencyMount>;
   readonly localRootsToProcess: string[];
   readonly processedLocalRoots: Set<string>;
   readonly snapshotRoot: string;
@@ -86,10 +75,9 @@ interface SnapshotPlanState {
 export async function createDevelopmentSourceSnapshotPlan(input: {
   readonly appRoot: string;
   /**
-   * Workspace roots that host runtime-hydrated authored source (extension
-   * mount roots from the compiled manifest). They are copied into the
-   * snapshot like the app root; every other workspace dependency package is
-   * mounted in place instead of copied.
+   * Workspace roots that host extension-authored source. Their dependency and
+   * tsconfig topology participates in watch and mount discovery before the
+   * authored module graph is materialized.
    */
   readonly authoredSourceRoots?: readonly string[];
   readonly snapshotRoot: string;
@@ -100,7 +88,6 @@ export async function createDevelopmentSourceSnapshotPlan(input: {
   const snapshotSourceRoot = join(snapshotRoot, DEV_RUNTIME_SOURCE_DIRECTORY);
   const state: SnapshotPlanState = {
     appRoot,
-    authoredLocalRoots: new Set([appRoot]),
     copyFiles: new Set(),
     dependencyMountsByPath: new Map(),
     localRootsToProcess: [appRoot],
@@ -111,7 +98,10 @@ export async function createDevelopmentSourceSnapshotPlan(input: {
     tsconfigPaths: new Set(),
   };
 
-  addWorkspaceMetadataFiles(state);
+  const appPackageJsonPath = join(appRoot, "package.json");
+  if (existsSync(appPackageJsonPath)) {
+    state.copyFiles.add(appPackageJsonPath);
+  }
   await addAuthoredSourceRoots(state, input.authoredSourceRoots ?? []);
 
   while (state.localRootsToProcess.length > 0) {
@@ -136,31 +126,20 @@ export async function createDevelopmentSourceSnapshotPlan(input: {
     await addDependencyMountsForRoot(state, resolvedLocalRoot);
   }
 
-  // Discovery walks every reachable root so the dependency-mount topology and
-  // tsconfig collection match a full copy; only the directory copies are
-  // narrowed to roots that host runtime-hydrated authored source.
-  const copyRoots = normalizeCopyRoots(
-    [...state.processedLocalRoots].filter((root) => state.authoredLocalRoots.has(root)),
-  );
   const copyFiles = [...state.copyFiles]
     .filter((path) => isPathInsideOrEqual(path, sourceRoot))
     .sort((left, right) => left.localeCompare(right));
   const tsconfigPaths = [...state.tsconfigPaths]
     .filter((path) => isPathInsideOrEqual(path, sourceRoot))
     .sort((left, right) => left.localeCompare(right));
-  const dependencyMounts = [...state.dependencyMountsByPath.values()]
-    .map((mount) => ({
-      ...mount,
-      copied:
-        mount.sourceKind === "workspace" &&
-        [...state.authoredLocalRoots].some((root) => isPathInsideOrEqual(mount.sourcePath, root)),
-    }))
-    .sort((left, right) => left.mountPath.localeCompare(right.mountPath));
+  const dependencyMounts = [...state.dependencyMountsByPath.values()].sort((left, right) =>
+    left.mountPath.localeCompare(right.mountPath),
+  );
   const watchPaths = createWatchPaths({
     appRoot,
     copyFiles,
-    copyRoots,
     dependencyMounts,
+    localRoots: [...state.processedLocalRoots],
     sourceRoot,
     tsconfigPaths,
   });
@@ -168,7 +147,6 @@ export async function createDevelopmentSourceSnapshotPlan(input: {
   return {
     appRoot,
     copyFiles,
-    copyRoots,
     dependencyMounts,
     runtimeAppRoot: toSnapshotPath({ sourcePath: appRoot, sourceRoot, snapshotSourceRoot }),
     snapshotRoot,
@@ -223,16 +201,6 @@ export function resolveDevelopmentSourceRoot(appRoot: string): string {
   }
 }
 
-function addWorkspaceMetadataFiles(state: SnapshotPlanState): void {
-  for (const fileName of WORKSPACE_METADATA_FILE_NAMES) {
-    const path = join(state.sourceRoot, fileName);
-
-    if (existsSync(path)) {
-      state.copyFiles.add(path);
-    }
-  }
-}
-
 async function addAuthoredSourceRoots(
   state: SnapshotPlanState,
   authoredSourceRoots: readonly string[],
@@ -247,7 +215,6 @@ async function addAuthoredSourceRoots(
     const localRoot =
       (await resolveNearestPackageRoot(resolvedRoot, state.sourceRoot)) ?? resolvedRoot;
 
-    state.authoredLocalRoots.add(localRoot);
     enqueueLocalRoot(state, localRoot);
   }
 }
@@ -264,15 +231,11 @@ async function addTsConfigDependenciesForRoot(
     }
 
     state.tsconfigPaths.add(tsconfigPath);
-    state.copyFiles.add(tsconfigPath);
 
     for (const localRoot of await resolveLocalTsConfigPathTargetRoots({
       configPath: tsconfigPath,
       sourceRoot: state.sourceRoot,
     })) {
-      // Path-alias targets host authored source that runtime hydration can
-      // read back from the snapshot, so they stay copies.
-      state.authoredLocalRoots.add(localRoot);
       enqueueLocalRoot(state, localRoot);
     }
   }
@@ -418,9 +381,8 @@ async function addDependencyMount(state: SnapshotPlanState, mountPath: string): 
  * Workspace dependency packages are mounted in place rather than copied: the
  * dev runtime resolves their contents through the real tree, the same way
  * installed dependencies already resolve (vercel/eve#652). Their dependency
- * closure is still discovered — packages nested inside a copied root keep
- * their mounts — but only roots that host runtime-hydrated authored source
- * (the app, extension mounts, tsconfig path-alias targets) stay copies.
+ * closure is still discovered so externalized dependencies resolve from the
+ * same installation topology as the authored source bundle.
  */
 async function addWorkspaceDependencyMount(input: {
   readonly mountPath: string;
@@ -513,29 +475,11 @@ async function readPackageDependencyNames(packageRoot: string): Promise<string[]
   return [...dependencyNames].sort((left, right) => left.localeCompare(right));
 }
 
-function normalizeCopyRoots(copyRoots: readonly string[]): string[] {
-  const sortedRoots = [...new Set(copyRoots.map((path) => resolve(path)))].sort((left, right) => {
-    const lengthDifference = left.length - right.length;
-    return lengthDifference === 0 ? left.localeCompare(right) : lengthDifference;
-  });
-  const normalizedRoots: string[] = [];
-
-  for (const root of sortedRoots) {
-    if (normalizedRoots.some((existingRoot) => isPathInsideOrEqual(root, existingRoot))) {
-      continue;
-    }
-
-    normalizedRoots.push(root);
-  }
-
-  return normalizedRoots.sort((left, right) => left.localeCompare(right));
-}
-
 function createWatchPaths(input: {
   readonly appRoot: string;
   readonly copyFiles: readonly string[];
-  readonly copyRoots: readonly string[];
   readonly dependencyMounts: readonly DevelopmentSourceSnapshotDependencyMount[];
+  readonly localRoots: readonly string[];
   readonly sourceRoot: string;
   readonly tsconfigPaths: readonly string[];
 }): string[] {
@@ -545,9 +489,9 @@ function createWatchPaths(input: {
     ...input.tsconfigPaths,
   ]);
 
-  for (const copyRoot of input.copyRoots) {
-    if (copyRoot !== input.appRoot) {
-      watchPaths.add(copyRoot);
+  for (const localRoot of input.localRoots) {
+    if (localRoot !== input.appRoot) {
+      watchPaths.add(localRoot);
     }
   }
 

@@ -23,7 +23,7 @@ export function createFakeSetupFlowRenderer(
     renderOutput: () => {},
     withInheritedStdio: (task) => task(),
     waitForInterrupt: () => ({
-      promise: new Promise<void>(() => {}),
+      promise: new Promise<"escape" | "ctrl-c">(() => {}),
       dispose: () => {},
     }),
     ...rest,

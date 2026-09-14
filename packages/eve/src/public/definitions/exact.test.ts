@@ -14,24 +14,39 @@ import {
   type HookEventMap,
   type StreamEventHook,
 } from "#public/definitions/hook.js";
-import { defineInstructions } from "#public/definitions/instructions.js";
-import { defineInstrumentation } from "#public/definitions/instrumentation.js";
+import {
+  defineDynamic as defineDynamicInstructions,
+  defineInstructions,
+} from "#public/definitions/instructions.js";
+import {
+  defineInstrumentation,
+  type ProviderDefinition,
+} from "#public/definitions/instrumentation.js";
 import { defineSandbox } from "#public/definitions/sandbox.js";
 import { defineSchedule } from "#public/definitions/schedule.js";
 import { defineSkill } from "#public/definitions/skill.js";
 import {
   defineTool,
-  experimental_workflow,
+  type TaskExec,
+  type TaskReceipt,
   type ToolDefinition,
-} from "#public/definitions/tool.js";
+} from "#public/tools/index.js";
+import { experimental_workflow } from "#public/tools/workflow.js";
 
 describe("definition helper exact inputs", () => {
   it("preserves literal inference for valid definitions", () => {
     const agent = defineAgent({
       description: "type-test",
+      experimental: {
+        workflow: {
+          modelCallsPerStep: 4,
+          retention: 0,
+        },
+      },
       limits: {
         maxInputTokensPerSession: 200_000,
         maxOutputTokensPerSession: 20_000,
+        maxTokenCostUsdPerSession: 1.5,
         sessionTimeoutMs: 86_400_000,
       },
       model: "anthropic/claude-sonnet-5",
@@ -43,8 +58,11 @@ describe("definition helper exact inputs", () => {
     });
 
     expect(agent.description).toBe("type-test");
+    expect(agent.experimental.workflow.modelCallsPerStep).toBe(4);
+    expect(agent.experimental.workflow.retention).toBe(0);
     expect(agent.limits.maxInputTokensPerSession).toBe(200_000);
     expect(agent.limits.maxOutputTokensPerSession).toBe(20_000);
+    expect(agent.limits.maxTokenCostUsdPerSession).toBe(1.5);
     expect(agent.limits.sessionTimeoutMs).toBe(86_400_000);
     expect(experimental_workflow({ maxSubagents: 6 }).maxSubagents).toBe(6);
     expect(schedule.cron).toBe("0 9 * * *");
@@ -52,6 +70,17 @@ describe("definition helper exact inputs", () => {
 
   it("accepts async-generator tool executors", () => {
     const streamedTool = defineTool({
+      label: {
+        start: () => "Build report",
+        complete(_input, output) {
+          expectTypeOf(output.phase).toEqualTypeOf<string>();
+          return `Report ${output.phase}`;
+        },
+        delta(_input, partial) {
+          expectTypeOf(partial.phase).toEqualTypeOf<string>();
+          return partial.phase;
+        },
+      },
       description: "Stream report progress.",
       inputSchema: { type: "object" },
       async *execute() {
@@ -70,6 +99,7 @@ describe("definition helper exact inputs", () => {
 
   it("preserves ordinary async tool executor return types", () => {
     const ordinaryTool = defineTool({
+      label: { start: (input) => `React with ${input.reaction}` },
       description: "React to a message.",
       inputSchema: z.object({ reaction: z.string() }),
       async execute(input) {
@@ -80,6 +110,27 @@ describe("definition helper exact inputs", () => {
     expectTypeOf<ReturnType<typeof ordinaryTool.execute>>().toEqualTypeOf<
       Promise<{ ok: boolean }>
     >();
+  });
+
+  it("types background tools in terms of the durable task capability", () => {
+    const backgroundTool = defineTool({
+      description: "Start a durable export.",
+      execution: "background",
+      inputSchema: z.object({ jobId: z.string() }),
+      async *execute(input, _ctx, task) {
+        expectTypeOf(task).toEqualTypeOf<TaskExec>();
+        expectTypeOf(task.taskId).toEqualTypeOf<string>();
+        expectTypeOf(task).not.toHaveProperty("delegated");
+        yield { jobId: input.jobId };
+        return { jobId: input.jobId };
+      },
+    });
+
+    expectTypeOf(backgroundTool.execution).toEqualTypeOf<"background">();
+    expectTypeOf<
+      Parameters<NonNullable<typeof backgroundTool.toModelOutput>>[0]
+    >().toEqualTypeOf<TaskReceipt>();
+    expect(backgroundTool.execution).toBe("background");
   });
 
   it("infers tool input from Zod 3 schemas", () => {
@@ -221,6 +272,30 @@ function typeOnlyFixtures(): void {
   // @ts-expect-error Instructions identity is path-derived.
   defineInstructions(instructionsWithName);
 
+  defineInstructions({ content: "Always be concise." });
+  defineInstructions({ content: "Account context.", role: "user" });
+
+  // @ts-expect-error Instructions use either content or deprecated markdown, never both.
+  defineInstructions({
+    content: "mixed",
+    markdown: "mixed",
+  });
+
+  defineInstructions({
+    content: "invalid role",
+    // @ts-expect-error Instructions support only system and user roles.
+    role: "assistant",
+  });
+
+  defineDynamicInstructions({
+    events: {
+      "session.started": () => defineInstructions({ content: "Session." }),
+      "turn.started": async () => defineInstructions({ content: "Turn.", role: "user" }),
+      // @ts-expect-error Dynamic instructions do not support step scope.
+      "step.started": () => defineInstructions({ content: "Step." }),
+    },
+  });
+
   defineInstrumentation({
     isEnabled: true,
     recordInputs: true,
@@ -243,6 +318,9 @@ function typeOnlyFixtures(): void {
       },
     },
   });
+
+  const providerWithCapture: ProviderDefinition = { capture: "content" };
+  void providerWithCapture;
 
   defineInstrumentation({
     // @ts-expect-error Instrumentation event hooks are authored through `events`.
@@ -391,7 +469,13 @@ function typeOnlyFixtures(): void {
   defineSandbox({
     async onSession({ ctx, use }) {
       const sessionId: string = ctx.session.id;
+      // @ts-expect-error Sandbox lifecycle access is unavailable during session initialization.
+      void ctx.getSandbox;
+      // @ts-expect-error Skill access is unavailable during session initialization.
+      void ctx.getSkill;
       const sandbox = await use();
+      // @ts-expect-error Runtime lifecycle access is unavailable during session initialization.
+      void sandbox.delete;
       void sandbox;
       void sessionId;
     },

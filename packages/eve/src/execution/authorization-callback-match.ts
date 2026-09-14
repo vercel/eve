@@ -1,10 +1,11 @@
 import type { DeliverPayload } from "#channel/types.js";
 import type { AuthorizationResult, PendingAuthorizationState } from "#harness/authorization.js";
-import type { ConnectionAuthorizationChallenge } from "#public/connections/errors.js";
-import type { AuthorizationCallback } from "#runtime/connections/types.js";
+import type { ConnectionAuthorizationChallenge } from "#connections/errors.js";
+import type { AuthorizationCallback } from "#shared/connection-types.js";
 
 export interface MatchedAuthorizationCallback {
   readonly authorization: ConnectionAuthorizationChallenge;
+  readonly candidateId?: string;
   readonly result: { readonly name: string } & AuthorizationResult;
 }
 
@@ -40,7 +41,7 @@ export function matchAuthorizationCallbacks(
         ? candidate.attemptId === undefined
         : candidate.attemptId === callback.attemptId;
     });
-    const attemptKey = challenge?.attemptId ?? challenge?.name;
+    const attemptKey = challenge?.attemptId ?? challenge?.candidateId ?? challenge?.name;
     if (
       challenge === undefined ||
       attemptKey === undefined ||
@@ -53,10 +54,12 @@ export function matchAuthorizationCallbacks(
     matchedAttemptKeys.add(attemptKey);
     matches.push({
       authorization: challenge.challenge,
+      candidateId: challenge.candidateId,
       result: {
         attemptId: challenge.attemptId,
         callback: callback.callback,
         hookUrl: challenge.hookUrl,
+        instanceId: challenge.instanceId,
         name: challenge.name,
         principal: challenge.principal,
         resume: challenge.resume,

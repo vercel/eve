@@ -7,6 +7,7 @@ const sources = [
   { pathname: "/" },
   { pathname: "/docs/getting-started", lastModified: sourceDate },
   { pathname: "/docs/getting-started", lastModified: new Date("2026-08-01") },
+  { pathname: "/benchmarks" },
   { pathname: "/integrations" },
   { pathname: "/integrations/slack" },
   { pathname: "/templates" },
@@ -30,6 +31,7 @@ describe("createCanonicalSitemap", () => {
 
     expect(sitemap.map(({ url }) => url)).toEqual([
       "https://eve.dev/",
+      "https://eve.dev/benchmarks",
       "https://eve.dev/docs/getting-started",
       "https://eve.dev/integrations",
       "https://eve.dev/integrations/slack",

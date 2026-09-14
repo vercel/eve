@@ -1,7 +1,7 @@
 import type { ModelMessage } from "ai";
 
 import type { HarnessSession, SessionStateMap } from "#harness/types.js";
-import { WORKFLOW_RUNTIME_ACTION_INTERRUPT_KIND } from "#harness/workflow-runtime-action-state.js";
+import { WORKFLOW_TASK_INTERRUPT_KIND } from "#harness/workflow-task-state.js";
 import type { WorkflowSandboxInterrupt } from "#shared/workflow-sandbox.js";
 
 const PENDING_KEY = "eve.harness.pendingWorkflowInterrupt";
@@ -9,6 +9,7 @@ const PENDING_KEY = "eve.harness.pendingWorkflowInterrupt";
 export interface PendingWorkflowInterrupt {
   readonly interrupt: WorkflowSandboxInterrupt;
   readonly responseMessages: readonly ModelMessage[];
+  readonly usedCalls: number;
 }
 
 export function getPendingWorkflowInterrupt(
@@ -19,9 +20,12 @@ export function getPendingWorkflowInterrupt(
   if (!isWorkflowInterruptShape(value.interrupt) || !Array.isArray(value.responseMessages)) {
     return undefined;
   }
+  if (!Number.isSafeInteger(value.usedCalls) || (value.usedCalls as number) < 0) return undefined;
+
   return {
     interrupt: value.interrupt,
     responseMessages: value.responseMessages as ModelMessage[],
+    usedCalls: value.usedCalls as number,
   };
 }
 
@@ -29,6 +33,7 @@ export function setPendingWorkflowInterrupt(input: {
   readonly interrupt: WorkflowSandboxInterrupt;
   readonly responseMessages: readonly ModelMessage[];
   readonly session: HarnessSession;
+  readonly usedCalls: number;
 }): HarnessSession {
   return {
     ...input.session,
@@ -37,9 +42,23 @@ export function setPendingWorkflowInterrupt(input: {
       [PENDING_KEY]: {
         interrupt: input.interrupt,
         responseMessages: input.responseMessages,
+        usedCalls: input.usedCalls,
       } satisfies PendingWorkflowInterrupt,
     },
   };
+}
+
+export function setPendingWorkflowUsedCalls(input: {
+  readonly session: HarnessSession;
+  readonly usedCalls: number;
+}): HarnessSession {
+  const pending = getPendingWorkflowInterrupt(input.session.state);
+  if (pending === undefined) return input.session;
+  return setPendingWorkflowInterrupt({
+    ...pending,
+    session: input.session,
+    usedCalls: input.usedCalls,
+  });
 }
 
 export function clearPendingWorkflowInterrupt(session: HarnessSession): HarnessSession {
@@ -60,9 +79,12 @@ function isWorkflowInterruptShape(value: unknown): value is WorkflowSandboxInter
     typeof value.interruptId === "string" &&
     typeof value.outerToolCallId === "string" &&
     isRecord(value.payload) &&
-    value.payload.kind === WORKFLOW_RUNTIME_ACTION_INTERRUPT_KIND &&
+    value.payload.kind === WORKFLOW_TASK_INTERRUPT_KIND &&
     isRecord(value.continuation) &&
-    typeof value.continuation.outerToolCallId === "string"
+    value.continuation.version === 2 &&
+    typeof value.continuation.outerToolCallId === "string" &&
+    Array.isArray(value.continuation.pendingInterruptions) &&
+    Array.isArray(value.continuation.resolutions)
   );
 }
 

@@ -41,17 +41,30 @@ function createFakeDockerCli(
   respond: (args: readonly string[]) => FakeResponse | undefined = () => undefined,
 ): { calls: FakeDockerCall[]; cli: DockerCli; killedStreams: (readonly string[])[] } {
   const calls: FakeDockerCall[] = [];
+  const createdContainerNames = new Set<string>();
   const killedStreams: (readonly string[])[] = [];
 
   function resolve(args: readonly string[]): DockerCommandResult {
-    const partial = respond(args) ?? {};
+    let partial = respond(args) ?? {};
+    if (args[0] === "container" && args[1] === "inspect" && args[3] === "{{.Id}}") {
+      const containerName = args.at(-1) ?? "unknown";
+      if (createdContainerNames.has(containerName) || (partial.exitCode ?? 0) === 0) {
+        partial = { ...partial, exitCode: 0, stdout: fakeDockerContainerIdentity(containerName) };
+      }
+    }
     const stdout = partial.stdout ?? "";
-    return {
+    const result = {
       exitCode: partial.exitCode ?? 0,
       stderr: partial.stderr ?? "",
       stdout,
       stdoutBytes: partial.stdoutBytes ?? Buffer.from(stdout, "utf8"),
     };
+    if (args[0] === "run" && result.exitCode === 0) {
+      const nameIndex = args.indexOf("--name");
+      const containerName = nameIndex === -1 ? undefined : args[nameIndex + 1];
+      if (containerName !== undefined) createdContainerNames.add(containerName);
+    }
+    return result;
   }
 
   return {
@@ -106,6 +119,10 @@ function isImageInspect(args: readonly string[], reference: string): boolean {
 
 function isContainerInspect(args: readonly string[]): boolean {
   return args[0] === "container" && args[1] === "inspect";
+}
+
+function fakeDockerContainerIdentity(containerName: string): string {
+  return `sha256:${containerName}`;
 }
 
 const TEMPLATE_KEY = "eve-sbx-tpl-local-abc123";
@@ -211,10 +228,15 @@ describe("createDockerSandboxBackend prewarm", () => {
     expect(seedWrite?.stdin?.toString("utf8")).toBe("# Weather skill\n");
 
     const stop = findCall(calls, (args) => args[0] === "stop");
-    expect(stop?.args).toEqual(["stop", "-t", "0", buildContainerName]);
+    expect(stop?.args).toEqual([
+      "stop",
+      "-t",
+      "0",
+      fakeDockerContainerIdentity(buildContainerName!),
+    ]);
 
     const commit = findCall(calls, (args) => args[0] === "commit");
-    expect(commit?.args.at(-2)).toBe(buildContainerName);
+    expect(commit?.args.at(-2)).toBe(fakeDockerContainerIdentity(buildContainerName!));
     expect(commit?.args.at(-1)).toBe(TEMPLATE_IMAGE);
 
     const cleanup = findCall(calls, (args) => args[0] === "rm" && args[1] === "-f");
@@ -386,7 +408,7 @@ describe("createDockerSandboxBackend create", () => {
         "stop",
         "-t",
         "0",
-        SESSION_KEY,
+        fakeDockerContainerIdentity(SESSION_KEY),
       ]);
     } finally {
       if (previousRunId === undefined) {
@@ -504,7 +526,7 @@ describe("docker session primitives", () => {
       "/workspace",
       "-e",
       "DEPLOY_ENV=staging",
-      SESSION_KEY,
+      fakeDockerContainerIdentity(SESSION_KEY),
       "bash",
       "-c",
     ]);
@@ -529,7 +551,7 @@ describe("docker session primitives", () => {
     await spawned.kill();
 
     const treeKill = findCall(calls, (args) => args.includes("eve-kill-tree"));
-    expect(treeKill?.args.slice(0, 2)).toEqual(["exec", SESSION_KEY]);
+    expect(treeKill?.args.slice(0, 2)).toEqual(["exec", fakeDockerContainerIdentity(SESSION_KEY)]);
     expect(treeKill?.args.at(-1)).toBe(pidFilePath);
     expect(String(treeKill?.args.at(-3))).toContain("kill_tree");
     // The local docker exec client is killed after the in-container
@@ -593,7 +615,7 @@ describe("docker session primitives", () => {
     const remove = findCall(calls, (args) => args[0] === "exec" && args.includes("rm"));
     expect(remove?.args).toEqual([
       "exec",
-      SESSION_KEY,
+      fakeDockerContainerIdentity(SESSION_KEY),
       "rm",
       "-rf",
       "--",
@@ -615,7 +637,13 @@ describe("docker session primitives", () => {
 
     expect(
       findCall(calls, (args) => args[0] === "network" && args[1] === "disconnect")?.args,
-    ).toEqual(["network", "disconnect", "--force", "bridge", SESSION_KEY]);
+    ).toEqual([
+      "network",
+      "disconnect",
+      "--force",
+      "bridge",
+      fakeDockerContainerIdentity(SESSION_KEY),
+    ]);
   });
 
   it("applies allow-all to a deny-all-created container by detaching none before bridge", async () => {
@@ -636,8 +664,8 @@ describe("docker session primitives", () => {
       .filter((call) => call.args[0] === "network")
       .map((call) => call.args);
     expect(networkCalls).toEqual([
-      ["network", "disconnect", "--force", "none", SESSION_KEY],
-      ["network", "connect", "bridge", SESSION_KEY],
+      ["network", "disconnect", "--force", "none", fakeDockerContainerIdentity(SESSION_KEY)],
+      ["network", "connect", "bridge", fakeDockerContainerIdentity(SESSION_KEY)],
     ]);
   });
 

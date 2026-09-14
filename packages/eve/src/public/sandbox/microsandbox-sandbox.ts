@@ -17,7 +17,7 @@ export interface MicrosandboxSandboxCreateOptions {
    * Python, or ripgrep in sandbox bootstrap or provide them through a
    * custom image.
    *
-   * @default "ghcr.io/vercel/eve:latest"
+   * @default The `ghcr.io/vercel/eve` tag matching the installed eve version, or `EVE_SANDBOX_IMAGE_TAG` when set.
    */
   readonly image?: string;
   /** Number of virtual CPUs assigned to each sandbox. @default 1 */

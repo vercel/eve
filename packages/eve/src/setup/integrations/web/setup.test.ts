@@ -23,7 +23,6 @@ function deps(): WebSetupDeps {
       nodeEngineOverride: undefined,
       competingNextConfigFiles: [],
     })),
-    installScaffoldDependencies: vi.fn(async () => {}),
   };
 }
 
@@ -41,9 +40,6 @@ describe("Web setup", () => {
     await applyWebSetup(plan, ctx.apply, effects);
     expect(effects.ensureChannel).toHaveBeenCalledWith(
       expect.objectContaining({ configureVercelServices: false, skipDependencyMutation: true }),
-    );
-    expect(effects.installScaffoldDependencies).toHaveBeenCalledWith(
-      expect.objectContaining({ changed: true, projectPath: "/project" }),
     );
   });
 });

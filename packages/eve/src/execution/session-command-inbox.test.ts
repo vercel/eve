@@ -1,12 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { SessionInboxPayload } from "#execution/session-command-inbox.js";
-import { createSessionCommandInbox } from "#execution/session-command-inbox.js";
+import {
+  createSessionCommandInbox,
+  type SessionInboxPayload,
+} from "#execution/session-command-inbox.js";
 
 const createHookMock = vi.fn();
 
 vi.mock("#compiled/@workflow/core/index.js", () => ({
   createHook: (...args: unknown[]) => createHookMock(...args),
+  getWritable: vi.fn(),
 }));
 
 describe("createSessionCommandInbox", () => {
@@ -119,6 +122,10 @@ describe("createSessionCommandInbox", () => {
       "A session command inbox cannot change its stable token.",
     );
     expect(createHookMock).toHaveBeenCalledOnce();
+    expect(createHookMock).toHaveBeenCalledWith({
+      metadata: { sessionInboxWireVersion: 7, workflowTaskAuthorization: true },
+      token: "stable",
+    });
     await inbox.dispose();
   });
 

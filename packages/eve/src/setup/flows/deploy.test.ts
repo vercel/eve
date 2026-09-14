@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { createFakePrompter } from "#internal/testing/fake-prompter.js";
+import { packageInstallResult } from "#internal/testing/package-process.js";
 import type { DeployProjectDeps } from "#setup/boxes/deploy-project.js";
 import type { LinkProjectDeps } from "#setup/boxes/link-project.js";
 import type { ResolveProvisioningDeps } from "#setup/boxes/resolve-provisioning.js";
@@ -26,8 +27,8 @@ function createDeployProjectDeps(probe: DeploymentInfo = DEPLOYED) {
       kind: "pnpm",
       source: "default",
     })),
-    runPackageManagerInstall: vi.fn<DeployProjectDeps["runPackageManagerInstall"]>(
-      async () => true,
+    runPackageManagerInstall: vi.fn<DeployProjectDeps["runPackageManagerInstall"]>(async () =>
+      packageInstallResult(),
     ),
     detectDeployment: vi.fn<DeployProjectDeps["detectDeployment"]>(async () => probe),
     syncHostFrameworkPreset: vi.fn<DeployProjectDeps["syncHostFrameworkPreset"]>(async () => {}),
@@ -89,6 +90,31 @@ function createLoginFlow(result: LoginFlowResult = { kind: "already" }) {
 }
 
 describe("runDeployFlow", () => {
+  it("blocks a local ChatGPT subscription model before Vercel effects", async () => {
+    const fake = createFakePrompter({});
+    const detectDeployment = vi.fn(async () => LINKED);
+
+    await expect(
+      runDeployFlow({
+        appRoot: APP_ROOT,
+        prompter: fake.prompter,
+        interactive: true,
+        deps: {
+          detectDeployment,
+          inspectApplication: vi.fn(async () => ({
+            compiledState: {
+              manifest: {
+                config: { model: { routing: { kind: "external", provider: "codex" } } },
+              },
+            },
+          })) as never,
+        },
+      }),
+    ).resolves.toEqual({ kind: "local-model" });
+
+    expect(detectDeployment).not.toHaveBeenCalled();
+  });
+
   it("deploys an already-linked project without asking anything", async () => {
     const fake = createFakePrompter({});
     const deployDeps = createDeployProjectDeps();

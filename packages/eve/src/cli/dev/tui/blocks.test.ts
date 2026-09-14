@@ -22,6 +22,41 @@ describe("renderBlockLines", () => {
     expect(lines[0]).toBe("▲ all done");
   });
 
+  it("colors per-item status markers in a mixed command result", () => {
+    const colored = createTheme({ color: true, unicode: true });
+    const lines = renderBlockLines(
+      {
+        kind: "result",
+        body: "2 additions: 1 added, 1 failed\n\n  ✓ Web Chat\n    Installed.\n\n  ⨯ Slack\n    Installation failed.",
+      },
+      80,
+      colored,
+      ctx,
+    );
+
+    expect(lines.join("\n")).toContain(colored.colors.green("✓"));
+    expect(lines[0]).toContain("2 additions: 1 added, 1 failed");
+    expect(lines.join("\n")).toContain(colored.colors.red("⨯"));
+  });
+
+  it("uses ASCII status markers when Unicode is unavailable", () => {
+    const ascii = createTheme({ color: false, unicode: false });
+    const lines = renderBlockLines(
+      {
+        kind: "result",
+        body: "3 additions: 1 added, 1 failed, 1 cancelled\n\n  ✓ Web Chat\n\n  ⨯ Slack\n\n  – Notion",
+      },
+      80,
+      ascii,
+      ctx,
+    );
+
+    expect(lines.join("\n")).toContain("+ Web Chat");
+    expect(lines.join("\n")).toContain("x Slack");
+    expect(lines.join("\n")).toContain("- Notion");
+    expect(lines.join("\n")).not.toMatch(/[✓⨯–]/u);
+  });
+
   it("summarizes a completed tool with a result line", () => {
     const lines = render({
       kind: "tool",

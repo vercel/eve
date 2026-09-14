@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { InputRequest } from "#runtime/input/types.js";
+import type { InputRequest } from "#shared/input.js";
 import { resolveTextToResponse, resolveTextToResponses } from "#channel/resolve-text.js";
 
 const APPROVAL_REQUEST: InputRequest = {

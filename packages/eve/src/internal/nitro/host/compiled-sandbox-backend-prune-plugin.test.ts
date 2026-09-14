@@ -16,6 +16,7 @@ describe("createCompiledSandboxBackendPrunePlugin", () => {
 
     const source = plugin.load?.(id);
 
+    expect(source).toContain("export const isLinuxDockerDaemonAvailableSync = () => false;");
     expect(source).toContain("export const stopDevelopmentSandboxResources = pruned;");
   });
 });

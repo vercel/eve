@@ -1,7 +1,10 @@
 import { createSign } from "node:crypto";
 
+import { createLogger } from "#internal/logging.js";
 import { isObject } from "#shared/guards.js";
 import type { GitHubWebhookVerifier } from "#public/channels/github/verify.js";
+
+const log = createLogger("github.auth");
 
 /** GitHub App id, supplied directly or resolved lazily from a secret manager. */
 export type GitHubAppId = number | string | (() => number | string | Promise<number | string>);
@@ -20,11 +23,30 @@ export type GitHubWebhookSecret = string | (() => string | Promise<string>);
  */
 export type GitHubInstallationToken = string | (() => string | Promise<string>);
 
+/**
+ * The name the channel answers to in `@mentions` (the GitHub App slug,
+ * without the `[bot]` suffix), supplied directly or resolved lazily.
+ *
+ * A lazy resolver runs on first use inside request handling, where
+ * credentials that only exist per request (such as the Vercel OIDC token
+ * behind Connect metadata lookups) are available; a fulfilled value is
+ * cached, and a rejection is retried on the next event instead of pinned.
+ */
+export type GitHubBotName = string | (() => string | Promise<string>);
+
 /** Credentials used by the native GitHub channel. */
 export interface GitHubChannelCredentials {
   readonly appId?: GitHubAppId;
   readonly privateKey?: GitHubPrivateKey;
   readonly webhookSecret?: GitHubWebhookSecret;
+  /**
+   * The GitHub App's slug (its `@mention` handle, without the `[bot]`
+   * suffix), supplied directly or resolved lazily. Used as the channel's
+   * `botName` when the config does not set one, so integrations that broker
+   * credentials can make mention dispatch work with no explicit
+   * configuration.
+   */
+  readonly appSlug?: GitHubBotName;
   /**
    * Pre-resolved GitHub installation access token. When supplied, eve uses
    * it directly for authenticated GitHub API calls and skips the native
@@ -85,6 +107,47 @@ export async function resolveGitHubWebhookSecret(
     throw new Error("githubChannel: GITHUB_WEBHOOK_SECRET is required.");
   }
   return typeof source === "function" ? await source() : source;
+}
+
+/** The channel's lazily resolved bot name, shared by dispatch and defaults. */
+export type GitHubBotNameResolver = () => Promise<string | undefined>;
+
+/**
+ * Creates the channel's `botName` resolver: explicit config first, then the
+ * credentials' `appSlug`, then `GITHUB_APP_SLUG`. A fulfilled name is cached
+ * for the channel's lifetime; a rejection is logged and retried on the next
+ * event, so one failed delivery cannot pin the channel to a missing name.
+ */
+export function createGitHubBotNameResolver(input: {
+  readonly botName?: GitHubBotName;
+  readonly credentials?: GitHubChannelCredentials;
+}): GitHubBotNameResolver {
+  let cached: string | undefined;
+  return async () => {
+    if (cached !== undefined) {
+      return cached;
+    }
+    const source = input.botName ?? input.credentials?.appSlug ?? process.env.GITHUB_APP_SLUG;
+    if (source === undefined) {
+      return undefined;
+    }
+    if (typeof source === "string") {
+      cached = normalizeBotName(source);
+      return cached;
+    }
+    try {
+      cached = normalizeBotName(await source());
+      return cached;
+    } catch (error) {
+      log.warn("githubChannel: botName resolver failed; retrying on the next event", { error });
+      return undefined;
+    }
+  };
+}
+
+function normalizeBotName(value: string): string | undefined {
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
 }
 
 /** Converts hosted-platform escaped newlines back into PEM newlines. */

@@ -112,6 +112,11 @@ describe("nextKey", () => {
     expect(nextKey("\x1bO")).toEqual({ consumed: 0, incomplete: true });
   });
 
+  it("decodes Alt+B/F as complete readline word-movement chords", () => {
+    expect(nextKey("\x1bb")).toEqual({ key: { type: "alt-b" }, consumed: 2 });
+    expect(nextKey("\x1bF")).toEqual({ key: { type: "alt-f" }, consumed: 2 });
+  });
+
   it("takes a printable run as a single character token", () => {
     expect(nextKey("hello")).toEqual({
       key: { type: "text", value: "hello", framing: "unframed" },
@@ -205,9 +210,17 @@ describe("parseKey", () => {
     expect(parseKey(Buffer.from("\r"))).toEqual({ type: "enter" });
   });
 
-  it("decodes ctrl-n and ctrl-p for emacs-style navigation", () => {
-    expect(parseKey(Buffer.from(""))).toEqual({ type: "ctrl-n" });
-    expect(parseKey(Buffer.from(""))).toEqual({ type: "ctrl-p" });
+  it("decodes ctrl-b/f/n/p for emacs-style navigation", () => {
+    expect(parseKey(Buffer.from("\u0002"))).toEqual({ type: "ctrl-b" });
+    expect(parseKey(Buffer.from("\u0006"))).toEqual({ type: "ctrl-f" });
+    expect(parseKey(Buffer.from("\u000e"))).toEqual({ type: "ctrl-n" });
+    expect(parseKey(Buffer.from("\u0010"))).toEqual({ type: "ctrl-p" });
+  });
+
+  it("decodes common modified-arrow word-movement sequences", () => {
+    expect(parseKey(Buffer.from("\x1b[1;3D"))).toEqual({ type: "alt-b" });
+    expect(parseKey(Buffer.from("\x1b[1;5C"))).toEqual({ type: "alt-f" });
+    expect(parseKey(Buffer.from("\x1b[5D"))).toEqual({ type: "alt-b" });
   });
 
   it("decodes SGR mouse press and release with cell coordinates", () => {

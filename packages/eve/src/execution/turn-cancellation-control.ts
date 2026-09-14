@@ -21,6 +21,7 @@ export interface TurnCancellationControl {
    * the signal aborted. Race it against turn-owned awaits — never
    * `await` it alone.
    */
+  readonly payload: Promise<TurnCancelPayload>;
   readonly requested: Promise<"cancel">;
   /** Disposes the hook, abandoning any outstanding read. Idempotent. */
   dispose(): Promise<void>;
@@ -34,6 +35,7 @@ export interface TurnCancellationControl {
 export async function createTurnCancellationControl(input: {
   readonly controlToken: string;
   readonly expectedTurnId: string;
+  readonly initialPayload?: TurnCancelPayload;
 }): Promise<TurnCancellationControl | undefined> {
   const hook = createHook<TurnCancelPayload>({
     token: turnCancellationHookToken(input.controlToken),
@@ -55,14 +57,20 @@ export async function createTurnCancellationControl(input: {
   // `.then` — so the signal is already flipped when a same-drain
   // continuation (the turn loop's settle check) reads it; one microtask
   // later and an ordinary completion swallows the cancel.
-  const requested = consumeMatchingCancel(iterator, input.expectedTurnId, () => {
-    controller.abort(new TurnCancelledError());
-  }).then(() => "cancel" as const);
+  const abort = () => controller.abort(new TurnCancelledError());
+  const initiallyCancelled =
+    input.initialPayload !== undefined &&
+    matchesActiveTurn(input.initialPayload, input.expectedTurnId);
+  if (initiallyCancelled) abort();
+  const payload = initiallyCancelled
+    ? Promise.resolve(input.initialPayload!)
+    : consumeMatchingCancel(iterator, input.expectedTurnId, abort);
 
   let disposed = false;
   return {
+    payload,
     signal: controller.signal,
-    requested,
+    requested: payload.then(() => "cancel" as const),
     async dispose(): Promise<void> {
       if (disposed) return;
       disposed = true;
@@ -80,13 +88,13 @@ async function consumeMatchingCancel(
   iterator: AsyncIterator<TurnCancelPayload>,
   expectedTurnId: string,
   onCancel: () => void,
-): Promise<void> {
+): Promise<TurnCancelPayload> {
   while (true) {
     const next = await iterator.next();
     if (next.done) return await new Promise<never>(() => {});
     if (matchesActiveTurn(next.value, expectedTurnId)) {
       onCancel();
-      return;
+      return next.value;
     }
   }
 }

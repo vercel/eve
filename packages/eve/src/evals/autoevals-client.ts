@@ -8,7 +8,7 @@ import {
 import { Factuality } from "autoevals";
 import { resolveProviderHeaders } from "#internal/gateway.js";
 
-import { toInputSchema } from "#shared/tool-schema.js";
+import { toInputSchema } from "#tools/schema.js";
 
 /**
  * The OpenAI-shaped client surface autoevals expects. Extracted from the

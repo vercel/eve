@@ -9,17 +9,27 @@ import semver from "#compiled/semver/index.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import { createPrompter, type Prompter } from "#setup/prompter.js";
 import type { RegistrySetupCompletion } from "#setup/registry-setup-protocol.js";
-import { isEveProject } from "#setup/scaffold/index.js";
 import { WizardCancelledError } from "#setup/step.js";
 
-import { hasInteractiveTerminal, NOT_AN_AGENT_MESSAGE } from "./preconditions.js";
+import { hasInteractiveTerminal } from "./preconditions.js";
+import { installRegistryItemTransaction } from "./registry-install-transaction.js";
 import { runDeclaredSetups } from "./registry-declared-setups.js";
+import {
+  errorMessage,
+  reportRegistryCompletion as reportCompletion,
+  resolveRegistryItemForAdd,
+  runRegistryAction,
+  setupReminder,
+  setupResumeCommand,
+  type RegistryCommandLogger,
+} from "./registry-recovery.js";
 import {
   eveMetadataFromRegistryItem,
   parseOfficialRegistrySearchMetadata,
   type RegistrySearchMetadata,
 } from "./registry-metadata.js";
 import { runRegistryPackage } from "./registry-package.js";
+import { prepareDeclaredPnpmBuildPolicy } from "./registry-pnpm-build-policy-flow.js";
 import {
   printRegistrySearchResults,
   registryViewText,
@@ -28,13 +38,13 @@ import {
 } from "./registry-presentation.js";
 import type { runRegistrySetupCommand } from "./registry-setup-command.js";
 import { serializeHeadlessSetupEvent } from "./setup-headless.js";
-import { addRegistryMappings, readRegistryConfig } from "./registry-project.js";
-
-export interface RegistryCommandLogger {
-  error(message: string): void;
-  log(message: string): void;
-}
-
+import {
+  assertCanInstallWebChat,
+  prepareWebRegistryProject,
+  readRegistryConfig,
+} from "./registry-project.js";
+export { runRegistryAddCommand } from "./registry-add-command.js";
+export type { RegistryCommandLogger } from "./registry-recovery.js";
 export interface AddCommandOptions {
   skipInstall?: boolean;
   overwrite?: boolean;
@@ -65,6 +75,7 @@ export interface RegistrySetupDependencies {
 export interface AddCommandDependencies extends RegistrySetupDependencies {
   createPrompter?: () => Prompter;
   hasInteractiveTerminal?: () => boolean;
+  prepareWebRegistryProject?: typeof prepareWebRegistryProject;
 }
 
 type RunAddCommandOptions = AddCommandOptions & {
@@ -95,6 +106,7 @@ const defaultAddCommandDependencies: AddCommandDependencies = {
   hasInteractiveTerminal,
   loadSetupCommandRunner: async () =>
     (await import("./registry-setup-command.js")).runRegistrySetupCommand,
+  prepareWebRegistryProject,
 };
 
 const DEFAULT_OFFICIAL_REGISTRY_URL = "https://eve.dev/r";
@@ -136,13 +148,12 @@ const SKILLS_REGISTRY = "@skills";
 const SKILLS_REGISTRY_URL = "https://www.skills.sh/r/{name}?agent=eve";
 const CATALOG_PAGE_SIZE = 100;
 const DEFAULT_SEARCH_LIMIT = 10;
-
-function isRegistryAddress(value: string): boolean {
-  return value.startsWith("@") || /^https?:\/\//.test(value);
-}
+const ADD_SUGGESTION_LIMIT = 5;
 
 function itemAddress(item: string): string {
-  return isRegistryAddress(item) ? item : `${OFFICIAL_REGISTRY}/${item}.json`;
+  return item.startsWith("@") || /^https?:\/\//.test(item)
+    ? item
+    : `${OFFICIAL_REGISTRY}/${item}.json`;
 }
 
 /** Installs an official registry item without running its declared setup command. */
@@ -157,16 +168,6 @@ export async function installOfficialRegistryItem(
     cwd: appRoot,
     overwrite: options.overwrite,
   });
-}
-
-function setupResumeCommand(item: string): string {
-  const argument = /^[\w@./:-]+$/.test(item) ? item : `'${item.replaceAll("'", `'\\''`)}'`;
-  return `eve add ${argument} --skip-install`;
-}
-
-function setupReminder(item: string, outcome: "cancelled" | "skipped"): string {
-  const action = outcome === "cancelled" ? "Setup cancelled." : "Setup skipped.";
-  return `${action} Run \`${setupResumeCommand(item)}\` when you're ready.`;
 }
 
 function assertCompatibleEveVersion(requiredVersion: string | undefined): void {
@@ -185,31 +186,6 @@ function isOfficialItemAddress(address: string): boolean {
   return address.startsWith(`${OFFICIAL_REGISTRY}/`);
 }
 
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
-
-async function runRegistryAction<T>(
-  logger: RegistryCommandLogger,
-  appRoot: string,
-  action: () => Promise<T>,
-): Promise<T | undefined> {
-  if (!(await isEveProject(appRoot))) {
-    logger.error(NOT_AN_AGENT_MESSAGE);
-    process.exitCode = 1;
-    return undefined;
-  }
-
-  try {
-    return await action();
-  } catch (error) {
-    if (error instanceof WizardCancelledError) return undefined;
-    logger.error(errorMessage(error));
-    process.exitCode = 1;
-    return undefined;
-  }
-}
-
 function withBuiltInRegistries(config: RegistryConfig): RegistryConfig {
   return {
     ...config,
@@ -226,7 +202,7 @@ function configuredRegistrySources(config: RegistryConfig): string[] {
 }
 
 function validateRegistrySource(source: string | undefined): void {
-  if (source !== undefined && !isRegistryAddress(source)) {
+  if (source !== undefined && !source.startsWith("@") && !/^https?:\/\//.test(source)) {
     throw new Error(`Registry sources must be a namespace or URL: ${source}`);
   }
 }
@@ -274,6 +250,27 @@ function searchPresentationSections(
           },
         ];
   });
+}
+
+async function printAddSuggestions(
+  logger: RegistryCommandLogger,
+  appRoot: string,
+  item: string,
+): Promise<void> {
+  try {
+    const query = item.split("/").at(-1) || item;
+    const { resultsBySource, sources, metadataByAddress } = await searchRegistryCatalog(appRoot, {
+      limit: ADD_SUGGESTION_LIMIT,
+      query,
+    });
+    const sections = searchPresentationSections(sources, resultsBySource, metadataByAddress);
+    if (sections.every((section) => section.items.length === 0)) return;
+
+    logger.log("Did you mean?");
+    printRegistrySearchResults(logger, { query, sections });
+  } catch {
+    // The original not-found error remains actionable when catalog search is unavailable.
+  }
 }
 
 async function searchRegistryCatalog(
@@ -336,6 +333,14 @@ async function searchRegistryCatalog(
     : new Map<string, RegistrySearchMetadata>();
   const official = resultsBySource.get(OFFICIAL_CATALOG);
   if (official !== undefined) {
+    const visibleItems = official.items.filter(
+      (item) => metadataByAddress.get(searchItemAddress(item))?.hidden !== true,
+    );
+    official.items = visibleItems;
+    official.pagination = {
+      ...official.pagination,
+      total: visibleItems.length,
+    };
     official.items.sort((left, right) => {
       const rank = (item: RegistrySearchItem) =>
         metadataByAddress.get(searchItemAddress(item))?.implementation === "native" ? 0 : 1;
@@ -356,34 +361,20 @@ async function searchRegistryCatalog(
   return { config, result, resultsBySource, sources, metadataByAddress };
 }
 
-function registryManifestTitle(manifest: unknown): string | undefined {
-  if (typeof manifest !== "object" || manifest === null || Array.isArray(manifest))
-    return undefined;
-  const title = (manifest as { title?: unknown }).title;
-  return typeof title === "string" ? title : undefined;
-}
-
 /** Browses all configured catalogs, or one namespace or URL source. */
 export async function browseRegistryCatalog(
   appRoot: string,
   options: { query?: string; source?: string } = {},
 ): Promise<RegistryCatalogResult> {
-  const { config, result } = await searchRegistryCatalog(appRoot, options);
-  const manifests = await Promise.all(
-    result.items.map(async (item) => {
-      const [manifest] = await getRegistryItems([item.addCommandArgument], { config });
-      return manifest;
-    }),
-  );
+  const { result } = await searchRegistryCatalog(appRoot, options);
   return {
-    items: result.items.map((item: RegistrySearchItem, index) => {
+    items: result.items.map((item: RegistrySearchItem) => {
       const catalogItem: RegistryCatalogItem = {
         address: item.registry === OFFICIAL_CATALOG ? item.name : item.addCommandArgument,
         name: item.name,
         source: item.registry === OFFICIAL_CATALOG ? "Vercel" : item.registry,
       };
-      const title = registryManifestTitle(manifests[index]);
-      if (title !== undefined) catalogItem.title = title;
+      if (item.title !== undefined) catalogItem.title = item.title;
       if (item.type !== undefined) catalogItem.type = item.type;
       if (item.description !== undefined) catalogItem.description = item.description;
       return catalogItem;
@@ -463,6 +454,7 @@ export async function installRegistryItem(
   );
   process.exitCode = previousExitCode;
   if (failure !== undefined) throw new Error(failure);
+  if (setup === false) throw new WizardCancelledError();
   const result: { output: readonly string[]; setup?: RegistrySetupCompletion } = { output };
   if (setup !== undefined) result.setup = setup;
   return result;
@@ -475,10 +467,11 @@ export async function runAddCommand(
   item: string,
   options: RunAddCommandOptions,
   dependencies: AddCommandDependencies = defaultAddCommandDependencies,
-): Promise<RegistrySetupCompletion | undefined> {
+): Promise<RegistrySetupCompletion | false | undefined> {
   return runRegistryAction(logger, appRoot, async () => {
-    const config = await readEveRegistryConfig(appRoot);
     const address = itemAddress(item);
+    if (address === itemAddress("channel/web")) await assertCanInstallWebChat(appRoot);
+    const config = await readEveRegistryConfig(appRoot);
     if (options.skipInstall === true) {
       if (options.overwrite === true) {
         throw new Error("--overwrite cannot be used with --skip-install.");
@@ -492,7 +485,13 @@ export async function runAddCommand(
         );
       }
     }
-    const [registryItem] = await getRegistryItems([address], { config });
+    const registryItemResult = await resolveRegistryItemForAdd(
+      logger,
+      async () => (await getRegistryItems([address], { config }))[0],
+      () => printAddSuggestions(logger, appRoot, item),
+    );
+    if (!registryItemResult.found) return;
+    const registryItem = registryItemResult.item;
     const eveMetadata = isOfficialItemAddress(address)
       ? eveMetadataFromRegistryItem(registryItem)
       : undefined;
@@ -521,6 +520,7 @@ export async function runAddCommand(
               setups,
               options: {
                 yes: options.yes,
+                force: options.overwrite,
                 nonInteractive: options.nonInteractive,
                 answers: options.answers,
                 prompter,
@@ -533,7 +533,7 @@ export async function runAddCommand(
           setupReminder: (packageItem) => setupReminder(packageItem, "skipped"),
         },
       });
-      return completion === false ? undefined : completion;
+      return reportCompletion(logger, item, completion, options);
     }
 
     if (options.skipInstall === true) {
@@ -550,17 +550,38 @@ export async function runAddCommand(
         cancelledReminder: setupReminder(item, "cancelled"),
         resumeCommand: setupResumeCommand(item),
       });
-      return completion === false ? undefined : completion;
+      return reportCompletion(logger, item, completion, options);
     }
 
-    await addRegistryItems([address], {
-      config,
-      cwd: appRoot,
-      overwrite: options.overwrite,
-      silent: options.silent,
+    const installReady = await prepareDeclaredPnpmBuildPolicy({
+      logger,
+      appRoot,
+      item,
+      policies: eveMetadata?.install?.pnpm?.buildScripts,
+      options,
     });
-    if (eveMetadata?.setup === undefined) return;
+    if (!installReady) return false;
 
+    if (address === itemAddress("channel/web")) {
+      await (dependencies.prepareWebRegistryProject ?? prepareWebRegistryProject)(appRoot);
+    }
+    await installRegistryItemTransaction({
+      appRoot,
+      item,
+      registryItem,
+      nonInteractive: options.nonInteractive,
+      logger,
+      install: async () => {
+        await addRegistryItems([address], {
+          config,
+          cwd: appRoot,
+          overwrite: options.overwrite,
+          silent: options.silent,
+        });
+      },
+    });
+    if (eveMetadata?.setup === undefined)
+      return reportCompletion(logger, item, { facts: [] }, options);
     const interactive =
       dependencies.hasInteractiveTerminal?.() ??
       defaultAddCommandDependencies.hasInteractiveTerminal!();
@@ -573,9 +594,16 @@ export async function runAddCommand(
         }),
       );
     }
+    if (options.skipSetup === true) {
+      if (options.nonInteractive) return reportCompletion(logger, item, { facts: [] }, options);
+      logger.log(setupReminder(item, "skipped"));
+      return;
+    }
     if (
-      options.skipSetup === true ||
-      (!options.nonInteractive && !options.yes && !interactive && options.setupAuthorized !== true)
+      !options.nonInteractive &&
+      !options.yes &&
+      !interactive &&
+      options.setupAuthorized !== true
     ) {
       logger.log(setupReminder(item, "skipped"));
       return;
@@ -611,51 +639,14 @@ export async function runAddCommand(
       appRoot,
       item,
       setups: eveMetadata.setup,
-      options,
+      options: { ...options, force: options.overwrite },
       dependencies,
       cancelledReminder: setupReminder(item, "cancelled"),
       resumeCommand: setupResumeCommand(item),
     });
-    if (completion !== false && options.nonInteractive) {
-      logger.log(
-        serializeHeadlessSetupEvent({
-          version: 1,
-          type: "completed",
-          item,
-          completedItems: [item],
-          ...(completion.deploymentRequired === true
-            ? {
-                deploymentRequired: true as const,
-                next: { command: "eve", args: ["deploy"] },
-              }
-            : {}),
-        }),
-      );
-    }
-    return completion === false ? undefined : completion;
+    return reportCompletion(logger, item, completion, options);
   });
 }
-
-/** Adds registry namespace mappings to the project's package.json. */
-export async function runRegistryAddCommand(
-  logger: RegistryCommandLogger,
-  appRoot: string,
-  mappings: readonly string[],
-): Promise<void> {
-  await runRegistryAction(logger, appRoot, async () => {
-    const result = await addRegistryMappings(appRoot, mappings);
-    for (const namespace of result.skippedBuiltIn) {
-      logger.log(`Skipped ${namespace} because it is built in.`);
-    }
-    for (const namespace of result.skippedExisting) {
-      logger.log(`Skipped ${namespace} because it is already configured.`);
-    }
-    if (result.added.length > 0) {
-      logger.log(`Added ${result.added.join(", ")} to package.json.`);
-    }
-  });
-}
-
 /** Lists registry items from every configured source or one selected source. */
 export async function runRegistryListCommand(
   logger: RegistryCommandLogger,
@@ -667,7 +658,6 @@ export async function runRegistryListCommand(
     browseRegistryItems(logger, appRoot, undefined, source, options),
   );
 }
-
 /** Searches registry items across every configured source or one selected source. */
 export async function runRegistrySearchCommand(
   logger: RegistryCommandLogger,
@@ -683,7 +673,6 @@ export async function runRegistrySearchCommand(
     }),
   );
 }
-
 /** Inspects one official, configured, or URL-addressed registry item. */
 export async function runRegistryViewCommand(
   logger: RegistryCommandLogger,

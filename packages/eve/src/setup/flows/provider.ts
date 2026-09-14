@@ -1,5 +1,3 @@
-import pc from "picocolors";
-
 import { appendEnv } from "../append-env.js";
 import {
   AI_GATEWAY_API_KEY_ENV_FILE,
@@ -16,27 +14,12 @@ import {
 } from "../vercel-project.js";
 import { withSpinner } from "../with-spinner.js";
 
-import type { GatewayCredentialSource } from "#internal/resolve-model-endpoint-status.js";
+import type { ProviderSelection } from "#setup/provider-settings.js";
+import { HumanActionRequiredError } from "#setup/human-action.js";
 
-import { runLinkFlow, type LinkFlowResult } from "./link.js";
+import { runLinkFlow } from "./link.js";
 
-export type ProviderConnection = "project" | "own-key" | "external";
-
-/**
- * How the agent's model is backed right now, as far as the local directory
- * shows: a linked Vercel project, a gateway credential in an env file, or
- * nothing detectable. An external provider (own ANTHROPIC_API_KEY etc.)
- * leaves no marker eve owns, so it reads as `unset`.
- */
-export type ModelProviderStatus =
-  | { kind: "unset" }
-  | { kind: "gateway-project"; projectName: string; teamName?: string }
-  | {
-      kind: "gateway-key";
-      envKey: typeof AI_GATEWAY_API_KEY_ENV_VAR | "VERCEL_OIDC_TOKEN";
-      /** Where the credential lives — an env file, or the shell for a key. */
-      source: GatewayCredentialSource;
-    };
+export type ProviderConnection = ProviderSelection | "external";
 
 export const PROVIDER_QUESTION = "Which model provider do you want to use?";
 
@@ -56,21 +39,19 @@ export interface ProviderFlowDeps {
   validateGatewayApiKey: typeof validateGatewayApiKey;
 }
 
-export type ProviderFlowResult =
-  | LinkFlowResult
-  | {
-      kind: "external-provider";
-      /** The user runs a non-gateway provider; nothing was linked or written. */
-    };
+export type ProviderFlowResult = {
+  kind: ProviderSelection | "cancelled" | "external-provider";
+};
 
 type AcceptedGatewayKeyValidation = Exclude<GatewayKeyValidation, { kind: "invalid" }>;
 
 /** A provider choice, including the accepted evidence for an inline key. */
 export type ProviderPickerChoice =
-  | { kind: "project" }
+  | { kind: "ai-gateway-project" }
+  | { kind: "chatgpt" }
   | { kind: "external" }
   | {
-      kind: "inline-key";
+      kind: "ai-gateway-key";
       key: string;
       validation: AcceptedGatewayKeyValidation;
     };
@@ -90,12 +71,22 @@ export type ProviderPicker = (
 
 function projectConnectionOption(
   authStatus: VercelAuthStatus | undefined,
+  recoverable: boolean,
 ): SelectOption<ProviderConnection> {
   const option: SelectOption<ProviderConnection> = {
-    value: "project",
+    value: "ai-gateway-project",
     label: "AI Gateway via Project",
     hint: "Authenticates with AI Gateway automatically\nin a new or existing project. No keys to manage.",
   };
+  if (authStatus === "unavailable") {
+    return { ...option, hint: "Couldn't reach Vercel — select to retry" };
+  }
+  if (recoverable && authStatus === "logged-out") {
+    return { ...option, hint: "Log in to Vercel — select to retry" };
+  }
+  if (recoverable && authStatus === "cli-missing") {
+    return { ...option, hint: "Install the Vercel CLI — select to retry" };
+  }
   const disabledReason = authStatus === undefined ? undefined : vercelAuthBlockerReason(authStatus);
   return disabledReason === undefined
     ? option
@@ -104,30 +95,41 @@ function projectConnectionOption(
 
 function providerOptions(
   authStatus: VercelAuthStatus | undefined,
-  current: ModelProviderStatus | undefined,
+  selectedProvider: ProviderSelection,
+  selectionExplicit: boolean,
+  recoverable: boolean,
 ): SelectOption<ProviderConnection>[] {
-  let project = projectConnectionOption(authStatus);
-  if (current?.kind === "gateway-project") {
-    const where =
-      current.teamName === undefined
-        ? pc.bold(current.projectName)
-        : `${pc.bold(current.projectName)} in team ${pc.bold(current.teamName)}`;
-    project = { ...project, checked: true, hint: `Linked to ${where}` };
+  let project = projectConnectionOption(authStatus, recoverable);
+  if (
+    selectionExplicit &&
+    selectedProvider === "ai-gateway-project" &&
+    authStatus !== "unavailable" &&
+    !(recoverable && (authStatus === "logged-out" || authStatus === "cli-missing"))
+  ) {
+    project = { ...project, checked: true, hint: "Current" };
   }
 
-  let ownKey: SelectOption<ProviderConnection> = {
-    value: "own-key",
+  let gatewayKey: SelectOption<ProviderConnection> = {
+    value: "ai-gateway-key",
     label: `AI Gateway via ${AI_GATEWAY_API_KEY_ENV_VAR}`,
     hint: "⎿ type your key",
   };
-  if (current?.kind === "gateway-key") {
-    const where = current.source.kind === "shell" ? "your shell" : current.source.path;
-    ownKey = { ...ownKey, checked: true, hint: `${current.envKey} set in ${where}` };
+  if (selectionExplicit && selectedProvider === "ai-gateway-key") {
+    gatewayKey = { ...gatewayKey, checked: true, hint: "Current" };
   }
 
   return [
     project,
-    ownKey,
+    gatewayKey,
+    {
+      value: "chatgpt",
+      label: "ChatGPT subscription",
+      hint:
+        selectionExplicit && selectedProvider === "chatgpt"
+          ? "Current"
+          : "Sign in with your ChatGPT account",
+      checked: (selectionExplicit && selectedProvider === "chatgpt") || undefined,
+    },
     {
       value: "external",
       label: "Other providers",
@@ -159,18 +161,25 @@ async function selectProvider(input: {
 /**
  * THE PROVIDER FLOW behind the dev TUI `/model` menu's provider row
  * (`eve link` keeps {@link runLinkFlow}'s shape). One question chooses a
- * project-backed AI Gateway connection, an `AI_GATEWAY_API_KEY`, or an
- * external provider. The project branch runs the link flow in create-or-link
- * mode, so a project-less agent can create its first project rather than
- * dead-end on an empty list.
+ * project-backed AI Gateway connection, an `AI_GATEWAY_API_KEY`, ChatGPT, or a
+ * direct provider. Selecting an available but inactive project only changes
+ * the selection; selecting the active project opens the link flow so it can
+ * be replaced. A project-less agent can create its first project there rather
+ * than dead-end on an empty list.
  */
 export async function runProviderFlow(input: {
   appRoot: string;
   prompter: Prompter;
   signal?: AbortSignal;
   picker?: ProviderPicker;
-  /** The detected provider, so the chooser can mark and describe the active row. */
-  currentProvider?: ModelProviderStatus;
+  /** Provider availability resolved before the picker opened. */
+  availableProviders: readonly ProviderSelection[];
+  /** The current provider selection. */
+  selectedProvider: ProviderSelection;
+  /** Whether that selection was explicitly persisted rather than inferred from available access. */
+  selectionExplicit?: boolean;
+  /** Interactive caller recovery that resumes project linking after Vercel repair. */
+  recoverHumanAction?: (error: HumanActionRequiredError) => Promise<"retry" | "cancel">;
   deps?: Partial<ProviderFlowDeps>;
 }): Promise<ProviderFlowResult> {
   const { appRoot, prompter, signal } = input;
@@ -183,17 +192,22 @@ export async function runProviderFlow(input: {
   };
 
   let authStatus: VercelAuthStatus | undefined;
+  const { availableProviders, selectedProvider } = input;
   // The cursor opens on the active provider; a Vercel auth blocker still
   // re-homes it onto the key row below.
-  let initialValue: ProviderConnection =
-    input.currentProvider?.kind === "gateway-key" ? "own-key" : "project";
-  let keyChoice: Extract<ProviderPickerChoice, { kind: "inline-key" }>;
+  let initialValue: ProviderConnection = selectedProvider;
+  let keyChoice: Extract<ProviderPickerChoice, { kind: "ai-gateway-key" }>;
 
   try {
     while (true) {
       const choice = await selectProvider({
         picker: input.picker,
-        options: providerOptions(authStatus, input.currentProvider),
+        options: providerOptions(
+          authStatus,
+          selectedProvider,
+          input.selectionExplicit !== false,
+          input.recoverHumanAction !== undefined,
+        ),
         initialValue,
         validateInlineKey: (key, validationSignal) =>
           deps.validateGatewayApiKey(
@@ -217,26 +231,76 @@ export async function runProviderFlow(input: {
         return { kind: "external-provider" };
       }
 
-      if (choice.kind === "inline-key") {
+      if (choice.kind === "chatgpt") return choice;
+
+      if (choice.kind === "ai-gateway-key") {
         keyChoice = choice;
         break;
       }
 
-      const auth = await withSpinner(prompter, "Checking your Vercel login…", () =>
-        deps.getVercelAuthStatus(appRoot, { signal }),
-      );
-      signal?.throwIfAborted();
-      authStatus = auth;
-      if (vercelAuthBlockerReason(authStatus) !== undefined) {
-        initialValue = "own-key";
-        continue;
+      if (
+        selectedProvider !== "ai-gateway-project" &&
+        availableProviders.includes("ai-gateway-project")
+      ) {
+        return choice;
       }
-      return await deps.runLinkFlow({
-        appRoot,
-        prompter,
-        signal,
-        projectSelection: "create-or-link",
-      });
+
+      while (true) {
+        const auth = await withSpinner(prompter, "Checking your Vercel login…", () =>
+          deps.getVercelAuthStatus(appRoot, { signal }),
+        );
+        signal?.throwIfAborted();
+        authStatus = auth;
+        if (auth === "authenticated") break;
+        const actionKind =
+          auth === "cli-missing"
+            ? "vercel-cli-missing"
+            : auth === "logged-out"
+              ? "vercel-login"
+              : undefined;
+        if (actionKind === undefined || input.recoverHumanAction === undefined) {
+          initialValue = auth === "unavailable" ? "ai-gateway-project" : "ai-gateway-key";
+          break;
+        }
+        const recovery = await input.recoverHumanAction(
+          new HumanActionRequiredError({
+            kind: actionKind,
+            command: auth === "cli-missing" ? "npm i -g vercel@latest" : "vercel login",
+            reason:
+              auth === "cli-missing"
+                ? "AI Gateway via Project requires the Vercel CLI."
+                : "AI Gateway via Project requires a Vercel login.",
+          }),
+        );
+        if (recovery === "cancel") {
+          initialValue = "ai-gateway-project";
+          break;
+        }
+      }
+      if (authStatus !== "authenticated") continue;
+      while (true) {
+        try {
+          const result = await deps.runLinkFlow({
+            appRoot,
+            prompter,
+            signal,
+            projectSelection: "create-or-link",
+          });
+          if (result.kind === "cancelled") return result;
+          return { kind: "ai-gateway-project" };
+        } catch (error) {
+          if (
+            !(error instanceof HumanActionRequiredError) ||
+            input.recoverHumanAction === undefined
+          ) {
+            throw error;
+          }
+          if ((await input.recoverHumanAction(error)) === "cancel") {
+            initialValue = "ai-gateway-key";
+            break;
+          }
+        }
+      }
     }
   } catch (error) {
     if (error instanceof WizardCancelledError) return { kind: "cancelled" };
@@ -262,8 +326,5 @@ export async function runProviderFlow(input: {
   // remaining UI, but the caller must still refresh model access for the key
   // that is now on disk.
   prompter.log.success(`${location.envKey} set.`);
-  return {
-    kind: "done",
-    resolution: { credential: "api-key", source: { kind: "env-file", path: location.envFile } },
-  };
+  return { kind: "ai-gateway-key" };
 }

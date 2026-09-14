@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { createFakePrompter } from "#internal/testing/fake-prompter.js";
+import { packageProcessResult } from "#internal/testing/package-process.js";
 import type { DetectedPackageManager } from "#setup/package-manager.js";
 
 import { runInstallVercelCliFlow, type InstallVercelCliDeps } from "./install-vercel-cli.js";
@@ -36,8 +37,8 @@ function run(
 
 describe("runInstallVercelCliFlow", () => {
   it("short-circuits when the CLI already resolves and never installs", async () => {
-    const spawnPackageManager = vi.fn<InstallVercelCliDeps["spawnPackageManager"]>(
-      async () => true,
+    const spawnPackageManager = vi.fn<InstallVercelCliDeps["spawnPackageManager"]>(async () =>
+      packageProcessResult(),
     );
     await expect(
       run({ getVercelAuthStatus: statusProbe("logged-out") }, spawnPackageManager),
@@ -46,8 +47,8 @@ describe("runInstallVercelCliFlow", () => {
   });
 
   it("installs globally with the project's package manager, then re-probes", async () => {
-    const spawnPackageManager = vi.fn<InstallVercelCliDeps["spawnPackageManager"]>(
-      async () => true,
+    const spawnPackageManager = vi.fn<InstallVercelCliDeps["spawnPackageManager"]>(async () =>
+      packageProcessResult(),
     );
     // cli-missing before; logged-out (i.e. CLI now present) after.
     await expect(
@@ -66,8 +67,8 @@ describe("runInstallVercelCliFlow", () => {
       async (): Promise<DetectedPackageManager> => ({ kind: "yarn", source: "lockfile" }),
     );
     const runVercel = vi.fn<InstallVercelCliDeps["runVercel"]>(async () => true);
-    const spawnPackageManager = vi.fn<InstallVercelCliDeps["spawnPackageManager"]>(
-      async () => true,
+    const spawnPackageManager = vi.fn<InstallVercelCliDeps["spawnPackageManager"]>(async () =>
+      packageProcessResult(),
     );
 
     await expect(
@@ -123,8 +124,8 @@ describe("runInstallVercelCliFlow", () => {
   });
 
   it("reports failed when the install exits non-zero", async () => {
-    const spawnPackageManager = vi.fn<InstallVercelCliDeps["spawnPackageManager"]>(
-      async () => false,
+    const spawnPackageManager = vi.fn<InstallVercelCliDeps["spawnPackageManager"]>(async () =>
+      packageProcessResult(1),
     );
     await expect(
       run({ getVercelAuthStatus: statusProbe("cli-missing") }, spawnPackageManager),
@@ -132,8 +133,8 @@ describe("runInstallVercelCliFlow", () => {
   });
 
   it("reports failed when the install exits clean but the CLI still isn't on PATH", async () => {
-    const spawnPackageManager = vi.fn<InstallVercelCliDeps["spawnPackageManager"]>(
-      async () => true,
+    const spawnPackageManager = vi.fn<InstallVercelCliDeps["spawnPackageManager"]>(async () =>
+      packageProcessResult(),
     );
     // Still cli-missing after a "successful" global install (bin not on PATH).
     await expect(
@@ -142,15 +143,16 @@ describe("runInstallVercelCliFlow", () => {
   });
 
   it("uses the npm global form for an npm project", async () => {
-    const spawnPackageManager = vi.fn<InstallVercelCliDeps["spawnPackageManager"]>(
-      async () => true,
+    const spawnPackageManager = vi.fn<InstallVercelCliDeps["spawnPackageManager"]>(async () =>
+      packageProcessResult(),
     );
     await run(
       {
         getVercelAuthStatus: statusProbe("cli-missing", "authenticated"),
-        detectPackageManager: vi.fn(
-          async (): Promise<DetectedPackageManager> => ({ kind: "npm", source: "lockfile" }),
-        ),
+        detectPackageManager: vi.fn(async (): Promise<DetectedPackageManager> => ({
+          kind: "npm",
+          source: "lockfile",
+        })),
       },
       spawnPackageManager,
     );

@@ -4,10 +4,14 @@
  */
 export {
   defineSandbox,
+  type SandboxAncestorReference,
   type SandboxBootstrapContext,
   type SandboxBootstrapUseFn,
   type SandboxCommandResult,
   type SandboxDefinition,
+  type SandboxParentDefinition,
+  type SandboxParentDefinitionContext,
+  type SandboxParentValue,
   type SandboxProcess,
   type SandboxReadBinaryFileOptions,
   type SandboxReadFileOptions,
@@ -30,6 +34,7 @@ export type {
   SandboxBackendPrewarmInput,
   SandboxBackendRuntimeContext,
   SandboxBackendSessionState,
+  SandboxDeleteOptions,
   SandboxSeedFile,
 } from "#public/definitions/sandbox-backend.js";
 export type { SandboxNetworkPolicy } from "#shared/sandbox-network-policy.js";

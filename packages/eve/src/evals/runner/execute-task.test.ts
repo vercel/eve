@@ -1,7 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { Client } from "#client/client.js";
-import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
+import { ClientSession } from "#client/session.js";
+import {
+  EVE_MESSAGE_STREAM_VERSION,
+  EVE_STREAM_VERSION_HEADER,
+  type UnstampedMessageStreamEvent,
+} from "#protocol/message.js";
 import { stampTestEvents } from "#internal/testing/events.js";
 import { executeTask } from "#evals/runner/execute-task.js";
 import type { EveEval, EveEvalContext } from "#evals/types.js";
@@ -15,6 +20,17 @@ const target = createEvalTargetHandle({
   kind: "local",
   url: "https://eve.test",
 });
+
+const TRACE_A = {
+  spanId: "0123456789abcdef",
+  traceFlags: 1,
+  traceId: "0123456789abcdef0123456789abcdef",
+};
+const TRACE_B = {
+  spanId: "fedcba9876543210",
+  traceFlags: 1,
+  traceId: "fedcba9876543210fedcba9876543210",
+};
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -41,6 +57,75 @@ describe("executeTask", () => {
     });
 
     expect(outcome.error).toMatch(/timed out|timeout/i);
+  });
+
+  it("resets each distinct known session after a configured timeout", async () => {
+    const reset = vi.spyOn(ClientSession.prototype, "reset").mockResolvedValue({
+      previousSessionId: "ignored-by-runner",
+      status: "reset",
+    });
+    let evalSignal: AbortSignal | undefined;
+
+    const outcome = await executeTask({
+      client: new Client({ host: target.url }),
+      target,
+      evaluation: createTestEval(async (t) => {
+        evalSignal = t.signal;
+        t.target.watchTurn("shared-root");
+        t.target.watchTurn("shared-root");
+        t.target.watchTurn("other-root");
+        await new Promise<void>(() => {});
+      }, "timeout-cleanup"),
+      timeoutMs: 1,
+    });
+
+    expect(outcome.error).toMatch(/timed out|timeout/i);
+    expect(reset).toHaveBeenCalledTimes(2);
+    expect(
+      reset.mock.contexts.map((session) => (session as ClientSession).state.sessionId),
+    ).toEqual(["shared-root", "other-root"]);
+    for (const [options] of reset.mock.calls) {
+      expect(options).toMatchObject({ reason: "Eval timed out", signal: expect.any(AbortSignal) });
+      expect(options?.signal).not.toBe(evalSignal);
+      expect(options?.signal?.aborted).toBe(false);
+    }
+  });
+
+  it("does not run timeout cleanup for an ordinary eval failure", async () => {
+    const reset = vi.spyOn(ClientSession.prototype, "reset").mockResolvedValue({
+      previousSessionId: "known-root",
+      status: "reset",
+    });
+
+    const outcome = await executeTask({
+      client: new Client({ host: target.url }),
+      target,
+      evaluation: createTestEval((t) => {
+        t.target.watchTurn("known-root");
+        throw new Error("eval failed");
+      }, "failure-with-timeout-configured"),
+      timeoutMs: 1_000,
+    });
+
+    expect(outcome.error).toBe("eval failed");
+    expect(reset).not.toHaveBeenCalled();
+  });
+
+  it("preserves the timeout verdict and appends cleanup failures", async () => {
+    vi.spyOn(ClientSession.prototype, "reset").mockRejectedValue(new Error("cleanup exploded"));
+
+    const outcome = await executeTask({
+      client: new Client({ host: target.url }),
+      target,
+      evaluation: createTestEval(async (t) => {
+        t.target.watchTurn("known-root");
+        await new Promise<void>(() => {});
+      }, "timeout-cleanup-failure"),
+      timeoutMs: 1,
+    });
+
+    expect(outcome.error).toMatch(/timed out|timeout/i);
+    expect(outcome.error).toContain("Eval timeout cleanup failed: cleanup exploded");
   });
 
   it("exposes a sleep helper with a one-second default", async () => {
@@ -124,6 +209,95 @@ describe("executeTask", () => {
     ]);
   });
 
+  it("collects every session trace and reports the first one live", async () => {
+    const server = createScriptedServer([
+      {
+        sessionId: "session_1",
+        events: [turnStarted("turn_1", TRACE_A), turnCompleted("turn_1"), sessionWaiting()],
+      },
+      {
+        sessionId: "session_1",
+        events: [
+          turnStarted("turn_2", TRACE_B),
+          messageCompleted("done", "turn_2"),
+          turnCompleted("turn_2"),
+          sessionCompleted(),
+        ],
+      },
+    ]);
+    vi.spyOn(globalThis, "fetch").mockImplementation(server.fetch);
+    const onSessionStart = vi.fn();
+
+    const { result } = await executeTask({
+      client: new Client({ host: target.url }),
+      target,
+      evaluation: createTestEval(async (t) => {
+        await t.send("first");
+        await t.send("second");
+      }, "trace-contexts"),
+      onSessionStart,
+    });
+
+    expect(onSessionStart).toHaveBeenCalledExactlyOnceWith({
+      primary: true,
+      sessionId: "session_1",
+      startedAt: "2026-01-01T00:00:00.000Z",
+      traceContext: TRACE_A,
+    });
+    expect(result.sessions?.[0]?.traceContexts).toEqual([TRACE_A, TRACE_B]);
+    expect(result.traceContexts).toEqual([
+      { ...TRACE_A, primary: true, sessionId: "session_1" },
+      { ...TRACE_B, primary: true, sessionId: "session_1" },
+    ]);
+  });
+
+  it("exposes the primary session transcript after each turn", async () => {
+    const server = createScriptedServer([
+      {
+        sessionId: "session_1",
+        events: [
+          turnStarted("turn_1"),
+          messageReceived("Remember marigold.", "turn_1"),
+          messageCompleted("I will remember marigold.", "turn_1"),
+          turnCompleted("turn_1"),
+          sessionWaiting(),
+        ],
+      },
+      {
+        sessionId: "session_1",
+        events: [
+          turnStarted("turn_2"),
+          messageReceived("What word did I ask you to remember?", "turn_2"),
+          messageCompleted("marigold", "turn_2"),
+          turnCompleted("turn_2"),
+          sessionCompleted(),
+        ],
+      },
+    ]);
+    vi.spyOn(globalThis, "fetch").mockImplementation(server.fetch);
+
+    await executeTask({
+      client: new Client({ host: target.url }),
+      target,
+      evaluation: createTestEval(async (t) => {
+        await t.send("Remember marigold.");
+        expect(t.transcript).toBe(
+          "User:\nRemember marigold.\n\nAssistant:\nI will remember marigold.",
+        );
+
+        await t.send("What word did I ask you to remember?");
+        expect(t.transcript).toBe(
+          [
+            "User:\nRemember marigold.",
+            "Assistant:\nI will remember marigold.",
+            "User:\nWhat word did I ask you to remember?",
+            "Assistant:\nmarigold",
+          ].join("\n\n"),
+        );
+      }, "transcript"),
+    });
+  });
+
   it("sends a single turn for input evals", async () => {
     const server = createScriptedServer([
       {
@@ -165,6 +339,7 @@ describe("executeTask", () => {
         sessionId: "secondary",
         events: [
           turnStarted("turn_2"),
+          messageReceived("secondary", "turn_2"),
           messageCompleted("secondary done", "turn_2"),
           actionsRequested("turn_2", "get_weather"),
           turnCompleted("turn_2"),
@@ -174,18 +349,22 @@ describe("executeTask", () => {
     ]);
     vi.spyOn(globalThis, "fetch").mockImplementation(server.fetch);
 
+    let secondaryTranscript: string | undefined;
     const { result } = await executeTask({
       client: new Client({ host: target.url }),
       target,
       evaluation: createTestEval(async (t) => {
         await t.send("primary");
-        await t.newSession().send("secondary");
+        const secondary = t.newSession();
+        await secondary.send("secondary");
+        secondaryTranscript = secondary.transcript;
       }, "multi-session"),
     });
 
     expect(result.sessionId).toBe("primary");
     expect(result.sessions?.map((session) => session.sessionId)).toEqual(["primary", "secondary"]);
-    expect(result.events).toHaveLength(9);
+    expect(result.events).toHaveLength(10);
+    expect(secondaryTranscript).toBe("User:\nsecondary\n\nAssistant:\nsecondary done");
     expect(result.derived.toolCalls.map((call) => call.sessionId)).toEqual(["secondary"]);
   });
 
@@ -623,13 +802,16 @@ function createScriptedServer(
   } = {},
 ) {
   const pendingTurns = [...turns];
-  const streamQueues = new Map<string, UnstampedMessageStreamEvent[][]>();
+  const streamQueues = new Map<
+    string,
+    { events: readonly UnstampedMessageStreamEvent[]; deliveryId?: string }[]
+  >();
   const posts: Array<{ body: unknown; method: string; url: string }> = [];
   const cancels: string[] = [];
 
   for (const stream of options.streams ?? []) {
     const queue = streamQueues.get(stream.sessionId) ?? [];
-    queue.push([...stream.events]);
+    queue.push({ events: stream.events });
     streamQueues.set(stream.sessionId, queue);
   }
 
@@ -661,46 +843,65 @@ function createScriptedServer(
         }
 
         posts.push({ body: JSON.parse(String(init?.body)), method, url });
+        const deliveryId = `delivery_${posts.length}`;
         const queue = streamQueues.get(next.sessionId) ?? [];
-        queue.push([...next.events]);
+        queue.push({ events: next.events, deliveryId });
         streamQueues.set(next.sessionId, queue);
 
         return Response.json(
           {
             ok: true,
             sessionId: next.sessionId,
+            deliveryId,
           },
           { status: posts.length === 1 ? 202 : 200 },
         );
       }
 
       const sessionId = decodeURIComponent(new URL(url).pathname.split("/").at(-2) ?? "");
-      const events = streamQueues.get(sessionId)?.shift();
-      if (events === undefined) {
+      const stream = streamQueues.get(sessionId)?.shift();
+      if (stream === undefined) {
         return Response.json({ error: "No stream.", ok: false }, { status: 404 });
       }
 
-      return streamResponse(events);
+      return streamResponse(stream.events, stream.deliveryId);
     },
   };
 }
 
-function streamResponse(events: readonly UnstampedMessageStreamEvent[]): Response {
+function streamResponse(
+  events: readonly UnstampedMessageStreamEvent[],
+  deliveryId?: string,
+): Response {
   const encoder = new TextEncoder();
   return new Response(
     new ReadableStream<Uint8Array>({
       start(controller) {
         for (const event of stampTestEvents(events)) {
+          if (deliveryId !== undefined) Object.assign(event.meta, { deliveryIds: [deliveryId] });
           controller.enqueue(encoder.encode(`${JSON.stringify(event)}\n`));
         }
         controller.close();
       },
     }),
+    {
+      headers: { [EVE_STREAM_VERSION_HEADER]: EVE_MESSAGE_STREAM_VERSION },
+    },
   );
 }
 
-function turnStarted(turnId: string): UnstampedMessageStreamEvent {
-  return { data: { sequence: 0, turnId }, type: "turn.started" };
+function turnStarted(
+  turnId: string,
+  trace?: { readonly spanId: string; readonly traceFlags: number; readonly traceId: string },
+): UnstampedMessageStreamEvent {
+  return { data: { sequence: 0, trace, turnId }, type: "turn.started" };
+}
+
+function messageReceived(message: string, turnId: string): UnstampedMessageStreamEvent {
+  return {
+    data: { message, parts: [{ text: message, type: "text" }], sequence: 1, turnId },
+    type: "message.received",
+  };
 }
 
 function turnCompleted(turnId: string): UnstampedMessageStreamEvent {
@@ -796,6 +997,7 @@ function subagentCalled(
     data: {
       callId: "call_subagent",
       childSessionId,
+      childStreamPath: `/eve/v1/session/${encodeURIComponent(childSessionId)}/stream`,
       sessionId: "parent-session",
       sequence: 1,
       name,

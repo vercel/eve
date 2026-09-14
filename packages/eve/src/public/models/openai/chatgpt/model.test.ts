@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { createCodexSubscriptionModel } from "./model.js";
-import { createUnsignedJwt } from "./unsigned-jwt.js";
+import type { CodexTokenBroker } from "./token-broker.js";
 
 const CODEX_ENDPOINT = "https://chatgpt.test/backend-api/codex/responses";
 
@@ -10,13 +10,8 @@ describe("Codex model", () => {
     const model = createCodexSubscriptionModel(
       { model: " gpt-5.4 " },
       {
+        broker: fakeBroker(),
         fetch: async () => Response.json({ ok: true }),
-        readCredentials: async () => ({
-          kind: "api-key",
-          apiKey: "sk-test",
-          authPath: "/home/user/.codex/auth.json",
-          codexHome: "/home/user/.codex",
-        }),
       },
     );
 
@@ -38,14 +33,9 @@ describe("Codex model", () => {
     const model = createCodexSubscriptionModel(
       { model: "gpt-5.2-codex" },
       {
+        broker: fakeBroker(),
         codexApiEndpoint: CODEX_ENDPOINT,
         fetch: createRecordingFetch(requests),
-        readCredentials: async () => ({
-          kind: "chatgpt",
-          accessToken: createUnsignedJwt({ exp: 2_000_000_000 }),
-          authPath: "/home/user/.codex/auth.json",
-          codexHome: "/home/user/.codex",
-        }),
       },
     );
 
@@ -94,14 +84,9 @@ describe("Codex model", () => {
     const model = createCodexSubscriptionModel(
       { model: "gpt-5.2-codex" },
       {
+        broker: fakeBroker(),
         codexApiEndpoint: CODEX_ENDPOINT,
         fetch: createRecordingFetch(requests),
-        readCredentials: async () => ({
-          kind: "chatgpt",
-          accessToken: createUnsignedJwt({ exp: 2_000_000_000 }),
-          authPath: "/home/user/.codex/auth.json",
-          codexHome: "/home/user/.codex",
-        }),
       },
     );
 
@@ -137,7 +122,68 @@ describe("Codex model", () => {
     // echoed back, so `include` must carry it whenever reasoning is set.
     expect(body.include).toContain("reasoning.encrypted_content");
   });
+
+  it("groups summaries by reasoning item and preserves encrypted-only items", async () => {
+    const requests: RecordedRequest[] = [];
+    const model = createCodexSubscriptionModel(
+      { model: "gpt-5.6-luna" },
+      {
+        broker: fakeBroker(),
+        fetch: createRecordingFetch(requests),
+      },
+    );
+    const result = await model.doGenerate({
+      prompt: [
+        {
+          role: "assistant",
+          content: [
+            {
+              type: "reasoning",
+              text: "First summary.",
+              providerOptions: { openai: { itemId: "rs_1" } },
+            },
+            {
+              type: "reasoning",
+              text: "Second summary.",
+              providerOptions: {
+                openai: { itemId: "rs_1", reasoningEncryptedContent: "encrypted-1" },
+              },
+            },
+            {
+              type: "reasoning",
+              text: "",
+              providerOptions: {
+                openai: { itemId: "rs_2", reasoningEncryptedContent: "encrypted-2" },
+              },
+            },
+          ],
+        },
+      ],
+    });
+
+    expect(result.warnings).toEqual([]);
+    expect(JSON.parse(requests[0]?.body ?? "{}").input).toEqual([
+      {
+        type: "reasoning",
+        encrypted_content: "encrypted-1",
+        summary: [
+          { type: "summary_text", text: "First summary." },
+          { type: "summary_text", text: "Second summary." },
+        ],
+      },
+      { type: "reasoning", encrypted_content: "encrypted-2", summary: [] },
+    ]);
+  });
 });
+
+function fakeBroker(): CodexTokenBroker {
+  return {
+    credentialOwner: () => undefined,
+    getToken: async () => ({ token: "access-token" }),
+    refreshState: async () => ({ kind: "ready" }),
+    state: () => ({ kind: "ready" }),
+  };
+}
 
 interface RecordedRequest {
   readonly body: string | undefined;

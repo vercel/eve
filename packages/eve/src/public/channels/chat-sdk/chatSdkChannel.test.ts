@@ -137,6 +137,37 @@ async function firePost(
 }
 
 describe("chatSdkChannel", () => {
+  it.each([
+    [{ isDM: true, channelVisibility: "unknown" }, "private"],
+    [{ isDM: false, channelVisibility: "workspace" }, "public"],
+    [{ isDM: false, channelVisibility: "private" }, "private"],
+  ] as const)("classifies the $audience audience", (thread, audience) => {
+    const bridge = chatSdkChannel({
+      adapters: { test: testAdapter() },
+      state: memoryState(),
+      userName: "bot",
+    });
+    const adapter = getAdapter(bridge.channel);
+    if (!adapter.state) throw new Error("Expected Chat SDK state.");
+    adapter.state.thread = {
+      _type: "chat:Thread",
+      adapterName: "test",
+      channelId: CHANNEL_ID,
+      id: THREAD_ID,
+      ...thread,
+    };
+
+    expect(
+      adapter.instrumentation?.audience?.({
+        auth: null,
+        channel: { kind: "channel:chat-sdk" },
+        environment: "production",
+        mode: "conversation",
+        state: adapter.state,
+      }),
+    ).toBe(audience);
+  });
+
   it("mounts GET and POST webhook routes per Chat SDK adapter", () => {
     const bridge = chatSdkChannel({
       adapters: {
@@ -365,6 +396,101 @@ describe("chatSdkChannel", () => {
     ]);
   });
 
+  it("renders an authorization challenge in a direct-message thread and updates it on completion", async () => {
+    const adapter = testAdapter();
+    const bridge = chatSdkChannel({
+      adapters: { test: adapter },
+      state: memoryState(),
+      userName: "bot",
+    });
+    const state: ChatSdkChannelState = { thread: serializedThread({ isDM: true }) };
+    const channelAdapter = withState(getAdapter(bridge.channel), state);
+    const ctx = buildAdapterContext(channelAdapter, stubAccessor());
+
+    await callEvent(
+      channelAdapter,
+      makeEvent("authorization.required", {
+        authorization: {
+          displayName: "Notion Workspace",
+          instructions: "Choose a workspace.",
+          url: "https://connect.example.com/a/sca_1",
+          userCode: "ABC-123",
+        },
+        name: "notion",
+        sequence: 0,
+        stepIndex: 0,
+        turnId: "turn-1",
+      }),
+      ctx,
+    );
+
+    expect(adapter.posted).toEqual([
+      {
+        message: {
+          markdown:
+            "Authorization required for Notion Workspace.\n\nChoose a workspace.\n\nCode: ABC-123\n\nhttps://connect.example.com/a/sca_1",
+        },
+        threadId: THREAD_ID,
+      },
+    ]);
+    expect(state.pendingAuthMessageIds).toEqual({ notion: "posted-1" });
+
+    await callEvent(
+      channelAdapter,
+      makeEvent("authorization.completed", {
+        authorization: { displayName: "Notion Workspace" },
+        name: "notion",
+        outcome: "authorized",
+        sequence: 1,
+        stepIndex: 0,
+        turnId: "turn-1",
+      }),
+      ctx,
+    );
+
+    expect(adapter.edited).toEqual([
+      {
+        message: { markdown: "Notion Workspace connected." },
+        messageId: "posted-1",
+        threadId: THREAD_ID,
+      },
+    ]);
+    expect(state.pendingAuthMessageIds).toEqual({});
+  });
+
+  it("keeps authorization challenges link-free outside direct messages", async () => {
+    const adapter = testAdapter();
+    const bridge = chatSdkChannel({
+      adapters: { test: adapter },
+      state: memoryState(),
+      userName: "bot",
+    });
+    const channelAdapter = withState(getAdapter(bridge.channel), { thread: serializedThread() });
+    const ctx = buildAdapterContext(channelAdapter, stubAccessor());
+
+    await callEvent(
+      channelAdapter,
+      makeEvent("authorization.required", {
+        authorization: { url: "https://connect.example.com/a/sca_1", userCode: "ABC-123" },
+        name: "notion",
+        sequence: 0,
+        stepIndex: 0,
+        turnId: "turn-1",
+      }),
+      ctx,
+    );
+
+    expect(adapter.posted).toEqual([
+      {
+        message: {
+          markdown:
+            "Authorization required for Notion. Continue in a direct message with this agent.",
+        },
+        threadId: THREAD_ID,
+      },
+    ]);
+  });
+
   it("does not throw when the adapter's startTyping is not implemented", async () => {
     const adapter = testAdapter();
     adapter.startTypingError = new NotImplementedError("startTyping");
@@ -400,7 +526,6 @@ describe("chatSdkChannel", () => {
       channelAdapter,
       makeEvent("message.appended", {
         messageDelta: "Hel",
-        messageSoFar: "Hel",
         sequence: 1,
         stepIndex: 0,
         turnId: "turn-1",
@@ -414,7 +539,6 @@ describe("chatSdkChannel", () => {
       channelAdapter,
       makeEvent("message.appended", {
         messageDelta: "lo",
-        messageSoFar: "Hello",
         sequence: 2,
         stepIndex: 0,
         turnId: "turn-1",
@@ -424,6 +548,50 @@ describe("chatSdkChannel", () => {
     expect(adapter.edited).toEqual([
       { message: { markdown: "Hello" }, messageId: "posted-1", threadId: THREAD_ID },
     ]);
+  });
+
+  it("finalizes a retried stream from the canonical completed message", async () => {
+    const adapter = testAdapter();
+    const bridge = chatSdkChannel({
+      adapters: { test: adapter },
+      state: memoryState(),
+      streamingEditIntervalMs: 0,
+      userName: "bot",
+    });
+    const state: ChatSdkChannelState = { thread: serializedThread() };
+    const channelAdapter = withState(getAdapter(bridge.channel), state);
+    const ctx = buildAdapterContext(channelAdapter, stubAccessor());
+
+    for (const messageDelta of ["abandoned", "replacement"]) {
+      await callEvent(
+        channelAdapter,
+        makeEvent("message.appended", {
+          messageDelta,
+          sequence: 1,
+          stepIndex: 0,
+          turnId: "turn-1",
+        }),
+        ctx,
+      );
+    }
+    await callEvent(
+      channelAdapter,
+      makeEvent("message.completed", {
+        finishReason: "stop",
+        message: "replacement",
+        sequence: 1,
+        stepIndex: 0,
+        turnId: "turn-1",
+      }),
+      ctx,
+    );
+
+    expect(adapter.edited.at(-1)).toEqual({
+      message: { markdown: "replacement" },
+      messageId: "posted-1",
+      threadId: THREAD_ID,
+    });
+    expect(state.anchorMessageId).toBeNull();
   });
 
   it("falls back to a fresh post when streaming edits are not implemented", async () => {
@@ -849,14 +1017,14 @@ function message(text: string): Message {
   });
 }
 
-function serializedThread() {
+function serializedThread(overrides: { readonly isDM?: boolean } = {}) {
   return {
     _type: "chat:Thread",
     adapterName: "test",
     channelId: CHANNEL_ID,
     channelVisibility: "workspace",
     id: THREAD_ID,
-    isDM: false,
+    isDM: overrides.isDM ?? false,
   } as const;
 }
 

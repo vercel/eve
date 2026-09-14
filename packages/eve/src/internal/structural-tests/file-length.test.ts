@@ -16,10 +16,11 @@ const LONG_SOURCE_FILE_ALLOWLIST = new Set<string>([
   "cli/dev/tui/setup-panel.ts",
   "cli/dev/tui/terminal-renderer.ts",
   "compiler/manifest.ts",
+  // Lifecycle and stream emission share one ordered protocol boundary.
+  "harness/emission.ts",
   "harness/tool-loop.ts",
   "internal/nitro/host/create-application-nitro.ts",
   "protocol/message.ts",
-  "public/channels/eve.ts",
   "public/channels/auth.ts",
   "public/channels/slack/slackChannel.ts",
   "public/channels/teams/teamsChannel.ts",

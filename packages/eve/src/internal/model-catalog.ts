@@ -41,7 +41,15 @@ export function findCatalogModelBySlug(
   models: readonly CatalogModel[],
   slug: string,
 ): CatalogModel | undefined {
-  return models.find((model) => model.slug === normalizeCatalogModelId(slug));
+  // Some models publish `-thinking` as their own canonical slug, so the
+  // verbatim id must win before the suffix is stripped.
+  const exact = models.find((model) => model.slug === slug);
+  if (exact !== undefined) {
+    return exact;
+  }
+
+  const normalized = normalizeCatalogModelId(slug);
+  return normalized === slug ? undefined : models.find((model) => model.slug === normalized);
 }
 
 export function findCatalogModelByProviderModelId(input: {

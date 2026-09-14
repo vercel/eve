@@ -22,7 +22,7 @@ export default defineDynamic({
             : (process.env.WORKFLOW_LOCAL_BASE_URL ?? "http://127.0.0.1:3000"),
         headers: () => {
           const headers: Record<string, string> = {
-            authorization: "Bearer e2e-principal-forwarding-router",
+            authorization: "Bearer e2e-workspace-label-router",
           };
           // Preview deployments behind Vercel deployment protection need the
           // bypass header on the self-call; harmless when protection is off.

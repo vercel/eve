@@ -2,7 +2,7 @@ import { detectPackageManager } from "#setup/package-manager.js";
 import { formatNodeEngineOverrideWarning } from "#setup/node-engine.js";
 import { ensureChannel, type EnsureChannelOptions } from "#setup/scaffold/index.js";
 
-import { installScaffoldDependencies, reportOverwrittenFiles } from "../shared/scaffold.js";
+import { reportOverwrittenFiles } from "../shared/scaffold.js";
 import {
   defineSetupIntegration,
   type SetupApplyContext,
@@ -23,14 +23,9 @@ function reportCompetingNextConfigFiles(
 export interface WebSetupDeps {
   detectPackageManager: typeof detectPackageManager;
   ensureChannel: typeof ensureChannel;
-  installScaffoldDependencies: typeof installScaffoldDependencies;
 }
 
-const defaultDeps: WebSetupDeps = {
-  detectPackageManager,
-  ensureChannel,
-  installScaffoldDependencies,
-};
+const defaultDeps: WebSetupDeps = { detectPackageManager, ensureChannel };
 
 export interface WebSetupPlan {
   configureVercelServices: boolean;
@@ -79,12 +74,8 @@ export async function applyWebSetup(
     return { facts: [] };
   }
   context.presenter.log.success("Scaffolded channel: web");
-  await deps.installScaffoldDependencies({
-    changed: result.packageJsonUpdated.length > 0,
-    log: context.presenter.log,
-    projectPath: context.appRoot,
-    signal: context.signal,
-  });
+  // The registry item owns dependency installation; this setup only applies
+  // native scripts and host configuration through `skipDependencyMutation`.
   return { facts: [], deploymentRequired: true as const };
 }
 

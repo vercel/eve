@@ -91,6 +91,20 @@ describe("createTurnCancellationControl", () => {
     expect(control!.signal.aborted).toBe(true);
   });
 
+  it("starts aborted when inline execution already consumed cancellation", async () => {
+    installCancelHook({ payloads: [] });
+
+    const control = await createTurnCancellationControl({
+      controlToken: "session-1",
+      expectedTurnId: "turn_2",
+      initialPayload: { turnId: "turn_2" },
+    });
+
+    await expect(control!.requested).resolves.toBe("cancel");
+    expect(control!.signal.aborted).toBe(true);
+    expect(control!.signal.reason).toBeInstanceOf(TurnCancelledError);
+  });
+
   it("consumes a stale turn guard as a no-op and honors the next matching cancel", async () => {
     installCancelHook({ payloads: [{ turnId: "turn_99" }, { turnId: "turn_2" }] });
 

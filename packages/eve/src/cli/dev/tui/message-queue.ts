@@ -180,7 +180,12 @@ export function renderMessageQueueRows(input: MessageQueuePanelRowsInput): strin
   if (view.messages.length === 0 && !view.steering) {
     if (!working) return [];
     if (view.cancelling) {
-      return [clipVisible(`${lead}${c.yellow(g.dotActive)} ${c.dim("Cancelling turn…")}`, width)];
+      return [
+        clipVisible(
+          `${lead}${c.yellow(g.dotActive)} ${c.dim("Cancelling turn… · Ctrl+C to stop waiting, then again to exit")}`,
+          width,
+        ),
+      ];
     }
     return [];
   }

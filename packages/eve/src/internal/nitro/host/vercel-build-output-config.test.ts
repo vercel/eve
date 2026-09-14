@@ -70,4 +70,25 @@ describe("createEveVercelOptions", () => {
       EVE_PUBLIC_ROUTE_PREFIX: "/eve/agents/support",
     });
   });
+
+  it("marks workspace-member flow functions without marking standalone agents", () => {
+    const standalone = createEveVercelOptions({
+      agentName: "test-agent",
+      enabled: true,
+      publicRoutePrefix: "/support",
+    });
+    const workspaceMember = createEveVercelOptions({
+      agentName: "test-agent",
+      enabled: true,
+      publicRoutePrefix: "/support",
+      workspaceMember: true,
+    });
+
+    expect(standalone?.functionRules[EVE_WORKFLOW_FLOW_ROUTE_PATH].environment).not.toHaveProperty(
+      "EVE_INTERNAL_AGENT_WORKSPACE_MEMBER",
+    );
+    expect(workspaceMember?.functionRules[EVE_WORKFLOW_FLOW_ROUTE_PATH].environment).toMatchObject({
+      EVE_INTERNAL_AGENT_WORKSPACE_MEMBER: "1",
+    });
+  });
 });

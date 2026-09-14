@@ -58,8 +58,17 @@ export interface TelegramMessageResult {
  * Body for Telegram's `sendMessage`. Only `text` is required; the remaining
  * snake_case fields are forwarded to Telegram unchanged.
  */
+export interface TelegramEphemeralMessageParameters {
+  /** Callback query that grants this ephemeral response's 15-second delivery window. */
+  readonly callback_query_id?: string;
+  /** Telegram user id that may view this group or supergroup response. */
+  readonly receiver_user_id: number | string;
+}
+
 export interface TelegramMessageBody {
   readonly disable_notification?: boolean;
+  /** Delivers this group or supergroup response only to one member. */
+  readonly ephemeral_message_parameters?: TelegramEphemeralMessageParameters;
   readonly link_preview_options?: Readonly<Record<string, unknown>>;
   readonly message_thread_id?: number;
   readonly protect_content?: boolean;
@@ -141,7 +150,9 @@ export async function sendTelegramMessage(
     method: "sendMessage",
   });
   if (!response.ok) {
-    throw new Error(`Telegram sendMessage failed with HTTP ${response.status}.`);
+    throw new Error(
+      `Telegram sendMessage failed with HTTP ${response.status}: ${formatTelegramErrorBody(response.body)}`,
+    );
   }
   return toTelegramMessageResult(response.body);
 }
@@ -188,6 +199,29 @@ export async function answerTelegramCallbackQuery(
     botToken: input.credentials?.botToken,
     fetch: input.fetch,
     method: "answerCallbackQuery",
+  });
+}
+
+/** Edits the text and optional reply markup for one Telegram message. */
+export async function editTelegramMessageText(
+  input: TelegramApiOptions & {
+    readonly chatId: number | string;
+    readonly messageId: number | string;
+    readonly replyMarkup?: Readonly<Record<string, unknown>>;
+    readonly text: string;
+  },
+): Promise<TelegramApiResponse> {
+  return callTelegramApi({
+    apiBaseUrl: input.apiBaseUrl,
+    body: parseJsonObject({
+      chat_id: input.chatId,
+      message_id: Number(input.messageId),
+      reply_markup: input.replyMarkup,
+      text: input.text,
+    }),
+    botToken: input.credentials?.botToken,
+    fetch: input.fetch,
+    method: "editMessageText",
   });
 }
 
@@ -294,6 +328,20 @@ function toTelegramMessageResult(body: unknown): TelegramMessageResult {
         : "",
     raw: body,
   };
+}
+
+function formatTelegramErrorBody(body: unknown): string {
+  if (typeof body === "string") return body;
+  if (body !== null && typeof body === "object") {
+    const description = (body as { description?: unknown }).description;
+    if (typeof description === "string" && description.length > 0) return description;
+  }
+  try {
+    const text = JSON.stringify(body);
+    return text === undefined || text.length === 0 ? "empty response body" : text;
+  } catch {
+    return "unserializable response body";
+  }
 }
 
 async function parseResponseBody(response: Response): Promise<unknown> {

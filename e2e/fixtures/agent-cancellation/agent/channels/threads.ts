@@ -20,10 +20,11 @@ export default defineChannel({
     POST("/threads/:threadId/messages", async (request, { from, params }) => {
       const body = (await request.json().catch(() => ({}))) as {
         message?: string;
+        actor?: "alice" | "bob" | "carol" | null;
         turnPolicy?: TurnPolicy;
       };
       const session = await from(params.threadId ?? "").send(body.message ?? "", {
-        auth: AUTH,
+        auth: body.actor === null ? null : { ...AUTH, principalId: body.actor ?? AUTH.principalId },
         turnPolicy: body.turnPolicy,
       });
       return Response.json({ ok: true, sessionId: session.id });

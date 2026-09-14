@@ -1,14 +1,18 @@
 import type { LanguageModel } from "ai";
 
 import type { StandardSchemaV1 } from "#compiled/@standard-schema/spec/index.js";
-import type { RuntimeIdentity, MessageStreamEvent } from "#protocol/message.js";
+import type {
+  RuntimeIdentity,
+  RuntimeTraceContext,
+  MessageStreamEvent,
+} from "#protocol/message.js";
 import type {
   CancelSessionResult,
   ClientSessionState,
   SendTurnInput,
   SendTurnOptions,
 } from "#client/types.js";
-import type { InputRequest, InputResponse } from "#runtime/input/types.js";
+import type { InputRequest, InputResponse } from "#shared/input.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
 import type { AgentModelOptionsDefinition } from "#shared/agent-definition.js";
 import type { EvalReporter } from "#evals/runner/reporters/types.js";
@@ -91,6 +95,14 @@ export interface EveEvalSessionResult {
   readonly primary: boolean;
   readonly sessionId?: string;
   readonly state: ClientSessionState | undefined;
+  /** Distinct trace contexts observed for this session, in stream order. */
+  readonly traceContexts: readonly RuntimeTraceContext[];
+}
+
+/** Trace context attributed to one session involved in an eval. */
+export interface EveEvalTraceContext extends RuntimeTraceContext {
+  readonly primary: boolean;
+  readonly sessionId: string;
 }
 
 /**
@@ -124,6 +136,8 @@ export interface EveEvalTaskResult {
    * Present when the eve server populates the event with its runtime metadata.
    */
   readonly runtimeIdentity?: RuntimeIdentity;
+  /** Distinct trace contexts observed across every captured session. */
+  readonly traceContexts: readonly EveEvalTraceContext[];
 }
 
 // ---------------------------------------------------------------------------
@@ -277,6 +291,11 @@ export interface EveEvalLiveTurn {
 export interface EveEvalSessionDriver {
   /** All events observed on this session so far. */
   readonly events: readonly MessageStreamEvent[];
+  /**
+   * User and assistant messages observed on this session in turn order. Pass
+   * this to a judge's `on` option to grade the complete conversation.
+   */
+  readonly transcript: string;
   /** Input requests left pending by the last parked turn. */
   readonly pendingInputRequests: readonly InputRequest[];
   /** Serializable cursor for resuming this session. */
@@ -289,6 +308,11 @@ export interface EveEvalSessionDriver {
   requireInputRequest(filter?: EveEvalInputRequestMatchOptions): InputRequest;
   /** Resolve specific pending requests and run the resumed turn. */
   respond(responses: readonly InputResponse[], options?: SendTurnOptions): Promise<EveEvalTurn>;
+  /** Start a response turn without waiting for its boundary. */
+  startRespond(
+    responses: readonly InputResponse[],
+    options?: SendTurnOptions,
+  ): Promise<EveEvalLiveTurn>;
   /** Resolve every pending request with the same option id. */
   respondAll(optionId: string): Promise<EveEvalTurn>;
   /** Send one turn through this session. */

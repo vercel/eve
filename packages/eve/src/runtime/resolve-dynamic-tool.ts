@@ -1,8 +1,11 @@
 import type { CompiledDynamicToolDefinition } from "#compiler/manifest.js";
 import type { CompiledModuleMap } from "#compiler/module-map.js";
 import { expectFunction, expectObjectRecord } from "#internal/authored-module.js";
-import { registerDefinitionSource, stampDefinitionKey } from "#public/tool-result-narrowing.js";
-import { isDynamicSentinel, type DynamicSentinel } from "#shared/dynamic-tool-definition.js";
+import {
+  registerDefinitionSource,
+  stampDefinitionKey,
+} from "#internal/authored-definition/source-identity.js";
+import { isDynamicSentinel, type DynamicSentinel } from "#dynamic/definition.js";
 import { toErrorMessage } from "#shared/errors.js";
 import type { ModuleSourceRef } from "#shared/source-ref.js";
 import { loadResolvedModuleExport, ResolveAgentError } from "#runtime/resolve-helpers.js";
@@ -12,6 +15,7 @@ type DynamicToolResolverSource = Readonly<
   ModuleSourceRef & {
     readonly extensionNamespace?: string;
     readonly slug: string;
+    readonly rebindMissingCallbacks?: boolean;
   }
 >;
 
@@ -102,6 +106,7 @@ function createResolvedDynamicToolResolver(
     exportName: source.exportName,
     extensionNamespace: source.extensionNamespace,
     logicalPath: source.logicalPath,
+    rebindMissingCallbacks: source.rebindMissingCallbacks,
     slug: source.slug,
     sourceId: source.sourceId,
     sourceKind: "module",

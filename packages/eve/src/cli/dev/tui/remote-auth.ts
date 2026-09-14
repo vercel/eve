@@ -20,7 +20,7 @@ import {
   type RemoteAuthPreparation,
 } from "./remote-auth-result.js";
 import { toErrorMessage } from "#shared/errors.js";
-import pc from "picocolors";
+import pc from "#compiled/picocolors/index.js";
 
 /** Injectable entry point for the remote authentication flow. */
 export type RemoteAuthFlow = typeof runRemoteAuthFlow;

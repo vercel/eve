@@ -22,6 +22,7 @@ function createTaskResult(label: string): EveEvalTaskResult {
     status: "completed",
     events: [],
     derived: createEmptyDerivedFacts(),
+    traceContexts: [],
   };
 }
 

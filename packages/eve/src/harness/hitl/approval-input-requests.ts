@@ -1,7 +1,7 @@
 import type { ModelMessage } from "ai";
 
-import type { RuntimeToolResultActionResult } from "#runtime/actions/types.js";
-import type { InputRequest, InputResponse } from "#runtime/input/types.js";
+import type { RuntimeToolResultActionResult } from "#shared/action-types.js";
+import type { InputRequest, InputResponse } from "#shared/input.js";
 import {
   buildResolvedInputBatch,
   resolveApprovalOutcome,
@@ -10,6 +10,7 @@ import {
 import { isApprovalRequest } from "#harness/input-request-class.js";
 import type { PendingInputBatch } from "#harness/pending-input-batches.js";
 import {
+  getPendingInputBatches,
   queueDeferredStepInput,
   removePendingInputBatches,
 } from "#harness/pending-input-batches.js";
@@ -139,8 +140,22 @@ export function resolveApprovalInputBatches(
   });
 }
 
-/** Returns tool approval keys recorded during this session. */
-export function getApprovedTools(session: HarnessSession): ReadonlySet<string> {
+/** Returns recorded approval keys that have no matching request still pending. */
+export function getApprovedTools(
+  session: HarnessSession,
+  resolveApprovalKey?: (request: InputRequest) => string | undefined,
+): ReadonlySet<string> {
+  const approvedTools = readRecordedApprovedTools(session);
+  for (const batch of getPendingInputBatches(session.state)) {
+    for (const request of batch.requests) {
+      if (!isApprovalRequest(request)) continue;
+      approvedTools.delete(resolveApprovalKey?.(request) ?? request.action.toolName);
+    }
+  }
+  return approvedTools;
+}
+
+function readRecordedApprovedTools(session: HarnessSession): Set<string> {
   const value = session.state?.[APPROVED_TOOLS_KEY];
   return Array.isArray(value) ? new Set(value as string[]) : new Set();
 }
@@ -191,7 +206,9 @@ function recordApprovedTools(input: {
   if (newKeys.length === 0) return input.session;
 
   const state = { ...input.session.state };
-  state[APPROVED_TOOLS_KEY] = [...new Set([...getApprovedTools(input.session), ...newKeys])];
+  state[APPROVED_TOOLS_KEY] = [
+    ...new Set([...readRecordedApprovedTools(input.session), ...newKeys]),
+  ];
   return { ...input.session, state };
 }
 

@@ -12,9 +12,9 @@ import { SessionCallbackKey, SessionIdKey } from "#context/keys.js";
 import {
   notifyTurnCallerStep,
   resolveInitialTurnCallerStep,
-} from "#execution/delegated-parent-notification.js";
-import { fireSessionCallbackStep } from "#execution/session-callback-step.js";
-import { startRemoteAgentSession } from "#execution/remote-agent-dispatch.js";
+} from "#subagents/parent-notification.js";
+import { fireSessionCallbackStep } from "#subagents/callback-step.js";
+import { startRemoteAgentSession } from "#subagents/remote-dispatch.js";
 import { resolveWorkflowCallbackBaseUrl } from "#execution/workflow-callback-url.js";
 import { authHookToken, CallbackBaseUrlKey, getHookUrl } from "#harness/authorization.js";
 import {
@@ -256,6 +256,7 @@ describe("multi-agent callback routing", () => {
 
   afterEach(() => {
     vi.unstubAllEnvs();
+    vi.restoreAllMocks();
   });
 
   function stubAgentRuntimeEnvironment(publicRoutePrefix: string | undefined): void {
@@ -288,7 +289,7 @@ describe("multi-agent callback routing", () => {
         remoteAgentName: "research",
       },
       callbackBaseUrl: resolveWorkflowCallbackBaseUrl(deploymentOrigin),
-      callbackToken,
+      parent: { continuationToken: callbackToken },
       remote: {
         description: "remote research agent",
         kind: "remote",
@@ -397,29 +398,62 @@ describe("multi-agent callback routing", () => {
     }
   });
 
-  it("reproduces the 404 when the public route prefix is absent (pre-fix behavior)", async () => {
-    stubAgentRuntimeEnvironment(undefined);
+  it.each(["session.completed", "turn.completed", "turn.failed"] as const)(
+    "logs %s delivery failures when the public route prefix is absent",
+    async (kind) => {
+      stubAgentRuntimeEnvironment(undefined);
+      vi.stubEnv("EVE_LOG_LEVEL", "error");
+      const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 
-    const { callback } = await mintRemoteAgentCallback("support");
+      const { callback } = await mintRemoteAgentCallback("support");
 
-    // Without the prefix the minted URL targets the bare /eve/v1 path that
-    // nothing serves in multi-agent mode — the exact production failure.
-    expect(callback.url).toBe(
-      `${deploymentOrigin}${createEveCallbackRoutePath("support-session:callback-token")}`,
-    );
-    await expect(
-      fireSessionCallbackStep({
-        output: "report done",
-        serializedContext: {
-          [SessionIdKey.name]: "remote-session-1",
-          [SessionCallbackKey.name]: {
-            callId: "call-support",
-            subagentName: "research",
-            ...callback,
-          },
-        },
-        status: "completed",
-      }),
-    ).rejects.toThrow("Session callback failed with HTTP 404.");
-  });
+      // Without the prefix the minted URL targets the bare /eve/v1 path that
+      // nothing serves in multi-agent mode — the exact production failure.
+      expect(callback.url).toBe(
+        `${deploymentOrigin}${createEveCallbackRoutePath("support-session:callback-token")}`,
+      );
+      const sessionCallback = {
+        callId: "call-support",
+        subagentName: "research",
+        taskId: "task-support",
+        ...callback,
+      };
+      const serializedContext = {
+        [SessionIdKey.name]: "remote-session-1",
+        [SessionCallbackKey.name]: sessionCallback,
+      };
+      const deliver = async () => {
+        if (kind === "session.completed") {
+          await fireSessionCallbackStep({
+            output: "report done",
+            serializedContext,
+            status: "completed",
+          });
+        } else {
+          await notifyTurnCallerStep({
+            caller: await resolveInitialTurnCallerStep({ serializedContext }),
+            lifecycle: "terminal",
+            sessionId: "remote-session-1",
+            settled:
+              kind === "turn.failed"
+                ? { isError: true, output: { message: "private failure" } }
+                : { output: "report done" },
+          });
+        }
+      };
+      await expect(deliver()).rejects.toThrow(/callback failed with HTTP 404/);
+      expect(errorSpy).toHaveBeenCalledExactlyOnceWith(
+        "[eve:execution.session-callback] callback delivery failed",
+        expect.objectContaining({
+          kind,
+          callId: "call-support",
+          callbackOrigin: deploymentOrigin,
+          callbackPath: "/eve/v1/callback/[redacted]",
+          statusCode: 404,
+        }),
+      );
+      expect(JSON.stringify(errorSpy.mock.calls)).not.toContain("callback-token");
+      expect(JSON.stringify(errorSpy.mock.calls)).not.toContain("private");
+    },
+  );
 });

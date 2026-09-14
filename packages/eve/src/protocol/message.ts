@@ -7,13 +7,17 @@ import {
 } from "#internal/attachments/url-refs.js";
 import { decodeSandboxRef, isSandboxRefUrl } from "#internal/attachments/sandbox-refs.js";
 import { createEventId } from "#protocol/event-id.js";
-import type { ConnectionAuthorizationChallenge } from "#public/connections/errors.js";
+import {
+  createEveSessionStreamRoutePath,
+  createEveSubagentStreamRoutePath,
+} from "#protocol/routes.js";
+import type { ConnectionAuthorizationChallenge } from "#connections/errors.js";
 import type {
   RuntimeActionRequest,
   RuntimeActionResult,
   RuntimeToolResultActionResult,
-} from "#runtime/actions/types.js";
-import type { InputRequest, InputResponse } from "#runtime/input/types.js";
+} from "#shared/action-types.js";
+import type { InputRequest, InputResponse } from "#shared/input.js";
 import { toChannelLocalContinuationToken } from "#shared/continuation-token.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
 
@@ -23,7 +27,7 @@ export const EVE_STREAM_TAIL_INDEX_HEADER = "x-eve-stream-tail-index";
 export const EVE_STREAM_VERSION_HEADER = "x-eve-stream-version";
 export const EVE_MESSAGE_STREAM_CONTENT_TYPE = "application/x-ndjson; charset=utf-8";
 export const EVE_MESSAGE_STREAM_FORMAT = "ndjson";
-export const EVE_MESSAGE_STREAM_VERSION = "21";
+export const EVE_MESSAGE_STREAM_VERSION = "25";
 
 /**
  * eve-owned finish reason for one completed assistant step.
@@ -57,6 +61,8 @@ export interface StepCompletedProviderMetadata {
  * or replaying a finished session — yields the same values every time.
  */
 export interface MessageStreamEventMeta {
+  /** Server-issued message delivery identities, retained across the turn's workflow steps. */
+  readonly deliveryIds?: readonly string[];
   /** ISO-8601 emission time. */
   readonly at: string;
   /**
@@ -120,13 +126,25 @@ export interface RuntimeIdentity {
 }
 
 /**
+ * Portable trace coordinates for correlating an eve run with an external
+ * observability backend. The fields follow the W3C trace-context model while
+ * remaining owned by eve rather than exposing an OpenTelemetry type.
+ */
+export interface RuntimeTraceContext {
+  readonly traceId: string;
+  readonly spanId: string;
+  readonly traceFlags: number;
+}
+
+/**
  * JSON request accepted by the canonical message route.
  *
  * `message` is either a plain text string or an AI SDK `UserContent`
  * array (mixing `text`, `image`, and `file` parts). Clients pass
  * multimodal attachments with the same shape AI SDK's `useChat`
- * `sendMessage({ files })` produces. `clientContext` is one-turn
- * client/page context; the channel converts it into internal model context.
+ * `sendMessage({ files })` produces. `clientContext` is turn-scoped
+ * client/page context; the channel converts it into internal model context
+ * for every model call in that turn.
  */
 export type HandleMessageRequestBody =
   | {
@@ -149,6 +167,7 @@ export interface SessionStartedStreamEvent {
   data: {
     invocation?: SubagentSessionInvocationMetadata;
     runtime?: RuntimeIdentity;
+    trace?: RuntimeTraceContext;
   };
   type: "session.started";
 }
@@ -159,6 +178,7 @@ export interface SessionStartedStreamEvent {
 export interface TurnStartedStreamEvent {
   data: {
     sequence: number;
+    trace?: RuntimeTraceContext;
     turnId: string;
   };
   type: "turn.started";
@@ -204,9 +224,16 @@ export type MessageReceivedPart =
  * action lifecycles by call ID rather than assume one event contains every call
  * from an assistant step.
  */
+export interface ActionPresentation {
+  readonly label?: string;
+}
+
+export type ActionPresentationByCallId = Readonly<Record<string, ActionPresentation>>;
+
 export interface ActionsRequestedStreamEvent {
   data: {
     actions: readonly RuntimeActionRequest[];
+    presentation?: ActionPresentationByCallId;
     sequence: number;
     stepIndex: number;
     turnId: string;
@@ -258,6 +285,31 @@ export interface InputRequestedStreamEvent {
   type: "input.requested";
 }
 
+/** Authoritative terminal outcome for one human-input request. */
+export type InputResolutionOutcome = "answered" | "approved" | "denied" | "ignored" | "invalid";
+
+/** One server-accepted resolution from a pending human-input batch. */
+export interface InputResolution {
+  readonly kind: InputRequest["kind"];
+  readonly outcome: InputResolutionOutcome;
+  readonly requestId: string;
+  readonly response?: InputResponse;
+}
+
+/**
+ * Stream event emitted after eve accepts a terminal resolution for one or more
+ * pending human-input requests.
+ */
+export interface InputResolvedStreamEvent {
+  data: {
+    resolutions: readonly InputResolution[];
+    sequence: number;
+    stepIndex: number;
+    turnId: string;
+  };
+  type: "input.resolved";
+}
+
 /**
  * Stream event emitted for each runtime action result projected back into the
  * session loop.
@@ -265,6 +317,7 @@ export interface InputRequestedStreamEvent {
 export interface ActionResultStreamEvent {
   data: {
     error?: ActionResultError;
+    presentation?: ActionPresentationByCallId;
     result: RuntimeActionResult;
     sequence: number;
     stepIndex: number;
@@ -280,6 +333,7 @@ export interface ActionResultStreamEvent {
  */
 export interface ActionPartialStreamEvent {
   data: {
+    presentation?: ActionPresentationByCallId;
     result: RuntimeToolResultActionResult;
     sequence: number;
     stepIndex: number;
@@ -293,12 +347,25 @@ export interface ActionPartialStreamEvent {
  */
 export interface SubagentCalledStreamEvent {
   data: {
+    agentId?: string;
     callId: string;
     childSessionId: string;
+    childStreamPath: string;
     sessionId: string;
     sequence: number;
     name: string;
     remote?: {
+      /**
+       * Key to the authored credential functions (`auth`/`headers`) for this
+       * remote child, resolved at stream-proxy time by
+       * `resolveRemoteAgentStreamHeaders`. Static subagent → the node id in
+       * `subagentRegistry.subagentsByNodeId`; dynamic subagent → its
+       * `credentialsStepId` in the step registry. The event stores this key —
+       * never resolved header values — because tokens expire and this event
+       * is persisted and streamed to clients. Absent when the remote child
+       * has no authored credentials.
+       */
+      resolverId?: string;
       url: string;
     };
     toolName: string;
@@ -338,6 +405,15 @@ export interface SubagentChildEventStreamEvent {
  */
 export interface SubagentCompletedStreamEvent {
   data: {
+    /**
+     * Present when the originating call completed with a background-task
+     * receipt while the child itself kept running. Consumers must not treat
+     * this as the child's terminal boundary; the child stream owns that.
+     */
+    backgroundTask?: {
+      taskId: string;
+      status: "working";
+    };
     callId: string;
     output: string;
     subagentName: string;
@@ -352,12 +428,27 @@ export interface SubagentCompletedStreamEvent {
 export interface MessageAppendedStreamEvent {
   data: {
     messageDelta: string;
-    messageSoFar: string;
     sequence: number;
     stepIndex: number;
     turnId: string;
   };
   type: "message.appended";
+}
+
+/**
+ * Stream event emitted while the model is generating the input for one tool
+ * call, before the validated call is announced via `actions.requested`.
+ */
+export interface ActionInputAppendedStreamEvent {
+  data: {
+    callId: string;
+    inputTextDelta: string;
+    sequence: number;
+    stepIndex: number;
+    toolName: string;
+    turnId: string;
+  };
+  type: "action.input.appended";
 }
 
 /**
@@ -367,7 +458,6 @@ export interface MessageAppendedStreamEvent {
 export interface ReasoningAppendedStreamEvent {
   data: {
     reasoningDelta: string;
-    reasoningSoFar: string;
     sequence: number;
     stepIndex: number;
     turnId: string;
@@ -558,6 +648,8 @@ export interface CompactionCompletedStreamEvent {
  */
 export interface AuthorizationRequiredStreamEvent {
   data: {
+    /** Stable identity of this exact authorization attempt. */
+    attemptId?: string;
     authorization?: ConnectionAuthorizationChallenge;
     candidateId?: string;
     description: string;
@@ -591,6 +683,8 @@ export type ConnectionAuthorizationOutcome = AuthorizationOutcome;
  */
 export interface AuthorizationCompletedStreamEvent {
   data: {
+    /** Stable identity shared with the matching required event. */
+    attemptId?: string;
     candidateId?: string;
     /**
      * The challenge from the matching `authorization.required` event,
@@ -648,6 +742,7 @@ export interface SessionCompletedStreamEvent {
  * consumers receive {@link MessageStreamEvent}.
  */
 export type UnstampedMessageStreamEvent =
+  | ActionInputAppendedStreamEvent
   | ApprovalCandidateStreamEvent
   | ApprovalSettledStreamEvent
   | ContextClearedStreamEvent
@@ -670,6 +765,7 @@ export type UnstampedMessageStreamEvent =
   | SubagentStartedStreamEvent
   | ActionsRequestedStreamEvent
   | InputRequestedStreamEvent
+  | InputResolvedStreamEvent
   | ActionPartialStreamEvent
   | ActionResultStreamEvent
   | ReasoningCompletedStreamEvent
@@ -737,6 +833,7 @@ export function isTurnFailureEvent<TEvent extends UnstampedMessageStreamEvent>(
 export function createSessionStartedEvent(input?: {
   readonly invocation?: SubagentSessionInvocationMetadata;
   readonly runtime?: RuntimeIdentity;
+  readonly trace?: RuntimeTraceContext;
 }): SessionStartedStreamEvent {
   const data: SessionStartedStreamEvent["data"] = {};
 
@@ -746,6 +843,10 @@ export function createSessionStartedEvent(input?: {
 
   if (input?.runtime !== undefined) {
     data.runtime = input.runtime;
+  }
+
+  if (input?.trace !== undefined) {
+    data.trace = input.trace;
   }
 
   return {
@@ -759,13 +860,20 @@ export function createSessionStartedEvent(input?: {
  */
 export function createTurnStartedEvent(input: {
   readonly sequence: number;
+  readonly trace?: RuntimeTraceContext;
   readonly turnId: string;
 }): TurnStartedStreamEvent {
+  const data: TurnStartedStreamEvent["data"] = {
+    sequence: input.sequence,
+    turnId: input.turnId,
+  };
+
+  if (input.trace !== undefined) {
+    data.trace = input.trace;
+  }
+
   return {
-    data: {
-      sequence: input.sequence,
-      turnId: input.turnId,
-    },
+    data,
     type: "turn.started",
   };
 }
@@ -986,6 +1094,7 @@ function basenameOf(path: string): string {
  */
 export function createActionsRequestedEvent(input: {
   readonly actions: readonly RuntimeActionRequest[];
+  readonly presentation?: ActionPresentationByCallId;
   readonly sequence: number;
   readonly stepIndex: number;
   readonly turnId: string;
@@ -993,11 +1102,40 @@ export function createActionsRequestedEvent(input: {
   return {
     data: {
       actions: input.actions,
+      ...optionalPresentation(input.presentation),
       sequence: input.sequence,
       stepIndex: input.stepIndex,
       turnId: input.turnId,
     },
     type: "actions.requested",
+  };
+}
+
+function optionalPresentation(presentation: ActionPresentationByCallId | undefined): {
+  readonly presentation?: ActionPresentationByCallId;
+} {
+  return presentation === undefined ? {} : { presentation };
+}
+
+/** Creates an `action.input.appended` event for streamed tool input text. */
+export function createActionInputAppendedEvent(input: {
+  readonly callId: string;
+  readonly inputTextDelta: string;
+  readonly sequence: number;
+  readonly stepIndex: number;
+  readonly toolName: string;
+  readonly turnId: string;
+}): ActionInputAppendedStreamEvent {
+  return {
+    data: {
+      callId: input.callId,
+      inputTextDelta: input.inputTextDelta,
+      sequence: input.sequence,
+      stepIndex: input.stepIndex,
+      toolName: input.toolName,
+      turnId: input.turnId,
+    },
+    type: "action.input.appended",
   };
 }
 
@@ -1010,6 +1148,7 @@ export function createActionsRequestedEvent(input: {
  * for `getToken`-only authorization sources that authorize out of band.
  */
 export function createAuthorizationRequiredEvent(input: {
+  readonly attemptId?: string;
   readonly authorization?: ConnectionAuthorizationChallenge;
   readonly candidateId?: string;
   readonly description: string;
@@ -1026,6 +1165,9 @@ export function createAuthorizationRequiredEvent(input: {
     stepIndex: input.stepIndex,
     turnId: input.turnId,
   };
+  if (input.attemptId !== undefined) {
+    data.attemptId = input.attemptId;
+  }
   if (input.authorization !== undefined) {
     data.authorization = input.authorization;
   }
@@ -1047,6 +1189,7 @@ export function createAuthorizationRequiredEvent(input: {
  * authorization deadline has expired.
  */
 export function createAuthorizationCompletedEvent(input: {
+  readonly attemptId?: string;
   readonly authorization?: ConnectionAuthorizationChallenge;
   readonly candidateId?: string;
   readonly name: string;
@@ -1063,6 +1206,9 @@ export function createAuthorizationCompletedEvent(input: {
     stepIndex: input.stepIndex,
     turnId: input.turnId,
   };
+  if (input.attemptId !== undefined) {
+    data.attemptId = input.attemptId;
+  }
   if (input.authorization !== undefined) {
     data.authorization = input.authorization;
   }
@@ -1112,6 +1258,24 @@ export function createInputRequestedEvent(input: {
   };
 }
 
+/** Creates the authoritative `input.resolved` event for one pending HITL batch. */
+export function createInputResolvedEvent(input: {
+  readonly resolutions: readonly InputResolution[];
+  readonly sequence: number;
+  readonly stepIndex: number;
+  readonly turnId: string;
+}): InputResolvedStreamEvent {
+  return {
+    data: {
+      resolutions: input.resolutions,
+      sequence: input.sequence,
+      stepIndex: input.stepIndex,
+      turnId: input.turnId,
+    },
+    type: "input.resolved",
+  };
+}
+
 /**
  * Creates the `action.result` event for one runtime action result.
  *
@@ -1120,6 +1284,7 @@ export function createInputRequestedEvent(input: {
  * derived from the synthesized denial output.
  */
 export function createActionResultEvent(input: {
+  readonly presentation?: ActionPresentationByCallId;
   readonly rejected?: boolean;
   readonly result: RuntimeActionResult;
   readonly sequence: number;
@@ -1134,6 +1299,7 @@ export function createActionResultEvent(input: {
   return {
     data: {
       error: outcome.error,
+      ...optionalPresentation(input.presentation),
       result: input.result,
       sequence: input.sequence,
       status: outcome.status,
@@ -1146,6 +1312,7 @@ export function createActionResultEvent(input: {
 
 /** Creates an `action.partial` event for one preliminary tool-result snapshot. */
 export function createActionPartialEvent(input: {
+  readonly presentation?: ActionPresentationByCallId;
   readonly result: RuntimeToolResultActionResult;
   readonly sequence: number;
   readonly stepIndex: number;
@@ -1153,6 +1320,7 @@ export function createActionPartialEvent(input: {
 }): ActionPartialStreamEvent {
   return {
     data: {
+      ...optionalPresentation(input.presentation),
       result: input.result,
       sequence: input.sequence,
       stepIndex: input.stepIndex,
@@ -1166,12 +1334,14 @@ export function createActionPartialEvent(input: {
  * Creates the `subagent.called` event for one started child workflow session.
  */
 export function createSubagentCalledEvent(input: {
+  readonly agentId?: string;
   readonly callId: string;
   readonly childSessionId: string;
   readonly sessionId: string;
   readonly sequence: number;
   readonly name: string;
   readonly remote?: {
+    readonly resolverId?: string;
     readonly url: string;
   };
   readonly toolName: string;
@@ -1180,8 +1350,17 @@ export function createSubagentCalledEvent(input: {
 }): SubagentCalledStreamEvent {
   return {
     data: {
+      agentId: input.agentId,
       callId: input.callId,
       childSessionId: input.childSessionId,
+      childStreamPath:
+        input.remote === undefined
+          ? createEveSessionStreamRoutePath(input.childSessionId)
+          : createEveSubagentStreamRoutePath({
+              callId: input.callId,
+              childSessionId: input.childSessionId,
+              parentSessionId: input.sessionId,
+            }),
       sessionId: input.sessionId,
       sequence: input.sequence,
       name: input.name,
@@ -1199,7 +1378,6 @@ export function createSubagentCalledEvent(input: {
  */
 export function createMessageAppendedEvent(input: {
   readonly messageDelta: string;
-  readonly messageSoFar: string;
   readonly sequence: number;
   readonly stepIndex: number;
   readonly turnId: string;
@@ -1207,7 +1385,6 @@ export function createMessageAppendedEvent(input: {
   return {
     data: {
       messageDelta: input.messageDelta,
-      messageSoFar: input.messageSoFar,
       sequence: input.sequence,
       stepIndex: input.stepIndex,
       turnId: input.turnId,
@@ -1221,7 +1398,6 @@ export function createMessageAppendedEvent(input: {
  */
 export function createReasoningAppendedEvent(input: {
   readonly reasoningDelta: string;
-  readonly reasoningSoFar: string;
   readonly sequence: number;
   readonly stepIndex: number;
   readonly turnId: string;
@@ -1229,7 +1405,6 @@ export function createReasoningAppendedEvent(input: {
   return {
     data: {
       reasoningDelta: input.reasoningDelta,
-      reasoningSoFar: input.reasoningSoFar,
       sequence: input.sequence,
       stepIndex: input.stepIndex,
       turnId: input.turnId,
@@ -1541,13 +1716,18 @@ export function createSessionCompletedEvent(): SessionCompletedStreamEvent {
  * One stamping seam is what makes the persisted stream and authored hooks
  * observe the same `meta.id`.
  */
-export function stampMessageStreamEvent(event: UnstampedMessageStreamEvent): MessageStreamEvent {
+export function stampMessageStreamEvent(
+  event: UnstampedMessageStreamEvent,
+  deliveryIds?: readonly string[],
+): MessageStreamEvent {
+  const meta: { at: string; id: string; deliveryIds?: readonly string[] } = {
+    at: new Date().toISOString(),
+    id: createEventId(),
+  };
+  if (deliveryIds !== undefined && deliveryIds.length > 0) meta.deliveryIds = deliveryIds;
   return {
     ...event,
-    meta: {
-      at: new Date().toISOString(),
-      id: createEventId(),
-    },
+    meta,
   };
 }
 

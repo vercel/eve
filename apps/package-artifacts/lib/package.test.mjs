@@ -13,8 +13,8 @@ const sha = "a".repeat(40);
 
 describe("package artifacts", () => {
   test("derives channel-specific build versions", () => {
-    expect(packageVersion("0.33.0", sha)).toBe(`0.33.0+main.${sha}`);
-    expect(packageVersion("0.33.0", sha, "git")).toBe(`0.33.0+git.${sha}`);
+    expect(packageVersion("0.33.0", sha)).toBe("0.33.0+main.aaaaaaaaaaaaaaaa");
+    expect(packageVersion("0.33.0", sha, "git")).toBe("0.33.0+git.aaaaaaaaaaaaaaaa");
   });
 
   test("derives immutable artifacts and mutable pointers", () => {
@@ -38,7 +38,7 @@ describe("package artifacts", () => {
     const source = { name: "eve", version: "0.33.0" };
     expect(preparePackageJson(source, sha, "git")).toEqual({
       name: "eve",
-      version: `0.33.0+git.${sha}`,
+      version: "0.33.0+git.aaaaaaaaaaaaaaaa",
     });
     expect(source.version).toBe("0.33.0");
   });

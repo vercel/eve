@@ -2,7 +2,7 @@
 export const SECOND_CHECKPOINT_MARKER = "SECOND_CHECKPOINT_READY";
 
 /** Trailing sentinel of the task-survival case's long task message. */
-export const TASK_TAIL_SENTINEL = "TASK_TAIL_SENTINEL_AFTER_PADDING";
+export const TASK_TAIL_SENTINEL = "Include a short migration note for renamed settings.";
 
 /**
  * Reported by the mock task model only when, after at least one compaction,

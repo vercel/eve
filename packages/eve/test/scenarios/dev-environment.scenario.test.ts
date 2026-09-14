@@ -60,7 +60,7 @@ describe("loadDevelopmentEnvironmentFiles", () => {
 
     process.env.EVE_DEV_SHELL_ONLY = "from-shell";
 
-    loadDevelopmentEnvironmentFiles(fixtureRoot);
+    await loadDevelopmentEnvironmentFiles(fixtureRoot);
 
     expect(process.env.EVE_DEV_DEVELOPMENT_LOCAL_ONLY).toBe("from-development-local");
     expect(process.env.EVE_DEV_LOCAL_ONLY).toBe("from-local");

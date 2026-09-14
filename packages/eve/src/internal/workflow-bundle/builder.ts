@@ -1,6 +1,5 @@
-import { Buffer } from "node:buffer";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { dirname, join, relative, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 
 import {
   resolvePackageSourceDirectoryPath,
@@ -10,21 +9,25 @@ import {
   prepareEveVersionedCacheDirectory,
   writeEveVersionedCacheMetadata,
 } from "#internal/application/cache-metadata.js";
-import { normalizeEsmImportSpecifier } from "#internal/application/import-specifier.js";
 import { runQueuedWorkflowBuild } from "#internal/workflow-bundle/build-queue.js";
-import { atomicWriteFile } from "#shared/atomic-write-file.js";
+import { createAuthoredPackageTsConfigPathsPlugin } from "#internal/authored-package-tsconfig-paths.js";
+import { createAuthoredRelativeExtensionResolverPlugin } from "#internal/authored-relative-extension-resolver.js";
 import {
+  type AuthoredWorkflowModules,
   bundleFinalWorkflowOutput,
   collectWorkflowInputFiles,
+  composeWorkflowDriverCode,
   convertClassesManifest,
   convertStepsManifest,
   convertWorkflowsManifest,
   createEvePackageImportsPlugin,
   createWorkflowImport,
   createWorkflowNodeBuiltinGuardPlugin,
+  createWorkflowDriverAliasPlugin,
   createWorkflowPseudoPackagePlugin,
   createWorkflowTransformPlugin,
   createWorkflowVirtualEntryPlugin,
+  WORKFLOW_SOURCE_EXTENSIONS,
   WORKFLOW_VIRTUAL_ENTRY_ID,
   type WorkflowBundleBuilderConfig,
   type WorkflowBundleBuilderOptions,
@@ -33,26 +36,33 @@ import {
   type WorkflowBundleDiscoveredEntries,
 } from "#internal/workflow-bundle/builder-support.js";
 import { buildSingleRolldownChunk } from "#internal/bundler/nitro-rolldown.js";
-import { writeNitroStepEntrypoint } from "#internal/workflow-bundle/nitro-step-entry.js";
+import {
+  type NitroStepEntrypointDiscoveredEntries,
+  writeNitroStepEntrypoint,
+} from "#internal/workflow-bundle/nitro-step-entry.js";
 import {
   WORKFLOW_BUILDER_DEFERRED_PACKAGES,
   WORKFLOW_STEP_EXTERNAL_PACKAGES,
 } from "#internal/workflow-bundle/vercel-workflow-output.js";
 import {
-  detectWorkflowPatterns,
+  findWorkflowPatterns,
   type WorkflowManifest,
 } from "#internal/workflow-bundle/workflow-builders.js";
 import { deriveEveWorkflowQueueNamespace } from "#internal/workflow/queue-namespace.js";
 
 export class WorkflowBundleBuilder {
+  readonly #authoredWorkflowModules: AuthoredWorkflowModules;
   readonly #compiledArtifactsBootstrapPath: string;
   readonly #outDir: string;
   readonly #queueNamespace: string;
   protected readonly config: WorkflowBundleBuilderConfig;
-  readonly #discoveredEntries = new WeakMap<readonly string[], WorkflowBundleDiscoveredEntries>();
 
   constructor(options: WorkflowBundleBuilderOptions) {
-    const dirs = [resolvePackageSourceDirectoryPath("src/execution")];
+    const dirs = [
+      resolvePackageSourceDirectoryPath("src/execution"),
+      resolvePackageSourceDirectoryPath("src/runtime/subagents"),
+      resolvePackageSourceDirectoryPath("src/subagents"),
+    ];
     if (options.includeTestFixtures === true) {
       dirs.push(resolvePackageSourceDirectoryPath("src/internal/testing"));
     }
@@ -66,6 +76,10 @@ export class WorkflowBundleBuilder {
       workingDir: options.rootDir,
     };
 
+    this.#authoredWorkflowModules = options.authoredWorkflowModules ?? {
+      directiveModules: [],
+      workflowModules: [],
+    };
     this.#compiledArtifactsBootstrapPath = options.compiledArtifactsBootstrapPath;
     this.#outDir = options.outDir;
     this.#queueNamespace = deriveEveWorkflowQueueNamespace(options.agentName);
@@ -83,69 +97,56 @@ export class WorkflowBundleBuilder {
   }): Promise<void> {
     await prepareEveVersionedCacheDirectory(this.#outDir);
 
-    const inputFiles = await this.#getBuildInputFiles();
+    const frameworkInputFiles = await this.#getBuildInputFiles();
 
-    if (inputFiles.length === 0) {
+    if (frameworkInputFiles.length === 0) {
       throw new Error(
-        `Expected the execution workflow source file under "${resolvePackageSourceDirectoryPath("src/execution")}".`,
+        `Expected framework workflow source files under eve's execution, runtime/subagents, or subagents source directories.`,
       );
     }
 
     const tsconfigPath = await this.findTsConfigPath();
 
     await mkdir(this.#outDir, { recursive: true });
-    const discoveredEntries = await this.discoverEntries(inputFiles, this.#outDir, tsconfigPath);
+    const frameworkEntries = await this.discoverEntries(frameworkInputFiles);
+    const appEntries = this.#authoredWorkflowModules;
+    const stepEntries = mergeStepEntries(frameworkEntries, appEntries);
 
-    const workflowsOutfile = join(this.#outDir, "workflows.mjs");
-    const { manifest: workflowsManifest } = await this.createWorkflowsBundle({
-      discoveredEntries,
-      // eve owns dev rebuilds through `dev-authored-source-watcher`.
-      keepInterimBundleContext: false,
-      outfile: workflowsOutfile,
-      bundleFinalOutput: false,
-      format: "esm",
-      inputFiles,
-      tsconfigPath,
-    });
     const stepsOutfile = join(this.#outDir, "steps.mjs");
-    const stepsManifest = await writeNitroStepEntrypoint({
-      builtinsPath: resolveWorkflowModulePath("workflow/internal/builtins"),
-      discoveredEntries,
-      outfile: stepsOutfile,
-      preferAbsoluteFileImports: true,
-      projectRoot: this.config.projectRoot ?? this.config.workingDir,
-      sideEffectFiles: [this.#compiledArtifactsBootstrapPath],
-      workingDir: this.config.workingDir,
-    });
+    const workflowsOutfile = join(this.#outDir, "workflows.mjs");
     const nitroStepOutfile = options.nitroStepOutfile;
-
-    if (nitroStepOutfile !== undefined && nitroStepOutfile !== stepsOutfile) {
-      await writeNitroStepEntrypoint({
+    const nitroWorkflowOutfile = options.nitroWorkflowOutfile;
+    const writeStepEntry = (outfile: string) =>
+      writeNitroStepEntrypoint({
         builtinsPath: resolveWorkflowModulePath("workflow/internal/builtins"),
-        discoveredEntries,
-        outfile: nitroStepOutfile,
+        discoveredEntries: stepEntries,
+        outfile,
         preferAbsoluteFileImports: true,
         projectRoot: this.config.projectRoot ?? this.config.workingDir,
         sideEffectFiles: [this.#compiledArtifactsBootstrapPath],
         workingDir: this.config.workingDir,
       });
+    const stepsManifest = await writeStepEntry(stepsOutfile);
+    if (nitroStepOutfile !== undefined && nitroStepOutfile !== stepsOutfile) {
+      await writeStepEntry(nitroStepOutfile);
     }
-
-    await addStepRegistrationsImport(workflowsOutfile, stepsOutfile);
-    await rewriteWorkflowRuntimeImports(workflowsOutfile);
-    await rewriteWorkflowCodeLiteral(workflowsOutfile, this.#queueNamespace);
-
-    const nitroWorkflowOutfile = options.nitroWorkflowOutfile;
-
-    if (nitroWorkflowOutfile !== undefined && nitroWorkflowOutfile !== workflowsOutfile) {
-      await mkdir(dirname(nitroWorkflowOutfile), { recursive: true });
-      await mirrorFileBypassingUnlink(workflowsOutfile, nitroWorkflowOutfile);
-      if (nitroStepOutfile !== undefined) {
-        await addStepRegistrationsImport(nitroWorkflowOutfile, nitroStepOutfile);
-        await rewriteWorkflowRuntimeImports(nitroWorkflowOutfile);
-        await rewriteWorkflowCodeLiteral(nitroWorkflowOutfile, this.#queueNamespace);
-      }
-    }
+    const { manifest: workflowsManifest } = await this.createWorkflowsBundle({
+      additionalOutputs:
+        nitroWorkflowOutfile === undefined || nitroWorkflowOutfile === workflowsOutfile
+          ? []
+          : [
+              {
+                outfile: nitroWorkflowOutfile,
+                stepRegistrationsPath: nitroStepOutfile ?? stepsOutfile,
+              },
+            ],
+      appWorkflowFiles: appEntries.workflowModules,
+      frameworkSerdeFiles: frameworkEntries.discoveredSerdeFiles,
+      frameworkWorkflowFiles: frameworkEntries.discoveredWorkflows,
+      outfile: workflowsOutfile,
+      stepRegistrationsPath: stepsOutfile,
+      tsconfigPath,
+    });
 
     await this.createManifest({
       workflowBundlePath: join(this.#outDir, "workflows.mjs"),
@@ -173,7 +174,7 @@ export class WorkflowBundleBuilder {
   }
 
   protected async findTsConfigPath(): Promise<string | undefined> {
-    let current = this.config.workingDir;
+    let current = this.transformProjectRoot;
 
     while (true) {
       for (const filename of ["tsconfig.json", "jsconfig.json"]) {
@@ -207,15 +208,7 @@ export class WorkflowBundleBuilder {
 
   protected async discoverEntries(
     inputs: readonly string[],
-    _outdir: string,
-    _tsconfigPath?: string,
   ): Promise<WorkflowBundleDiscoveredEntries> {
-    const cached = this.#discoveredEntries.get(inputs);
-
-    if (cached !== undefined) {
-      return cached;
-    }
-
     const discovered: WorkflowBundleDiscoveredEntries = {
       discoveredSerdeFiles: [],
       discoveredSteps: [],
@@ -224,108 +217,123 @@ export class WorkflowBundleBuilder {
 
     for (const filePath of inputs) {
       const source = await readFile(filePath, "utf8");
-      const patterns = detectWorkflowPatterns(source);
+      const patterns = await findWorkflowPatterns(filePath, source);
 
-      if (patterns.hasUseStep) {
-        discovered.discoveredSteps.push(filePath);
-      }
-
-      if (patterns.hasUseWorkflow) {
-        discovered.discoveredWorkflows.push(filePath);
-      }
-
-      if (patterns.hasSerde) {
-        discovered.discoveredSerdeFiles.push(filePath);
-      }
+      if (patterns.hasUseStep) discovered.discoveredSteps.push(filePath);
+      if (patterns.hasUseWorkflow) discovered.discoveredWorkflows.push(filePath);
+      if (patterns.hasSerde) discovered.discoveredSerdeFiles.push(filePath);
     }
 
-    this.#discoveredEntries.set(inputs, discovered);
     return discovered;
   }
 
   protected async createWorkflowsBundle({
-    bundleFinalOutput = true,
-    discoveredEntries,
-    format = "cjs",
-    inputFiles,
-    keepInterimBundleContext = this.config.watch,
+    additionalOutputs = [],
+    appWorkflowFiles,
+    frameworkSerdeFiles,
+    frameworkWorkflowFiles,
     outfile,
+    stepRegistrationsPath,
     tsconfigPath,
   }: WorkflowBundleCreateWorkflowsBundleOptions): Promise<WorkflowBundleCreateWorkflowsBundleResult> {
-    const discovered =
-      discoveredEntries ?? (await this.discoverEntries(inputFiles, dirname(outfile), tsconfigPath));
-    const workflowFiles = [...discovered.discoveredWorkflows].sort();
+    const manifest: WorkflowManifest = {};
+    const frameworkChunk = await this.#buildDriverChunk({
+      label: "framework",
+      manifest,
+      serdeFiles: frameworkSerdeFiles,
+      tsconfigPath,
+      workflowFiles: frameworkWorkflowFiles,
+    });
+    const appChunk = await this.#buildDriverChunk({
+      label: "app",
+      manifest,
+      serdeFiles: [],
+      tsconfigPath,
+      workflowFiles: appWorkflowFiles,
+    });
+    const workflowCode = composeWorkflowDriverCode([frameworkChunk, appChunk]);
+
+    await Promise.all(
+      [{ outfile, stepRegistrationsPath }, ...additionalOutputs].map((output) =>
+        bundleFinalWorkflowOutput({
+          code: workflowCode,
+          outfile: output.outfile,
+          queueNamespace: this.#queueNamespace,
+          stepRegistrationsPath: output.stepRegistrationsPath,
+        }),
+      ),
+    );
+
+    return { manifest };
+  }
+
+  /**
+   * One driver layer, without registry banner or entrypoint wrapper so
+   * `composeWorkflowDriverCode` can concatenate layers. `""` when the layer has
+   * nothing to bundle, the common case for an app with no workflow tools.
+   */
+  async #buildDriverChunk(options: {
+    label: string;
+    manifest: WorkflowManifest;
+    serdeFiles: readonly string[];
+    tsconfigPath?: string;
+    workflowFiles: readonly string[];
+  }): Promise<string> {
+    const workflowFiles = [...options.workflowFiles].sort();
     const workflowFileSet = new Set(workflowFiles);
-    const serdeOnlyFiles = [...discovered.discoveredSerdeFiles]
+    const serdeOnlyFiles = [...options.serdeFiles]
       .sort()
       .filter((filePath) => !workflowFileSet.has(filePath));
-    const workflowManifest: WorkflowManifest = {};
+    if (workflowFiles.length === 0 && serdeOnlyFiles.length === 0) return "";
+
     const virtualEntrySource = [
       ...workflowFiles.map((filePath) => createWorkflowImport(filePath, this.config.workingDir)),
       ...serdeOnlyFiles.map((filePath) => createWorkflowImport(filePath, this.config.workingDir)),
     ].join("\n");
-    const interimBundle = await buildSingleRolldownChunk(
-      `intermediate workflow bundle for "${outfile}"`,
-      {
-        cwd: this.config.workingDir,
-        input: WORKFLOW_VIRTUAL_ENTRY_ID,
-        platform: "neutral",
-        plugins: [
-          createWorkflowVirtualEntryPlugin(virtualEntrySource),
-          createWorkflowPseudoPackagePlugin(),
-          createEvePackageImportsPlugin(this.config.workingDir, { workflowCondition: true }),
-          createWorkflowTransformPlugin({
-            manifest: workflowManifest,
-            projectRoot: this.transformProjectRoot,
-            sideEffectFiles: [...workflowFiles, ...serdeOnlyFiles],
-            workingDir: this.config.workingDir,
-          }),
-          // Must run after the transform so `"use step"` bodies are already
-          // stubbed and their node:* imports stripped from this graph.
-          createWorkflowNodeBuiltinGuardPlugin(),
-        ],
-        resolve: {
-          conditionNames: ["eve-source", "workflow", "node", "import", "default"],
-          extensions: [".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs"],
-          mainFields: ["module", "main"],
-        },
-        tsconfig: tsconfigPath ?? false,
-        output: {
-          banner: "globalThis.__private_workflows = new Map();",
-          comments: false,
-          format: "cjs",
-          sourcemap: "inline",
-        },
+    const interimBundle = await buildSingleRolldownChunk(`${options.label} workflow driver chunk`, {
+      cwd: this.config.workingDir,
+      onwarn(warning: { code: string; message: string }, warn: (warning: unknown) => void) {
+        if (warning.code === "UNRESOLVED_IMPORT") {
+          throw new Error(`Cannot build workflow bundle: ${warning.message}`);
+        }
+        warn(warning);
       },
-    );
-
-    await bundleFinalWorkflowOutput({
-      bundleFinalOutput,
-      code: interimBundle.code,
-      format,
-      outfile,
-      queueNamespace: this.#queueNamespace,
-      workingDir: this.config.workingDir,
+      input: WORKFLOW_VIRTUAL_ENTRY_ID,
+      platform: "neutral",
+      plugins: [
+        createWorkflowVirtualEntryPlugin(virtualEntrySource),
+        createWorkflowPseudoPackagePlugin(),
+        createWorkflowDriverAliasPlugin(this.config.workingDir),
+        createAuthoredRelativeExtensionResolverPlugin({
+          extensions: WORKFLOW_SOURCE_EXTENSIONS,
+        }),
+        createAuthoredPackageTsConfigPathsPlugin({
+          appPackageRoot: this.transformProjectRoot,
+          extensions: WORKFLOW_SOURCE_EXTENSIONS,
+        }),
+        createEvePackageImportsPlugin(this.config.workingDir, { workflowCondition: true }),
+        createWorkflowTransformPlugin({
+          manifest: options.manifest,
+          projectRoot: this.transformProjectRoot,
+          sideEffectFiles: [...workflowFiles, ...serdeOnlyFiles],
+          workingDir: this.config.workingDir,
+        }),
+        // After the transform, so stubbed step bodies' node:* imports are already gone.
+        createWorkflowNodeBuiltinGuardPlugin(),
+      ],
+      resolve: {
+        conditionNames: ["eve-source", "workflow"],
+        extensions: WORKFLOW_SOURCE_EXTENSIONS,
+        mainFields: ["module", "main"],
+      },
+      tsconfig: options.tsconfigPath ?? false,
+      output: {
+        comments: false,
+        format: "cjs",
+        sourcemap: "inline",
+      },
     });
-
-    if (keepInterimBundleContext) {
-      return {
-        bundleFinal: async (interimBundleResult: string) => {
-          await bundleFinalWorkflowOutput({
-            bundleFinalOutput,
-            code: interimBundleResult,
-            format,
-            outfile,
-            queueNamespace: this.#queueNamespace,
-            workingDir: this.config.workingDir,
-          });
-        },
-        interimBundleCtx: undefined,
-        manifest: workflowManifest,
-      };
-    }
-
-    return { manifest: workflowManifest };
+    return interimBundle.code;
   }
 
   protected async createManifest({
@@ -354,186 +362,13 @@ export class WorkflowBundleBuilder {
   }
 }
 
-async function addStepRegistrationsImport(
-  workflowBundlePath: string,
-  stepRegistrationsPath: string,
-): Promise<void> {
-  const source = await readTextFileIfPresent(workflowBundlePath);
-
-  if (source === null || source.includes("__eveWorkflowStepsRegistered")) {
-    return;
-  }
-
-  const importSpecifier = createRelativeImportSpecifier(
-    dirname(workflowBundlePath),
-    stepRegistrationsPath,
-  );
-  const importSource = [
-    `import { __steps_registered as __eveWorkflowStepsRegistered } from ${JSON.stringify(importSpecifier)};`,
-    "void __eveWorkflowStepsRegistered;",
-    "",
-  ].join("\n");
-  const firstImportMatch = source.match(/^import\s.+?;\n/m);
-
-  if (firstImportMatch === null || firstImportMatch.index === undefined) {
-    await atomicWriteFile(workflowBundlePath, `${importSource}${source}`);
-    return;
-  }
-
-  const insertionIndex = firstImportMatch.index + firstImportMatch[0].length;
-  const nextSource = `${source.slice(0, insertionIndex)}${importSource}${source.slice(insertionIndex)}`;
-
-  await atomicWriteFile(workflowBundlePath, nextSource);
-}
-
-async function rewriteWorkflowRuntimeImports(filePath: string): Promise<void> {
-  const source = await readTextFileIfPresent(filePath);
-
-  if (source === null) {
-    return;
-  }
-
-  let nextSource = source;
-
-  for (const specifier of [
-    "workflow",
-    "workflow/api",
-    "workflow/internal/builtins",
-    "workflow/internal/private",
-    "workflow/runtime",
-  ]) {
-    const resolvedSpecifier = normalizeImportSpecifierPath(resolveWorkflowModulePath(specifier));
-    nextSource = replaceStringLiteralSpecifier(nextSource, specifier, resolvedSpecifier);
-  }
-
-  if (nextSource !== source) {
-    await atomicWriteFile(filePath, nextSource);
-  }
-}
-
-async function rewriteWorkflowCodeLiteral(filePath: string, queueNamespace: string): Promise<void> {
-  const source = await readTextFileIfPresent(filePath);
-
-  if (source === null) {
-    return;
-  }
-
-  const declarationPrefix = "const workflowCode = ";
-  const declarationSuffix = `;\n\nexport const POST = workflowEntrypoint(workflowCode, { namespace: ${JSON.stringify(queueNamespace)} });`;
-  const expressionStart = source.indexOf(declarationPrefix);
-  const expressionEnd = source.lastIndexOf(declarationSuffix);
-
-  if (expressionStart === -1 || expressionEnd === -1 || expressionEnd <= expressionStart) {
-    return;
-  }
-
-  const valueStart = expressionStart + declarationPrefix.length;
-  const expression = source.slice(valueStart, expressionEnd);
-
-  if (!expression.trimStart().startsWith("`")) {
-    return;
-  }
-
-  const workflowCode = decodeWorkflowCodeTemplateLiteral(expression, filePath);
-  const nextSource = `${source.slice(0, valueStart)}${encodeWorkflowCodeLiteral(workflowCode)}${source.slice(
-    expressionEnd,
-  )}`;
-
-  if (nextSource !== source) {
-    await atomicWriteFile(filePath, nextSource);
-  }
-}
-
-function encodeWorkflowCodeLiteral(workflowCode: string): string {
-  const encodedWorkflowCode = Buffer.from(workflowCode, "utf8").toString("base64");
-  const chunks = encodedWorkflowCode.match(/.{1,16384}/g) ?? [""];
-
-  return `Buffer.from(${JSON.stringify(chunks)}.join(""), "base64").toString("utf8")`;
-}
-
-function decodeWorkflowCodeTemplateLiteral(expression: string, filePath: string): string {
-  const trimmedExpression = expression.trim();
-
-  if (!trimmedExpression.startsWith("`") || !trimmedExpression.endsWith("`")) {
-    throw new Error(`Expected generated workflow code literal in "${filePath}" to be a template.`);
-  }
-
-  const rawValue = trimmedExpression.slice(1, -1);
-  let value = "";
-
-  for (let index = 0; index < rawValue.length; index += 1) {
-    const char = rawValue[index];
-
-    if (char !== "\\") {
-      value += char;
-      continue;
-    }
-
-    const escapedChar = rawValue[index + 1];
-
-    if (escapedChar === "\\" || escapedChar === "`" || escapedChar === "$") {
-      value += escapedChar;
-      index += 1;
-      continue;
-    }
-
-    value += char;
-  }
-
-  return value;
-}
-
-function replaceStringLiteralSpecifier(source: string, from: string, to: string): string {
-  return source
-    .replaceAll(JSON.stringify(from), JSON.stringify(to))
-    .replaceAll(`'${from}'`, JSON.stringify(to));
-}
-
-function normalizeImportSpecifierPath(path: string): string {
-  return normalizeEsmImportSpecifier(path);
-}
-
-function createRelativeImportSpecifier(fromDirectoryPath: string, targetPath: string): string {
-  const relativePath = relative(fromDirectoryPath, targetPath).replaceAll("\\", "/");
-
-  if (relativePath.startsWith(".")) {
-    return relativePath;
-  }
-
-  return `./${relativePath}`;
-}
-
-async function readTextFileIfPresent(filePath: string): Promise<string | null> {
-  try {
-    return await readFile(filePath, "utf8");
-  } catch (error) {
-    if (error instanceof Error && "code" in error && error.code === "ENOENT") {
-      return null;
-    }
-
-    throw error;
-  }
-}
-
-async function readBinaryFileIfPresent(filePath: string): Promise<Buffer | null> {
-  try {
-    return await readFile(filePath);
-  } catch (error) {
-    if (error instanceof Error && "code" in error && error.code === "ENOENT") {
-      return null;
-    }
-
-    throw error;
-  }
-}
-
-async function mirrorFileBypassingUnlink(sourcePath: string, targetPath: string): Promise<void> {
-  const sourceContents = await readFile(sourcePath);
-  const existingContents = await readBinaryFileIfPresent(targetPath);
-
-  if (existingContents !== null && existingContents.equals(sourceContents)) {
-    return;
-  }
-
-  await atomicWriteFile(targetPath, sourceContents);
+/** App step modules register with the framework's server steps; driver inputs stay per-layer. */
+function mergeStepEntries(
+  framework: WorkflowBundleDiscoveredEntries,
+  app: AuthoredWorkflowModules,
+): NitroStepEntrypointDiscoveredEntries {
+  return {
+    discoveredSerdeFiles: framework.discoveredSerdeFiles,
+    discoveredSteps: [...new Set([...framework.discoveredSteps, ...app.directiveModules])],
+  };
 }

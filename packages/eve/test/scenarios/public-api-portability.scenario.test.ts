@@ -42,11 +42,34 @@ const PORTABILITY_CASES: readonly PortabilityCase[] = [
   {
     descriptor: {
       files: {
+        "agent/vercel.ts": `import { withEve, type EveVercelConfig } from "eve/vercel";
+
+const config = {
+  routes: [{ destination: { service: "web", type: "service" }, src: "^(.*)$" }],
+  services: { web: { framework: "nextjs", root: "apps/web" } },
+} satisfies EveVercelConfig;
+
+export default withEve(config);
+`,
+      },
+      name: "vercel-composer-public-api-portability",
+    },
+    include: ["src/public/vercel/index.ts"],
+    name: "lets tsc typecheck withEve from the public Vercel subpath",
+    packageExports: {
+      "./vercel": {
+        types: "./dist/src/public/vercel/index.d.ts",
+      },
+    },
+  },
+  {
+    descriptor: {
+      files: {
         "agent/sandbox.ts": `import { defaultBackend, defineSandbox } from "eve/sandbox";
 import { docker } from "eve/sandbox/docker";
 import { justbash } from "eve/sandbox/just-bash";
 import { microsandbox } from "eve/sandbox/microsandbox";
-import { vercel } from "eve/sandbox/vercel";
+import { Drive, vercel } from "eve/sandbox/vercel";
 
 const fallback = defaultBackend({
   docker: { image: "ghcr.io/vercel/eve:latest" },
@@ -54,6 +77,7 @@ const fallback = defaultBackend({
   microsandbox: {},
   vercel: { resources: { vcpus: 2 } },
 });
+void Drive;
 
 void docker;
 void justbash;
@@ -89,6 +113,48 @@ export default defineSandbox({
       },
       "./sandbox/vercel": {
         types: "./dist/src/public/sandbox/vercel.d.ts",
+      },
+    },
+  },
+  {
+    descriptor: {
+      files: {
+        "agent/memory/user.ts": `import { defineMemory } from "eve/memory";
+import {
+  fileMemory,
+  inMemory,
+  type MemoryDocumentBackend,
+} from "eve/memory/file";
+import { vercelBlob, type VercelBlobBackendOptions } from "eve/memory/file/vercel";
+
+const blobOptions: VercelBlobBackendOptions = { prefix: "portable/memory" };
+const backend: MemoryDocumentBackend = process.env.VERCEL
+  ? vercelBlob(blobOptions)
+  : inMemory();
+
+export default defineMemory({
+  provider: fileMemory({ backend, maxCharacters: 8_000 }),
+  scope: "shared",
+});
+`,
+      },
+      name: "file-memory-public-api-portability",
+    },
+    include: [
+      "src/public/memory/index.ts",
+      "src/public/memory/file/index.ts",
+      "src/public/memory/file/vercel.ts",
+    ],
+    name: "lets tsc typecheck file-memory providers and backends from public subpaths",
+    packageExports: {
+      "./memory": {
+        types: "./dist/src/public/memory/index.d.ts",
+      },
+      "./memory/file": {
+        types: "./dist/src/public/memory/file/index.d.ts",
+      },
+      "./memory/file/vercel": {
+        types: "./dist/src/public/memory/file/vercel.d.ts",
       },
     },
   },

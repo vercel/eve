@@ -1,4 +1,4 @@
-import pc from "picocolors";
+import pc from "#compiled/picocolors/index.js";
 
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 

@@ -21,7 +21,7 @@ export {
   DOCKER_BACKEND_NAME,
   pruneDockerSandboxTemplates,
 } from "#execution/sandbox/bindings/docker.js";
-export { isDockerDaemonAvailableSync } from "#execution/sandbox/bindings/docker-cli.js";
+export { isLinuxDockerDaemonAvailableSync } from "#execution/sandbox/bindings/docker-cli.js";
 export {
   createJustBashSandboxBackend,
   JUST_BASH_BACKEND_NAME,

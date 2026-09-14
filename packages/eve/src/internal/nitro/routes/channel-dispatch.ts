@@ -1,5 +1,9 @@
 import type { H3Event } from "nitro";
-import type { Span } from "#compiled/@opentelemetry/api/index.js";
+import {
+  context as otelContext,
+  trace as otelTrace,
+  type SpanContext,
+} from "#compiled/@opentelemetry/api/index.js";
 import type { RouteContext } from "#public/definitions/channel.js";
 import { getChannelInstrumentationKind } from "#channel/compiled-channel.js";
 import { createCrossChannelToFn, toCrossChannelTargets } from "#channel/cross-channel-receive.js";
@@ -12,13 +16,17 @@ import { readTrustedDevelopmentClientAddress } from "#internal/nitro/dev-client-
 import { DEVELOPMENT_WORKFLOW_SECRET_ENV } from "#internal/workflow/development-world-protocol.js";
 import {
   attachAgentInfoRouteResponse,
+  attachHomeRouteMetadata,
+  attachRouteChannelName,
+  attachRemoteAgentStreamHeadersResolver,
   attachRouteSessionCreator,
 } from "#internal/nitro/routes/channel-route-context.js";
 import type { NitroArtifactsConfig } from "#internal/nitro/routes/runtime-artifacts.js";
 import { traceChannelRequest } from "#internal/nitro/routes/channel-request-instrumentation.js";
 import { resolveNitroChannelRuntimeBundle } from "#internal/nitro/routes/runtime-stack.js";
 import { readVercelProjectLink } from "#internal/vercel/project-link.js";
-import { withVercelOidcProjectResolver } from "#runtime/governance/auth/vercel-oidc-project.js";
+import { withVercelOidcProjectResolver } from "#channel/auth/vercel-oidc-project.js";
+import { withLocalDevRequestScope } from "#runtime/local-dev-capability.js";
 
 const log = createLogger("channel.dispatch");
 
@@ -47,6 +55,10 @@ export async function dispatchChannelRequest(
   config: NitroArtifactsConfig,
 ): Promise<Response> {
   return await traceChannelRequest({ request: event.req, routeKey }, async (span) => {
+    // Correlation does not require an eve-owned request span. Preserve any
+    // active platform request or function span before route resolution.
+    const requestTraceContext =
+      span?.spanContext() ?? otelTrace.getSpan(otelContext.active())?.spanContext();
     const bundle = await resolveNitroChannelRuntimeBundle(config);
 
     const matchedChannel = bundle.channels.find(
@@ -79,7 +91,7 @@ export async function dispatchChannelRequest(
       matchedChannel.name,
       channelKind ?? "channel",
       config,
-      span,
+      requestTraceContext,
     );
 
     let response: Response;
@@ -184,17 +196,21 @@ async function withDevelopmentVercelOidcContext<T>(
     return await callback();
   }
 
-  return await withVercelOidcProjectResolver(
-    {
-      request,
-      resolveCurrentProject: async () => {
-        const link = await readVercelProjectLink(config.appRoot);
-        return link === undefined
-          ? undefined
-          : { environment: "development", projectId: link.projectId };
-      },
-    },
-    callback,
+  return await withLocalDevRequestScope(
+    request,
+    async () =>
+      await withVercelOidcProjectResolver(
+        {
+          request,
+          resolveCurrentProject: async () => {
+            const link = await readVercelProjectLink(config.appRoot);
+            return link === undefined
+              ? undefined
+              : { environment: "development", projectId: link.projectId };
+          },
+        },
+        callback,
+      ),
   );
 }
 
@@ -204,7 +220,7 @@ function buildRouteArgs(
   channelName: string,
   channelKind: string,
   config: NitroArtifactsConfig,
-  requestSpan: Span | undefined,
+  requestTraceContext: SpanContext | undefined,
 ): BuiltRouteArgs {
   const requestId = readVercelRequestId(event.req.headers);
   const requestIp = extractRequestIp(event, config);
@@ -220,18 +236,19 @@ function buildRouteArgs(
   };
   const channel = bundle.channels.find((candidate) => candidate.name === channelName);
   const adapter = channel?.adapter ?? { kind: "channel" };
-  const requestSpanContext = requestSpan?.spanContext();
+  const acceptedDeploymentId = process.env.VERCEL_DEPLOYMENT_ID?.trim() || undefined;
   const deliverySource = {
+    acceptedDeploymentId,
     channelKind,
     channelName,
     requestId,
     requestTraceContext:
-      requestSpanContext === undefined
+      requestTraceContext === undefined
         ? undefined
         : {
-            spanId: requestSpanContext.spanId,
-            traceFlags: requestSpanContext.traceFlags,
-            traceId: requestSpanContext.traceId,
+            spanId: requestTraceContext.spanId,
+            traceFlags: requestTraceContext.traceFlags,
+            traceId: requestTraceContext.traceId,
           },
   };
   const channelOperations = createChannelOperations({
@@ -248,29 +265,42 @@ function buildRouteArgs(
   const to = createCrossChannelToFn(bundle.runtime, toCrossChannelTargets(bundle.channels));
 
   const args = attachRouteSessionCreator(
-    attachAgentInfoRouteResponse(
-      {
-        attachSession,
-        ...channelOperations,
-        params,
-        requestIp,
-        to,
-        waitUntil,
-      },
-      async () => {
-        const { handleAgentInfoRequest } = await import("#internal/nitro/routes/info.js");
-        return await handleAgentInfoRequest(config);
-      },
+    attachHomeRouteMetadata(
+      attachRouteChannelName(
+        attachAgentInfoRouteResponse(
+          {
+            attachSession,
+            ...channelOperations,
+            params,
+            requestIp,
+            to,
+            waitUntil,
+          },
+          async () => {
+            const { handleAgentInfoRequest } = await import("#internal/nitro/routes/info.js");
+            return await handleAgentInfoRequest(config);
+          },
+        ),
+        channelName,
+      ),
+      { agentName: bundle.agentName },
     ),
     async (input) =>
       await bundle.runtime.createSession({
         ...input,
         adapter,
         channelName,
+        continuationToken:
+          input.continuationToken === undefined
+            ? undefined
+            : `${channelName}:${input.continuationToken}`,
         delivery: createChannelDeliveryMetadata(deliverySource),
         requestId,
       }),
   );
+  if (bundle.resolveRemoteAgentStreamHeaders !== undefined) {
+    attachRemoteAgentStreamHeadersResolver(args, bundle.resolveRemoteAgentStreamHeaders);
+  }
 
   return {
     args,

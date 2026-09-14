@@ -9,6 +9,7 @@ import { createLogger } from "#internal/logging.js";
 const log = createLogger("channel.instrumentation");
 
 export interface ChannelInstrumentationProjection {
+  readonly channelType?: string;
   readonly kind: string;
   readonly metadata: ChannelInstrumentationMetadata;
 }
@@ -21,6 +22,7 @@ export function buildChannelInstrumentationProjection(input: {
   const { adapter, channelName, existingKind } = input;
 
   return {
+    channelType: getAdapterKind(adapter),
     kind: resolveKind({ adapter, channelName, existingKind }),
     metadata: resolveMetadata(adapter),
   };
@@ -57,5 +59,6 @@ function resolveMetadata(adapter: ChannelAdapter): ChannelInstrumentationMetadat
     source: getAdapterKind(adapter),
   });
 
-  return projection ?? {};
+  const { audience: _ignoredAudience, ...metadata } = projection ?? {};
+  return metadata;
 }

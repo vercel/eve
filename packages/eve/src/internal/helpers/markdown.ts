@@ -75,7 +75,7 @@ function parseMarkdownDocument(source: string): ParsedMarkdownDocument {
  */
 export function lowerInstructionsMarkdown(markdown: string): InstructionsDefinition {
   return normalizeInstructionsDefinition(
-    { markdown },
+    { content: markdown, role: "system" },
     "Expected authored instructions markdown to match the public eve shape.",
   );
 }

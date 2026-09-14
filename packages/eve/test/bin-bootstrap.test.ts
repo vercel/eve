@@ -16,8 +16,26 @@ const workspaceBuildInputPaths = new Set([
   ...bootstrapOptions.postBuildScriptPaths,
   `${bootstrapOptions.packageRoot}/bin`,
   `${bootstrapOptions.packageRoot}/src`,
+  `${bootstrapOptions.packageRoot}/scripts/vendor-compiled.mjs`,
   `${bootstrapOptions.packageRoot}/tsconfig.json`,
 ]);
+const workspaceBuildCommands = [
+  [
+    process.execPath,
+    [`${bootstrapOptions.packageRoot}/scripts/vendor-compiled.mjs`],
+    { cwd: bootstrapOptions.packageRoot },
+  ],
+  [
+    process.execPath,
+    [bootstrapOptions.tscCliPath, "-p", "tsconfig.json"],
+    { cwd: bootstrapOptions.packageRoot },
+  ],
+  ...bootstrapOptions.postBuildScriptPaths.map((scriptPath) => [
+    process.execPath,
+    [scriptPath],
+    { cwd: bootstrapOptions.packageRoot },
+  ]),
+];
 
 describe("eve CLI bootstrap", () => {
   it("fails before bootstrapping when Node.js is older than 24", async () => {
@@ -133,38 +151,7 @@ describe("eve CLI bootstrap", () => {
       runCommand,
     });
 
-    expect(runCommand).toHaveBeenNthCalledWith(
-      1,
-      process.execPath,
-      [bootstrapOptions.tscCliPath, "-p", "tsconfig.json"],
-      {
-        cwd: bootstrapOptions.packageRoot,
-      },
-    );
-    expect(runCommand).toHaveBeenNthCalledWith(
-      2,
-      process.execPath,
-      [bootstrapOptions.postBuildScriptPaths[0]],
-      {
-        cwd: bootstrapOptions.packageRoot,
-      },
-    );
-    expect(runCommand).toHaveBeenNthCalledWith(
-      3,
-      process.execPath,
-      [bootstrapOptions.postBuildScriptPaths[1]],
-      {
-        cwd: bootstrapOptions.packageRoot,
-      },
-    );
-    expect(runCommand).toHaveBeenNthCalledWith(
-      4,
-      process.execPath,
-      [bootstrapOptions.postBuildScriptPaths[2]],
-      {
-        cwd: bootstrapOptions.packageRoot,
-      },
-    );
+    expect(runCommand.mock.calls).toEqual(workspaceBuildCommands);
     expect(importModule).toHaveBeenCalledWith("file:///workspace/packages/eve/dist/src/cli/run.js");
     expect(runCli).toHaveBeenCalledWith(["build"]);
   });
@@ -187,38 +174,7 @@ describe("eve CLI bootstrap", () => {
       runCommand,
     });
 
-    expect(runCommand).toHaveBeenNthCalledWith(
-      1,
-      process.execPath,
-      [bootstrapOptions.tscCliPath, "-p", "tsconfig.json"],
-      {
-        cwd: bootstrapOptions.packageRoot,
-      },
-    );
-    expect(runCommand).toHaveBeenNthCalledWith(
-      2,
-      process.execPath,
-      [bootstrapOptions.postBuildScriptPaths[0]],
-      {
-        cwd: bootstrapOptions.packageRoot,
-      },
-    );
-    expect(runCommand).toHaveBeenNthCalledWith(
-      3,
-      process.execPath,
-      [bootstrapOptions.postBuildScriptPaths[1]],
-      {
-        cwd: bootstrapOptions.packageRoot,
-      },
-    );
-    expect(runCommand).toHaveBeenNthCalledWith(
-      4,
-      process.execPath,
-      [bootstrapOptions.postBuildScriptPaths[2]],
-      {
-        cwd: bootstrapOptions.packageRoot,
-      },
-    );
+    expect(runCommand.mock.calls).toEqual(workspaceBuildCommands);
     expect(importModule).toHaveBeenCalledWith("file:///workspace/packages/eve/dist/src/cli/run.js");
     expect(runCli).toHaveBeenCalledWith(["dev"]);
   });
@@ -246,6 +202,24 @@ describe("eve CLI bootstrap", () => {
     expect(runCommand).not.toHaveBeenCalled();
     expect(importModule).toHaveBeenCalledWith("file:///workspace/packages/eve/dist/src/cli/run.js");
     expect(runCli).toHaveBeenCalledWith(["info"]);
+  });
+
+  it("does not attempt a workspace build without the vendor script", async () => {
+    const availablePaths = new Set(workspaceBuildInputPaths);
+    availablePaths.delete(`${bootstrapOptions.packageRoot}/scripts/vendor-compiled.mjs`);
+    const exists = vi.fn(async (path: string) => availablePaths.has(path));
+    const runCommand = vi.fn(async () => {});
+
+    await expect(
+      ensureBuiltCli(bootstrapOptions, {
+        exists,
+        runCommand,
+      }),
+    ).rejects.toThrow(
+      `eve package at ${bootstrapOptions.packageRoot} does not include the sources required to rebuild the CLI.`,
+    );
+
+    expect(runCommand).not.toHaveBeenCalled();
   });
 
   it("fails when the CLI is missing from a packaged install", async () => {

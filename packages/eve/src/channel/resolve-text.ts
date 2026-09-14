@@ -1,4 +1,4 @@
-import type { InputOption, InputRequest, InputResponse } from "#runtime/input/types.js";
+import type { InputOption, InputRequest, InputResponse } from "#shared/input.js";
 
 /**
  * Maps freeform text to an {@link InputResponse} for a single request.

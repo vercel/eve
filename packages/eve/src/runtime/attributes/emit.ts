@@ -39,7 +39,7 @@ let WARNED_ABOUT_TAG_FAILURE = false;
  * - `undefined` entries are dropped so callers can build attribute
  *   maps with optional fields (`$eve.subagent` is only present on
  *   subagent roots, for example).
- * - Numbers are stringified (the runtime stores all values as strings).
+ * - Numbers and booleans are stringified (the runtime stores all values as strings).
  * - Strings are truncated to {@link EVE_ATTRIBUTE_VALUE_MAX_BYTES} via
  *   {@link truncateForTag} so a long free-form value (e.g. `$eve.title`)
  *   can never trip the runtime's per-value byte budget.

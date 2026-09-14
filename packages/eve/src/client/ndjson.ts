@@ -1,4 +1,9 @@
-import type { MessageStreamEvent } from "#protocol/message.js";
+import { type MessageStreamEvent } from "#protocol/message.js";
+import {
+  normalizeMessageStreamEvent,
+  type MessageStreamEventForVersion,
+  type MessageStreamVersion,
+} from "#protocol/message-version.js";
 
 /**
  * Returns true when an error looks like a stream socket disconnection that
@@ -35,6 +40,10 @@ export function isStreamDisconnectError(error: unknown): boolean {
  */
 export async function* readNdjsonStream(
   body: ReadableStream<Uint8Array>,
+  options: {
+    readonly idleTimeoutMs?: number;
+    readonly streamVersion: MessageStreamVersion;
+  },
 ): AsyncGenerator<MessageStreamEvent> {
   const reader = body.getReader();
   const decoder = new TextDecoder();
@@ -43,7 +52,7 @@ export async function* readNdjsonStream(
 
   try {
     while (true) {
-      const result = await reader.read();
+      const result = await readWithIdleTimeout(reader, options?.idleTimeoutMs);
 
       if (result.done) {
         reachedEof = true;
@@ -63,7 +72,7 @@ export async function* readNdjsonStream(
         buffer = buffer.slice(newlineIndex + 1);
 
         if (line.length > 0) {
-          yield JSON.parse(line) as MessageStreamEvent;
+          yield parseMessageStreamEvent(line, options.streamVersion);
         }
 
         newlineIndex = buffer.indexOf("\n");
@@ -73,14 +82,49 @@ export async function* readNdjsonStream(
     // Yield any trailing content without a final newline.
     const trailing = buffer.trim();
     if (trailing.length > 0) {
-      yield JSON.parse(trailing) as MessageStreamEvent;
+      yield parseMessageStreamEvent(trailing, options.streamVersion);
     }
   } finally {
     if (!reachedEof) {
-      // Breaking an async iteration must close the response body; releasing
-      // its lock alone leaves the server-side stream open.
-      await reader.cancel().catch(() => {});
+      // A cloned response waits for both branches to cancel. Let the caller
+      // abort the fetch instead of blocking cleanup on a tracing reader.
+      void reader.cancel().catch(() => {});
     }
     reader.releaseLock();
+  }
+}
+
+function parseMessageStreamEvent<Version extends MessageStreamVersion>(
+  line: string,
+  version: Version,
+): MessageStreamEvent {
+  const event = JSON.parse(line) as MessageStreamEventForVersion<Version>;
+  return normalizeMessageStreamEvent(version, event);
+}
+
+async function readWithIdleTimeout(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  idleTimeoutMs: number | undefined,
+): ReturnType<ReadableStreamDefaultReader<Uint8Array>["read"]> {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    if (idleTimeoutMs === undefined) return await reader.read();
+    return await Promise.race([
+      reader.read(),
+      new Promise<never>((_resolve, reject) => {
+        timeout = setTimeout(
+          () => reject(new DOMException("Session stream was idle.", "AbortError")),
+          idleTimeoutMs,
+        );
+      }),
+    ]);
+  } catch (error) {
+    // Browsers use vendor-specific TypeError messages for response-body transport failures.
+    if (error instanceof TypeError) {
+      throw new Error("Session stream disconnected.", { cause: error });
+    }
+    throw error;
+  } finally {
+    if (timeout !== undefined) clearTimeout(timeout);
   }
 }

@@ -3,7 +3,6 @@ import type { CompiledModuleMap } from "#compiler/module-map.js";
 import type { ContextAccessor } from "#context/key.js";
 import { RuntimeModelMetadataCacheKey, type CachedModelMetadata } from "#context/keys.js";
 import { normalizeAgentDefinition } from "#internal/authored-definition/core.js";
-import { normalizeCatalogModelId } from "#internal/model-catalog.js";
 import { formatLanguageModelGatewayId } from "#internal/runtime-model.js";
 import type {
   RuntimeDynamicModelReference,
@@ -166,7 +165,7 @@ export async function resolveRuntimeModelSelection(input: {
   if (typeof selectedModel === "string") {
     const id = formatLanguageModelGatewayId(selectedModel);
     const metadata = await resolveSelectionMetadata({
-      cacheKey: `gateway:${normalizeCatalogModelId(id)}`,
+      cacheKey: `gateway:${id}`,
       catalog,
       contextWindowTokens: selection.modelContextWindowTokens,
       load: (catalog) => catalog.getByGatewayId(id),
@@ -195,8 +194,8 @@ export async function resolveRuntimeModelSelection(input: {
   const metadata = await resolveSelectionMetadata({
     cacheKey:
       topLevelProvider === "gateway"
-        ? `gateway:${normalizeCatalogModelId(selectedModel.modelId)}`
-        : `provider:${selectedModel.provider}:${normalizeCatalogModelId(selectedModel.modelId)}`,
+        ? `gateway:${selectedModel.modelId}`
+        : `provider:${selectedModel.provider}:${selectedModel.modelId}`,
     catalog,
     contextWindowTokens: selection.modelContextWindowTokens,
     load: (catalog) =>

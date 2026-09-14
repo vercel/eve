@@ -1,6 +1,6 @@
 import type { SandboxSession } from "#public/definitions/sandbox.js";
 import type { SandboxAccess } from "#sandbox/state.js";
-import type { SkillHandle } from "#execution/skills/types.js";
+import type { SkillHandle } from "#shared/skill-types.js";
 import { resolveSandboxSkillReadPaths } from "#shared/skill-paths.js";
 
 const FRONTMATTER_PATTERN = /^---\r?\n[\s\S]*?\r?\n---\r?\n?/;

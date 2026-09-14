@@ -126,20 +126,21 @@ export function createDockerSandboxBackend(
       });
 
       try {
+        const buildContainerIdentity = await resolveDockerHandleIdentity(cli, buildContainerName);
         prewarmInput.log?.("preparing base runtime inside container");
-        await runDockerBaseSetup(cli, buildContainerName);
+        await runDockerBaseSetup(cli, buildContainerIdentity);
         if (options.networkPolicy !== "allow-all") {
           prewarmInput.log?.("applying network policy");
-          await setDockerNetworkPolicy(cli, buildContainerName, options.networkPolicy);
+          await setDockerNetworkPolicy(cli, buildContainerIdentity, options.networkPolicy);
         }
 
         const templateSession = buildSandboxSession(
           createDockerInternalSession({
             cli,
-            containerName: buildContainerName,
+            containerIdentity: buildContainerIdentity,
             id: prewarmInput.templateKey,
           }),
-          (policy) => setDockerNetworkPolicy(cli, buildContainerName, policy),
+          (policy) => setDockerNetworkPolicy(cli, buildContainerIdentity, policy),
         );
 
         if (prewarmInput.seedFiles.length > 0) {
@@ -161,7 +162,7 @@ export function createDockerSandboxBackend(
         // Quiesce before commit so the captured filesystem is stable.
         prewarmInput.log?.("stopping template build container");
         expectDockerSuccess(
-          await cli.run(["stop", "-t", "0", buildContainerName]),
+          await cli.run(["stop", "-t", "0", buildContainerIdentity]),
           `stop template build container "${buildContainerName}"`,
         );
         prewarmInput.log?.(`committing template image "${imageReference}"`);
@@ -174,7 +175,7 @@ export function createDockerSandboxBackend(
             `LABEL ${DOCKER_SANDBOX_LABEL}.role=template`,
             "--change",
             `LABEL ${DOCKER_SANDBOX_LABEL}.template-key=${prewarmInput.templateKey}`,
-            buildContainerName,
+            buildContainerIdentity,
             imageReference,
           ]),
           `commit sandbox template image "${imageReference}"`,
@@ -261,9 +262,10 @@ export function createDockerSandboxBackend(
         }
       }
 
+      const containerIdentity = await resolveDockerHandleIdentity(cli, containerName);
       const session = buildSandboxSession(
-        createDockerInternalSession({ cli, containerName, id: createInput.sessionKey }),
-        (policy) => setDockerNetworkPolicy(cli, containerName, policy),
+        createDockerInternalSession({ cli, containerIdentity, id: createInput.sessionKey }),
+        (policy) => setDockerNetworkPolicy(cli, containerIdentity, policy),
       );
 
       return {
@@ -276,13 +278,20 @@ export function createDockerSandboxBackend(
             sessionKey: createInput.sessionKey,
           };
         },
+        async delete() {
+          await stopDockerContainerIfRunning(cli, containerIdentity);
+          expectDockerSuccess(
+            await cli.run(["rm", "-f", containerIdentity]),
+            `delete sandbox session container "${containerName}"`,
+          );
+        },
         async stop() {
-          await stopDockerContainerIfRunning(cli, containerName);
+          await stopDockerContainerIfRunning(cli, containerIdentity);
         },
         // Session state lives in the container filesystem, so a stopped
         // container restarts with state intact on the next `create`.
         async shutdown() {
-          await stopDockerContainerIfRunning(cli, containerName);
+          await stopDockerContainerIfRunning(cli, containerIdentity);
         },
       };
     },
@@ -292,4 +301,14 @@ export function createDockerSandboxBackend(
 function getDockerContainerName(metadata: Record<string, unknown> | undefined): string | undefined {
   const containerName = metadata?.containerName;
   return typeof containerName === "string" ? containerName : undefined;
+}
+
+async function resolveDockerHandleIdentity(cli: DockerCli, containerName: string): Promise<string> {
+  const result = await cli.run(["container", "inspect", "--format", "{{.Id}}", containerName]);
+  expectDockerSuccess(result, `resolve sandbox container identity for "${containerName}"`);
+  const identity = result.stdout.trim();
+  if (identity.length === 0) {
+    throw new Error(`Docker returned an empty identity for sandbox container "${containerName}".`);
+  }
+  return identity;
 }

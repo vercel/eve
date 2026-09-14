@@ -29,9 +29,17 @@ export {
   type SlackInboundResult,
   type SlackInboundResultOrPromise,
   type SlackInitialMessage,
+  type SlackInputResponseContext,
+  type SlackInputResponseResult,
+  type SlackInputResponseSubmission,
   type SlackInstrumentationMetadata,
   type SlackInteractionAction,
   type SlackInteractionContext,
+  type SlackSlashCommand,
+  type SlackSlashCommandContext,
+  type SlackShortcut,
+  type SlackShortcutContext,
+  type SlackShortcutMessage,
   type SlackMentionResult,
   type SlackMentionResultOrPromise,
   type SlackReceiveTarget,
@@ -59,12 +67,24 @@ export {
   slackContinuationToken,
   type SlackPostInput,
   type SlackPostedMessage,
+  type SlackBotTokenContext,
   type SlackThreadMessage,
   type SlackUploadFilesOptions,
   type SlackUploadFilesResult,
 } from "#public/channels/slack/api.js";
 
 export { defaultSlackAuth } from "#public/channels/slack/defaults.js";
+
+export {
+  experimental_slackActivityPlan,
+  experimental_slackActivityRenderer,
+  experimental_slackActivityTree,
+  experimental_slackActivityStatus,
+  type ExperimentalSlackActivityDestination,
+  type ExperimentalSlackActivityRenderer,
+  type ExperimentalSlackActivitySnapshot,
+  type SlackActivityRenderer,
+} from "#public/channels/slack/activity.js";
 
 export {
   describeActionRequest,

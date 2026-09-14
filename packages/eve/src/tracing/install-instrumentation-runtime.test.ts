@@ -1,12 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ContextContainer, contextStorage } from "#context/container.js";
-import { turnIdempotencyKey } from "#harness/instrumentation-lifecycle.js";
+import { ConversationIdKey } from "#context/keys.js";
+import { sessionIdempotencyKey, turnIdempotencyKey } from "#instrumentation/lifecycle.js";
 import { installInstrumentationRuntime } from "#tracing/install-instrumentation-runtime.js";
 import { otelIntegration, collectOtelPipeline } from "#tracing/otel-declaration.js";
 
-const { forceFlush, internalTerminalState, shutdown } = vi.hoisted(() => ({
+const { forceFlush, invocationFlush, internalTerminalState, shutdown } = vi.hoisted(() => ({
   forceFlush: vi.fn(async () => undefined),
+  invocationFlush: vi.fn(async () => undefined),
   internalTerminalState: vi.fn(),
   shutdown: vi.fn(async () => undefined),
 }));
@@ -29,6 +31,7 @@ vi.mock("#tracing/otel-registration.js", async (importOriginal) => {
 vi.mock("#tracing/agent-otel-provider.js", () => ({
   createAgentOtelInstrumentation: () => ({
     hook: {
+      flush: invocationFlush,
       events: {
         "turn.completed": (_event: unknown, ctx: { state: { get(): unknown } }) => {
           internalTerminalState(ctx.state.get());
@@ -48,6 +51,7 @@ const RUNTIME_GLOBAL_KEY = Symbol.for("eve.instrumentation-runtime");
 describe("installInstrumentationRuntime", () => {
   beforeEach(() => {
     forceFlush.mockClear();
+    invocationFlush.mockClear();
     internalTerminalState.mockClear();
     shutdown.mockClear();
     delete (globalThis as Record<symbol, unknown>)[RUNTIME_GLOBAL_KEY];
@@ -59,6 +63,7 @@ describe("installInstrumentationRuntime", () => {
     const runtime = installInstrumentationRuntime({
       collected: collectOtelPipeline([otelIntegration()]),
       frameworkVersion: "test",
+      instrumentationProviders: true,
       providers: [{ flush: providerFlush, name: "test", shutdown: providerShutdown }],
       serviceName: "weather",
     });
@@ -69,7 +74,11 @@ describe("installInstrumentationRuntime", () => {
 
     expect(forceFlush).toHaveBeenCalledOnce();
     expect(providerFlush).toHaveBeenCalledOnce();
+    expect(runtime.instrumentationProviders).toBe(true);
+    expect(runtime.memoryOperations).toBe(true);
+    expect(runtime.ownsAgentSpans).toBe(true);
     expect(runtime.otelSettings).toEqual({
+      functionId: undefined,
       recordInputs: true,
       recordOutputs: true,
       traceChannelRequests: false,
@@ -77,6 +86,79 @@ describe("installInstrumentationRuntime", () => {
     expect(shutdown).toHaveBeenCalledOnce();
     expect(providerShutdown).toHaveBeenCalledOnce();
   });
+
+  it("materializes settled invocations without draining authored providers or the exporter", async () => {
+    const providerFlush = vi.fn();
+    const runtime = installInstrumentationRuntime({
+      collected: collectOtelPipeline([otelIntegration()]),
+      frameworkVersion: "test",
+      providers: [{ flush: providerFlush, name: "test" }],
+      serviceName: "weather",
+    });
+
+    await runtime.flushSettledInvocations!();
+
+    expect(invocationFlush).toHaveBeenCalledOnce();
+    expect(providerFlush).not.toHaveBeenCalled();
+    expect(forceFlush).not.toHaveBeenCalled();
+  });
+
+  it("enables memory operations only for OTel or a provider that handles them", () => {
+    const withoutMemory = installInstrumentationRuntime({
+      collected: collectOtelPipeline([]),
+      frameworkVersion: "test",
+      providers: [{ events: { "turn.started": vi.fn() }, name: "turns" }],
+      serviceName: "weather",
+    });
+    delete (globalThis as Record<symbol, unknown>)[RUNTIME_GLOBAL_KEY];
+    const withMemory = installInstrumentationRuntime({
+      collected: collectOtelPipeline([]),
+      frameworkVersion: "test",
+      providers: [{ events: { "memory.operation.started": vi.fn() }, name: "memory" }],
+      serviceName: "weather",
+    });
+
+    expect(withoutMemory.memoryOperations).toBe(false);
+    expect(withMemory.memoryOperations).toBe(true);
+  });
+
+  it.each([
+    ["session.completed", "conversation-1", true],
+    ["session.failed", "conversation-1", true],
+    ["session.completed", "child-1", false],
+    ["session.failed", "child-1", false],
+  ] as const)(
+    "releases conversation traces after %s for %s",
+    async (type, sessionId, expectedRelease) => {
+      const releaseConversation = vi.fn(async () => true);
+      const processor = {
+        forceFlush: vi.fn(async () => undefined),
+        onEnd: vi.fn(),
+        onStart: vi.fn(),
+        releaseConversation,
+        shutdown: vi.fn(async () => undefined),
+      };
+      const runtime = installInstrumentationRuntime({
+        collected: collectOtelPipeline([otelIntegration({ spanProcessors: [processor] })]),
+        frameworkVersion: "test",
+        providers: [],
+        serviceName: "weather",
+      });
+      const hooks = runtime.hooks.forTrace!(traceContext("unknown"));
+      const event = {
+        idempotencyKey: sessionIdempotencyKey(sessionId),
+        sessionId,
+        type,
+        ...(type === "session.failed" ? { error: new Error("failed") } : undefined),
+      };
+
+      const context = new ContextContainer();
+      context.set(ConversationIdKey, "conversation-1");
+      await contextStorage.run(context, () => hooks.publish(event));
+
+      expect(releaseConversation.mock.calls).toEqual(expectedRelease ? [["conversation-1"]] : []);
+    },
+  );
 
   it("isolates authored state from an internal provider with the same name", async () => {
     const authoredTerminalState = vi.fn();
@@ -96,9 +178,10 @@ describe("installInstrumentationRuntime", () => {
       serviceName: "weather",
     });
     const idempotencyKey = turnIdempotencyKey("session-1", "turn-1");
+    const hooks = runtime.hooks.forTrace!(traceContext("unknown"));
 
     await contextStorage.run(new ContextContainer(), async () => {
-      await runtime.hooks.publish({
+      await hooks.publish({
         idempotencyKey,
         rootSessionId: "session-1",
         sequence: 0,
@@ -106,7 +189,7 @@ describe("installInstrumentationRuntime", () => {
         turnId: "turn-1",
         type: "turn.started",
       });
-      await runtime.hooks.publish({
+      await hooks.publish({
         idempotencyKey,
         sessionId: "session-1",
         turnId: "turn-1",
@@ -117,4 +200,13 @@ describe("installInstrumentationRuntime", () => {
     expect(internalTerminalState).toHaveBeenCalledExactlyOnceWith("framework");
     expect(authoredTerminalState).toHaveBeenCalledExactlyOnceWith("authored");
   });
+});
+
+const traceContext = (audience: "public" | "private" | "unknown") => ({
+  agentName: "weather",
+  audience,
+  channel: { kind: "http" as const },
+  environment: "production" as const,
+  mode: "conversation" as const,
+  principalType: "anonymous",
 });

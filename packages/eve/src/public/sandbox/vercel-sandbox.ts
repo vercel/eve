@@ -1,4 +1,4 @@
-import type * as Vercel from "#compiled/@vercel/sandbox/index.js";
+import type * as Vercel from "#compiled/@vercel/sandbox-drives/index.js";
 
 type VercelCreateOptions = NonNullable<Parameters<typeof Vercel.Sandbox.create>[0]>;
 
@@ -9,7 +9,7 @@ type VercelSandboxInternalCreateOptions = {
 };
 
 type VercelSandboxAuthorCreateOptions<T> = T extends unknown
-  ? Omit<T, "name" | "onResume" | "persistent" | "runtime" | "signal"> &
+  ? Omit<T, "mounts" | "name" | "onResume" | "persistent" | "runtime" | "signal"> &
       VercelSandboxInternalCreateOptions
   : never;
 
@@ -29,8 +29,14 @@ type VercelSandboxAuthorCreateOptions<T> = T extends unknown
  * are excluded: the framework owns those and overrides any
  * author-supplied values.
  *
- * `runtime` is excluded as well: eve always boots its sandboxes from the
- * published eve image, which is mutually exclusive with a stock runtime.
+ * `runtime` is excluded: eve defaults to its published
+ * `vcr.vercel.com/vercel/eve/base` image tagged with the installed eve version
+ * or `EVE_SANDBOX_IMAGE_TAG` when `image` is not supplied. Both are mutually
+ * exclusive with a stock runtime.
+ *
+ * `image` is honored for fresh templates and template-less sessions. A
+ * snapshot `source` takes precedence because the Vercel SDK makes it mutually
+ * exclusive with `image`.
  *
  * `source` is honored only on the template create at prewarm time, so
  * an author-supplied snapshot, git revision, or tarball becomes the
@@ -43,6 +49,36 @@ type VercelSandboxAuthorCreateOptions<T> = T extends unknown
  * definition so its template key changes).
  */
 export type VercelSandboxCreateOptions = VercelSandboxAuthorCreateOptions<VercelCreateOptions>;
+
+/** Access mode for a Drive mounted into a Vercel Sandbox. */
+export type VercelSandboxMountMode = Vercel.SandboxMountMode;
+
+/** A Drive mounted at one absolute path in a Vercel Sandbox. */
+export type VercelSandboxMount = Vercel.SandboxMounts[string];
+
+/** Drive mounts keyed by absolute sandbox path. */
+export type VercelSandboxMounts = Vercel.SandboxMounts;
+
+/** Options resolved when eve creates a fresh live session sandbox. */
+export interface VercelSandboxSessionCreateOptions {
+  readonly mounts?: VercelSandboxMounts;
+}
+
+/** Context available while resolving fresh live-session creation options. */
+export interface VercelSandboxSessionCreateContext {
+  readonly session: { readonly id: string };
+}
+
+/** Options accepted by `vercel(opts)`. */
+export type VercelSandboxOptions = VercelSandboxCreateOptions & {
+  /**
+   * Resolves options that apply only to fresh live sessions. It is not called
+   * while prewarming templates or resuming an existing sandbox.
+   */
+  readonly sessionCreateOptions?: (
+    context: VercelSandboxSessionCreateContext,
+  ) => Promise<VercelSandboxSessionCreateOptions> | VercelSandboxSessionCreateOptions;
+};
 
 /**
  * Options accepted by the Vercel backend's `bootstrap({ use })` hook.

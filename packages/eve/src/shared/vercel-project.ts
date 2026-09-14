@@ -11,6 +11,11 @@ export interface VercelOidcTokenClaims {
 }
 
 const EMPTY_CLAIMS: VercelOidcTokenClaims = { ownerId: undefined, projectId: undefined };
+const VERCEL_OIDC_ISSUER = "https://oidc.vercel.com";
+
+export function isVercelOidcIssuer(issuer: string | undefined): boolean {
+  return issuer === VERCEL_OIDC_ISSUER || issuer?.startsWith(`${VERCEL_OIDC_ISSUER}/`) === true;
+}
 
 /**
  * Decodes the payload claims of a Vercel OIDC token. Values that are not

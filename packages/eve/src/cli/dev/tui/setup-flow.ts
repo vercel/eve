@@ -2,7 +2,7 @@ import type { ChannelSetupChoice, ChannelSetupChoiceOptions } from "#setup/cli/i
 import type { SearchActionOption } from "#setup/cli/select-state.js";
 import type { ModelSettingsRequest, ModelSettingsResult } from "#setup/flows/model.js";
 import type { ProviderPickerChoice, ProviderPickerRequest } from "#setup/flows/provider.js";
-import type { SelectMetadata, SelectNotice } from "#setup/prompter.js";
+import type { PlannerNavigation, SelectMetadata, SelectNotice } from "#setup/prompter.js";
 
 import type { SetupPanelOption } from "./setup-panel.js";
 
@@ -22,6 +22,7 @@ interface SetupSelectRequestBase {
   metadata?: readonly SelectMetadata[];
   options: readonly SetupPanelOption[];
   notices?: readonly SelectNotice[];
+  navigation?: PlannerNavigation;
 }
 
 interface SetupSingleSelectRequest extends SetupSelectRequestBase {
@@ -49,6 +50,7 @@ interface SetupMultiSelectRequest extends SetupSelectRequestBase {
 
 interface SetupSearchableMultiSelectRequest extends SetupSelectRequestBase {
   kind: "searchable-multi";
+  layout?: "stacked";
   initialValues?: readonly string[];
   placeholder?: string;
   required: boolean;
@@ -56,8 +58,8 @@ interface SetupSearchableMultiSelectRequest extends SetupSelectRequestBase {
 
 /**
  * A setup select's complete interaction grammar. The discriminant prevents
- * callers from combining incompatible modes such as multi-select plus a
- * single-select layout.
+ * callers from combining incompatible modes; searchable multi-select supports
+ * the stable stacked checklist layout but not single-select task actions.
  */
 export type SetupSelectRequest =
   | SetupSingleSelectRequest
@@ -65,10 +67,19 @@ export type SetupSelectRequest =
   | SetupMultiSelectRequest
   | SetupSearchableMultiSelectRequest;
 
+export type SetupSelectResult =
+  | readonly string[]
+  | { kind: "navigate"; direction: "back" | "forward"; values: readonly string[] }
+  | undefined;
+
+export type SetupFlowInterrupt = "escape" | "ctrl-c";
+
 export interface SetupFlowRenderer {
   begin(title: string, indicator?: SetupFlowIndicator): void;
+  /** Sets progress owned by an enclosing setup journey, independent of its active question. */
+  setNavigation?(navigation: PlannerNavigation | undefined): void;
   end(options?: { preserveDiagnostics?: boolean }): void;
-  readSelect(options: SetupSelectRequest): Promise<readonly string[] | undefined>;
+  readSelect(options: SetupSelectRequest): Promise<SetupSelectResult>;
   readEditableSelect(options: {
     message: string;
     options: readonly SetupPanelOption[];
@@ -122,7 +133,7 @@ export interface SetupFlowRenderer {
    * the trap; the promise then never resolves.
    */
   waitForInterrupt(options?: { interruptible?: boolean }): {
-    promise: Promise<void>;
+    promise: Promise<SetupFlowInterrupt>;
     dispose(): void;
   };
 }

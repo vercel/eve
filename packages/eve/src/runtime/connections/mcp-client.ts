@@ -2,8 +2,8 @@ import { createMCPClient, type MCPClient } from "#compiled/@ai-sdk/mcp/index.js"
 import type { ToolSet } from "ai";
 
 import { buildCallbackContext } from "#context/build-callback-context.js";
-import { ConnectionAuthorizationRequiredError } from "#public/connections/errors.js";
-import type { SessionContext } from "#public/definitions/callback-context.js";
+import { ConnectionAuthorizationRequiredError } from "#connections/errors.js";
+import type { SessionContext } from "#context/session-context.js";
 import type { ResolvedConnectionDefinition } from "#runtime/types.js";
 import { evictScopedToken, resolveScopedToken } from "#runtime/connections/scoped-authorization.js";
 import { resolveConnectionAuthorization } from "#runtime/connections/resolve-authorization.js";
@@ -20,7 +20,7 @@ import type {
   HeadersDefinition,
   HeaderValue,
   ToolFilterDefinition,
-} from "#runtime/connections/types.js";
+} from "#shared/connection-types.js";
 
 interface McpToolCache {
   readonly metadata: readonly ConnectionToolMetadata[];
@@ -124,7 +124,7 @@ export class McpConnectionClient implements ConnectionClient {
   async executeTool(
     toolName: string,
     args: unknown,
-    options?: ConnectionToolExecuteOptions,
+    options: ConnectionToolExecuteOptions,
   ): Promise<unknown> {
     try {
       const { tools } = await this.#ensureTools();
@@ -138,11 +138,12 @@ export class McpConnectionClient implements ConnectionClient {
 
       const resolvedArgs = await resolveProvidedArguments({
         args,
+        callId: options.callId,
         connection: this.#connection,
         toolName,
       });
 
-      return await sdkTool.execute(resolvedArgs, { abortSignal: options?.abortSignal } as never);
+      return await sdkTool.execute(resolvedArgs, { abortSignal: options.abortSignal } as never);
     } catch (error) {
       return await this.#rethrowClassified(error);
     }
@@ -257,6 +258,7 @@ export class McpConnectionClient implements ConnectionClient {
     await evictScopedToken({
       authorization,
       connection: { url: this.#connection.url },
+      instanceId: this.#connection.instanceId,
       scope: this.#connection.connectionName,
     });
   }
@@ -408,7 +410,7 @@ export async function resolveHeaders(
 
 /**
  * Resolves a connection's bearer token via the shared scoped-token path,
- * keyed by the connection name. See
+ * keyed by the resolved connection instance. See
  * {@link resolveScopedToken} for the cache and principal semantics.
  */
 async function resolveToken(
@@ -418,6 +420,7 @@ async function resolveToken(
   return await resolveScopedToken({
     authorization,
     connection: { url: connection.url },
+    instanceId: connection.instanceId,
     scope: connection.connectionName,
   });
 }

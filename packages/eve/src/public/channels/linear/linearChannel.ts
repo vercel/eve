@@ -162,6 +162,8 @@ export interface LinearChannelEvents {
 export type LinearInboundResult = {
   readonly auth: SessionAuthContext | null;
   readonly context?: readonly string[];
+  /** Overrides the workflow run title without changing the message sent to the model. */
+  readonly title?: string;
 } | null;
 
 /** Sync or async {@link LinearInboundResult}. */
@@ -362,6 +364,7 @@ async function dispatchAgentSession(input: {
       ...(result.context ?? []),
     ],
     state: stateFromAgentSession(event.agentSession),
+    title: result.title,
   });
 }
 

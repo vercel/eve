@@ -1,0 +1,3 @@
+#!/bin/sh
+
+exec node ./scripts/pre-commit-fmt.mjs

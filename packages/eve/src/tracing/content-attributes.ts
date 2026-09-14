@@ -16,15 +16,16 @@
 /** Prompts, instructions, tool arguments — what went in. */
 const INPUT_CONTENT_ATTRIBUTES: ReadonlySet<string> = new Set([
   "agent.channel.delivery.input",
+  "agent.approval.request",
   "ai.documents",
   "ai.prompt",
-  "ai.prompt.messages",
   "ai.prompt.system",
   "ai.prompt.toolChoice",
   "ai.prompt.tools",
   "ai.value",
   "ai.values",
   "gen_ai.input.messages",
+  "gen_ai.memory.records",
   "gen_ai.system_instructions",
   "gen_ai.tool.call.arguments",
   "gen_ai.tool.definitions",
@@ -37,6 +38,7 @@ const INPUT_CONTENT_ATTRIBUTES: ReadonlySet<string> = new Set([
  * `recordOutputs`; matching that is what keeps one destination's view coherent.
  */
 const OUTPUT_CONTENT_ATTRIBUTES: ReadonlySet<string> = new Set([
+  "agent.approval.response",
   "ai.embedding",
   "ai.embeddings",
   "ai.ranking",

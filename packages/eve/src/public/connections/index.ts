@@ -14,9 +14,18 @@ export type {
   NonInteractiveAuthorizationDefinition,
   TokenResult,
   ToolFilterDefinition,
-} from "#runtime/connections/types.js";
-export { defineInteractiveAuthorization } from "#runtime/connections/types.js";
+} from "#shared/connection-types.js";
+export { defineInteractiveAuthorization } from "#shared/connection-types.js";
 export type { JsonValue } from "#public/types/json.js";
+export {
+  defineDynamic,
+  type DynamicConnectionDefinition,
+  type DynamicConnectionEvents,
+  type DynamicConnectionResolveContext,
+  type DynamicConnectionResult,
+  type DynamicConnectionSet,
+} from "#public/definitions/connections/dynamic.js";
+export type { DynamicResolveContext, DynamicSentinel } from "#dynamic/definition.js";
 export {
   defineMcpClientConnection,
   type McpClientConnectionDefinition,

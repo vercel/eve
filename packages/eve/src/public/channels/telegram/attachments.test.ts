@@ -86,4 +86,28 @@ describe("createTelegramFetchFile", () => {
 
     await expect(fetchFile("https://example.com/file.png")).resolves.toBeNull();
   });
+
+  it("reports download status without exposing the Telegram file reference", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ ok: true, result: { file_path: "private/path.pdf" } }), {
+          headers: { "content-type": "application/json" },
+        }),
+      )
+      .mockResolvedValueOnce(new Response("forbidden", { status: 403 }));
+    const fetchFile = createTelegramFetchFile({
+      api: { apiBaseUrl: "https://telegram.example", fetch: fetchMock },
+      credentials: { botToken: "123456:PRIVATE" },
+      policy: { allowedMediaTypes: "*", maxBytes: 1024 },
+    });
+    const reference = String(
+      createTelegramFileUrl({ fileId: "PRIVATE_FILE_ID", filename: "report.pdf" }),
+    );
+
+    const result = fetchFile(reference);
+    await expect(result).rejects.toThrow("HTTP 403");
+    await expect(result).rejects.not.toThrow("PRIVATE_FILE_ID");
+    await expect(result).rejects.not.toThrow("123456:PRIVATE");
+  });
 });

@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { SessionKey, type Session } from "#context/keys.js";
 import { SCHEDULE_APP_AUTH } from "#channel/schedule-auth.js";
-import { always, never, once } from "#public/tools/approval/approval-helpers.js";
+import { always, never, once } from "#tools/approval/policies.js";
 
 import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
 import {
@@ -13,16 +13,17 @@ import {
   WEB_SEARCH_GOOGLE_OUTPUT_SCHEMA,
   WEB_SEARCH_OPENAI_OUTPUT_SCHEMA,
   WEB_SEARCH_PARALLEL_OUTPUT_SCHEMA,
-} from "#runtime/framework-tools/web-search.js";
+} from "#harness/provider-tool-schemas.js";
 import type { JsonObject } from "#shared/json.js";
 import { isAsyncIterable } from "#shared/async-iterable.js";
+import { BackgroundToolExecutorKey } from "#harness/background-tools.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import { buildToolApproval, buildToolSet, buildToolSetWithProviderTools } from "#harness/tools.js";
 import type { HarnessToolMap } from "#harness/types.js";
 import { createToolExecuteWithAuth } from "#execution/tool-auth.js";
-import type { ApprovalContext } from "#public/definitions/approval.js";
-import type { ToolContext } from "#public/definitions/tool.js";
-import type { ToolExecuteOptions } from "#shared/tool-definition.js";
+import type { ApprovalContext } from "#approval/definition.js";
+import type { ToolContext } from "#tools/definition.js";
+import type { ToolExecuteOptions } from "#tools/definition.js";
 
 function getJsonSchema(tool: unknown): unknown {
   return (tool as { inputSchema: { jsonSchema: unknown } }).inputSchema.jsonSchema;
@@ -129,6 +130,56 @@ describe("buildToolSet", () => {
 
     expect(receivedOptions?.abortSignal).toBe(abortController.signal);
     expect(receivedOptions?.toolCallId).toBe("call_observe");
+  });
+
+  it("registers background calls at execution when input callbacks are skipped or repeated", async () => {
+    const observedBatches: string[][] = [];
+    const ctx = new ContextContainer();
+    ctx.set(BackgroundToolExecutorKey, {
+      async execute({ batch }) {
+        observedBatches.push(batch.calls.map((call) => call.callId));
+        return { status: "working" };
+      },
+    });
+    const tools: HarnessToolMap = new Map([
+      [
+        "background_work",
+        {
+          description: "Start background work.",
+          execute: async () => ({ status: "working" }),
+          execution: "background",
+          inputSchema: jsonSchema({ type: "object" }),
+          name: "background_work",
+        },
+      ],
+    ]);
+
+    const result = buildToolSet({ tools });
+    const backgroundTool = result.background_work as typeof result.background_work & {
+      readonly onInputAvailable: (input: {
+        readonly input: unknown;
+        readonly toolCallId: string;
+      }) => void;
+    };
+    await contextStorage.run(ctx, async () => {
+      await executeSdkTool({
+        tool: backgroundTool,
+        toolCallId: "approved-call",
+        toolInput: { task: "resume" },
+      });
+
+      backgroundTool.onInputAvailable({
+        input: { task: "new" },
+        toolCallId: "new-call",
+      });
+      await executeSdkTool({
+        tool: backgroundTool,
+        toolCallId: "new-call",
+        toolInput: { task: "new" },
+      });
+    });
+
+    expect(observedBatches).toEqual([["approved-call"], ["approved-call", "new-call"]]);
   });
 
   it("passes the AI SDK abort signal to the authored tool context", async () => {
@@ -361,6 +412,10 @@ describe("buildToolSet", () => {
       [
         "web_search",
         {
+          behavior: {
+            availability: [],
+            handling: { kind: "provider-tool", provider: "parallel" },
+          },
           description: "Web search.",
           inputSchema: jsonSchema({}),
           name: "web_search",
@@ -433,6 +488,10 @@ describe("buildToolSet", () => {
         [
           "web_search",
           {
+            behavior: {
+              availability: [],
+              handling: { kind: "provider-tool", provider: "exa" },
+            },
             description: "Web search.",
             inputSchema: jsonSchema({}),
             name: "web_search",
@@ -454,6 +513,10 @@ describe("buildToolSet", () => {
       [
         "web_search",
         {
+          behavior: {
+            availability: [],
+            handling: { kind: "provider-tool", provider: "parallel" },
+          },
           description: "Web search.",
           inputSchema: jsonSchema({}),
           name: "web_search",
@@ -464,7 +527,6 @@ describe("buildToolSet", () => {
     const result = await buildToolSetWithProviderTools({
       modelReference: { id: "openai/gpt-5.4" },
       tools,
-      webSearchProvider: "parallel",
     });
 
     expect(getOutputJsonSchema(result.web_search)).toEqual(WEB_SEARCH_PARALLEL_OUTPUT_SCHEMA);
@@ -475,6 +537,10 @@ describe("buildToolSet", () => {
       [
         "web_search",
         {
+          behavior: {
+            availability: [],
+            handling: { kind: "provider-tool", provider: "exa" },
+          },
           description: "Web search.",
           inputSchema: jsonSchema({}),
           name: "web_search",
@@ -503,6 +569,10 @@ describe("buildToolSet", () => {
       [
         "ask_question",
         {
+          behavior: {
+            availability: ["requires-request-input"],
+            handling: { kind: "request-input", request: "question" },
+          },
           description: "Ask the user a question.",
           inputSchema: jsonSchema({}),
           name: "ask_question",

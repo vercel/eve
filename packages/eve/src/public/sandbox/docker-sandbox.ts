@@ -23,10 +23,11 @@ export type DockerSandboxNetworkPolicy = "allow-all" | "deny-all";
  */
 export interface DockerSandboxCreateOptions {
   /**
-   * Base container image for templates and sessions. Defaults to
-   * `ghcr.io/vercel/eve:latest` — eve's published sandbox runtime image.
-   * Framework setup creates `/workspace` and verifies Bash. Install any
-   * authored runtime tools in sandbox bootstrap or provide them through a
+   * Base container image for templates and sessions. Defaults to eve's
+   * published `ghcr.io/vercel/eve` image, tagged with the installed eve
+   * version or `EVE_SANDBOX_IMAGE_TAG` when set. Framework setup creates
+   * `/workspace` and verifies Bash. Install
+   * any authored runtime tools in sandbox bootstrap or provide them through a
    * custom image.
    */
   readonly image?: string;

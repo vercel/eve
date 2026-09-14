@@ -15,9 +15,8 @@
  * preserves unknown POJO fields); shape-breaking changes bump
  * `version` and add a migrator.
  */
-import type { ModelMessage } from "ai";
-
 import { getHarnessEmissionState, type HarnessEmissionState } from "#harness/emission.js";
+import type { HarnessModelMessage } from "#harness/messages.js";
 import { hasProxyInputRequests } from "#harness/proxy-input-requests.js";
 import type { HarnessSession, SessionStateMap } from "#harness/types.js";
 import { migrateDurableSessionSnapshot } from "#execution/durable-session-migrations/snapshot.js";
@@ -80,12 +79,12 @@ export interface DurableSession {
    */
   readonly rootSessionId?: string;
   readonly continuationToken: string;
-  readonly history: ModelMessage[];
+  readonly history: HarnessModelMessage[];
   readonly limits?: HarnessSession["limits"];
   readonly outputSchema?: JsonObject;
   readonly state?: SessionStateMap;
   readonly sandboxState?: SandboxState;
-  readonly subagentDepth?: number;
+  readonly taskId?: string;
   readonly workflowMaxSubagents?: number;
   readonly agent: {
     readonly system: string;

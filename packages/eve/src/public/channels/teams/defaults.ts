@@ -69,13 +69,39 @@ export const defaultEvents: TeamsChannelEvents = {
 
   async "input.requested"(event, channel, _ctx) {
     for (const request of event.requests) {
-      await channel.thread.post(
+      const posted = await channel.thread.post(
         renderInputRequestMessage(request, {
           adaptiveCardVersion: channel.adaptiveCardVersion,
           replyToActivityId: channel.teams.replyToActivityId,
         }),
       );
+      if (request.kind === "tool-approval" && posted.id) {
+        channel.state.pendingApprovalCards = {
+          ...channel.state.pendingApprovalCards,
+          [request.requestId]: { activityId: posted.id, prompt: request.prompt },
+        };
+      }
     }
+  },
+
+  async "approval.settled"(event, channel, _ctx) {
+    const cards = channel.state.pendingApprovalCards ?? {};
+    const card = cards[event.requestId];
+    if (card === undefined) return;
+    const account = channel.state.approvalResponderAccounts?.[event.responderPrincipalId];
+    const label = event.outcome === "approved" ? "Approved" : "Cancelled";
+    const actor = account?.name ?? account?.id;
+    await channel.thread.update(
+      card.activityId,
+      renderAnsweredInputRequestMessage({
+        includeText: false,
+        label: actor === undefined ? label : `${label} by ${actor}`,
+        prompt: card.prompt,
+      }),
+    );
+    const next = { ...cards };
+    delete next[event.requestId];
+    channel.state.pendingApprovalCards = next;
   },
 
   async "message.completed"(event, channel, _ctx) {

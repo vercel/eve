@@ -1,6 +1,6 @@
 ---
 title: "Run Analysis"
-description: "Part 5 of the Build an Agent tutorial. Seed the warehouse schema into the sandbox workspace, then compute and chart beyond SQL."
+description: "Part 4 of the Build an Agent tutorial. Seed the sample database schema into the sandbox workspace, then compute and chart beyond SQL."
 ---
 
 SQL tells the analytics assistant the numbers, but a cohort curve, a forecast, or a chart needs real computation. That's what the sandbox is for. It's an isolated bash environment with a `/workspace` filesystem, and every agent gets exactly one.
@@ -9,7 +9,7 @@ This takes two pieces. First seed reference files the model can read, then compu
 
 ## Seed the schema into the workspace
 
-Mount the warehouse schema into the sandbox so the model isn't guessing at table shapes. Seeding uses the folder sandbox layout, where anything under `agent/sandbox/workspace/` lands in the live `/workspace` cwd at session bootstrap.
+Mount the sample database schema into the sandbox so the model isn't guessing at table shapes. Seeding uses the folder sandbox layout, where anything under `agent/sandbox/workspace/` lands in the live `/workspace` cwd at session bootstrap.
 
 ```text
 agent/sandbox/
@@ -21,65 +21,202 @@ agent/sandbox/
 ```sql
 -- agent/sandbox/workspace/schema.sql
 -- Reference only: table shapes the analyst can read before writing queries.
-CREATE TABLE orders     (id INT, customer_id INT, amount_cents INT, created_at DATE);
-CREATE TABLE customers  (id INT, name TEXT, plan TEXT, signed_up_at DATE);
+CREATE TABLE orders     (id INTEGER, customer_id INTEGER, amount_cents INTEGER, created_at TEXT);
+CREATE TABLE customers  (id INTEGER, name TEXT, plan TEXT);
 ```
 
-Top-level workspace entries get advertised to the model automatically, so it knows `schema.sql` is there to read. No `agent/sandbox/sandbox.ts` required. A `workspace/` folder keeps the default sandbox and seeds your files into it.
+Top-level workspace entries get advertised to the model automatically, so it knows `schema.sql` is there to read. A `workspace/` folder seeds your files without requiring a sandbox definition. Add one next to install the chart dependencies.
+
+## Install the chart dependencies
+
+Python needs a sandbox that runs real binaries. For local development, start a Docker-compatible daemon and run `docker info` to verify it is reachable before restarting `npm run dev`. eve also supports [microsandbox](../sandbox#microsandbox) on compatible hosts. The `just-bash` fallback cannot run Python or install packages; installing Python on your laptop does not add it to the sandbox. You can [continue to the next chapter](./remember-definitions) if you do not want to set up a local container or VM yet.
+
+The default eve images for Docker, microsandbox, and Vercel Sandbox include Python, but not matplotlib. Add this definition alongside `workspace/` to install matplotlib in a virtual environment. It uses the same environment for installation and chart execution, without changing the system Python:
+
+```ts title="agent/sandbox/sandbox.ts"
+import { defineSandbox } from "eve/sandbox";
+
+export default defineSandbox({
+  async bootstrap({ use }) {
+    const sandbox = await use();
+    const commands = [
+      "sudo apt-get update && sudo apt-get install -y python3 python3-venv",
+      "python3 -m venv /workspace/.venv",
+      "/workspace/.venv/bin/python -m pip install matplotlib==3.10.8",
+      "/workspace/.venv/bin/python -c \"import matplotlib.pyplot; print('Chart dependencies ready')\"",
+    ];
+    for (const command of commands) {
+      const result = await sandbox.run({ command });
+      if (result.exitCode !== 0) {
+        throw new Error(
+          `Chart setup failed (exit ${result.exitCode}): ${result.stderr || result.stdout}`,
+        );
+      }
+    }
+  },
+});
+```
+
+Bootstrap runs when eve builds the sandbox template, and sessions inherit the installed environment. The first build needs network access to Ubuntu package repositories and PyPI. Keep the default network policy while following this example; a custom `deny-all` or allow-list policy must permit these downloads during bootstrap. The same definition uses Vercel Sandbox after deployment to Vercel.
+
+Restart `npm run dev` after adding the definition. Before asking for a chart, send this message in the TUI:
+
+```text
+Run /workspace/.venv/bin/python -c "import matplotlib; print(matplotlib.__version__)" in the sandbox.
+```
+
+The command should print `3.10.8`. If setup fails, check the dev server's sandbox logs for the failing command. Resolve the package download or backend error before continuing.
 
 ## Compute and chart in the sandbox
 
 The built-in `bash`, `read_file`, and `write_file` tools already target the sandbox. When you write your own analysis steps, grab a live handle with `ctx.getSandbox()`:
 
 ```ts title="agent/tools/chart_series.ts"
+import { randomUUID } from "node:crypto";
 import { defineTool } from "eve/tools";
 import { z } from "zod";
 
 export default defineTool({
   description:
     "Plot a time series to a PNG in the workspace. Pass {date, value} points; " +
-    "returns the chart path.",
+    "returns the chart path and PNG data for the client to save.",
   inputSchema: z.object({
-    title: z.string(),
-    points: z.array(z.object({ date: z.string(), value: z.number() })),
+    title: z.string().min(1).max(120),
+    points: z
+      .array(z.object({ date: z.string().max(40), value: z.number() }))
+      .min(1)
+      .max(366),
   }),
   async execute({ title, points }, ctx) {
     const sandbox = await ctx.getSandbox();
+    const directory = `analysis/${randomUUID()}`;
     await sandbox.writeTextFile({
-      path: "analysis/series.json",
+      path: `${directory}/series.json`,
       content: JSON.stringify({ title, points }),
     });
     await sandbox.writeTextFile({
-      path: "analysis/plot.py",
+      path: `${directory}/plot.py`,
       content: [
         "import json, matplotlib",
         "matplotlib.use('Agg')",
         "import matplotlib.pyplot as plt",
         "d = json.load(open('series.json'))",
+        "plt.figure(figsize=(8, 4), dpi=100)",
         "plt.plot([p['date'] for p in d['points']], [p['value'] for p in d['points']])",
         "plt.title(d['title']); plt.savefig('chart.png')",
       ].join("\n"),
     });
-    const root = sandbox.resolvePath("analysis");
-    await sandbox.run({ command: `cd ${JSON.stringify(root)} && python plot.py` });
-    return { chart: `${root}/chart.png` };
+    const root = sandbox.resolvePath(directory);
+    const result = await sandbox.run({
+      command: `cd ${JSON.stringify(root)} && /workspace/.venv/bin/python plot.py`,
+    });
+    if (result.exitCode !== 0) {
+      throw new Error(
+        `Chart generation failed (exit ${result.exitCode}): ${result.stderr || result.stdout}`,
+      );
+    }
+    const chart = `${root}/chart.png`;
+    const png = await sandbox.readBinaryFile({ path: chart });
+    if (!png || png.byteLength === 0) {
+      throw new Error("The chart command did not produce a PNG.");
+    }
+    if (png.byteLength > 1024 * 1024) {
+      throw new Error("The chart exceeds the 1 MiB download limit. Plot fewer points.");
+    }
+    return { chart, pngBase64: Buffer.from(png).toString("base64") };
+  },
+  toModelOutput({ chart }) {
+    return {
+      type: "text",
+      value: `Created ${chart}. The PNG is available in the tool result for the client to save.`,
+    };
   },
 });
 ```
 
-This tool shells out to `python` with matplotlib, which the sandbox base image does not preinstall. Install the runtime in sandbox bootstrap (or bake it into a custom image) so `python plot.py` resolves. See [Sandbox](../sandbox) for where bootstrap runs.
+The tool uses the Python environment installed in bootstrap. `matplotlib.use('Agg')` selects a renderer that writes PNGs without a desktop display.
 
-Now ask for something past plain SQL. If you skipped Step 4, this still works against the Step 3 sample dataset:
+`sandbox.run()` returns an exit code even when the command fails. Check `exitCode` before returning a chart path. Throwing an error gives the model the failed command's output, including a missing Python executable or matplotlib import, so it can report the failure instead of claiming a chart exists.
+
+Ask for a chart using the sample data from Step 3:
 
 ```text
-Plot total order revenue per customer.
+Plot daily order revenue in dollars for May 2026.
 ```
 
-The model queries for the numbers (the warehouse from Step 4, or the sample dataset if you skipped it), checks `schema.sql` to get the grain right, then calls `chart_series` to render the PNG in `/workspace`.
+The model queries `run_sql` for daily totals, divides `amount_cents` by 100, and passes date/value points to `chart_series`. The sample data has four dates with revenue of $42, $15, $99, and $8. The chart uses the same data you queried in Step 3.
+
+## Save the chart to your computer
+
+A sandbox path is not a download URL or a file on your laptop. `readBinaryFile` copies the generated PNG out of the sandbox into the tool result, where your client can use it. `toModelOutput` sends the model only a short description, so the image's base64 data does not fill its context. The TUI shows tool results as text; it does not save or preview this PNG automatically.
+
+Create this script in your project root. It asks for a chart through the same local HTTP API as the TUI, then saves the successful tool result as `chart.png` in the directory where you run the script:
+
+```ts title="save-chart.ts"
+import { writeFile } from "node:fs/promises";
+import { resolve } from "node:path";
+import { Client } from "eve/client";
+import { z } from "zod";
+
+const host = process.argv[2];
+if (!host) throw new Error("Usage: node save-chart.ts <dev-server-url>");
+
+const client = new Client({ host });
+const { response } = await client.sessions.create({
+  message: "Use run_sql and chart_series to plot daily order revenue in May 2026.",
+});
+const turn = await response.result();
+if (turn.status === "failed") throw new Error("The agent turn failed. Check the dev server logs.");
+if (turn.inputRequests.length > 0) {
+  const prompts = turn.inputRequests.map((request) => request.prompt).join("\n");
+  throw new Error(
+    `Session ${turn.sessionId} needs your input before it can create the chart:\n${prompts}`,
+  );
+}
+
+const chartOutput = z.object({ pngBase64: z.string().min(1).max(1_398_104) });
+let saved = false;
+for (const event of turn.events) {
+  if (event.type !== "action.result") continue;
+  const result = event.data.result;
+  if (result.kind !== "tool-result" || result.toolName !== "chart_series" || result.isError)
+    continue;
+
+  const { pngBase64 } = chartOutput.parse(result.output);
+  const png = Buffer.from(pngBase64, "base64");
+  if (
+    png.byteLength > 1024 * 1024 ||
+    !png.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))
+  ) {
+    throw new Error("The tool result is not a PNG within the 1 MiB download limit.");
+  }
+  await writeFile("chart.png", png);
+  saved = true;
+}
+if (!saved) {
+  console.error(turn.message ?? "The agent returned no explanation.");
+  throw new Error("No chart was returned. Check the agent's response above and sandbox setup.");
+}
+console.log(`Saved ${resolve("chart.png")}`);
+```
+
+Keep `npm run dev` running. In a second terminal, run the script with the actual URL printed by the dev server; for example:
+
+```bash
+node save-chart.ts http://localhost:2000
+```
+
+Open the saved `chart.png` in your image viewer. This creates a separate session from your TUI conversation and overwrites an existing `chart.png`. A failed tool call or a turn without a chart fails the script instead of claiming a file was saved.
+
+This step does not require approvals. If you return after adding the approval gate in [Guard the spend](./guard-the-spend), the script reports any pending request with its session ID. [Respond through the client](../guides/client/messages#answer-human-input-requests) before collecting that session's chart result.
+
+The same client can save a chart from a hosted agent: pass the deployment URL and configure [client authentication](../guides/client/overview#authentication) for that deployment. The file is saved on the computer running the script. In a web UI, consume the same `action.result` output to build an image preview or download control. Returning bytes from a tool does not add that UI automatically.
+
+This example caps charts at 1 MiB because tool outputs are persisted with session events. For larger files, copy the bytes to your application's file storage and return an authorized download URL instead. Sandbox files themselves are not permanent artifact storage.
 
 ## Secrets stay out of the sandbox
 
-The sandbox has no `process.env` and no access to your app's secrets. Your warehouse token lives in the app runtime, and firewall brokering is the only path it takes to the warehouse host. It never enters the sandbox process.
+The sandbox has no `process.env` and no access to your app's secrets. The `run_sql` tool and sample database run in your app. You pass only the query results to the chart tool; the sandbox does not need database credentials.
 
 The local backend runs the sandbox on your laptop during `eve dev`; on Vercel it runs on Vercel Sandbox. Lifecycle, backends, and network policy are in [Sandbox](../sandbox).
 

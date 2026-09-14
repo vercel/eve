@@ -1,0 +1,13 @@
+name: "Log in to Vercel Container Registry"
+description: "Log Docker in to VCR with a GitHub Actions OIDC token."
+
+inputs:
+  team:
+    description: "Vercel team ID (team_xxxxxxxx)."
+    required: true
+
+runs:
+  using: "node24"
+  main: "main.mjs"
+  post: "post.mjs"
+  post-if: "always()"

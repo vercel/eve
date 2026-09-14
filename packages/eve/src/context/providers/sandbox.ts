@@ -24,17 +24,21 @@ export const sandboxProvider: FrameworkContextProvider<SandboxAccess> = {
     const sessionId = ctx.require(SessionIdKey);
     const channel = ctx.get(ChannelKey);
     const adapterState = channel?.state as Record<string, unknown> | undefined;
-    const sandboxSessionId = (adapterState?.sandboxSessionId as string | undefined) ?? sessionId;
     const parentSandboxState = adapterState?.parentSandboxState as SandboxState | undefined;
+    const inheritsParent = registry.sandbox?.definition.inheritsParent === true;
+    const sharedSandboxSessionId = adapterState?.sandboxSessionId as string | undefined;
+    const sharesSandbox = inheritsParent || sharedSandboxSessionId !== undefined;
+    const sandboxSessionId = sharesSandbox ? (sharedSandboxSessionId ?? sessionId) : sessionId;
 
     return {
       value: await ensureSandboxAccess({
         compiledArtifactsSource: bundle.compiledArtifactsSource,
         nodeId: node.nodeId,
+        ownsSandbox: !sharesSandbox,
         registry,
         runOnSession: async (callback) => await contextStorage.run(ctx, callback),
         sessionId: sandboxSessionId,
-        state: session.sandboxState ?? parentSandboxState ?? null,
+        state: session.sandboxState ?? (sharesSandbox ? parentSandboxState : undefined) ?? null,
         tags: {
           agent: resolveTagAgentName({ bundle, node }),
           channel: resolveTagChannelKind(channel),

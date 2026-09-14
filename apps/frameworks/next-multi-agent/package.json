@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "pnpm --filter eve build && next build",
+    "build": "next build",
     "build:billing-agent": "cd agents/billing && eve build",
     "dev": "next dev",
     "typecheck": "tsc --noEmit -p tsconfig.json"

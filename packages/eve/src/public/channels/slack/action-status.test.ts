@@ -4,7 +4,7 @@ import {
   describeActionRequest,
   describeActionRequests,
 } from "#public/channels/slack/action-status.js";
-import type { RuntimeActionRequest } from "#runtime/actions/types.js";
+import type { RuntimeActionRequest } from "#shared/action-types.js";
 import type { JsonObject } from "#shared/json.js";
 
 function toolCall(toolName: string, input: JsonObject = {}): RuntimeActionRequest {
@@ -74,6 +74,15 @@ describe("describeActionRequest", () => {
     expect(
       describeActionRequest({ callId: "c1", input: { skill: "arena" }, kind: "load-skill" }),
     ).toBe("load_skill arena");
+    expect(
+      describeActionRequest({
+        callId: "c1",
+        input: { path: "agent/agent.ts" },
+        kind: "workflow-tool-call",
+        toolName: "publish",
+        workflowId: "publish-workflow",
+      }),
+    ).toBe("publish agent/agent.ts");
   });
 });
 

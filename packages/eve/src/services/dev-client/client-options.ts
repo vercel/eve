@@ -1,5 +1,6 @@
 import type { ClientOptions } from "#client/index.js";
 import { VERCEL_TRUSTED_OIDC_IDP_TOKEN_HEADER } from "#client/types.js";
+import { LOCAL_DEV_INTERACTIVE_CLIENT_HEADER } from "#runtime/local-dev-capability.js";
 
 import type { DevelopmentCredentialGate } from "./credential-gate.js";
 
@@ -54,16 +55,21 @@ export function resolveDevelopmentClientOptions(serverUrl: string): ClientOption
 /** Builds a non-redirecting local client, using ambient bearer auth only when it owns Authorization. */
 export function resolveLocalDevelopmentClientOptions(input: {
   readonly headers?: DevelopmentClientHeaders;
+  readonly interactiveClient?: boolean;
   readonly serverUrl: string;
   readonly token: () => Promise<string>;
 }): ClientOptions {
+  const headers =
+    input.interactiveClient === true
+      ? { ...input.headers, [LOCAL_DEV_INTERACTIVE_CLIENT_HEADER]: "1" }
+      : input.headers;
   const options = {
     host: input.serverUrl,
     redirect: "manual",
   } satisfies ClientOptions;
 
-  if (hasDevelopmentAuthorizationHeader(input.headers)) {
-    return { ...options, headers: input.headers };
+  if (hasDevelopmentAuthorizationHeader(headers)) {
+    return { ...options, headers };
   }
 
   const authorizedOptions = {
@@ -71,8 +77,8 @@ export function resolveLocalDevelopmentClientOptions(input: {
     auth: { bearer: input.token },
   } satisfies ClientOptions;
 
-  if (input.headers !== undefined) {
-    return { ...authorizedOptions, headers: input.headers };
+  if (headers !== undefined) {
+    return { ...authorizedOptions, headers };
   }
   return authorizedOptions;
 }

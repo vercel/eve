@@ -11,7 +11,6 @@
     "test:e2e": "eve eval --strict"
   },
   "dependencies": {
-    "@ai-sdk/anthropic": "catalog:",
     "@eve-e2e/config": "workspace:*",
     "@workflow/world-postgres": "catalog:",
     "eve": "workspace:*",
@@ -22,6 +21,9 @@
     "typescript": "catalog:"
   },
   "e2e": {
-    "modelMatrix": "full"
+    "modelMatrix": "full",
+    "optionalModels": [
+      "anthropic-opus"
+    ]
   }
 }

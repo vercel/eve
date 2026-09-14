@@ -1,5 +1,5 @@
 ---
-title: "Multi-tenant outbound auth"
+title: "Multi-Tenant Outbound Auth"
 description: "Select tenant-scoped credentials inside authored tools, OpenAPI connections, and MCP connections from the active turn context."
 ---
 

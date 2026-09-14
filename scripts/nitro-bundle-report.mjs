@@ -1053,6 +1053,18 @@ function renderComparisonSection(comparison) {
     lines.push(
       `| Package | Installed files | ${comparison.package.installedFileCount.baseline} | ${comparison.package.installedFileCount.current} | ${formatSignedCount(comparison.package.installedFileCount.delta)} |`,
     );
+    for (const [label, metric] of [
+      ["Installed package instances", comparison.package.installedPackageInstanceCount],
+      ["Distinct installed package names", comparison.package.installedDistinctPackageNameCount],
+      ["Installed dependency edges", comparison.package.installedDependencyEdgeCount],
+      ["Installed optional peer edges", comparison.package.installedOptionalPeerEdgeCount],
+    ]) {
+      if (metric !== undefined) {
+        lines.push(
+          `| Package | ${label} | ${metric.baseline} | ${metric.current} | ${formatSignedCount(metric.delta)} |`,
+        );
+      }
+    }
   }
 
   lines.push(
@@ -1112,6 +1124,12 @@ function renderPublishedPackageSection(publishedPackage) {
   );
   lines.push(`- Installed root package: ${formatBytes(publishedPackage.installedPackageBytes)}`);
   lines.push(`- Installed dependencies: ${formatBytes(publishedPackage.installedDependencyBytes)}`);
+  lines.push(`- Installed package instances: ${publishedPackage.installedPackageInstanceCount}`);
+  lines.push(
+    `- Distinct installed package names: ${publishedPackage.installedDistinctPackageNameCount}`,
+  );
+  lines.push(`- Installed dependency edges: ${publishedPackage.installedDependencyEdgeCount}`);
+  lines.push(`- Installed optional peer edges: ${publishedPackage.installedOptionalPeerEdgeCount}`);
   lines.push(`- Runtime dependencies: ${publishedPackage.runtimeDependencies.length}`);
   lines.push(
     `- Peer dependencies: ${publishedPackage.peerDependencies.length}${publishedPackage.peerDependencies.some((dependency) => dependency.optional) ? ` (${publishedPackage.peerDependencies.filter((dependency) => dependency.optional).length} optional)` : ""}`,
@@ -1119,6 +1137,7 @@ function renderPublishedPackageSection(publishedPackage) {
   lines.push(
     "",
     "_Installed footprint is measured from an isolated temporary `npm install` of the packed tarball._",
+    "_Graph metrics read only `package.json` files in package directories directly beneath a `node_modules` boundary, including nested boundaries. Each directory is one package instance; distinct names come from those manifests. Dependency edges count each unique name in `dependencies` or `optionalDependencies` per instance; optional peer edges count `peerDependencies` marked optional._",
     "",
   );
 

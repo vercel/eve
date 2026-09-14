@@ -2,8 +2,15 @@ import { generateText, jsonSchema, type LanguageModel, ToolLoopAgent } from "ai"
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { appendPendingInputBatch } from "#harness/input-requests.js";
+import { validateHarnessModelMessages } from "#harness/messages.js";
 import { createToolLoopHarness } from "#harness/tool-loop.js";
 import type { HarnessSession, StepFn, StepNext, ToolLoopHarnessConfig } from "#harness/types.js";
+import {
+  applyMemoryRecallBatches,
+  createMemoryLock,
+  projectMemoryHistoryFromSessionState,
+  validateMemoryRecallResult,
+} from "#shared/memory-state.js";
 
 vi.mock("ai", () => ({
   generateText: vi.fn(),
@@ -52,7 +59,8 @@ function createTestConfig(overrides?: Partial<ToolLoopHarnessConfig>): ToolLoopH
 }
 
 type MockAgentSettings = {
-  onStepFinish?: (step: unknown) => Promise<void> | void;
+  onStepStart?: (input: unknown) => Promise<void> | void;
+  onStepEnd?: (step: unknown) => Promise<void> | void;
   prepareStep?: (input: unknown) => Promise<unknown> | unknown;
 };
 
@@ -81,7 +89,7 @@ function setupMockAgentSequence(results: readonly Record<string, unknown>[]): vo
     this: Record<string, unknown>,
     settings: MockAgentSettings,
   ) {
-    const { onStepFinish, prepareStep } = settings;
+    const { onStepEnd, onStepStart, prepareStep } = settings;
 
     this.generate = vi.fn().mockImplementation(async (options: { messages: unknown[] }) => {
       const result = queue.shift();
@@ -89,8 +97,9 @@ function setupMockAgentSequence(results: readonly Record<string, unknown>[]): vo
         throw new Error("No mock ToolLoopAgent result available.");
       }
 
+      let preparedMessages = options.messages;
       if (prepareStep) {
-        await prepareStep({
+        const prepared = await prepareStep({
           messages: options.messages,
           model: {},
           runtimeContext: {},
@@ -98,10 +107,19 @@ function setupMockAgentSequence(results: readonly Record<string, unknown>[]): vo
           steps: [],
           toolsContext: {},
         });
+        if (
+          prepared !== null &&
+          typeof prepared === "object" &&
+          "messages" in prepared &&
+          Array.isArray(prepared.messages)
+        ) {
+          preparedMessages = prepared.messages;
+        }
       }
+      await onStepStart?.({ messages: preparedMessages });
 
-      if (onStepFinish) {
-        await onStepFinish(result);
+      if (onStepEnd) {
+        await onStepEnd(result);
       }
 
       return { ...result, responseMessages: getMockResponseMessages(result) };
@@ -122,6 +140,67 @@ function expectStepFn(value: StepNext): StepFn {
 }
 
 describe("tool-loop structured compaction accounting", () => {
+  it("keeps private memory out of the summary while retaining its attributed record", async () => {
+    vi.mocked(generateText).mockResolvedValue({
+      text: "ordinary summary",
+    } as Awaited<ReturnType<typeof generateText>>);
+    setupMockAgentSequence([
+      {
+        finishReason: "stop",
+        response: { messages: [{ content: "Done.", role: "assistant" }] },
+        text: "Done.",
+        toolCalls: [],
+        toolResults: [],
+      },
+    ]);
+    const memoryLock = createMemoryLock({
+      namespace: "app",
+      scope: "user_1",
+      slot: "profile",
+      turn: { id: "turn_0", input: [], sequence: 0 },
+      visibility: "scope",
+    });
+    const recalled = applyMemoryRecallBatches({
+      batches: [
+        {
+          lock: memoryLock,
+          messages: validateMemoryRecallResult(
+            { messages: [{ content: "PRIVATE_MEMORY_SENTINEL", id: "profile" }] },
+            "profile",
+          ),
+          operationId: "recall_1",
+        },
+      ],
+      history: [],
+      state: undefined,
+    });
+    const runStep = createToolLoopHarness(
+      createTestConfig({
+        historyProjector: projectMemoryHistoryFromSessionState,
+        resolveModel: vi.fn().mockResolvedValue({ modelId: "test-model" } as LanguageModel),
+      }),
+    );
+
+    const result = await runStep(
+      createTestSession({
+        compaction: { recentWindowSize: 0, threshold: 100 },
+        history: [
+          ...validateHarnessModelMessages(recalled.history),
+          { content: `ordinary ${"conversation ".repeat(100)}`, kind: "user", role: "user" },
+        ],
+        state: recalled.state,
+      }),
+      { message: "continue" },
+    );
+
+    expect(vi.mocked(generateText)).toHaveBeenCalledOnce();
+    const prompt = vi.mocked(generateText).mock.calls[0]?.[0].messages?.[0]?.content;
+    if (typeof prompt !== "string") throw new Error("Expected the compaction prompt text.");
+    expect(prompt).not.toContain("PRIVATE_MEMORY_SENTINEL");
+    expect(JSON.stringify(result.session.history)).toContain("PRIVATE_MEMORY_SENTINEL");
+    expect(JSON.stringify(result.session.history)).toContain("eve.memory");
+  });
+
   it("compacts before the continuation step when structured tool results were appended", async () => {
     vi.mocked(generateText).mockResolvedValue({
       text: "summary",
@@ -223,6 +302,7 @@ describe("tool-loop structured compaction accounting", () => {
     expect(vi.mocked(generateText)).toHaveBeenCalledTimes(1);
     expect(second.session.history[0]).toEqual({
       content: "Summary of our conversation so far:",
+      kind: "context.compaction",
       role: "user",
     });
     expect(second.session.history[1]).toEqual({
@@ -272,7 +352,7 @@ describe("tool-loop structured compaction accounting", () => {
           recentWindowSize: 10,
           threshold: 101,
         },
-        history: [{ content: "Previous exact prompt", role: "user" }],
+        history: [{ content: "Previous exact prompt", kind: "user", role: "user" }],
       }),
     });
 
@@ -288,6 +368,7 @@ describe("tool-loop structured compaction accounting", () => {
     expect(vi.mocked(generateText)).toHaveBeenCalledTimes(1);
     expect(result.session.history[0]).toEqual({
       content: "Summary of our conversation so far:",
+      kind: "context.compaction",
       role: "user",
     });
     expect(result.session.history[1]).toEqual({

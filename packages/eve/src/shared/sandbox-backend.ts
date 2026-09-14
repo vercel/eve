@@ -13,6 +13,11 @@ export interface SandboxBackendHandle<SO = Record<string, never>> {
   readonly useSessionFn: SandboxSessionUseFn<SO>;
   captureState(): Promise<SandboxBackendSessionState>;
   /**
+   * Permanently deletes this sandbox and its disposable backend state.
+   * Reusable or shared template state must not be deleted.
+   */
+  delete(options?: SandboxDeleteOptions): Promise<void>;
+  /**
    * Stops the underlying compute at an authored runtime boundary while
    * preserving any backend state needed to reopen the durable session.
    * Provider errors must reject this call.
@@ -25,6 +30,11 @@ export interface SandboxBackendHandle<SO = Record<string, never>> {
    * when the backend supports durable sessions.
    */
   shutdown(): Promise<void>;
+}
+
+/** Options for permanently deleting one sandbox. */
+export interface SandboxDeleteOptions {
+  readonly abortSignal?: AbortSignal;
 }
 
 /**

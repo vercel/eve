@@ -1,5 +1,5 @@
 ---
-title: "Dev TUI"
+title: "Terminal UI"
 description: "Use eve locally or connect to a deployed agent from an interactive terminal UI."
 ---
 
@@ -13,39 +13,63 @@ The transcript remains in your terminal scrollback after you exit. Run `/help` i
 
 ## Commands
 
-| Command       | Description                                                                                           |
-| ------------- | ----------------------------------------------------------------------------------------------------- |
-| `/model`      | Configure the model and its provider. Pass a model ID to set it directly: `/model provider/model-id`. |
-| `/add`        | Browse and install channels, MCP connections, extensions, and observability integrations.             |
-| `/deploy`     | Deploy the agent to Vercel production. Links the directory first if needed.                           |
-| `/vc:install` | Install the Vercel CLI.                                                                               |
-| `/vc:login`   | Log in to Vercel or restore access to a remote deployment.                                            |
-| `/loglevel`   | Choose which server and agent logs appear in the transcript.                                          |
-| `/traces`     | Open the local trace viewer. Pass a trace ID prefix to open a specific trace.                         |
-| `/reset`      | Start a fresh session.                                                                                |
-| `/cancel`     | Cancel the current turn without discarding settled context.                                           |
-| `/clear`      | Clear the session's model-message history. `/new` is an alias.                                        |
-| `/compact`    | Compact the current session's context.                                                                |
-| `/exit`       | Quit the UI.                                                                                          |
-| `/help`       | List available commands.                                                                              |
+| Command       | Description                                                                                                                                                              |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `/model`      | Configure the model and its provider. Pass a model ID to set it directly: `/model provider/model-id`.                                                                    |
+| `/add`        | Select and install channels, MCP connections, extensions, and observability integrations. Pass an item address to confirm and install it directly: `/add channel/slack`. |
+| `/deploy`     | Deploy the agent to Vercel production. Links the directory first if needed.                                                                                              |
+| `/vc:install` | Install the Vercel CLI.                                                                                                                                                  |
+| `/vc:login`   | Log in to Vercel or restore access to a remote deployment.                                                                                                               |
+| `/info`       | Show the resolved application, compiled artifacts, discovery diagnostics, and messaging routes.                                                                          |
+| `/loglevel`   | Choose which server and agent logs appear in the transcript.                                                                                                             |
+| `/traces`     | Open the local trace viewer. Pass a trace ID prefix to open a specific trace.                                                                                            |
+| `/reset`      | Start a fresh session.                                                                                                                                                   |
+| `/cancel`     | Cancel the current turn without discarding settled context.                                                                                                              |
+| `/clear`      | Clear the session's model-message history. `/new` is an alias.                                                                                                           |
+| `/compact`    | Compact the current session's context.                                                                                                                                   |
+| `/exit`       | Quit the UI.                                                                                                                                                             |
+| `/help`       | List available commands.                                                                                                                                                 |
 
-`/model`, `/add`, `/deploy`, and `/traces` are available when `eve dev` runs locally. They are unavailable when the UI connects to a server with `--url`.
+`/model`, `/add`, `/deploy`, `/info`, and `/traces` are available when `eve dev` runs locally. They are unavailable when the UI connects to a server with `--url`.
+
+## Set up a new agent
+
+After `eve init`, the terminal UI guides you through **Model**, **Channels**, **Integrations**, and **Review** before the first chat prompt. The progress rail keeps the four steps visible throughout onboarding. Model setup can install or upgrade the Vercel CLI, open Vercel login, and resume project linking without leaving the flow.
+
+Model and Vercel changes take effect when you complete Model, then onboarding continues to Channels. Channel and integration selections remain drafts until you finish Review. You can move back and forth between Channels, Integrations, and Review; use `/model` after onboarding to change the committed model configuration.
+
+## Add an integration
+
+Bare `/add` opens the standalone planner on **Channels**. It does not include model configuration. The progress rail shows selection counts as you move between **Channels**, **Integrations**, and **Review**.
+
+Press `Space` or `Enter` to toggle the highlighted item. Press `Right Arrow` to preserve the current selections and continue, `Left Arrow` to preserve them and go back, or `Esc` to cancel. Installation requires `Enter` on **Install and set up** from Review. During installation, `Esc` cancels only the active item and continues with the remaining selections. The final summary reports installed, cancelled, and failed items separately.
+
+Pass an item address to `/add` to confirm and install that exact address without opening the planner:
+
+```text
+/add channel/slack
+/add extension/agent-browser
+/add linear
+/add @acme/analytics
+```
+
+The UI installs planner selections in order and offers deployment once after the batch when an installed item requires it.
 
 ## Work with the agent
 
 Type a message and press `Enter` to send it. When the agent asks a question or requests tool approval, respond in the prompt shown by the UI. Connection authorization can open a browser; keep local `eve dev` running until the browser returns to it.
 
-While a turn is running, `Enter` queues a follow-up message. Press `Esc` or `Ctrl+C` to cancel the turn; when messages are queued, this uses the oldest queued message as the next turn instead. At an idle prompt, press `Ctrl+C` twice to exit.
+While a turn is running, `Enter` queues a follow-up message. Press `Esc` or `Ctrl+C` to cancel the turn; when messages are queued, this uses the oldest queued message as the next turn instead. If a direct cancellation requested with `/cancel` or `Ctrl+C` does not settle, press `Ctrl+C` to stop waiting. The UI then returns to the prompt and asks you to press `Ctrl+C` again to exit. At an idle prompt, press `Ctrl+C` twice to exit.
 
-| Key           | Action                                                                              |
-| ------------- | ----------------------------------------------------------------------------------- |
-| `Enter`       | Send the current message or answer.                                                 |
-| `Shift+Enter` | Insert a newline. Requires a terminal that reports modified keys.                   |
-| `Esc`         | Cancel a running turn, or steer with the oldest queued message.                     |
-| `Ctrl+C`      | Cancel or steer during a turn; clear input, then exit on a second press, when idle. |
-| `↑` / `↓`     | Move through input lines or sent-message history.                                   |
-| `Ctrl+L`      | Cycle log display modes.                                                            |
-| `Ctrl+R`      | Redraw the screen.                                                                  |
+| Key           | Action                                                                                                                  |
+| ------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `Enter`       | Send the current message or answer.                                                                                     |
+| `Shift+Enter` | Insert a newline. Requires a terminal that reports modified keys.                                                       |
+| `Esc`         | Cancel a running turn, or steer with the oldest queued message.                                                         |
+| `Ctrl+C`      | Cancel or steer during a turn; stop a pending cancellation, then exit on the next press; press twice to exit when idle. |
+| `↑` / `↓`     | Move through input lines or sent-message history.                                                                       |
+| `Ctrl+L`      | Cycle log display modes.                                                                                                |
+| `Ctrl+R`      | Redraw the screen.                                                                                                      |
 
 ## Logs and traces
 
@@ -57,23 +81,13 @@ Use `/traces` to inspect traces recorded during local development. See [Instrume
 
 ## Display options
 
-Use `eve dev` flags to control how much detail the UI renders:
+Use `eve dev` flags to control tool calls, reasoning, subagents, connection authorization, response statistics, context usage, and logs:
 
 ```bash
 eve dev --tools full --reasoning collapsed --logs all
 ```
 
-| Flag                         | Values                                          | Description                                        |
-| ---------------------------- | ----------------------------------------------- | -------------------------------------------------- |
-| `--tools`                    | `full`, `collapsed`, `auto-collapsed`, `hidden` | Tool-call display.                                 |
-| `--reasoning`                | `full`, `collapsed`, `auto-collapsed`, `hidden` | Reasoning display.                                 |
-| `--subagents`                | `full`, `collapsed`, `auto-collapsed`, `hidden` | Subagent display.                                  |
-| `--connection-auth`          | `full`, `collapsed`, `auto-collapsed`, `hidden` | Connection-authorization display.                  |
-| `--assistant-response-stats` | `tokens`, `tokensPerSecond`                     | Assistant response statistic.                      |
-| `--context-size`             | Token count                                     | Model context-window size for the usage indicator. |
-| `--logs`                     | `all`, `stderr`, `sandbox`, `none`              | Initial log display mode.                          |
-
-Use `--host` and `--port` to bind the local server, or `--no-ui` to run without the terminal UI. See the [CLI reference](../reference/cli#eve-dev) for all options.
+Use `--host` and `--port` to bind the local server, or `--no-ui` to run without the terminal UI. See the [`eve dev` CLI reference](../reference/cli#eve-dev) for the complete option list, accepted values, and defaults.
 
 ## Connect to a deployment
 
@@ -96,3 +110,4 @@ For a Vercel deployment that needs authentication, run `/vc:login` and follow th
 
 - [Instrumentation](./instrumentation): traces, OpenTelemetry, and diagnostics.
 - [CLI](../reference/cli): commands and flags.
+- [Agent Client Protocol (ACP)](../protocols/acp): drive the same agent from ACP clients such as Zed instead of the TUI.

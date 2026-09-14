@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import { RuntimeRegistryError } from "../src/internal/runtime-registry.js";
+import { subagentToolExecuteWorkflowReference } from "../src/runtime/subagents/workflow-reference.js";
 import { createRuntimeToolRegistry } from "../src/runtime/tools/registry.js";
 import type { ResolvedToolDefinition } from "../src/runtime/types.js";
-import { toInputSchema } from "../src/shared/tool-schema.js";
+import { toInputSchema } from "../src/tools/schema.js";
 
 describe("createRuntimeToolRegistry", () => {
   it("lowers authored tool schemas into serializable runtime descriptors", async () => {
@@ -42,6 +43,91 @@ describe("createRuntimeToolRegistry", () => {
       },
       required: ["city"],
       type: "object",
+    });
+  });
+
+  it("carries delegated-task-child availability into the prepared tool descriptor", async () => {
+    const registry = await createRuntimeToolRegistry({
+      tools: [
+        createResolvedToolDefinition({
+          behavior: {
+            availability: ["delegated-task-child"],
+          },
+          logicalPath: "tools/child_only.ts",
+          name: "child_only",
+          sourceId: "tools/child_only.ts",
+        }),
+      ],
+    });
+
+    expect(registry.preparedTools[0]?.behavior).toEqual({
+      availability: ["delegated-task-child"],
+      handling: undefined,
+      presentation: undefined,
+    });
+  });
+
+  it("keeps authored workflow execution metadata grouped", async () => {
+    const workflowId = "workflow//./agent/tools/deploy//execute";
+    const registry = await createRuntimeToolRegistry({
+      tools: [
+        createResolvedToolDefinition({
+          behavior: {
+            availability: [],
+            handling: { kind: "workflow-tool", workflowId },
+          },
+          logicalPath: "tools/deploy.ts",
+          name: "deploy",
+          sourceId: "tools/deploy.ts",
+        }),
+      ],
+    });
+
+    expect(registry.preparedTools[0]).toMatchObject({
+      behavior: {
+        handling: { kind: "dispatch", target: { kind: "workflow-tool-call", workflowId } },
+      },
+    });
+    expect(registry.preparedTools[0]?.task).toEqual({ workflowId });
+    expect(registry.preparedTools[0]).not.toHaveProperty("workflowId");
+    expect(registry.preparedTools[0]).not.toHaveProperty("nodeId");
+    expect(registry.preparedTools[0]).not.toHaveProperty("resultKind");
+  });
+
+  it("uses the shared stable workflow for the framework agent tool", async () => {
+    const registry = await createRuntimeToolRegistry({
+      tools: [
+        createResolvedToolDefinition({
+          behavior: {
+            availability: [],
+            handling: {
+              kind: "workflow-tool",
+              workflowId: "workflow//./agent/tools/agent//execute",
+            },
+          },
+          logicalPath: "tools/agent.ts",
+          name: "agent",
+          owner: { feature: "root-defaults", kind: "framework" },
+          sourceId: "eve:root-defaults:tools/agent.ts",
+        }),
+      ],
+    });
+
+    const prepared = registry.preparedTools[0];
+    expect(subagentToolExecuteWorkflowReference.workflowId).toMatch(
+      /^workflow\/\/[^/]+\/\/subagentToolExecuteWorkflow$/,
+    );
+    expect(prepared?.task).toEqual({
+      nodeId: "__root__",
+      resultKind: "subagent",
+      workflowId: subagentToolExecuteWorkflowReference.workflowId,
+    });
+    expect(prepared?.behavior?.handling).toEqual({
+      kind: "dispatch",
+      target: {
+        kind: "workflow-tool-call",
+        workflowId: subagentToolExecuteWorkflowReference.workflowId,
+      },
     });
   });
 
@@ -85,13 +171,16 @@ describe("createRuntimeToolRegistry", () => {
 });
 
 function createResolvedToolDefinition(input: {
+  readonly behavior?: ResolvedToolDefinition["behavior"];
   readonly description?: string;
   readonly inputSchema?: ResolvedToolDefinition["inputSchema"];
   readonly logicalPath: string;
   readonly name: string;
+  readonly owner?: ResolvedToolDefinition["owner"];
   readonly sourceId: string;
 }): ResolvedToolDefinition {
   return {
+    behavior: input.behavior,
     inputSchema: input.inputSchema ?? null,
     description: input.description ?? "Get the weather.",
     execute(inputValue: unknown) {
@@ -99,6 +188,7 @@ function createResolvedToolDefinition(input: {
     },
     logicalPath: input.logicalPath,
     name: input.name,
+    owner: input.owner ?? { kind: "application" },
     sourceId: input.sourceId,
     sourceKind: "module",
   };

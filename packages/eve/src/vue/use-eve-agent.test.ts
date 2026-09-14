@@ -4,7 +4,11 @@ import { effectScope } from "vue";
 import { EveAgentStore, type EveAgentStoreSnapshot } from "#client/eve-agent-store.js";
 import { useEveAgent } from "#vue/use-eve-agent.js";
 import type { EveMessageData } from "#client/message-reducer.js";
-import { EVE_SESSION_ID_HEADER } from "#protocol/message.js";
+import {
+  EVE_MESSAGE_STREAM_VERSION,
+  EVE_SESSION_ID_HEADER,
+  EVE_STREAM_VERSION_HEADER,
+} from "#protocol/message.js";
 import {
   createMessageCompletedEvent,
   createMessageReceivedEvent,
@@ -37,7 +41,19 @@ function createEagerStreamResponse(events: readonly UnstampedMessageStreamEvent[
         controller.close();
       },
     }),
+    {
+      headers: { [EVE_STREAM_VERSION_HEADER]: EVE_MESSAGE_STREAM_VERSION },
+    },
   );
+}
+
+function createBoundedStreamResponse(
+  events: readonly UnstampedMessageStreamEvent[],
+  tailIndex = events.length - 1,
+): Response {
+  const response = createEagerStreamResponse(events);
+  response.headers.set("x-eve-stream-tail-index", String(tailIndex));
+  return response;
 }
 
 function createDeferred<T>() {
@@ -334,6 +350,44 @@ describe("EveAgentStore (Vue composable backing store)", () => {
 });
 
 describe("useEveAgent (Vue composable wiring)", () => {
+  it("automatically replays an initial session when resume is enabled", async () => {
+    vi.stubGlobal("window", {});
+    const events = [
+      createMessageReceivedEvent({ message: "Hello", sequence: 0, turnId: "turn_1" }),
+      createMessageCompletedEvent({
+        message: "Hi there.",
+        sequence: 1,
+        stepIndex: 0,
+        turnId: "turn_1",
+      }),
+      createSessionWaitingEvent(),
+    ];
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(createBoundedStreamResponse(events))
+      .mockResolvedValueOnce(createBoundedStreamResponse([], events.length - 1));
+    const scope = effectScope();
+    const agent = scope.run(() =>
+      useEveAgent({
+        initialSession: { sessionId: "session_1", streamIndex: 0 },
+        resume: true,
+      }),
+    );
+    if (agent === undefined) throw new Error("effect scope did not run");
+
+    expect(agent.status.value).toBe("resuming");
+    await vi.waitFor(() => expect(agent.events.value).toHaveLength(events.length));
+    expect(agent.status.value).toBe("ready");
+    expect(agent.data.value).toEqual(
+      completedTurnData({
+        assistantMessage: "Hi there.",
+        turnId: "turn_1",
+        userMessage: "Hello",
+      }),
+    );
+
+    scope.stop();
+  });
+
   it("projects streamed events into reactive refs in the browser", async () => {
     vi.stubGlobal("window", {});
     const events = [
@@ -378,7 +432,7 @@ describe("useEveAgent (Vue composable wiring)", () => {
     scope.stop();
   });
 
-  it("unsubscribes and stops the session when the scope is disposed", async () => {
+  it("unsubscribes and detaches the local stream when the scope is disposed", async () => {
     vi.stubGlobal("window", {});
     vi.spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(createStartedMessageResponse("session_1", "http:session_1"))

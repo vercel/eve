@@ -137,14 +137,6 @@ async function readUntilBoundary(
   const events: MessageStreamEvent[] = [];
 
   while (true) {
-    const { done, value } = await reader.read();
-
-    if (done) {
-      throw new Error("Workflow stream closed before reaching a turn boundary.");
-    }
-
-    state.buffer += decoder.decode(value);
-
     for (
       let newlineIndex = state.buffer.indexOf("\n");
       newlineIndex !== -1;
@@ -164,6 +156,12 @@ async function readUntilBoundary(
         return events;
       }
     }
+
+    const { done, value } = await reader.read();
+    if (done) {
+      throw new Error("Workflow stream closed before reaching a turn boundary.");
+    }
+    state.buffer += decoder.decode(value, { stream: true });
   }
 }
 

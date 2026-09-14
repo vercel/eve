@@ -149,7 +149,7 @@ async function waitForWebSocketEvent<T>(
     }, 10_000);
     const cleanup = () => {
       clearTimeout(deadline);
-      socket.removeEventListener(eventName, onEvent as EventListener);
+      socket.removeEventListener(eventName, onEvent);
       socket.removeEventListener("error", onError);
     };
     const onEvent = (event: Event) => {
@@ -160,7 +160,7 @@ async function waitForWebSocketEvent<T>(
       cleanup();
       reject(new Error(`WebSocket failed while waiting for ${eventName}.`));
     };
-    socket.addEventListener(eventName, onEvent as EventListener, { once: true });
+    socket.addEventListener(eventName, onEvent, { once: true });
     socket.addEventListener("error", onError, { once: true });
   });
 }
@@ -251,7 +251,7 @@ describe("eve dev server live connections", () => {
           join(app.appRoot, "agent", "instrumentation.ts"),
           createInstrumentationSource("keep-alive-two"),
         );
-        await forceDevelopmentRebuild(server.url);
+        await forceDevelopmentRebuild(server.url, agent);
         await waitForCondition(
           async () => (await fetchText(server.url, "/instrumentation-marker")) === "keep-alive-two",
           `Timed out waiting for the structural replacement.\n\nstdout:\n${server.stdout()}\n\nstderr:\n${server.stderr()}`,

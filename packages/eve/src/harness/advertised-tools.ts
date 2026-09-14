@@ -1,17 +1,13 @@
 import type { ToolSet } from "ai";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
-import { resolveSubagentDepth } from "#harness/subagent-depth.js";
-import { AGENT_TOOL_NAME } from "#runtime/framework-tools/agent.js";
-import { ROOT_RUNTIME_AGENT_NODE_ID } from "#runtime/graph.js";
 import {
   ensureWorkflowContinuationSecurity,
   getWorkflowContinuationSecurity,
 } from "#harness/workflow-continuation-security.js";
 import { applyWorkflowTool } from "#harness/workflow-sandbox.js";
 import type { HarnessSession, HarnessToolMap } from "#harness/types.js";
-import type { WorkflowSandboxLifecycle } from "#shared/workflow-sandbox.js";
 
-type AdvertisedToolSession = Pick<HarnessSession, "rootSessionId" | "subagentDepth">;
+type AdvertisedToolSession = Pick<HarnessSession, "rootSessionId" | "taskId">;
 
 type AdvertisedToolMapInput = {
   readonly session: AdvertisedToolSession;
@@ -28,10 +24,6 @@ type AdvertisedModelToolsInput = {
   readonly session: HarnessSession;
   readonly tools: HarnessToolMap;
   readonly workflow?: {
-    readonly lifecycle?: (input: {
-      readonly session: HarnessSession;
-      readonly tools: HarnessToolMap;
-    }) => WorkflowSandboxLifecycle | undefined;
     readonly maxSubagents?: number;
   };
 };
@@ -61,16 +53,16 @@ export function getAdvertisedTools(
   }
 
   if (isToolDefinitionList(input.tools)) {
-    return filterUnavailableDelegationToolDefinitions(input.tools, input.session);
+    return filterUnavailableToolDefinitions(input.tools, input.session);
   }
 
-  return filterUnavailableDelegationToolMap(input.tools, input.session);
+  return filterUnavailableToolMap(input.tools, input.session);
 }
 
 async function getAdvertisedModelTools(
   input: AdvertisedModelToolsInput,
 ): Promise<AdvertisedModelTools> {
-  const tools = filterUnavailableDelegationToolMap(input.tools, input.session);
+  const tools = filterUnavailableToolMap(input.tools, input.session);
   if (input.workflow === undefined) {
     return {
       harnessTools: tools,
@@ -92,7 +84,6 @@ async function getAdvertisedModelTools(
   const { modelTools } = await applyWorkflowTool({
     continuationSecurity: getWorkflowContinuationSecurity(session),
     harnessTools: workflowHostTools,
-    lifecycle: input.workflow.lifecycle?.({ session, tools: workflowHostTools }),
     maxSubagents: input.workflow.maxSubagents,
     tools: input.modelTools,
   });
@@ -104,14 +95,14 @@ async function getAdvertisedModelTools(
   };
 }
 
-function filterUnavailableDelegationToolDefinitions(
+function filterUnavailableToolDefinitions(
   tools: readonly HarnessToolDefinition[],
   session: AdvertisedToolSession,
 ): readonly HarnessToolDefinition[] {
   const filteredTools: HarnessToolDefinition[] = [];
 
   for (const tool of tools) {
-    if (shouldHideDelegationTool(tool, session)) {
+    if (shouldHideTool(tool, session)) {
       continue;
     }
     filteredTools.push(tool);
@@ -119,14 +110,14 @@ function filterUnavailableDelegationToolDefinitions(
   return filteredTools;
 }
 
-function filterUnavailableDelegationToolMap(
+function filterUnavailableToolMap(
   tools: HarnessToolMap,
   session: AdvertisedToolSession,
 ): HarnessToolMap {
   const filteredTools = new Map<string, HarnessToolDefinition>();
 
   for (const [name, tool] of tools) {
-    if (shouldHideDelegationTool(tool, session)) {
+    if (shouldHideTool(tool, session)) {
       continue;
     }
     filteredTools.set(name, tool);
@@ -139,38 +130,35 @@ function filterWorkflowHostToolsForRootSession(
   session: AdvertisedToolSession,
 ): HarnessToolMap {
   const filteredTools = new Map<string, HarnessToolDefinition>();
-  const subagentDepth = resolveSubagentDepth(session);
 
-  if (session.rootSessionId !== undefined || subagentDepth.currentDepth > 0) {
+  if (session.rootSessionId !== undefined) {
     return filteredTools;
   }
 
   for (const [name, tool] of tools) {
-    if (isDelegatedRuntimeActionTool(tool)) {
+    if (tool.resultKind === "subagent") {
       filteredTools.set(name, tool);
     }
   }
   return filteredTools;
 }
 
-function isDelegatedRuntimeActionTool(definition: HarnessToolDefinition): boolean {
-  const runtimeAction = definition.runtimeAction;
-  return runtimeAction?.kind === "subagent-call" || runtimeAction?.kind === "remote-agent-call";
-}
-
-function shouldHideDelegationTool(
+function shouldHideTool(
   definition: HarnessToolDefinition,
   session: AdvertisedToolSession,
 ): boolean {
+  const delegated = session.rootSessionId !== undefined;
   if (
-    definition.name !== AGENT_TOOL_NAME ||
-    definition.runtimeAction?.kind !== "subagent-call" ||
-    definition.runtimeAction.nodeId !== ROOT_RUNTIME_AGENT_NODE_ID
+    definition.rootOnly === true ||
+    definition.behavior?.availability.includes("root-session") === true
   ) {
-    return false;
+    return delegated;
+  }
+  if (definition.behavior?.availability.includes("delegated-task-child") === true) {
+    return session.taskId === undefined;
   }
 
-  return session.rootSessionId !== undefined || resolveSubagentDepth(session).currentDepth > 0;
+  return false;
 }
 
 function isToolDefinitionList(

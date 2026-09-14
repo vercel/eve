@@ -73,6 +73,25 @@ function readMessageFromCompletedEvent(event: { readonly data?: unknown }): stri
 }
 
 /**
+ * Resolves the latest assistant text, including a response that is still
+ * streaming and has not emitted `message.completed` yet.
+ */
+export function resolveTurnAssistantMessage(turn: TraceTurn): string | undefined {
+  if (typeof turn.assistantMessage === "string" && turn.assistantMessage.length > 0) {
+    return turn.assistantMessage;
+  }
+
+  for (let index = turn.steps.length - 1; index >= 0; index -= 1) {
+    const responseText = turn.steps[index]?.responseText;
+    if (typeof responseText === "string" && responseText.length > 0) {
+      return responseText;
+    }
+  }
+
+  return undefined;
+}
+
+/**
  * Resolves the most useful assistant-facing failure text for a turn when no
  * normal assistant message was completed.
  */
@@ -102,7 +121,7 @@ export function resolveTurnFailureMessage(turn: TraceTurn): string | undefined {
  * for the provided turn.
  */
 export function shouldRenderAssistantTurn(turn: TraceTurn): boolean {
-  if (typeof turn.assistantMessage === "string" && turn.assistantMessage.length > 0) {
+  if (resolveTurnAssistantMessage(turn) !== undefined) {
     return true;
   }
 

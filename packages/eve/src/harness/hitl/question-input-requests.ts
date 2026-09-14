@@ -1,6 +1,6 @@
 import type { ModelMessage } from "ai";
 
-import type { InputRequest, InputResponse } from "#runtime/input/types.js";
+import type { InputRequest, InputResponse } from "#shared/input.js";
 import { buildResolvedInputBatch } from "#harness/input-request-resolution.js";
 import type { PendingInputBatch } from "#harness/pending-input-batches.js";
 import {

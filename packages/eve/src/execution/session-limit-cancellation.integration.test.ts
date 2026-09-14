@@ -9,6 +9,7 @@ import {
 } from "#internal/testing/events.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { workflowEntry } from "#execution/workflow-entry.js";
+import { experimental_workflow } from "#tools/workflow.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 
 /**
@@ -77,7 +78,7 @@ function requestIdFromPromptTurn(events: readonly UnstampedMessageStreamEvent[])
 
 describe("session-limit continuation decline integration", () => {
   it("cancels the turn and keeps the session resumable when the user declines", async () => {
-    const runtime = createTestRuntime({
+    const runtime = await createTestRuntime({
       agent: { limits: { maxInputTokensPerSession: 1 }, name: "limit-decline-root" },
     });
     const continuationToken = "http:limit-decline-root";
@@ -143,15 +144,21 @@ describe("session-limit continuation decline integration", () => {
   }, 60_000);
 
   it("fails a zero-quota delegation fast and declines the root's own prompt", async () => {
-    const runtime = createTestRuntime({
+    const runtime = await createTestRuntime({
       agent: { limits: { maxInputTokensPerSession: 1 }, name: "limit-decline-child" },
+      modules: [
+        {
+          loadNamespace: async () => ({ default: experimental_workflow() }),
+          logicalPath: "tools/workflow.ts",
+        },
+      ],
     });
     const continuationToken = "http:limit-decline-child";
 
     await runtime.run(async () => {
       const run = await start(workflowEntry, [
         {
-          input: { message: "Delegate to a subagent: summarize the weather." },
+          input: { message: "Delegate through Workflow to a subagent: summarize the weather." },
           serializedContext: {
             ...buildSerializedContext({
               channelKind: "http",
@@ -173,7 +180,9 @@ describe("session-limit continuation decline integration", () => {
         // result, reaches its own pre-model gate, and parks on its OWN
         // continuation prompt.
         const hitlTurn = await stream.nextTurn();
-        expect(hitlTurn.at(-1)?.type).toBe("session.waiting");
+        expect(hitlTurn.at(-1)?.type, JSON.stringify(hitlTurn.at(-1), null, 2)).toBe(
+          "session.waiting",
+        );
         expect(filterEventsByType(hitlTurn, "subagent.called")).toHaveLength(1);
         expect(filterEventsByType(hitlTurn, "input.requested")).toHaveLength(1);
         const requestId = requestIdFromPromptTurn(hitlTurn);

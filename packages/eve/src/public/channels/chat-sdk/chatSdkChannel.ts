@@ -13,7 +13,7 @@ import { ContextContainer, contextStorage } from "#context/container.js";
 import { ContextKey } from "#context/key.js";
 import { createLogger, extractErrorId, formatErrorHint } from "#internal/logging.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
-import type { InputRequest } from "#runtime/input/types.js";
+import type { InputRequest } from "#shared/input.js";
 import type {
   ActionEvent,
   Adapter,
@@ -32,6 +32,7 @@ import {
   Message,
   ThreadImpl,
 } from "#compiled/chat/index.js";
+import { defaultAuthorizationEvents } from "#public/channels/chat-sdk/authorization.js";
 import { isNotImplemented } from "#public/channels/chat-sdk/notImplemented.js";
 import {
   defineChannel,
@@ -43,17 +44,21 @@ import {
   type RouteHandlerArgs,
   type Session,
 } from "#public/definitions/channel.js";
+import { chatSdkInstrumentation } from "#public/channels/chat-sdk/audience.js";
 
 const log = createLogger("chat-sdk.channel");
 const DEFAULT_ROUTE = "/eve/v1";
 const DEFAULT_INPUT_ACTION_PREFIX = "eve_input:";
 const DEFAULT_STREAMING_EDIT_INTERVAL_MS = 1_000;
 const MAX_TYPING_STATUS = 80;
+const streamTextByState = new WeakMap<ChatSdkChannelState, string>();
 
 type ChatSdkAdapters = Record<string, Adapter>;
 type ChatSdkSendInput = string | UserContent | SendPayload;
 type MutableDeliveryOptions<TState> = {
-  -readonly [Key in keyof ChannelAddressDeliveryOptions<TState>]: ChannelAddressDeliveryOptions<TState>[Key];
+  -readonly [
+    Key in keyof ChannelAddressDeliveryOptions<TState>
+  ]: ChannelAddressDeliveryOptions<TState>[Key];
 };
 type EventData<T extends UnstampedMessageStreamEvent["type"]> =
   Extract<UnstampedMessageStreamEvent, { type: T }> extends { data: infer D } ? D : undefined;
@@ -79,7 +84,8 @@ export interface ChatSdkChannelState extends Record<string, unknown> {
   lastEditAtMs?: number | null;
   /** Buffered first line of a tool-call message, surfaced as typing status. */
   pendingToolCallMessage?: string | null;
-  /** Step index the current stream anchor belongs to (resets per step). */
+  /** Authorization status messages, keyed by connection name. */
+  pendingAuthMessageIds?: Record<string, string>;
   streamStepIndex?: number | null;
 }
 
@@ -288,7 +294,7 @@ export function chatSdkChannel<TAdapters extends ChatSdkAdapters>(
     kindHint: "chat-sdk",
     turnPolicy: config.turnPolicy,
     state: initialState(),
-    metadata: metadataFromState,
+    ...chatSdkInstrumentation,
     context(state) {
       return {
         bot,
@@ -344,6 +350,7 @@ function defaultEvents<TAdapters extends ChatSdkAdapters>(
   inputActionPrefix: string,
 ): ChatSdkChannelEvents<TAdapters> {
   return {
+    ...defaultAuthorizationEvents(),
     async "turn.started"(_event, channel, _ctx) {
       channel.state.pendingToolCallMessage = null;
       clearStream(channel.state);
@@ -362,10 +369,17 @@ function defaultEvents<TAdapters extends ChatSdkAdapters>(
       await safeStartTyping(channel.thread, truncate(`Running ${labels.join(", ")}...`));
     },
     async "message.appended"(event, channel, _ctx) {
-      if (!channel.thread || !event.messageSoFar || !canStream(channel)) return;
+      if (!channel.thread || !canStream(channel)) return;
+      const currentText =
+        channel.state.streamStepIndex === event.stepIndex
+          ? streamTextByState.get(channel.state)
+          : undefined;
+      const message = (currentText ?? "") + event.messageDelta;
+      if (!message) return;
+      streamTextByState.set(channel.state, message);
       const anchor = channel.state.anchorMessageId;
       if (!anchor || channel.state.streamStepIndex !== event.stepIndex) {
-        const sent = await channel.thread.post({ markdown: event.messageSoFar });
+        const sent = await channel.thread.post({ markdown: message });
         channel.state.anchorMessageId = sent.id;
         channel.state.streamStepIndex = event.stepIndex;
         channel.state.lastEditAtMs = Date.now();
@@ -374,7 +388,7 @@ function defaultEvents<TAdapters extends ChatSdkAdapters>(
       const lastEdit = channel.state.lastEditAtMs ?? 0;
       if (Date.now() - lastEdit < channel.streamingEditIntervalMs) return;
       try {
-        await editMessage(channel.thread, anchor, event.messageSoFar);
+        await editMessage(channel.thread, anchor, message);
         channel.state.lastEditAtMs = Date.now();
       } catch (error) {
         if (!isNotImplemented(error)) throw error;
@@ -484,6 +498,7 @@ function clearStream(state: ChatSdkChannelState): void {
   state.anchorMessageId = null;
   state.lastEditAtMs = null;
   state.streamStepIndex = null;
+  streamTextByState.delete(state);
 }
 
 /** First non-blank line of `text`, used as a compact typing status. */
@@ -572,16 +587,7 @@ async function bridgeSend<TAdapters extends ChatSdkAdapters>(
 }
 
 function initialState(): ChatSdkChannelState {
-  return { thread: null };
-}
-
-function metadataFromState(state: ChatSdkChannelState): ChatSdkInstrumentationMetadata {
-  return {
-    adapterName: state.thread?.adapterName ?? null,
-    channelId: state.thread?.channelId ?? null,
-    isDM: state.thread?.isDM ?? null,
-    threadId: state.thread?.id ?? null,
-  };
+  return { pendingAuthMessageIds: {}, thread: null };
 }
 
 function threadFromState<TAdapters extends ChatSdkAdapters>(

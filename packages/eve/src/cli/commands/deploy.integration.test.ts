@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, test, vi } from "vitest";
 
 import { createFakePrompter } from "#internal/testing/fake-prompter.js";
+import { packageInstallResult } from "#internal/testing/package-process.js";
 import type { DeployProjectDeps } from "#setup/boxes/deploy-project.js";
 import type { DeploymentInfo } from "#setup/project-resolution.js";
 import { isEveProject } from "#setup/scaffold/index.js";
@@ -24,13 +25,24 @@ class TestLogger implements DeployCliLogger {
   }
 }
 
+async function createWorkspaceProject(): Promise<string> {
+  const projectRoot = await mkdtemp(join(tmpdir(), "eve-deploy-workspace-"));
+  await mkdir(join(projectRoot, "agents/support/agent"), { recursive: true });
+  await writeFile(
+    join(projectRoot, "package.json"),
+    JSON.stringify({ dependencies: { eve: "*" }, private: true }),
+    "utf8",
+  );
+  return projectRoot;
+}
+
 async function createAgentProject(): Promise<string> {
   const projectRoot = await mkdtemp(join(tmpdir(), "eve-deploy-command-"));
   await mkdir(join(projectRoot, "agent"), { recursive: true });
   await writeFile(join(projectRoot, "agent/agent.ts"), "export default {};\n", "utf8");
   await writeFile(
     join(projectRoot, "package.json"),
-    `${JSON.stringify({ name: "my-agent", dependencies: {} }, null, 2)}\n`,
+    `${JSON.stringify({ name: "my-agent", dependencies: { eve: "*" } }, null, 2)}\n`,
     "utf8",
   );
   return projectRoot;
@@ -50,8 +62,8 @@ function createDeployProjectDeps() {
       kind: "pnpm",
       source: "default",
     })),
-    runPackageManagerInstall: vi.fn<DeployProjectDeps["runPackageManagerInstall"]>(
-      async () => true,
+    runPackageManagerInstall: vi.fn<DeployProjectDeps["runPackageManagerInstall"]>(async () =>
+      packageInstallResult(),
     ),
     detectDeployment: vi.fn<DeployProjectDeps["detectDeployment"]>(async () => DEPLOYED),
     syncHostFrameworkPreset: vi.fn<DeployProjectDeps["syncHostFrameworkPreset"]>(async () => {}),
@@ -78,6 +90,19 @@ describe("runDeployCommand", () => {
     expect(process.exitCode).toBe(1);
   });
 
+  test("refuses to deploy one member of a workspace", async () => {
+    const projectRoot = await createWorkspaceProject();
+    const logger = new TestLogger();
+
+    await runDeployCommand(logger, join(projectRoot, "agents/support"), {
+      isEveProject,
+      hasInteractiveTerminal: () => true,
+    });
+
+    expect(logger.errors[0]).toContain("workspace root");
+    expect(process.exitCode).toBe(1);
+  });
+
   test("points an unlinked non-interactive run at eve link", async () => {
     const projectRoot = await createAgentProject();
     const logger = new TestLogger();
@@ -86,7 +111,6 @@ describe("runDeployCommand", () => {
 
     await runDeployCommand(logger, projectRoot, {
       createPrompter: () => fake.prompter,
-      isEveProject,
       hasInteractiveTerminal: () => false,
       flowDeps: {
         detectDeployment: vi.fn(async () => ({ state: "unlinked" }) as DeploymentInfo),
@@ -107,7 +131,6 @@ describe("runDeployCommand", () => {
 
     await runDeployCommand(logger, projectRoot, {
       createPrompter: () => fake.prompter,
-      isEveProject,
       hasInteractiveTerminal: () => false,
       flowDeps: {
         detectDeployment: vi.fn(async () => LINKED),

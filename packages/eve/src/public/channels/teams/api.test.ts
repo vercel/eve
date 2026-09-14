@@ -103,6 +103,28 @@ describe("Teams Connector API wrapper", () => {
     expect(requests[3]!.body).toEqual({ type: "typing" });
   });
 
+  it("reports Connector update failures with the response body and target", async () => {
+    const apiFetch = vi.fn(async () =>
+      Response.json(
+        { error: { code: "BadArgument", message: "Activity cannot be updated." } },
+        { status: 400 },
+      ),
+    );
+
+    await expect(
+      updateTeamsActivity({
+        activityId: "ACTIVITY_1",
+        body: { text: "updated", type: "message" },
+        conversationId: "CONV",
+        credentials: { tokenProvider: () => "connector-token" },
+        fetch: apiFetch,
+        serviceUrl: "https://smba.example.test/teams",
+      }),
+    ).rejects.toThrow(
+      'Teams update activity failed with HTTP 400 for conversation "CONV" activity "ACTIVITY_1": {"error":{"code":"BadArgument","message":"Activity cannot be updated."}}',
+    );
+  });
+
   it("exposes a raw Connector request helper", async () => {
     const apiFetch = vi.fn(async () => Response.json({ ok: true }));
     await callTeamsConnectorApi({

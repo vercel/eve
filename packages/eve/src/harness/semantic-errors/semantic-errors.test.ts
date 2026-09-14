@@ -17,6 +17,30 @@ describe("summarizeKnownError (catalog table)", () => {
     readonly id: string;
   }[] = [
     {
+      title: "gateway billing setup required",
+      error: named(
+        "GatewayInvalidRequestError",
+        "AI Gateway requires a valid credit card on file to service requests.",
+      ),
+      id: "gateway-billing-required",
+    },
+    {
+      title: "gateway free-tier model restriction",
+      error: named(
+        "GatewayInvalidRequestError",
+        "Model call failed: Free tier users do not have access to this model.",
+      ),
+      id: "gateway-free-tier-model-restricted",
+    },
+    {
+      title: "gateway free-tier model rate limit",
+      error: named(
+        "GatewayInvalidRequestError",
+        "Model call failed: Free tier requests on this model are rate-limited.",
+      ),
+      id: "gateway-free-tier-rate-limited",
+    },
+    {
       title: "gateway invalid api key",
       error: named(
         "GatewayAuthenticationError",
@@ -77,6 +101,14 @@ describe("summarizeKnownError (catalog table)", () => {
         "The model did not return a response. Please try again.",
       ),
       id: "empty-model-response",
+    },
+    {
+      title: "content-filtered model response",
+      error: named(
+        "ContentFilteredModelResponseError",
+        "The model provider filtered this response.",
+      ),
+      id: "model-response-content-filtered",
     },
     {
       title: "unsupported model capability",
@@ -182,6 +214,16 @@ describe("summarizeKnownError (catalog table)", () => {
       expect(summarizeKnownError(testCase.error)?.id).toBe(testCase.id);
     });
   }
+
+  it.each([
+    "AI Gateway requires a valid credit card on file to service requests.",
+    "Model call failed: Free tier users do not have access to this model.",
+    "Model call failed: Free tier requests on this model are rate-limited.",
+  ])("preserves recoverable AI Gateway messages", (message) => {
+    expect(summarizeKnownError(named("GatewayInvalidRequestError", message))?.message).toBe(
+      message,
+    );
+  });
 
   it("prefers the structured code as network evidence over the generic wrapper message", () => {
     const error = new TypeError("fetch failed", {

@@ -1,6 +1,6 @@
 import {
   ROOT_CONTEXT,
-  SpanStatusCode,
+  SpanKind,
   type Context,
   type Span,
   type SpanContext,
@@ -12,11 +12,15 @@ import type {
   InstrumentationActionStartedEvent,
   InstrumentationToolCallStartedEvent,
   InstrumentationToolCallTerminalEvent,
-} from "#harness/instrumentation-lifecycle.js";
-import { actionIdempotencyKey } from "#harness/instrumentation-lifecycle.js";
+} from "#instrumentation/lifecycle.js";
+import { actionIdempotencyKey } from "#instrumentation/lifecycle.js";
 import { contentAttribute } from "#tracing/agent-otel-content.js";
+import { agentSpanNamingAttributes } from "#tracing/agent-span-naming.js";
+import { agentTraceIdentityAttributes } from "#tracing/agent-otel-attributes.js";
+import { withChannelAudience } from "#tracing/channel-audience-context.js";
 import type { AgentSpanIdGenerator } from "#tracing/agent-span-id-generator.js";
 import type { AgentActionContext } from "#tracing/agent-action-instrumentation.js";
+import { recordAgentSpanError as recordError } from "#tracing/agent-span-error.js";
 
 interface ToolSpanState {
   readonly actionKey: string;
@@ -143,12 +147,15 @@ export function createAgentToolInstrumentation(input: {
     const state: ToolSpanState = {
       actionKey,
       attemptId: event.scope.attemptId,
-      context: contextFromSpanContext({
-        isRemote: false,
-        spanId,
-        traceFlags: parent.spanContext.traceFlags,
-        traceId: parent.spanContext.traceId,
-      }),
+      context: withChannelAudience(
+        contextFromSpanContext({
+          isRemote: false,
+          spanId,
+          traceFlags: parent.spanContext.traceFlags,
+          traceId: parent.spanContext.traceId,
+        }),
+        event.scope.channelAudience,
+      ),
       event,
       fallbackParent: parent.context,
       idempotencyKey: event.idempotencyKey,
@@ -164,16 +171,17 @@ export function createAgentToolInstrumentation(input: {
     if (state.span !== undefined || state.finished === true) return;
     state.span = input.idGenerator.withSpanId(state.spanId, () =>
       input.tracer.startSpan(
-        "ai.toolCall",
+        `execute_tool ${state.event.toolName}`,
         {
           attributes: toolAttributes(state.event),
+          kind: SpanKind.INTERNAL,
           startTime: state.startTimeMs,
         },
         parent,
       ),
     );
     if (input.recordInputs) {
-      const args = contentAttribute(state.event.input, false);
+      const args = contentAttribute(state.event.input);
       if (args !== undefined) state.span.setAttribute("gen_ai.tool.call.arguments", args);
     }
   }
@@ -195,7 +203,7 @@ export function createAgentToolInstrumentation(input: {
     } else if (terminal?.output.type === "error") {
       recordError(span, terminal.output.error);
     } else if (terminal !== undefined && input.recordOutputs) {
-      const result = contentAttribute(terminal.output.output, false);
+      const result = contentAttribute(terminal.output.output);
       if (result !== undefined) span.setAttribute("gen_ai.tool.call.result", result);
     }
     span.end();
@@ -206,21 +214,22 @@ export function createAgentToolInstrumentation(input: {
   }
 }
 
-function toolAttributes(event: InstrumentationToolCallStartedEvent): Record<string, string> {
+function toolAttributes(
+  event: InstrumentationToolCallStartedEvent,
+): Record<string, string | number> {
   return {
     "gen_ai.operation.name": "execute_tool",
     "gen_ai.tool.call.id": event.callId,
     "gen_ai.tool.name": event.toolName,
+    "gen_ai.tool.type": "function",
+    ...agentSpanNamingAttributes(`execute_tool ${event.toolName}`, "execute_tool"),
+    ...agentTraceIdentityAttributes({
+      rootSessionId: event.scope.rootSessionId ?? event.scope.sessionId,
+      sessionId: event.scope.sessionId,
+    }),
   };
 }
 
 function contextFromSpanContext(spanContext: SpanContext): Context {
   return trace.setSpan(ROOT_CONTEXT, trace.wrapSpanContext(spanContext));
-}
-
-function recordError(span: Span, error: unknown): void {
-  if (error instanceof Error) {
-    span.recordException(error);
-    span.setStatus({ code: SpanStatusCode.ERROR, message: error.message });
-  } else span.setStatus({ code: SpanStatusCode.ERROR });
 }

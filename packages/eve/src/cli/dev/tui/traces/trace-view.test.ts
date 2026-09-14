@@ -43,20 +43,25 @@ function span(
 /** A turn with a user message, an assistant reply, and a tool call. */
 function conversationSpans(): LocalTraceSpan[] {
   const turn = span("a".repeat(16), "agent.turn", 0, 0, undefined, { "agent.turn.id": "turn_0" });
+  const delivery = span("0".repeat(16), "agent.channel.delivery", 0, 0, undefined, {
+    "agent.channel.delivery.input": JSON.stringify({ message: "hi" }),
+    "agent.turn.id": "turn_0",
+  });
   const step = span("b".repeat(16), "agent.step", 10, 5000, turn.spanId, {});
   const model = span("c".repeat(16), "ai.streamText.doStream", 20, 2000, step.spanId, {
     "gen_ai.request.model": "gpt-5",
     "agent.usage.input_tokens": 1234,
-    "ai.prompt.messages": JSON.stringify([{ role: "user", content: "hi" }]),
+    "gen_ai.input.messages": JSON.stringify([
+      { parts: [{ content: "hi", type: "text" }], role: "user" },
+    ]),
     "ai.prompt.system": "You are a test assistant.",
     "ai.response.text": "reply",
   });
-  const action = span("d".repeat(16), "agent.action", 2100, 2400, step.spanId, {});
-  const toolCall = span("e".repeat(16), "ai.toolCall", 2100, 2400, action.spanId, {
-    "gen_ai.tool.name": "get_weather",
+  const action = span("d".repeat(16), "agent.action", 2100, 2400, turn.spanId, {
+    "agent.action.name": "get_weather",
     "gen_ai.tool.call.arguments": '{"city":"sf"}',
   });
-  return [turn, step, model, action, toolCall];
+  return [turn, delivery, step, model, action];
 }
 
 function viewerState(
@@ -69,8 +74,8 @@ function viewerState(
   const trace: LocalTrace = {
     agentName: "weather",
     endTimeNs: ends.reduce((a, b) => (b > a ? b : a), 0n),
-    sessionId: "session-123",
-    sessionIds: ["session-123"],
+    conversationId: "session-123",
+    conversationIds: ["session-123"],
     spans,
     startTimeNs: starts.reduce((a, b) => (b < a ? b : a), starts[0] ?? 0n),
     traceId,
@@ -96,7 +101,7 @@ describe("renderTraceViewer", () => {
     const header = stripAnsi(frame.rows[1]!);
     expect(header).toContain("traces");
     expect(header).toContain("weather");
-    expect(header).toContain("session session-123");
+    expect(header).toContain("conversation session-123");
     expect(header).toContain(clockTimeOf(BASE));
     expect(header).toContain("5 spans");
     expect(header).toContain("[1/1]");
@@ -204,19 +209,28 @@ describe("renderTraceViewer", () => {
     const turn = span("a".repeat(16), "agent.turn", 0, 0);
     const step = span("b".repeat(16), "agent.step", 10, 300, turn.spanId, {});
     const model = span("c".repeat(16), "ai.streamText.doStream", 20, 100, step.spanId, {
-      "ai.prompt.messages": JSON.stringify([{ role: "user", content: "hi" }]),
+      "gen_ai.input.messages": JSON.stringify([
+        { parts: [{ content: "hi", type: "text" }], role: "user" },
+      ]),
       "ai.response.text": "reply",
       "agent.usage.input_tokens": 10,
     });
-    const action = span("d".repeat(16), "agent.action", 110, 200, step.spanId, {});
-    const failingToolCall = {
-      ...span("f".repeat(16), "ai.toolCall", 110, 200, action.spanId, {
-        "gen_ai.tool.name": "explode",
-      }),
-      statusCode: 2,
-    };
+    const delivery = span("0".repeat(16), "agent.channel.delivery", 0, 0, undefined, {
+      "agent.channel.delivery.input": JSON.stringify({ message: "hi" }),
+    });
+    const action = span(
+      "d".repeat(16),
+      "agent.action",
+      110,
+      200,
+      turn.spanId,
+      {
+        "agent.action.name": "explode",
+      },
+      2,
+    );
     const frame = render(
-      viewerState([turn, step, model, action, failingToolCall], {
+      viewerState([turn, delivery, step, model, action], {
         panelOpen: true,
         selectedRow: 2,
       }),
@@ -240,7 +254,7 @@ describe("renderTraceViewer", () => {
   it("skips payload keys in the drawer since the cards already carry them", () => {
     const frame = render(viewerState(conversationSpans(), { panelOpen: true, selectedRow: 2 }));
     const body = frame.rows.map(stripAnsi).join("\n");
-    expect(body).not.toContain("ai.prompt.messages");
+    expect(body).not.toContain("gen_ai.input.messages");
     expect(body).not.toContain("ai.response.text");
     expect(body).toContain("agent.usage.input_tokens 1234");
   });
@@ -250,9 +264,8 @@ describe("renderTraceViewer", () => {
       Array.from({ length: 30 }, (_, index) => [`key.${index}`, `value-${index}`]),
     );
     const turn = span("a".repeat(16), "agent.turn", 0, 0);
-    const action = span("d".repeat(16), "agent.action", 100, 200, turn.spanId, {});
-    const toolCall = span("f".repeat(16), "ai.toolCall", 100, 200, action.spanId, attributes);
-    const state = viewerState([turn, action, toolCall], {
+    const action = span("d".repeat(16), "agent.action", 100, 200, turn.spanId, attributes);
+    const state = viewerState([turn, action], {
       panelOpen: true,
       selectedRow: 0,
       panelScroll: 15,
@@ -298,9 +311,9 @@ describe("renderTraceViewer", () => {
     // A tool result ending in a real newline used to split its composed row
     // and inject a phantom blank line into the frame.
     const turn = span("a".repeat(16), "agent.turn", 0, 0);
-    const selected = span("f".repeat(16), "ai.toolCall", 100, 200, turn.spanId, {
+    const selected = span("f".repeat(16), "agent.action", 100, 200, turn.spanId, {
+      "agent.action.name": "load_skill",
       "gen_ai.tool.call.result": "When the user asks about weather, call the tool.\n",
-      "gen_ai.tool.name": "load_skill",
     });
     const frame = render(viewerState([turn, selected], { panelOpen: true }), 100, 24);
     for (const row of frame.rows) {

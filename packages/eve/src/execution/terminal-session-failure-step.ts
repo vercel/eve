@@ -1,14 +1,7 @@
-import { buildAdapterContext } from "#channel/adapter-context.js";
-import { callAdapterEventHandler } from "#channel/adapter.js";
-import { deserializeContext } from "#context/serialize.js";
+import { emitTerminalSessionEvent } from "#execution/terminal-session-event.js";
 import { summarizeKnownError } from "#harness/semantic-errors/index.js";
 import { createLogger, formatError } from "#internal/logging.js";
-import {
-  createSessionFailedEvent,
-  encodeMessageStreamEvent,
-  stampMessageStreamEvent,
-} from "#protocol/message.js";
-import { ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
+import { createSessionFailedEvent } from "#protocol/message.js";
 
 const log = createLogger("execution.workflow-entry");
 
@@ -17,6 +10,7 @@ export async function emitTerminalSessionFailureStep(input: {
   readonly error: unknown;
   readonly parentWritable: WritableStream<Uint8Array>;
   readonly serializedContext: Record<string, unknown>;
+  readonly turnId?: string;
 }): Promise<void> {
   "use step";
 
@@ -45,41 +39,11 @@ export async function emitTerminalSessionFailureStep(input: {
     code,
   });
 
-  const event = createSessionFailedEvent({ code, details, message, sessionId });
-
-  // Best-effort: invoke the adapter handler so channels surface the
-  // failure. Errors are logged, never rethrown — the outer workflow
-  // throw must still reach the run handle.
-  try {
-    const ctx = await deserializeContext(input.serializedContext);
-    const adapter = ctx.get(ChannelKey);
-    if (adapter !== undefined) {
-      const adapterCtx = buildAdapterContext(adapter, ctx);
-      await callAdapterEventHandler(adapter, event, adapterCtx);
-    }
-  } catch (notificationError) {
-    log.error("adapter failed to handle terminal session.failed event", {
-      errorId: typeof details.errorId === "string" ? details.errorId : undefined,
-      sessionId,
-      error: notificationError,
-    });
-  }
-
-  // Always write the event to the durable stream so downstream
-  // consumers see a canonical terminal event instead of an abrupt
-  // stream close.
-  try {
-    const writer = input.parentWritable.getWriter();
-    try {
-      await writer.write(encodeMessageStreamEvent(stampMessageStreamEvent(event)));
-    } finally {
-      writer.releaseLock();
-    }
-  } catch (writeError) {
-    log.error("failed to write terminal session.failed event to durable stream", {
-      errorId: typeof details.errorId === "string" ? details.errorId : undefined,
-      sessionId,
-      error: writeError,
-    });
-  }
+  await emitTerminalSessionEvent({
+    errorId: typeof details.errorId === "string" ? details.errorId : undefined,
+    event: createSessionFailedEvent({ code, details, message, sessionId }),
+    parentWritable: input.parentWritable,
+    serializedContext: input.serializedContext,
+    turnId: input.turnId,
+  });
 }

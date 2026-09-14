@@ -35,8 +35,12 @@ export type TerminalKey =
       y: number;
     }
   | { type: "ctrl-a" }
+  | { type: "ctrl-b" }
   | { type: "ctrl-e" }
+  | { type: "ctrl-f" }
   | { type: "ctrl-d" }
+  | { type: "alt-b" }
+  | { type: "alt-f" }
   | { type: "ctrl-k" }
   | { type: "ctrl-n" }
   | { type: "ctrl-p" }
@@ -182,7 +186,15 @@ export function nextKey(buffer: string): KeyToken {
         consumed: end + (end === bel ? 1 : 2),
       };
     }
-    // `ESC` + another byte (e.g. Alt+key): surface the Escape and re-tokenize.
+    // Alt/Meta letter chords arrive as ESC followed by the letter. Decode the
+    // readline word-movement chords together instead of surfacing Escape first.
+    if (second === "b" || second === "B") {
+      return { key: { type: "alt-b" }, consumed: 2 };
+    }
+    if (second === "f" || second === "F") {
+      return { key: { type: "alt-f" }, consumed: 2 };
+    }
+    // Other `ESC` + byte chords surface Escape and then re-tokenize the byte.
     return { key: { type: "escape" }, consumed: 1 };
   }
 
@@ -224,8 +236,12 @@ export function parseKey(chunk: Buffer): TerminalKey {
   switch (value) {
     case "\u0001":
       return { type: "ctrl-a" };
+    case "\u0002":
+      return { type: "ctrl-b" };
     case "\u0005":
       return { type: "ctrl-e" };
+    case "\u0006":
+      return { type: "ctrl-f" };
     case "\u0004":
       return { type: "ctrl-d" };
     case "\u000b":
@@ -267,6 +283,14 @@ export function parseKey(chunk: Buffer): TerminalKey {
     case "\x1B[D":
     case "\x1BOD":
       return { type: "left" };
+    case "\x1B[1;3C":
+    case "\x1B[1;5C":
+    case "\x1B[5C":
+      return { type: "alt-f" };
+    case "\x1B[1;3D":
+    case "\x1B[1;5D":
+    case "\x1B[5D":
+      return { type: "alt-b" };
     case "\x1B[H":
     case "\x1BOH":
     case "\x1B[1~":

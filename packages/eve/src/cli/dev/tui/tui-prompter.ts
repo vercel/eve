@@ -1,3 +1,4 @@
+import { PlannerNavigationError } from "#setup/prompter.js";
 import type {
   EditableSelectOptions,
   EditableSelectResult,
@@ -36,16 +37,13 @@ function setupSelectRequest<T extends PrompterValue>(
   } = { message: opts.message, options };
   if (opts.description !== undefined) base.description = opts.description;
   if (opts.metadata !== undefined) base.metadata = opts.metadata;
-  const withNotices = <Request extends SetupSelectRequest>(request: Request): Request => {
+  const withContext = <Request extends SetupSelectRequest>(request: Request): Request => {
     if (opts.notices !== undefined) request.notices = opts.notices;
+    if (opts.navigation !== undefined) request.navigation = opts.navigation;
     return request;
   };
 
   if (opts.multiple === true) {
-    if (opts.hintLayout !== undefined) {
-      throw new Error("Multi-select setup questions do not support a hint layout.");
-    }
-
     let request: SetupSelectRequest;
     if (opts.search === true) {
       request = {
@@ -53,6 +51,10 @@ function setupSelectRequest<T extends PrompterValue>(
         kind: "searchable-multi",
         required: opts.required ?? false,
       };
+      if (opts.hintLayout === "stacked") request.layout = "stacked";
+      if (opts.hintLayout === "inline") {
+        throw new Error("Multi-select setup questions do not support inline hint layout.");
+      }
       if (opts.placeholder !== undefined) request.placeholder = opts.placeholder;
     } else {
       request = {
@@ -64,7 +66,7 @@ function setupSelectRequest<T extends PrompterValue>(
     if (opts.initialValues !== undefined) {
       request.initialValues = opts.initialValues.map(encode);
     }
-    return withNotices(request);
+    return withContext(request);
   }
 
   if (opts.search === true && opts.hintLayout === "stacked") {
@@ -89,7 +91,7 @@ function setupSelectRequest<T extends PrompterValue>(
     request = { ...base, kind };
   }
   if (opts.initialValue !== undefined) request.initialValue = encode(opts.initialValue);
-  return withNotices(request);
+  return withContext(request);
 }
 
 /**
@@ -116,8 +118,11 @@ export function createTuiPrompter(renderer: TuiPrompterRenderer): Prompter {
     const codec = createSelectOptionCodec(opts.options);
     const request = setupSelectRequest(opts, codec.options, codec.encode, codec.encodeOptions);
 
-    const keys = guardCancel(await renderer.readSelect(request));
-    const values = keys.map((key) => {
+    const result = guardCancel(await renderer.readSelect(request));
+    if ("kind" in result) {
+      throw new PlannerNavigationError(result.direction, result.values.map(codec.decode));
+    }
+    const values = result.map((key) => {
       const query = searchActionQuery(key);
       if (query !== undefined && opts.multiple !== true && opts.searchAction !== undefined) {
         return opts.searchAction.value(query);
@@ -204,6 +209,8 @@ export function createTuiPrompter(renderer: TuiPrompterRenderer): Prompter {
     replaceContent: (content) => renderer.replaceContent?.(content),
 
     withInheritedStdio: (task) => renderer.withInheritedStdio(task),
+
+    withExclusiveTerminal: (task) => renderer.withExclusiveTerminal?.(task) ?? task(),
 
     log: {
       message: line("info"),

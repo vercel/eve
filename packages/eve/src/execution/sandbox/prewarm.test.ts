@@ -14,12 +14,20 @@ vi.mock("#execution/sandbox/template-prewarm-lock.js", () => ({
   withSandboxTemplatePrewarmLock: async (_input: unknown, callback: () => Promise<unknown>) =>
     await callback(),
 }));
+const mocks = vi.hoisted(() => ({
+  materializeWorkspaceDirectory: vi.fn<
+    (path: string) => Promise<readonly { readonly content: Buffer; readonly path: string }[]>
+  >(async () => []),
+}));
+
 vi.mock("#runtime/workspace/seed-files.js", () => ({
-  materializeWorkspaceDirectory: vi.fn(async () => []),
+  materializeWorkspaceDirectory: mocks.materializeWorkspaceDirectory,
 }));
 
 describe("prewarmAppSandboxes", () => {
   afterEach(() => {
+    mocks.materializeWorkspaceDirectory.mockReset();
+    mocks.materializeWorkspaceDirectory.mockResolvedValue([]);
     vi.unstubAllEnvs();
   });
 

@@ -11,7 +11,11 @@ import {
   type GitHubThread,
 } from "#public/channels/github/binding.js";
 import { getGitHubRepository, type GitHubApiOptions } from "#public/channels/github/api.js";
-import type { GitHubChannelCredentials } from "#public/channels/github/auth.js";
+import {
+  createGitHubBotNameResolver,
+  type GitHubBotName,
+  type GitHubChannelCredentials,
+} from "#public/channels/github/auth.js";
 import { GITHUB_CHANNEL_DEFAULT_ROUTE } from "#public/channels/github/constants.js";
 import { createDefaultEvents, defaultOnComment } from "#public/channels/github/defaults.js";
 import {
@@ -105,6 +109,8 @@ export interface GitHubEventContext extends GitHubChannelContext, ChannelContinu
 export type GitHubInboundResult = {
   readonly auth: SessionAuthContext | null;
   readonly context?: readonly string[];
+  /** Overrides the workflow run title without changing the message sent to the model. */
+  readonly title?: string;
 } | null;
 
 /**
@@ -152,7 +158,12 @@ export interface GitHubChannelEvents {
 /** Configuration for {@link githubChannel}. */
 export interface GitHubChannelConfig {
   readonly api?: GitHubApiOptions;
-  readonly botName?: string;
+  /**
+   * The name the channel answers to in `@mentions`, supplied directly or
+   * resolved lazily on first use inside request handling. Falls back to the
+   * credentials' `appSlug`, then `GITHUB_APP_SLUG`.
+   */
+  readonly botName?: GitHubBotName;
   readonly credentials?: GitHubChannelCredentials;
   readonly events?: GitHubChannelEvents;
   readonly progress?: GitHubProgressConfig;
@@ -220,7 +231,10 @@ export interface GitHubChannel extends Channel<GitHubChannelState, GitHubReceive
 
 /** GitHub channel factory for GitHub App webhooks and proactive comments. */
 export function githubChannel(config: GitHubChannelConfig = {}): GitHubChannel {
-  const botName = config.botName ?? process.env.GITHUB_APP_SLUG;
+  const botName = createGitHubBotNameResolver({
+    botName: config.botName,
+    credentials: config.credentials,
+  });
   const dispatchOptions = { botName };
   const mergedEvents: GitHubChannelEvents = {
     ...createDefaultEvents({
@@ -312,6 +326,7 @@ export function githubChannel(config: GitHubChannelConfig = {}): GitHubChannel {
           if (event.kind === "issues" && config.onIssue !== undefined) {
             waitUntil(
               dispatchIssue({
+                botName,
                 config,
                 event,
                 handler: config.onIssue,
@@ -324,6 +339,7 @@ export function githubChannel(config: GitHubChannelConfig = {}): GitHubChannel {
           if (event.kind === "pull_request" && config.onPullRequest !== undefined) {
             waitUntil(
               dispatchPullRequest({
+                botName,
                 config,
                 event,
                 handler: config.onPullRequest,
@@ -336,6 +352,7 @@ export function githubChannel(config: GitHubChannelConfig = {}): GitHubChannel {
           if (event.kind === "check_suite" && config.onCheckSuite !== undefined) {
             waitUntil(
               dispatchCheckSuite({
+                botName,
                 config,
                 event,
                 handler: config.onCheckSuite,
@@ -348,6 +365,7 @@ export function githubChannel(config: GitHubChannelConfig = {}): GitHubChannel {
           if (event.kind === "check_run" && config.onCheckRun !== undefined) {
             waitUntil(
               dispatchCheckRun({
+                botName,
                 config,
                 event,
                 handler: config.onCheckRun,
@@ -360,6 +378,7 @@ export function githubChannel(config: GitHubChannelConfig = {}): GitHubChannel {
           if (event.kind === "workflow_run" && config.onWorkflowRun !== undefined) {
             waitUntil(
               dispatchWorkflowRun({
+                botName,
                 config,
                 event,
                 handler: config.onWorkflowRun,

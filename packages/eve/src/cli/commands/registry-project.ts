@@ -1,7 +1,15 @@
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
+import {
+  applyEdits as applyJsoncEdits,
+  modify as modifyJsonc,
+  type ParseError,
+  parse as parseJsonc,
+} from "#compiled/jsonc-parser/index.js";
 import type { RegistryConfig, RegistrySource } from "#compiled/shadcn-registry/index.js";
+import { resolveEveProjectContext } from "#internal/project-context.js";
+import { WEB_APP_TEMPLATE_FILES } from "#setup/scaffold/create/web-template.js";
 
 interface RegistryPackage {
   path: string;
@@ -42,7 +50,8 @@ function parseRegistries(path: string, value: unknown): Record<string, RegistryS
 }
 
 async function readRegistryPackage(appRoot: string): Promise<RegistryPackage> {
-  const path = join(appRoot, "package.json");
+  const context = await resolveEveProjectContext(appRoot);
+  const path = join(context.environmentRoot, "package.json");
   let parsed: unknown;
   try {
     parsed = JSON.parse(await readFile(path, "utf8"));
@@ -76,9 +85,107 @@ function parseRegistryMapping(argument: string): { namespace: string; url: strin
   return { namespace, url };
 }
 
+export async function assertCanInstallWebChat(appRoot: string): Promise<void> {
+  if ((await resolveEveProjectContext(appRoot)).kind === "standalone") return;
+  throw new Error(
+    "Web Chat installs a project-level Next.js application and cannot currently be added to a top-level agents/ workspace. Configure a root Next.js app with withEve({ agents }) instead.",
+  );
+}
+
 /** Reads registry namespace mappings from package.json. */
 export async function readRegistryConfig(appRoot: string): Promise<RegistryConfig> {
   return (await readRegistryPackage(appRoot)).config;
+}
+
+const JSONC_FORMATTING = { insertSpaces: true, tabSize: 2, eol: "\n" } as const;
+
+function setJsoncValue(source: string, path: (string | number)[], value: unknown): string {
+  return applyJsoncEdits(
+    source,
+    modifyJsonc(source, path, value, { formattingOptions: JSONC_FORMATTING }),
+  );
+}
+
+export function addWebRegistryTsconfig(source: string, path: string): string {
+  const errors: ParseError[] = [];
+  const parsed = parseJsonc(source, errors, { allowTrailingComma: true });
+  if (errors.length > 0 || typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    throw new Error(`Could not add Web Chat because ${path} is not a valid JSON object.`);
+  }
+
+  const document = parsed as {
+    compilerOptions?: {
+      paths?: Record<string, unknown>;
+      plugins?: unknown[];
+      [key: string]: unknown;
+    };
+    include?: string[];
+    exclude?: string[];
+  };
+  const template = JSON.parse(WEB_APP_TEMPLATE_FILES["tsconfig.json"]) as {
+    compilerOptions: Record<string, unknown>;
+    include: string[];
+    exclude: string[];
+  };
+  const configuredAlias = document.compilerOptions?.paths?.["@/*"];
+  if (
+    configuredAlias !== undefined &&
+    (!Array.isArray(configuredAlias) || !configuredAlias.includes("./*"))
+  ) {
+    throw new Error(
+      `Could not add Web Chat because ${path} already defines @/* without mapping it to ./*.`,
+    );
+  }
+
+  let updated = source;
+  for (const [key, value] of Object.entries(template.compilerOptions)) {
+    if (key === "paths" || key === "plugins" || document.compilerOptions?.[key] !== undefined) {
+      continue;
+    }
+    updated = setJsoncValue(updated, ["compilerOptions", key], value);
+  }
+  if (configuredAlias === undefined) {
+    updated = setJsoncValue(updated, ["compilerOptions", "paths", "@/*"], ["./*"]);
+  }
+
+  const plugins = document.compilerOptions?.plugins ?? [];
+  const hasNextPlugin = plugins.some(
+    (plugin) =>
+      typeof plugin === "object" && plugin !== null && "name" in plugin && plugin.name === "next",
+  );
+  if (!hasNextPlugin) {
+    updated = setJsoncValue(
+      updated,
+      ["compilerOptions", "plugins"],
+      [...plugins, { name: "next" }],
+    );
+  }
+  updated = setJsoncValue(
+    updated,
+    ["include"],
+    [...new Set([...(document.include ?? []), ...template.include])],
+  );
+  updated = setJsoncValue(
+    updated,
+    ["exclude"],
+    [...new Set([...(document.exclude ?? []), ...template.exclude])],
+  );
+  return updated;
+}
+
+/** Prepares the TypeScript host configuration shadcn registry items expect. */
+export async function prepareWebRegistryProject(appRoot: string): Promise<void> {
+  const path = join(appRoot, "tsconfig.json");
+  let source: string;
+  try {
+    source = await readFile(path, "utf8");
+  } catch (error) {
+    throw new Error(
+      `Could not add Web Chat because ${path} could not be read: ${errorMessage(error)}`,
+    );
+  }
+  const updated = addWebRegistryTsconfig(source, path);
+  if (updated !== source) await writeFile(path, updated, "utf8");
 }
 
 /** Adds explicit registry namespace mappings to package.json. */

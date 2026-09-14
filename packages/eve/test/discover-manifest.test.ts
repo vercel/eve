@@ -37,6 +37,7 @@ describe("agent source manifest", () => {
       hooks: [],
       instructions: [],
       lib: [],
+      memories: [],
       kind: AGENT_SOURCE_MANIFEST_KIND,
       sandbox: null,
       sandboxWorkspaces: [],

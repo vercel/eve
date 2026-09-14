@@ -1,7 +1,6 @@
 import { join } from "node:path";
 
 import type { DiscoverDiagnostic } from "#discover/diagnostics.js";
-import { hasDiscoverErrors, summarizeDiscoverDiagnostics } from "#discover/diagnostics.js";
 import { discoverAgent } from "#discover/discover-agent.js";
 import type { ResolvedDiscoveryProject } from "#discover/project.js";
 import { resolveDiscoveryProject } from "#discover/project.js";
@@ -14,6 +13,7 @@ import {
   writeCompilerArtifacts,
 } from "#compiler/artifacts.js";
 import type { CompiledAgentManifest } from "#compiler/manifest.js";
+import { summarizeCompilerDiagnostics, type CompilerDiagnostic } from "#compiler/diagnostics.js";
 
 /**
  * Input for compiling the current authored agent into framework-owned
@@ -33,7 +33,7 @@ export interface CompileAgentInput {
  * artifacts.
  */
 export interface CompileAgentResult {
-  diagnostics: DiscoverDiagnostic[];
+  diagnostics: CompilerDiagnostic[];
   manifest: CompiledAgentManifest;
   metadata: CompileMetadata;
   paths: CompilerArtifactPaths;
@@ -131,7 +131,7 @@ async function writeAgentCompilation(
   });
 
   return {
-    diagnostics: discovered.diagnostics,
+    diagnostics: writtenArtifacts.diagnosticsArtifact.diagnostics,
     manifest: writtenArtifacts.compiledManifest,
     metadata: writtenArtifacts.metadata,
     paths: writtenArtifacts.paths,
@@ -143,7 +143,7 @@ function finishAgentCompilation(
   result: CompileAgentResult,
   createError: (result: CompileAgentResult) => CompileAgentError,
 ): CompileAgentResult {
-  if (hasDiscoverErrors(result.diagnostics)) {
+  if (result.diagnostics.some((diagnostic) => diagnostic.severity === "error")) {
     throw createError(result);
   }
 
@@ -152,7 +152,7 @@ function finishAgentCompilation(
   return result;
 }
 
-function reportDiscoverWarnings(diagnostics: readonly DiscoverDiagnostic[]): void {
+function reportDiscoverWarnings(diagnostics: readonly CompilerDiagnostic[]): void {
   const warnings = diagnostics.filter((diagnostic) => diagnostic.severity === "warning");
 
   if (warnings.length === 0) {
@@ -160,12 +160,14 @@ function reportDiscoverWarnings(diagnostics: readonly DiscoverDiagnostic[]): voi
   }
 
   for (const warning of warnings) {
-    console.warn(`Warning [${warning.code}]: ${warning.message}\n  source: ${warning.sourcePath}`);
+    console.warn(
+      `Warning [${warning.code}]: ${warning.message}\n  source: ${formatDiagnosticSources(warning)}`,
+    );
   }
 }
 
-function formatCompileAgentErrorLines(diagnostics: readonly DiscoverDiagnostic[]): string[] {
-  const summary = summarizeDiscoverDiagnostics(diagnostics);
+function formatCompileAgentErrorLines(diagnostics: readonly CompilerDiagnostic[]): string[] {
+  const summary = summarizeCompilerDiagnostics(diagnostics);
   const lines: string[] = [
     `Discovery failed with ${summary.errors} error(s) and ${summary.warnings} warning(s).`,
   ];
@@ -178,10 +180,16 @@ function formatCompileAgentErrorLines(diagnostics: readonly DiscoverDiagnostic[]
 
   for (const diagnostic of diagnostics) {
     lines.push(`- ${formatDiagnosticSeverity(diagnostic.severity)}: ${diagnostic.message}`);
-    lines.push(`  source: ${diagnostic.sourcePath}`);
+    lines.push(`  source: ${formatDiagnosticSources(diagnostic)}`);
   }
 
   return lines;
+}
+
+function formatDiagnosticSources(diagnostic: CompilerDiagnostic): string {
+  return diagnostic.sources
+    .map((source) => source.sourcePath ?? source.logicalPath ?? source.sourceId ?? source.nodeId)
+    .join(", ");
 }
 
 function formatDiagnosticSeverity(severity: DiscoverDiagnostic["severity"]): string {

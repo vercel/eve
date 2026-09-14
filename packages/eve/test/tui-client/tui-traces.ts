@@ -58,23 +58,22 @@ void (async () => {
   const runPromise = runner.run();
 
   try {
-    const sessionWindow = "9".repeat(16);
+    const sessionRoot = "9".repeat(16);
     const turn = "a".repeat(16);
+    const delivery = "0".repeat(16);
     const step = "b".repeat(16);
     const model = "c".repeat(16);
     const action = "e".repeat(16);
-    const toolCall = "f".repeat(16);
-    // A real capture roots turns under the session's window span, so the
+    // A real capture roots turns under the session span, so the
     // fixture does too — turn discovery must not depend on root position.
     await writeSegment(appRoot, TRACE_ONE, {
-      spanId: sessionWindow,
+      spanId: sessionRoot,
       name: "agent.session",
       start: 900,
       end: 900,
       attributes: {
-        "agent.session.id": "session-smoke",
+        "gen_ai.conversation.id": "session-smoke",
         "agent.name": "smoke-agent",
-        "agent.session.window": 0,
       },
     });
     await writeSegment(appRoot, TRACE_ONE, {
@@ -82,8 +81,23 @@ void (async () => {
       name: "agent.turn",
       start: 1_000,
       end: 1_000,
-      parentSpanId: sessionWindow,
-      attributes: { "agent.session.id": "session-smoke", "agent.name": "smoke-agent" },
+      parentSpanId: sessionRoot,
+      attributes: {
+        "gen_ai.conversation.id": "session-smoke",
+        "agent.name": "smoke-agent",
+        "agent.turn.id": "turn_0",
+      },
+    });
+    await writeSegment(appRoot, TRACE_ONE, {
+      spanId: delivery,
+      name: "agent.channel.delivery",
+      start: 1_000,
+      end: 1_000,
+      parentSpanId: sessionRoot,
+      attributes: {
+        "agent.channel.delivery.input": JSON.stringify({ message: "smoke prompt" }),
+        "agent.turn.id": "turn_0",
+      },
     });
     await writeSegment(appRoot, TRACE_ONE, {
       spanId: step,
@@ -102,7 +116,6 @@ void (async () => {
       attributes: {
         "gen_ai.request.model": "smoke-model-v1",
         "ai.prompt.system": SYSTEM_PROMPT,
-        "ai.prompt.messages": JSON.stringify([{ role: "user", content: "smoke prompt" }]),
         "ai.response.text": "smoke reply",
       },
     });
@@ -111,35 +124,50 @@ void (async () => {
       name: "agent.action",
       start: 6_000,
       end: 6_300,
-      parentSpanId: step,
-      attributes: { "agent.action.kind": "tool", "agent.action.name": "get_weather" },
-    });
-    await writeSegment(appRoot, TRACE_ONE, {
-      spanId: toolCall,
-      name: "ai.toolCall",
-      start: 6_000,
-      end: 6_300,
-      parentSpanId: action,
+      parentSpanId: turn,
       attributes: {
+        "agent.action.kind": "tool",
+        "agent.action.name": "get_weather",
         "gen_ai.tool.call.arguments": '{"city":"San Francisco"}',
         "gen_ai.tool.call.result": '{"temperature":72}',
-        "gen_ai.tool.name": "get_weather",
       },
     });
-    // A subagent child turn recorded into the same trace, carrying its
-    // dispatch lineage (#1433 attributes).
+    const subagentAction = "d".repeat(16);
+    await writeSegment(appRoot, TRACE_ONE, {
+      spanId: subagentAction,
+      name: "agent.action",
+      start: 6_500,
+      end: 7_000,
+      parentSpanId: turn,
+      attributes: {
+        "agent.action.call_id": "call-1",
+        "agent.action.kind": "subagent-call",
+        "agent.action.name": "echo",
+        "agent.turn.id": "turn_0",
+      },
+    });
+    // A subagent child turn recorded into the same trace and parented to its
+    // dispatch action.
     await writeSegment(appRoot, TRACE_ONE, {
       spanId: "8".repeat(16),
       name: "agent.turn",
       start: 7_000,
       end: 7_000,
-      parentSpanId: sessionWindow,
+      parentSpanId: subagentAction,
       attributes: {
-        "agent.session.id": "child-session",
-        "agent.parent.session.id": "session-smoke",
-        "agent.parent.turn.id": "turn_0",
-        "agent.parent.call_id": "call-1",
-        "agent.subagent.name": "echo",
+        "gen_ai.conversation.id": "child-session",
+        "agent.turn.id": "turn_child",
+      },
+    });
+    await writeSegment(appRoot, TRACE_ONE, {
+      spanId: "5".repeat(16),
+      name: "agent.channel.delivery",
+      start: 7_000,
+      end: 7_000,
+      parentSpanId: sessionRoot,
+      attributes: {
+        "agent.channel.delivery.input": JSON.stringify({ message: "delegated task" }),
+        "agent.turn.id": "turn_child",
       },
     });
     await writeSegment(appRoot, TRACE_ONE, {
@@ -158,7 +186,6 @@ void (async () => {
       parentSpanId: "7".repeat(16),
       attributes: {
         "gen_ai.request.model": "smoke-model-v1",
-        "ai.prompt.messages": JSON.stringify([{ role: "user", content: "delegated task" }]),
         "ai.response.text": "delegated reply",
       },
     });
@@ -167,7 +194,7 @@ void (async () => {
       name: "agent.turn",
       start: 500,
       end: 900,
-      attributes: { "agent.session.id": "older-session" },
+      attributes: { "gen_ai.conversation.id": "older-session" },
     });
     // The viewer lists traces by segments-dir mtime (last span activity);
     // same-millisecond writes would race, so pin the ordering explicitly.
@@ -235,7 +262,7 @@ void (async () => {
     input.enter();
     await screen.waitForText("status", 5_000);
     await screen.waitForText("duration", 5_000);
-    await screen.waitForText("gen_ai.tool.name", 5_000);
+    await screen.waitForText("agent.action.name", 5_000);
     if (!screen.snapshot().includes('"city"')) {
       throw new Error(`The tool card lost its inline payload:\n${screen.snapshot()}`);
     }
@@ -250,7 +277,7 @@ void (async () => {
     // key merges into an unfinished CSI in the input tokenizer and wedges
     // every key after it (the lone-ESC flush never fires).
     input.send("\x1b");
-    await waitForAbsence(screen, "gen_ai.tool.name", 5_000);
+    await waitForAbsence(screen, "agent.action.name", 5_000);
 
     // The subagent child turn renders below the fold; End jumps to its cards,
     // which carry the dispatch lineage badge.

@@ -7,6 +7,12 @@ describe("createLlmsIndex", () => {
 
     expect(output).toMatch(/^# eve\n\n> /);
     expect(output).not.toMatch(/^---/);
+    expect(output).toContain("## Introduction");
+    expect(output).toContain("## Build");
+    expect(output).toContain("## Integrate");
+    expect(output).toContain("## Operate");
+    expect(output).not.toContain("## Application Integration");
+    expect(output).toContain("## Core Concepts");
     expect(output).toContain("## Optional");
   });
 
@@ -20,6 +26,7 @@ describe("createLlmsIndex", () => {
     expect(output).toContain("https://eve.dev/sitemap.md");
     expect(output).toContain("https://eve.dev/agents.md");
     expect(output).toContain("https://eve.dev/llms-full.txt");
+    expect(output).toContain("https://eve.dev/changelog.md");
   });
 
   it("uses unique absolute links and stays concise", () => {

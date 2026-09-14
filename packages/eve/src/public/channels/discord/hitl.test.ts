@@ -12,7 +12,7 @@ import type {
   DiscordComponentInteraction,
   DiscordModalSubmitInteraction,
 } from "#public/channels/discord/inbound.js";
-import type { InputRequest } from "#runtime/input/types.js";
+import type { InputRequest } from "#shared/input.js";
 
 const BASE_COMPONENT: Omit<
   DiscordComponentInteraction,

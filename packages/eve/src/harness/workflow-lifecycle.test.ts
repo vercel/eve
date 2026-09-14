@@ -3,10 +3,15 @@ import { describe, expect, it } from "vitest";
 
 import { ContextContainer, contextStorage } from "#context/container.js";
 import type { HarnessEmissionState } from "#harness/emission.js";
-import { createWorkflowLifecycle } from "#harness/workflow-lifecycle.js";
+import {
+  emitWorkflowActionResults,
+  emitWorkflowActionsRequested,
+} from "#harness/workflow-lifecycle.js";
+import { WORKFLOW_TASK_INTERRUPT_KIND } from "#harness/workflow-task-state.js";
 import type { HarnessToolMap } from "#harness/types.js";
 import { defineState } from "#public/definitions/state.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
+import type { WorkflowSandboxInterrupt } from "#shared/workflow-sandbox.js";
 
 const emissionState: HarnessEmissionState = {
   sequence: 2,
@@ -23,49 +28,77 @@ function createTools(): HarnessToolMap {
         description: "Delegate to the researcher.",
         inputSchema: jsonSchema({ type: "object" }),
         name: "researcher",
-        runtimeAction: {
-          kind: "subagent-call",
-          nodeId: "subagents/researcher",
-          subagentName: "researcher",
-        },
+        resultKind: "subagent",
+        workflowId: "workflow//./agent/subagents/researcher//execute",
       },
     ],
   ]);
 }
 
-function nestedCall(replayed = false) {
+function workflowInterrupt(): WorkflowSandboxInterrupt {
+  const payload = {
+    kind: WORKFLOW_TASK_INTERRUPT_KIND,
+    task: {
+      resultKind: "subagent" as const,
+      workflowId: "workflow//./agent/subagents/researcher//execute",
+    },
+    toolInput: { message: "Investigate" },
+    toolName: "researcher",
+  };
   return {
-    bridgeIndex: 1,
+    continuation: {
+      auth: {
+        alg: "HMAC-SHA256",
+        expiresAtMs: 2,
+        issuedAtMs: 1,
+        nonce: "nonce",
+        signature: "signature",
+      },
+      js: "return tools.researcher({ message: 'Investigate' })",
+      outerToolCallId: "outer-call",
+      pendingInterruptions: [
+        {
+          input: { message: "Investigate" },
+          interruptId: "outer-call:tool-1:interrupt",
+          payload,
+          runInterruptionId: "run-interruption-1",
+          toolCallId: "outer-call:tool-1",
+          toolName: "researcher",
+        },
+      ],
+      resolutions: [],
+      token: "token",
+      toolNames: ["researcher"],
+      version: 2,
+    },
     input: { message: "Investigate" },
-    inputBytes: 24,
-    invocationId: "workflow-1",
+    interruptId: "outer-call:tool-1:interrupt",
     outerToolCallId: "outer-call",
-    replayed,
-    startedAtMs: 10,
+    payload,
     toolCallId: "outer-call:tool-1",
     toolName: "researcher",
+    type: "code-mode-interrupt",
   };
 }
 
-describe("createWorkflowLifecycle", () => {
-  it("emits nested subagent calls and results as action events", async () => {
+describe("workflow lifecycle projection", () => {
+  it("emits parked subagent calls and resumed results as action events", async () => {
     const events: UnstampedMessageStreamEvent[] = [];
-    const lifecycle = createWorkflowLifecycle({
-      emit: async (event) => {
-        events.push(event);
-      },
+    const emit = async (event: UnstampedMessageStreamEvent) => {
+      events.push(event);
+    };
+
+    await emitWorkflowActionsRequested({
+      emit,
       emissionState,
+      interrupts: [workflowInterrupt()],
       tools: createTools(),
     });
-
-    await lifecycle.onNestedToolCall?.(nestedCall());
-    await lifecycle.onNestedToolResult?.({
-      ...nestedCall(),
-      completedAtMs: 20,
-      durationMs: 10,
-      output: { value: "ok" },
-      outputBytes: 14,
-      status: "fulfilled",
+    await emitWorkflowActionResults({
+      emit,
+      emissionState,
+      interrupts: [workflowInterrupt()],
+      results: [{ output: { value: "ok" } }],
     });
 
     expect(events[0]).toMatchObject({
@@ -73,8 +106,8 @@ describe("createWorkflowLifecycle", () => {
         actions: [
           {
             callId: "outer-call:tool-1",
-            kind: "subagent-call",
-            subagentName: "researcher",
+            kind: "tool-call",
+            toolName: "researcher",
           },
         ],
         sequence: 2,
@@ -95,22 +128,15 @@ describe("createWorkflowLifecycle", () => {
     });
   });
 
-  it("projects rejected child results through the shared result contract", async () => {
+  it("projects failed child results through the shared result contract", async () => {
     const events: UnstampedMessageStreamEvent[] = [];
-    const lifecycle = createWorkflowLifecycle({
+    await emitWorkflowActionResults({
       emit: async (event) => {
         events.push(event);
       },
       emissionState,
-      tools: createTools(),
-    });
-
-    await lifecycle.onNestedToolResult?.({
-      ...nestedCall(),
-      completedAtMs: 20,
-      durationMs: 10,
-      error: new Error("child failed"),
-      status: "rejected",
+      interrupts: [workflowInterrupt()],
+      results: [{ isError: true, output: "child failed" }],
     });
 
     expect(events[0]).toMatchObject({
@@ -122,39 +148,24 @@ describe("createWorkflowLifecycle", () => {
     });
   });
 
-  it("skips replayed calls during continuation", async () => {
-    const events: UnstampedMessageStreamEvent[] = [];
-    const lifecycle = createWorkflowLifecycle({
-      emit: async (event) => {
-        events.push(event);
-      },
-      emissionState,
-      skipReplayed: true,
-      tools: createTools(),
-    });
-
-    await lifecycle.onNestedToolCall?.(nestedCall(true));
-    expect(events).toEqual([]);
-  });
-
-  it("dispatches lifecycle events in the invoking context", async () => {
+  it("emits events in the invoking context", async () => {
     const lifecycleDispatches = defineState<string[]>(
       "test.workflow.lifecycle.dispatch-context",
       () => [],
     );
     const buildSession = new ContextContainer();
     const callSession = new ContextContainer();
-    const lifecycle = await contextStorage.run(buildSession, async () =>
-      createWorkflowLifecycle({
+
+    await contextStorage.run(callSession, () =>
+      emitWorkflowActionsRequested({
         emit: async (event) => {
           lifecycleDispatches.update((events) => [...events, event.type]);
         },
         emissionState,
+        interrupts: [workflowInterrupt()],
         tools: createTools(),
       }),
     );
-
-    await contextStorage.run(callSession, () => lifecycle.onNestedToolCall?.(nestedCall()));
 
     expect(contextStorage.run(callSession, () => lifecycleDispatches.get())).toEqual([
       "actions.requested",

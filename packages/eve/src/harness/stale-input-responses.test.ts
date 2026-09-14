@@ -7,6 +7,21 @@ import {
   dropStaleSessionLimitContinuationResponses,
 } from "#harness/stale-input-responses.js";
 
+const QUESTION_TOOLS = new Map([
+  [
+    "ask_question",
+    {
+      behavior: {
+        availability: ["requires-request-input" as const],
+        handling: { kind: "request-input" as const, request: "question" as const },
+      },
+      description: "Ask a question.",
+      inputSchema: {} as never,
+      name: "ask_question",
+    },
+  ],
+]);
+
 const approvalHistory: ModelMessage[] = [
   {
     content: [
@@ -54,6 +69,7 @@ it("converts a stale approval into a non-authorizing user message", () => {
     stepInput: {
       inputResponses: [{ optionId: "approve", requestId: "approval-1" }],
     },
+    tools: QUESTION_TOOLS,
   });
 
   expect(result.kind).toBe("converted");
@@ -87,6 +103,7 @@ it("converts an attributed stale question selection using its option label", () 
         },
       ],
     },
+    tools: QUESTION_TOOLS,
   });
 
   expect(result.kind).toBe("converted");
@@ -112,6 +129,7 @@ it("keeps responses for pending requests structured while converting stale ones"
         { optionId: "candidate", requestId: "question-1" },
       ],
     },
+    tools: QUESTION_TOOLS,
   });
 
   expect(result.kind).toBe("converted");
@@ -131,6 +149,7 @@ it("keeps the non-authorization notice when request metadata is missing", () => 
     stepInput: {
       inputResponses: [{ optionId: "approve", requestId: "approval-gone" }],
     },
+    tools: QUESTION_TOOLS,
   });
 
   expect(result.kind).toBe("converted");
@@ -153,6 +172,7 @@ it("returns unchanged when every response matches the pending batch", () => {
     history: approvalHistory,
     pendingRequestIds: new Set(["approval-1"]),
     stepInput,
+    tools: QUESTION_TOOLS,
   });
 
   expect(result.kind).toBe("unchanged");
@@ -222,6 +242,7 @@ it("converts remaining stale responses after the drop pass", () => {
     history: questionHistory,
     pendingRequestIds,
     stepInput,
+    tools: QUESTION_TOOLS,
   });
 
   expect(result.kind).toBe("converted");

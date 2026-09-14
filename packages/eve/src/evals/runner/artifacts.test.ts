@@ -16,6 +16,29 @@ beforeEach(() => {
 });
 
 describe("eval artifacts", () => {
+  it("persists trace contexts in summary, index, and detail artifacts", async () => {
+    await writeArtifacts("/tmp/eve-evals", judgedSummary());
+
+    const expected = [
+      {
+        primary: true,
+        sessionId: "session-1",
+        spanId: "0123456789abcdef",
+        traceFlags: 1,
+        traceId: "0123456789abcdef0123456789abcdef",
+      },
+    ];
+    expect(writtenJson("/tmp/eve-evals/summary.json")).toMatchObject({
+      evals: [{ traceContexts: expected }],
+    });
+    expect(writtenJson("/tmp/eve-evals/results.jsonl")).toMatchObject({
+      traceContexts: expected,
+    });
+    expect(writtenJson("/tmp/eve-evals/evals/quality/source.json")).toMatchObject({
+      result: { traceContexts: expected },
+    });
+  });
+
   it("persists skipped counts and reasons in every JSON artifact", async () => {
     await writeArtifacts("/tmp/eve-evals", skippedSummary());
 
@@ -84,6 +107,7 @@ function skippedSummary(): EveEvalRunSummary {
       finalMessage: null,
       output: null,
       status: "completed",
+      traceContexts: [],
     },
     verdict: "skipped",
     skipReason: "dev routes unavailable",
@@ -127,6 +151,15 @@ function judgedSummary(): EveEvalRunSummary {
       finalMessage: "No source.",
       output: "No source.",
       status: "completed",
+      traceContexts: [
+        {
+          primary: true,
+          sessionId: "session-1",
+          spanId: "0123456789abcdef",
+          traceFlags: 1,
+          traceId: "0123456789abcdef0123456789abcdef",
+        },
+      ],
     },
     verdict: "scored",
     startedAt: "2026-01-01T00:00:00.000Z",

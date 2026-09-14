@@ -1,6 +1,6 @@
 import type { SandboxSession } from "#shared/sandbox-session.js";
 import type { SandboxBackend } from "#shared/sandbox-backend.js";
-import type { SessionContext } from "#public/definitions/callback-context.js";
+import type { SessionContext } from "#context/session-context.js";
 
 /**
  * Opens the template session inside a `bootstrap` hook. Optional `options`
@@ -34,12 +34,13 @@ export interface SandboxBootstrapContext<O = Record<string, never>> {
 
 /**
  * Argument passed to a sandbox `onSession` hook, invoked once per live
- * session. `ctx` is the runtime {@link SessionContext} (session id, auth,
- * turn). `use(options?)` opens the live session, applying backend-specific
- * `options` (typed by the backend's session-use options `SO`).
+ * session. `ctx` contains the active session metadata; sandbox access during
+ * initialization goes through `use(options?)`, which opens the live session
+ * and applies backend-specific `options` (typed by the backend's session-use
+ * options `SO`).
  */
 export interface SandboxSessionContext<O = Record<string, never>> {
-  readonly ctx: SessionContext;
+  readonly ctx: Pick<SessionContext, "session">;
   readonly use: SandboxSessionUseFn<O>;
 }
 

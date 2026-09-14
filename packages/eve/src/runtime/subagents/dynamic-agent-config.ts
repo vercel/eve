@@ -9,7 +9,7 @@ import {
   type AgentReasoningDefinition,
 } from "#shared/agent-definition.js";
 import type { JsonObject } from "#shared/json.js";
-import { serializeOutputSchema } from "#shared/tool-schema.js";
+import { serializeOutputSchema } from "#tools/schema.js";
 
 export interface DynamicSubagentAgentConfig {
   readonly compaction?: {
@@ -39,6 +39,9 @@ export async function normalizeDynamicSubagentAgentConfig(input: {
   }
   if (definition.build !== undefined) {
     throw new Error(`${message} The "build" field cannot be selected at runtime.`);
+  }
+  if (definition.defaultTools !== undefined) {
+    throw new Error(`${message} The "defaultTools" field cannot be selected at runtime.`);
   }
   if (definition.experimental !== undefined) {
     throw new Error(`${message} The "experimental" field cannot be selected at runtime.`);

@@ -31,6 +31,30 @@ const gatewayAuthenticationFailure = anyOf(
  */
 export const GATEWAY_RULES: readonly SemanticErrorRule[] = [
   {
+    id: "gateway-billing-required",
+    name: "AI Gateway billing setup required",
+    tags: ["gateway", "config", "recoverable"],
+    when: messageMatches(/AI Gateway requires a valid credit card on file/),
+    message: (link) => link.message,
+    hint: "Add a valid credit card or credits in the Vercel dashboard, then retry.",
+  },
+  {
+    id: "gateway-free-tier-model-restricted",
+    name: "Model unavailable on AI Gateway free tier",
+    tags: ["gateway", "config", "recoverable"],
+    when: messageMatches(/Free tier users do not have access to this model/),
+    message: (link) => link.message,
+    hint: "Switch to a model available on the free tier or upgrade your Vercel plan, then retry.",
+  },
+  {
+    id: "gateway-free-tier-rate-limited",
+    name: "AI Gateway free tier rate limit exceeded",
+    tags: ["gateway", "recoverable"],
+    when: messageMatches(/Free tier requests on this model are rate-limited/),
+    message: (link) => link.message,
+    hint: "Wait for the free-tier limit to reset or upgrade your Vercel plan, then retry.",
+  },
+  {
     id: "gateway-auth-invalid-api-key",
     name: GATEWAY_AUTH_FAILURE_SUMMARY_NAME,
     tags: ["gateway", "config"],

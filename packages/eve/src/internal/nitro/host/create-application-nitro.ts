@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { resolveAuthoredTsConfigPath } from "#internal/authored-module-loader.js";
 import { createNitro } from "nitro/builder";
 import type { Nitro } from "nitro/types";
 import { EVE_PACKAGE_NAME } from "#internal/package-name.js";
@@ -18,6 +19,10 @@ import {
 import { createProductionNitroArtifactsConfig } from "#internal/nitro/host/artifacts-config.js";
 import { createCompiledSandboxBackendPrunePlugin } from "#internal/nitro/host/compiled-sandbox-backend-prune-plugin.js";
 import { createExtensionScopePlugin } from "#internal/bundler/extension-scope-plugin.js";
+import {
+  createExtensionExternalDependencyPlugin,
+  resolveExtensionExternalDependencyPaths,
+} from "#internal/nitro/host/extension-external-dependency-plugin.js";
 import {
   configureDevelopmentNitroRoutes,
   configureProductionNitroRoutes,
@@ -36,7 +41,6 @@ import type {
 } from "#internal/nitro/host/types.js";
 import { createEveVercelOptions } from "#internal/nitro/host/vercel-build-output-config.js";
 import { applyWorkflowTransform } from "#internal/workflow-bundle/workflow-builders.js";
-import { createDynamicCapabilityTransformPlugin } from "#internal/workflow-bundle/dynamic-capability-transform-plugin.js";
 import type { CompiledAgentManifest } from "#compiler/manifest.js";
 
 /**
@@ -56,17 +60,6 @@ const WORKFLOW_ALIAS_SPECIFIERS = [
 const WORKFLOW_TRANSFORM_PATCHED = Symbol("eve.workflow-transform-patched");
 const WORKFLOW_CACHE_PATH_FRAGMENT = "/.eve/workflow-cache/";
 
-/**
- * Packages eve itself pulls into hosted application output that must stay
- * external so Nitro/rolldown does not try to inline platform-specific
- * `.node` binaries (which would fail with a UTF-8 decode error).
- *
- * `@napi-rs/keyring` reaches the hosted bundle transitively through
- * `@vercel/oidc` → `@vercel/cli-auth` and ships native `keyring.<platform>.node`
- * binaries. App authors should not have to know about this; the framework
- * traces it into `server/node_modules` automatically.
- */
-const FRAMEWORK_HOSTED_EXTERNAL_PACKAGES: readonly string[] = ["@napi-rs/keyring"];
 const LOCAL_SANDBOX_BACKEND_NAMES = new Set([
   "docker",
   ...Object.keys(OPTIONAL_ENGINE_PACKAGES_BY_BACKEND_NAME),
@@ -91,15 +84,16 @@ function manifestEnablesWorkflow(manifest: CompiledAgentManifest): boolean {
 }
 
 function manifestHasWebSocketChannel(manifest: CompiledAgentManifest): boolean {
-  return manifest.channels.some(
-    (entry) => entry.kind === "channel" && entry.method === "WEBSOCKET",
-  );
+  return manifest.channelRoutes.effective.some((entry) => entry.method === "WEBSOCKET");
 }
 
 function collectHostedTraceDependencies(
   preparedHost: PreparedApplicationHost,
   configuredOptionalEnginePackages: readonly string[],
 ): string[] {
+  const extensionExternalDependencies = new Set(
+    collectExtensionExternalDependencies(preparedHost.compileResult.manifest),
+  );
   const configuredExternalDependencies = [
     ...(preparedHost.compileResult.manifest.config.build?.externalDependencies ?? []),
     ...preparedHost.compileResult.manifest.subagents.flatMap((subagent) =>
@@ -112,7 +106,6 @@ function collectHostedTraceDependencies(
   // its nf3 database. traceDeps is only for eve-owned or author-configured
   // additions to that upstream policy.
   const merged = new Set<string>([
-    ...FRAMEWORK_HOSTED_EXTERNAL_PACKAGES,
     // Optional engine packages (just-bash, microsandbox) join the
     // externalize-and-trace path only when the compiled sandbox config
     // selects their backend — the app's opt-in. Otherwise
@@ -121,8 +114,18 @@ function collectHostedTraceDependencies(
     // output.
     ...configuredOptionalEnginePackages,
     ...configuredExternalDependencies,
+    ...[...extensionExternalDependencies].map((dependencyName) => `${dependencyName}*`),
   ]);
-  return [...merged].filter((dependencyName) => dependencyName !== EVE_PACKAGE_NAME);
+  return [...merged].filter(
+    (dependencyName) =>
+      dependencyName !== EVE_PACKAGE_NAME && dependencyName !== `${EVE_PACKAGE_NAME}*`,
+  );
+}
+
+function collectExtensionExternalDependencies(manifest: CompiledAgentManifest): string[] {
+  return [manifest, ...manifest.subagents.map((subagent) => subagent.agent)].flatMap((node) =>
+    node.extensionMounts.flatMap((mount) => mount.externalDependencies),
+  );
 }
 
 /**
@@ -504,15 +507,6 @@ function addNitroStepTransformPlugin(
   return clearCachedStepTransformTargets;
 }
 
-function addDynamicCapabilityTransformPlugin(nitro: Nitro): void {
-  nitro.hooks.hook("rollup:before", (_nitro, config) => {
-    if (!Array.isArray(config.plugins)) {
-      return;
-    }
-    config.plugins.unshift(createDynamicCapabilityTransformPlugin());
-  });
-}
-
 /**
  * Marks the authored instrumentation module as side-effectful so Nitro's final
  * Rollup/Rolldown pass preserves its eager evaluation from the generated
@@ -634,22 +628,32 @@ function createApplicationNitroBundlerConfiguration(
       })),
     ),
   );
+  const extensionMounts = [
+    preparedHost.compileResult.manifest,
+    ...preparedHost.compileResult.manifest.subagents.map((subagent) => subagent.agent),
+  ].flatMap((node) => node.extensionMounts);
   const nitroBundlerPlugins = [
     compiledSandboxBackendPrunePlugin,
     createOptionalEngineDependencyPlugin(unconfiguredOptionalEnginePackages),
+    createExtensionExternalDependencyPlugin(extensionMounts),
     extensionScopePlugin,
   ].filter((plugin) => plugin !== null);
-  const nitroRolldownConfig = createNitroBundlerConfig(nitroBundlerPlugins);
+  const nitroRolldownConfig = {
+    ...createNitroBundlerConfig(nitroBundlerPlugins),
+    tsconfig: resolveAuthoredTsConfigPath(preparedHost.appRoot),
+  };
   const nitroRollupConfig = createNitroBundlerConfig(nitroBundlerPlugins);
   const tracedAppDependencies = collectHostedTraceDependencies(
     preparedHost,
     configuredOptionalEnginePackages,
   );
+  const tracedAppDependencyPaths = resolveExtensionExternalDependencyPaths(extensionMounts);
 
   return {
     nitroRolldownConfig,
     nitroRollupConfig,
     tracedAppDependencies,
+    tracedAppDependencyPaths,
   };
 }
 
@@ -682,8 +686,8 @@ function configureSharedApplicationNitro(
   addWorkflowModuleSideEffectsPlugin(nitro, preparedHost.workflowBuildDir);
   patchWorkflowTransformExcludePath(nitro, preparedHost.workflowBuildDir);
 
-  addDynamicCapabilityTransformPlugin(nitro);
-
+  // Dynamic capabilities are stamped while preparing the authored generation.
+  // Repeating that transform here would parse the entire prebundled module map.
   if (preparedHost.compiledArtifacts.instrumentationSourcePaths !== undefined) {
     addInstrumentationModuleSideEffectsPlugin(
       nitro,
@@ -756,6 +760,7 @@ export async function createDevelopmentApplicationNitro(
       rootDir: preparedHost.appRoot,
       serverDir: false,
       traceDeps: bundler.tracedAppDependencies,
+      traceOpts: { nft: { paths: bundler.tracedAppDependencyPaths } },
       vercel: createEveVercelOptions({
         agentName: preparedHost.compileResult.manifest.config.name,
         enabled: false,
@@ -789,6 +794,7 @@ interface ProductionApplicationNitroOptions {
    * function's environment for callback-URL minting behind a per-agent mount.
    */
   readonly publicRoutePrefix?: string;
+  readonly workspaceMember?: boolean;
 }
 
 /**
@@ -827,10 +833,12 @@ export async function createProductionApplicationNitro(
     rootDir: preparedHost.appRoot,
     serverDir: false,
     traceDeps: bundler.tracedAppDependencies,
+    traceOpts: { nft: { paths: bundler.tracedAppDependencyPaths } },
     vercel: createEveVercelOptions({
       agentName: preparedHost.compileResult.manifest.config.name,
       enabled: preset === "vercel",
       publicRoutePrefix: options.publicRoutePrefix,
+      workspaceMember: options.workspaceMember,
     }),
   });
   await writeEveVersionedCacheMetadata(options.buildDir);

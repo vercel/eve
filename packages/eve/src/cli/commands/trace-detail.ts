@@ -11,6 +11,7 @@ import { formatAttributeContent } from "#cli/dev/tui/traces/trace-content.js";
 import { formatElapsed } from "#cli/format-elapsed.js";
 import { sanitizeForTerminal } from "#cli/ui/output.js";
 import type { LocalTraceSpan } from "#tracing/local-trace-reader.js";
+import { AGENT_USAGE_ATTRIBUTES } from "#tracing/agent-span-contract.js";
 
 /** Usage and cost totals aggregated over a trace's `agent.step` spans. */
 export interface LocalTraceSummary {
@@ -27,8 +28,9 @@ export interface LocalTraceSummary {
 
 /**
  * Compact metrics for one tree row: token chips (`↑1.4K`/`↓213`), cost
- * (`$0.0031`), and the tool name for `ai.toolCall` spans. Only chips whose
- * attributes the span actually carries — rows without usage stay clean.
+ * (`$0.0031`). Only chips whose attributes the span actually carries — rows
+ * without usage stay clean. Tool names belong to eve's durable `agent.action`
+ * label instead of the AI SDK's child span.
  * Raw values: callers sanitize for their output surface.
  */
 export function spanMetricChips(span: LocalTraceSpan): string[] {
@@ -39,10 +41,6 @@ export function spanMetricChips(span: LocalTraceSpan): string[] {
   if (output !== undefined) chips.push(`↓${formatCompactTokenCount(output)}`);
   const cost = spanCostUsd(span);
   if (cost !== undefined) chips.push(formatCostUsd(cost));
-  if (span.name === "ai.toolCall") {
-    const tool = span.attributes["gen_ai.tool.name"];
-    if (typeof tool === "string" && tool.length > 0) chips.push(tool);
-  }
   return chips;
 }
 
@@ -68,8 +66,14 @@ export function summarizeLocalTrace(spans: readonly LocalTraceSpan[]): LocalTrac
     if (span.name !== "agent.step") continue;
     inputTokens += numberAttribute(span, "agent.usage.input_tokens") ?? 0;
     outputTokens += numberAttribute(span, "agent.usage.output_tokens") ?? 0;
-    cacheReadTokens += numberAttribute(span, "gen_ai.usage.cache_read.input_tokens") ?? 0;
-    cacheWriteTokens += numberAttribute(span, "gen_ai.usage.cache_creation.input_tokens") ?? 0;
+    cacheReadTokens +=
+      numberAttribute(span, AGENT_USAGE_ATTRIBUTES.cacheReadTokens) ??
+      numberAttribute(span, "gen_ai.usage.cache_read.input_tokens") ??
+      0;
+    cacheWriteTokens +=
+      numberAttribute(span, AGENT_USAGE_ATTRIBUTES.cacheWriteTokens) ??
+      numberAttribute(span, "gen_ai.usage.cache_creation.input_tokens") ??
+      0;
     const cost = spanCostUsd(span);
     if (cost !== undefined) costUsd = (costUsd ?? 0) + cost;
   }

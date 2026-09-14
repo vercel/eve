@@ -1,6 +1,6 @@
 import { isApprovalRequest } from "#harness/input-request-class.js";
 import type { PendingInputBatchEvent } from "#harness/pending-input-batches.js";
-import type { InputRequest, InputResponse } from "#runtime/input/types.js";
+import type { InputRequest, InputResponse } from "#shared/input.js";
 
 const IGNORED_INPUT_REASON = "Ignored because the user continued without responding.";
 export const TOOL_EXECUTION_DENIED_MESSAGE = "Tool execution was denied.";

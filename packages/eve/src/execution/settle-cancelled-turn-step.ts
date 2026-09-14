@@ -1,10 +1,11 @@
 import { buildAdapterContext } from "#channel/adapter-context.js";
 import { callAdapterEventHandler } from "#channel/adapter.js";
 import { dispatchStreamEventHooks } from "#context/hook-lifecycle.js";
+import { TurnDeliveryIdsKey } from "#context/keys.js";
 import { withContextScope } from "#context/run-step.js";
 import { deserializeContext, serializeContext } from "#context/serialize.js";
-import { ChannelInstrumentationKey } from "#context/keys.js";
 import { setChannelContext } from "#execution/channel-context.js";
+import { observeSessionActivity } from "#execution/session-activity-projection.js";
 import {
   createDurableSessionState,
   type DurableSessionState,
@@ -25,10 +26,14 @@ import {
   getProxyInputRequests,
   hasProxyInputRequests,
 } from "#harness/proxy-input-requests.js";
-import { abandonRunningAgentTurns } from "#harness/handles/transitions.js";
-import { clearPendingRuntimeActionBatch } from "#harness/runtime-actions.js";
-import { createInstrumentationHandleEvent } from "#harness/instrumentation-native-events.js";
-import { getInstrumentationRuntime } from "#harness/instrumentation-runtime.js";
+import {
+  abandonAgentInvocationOwners,
+  abandonRunningAgentTurns,
+} from "#subagents/handles/transitions.js";
+import { clearPendingCoordinationBatch } from "#harness/coordination.js";
+import { clearWorkflowToolRuns, getWorkflowToolRuns } from "#harness/workflow-tool-runs.js";
+import { bindSessionInstrumentation } from "#instrumentation/runtime.js";
+import { getTurnUsageState, toUsage } from "#harness/turn-tag-state.js";
 import { clearPendingWorkflowInterrupt } from "#harness/workflow-interrupt-state.js";
 import {
   encodeMessageStreamEvent,
@@ -37,15 +42,17 @@ import {
 } from "#protocol/message.js";
 import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 import { resolveEffectiveAgentRuntime } from "#execution/effective-agent-config.js";
+import type { TokenUsage } from "#shared/token-usage.js";
 
 export interface CancelledTurnSettleResult {
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
+  readonly usage?: TokenUsage;
 }
 
 /**
  * Settles one cancelled turn: emits `turn.cancelled` → `session.waiting`,
- * drops pending runtime-action state, and persists the between-turns
+ * drops pending coordination state, and persists the between-turns
  * session. Runs in the *driver* run, whose wake sources exclude the
  * cancel hook, so a queued cancel wake cannot re-dispatch it.
  */
@@ -62,7 +69,6 @@ export async function settleCancelledTurnStep(input: {
   const adapterCtx = buildAdapterContext(adapter, ctx);
   const bundle = ctx.require(BundleKey);
   const effectiveAgent = resolveEffectiveAgentRuntime(bundle, ctx);
-  const instrumentation = getInstrumentationRuntime();
 
   let session = hydrateDurableSession({
     compactionOverrides: {
@@ -70,6 +76,12 @@ export async function settleCancelledTurnStep(input: {
     },
     durable: durableSession,
     turnAgent: effectiveAgent.turnAgent,
+  });
+  const instrumentation = bindSessionInstrumentation({
+    agentName: effectiveAgent.turnAgent.id,
+    ctx,
+    rootSessionId: session.rootSessionId ?? session.sessionId,
+    sessionId: session.sessionId,
   });
 
   let emissionState = getHarnessEmissionState(durableSession.state);
@@ -93,8 +105,9 @@ export async function settleCancelledTurnStep(input: {
           const transformed = await callAdapterEventHandler(adapter, event, adapterCtx);
           setChannelContext(ctx, { ...adapter, state: { ...adapterCtx.state } });
           // Stamp once: the persisted chunk and the hooks must agree on the id.
-          const stamped = stampMessageStreamEvent(transformed);
+          const stamped = stampMessageStreamEvent(transformed, ctx.get(TurnDeliveryIdsKey));
           await writer.write(encodeMessageStreamEvent(stamped));
+          void observeSessionActivity({ ctx, event: stamped, sessionId: session.sessionId });
           await dispatchStreamEventHooks({
             ctx,
             event: stamped,
@@ -102,12 +115,8 @@ export async function settleCancelledTurnStep(input: {
           });
         };
         const emit =
-          createInstrumentationHandleEvent({
-            agentName: bundle.turnAgent.id,
-            channelKind: ctx.get(ChannelInstrumentationKey)?.kind,
+          instrumentation?.createHandleEvent({
             handleEvent: baseEmit,
-            hooks: instrumentation?.hooks,
-            sessionId: session.sessionId,
             turnId: activeTurnId(emissionState),
           }) ?? baseEmit;
         return {
@@ -118,7 +127,7 @@ export async function settleCancelledTurnStep(input: {
       emissionState = scoped.result;
       session = scoped.session;
     } finally {
-      await instrumentation?.forceFlush();
+      await instrumentation?.flush();
       writer.releaseLock();
     }
   }
@@ -130,26 +139,37 @@ export async function settleCancelledTurnStep(input: {
   // violation holds, so the next delivery gets a fresh prompt instead of
   // queueing forever behind a stale one.
   //
-  // `abandonRunningAgentTurns`: `cancelDescendantTurnsStep` already ran and
-  // the cancelled turn's inbox is gone, so a child settlement can never
-  // reach this store again. This is the last write that can move those
-  // handles out of `running`.
+  // Descendant cancellation already ran and the cancelled turn's inbox is
+  // gone, so a child settlement can never reach this store again. This is the
+  // last write that can park turn-owned `running` and workflow-owned `claimed`
+  // handles.
+  const workflowToolRuns = getWorkflowToolRuns(session.state);
+  session = abandonAgentInvocationOwners(
+    session,
+    new Set(workflowToolRuns.map((run) => run.runId)),
+  );
   const cancelledSession = reconcileSessionContinuationToken(
     ctx,
     setHarnessEmissionState(
       clearPendingSessionLimitPrompt(
         clearAllProxyInputRequests(
           clearPendingWorkflowInterrupt(
-            clearPendingRuntimeActionBatch(abandonRunningAgentTurns(session)),
+            clearPendingCoordinationBatch(
+              clearWorkflowToolRuns(
+                abandonRunningAgentTurns({ ...session, outputSchema: undefined }),
+              ),
+            ),
           ),
         ),
       ),
       emissionState,
     ),
   );
+  const totals = getTurnUsageState(session.state)?.session;
 
-  return {
+  const base = {
     serializedContext: serializeContext(ctx),
     sessionState: createDurableSessionState({ session: cancelledSession }),
   };
+  return totals === undefined ? base : { ...base, usage: toUsage(totals) };
 }

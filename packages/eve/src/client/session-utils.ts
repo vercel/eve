@@ -5,7 +5,7 @@ import type {
   UnstampedMessageStreamEvent,
 } from "#protocol/message.js";
 import { isCurrentTurnBoundaryEvent, isTurnFailureEvent } from "#protocol/message.js";
-import type { InputRequest } from "#runtime/input/types.js";
+import type { InputRequest } from "#shared/input.js";
 
 /** A connection authorization challenge that remains unresolved at a turn boundary. */
 export interface PendingAuthorization {

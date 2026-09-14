@@ -18,6 +18,27 @@ const TestTurnAgent: RuntimeTurnAgent = {
 };
 
 describe("createSessionStep", () => {
+  it("preserves task ownership without injecting progress-reporting instructions", async () => {
+    vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue({
+      resolvedAgent: {
+        config: {},
+      },
+      turnAgent: TestTurnAgent,
+    } as never);
+
+    const { state } = await createSessionStep({
+      compiledArtifactsSource: { kind: "bundled" },
+      continuationToken: "subagent:test",
+      sessionId: "sess-child",
+      taskId: "task-1",
+    });
+
+    expect(state.snapshot?.session.agent.system).not.toContain("Background task updates");
+    expect(state.snapshot?.session.agent.system).not.toContain("task_update");
+    expect(state.snapshot?.session.taskId).toBe("task-1");
+    expect(state.snapshot?.session.state).toBeUndefined();
+  });
+
   it("defaults root sessions to the root input token budget", async () => {
     vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue({
       resolvedAgent: {
@@ -49,8 +70,8 @@ describe("createSessionStep", () => {
       compiledArtifactsSource: { kind: "bundled" },
       continuationToken: "subagent:test",
       inheritedLimits: { maxInputTokensPerSession: 3_000_000, maxOutputTokensPerSession: false },
+      rootSessionId: "sess-root",
       sessionId: "sess-child",
-      subagentDepth: 1,
     });
 
     expect(state.snapshot?.session.limits).toEqual({
@@ -70,8 +91,8 @@ describe("createSessionStep", () => {
       compiledArtifactsSource: { kind: "bundled" },
       continuationToken: "subagent:test",
       inheritedLimits: { maxInputTokensPerSession: false, maxOutputTokensPerSession: false },
+      rootSessionId: "sess-root",
       sessionId: "sess-child",
-      subagentDepth: 1,
     });
 
     expect(state.snapshot?.session.limits).toEqual({});
@@ -91,11 +112,30 @@ describe("createSessionStep", () => {
       compiledArtifactsSource: { kind: "bundled" },
       continuationToken: "subagent:test",
       inheritedLimits: { maxInputTokensPerSession: 2_000_000, maxOutputTokensPerSession: false },
+      rootSessionId: "sess-root",
       sessionId: "sess-child",
-      subagentDepth: 1,
     });
 
     expect(state.snapshot?.session.limits?.maxInputTokensPerSession).toBe(2_000_000);
+  });
+
+  it("caps a configured child token-cost limit at the inherited budget", async () => {
+    vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue({
+      resolvedAgent: {
+        config: { limits: { maxTokenCostUsdPerSession: 2 } },
+      },
+      turnAgent: TestTurnAgent,
+    } as never);
+
+    const { state } = await createSessionStep({
+      compiledArtifactsSource: { kind: "bundled" },
+      continuationToken: "subagent:test",
+      inheritedLimits: { maxTokenCostUsdPerSession: 0.75 },
+      rootSessionId: "sess-root",
+      sessionId: "sess-child",
+    });
+
+    expect(state.snapshot?.session.limits?.maxTokenCostUsdPerSession).toBe(0.75);
   });
 
   it("keeps tighter configured child token limits under inherited token budget", async () => {
@@ -112,8 +152,8 @@ describe("createSessionStep", () => {
       compiledArtifactsSource: { kind: "bundled" },
       continuationToken: "subagent:test",
       inheritedLimits: { maxInputTokensPerSession: 2_000_000, maxOutputTokensPerSession: false },
+      rootSessionId: "sess-root",
       sessionId: "sess-child",
-      subagentDepth: 1,
     });
 
     expect(state.snapshot?.session.limits?.maxInputTokensPerSession).toBe(1_000_000);
@@ -133,8 +173,8 @@ describe("createSessionStep", () => {
       compiledArtifactsSource: { kind: "bundled" },
       continuationToken: "subagent:test",
       inheritedLimits: { maxInputTokensPerSession: 500_000, maxOutputTokensPerSession: false },
+      rootSessionId: "sess-root",
       sessionId: "sess-child",
-      subagentDepth: 1,
     });
 
     expect(state.snapshot?.session.limits?.maxInputTokensPerSession).toBe(500_000);
@@ -147,6 +187,7 @@ describe("createSessionStep", () => {
           limits: {
             maxInputTokensPerSession: 200_000,
             maxOutputTokensPerSession: 20_000,
+            maxTokenCostUsdPerSession: 1.5,
           },
         },
       },
@@ -162,6 +203,7 @@ describe("createSessionStep", () => {
     expect(state.snapshot?.session.limits).toMatchObject({
       maxInputTokensPerSession: 200_000,
       maxOutputTokensPerSession: 20_000,
+      maxTokenCostUsdPerSession: 1.5,
     });
   });
 

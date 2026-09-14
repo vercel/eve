@@ -34,7 +34,7 @@ function trace(spans: readonly LocalTraceSpan[], traceId = "t".repeat(32)): Loca
   const ends = spans.map((s) => s.endTimeNs);
   return {
     endTimeNs: ends.reduce((a, b) => (b > a ? b : a), 0n),
-    sessionIds: [],
+    conversationIds: [],
     spans,
     startTimeNs: starts.reduce((a, b) => (b < a ? b : a), starts[0] ?? 0n),
     traceId,
@@ -43,25 +43,38 @@ function trace(spans: readonly LocalTraceSpan[], traceId = "t".repeat(32)): Loca
 
 /** A turn with a user message, an assistant reply, and a tool call. */
 function conversationTrace(options: { readonly longReply?: boolean } = {}): LocalTrace {
-  const turn = span({ name: "agent.turn", spanId: "a".repeat(16) });
+  const turn = span({
+    name: "agent.turn",
+    spanId: "a".repeat(16),
+    attributes: { "agent.turn.id": "turn_0" },
+  });
+  const delivery = span({
+    name: "agent.channel.delivery",
+    spanId: "0".repeat(16),
+    attributes: {
+      "agent.channel.delivery.input": JSON.stringify({ message: "hi" }),
+      "agent.turn.id": "turn_0",
+    },
+  });
   const step = span({ name: "agent.step", spanId: "b".repeat(16), parentSpanId: turn.spanId });
   const model = span({
     name: "ai.streamText.doStream",
     spanId: "c".repeat(16),
     parentSpanId: step.spanId,
     attributes: {
-      "ai.prompt.messages": JSON.stringify([{ role: "user", content: "hi" }]),
+      "gen_ai.input.messages": JSON.stringify([
+        { parts: [{ content: "hi", type: "text" }], role: "user" },
+      ]),
       "ai.response.text": options.longReply === true ? "a long reply. ".repeat(60) : "reply",
     },
   });
-  const action = span({ name: "agent.action", spanId: "d".repeat(16), parentSpanId: step.spanId });
-  const toolCall = span({
-    name: "ai.toolCall",
-    spanId: "e".repeat(16),
-    parentSpanId: action.spanId,
-    attributes: { "gen_ai.tool.name": "get_weather" },
+  const action = span({
+    name: "agent.action",
+    spanId: "d".repeat(16),
+    parentSpanId: turn.spanId,
+    attributes: { "agent.action.name": "get_weather" },
   });
-  return trace([turn, step, model, action, toolCall]);
+  return trace([turn, delivery, step, model, action]);
 }
 
 function entry(traceId: string, lastActivityMs = 0): TraceStoreEntry {
@@ -93,6 +106,31 @@ describe("reduceTraceViewerKey", () => {
     expect(state.selectedRow).toBe(count - 1);
     state = reduceTraceViewerKey(state, key("up"), ENV).state;
     expect(state.selectedRow).toBe(count - 2);
+  });
+
+  it("moves and scrolls with j/k", () => {
+    let state = applyLoadedTrace(createTraceViewerState(), conversationTrace());
+    state = reduceTraceViewerKey(state, key("text", "j"), ENV).state;
+    expect(state.selectedRow).toBe(1);
+    state = reduceTraceViewerKey(state, key("text", "k"), ENV).state;
+    expect(state.selectedRow).toBe(0);
+
+    state = reduceTraceViewerKey(state, key("enter"), ENV).state;
+    state = reduceTraceViewerKey(state, key("tab"), ENV).state;
+    state = reduceTraceViewerKey(state, key("text", "j"), ENV).state;
+    expect(state.panelScroll).toBe(1);
+    state = reduceTraceViewerKey(state, key("text", "k"), ENV).state;
+    expect(state.panelScroll).toBe(0);
+  });
+
+  it("ignores pasted j/k navigation", () => {
+    const state = applyLoadedTrace(createTraceViewerState(), conversationTrace());
+    const result = reduceTraceViewerKey(
+      state,
+      { type: "text", value: "j", framing: "bracketed-paste" },
+      ENV,
+    );
+    expect(result.state.selectedRow).toBe(0);
   });
 
   it("jumps home and end", () => {
@@ -488,14 +526,28 @@ describe("applyLoadedTrace", () => {
     let state = applyLoadedTrace(
       createTraceViewerState(),
       trace([
-        span({ name: "agent.turn", spanId: "a".repeat(16) }),
+        span({
+          name: "agent.turn",
+          spanId: "a".repeat(16),
+          attributes: { "agent.turn.id": "turn_0" },
+        }),
+        span({
+          name: "agent.channel.delivery",
+          spanId: "0".repeat(16),
+          attributes: {
+            "agent.channel.delivery.input": JSON.stringify({ message: "hi" }),
+            "agent.turn.id": "turn_0",
+          },
+        }),
         span({ name: "agent.step", spanId: "b".repeat(16), parentSpanId: "a".repeat(16) }),
         span({
           name: "ai.streamText.doStream",
           spanId: "c".repeat(16),
           parentSpanId: "b".repeat(16),
           attributes: {
-            "ai.prompt.messages": JSON.stringify([{ role: "user", content: "hi" }]),
+            "gen_ai.input.messages": JSON.stringify([
+              { parts: [{ content: "hi", type: "text" }], role: "user" },
+            ]),
             "ai.prompt.system": "system prompt",
             "ai.response.text": "reply",
           },

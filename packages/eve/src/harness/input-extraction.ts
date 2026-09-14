@@ -1,8 +1,8 @@
 import type { ContentPart, ModelMessage, ToolSet, TypedToolCall } from "ai";
 import { z } from "zod";
 
-import { ASK_QUESTION_TOOL_NAME } from "#runtime/framework-tools/ask-question.js";
-import type { InputRequest } from "#runtime/input/types.js";
+import type { HarnessToolMap } from "#harness/types.js";
+import type { InputRequest } from "#shared/input.js";
 import { createRuntimeToolCallActionFromToolCall } from "#harness/tool-call-action.js";
 
 // Persisted history parts lose AI SDK typing on the storage round trip. The
@@ -38,6 +38,7 @@ const ToolApprovalRequestSchema = z.object({
 export function extractQuestionInputRequests(input: {
   readonly excludedCallIds: ReadonlySet<string>;
   readonly toolCalls: readonly TypedToolCall<ToolSet>[];
+  readonly tools: HarnessToolMap;
 }): InputRequest[] {
   return extractQuestionRequests(input);
 }
@@ -45,11 +46,13 @@ export function extractQuestionInputRequests(input: {
 function extractQuestionRequests(input: {
   readonly excludedCallIds: ReadonlySet<string>;
   readonly toolCalls: readonly ToolCallDescriptor[];
+  readonly tools: HarnessToolMap;
 }): InputRequest[] {
   const requests: InputRequest[] = [];
 
   for (const toolCall of input.toolCalls) {
-    if (toolCall.toolName !== ASK_QUESTION_TOOL_NAME) {
+    const handling = input.tools.get(toolCall.toolName)?.behavior?.handling;
+    if (handling?.kind !== "request-input" || handling.request !== "question") {
       continue;
     }
 
@@ -179,6 +182,7 @@ function extractApprovalRequests(input: {
 export function extractHistoricalInputRequests(input: {
   readonly history: readonly ModelMessage[];
   readonly requestIds: ReadonlySet<string>;
+  readonly tools: HarnessToolMap;
 }): ReadonlyMap<string, InputRequest> {
   const requests = new Map<string, InputRequest>();
 
@@ -195,7 +199,7 @@ export function extractHistoricalInputRequests(input: {
         : [];
     });
     const candidates = [
-      ...extractQuestionRequests({ excludedCallIds: new Set(), toolCalls }),
+      ...extractQuestionRequests({ excludedCallIds: new Set(), toolCalls, tools: input.tools }),
       ...extractApprovalRequests({
         content: message.content,
         includedRequestIds: input.requestIds,

@@ -124,5 +124,6 @@ function emptyTaskResult(): EveEvalTaskResult {
     finalMessage: null,
     output: null,
     status: "completed",
+    traceContexts: [],
   };
 }

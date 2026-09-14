@@ -1,16 +1,18 @@
-import { isAbsolute, resolve } from "node:path";
+import { readFile, writeFile } from "node:fs/promises";
+import { isAbsolute, join, resolve } from "node:path";
 
-import type { Plugin, UserConfig } from "vite";
+import type { Plugin, ResolvedConfig, UserConfig } from "vite";
 
 import { EVE_ROUTE_PREFIX } from "#protocol/routes.js";
+import {
+  ensureEveVercelServicesConfig,
+  mergeEveVercelConfig,
+  type EnsureEveVercelServicesConfigResult,
+  type VercelBuildConfig,
+} from "#shared/vercel-services.js";
 
 import { EVE_BASE_URL_ENV, resolveSharedEveDevServer } from "./dev-server.js";
-import { EVE_SVELTEKIT_SERVICE_PREFIX, normalizeOrigin, normalizeRoutePrefix } from "./routing.js";
-import { ensureEveVercelJson } from "./vercel-json.js";
-
-export { EVE_SVELTEKIT_SERVICE_PREFIX };
-
-const DEFAULT_EVE_BUILD_COMMAND = "eve build";
+import { normalizeOrigin } from "./routing.js";
 
 /**
  * Options for the eve SvelteKit Vite plugin.
@@ -22,23 +24,11 @@ export interface EveSvelteKitPluginOptions {
    */
   readonly eveRoot?: string;
   /**
-   * Build command for the generated eve Vercel service.
-   * Defaults to `"eve build"`.
+   * Command that builds the eve app inside the generated Vercel eve service.
+   * Defaults to running the installed eve binary from the SvelteKit app's
+   * dependencies (`node <path-to>/eve/bin/eve.js build`).
    */
   readonly eveBuildCommand?: string;
-  /**
-   * Set to `false` to skip creating or updating `vercel.json`.
-   *
-   * By default the plugin ensures `vercel.json` contains `experimentalServices`
-   * for the SvelteKit app and eve app.
-   */
-  readonly configureVercelJson?: boolean;
-  /**
-   * Private Vercel service prefix for the eve deployment. Must match the
-   * eve service's `routePrefix` in `vercel.json`. Defaults to
-   * {@link EVE_SVELTEKIT_SERVICE_PREFIX} (`"/_eve_internal/eve"`).
-   */
-  readonly servicePrefix?: string;
 }
 
 function resolveApplicationRoot(svelteKitRoot: string, appPath: string | undefined): string {
@@ -70,6 +60,36 @@ async function resolveEveDevProxyTarget(appRoot: string): Promise<string> {
   return (await resolveSharedEveDevServer(appRoot)).origin;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+async function mergeGeneratedVercelServicesConfig(input: {
+  readonly generated: Extract<EnsureEveVercelServicesConfigResult, { mode: "generated" }>;
+  readonly outputConfigPath: string;
+}): Promise<void> {
+  let outputConfigContents: string;
+
+  try {
+    outputConfigContents = await readFile(input.outputConfigPath, "utf8");
+  } catch (error) {
+    if (error instanceof Error && "code" in error && error.code === "ENOENT") {
+      return;
+    }
+
+    throw error;
+  }
+
+  const outputConfig: unknown = JSON.parse(outputConfigContents);
+
+  if (!isRecord(outputConfig)) {
+    throw new Error("Vercel Build Output config.json must contain a JSON object.");
+  }
+
+  const merged = mergeEveVercelConfig(outputConfig as VercelBuildConfig, input.generated);
+  await writeFile(input.outputConfigPath, `${JSON.stringify(merged, null, 2)}\n`);
+}
+
 /**
  * Vite plugin for running an eve agent alongside a SvelteKit app.
  *
@@ -78,30 +98,35 @@ async function resolveEveDevProxyTarget(appRoot: string): Promise<string> {
  * `EVE_BASE_URL` env var if set, then a healthy shared eve dev server already
  * running for the app, then a freshly spawned `eve dev --no-ui --port 0`.
  *
- * During builds, unless `configureVercelJson` is `false`, it ensures
- * `vercel.json` deploys the SvelteKit app and eve agent as sibling Vercel
- * services.
+ * On Vercel builds, `eveSvelteKit` adds the eve runtime as a sibling Vercel
+ * service and routes its transport requests before SvelteKit filesystem
+ * routing.
  */
 export function eveSvelteKit(options: EveSvelteKitPluginOptions = {}): Plugin {
   let svelteKitRoot = process.cwd();
   let appRoot = resolveApplicationRoot(svelteKitRoot, options.eveRoot);
-  const servicePrefix = normalizeRoutePrefix(options.servicePrefix ?? EVE_SVELTEKIT_SERVICE_PREFIX);
-  const shouldConfigureVercelJson = options.configureVercelJson !== false;
+  let isSsrBuild = false;
+  let generatedVercelServices:
+    | Extract<EnsureEveVercelServicesConfigResult, { mode: "generated" }>
+    | undefined;
 
   return {
+    enforce: "post",
     name: "eve:sveltekit",
     async config(config, env) {
       svelteKitRoot =
         config.root === undefined ? process.cwd() : resolve(process.cwd(), config.root);
       appRoot = resolveApplicationRoot(svelteKitRoot, options.eveRoot);
 
-      if (shouldConfigureVercelJson && env.command === "build") {
-        await ensureEveVercelJson({
+      if (env.command === "build" && process.env.VERCEL) {
+        const configured = await ensureEveVercelServicesConfig({
           appRoot,
-          eveBuildCommand: options.eveBuildCommand ?? DEFAULT_EVE_BUILD_COMMAND,
-          servicePrefix,
-          svelteKitRoot,
+          eveBuildCommand: options.eveBuildCommand,
+          frameworkName: "SvelteKit",
+          hostRoot: svelteKitRoot,
         });
+
+        generatedVercelServices = configured.mode === "generated" ? configured : undefined;
       }
 
       if (env.command !== "serve") {
@@ -123,6 +148,23 @@ export function eveSvelteKit(options: EveSvelteKitPluginOptions = {}): Plugin {
           proxy: mergeProxyConfig(config.server?.proxy, proxyTarget),
         },
       };
+    },
+    configResolved(config: ResolvedConfig) {
+      isSsrBuild = Boolean(config.build.ssr);
+      svelteKitRoot = config.root;
+    },
+    closeBundle: {
+      sequential: true,
+      async handler() {
+        if (!isSsrBuild || generatedVercelServices === undefined) {
+          return;
+        }
+
+        await mergeGeneratedVercelServicesConfig({
+          generated: generatedVercelServices,
+          outputConfigPath: join(svelteKitRoot, ".vercel", "output", "config.json"),
+        });
+      },
     },
   };
 }

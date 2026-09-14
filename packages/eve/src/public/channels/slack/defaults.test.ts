@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import type { SessionContext } from "#public/definitions/callback-context.js";
-import { defaultEvents } from "#public/channels/slack/defaults.js";
+import { defaultEvents, defaultInputRequestedHandler } from "#public/channels/slack/defaults.js";
 import type { SlackChannelState, SlackEventContext } from "#public/channels/slack/slackChannel.js";
 
 function sessionContext(
@@ -20,14 +20,75 @@ function sessionContext(
 
 const sessionCtx = sessionContext();
 
+function approvalRequest(requestId = "approval-1") {
+  return {
+    action: {
+      callId: "call-1",
+      input: { answer: "private draft" },
+      kind: "tool-call" as const,
+      toolName: "review_answer",
+    },
+    allowFreeform: false,
+    display: "confirmation" as const,
+    kind: "tool-approval" as const,
+    options: [
+      { id: "approve", label: "Approve", style: "primary" as const },
+      { id: "cancel", label: "Cancel", style: "danger" as const },
+    ],
+    prompt: "Approve review_answer?",
+    requestId,
+  };
+}
+
+function questionRequest(requestId = "question-1") {
+  return {
+    action: {
+      callId: "call-1",
+      input: { prompt: "Share the result?" },
+      kind: "tool-call" as const,
+      toolName: "ask_question",
+    },
+    allowFreeform: false,
+    display: "confirmation" as const,
+    kind: "question" as const,
+    options: [
+      { id: "yes", label: "Yes", style: "primary" as const },
+      { id: "no", label: "No", style: "danger" as const },
+    ],
+    prompt: "Share the result?",
+    requestId,
+  };
+}
+
 function buildChannelStub(state: Partial<SlackChannelState> = {}) {
-  const postEphemeral = vi.fn().mockResolvedValue({ id: "eph1" });
-  const post = vi.fn().mockResolvedValue({ id: "ts1" });
+  const postEphemeral = vi.fn().mockResolvedValue({ id: "eph1", raw: { ok: true } });
+  const postDirectMessage = vi
+    .fn()
+    .mockResolvedValue({ id: "dm1", raw: { channel: "D123", ok: true } });
+  const post = vi.fn().mockResolvedValue({ id: "ts1", raw: { ok: true } });
   const startTyping = vi.fn().mockResolvedValue(undefined);
-  const request = vi.fn().mockResolvedValue({ ok: true });
+  let postedMessages = 0;
+  const request = vi.fn(async (operation: string, _body: unknown) => {
+    if (operation === "conversations.open") return { channel: { id: "D123" }, ok: true };
+    if (operation === "chat.getPermalink") {
+      return {
+        ok: true,
+        permalink: "https://example.slack.com/archives/C123/p111333?thread_ts=111.222&cid=C123",
+      };
+    }
+    if (operation === "chat.postMessage") {
+      postedMessages += 1;
+      return { ok: true, ts: `dm${postedMessages}` };
+    }
+    return { ok: true };
+  });
   const channel = {
-    thread: { postEphemeral, post, startTyping } as Partial<SlackEventContext["thread"]>,
-    slack: { channelId: "C123", request } as Partial<SlackEventContext["slack"]>,
+    thread: { postDirectMessage, postEphemeral, post, startTyping } as Partial<
+      SlackEventContext["thread"]
+    >,
+    slack: { channelId: "C123", request, threadTs: "111.222" } as Partial<
+      SlackEventContext["slack"]
+    >,
     state: {
       channelId: "C123",
       threadTs: "111.222",
@@ -35,7 +96,7 @@ function buildChannelStub(state: Partial<SlackChannelState> = {}) {
       ...state,
     },
   } as SlackEventContext;
-  return { channel, post, postEphemeral, request, startTyping };
+  return { channel, post, postDirectMessage, postEphemeral, request, startTyping };
 }
 
 function authRequiredEvent(
@@ -50,6 +111,176 @@ function authRequiredEvent(
     turnId: "turn_0",
   };
 }
+
+describe("defaultInputRequestedHandler private input requests", () => {
+  it("uses the authored destination for a tool approval", async () => {
+    const { channel, post, postDirectMessage } = buildChannelStub();
+    const approvalChannel = vi.fn(() => "thread" as const);
+
+    await defaultInputRequestedHandler(approvalChannel)(
+      { requests: [approvalRequest()], sequence: 1, stepIndex: 0, turnId: "turn-1" },
+      channel,
+      sessionCtx,
+    );
+
+    expect(approvalChannel).toHaveBeenCalledWith(
+      expect.objectContaining({ requestId: "approval-1" }),
+      sessionCtx,
+    );
+    expect(post).toHaveBeenCalled();
+    expect(postDirectMessage).not.toHaveBeenCalled();
+  });
+
+  it("routes a ctx.ask question through the same destination resolver", async () => {
+    const { channel, post, request } = buildChannelStub({ triggeringUserId: "U_REVIEWER" });
+    const approvalChannel = vi.fn(() => "direct-message" as const);
+
+    await defaultInputRequestedHandler(approvalChannel)(
+      { requests: [questionRequest()], sequence: 1, stepIndex: 0, turnId: "turn-1" },
+      channel,
+      sessionCtx,
+    );
+
+    expect(approvalChannel).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "question", requestId: "question-1" }),
+      sessionCtx,
+    );
+    expect(post).toHaveBeenCalledWith("Waiting on a response from <@U_REVIEWER>…");
+    expect(JSON.stringify(request.mock.calls)).toContain("eve_input:route:C123:111.222:question-1");
+    expect(channel.state.pendingApprovalCards).toEqual({});
+  });
+
+  it("fails closed when no direct-message reviewer can be resolved", async () => {
+    const { channel, post, postDirectMessage, postEphemeral } = buildChannelStub();
+
+    await defaultInputRequestedHandler(() => "direct-message")(
+      { requests: [approvalRequest()], sequence: 1, stepIndex: 0, turnId: "turn-1" },
+      channel,
+      sessionCtx,
+    );
+
+    expect(post).not.toHaveBeenCalled();
+    expect(postDirectMessage).not.toHaveBeenCalled();
+    expect(postEphemeral).not.toHaveBeenCalled();
+  });
+
+  it("rolls back partial DM delivery without announcing an unusable approval", async () => {
+    const { channel, post, request } = buildChannelStub({
+      triggeringMessageTs: "111.333",
+      triggeringUserId: "U_REVIEWER",
+    });
+    let postedMessages = 0;
+    request.mockImplementation(async (operation: string) => {
+      if (operation === "conversations.open") return { channel: { id: "D123" }, ok: true };
+      if (operation === "chat.getPermalink") {
+        return { ok: true, permalink: "https://example.slack.com/archives/C123/p111333" };
+      }
+      if (operation === "chat.postMessage") {
+        postedMessages += 1;
+        return postedMessages < 3
+          ? { ok: true, ts: `dm${postedMessages}` }
+          : { error: "message_failed", ok: false };
+      }
+      return { ok: true };
+    });
+
+    await expect(
+      defaultInputRequestedHandler(() => "direct-message")(
+        { requests: [approvalRequest()], sequence: 1, stepIndex: 0, turnId: "turn-1" },
+        channel,
+        sessionCtx,
+      ),
+    ).rejects.toThrow("Slack chat.postMessage failed: message_failed");
+
+    expect(post).not.toHaveBeenCalled();
+    expect(request).toHaveBeenCalledWith("chat.delete", { channel: "D123", ts: "dm1" });
+    expect(request).toHaveBeenCalledWith("chat.delete", { channel: "D123", ts: "dm2" });
+    expect(channel.state.pendingApprovalCards).toBeUndefined();
+  });
+
+  it("keeps the actionable DM committed when its thread announcement fails", async () => {
+    const { channel, post, request } = buildChannelStub({
+      triggeringMessageTs: "111.333",
+      triggeringUserId: "U_REVIEWER",
+    });
+    post.mockRejectedValueOnce(new Error("thread unavailable"));
+
+    await expect(
+      defaultInputRequestedHandler(() => "direct-message")(
+        { requests: [approvalRequest()], sequence: 1, stepIndex: 0, turnId: "turn-1" },
+        channel,
+        sessionCtx,
+      ),
+    ).resolves.toBeUndefined();
+
+    expect(
+      request.mock.calls.filter(([operation]) => operation === "chat.postMessage"),
+    ).toHaveLength(3);
+    expect(channel.state.pendingApprovalCards?.["approval-1"]).toMatchObject({
+      messageChannelId: "D123",
+      messageTs: "dm3",
+    });
+  });
+
+  it("previews the triggering message and updates the routed DM card after settlement", async () => {
+    const { channel, post, postDirectMessage, request } = buildChannelStub({
+      triggeringMessageTs: "111.333",
+      triggeringUserId: "U_REVIEWER",
+    });
+
+    await defaultInputRequestedHandler(() => "direct-message")(
+      { requests: [approvalRequest()], sequence: 1, stepIndex: 0, turnId: "turn-1" },
+      channel,
+      sessionCtx,
+    );
+
+    expect(post).toHaveBeenCalledWith("Waiting on approval from <@U_REVIEWER>…");
+    expect(postDirectMessage).not.toHaveBeenCalled();
+    expect(
+      request.mock.calls.filter(([operation]) => operation === "conversations.open"),
+    ).toHaveLength(1);
+    const directMessages = request.mock.calls.filter(
+      ([operation]) => operation === "chat.postMessage",
+    );
+    expect(directMessages).toHaveLength(3);
+    expect(directMessages[0]?.[1]).toMatchObject({
+      channel: "D123",
+      markdown_text: "https://example.slack.com/archives/C123/p111333?thread_ts=111.222&cid=C123",
+      unfurl_links: true,
+    });
+    expect(JSON.stringify(directMessages[1]?.[1])).toContain("private draft");
+    expect(JSON.stringify(directMessages[2]?.[1])).toContain(
+      "eve_input:route:C123:111.222:tool-approval:approval-1",
+    );
+    expect(request).toHaveBeenCalledWith("chat.getPermalink", {
+      channel: "C123",
+      message_ts: "111.333",
+    });
+    expect(channel.state.pendingApprovalCards?.["approval-1"]?.messageChannelId).toBe("D123");
+
+    await defaultEvents["approval.settled"]!(
+      {
+        outcome: "approved",
+        requestId: "approval-1",
+        responderPrincipalId: "slack:T1:U_REVIEWER",
+        sequence: 1,
+        stepIndex: 0,
+        turnId: "turn-1",
+      },
+      channel,
+      sessionCtx,
+    );
+
+    expect(request).toHaveBeenCalledWith(
+      "chat.update",
+      expect.objectContaining({ channel: "D123", text: "Answered: Approve", ts: "dm3" }),
+    );
+    const update = request.mock.calls.find(([method]) => method === "chat.update")?.[1] as {
+      blocks?: unknown[];
+    };
+    expect(JSON.stringify(update.blocks)).not.toContain("eve_input:route:");
+  });
+});
 
 describe("defaultEvents approval lifecycle", () => {
   it("sends candidate progress privately", async () => {
@@ -147,17 +378,17 @@ describe("defaultEvents approval lifecycle", () => {
 
   it("updates the shared card only after settlement", async () => {
     const { channel, request } = buildChannelStub({
+      approvalResponderUsers: { "slack:T1:U777": "U777" },
       pendingApprovalCards: {
         "approval-1": {
           messageBlocks: [
             {
-              actions: [{ action_id: "eve_input:approval-1:button:1" }],
+              actions: [{ action_id: "eve_input:tool-approval:approval-1:button:1" }],
               body: { text: "Approve?", type: "mrkdwn" },
               type: "card",
             },
           ],
           messageTs: "123.456",
-          userId: "U777",
         },
       },
     });
@@ -179,25 +410,29 @@ describe("defaultEvents approval lifecycle", () => {
       "chat.update",
       expect.objectContaining({ channel: "C123", text: "Answered: Approve", ts: "123.456" }),
     );
+    const update = request.mock.calls.find(([method]) => method === "chat.update")?.[1] as {
+      blocks?: unknown[];
+    };
+    expect(JSON.stringify(update.blocks)).toContain("Answered by <@U777>");
     expect(channel.state.pendingApprovalCards).toEqual({});
   });
 
-  it("settles the request even when the stored click id differs from its sibling button", async () => {
+  it("settles the request when its buttons carry tool-approval metadata", async () => {
     const { channel, request } = buildChannelStub({
+      approvalResponderUsers: { "slack:T1:U777": "U777" },
       pendingApprovalCards: {
         "approval-1": {
           messageBlocks: [
             {
               actions: [
-                { action_id: "eve_input:approval-1:button:0" },
-                { action_id: "eve_input:approval-1:button:1" },
+                { action_id: "eve_input:tool-approval:approval-1:button:0" },
+                { action_id: "eve_input:tool-approval:approval-1:button:1" },
               ],
               body: { text: "Approve?", type: "mrkdwn" },
               type: "card",
             },
           ],
           messageTs: "123.456",
-          userId: "U777",
         },
       },
     });
@@ -218,7 +453,52 @@ describe("defaultEvents approval lifecycle", () => {
     const update = request.mock.calls.find(([method]) => method === "chat.update")?.[1] as {
       blocks?: unknown[];
     };
-    expect(JSON.stringify(update.blocks)).not.toContain("eve_input:approval-1");
+    expect(JSON.stringify(update.blocks)).not.toContain("eve_input:tool-approval:approval-1");
+  });
+
+  it("keeps earlier grouped cards settled when approvals are answered out of order", async () => {
+    const requestIds = Array.from({ length: 5 }, (_, index) => `approval-${index + 1}`);
+    const messageBlocks = requestIds.map((requestId) => ({
+      actions: [
+        { action_id: `eve_input:tool-approval:${requestId}:button:0` },
+        { action_id: `eve_input:tool-approval:${requestId}:button:1` },
+      ],
+      body: { text: `Approve ${requestId}?`, type: "mrkdwn" },
+      type: "card",
+    }));
+    const { channel, request } = buildChannelStub({
+      approvalResponderUsers: { "slack:T1:U777": "U777" },
+      pendingApprovalCards: Object.fromEntries(
+        requestIds.map((requestId) => [requestId, { messageBlocks, messageTs: "123.456" }]),
+      ),
+    });
+    const settlementOrder = ["approval-5", "approval-2", "approval-1"];
+
+    for (const [index, requestId] of settlementOrder.entries()) {
+      await defaultEvents["approval.settled"]!(
+        {
+          outcome: "approved",
+          requestId,
+          responderPrincipalId: "slack:T1:U777",
+          sequence: index + 1,
+          stepIndex: index,
+          turnId: "turn-1",
+        },
+        channel,
+        sessionCtx,
+      );
+
+      const update = request.mock.calls[index]?.[1] as { blocks?: unknown[] };
+      const rendered = JSON.stringify(update.blocks);
+      for (const settledRequestId of settlementOrder.slice(0, index + 1)) {
+        expect(rendered).not.toContain(`eve_input:tool-approval:${settledRequestId}`);
+      }
+      for (const pendingRequestId of requestIds.filter(
+        (candidate) => !settlementOrder.slice(0, index + 1).includes(candidate),
+      )) {
+        expect(rendered).toContain(`eve_input:tool-approval:${pendingRequestId}`);
+      }
+    }
   });
 });
 

@@ -44,21 +44,19 @@ describe("withEve Vercel config", () => {
     vi.unstubAllGlobals();
   });
 
-  it("does not create Build Output config outside Vercel when no Vercel project is detected", async () => {
+  it("requires a local eve build outside Vercel", async () => {
     const appRoot = await createTempAppRoot();
     process.chdir(appRoot);
     vi.stubEnv("NODE_ENV", "production");
 
     const config = await resolveConfig(withEve<TestConfig>({}));
-    const rewrites = await config.rewrites?.();
 
+    await expect(config.rewrites?.()).rejects.toThrow(
+      `Run eve build from ${appRoot} before starting Next.js.`,
+    );
     await expect(
       readFile(join(appRoot, ".vercel", "output", "config.json"), "utf8"),
     ).rejects.toThrow();
-    expect(getBeforeFiles(rewrites)).toContainEqual({
-      destination: "http://127.0.0.1:4274/eve/v1/:path+",
-      source: "/eve/v1/:path+",
-    });
   });
 
   it("writes Build Output config in Vercel even when no linked project is detected", async () => {
@@ -291,6 +289,55 @@ describe("withEve Vercel config", () => {
     expect(rewrites).toBeUndefined();
   });
 
+  it("discovers workspace agents when the Next.js app owns the workspace", async () => {
+    const appRoot = await createTempAppRoot();
+    process.chdir(appRoot);
+    await Promise.all([
+      mkdir(join(appRoot, "agents", "support", "agent"), { recursive: true }),
+      mkdir(join(appRoot, "agents", "research", "agent"), { recursive: true }),
+      writeFile(join(appRoot, "package.json"), JSON.stringify({ dependencies: { eve: "*" } })),
+    ]);
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("VERCEL", "1");
+    vi.stubEnv("VERCEL_URL", "preview.example.com");
+
+    const config = await resolveConfig(withEve<TestConfig>({}));
+    const rewrites = await config.rewrites?.();
+    const outputConfig = await readJsonFile(join(appRoot, ".vercel", "output", "config.json"));
+
+    expect(outputConfig).toMatchObject({
+      routes: expect.arrayContaining([
+        expect.objectContaining({
+          destination: { service: "eve-research", type: "service" },
+          src: "^/eve/agents/research/eve/v1/(.*)$",
+        }),
+        expect.objectContaining({
+          destination: { service: "eve-support", type: "service" },
+          src: "^/eve/agents/support/eve/v1/(.*)$",
+        }),
+        expect.objectContaining({
+          destination: { service: "eve-research", type: "service" },
+          src: "^/eve/agents/research/?$",
+        }),
+        expect.objectContaining({
+          destination: { service: "eve-support", type: "service" },
+          src: "^/eve/agents/support/?$",
+        }),
+      ]),
+      services: expect.objectContaining({
+        "eve-research": expect.objectContaining({
+          buildCommand: expect.stringContaining("EVE_INTERNAL_AGENT_WORKSPACE_MEMBER=1"),
+          routePrefix: "/eve/agents/research",
+        }),
+        "eve-support": expect.objectContaining({
+          buildCommand: expect.stringContaining("EVE_INTERNAL_AGENT_WORKSPACE_MEMBER=1"),
+          routePrefix: "/eve/agents/support",
+        }),
+      }),
+    });
+    expect(rewrites).toBeUndefined();
+  });
+
   it("accepts a custom eve service build command", async () => {
     const appRoot = await createTempAppRoot();
     process.chdir(appRoot);
@@ -384,7 +431,7 @@ describe("withEve Vercel config", () => {
         },
         "eve-support": {
           buildCommand:
-            "cd '../../../agents/support' && export EVE_INTERNAL_BUILD_OUTPUT_DIRECTORY='../../.eve/vercel-services/eve-support/.vercel/output' && export EVE_INTERNAL_HOST_BUILD_OUTPUT_DIRECTORY='../../.vercel/output' && export EVE_PUBLIC_ROUTE_PREFIX='/eve/agents/support' && node '../../node_modules/eve/bin/eve.js' build",
+            "cd '../../../agents/support' && export EVE_INTERNAL_BUILD_OUTPUT_DIRECTORY='../../.eve/vercel-services/eve-support/.vercel/output' && export EVE_INTERNAL_HOST_BUILD_OUTPUT_DIRECTORY='../../.vercel/output' && export EVE_PUBLIC_ROUTE_PREFIX='/eve/agents/support' && node 'node_modules/eve/bin/eve.js' build",
           framework: "eve",
           routes: [
             {
@@ -483,7 +530,7 @@ describe("withEve Vercel config", () => {
       services: {
         "eve-billing": {
           buildCommand:
-            "cd '../../../agents/billing' && export EVE_INTERNAL_BUILD_OUTPUT_DIRECTORY='../../.eve/vercel-services/eve-billing/.vercel/output' && export EVE_INTERNAL_HOST_BUILD_OUTPUT_DIRECTORY='../../.vercel/output' && export EVE_PUBLIC_ROUTE_PREFIX='/eve/agents/billing' && node '../../node_modules/eve/bin/eve.js' build",
+            "cd '../../../agents/billing' && export EVE_INTERNAL_BUILD_OUTPUT_DIRECTORY='../../.eve/vercel-services/eve-billing/.vercel/output' && export EVE_INTERNAL_HOST_BUILD_OUTPUT_DIRECTORY='../../.vercel/output' && export EVE_PUBLIC_ROUTE_PREFIX='/eve/agents/billing' && node 'node_modules/eve/bin/eve.js' build",
           framework: "eve",
           routes: [
             {
@@ -553,7 +600,7 @@ describe("withEve Vercel config", () => {
     vi.stubEnv("NODE_ENV", "development");
     vi.stubGlobal(
       "fetch",
-      vi.fn(async () => new Response(null, { status: 200 })),
+      vi.fn(async () => Response.json({ revision: "rev-1" })),
     );
     await mkdir(join(resolvedAppRoot, ".eve"), {
       recursive: true,
@@ -575,9 +622,10 @@ describe("withEve Vercel config", () => {
     const config = await resolveConfig(withEve<TestConfig>({}));
     const rewrites = await config.rewrites?.();
 
-    expect(fetch).toHaveBeenCalledWith("http://127.0.0.1:49152/eve/v1/health", {
-      signal: expect.any(AbortSignal),
-    });
+    expect(fetch).toHaveBeenCalledWith(
+      new URL("/eve/v1/dev/runtime-artifacts", "http://127.0.0.1:49152"),
+      { redirect: "error", signal: expect.any(AbortSignal) },
+    );
     expect(getBeforeFiles(rewrites)).toContainEqual({
       destination: "http://127.0.0.1:49152/eve/v1/:path+",
       source: "/eve/v1/:path+",

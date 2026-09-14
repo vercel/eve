@@ -9,6 +9,8 @@ import {
   SCHEDULE_APP_AUTH,
   ScheduleDispatcher,
 } from "#channel/schedule.js";
+import { contextStorage } from "#context/container.js";
+import { ScheduleIdKey } from "#context/keys.js";
 import type { RunHandle, Runtime } from "#channel/types.js";
 import { slackChannel } from "#public/channels/slack/slackChannel.js";
 import type { ResolvedChannelDefinition } from "#runtime/types.js";
@@ -147,6 +149,45 @@ describe("ScheduleDispatcher", () => {
       expect(result.waitUntilTasks).toHaveLength(2);
       await expect(Promise.all(result.waitUntilTasks)).resolves.toEqual(["done", 42]);
       expect(result.sessions).toHaveLength(0);
+    });
+
+    it("scopes user-auth sessions started through waitUntil to the active schedule", async () => {
+      const runtime = createMockRuntime();
+      const observedScheduleIds: Array<string | undefined> = [];
+      runtime.createSession = vi.fn(async () => {
+        observedScheduleIds.push(contextStorage.getStore()?.get(ScheduleIdKey));
+        return createMockRunHandle();
+      });
+      vi.stubEnv("SLACK_BOT_TOKEN", "xoxb-test");
+      vi.stubEnv("SLACK_SIGNING_SECRET", "test-secret");
+      try {
+        const { definition, resolved } = makeSlackChannelEntry();
+        const dispatcher = new ScheduleDispatcher({ runtime, channels: [resolved] });
+
+        const result = await dispatcher.trigger({
+          scheduleId: "dynamic-tasks",
+          run({ to, waitUntil }) {
+            waitUntil(
+              Promise.resolve().then(() =>
+                to(definition, { channelId: "C0123ABC" }).send("run", {
+                  auth: {
+                    attributes: {},
+                    authenticator: "slack",
+                    principalId: "schedule-owner",
+                    principalType: "user",
+                  },
+                }),
+              ),
+            );
+          },
+        });
+
+        await Promise.all(result.waitUntilTasks);
+        expect(observedScheduleIds).toEqual(["dynamic-tasks"]);
+        expect(contextStorage.getStore()?.get(ScheduleIdKey)).toBeUndefined();
+      } finally {
+        vi.unstubAllEnvs();
+      }
     });
 
     it("throws when ctx.to(channel) is called with an unregistered channel", async () => {

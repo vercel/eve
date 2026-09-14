@@ -65,6 +65,27 @@ describe("parsePromptCommand", () => {
     });
   });
 
+  it("parses /add with a trimmed registry address", () => {
+    expect(parsePromptCommand("/add channel/slack")).toEqual({
+      type: "extension",
+      name: "add",
+      argument: "channel/slack",
+    });
+    expect(parsePromptCommand("/add  extension/agent-browser ")).toEqual({
+      type: "extension",
+      name: "add",
+      argument: "extension/agent-browser",
+    });
+  });
+
+  it("parses the typeahead's completed /add, which carries a trailing space", () => {
+    expect(parsePromptCommand("/add ")).toEqual({
+      type: "extension",
+      name: "add",
+      argument: "",
+    });
+  });
+
   it("parses bare /loglevel and /loglevel with a mode argument", () => {
     expect(parsePromptCommand("/loglevel")).toEqual({ type: "loglevel", argument: "" });
     expect(parsePromptCommand("/loglevel none")).toEqual({ type: "loglevel", argument: "none" });
@@ -74,8 +95,10 @@ describe("parsePromptCommand", () => {
     });
   });
 
-  it("parses /help and rejects /help with an argument", () => {
+  it("parses /help and /info without arguments", () => {
     expect(parsePromptCommand("/help")).toEqual({ type: "help" });
+    expect(parsePromptCommand("/info")).toEqual({ type: "info" });
+    expect(parsePromptCommand("/info verbose")).toBeNull();
     expect(parsePromptCommand("/help model")).toBeNull();
   });
 
@@ -100,6 +123,7 @@ describe("parsePromptCommand", () => {
 describe("promptCommandsFor", () => {
   it("exposes project commands only for local sessions", () => {
     const names = promptCommandsFor("local").map((command) => command.name);
+    expect(names).toContain("info");
     expect(names).toContain("model");
     expect(names).toContain("add");
     expect(names).toContain("deploy");
@@ -113,6 +137,7 @@ describe("promptCommandsFor", () => {
     expect(names).toContain("vc:install");
     expect(names).toContain("vc:login");
     expect(names).not.toContain("vc:auth");
+    expect(names).not.toContain("info");
     expect(names).not.toContain("model");
     expect(names).not.toContain("add");
     expect(names).not.toContain("deploy");
@@ -154,9 +179,9 @@ describe("PROMPT_COMMANDS registry", () => {
     }
   });
 
-  it("pairs an argument hint with takesArgument", () => {
+  it("only gives argument hints to commands that accept arguments", () => {
     for (const spec of PROMPT_COMMANDS) {
-      expect(spec.argumentHint !== undefined).toBe(spec.takesArgument);
+      if (spec.argumentHint !== undefined) expect(spec.takesArgument).toBe(true);
     }
   });
 

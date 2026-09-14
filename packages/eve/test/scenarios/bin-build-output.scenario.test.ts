@@ -1,10 +1,11 @@
 import { spawn } from "node:child_process";
-import { mkdir, realpath, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, realpath, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
+import { useScenarioApp } from "../../src/internal/testing/scenario-app.js";
 import { useTemporaryDirectories } from "../../src/internal/testing/use-temporary-app-roots.js";
 
 const EVE_BIN_PATH = fileURLToPath(new URL("../../bin/eve.js", import.meta.url));
@@ -77,6 +78,7 @@ async function createTemporaryAppRoot(input: {
     join(appRoot, "package.json"),
     `${JSON.stringify(
       {
+        dependencies: { eve: "*" },
         name: "eve-bin-build-output-test",
         private: true,
         type: "module",
@@ -95,6 +97,23 @@ async function createTemporaryAppRoot(input: {
   }
 
   return appRoot;
+}
+
+async function readDirectorySources(root: string): Promise<string> {
+  const entries = await readdir(root, { recursive: true, withFileTypes: true });
+  const sources = await Promise.all(
+    entries
+      .filter((entry) => entry.isFile() && /\.(?:m?js|cjs)$/u.test(entry.name))
+      .map((entry) => readFile(join(entry.parentPath, entry.name), "utf8")),
+  );
+  return sources.join("\n");
+}
+
+function decodeEmbeddedWorkflowCode(source: string): string {
+  const chunks = [...source.matchAll(/Buffer\.from\((\[[\s\S]*?\])\.join\(""\), "base64"\)/gu)].map(
+    (match) => JSON.parse(match[1]!) as string[],
+  );
+  return chunks.map((chunk) => Buffer.from(chunk.join(""), "base64").toString("utf8")).join("\n");
 }
 
 async function runEveBuild(appRoot: string): Promise<ProcessResult> {
@@ -162,6 +181,8 @@ async function runEveBuild(appRoot: string): Promise<ProcessResult> {
 }
 
 describe("eve build process output", () => {
+  const scenarioApp = useScenarioApp();
+
   it("prints successful build output to stdout", async () => {
     const appRoot = await createTemporaryAppRoot({
       prefix: "eve-bin-build-output-success-",
@@ -174,6 +195,67 @@ describe("eve build process output", () => {
     expect(result.stdout).toContain("[BUILD] built output at");
     expect(result.stdout).toContain(".output");
   }, 120_000);
+
+  it("bundles authored workflow tools into the server and driver output", async () => {
+    const { appRoot } = await scenarioApp({
+      files: {
+        "agent/agent.mjs": 'export default { model: "openai/gpt-5.4" };',
+        "agent/instructions.md": "You are a precise assistant.",
+      },
+      installDependencies: true,
+      name: "bin-build-output-workflow-tool",
+    });
+    await mkdir(join(appRoot, "agent", "tools"), { recursive: true });
+    await mkdir(join(appRoot, "agent", "lib"), { recursive: true });
+    await writeFile(
+      join(appRoot, "agent", "lib", "plan.mjs"),
+      [
+        'import { createHash } from "node:crypto";',
+        "",
+        "export async function hashPlan(plan) {",
+        '  "use step";',
+        '  return createHash("sha256").update(plan).digest("hex");',
+        "}",
+        "",
+      ].join("\n"),
+    );
+    await writeFile(
+      join(appRoot, "agent", "tools", "deploy_service.mjs"),
+      [
+        'import { defineWorkflowTool } from "eve/tools";',
+        'import { sleep } from "workflow";',
+        'import { hashPlan } from "../lib/plan.mjs";',
+        "",
+        "export default defineWorkflowTool({",
+        '  description: "Deploy a service.",',
+        '  inputSchema: { type: "object", properties: { service: { type: "string" } } },',
+        "  async execute({ service }) {",
+        '    "use workflow";',
+        "    const digest = await hashPlan(service);",
+        '    await sleep("10ms");',
+        "    return { digest };",
+        "  },",
+        "});",
+        "",
+      ].join("\n"),
+    );
+
+    const result = await runEveBuild(appRoot);
+    expect(result.code, `stderr:\n${result.stderr}`).toBe(0);
+
+    const output = join(appRoot, ".output", "server");
+    const serverSources = await readDirectorySources(output);
+    expect(serverSources).toContain('"step//./agent/lib/plan//hashPlan"');
+    expect(serverSources).toContain('"workflow//./agent/tools/deploy_service//execute"');
+    // The driver body is base64-embedded; decode and check it registers the
+    // authored workflow and proxies the authored step without its Node import.
+    const driverCode = decodeEmbeddedWorkflowCode(serverSources);
+    expect(driverCode).toContain(
+      '__private_workflows.set("workflow//./agent/tools/deploy_service//execute"',
+    );
+    expect(driverCode).toContain('WORKFLOW_USE_STEP")]("step//./agent/lib/plan//hashPlan")');
+    expect(driverCode).not.toContain("node:crypto");
+  }, 180_000);
 
   it("prints discovery diagnostics to stderr when build fails", async () => {
     const appRoot = await createTemporaryAppRoot({
@@ -252,7 +334,7 @@ describe("eve build process output", () => {
     expect(result.code).toBe(1);
     expect(result.signal).toBeNull();
     expect(result.stdout).toBe("");
-    expect(result.stderr).toContain("Unexpected token");
+    expect(result.stderr).toMatch(/Expected `}` but found `EOF`|Unexpected token/);
     expect(result.stderr).toContain("Build failed with 1 error:");
     expect(result.stderr).toContain("agent/tools/bad.ts");
     expect(result.stderr).not.toContain("Diagnostics artifact:");

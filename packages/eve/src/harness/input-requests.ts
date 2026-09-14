@@ -1,8 +1,9 @@
 import type { ModelMessage } from "ai";
 
-import type { RuntimeToolCallActionRequest } from "#runtime/actions/types.js";
-import type { InputRequest, InputResponse } from "#runtime/input/types.js";
+import type { RuntimeToolCallActionRequest } from "#shared/action-types.js";
+import type { InputRequest, InputResponse } from "#shared/input.js";
 import { resolveTextToResponses } from "#channel/resolve-text.js";
+import { hasTailApprovalResponse } from "#harness/current-messages.js";
 import {
   getApprovedTools,
   hasAnsweredApprovalBatch,
@@ -18,13 +19,14 @@ import type {
   ResolvedStepInput,
 } from "#harness/hitl/pending-input-resolution.js";
 import { resolveQuestionOnlyInputBatches } from "#harness/hitl/question-input-requests.js";
-import { resolveToolCallInputObject } from "#harness/runtime-actions.js";
+import { resolveToolCallInputObject } from "#harness/coordination.js";
 import {
   clearPendingSessionLimitPrompt,
   isSessionLimitInputBatch,
   resolveSessionLimitInput,
 } from "#harness/hitl/session-limit-input-requests.js";
 import type { HarnessSession, StepInput } from "#harness/types.js";
+import { readClientContext } from "#internal/client-context.js";
 
 export { getApprovedTools, clearPendingSessionLimitPrompt };
 export type { RejectedActionBatch };
@@ -97,7 +99,9 @@ export function resolvePendingInput(input: {
   if (responses.length === 0 && resolvedStepInput?.message === undefined) {
     const deferredInput = compactStepInput(resolvedStepInput);
     const session =
-      deferredInput.context !== undefined || deferredInput.outputSchema !== undefined
+      deferredInput.context !== undefined ||
+      readClientContext(deferredInput) !== undefined ||
+      deferredInput.outputSchema !== undefined
         ? queueDeferredStepInput(input.session, deferredInput)
         : input.session;
     return { outcome: "unresolved", messages: baseHistory, session };
@@ -179,13 +183,6 @@ function canonicalizeInputResponses(responses: readonly InputResponse[]): readon
   const byRequestId = new Map<string, InputResponse>();
   for (const response of responses) byRequestId.set(response.requestId, response);
   return [...byRequestId.values()];
-}
-
-function hasTailApprovalResponse(messages: readonly ModelMessage[]): boolean {
-  const tail = messages.at(-1);
-  return (
-    tail?.role === "tool" && tail.content.some((part) => part.type === "tool-approval-response")
-  );
 }
 
 function resolveTextMessageInput(

@@ -1,12 +1,66 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { Client } from "#client/client.js";
+import { EVE_MESSAGE_STREAM_VERSION, EVE_STREAM_VERSION_HEADER } from "#protocol/message.js";
 
 afterEach(() => {
   vi.restoreAllMocks();
 });
 
 describe("Client.sessions", () => {
+  it("returns structured output when fetch instrumentation clones the live stream", async () => {
+    const events = [
+      { type: "result.completed", data: { result: { answer: "child-result" } } },
+      { type: "session.waiting", data: { wait: "next-user-message" } },
+    ];
+    let source: ReadableStreamDefaultController<Uint8Array> | undefined;
+    let streamSignal: AbortSignal | undefined;
+    let traceBody: Promise<string> | undefined;
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (_request, init) => {
+      if (init?.method === "POST") {
+        return Response.json({ sessionId: "child-session" }, { status: 202 });
+      }
+      streamSignal = init?.signal ?? undefined;
+      const response = new Response(
+        new ReadableStream<Uint8Array>({
+          start(controller) {
+            source = controller;
+            controller.enqueue(
+              new TextEncoder().encode(
+                events.map((event) => JSON.stringify(event)).join("\n") + "\n",
+              ),
+            );
+            streamSignal?.addEventListener("abort", () => controller.error(streamSignal?.reason));
+          },
+        }),
+        { headers: { [EVE_STREAM_VERSION_HEADER]: EVE_MESSAGE_STREAM_VERSION } },
+      );
+      traceBody = response
+        .clone()
+        .text()
+        .catch(() => "");
+      return response;
+    });
+    const client = new Client({ host: "https://eve.test" });
+    const { response, session } = await client.sessions.create({
+      message: "Return a structured answer.",
+      outputSchema: { type: "object", properties: { answer: { type: "string" } } },
+    });
+    const settled = vi.fn();
+    const result = response.result().then(settled);
+    try {
+      await vi.waitFor(() => expect(settled).toHaveBeenCalledOnce());
+      expect(settled).toHaveBeenCalledWith(
+        expect.objectContaining({ data: { answer: "child-result" }, status: "waiting" }),
+      );
+      expect(streamSignal?.aborted).toBe(true);
+      expect(session.state.streamIndex).toBe(events.length);
+    } finally {
+      source?.error(new DOMException("Test cleanup", "AbortError"));
+      await Promise.all([result, traceBody]);
+    }
+  });
+
   it("creates explicitly, streams by ID, and keeps the fixed session state", async () => {
     const requests: Array<{ readonly body?: string; readonly url: string }> = [];
     vi.spyOn(globalThis, "fetch")
@@ -21,6 +75,9 @@ describe("Client.sessions", () => {
         requests.push({ url: String(request) });
         return new Response(
           `${JSON.stringify({ data: { reason: "completed" }, type: "session.completed" })}\n`,
+          {
+            headers: { [EVE_STREAM_VERSION_HEADER]: EVE_MESSAGE_STREAM_VERSION },
+          },
         );
       });
     const client = new Client({ host: "https://eve.test" });
@@ -42,7 +99,7 @@ describe("Client.sessions", () => {
       const path = new URL(url).pathname;
       if (path === "/eve/v1/session/wrun_A") {
         return Response.json(
-          { ok: true, sessionId: "wrun_A", status: "accepted" },
+          { ok: true, sessionId: "wrun_A", status: "accepted", deliveryId: "delivery_1" },
           { status: 202 },
         );
       }

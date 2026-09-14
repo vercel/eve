@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { cache } from "react";
+import { cacheLife } from "next/cache";
 import {
   composeTemplateEntries,
   type GeneratedTemplatesInput,
@@ -13,7 +13,10 @@ export type { TemplateCategory, TemplateIntegration, TemplateSource } from "./ma
 
 const generatedTemplatesPath = join(process.cwd(), ".template-data/templates.json");
 
-export const getTemplateEntries = cache(async (): Promise<TemplateEntry[]> => {
+export const getTemplateEntries = async (): Promise<TemplateEntry[]> => {
+  "use cache";
+  cacheLife("max");
+
   let contents: string;
   try {
     contents = await readFile(generatedTemplatesPath, "utf8");
@@ -26,9 +29,11 @@ export const getTemplateEntries = cache(async (): Promise<TemplateEntry[]> => {
   }
 
   return composeTemplateEntries(templateManifest, JSON.parse(contents) as GeneratedTemplatesInput);
-});
+};
 
-export const getTemplateEntry = cache(
-  async (slug: string): Promise<TemplateEntry | undefined> =>
-    (await getTemplateEntries()).find((entry) => entry.slug === slug),
-);
+export const getTemplateEntry = async (slug: string): Promise<TemplateEntry | undefined> => {
+  "use cache";
+  cacheLife("max");
+
+  return (await getTemplateEntries()).find((entry) => entry.slug === slug);
+};

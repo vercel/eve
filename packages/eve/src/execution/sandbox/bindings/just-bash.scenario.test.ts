@@ -2,7 +2,7 @@ import { existsSync } from "node:fs";
 import { mkdir, readdir, readFile, stat, utimes, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
-import { MountableFs, ReadWriteFs } from "just-bash";
+import { decodeBytesToUtf8, defineCommand, MountableFs, ReadWriteFs } from "just-bash";
 import { describe, expect, it } from "vitest";
 
 import { useTemporaryDirectories } from "#internal/testing/use-temporary-app-roots.js";
@@ -401,6 +401,43 @@ describe("just-bash sandbox file API", () => {
     const result = await handle.session.run({ command: "wc -c < assets/fixture.bin" });
     expect(result.exitCode).toBe(0);
     expect(Number(result.stdout.trim())).toBe(bytes.length);
+  });
+});
+
+describe("just-bash custom commands", () => {
+  it("forwards custom commands to live sessions", async () => {
+    const appRoot = await createTemporaryCacheDirectory("custom-command");
+    const backend = justbash({
+      customCommands: [
+        defineCommand("cap", async (args, context) => {
+          if (args[0] === "fail") {
+            return { exitCode: 23, stderr: "cap failed\n", stdout: "" };
+          }
+          return {
+            exitCode: 0,
+            stderr: "",
+            stdout: decodeBytesToUtf8(context.stdin).toUpperCase(),
+          };
+        }),
+      ],
+    });
+    const handle = await backend.create({
+      runtimeContext: { appRoot },
+      sessionKey: "session-custom-command",
+      templateKey: null,
+    });
+    await expect(
+      handle.session.run({ command: "printf 'hello' | cap > result.txt" }),
+    ).resolves.toMatchObject({
+      exitCode: 0,
+      stdout: "",
+    });
+    await expect(handle.session.readTextFile({ path: "result.txt" })).resolves.toBe("HELLO");
+    await expect(handle.session.run({ command: "cap fail" })).resolves.toMatchObject({
+      exitCode: 23,
+      stderr: "cap failed\n",
+    });
+    await handle.shutdown();
   });
 });
 

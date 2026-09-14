@@ -1,16 +1,24 @@
 import type { DeliverHookPayload, DeliverPayload } from "#channel/types.js";
-import type { DurableSessionState } from "#execution/durable-session-store.js";
+import { jsonValuesEqual } from "#shared/json.js";
+import { cancelAllIndexedSessionTasksStep } from "#execution/cancel-indexed-session-tasks-step.js";
 import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
 import type { SessionCommandInbox } from "#execution/session-command-inbox.js";
-import { sendCommandToDelivery } from "#execution/session-command-wire.js";
+import type { SessionStateCursor } from "#execution/session-state-cursor.js";
+import { reportDroppedWirePayloadStep } from "#execution/report-dropped-wire-payload-step.js";
+import {
+  sessionInboxWire,
+  SessionInboxWireError,
+  type DecodedSessionInbox,
+} from "#execution/wire/session-inbox-wire.js";
 import { coalesceDeliveries } from "#harness/messages.js";
+import { getSessionTaskCohorts } from "#tasks/session-task-cohorts.js";
 
 type NextSessionAction =
   | { readonly kind: "clear" }
   | { readonly kind: "compact" }
   | { readonly kind: "expired" }
   | { readonly kind: "reset" }
-  | Omit<AuthorizationCallbackInstruction, "sessionState">
+  | AuthorizationCallbackInstruction
   | {
       readonly delivery: DeliverHookPayload | null;
       readonly kind: "delivery";
@@ -22,23 +30,20 @@ export interface AuthorizationCallbackInstruction {
   /** True when the authorization hook closed; no further callbacks can arrive. */
   readonly closed: boolean;
   readonly payloads: readonly DeliverPayload[];
-  readonly sessionState: DurableSessionState;
 }
 
 /** What the parked driver should do with the next session activity. */
 export type NextTurnInstruction =
-  | { readonly kind: "clear"; readonly sessionState: DurableSessionState }
-  | { readonly kind: "compact"; readonly sessionState: DurableSessionState }
-  | { readonly kind: "expired"; readonly sessionState: DurableSessionState }
-  | { readonly kind: "reset"; readonly sessionState: DurableSessionState }
-  | { readonly kind: "closed"; readonly sessionState: DurableSessionState }
-  | { readonly kind: "cancel-turn"; readonly sessionState: DurableSessionState }
+  | { readonly kind: "clear" }
+  | { readonly kind: "compact" }
+  | { readonly kind: "expired" }
+  | { readonly kind: "reset" }
+  | { readonly kind: "closed" }
+  | { readonly kind: "cancel-turn" }
   | AuthorizationCallbackInstruction
   | {
       readonly kind: "turn";
-      readonly deliver: DeliverHookPayload;
-      readonly remainder: DeliverHookPayload;
-      readonly sessionState: DurableSessionState;
+      readonly delivery: DeliverHookPayload;
     };
 
 /**
@@ -53,15 +58,20 @@ export type NextTurnInstruction =
  * without producing a parent turn (no-op cancels, fully-routed descendant
  * deliveries) — so an open challenge's callback surfaces as an
  * `"authorization"` instruction no matter when it arrives.
+ *
+ * Routing steps mutate durable state; each transition is adopted into the
+ * caller-owned `stateCursor`, so returns carry only the instruction kind.
  */
 export async function nextTurnDelivery(input: {
   readonly awaitAuthorizationCallbacks?: boolean;
   readonly bufferedDeliveries: DeliverHookPayload[];
   readonly bufferedSessionControls: Array<"clear" | "compact" | "expired" | "reset">;
+  readonly cancelledTaskIds?: Set<string>;
   readonly commandInbox: SessionCommandInbox;
   readonly deferDeliveries?: boolean;
   readonly driverWritable: WritableStream<Uint8Array>;
-  readonly sessionState: DurableSessionState;
+  readonly seenTaskDeliveries?: Set<string>;
+  readonly stateCursor: SessionStateCursor;
 }): Promise<NextTurnInstruction> {
   if (input.awaitAuthorizationCallbacks !== true) {
     return await awaitNextTurnDelivery(input);
@@ -78,43 +88,49 @@ export async function nextTurnDelivery(input: {
 async function awaitNextTurnDelivery(input: {
   readonly bufferedDeliveries: DeliverHookPayload[];
   readonly bufferedSessionControls: Array<"clear" | "compact" | "expired" | "reset">;
+  readonly cancelledTaskIds?: Set<string>;
   readonly commandInbox: SessionCommandInbox;
   readonly deferDeliveries?: boolean;
   readonly driverWritable: WritableStream<Uint8Array>;
-  readonly sessionState: DurableSessionState;
+  readonly seenTaskDeliveries?: Set<string>;
+  readonly stateCursor: SessionStateCursor;
 }): Promise<NextTurnInstruction> {
-  let sessionState = input.sessionState;
-
+  const cancelledTaskIds = input.cancelledTaskIds ?? new Set<string>();
+  const seenTaskDeliveries = input.seenTaskDeliveries ?? new Set<string>();
   while (true) {
     const nextAction = await waitForNextSessionAction({
       bufferedDeliveries: input.bufferedDeliveries,
       bufferedSessionControls: input.bufferedSessionControls,
+      cancelledTaskIds,
       commandInbox: input.commandInbox,
       deferDeliveries: input.deferDeliveries,
+      seenTaskDeliveries,
+      stateCursor: input.stateCursor,
     });
 
     if (nextAction.kind === "authorization") {
-      return { ...nextAction, sessionState };
+      return nextAction;
     }
 
     if (nextAction.kind !== "delivery") {
-      return { kind: nextAction.kind, sessionState };
+      return { kind: nextAction.kind };
     }
 
     const deliver = nextAction.delivery;
     if (deliver === null) {
-      return { kind: "closed", sessionState };
+      return { kind: "closed" };
     }
 
     const routed = await routeDeliverToChildren({
       delivery: deliver,
       parentWritable: input.driverWritable,
-      sessionState,
+      serializedContext: input.stateCursor.serializedContext,
+      sessionState: input.stateCursor.sessionState,
     });
-    sessionState = routed.sessionState;
+    input.stateCursor.adoptState(routed);
 
     if (routed.kind === "cancel-turn") {
-      return { kind: "cancel-turn", sessionState };
+      return { kind: "cancel-turn" };
     }
 
     if (routed.remainder === undefined) {
@@ -122,33 +138,34 @@ async function awaitNextTurnDelivery(input: {
       continue;
     }
 
-    return { deliver, kind: "turn", remainder: routed.remainder, sessionState };
+    return { delivery: routed.remainder, kind: "turn" };
   }
 }
 
 async function waitForNextSessionAction(input: {
   readonly bufferedDeliveries: DeliverHookPayload[];
   readonly bufferedSessionControls: Array<"clear" | "compact" | "expired" | "reset">;
+  readonly cancelledTaskIds: Set<string>;
   readonly commandInbox: SessionCommandInbox;
   readonly deferDeliveries?: boolean;
+  readonly seenTaskDeliveries: Set<string>;
+  readonly stateCursor: SessionStateCursor;
 }): Promise<NextSessionAction> {
   const pendingSessionControl = input.bufferedSessionControls.shift();
   if (pendingSessionControl !== undefined) {
     return { kind: pendingSessionControl };
   }
 
-  if (
-    input.deferDeliveries !== true &&
-    !input.commandInbox.hasReadyAuthorization() &&
-    input.bufferedDeliveries.length > 0
-  ) {
-    return {
-      delivery: takeBufferedTurnDelivery(input.bufferedDeliveries),
-      kind: "delivery",
-    };
-  }
-
   while (true) {
+    if (input.deferDeliveries !== true && !input.commandInbox.hasReadyAuthorization()) {
+      const delivery = takeBufferedTurnDelivery(
+        input.bufferedDeliveries,
+        getSessionTaskCohorts(input.stateCursor.sessionState.snapshot?.session.state),
+        input.cancelledTaskIds,
+      );
+      if (delivery !== undefined) return { delivery, kind: "delivery" };
+    }
+
     const { result: first, source } = await input.commandInbox.nextWithSource();
     input.commandInbox.consumeNext();
 
@@ -167,60 +184,151 @@ async function waitForNextSessionAction(input: {
       return { delivery: null, kind: "delivery" };
     }
 
-    if (first.value.kind === "session-timeout") {
-      return { kind: "expired" };
-    }
-
-    if (
-      first.value.kind === "clear" ||
-      first.value.kind === "compact" ||
-      first.value.kind === "reset"
-    ) {
-      return { kind: first.value.kind };
-    }
-
-    if (first.value.kind === "cancel") {
-      continue;
-    }
-
-    // Child results also arrive through this inbox, but the runtime-action
-    // collector owns them. They are not channel deliveries.
+    // Runtime-action results use the active turn's private inbox. A late value
+    // can still surface through an old session alias, where the driver has
+    // always ignored it rather than treating it as a session command.
     if (first.value.kind === "runtime-action-result") {
       continue;
     }
 
-    if (first.value.kind === "deliver") {
-      if (input.deferDeliveries === true) {
-        input.bufferedDeliveries.push(first.value);
-        continue;
-      }
-      return { delivery: first.value, kind: "delivery" };
-    }
-
-    const delivery = sendCommandToDelivery(first.value);
-    if (input.deferDeliveries === true) {
-      input.bufferedDeliveries.push(delivery);
+    let decoded: DecodedSessionInbox;
+    try {
+      decoded = sessionInboxWire.decode(first.value);
+    } catch (error) {
+      if (!(error instanceof SessionInboxWireError)) throw error;
+      // A lost delivery with an operator-visible signal is the designed
+      // failure; reinterpreting an unknown payload is the bug. Stay parked.
+      await reportDroppedWirePayloadStep({ detail: error.message, family: "session-inbox" });
       continue;
     }
-    return { delivery, kind: "delivery" };
+
+    if (decoded.kind === "session-timeout") {
+      return { kind: "expired" };
+    }
+
+    if (decoded.kind === "clear" || decoded.kind === "compact" || decoded.kind === "reset") {
+      return { kind: decoded.kind };
+    }
+
+    if (decoded.kind === "cancel") {
+      if ("tasks" in decoded && decoded.tasks === true) {
+        await cancelAllIndexedSessionTasksStep({
+          serializedContext: input.stateCursor.serializedContext,
+          sessionState: input.stateCursor.sessionState,
+        });
+      }
+      if (decoded.taskId !== undefined) {
+        input.cancelledTaskIds.add(decoded.taskId);
+        const kept = input.bufferedDeliveries.filter(
+          (delivery) => !isCancelledTaskDelivery(delivery, input.cancelledTaskIds),
+        );
+        input.bufferedDeliveries.splice(0, input.bufferedDeliveries.length, ...kept);
+      }
+      continue;
+    }
+
+    const deliveryId = decoded.taskDeliveryId ?? decoded.caller?.taskId;
+    if (deliveryId !== undefined && isCancelledTaskDeliveryId(deliveryId, input.cancelledTaskIds)) {
+      continue;
+    }
+    if (deliveryId !== undefined) {
+      if (input.seenTaskDeliveries.has(deliveryId)) continue;
+      input.seenTaskDeliveries.add(deliveryId);
+    }
+
+    input.bufferedDeliveries.push(decoded);
   }
 }
 
-function takeBufferedTurnDelivery(bufferedDeliveries: DeliverHookPayload[]): DeliverHookPayload {
-  const first = bufferedDeliveries.shift();
-  if (first === undefined) {
-    throw new Error("Cannot take a turn delivery from an empty buffer.");
+function isCancelledTaskDelivery(
+  delivery: DeliverHookPayload,
+  cancelledTaskIds: ReadonlySet<string>,
+): boolean {
+  const deliveryId = delivery.taskDeliveryId ?? delivery.caller?.taskId;
+  return deliveryId !== undefined && isCancelledTaskDeliveryId(deliveryId, cancelledTaskIds);
+}
+
+function isCancelledTaskDeliveryId(
+  deliveryId: string,
+  cancelledTaskIds: ReadonlySet<string>,
+): boolean {
+  return [...cancelledTaskIds].some(
+    (taskId) => deliveryId === taskId || deliveryId.startsWith(`${taskId}:`),
+  );
+}
+
+function takeBufferedTurnDelivery(
+  bufferedDeliveries: DeliverHookPayload[],
+  cohorts: ReturnType<typeof getSessionTaskCohorts>,
+  cancelledTaskIds: ReadonlySet<string>,
+): DeliverHookPayload | undefined {
+  const retained = bufferedDeliveries.filter(
+    (delivery) => !isCancelledTaskDelivery(delivery, cancelledTaskIds),
+  );
+  bufferedDeliveries.splice(0, bufferedDeliveries.length, ...retained);
+
+  const completed = new Set(
+    bufferedDeliveries.flatMap((delivery) => {
+      const taskId = completionTaskId(delivery);
+      return taskId === undefined ? [] : [taskId];
+    }),
+  );
+  const pendingCohorts = new Set<string>();
+  for (const [taskId, cohort] of cohorts) {
+    if (!cohort.settled && !completed.has(taskId) && !cancelledTaskIds.has(taskId)) {
+      pendingCohorts.add(cohort.cohortId);
+    }
+  }
+  let index = bufferedDeliveries.findIndex((delivery) => {
+    const cohort = completionCohort(delivery, cohorts);
+    return cohort === undefined || !pendingCohorts.has(cohort);
+  });
+  if (index < 0) return undefined;
+  const readyCohort = completionCohort(bufferedDeliveries[index]!, cohorts);
+  if (readyCohort !== undefined) {
+    const lastSibling = bufferedDeliveries.findLastIndex(
+      (delivery) => completionCohort(delivery, cohorts) === readyCohort,
+    );
+    // Settlement must apply before terminal views release its claimed handle.
+    // Process intervening deliveries first, then re-evaluate the cohort.
+    const boundary = bufferedDeliveries.findIndex(
+      (delivery, position) =>
+        position > index &&
+        position < lastSibling &&
+        completionCohort(delivery, cohorts) === undefined,
+    );
+    if (boundary >= 0) index = boundary;
+  }
+  const first = bufferedDeliveries.splice(index, 1)[0]!;
+  const cohort = completionCohort(first, cohorts);
+  if (cohort !== undefined) {
+    const siblings = bufferedDeliveries.filter(
+      (delivery) => completionCohort(delivery, cohorts) === cohort,
+    );
+    const remaining = bufferedDeliveries.filter(
+      (delivery) => completionCohort(delivery, cohorts) !== cohort,
+    );
+    bufferedDeliveries.splice(0, bufferedDeliveries.length, ...remaining);
+    return coalesceDeliveries([first, ...siblings]);
   }
 
+  const authenticated = first.auth != null && first.auth.principalType !== "anonymous";
   const turnDeliveries = [first];
   let caller = first.caller;
-  while (bufferedDeliveries.length > 0) {
-    const next = bufferedDeliveries[0];
-    if (next === undefined || (caller !== undefined && next.caller !== undefined)) {
+  while (bufferedDeliveries.length > index) {
+    const next = bufferedDeliveries[index];
+    if (
+      next === undefined ||
+      first.taskDeliveryId !== undefined ||
+      next.taskDeliveryId !== undefined ||
+      !authenticated ||
+      !jsonValuesEqual(first.auth, next.auth) ||
+      (caller !== undefined && next.caller !== undefined)
+    ) {
       break;
     }
 
-    const delivery = bufferedDeliveries.shift();
+    const delivery = bufferedDeliveries.splice(index, 1)[0];
     if (delivery === undefined) {
       throw new Error("Buffered turn delivery disappeared while partitioning.");
     }
@@ -229,4 +337,19 @@ function takeBufferedTurnDelivery(bufferedDeliveries: DeliverHookPayload[]): Del
   }
 
   return coalesceDeliveries(turnDeliveries);
+}
+
+/** Only successful sibling notifications can share their existing cohort context. */
+function completionCohort(
+  delivery: DeliverHookPayload,
+  cohorts: ReturnType<typeof getSessionTaskCohorts>,
+): string | undefined {
+  const taskId = completionTaskId(delivery);
+  return taskId === undefined ? undefined : cohorts.get(taskId)?.cohortId;
+}
+
+function completionTaskId(delivery: DeliverHookPayload): string | undefined {
+  const suffix = ":ready:completed";
+  if (delivery.caller !== undefined || !delivery.taskDeliveryId?.endsWith(suffix)) return undefined;
+  return delivery.taskDeliveryId.slice(0, -suffix.length);
 }

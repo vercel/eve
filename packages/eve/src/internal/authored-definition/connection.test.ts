@@ -1,10 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { normalizeMcpClientConnectionDefinition } from "#internal/authored-definition/connection.js";
-import type {
-  ConnectionAuthDefinition,
-  ConnectionAuthProvider,
-} from "#runtime/connections/types.js";
+import type { ConnectionAuthDefinition, ConnectionAuthProvider } from "#shared/connection-types.js";
 
 const MSG = "Expected the connection export to match the public eve shape.";
 
@@ -35,6 +32,15 @@ describe("normalizeMcpClientConnectionDefinition", () => {
       expect(result.url).toBe("https://mcp.example.com/sse");
       expect(result.description).toBe("A test connection.");
       expect(typeof authProvider(result.auth).getToken).toBe("function");
+    });
+
+    it("preserves a stable connection instance key", () => {
+      const result = normalizeMcpClientConnectionDefinition(
+        validInput({ instanceKey: "account-123" }),
+        MSG,
+      );
+
+      expect(result.instanceKey).toBe("account-123");
     });
 
     it("preserves the author's getToken reference", () => {
@@ -190,6 +196,14 @@ describe("normalizeMcpClientConnectionDefinition", () => {
       expect(() =>
         normalizeMcpClientConnectionDefinition(validInput({ description: "" }), MSG),
       ).toThrow(/must be a non-empty string/);
+    });
+  });
+
+  describe("instance key validation", () => {
+    it("rejects an empty connection instance key", () => {
+      expect(() =>
+        normalizeMcpClientConnectionDefinition(validInput({ instanceKey: "" }), MSG),
+      ).toThrow(/instanceKey/);
     });
   });
 

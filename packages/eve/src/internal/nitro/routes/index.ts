@@ -1,5 +1,3 @@
-import type { H3Event } from "nitro";
-
 /**
  * Public docs URL surfaced from the barebones home page. Kept in source
  * so the deployment output is a fully static, build-time-baked HTML
@@ -7,13 +5,17 @@ import type { H3Event } from "nitro";
  */
 const EVE_DOCS_URL = "https://eve.dev/docs";
 
-const DEPLOYMENT_URL_PLACEHOLDER = "{{DEPLOYMENT_URL}}";
 const AGENT_NAME_PLACEHOLDER = "{{AGENT_NAME}}";
+const STATUS_DETAIL_PLACEHOLDER = "{{STATUS_DETAIL}}";
+const TERMINAL_PLACEHOLDER = "{{TERMINAL}}";
 
 const EVE_LOGO_SVG = `<svg aria-hidden="true" class="logo" fill="none" viewBox="0 0 169 53" xmlns="http://www.w3.org/2000/svg">
     <path d="M169 8.47h-51.39L81.73 53H70.36L113 0H169zM169 44.51v8.47h-45.87V44.5zM45.87 52.98H0V44.5h45.87zM38.66 30.55H0v-8.47h38.66z" fill="currentColor"></path>
     <path d="M169 30.55h-38.66v-8.47H169zM75.52 8.47H0V0h75.52z" fill="currentColor"></path>
   </svg>`;
+
+const EVE_FAVICON_DATA_URL =
+  "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 102 102'%3E%3Cpath fill='%23000' d='M0 0h102v102H0z'/%3E%3Cpath fill='%23fff' d='M49.28 66.94 75.03 34.96h-6.89L47.91 60.11l-5.49 6.83h6.86ZM0 34.96h42.4v5.11H0zm0 13.32h27.66v5.11H0zm0 13.54h27.66v5.11H0zm69.63-26.86H102v5.11H69.63zm4.71 13.32H102v5.11H74.34zm0 13.54H102v5.11H74.34z'/%3E%3C/svg%3E";
 
 /**
  * Barebones HTML served at `GET /`.
@@ -39,6 +41,7 @@ const HOME_PAGE_HTML_TEMPLATE = `<!doctype html>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="robots" content="noindex">
 <meta name="referrer" content="no-referrer">
+<link rel="icon" href="${EVE_FAVICON_DATA_URL}" type="image/svg+xml">
 <title>eve</title>
 <style>
   :root {
@@ -200,11 +203,8 @@ const HOME_PAGE_HTML_TEMPLATE = `<!doctype html>
     <div class="agent-row">
       <strong class="agent-name">${AGENT_NAME_PLACEHOLDER}</strong>
     </div>
-    <p class="lede"><span class="status"><span class="status-dot" aria-hidden="true"></span>Ready</span><span class="lede-divider" aria-hidden="true">／</span><span>Agent is up and accepting messages.</span> <a href="${EVE_DOCS_URL}">Docs<span class="lede-arrow" aria-hidden="true">&nbsp;&rarr;</span></a></p>
-    <div class="terminal mono" role="group" aria-label="Send a message from your terminal">
-      <span class="terminal-prompt" aria-hidden="true">$</span>
-      <span class="terminal-cmd">eve dev ${DEPLOYMENT_URL_PLACEHOLDER}</span>
-    </div>
+    <p class="lede"><span class="status"><span class="status-dot" aria-hidden="true"></span>Ready</span><span class="lede-divider" aria-hidden="true">／</span><span>${STATUS_DETAIL_PLACEHOLDER}</span> <a href="${EVE_DOCS_URL}">Docs<span class="lede-arrow" aria-hidden="true">&nbsp;&rarr;</span></a></p>
+    ${TERMINAL_PLACEHOLDER}
   </section>
 </main>
 </body>
@@ -252,6 +252,25 @@ function resolveDeploymentUrl(request: Request): string {
   return `${proto}://${host}`;
 }
 
+/** Render the shared lightweight deployment status page. */
+export function buildHomePageHtml(input: {
+  readonly name: string;
+  readonly statusDetail: string;
+  readonly terminalCommand?: string;
+}): string {
+  const terminal =
+    input.terminalCommand === undefined
+      ? ""
+      : `<div class="terminal mono" role="group" aria-label="Send a message from your terminal">
+      <span class="terminal-prompt" aria-hidden="true">$</span>
+      <span class="terminal-cmd">${escapeHtml(input.terminalCommand)}</span>
+    </div>`;
+
+  return HOME_PAGE_HTML_TEMPLATE.replace(AGENT_NAME_PLACEHOLDER, () => escapeHtml(input.name))
+    .replace(STATUS_DETAIL_PLACEHOLDER, () => escapeHtml(input.statusDetail))
+    .replace(TERMINAL_PLACEHOLDER, () => terminal);
+}
+
 /**
  * Builds the barebones home page response for one request. Exposed
  * for tests so callers can supply a real {@link Request}; production
@@ -264,9 +283,11 @@ export function buildHomePageResponse(
   request: Request,
 ): Response {
   const deploymentUrl = resolveDeploymentUrl(request);
-  const html = HOME_PAGE_HTML_TEMPLATE.replace(AGENT_NAME_PLACEHOLDER, () =>
-    escapeHtml(input.agentName),
-  ).replace(DEPLOYMENT_URL_PLACEHOLDER, () => escapeHtml(deploymentUrl));
+  const html = buildHomePageHtml({
+    name: input.agentName,
+    statusDetail: "Agent is up and accepting messages.",
+    terminalCommand: `eve dev ${deploymentUrl}`,
+  });
 
   return new Response(html, {
     headers: {
@@ -274,21 +295,4 @@ export function buildHomePageResponse(
       "content-type": "text/html; charset=utf-8",
     },
   });
-}
-
-/**
- * Nitro route handler for `GET /`. Adapts the Nitro event shape into
- * {@link buildHomePageResponse}.
- */
-export function handleHomePageRequest(
-  input: {
-    readonly agentName: string;
-  },
-  request: Request,
-): Response {
-  return buildHomePageResponse(input, request);
-}
-
-export default function handleStaticHomePageRequest(event: H3Event): Response {
-  return buildHomePageResponse({ agentName: "eve" }, event.req);
 }

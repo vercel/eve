@@ -52,7 +52,7 @@ export async function runIntegrationSetup(
   deps: IntegrationSetupRunnerDeps = defaultDeps,
 ): Promise<IntegrationSetupResult> {
   const integration = setupIntegration(kind);
-  options.prompter.intro(`Set up ${integration.label}`);
+  options.prompter.intro(`Set up ${integration.label}`, integration.hint);
   options.prompter.log.message("Checking Vercel setup...");
   const [deployment, authStatus] = await Promise.all([
     deps.detectDeployment(options.appRoot, { signal: options.signal }),
@@ -60,7 +60,10 @@ export async function runIntegrationSetup(
   ]);
   const project = projectResolutionFromDeployment(deployment);
   const environment = integrationSetupEnvironment(authStatus, project);
-  options.prompter.log.info(describeIntegrationSetupEnvironment(environment));
+  options.prompter.log.info(
+    integration.describeEnvironment?.(environment) ??
+      describeIntegrationSetupEnvironment(environment),
+  );
   return integration.run(
     createSetupContexts({
       appRoot: options.appRoot,

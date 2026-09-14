@@ -3,9 +3,9 @@ title: "Sandbox"
 description: "The agent's isolated bash environment, including built-in file tools, a seeded /workspace, backends, lifecycle, and network policy."
 ---
 
-The sandbox is the agent's isolated bash environment: a filesystem rooted at `/workspace` where it can run shell commands, execute scripts, and read or write files without ever touching your app runtime. Every eve agent has exactly one. The built-in `bash`, `read_file`, `write_file`, `glob`, and `grep` tools already target it, and your authored code can too.
+The sandbox is the agent's isolated bash environment: a filesystem rooted at `/workspace` where it can run shell commands, execute scripts, and read or write files without ever touching your app runtime. Every eve agent has exactly one. The default `bash`, `read_file`, and `write_file` tools target it; you can also add the framework's `glob` and `grep` tools or access it from authored code.
 
-A working sandbox exists by default, with nothing to author. Override it only to add setup, seed files, pick a backend, or lock down the network.
+A working sandbox exists by default, with nothing to author. eve selects a framework-provided `defineSandbox({})` source for each local agent; `agent/sandbox.ts` or `agent/sandbox/sandbox.ts` replaces that source. Override it only to add setup, seed files, pick a backend, or lock down the network.
 
 The default sandbox is not a substitute for configuring network policy, credentials, retention, deletion, or other controls your application requires.
 
@@ -17,10 +17,8 @@ The model already has shell and file access through the default tools:
 | -------------------------- | ----------------------------------- |
 | `bash`                     | run a shell command in the sandbox  |
 | `read_file` / `write_file` | read/write files under `/workspace` |
-| `glob`                     | find files by pattern               |
-| `grep`                     | search file contents                |
 
-All of them run with `/workspace` as the working directory. The model-facing file tools accept both absolute paths and paths beginning with `$HOME/`; eve resolves the latter inside the sandbox before reading, writing, or searching. Any authored runtime function (a tool, a step, a model callback) can get a live sandbox handle with `ctx.getSandbox()`.
+These tools run with `/workspace` as the working directory. The model-facing file tools accept both absolute paths and paths beginning with `$HOME/`; eve resolves the latter inside the sandbox before reading, writing, or searching. Any authored runtime function (a tool, a step, a model callback) can get a live sandbox handle with `ctx.getSandbox()`.
 
 ```ts title="agent/tools/run_analysis.ts"
 import { defineTool } from "eve/tools";
@@ -33,6 +31,11 @@ export default defineTool({
     const sandbox = await ctx.getSandbox();
     await sandbox.writeTextFile({ path: "analysis/run.py", content: script });
     const result = await sandbox.run({ command: "python analysis/run.py" });
+    if (result.exitCode !== 0) {
+      throw new Error(
+        `Analysis failed (exit ${result.exitCode}): ${result.stderr || result.stdout}`,
+      );
+    }
     return { stdout: result.stdout };
   },
 });
@@ -40,13 +43,15 @@ export default defineTool({
 
 `ctx.getSandbox()` takes no arguments, is async, and only works inside authored runtime execution.
 
+`sandbox.run()` resolves with `{ exitCode, stdout, stderr }` when the process exits, including a nonzero exit. Check `exitCode` before reporting success or using generated files. Throw from a tool to report a failed operation to the model, and throw from `bootstrap` to prevent eve from caching an incomplete setup. The built-in `bash` tool returns all three fields so the model can interpret command results itself.
+
 `/workspace` is one namespace across every backend, so `/workspace/foo` points at the same file whether the backend is local or Vercel. When you need to interpolate a path into a generated command, `sandbox.resolvePath("repo/build.py")` anchors a relative path to its absolute `/workspace/repo/build.py` form.
 
 The handle does more than `run` and `writeTextFile`. In every method, relative paths resolve from `/workspace` and absolute paths pass through untouched:
 
 | Method                                   | Does                                                                                            |
 | ---------------------------------------- | ----------------------------------------------------------------------------------------------- |
-| `run({ command })`                       | run one command, block until it exits, return `{ stdout, stderr, ... }`                         |
+| `run({ command })`                       | run one command, block until it exits, return `{ exitCode, stdout, stderr }`                    |
 | `spawn(options)`                         | launch a long-running process (server, watcher) and return a `SandboxProcess` handle            |
 | `readTextFile` / `writeTextFile`         | read/write a UTF-8 (or specified encoding) file; `readTextFile` supports 1-based line ranges    |
 | `readBinaryFile` / `writeBinaryFile`     | read/write raw bytes (images, archives, anything non-text)                                      |
@@ -69,6 +74,14 @@ A `SandboxProcess` exposes `stdout`/`stderr` byte streams, `wait()` (resolves wi
 `sandbox.id` is a stable per-session identifier that persists across reconnects to the same logical session. Use it as the cache key for per-session state that must outlive individual step executions.
 
 The option types (`SandboxSpawnOptions`, `SandboxReadBinaryFileOptions`, `SandboxWriteBinaryFileOptions`, and so on) are named exports from `eve/sandbox`, alongside `SandboxProcess`.
+
+## Inbound attachments
+
+Before the first model step, eve writes byte-backed AI SDK `file` parts under
+`/workspace/attachments` and stores a sandbox reference in session history.
+For provider calls, images up to 3 MiB and PDFs up to 20 MiB are restored as
+bytes; other files become text references to their sandbox paths. Unresolved
+remote URLs and legacy AI SDK `image` parts are not staged.
 
 ## Seeding `/workspace`
 
@@ -100,7 +113,12 @@ export default defineSandbox({
   revalidationKey: () => "repo-bootstrap-v1",
   async bootstrap({ use }) {
     const sandbox = await use();
-    await sandbox.run({ command: "sudo apt-get install -y jq" });
+    const result = await sandbox.run({ command: "sudo apt-get install -y jq" });
+    if (result.exitCode !== 0) {
+      throw new Error(
+        `Sandbox setup failed (exit ${result.exitCode}): ${result.stderr || result.stdout}`,
+      );
+    }
   },
   async onSession({ use }) {
     await use({ networkPolicy: "deny-all" });
@@ -109,6 +127,25 @@ export default defineSandbox({
 ```
 
 `defineSandbox` and `defaultBackend` live on `eve/sandbox`. Omit `backend` and the runtime falls back to `defaultBackend()` (see [Backends](#backends)).
+
+### Sharing a parent's sandbox
+
+Sandbox definitions use two distinct forms. Pass an object to give an agent or subagent an independent sandbox. Passing a callback to `defineSandbox` opts a declared subagent into sharing: return `parent.sandbox` to select the dispatching agent's exact live sandbox. A raw function export remains a zero-argument definition factory.
+
+```ts title="agent/subagents/reviewer/sandbox.ts"
+import { defineSandbox } from "eve/sandbox";
+
+export default defineSandbox(({ parent }) => {
+  if (parent === null) throw new Error("reviewer must run as a child");
+  return parent.sandbox;
+});
+```
+
+The parent and child then see the same files, processes, `/workspace`, and sandbox home. Nested children that also select `parent.sandbox` keep using the same owning sandbox rather than creating another one. The owning sandbox's `bootstrap` and `onSession` hooks remain authoritative; the child cannot add its own sandbox hooks or backend configuration.
+
+An inheriting child must not declare managed files under its own `sandbox/workspace/` or `skills/` directories, including dynamic skills. Eve rejects that configuration before execution. Remove the child resources when the shared workspace is sufficient, or give the child its own sandbox when it needs independently seeded files or skills.
+
+The built-in `agent` self-delegation path continues to share the root agent's sandbox automatically.
 
 ## Backends
 
@@ -131,6 +168,10 @@ With `backend` omitted, eve uses `defaultBackend()`, which resolves on first use
 3. **microsandbox** when the host supports it: macOS on Apple Silicon, or glibc Linux with KVM enabled.
 4. **just-bash** as the dependency-free fallback.
 
+By default, Docker and microsandbox pull `ghcr.io/vercel/eve` while Vercel Sandbox pulls `vcr.vercel.com/vercel/eve/base`. Each image tag matches the installed eve version. Set `EVE_SANDBOX_IMAGE_TAG` to replace the version-derived tag for these default images. An explicit `image` passed to `docker()`, `microsandbox()`, or `vercel()` takes precedence. A snapshot `source` on `vercel()` takes precedence over its `image` because Vercel Sandbox treats them as mutually exclusive.
+
+On every backend, authored commands run as the non-root `vercel-sandbox` user through a non-interactive `bash -lc` login shell. `/workspace` and `$HOME` are writable, `$HOME/.local/bin` is on `PATH` for user-scoped executables, and system paths such as `/usr/local` stay root-owned. Use passwordless `sudo` when setup genuinely needs system-wide changes; `sudo` resets the environment, so pass through variables like `NPM_CONFIG_PREFIX` explicitly if a privileged step depends on them.
+
 `defaultBackend()` also accepts a keyed bag so each inner backend gets its own typed create options:
 
 ```ts
@@ -139,7 +180,7 @@ import { defaultBackend, defineSandbox } from "eve/sandbox";
 export default defineSandbox({
   backend: defaultBackend({
     vercel: { networkPolicy: "deny-all", resources: { vcpus: 4 } },
-    docker: { image: "ghcr.io/vercel/eve:latest" },
+    docker: { networkPolicy: "deny-all" },
     microsandbox: { memoryMiB: 2048 },
   }),
 });
@@ -147,24 +188,44 @@ export default defineSandbox({
 
 ### Docker
 
-`docker()` drives the Docker CLI directly. The default base image is `ghcr.io/vercel/eve:latest`, eve's published sandbox runtime image. eve creates `/workspace` and verifies Bash during framework setup, before authored bootstrap code runs. Configure it through `docker({ image, env, pullPolicy, networkPolicy })`, and install authored runtime tools in sandbox bootstrap or provide them through a custom image. Templates are committed as local Docker images and reused across sessions when the sandbox source, seed files, `revalidationKey`, and Docker backend options still match. Sessions run as long-lived containers whose filesystems persist `/workspace` changes across turns for the same durable session. `eve dev` prunes stale template images in the background.
+`docker()` drives the Docker CLI directly. By default, it uses the `ghcr.io/vercel/eve` image tag matching the installed eve version. eve creates `/workspace` and verifies Bash during framework setup, before authored bootstrap code runs. Configure it through `docker({ image, env, pullPolicy, networkPolicy })`, and install authored runtime tools in sandbox bootstrap or provide them through a custom image. Templates are committed as local Docker images and reused across sessions when the sandbox source, seed files, `revalidationKey`, and Docker backend options still match. Sessions run as long-lived containers whose filesystems persist `/workspace` changes across turns for the same durable session. `eve dev` prunes stale template images in the background.
 
 ### microsandbox
 
-`microsandbox()` runs each sandbox in a lightweight local VM with snapshot-backed templates, a `vercel-sandbox` user, and a firewall capable of domain-level network policies and credential brokering. It is the closest local match to hosted Vercel Sandbox. The default base image is `ghcr.io/vercel/eve:latest`, eve's published sandbox runtime image. During framework setup, before authored bootstrap code runs, eve verifies Bash and creates `/workspace` and the sandbox user. Install authored runtime tools in sandbox bootstrap or provide them through a custom image. Supported hosts are macOS on Apple Silicon, or Linux (glibc) with KVM. The `microsandbox` npm package and its VM runtime are not bundled with eve, so `eve dev` installs both automatically when missing (disable with `setup: { autoInstall: false }`); production processes fail with actionable install errors instead.
+`microsandbox()` runs each sandbox in a lightweight local VM with snapshot-backed templates, a `vercel-sandbox` user, and a firewall capable of domain-level network policies and credential brokering. It is the closest local match to hosted Vercel Sandbox. By default, it uses the `ghcr.io/vercel/eve` image tag matching the installed eve version. During framework setup, before authored bootstrap code runs, eve verifies Bash and creates `/workspace` and the sandbox user. Install authored runtime tools in sandbox bootstrap or provide them through a custom image. Supported hosts are macOS on Apple Silicon, or Linux (glibc) with KVM. The `microsandbox` npm package and its VM runtime are not bundled with eve, so `eve dev` installs both automatically when missing (disable with `setup: { autoInstall: false }`); production processes fail with actionable install errors instead.
 
 ### just-bash
 
 `justbash()` needs no daemon or VM, but commands run in a simulated bash with a virtual filesystem under `.eve/sandbox-cache/`, with no real binaries (`git`, `node`, package managers) and no network isolation. The `just-bash` package is an optional peer dependency, so `eve dev` installs it into your application automatically when missing (disable with `autoInstall: false`); production processes fail with an actionable install error instead.
 
-You can also write your own backend. A `SandboxBackend` is an adapter object with a `name`, a `create`, and an optional `prewarm`. It can point at your own container runner, VM pool, internal sandbox service, or another isolation layer, as long as it returns the `SandboxSession` operations eve needs. Handles returned by `create` implement `shutdown()`, which stops the underlying compute at server shutdown. See the `SandboxBackend*` types on `eve/sandbox`.
+Pass `customCommands` to expose a `just-bash` `CustomCommand` inside each live sandbox session. The command participates in shell pipelines, redirections, and exit-code handling like a built-in command:
+
+```ts title="agent/sandbox.ts"
+import { defineSandbox } from "eve/sandbox";
+import { justbash } from "eve/sandbox/just-bash";
+import { decodeBytesToUtf8, defineCommand } from "just-bash";
+
+const uppercase = defineCommand("uppercase", async (_args, context) => ({
+  stdout: decodeBytesToUtf8(context.stdin).toUpperCase(),
+  stderr: "",
+  exitCode: 0,
+}));
+
+export default defineSandbox({
+  backend: justbash({ customCommands: [uppercase] }),
+});
+```
+
+Custom commands are registered on live and reopened sessions, not during template prewarming. They run trusted host application code and create an explicit bridge from the sandbox to that code. Adapters can use this extension point to expose application APIs such as a Capable App's CLI; the outer eve `bash` tool does not automatically provide per-command Capable approvals.
+
+You can also write your own backend. A `SandboxBackend` is an adapter object with a `name`, a `create`, and an optional `prewarm`. It can point at your own container runner, VM pool, internal sandbox service, or another isolation layer, as long as it returns the `SandboxSession` operations eve needs. Handles returned by `create` implement `delete()`, `stop()`, and `shutdown()`. See the `SandboxBackend*` types on `eve/sandbox`.
 
 ## Lifecycle
 
 There are two hooks, scoped differently:
 
 - **`bootstrap({ use })`** is template-scoped and runs once when the template is built. Put reusable setup here that every later session inherits, such as cloning a baseline repo, installing dependencies, or seeding files. Call `use()` to get a `SandboxSession`. Only template filesystem state and supported backend metadata carry into later sessions; config like network policy does not. If external inputs affect what bootstrap produces, set `revalidationKey: () => string` so eve knows when to rebuild the template (authored sandbox source and seed contents are already tracked for you).
-- **`onSession({ use, ctx })`** is durable-session-scoped and runs once per session (and again if a sandbox definition change replaces the session's sandbox). Put per-session setup here, including network policy, resources, timeout, per-user credentials, and one-time markers. Because it runs inside the active runtime context, it can read `ctx.session` and derive the current principal without baking credentials into the template. Call `use(opts?)` to get a `SandboxSession`; `opts` flow to the backend's update path after create.
+- **`onSession({ use, ctx })`** is durable-session-scoped and runs once per session (and again if a sandbox definition change replaces the session's sandbox). Put per-session setup here, including network policy, resources, timeout, per-user credentials, and one-time markers. `ctx` contains only the active session metadata, so it can identify the current principal without exposing runtime lifecycle operations while the sandbox is initializing. Call `use(opts?)` to get a `SandboxSession`; `opts` flow to the backend's update path after create.
 
 If you require a network policy or other configuration for every session, configure it on the backend factory or in `onSession`; do not rely on bootstrap-only configuration.
 
@@ -203,9 +264,34 @@ stop-specific state is needed. Lifecycle `use()` calls return the I/O-only
 `SandboxSession` because bootstrap and session initialization do not own runtime
 teardown.
 
+### Delete a sandbox
+
+Permanently delete the current session sandbox from an authored runtime callback:
+
+```ts
+const sandbox = await ctx.getSandbox();
+await sandbox.delete();
+```
+
+eve stops compute first, deletes the physical sandbox and its disposable backend state, and clears the saved reconnect state. It preserves reusable template state that contains `bootstrap` and seeded workspace files.
+
+The durable eve session remains active. The next call to `ctx.getSandbox()` provisions a fresh workspace from the current sandbox definition and runs `onSession` again. Files and other workspace changes from the deleted sandbox are not restored.
+
+Backend behavior differs:
+
+- **Vercel Sandbox**: stops the persistent sandbox, deletes its record, and asks Vercel to delete snapshots that no other sandbox uses. Snapshot cleanup runs asynchronously.
+- **microsandbox**: stops and removes the session VM and its persisted state snapshot
+- **Docker and just-bash**: stop compute and discard their session runtime state
+
+Only the session that owns a shared sandbox can delete it. Deleting the owner's sandbox affects every parent or child currently using it. If the backend rejects deletion, eve preserves the current reconnect state so you can retry.
+
+Custom backend handles implement the same boundary in `delete()`: remove the session runtime and disposable persisted state without deleting reusable templates.
+
 Session sandboxes are keyed per durable session, not per deployment, so redeploying your app does not by itself discard them. A definition change to the authored sandbox source, workspace seed content, or `revalidationKey` replaces the sandbox on the next turn and runs `onSession` again.
 
-Reattachment still depends on the backend retaining its physical sandbox state. If a persisted Vercel sandbox is no longer available, eve creates a replacement, using the current template when one is configured. Files and other changes made after the original sandbox was created are not restored automatically. Because the durable session still has the same sandbox key, `onSession` does not run again for this replacement. Persist important artifacts outside the sandbox, and do not rely on `onSession` as the only place that applies security-critical configuration.
+For sandboxes with `bootstrap`, unrelated agent changes preserve the template and session sandbox keys even when there are no skill or workspace seed files. You do not need to add a seed file or `revalidationKey` solely to preserve reuse across those changes.
+
+Reattachment still depends on the backend retaining its physical sandbox state. If a persisted Vercel sandbox is missing or its saved filesystem snapshot is no longer available, eve deletes the unusable record and creates a replacement from the current template when one is configured. Files and other changes made after the original sandbox was created are not restored automatically. Because the durable session still has the same sandbox key, `onSession` does not run again for this replacement. Persist important artifacts outside the sandbox, and do not rely on `onSession` as the only place that applies security-critical configuration.
 
 When the eve server stops, no sandbox compute outlives it. `eve dev` stops the sandboxes it started when the dev server closes, and a self-hosted production server stops every open sandbox on shutdown (`SIGTERM`/`SIGINT`). Session state persists across the stop — the next server start reattaches each durable session from its stopped container, VM, or snapshot. Custom `SandboxBackend` adapters implement `stop()` for authored runtime calls and `shutdown()` for server teardown. Both stop the underlying compute while keeping the session reattachable from persisted state where the backend supports it; authored `stop()` failures reject, while process-wide shutdown collects and logs failures without blocking teardown.
 

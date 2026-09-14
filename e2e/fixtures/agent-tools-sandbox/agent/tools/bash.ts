@@ -1,5 +1,6 @@
-import { defineTool, defineBashTool } from "eve/tools";
+import { defineTool } from "eve/tools";
 import { never } from "eve/tools/approval";
+import { bash } from "eve/tools/bash";
 
 /**
  * Bash tool exposed to the model for the sandbox-bootstrap smoke
@@ -7,12 +8,12 @@ import { never } from "eve/tools/approval";
  * and avoids tripping the HITL machinery already exercised by
  * `tool-approval.ts` / `tool-denial.ts`.
  *
- * Wrapping the framework's `defineBashTool()` in `defineTool({...})`
+ * Wrapping the framework's `bash` definition in `defineTool({...})`
  * gives the inferred default a named return type so tsc does not
  * trip the TS2883 "inferred type cannot be named" portability
  * check.
  */
 export default defineTool({
-  ...defineBashTool(),
+  ...bash,
   approval: never(),
 });

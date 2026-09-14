@@ -157,6 +157,13 @@ class BraintrustReporter implements EvalReporter {
       eveParked: result.result.derived.parked,
     };
 
+    if (result.result.traceContexts.length > 0) {
+      metadata.eveTraceIds = [
+        ...new Set(result.result.traceContexts.map((traceContext) => traceContext.traceId)),
+      ];
+      metadata.eveTraceContexts = result.result.traceContexts;
+    }
+
     if (failedAssertions.length > 0) {
       metadata.eveFailedAssertions = failedAssertions;
     }

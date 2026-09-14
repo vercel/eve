@@ -110,6 +110,7 @@ function makeEvalResult(overrides: Partial<EveEvalResult> = {}): EveEvalResult {
       finalMessage: "done",
       output: "done",
       status: "completed",
+      traceContexts: [],
     },
     verdict: "passed",
     startedAt: "2026-01-01T00:00:00.000Z",

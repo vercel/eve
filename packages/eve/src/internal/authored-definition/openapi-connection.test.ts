@@ -33,6 +33,15 @@ describe("normalizeOpenApiConnectionDefinition", () => {
       expect(result.description).toBe("A test OpenAPI connection.");
     });
 
+    it("preserves a stable connection instance key", () => {
+      const result = normalizeOpenApiConnectionDefinition(
+        validInput({ instanceKey: "account-123" }),
+        MSG,
+      );
+
+      expect(result.instanceKey).toBe("account-123");
+    });
+
     it("accepts an inline spec object", () => {
       const spec = { openapi: "3.0.0", paths: {} };
       const result = normalizeOpenApiConnectionDefinition(validInput({ spec }), MSG);
@@ -70,6 +79,12 @@ describe("normalizeOpenApiConnectionDefinition", () => {
   });
 
   describe("validation", () => {
+    it("rejects an empty connection instance key", () => {
+      expect(() =>
+        normalizeOpenApiConnectionDefinition(validInput({ instanceKey: "" }), MSG),
+      ).toThrow(/instanceKey/);
+    });
+
     it("accepts an omitted baseUrl (falls back to the spec servers at runtime)", () => {
       const result = normalizeOpenApiConnectionDefinition(validInput({ baseUrl: undefined }), MSG);
 

@@ -1,14 +1,15 @@
 {
   "title": "Tutorial",
+  "defaultOpen": false,
   "pages": [
     "first-agent",
     "how-it-runs",
     "query-sample-data",
-    "connect-a-warehouse",
     "run-analysis",
     "remember-definitions",
     "team-playbooks",
     "guard-the-spend",
-    "ship-it"
+    "ship-it",
+    "connect-a-warehouse"
   ]
 }

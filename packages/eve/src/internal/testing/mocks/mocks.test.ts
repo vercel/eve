@@ -1,7 +1,23 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
+import { mockChannelContext } from "#internal/testing/mocks/mock-channel-operations.js";
 import { mockSandbox } from "#internal/testing/mocks/mock-sandbox.js";
 import { mockTool } from "#internal/testing/mocks/mock-tool.js";
+
+describe("mockChannelContext", () => {
+  it("rejects producer metadata outside the input response contract", async () => {
+    const observeDelivery = vi.fn();
+    const source = mockChannelContext(observeDelivery).from("thread-1");
+
+    await expect(
+      source.respond(
+        [{ kind: "tool-approval", optionId: "approve", requestId: "approval-1" }] as never,
+        { auth: null },
+      ),
+    ).rejects.toThrow(/unrecognized_keys/);
+    expect(observeDelivery).not.toHaveBeenCalled();
+  });
+});
 
 describe("mockTool", () => {
   it("assigns deterministic defaults from the tool name", () => {

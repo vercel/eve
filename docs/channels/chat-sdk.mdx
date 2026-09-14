@@ -63,7 +63,7 @@ eve deploy
 
 ## Configure the webhook route
 
-Each adapter mounts one `POST` route at `/eve/v1/{adapterName}`, so the `resend` adapter above is served at `/eve/v1/resend`. Point your provider's webhook (the Resend inbound address, the Slack Event Subscriptions URL, etc.) at that path.
+Each adapter registers `GET` and `POST` handlers at `/eve/v1/{adapterName}`, so the `resend` adapter above is served at `/eve/v1/resend`. Point your provider's webhook (the Resend inbound address, the Slack Event Subscriptions URL, etc.) at that path. The adapter handles the incoming method. For example, X sends its webhook-verification challenge with `GET` and delivers events with `POST`.
 
 Override the base path for every adapter with `route`, or pin an individual adapter's path with `routes`:
 

@@ -23,6 +23,7 @@ function makeResult(overrides: {
     status: overrides.status ?? "completed",
     events: stampTestEvents(overrides.events ?? []),
     derived: { ...createEmptyDerivedFacts(), ...overrides.derived },
+    traceContexts: [],
   };
 }
 

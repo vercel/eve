@@ -1,4 +1,5 @@
 import type { HarnessSession, SessionStateMap } from "#harness/types.js";
+import { clearTurnClientContextState } from "#harness/turn-client-context.js";
 
 /**
  * Tracks emission lifecycle state across harness step invocations.
@@ -44,10 +45,11 @@ export function setHarnessEmissionState(
   session: HarnessSession,
   state: HarnessEmissionState,
 ): HarnessSession {
+  const scopedSession = state.turnId === "" ? clearTurnClientContextState(session) : session;
   return {
-    ...session,
+    ...scopedSession,
     state: {
-      ...session.state,
+      ...scopedSession.state,
       [HARNESS_EMISSION_STATE_KEY]: state,
     },
   };

@@ -1,6 +1,12 @@
 import { existsSync, readFileSync, realpathSync } from "node:fs";
-import { isBuiltin } from "node:module";
+import { createRequire, isBuiltin } from "node:module";
 import { dirname, join, resolve, sep } from "node:path";
+
+import { normalizeEsmImportSpecifier } from "#internal/application/import-specifier.js";
+import {
+  resolvePackageDependencyPath,
+  resolveWorkflowModulePath,
+} from "#internal/application/package.js";
 
 export const CACHED_CHANNEL_PREFIX = "eve-cached-channel:";
 
@@ -50,10 +56,16 @@ export function createGenerationPackageBoundaryPlugin(input: {
       }
 
       if (isFrameworkRuntimeImport(source, importer)) {
-        return {
-          external: true,
-          id: source,
-        };
+        return { external: true, id: resolveFrameworkRuntimeImport(source) };
+      }
+
+      // Package-private imports must be resolved before this bundle is moved
+      // into the generated host, where the owning package scope no longer exists.
+      if (source.startsWith("#")) {
+        const resolvedPackageImport = resolvePackageImport(source, importer, input.packageRoot);
+        if (resolvedPackageImport !== undefined) {
+          return { id: resolvedPackageImport };
+        }
       }
 
       const externalModule = await resolveConfiguredExternalModule.call(this, {
@@ -91,7 +103,21 @@ export function createRuntimeLoaderPackageBoundaryPlugin(input: {
       }
 
       if (isFrameworkRuntimeImport(source, importer)) {
-        return { external: true, id: source };
+        return {
+          external: true,
+          id: resolveRuntimeLoaderFrameworkImport(source),
+        };
+      }
+
+      // The published package maps #imports to dist, while the eve-source
+      // condition used by the app build maps them to TypeScript source.
+      // Resolve through Node's default package-import conditions here so a
+      // packed eve installation does not leak #shared/* into the bundle.
+      if (source.startsWith("#")) {
+        const resolvedPackageImport = resolvePackageImport(source, importer, input.packageRoot);
+        if (resolvedPackageImport !== undefined) {
+          return { id: resolvedPackageImport };
+        }
       }
 
       const externalModule = await resolveConfiguredExternalModule.call(this, {
@@ -102,10 +128,12 @@ export function createRuntimeLoaderPackageBoundaryPlugin(input: {
         source,
       });
       if (externalModule !== undefined) {
+        const resolvedId =
+          resolveExistingExternalFilePath(externalModule.resolvedId) ?? externalModule.resolvedId;
+
         return {
           external: true,
-          id:
-            resolveExistingExternalFilePath(externalModule.resolvedId) ?? externalModule.resolvedId,
+          id: normalizeEsmImportSpecifier(resolvedId),
         };
       }
 
@@ -288,24 +316,47 @@ function packageImportName(source: string): string {
 }
 
 function nearestPackageName(filePath: string): string | undefined {
+  const packageRoot = nearestPackageRoot(filePath);
+  if (packageRoot === undefined) return undefined;
+
+  try {
+    const manifest = JSON.parse(readFileSync(join(packageRoot, "package.json"), "utf8")) as {
+      name?: unknown;
+    };
+    return typeof manifest.name === "string" && manifest.name.length > 0
+      ? manifest.name
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function nearestPackageRoot(filePath: string): string | undefined {
   let directory = dirname(toCanonicalPath(filePath));
   while (true) {
-    const manifestPath = join(directory, "package.json");
-    if (existsSync(manifestPath)) {
-      try {
-        const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as { name?: unknown };
-        return typeof manifest.name === "string" && manifest.name.length > 0
-          ? manifest.name
-          : undefined;
-      } catch {
-        return undefined;
-      }
-    }
+    if (existsSync(join(directory, "package.json"))) return directory;
     const parent = dirname(directory);
-    if (parent === directory) {
-      return undefined;
-    }
+    if (parent === directory) return undefined;
     directory = parent;
+  }
+}
+
+function resolvePackageImport(
+  source: string,
+  importer: string | undefined,
+  fallbackPackageRoot: string,
+): string | undefined {
+  const packageRoot =
+    importer === undefined || importer.startsWith("\0")
+      ? fallbackPackageRoot
+      : (nearestPackageRoot(importer) ?? fallbackPackageRoot);
+  try {
+    const resolved = createRequire(join(packageRoot, "package.json")).resolve(source);
+    return isPathInsideOrEqual(toCanonicalPath(resolved), toCanonicalPath(packageRoot))
+      ? resolved
+      : undefined;
+  } catch {
+    return undefined;
   }
 }
 
@@ -360,6 +411,32 @@ function isFrameworkRuntimeImport(source: string, importer: string | undefined):
   }
 
   return false;
+}
+
+/**
+ * `eve` and `eve/*` stay bare: the application installs eve, so Node resolves
+ * them to the one installed copy. The public `workflow` surface is not a
+ * dependency of the application; eve vendors it, so those specifiers bind to
+ * eve's own modules by path and share the process-wide Workflow runtime.
+ */
+function resolveFrameworkRuntimeImport(source: string): string {
+  if (source === "eve" || source.startsWith("eve/")) {
+    return source;
+  }
+  return normalizeEsmImportSpecifier(resolveWorkflowModulePath(source));
+}
+
+/**
+ * Immediate loader bundles live in a cache below the authored package root.
+ * Resolve eve self-references before moving eve-owned authored modules below a
+ * nested node_modules boundary, where Node can no longer see the owning package
+ * scope. Generation bundles remain portable and keep these imports bare.
+ */
+function resolveRuntimeLoaderFrameworkImport(source: string): string {
+  if (source === "eve" || source.startsWith("eve/")) {
+    return normalizeEsmImportSpecifier(resolvePackageDependencyPath(source));
+  }
+  return resolveFrameworkRuntimeImport(source);
 }
 
 export function isNodeModulesPath(path: string): boolean {

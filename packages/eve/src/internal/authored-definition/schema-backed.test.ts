@@ -2,14 +2,11 @@ import { describe, expect, it } from "vitest";
 import { z as z3 } from "zod/v3";
 import { z } from "#compiled/zod/index.js";
 
-import {
-  defineTool,
-  defineDynamic,
-  disableTool,
-  experimental_workflow,
-} from "#public/definitions/tool.js";
-import { once } from "#public/tools/approval/approval-helpers.js";
-import { webSearch } from "#public/tools/web-search.js";
+import { defineDynamic } from "#dynamic/definition.js";
+import { defineTool, disableTool } from "#tools/definition.js";
+import { experimental_workflow } from "#tools/workflow.js";
+import { once } from "#tools/approval/policies.js";
+import { webSearch } from "#tools/provided/web-search.js";
 import { normalizeToolDefinition } from "#internal/authored-definition/schema-backed.js";
 
 const FAILURE_MESSAGE = "Expected the tool export to match the public eve shape.";
@@ -32,6 +29,24 @@ describe("normalizeToolDefinition", () => {
     }
     expect(entry.definition.description).toBe("Echoes the input back to the caller.");
     expect(typeof entry.definition.execute).toBe("function");
+  });
+
+  it("preserves the background execution discriminator", () => {
+    const tool = defineTool({
+      description: "Starts an export.",
+      execution: "background",
+      inputSchema: z.object({ exportId: z.string() }),
+      async *execute(input) {
+        yield { exportId: input.exportId };
+        return { exportId: input.exportId };
+      },
+    });
+
+    const entry = normalizeToolDefinition(tool, FAILURE_MESSAGE);
+
+    expect(entry.kind).toBe("tool");
+    if (entry.kind !== "tool") throw new Error("expected tool kind");
+    expect(entry.definition.execution).toBe("background");
   });
 
   it("normalizes a tool with a Zod 3 input schema", () => {
@@ -117,6 +132,50 @@ describe("normalizeToolDefinition", () => {
       FAILURE_MESSAGE,
     );
     expect(() => normalizeToolDefinition(null, FAILURE_MESSAGE)).toThrow(FAILURE_MESSAGE);
+  });
+
+  it("accepts and types authored tool labels", () => {
+    const tool = defineTool({
+      label: {
+        start(input) {
+          const city: string = input.city;
+          // @ts-expect-error label start callback input is schema-typed.
+          const missing = input.missing;
+          void missing;
+          return `Fetch ${city}`;
+        },
+      },
+      description: "Fetch weather.",
+      inputSchema: z.object({ city: z.string() }),
+      execute: ({ city }) => city,
+    });
+
+    expect(normalizeToolDefinition(tool, FAILURE_MESSAGE).kind).toBe("tool");
+  });
+
+  it("rejects malformed label definitions", () => {
+    expect(() =>
+      normalizeToolDefinition(
+        {
+          label: { start: "Fetch weather" },
+          description: "Fetch weather.",
+          execute: () => null,
+          inputSchema: { type: "object" },
+        },
+        FAILURE_MESSAGE,
+      ),
+    ).toThrow(FAILURE_MESSAGE);
+    expect(() =>
+      normalizeToolDefinition(
+        {
+          label: { label: () => "Fetch weather", result: "Done" },
+          description: "Fetch weather.",
+          execute: () => null,
+          inputSchema: { type: "object" },
+        },
+        FAILURE_MESSAGE,
+      ),
+    ).toThrow(FAILURE_MESSAGE);
   });
 
   it("accepts authored tools that declare a `toModelOutput` function", () => {

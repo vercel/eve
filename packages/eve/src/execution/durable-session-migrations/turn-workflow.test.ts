@@ -62,6 +62,27 @@ describe("turn workflow wire migrations", () => {
     });
   });
 
+  it("migrates frozen v1 child inputs into the current continuation shape", () => {
+    const input = {
+      capabilities: undefined,
+      completionToken: "turn-token",
+      driverCapabilities: { cancelledTurnSettle: true as const, turnInbox: true as const },
+      mode: "conversation" as const,
+      stepInput: {
+        input: createDelivery(),
+        parentWritable: new WritableStream<Uint8Array>(),
+        serializedContext: { state: "v1" },
+        sessionState: createSessionState(),
+      },
+      version: 1 as const,
+    };
+
+    expect(migrateTurnWorkflowInput(input)).toEqual({
+      ...input,
+      version: TURN_WORKFLOW_INPUT_VERSION,
+    });
+  });
+
   it("migrates pre-version (unversioned) workflow input into the current shape", () => {
     const delivery = createDelivery();
     const parentWritable = new WritableStream<Uint8Array>();

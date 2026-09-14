@@ -49,8 +49,10 @@ describe("Teams inbound parsing", () => {
   it("renders deterministic Teams context", () => {
     const block = formatTeamsContextBlock({
       activityId: "A1",
+      botId: "BOT",
       channelId: "CH1",
       conversationId: "C1",
+      isMentioned: true,
       scope: "channel",
       teamId: "TEAM",
       tenantId: "TENANT",
@@ -59,6 +61,8 @@ describe("Teams inbound parsing", () => {
     });
     expect(block).toContain("<teams_context>");
     expect(block).toContain("response_medium: microsoft_teams");
+    expect(block).toContain("bot_id: BOT");
+    expect(block).toContain("is_mentioned: true");
     expect(block).toContain("user_id: U1");
   });
 });

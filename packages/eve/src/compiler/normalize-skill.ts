@@ -9,13 +9,14 @@ import type {
 } from "#compiler/manifest.js";
 import {
   loadModuleBackedDefinition,
-  type ModuleBackedDefinitionLoadOptions,
+  requireModuleBackedDefinitionLoadOptions,
+  type SourceDefinitionCompileOptions,
 } from "#compiler/normalize-helpers.js";
 import {
   assertResolverOnlyDynamicSentinel,
   isDynamicSentinel,
   type DynamicToolEventName,
-} from "#shared/dynamic-tool-definition.js";
+} from "#dynamic/definition.js";
 
 /**
  * Compiled skill entry produced from one authored `skills/*` file.
@@ -33,12 +34,12 @@ export type CompiledSkillEntry =
  * agent manifest.
  */
 export async function compileSkillSource(
-  agentRoot: string,
+  _agentRoot: string,
   source: SkillSourceRef,
-  options: ModuleBackedDefinitionLoadOptions = {},
+  options: SourceDefinitionCompileOptions,
 ): Promise<CompiledSkillEntry> {
   if (source.sourceKind === "skill-package") {
-    return { kind: "skill", definition: compileSkillPackageSource(source) };
+    return { kind: "skill", definition: compileSkillPackageSource(source, options.owner) };
   }
 
   if (source.sourceKind === "markdown") {
@@ -53,6 +54,7 @@ export async function compileSkillSource(
         files: definition.files,
         license: definition.license,
         logicalPath: source.logicalPath,
+        owner: options.owner,
         markdown: definition.markdown,
         metadata:
           definition.metadata === undefined
@@ -68,10 +70,11 @@ export async function compileSkillSource(
   }
 
   // Module-backed skill — load the export and check for DynamicSentinel.
+  const loadOptions = requireModuleBackedDefinitionLoadOptions(options, source.logicalPath);
   const exportValue = await loadModuleBackedDefinition({
-    agentRoot,
-    externalDependencies: options.externalDependencies,
+    binding: loadOptions.binding,
     kind: "skill",
+    loadNamespace: loadOptions.loadNamespace,
     source,
   });
 
@@ -122,12 +125,14 @@ export async function compileSkillSource(
 
 function compileSkillPackageSource(
   source: NamedSkillDefinition & SkillPackageSourceRef,
+  owner: SourceDefinitionCompileOptions["owner"],
 ): CompiledSkillDefinition {
   return {
     assetsPath: source.assetsPath,
     description: source.description,
     license: source.license,
     logicalPath: source.logicalPath,
+    owner,
     markdown: source.markdown,
     metadata:
       source.metadata === undefined

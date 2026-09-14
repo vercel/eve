@@ -35,7 +35,7 @@ export function createCompiledSandboxBackendPrunePlugin(): BundlerPluginShape {
         'export const DOCKER_BACKEND_NAME = "docker";',
         'export const JUST_BASH_BACKEND_NAME = "just-bash";',
         'export const MICROSANDBOX_BACKEND_NAME = "microsandbox";',
-        "export const isDockerDaemonAvailableSync = () => false;",
+        "export const isLinuxDockerDaemonAvailableSync = () => false;",
         "export const isMicrosandboxPlatformSupported = () => false;",
         "export const pruneDockerSandboxTemplates = pruned;",
         "export const pruneJustBashSandboxTemplates = pruned;",

@@ -32,16 +32,16 @@ const docsRoot = join(import.meta.dirname, "..");
 const registry = JSON.parse(await readFile(join(docsRoot, "registry.json"), "utf8")) as Registry;
 const items = registry.items.filter((item) => item.name.startsWith("instrumentation/"));
 const expectedSlugs = instrumentationEntries()
-  .filter((entry) => entry.surfaces.gallery)
+  .filter((entry) => entry.surfaces.registry)
   .map((entry) => registrySlugsByCatalogSlug[entry.slug]);
 const actualSlugs = items.map((item) => item.name.slice("instrumentation/".length));
 
 if (expectedSlugs.some((slug) => slug === undefined)) {
-  throw new Error("Every gallery instrumentation provider needs a registry slug mapping.");
+  throw new Error("Every catalog instrumentation provider needs a registry slug mapping.");
 }
 if (JSON.stringify(actualSlugs) !== JSON.stringify(expectedSlugs)) {
   throw new Error(
-    `Instrumentation registry entries do not match the gallery.\nExpected: ${expectedSlugs.join(", ")}\nActual: ${actualSlugs.join(", ")}`,
+    `Instrumentation registry entries do not match the catalog.\nExpected: ${expectedSlugs.join(", ")}\nActual: ${actualSlugs.join(", ")}`,
   );
 }
 

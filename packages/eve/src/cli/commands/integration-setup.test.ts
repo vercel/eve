@@ -78,6 +78,21 @@ describe("runIntegrationSetupCommand", () => {
     expect(output.errors).toEqual([]);
   });
 
+  it("passes force to the integration runner", async () => {
+    vi.mocked(runIntegrationSetup).mockResolvedValue({
+      kind: "done",
+      completion: { facts: [] },
+    });
+
+    await runIntegrationSetupCommand(logger(), "/project", "photon", { force: true });
+
+    expect(runIntegrationSetup).toHaveBeenCalledWith(
+      "photon",
+      expect.objectContaining({ force: true }),
+      undefined,
+    );
+  });
+
   it("assumes recommended setup answers with --yes in interactive mode", async () => {
     vi.mocked(runIntegrationSetup).mockImplementation(async (_kind, options) => {
       await expect(

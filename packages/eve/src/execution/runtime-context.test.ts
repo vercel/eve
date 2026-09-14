@@ -4,12 +4,17 @@ import {
   AuthKey,
   ChannelInstrumentationKey,
   ContinuationTokenKey,
+  ParentTraceContextKey,
   type Session,
   type SessionAuthContext,
+  ActivityObserverKey,
   SessionIdKey,
   SessionKey,
+  ScheduleIdKey,
 } from "#context/keys.js";
+import { setChannelContext } from "#execution/channel-context.js";
 import { buildRunContext } from "#execution/runtime-context.js";
+import { ConversationContextKey } from "#shared/conversation-context.js";
 
 function createTestSession(
   input: { readonly auth?: SessionAuthContext | null; readonly parent?: Session["parent"] } = {},
@@ -178,6 +183,26 @@ describe("buildRunContext", () => {
     expect(ctx.require(AuthKey)).toBeNull();
   });
 
+  it("inherits schedule provenance independently from run auth", () => {
+    const scope = new ContextContainer();
+    scope.set(ScheduleIdKey, "dynamic-tasks");
+
+    const ctx = contextStorage.run(scope, () =>
+      buildRunContext({
+        bundle: createMinimalBundle(),
+        run: {
+          auth: testAuth,
+          adapter: { kind: "channel:slack" },
+          input: { message: "run the scheduled task" },
+          mode: "conversation",
+        },
+      }),
+    );
+
+    expect(ctx.require(AuthKey)).toEqual(testAuth);
+    expect(ctx.require(ScheduleIdKey)).toBe("dynamic-tasks");
+  });
+
   it("does not invent a continuation for an ID-only run", () => {
     const ctx = buildRunContext({
       bundle: createMinimalBundle(),
@@ -222,10 +247,43 @@ describe("buildRunContext", () => {
     expect(ctx.get(SessionIdKey)).toBeUndefined();
   });
 
-  it("grafts parent metadata onto the child's own kind", () => {
+  it("seeds inherited private activity observer configuration", () => {
+    const sink = {
+      url: "https://root.example.com/eve/v1/activity/abcdefghijklmnopqrstuvwxyz123456",
+      version: 1 as const,
+    };
+    const workIdentity = {
+      id: "work:root:turn:call",
+      kind: "subagent" as const,
+      parentId: "work:root:turn",
+      rootSessionId: "root",
+      rootTurnId: "turn",
+    };
+    const ctx = buildRunContext({
+      bundle: createMinimalBundle(),
+      run: {
+        auth: null,
+        adapter: { kind: "subagent" },
+        input: { message: "hi" },
+        mode: "task",
+        activityObserver: { sink, workIdentity },
+      },
+    });
+
+    expect(ctx.get(ActivityObserverKey)).toEqual({ sink, workIdentity });
+  });
+
+  it("grafts parent custom metadata and inherits the conversation audience", () => {
     const parentProjection = {
       kind: "channel:slack",
       metadata: { threadTs: "1234.5678", userId: "U123" },
+    };
+    const inheritedConversation = {
+      audience: "public" as const,
+      channel: { kind: "channel:slack" as const, name: "slack" },
+      environment: "production" as const,
+      mode: "conversation" as const,
+      principalType: "user",
     };
     const ctx = buildRunContext({
       bundle: createMinimalBundle(),
@@ -233,6 +291,7 @@ describe("buildRunContext", () => {
         auth: null,
         adapter: { kind: "subagent" },
         channelMetadata: parentProjection,
+        inheritedConversation,
         continuationToken: "t",
         input: { message: "hi" },
         mode: "task",
@@ -242,6 +301,15 @@ describe("buildRunContext", () => {
     const result = ctx.get(ChannelInstrumentationKey)!;
     expect(result.kind).toBe("subagent");
     expect(result.metadata).toEqual({ threadTs: "1234.5678", userId: "U123" });
+    expect(ctx.get(ConversationContextKey)).toEqual({
+      ...inheritedConversation,
+      channel: { kind: "subagent", name: undefined },
+      mode: "task",
+      principalType: "anonymous",
+    });
+
+    setChannelContext(ctx, { kind: "subagent", state: { persisted: true } });
+    expect(ctx.get(ChannelInstrumentationKey)?.metadata).toEqual(parentProjection.metadata);
   });
 
   it("uses the adapter's own projection when channelMetadata is not provided", () => {
@@ -260,5 +328,31 @@ describe("buildRunContext", () => {
     expect(projection).toBeDefined();
     expect(projection!.kind).toBe("http");
     expect(projection!.metadata).toEqual({});
+  });
+
+  it("keeps forwarded origin policy separate from inherited channel metadata", () => {
+    const forwardedTracePolicy = {
+      ceiling: { recordInputs: false, recordOutputs: true },
+      originAudience: "private",
+    } as const;
+    const ctx = buildRunContext({
+      bundle: createMinimalBundle(),
+      run: {
+        auth: null,
+        adapter: { kind: "eve" },
+        channelMetadata: { kind: "eve", metadata: {} },
+        input: { message: "hi" },
+        mode: "task",
+        parentTraceContext: {
+          forwardedTracePolicy,
+          spanId: "1".repeat(16),
+          traceFlags: 1,
+          traceId: "2".repeat(32),
+        },
+      },
+    });
+
+    expect(ctx.get(ParentTraceContextKey)?.forwardedTracePolicy).toEqual(forwardedTracePolicy);
+    expect(ctx.get(ConversationContextKey)?.audience).toBe("private");
   });
 });

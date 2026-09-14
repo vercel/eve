@@ -16,7 +16,7 @@ describe("validateWorkflowWorld", () => {
       validateWorkflowWorld({
         world: {
           events: {},
-          specVersion: 5,
+          specVersion: 6,
         },
       }),
     ).toThrow("Configured Workflow world factory did not return a valid World.");
@@ -27,7 +27,7 @@ describe("validateWorkflowWorld", () => {
       validateWorkflowWorld({
         world: {
           createQueueHandler: vi.fn(),
-          specVersion: 5,
+          specVersion: 6,
         },
       }),
     ).toThrow("Configured Workflow world factory did not return a valid World.");
@@ -49,6 +49,6 @@ function createMockWorld() {
   return {
     createQueueHandler: vi.fn(),
     events: {},
-    specVersion: 5,
+    specVersion: 6,
   };
 }

@@ -59,6 +59,8 @@ export default defineSkill({
 
 eve generates `SKILL.md` from `markdown`, and each `files` entry becomes a package-relative sibling. Start with plain markdown and move to `defineSkill` only when you hit its limits.
 
+A static `defineSkill` module is evaluated during compilation and its resolved definition is stored in the manifest; a dynamic skill module is also retained as a runtime entry. See [Authored module lifecycle](./reference/typescript-api#authored-module-lifecycle).
+
 ## Find and install community skills
 
 `eve registry search` includes [skills.sh](https://skills.sh) as the built-in `@skills` source. Search by task, review the source, then install the returned skill into your project:

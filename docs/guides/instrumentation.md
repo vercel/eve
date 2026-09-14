@@ -1,11 +1,13 @@
 ---
-title: "instrumentation.ts"
+title: "Observability"
 description: "Trace an agent with OpenTelemetry in instrumentation.ts, read the workflow run tags eve emits, and debug discovery with eve info and the common-failures table."
 ---
 
 `instrumentation.ts` is where you configure how an eve agent is observed. The framework auto-discovers `agent/instrumentation.ts` and runs it at server startup before any agent code. Its presence implicitly enables telemetry, so there is no separate `isEnabled` toggle.
 
 If you intend to export telemetry, review the exporter destination, data categories, and required legal approvals before enabling telemetry.
+
+**The instrumentation provider API is experimental and off by default.** Enable `experimental.instrumentationProviders` to use its one-file-per-provider layout, directional content capture, and per-destination redaction. See [Instrumentation Providers](./instrumentation-providers) for setup and current limitations.
 
 ## Three observability surfaces
 
@@ -44,19 +46,23 @@ Export the result of `defineInstrumentation` as the default export.
 
 Use the `setup` callback to register your OTel provider (for example `registerOTel` from `@vercel/otel`). The framework invokes it at server startup with the resolved agent name. `context.agentName` is resolved at compile time from your project (the package's `name`, falling back to the app directory name), so you never hard-code a service name.
 
-Any OTel-compatible backend works (Braintrust, PostHog, Raindrop, Arize, Honeycomb, Datadog, Jaeger). Install the exporter package you need and configure it in the callback. The [PostHog AI Observability integration](/integrations/posthog-instrumentation) provides a ready-to-install exporter and optional user identification.
+Any OTel-compatible backend works (Braintrust, PostHog, Sentry, Raindrop, Arize, Honeycomb, Datadog, Jaeger). Install the exporter package you need and configure it in the callback. The [PostHog AI Observability integration](/integrations/posthog-instrumentation) provides a ready-to-install exporter and optional user identification. The [Sentry integration](/integrations/sentry-instrumentation) provides a ready-to-install OTLP exporter that sends traces to Sentry without a Sentry SDK.
 
-Three more fields control what the AI SDK records inside those spans (see the AI SDK's [telemetry reference](https://ai-sdk.dev/docs/ai-sdk-core/telemetry)):
+Three more fields control what eve and the AI SDK record inside those spans (see the AI SDK's [telemetry reference](https://ai-sdk.dev/docs/ai-sdk-core/telemetry)):
 
-- `recordInputs` records full message history on each step span (defaults to `true`). Set it to `false` if inputs contain sensitive content or you want to reduce span payload size.
-- `recordOutputs` records model outputs on spans (defaults to `true`). Set it to `false` to disable output recording.
+- `recordInputs` records full message history on each step span and recalled records on memory spans. It defaults to `false`; set it to `true` to include input content.
+- `recordOutputs` records model outputs. It defaults to `false`; set it to `true` to include output content.
 - `functionId` overrides the function name on spans (defaults to the agent name).
 
-For sensitive, regulated, or production data, set `recordInputs` and `recordOutputs` to `false` unless you have reviewed the exporter and its data-retention path.
+eve records metadata without model, tool, or memory-record content by default. Enable either content category only after reviewing the exporter and its data-retention path.
+
+In the provider layout, eve stamps each span with `gen_ai.conversation.id`, which stays fixed across local and remote activations, including independent remote root workflows. Query this attribute to find the conversation's exported, retained traces; it does not grant access or control trace parenting. On Vercel, `vercel.session_id` identifies the verified root session, while `agent.run.id` identifies the current agent run. See [Query exported traces](#query-exported-traces) for the cross-backend workflow.
 
 You are responsible for ensuring any observability or eval provider is approved for the data exported to it.
 
 The third configurable surface, [runtime context events](#runtime-context), attaches per-model-call values to these spans.
+
+Channels classify their conversation with an `audience`: `public`, `private`, or `unknown`. The eve channel classifies anonymous callers as public and authenticated `user`, `service`, or `runtime` callers as private. Slack public-channel handoffs and Chat SDK workspace-visible threads are public; direct and private conversations are private; platform surfaces without enough visibility evidence remain unknown. Inbound Slack webhooks remain `unknown`; proactive Slack `receive` / `ctx.send` handoffs also stay `unknown` unless the caller passes `audience` on the target, for example when a webhook or schedule already knows the destination channel is public.
 
 ## Channel delivery traces
 
@@ -65,8 +71,9 @@ Instrumentation providers receive `channel.delivery.started` followed by
 `channel.delivery.failed` for every inbound channel operation. The lifecycle
 covers durable processing through the terminal state of the resulting turn, not
 messages an adapter sends back to Slack, Telegram, Twilio, or another platform.
-Several deliveries can coalesce into one turn while retaining separate lifecycle
-pairs, and an adapter can consume a delivery without starting a turn.
+Adjacent queued messages with matching authenticated identities and authorization
+attributes can share a turn while retaining separate lifecycle pairs. An adapter
+can also consume a delivery without starting a turn.
 
 Each operation has a framework-owned `deliveryId` distinct from its optional
 platform request ID. Metadata-only providers receive identity, channel, session,
@@ -74,11 +81,236 @@ and outcome fields. Content providers additionally receive only eve's known
 message, context, input-response, and output-schema fields; adapter-specific
 payload fields are never projected.
 
-The built-in OpenTelemetry provider maps each pair to an
-`agent.channel.delivery` consumer span under the durable session window. When
-`traceChannelRequests: true` creates an inbound HTTP server span, the delivery
-span links to it with `eve.link.type=channel.request` rather than using the
-short-lived request span as its parent.
+For a single delivery that starts a turn, the built-in OpenTelemetry provider records the channel kind, channel name, delivery ID, optional request ID, and captured input on that turn's `invoke_agent` activation. The activation remains a root in its own trace and links to the active upstream request or function span with `eve.link.type=channel.request`. Set `traceChannelRequests: true` to create an eve-owned HTTP server span as that link target; when the option is false, an already-active upstream span remains the target.
+
+Deliveries that do not map one-to-one to an activation still produce instrumentation lifecycle events, but the built-in OpenTelemetry provider does not emit a separate delivery span.
+
+## Callback delivery errors
+
+Failed outbound session and task callback attempts emit an error-level
+`[eve:execution.session-callback] callback delivery failed` runtime log without
+requiring an instrumentation provider. Filter by `statusCode` for HTTP failures
+or `failure` (`http`, `transport`, or `timeout`). The log includes the callback
+origin, token-redacted route, payload kind, and available call, task, and child
+session identifiers. Payload content, credentials, and callback tokens are
+excluded. Each retry can emit a separate error; logging does not change Workflow
+retry behavior. Best-effort activity delivery keeps its single
+`[eve:execution.activity-submit] activity sink request failed` warning and does
+not mark the active span as failed.
+
+## Exported span names and outcomes
+
+The built-in OpenTelemetry provider preserves each span's OTel name and adds
+`operation.name` and `resource.name` for Datadog's operation/resource mapping:
+
+| OTel span name                                                          | `operation.name`  | `resource.name`          |
+| ----------------------------------------------------------------------- | ----------------- | ------------------------ |
+| `invoke_agent weather`                                                  | `invoke_agent`    | `invoke_agent weather`   |
+| `invoke_workflow deploy`                                                | `invoke_workflow` | `invoke_workflow deploy` |
+| `execute_tool search`                                                   | `execute_tool`    | `execute_tool search`    |
+| `chat <model>`                                                          | `chat`            | `chat <model>`           |
+| `search_memory`, `upsert_memory`                                        | Same as span name | Same as span name        |
+| `agent.step`, `agent.action`, `agent.approval`, `agent.channel.request` | Same as span name | Same as span name        |
+
+These rows apply to eve-owned spans in local tracing and the
+[instrumentation provider layout](./instrumentation-providers). They do not
+rename Workflow, AI SDK, or other third-party spans, or change trace IDs,
+parenting, or session grouping. Legacy `instrumentation.ts` setup still owns
+its exporter configuration and [authored trace hierarchy](#authored-trace-hierarchy).
+
+Workflow action spans enter the sampler as `agent.action`, with
+`gen_ai.operation.name` and `gen_ai.workflow.name` already present. After
+sampling, eve changes the exported span name to `invoke_workflow <tool>`.
+Existing name-based samplers therefore keep their `agent.action` behavior;
+attribute-based samplers can select GenAI workflow operations explicitly.
+Review custom attribute rules when upgrading because the new workflow
+attributes may change their decisions.
+
+In Datadog APM, `operation_name:invoke_agent resource_name:"invoke_agent weather"`
+selects named agent invocations. Operation-based dashboards and monitors may
+need to replace inferred names such as `otel.span` with these explicit names.
+Keep session IDs, turn IDs, and message content in attributes, not operation or
+resource names.
+
+If an eve-owned span still appears as `otel.span`, inspect its exported OTel
+name, `operation.name`, and `resource.name` before and after any drain or
+Collector transforms. Datadog's [operation-name mapping
+guide](https://docs.datadoghq.com/opentelemetry/migrate/migrate_operation_names/)
+describes the explicit override. Exported fields must survive the ingestion
+path; a local export does not prove that a hosted backend retained them.
+
+Agent invocation spans carry `agent.turn.outcome=completed|failed|cancelled`
+when the turn has a terminal outcome. A failed invocation also has OTel error
+status; cancellation is not an error. The scalar outcome survives backends
+that discard span events, including Sentry's [direct OTLP
+intake](https://docs.sentry.io/concepts/otlp/direct/traces/). These attributes
+remain available when model and tool content is redacted.
+
+## Memory spans
+
+eve records [OpenTelemetry GenAI memory spans](https://opentelemetry.io/docs/specs/semconv/gen-ai/gen-ai-spans/#memory) for provider calls. Recalls at `turn.started` and `compaction.completed` use `search_memory`; capture handlers use `upsert_memory`. They are client spans, following the GenAI memory convention for a call to a memory system.
+
+Every memory span includes `gen_ai.operation.name` and `gen_ai.memory.store.id`. The store ID is eve's opaque `memory.scope.key`, which identifies the resolved scope without exposing the namespace or scope values. Recall spans set `gen_ai.memory.record.count` to their result count.
+
+`gen_ai.memory.records` contains recalled record content only when `recordInputs` is enabled. eve classifies recalled records as input content because they become part of the model context. eve does not set `gen_ai.memory.query.text` because a memory provider receives structured conversation messages, not a standalone search-query string. The `agent.memory.slot` and `agent.memory.phase` attributes identify the eve slot and lifecycle boundary without adding either to the span name.
+
+Messages in `gen_ai.input.messages` include a `kind` for user-role entries.
+New human input uses `user`; framework-authored input uses namespaced kinds
+such as `context.instruction` and `execution.background_task`. When resuming
+history saved before eve 0.54, entries without a kind use `legacy.unknown`:
+the old format did not reliably distinguish human input from framework input.
+Their content and metadata remain unchanged, and already classified entries
+retain their kind. Unknown legacy entries are not replayed as the latest human
+request after compaction.
+
+## Agent trace contract
+
+The provider layout and zero-config local tracing emit the following spans.
+The legacy `instrumentation.ts` layout still uses its authored OTel setup.
+
+| Span                     | Meaning                                                  |
+| ------------------------ | -------------------------------------------------------- |
+| `invoke_agent <agent>`   | One agent activation in its own trace                    |
+| `agent.step`             | One model attempt                                        |
+| `chat <model>`           | One model call beneath its step                          |
+| `invoke_workflow <tool>` | One workflow tool run that coordinated a nested agent    |
+| `agent.action`           | Durable action lifecycle, including dispatch and waiting |
+| `execute_tool <tool>`    | In-process tool execution beneath its action             |
+| `agent.approval`         | Approval waiting beneath its action                      |
+| `search_memory`          | Recall memory records before a turn or after compaction  |
+| `upsert_memory`          | Automatic memory capture                                 |
+| `agent.channel.request`  | Optional HTTP request span in the provider layout        |
+
+For background tools and subagents, the AI SDK's `execute_tool` span ends when
+the model receives the task receipt. The enclosing `agent.action` span remains
+open until the background task completes, fails, or is cancelled. When a
+workflow tool coordinates a nested `ctx.agent()` call, eve exports that span as
+`invoke_workflow` instead. Its duration, outcome, and usage describe the
+background task rather than the receipt.
+Background tool results follow the output-content policy. Recorded task failure
+details become bounded exception and status messages; redacted spans retain only
+the failure outcome, error status, and error type. The initiating turn can
+finish or be cancelled while the action remains open. Ending the session closes
+an action whose task never reported a terminal result.
+
+Schema v4 removes the session-long `agent.session` root. Every run-associated
+eve span carries `agent.trace.schema.version=4`, `agent.run.id`, and
+`gen_ai.conversation.id`; the pre-session `agent.channel.request` span is the
+exception. Vercel deployments additionally carry
+`vercel.session_id`, which stays fixed to the root session across local and
+trusted remote subagents. Remote lineage is accepted only when the receiver's
+`trustedForwarders` predicate approves the authenticated caller. Child
+activation roots carry `agent.parent_run.id` and `agent.parent_call.id`.
+Only activations use the `invoke_agent` operation. A workflow tool invocation
+that coordinates at least one nested agent uses `invoke_workflow`, with its
+path-derived tool name in `gen_ai.workflow.name`. Durable workflow tools without
+agent operations, including `sleep`, remain `agent.action` spans. Dispatch
+lifecycle spans use `agent.action` with
+`agent.invocation.role=caller`; the built-in `agent` tool executes under
+`execute_tool agent`. Turn IDs such as `turn_0` are local to a session, so
+correlate turns by session ID and turn ID together.
+
+A conversation remains durable state; `gen_ai.conversation.id` joins the activations that operate on it.
+
+Each activation owns a fresh trace identity, including local and remote
+subagents. The first child activation links to its caller with
+`eve.link.type=agent.dispatch`; remote dispatch preserves that caller separately
+in W3C `tracestate` while HTTP intermediaries update `traceparent`. Older peers
+fall back to the incoming transport context. Later turns do not reuse the
+original caller link.
+Conversation baggage is independent of execution lineage and trace-policy
+ceilings, which remain in force across the boundary.
+
+Channel delivery does not allocate or replace the activation, and a later turn
+receives a new trace. Samplers
+see the activation name and attributes after its session coordinates are
+available. Sampling must be deterministic for the same trace and operation
+because durable reconstruction can evaluate it again.
+
+Use `agent.turn.outcome` to distinguish completed, failed, and cancelled activations. A failed action can be handled by the agent without failing its activation; see [Exported span names and outcomes](#exported-span-names-and-outcomes).
+
+Activation spans retain `gen_ai.usage.input_tokens` and
+`gen_ai.usage.output_tokens` alongside `agent.usage.*` totals for that activation.
+Model spans carry `gen_ai.usage.*`; step and dispatch spans report
+`agent.usage.*`. Activation totals summarize that activation's own model calls, while caller spans can summarize delegated usage. Do not sum usage across these levels.
+
+Nested dispatch spans are materialized when the child settles and handed to
+span processors; successful materialization removes their completed records
+from durable state. Settlement does not drain exporters or authored providers.
+Materialization failures are logged without failing settlement, and exporter
+draining follows the runtime's normal flush lifecycle.
+
+Cancelled or abandoned dispatches retain
+their outcome without error status. Error messages and stacks on eve spans count as
+output content, including errors reconstructed after a worker replacement.
+Metadata-only capture retains failure status without those details. Error logging
+outside eve's instrumented execution retains its existing exception content.
+
+Agent Runs activation metadata includes bounded principal summaries:
+
+- `agent.principal.current.type` and `agent.principal.current.id` describe the current caller.
+- `agent.principal.initiator.type` and `agent.principal.initiator.id` describe the authenticated principal that created the root session. The initiator remains fixed when later turns have a different caller.
+
+Types are limited to `user`, `service`, `runtime`, `app`, `anonymous`, `local-dev`, `unknown`, `none`, and `other`. Types are emitted for every audience when a principal is present. An absent type means no authentication context was set; `none` means an explicitly null principal and has no ID. The auth layer's `unknown` type stays `unknown`; unrecognized authored types become `other`.
+
+Principal IDs require content-visible capture and a resolved trace decision that allows both `recordInputs` and `recordOutputs`. Public turns and every audience in a development environment can include IDs; private and unknown turns omit them in preview and production. A user-configured trace policy or forwarded content ceiling that denies either direction omits both principal IDs before turn state is stored or sampled. Empty IDs and IDs larger than 1 KiB of UTF-8 data are omitted, not truncated; authentication records are unchanged. eve does not copy other authentication fields, such as claims, email attributes, issuers, or subjects, into these summaries.
+
+## Query exported traces
+
+Use a trace to investigate one activation's work. Use session and conversation attributes to find the other activations. Exporting to an OpenTelemetry backend does not turn a conversation into one continuous waterfall.
+
+This workflow applies to schema v4 from the [instrumentation provider layout](./instrumentation-providers). Configure third-party exporters through `otelIntegration()` so they receive the same framework spans as local tracing and Agent Runs. The legacy `instrumentation.ts` setup emits the [authored trace hierarchy](#authored-trace-hierarchy), not this contract.
+
+### Find an activation or conversation
+
+| Investigation            | Filter                                                                  |
+| ------------------------ | ----------------------------------------------------------------------- |
+| Agent activations        | `agent.trace.schema.version=4` and `gen_ai.operation.name=invoke_agent` |
+| One logical conversation | `gen_ai.conversation.id=<conversation ID>`                              |
+| One turn                 | Both `gen_ai.conversation.id` and `agent.turn.id`                       |
+| One Vercel root session  | `vercel.session_id=<root session ID>`                                   |
+| One agent run            | `agent.run.id=<run ID>`                                                 |
+| Delegated dispatches     | `agent.invocation.role=caller`                                          |
+
+Start with an activation filter for latency, failure, or turn-count dashboards. Every activation is a trace root. Within a conversation, group by trace ID, order activations by `agent.turn.sequence` or start time, and open the selected trace ID. Child activations link to their caller with `eve.link.type=agent.dispatch`; remote workflows keep their own execution lineage, so use conversation IDs and caller links for cross-deployment correlation.
+
+For example, the built-in `agent` tool dispatches research into a new workflow and trace, and the next user turn starts another trace:
+
+```text
+Trace A
+invoke_agent support                 session=S, turn=turn_0, conversation=S
+  agent.step
+    chat <model>
+    agent.action                     role=caller, action.call_id=C
+      execute_tool agent
+
+Trace B
+invoke_agent research                session=R, turn=turn_0, conversation=S
+  link: agent.dispatch -> Trace A's caller action C
+  agent.step
+    chat <model>
+
+Trace C
+invoke_agent support                 session=S, turn=turn_1, conversation=S
+  agent.step
+    chat <model>
+```
+
+The conversation filter finds all three retained traces. eve initializes the conversation ID once and carries it through the existing parent context for local dispatch and `eve.conversation.id` baggage for remote dispatch. Remote session creation does not carry execution lineage or add authorization requirements for tracing. Existing authentication, principal forwarding, and root-session limits remain unchanged.
+
+Remote dispatch records the caller's span ID in eve's W3C `tracestate` entry because HTTP intermediaries may advance `traceparent` to their own request span. The receiver combines that prior parent with the current trace identity for the causal link and retains the transport context for `channel.request`; adopting either as the child's parent would instead keep both in the same trace. Resolved trace-policy decisions and trusted remote content ceilings continue across this boundary independently of correlation, and an unsampled caller cannot be widened into a sampled child. No synthetic session span is needed.
+
+Activation duration is elapsed time for that activation, including waits inside it, not the lifetime of the conversation or CPU time. Idle time between ended activations is not part of their durations. For token totals, choose one level: filter to `chat` model spans and sum `gen_ai.usage.*`, or filter to activations and sum their `agent.usage.input_tokens` and `agent.usage.output_tokens`. Exclude caller summaries from the activation total. Query cache usage on model spans. Do not add model, step, activation, and caller counters together.
+
+### Search traces
+
+Use your destination's span-search surface to filter by the attributes in the table, group activations by session or trace ID, and open one activation's trace waterfall. Use the OTel span name and `gen_ai.operation.name` to identify the operation. Preserve eve's ownership of the OTel provider; do not register a second provider merely to add a destination.
+
+### Sampling and completeness
+
+A session can contain both retained and missing activation traces. Head sampling, backend retention, destination filtering, and exporter failures all affect what a conversation query returns. Preserve the schema and correlation attributes in Collector transforms and destination policies, and configure indexing and retention for the queries above.
+
+Do not interpret a missing activation as a missing execution, or sampled trace counts and token sums as an exact session ledger. A backend may receive descendants before the activation span finishes and exports; a temporarily missing root is not necessarily a broken parent ID. After deployment, verify a two-turn conversation and a delegation in the actual destination, including names, conversation grouping across services, separate trace roots, caller links, and outcome attributes.
 
 ## Runtime context
 
@@ -126,18 +358,22 @@ When authored telemetry is enabled, each turn currently produces a trace like:
 
 ```text
 ai.eve.turn  {eve.session.id}
-  +-- ai.streamText                           step 1
-  |     +-- ai.streamText.doStream            model call
-  |     +-- ai.toolCall  {toolName: search}   tool exec
-  +-- ai.streamText                           step 2
-  |     +-- ai.streamText.doStream
-  |     +-- ai.toolCall  {toolName: read}
-  +-- ai.streamText                           step 3 (final text)
+  +-- invoke_agent <model>                    gen_ai.operation.name=invoke_agent
+        +-- step 1                            gen_ai.operation.name=agent_step
+        |     +-- chat <model>                gen_ai.operation.name=chat
+        |     +-- execute_tool search         gen_ai.operation.name=execute_tool
+        +-- step 2
+        |     +-- chat <model>
+        |     +-- execute_tool read
+        +-- step 3 (final text)
+              +-- chat <model>
 ```
 
-eve creates the `ai.eve.turn` parent span per turn and passes enriched telemetry to the AI SDK so model calls and tool executions are traced automatically. Session, turn, step, and channel context is injected as the framework half of the runtime context (`eve.version`, `eve.session.id`, `eve.environment`, `eve.turn.id`, `eve.turn.sequence`, `eve.step.index`, `eve.channel.kind`) and rides onto the spans alongside any values your `events["step.started"]` callback returns under `runtimeContext`.
+eve creates the `ai.eve.turn` parent span per turn and passes enriched telemetry to the AI SDK so model calls and tool executions are traced automatically. The AI SDK's OpenTelemetry integration names these spans after the [OpenTelemetry GenAI semantic conventions](https://opentelemetry.io/docs/specs/semconv/gen-ai/), so backends that understand `gen_ai.operation.name` can classify them without extra configuration. The `invoke_agent` span is named after the model; the agent name is on its `gen_ai.agent.name` attribute.
 
-Set `traceChannelRequests: true` on `defineInstrumentation` to also wrap each inbound channel HTTP request in a single OpenTelemetry `SERVER` span named for the registered route, which parents the turn tree above (and any `hook.resume` and outgoing HTTP spans):
+This hierarchy applies when eve passes telemetry to the AI SDK. When the `otel()` provider layout is declared and eve owns the agent spans, eve names its invocation span `invoke_agent <agent>` and its model-attempt spans `agent.step`. Session, turn, step, and channel context is injected as the framework half of the runtime context (`eve.version`, `eve.session.id`, `eve.environment`, `eve.turn.id`, `eve.turn.sequence`, `eve.step.index`, `eve.channel.kind`) and rides onto the spans alongside any values your `events["step.started"]` callback returns under `runtimeContext`.
+
+Set `traceChannelRequests: true` on `defineInstrumentation` to also wrap each inbound channel HTTP request in a single OpenTelemetry `SERVER` span named for the registered route. In the authored hierarchy above, this span parents the turn tree and any `hook.resume` or outgoing HTTP spans. In the provider layout, `invoke_agent` remains a separate trace root and links to the request span.
 
 ```text
 POST /eve/v1/session/:sessionId
@@ -161,7 +397,9 @@ Structural tags describe each run's place in the tree:
 - `$eve.root`: session id of the root session in the chain (group a whole tree with `$eve.root=<id>`)
 - `$eve.subagent`: compiled graph node id (subagent runs only)
 - `$eve.trigger`: the channel kind that started the run
+- `$eve.schedule`: the authored schedule that created the session, including sessions started through a target channel
 - `$eve.title`: truncated title derived from the first user message
+- `$eve.trace_id`: sampled trace seed available when tagging a session, subagent, or turn run. Use it as a trace link, not a conversation-wide trace identity. Later activations can use other trace IDs; query `gen_ai.conversation.id` for the history. The tag does not confirm that a destination retained the trace.
 
 Per-turn usage tags are written on each step of a turn, accumulating cumulative totals (last write wins):
 
@@ -171,22 +409,22 @@ Per-turn usage tags are written on each step of a turn, accumulating cumulative 
 
 Tag writes are best-effort: a failure is logged once per process and then swallowed, so a broken tag emit never breaks the agent.
 
-These tags power the **Agent Runs** tab in the Vercel dashboard. When you deploy on Vercel, the platform auto-detects `eve` as the framework and surfaces an Agent Runs view under your project's **Observability** tab, where you can browse sessions and drill into each conversation's trace, with no `instrumentation.ts` required. The tab is currently gated per team. See [Deploy to Vercel](./deployment/vercel#inspect-agent-runs) for enablement. Agent Runs is separate from the OpenTelemetry export above. Use OTel when you want spans in Braintrust, PostHog, Datadog, or another third-party backend.
-
-Note: By default, telemetry records full message history and model outputs You may need to disclose these data flows in your privacy materials if utilized.
+These tags power the **Agent Runs** tab in the Vercel dashboard. When you deploy on Vercel, the platform auto-detects `eve` as the framework and surfaces an Agent Runs view under your project's **Observability** tab, where you can browse sessions and drill into each conversation's trace, with no `instrumentation.ts` required. The tab is currently gated per team. See [Deploy to Vercel](./deployment/vercel#inspect-agent-runs) for enablement. Agent Runs is separate from the OpenTelemetry export above. Use OTel when you want spans in Braintrust, PostHog, Sentry, Datadog, or another third-party backend.
 
 ## Local traces
 
-Without an `instrumentation.ts`, `eve dev` records spans to disk — one trace per session, with turns, model steps, and tool calls. Read them two ways:
+Without an `instrumentation.ts`, `eve dev` records spans to disk with one bounded trace per turn, including its model steps and tool calls. Read them two ways:
 
-- [`/traces`](dev-tui#inspect-traces) in the dev TUI: a live viewer that replays the trace as a conversation.
+- [`/traces`](dev-tui#logs-and-traces) in the dev TUI: a live trace viewer that replays captured content as a conversation.
 - [`eve traces`](../reference/cli#eve-traces): a span tree in the terminal, `eve traces ls` to list. Works after `eve dev` exits.
+
+Local traces omit model, tool, and memory-record content by default. Set `EVE_TRACES_CONTENT=on` in `.env.local` to capture that content.
 
 Writing `instrumentation.ts` replaces this: your `setup` takes over and nothing is recorded locally. For span attributes, retention, and the `EVE_TRACES*` variables, see [`eve traces`](../reference/cli#eve-traces).
 
 ## Debugging
 
-`eve info` is the fastest way to see what eve actually picked up: the active tools, skills, subagents, schedules, routes, and discovery diagnostics. eve also writes inspectable artifacts under `.eve/`, kept even when discovery hits errors:
+`eve info` is the fastest way to see what eve actually picked up: ordered static instructions with their roles, plus the active tools, skills, subagents, schedules, routes, and discovery diagnostics. Dynamic instruction results exist only at runtime and are not part of this static inspection. eve also writes inspectable artifacts under `.eve/`, kept even when discovery hits errors:
 
 | Artifact                        | Tells you                                   |
 | ------------------------------- | ------------------------------------------- |
@@ -199,13 +437,13 @@ When `eve build` fails on discovery errors, the CLI prints the full diagnostics 
 
 ### Common failures
 
-| Symptom                                       | Likely cause and fix                                                                                                                                                                                                                                                        |
-| --------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Tool not discovered (the model never sees it) | Run `eve info`. Confirm the file is in the right slot (`agent/tools/<name>.ts`) and default-exports `defineTool(...)`, and check `.eve/diagnostics.json` for shape errors. `schedules/` are root-only.                                                                      |
-| Model won't call a tool it should             | Tighten the tool `description` and `inputSchema`; put procedural guidance in a [skill](../skills), not the description. Confirm it's in the active set with `eve info`.                                                                                                     |
-| Stuck on `session.waiting`                    | The turn is parked for input. Answer the pending approval or question, or POST a follow-up to `/eve/v1/session/:sessionId`.                                                                                                                                                 |
-| 401 on production routes                      | Expected: auth fails closed. Replace `placeholderAuth()` with your route policy. Use `vercelOidc()` only for Vercel-issued tokens; otherwise configure `httpBasic()`, JWT/OIDC helpers, or a custom `AuthFn`. See [Auth and route protection](./auth-and-route-protection). |
-| Build fails with discovery errors             | Read the printed diagnostics and `.eve/diagnostics.json`; confirm the root-vs-subagent boundary is valid and secrets come from env vars.                                                                                                                                    |
+| Symptom                                       | Likely cause and fix                                                                                                                                                                                                                                             |
+| --------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Tool not discovered (the model never sees it) | Run `eve info`. Confirm the file is in the right slot (`agent/tools/<name>.ts`) and default-exports `defineTool(...)`, and check `.eve/diagnostics.json` for shape errors. `schedules/` are root-only.                                                           |
+| Model won't call a tool it should             | Tighten the tool `description` and `inputSchema`; put procedural guidance in a [skill](../skills), not the description. Confirm it's in the active set with `eve info`.                                                                                          |
+| Stuck on `session.waiting`                    | The turn is parked for input. Answer the pending approval or question, or POST a follow-up to `/eve/v1/session/:sessionId`.                                                                                                                                      |
+| 401 on production routes                      | Expected: auth fails closed. Replace `placeholderAuth()` with your route policy. Use `vercelOidc()` only for Vercel-issued tokens; otherwise configure `httpBasic()`, JWT/OIDC helpers, or a custom `AuthFn`. See [Authentication](./auth-and-route-protection). |
+| Build fails with discovery errors             | Read the printed diagnostics and `.eve/diagnostics.json`; confirm the root-vs-subagent boundary is valid and secrets come from env vars.                                                                                                                         |
 
 ## What to read next
 

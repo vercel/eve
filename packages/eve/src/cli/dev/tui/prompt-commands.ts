@@ -10,6 +10,7 @@ export type PromptCommand =
   | { type: "compact" }
   | { type: "exit" }
   | { type: "help" }
+  | { type: "info" }
   | { type: "loglevel"; argument: string }
   | { type: "traces"; argument: string }
   | { type: "extension"; name: PromptCommandExtensionName; argument: string };
@@ -25,7 +26,7 @@ export interface PromptCommandSpec {
   readonly aliases: readonly string[];
   /** One-line discovery copy shown by the typeahead. */
   readonly description: string;
-  /** Argument shape shown dim after the name, e.g. "[provider/model]". */
+  /** Optional argument shape shown dim after the name, e.g. "[provider/model]". */
   readonly argumentHint?: string;
   /** Accepts a trailing argument (enables `/name <arg>` parsing). */
   readonly takesArgument: boolean;
@@ -52,6 +53,14 @@ const PROMPT_COMMAND_DEFINITIONS = [
     takesArgument: false,
     build: () => ({ type: "help" }),
     targets: ["local", "remote"],
+  },
+  {
+    name: "info",
+    aliases: [],
+    description: "Show application and messaging information",
+    takesArgument: false,
+    build: () => ({ type: "info" }),
+    targets: ["local"],
   },
   {
     name: "reset",
@@ -132,8 +141,8 @@ const PROMPT_COMMAND_DEFINITIONS = [
     name: "add",
     aliases: [],
     description: "Add an integration from the registry",
-    takesArgument: false,
-    build: () => ({ type: "extension", name: "add", argument: "" }),
+    takesArgument: true,
+    build: (argument) => ({ type: "extension", name: "add", argument }),
     targets: ["local"],
   },
   {

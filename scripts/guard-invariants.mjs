@@ -50,8 +50,8 @@
  *             return shapes must carry only what the harness consumes;
  *             durable state belongs on `ctx.eve`.
  *   rule 28 — Imports under `packages/eve/src/setup/scaffold/**` stay within
- *             their layer: node:* builtins, relative siblings, and the shared
- *             `@eve/catalog` data package. The scaffold stays free of
+ *             their layer: node:* builtins, relative siblings, and eve's
+ *             vendored integration catalog. The scaffold stays free of
  *             framework runtime, compiler, terminal UI, and provider SDK
  *             dependencies.
  *   rule 29 — Changeset package keys must match workspace package names.
@@ -92,20 +92,42 @@
  *             authoring roots, every historical epoch must be supported or
  *             dropped, every retained epoch needs a compiling fixture, and
  *             every public authoring value must belong to a capability.
- *
- *   rule 37 — The instrumentation lifecycle contract stays provider-neutral.
- *             `harness/instrumentation-lifecycle.ts` must not import from
- *             `ai`: its event payloads are eve's published shape, so deriving
- *             them from the model SDK's callback types would make an SDK
- *             upgrade a breaking change for every provider. Map at the bridge.
+ *   rule 37 — Instrumentation ownership stays provider-neutral and outside the
+ *             harness. The lifecycle contract must not import from `ai`, harness
+ *             code may import only runtime facade types, and execution may use
+ *             only runtime entrypoints and cancellation-state preservation.
+ *   rule 38 — Workspace build scripts must not launch a nested
+ *             `pnpm --filter eve build`. Turbo owns workspace dependency
+ *             ordering; nested builds race on eve's clean-and-publish dist
+ *             directory and let consumers observe a partial package.
+ *   rule 40 — Wire schemas and version-bound encoders are immutable protocol
+ *             data. Pure `*.vN.migration.ts` transforms are immutable data too;
+ *             version selection, chain assembly, and realm normalization remain
+ *             editable policy. Every data module must carry a colocated test.
+ *             The session-inbox registry must be contiguous, name every schema
+ *             module, and identify its highest version as current. Wire versions
+ *             are append-only protocol history: change the contract by adding a
+ *             version and migration, never by updating historical data and its
+ *             snapshot together. The workflow-safe decoder must not import
+ *             schemas or validation libraries at runtime.
+ *   rule 42 — The shared subagent workflow body is framework-authored
+ *             userspace. It must not import task, harness, or context
+ *             internals or recover private state through `Symbol.for`.
+ *             Privileged dispatch belongs in ordinary step-backed APIs that
+ *             the workflow body consumes through a public contract.
+ *   rule 43 — Reusable session plumbing stays independent of the subagent
+ *             executor. The generic inbox and state cursor must not
+ *             import subagent modules; session/turn composition roots may
+ *             compose built-in executors directly.
  *
  * Baselines for rules with pre-existing violations live in
  * `guard-invariants-baseline.json`. Counts and allowlists in that file
  * may only shrink (as offenders are removed) — they may never grow.
  */
-import { readFile, readdir, lstat } from "node:fs/promises";
+import { execFileSync } from "node:child_process";
+import { glob, readFile, readdir, lstat } from "node:fs/promises";
 import { createRequire } from "node:module";
-import { join, relative, resolve, sep } from "node:path";
+import { dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import matter from "gray-matter";
 import { checkExtensionCapabilityContracts } from "./extension-capability-contracts.mjs";
@@ -193,6 +215,8 @@ function isTsLike(relPath) {
  *   rule33: Violation[];
  *   rule35: Violation[];
  *   rule37: Violation[];
+ *   rule42: Violation[];
+ *   rule43: Violation[];
  *   symlinks: string[];
  * }} state
  */
@@ -222,7 +246,69 @@ async function scanRepo(state) {
     checkRule33(posix, lines, state.rule33);
     checkRule35(posix, lines, state.rule35);
     checkRule37(posix, content, state.rule37);
+    checkRule42(posix, lines, state.rule42);
+    checkRule43(posix, lines, state.rule43);
   }
+}
+
+// ---------- Rule 42: userspace subagent workflow ----------
+
+const SUBAGENT_WORKFLOW_PATH = "packages/eve/src/runtime/subagents/workflow.ts";
+const SUBAGENT_WORKFLOW_PRIVATE_IMPORT_RE =
+  /["']#(?:tasks|execution|harness|context|shared)(?:\/|\.js)/;
+// The shared body owns its invocation id, so it consumes the framework-internal
+// entry rather than the public `agent()`; that import is the one exception.
+const SUBAGENT_WORKFLOW_ALLOWED_IMPORT = '"#execution/tools/subagent/invoke-agent.js"';
+
+/**
+ * @param {string} posix
+ * @param {string[]} lines
+ * @param {Violation[]} violations
+ */
+function checkRule42(posix, lines, violations) {
+  if (posix !== SUBAGENT_WORKFLOW_PATH) return;
+
+  lines.forEach((line, idx) => {
+    if (line.includes(SUBAGENT_WORKFLOW_ALLOWED_IMPORT)) return;
+    if (!SUBAGENT_WORKFLOW_PRIVATE_IMPORT_RE.test(line) && !line.includes("Symbol.for(")) return;
+    violations.push({
+      rule: 42,
+      file: posix,
+      line: idx + 1,
+      message:
+        "the shared subagent workflow reaches into task, harness, or context internals. Keep the body userspace-shaped and call a public workflow-safe agent API instead.",
+    });
+  });
+}
+
+// ---------- Rule 43: executor-neutral session plumbing ----------
+
+// Matches both `#` alias specifiers and relative paths into the executor trees.
+const SUBAGENT_IMPORT_RE =
+  /from ["'](?:#|(?:\.\.?\/)+(?:[\w-]+\/)*)(?:subagents|execution\/tools\/subagent|tools\/subagent)(?:\/|\.js|["'])/;
+
+const RULE43_GENERIC_SESSION_FILES = new Set([
+  "packages/eve/src/execution/session-command-inbox.ts",
+  "packages/eve/src/execution/session-state-cursor.ts",
+]);
+
+/**
+ * @param {string} posix
+ * @param {string[]} lines
+ * @param {Violation[]} violations
+ */
+function checkRule43(posix, lines, violations) {
+  if (!RULE43_GENERIC_SESSION_FILES.has(posix)) return;
+  lines.forEach((line, idx) => {
+    if (!SUBAGENT_IMPORT_RE.test(line)) return;
+    violations.push({
+      rule: 43,
+      file: posix,
+      line: idx + 1,
+      message:
+        "generic session plumbing imports the subagent executor. Move executor-specific behavior to composition roots or subagent-owned modules.",
+    });
+  });
 }
 
 // ---------- Rule 13: spread-ternary object composition ----------
@@ -292,6 +378,10 @@ const WORKFLOW_QUEUE_NAMESPACE_MODULE = "packages/eve/src/internal/workflow/queu
  * @param {Violation[]} violations
  */
 function checkRule33(posix, lines, violations) {
+  // The single-runtime-identity boundary is eve's own source. Application code
+  // (fixtures, templates) legitimately imports the public `workflow/api`
+  // surface, which eve's bundler resolves to its own runtime.
+  if (!posix.startsWith("packages/eve/src/")) return;
   lines.forEach((line, idx) => {
     const isTypeOnlyImport = /^\s*(?:import|export)\s+type\b/.test(line);
     const isRuntimeImport =
@@ -346,7 +436,23 @@ function checkRule35(posix, lines, violations) {
 
 // ---------- Rule 37: instrumentation lifecycle provider boundary ----------
 
-const INSTRUMENTATION_LIFECYCLE_CONTRACT = "packages/eve/src/harness/instrumentation-lifecycle.ts";
+const INSTRUMENTATION_LIFECYCLE_CONTRACT = "packages/eve/src/instrumentation/lifecycle.ts";
+const HARNESS_RUNTIME_IMPORTS = new Map([
+  ["InstrumentationAttempt", "type"],
+  ["InstrumentationStepScope", "type"],
+  ["SessionInstrumentation", "type"],
+]);
+const EXECUTION_INSTRUMENTATION_IMPORTS = new Map([
+  [
+    "#instrumentation/runtime.js",
+    new Map([
+      ["bindSessionInstrumentation", "value"],
+      ["ExecutionInstrumentation", "type"],
+      ["initializeSessionInstrumentation", "value"],
+    ]),
+  ],
+  ["#instrumentation/state.js", new Map([["preserveSerializedInstrumentationState", "value"]])],
+]);
 
 /**
  * @param {string} posix
@@ -354,7 +460,15 @@ const INSTRUMENTATION_LIFECYCLE_CONTRACT = "packages/eve/src/harness/instrumenta
  * @param {Violation[]} violations
  */
 function checkRule37(posix, source, violations) {
-  if (posix !== INSTRUMENTATION_LIFECYCLE_CONTRACT) return;
+  const productionHarness =
+    posix.startsWith("packages/eve/src/harness/") &&
+    !/\.(?:test|integration\.test|scenario\.test)\.ts$/.test(posix);
+  const productionExecution =
+    posix.startsWith("packages/eve/src/execution/") &&
+    !/\.(?:test|integration\.test|scenario\.test)\.ts$/.test(posix);
+  if (posix !== INSTRUMENTATION_LIFECYCLE_CONTRACT && !productionHarness && !productionExecution) {
+    return;
+  }
 
   const sourceFile = ts.createSourceFile(
     posix,
@@ -365,7 +479,11 @@ function checkRule37(posix, source, violations) {
   );
   const visit = (node) => {
     const specifier = importSpecifier(node);
-    if (specifier !== undefined && (specifier.text === "ai" || specifier.text.startsWith("ai/"))) {
+    if (
+      posix === INSTRUMENTATION_LIFECYCLE_CONTRACT &&
+      specifier !== undefined &&
+      (specifier.text === "ai" || specifier.text.startsWith("ai/"))
+    ) {
       violations.push({
         rule: 37,
         file: posix,
@@ -373,9 +491,84 @@ function checkRule37(posix, source, violations) {
         message: `imports from "ai". Lifecycle event payloads are eve's own shape, so an AI SDK type reaching them makes an SDK upgrade a breaking change for every provider. Add an eve type here and map to it in ai-sdk-hook-bridge.ts.`,
       });
     }
+    if (
+      productionHarness &&
+      specifier?.text.startsWith("#instrumentation/") === true &&
+      specifier.text !== "#instrumentation/runtime.js"
+    ) {
+      violations.push({
+        rule: 37,
+        file: posix,
+        line: sourceFile.getLineAndCharacterOfPosition(specifier.getStart(sourceFile)).line + 1,
+        message: `imports "${specifier.text}" directly. Harness code may consume instrumentation only through the bound SessionInstrumentation facade from "#instrumentation/runtime.js".`,
+      });
+    }
+    if (productionHarness && specifier?.text.startsWith("#tracing/") === true) {
+      violations.push({
+        rule: 37,
+        file: posix,
+        line: sourceFile.getLineAndCharacterOfPosition(specifier.getStart(sourceFile)).line + 1,
+        message: `imports "${specifier.text}" directly. Tracing implementation belongs behind the bound instrumentation facade.`,
+      });
+    }
+    if (
+      productionHarness &&
+      specifier?.text === "#instrumentation/runtime.js" &&
+      !hasOnlyAllowedNamedImports(node, HARNESS_RUNTIME_IMPORTS)
+    ) {
+      violations.push({
+        rule: 37,
+        file: posix,
+        line: sourceFile.getLineAndCharacterOfPosition(specifier.getStart(sourceFile)).line + 1,
+        message: `imports unsupported instrumentation runtime bindings. Harness code may use only the SessionInstrumentation, InstrumentationStepScope, and InstrumentationAttempt types.`,
+      });
+    }
+    if (productionHarness && specifier?.text.startsWith("#compiled/@opentelemetry/") === true) {
+      violations.push({
+        rule: 37,
+        file: posix,
+        line: sourceFile.getLineAndCharacterOfPosition(specifier.getStart(sourceFile)).line + 1,
+        message: `imports OpenTelemetry directly. OTel implementation belongs behind the bound instrumentation facade.`,
+      });
+    }
+    if (
+      productionExecution &&
+      specifier?.text.startsWith("#instrumentation/") === true &&
+      !hasOnlyAllowedNamedImports(
+        node,
+        EXECUTION_INSTRUMENTATION_IMPORTS.get(specifier.text) ?? new Map(),
+      )
+    ) {
+      violations.push({
+        rule: 37,
+        file: posix,
+        line: sourceFile.getLineAndCharacterOfPosition(specifier.getStart(sourceFile)).line + 1,
+        message: `imports unsupported instrumentation bindings from "${specifier.text}". Execution may use only session binding/initialization, the ExecutionInstrumentation type, and cancellation-state preservation.`,
+      });
+    }
     ts.forEachChild(node, visit);
   };
   visit(sourceFile);
+}
+
+function hasOnlyAllowedNamedImports(node, allowed) {
+  if (!ts.isImportDeclaration(node)) return false;
+  const clause = node.importClause;
+  if (
+    clause === undefined ||
+    clause.name !== undefined ||
+    clause.namedBindings === undefined ||
+    !ts.isNamedImports(clause.namedBindings) ||
+    clause.namedBindings.elements.length === 0
+  ) {
+    return false;
+  }
+  return clause.namedBindings.elements.every((element) => {
+    const imported = element.propertyName?.text ?? element.name.text;
+    const expectedKind = allowed.get(imported);
+    const actualKind = clause.isTypeOnly || element.isTypeOnly ? "type" : "value";
+    return expectedKind === actualKind;
+  });
 }
 
 function importSpecifier(node) {
@@ -411,6 +604,273 @@ function importSpecifier(node) {
     return node.arguments[0];
   }
   return undefined;
+}
+
+// ---------- Rule 40: wire versions carry colocated contract tests ----------
+
+const WIRE_FAMILY_DIR = "packages/eve/src/execution/wire";
+const SESSION_INBOX_WIRE_CONTRACT = `${WIRE_FAMILY_DIR}/session-inbox-contract.ts`;
+const SESSION_INBOX_WIRE_DECODER = `${WIRE_FAMILY_DIR}/session-inbox-wire.ts`;
+const VERSIONED_WIRE_HISTORY_RE = new RegExp(
+  `^${WIRE_FAMILY_DIR}/(?:__snapshots__/)?[a-z0-9-]+-wire\\.v\\d+(?:\\.migration)?(?:\\.test\\.ts(?:\\.snap)?|\\.ts)$`,
+);
+const RULE_40_ALLOWED_REWRITES = new Map([
+  [
+    `${WIRE_FAMILY_DIR}/session-inbox-wire.v1.ts`,
+    {
+      from: "5f110be5d7b488216c574a1aef9d2074d670efd2",
+      to: "7f5864f20e6bbb9f430c23918320ca6319c4cb14",
+    },
+  ],
+]);
+const PURE_MIGRATION_IMPORTS = new Map([
+  ["#execution/durable-session-migrations/chain.js", new Map([["VersionMigration", "type"]])],
+  ["#shared/guards.js", new Map([["isObject", "value"]])],
+]);
+const WORKFLOW_DECODER_RUNTIME_IMPORTS = new Set([
+  "#execution/durable-session-migrations/chain.js",
+  "#execution/wire/session-inbox-contract.js",
+  "#execution/wire/session-inbox-wire.v0.js",
+  "#execution/wire/session-inbox-wire.v2-migration.js",
+  "#execution/wire/session-inbox-wire.v2.migration.js",
+  "#execution/wire/session-inbox-wire.v3.migration.js",
+  "#execution/wire/session-inbox-wire.v4.migration.js",
+  "#execution/wire/session-inbox-wire.v5.migration.js",
+  "#shared/guards.js",
+]);
+
+function gitOutput(args) {
+  try {
+    return execFileSync("git", args, {
+      cwd: REPO_ROOT,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+  } catch {
+    return undefined;
+  }
+}
+
+function checkRule40ImmutableWireHistory() {
+  const hasBase = gitOutput(["rev-parse", "--verify", "origin/main"]) !== undefined;
+  const comparisons = [
+    { args: ["diff", "--name-status", "--", WIRE_FAMILY_DIR], state: "worktree" },
+    {
+      args: ["diff", "--cached", "--name-status", "--", WIRE_FAMILY_DIR],
+      state: "index",
+    },
+  ];
+  if (hasBase)
+    comparisons.push({
+      args: ["diff", "--name-status", "origin/main...HEAD", "--", WIRE_FAMILY_DIR],
+      state: "head",
+    });
+
+  const changes = new Set();
+  for (const { args, state } of comparisons) {
+    for (const line of (gitOutput(args) ?? "").trim().split("\n")) {
+      if (line !== "") changes.add(`${state}\t${line}`);
+    }
+  }
+
+  /** @type {Violation[]} */
+  const violations = [];
+  for (const change of changes) {
+    const [state, status, ...paths] = change.split("\t");
+    const protectedPaths = paths.filter((path) => VERSIONED_WIRE_HISTORY_RE.test(path));
+    if (protectedPaths.length === 0 || status === "A") continue;
+    if (protectedPaths.every((path) => isAllowedRule40Rewrite(path, state))) continue;
+    if (
+      hasBase &&
+      protectedPaths.every(
+        (path) => gitOutput(["cat-file", "-e", `origin/main:${path}`]) === undefined,
+      )
+    ) {
+      continue;
+    }
+    violations.push({
+      rule: 40,
+      file: protectedPaths.at(-1),
+      line: 1,
+      message: `shipped wire-version history is immutable (git status ${status}). Add the next wire version and migration instead of changing or deleting an existing version module, contract test, or snapshot.`,
+    });
+  }
+  return violations;
+}
+
+function isAllowedRule40Rewrite(path, state) {
+  const rewrite = RULE_40_ALLOWED_REWRITES.get(path);
+  if (rewrite === undefined) return false;
+  const baseHash = gitOutput(["rev-parse", `origin/main:${path}`])?.trim();
+  const currentHash =
+    state === "head"
+      ? gitOutput(["rev-parse", `HEAD:${path}`])?.trim()
+      : state === "index"
+        ? gitOutput(["rev-parse", `:${path}`])?.trim()
+        : gitOutput(["hash-object", path])?.trim();
+  return baseHash === rewrite.from && currentHash === rewrite.to;
+}
+
+function checkRule40MigrationPurity(path, source) {
+  const sourceFile = ts.createSourceFile(
+    path,
+    source,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TS,
+  );
+  /** @type {Violation[]} */
+  const violations = [];
+  const visit = (node) => {
+    const specifier = importSpecifier(node);
+    if (specifier !== undefined) {
+      const allowed = PURE_MIGRATION_IMPORTS.get(specifier.text);
+      if (allowed === undefined || !hasOnlyAllowedNamedImports(node, allowed)) {
+        violations.push({
+          rule: 40,
+          file: path,
+          line: sourceFile.getLineAndCharacterOfPosition(specifier.getStart(sourceFile)).line + 1,
+          message: `imports "${specifier.text}". Versioned wire migrations are immutable data transforms, so they may import only the VersionMigration type or dependency-free shared guards. Move normalization and version-selection policy to the wire facade.`,
+        });
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sourceFile);
+  return violations;
+}
+
+function checkRule40WorkflowDecoderImports(source) {
+  const sourceFile = ts.createSourceFile(
+    SESSION_INBOX_WIRE_DECODER,
+    source,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TS,
+  );
+  /** @type {Violation[]} */
+  const violations = [];
+  const visit = (node) => {
+    const specifier = importSpecifier(node);
+    if (
+      specifier !== undefined &&
+      isRuntimeImportReference(node) &&
+      !WORKFLOW_DECODER_RUNTIME_IMPORTS.has(specifier.text)
+    ) {
+      violations.push({
+        rule: 40,
+        file: SESSION_INBOX_WIRE_DECODER,
+        line: sourceFile.getLineAndCharacterOfPosition(specifier.getStart(sourceFile)).line + 1,
+        message: `imports "${specifier.text}" at runtime. The session-inbox decoder is embedded with inline sources in every workflow driver; keep schema and validation dependencies in the encoder and import only the inferred wire type here.`,
+      });
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sourceFile);
+  return violations;
+}
+
+function isRuntimeImportReference(node) {
+  if (ts.isImportTypeNode(node)) return false;
+  if (ts.isImportDeclaration(node)) {
+    const clause = node.importClause;
+    if (clause?.isTypeOnly === true) return false;
+    if (clause?.namedBindings !== undefined && ts.isNamedImports(clause.namedBindings)) {
+      return clause.namedBindings.elements.some((element) => !element.isTypeOnly);
+    }
+    return true;
+  }
+  if (ts.isExportDeclaration(node)) {
+    if (node.isTypeOnly) return false;
+    if (node.exportClause !== undefined && ts.isNamedExports(node.exportClause)) {
+      return node.exportClause.elements.some((element) => !element.isTypeOnly);
+    }
+    return true;
+  }
+  return true;
+}
+
+async function checkRule40WireContracts() {
+  const violations = checkRule40ImmutableWireHistory();
+  let entries;
+  try {
+    entries = await readdir(join(REPO_ROOT, WIRE_FAMILY_DIR));
+  } catch {
+    return violations;
+  }
+
+  for (const name of entries) {
+    const match = name.match(/^([a-z0-9-]+)-wire\.v(\d+)(\.migration)?\.ts$/);
+    if (match === null) continue;
+    const [, family, version, kind = ""] = match;
+
+    const testName = `${family}-wire.v${version}${kind}.test.ts`;
+    if (!entries.includes(testName)) {
+      violations.push({
+        rule: 40,
+        file: `${WIRE_FAMILY_DIR}/${name}`,
+        line: 1,
+        message: `wire family "${family}" version ${version} has no colocated contract test (${testName}). Pin this version's schema/encoder or migration/fixtures before shipping it.`,
+      });
+    }
+    if (kind === ".migration") {
+      const path = `${WIRE_FAMILY_DIR}/${name}`;
+      violations.push(
+        ...checkRule40MigrationPurity(path, await readFile(join(REPO_ROOT, path), "utf8")),
+      );
+    }
+  }
+
+  const contractSource = await readFile(join(REPO_ROOT, SESSION_INBOX_WIRE_CONTRACT), "utf8");
+  const decoderSource = await readFile(join(REPO_ROOT, SESSION_INBOX_WIRE_DECODER), "utf8");
+  violations.push(...checkRule40WorkflowDecoderImports(decoderSource));
+  const registryMatch = contractSource.match(
+    /SESSION_INBOX_WIRE_VERSIONS\s*=\s*\[([^\]]*)\]\s*as const/,
+  );
+  const tokens = registryMatch?.[1]
+    .split(",")
+    .map((token) => token.trim())
+    .filter(Boolean);
+  if (tokens === undefined || tokens.length === 0 || tokens.some((token) => !/^\d+$/.test(token))) {
+    violations.push({
+      rule: 40,
+      file: SESSION_INBOX_WIRE_CONTRACT,
+      line: 1,
+      message:
+        "SESSION_INBOX_WIRE_VERSIONS must be an explicit numeric tuple so CI can compare the declared protocol history with shipped version modules.",
+    });
+    return violations;
+  }
+
+  const line = contractSource.slice(0, registryMatch.index).split("\n").length;
+  const versions = tokens.map(Number);
+  const expectedVersions = versions.map((_, index) => index + 1);
+  if (JSON.stringify(versions) !== JSON.stringify(expectedVersions)) {
+    violations.push({
+      rule: 40,
+      file: SESSION_INBOX_WIRE_CONTRACT,
+      line,
+      message: `SESSION_INBOX_WIRE_VERSIONS must be contiguous and ascending from 1; found [${versions.join(", ")}]. Add new versions without renumbering or removing protocol history.`,
+    });
+  }
+
+  const shippedVersions = entries
+    .flatMap((name) => {
+      const match = name.match(/^session-inbox-wire\.v(\d+)\.ts$/);
+      return match === null ? [] : [Number(match[1])];
+    })
+    .sort((left, right) => left - right);
+  const registeredModules = [0, ...versions];
+  if (JSON.stringify(shippedVersions) !== JSON.stringify(registeredModules)) {
+    violations.push({
+      rule: 40,
+      file: SESSION_INBOX_WIRE_CONTRACT,
+      line,
+      message: `session-inbox wire modules [${shippedVersions.join(", ")}] must exactly match legacy v0 plus registered versions [${registeredModules.join(", ")}].`,
+    });
+  }
+
+  return violations;
 }
 
 // ---------- Rule 19: AsyncLocalStorage instances ----------
@@ -594,15 +1054,14 @@ function checkRule27(posix, lines, violations) {
 
 const SCAFFOLD_PREFIX = "packages/eve/src/setup/scaffold/";
 
-// The curated connection and channel catalogs (and any future surface
-// overlays) read canonical identity from `@eve/catalog`, a
-// dependency-free data package shared across the scaffolder and docs. It
-// carries no runtime, compiler, or provider-SDK weight, so the entire scaffold
-// layer may import it. The terminal UI adapters (which carry @clack/core and
-// picocolors) live outside the scaffold, in `packages/eve/src/setup/cli/`.
-const SCAFFOLD_ALLOWED_PACKAGES = new Set(["@eve/catalog"]);
+// The curated connection and channel catalogs read canonical identity from
+// the private `@eve/catalog` workspace package through eve's vendored copy.
+// This keeps the published package self-contained without allowing the
+// scaffold layer to reach into runtime, compiler, or provider SDK modules.
+// Terminal UI adapters live outside the scaffold in `packages/eve/src/setup/cli/`.
+const SCAFFOLD_ALLOWED_PACKAGES = new Set([]);
 
-const SCAFFOLD_ALLOWED_INTERNAL_IMPORTS = new Set([]);
+const SCAFFOLD_ALLOWED_INTERNAL_IMPORTS = new Set(["#compiled/@eve/catalog/index.js"]);
 
 // Only match top-of-line `import` statements, not strings nested inside
 // template literals (e.g. the channel templates embed `from "react"` as
@@ -641,7 +1100,7 @@ function checkRule28(posix, lines, violations) {
             rule: 28,
             file: posix,
             line: idx + 1,
-            message: `import from "${spec}" not allowed in the packages/eve/src/setup/scaffold source layer. Scaffold modules allow only node:* builtins, relative files, and @eve/catalog. Keep runtime, compiler, terminal UI, and provider SDK dependencies in their owning package.`,
+            message: `import from "${spec}" not allowed in the packages/eve/src/setup/scaffold source layer. Scaffold modules allow only node:* builtins, relative files, and #compiled/@eve/catalog/index.js. Keep runtime, compiler, terminal UI, and provider SDK dependencies in their owning package.`,
           });
         }
       }
@@ -969,6 +1428,33 @@ async function checkRule34PhaseBoundary() {
   return violations;
 }
 
+// ---------- Rule 38: one owner for the eve package build ----------
+
+const NESTED_EVE_BUILD_RE = /\bpnpm\s+(?:--filter(?:=|\s+)eve|-F\s+eve)\s+(?:run\s+)?build\b/;
+
+/**
+ * @returns {Promise<Violation[]>}
+ */
+async function checkRule38NoNestedEveBuild() {
+  /** @type {Violation[]} */
+  const violations = [];
+
+  for (const dir of await readPnpmWorkspacePackageDirs()) {
+    if (dir === "packages/eve") continue;
+    const packageJson = await readJsonIfExists(join(REPO_ROOT, dir, "package.json"));
+    for (const [scriptName, command] of Object.entries(packageJson?.scripts ?? {})) {
+      if (typeof command !== "string" || !NESTED_EVE_BUILD_RE.test(command)) continue;
+      violations.push({
+        rule: 38,
+        file: `${dir}/package.json`,
+        message: `script "${scriptName}" launches a nested eve package build. Declare eve as a workspace dependency and let Turbo's ^build edge produce it once; rebuilding eve inside a consumer races its destructive dist clean against other consumers.`,
+      });
+    }
+  }
+
+  return violations;
+}
+
 /**
  * @returns {Promise<Set<string>>}
  */
@@ -996,6 +1482,11 @@ async function readPnpmWorkspacePackageDirs() {
     const excluded = rawPattern.startsWith("!");
     const pattern = excluded ? rawPattern.slice(1) : rawPattern;
     const dirs = await expandWorkspacePackagePattern(pattern);
+
+    if (!excluded && dirs.length === 0) {
+      throw new Error(`Workspace package pattern "${rawPattern}" matched no package.json files.`);
+    }
+
     const target = excluded ? excludeDirs : includeDirs;
 
     dirs.forEach((dir) => target.add(dir));
@@ -1047,31 +1538,16 @@ function stripYamlString(value) {
  * @returns {Promise<string[]>}
  */
 async function expandWorkspacePackagePattern(pattern) {
-  if (pattern.endsWith("/*")) {
-    const root = pattern.slice(0, -2);
-    let entries;
-    try {
-      entries = await readdir(join(REPO_ROOT, root), { withFileTypes: true });
-    } catch (error) {
-      if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") {
-        return [];
-      }
-      throw error;
-    }
+  const normalizedPattern = pattern.replace(/\/+$/, "");
+  const dirs = [];
 
-    const dirs = [];
-    for (const entry of entries) {
-      if (!entry.isDirectory()) continue;
-      const dir = `${root}/${entry.name}`;
-      if (await readJsonIfExists(join(REPO_ROOT, dir, "package.json"))) dirs.push(dir);
-    }
-    return dirs;
+  for await (const manifestPath of glob(`${normalizedPattern}/package.json`, {
+    cwd: REPO_ROOT,
+  })) {
+    dirs.push(toPosix(dirname(manifestPath)));
   }
 
-  if (await readJsonIfExists(join(REPO_ROOT, pattern, "package.json"))) {
-    return [pattern];
-  }
-  return [];
+  return dirs.sort();
 }
 
 /**
@@ -1148,6 +1624,8 @@ async function main() {
     rule33: /** @type {Violation[]} */ ([]),
     rule35: /** @type {Violation[]} */ ([]),
     rule37: /** @type {Violation[]} */ ([]),
+    rule42: /** @type {Violation[]} */ ([]),
+    rule43: /** @type {Violation[]} */ ([]),
     symlinks: /** @type {string[]} */ ([]),
   };
 
@@ -1246,6 +1724,18 @@ async function main() {
 
   // Rule 37
   violations.push(...state.rule37);
+
+  // Rule 38
+  violations.push(...(await checkRule38NoNestedEveBuild()));
+
+  // Rule 40
+  violations.push(...(await checkRule40WireContracts()));
+
+  // Rule 42
+  violations.push(...state.rule42);
+
+  // Rule 43
+  violations.push(...state.rule43);
 
   if (violations.length === 0) {
     process.stdout.write("[eve:guard:invariants] ok — all mechanical lints passed.\n");

@@ -40,7 +40,7 @@ Point your Twilio number's Messaging webhook at `/messages` and Voice webhook at
 export default twilioChannel({ allowFrom: ["+15551234567", "+15557654321"] });
 ```
 
-`onText` and `onVoiceTranscription` decide dispatch and `auth`. Return `{ auth }` to proceed, or `null` to drop the message. `onVoice` fires the moment a call comes in. Return `null` to reject it, or return an object to override the spoken prompt, language, `<Say voice>`, and speech-recognition options.
+`onText` and `onVoiceTranscription` decide dispatch and `auth`. Return `{ auth }` to proceed, `null` to drop the message, or `title` alongside `auth` to set the title when the dispatch starts a run. `onVoice` fires the moment a call comes in. Return `null` to reject it, or return an object to override the spoken prompt, language, `<Say voice>`, and speech-recognition options.
 
 ```ts
 export default twilioChannel({

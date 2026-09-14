@@ -169,11 +169,13 @@ describe("renderCommandSuggestions", () => {
   });
 
   it("windows long lists around the highlight without a count row", () => {
-    const many = Array.from({ length: 14 }, (_, index) => spec(`command-${index}`));
-    const state = { ...typeaheadFor(many, "/"), selectedIndex: 13 };
+    const many = Array.from({ length: PROMPT_COMMANDS.length + 1 }, (_, index) =>
+      spec(`command-${index}`),
+    );
+    const state = { ...typeaheadFor(many, "/"), selectedIndex: many.length - 1 };
     const rows = renderCommandSuggestions(state, theme, 80).map(stripAnsi);
     expect(rows).toHaveLength(PROMPT_COMMANDS.length);
-    expect(rows.some((row) => row.includes("command-13"))).toBe(true);
+    expect(rows.some((row) => row.includes(`command-${many.length - 1}`))).toBe(true);
     expect(rows.some((row) => row.includes("command-0"))).toBe(false);
     expect(rows.some((row) => row.includes("commands, showing"))).toBe(false);
   });

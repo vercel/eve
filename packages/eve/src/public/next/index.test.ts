@@ -355,7 +355,7 @@ describe("withEve", () => {
         },
         {
           appRoot: expect.stringContaining("/agents/support"),
-          buildCommand: "node '../../node_modules/eve/bin/eve.js' build",
+          buildCommand: "node 'node_modules/eve/bin/eve.js' build",
           name: "support",
           publicRoutePrefix: "/eve/agents/support",
           servicePrefix: `${EVE_NEXT_SERVICE_PREFIX}/support`,
@@ -392,6 +392,22 @@ describe("withEve", () => {
           source: "/eve/agents/support/eve/v1/:path+",
         },
       ]),
+    );
+  });
+
+  it("accepts digit-bearing public agent names", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    const config = await withEve<TestConfig>({}, { agents: { support2: "./agents/support" } })(
+      "phase-production-build",
+      { defaultConfig: {} },
+    );
+
+    await expect(config.rewrites?.()).resolves.toEqual(
+      expect.objectContaining({
+        beforeFiles: expect.arrayContaining([
+          expect.objectContaining({ source: "/eve/agents/support2/eve/v1/:path+" }),
+        ]),
+      }),
     );
   });
 

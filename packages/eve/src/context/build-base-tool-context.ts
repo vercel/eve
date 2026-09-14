@@ -1,7 +1,7 @@
 import { buildCallbackContext } from "#context/build-callback-context.js";
-import type { SessionContext } from "#public/definitions/callback-context.js";
+import type { SessionContext } from "#context/session-context.js";
 import { bindSandboxAbortSignal } from "#execution/sandbox/abort-bound-session.js";
-import type { ToolExecuteOptions } from "#shared/tool-definition.js";
+import type { ToolExecuteOptions } from "#tools/definition.js";
 
 /** Base context shared by tool executors. */
 export type BaseToolContext = SessionContext & {

@@ -1,7 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { useEveAgent } from "#svelte/use-eve-agent.js";
-import { EVE_SESSION_ID_HEADER } from "#protocol/message.js";
+import {
+  EVE_MESSAGE_STREAM_VERSION,
+  EVE_SESSION_ID_HEADER,
+  EVE_STREAM_VERSION_HEADER,
+} from "#protocol/message.js";
 import {
   createMessageCompletedEvent,
   createMessageReceivedEvent,
@@ -31,7 +35,19 @@ function createEagerStreamResponse(events: readonly UnstampedMessageStreamEvent[
         controller.close();
       },
     }),
+    {
+      headers: { [EVE_STREAM_VERSION_HEADER]: EVE_MESSAGE_STREAM_VERSION },
+    },
   );
+}
+
+function createBoundedStreamResponse(
+  events: readonly UnstampedMessageStreamEvent[],
+  tailIndex = events.length - 1,
+): Response {
+  const response = createEagerStreamResponse(events);
+  response.headers.set("x-eve-stream-tail-index", String(tailIndex));
+  return response;
 }
 
 afterEach(() => {
@@ -79,6 +95,30 @@ describe("useEveAgent (Svelte rune binding)", () => {
 
     expect(agent.data).toBe(dataBeforeSend);
     expect(agent.status).toBe("ready");
+  });
+
+  it("automatically replays an initial session when resume is enabled", async () => {
+    vi.stubGlobal("window", {});
+    const events = [
+      createMessageReceivedEvent({ message: "Hello", sequence: 0, turnId: "turn_1" }),
+      createSessionWaitingEvent(),
+    ];
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(createBoundedStreamResponse(events))
+      .mockResolvedValueOnce(createBoundedStreamResponse([], events.length - 1));
+    const seenEvents: UnstampedMessageStreamEvent[] = [];
+
+    useEveAgent({
+      initialSession: { sessionId: "session_1", streamIndex: 0 },
+      resume: true,
+      onEvent(event) {
+        seenEvents.push(event);
+      },
+    });
+
+    await vi.waitFor(() => expect(seenEvents).toEqual(stampTestEvents(events)));
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
   });
 
   it("sends messages and notifies lifecycle callbacks from the shared store", async () => {

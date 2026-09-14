@@ -10,9 +10,6 @@
     "typecheck": "eve build && tsc"
   },
   "dependencies": {
-    "@opentelemetry/core": "catalog:",
-    "@opentelemetry/sdk-trace-base": "catalog:",
-    "@vercel/otel": "catalog:",
     "eve": "workspace:*",
     "zod": "catalog:"
   },

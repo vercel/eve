@@ -1,12 +1,16 @@
 <script setup lang="ts">
 import type { EveDynamicToolPart, EveMessagePart } from "eve/vue";
 
-const { data, status, error, respond, send, stop } = useEveAgent();
+const { cancel, data, status, error, respond, send } = useEveAgent();
 
 type EveFilePart = Extract<EveMessagePart, { type: "file" }>;
 
 const isBusy = computed(() => status.value === "submitted" || status.value === "streaming");
+const isResuming = computed(() => status.value === "resuming");
+const isInputDisabled = computed(() => isBusy.value || isResuming.value);
 const isEmpty = computed(() => data.value.messages.length === 0);
+const cancellationError = ref<string>();
+const errorMessage = computed(() => cancellationError.value ?? error.value?.message);
 
 const messagesEl = useTemplateRef("messagesEl");
 
@@ -35,9 +39,20 @@ const messageText = ref("");
 
 function submitMessage() {
   const text = messageText.value.trim();
-  if (!text || isBusy.value) return;
+  if (!text || isInputDisabled.value) return;
+  cancellationError.value = undefined;
   messageText.value = "";
   void send(text);
+}
+
+async function requestCancellation() {
+  cancellationError.value = undefined;
+  try {
+    await cancel();
+  } catch (cause) {
+    cancellationError.value =
+      cause instanceof Error ? cause.message : "The cancellation request failed.";
+  }
 }
 
 function onKeydown(e: KeyboardEvent) {
@@ -54,6 +69,7 @@ function handleInputResponses(
     readonly text?: string;
   }[],
 ) {
+  cancellationError.value = undefined;
   void respond(responses);
 }
 
@@ -97,13 +113,13 @@ function formatBytes(size: number | undefined): string | undefined {
 
     <section class="mx-auto flex min-h-0 w-full max-w-3xl flex-1 flex-col px-4 sm:px-6">
       <div
-        v-if="error"
+        v-if="errorMessage"
         class="mt-4 flex items-start gap-3 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2.5 text-sm"
       >
         <div>
           <p class="font-medium">Request failed</p>
           <p class="mt-0.5 text-muted-foreground">
-            {{ error.message }}
+            {{ errorMessage }}
           </p>
         </div>
       </div>
@@ -227,7 +243,7 @@ function formatBytes(size: number | undefined): string | undefined {
                 <ToolBlock
                   v-else-if="part.type === 'dynamic-tool'"
                   :part="part as EveDynamicToolPart"
-                  :can-respond="!isBusy"
+                  :can-respond="!isInputDisabled"
                   @input-responses="handleInputResponses"
                 />
               </template>
@@ -243,7 +259,7 @@ function formatBytes(size: number | undefined): string | undefined {
         >
           <textarea
             v-model="messageText"
-            :disabled="isBusy"
+            :disabled="isInputDisabled"
             placeholder="Send a message…"
             rows="1"
             class="min-h-20 flex-1 resize-none border-0 bg-transparent px-2 py-1.5 text-sm outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50"
@@ -253,7 +269,7 @@ function formatBytes(size: number | undefined): string | undefined {
             v-if="isBusy"
             type="button"
             class="flex size-8 shrink-0 items-center justify-center rounded-md bg-primary text-primary-foreground hover:bg-primary/90"
-            @click="stop()"
+            @click="requestCancellation"
           >
             <svg class="size-3.5" fill="currentColor" viewBox="0 0 24 24">
               <rect x="4" y="4" width="16" height="16" rx="2" />
@@ -262,7 +278,7 @@ function formatBytes(size: number | undefined): string | undefined {
           <button
             v-else
             type="submit"
-            :disabled="!messageText.trim()"
+            :disabled="isInputDisabled || !messageText.trim()"
             class="flex size-8 shrink-0 items-center justify-center rounded-md bg-primary text-primary-foreground hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-50"
           >
             <svg

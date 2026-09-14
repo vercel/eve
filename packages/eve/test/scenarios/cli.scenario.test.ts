@@ -57,6 +57,7 @@ async function createMinimalAppRoot(prefix: string): Promise<string> {
     join(appRoot, "package.json"),
     `${JSON.stringify(
       {
+        dependencies: { eve: "*" },
         name: "eve-cli-start-health-test",
         private: true,
         type: "module",
@@ -204,13 +205,20 @@ describe("runCli", () => {
   });
 
   it("prints the installed package version when running a CLI command", async () => {
+    const appRoot = await createMinimalAppRoot("eve-cli-version-");
+    const previousCwd = process.cwd();
     const logger = {
       error: vi.fn(),
       log: vi.fn(),
     };
     const evePackage = resolveInstalledPackageInfo();
 
-    await runCli(["info"], logger);
+    process.chdir(appRoot);
+    try {
+      await runCli(["info"], logger);
+    } finally {
+      process.chdir(previousCwd);
+    }
 
     const output = getLogOutput(logger);
     expect(output).toContain("eve");
@@ -218,6 +226,8 @@ describe("runCli", () => {
   });
 
   it("does not print the startup banner before JSON eval output", async () => {
+    const appRoot = await createMinimalAppRoot("eve-cli-eval-json-");
+    const previousCwd = process.cwd();
     const logger = {
       error: vi.fn(),
       log: vi.fn(),
@@ -226,23 +236,35 @@ describe("runCli", () => {
       logger.log("{}");
     });
 
-    await runCli(["eval", "--json"], logger, {
-      runEvalCommand,
-    });
+    process.chdir(appRoot);
+    try {
+      await runCli(["eval", "--json"], logger, {
+        runEvalCommand,
+      });
+    } finally {
+      process.chdir(previousCwd);
+    }
 
     expect(getLogOutput(logger)).toBe("{}");
   });
 
   it("prints fixture information", async () => {
+    const appRoot = await createMinimalAppRoot("eve-cli-info-");
+    const previousCwd = process.cwd();
     const logger = {
       error: vi.fn(),
       log: vi.fn(),
     };
 
-    await runCli(["info"], logger);
+    process.chdir(appRoot);
+    try {
+      await runCli(["info"], logger);
+    } finally {
+      process.chdir(previousCwd);
+    }
 
     expect(logger.log).toHaveBeenCalled();
-    expect(getLogOutput(logger)).toContain("eve Info");
+    expect(getLogOutput(logger)).not.toContain("eve Info");
     expect(getLogOutput(logger)).toContain("Application");
     expect(getLogOutput(logger)).toContain("Workflow ID");
     expect(getLogOutput(logger)).toContain(`POST ${EVE_SESSION_ROUTE_PATH}`);
@@ -278,11 +300,14 @@ describe("runCli", () => {
     expect(output).toContain("0 errors, 0 warnings");
   });
 
-  it("defaults to dev when no command is provided", async () => {
+  it("defaults to dev when no command is provided in an eve project", async () => {
+    const appRoot = await createMinimalAppRoot("eve-cli-default-dev-");
+    const previousCwd = process.cwd();
     const logger = {
       error: vi.fn(),
       log: vi.fn(),
     };
+    const findApplicationRoot = vi.fn(async () => process.cwd());
     const startHost = vi.fn(() => ({
       start: async () => {
         throw new Error("dev started");
@@ -290,12 +315,19 @@ describe("runCli", () => {
       close: async () => {},
     }));
 
-    await expect(
-      runCli([], logger, {
-        startHost,
-      }),
-    ).rejects.toThrow("dev started");
+    process.chdir(appRoot);
+    try {
+      await expect(
+        runCli([], logger, {
+          findApplicationRoot,
+          startHost,
+        }),
+      ).rejects.toThrow("dev started");
+    } finally {
+      process.chdir(previousCwd);
+    }
 
+    expect(findApplicationRoot).toHaveBeenCalledOnce();
     expect(startHost).toHaveBeenCalledOnce();
   });
 
@@ -343,7 +375,7 @@ describe("runCli", () => {
   });
 
   it("passes host and port to the production start host", async () => {
-    const workspaceRoot = await createScratchDirectory("eve-cli-start-options-");
+    const workspaceRoot = await createMinimalAppRoot("eve-cli-start-options-");
     const resolvedWorkspaceRoot = await realpath(workspaceRoot);
     const previousCwd = process.cwd();
     const logger = {
@@ -373,7 +405,7 @@ describe("runCli", () => {
   });
 
   it("fails clearly when start runs before build output exists", async () => {
-    const workspaceRoot = await createScratchDirectory("eve-cli-start-missing-output-");
+    const workspaceRoot = await createMinimalAppRoot("eve-cli-start-missing-output-");
     const resolvedWorkspaceRoot = await realpath(workspaceRoot);
     const previousCwd = process.cwd();
     const logger = {
@@ -439,7 +471,7 @@ describe("runCli", () => {
     });
     await writeFile(
       join(workspaceRoot, "package.json"),
-      `${JSON.stringify({ name: "build-diagnostics" }, null, 2)}\n`,
+      `${JSON.stringify({ dependencies: { eve: "*" }, name: "build-diagnostics" }, null, 2)}\n`,
     );
     await writeFile(
       join(workspaceRoot, "agent", "agent.mjs"),
@@ -477,7 +509,7 @@ describe("runCli", () => {
   });
 
   it("loads development env files before running build", async () => {
-    const workspaceRoot = await createScratchDirectory("eve-cli-build-env-");
+    const workspaceRoot = await createMinimalAppRoot("eve-cli-build-env-");
     const resolvedWorkspaceRoot = await realpath(workspaceRoot);
     const previousCwd = process.cwd();
     const logger = {
@@ -526,7 +558,10 @@ describe("runCli", () => {
     }
 
     expect(buildHost).toHaveBeenCalledWith(resolvedWorkspaceRoot, {
+      publicRoutePrefix: undefined,
       skipVercelSandboxPrewarm: false,
+      vercelServiceOutput: undefined,
+      workspaceMember: false,
     });
     expect(observedEnvironment).toEqual({
       EVE_BUILD_DEFAULT_ONLY: "from-env",
@@ -539,7 +574,7 @@ describe("runCli", () => {
   });
 
   it("forwards the sandbox prewarm opt-out to the build host", async () => {
-    const workspaceRoot = await createScratchDirectory("eve-cli-build-skip-prewarm-");
+    const workspaceRoot = await createMinimalAppRoot("eve-cli-build-skip-prewarm-");
     const resolvedWorkspaceRoot = await realpath(workspaceRoot);
     const previousCwd = process.cwd();
     const logger = {
@@ -559,7 +594,10 @@ describe("runCli", () => {
     }
 
     expect(buildHost).toHaveBeenCalledWith(resolvedWorkspaceRoot, {
+      publicRoutePrefix: undefined,
       skipVercelSandboxPrewarm: true,
+      vercelServiceOutput: undefined,
+      workspaceMember: false,
     });
   });
 });

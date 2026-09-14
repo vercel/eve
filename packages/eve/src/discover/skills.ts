@@ -176,6 +176,7 @@ async function discoverOneSkill(input: {
         skillFileName: input.entryName,
       });
     case "ignored-declaration":
+    case "ignored-source-map":
       return {
         diagnostics: [],
         logicalPath: normalizeLogicalPath(join(input.skillsLogicalPath, input.entryName)),

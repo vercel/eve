@@ -1,5 +1,5 @@
 import { readFile } from "node:fs/promises";
-import { basename, extname } from "node:path";
+import { basename } from "node:path";
 
 import { createTextWithFileContent } from "#client/file-parts.js";
 import type { Client } from "#client/client.js";
@@ -11,12 +11,18 @@ import type {
   SendTurnOptions,
   SendTurnPayload,
 } from "#client/types.js";
-import type { MessageStreamEvent, TurnFailureStreamEvent } from "#protocol/message.js";
+import type {
+  MessageStreamEvent,
+  RuntimeTraceContext,
+  TurnFailureStreamEvent,
+} from "#protocol/message.js";
 import { isCurrentTurnBoundaryEvent, isTurnFailureEvent } from "#protocol/message.js";
 import { summarizeTurnEvents } from "#client/session-utils.js";
 import { extractCompletedResult } from "#client/output-schema.js";
-import type { InputRequest, InputResponse } from "#runtime/input/types.js";
+import type { InputRequest, InputResponse } from "#shared/input.js";
 import { deriveRunFacts } from "#evals/runner/derive-run-facts.js";
+import { cleanupEvalSessions } from "#evals/session-cleanup.js";
+import { formatEvalTranscript, inferMediaType } from "#evals/session-content.js";
 import { AssertionCollector } from "#evals/assertions/collector.js";
 import { createOutputAssertions, createScopedAssertions } from "#evals/assertions/scoped.js";
 import { EvalRequirementFailed } from "#evals/control-flow.js";
@@ -59,23 +65,39 @@ export class EveEvalTurnFailedError extends Error {
 
 export interface EvalSessionDriver extends EveEvalAssertions, EveEvalOutputAssertions {}
 
+export interface EvalSessionStartedEvent {
+  readonly primary: boolean;
+  readonly sessionId: string;
+  readonly startedAt: string;
+  readonly traceContext: RuntimeTraceContext;
+}
+
 export class EvalSessionDriver implements EveEvalSession {
   readonly #client: Client;
   #session: ClientSession | undefined;
   readonly #signal: AbortSignal | undefined;
   readonly #collector: AssertionCollector;
   readonly #events: MessageStreamEvent[] = [];
+  readonly #primary: boolean;
+  readonly #onSessionStart: ((event: EvalSessionStartedEvent) => void) | undefined;
+  readonly #traceContexts: RuntimeTraceContext[] = [];
+  readonly #traceKeys = new Set<string>();
   #lastTurn: EvalTurn | undefined;
+  #sessionStartReported = false;
   #pendingInputRequests: readonly InputRequest[] = [];
 
   constructor(input: {
     readonly client: Client;
     readonly collector: AssertionCollector;
+    readonly onSessionStart?: (event: EvalSessionStartedEvent) => void;
+    readonly primary: boolean;
     readonly session?: ClientSession;
     readonly signal?: AbortSignal;
   }) {
     this.#client = input.client;
     this.#collector = input.collector;
+    this.#onSessionStart = input.onSessionStart;
+    this.#primary = input.primary;
     this.#session = input.session;
     this.#signal = input.signal;
     Object.assign(
@@ -93,6 +115,10 @@ export class EvalSessionDriver implements EveEvalSession {
 
   get events(): readonly MessageStreamEvent[] {
     return this.#events;
+  }
+
+  get transcript(): string {
+    return formatEvalTranscript(this.#events);
   }
 
   get lastTurn(): EveEvalTurn | undefined {
@@ -114,6 +140,12 @@ export class EvalSessionDriver implements EveEvalSession {
   async cancel(): Promise<CancelSessionResult> {
     if (this.#session === undefined) throw new Error("Eval session has not started.");
     return await this.#session.cancel();
+  }
+
+  /** @internal */
+  async cleanup(signal: AbortSignal): Promise<void> {
+    if (this.#session === undefined) return;
+    await this.#session.reset({ reason: "Eval timed out", signal });
   }
 
   requireInputRequest(filter: EveEvalInputRequestMatchOptions = {}): InputRequest {
@@ -147,6 +179,14 @@ export class EvalSessionDriver implements EveEvalSession {
     }
 
     return await (await this.#start({ ...options, inputResponses: responses })).result();
+  }
+
+  async startRespond(
+    responses: readonly InputResponse[],
+    options: SendTurnOptions = {},
+  ): Promise<EveEvalLiveTurn> {
+    if (responses.length === 0) throw new Error("startRespond() requires input responses.");
+    return await this.#start({ ...options, inputResponses: responses });
   }
 
   async respondAll(optionId: string): Promise<EveEvalTurn> {
@@ -199,6 +239,7 @@ export class EvalSessionDriver implements EveEvalSession {
     }
     return new EvalLiveTurn({
       events: response,
+      observe: (event) => this.#observeEvent(response.sessionId, event),
       record: (events) => this.#recordObservedTurn(response.sessionId, events),
       session: this,
       sessionId: response.sessionId,
@@ -231,21 +272,43 @@ export class EvalSessionDriver implements EveEvalSession {
         signal: this.#signal,
         startIndex: options?.startIndex,
       }),
+      observe: (event) => this.#observeEvent(sessionId, event),
       record: (events) => this.#recordObservedTurn(sessionId, events),
       session: this,
       sessionId,
     });
   }
 
-  snapshot(primary: boolean): EveEvalSessionResult {
+  snapshot(): EveEvalSessionResult {
     const sessionId = this.sessionId;
     return {
       derived: deriveRunFacts(this.#events, { sessionId }),
       events: [...this.#events],
-      primary,
+      primary: this.#primary,
       sessionId,
       state: this.#session?.state,
+      traceContexts: [...this.#traceContexts],
     };
+  }
+
+  #observeEvent(sessionId: string, event: MessageStreamEvent): void {
+    if (event.type !== "session.started" && event.type !== "turn.started") return;
+    const traceContext = event.data.trace;
+    if (traceContext === undefined) return;
+
+    const key = `${traceContext.traceId}:${traceContext.spanId}`;
+    if (this.#traceKeys.has(key)) return;
+    this.#traceKeys.add(key);
+    this.#traceContexts.push(traceContext);
+
+    if (this.#sessionStartReported) return;
+    this.#sessionStartReported = true;
+    this.#onSessionStart?.({
+      primary: this.#primary,
+      sessionId,
+      startedAt: event.meta.at,
+      traceContext,
+    });
   }
 
   #recordTurn(input: {
@@ -320,13 +383,14 @@ class EvalLiveTurn implements EveEvalLiveTurn {
 
   constructor(input: {
     readonly events: AsyncIterable<MessageStreamEvent>;
+    readonly observe: (event: MessageStreamEvent) => void;
     readonly record: (events: readonly MessageStreamEvent[]) => EveEvalTurn;
     readonly session: EveEvalSession;
     readonly sessionId: string;
   }) {
     this.session = input.session;
     this.sessionId = input.sessionId;
-    this.#completion = this.#consume(input.events, input.record);
+    this.#completion = this.#consume(input.events, input.observe, input.record);
     void this.#completion.catch(() => {});
   }
 
@@ -366,12 +430,14 @@ class EvalLiveTurn implements EveEvalLiveTurn {
 
   async #consume(
     source: AsyncIterable<MessageStreamEvent>,
+    observe: (event: MessageStreamEvent) => void,
     record: (events: readonly MessageStreamEvent[]) => EveEvalTurn,
   ): Promise<EveEvalTurn> {
     try {
       let sawBoundary = false;
       for await (const event of source) {
         this.#events.push(event);
+        observe(event);
         this.#resolveWaiters(event);
 
         if (isTurnFailureEvent(event)) {
@@ -504,26 +570,29 @@ export class EvalSessionManager {
   readonly #client: Client;
   readonly #signal: AbortSignal | undefined;
   readonly #collector: AssertionCollector;
+  readonly #onSessionStart: ((event: EvalSessionStartedEvent) => void) | undefined;
   readonly #sessions: EvalSessionDriver[] = [];
   #primary: EvalSessionDriver | undefined;
 
   constructor(input: {
     readonly client: Client;
     readonly collector?: AssertionCollector;
+    readonly onSessionStart?: (event: EvalSessionStartedEvent) => void;
     readonly signal?: AbortSignal;
   }) {
     this.#client = input.client;
     this.#collector = input.collector ?? new AssertionCollector();
+    this.#onSessionStart = input.onSessionStart;
     this.#signal = input.signal;
   }
 
   get primary(): EvalSessionDriver {
-    this.#primary ??= this.#createSession();
+    this.#primary ??= this.#createSession(true);
     return this.#primary;
   }
 
   newSession(): EvalSessionDriver {
-    return this.#createSession();
+    return this.#createSession(false);
   }
 
   async attachSession(
@@ -540,7 +609,7 @@ export class EvalSessionManager {
   }
 
   snapshots(): readonly EveEvalSessionResult[] {
-    return this.#sessions.map((session) => session.snapshot(session === this.#primary));
+    return this.#sessions.map((session) => session.snapshot());
   }
 
   lastTurnSession(): EvalSessionDriver | undefined {
@@ -554,11 +623,17 @@ export class EvalSessionManager {
   hasActivity(): boolean {
     return this.#sessions.length > 0;
   }
+  /** @internal */
+  async cleanup(signal: AbortSignal): Promise<readonly PromiseSettledResult<void>[]> {
+    return await cleanupEvalSessions(this.#sessions, signal);
+  }
 
-  #createSession(): EvalSessionDriver {
+  #createSession(primary: boolean): EvalSessionDriver {
     const session = new EvalSessionDriver({
       client: this.#client,
       collector: this.#collector,
+      onSessionStart: this.#onSessionStart,
+      primary,
       signal: this.#signal,
     });
     this.#sessions.push(session);
@@ -572,6 +647,8 @@ export class EvalSessionManager {
     const session = new EvalSessionDriver({
       client: this.#client,
       collector: this.#collector,
+      onSessionStart: this.#onSessionStart,
+      primary: false,
       session: this.#client.sessions.attach(sessionId, {
         streamIndex: options?.startIndex ?? 0,
       }),
@@ -619,21 +696,5 @@ function assertRequestHasOption(request: InputRequest, optionId: string): void {
 
   if (!request.options.some((option) => option.id === optionId)) {
     throw new Error(`Input request "${request.requestId}" does not offer option "${optionId}".`);
-  }
-}
-
-function inferMediaType(filePath: string): string {
-  switch (extname(filePath).toLowerCase()) {
-    case ".gif":
-      return "image/gif";
-    case ".jpg":
-    case ".jpeg":
-      return "image/jpeg";
-    case ".png":
-      return "image/png";
-    case ".webp":
-      return "image/webp";
-    default:
-      return "application/octet-stream";
   }
 }

@@ -3,6 +3,7 @@ import { join } from "node:path";
 import {
   cleanupCreatedConnectionConnector,
   setupConnectionConnector,
+  type ConnectPrincipalType,
   type SetupConnectionConnectorOptions,
 } from "#setup/connection-connector.js";
 import {
@@ -15,15 +16,16 @@ import { resolveIntegrationVercelProject } from "#setup/integrations/shared/verc
 import { readProjectLink } from "#setup/project-resolution.js";
 import { createPrompter, type Prompter } from "#setup/prompter.js";
 import { createRegistrySetupClient } from "#setup/registry-setup-client.js";
-import { isEveProject } from "#setup/scaffold/index.js";
 import { updateConnectionConnectorUid } from "#setup/scaffold/update/update-connection-connector.js";
 import { WizardCancelledError } from "#setup/step.js";
 
-import { NOT_AN_AGENT_MESSAGE } from "./preconditions.js";
 import type { RegistryCommandLogger } from "./registry.js";
 import { serializeHeadlessSetupEvent } from "./setup-headless.js";
 
 export interface IntegrationConnectOptions {
+  creationType?: string;
+  connectionMethod?: "mcp" | "oauth";
+  principalType?: ConnectPrincipalType;
   nonInteractive?: boolean;
   signal?: AbortSignal;
 }
@@ -95,6 +97,9 @@ export async function runIntegrationConnect(input: {
     projectRoot: input.appRoot,
     slug: input.slug,
     service: input.service,
+    creationType: input.options?.creationType,
+    connectionMethod: input.options?.connectionMethod,
+    principalType: input.options?.principalType,
     canonicalConnectorName: input.canonicalConnectorName ?? input.slug,
     project,
     signal,
@@ -126,11 +131,6 @@ export async function runIntegrationConnectCommand(
   options: IntegrationConnectOptions = {},
   dependencies: IntegrationConnectDependencies = defaultDependencies,
 ): Promise<void> {
-  if (!(await isEveProject(appRoot))) {
-    logger.error(NOT_AN_AGENT_MESSAGE);
-    process.exitCode = 1;
-    return;
-  }
   const client = createRegistrySetupClient({ signal: options.signal });
   try {
     await runIntegrationConnect({

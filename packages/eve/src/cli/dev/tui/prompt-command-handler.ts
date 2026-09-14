@@ -52,7 +52,7 @@ export function createPromptCommandHandler(
               "/model needs eve dev running the local server (it is not available with --url).",
           };
         }
-        const appRoot = target.workspaceRoot;
+        const appRoot = target.agentRoot ?? target.workspaceRoot;
         // Package-loading failures are command outcomes at this CLI boundary.
         try {
           const { modelChangeRefusalForUneditableModel } = await import("#setup/flows/model.js");
@@ -109,7 +109,8 @@ export function createPromptCommandHandler(
       }
       const { runTuiSetupCommand, SETUP_FLOW_CONFIG } = setupCommands;
       const flowConfig = SETUP_FLOW_CONFIG[command.name];
-      flow.begin(flowConfig.title, flowConfig.indicator);
+      flow.begin(context.setupFlowTitle ?? flowConfig.title, flowConfig.indicator);
+      flow.setNavigation?.(context.setupFlowNavigation);
       let preserveFlowDiagnostics = true;
       try {
         const commandInput: TuiSetupCommandInput = {
@@ -117,16 +118,26 @@ export function createPromptCommandHandler(
           appRoot: target.workspaceRoot,
           renderer: flow,
           withExclusiveTerminal: context.withExclusiveTerminal,
+          chatGptAccountLabel: context.chatGptAccountLabel,
         };
+        if (target.agentRoot !== undefined) commandInput.agentRoot = target.agentRoot;
         if (context.initialModelStep !== undefined) {
           commandInput.initialModelStep = context.initialModelStep;
+        }
+        if (context.registryPlannerContext !== undefined) {
+          commandInput.registryPlannerContext = context.registryPlannerContext;
+        }
+        if (context.onOnboardingScreen !== undefined) {
+          commandInput.onOnboardingScreen = context.onOnboardingScreen;
+        }
+        // `/add <item>` confirms and installs that address; bare `/add` opens the planner.
+        if (command.name === "add" && command.argument.length > 0) {
+          commandInput.initialRegistryAddress = command.argument;
         }
         if (options.flows !== undefined) commandInput.flows = options.flows;
         const result = await runTuiSetupCommand(commandInput);
         preserveFlowDiagnostics = result.preserveFlowDiagnostics;
-        const outcome: PromptCommandOutcome = { message: result.message };
-        if (result.tone !== undefined) outcome.tone = result.tone;
-        if (result.effect !== undefined) outcome.effect = result.effect;
+        const { preserveFlowDiagnostics: _preserve, partial: _partial, ...outcome } = result;
         return outcome;
       } finally {
         if (context.keepSetupFlowOpen !== true) {

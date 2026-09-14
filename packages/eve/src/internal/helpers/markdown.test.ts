@@ -12,7 +12,10 @@ describe("markdown helpers", () => {
   it("lowers instructions markdown into the same shape as a module-authored instructions definition", () => {
     const markdown = "You are a weather-focused assistant.";
 
-    expect(lowerInstructionsMarkdown(markdown)).toEqual({ markdown });
+    expect(lowerInstructionsMarkdown(markdown)).toEqual({
+      content: markdown,
+      role: "system",
+    });
   });
 
   it("lowers skill markdown frontmatter into the same shape as a module-authored skill definition", () => {

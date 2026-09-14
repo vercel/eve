@@ -2,6 +2,7 @@ import { createSubscriber } from "svelte/reactivity";
 import type { UserContent } from "ai";
 
 import {
+  detachEveAgentStore,
   EveAgentStore,
   type EveAgentStoreCallbacks,
   type EveAgentStoreSnapshot,
@@ -13,6 +14,7 @@ import { defaultMessageReducer, type EveMessageData } from "#client/message-redu
 import type { EveAgentReducer } from "#client/reducer.js";
 import type { ClientSession } from "#client/session.js";
 import type {
+  CancelSessionResult,
   ClientAuth,
   HeadersValue,
   RespondTurnOptions,
@@ -24,9 +26,9 @@ import type { MessageStreamEvent } from "#protocol/message.js";
 export type { PrepareSend };
 
 /**
- * Session lifecycle phase: `"ready"` (idle), `"submitted"` (request sent,
- * awaiting the first stream event), `"streaming"` (events arriving), or
- * `"error"`.
+ * Session lifecycle phase: `"ready"` (idle), `"resuming"` (checking an
+ * attached session), `"submitted"` (request sent, awaiting the first stream
+ * event), `"streaming"` (events arriving), or `"error"`.
  */
 export type UseEveAgentStatus = EveAgentStoreStatus;
 
@@ -45,12 +47,16 @@ export type UseEveAgentSnapshot<TData> = EveAgentStoreSnapshot<TData>;
  * new events.
  */
 export interface UseEveAgentReturn<TData> {
+  /** Request durable cancellation of the active turn while continuing to receive its events. */
+  readonly cancel: () => Promise<CancelSessionResult>;
   /** Projected state built by reducing every stream event through the reducer. */
   readonly data: TData;
   /** Last transport-level error, or `undefined` when healthy. */
   readonly error: Error | undefined;
   /** Raw server events received during this session (authoritative stream). */
   readonly events: readonly MessageStreamEvent[];
+  /** Replay the attached durable session and follow its in-flight turn, if any. */
+  readonly resume: () => Promise<void>;
   /** Clear all state and start a new session. */
   readonly reset: () => void;
   /** Send a message with optional turn settings. */
@@ -65,10 +71,12 @@ export interface UseEveAgentReturn<TData> {
   ) => Promise<void>;
   /** Current session identity and stream cursor. */
   readonly session: ClientSessionState | undefined;
-  /** Lifecycle phase: `"ready"` (idle), `"submitted"` (request sent, awaiting first event), `"streaming"` (events arriving), or `"error"`. */
+  /**
+   * Lifecycle phase: `"ready"` (idle), `"resuming"` (checking an attached
+   * session), `"submitted"` (request sent, awaiting first event), `"streaming"`
+   * (events arriving), or `"error"`.
+   */
   readonly status: UseEveAgentStatus;
-  /** Abort the in-flight request. */
-  readonly stop: () => void;
 }
 
 /**
@@ -123,6 +131,8 @@ export interface UseEveAgentOptions<TData> extends EveAgentStoreCallbacks<TData>
    * which fixes `TData` to {@link EveMessageData}.
    */
   readonly reducer?: EveAgentReducer<TData>;
+  /** Replay the attached durable session after mount. Requires `initialSession` or `session`. */
+  readonly resume?: boolean;
   /**
    * Pre-built client session to bind to. When omitted, the binding creates its
    * own session from `auth`, `headers`, and `host`.
@@ -148,7 +158,7 @@ class SvelteEveAgent<TData> implements UseEveAgentReturn<TData> {
 
       return () => {
         unsubscribe();
-        store.stop();
+        detachEveAgentStore(store);
       };
     });
   }
@@ -178,8 +188,16 @@ class SvelteEveAgent<TData> implements UseEveAgentReturn<TData> {
     return this.#snapshot.status;
   }
 
+  cancel = (): Promise<CancelSessionResult> => {
+    return this.#store.cancel();
+  };
+
   reset = (): void => {
     this.#store.reset();
+  };
+
+  resume = (): Promise<void> => {
+    return this.#store.resume();
   };
 
   respond = <TOutput = unknown>(
@@ -194,10 +212,6 @@ class SvelteEveAgent<TData> implements UseEveAgentReturn<TData> {
     options?: SendTurnOptions<TOutput>,
   ): Promise<void> => {
     return this.#store.send({ ...options, message });
-  };
-
-  stop = (): void => {
-    this.#store.stop();
   };
 }
 
@@ -221,6 +235,9 @@ export function useEveAgent<TData>(
 export function useEveAgent<TData>(
   options: UseEveAgentOptions<TData> = {},
 ): UseEveAgentReturn<TData> {
+  if (options.resume && options.initialSession === undefined && options.session === undefined) {
+    throw new Error("useEveAgent({ resume: true }) requires initialSession or session.");
+  }
   const reducer = options.reducer ?? (defaultMessageReducer() as EveAgentReducer<TData>);
   const store = new EveAgentStore<TData>({
     auth: options.auth,
@@ -240,6 +257,7 @@ export function useEveAgent<TData>(
     onSessionChange: options.onSessionChange,
     prepareSend: options.prepareSend,
   });
+  if ("window" in globalThis && options.resume) void store.resume();
 
   return new SvelteEveAgent(store);
 }

@@ -7,7 +7,7 @@ When eve doesn't ship a channel for your surface, you build one. Custom channels
 
 ## File location and identity
 
-Custom channels live in `agent/channels/` at the root agent. Local subagents do not declare channels today.
+Custom channels live in `agent/channels/` at the root agent or in an [extension](../extensions) mounted there. Local subagents do not declare channels today.
 
 The channel file stem becomes the channel id, so `agent/channels/internal-webhook.ts` is addressed as `internal-webhook`. Export the channel definition as the module's default export.
 
@@ -58,6 +58,8 @@ export default defineChannel({
 });
 ```
 
+A route's `path` is its app URL; the channel filename does not prefix it. The route above answers at `POST /threads/:threadId/messages`, not `/support/threads/:threadId/messages`. Use a unique method-and-path pair for each route, and do not use the framework-owned `/eve/v1/*` namespace.
+
 Each route receives these operation surfaces:
 
 - `from(address)` binds `send`, `respond`, `cancel`, `compact`, `clear`, and `reset` to a channel-local continuation address.
@@ -80,6 +82,10 @@ part of the authored channel API.
 
 Channel operations are dynamic: every call targets whichever session currently
 owns the address. Only `send()` can create a session when the address is unowned.
+Cold-start sends return their accepted candidate without waiting for address
+ownership. If simultaneous sends race, eve forwards the losing candidate's
+message to the winner; resolve the address after startup when you need a fixed
+handle to the canonical owner.
 
 ```ts
 const source = from(threadId);
@@ -107,6 +113,18 @@ await session.compact();
 await session.clear();
 await session.reset({ reason: "Retire this session" });
 await session.getEventStream({ startIndex: 12 });
+```
+
+`respond()` accepts exact response literals directly. If responses have already
+been widened to `InputResponse[]`—for example, after decoding a platform
+payload—validate them with eve's strict schema before delivery. The validated
+type preserves that proof across channel wrappers:
+
+```ts
+import { parseInputResponses } from "eve/client";
+
+const inputResponses = parseInputResponses(decodedResponses);
+await source.respond(inputResponses, { auth });
 ```
 
 Message sends use the channel's `turnPolicy`, which defaults to `"steer"`. An accepted message arriving during an active turn is durably buffered before eve cancels that turn and starts the message as a replacement turn. Configure `turnPolicy: "queue"` on `defineChannel(...)` when active turns should finish in order, or override one send:
@@ -210,7 +228,9 @@ The bridge server does not listen on its own port. It receives only upgrade even
 
 ## Cross-channel hand-off
 
-Route handlers can start a session on a different channel via `ctx.to(channel, target).send(message, options)`. Use this when an inbound request on one channel should pivot the conversation onto another, such as an incident webhook that opens an investigation thread in Slack.
+Route handlers can start or resume an agent session on a different channel via `ctx.to(channel, target).send(message, options)`. This is an agent hand-off: the message becomes turn input and invokes the model on the destination channel. Use it when an inbound request should pivot the conversation, such as an incident webhook that opens an investigation thread in Slack.
+
+To post a provider notification without starting an agent turn, call the destination provider's API instead. If that notification must survive process failures, use an application-owned outbox; see [Durable cross-channel notifications](../patterns/durable-cross-channel-notifications).
 
 ```ts
 import { defineChannel, POST } from "eve/channels";
@@ -245,6 +265,7 @@ Semantics:
 - The target channel's authored `receive(input, { from })` hook owns the continuation-token format and initial state. Callers supply the target to `to(...)`, then the message and auth to `send(...)`.
 - `auth` flows through to `session.auth.initiator` so the target's event handlers and the agent's tools can read who started the session.
 - Calling `ctx.to(...).send(...)` does not also start a session on the current channel. The inbound channel's response is whatever the route handler returns explicitly.
+- `send(...)` is not a direct provider-message API. It supplies input to the agent on the destination channel.
 - The first argument is the target channel module's default export. Import it directly from `agent/channels/<name>.ts`. Identity is matched by reference.
 
 ## Channel metadata
@@ -289,7 +310,29 @@ export default defineChannel({
 
 The projection is re-evaluated whenever adapter state changes after channel event handlers run. Dynamic tool resolvers read it via `ctx.channel.metadata` and narrow it with `isChannel`. See [Dynamic capabilities](../guides/dynamic-capabilities) for the full consumption pattern.
 
-When a parent agent dispatches a subagent, the framework forwards the parent's channel metadata projection to the child. The same `metadata(state)` projector also serves instrumentation metadata resolvers.
+### Conversation audience
+
+Use `audience(input)` to classify who can observe the conversation. The hook runs after route authentication and before the session is created:
+
+```ts
+import { defineChannel, POST } from "eve/channels";
+
+export default defineChannel({
+  state: { visibility: "workspace" as "workspace" | "private" | "unknown" },
+  audience({ state, auth }) {
+    if (state.visibility === "workspace") return "public";
+    if (auth?.principalType === "user") return "private";
+    return "unknown";
+  },
+  routes: [POST("/webhook", async () => new Response("ok"))],
+});
+```
+
+The input contains the channel's `state`, authenticated `auth` principal, `channel`, `mode`, and `environment`. Return `"public"`, `"private"`, or `"unknown"`. Return `"unknown"` when the channel does not have enough evidence to classify confidently; consumers treat it as non-public. A missing, throwing, asynchronous, or malformed classifier also fails closed to `"unknown"`.
+
+Classification is fixed when the session is created. Continuation turns from a different caller do not reclassify an existing session. When a parent dispatches a local subagent, the child inherits the parent's audience while the framework forwards the parent's custom channel metadata separately.
+
+`metadata(state)` remains a channel-owned projection of custom observability fields. It no longer carries a reserved `audience` key. Channel extensions built before channel epoch 20 can still use that key; eve accepts it as a deprecated fallback and warns once, then authors should move classification to `audience(input)`.
 
 ## Continuation tokens
 
@@ -386,12 +429,16 @@ defineChannel({
 });
 ```
 
+If `fetchFile` throws, eve replaces that attachment with a model-visible error note and continues the turn. Built-in channels include safe details such as the upstream HTTP status. Custom channel errors use a generic note, while eve keeps the original error in operator logs.
+
 The `URL` object survives the queue boundary as a string and is reconstituted inside the workflow step. The staging pipeline calls `fetchFile` with the URL serialized as a string (the URL's `href`), which is why the example matches on `url.startsWith(...)`. Return bytes to stage the file to the sandbox, or `null` to let the URL pass through to the model provider.
 
-The framework handles staging bytes to the sandbox, enforcing upload policy, hydrating files for the model call, and reconstituting `URL` objects after queue serialization.
+The framework handles staging bytes to the sandbox, enforcing upload policy, hydrating files for the model call, and reconstituting `URL` objects after queue serialization. See [Inbound attachments](../sandbox#inbound-attachments) for the shared storage, size, and provider-input behavior.
 
 ## What to read next
 
 - [Channels overview](./overview)
 - [Dynamic capabilities](../guides/dynamic-capabilities)
 - [Auth & route protection](../guides/auth-and-route-protection)
+- [Durable cross-channel notifications](../patterns/durable-cross-channel-notifications): deliver a provider message without starting an agent turn
+- [Universal Commerce Protocol (UCP)](../protocols/ucp): serve a UCP profile from a custom channel

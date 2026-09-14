@@ -5,11 +5,14 @@
 // A fixture qualifies when it has an `evals/` directory under one of the
 // fixture roots. Emits one GitHub Actions output per matrix:
 //
-//   model_matrix          `{ name, dir, model_name, model_id }` entries for
-//                         the model suite (e2e-local). Fixtures marked
-//                         `"e2e": { "modelMatrix": "full" }` in package.json
-//                         run on every registry model; all other fixtures run
-//                         once on the default (first) model.
+//   model_matrix          `{ name, dir, model_name, model_id, optional }`
+//                         entries for the model suite (e2e-local). Fixtures
+//                         marked `"e2e": { "modelMatrix": "full" }` in
+//                         package.json run on every registry model; all other
+//                         fixtures run once on the default (first) model. A
+//                         fixture may add narrowly scoped model legs through
+//                         `additionalModels` and make selected legs non-blocking
+//                         through `optionalModels`.
 //   world_matrix_<world>  `{ name, dir[, world_package] }` entries for that
 //                         world's suite workflow, which runs every fixture
 //                         once with mock models (EVE_E2E_MODEL=mock).
@@ -30,16 +33,28 @@ for (const root of roots) {
     if (!statSync(dir).isDirectory() || !existsSync(join(dir, "evals"))) continue;
 
     let modelMatrix = "default";
+    let additionalModels = [];
+    let optionalModels = [];
     const packageJsonPath = join(dir, "package.json");
     if (existsSync(packageJsonPath)) {
       const pkg = JSON.parse(readFileSync(packageJsonPath, "utf8"));
       modelMatrix = pkg.e2e?.modelMatrix ?? "default";
+      additionalModels = validateNamedEntries(
+        pkg.e2e?.additionalModels ?? [],
+        `${packageJsonPath}: e2e.additionalModels`,
+        ["id"],
+        { allowEmpty: true },
+      );
+      optionalModels = validateNames(
+        pkg.e2e?.optionalModels ?? [],
+        `${packageJsonPath}: e2e.optionalModels`,
+      );
     }
     if (modelMatrix !== "default" && modelMatrix !== "full") {
       throw new Error(`${packageJsonPath}: e2e.modelMatrix must be "default" or "full".`);
     }
 
-    fixtures.push({ name: entry, dir, modelMatrix });
+    fixtures.push({ name: entry, dir, modelMatrix, additionalModels, optionalModels });
   }
 }
 
@@ -48,13 +63,28 @@ if (fixtures.length === 0) {
   process.exit(1);
 }
 
-const modelMatrix = fixtures.flatMap(({ name, dir, modelMatrix }) =>
-  (modelMatrix === "full" ? models : models.slice(0, 1)).map((model) => ({
-    name,
-    dir,
-    model_name: model.name,
-    model_id: model.id,
-  })),
+const modelMatrix = fixtures.flatMap(
+  ({ name, dir, modelMatrix, additionalModels, optionalModels }) => {
+    const fixtureModels = uniqueModels([
+      ...(modelMatrix === "full" ? models : models.slice(0, 1)),
+      ...additionalModels,
+    ]);
+    const selectedNames = new Set(fixtureModels.map((model) => model.name));
+    for (const optionalModel of optionalModels) {
+      if (!selectedNames.has(optionalModel)) {
+        throw new Error(
+          `${dir}/package.json: optional model "${optionalModel}" is not selected by this fixture.`,
+        );
+      }
+    }
+    return fixtureModels.map((model) => ({
+      name,
+      dir,
+      model_name: model.name,
+      model_id: model.id,
+      optional: optionalModels.includes(model.name),
+    }));
+  },
 );
 
 const outputs = [`model_matrix=${JSON.stringify(modelMatrix)}`];
@@ -75,8 +105,8 @@ if (process.env.GITHUB_OUTPUT) {
   process.stdout.write(lines);
 }
 
-function validateNamedEntries(entries, key, requiredFields) {
-  if (!Array.isArray(entries) || entries.length === 0) {
+function validateNamedEntries(entries, key, requiredFields, options = {}) {
+  if (!Array.isArray(entries) || (entries.length === 0 && options.allowEmpty !== true)) {
     throw new Error(`e2e/matrix.json: "${key}" must be a non-empty array.`);
   }
   const names = new Set();
@@ -97,4 +127,32 @@ function validateNamedEntries(entries, key, requiredFields) {
     names.add(entry.name);
   }
   return entries;
+}
+
+function validateNames(entries, key) {
+  if (!Array.isArray(entries)) {
+    throw new Error(`${key} must be an array.`);
+  }
+  const names = new Set();
+  for (const entry of entries) {
+    if (typeof entry !== "string" || !/^[a-z0-9-]+$/.test(entry)) {
+      throw new Error(`${key} entries must be lowercase alphanumerics and dashes.`);
+    }
+    if (names.has(entry)) {
+      throw new Error(`${key} contains duplicate model "${entry}".`);
+    }
+    names.add(entry);
+  }
+  return entries;
+}
+
+function uniqueModels(entries) {
+  const ids = new Set();
+  const names = new Set();
+  return entries.filter((entry) => {
+    if (ids.has(entry.id) || names.has(entry.name)) return false;
+    ids.add(entry.id);
+    names.add(entry.name);
+    return true;
+  });
 }

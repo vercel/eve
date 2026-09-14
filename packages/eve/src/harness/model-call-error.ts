@@ -167,6 +167,10 @@ function collectUnsupportedToolTypesFromValue(value: unknown, out: Set<string>):
 export function extractModelCallErrorDetails(error: unknown): JsonObject {
   const signals = readModelCallErrorSignals(error);
   const details: Record<string, JsonValue> = {};
+  if (error instanceof ContentFilteredModelResponseError) {
+    details.finishReason = "content-filter";
+    appendJsonField(details, "generationId", error.generationId);
+  }
 
   appendJsonField(details, "apiErrorMessage", signals.apiErrorMessage);
   appendJsonField(details, "gatewayName", signals.gatewayName);
@@ -218,6 +222,17 @@ export class EmptyModelResponseError extends Error {
   constructor(options?: { cause?: unknown }) {
     super("The model did not return a response. Please try again.", options);
     this.name = "EmptyModelResponseError";
+  }
+}
+
+/** Provider filtering is a completed rejection, not an empty response to reissue. */
+export class ContentFilteredModelResponseError extends Error {
+  readonly generationId?: string;
+
+  constructor(generationId?: string) {
+    super("The model provider filtered this response.");
+    this.name = "ContentFilteredModelResponseError";
+    this.generationId = generationId;
   }
 }
 
@@ -280,10 +295,13 @@ export function classifyModelCallError(error: unknown): "retry" | "recoverable" 
   }
 
   // The catalog's tags carry the recovery judgment for every failure
-  // shape it can see on the cause chain: a fixable configuration mistake
-  // is terminal (repeating the request cannot fix a credential), a
-  // transient provider condition retries.
+  // shape it can see on the cause chain. Some configuration failures can
+  // be fixed externally while preserving the conversation; otherwise a
+  // configuration mistake is terminal. Transient provider conditions retry.
   const summary = summarizeKnownError(error);
+  if (summary?.tags.includes("recoverable") === true) {
+    return "recoverable";
+  }
   if (summary?.tags.includes("config") === true) {
     return "terminal";
   }
@@ -292,6 +310,12 @@ export function classifyModelCallError(error: unknown): "retry" | "recoverable" 
   }
 
   const signals = readModelCallErrorSignals(error);
+  // Payment-required responses can be fixed outside the running process;
+  // keep the conversation available so the user can retry afterward.
+  if (signals.statusCode === 402) {
+    return "recoverable";
+  }
+
   // The catalog matches structural fields on the chain; these checks
   // cover the one channel it deliberately does not model — discriminators
   // that only exist inside the deep-parsed upstream response body — plus

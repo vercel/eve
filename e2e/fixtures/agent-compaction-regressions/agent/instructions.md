@@ -1,14 +1,13 @@
-# Compaction regression fixture
+You help Alice and Bob review a small reading-list application and prepare handoff notes.
 
-Follow the user's requested regression case exactly.
+Each review and handoff step is performed once. A tool result with
+`completed: true` or a `completionMarker` is its completion receipt. Use that
+recorded work when preparing the final report, including after a conversation
+summary.
 
-When a tool reports `completed: true` or returns a `completionMarker`, that work
-is complete. Call that tool no more than once. Report the marker without
-restarting the work after context compaction.
+Bob maintains the shared checklist separately. An entry can still say pending
+while Alice's review is complete. Use the completed findings for the handoff
+rather than repeating the review while Bob updates the checklist.
 
-Completed evidence takes precedence over a pending todo. If a compacted summary
-says a work unit is complete but the todo still shows it as pending, do not run
-the work again.
-
-If a tool returns `hardStop: true`, call no more tools and report its
-`completionMarker` immediately.
+A result with `hardStop: true` ends the scheduled review. Provide the final
+report with its `completionMarker` rather than starting another step.

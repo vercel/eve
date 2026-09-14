@@ -2,7 +2,7 @@ import { jsonSchema } from "ai";
 import { describe, expect, it } from "vitest";
 
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
-import { getWorkflowRuntimeActionInterrupts } from "#harness/workflow-runtime-action-state.js";
+import { getWorkflowTaskInterrupts } from "#harness/workflow-task-state.js";
 import {
   applyWorkflowTool,
   resolveWorkflowSandboxBridgeRequestLimit,
@@ -12,7 +12,6 @@ import type { HarnessToolMap } from "#harness/types.js";
 import {
   continueWorkflowSandboxInterrupt,
   getWorkflowSandboxInterrupt,
-  type WorkflowSandboxLifecycle,
   unwrapWorkflowSandboxResult,
 } from "#shared/workflow-sandbox.js";
 
@@ -28,11 +27,8 @@ function orchestrationTools(): HarnessToolMap {
           type: "object",
         }),
         name: "echo-marker",
-        runtimeAction: {
-          kind: "subagent-call",
-          nodeId: "subagents/echo-marker",
-          subagentName: "echo-marker",
-        },
+        resultKind: "subagent",
+        workflowId: "workflow//./agent/subagents/researcher//execute",
       },
     ],
   ]);
@@ -60,15 +56,9 @@ const continuationSecurity = {
 describe("Workflow concurrent continuation", () => {
   it("collects fan-out above code mode's default in-flight bridge limit", async () => {
     const tools = orchestrationTools();
-    const lifecycle: WorkflowSandboxLifecycle = {
-      async onNestedToolCall() {
-        await new Promise((resolve) => setTimeout(resolve, 50));
-      },
-    };
     const { modelTools } = await applyWorkflowTool({
       continuationSecurity,
       harnessTools: tools,
-      lifecycle,
       maxSubagents: 100,
       tools: buildToolSet({ tools }),
     });
@@ -82,7 +72,7 @@ describe("Workflow concurrent continuation", () => {
     );
     const interrupt = await getWorkflowSandboxInterrupt(initialOutput, continuationSecurity);
 
-    expect(getWorkflowRuntimeActionInterrupts(interrupt!)).toHaveLength(highFanOutCount);
+    expect(getWorkflowTaskInterrupts(interrupt!)).toHaveLength(highFanOutCount);
   });
 
   it("collects an over-budget call above the default bridge-request floor", async () => {
@@ -103,7 +93,7 @@ describe("Workflow concurrent continuation", () => {
     );
     const interrupt = await getWorkflowSandboxInterrupt(initialOutput, continuationSecurity);
 
-    expect(getWorkflowRuntimeActionInterrupts(interrupt!)).toHaveLength(overBudgetFanOutCount);
+    expect(getWorkflowTaskInterrupts(interrupt!)).toHaveLength(overBudgetFanOutCount);
   });
 
   it("collects promptly interrupted Promise.all siblings in one ledger", async () => {
@@ -126,25 +116,17 @@ describe("Workflow concurrent continuation", () => {
     expect(interrupt!.continuation.auth.expiresAtMs - interrupt!.continuation.auth.issuedAtMs).toBe(
       continuationSecurity.maxAgeMs,
     );
-    expect(getWorkflowRuntimeActionInterrupts(interrupt!).map((entry) => entry.input)).toEqual([
+    expect(getWorkflowTaskInterrupts(interrupt!).map((entry) => entry.input)).toEqual([
       { message: "alpha" },
       { message: "beta" },
     ]);
   });
 
-  it("preserves and resolves sibling interrupts when a later call interrupts first", async () => {
+  it("preserves and resolves sibling interrupts in request order", async () => {
     const tools = orchestrationTools();
-    const lifecycle: WorkflowSandboxLifecycle = {
-      async onNestedToolCall(event) {
-        if ((event.input as { message?: string }).message === "alpha") {
-          await new Promise((resolve) => setTimeout(resolve, 25));
-        }
-      },
-    };
     const { hostTools, modelTools } = await applyWorkflowTool({
       continuationSecurity,
       harnessTools: tools,
-      lifecycle,
       tools: buildToolSet({ tools }),
     });
     const execute = modelTools.Workflow?.execute as
@@ -157,9 +139,8 @@ describe("Workflow concurrent continuation", () => {
       { messages: [], toolCallId: "workflow-call" },
     );
     const racedInterrupt = await getWorkflowSandboxInterrupt(initialOutput, continuationSecurity);
-    expect(racedInterrupt?.input).toEqual({ message: "beta" });
 
-    const pending = getWorkflowRuntimeActionInterrupts(racedInterrupt!);
+    const pending = getWorkflowTaskInterrupts(racedInterrupt!);
     expect(pending.map((interrupt) => interrupt.input)).toEqual([
       { message: "alpha" },
       { message: "beta" },
@@ -169,7 +150,6 @@ describe("Workflow concurrent continuation", () => {
       bridgeRequestLimit: resolveWorkflowSandboxBridgeRequestLimit(),
       continuationSecurity,
       interrupt: pending[0]!,
-      lifecycle,
       resolution: "alpha-result",
       tools: hostTools,
     });
@@ -187,7 +167,6 @@ describe("Workflow concurrent continuation", () => {
       bridgeRequestLimit: resolveWorkflowSandboxBridgeRequestLimit(),
       continuationSecurity,
       interrupt: firstUnwrapped.interrupt,
-      lifecycle,
       resolution: "beta-result",
       tools: hostTools,
     });

@@ -1,6 +1,6 @@
 import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
@@ -8,12 +8,256 @@ import { compileAgentManifest } from "#compiler/normalize-manifest.js";
 import { discoverAgent } from "#discover/discover-agent.js";
 import {
   bundleAuthoredModuleForGeneration,
+  bundleAuthoredModuleMapForGeneration,
   loadAuthoredModuleNamespace,
 } from "#internal/authored-module-loader.js";
 import { useScenarioApp } from "#internal/testing/scenario-app.js";
 
 describe("loadAuthoredModuleNamespace", () => {
   const scenarioApp = useScenarioApp();
+
+  it.each(["agent", "ask"])(
+    "rejects the removed eve/workflow %s import at build time",
+    async (helper) => {
+      const app = await scenarioApp({
+        files: {
+          "agent/agent.ts": 'export default { model: "openai/gpt-5.4" };',
+          "agent/tools/probe.ts": `import { defineTool } from "eve/tools";
+import { ${helper} } from "eve/workflow";
+export default defineTool({ description: "Probe", inputSchema: { type: "object" }, async execute(input, ctx) { return ${helper}(ctx, input); } });`,
+        },
+        installDependencies: true,
+        name: "removed-workflow-helper",
+      });
+      const discovered = await discoverAgent({
+        agentRoot: join(app.appRoot, "agent"),
+        appRoot: app.appRoot,
+      });
+      await expect(compileAgentManifest(discovered.manifest)).rejects.toThrow(/eve\/workflow/);
+    },
+  );
+
+  it.each(["defineTool", "bare object"])(
+    "rejects %s workflow executors during compilation",
+    async (kind) => {
+      const definition = `{ description: "Legacy workflow", inputSchema: {}, async execute() {
+  "use workflow";
+  return 1;
+} }`;
+      const app = await scenarioApp({
+        files: {
+          "agent/agent.ts": 'export default { model: "openai/gpt-5.4" };',
+          "agent/tools/probe.ts": `import { defineTool } from "eve/tools";\nexport default ${kind === "defineTool" ? `defineTool(${definition})` : definition};`,
+        },
+        installDependencies: true,
+        name: "legacy-workflow-tool",
+      });
+      const discovered = await discoverAgent({
+        agentRoot: join(app.appRoot, "agent"),
+        appRoot: app.appRoot,
+      });
+      await expect(compileAgentManifest(discovered.manifest)).rejects.toThrow(
+        "Workflow executors require defineWorkflowTool()",
+      );
+    },
+  );
+
+  it("rejects a named workflow channel handler during compilation", async () => {
+    const app = await scenarioApp({
+      files: {
+        "agent/agent.ts": 'export default { model: "openai/gpt-5.4" };\n',
+        "agent/channels/probe.ts": `import { defineChannel, POST } from "eve/channels";
+export default defineChannel({ routes: [POST("/probe", handler)] });
+async function handler() {
+  "use workflow";
+  return new Response("Done");
+}`,
+      },
+      installDependencies: true,
+      name: "invalid-workflow-channel",
+    });
+    const discovered = await discoverAgent({
+      agentRoot: join(app.appRoot, "agent"),
+      appRoot: app.appRoot,
+    });
+    await expect(compileAgentManifest(discovered.manifest)).rejects.toThrow(
+      '"use workflow" is not supported on channel callbacks',
+    );
+  });
+
+  it.each([
+    ["missing", "async execute() { return 1; }", "", "requires a compiled workflow executor"],
+    ["generator", "async *execute() { yield 1; }", "", "requires a compiled workflow executor"],
+    ["expression body", "execute: async () => 1", "", "requires a compiled workflow executor"],
+    ["synchronous", "execute() { return 1; }", "", "requires a compiled workflow executor"],
+    [
+      "misplaced",
+      'async execute() { void 0; "use workflow"; return 1; }',
+      "",
+      "requires a compiled workflow executor",
+    ],
+    [
+      "local reference",
+      "execute: run",
+      "async function run() { return 1; }",
+      "requires a compiled workflow executor",
+    ],
+    [
+      "unrelated workflow",
+      "async execute() { return 1; }",
+      'async function other() { "use workflow"; return 1; }',
+      "requires a compiled workflow executor",
+    ],
+    [
+      "nested only",
+      'async execute() { async function inner() { "use workflow"; return 1; } return inner(); }',
+      "",
+      'marks the nested function "inner"',
+    ],
+  ])(
+    "rejects a workflow tool with a %s executor directive during compilation",
+    async (_kind, execute, helper, error) => {
+      const app = await scenarioApp({
+        files: {
+          "agent/agent.ts": 'export default { model: "openai/gpt-5.4" };',
+          "agent/tools/probe.ts": `import { defineWorkflowTool } from "eve/tools";
+export default defineWorkflowTool({ description: "Probe", inputSchema: {}, ${execute} });
+${helper}`,
+        },
+        installDependencies: true,
+        name: "missing-workflow-directive",
+      });
+      const discovered = await discoverAgent({
+        agentRoot: join(app.appRoot, "agent"),
+        appRoot: app.appRoot,
+      });
+      await expect(compileAgentManifest(discovered.manifest)).rejects.toThrow(error);
+    },
+  );
+
+  it.each([
+    ['import { defineWorkflowTool as durable } from "eve/tools";', "durable"],
+    ['import * as tools from "eve/tools";', "tools.defineWorkflowTool"],
+  ])("validates a workflow tool through its compiled definition: %s", async (binding, definer) => {
+    const app = await scenarioApp({
+      files: {
+        "agent/agent.ts": 'export default { model: "openai/gpt-5.4" };',
+        "agent/tools/probe.ts": `${binding}
+import { run } from "../lib/run";
+export default ${definer}({ description: "Probe", inputSchema: {}, execute: run });`,
+        "agent/lib/run.ts": 'export async function run() { "use workflow"; return 1; }',
+      },
+      installDependencies: true,
+      name: "compiled-workflow-reference",
+    });
+    const discovered = await discoverAgent({
+      agentRoot: join(app.appRoot, "agent"),
+      appRoot: app.appRoot,
+    });
+    const compiled = await compileAgentManifest(discovered.manifest);
+    expect(compiled.tools.find((tool) => tool.name === "probe")?.behavior?.handling).toEqual({
+      kind: "workflow-tool",
+      workflowId: "workflow//./agent/lib/run//run",
+    });
+  });
+
+  it("compiles a workflow tool that calls agent through an imported helper", async () => {
+    const app = await scenarioApp({
+      files: {
+        "agent/agent.ts": 'export default { model: "openai/gpt-5.4" };\n',
+        "agent/tools/probe.ts": `import { defineWorkflowTool } from "eve/tools";
+import { delegate } from "../lib/delegate";
+export default defineWorkflowTool({ description: "Probe", inputSchema: { type: "object" }, async execute(input, ctx) {
+  "use workflow";
+  return delegate(ctx, input);
+} });`,
+        "agent/lib/delegate.ts": `export async function delegate(ctx, input) { return ctx.agent("researcher", input); }`,
+      },
+      installDependencies: true,
+      name: "valid-workflow-helper",
+    });
+    const discovered = await discoverAgent({
+      agentRoot: join(app.appRoot, "agent"),
+      appRoot: app.appRoot,
+    });
+    await expect(compileAgentManifest(discovered.manifest)).resolves.toBeDefined();
+  });
+
+  it.each([
+    [
+      "channels/probe.ts",
+      "channel",
+      'import { defineChannel, POST } from "eve/channels";',
+      'defineChannel({ routes: [POST("/probe", handler)] })',
+    ],
+    [
+      "schedules/probe.ts",
+      "schedule",
+      'import { defineSchedule } from "eve/schedules";',
+      'defineSchedule({ cron: "* * * * *", run: handler })',
+    ],
+  ])(
+    "rejects an imported workflow handler while compiling %s",
+    async (path, kind, binding, definition) => {
+      const app = await scenarioApp({
+        files: {
+          "agent/agent.ts": 'export default { model: "openai/gpt-5.4" };\n',
+          [`agent/${path}`]: `${binding}\nimport { handler } from "../lib/handler";\nexport default ${definition};\n`,
+          "agent/lib/handler.ts": `export async function handler() {
+  "use workflow";
+  return undefined;
+}`,
+        },
+        installDependencies: true,
+        name: "imported-workflow-handler",
+      });
+      const discovered = await discoverAgent({
+        agentRoot: join(app.appRoot, "agent"),
+        appRoot: app.appRoot,
+      });
+      await expect(compileAgentManifest(discovered.manifest)).rejects.toThrow(
+        `"use workflow" is not supported on ${kind} callbacks`,
+      );
+    },
+  );
+
+  it("stamps dynamic callbacks while building the generation module map", async () => {
+    const app = await scenarioApp({
+      files: {
+        "agent/agent.ts": 'export default { model: "openai/gpt-5.4" };\n',
+        "agent/tools/dynamic.ts": [
+          'import { defineDynamic, defineTool } from "eve/tools";',
+          "",
+          "const marker = defineTool({",
+          '  description: "Return a marker.",',
+          '  inputSchema: { type: "object" },',
+          '  execute: () => ({ marker: "generation" }),',
+          "});",
+          "",
+          "export default defineDynamic({",
+          "  events: {",
+          '    "session.started": () => marker,',
+          "  },",
+          "});",
+          "",
+        ].join("\n"),
+      },
+      installDependencies: true,
+      name: "generation-dynamic-callback",
+    });
+    const discovered = await discoverAgent({
+      agentRoot: join(app.appRoot, "agent"),
+      appRoot: app.appRoot,
+    });
+    const manifest = await compileAgentManifest(discovered.manifest);
+
+    const { code } = await bundleAuthoredModuleMapForGeneration({
+      manifest,
+      moduleMapPath: join(app.appRoot, ".eve", "compile", "module-map.mjs"),
+    });
+
+    expect(code).toContain("eve:durable-dynamic-callback");
+  });
 
   it("preserves cached channel identity for relative channel imports", async () => {
     const app = await scenarioApp({
@@ -316,7 +560,10 @@ describe("loadAuthoredModuleNamespace", () => {
         JSON.stringify(
           {
             exports: {
-              "./exa-linkedin": "./src/exa-linkedin.ts",
+              "./exa-linkedin": {
+                "eve-source": "./src/exa-linkedin.ts",
+                default: "./dist/exa-linkedin.js",
+              },
             },
             name: "@repo/enrichment",
             type: "module",
@@ -504,6 +751,40 @@ describe("loadAuthoredModuleNamespace", () => {
       expect(moduleNamespace.result).toBe("package-local-paths");
     } finally {
       await rm(workspaceRoot, { force: true, recursive: true });
+    }
+  });
+
+  it("loads a linked package tsconfig from its real workspace location", async () => {
+    const root = await mkdtemp(join(tmpdir(), "eve-linked-package-tsconfig-"));
+
+    try {
+      const workspaceRoot = join(root, "workspace");
+      const packageRoot = join(workspaceRoot, "packages", "extension");
+      const linkedPackageRoot = join(root, "app", "node_modules", "@repo", "extension");
+      await mkdir(join(packageRoot, "dist"), { recursive: true });
+      await mkdir(join(linkedPackageRoot, ".."), { recursive: true });
+      await writeFile(
+        join(workspaceRoot, "tsconfig.json"),
+        JSON.stringify({ compilerOptions: { target: "ES2024" } }),
+      );
+      await writeFile(
+        join(packageRoot, "tsconfig.json"),
+        JSON.stringify({ extends: "../../tsconfig.json" }),
+      );
+      await writeFile(
+        join(packageRoot, "package.json"),
+        JSON.stringify({ name: "@repo/extension", type: "module" }),
+      );
+      await writeFile(join(packageRoot, "dist", "entry.mjs"), 'export const result = "linked";\n');
+      await symlink(packageRoot, linkedPackageRoot, "junction");
+
+      const moduleNamespace = await loadAuthoredModuleNamespace(
+        join(linkedPackageRoot, "dist", "entry.mjs"),
+      );
+
+      expect(moduleNamespace.result).toBe("linked");
+    } finally {
+      await rm(root, { force: true, recursive: true });
     }
   });
 
@@ -1020,7 +1301,11 @@ describe("loadAuthoredModuleNamespace", () => {
       const manifest = await compileAgentManifest(discovered.manifest);
 
       expect(manifest.config.build?.externalDependencies).toEqual(["external-only"]);
-      expect(manifest.tools).toHaveLength(1);
+      expect(
+        manifest.tools.filter(
+          (tool) => manifest.bindings[tool.sourceId]?.owner.kind === "application",
+        ),
+      ).toHaveLength(1);
     } finally {
       await rm(workspaceRoot, { force: true, recursive: true });
     }
@@ -1126,7 +1411,11 @@ describe("loadAuthoredModuleNamespace", () => {
 
       expect(manifest.config.build?.externalDependencies).toEqual(["external-only"]);
       expect(subagent?.agent.config.build?.externalDependencies).toEqual(["external-only"]);
-      expect(subagent?.agent.tools).toHaveLength(1);
+      expect(
+        subagent?.agent.tools.filter(
+          (tool) => subagent.agent.bindings[tool.sourceId]?.owner.kind === "application",
+        ),
+      ).toHaveLength(1);
     } finally {
       await rm(workspaceRoot, { force: true, recursive: true });
     }
@@ -1175,6 +1464,34 @@ describe("loadAuthoredModuleNamespace", () => {
       logoUrl: "data:application/octet-stream;base64,bG9nby1ieXRlcw==",
       rawText: "asset text",
     });
+  });
+
+  it("rejects asset imports outside the authored package", async () => {
+    const app = await scenarioApp({
+      files: {
+        "agent/tools/outside_asset.ts": "export default {};\n",
+      },
+      name: "outside-asset-import",
+    });
+    const outsideFileName = `${basename(app.appRoot)}.txt`;
+    const outsidePath = join(app.appRoot, "..", outsideFileName);
+    const modulePath = join(app.appRoot, "agent", "tools", "outside_asset.ts");
+
+    try {
+      await Promise.all([
+        writeFile(outsidePath, "outside\n"),
+        writeFile(
+          modulePath,
+          `import value from "../../../${outsideFileName}?raw";\nexport default value;\n`,
+        ),
+      ]);
+
+      await expect(loadAuthoredModuleNamespace(modulePath)).rejects.toThrow(
+        /resolves outside package root/,
+      );
+    } finally {
+      await rm(outsidePath, { force: true });
+    }
   });
 
   it("recovers in the same process once a missing package is installed", async () => {

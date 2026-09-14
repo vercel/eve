@@ -157,11 +157,9 @@ async function main() {
     const selectedMismatch = reportIssues.find(
       (issue) => issue.kind === "contract-mismatch" && issue.capability === request.capability,
     );
-    initialIssues.push(
-      ...reportIssues.filter(
-        (issue) => issue.kind !== "contract-mismatch" || issue.capability !== request.capability,
-      ),
-    );
+    // Other capabilities' mismatches are bumped by their own --update runs and
+    // re-reported by the closing check, so they do not block this one.
+    initialIssues.push(...reportIssues.filter((issue) => issue.kind !== "contract-mismatch"));
     if (selectedMismatch === undefined) {
       initialIssues.push({
         file: toPosix(relative(REPO_ROOT, COMPATIBILITY_SOURCE)),

@@ -37,6 +37,7 @@ interface Registry {
 
 const registrySlugsByCatalogSlug: Readonly<Record<string, string>> = {
   eve: "web",
+  linq: "linq",
   photon: "photon-imessage",
 };
 
@@ -45,6 +46,7 @@ const setupKindsByCatalogSlug: Readonly<Record<string, string>> = {
   github: "github",
   "linear-agent": "linear",
   eve: "web",
+  linq: "linq",
   photon: "photon",
 };
 
@@ -58,7 +60,6 @@ const adapterDependenciesByCatalogSlug: Readonly<Record<string, string>> = {
   "chat-sdk-sendblue": "chat-adapter-sendblue",
   "chat-sdk-novu": "@novu/chat-sdk-adapter",
   "chat-sdk-liveblocks": "@liveblocks/chat-sdk-adapter",
-  "chat-sdk-linq": "@linqapp/chat-sdk-adapter",
   "chat-sdk-kapso": "@kapso/chat-adapter",
   "chat-sdk-dial": "@getdial/chat-sdk-adapter",
   "chat-sdk-agentphone": "@agentphone/chat-sdk-adapter",
@@ -78,7 +79,6 @@ const targetSlugsByCatalogSlug: Readonly<Record<string, string>> = {
   "chat-sdk-sendblue": "sendblue",
   "chat-sdk-novu": "novu",
   "chat-sdk-liveblocks": "liveblocks",
-  "chat-sdk-linq": "linq",
   "chat-sdk-kapso": "kapso",
   "chat-sdk-dial": "dial",
   "chat-sdk-agentphone": "agentphone",
@@ -92,15 +92,15 @@ const nonStreamingCatalogSlugs = new Set(["chat-sdk-sendblue"]);
 const docsRoot = join(import.meta.dirname, "..");
 const registry = JSON.parse(await readFile(join(docsRoot, "registry.json"), "utf8")) as Registry;
 const items = registry.items.filter((item) => item.name.startsWith("channel/"));
-const galleryEntries = channelEntries().filter((entry) => entry.surfaces.gallery);
-const expectedSlugs = galleryEntries.map(
+const registryEntries = channelEntries().filter((entry) => entry.surfaces.registry);
+const expectedSlugs = registryEntries.map(
   (entry) => registrySlugsByCatalogSlug[entry.slug] ?? entry.slug,
 );
 const actualSlugs = items.map((item) => item.name.slice("channel/".length));
 
 if (JSON.stringify(actualSlugs) !== JSON.stringify(expectedSlugs)) {
   throw new Error(
-    `Channel registry entries do not match the gallery.\nExpected: ${expectedSlugs.join(", ")}\nActual: ${actualSlugs.join(", ")}`,
+    `Channel registry entries do not match the catalog.\nExpected: ${expectedSlugs.join(", ")}\nActual: ${actualSlugs.join(", ")}`,
   );
 }
 
@@ -126,9 +126,24 @@ for (const [index, item] of items.entries()) {
     );
   }
 
-  const entry = galleryEntries[index];
+  const entry = registryEntries[index];
   if (entry === undefined) throw new Error(`Unexpected channel registry item "${item.name}".`);
   const registrySlug = expectedSlugs[index];
+
+  if (entry.slug === "eve") {
+    if (
+      item.dependencies?.some((dependency) => dependency === "ai" || dependency.startsWith("ai@"))
+    ) {
+      throw new Error(
+        `Registry item "${item.name}" must preserve the agent's existing AI SDK dependency.`,
+      );
+    }
+    if (item.files?.some((file) => file.target === "tsconfig.json")) {
+      throw new Error(
+        `Registry item "${item.name}" must let eve prepare tsconfig.json before shadcn installs files.`,
+      );
+    }
+  }
 
   if (
     entry.slug === "slack" ||
@@ -136,6 +151,7 @@ for (const [index, item] of items.entries()) {
     entry.slug === "github" ||
     entry.slug === "linear-agent" ||
     entry.slug === "eve" ||
+    entry.slug === "linq" ||
     entry.slug === "photon"
   ) {
     const expectedArgs = [

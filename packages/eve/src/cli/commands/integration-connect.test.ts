@@ -58,6 +58,26 @@ describe("runIntegrationConnect", () => {
     );
   });
 
+  it("passes connector creation options to setup", async () => {
+    const deps = dependencies();
+
+    await runIntegrationConnect({
+      appRoot: "/project",
+      slug: "agentcard",
+      service: "mcp.agentcard.sh/mcp",
+      options: { creationType: "agentcard", connectionMethod: "mcp", principalType: "app" },
+      dependencies: deps,
+    });
+
+    expect(deps.setupConnectionConnector).toHaveBeenCalledWith(
+      expect.objectContaining({
+        creationType: "agentcard",
+        connectionMethod: "mcp",
+        principalType: "app",
+      }),
+    );
+  });
+
   it("links an unlinked project before connector setup", async () => {
     const deps = dependencies({ readProjectLink: vi.fn(async () => undefined) });
 

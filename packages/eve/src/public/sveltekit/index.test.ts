@@ -2,22 +2,23 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ConfigEnv, Plugin, UserConfig } from "vite";
 
 import { EVE_ROUTE_PREFIX } from "#protocol/routes.js";
+import { ensureEveVercelServicesConfig } from "#shared/vercel-services.js";
 
 import { eveSvelteKit } from "./index.js";
 import { resolveSharedEveDevServer } from "./dev-server.js";
-import { ensureEveVercelJson } from "./vercel-json.js";
 
 vi.mock("./dev-server.js", () => ({
   EVE_BASE_URL_ENV: "EVE_BASE_URL",
   resolveSharedEveDevServer: vi.fn(async () => ({ origin: "http://127.0.0.1:49152" })),
 }));
 
-vi.mock("./vercel-json.js", () => ({
-  ensureEveVercelJson: vi.fn(async () => ({ servicePrefix: "/_eve_internal/eve" })),
+vi.mock("#shared/vercel-services.js", () => ({
+  ensureEveVercelServicesConfig: vi.fn(async () => ({ mode: "root" })),
+  mergeEveVercelConfig: vi.fn(),
 }));
 
 const resolveSharedEveDevServerMock = vi.mocked(resolveSharedEveDevServer);
-const ensureEveVercelJsonMock = vi.mocked(ensureEveVercelJson);
+const ensureEveVercelServicesConfigMock = vi.mocked(ensureEveVercelServicesConfig);
 
 type ConfigHook = (config: UserConfig, env: ConfigEnv) => unknown;
 
@@ -105,16 +106,17 @@ describe("eveSvelteKit", () => {
     });
   });
 
-  it("configures vercel.json during production builds", async () => {
+  it("configures a generated Vercel service during Vercel production builds", async () => {
+    vi.stubEnv("VERCEL", "1");
     const plugin = eveSvelteKit({ eveBuildCommand: "pnpm build:eve", eveRoot: "agent" });
 
     await getConfigHook(plugin)({}, { command: "build", mode: "production" });
 
-    expect(ensureEveVercelJsonMock).toHaveBeenCalledWith({
+    expect(ensureEveVercelServicesConfigMock).toHaveBeenCalledWith({
       appRoot: expect.stringMatching(/agent$/),
       eveBuildCommand: "pnpm build:eve",
-      servicePrefix: "/_eve_internal/eve",
-      svelteKitRoot: process.cwd(),
+      frameworkName: "SvelteKit",
+      hostRoot: process.cwd(),
     });
   });
 });

@@ -96,7 +96,7 @@ export async function resolveLinkedDevelopmentOidcToken(workspaceRoot: string): 
 
 function isLocalDevelopmentUserToken(token: string): boolean {
   const decoded = decodeOidcPayload(token);
-  return decoded !== undefined && LocalDevelopmentUserOidcClaimsSchema.safeParse(decoded).success;
+  return decoded !== undefined && z.validate(LocalDevelopmentUserOidcClaimsSchema, decoded);
 }
 
 function validateDevelopmentOidcToken(

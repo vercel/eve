@@ -33,7 +33,7 @@ export interface RunEvalsOptions {
   readonly maxConcurrency?: number;
   /** Overrides every eval's `timeoutMs` when set (CLI `--timeout`). */
   readonly timeoutMs?: number;
-  /** Receives `t.log` lines as evals run (used by `--verbose`). */
+  /** Receives verbose activity lines as evals run. */
   readonly onEvalLog?: (evalId: string, message: string) => void;
 }
 
@@ -87,11 +87,32 @@ export async function runEvals(options: RunEvalsOptions): Promise<EveEvalRunSumm
   const pending = [...evaluations];
   const executing = new Set<Promise<void>>();
   let reporterQueue: Promise<void> = Promise.resolve();
+  const enqueueReporterCallback = (
+    evaluation: EveEval,
+    callback: (reporter: EvalReporter) => void | Promise<void>,
+  ): void => {
+    reporterQueue = reporterQueue.then(async () => {
+      for (const binding of bindings) {
+        if (binding.evalIds.has(evaluation.id)) {
+          await callback(binding.reporter);
+        }
+      }
+    });
+  };
 
   while (pending.length > 0 || executing.size > 0) {
     while (pending.length > 0 && executing.size < maxConcurrency) {
       const evaluation = pending.shift();
       if (evaluation === undefined) break;
+      const evalStartedAt = new Date().toISOString();
+
+      enqueueReporterCallback(evaluation, async (reporter) => {
+        await reporter.onEvalStart?.({
+          evaluation,
+          startedAt: evalStartedAt,
+          target,
+        });
+      });
 
       const task = (async () => {
         const result = await executeEval({
@@ -101,17 +122,36 @@ export async function runEvals(options: RunEvalsOptions): Promise<EveEvalRunSumm
             options.onEvalLog === undefined
               ? undefined
               : (message) => options.onEvalLog?.(evaluation.id, message),
+          onSessionStart: (event) => {
+            enqueueReporterCallback(evaluation, async (reporter) => {
+              await reporter.onSessionStart?.({
+                evaluation,
+                primary: event.primary,
+                sessionId: event.sessionId,
+                startedAt: event.startedAt,
+                target,
+                traceContext: event.traceContext,
+              });
+            });
+          },
+          startedAt: evalStartedAt,
           target,
           timeoutMs: options.timeoutMs,
         });
         results.push(result);
 
-        reporterQueue = reporterQueue.then(async () => {
-          for (const binding of bindings) {
-            if (binding.evalIds.has(result.id)) {
-              await binding.reporter.onEvalComplete(result);
-            }
-          }
+        for (const session of result.result.sessions ?? []) {
+          if (session.sessionId === undefined) continue;
+          const role = session.primary ? "primary session" : "secondary session";
+          options.onEvalLog?.(evaluation.id, `workflow run id (${role}): ${session.sessionId}`);
+        }
+
+        enqueueReporterCallback(evaluation, async (reporter) => {
+          await reporter.onEvalComplete(result, {
+            evaluation,
+            target,
+            traceContexts: result.result.traceContexts,
+          });
         });
       })();
 

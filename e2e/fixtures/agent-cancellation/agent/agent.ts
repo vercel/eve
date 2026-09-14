@@ -1,25 +1,80 @@
 import { e2eAgentConfig } from "@eve-e2e/config";
 import { defineAgent } from "eve";
+import type { MockModelRequest, MockModelResponse } from "eve/evals";
 
-const base = e2eAgentConfig({
-  mock: ({ lastUserMessage }) =>
-    lastUserMessage?.includes("Please wait for cancellation.") === true
+const RECOVERY_REQUEST = "RESUME-CANCELLED-SLEEPER";
+
+function respond(request: MockModelRequest): MockModelResponse | string {
+  const message = request.lastUserMessage ?? "";
+  if (message.includes("Please wait for cancellation.")) {
+    return {
+      toolCalls: [{ id: "wait-for-cancellation", input: {}, name: "wait-for-cancellation" }],
+    };
+  }
+  const markers = [...message.matchAll(/record-request with marker "([^"]+)"/gu)].map(
+    (match) => match[1]!,
+  );
+  if (markers.length > 0) {
+    const pending = markers.filter(
+      (marker) => !request.toolResults.some((entry) => entry.id === `record-${marker}`),
+    );
+    return pending.length > 0
       ? {
-          toolCalls: [
-            {
-              id: "wait-for-cancellation",
-              input: {},
-              name: "wait-for-cancellation",
-            },
-          ],
+          toolCalls: pending.map((marker) => ({
+            id: `record-${marker}`,
+            input: { marker },
+            name: "record-request",
+          })),
         }
-      : `Mock reply: ${lastUserMessage ?? ""}`,
-});
+      : markers
+          .map((marker) =>
+            String(request.toolResults.find((entry) => entry.id === `record-${marker}`)?.output),
+          )
+          .join("\n");
+  }
+  if (message.includes("call the sleeper subagent")) {
+    return {
+      toolCalls: [
+        {
+          id: "cancel-sleeper",
+          input: {
+            js: 'return await tools["sleeper"]({ message: "Call the wait-for-cancellation tool exactly once and wait until this delegated turn is cancelled." });',
+          },
+          name: "Workflow",
+        },
+      ],
+    };
+  }
+  if (message.includes("[Agents] listing")) {
+    return (
+      [...request.messages].reverse().find((entry) => entry.text.startsWith("[Agents]"))?.text ??
+      "No agents listed."
+    );
+  }
+  if (message.includes(RECOVERY_REQUEST)) {
+    const result = request.toolResults.find((entry) => entry.id === "resume-sleeper");
+    if (result !== undefined) {
+      return typeof result.output === "string" ? result.output : JSON.stringify(result.output);
+    }
+    const agentId = /agentId ("[^"]+")/u.exec(message)?.[1];
+    if (agentId === undefined) throw new Error("Recovery prompt has no sleeper agent id.");
+    return {
+      toolCalls: [
+        {
+          id: "resume-sleeper",
+          input: {
+            js: `return await tools["sleeper"]({ agentId: ${agentId}, message: ${JSON.stringify(RECOVERY_REQUEST)} });`,
+          },
+          name: "Workflow",
+        },
+      ],
+    };
+  }
+  return `Mock reply: ${message}`;
+}
+
+const base = e2eAgentConfig({ mock: respond });
 
 export default defineAgent({
   ...base,
-  // Persistent children keep the cancelled sleeper in the model-visible
-  // [Agents] listing, which the cancel-subagent eval inspects after a
-  // cascaded cancellation.
-  experimental: { ...base.experimental, subagentPersistentSessions: true },
 });

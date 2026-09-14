@@ -8,14 +8,17 @@ import type {
   EveEvalSessionResult,
   EveEvalTargetHandle,
   EveEvalTaskResult,
+  EveEvalTraceContext,
   EveEvalTurn,
 } from "#evals/types.js";
 import { createEmptyDerivedFacts } from "#evals/runner/derive-run-facts.js";
-import { EvalSessionManager } from "#evals/session.js";
+import { EvalSessionManager, type EvalSessionStartedEvent } from "#evals/session.js";
 import { createEvalContext } from "#evals/context.js";
 import { scopeEvalTargetHandle } from "#evals/target.js";
 import { AssertionCollector } from "#evals/assertions/collector.js";
 import { EvalRequirementFailed, EvalSkipped } from "#evals/control-flow.js";
+
+const EVAL_TIMEOUT_CLEANUP_TIMEOUT_MS = 5_000;
 
 /**
  * Options for executing one eval's task.
@@ -25,6 +28,8 @@ interface ExecuteTaskOptions {
   readonly evaluation: EveEval;
   /** Receives each `t.log` line as it is written (used by `--verbose`). */
   readonly onLog?: (message: string) => void;
+  /** Receives the first trace context observed for each session. */
+  readonly onSessionStart?: (event: EvalSessionStartedEvent) => void;
   readonly target: EveEvalTargetHandle;
   readonly timeoutMs?: number;
 }
@@ -50,7 +55,12 @@ export async function executeTask(options: ExecuteTaskOptions): Promise<ExecuteT
   const { client, evaluation, target, timeoutMs } = options;
   const signal = timeoutMs !== undefined ? AbortSignal.timeout(timeoutMs) : neverAbortSignal();
   const collector = new AssertionCollector();
-  const manager = new EvalSessionManager({ client, collector, signal });
+  const manager = new EvalSessionManager({
+    client,
+    collector,
+    onSessionStart: options.onSessionStart,
+    signal,
+  });
   const targetForRun = scopeEvalTargetHandle(target, {
     sessions: manager,
   });
@@ -77,6 +87,19 @@ export async function executeTask(options: ExecuteTaskOptions): Promise<ExecuteT
       skipReason = err.reason;
     } else if (!(err instanceof EvalRequirementFailed)) {
       error = toErrorMessage(err);
+    }
+  }
+
+  if (timeoutMs !== undefined && signal.aborted) {
+    const cleanupResults = await manager.cleanup(
+      AbortSignal.timeout(EVAL_TIMEOUT_CLEANUP_TIMEOUT_MS),
+    );
+    const cleanupErrors = cleanupResults.flatMap((result) =>
+      result.status === "rejected" ? [toErrorMessage(result.reason)] : [],
+    );
+    if (cleanupErrors.length > 0) {
+      const cleanupDetail = `Eval timeout cleanup failed: ${cleanupErrors.join("; ")}`;
+      error = error === undefined ? cleanupDetail : `${error}\n${cleanupDetail}`;
     }
   }
 
@@ -107,7 +130,22 @@ function buildTaskResult(input: {
     derived: combineDerivedFacts(input.sessions),
     sessions: input.sessions,
     runtimeIdentity: extractRuntimeIdentity(events),
+    traceContexts: collectTraceContexts(input.sessions),
   };
+}
+
+function collectTraceContexts(
+  sessions: readonly EveEvalSessionResult[],
+): readonly EveEvalTraceContext[] {
+  return sessions.flatMap((session) => {
+    const sessionId = session.sessionId;
+    if (sessionId === undefined) return [];
+    return session.traceContexts.map((traceContext) => ({
+      ...traceContext,
+      primary: session.primary,
+      sessionId,
+    }));
+  });
 }
 
 function combineDerivedFacts(sessions: readonly EveEvalSessionResult[]): EveEvalDerivedFacts {

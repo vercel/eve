@@ -57,15 +57,18 @@ import {
 import type {
   SetupEditableSelectResult,
   SetupFlowIndicator,
+  SetupFlowInterrupt,
   SetupFlowRenderer,
   SetupFlowStatus,
   SetupSelectRequest,
+  SetupSelectResult,
 } from "./setup-flow.js";
-import type { SelectNotice } from "#setup/prompter.js";
+import type { PlannerNavigation, SelectNotice } from "#setup/prompter.js";
 import type { ModelSettingsRequest, ModelSettingsResult } from "#setup/flows/model.js";
 import type { ProviderPickerChoice, ProviderPickerRequest } from "#setup/flows/provider.js";
 import {
   initialSelectState,
+  orderedSelection,
   reduceSelect,
   searchActionQuery,
   selectValueAtCursor,
@@ -116,7 +119,7 @@ import { AltScreen } from "#cli/ui/alt-screen.js";
 import { copyTextToClipboard } from "./clipboard.js";
 import type { TraceViewerOpenOptions, TraceViewerRenderer } from "./traces/trace-viewer-session.js";
 import { TraceViewerSession } from "./traces/trace-viewer-session.js";
-import { buildStatusLine } from "./status-line.js";
+import { buildStatusLine, type DevBuildStatus } from "./status-line.js";
 import { nextLogDisplayMode } from "./log-display-mode.js";
 import { createTheme, detectUnicode, type Theme } from "./theme.js";
 import {
@@ -240,6 +243,7 @@ type TurnIndicatorState = { kind: "idle" } | { kind: "waiting"; startedAtMs: num
 
 type SetupFlowState = {
   title: string;
+  navigation?: PlannerNavigation;
   indicator: SetupFlowIndicatorState;
   lines: FlowPanelLine[];
   summary?: { headline: string; facts: readonly { label: string; value: string }[] };
@@ -295,7 +299,7 @@ export type AgentHeaderOptions = {
   name: string;
   serverUrl: string;
   info?: AgentInfoResult;
-  /** Message-of-the-day line under the brand line (local sessions only). */
+  /** Message-of-the-day line below the startup card (local sessions only). */
   tip?: string;
 };
 
@@ -309,6 +313,8 @@ type RenderTurnState = {
   text: Map<string, string>;
   reasoning: Map<string, string>;
   tools: Map<string, NativeToolState>;
+  cancelled: boolean;
+  restoreCancelledPrompt: boolean;
 };
 
 type NativeToolState = {
@@ -334,6 +340,10 @@ const incompletePasteFlushMs = 1_000;
 // How long the transient Ctrl+L log-mode hint stays in the status line after
 // the last cycle before it clears itself.
 const logLevelHintMs = 5_000;
+// Fast authored-source rebuilds skip their intermediate state to avoid a
+// distracting status-bar flash; genuinely slow builds still show progress.
+const devBuildProgressDelayMs = 250;
+const devBuildLoadedStatusMs = 4_000;
 
 const STATUS = {
   processing: "Working…",
@@ -388,10 +398,15 @@ export class TerminalRenderer implements AgentTUIRenderer {
   #updateSequence = 0;
   /** Call ids per subagent name, for the sections' ordinal subtitles. */
   readonly #subagentCallsByName = new Map<string, string[]>();
+  /** Background sections kept at the live edge until their child boundary. */
+  readonly #backgroundSubagentCallIds = new Set<string>();
+  /** Parent-completed sections retained as mutable until the child boundary. */
+  readonly #provisionalSubagentCallIds = new Set<string>();
   /** Session-local file contents, so write blocks can render real diffs. */
   readonly #fileContents = new FileContentCache();
   readonly #subagentHeaders = new Set<string>();
   #agentHeader?: AgentHeaderOptions;
+  #startupHeader?: { readonly name: string; readonly tip: string };
   #agentHeaderRendered = false;
   /** The last committed header body, to skip re-committing an unchanged banner. */
   #agentHeaderBody?: string;
@@ -472,6 +487,8 @@ export class TerminalRenderer implements AgentTUIRenderer {
   #exitRequested = false;
   /** True after the first consecutive Ctrl+C at the idle chat prompt. */
   #exitArmed = false;
+  /** Carries a pending-cancel interrupt into the next prompt as the first exit press. */
+  #armExitOnNextPrompt = false;
   readonly #onExitRequest?: () => void;
   #caretVisible = true;
   #spinnerIndex = 0;
@@ -513,6 +530,10 @@ export class TerminalRenderer implements AgentTUIRenderer {
    * an ordinary log block, and the next rebuild line opens a fresh cycle.
    */
   #devRebuild?: { id: string; summary: string };
+  /** Log-filter-independent authored-source state shown in the bottom status bar. */
+  #devBuildStatus?: DevBuildStatus;
+  #devBuildStatusVisible = false;
+  #devBuildStatusTimer?: ReturnType<typeof setTimeout>;
   /** Monotonic id source — committed cycle ids must never be reused. */
   #devRebuildSequence = 0;
   #pendingEchoedPrompt?: string;
@@ -559,7 +580,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
   /** The prompt submitted for the streaming turn, for external-cancel recovery. */
   #currentSubmittedPrompt?: string;
   /** Armed by {@link SetupFlowRenderer.waitForInterrupt}; fired by the idle key trap. */
-  #flowInterrupt?: () => void;
+  #flowInterrupt?: (interrupt: SetupFlowInterrupt) => void;
   /** The installed working-state key consumer, so re-arming and disposal can recognize it. */
   #flowIdleConsumer?: (key: TerminalKey) => void;
   /** The open `/traces` viewer session, if the alt-screen viewer is active. */
@@ -572,6 +593,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
   #terminalBackground?: RgbColor;
   readonly setupFlow: SetupFlowRenderer = {
     begin: (title, indicator) => this.#beginSetupFlow(title, indicator),
+    setNavigation: (navigation) => this.#setSetupFlowNavigation(navigation),
     end: (options) => this.#endSetupFlow(options?.preserveDiagnostics ?? true),
     readSelect: (options) => this.#readSetupSelect(options),
     readEditableSelect: (options) => this.#readSetupEditableSelect(options),
@@ -623,8 +645,8 @@ export class TerminalRenderer implements AgentTUIRenderer {
   /**
    * Commits the startup agent header (brand mark + resolved configuration) to
    * scrollback before the first prompt. Later calls (dev HMR refreshing fields
-   * such as the agent name) commit a fresh header beneath the existing
-   * transcript only when the rendered header actually changed — every source
+   * such as the model) commit a fresh header beneath the existing transcript
+   * only when the rendered header actually changed — every source
    * reload re-sends it, and an identical banner repeated per reload is noise.
    * Committed scrollback is never cleared or replayed.
    */
@@ -650,6 +672,43 @@ export class TerminalRenderer implements AgentTUIRenderer {
     this.#live.flush(this.#renderAgentHeaderRows(), []);
   }
 
+  beginStartupDraft(options: { initialDraft?: string; tip: string; title: string }): void {
+    this.#start({ title: options.title });
+    this.#inputActive = true;
+    this.#promptPlaceholderActive = true;
+    this.#startupHeader = { name: options.title, tip: options.tip };
+    let editor = lineOf(stripPromptControlCharacters(options.initialDraft ?? ""));
+    this.#syncInput(editor);
+    this.#startCaretBlink();
+    this.#paint();
+
+    const apply = (next: LineState) => {
+      editor = next;
+      this.#showCaret();
+      this.#syncInput(editor);
+      this.#paint();
+    };
+    this.#consumeKey = (key) => {
+      const edited = applyLineEditorKey(editor, key, { multiline: true });
+      if (edited !== undefined) {
+        apply(edited);
+        return;
+      }
+      if (key.type === "ctrl-c") this.#onExitRequest?.();
+    };
+    this.#attachInput();
+  }
+
+  finishStartupDraft(): string {
+    const draft = this.#inputText;
+    this.#detachInput();
+    this.#stopCaretBlink();
+    this.#inputActive = false;
+    this.#startupHeader = undefined;
+    this.#promptPlaceholderActive = false;
+    return draft;
+  }
+
   async readPrompt(options?: AgentTUISessionOptions): Promise<string> {
     this.#start(options);
     this.#stopTicker();
@@ -658,7 +717,8 @@ export class TerminalRenderer implements AgentTUIRenderer {
     this.#promptPlaceholderActive = true;
     this.#turnIndicator = { kind: "idle" };
     this.#status = "";
-    this.#exitArmed = false;
+    this.#exitArmed = this.#armExitOnNextPrompt;
+    this.#armExitOnNextPrompt = false;
     // A draft typed during the turn carries into the prompt; an explicit
     // initial draft (`eve dev --input`) wins over it. Queued messages the
     // runner never drained (an interrupted or failed turn) fold back in
@@ -907,6 +967,8 @@ export class TerminalRenderer implements AgentTUIRenderer {
       text: new Map(),
       reasoning: new Map(),
       tools: new Map(),
+      cancelled: false,
+      restoreCancelledPrompt: true,
     };
 
     try {
@@ -948,7 +1010,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
       // An interrupted or cancelled turn gets no terminal updates for its
       // in-flight calls; a block left `running` would keep the settled
       // prefix wedged and freeze scrollback for the rest of the session.
-      if (this.#interrupted || this.#turnCancelled) this.#settleInterruptedToolBlocks();
+      if (this.#interrupted || turnState.cancelled) this.#settleCurrentTurnToolBlocks(turnState);
       this.#finalizeAllBlocks();
       this.#diagnostics?.reportStats();
       this.#paint();
@@ -956,6 +1018,51 @@ export class TerminalRenderer implements AgentTUIRenderer {
       if (!options?.continueSession) {
         this.#stop();
       }
+    }
+  }
+
+  /**
+   * Applies a wake-initiated turn without taking input ownership from the
+   * prompt. Paints use the same live region, so the editor redraws around
+   * incoming tool and assistant blocks exactly as it does for subagent pumps.
+   */
+  async renderIdleStream(
+    result: AgentTUIStreamResult,
+    options?: AgentTUISessionOptions,
+  ): Promise<void> {
+    const displayModes: DisplayModes = {
+      tools: options?.tools ?? this.#tools,
+      reasoning: options?.reasoning ?? this.#reasoning,
+      assistantResponseStats: options?.assistantResponseStats ?? this.#assistantResponseStats,
+    };
+    const turnState: RenderTurnState = {
+      text: new Map(),
+      reasoning: new Map(),
+      tools: new Map(),
+      cancelled: false,
+      restoreCancelledPrompt: false,
+    };
+
+    try {
+      for await (const event of iterateTUIStream(result.events)) {
+        this.#applyStreamEvent(event, displayModes, turnState);
+      }
+    } catch (error) {
+      const summary = summarizeKnownError(error);
+      if (summary === null) {
+        this.#addErrorBlock("Error", toErrorMessage(error), { detail: inspectError(error) });
+      } else {
+        this.#addErrorBlock(summary.name, summary.message, {
+          detail: inspectError(error),
+          hint: summary.hint,
+        });
+      }
+    } finally {
+      this.#sweepPreparingToolBlocks(turnState);
+      if (turnState.cancelled) this.#settleCurrentTurnToolBlocks(turnState);
+      this.#finalizeAllBlocks();
+      this.#diagnostics?.reportStats();
+      this.#paint();
     }
   }
 
@@ -1192,6 +1299,14 @@ export class TerminalRenderer implements AgentTUIRenderer {
         }
 
         if (mode === "overlay") {
+          const textNavigation = setupSelectionIntent(key, {
+            textNavigation: !isOnFreeformRow(),
+          });
+          if (textNavigation?.kind === "move") {
+            moveCursor(textNavigation.direction === "up" ? -1 : 1);
+            return;
+          }
+
           switch (key.type) {
             case "up":
             case "ctrl-p":
@@ -1306,7 +1421,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
       return;
     }
 
-    this.#upsertBlock({
+    this.#upsertSubagentBlock({
       id: subagentStepSectionId(update.callId, update.sectionKey),
       kind: "subagent-step",
       subagentCallId: update.callId,
@@ -1382,7 +1497,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
     } else if (update.errorText !== undefined) {
       block.result = stripTerminalControls(update.errorText);
     }
-    this.#upsertBlock(block);
+    this.#upsertSubagentBlock(block);
     this.#syncSubagentChildLiveness(update.callId);
     this.#paint();
   }
@@ -1412,6 +1527,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
    */
   readonly subagents: SubagentView = {
     begin: (update) => this.beginSubagent(update),
+    background: (update) => this.backgroundSubagent(update),
     upsertStep: (update) => this.upsertSubagentStep(update),
     upsertTool: (update) => this.upsertSubagentTool(update),
     removeTool: (update) => this.removeSubagentTool(update),
@@ -1430,7 +1546,28 @@ export class TerminalRenderer implements AgentTUIRenderer {
     if (this.#subagents === "hidden") return;
     this.#ensureSubagentHeader(update.callId, update.name);
     const header = this.#blockById.get(subagentHeaderId(update.callId));
-    if (header?.status === "done") delete header.status;
+    if (header !== undefined) {
+      if (header.status === "done") delete header.status;
+      header.live = true;
+    }
+    this.#provisionalSubagentCallIds.delete(update.callId);
+    this.#paint();
+  }
+
+  /**
+   * A background receipt closes the model tool call, not the child. Mark the
+   * header running so turn finalization cannot commit immutable scrollback
+   * before the child pump has folded in its later events.
+   */
+  backgroundSubagent(update: { callId: string }): void {
+    const header = this.#blockById.get(subagentHeaderId(update.callId));
+    if (header === undefined || this.#committedIds.has(subagentHeaderId(update.callId))) return;
+    header.status = "running";
+    header.live = true;
+    header.updateSeq = ++this.#updateSequence;
+    const wasBackground = this.#backgroundSubagentCallIds.has(update.callId);
+    this.#backgroundSubagentCallIds.add(update.callId);
+    if (!wasBackground) this.#moveSubagentCohortToBackgroundTail(update.callId);
     this.#paint();
   }
 
@@ -1439,10 +1576,22 @@ export class TerminalRenderer implements AgentTUIRenderer {
    * section's closing corner reports `Done`. The header stays live until the
    * turn finalizes (committing mid-turn would freeze its child window).
    */
-  completeSubagent(update: { callId: string }): void {
+  completeSubagent(update: { authoritative: boolean; callId: string }): void {
     const header = this.#blockById.get(subagentHeaderId(update.callId));
     if (header === undefined) return;
     header.status = "done";
+    if (update.authoritative) {
+      this.#backgroundSubagentCallIds.delete(update.callId);
+      this.#provisionalSubagentCallIds.delete(update.callId);
+      for (const block of this.#blocks) {
+        if (block.subagentCallId === update.callId) block.live = false;
+      }
+    } else {
+      this.#provisionalSubagentCallIds.add(update.callId);
+      for (const block of this.#blocks) {
+        if (block.subagentCallId === update.callId) block.live = true;
+      }
+    }
     this.#paint();
   }
 
@@ -1569,6 +1718,8 @@ export class TerminalRenderer implements AgentTUIRenderer {
     this.#childToolCallIds.clear();
     this.#parentToolBlockIds.clear();
     this.#subagentHeaders.clear();
+    this.#backgroundSubagentCallIds.clear();
+    this.#provisionalSubagentCallIds.clear();
     this.#subagentCallsByName.clear();
     this.#todoItems = undefined;
     this.#todoCommittedSignature = undefined;
@@ -1647,16 +1798,15 @@ export class TerminalRenderer implements AgentTUIRenderer {
 
   /** Commits one command outcome, promoting explicit status to a top-level result. */
   renderCommandResult(text: string, tone?: "success" | "error"): void {
-    const content = stripTerminalControls(text);
+    const content = stripAnsi(text);
     if (content.trim().length === 0) return;
     this.#start();
-    this.#pushBlock(
-      tone === "success"
-        ? { kind: "result", body: content, live: false, status: "done" }
-        : tone === "error"
-          ? { kind: "flow", title: tone, body: content, live: false }
-          : { kind: "result", body: content, live: false },
-    );
+    this.#pushBlock({
+      kind: "result",
+      body: content,
+      live: false,
+      status: tone === "success" ? "done" : undefined,
+    });
     this.#paint();
   }
 
@@ -1681,6 +1831,12 @@ export class TerminalRenderer implements AgentTUIRenderer {
     // The ticker runs for the whole flow: the idle pulse, the status indicator,
     // and the output preview all animate through it.
     this.#startTicker();
+    this.#paint();
+  }
+
+  #setSetupFlowNavigation(navigation: PlannerNavigation | undefined): void {
+    if (this.#setupFlow === undefined) return;
+    this.#setupFlow.navigation = navigation;
     this.#paint();
   }
 
@@ -1732,16 +1888,17 @@ export class TerminalRenderer implements AgentTUIRenderer {
    * clears an active search first. One question at a time; it vanishes on
    * resolve.
    */
-  async #readSetupSelect(opts: SetupSelectRequest): Promise<readonly string[] | undefined> {
+  async #readSetupSelect(opts: SetupSelectRequest): Promise<SetupSelectResult> {
     const flow = this.#beginSetupQuestion();
     const multiple = isMultiSelectRequest(opts);
     const searchAction = opts.kind === "search" ? opts.searchAction : undefined;
     let selectOptions: readonly SetupPanelOption[] = opts.options;
 
+    const plannerNavigation = opts.navigation?.kind === "planner";
     const initial: Parameters<typeof initialSelectState>[0] = {
       options: selectOptions,
       searchAction,
-      submitRow: multiple,
+      submitRow: multiple && !plannerNavigation,
     };
     if ("initialValue" in opts && opts.initialValue !== undefined) {
       initial.defaultValue = opts.initialValue;
@@ -1764,7 +1921,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
         {
           options: selectOptions,
           searchAction,
-          submitRow: multiple,
+          submitRow: multiple && !plannerNavigation,
         },
       );
       this.#paint();
@@ -1785,7 +1942,11 @@ export class TerminalRenderer implements AgentTUIRenderer {
         const filter = select.filter;
         selectOptions = options;
         select = {
-          ...initialSelectState({ options, searchAction, submitRow: multiple }),
+          ...initialSelectState({
+            options,
+            searchAction,
+            submitRow: multiple && !plannerNavigation,
+          }),
           filter,
         };
       } catch (reason) {
@@ -1822,8 +1983,8 @@ export class TerminalRenderer implements AgentTUIRenderer {
     flow.question = (width) => renderSelectQuestion(panelState(), this.#theme, width);
     this.#paint();
 
-    const question = this.#captureSetupQuestion<readonly string[] | undefined>((key, settle) => {
-      const close = (value: readonly string[] | undefined): void => {
+    const question = this.#captureSetupQuestion<SetupSelectResult>((key, settle) => {
+      const close = (value: SetupSelectResult): void => {
         searchVersion += 1;
         settle(value);
       };
@@ -1834,9 +1995,34 @@ export class TerminalRenderer implements AgentTUIRenderer {
         return;
       }
 
+      const plannerStep = opts.navigation?.kind === "planner" ? opts.navigation : undefined;
+      const plannerDirection =
+        key.type === "left" &&
+        (plannerStep?.activeStep ?? 0) > (plannerStep?.firstNavigableStep ?? 0)
+          ? "back"
+          : key.type === "right" &&
+              plannerStep !== undefined &&
+              plannerStep.activeStep >= (plannerStep.firstNavigableStep ?? 0) &&
+              plannerStep.activeStep < plannerStep.steps.length - 1
+            ? "forward"
+            : undefined;
+      if (plannerDirection !== undefined) {
+        close({
+          kind: "navigate",
+          direction: plannerDirection,
+          values: multiple ? orderedSelection(selectOptions, select.selected) : [],
+        });
+        return;
+      }
+
       const base = { key, options: selectOptions, searchAction, select };
       const result = multiple
-        ? reduceSetupSelectInput({ ...base, kind: opts.kind, required: opts.required })
+        ? reduceSetupSelectInput({
+            ...base,
+            kind: opts.kind,
+            required: opts.required,
+            plannerNavigation: plannerNavigation || undefined,
+          })
         : reduceSetupSelectInput({ ...base, kind: opts.kind });
       switch (result.kind) {
         case "cancel":
@@ -1906,7 +2092,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
 
     const question = this.#captureSetupQuestion<string | undefined>(
       (key, settle) => {
-        const intent = setupSelectionIntent(key);
+        const intent = setupSelectionIntent(key, { textNavigation: true });
         switch (intent?.kind) {
           case "cancel":
             settle(undefined);
@@ -2024,7 +2210,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
           );
         };
 
-        const intent = setupSelectionIntent(key);
+        const intent = setupSelectionIntent(key, { textNavigation: !onEditableRow() });
         switch (intent?.kind) {
           case "cancel":
             settle(undefined);
@@ -2078,7 +2264,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
         options: opts.options,
         select: interaction.select,
         edit: {
-          optionValue: "own-key",
+          optionValue: "ai-gateway-key",
           caretVisible: this.#caretVisible,
           editor: { kind: "key", phase: interaction.phase },
         },
@@ -2152,7 +2338,9 @@ export class TerminalRenderer implements AgentTUIRenderer {
           }
         };
 
-        const intent = setupSelectionIntent(key);
+        const intent = setupSelectionIntent(key, {
+          textNavigation: interaction.phase.kind === "inactive",
+        });
         switch (intent?.kind) {
           case "cancel":
             dispatch({ type: "cancel" });
@@ -2373,7 +2561,15 @@ export class TerminalRenderer implements AgentTUIRenderer {
     this.#inputActive = false;
     this.#turnIndicator = { kind: "idle" };
     this.#status = "";
-    return this.#requireSetupFlow();
+    const flow = this.#requireSetupFlow();
+    // A standard question means the preceding background operation settled.
+    // Clear its transient item summary and timer before painting the prompt.
+    if (flow.status !== undefined) {
+      flow.status = undefined;
+      flow.summary = undefined;
+      flow.preview = undefined;
+    }
+    return flow;
   }
 
   /** A flow is implicitly opened for a bare question (tests, future hosts). */
@@ -2456,11 +2652,11 @@ export class TerminalRenderer implements AgentTUIRenderer {
 
   /** See {@link SetupFlowRenderer.waitForInterrupt}. */
   #waitForFlowInterrupt(options?: { interruptible?: boolean }): {
-    promise: Promise<void>;
+    promise: Promise<SetupFlowInterrupt>;
     dispose(): void;
   } {
-    let fire!: () => void;
-    const promise = new Promise<void>((resolve) => {
+    let fire!: (interrupt: SetupFlowInterrupt) => void;
+    const promise = new Promise<SetupFlowInterrupt>((resolve) => {
       fire = resolve;
     });
     this.#flowInterrupt = fire;
@@ -2493,7 +2689,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
         const fire = this.#flowInterrupt;
         this.#flowInterrupt = undefined;
         this.#disarmFlowIdleTrap();
-        fire?.();
+        fire?.(key.type === "ctrl-c" ? "ctrl-c" : "escape");
         return;
       }
       if (key.type === "ctrl-r") this.#paint();
@@ -2593,6 +2789,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
     flow.lines = [];
     flow.outputBuffer = [];
     flow.preview = undefined;
+    flow.status = undefined;
     flow.summary =
       content === undefined
         ? undefined
@@ -2626,7 +2823,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
     this.#paint();
   }
 
-  /** Gives an interactive subprocess the real terminal, then restores the live region. */
+  /** Gives an interactive subprocess a temporary screen, then restores the transcript. */
   async #withInheritedStdio<T>(task: () => Promise<T>): Promise<T> {
     // Setup questions can resolve from the first key in a buffered terminal
     // chunk. The remaining bytes belong to the child process, not the next
@@ -2638,13 +2835,14 @@ export class TerminalRenderer implements AgentTUIRenderer {
     this.#detachInput();
     this.#stopTicker();
     this.#live.clear();
-    this.#live.showCursor();
     this.#removeLogCapture();
+    this.#altScreen.enter({ cursor: "visible", mouse: false });
     if (this.#input.isTTY) this.#input.setRawMode?.(false);
     this.#input.pause();
     try {
       return await task();
     } finally {
+      this.#altScreen.exit();
       if (this.#input.isTTY) this.#input.setRawMode?.(true);
       // The parent stream must remain paused while the child owns the terminal.
       // Resume only after its raw mode and key consumer are ready again.
@@ -2681,6 +2879,11 @@ export class TerminalRenderer implements AgentTUIRenderer {
         this.#sessionId === undefined ? "" : ` ${this.#theme.glyph.dot} session ${this.#sessionId}`;
       this.#output.write(`${this.#theme.colors.dim(`${eveVersionTag()}${session}`)}\n`);
     }
+  }
+
+  suspendPromptForInput(): void {
+    this.#streamDraft = { cursor: this.#inputCursor, text: this.#inputText };
+    this.#stop();
   }
 
   requestInterrupt(): void {
@@ -2823,6 +3026,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
       this.#logLevelHintTimer = undefined;
     }
     this.#logLevelHintActive = false;
+    this.#clearDevBuildStatus();
 
     if (!this.#isInteractive) return;
 
@@ -3013,6 +3217,18 @@ export class TerminalRenderer implements AgentTUIRenderer {
       }
       case "ctrl-c":
       case "escape": {
+        // Once a direct cancellation is pending, Ctrl+C is the hard escape
+        // hatch. Esc remains cooperative and repeated Ctrl+C presses can still
+        // pop queued messages into a steer payload.
+        if (key.type === "ctrl-c" && this.#messageQueue.view().cancelling) {
+          this.#interrupted = true;
+          this.#armExitOnNextPrompt = true;
+          this.#turnIndicator = { kind: "idle" };
+          this.#status = "Interrupted";
+          this.#resolveStreamInterrupt?.();
+          this.#paint();
+          break;
+        }
         // Esc and Ctrl+C drive steering and cancellation: pop the oldest
         // queued message and cancel the running turn so the runner submits it
         // as the replacement turn; with nothing queued, cancel immediately.
@@ -3092,7 +3308,18 @@ export class TerminalRenderer implements AgentTUIRenderer {
   #pushBlock(block: Block) {
     if (block.id !== this.#devRebuild?.id) this.#settleDevRebuildStatus();
     block.updateSeq = ++this.#updateSequence;
-    this.#blocks.push(block);
+    const isBackgroundChild =
+      block.subagentCallId !== undefined &&
+      this.#backgroundSubagentCallIds.has(block.subagentCallId);
+    const backgroundIndex = isBackgroundChild
+      ? -1
+      : this.#blocks.findIndex(
+          (candidate) =>
+            candidate.subagentCallId !== undefined &&
+            this.#backgroundSubagentCallIds.has(candidate.subagentCallId),
+        );
+    if (backgroundIndex < 0) this.#blocks.push(block);
+    else this.#blocks.splice(backgroundIndex, 0, block);
     if (block.id) this.#blockById.set(block.id, block);
   }
 
@@ -3224,9 +3451,51 @@ export class TerminalRenderer implements AgentTUIRenderer {
     this.#pushBlock(block);
   }
 
+  /**
+   * Inserts a new child beside the rest of its call's cohort instead of at
+   * the transcript's live edge. Background children can emit after parent
+   * and user blocks from later turns; arrival order must not split their
+   * section.
+   */
+  #upsertSubagentBlock(block: Block) {
+    if (block.id && this.#committedIds.has(block.id)) return;
+    const existing = block.id ? this.#blockById.get(block.id) : undefined;
+    if (existing !== undefined) {
+      Object.assign(existing, block);
+      existing.updateSeq = ++this.#updateSequence;
+      return;
+    }
+
+    const callId = block.subagentCallId;
+    if (callId === undefined) {
+      this.#pushBlock(block);
+      return;
+    }
+    if (block.id !== this.#devRebuild?.id) this.#settleDevRebuildStatus();
+    block.updateSeq = ++this.#updateSequence;
+    let anchor = -1;
+    for (let index = 0; index < this.#blocks.length; index += 1) {
+      if (this.#blocks[index]?.subagentCallId === callId) anchor = index;
+    }
+    this.#blocks.splice(anchor < 0 ? this.#blocks.length : anchor + 1, 0, block);
+    if (block.id !== undefined) this.#blockById.set(block.id, block);
+  }
+
   #removeBlock(id: string) {
     this.#blocks = this.#blocks.filter((candidate) => candidate.id !== id);
     this.#blockById.delete(id);
+  }
+
+  /**
+   * Background children may outlive several foreground turns. Keep their
+   * mutable cohort at the live edge so it cannot hold those settled turns in
+   * the renderer's leading-prefix commit queue.
+   */
+  #moveSubagentCohortToBackgroundTail(callId: string): void {
+    const cohort = this.#blocks.filter((block) => block.subagentCallId === callId);
+    if (cohort.length === 0) return;
+    this.#blocks = this.#blocks.filter((block) => block.subagentCallId !== callId);
+    this.#blocks.push(...cohort);
   }
 
   #finalizeAllBlocks() {
@@ -3235,6 +3504,8 @@ export class TerminalRenderer implements AgentTUIRenderer {
       // stay live past this stream boundary so their later terminal update can
       // replace the same transcript block.
       if (
+        (block.subagentCallId !== undefined &&
+          this.#provisionalSubagentCallIds.has(block.subagentCallId)) ||
         block.status === "approval" ||
         block.status === "running" ||
         (block.kind === "connection-auth" && block.live)
@@ -3277,10 +3548,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
 
       case "assistant-complete": {
         const existing = turnState.text.get(event.id) ?? "";
-        const text =
-          event.text !== undefined && existing.length === 0
-            ? stripTerminalControls(event.text ?? "")
-            : existing;
+        const text = typeof event.text === "string" ? stripTerminalControls(event.text) : existing;
         turnState.text.set(event.id, text);
         this.#upsertAssistantBlock(event.id, text, false);
         break;
@@ -3399,7 +3667,9 @@ export class TerminalRenderer implements AgentTUIRenderer {
       case "turn-cancelled":
         // The server settled the turn cooperatively (a key-driven steer or an
         // empty-queue cancel); its in-flight tool calls get no further updates.
-        // The interrupted-blocks sweep settles them at stream end.
+        // The current pass's top-level-tool sweep settles them at stream end.
+        turnState.cancelled = true;
+        if (!turnState.restoreCancelledPrompt) break;
         this.#turnCancelled = true;
         // A cancellation nobody asked for through THIS prompt — a stale
         // cancel from the previous turn landing late (the unguarded
@@ -3507,13 +3777,15 @@ export class TerminalRenderer implements AgentTUIRenderer {
   }
 
   /**
-   * Flips still-running tool blocks of an interrupted turn to a terminal
-   * state. Approval-parked blocks are spared — a later pass can still
-   * settle them.
+   * Flips this pass's still-running top-level tool blocks to a terminal state.
+   * Approval-parked and out-of-band subagent blocks remain mutable.
    */
-  #settleInterruptedToolBlocks(): void {
-    for (const block of this.#blocks) {
-      if (block.kind !== "tool" && block.kind !== "subagent-tool") continue;
+  #settleCurrentTurnToolBlocks(turnState: RenderTurnState): void {
+    for (const toolCallId of turnState.tools.keys()) {
+      if (this.#childToolCallIds.has(toolCallId)) continue;
+      const id = this.#parentToolBlockIds.get(toolCallId) ?? toolSectionId(toolCallId);
+      const block = this.#blockById.get(id);
+      if (block?.kind !== "tool") continue;
       if (block.status !== "running") continue;
       block.status = "error";
       block.result = "interrupted";
@@ -3660,7 +3932,8 @@ export class TerminalRenderer implements AgentTUIRenderer {
 
     const width = this.#width();
     const footer = this.#footerRows(width);
-    const maxBlockRows = Math.max(1, this.#height() - footer.length);
+    const startupHeader = this.#startupHeader === undefined ? [] : this.#renderAgentHeaderRows();
+    const maxBlockRows = Math.max(1, this.#height() - startupHeader.length - footer.length);
     const committed: string[] = [];
     let previous = this.#lastCommitted;
 
@@ -3713,6 +3986,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
     }
 
     const liveRows = [
+      ...startupHeader,
       ...clipLiveRows(
         flat.map((entry) => entry.row),
         maxBlockRows,
@@ -3822,14 +4096,16 @@ export class TerminalRenderer implements AgentTUIRenderer {
 
   #renderAgentHeaderRows(): string[] {
     const header = this.#agentHeader;
-    if (header === undefined) return [];
+    const startup = this.#startupHeader;
+    if (header === undefined && startup === undefined) return [];
     const input: Parameters<typeof buildAgentHeader>[0] = {
-      name: header.name,
+      name: header?.name ?? startup?.name,
       theme: this.#theme,
       width: this.#width(),
     };
-    if (header.info !== undefined) input.info = header.info;
-    if (header.tip !== undefined) input.tip = header.tip;
+    if (header?.info !== undefined) input.info = header.info;
+    const tip = header?.tip ?? startup?.tip;
+    if (tip !== undefined) input.tip = tip;
     return buildAgentHeader(input);
   }
 
@@ -3921,6 +4197,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
       }
       const state: Parameters<typeof renderFlowPanel>[0] = {
         title: flow.title,
+        navigation: flow.navigation,
         lines:
           flow.summary === undefined
             ? flow.hideLinesWhileQuestion === true
@@ -3997,6 +4274,9 @@ export class TerminalRenderer implements AgentTUIRenderer {
       const isCommand = isPromptControlCommand(this.#inputText);
       const ghost = inlineHint ? c.dim(` ${inlineHint}`) : "";
       const statusRows: string[] = [];
+      if (this.#startupHeader !== undefined) {
+        statusRows.push(clip(c.dim(`${this.#theme.glyph.dot} Building your agent…`), width));
+      }
       this.#pushStatusLine(statusRows, width);
       // Keep one transcript row above the footer and one separator below the
       // prompt. Everything already in `rows` has higher-level footer ownership
@@ -4150,6 +4430,9 @@ export class TerminalRenderer implements AgentTUIRenderer {
       theme: this.#theme,
       width: contentWidth,
     };
+    if (this.#devBuildStatusVisible && this.#devBuildStatus !== undefined) {
+      input.devBuild = this.#devBuildStatus;
+    }
     if (this.#logLevelHintActive) input.logLevel = this.#logs;
     const serverUrl = this.#agentHeader?.serverUrl;
     if (serverUrl !== undefined && this.#remoteConnection === undefined) {
@@ -4406,6 +4689,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
   }
 
   #handleDevRebuildFailure(body: string): void {
+    this.#clearDevBuildStatus();
     if (this.#logs === "all") {
       if (body.trim().length === 0) return;
       this.#pushBlock({ kind: "log", title: "stderr", body, live: true });
@@ -4432,6 +4716,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
 
     if (update.kind === "rebuilding") {
       const summary = summarizeChangedFiles(update.events, update.more);
+      this.#setDevBuildStatus({ phase: "building", summary });
       if (cycle !== undefined) {
         cycle.state.summary = summary;
         cycle.block.body = formatDevRebuildStatus(summary, "rebuilding");
@@ -4450,6 +4735,8 @@ export class TerminalRenderer implements AgentTUIRenderer {
       return;
     }
 
+    const summary = cycle?.state.summary ?? this.#devBuildStatus?.summary;
+    if (summary !== undefined) this.#setDevBuildStatus({ phase: "complete", summary });
     if (cycle !== undefined) {
       cycle.block.body = formatDevRebuildStatus(cycle.state.summary, update.kind);
       if (update.kind === "rebuilt") this.#delayedDevBuildError = undefined;
@@ -4457,6 +4744,31 @@ export class TerminalRenderer implements AgentTUIRenderer {
     }
     if (update.kind === "rebuilt") this.#delayedDevBuildError = undefined;
     this.#pushBlock({ kind: "log", title: "stdout", body: line, live: true });
+  }
+
+  #setDevBuildStatus(status: DevBuildStatus): void {
+    if (this.#devBuildStatusTimer !== undefined) clearTimeout(this.#devBuildStatusTimer);
+    this.#devBuildStatus = status;
+    this.#devBuildStatusVisible = status.phase === "complete";
+    this.#devBuildStatusTimer = setTimeout(
+      () => {
+        if (status.phase === "building") {
+          this.#devBuildStatusVisible = true;
+          this.#devBuildStatusTimer = undefined;
+        } else {
+          this.#clearDevBuildStatus();
+        }
+        this.#paint();
+      },
+      status.phase === "building" ? devBuildProgressDelayMs : devBuildLoadedStatusMs,
+    );
+  }
+
+  #clearDevBuildStatus(): void {
+    if (this.#devBuildStatusTimer !== undefined) clearTimeout(this.#devBuildStatusTimer);
+    this.#devBuildStatus = undefined;
+    this.#devBuildStatusVisible = false;
+    this.#devBuildStatusTimer = undefined;
   }
 
   /** The rebuild status block still cycling in place, if any. */

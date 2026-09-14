@@ -4,12 +4,12 @@
  * `#runtime/sessions/runtime-context-keys.ts`.
  */
 
-import type { LanguageModel, SystemModelMessage } from "ai";
+import type { LanguageModel, ModelMessage, SystemModelMessage } from "ai";
 
-import type { JsonObject } from "#shared/json.js";
 import type {
-  ChannelInstrumentationProjection,
+  ActivityObserverConfig,
   ChannelDeliveryMetadata,
+  ChannelInstrumentationProjection,
   SessionAuthContext,
   SessionCallback,
   SessionCapabilities,
@@ -18,14 +18,22 @@ import type {
   SessionTurn,
 } from "#channel/types.js";
 import { ContextKey } from "#context/key.js";
-import type { InstrumentationChannelDeliveryRef } from "#harness/instrumentation-lifecycle.js";
-import type { HarnessToolDefinition } from "#harness/execute-tool.js";
+import {
+  SESSION_INBOX_CONTEXT_KEY,
+  type SessionInboxAddress,
+} from "#execution/wire/session-inbox-contract.js";
+import { SESSION_CALLBACK_CONTEXT_KEY_NAME } from "#context/key-names.js";
+import type { InstrumentationChannelDeliveryRef } from "#instrumentation/lifecycle.js";
+import type { UserModelMessage } from "#harness/messages.js";
+import type { HandleEventFn } from "#harness/types.js";
+import type { PersistedDynamicToolMetadata } from "#context/dynamic-tool-metadata.js";
 import type { DynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agent-config.js";
 import type { DynamicRemoteAgentConfig } from "#runtime/subagents/dynamic-remote-agent-config.js";
 import type { SandboxAccess } from "#sandbox/state.js";
 import type { RunMode } from "#shared/run-mode.js";
 import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
 import type { PreparedRuntimeDelegationTool } from "#runtime/sessions/turn.js";
+import type { MemoryScope, MemoryTurnContext } from "#public/memory/index.js";
 
 // Re-export so consumers don't need a direct channel/ import.
 export type { SessionAuthContext, SessionParent, SessionTurn } from "#channel/types.js";
@@ -67,12 +75,40 @@ export interface Session {
 export const AuthKey = new ContextKey<SessionAuthContext | null>("eve.auth");
 export const InitiatorAuthKey = new ContextKey<SessionAuthContext | null>("eve.initiatorAuth");
 export const SessionIdKey = new ContextKey<string>("eve.sessionId");
+export const ConversationIdKey = new ContextKey<string>("eve.conversationId");
+export const SessionInboxKey = new ContextKey<SessionInboxAddress>(SESSION_INBOX_CONTEXT_KEY);
 export const ContinuationTokenKey = new ContextKey<string>("eve.continuationToken");
 export const ChannelRequestIdKey = new ContextKey<string>("eve.channelRequestId");
+/** Parent-verified local client provenance, valid only for the current dev host secret. */
+export interface LocalDevRequestProvenance {
+  readonly address: string;
+  readonly interactiveClient: boolean;
+  readonly signature: string;
+}
+export const LocalDevRequestKey = new ContextKey<LocalDevRequestProvenance>(
+  "eve.internal.localDevRequest",
+);
+/** Authored schedule whose dispatch created this session. */
+export const ScheduleIdKey = new ContextKey<string>("eve.scheduleId");
 export const ChannelDeliveryKey = new ContextKey<ChannelDeliveryMetadata>("eve.channelDelivery");
+/** Accepted messages whose response owns the current turn's durable stream events. */
+export const TurnDeliveryIdsKey = new ContextKey<readonly string[]>("eve.turnDeliveryIds");
+/** Task-reporting phase for the active root turn. */
+export const TurnTaskDeliveryKey = new ContextKey<"none" | "initiating" | "pending" | "settled">(
+  "eve.turnTaskDelivery",
+);
+/** Last framework announcements recorded in the retained session history. */
+export interface HistoryState {
+  readonly availableSkills?: string;
+  readonly taskState?: string;
+  readonly deliveryInstruction?: string;
+}
+export const HistoryStateKey = new ContextKey<HistoryState>("eve.historyState");
 export interface ActiveChannelDelivery {
   readonly agentName?: string;
+  readonly channelType?: string;
   readonly delivery: InstrumentationChannelDeliveryRef;
+  readonly policyAgentName?: string;
   readonly rootSessionId: string;
   readonly sequence: number;
   readonly sessionId: string;
@@ -84,11 +120,15 @@ export const ActiveChannelDeliveriesKey = new ContextKey<readonly ActiveChannelD
 export const ChannelInstrumentationKey = new ContextKey<ChannelInstrumentationProjection>(
   "eve.channelInstrumentation",
 );
+/** Trace ceiling and immutable origin accepted from a trusted forwarding deployment. */
 export const ModeKey = new ContextKey<RunMode>("eve.mode");
 export const ParentSessionKey = new ContextKey<SessionParent>("eve.parentSession");
 /** Separate from {@link ParentSessionKey} so it stays out of what extensions read. */
 export const ParentTraceContextKey = new ContextKey<SessionTraceContext>("eve.parentTraceContext");
-export const SubagentDepthKey = new ContextKey<number>("eve.subagentDepth");
+
+export type SessionTraceSeed = SessionTraceContext;
+export const SessionTraceSeedKey = new ContextKey<SessionTraceSeed>("eve.sessionTraceSeed");
+export const OtelTraceEnabledKey = new ContextKey<boolean>("eve.otelTraceEnabled");
 
 /**
  * Session-level capability flags (see {@link SessionCapabilities}). Set
@@ -96,11 +136,20 @@ export const SubagentDepthKey = new ContextKey<number>("eve.subagentDepth");
  * dispatch so HITL readiness flows through a conversation chain.
  */
 export const CapabilitiesKey = new ContextKey<SessionCapabilities>("eve.capabilities");
+export const ActivityObserverKey = new ContextKey<ActivityObserverConfig>("eve.activityObserver");
+/** Originating root turn that owns the current user-visible activity artifact. */
+export const ActivityRootTurnIdKey = new ContextKey<string>("eve.activityRootTurnId");
+/** Pending HITL request identities that keep the current activity artifact open. */
+export const ActivityPendingBlockersKey = new ContextKey<readonly string[]>(
+  "eve.activityPendingBlockers",
+);
 
 /**
  * Optional framework-owned caller callback captured when the session is created.
  */
-export const SessionCallbackKey = new ContextKey<SessionCallback>("eve.sessionCallback");
+export const SessionCallbackKey = new ContextKey<SessionCallback>(
+  SESSION_CALLBACK_CONTEXT_KEY_NAME,
+);
 
 // ---------------------------------------------------------------------------
 // Derived keys — reconstructed by providers each step, never serialized.
@@ -108,10 +157,16 @@ export const SessionCallbackKey = new ContextKey<SessionCallback>("eve.sessionCa
 
 export const SessionKey = new ContextKey<Session>("eve.session");
 export const SandboxKey = new ContextKey<SandboxAccess>("eve.sandbox");
+export const HandleEventKey = new ContextKey<HandleEventFn>("eve.internal.handleEvent");
 
 // ---------------------------------------------------------------------------
 // Dynamic model keys
 // ---------------------------------------------------------------------------
+
+/** Static model configured for the effective turn agent, or `null` for a dynamic-only agent. */
+export const StaticModelReferenceKey = new ContextKey<RuntimeModelReference | null>(
+  "eve.staticModelReference",
+);
 
 /** Session-scoped dynamic model selection (from `session.started`). */
 export const SessionDynamicModelReferenceKey = new ContextKey<RuntimeModelReference | null>(
@@ -150,26 +205,13 @@ export const LiveStepDynamicModelSelectionKey = new ContextKey<LiveDynamicModelS
 // Dynamic tool keys
 // ---------------------------------------------------------------------------
 
-export interface DurableDynamicToolMetadata {
-  readonly name: string;
-  readonly description: string;
-  readonly inputSchema: JsonObject;
-  readonly outputSchema?: JsonObject;
-  readonly resolverSlug: string;
-  readonly entryKey: string;
-  readonly executeStepFnName?: string;
-  readonly approvalStepFnName?: string;
-  readonly approvalResponseStepFnName?: string;
-  readonly closureVars?: Record<string, unknown>;
-}
-
 /**
  * Session-scoped dynamic tool metadata (from `session.started`).
  * Persists for the session lifetime.
  */
-export const SessionDynamicToolMetadataKey = new ContextKey<readonly DurableDynamicToolMetadata[]>(
-  "eve.sessionDynamicToolMetadata",
-);
+export const SessionDynamicToolMetadataKey = new ContextKey<
+  readonly PersistedDynamicToolMetadata[]
+>("eve.sessionDynamicToolMetadata");
 
 /**
  * Runtime revision that last resolved session-scoped dynamic tools.
@@ -183,17 +225,53 @@ export const SessionDynamicToolRuntimeRevisionKey = new ContextKey<string>(
  * Turn-scoped dynamic tool metadata (from `turn.started`).
  * Replaced each turn.
  */
-export const TurnDynamicToolMetadataKey = new ContextKey<readonly DurableDynamicToolMetadata[]>(
+export const TurnDynamicToolMetadataKey = new ContextKey<readonly PersistedDynamicToolMetadata[]>(
   "eve.turnDynamicToolMetadata",
 );
 
-/**
- * Virtual (non-serialized) live step-scoped tool definitions from
- * `step.started` resolvers. Carries original execute closures so
- * framework tools (which lack bundler step-function metadata) work.
- * Re-resolved every step — no cross-step persistence needed.
- */
-export const LiveStepToolsKey = new ContextKey<HarnessToolDefinition[]>("eve.liveStepTools");
+export interface LockedMemorySlot {
+  readonly scope: MemoryScope;
+  readonly slot: string;
+  readonly turn: MemoryTurnContext;
+  readonly visibility: "scope" | "session";
+}
+
+export const TurnMemoryLocksKey = new ContextKey<Readonly<Record<string, LockedMemorySlot>>>(
+  "eve.memory.turnLocks",
+);
+
+export interface PreparedMemoryPreamble {
+  readonly history: readonly ModelMessage[];
+  readonly input: readonly ModelMessage[];
+  readonly state?: Readonly<Record<string, unknown>>;
+}
+
+export interface PendingMemoryCommit {
+  readonly history: readonly ModelMessage[];
+  readonly projectedMessages: readonly ModelMessage[];
+  readonly state: Readonly<Record<string, unknown>>;
+}
+
+export const PreparedMemoryPreambleKey = new ContextKey<PreparedMemoryPreamble>(
+  "eve.memory.preparedPreamble",
+);
+export const PendingMemoryCommitKey = new ContextKey<PendingMemoryCommit>(
+  "eve.memory.pendingCommit",
+);
+
+export interface PreparedMemoryCompaction {
+  readonly history: readonly ModelMessage[];
+  readonly state?: Readonly<Record<string, unknown>>;
+}
+
+export const PreparedMemoryCompactionKey = new ContextKey<PreparedMemoryCompaction>(
+  "eve.memory.preparedCompaction",
+);
+
+/** Step-scoped dynamic tool metadata, replaced before each model step. */
+export const StepDynamicToolMetadataKey = new ContextKey<readonly PersistedDynamicToolMetadata[]>(
+  "eve.stepDynamicToolMetadata",
+);
 
 export type DurableDynamicSubagentSelection =
   | {
@@ -266,3 +344,13 @@ export const SessionDynamicInstructionsKey = new ContextKey<
 export const TurnDynamicInstructionsKey = new ContextKey<
   Record<string, readonly SystemModelMessage[]>
 >("eve.turnDynamicInstructions");
+
+/** Existing history exposed only to instructions resolvers during a preamble. */
+export const DynamicInstructionResolveMessagesKey = new ContextKey<readonly ModelMessage[]>(
+  "eve.dynamicInstructionResolveMessages",
+);
+
+/** User-role results waiting to be committed immediately after a preamble. */
+export const PendingDynamicInstructionUserMessagesKey = new ContextKey<readonly UserModelMessage[]>(
+  "eve.pendingDynamicInstructionUserMessages",
+);

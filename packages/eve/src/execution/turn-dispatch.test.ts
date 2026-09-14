@@ -2,15 +2,24 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { DeliverHookPayload } from "#channel/types.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
+import { cancelAllIndexedSessionTasksStep } from "#execution/cancel-indexed-session-tasks-step.js";
+import { dispatchTurnStep } from "#execution/dispatch-turn-step.js";
+import { forwardTurnCancellationStep } from "#execution/forward-turn-cancellation-step.js";
 import { forwardTurnDeliveryStep } from "#execution/forward-turn-delivery-step.js";
+import { runTurnOwnedWorkflow } from "#execution/turn-workflow.js";
 import { dispatchAndAwaitTurn } from "#execution/turn-dispatch.js";
 import type { SessionCommandInbox, SessionInboxPayload } from "#execution/session-command-inbox.js";
 import type { TurnControlPayload } from "#execution/turn-control-protocol.js";
+import { turnStep } from "#execution/workflow-steps.js";
 
 const createHookMock = vi.fn();
 
 vi.mock("#compiled/@workflow/core/index.js", () => ({
   createHook: (...args: unknown[]) => createHookMock(...args),
+}));
+
+vi.mock("./cancel-indexed-session-tasks-step.js", () => ({
+  cancelAllIndexedSessionTasksStep: vi.fn(),
 }));
 
 vi.mock("./dispatch-turn-step.js", () => ({
@@ -21,10 +30,23 @@ vi.mock("./forward-turn-delivery-step.js", () => ({
   forwardTurnDeliveryStep: vi.fn(),
 }));
 
+vi.mock("./forward-turn-cancellation-step.js", () => ({
+  forwardTurnCancellationStep: vi.fn(),
+}));
+
+vi.mock("./turn-workflow.js", () => ({
+  runTurnOwnedWorkflow: vi.fn(),
+}));
+
+vi.mock("./workflow-steps.js", () => ({
+  turnStep: vi.fn(),
+}));
+
 describe("dispatchAndAwaitTurn", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     createHookMock.mockReset();
+    vi.mocked(runTurnOwnedWorkflow).mockImplementation(async (_input, onReady) => onReady?.());
   });
 
   it("rekeys the public hook when the active turn changes its continuation token", async () => {
@@ -226,6 +248,308 @@ describe("dispatchAndAwaitTurn", () => {
     await turn.dispose();
     expect(hook.dispose).toHaveBeenCalledOnce();
   });
+
+  it("settles an ordinary same-deployment turn without a child workflow", async () => {
+    const state = createState("http:test");
+    vi.mocked(turnStep).mockResolvedValueOnce({
+      action: "park",
+      hasPendingAuthorization: false,
+      hasPendingInputBatch: false,
+      serializedContext: { state: "settled" },
+      sessionState: state,
+      settled: { output: "ok" },
+    });
+
+    const turn = await dispatchAndAwaitTurn({
+      bufferedDeliveries: [],
+      bufferedSessionControls: [],
+      commandInbox: createCommandInbox(),
+      controlToken: "turn-control",
+      delivery: createAcceptedDelivery(),
+      mode: "conversation",
+      parentWritable: new WritableStream<Uint8Array>(),
+      serializedContext: { state: "start" },
+      sessionState: state,
+    });
+
+    expect(turn.action).toMatchObject({ kind: "park", settled: { output: "ok" } });
+    expect(turnStep).toHaveBeenCalledWith(
+      expect.objectContaining({ acceptedDeploymentId: "dpl_current" }),
+    );
+    expect(dispatchTurnStep).not.toHaveBeenCalled();
+    expect(createHookMock).not.toHaveBeenCalled();
+  });
+
+  it("cancels indexed tasks from an inline turn and preserves turn cancellation", async () => {
+    const state = createState("http:test");
+    vi.mocked(turnStep).mockImplementation(async ({ abortSignal }) => {
+      await new Promise<void>((resolve) => abortSignal?.addEventListener("abort", () => resolve()));
+      return {
+        action: "cancelled",
+        serializedContext: { state: "cancelled" },
+        sessionState: state,
+      };
+    });
+    let delivered = false;
+    const commandInbox = createCommandInbox({
+      next: vi.fn(async () => {
+        if (!delivered) {
+          delivered = true;
+          return { done: false as const, value: { kind: "cancel", tasks: true } as never };
+        }
+        return await new Promise<IteratorResult<SessionInboxPayload>>(() => {});
+      }),
+    });
+    installControlHook([
+      {
+        action: { cancelled: true, kind: "park", serializedContext: {}, sessionState: state },
+        kind: "turn-result",
+      },
+    ]);
+
+    await dispatchAndAwaitTurn({
+      bufferedDeliveries: [],
+      bufferedSessionControls: [],
+      commandInbox,
+      controlToken: "turn-control",
+      delivery: createAcceptedDelivery(),
+      mode: "conversation",
+      parentWritable: new WritableStream<Uint8Array>(),
+      serializedContext: { state: "start" },
+      sessionState: state,
+    });
+
+    expect(cancelAllIndexedSessionTasksStep).toHaveBeenCalledWith({
+      serializedContext: { state: "start" },
+      sessionState: state,
+    });
+    expect(dispatchTurnStep).not.toHaveBeenCalled();
+    expect(runTurnOwnedWorkflow).toHaveBeenCalledWith(
+      expect.objectContaining({ initialCancellation: { tasks: true } }),
+      expect.any(Function),
+    );
+  });
+
+  it("keeps ordinary tool-loop continuations inline", async () => {
+    const firstState = createState("http:test:rekeyed");
+    const finalState = createState("http:test:rekeyed");
+    vi.mocked(turnStep)
+      .mockResolvedValueOnce({
+        action: "continue",
+        serializedContext: { state: "continued" },
+        sessionState: firstState,
+      })
+      .mockResolvedValueOnce({
+        action: "done",
+        output: "complete",
+        serializedContext: { state: "done" },
+        sessionState: finalState,
+      });
+    const commandInbox = createCommandInbox();
+
+    const turn = await dispatchAndAwaitTurn({
+      bufferedDeliveries: [],
+      bufferedSessionControls: [],
+      commandInbox,
+      controlToken: "turn-control",
+      delivery: createAcceptedDelivery(),
+      mode: "conversation",
+      parentWritable: new WritableStream<Uint8Array>(),
+      serializedContext: { state: "start" },
+      sessionState: createState("http:test"),
+    });
+
+    expect(turn.action).toMatchObject({ kind: "done", output: "complete" });
+    expect(vi.mocked(turnStep).mock.calls[1]?.[0].input).toBeUndefined();
+    expect(commandInbox.rekeyContinuation).toHaveBeenCalledWith("http:test:rekeyed");
+    expect(dispatchTurnStep).not.toHaveBeenCalled();
+  });
+
+  it("runs coordination on the parent from an already-completed inline step", async () => {
+    const state = createState("http:test");
+    const result = {
+      action: "park" as const,
+      hasPendingAuthorization: false,
+      hasPendingInputBatch: false,
+      pendingCoordinationCallIds: ["call-1"],
+      serializedContext: { state: "pending" },
+      sessionState: state,
+    };
+    vi.mocked(turnStep).mockResolvedValueOnce(result);
+    installControlHook([
+      {
+        action: { kind: "park", serializedContext: result.serializedContext, sessionState: state },
+        kind: "turn-result",
+      },
+    ]);
+
+    await dispatchAndAwaitTurn({
+      bufferedDeliveries: [],
+      bufferedSessionControls: [],
+      commandInbox: createCommandInbox(),
+      controlToken: "turn-control",
+      delivery: createAcceptedDelivery(),
+      mode: "conversation",
+      parentWritable: new WritableStream<Uint8Array>(),
+      serializedContext: { state: "start" },
+      sessionState: state,
+    });
+
+    expect(dispatchTurnStep).not.toHaveBeenCalled();
+    expect(runTurnOwnedWorkflow).toHaveBeenCalledWith(
+      expect.objectContaining({
+        initialStep: {
+          beforeStep: expect.objectContaining({ serializedContext: { state: "start" } }),
+          result,
+        },
+      }),
+      expect.any(Function),
+    );
+  });
+
+  it("waits for inline hook initialization before forwarding a queued cancel", async () => {
+    const state = createState("http:test");
+    const command = Promise.withResolvers<IteratorResult<SessionInboxPayload>>();
+    const forwarded = Promise.withResolvers<void>();
+    vi.mocked(turnStep).mockResolvedValueOnce({
+      action: "park",
+      hasPendingAuthorization: false,
+      hasPendingInputBatch: false,
+      pendingCoordinationCallIds: ["call-1"],
+      serializedContext: {},
+      sessionState: state,
+    });
+    vi.mocked(forwardTurnCancellationStep).mockImplementationOnce(async () => {
+      forwarded.resolve();
+      return true;
+    });
+    createHookMock.mockReturnValue(
+      createMockHook(async () => {
+        await forwarded.promise;
+        return {
+          done: false,
+          value: {
+            action: { cancelled: true, kind: "park", serializedContext: {}, sessionState: state },
+            kind: "turn-result",
+          },
+        };
+      }),
+    );
+    vi.mocked(runTurnOwnedWorkflow).mockImplementationOnce(async (_input, onReady) => {
+      command.resolve({ done: false, value: { kind: "cancel" } });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(forwardTurnCancellationStep).not.toHaveBeenCalled();
+      onReady?.();
+    });
+    let consumed = false;
+
+    const turn = await dispatchAndAwaitTurn({
+      bufferedDeliveries: [],
+      bufferedSessionControls: [],
+      commandInbox: createCommandInbox({
+        next: () => (consumed ? new Promise(() => {}) : command.promise),
+        consumeNext: () => {
+          consumed = true;
+        },
+      }),
+      controlToken: "turn-control",
+      delivery: createAcceptedDelivery(),
+      mode: "conversation",
+      parentWritable: new WritableStream<Uint8Array>(),
+      serializedContext: {},
+      sessionState: state,
+    });
+
+    expect(turn.action).toMatchObject({ cancelled: true });
+    expect(forwardTurnCancellationStep).toHaveBeenCalledExactlyOnceWith({
+      payload: { tasks: undefined },
+      token: "turn-control:cancel",
+    });
+  });
+
+  it("defers a guarded deployment mismatch without consuming the delivery", async () => {
+    const state = createState("http:test");
+    vi.mocked(turnStep).mockResolvedValueOnce({
+      action: "continue",
+      requiresChildDispatch: true,
+      serializedContext: { state: "start" },
+      sessionState: state,
+    });
+    installControlHook([
+      {
+        action: { kind: "park", serializedContext: {}, sessionState: state },
+        kind: "turn-result",
+      },
+    ]);
+
+    await dispatchAndAwaitTurn({
+      bufferedDeliveries: [],
+      bufferedSessionControls: [],
+      commandInbox: createCommandInbox(),
+      controlToken: "turn-control",
+      delivery: createAcceptedDelivery(),
+      mode: "conversation",
+      parentWritable: new WritableStream<Uint8Array>(),
+      serializedContext: { state: "start" },
+      sessionState: state,
+    });
+
+    expect(dispatchTurnStep).toHaveBeenCalledWith(
+      expect.objectContaining({ initialStep: undefined }),
+    );
+  });
+
+  it("carries inline cancellation into the shared turn runner on the parent", async () => {
+    const state = createState("http:test");
+    vi.mocked(turnStep).mockImplementationOnce(async (input) => {
+      await vi.waitFor(() => expect(input.abortSignal?.aborted).toBe(true));
+      return {
+        action: "cancelled",
+        serializedContext: { state: "cancelled" },
+        sessionState: state,
+      };
+    });
+    let delivered = false;
+    const commandInbox = createCommandInbox({
+      next: vi.fn(async () => {
+        if (!delivered) {
+          delivered = true;
+          return { done: false as const, value: { kind: "cancel" as const } };
+        }
+        return await new Promise<IteratorResult<SessionInboxPayload>>(() => {});
+      }),
+    });
+    installControlHook([
+      {
+        action: { cancelled: true, kind: "park", serializedContext: {}, sessionState: state },
+        kind: "turn-result",
+      },
+    ]);
+
+    await dispatchAndAwaitTurn({
+      bufferedDeliveries: [],
+      bufferedSessionControls: [],
+      commandInbox,
+      controlToken: "turn-control",
+      delivery: createAcceptedDelivery(),
+      mode: "conversation",
+      parentWritable: new WritableStream<Uint8Array>(),
+      serializedContext: { state: "start" },
+      sessionState: state,
+    });
+
+    expect(dispatchTurnStep).not.toHaveBeenCalled();
+    expect(runTurnOwnedWorkflow).toHaveBeenCalledWith(
+      expect.objectContaining({
+        initialCancellation: {},
+        initialStep: expect.objectContaining({
+          result: expect.objectContaining({ action: "cancelled" }),
+        }),
+      }),
+      expect.any(Function),
+    );
+    expect(commandInbox.consumeNext).toHaveBeenCalledOnce();
+  });
 });
 
 function createCommandInbox(overrides: Partial<SessionCommandInbox> = {}): SessionCommandInbox {
@@ -274,5 +598,21 @@ function createState(continuationToken: string): DurableSessionState {
     hasProxyInputRequests: false,
     sessionId: "session",
     version: 1,
+  };
+}
+
+function createAcceptedDelivery(): DeliverHookPayload {
+  return {
+    deliveryMetadata: [
+      {
+        acceptedDeploymentId: "dpl_current",
+        channelKind: "channel:test",
+        channelName: "test",
+        deliveryId: "delivery-1",
+        payloadIndex: 0,
+      },
+    ],
+    kind: "deliver",
+    payloads: [{ message: "start" }],
   };
 }

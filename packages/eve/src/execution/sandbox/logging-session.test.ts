@@ -24,6 +24,37 @@ describe("createLoggingSandboxSession", () => {
     expect(log.mock.calls.flat().join("\n")).not.toContain("do-not-log");
   });
 
+  it("redacts brokered credential values from network policy logs", async () => {
+    const log = vi.fn();
+    const session = createTestSession();
+    const wrapped = createLoggingSandboxSession({ log, session });
+
+    const policy = {
+      allow: {
+        "api.github.com": [
+          {
+            transform: [
+              {
+                headers: {
+                  Authorization: "Bearer ghp_repro-do-not-log",
+                  "x-api-key": "repro-api-key-do-not-log",
+                },
+              },
+            ],
+          },
+        ],
+      },
+    };
+    await wrapped.setNetworkPolicy(policy);
+
+    const message = log.mock.calls.flat().join("\n");
+    expect(message).toContain("api.github.com");
+    expect(message).toContain('"transform":"[redacted]"');
+    expect(message).not.toContain("ghp_repro-do-not-log");
+    expect(message).not.toContain("repro-api-key-do-not-log");
+    expect(session.setNetworkPolicy).toHaveBeenCalledWith(policy);
+  });
+
   it("wraps the original session when no logger is provided", () => {
     const session = createTestSession();
     expect(createLoggingSandboxSession({ session })).not.toBe(session);

@@ -25,7 +25,6 @@ function dependencies(overrides: Partial<SetCommandDependencies> = {}): SetComma
         reasoning: "high",
       }),
     ),
-    isEveProject: vi.fn(async () => true),
     ...overrides,
   };
 }

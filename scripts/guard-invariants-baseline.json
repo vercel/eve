@@ -31,22 +31,10 @@
     "packages/eve/src/internal/nitro/host/dev-authored-source-watcher.scenario.test.ts": 2,
     "packages/eve/src/internal/nitro/host/schedule-task-routes.test.ts": 1,
     "packages/eve/src/internal/nitro/routes/runtime-artifacts.test.ts": 1,
-    "packages/eve/src/public/tools/define-bash-tool.ts": 1,
-    "packages/eve/src/public/tools/define-glob-tool.ts": 1,
-    "packages/eve/src/public/tools/define-grep-tool.ts": 1,
-    "packages/eve/src/public/tools/define-read-file-tool.ts": 1,
-    "packages/eve/src/public/tools/define-write-file-tool.ts": 1,
-    "packages/eve/src/public/tools/internal.ts": 1,
     "packages/eve/src/runtime/agent/bootstrap-model-utils.ts": 3,
     "packages/eve/src/runtime/agent/mock-model-adapter.test.ts": 1,
     "packages/eve/src/runtime/agent/mock-model-adapter.ts": 1,
-    "packages/eve/src/runtime/framework-tools/connection-search-dynamic.ts": 1,
-    "packages/eve/src/runtime/resolve-sandbox.ts": 1,
-    "packages/eve/test/define-bash-tool.test.ts": 1,
-    "packages/eve/test/define-glob-tool.test.ts": 1,
-    "packages/eve/test/define-grep-tool.test.ts": 1,
-    "packages/eve/test/define-read-file-tool.test.ts": 1,
-    "packages/eve/test/define-write-file-tool.test.ts": 1
+    "packages/eve/src/runtime/resolve-sandbox.ts": 1
   },
   "rule25_installRuntimeArtifactsAllowlist": [
     "packages/eve/src/internal/application/compiled-artifacts.ts",

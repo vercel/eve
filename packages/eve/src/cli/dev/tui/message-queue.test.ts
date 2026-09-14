@@ -147,5 +147,6 @@ describe("renderMessageQueueRows", () => {
     const queue = new MessageQueue();
     queue.handleEscape();
     expect(render(queue)).toEqual([expect.stringContaining("Cancelling turn…")]);
+    expect(render(queue)[0]).toContain("Ctrl+C to stop waiting, then again to exit");
   });
 });

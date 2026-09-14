@@ -1,11 +1,41 @@
+import { setTurnClientContextState } from "#harness/turn-client-context.js";
 import { jsonSchema, type LanguageModel, type ModelMessage, simulateReadableStream } from "ai";
 import { MockLanguageModelV4 } from "ai/test";
 import { describe, expect, it, vi } from "vitest";
 
-import { appendPendingInputBatch } from "#harness/input-requests.js";
+import { ContextContainer, contextStorage } from "#context/container.js";
+import {
+  dispatchDynamicToolEvent,
+  preparePersistedStepDynamicToolMetadata,
+} from "#context/dynamic-tool-lifecycle.js";
+import type { OldSourceOffsetDynamicToolMetadata } from "#context/dynamic-tool-metadata.js";
+import { PendingSkillAnnouncementKey } from "#context/dynamic-skill-lifecycle.js";
+import {
+  AuthKey,
+  HistoryStateKey,
+  SessionKey,
+  SessionIdKey,
+  SessionDynamicToolMetadataKey,
+  TurnDynamicToolMetadataKey,
+  StepDynamicToolMetadataKey,
+  TurnTaskDeliveryKey,
+} from "#context/keys.js";
+import { setHarnessEmissionState } from "#harness/emission.js";
+import type { HarnessToolDefinition } from "#harness/execute-tool.js";
+import type { InputRequest } from "#shared/input.js";
+import { appendPendingInputBatch, getApprovedTools } from "#harness/input-requests.js";
+import type { HarnessModelMessage } from "#harness/messages.js";
+import { getPendingInputBatches } from "#harness/pending-input-batches.js";
 import { createToolLoopHarness } from "#harness/tool-loop.js";
 import { setTurnUsageState } from "#harness/turn-tag-state.js";
 import type { HarnessSession, ToolLoopHarnessConfig } from "#harness/types.js";
+import { recordSessionTask } from "#tasks/session-index.js";
+import { once } from "#tools/approval/policies.js";
+import { defineTool } from "#tools/definition.js";
+import {
+  registerDurableDynamicCallback,
+  stampDurableDynamicCallback,
+} from "#tools/durable-callbacks.js";
 
 const usage = {
   inputTokens: {
@@ -42,6 +72,26 @@ function textStreamResult(text: string): StreamResult {
   };
 }
 
+function toolCallStreamResult(call: {
+  readonly input: string;
+  readonly toolCallId: string;
+  readonly toolName: string;
+}): StreamResult {
+  return {
+    stream: simulateReadableStream({
+      chunks: [
+        { type: "stream-start", warnings: [] },
+        { ...call, type: "tool-call" },
+        {
+          finishReason: { raw: undefined, unified: "tool-calls" },
+          type: "finish",
+          usage,
+        },
+      ] satisfies StreamPart[],
+    }),
+  };
+}
+
 const toolCall = {
   input: { command: "pwd" },
   toolCallId: "call-1",
@@ -68,8 +118,8 @@ const secondApprovalRequest = {
   type: "tool-approval-request" as const,
 };
 
-function createPendingApprovalSession(history?: readonly ModelMessage[]): HarnessSession {
-  const session: HarnessSession = {
+function createBaseSession(history?: readonly HarnessModelMessage[]): HarnessSession {
+  return {
     agent: {
       modelReference: { id: "generate-approval-resume-model" },
       system: "You are a test assistant.",
@@ -83,37 +133,45 @@ function createPendingApprovalSession(history?: readonly ModelMessage[]): Harnes
     },
     compaction: { recentWindowSize: 10, threshold: 100_000 },
     continuationToken: "http:generate-approval-resume-session",
-    history: [...(history ?? [{ content: "Run pwd.", role: "user" }])],
+    history: [...(history ?? [{ content: "Run pwd.", kind: "user" as const, role: "user" }])],
     sessionId: "generate-approval-resume-session",
   };
+}
 
+const pendingApprovalInputRequest: InputRequest = {
+  action: {
+    callId: toolCall.toolCallId,
+    input: toolCall.input,
+    kind: "tool-call",
+    toolName: toolCall.toolName,
+  },
+  allowFreeform: false,
+  display: "confirmation",
+  kind: "tool-approval",
+  options: [
+    { id: "approve", label: "Yes" },
+    { id: "cancel", label: "No" },
+  ],
+  prompt: "Approve tool call: bash",
+  requestId: approvalRequest.approvalId,
+};
+
+function createPendingApprovalSession(
+  history?: readonly HarnessModelMessage[],
+  responseAuthorization = false,
+): HarnessSession {
   return appendPendingInputBatch({
-    requests: [
-      {
-        action: {
-          callId: toolCall.toolCallId,
-          input: toolCall.input,
-          kind: "tool-call",
-          toolName: toolCall.toolName,
-        },
-        allowFreeform: false,
-        display: "confirmation",
-        kind: "tool-approval",
-        options: [
-          { id: "approve", label: "Yes" },
-          { id: "cancel", label: "No" },
-        ],
-        prompt: "Approve tool call: bash",
-        requestId: approvalRequest.approvalId,
-      },
-    ],
+    requests: [pendingApprovalInputRequest],
+    responseAuthRequiredRequestIds: responseAuthorization
+      ? [approvalRequest.approvalId]
+      : undefined,
     responseMessages: [
       {
         content: [toolCall, approvalRequest],
         role: "assistant",
       },
     ],
-    session,
+    session: createBaseSession(history),
   });
 }
 
@@ -148,6 +206,25 @@ function createTwoPendingApprovalSession(): HarnessSession {
   });
 }
 
+function createApprovalContext(): ContextContainer {
+  const responder = {
+    attributes: {},
+    authenticator: "test",
+    issuer: "test",
+    principalId: "user-1",
+    principalType: "user" as const,
+  };
+  const ctx = new ContextContainer();
+  ctx.set(AuthKey, responder);
+  ctx.set(SessionIdKey, "generate-approval-resume-session");
+  ctx.set(SessionKey, {
+    auth: { current: responder, initiator: null },
+    sessionId: "generate-approval-resume-session",
+    turn: { id: "turn-1", sequence: 1 },
+  });
+  return ctx;
+}
+
 function createModel(): MockLanguageModelV4 {
   return new MockLanguageModelV4({
     doGenerate: {
@@ -164,11 +241,13 @@ function createModel(): MockLanguageModelV4 {
 function createConfig(
   model: MockLanguageModelV4,
   execute: (input: unknown, options: unknown) => Promise<string>,
+  approval?: HarnessToolDefinition["approval"],
 ): ToolLoopHarnessConfig {
   const tools: ToolLoopHarnessConfig["tools"] = new Map([
     [
       toolCall.toolName,
       {
+        approval,
         description: "Run a shell command.",
         execute,
         inputSchema: jsonSchema({ type: "object" }),
@@ -207,6 +286,297 @@ function findPart(
 }
 
 describe("tool loop generate approval resume (real AI SDK)", () => {
+  it.each(
+    [
+      { scope: "step", metadataKey: StepDynamicToolMetadataKey },
+      { scope: "turn", metadataKey: TurnDynamicToolMetadataKey },
+      { scope: "session", metadataKey: SessionDynamicToolMetadataKey },
+    ].flatMap((scope) => ["structured", "text"].map((response) => ({ ...scope, response }))),
+  )(
+    "records the scoped key for a $response approval of a $scope dynamic tool",
+    async ({ metadataKey, response, scope }) => {
+      const ctx = createApprovalContext();
+      const execute = vi.fn(async () => "/workspace");
+      const owner = {
+        sessionId: ctx.require(SessionIdKey),
+        scope: scope as "session" | "turn" | "step",
+        resolverSlug: "dynamic-shell",
+        entryKey: "bash",
+        name: "bash",
+      };
+      registerDurableDynamicCallback({ owner, phase: "execute", callback: execute });
+      registerDurableDynamicCallback({
+        owner,
+        phase: "approvalKey",
+        callback: (_closure, input: { command: string }) => `bash:${input.command}`,
+      });
+      ctx.set(metadataKey, [
+        {
+          name: "bash",
+          description: "Run a shell command.",
+          inputSchema: { type: "object" },
+          resolverSlug: "dynamic-shell",
+          entryKey: "bash",
+          callbacks: { execute: { closure: {} }, approvalKey: { closure: {} } },
+        },
+      ]);
+      const staticExecute = vi.fn(async () => "static");
+      const resolveStepDynamicTools = vi.fn(async () => {});
+      const runStep = createToolLoopHarness({
+        ...createConfig(createModel(), staticExecute),
+        resolveStepDynamicTools,
+      });
+
+      const result = await contextStorage.run(ctx, () =>
+        runStep(
+          createPendingApprovalSession(),
+          response === "text"
+            ? { message: "approve" }
+            : {
+                inputResponses: [{ optionId: "approve", requestId: approvalRequest.approvalId }],
+              },
+        ),
+      );
+      expect(resolveStepDynamicTools).toHaveBeenCalledOnce();
+
+      expect(getApprovedTools(result.session)).toEqual(new Set(["bash:pwd"]));
+      expect(execute).toHaveBeenCalledOnce();
+      expect(staticExecute).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    { label: "direct", responseAuthorization: false },
+    { label: "response-authorized", responseAuthorization: true },
+  ])("keeps a migrated step callback binding through $label approval", async (testCase) => {
+    const order: string[] = [];
+    const executeCallback = vi.fn(async (closure: unknown) => {
+      const version = (closure as { version: string }).version;
+      order.push(`execute:${version}`);
+      return "/workspace";
+    });
+    const approvalResponseCallback = vi.fn(async (closure: unknown) => {
+      const version = (closure as { version: string }).version;
+      order.push(`authorize:${version}`);
+      return { status: "allowed" as const };
+    });
+    const handler = vi.fn((event: { data?: { stepIndex?: number; turnId?: string } }) => {
+      order.push(`resolve:${String(event.data?.turnId)}:${String(event.data?.stepIndex)}`);
+      return {
+        bash: defineTool({
+          approval: {
+            request: stampDurableDynamicCallback(() => "user-approval" as const, {
+              callback: () => "user-approval" as const,
+              closure: { version: "current-request" },
+            }),
+            response: stampDurableDynamicCallback(() => ({ status: "allowed" as const }), {
+              callback: approvalResponseCallback,
+              closure: { version: "current-response" },
+            }),
+          },
+          description: "Run a shell command.",
+          execute: stampDurableDynamicCallback(async () => "/current-workspace", {
+            callback: executeCallback,
+            closure: { version: "current-execute" },
+          }),
+          inputSchema: { type: "object" },
+        }),
+      };
+    });
+    const resolver = {
+      eventNames: ["step.started"],
+      events: {
+        "step.started": handler,
+      },
+      logicalPath: "agent/tools/bash.ts",
+      slug: "legacy",
+      sourceId: "test:legacy-bash",
+      sourceKind: "module",
+    } as never;
+    const ctx = new ContextContainer();
+    const responder = {
+      attributes: {},
+      authenticator: "test",
+      issuer: "test",
+      principalId: "user-1",
+      principalType: "user" as const,
+    };
+    ctx.set(AuthKey, responder);
+    ctx.set(SessionIdKey, "generate-approval-resume-session");
+    ctx.set(SessionKey, {
+      auth: { current: responder, initiator: null },
+      sessionId: "generate-approval-resume-session",
+      turn: { id: "turn-1", sequence: 1 },
+    });
+    ctx.set(StepDynamicToolMetadataKey, [
+      {
+        callbacks: {
+          approvalRequest: {
+            closure: { version: "persisted-request" },
+            stepId: "eve:dynamic-tool//old/approval-request/0-100",
+          },
+          approvalResponse: {
+            closure: { version: "persisted-response" },
+            stepId: "eve:dynamic-tool//old/approval-response/0-100",
+          },
+          execute: {
+            closure: { version: "persisted-execute" },
+            stepId: "eve:dynamic-tool//old/execute/0-100",
+          },
+        },
+        description: "Old shell tool.",
+        entryKey: "bash",
+        inputSchema: { type: "object" },
+        name: "bash",
+        resolverSlug: "legacy",
+      } satisfies OldSourceOffsetDynamicToolMetadata,
+    ]);
+
+    const model = new MockLanguageModelV4({
+      doStream: textStreamResult("The command completed."),
+      modelId: "generate-approval-resume-model",
+      provider: "eve-integration-mock",
+    });
+    const config = {
+      handleEvent: async (event, messages) => {
+        await dispatchDynamicToolEvent({
+          ctx,
+          event,
+          messages: messages ?? [],
+          resolvers: [resolver],
+        });
+        if (event.type === "step.started") {
+          const metadata = ctx.get(StepDynamicToolMetadataKey) ?? [];
+          const version = (
+            metadata[0]?.callbacks?.execute?.closure as { version?: string } | undefined
+          )?.version;
+          order.push(`step.started:${String(version)}`);
+        }
+      },
+      mode: "conversation",
+      resolveStepDynamicTools: (input) =>
+        preparePersistedStepDynamicToolMetadata({ ...input, resolvers: [resolver] }),
+      resolveModel: async (): Promise<LanguageModel> => model,
+      tools: new Map(),
+    } satisfies ToolLoopHarnessConfig;
+    const session = setHarnessEmissionState(
+      createPendingApprovalSession(undefined, testCase.responseAuthorization),
+      {
+        sequence: 1,
+        sessionStarted: true,
+        stepIndex: 1,
+        turnId: "turn-1",
+      },
+    );
+    const runStep = createToolLoopHarness(config);
+
+    const first = await contextStorage.run(ctx, () =>
+      runStep(session, {
+        attributedInputResponses: [
+          {
+            auth: responder,
+            response: { optionId: "approve", requestId: approvalRequest.approvalId },
+          },
+        ],
+      }),
+    );
+    if (testCase.responseAuthorization) {
+      if (typeof first.next !== "function") {
+        throw new TypeError("Expected response authorization to schedule a continuation.");
+      }
+      const next = first.next;
+      await contextStorage.run(ctx, () => next(first.session));
+    } else {
+      expect(first.next).toBeNull();
+    }
+
+    expect(order).toEqual(
+      testCase.responseAuthorization
+        ? [
+            "resolve:turn-1:1",
+            "authorize:persisted-response",
+            "step.started:persisted-execute",
+            "execute:persisted-execute",
+          ]
+        : ["resolve:turn-1:1", "step.started:persisted-execute", "execute:persisted-execute"],
+    );
+    expect(handler).toHaveBeenCalledOnce();
+    if (testCase.responseAuthorization) {
+      expect(approvalResponseCallback).toHaveBeenCalledWith(
+        { version: "persisted-response" },
+        expect.anything(),
+      );
+    } else {
+      expect(approvalResponseCallback).not.toHaveBeenCalled();
+    }
+    expect(executeCallback).toHaveBeenCalledWith(
+      { version: "persisted-execute" },
+      toolCall.input,
+      expect.objectContaining({ callId: toolCall.toolCallId }),
+    );
+    const metadata = ctx.get(StepDynamicToolMetadataKey) ?? [];
+    expect(metadata[0]?.callbacks?.execute).toEqual({
+      closure: { version: "persisted-execute" },
+    });
+  });
+
+  it("does not resolve removed dynamic tools when an approval is cancelled", async () => {
+    const responder = {
+      attributes: {},
+      authenticator: "test",
+      issuer: "test",
+      principalId: "user-1",
+      principalType: "user" as const,
+    };
+    const ctx = new ContextContainer();
+    ctx.set(AuthKey, responder);
+    ctx.set(SessionIdKey, "generate-approval-resume-session");
+    ctx.set(SessionKey, {
+      auth: { current: responder, initiator: null },
+      sessionId: "generate-approval-resume-session",
+      turn: { id: "turn-1", sequence: 1 },
+    });
+    ctx.set(StepDynamicToolMetadataKey, [
+      {
+        callbacks: {
+          execute: {
+            closure: { version: "persisted-execute" },
+            stepId: "eve:dynamic-tool//old/execute/0-100",
+          },
+        },
+        description: "Removed shell tool.",
+        entryKey: "bash",
+        inputSchema: { type: "object" },
+        name: "bash",
+        resolverSlug: "removed",
+      } satisfies OldSourceOffsetDynamicToolMetadata,
+    ]);
+    const execute = vi.fn(async () => "/workspace");
+    const resolveStepDynamicTools = vi.fn((input) =>
+      preparePersistedStepDynamicToolMetadata({ ...input, resolvers: [] }),
+    );
+    const runStep = createToolLoopHarness({
+      ...createConfig(createModel(), execute),
+      resolveStepDynamicTools,
+    });
+
+    await expect(
+      contextStorage.run(ctx, () =>
+        runStep(createPendingApprovalSession(undefined, true), {
+          attributedInputResponses: [
+            {
+              auth: responder,
+              response: { optionId: "cancel", requestId: approvalRequest.approvalId },
+            },
+          ],
+        }),
+      ),
+    ).resolves.toBeDefined();
+
+    expect(resolveStepDynamicTools).not.toHaveBeenCalled();
+    expect(execute).not.toHaveBeenCalled();
+  });
+
   it("executes two approvals delivered together exactly once each", async () => {
     const execute = vi.fn(async (input: unknown) =>
       (input as { command: string }).command === "pwd" ? "/workspace" : "eve",
@@ -246,6 +616,112 @@ describe("tool loop generate approval resume (real AI SDK)", () => {
         : [],
     );
     expect(toolResultCallIds).toEqual([toolCall.toolCallId, secondToolCall.toolCallId]);
+  });
+
+  // Regression: approving one once()-gated call recorded the grant immediately,
+  // so a new same-tool call proposed on the resume step executed without a
+  // prompt while the other parked card was still visible to the user.
+  it("keeps prompting a once() tool while a sibling approval is still pending", async () => {
+    const thirdToolCall = {
+      input: JSON.stringify({ command: "ls" }),
+      toolCallId: "call-3",
+      toolName: "bash",
+    };
+    const execute = vi.fn(async () => "/workspace");
+    const model = new MockLanguageModelV4({
+      doStream: async () => toolCallStreamResult(thirdToolCall),
+      modelId: "generate-approval-resume-model",
+      provider: "eve-integration-mock",
+    });
+    const requested: InputRequest[] = [];
+    const config = {
+      ...createConfig(model, execute, once()),
+      handleEvent: async (event) => {
+        if (event.type === "input.requested") requested.push(...event.data.requests);
+      },
+    } satisfies ToolLoopHarnessConfig;
+
+    const result = await contextStorage.run(createApprovalContext(), () =>
+      createToolLoopHarness(config)(createTwoPendingApprovalSession(), {
+        inputResponses: [{ optionId: "approve", requestId: approvalRequest.approvalId }],
+      }),
+    );
+
+    expect(execute).toHaveBeenCalledExactlyOnceWith(
+      toolCall.input,
+      expect.objectContaining({ toolCallId: toolCall.toolCallId }),
+    );
+    expect(requested.map((request) => request.action.callId)).toEqual([thirdToolCall.toolCallId]);
+    expect(result.next).toBeNull();
+    const pendingCallIds = getPendingInputBatches(result.session.state).flatMap((batch) =>
+      batch.requests.map((request) => request.action.callId),
+    );
+    expect(pendingCallIds).toEqual([secondToolCall.toolCallId, thirdToolCall.toolCallId]);
+  });
+
+  it("auto-allows a once() tool after every pending approval with its key is settled", async () => {
+    const thirdToolCall = {
+      input: JSON.stringify({ command: "ls" }),
+      toolCallId: "call-3",
+      toolName: "bash",
+    };
+    const execute = vi.fn(async () => "/workspace");
+    // Batches settle one per step, so the model is called between them. It
+    // proposes the third call only once both pending prompts are gone.
+    const responses = [
+      textStreamResult("Ran pwd."),
+      toolCallStreamResult(thirdToolCall),
+      textStreamResult("All done."),
+    ];
+    const model = new MockLanguageModelV4({
+      doStream: async () => {
+        const next = responses.shift();
+        if (next === undefined) throw new Error("Unexpected extra model call.");
+        return next;
+      },
+      modelId: "generate-approval-resume-model",
+      provider: "eve-integration-mock",
+    });
+    const requested: InputRequest[] = [];
+    const config = {
+      ...createConfig(model, execute, once()),
+      handleEvent: async (event) => {
+        if (event.type === "input.requested") requested.push(...event.data.requests);
+      },
+    } satisfies ToolLoopHarnessConfig;
+    const ctx = createApprovalContext();
+    const runStep = createToolLoopHarness(config);
+
+    const first = await contextStorage.run(ctx, () =>
+      runStep(createTwoPendingApprovalSession(), {
+        inputResponses: [
+          { optionId: "approve", requestId: approvalRequest.approvalId },
+          { optionId: "cancel", requestId: secondApprovalRequest.approvalId },
+        ],
+      }),
+    );
+    // The second batch's denial replays on a deferred step; drain until the turn settles.
+    if (typeof first.next !== "function") {
+      throw new TypeError("Expected the deferred approval response to schedule another step.");
+    }
+    let result = first;
+    while (typeof result.next === "function") {
+      const { next, session } = result;
+      result = await contextStorage.run(ctx, () => next(session));
+    }
+
+    expect(requested).toEqual([]);
+    expect(execute).toHaveBeenCalledTimes(2);
+    expect(execute).toHaveBeenNthCalledWith(
+      2,
+      { command: "ls" },
+      expect.objectContaining({ toolCallId: thirdToolCall.toolCallId }),
+    );
+    expect(responses).toEqual([]);
+    expect(result.session.history.at(-1)).toMatchObject({
+      content: [{ text: "All done.", type: "text" }],
+      role: "assistant",
+    });
   });
 
   it("executes an approval before replaying its message after a limit continuation", async () => {
@@ -357,14 +833,129 @@ describe("tool loop generate approval resume (real AI SDK)", () => {
     });
   });
 
+  // Regression: turn-local context (task state, dynamic skill announcement) was
+  // appended as a user message after the approval response. The AI SDK reads
+  // approvals only from the tail tool message, so the approved tool never ran
+  // and the provider rejected the prompt with a tool call that had no output.
+  it.each(
+    [
+      {
+        label: "dynamic skill announcement",
+        historyKey: "availableSkills" as const,
+      },
+      { label: "task state", historyKey: "taskState" as const },
+    ].flatMap((context) => [false, true].map((restoredAnchor) => ({ ...context, restoredAnchor }))),
+  )(
+    "executes the approved tool when $label is injected on the resume step (restored anchor: $restoredAnchor)",
+    async ({ historyKey, restoredAnchor }) => {
+      const siblingCall = {
+        input: { command: "whoami" },
+        toolCallId: "call-sibling",
+        toolName: "bash",
+        type: "tool-call" as const,
+      };
+      const siblingResult = {
+        output: { type: "text" as const, value: "eve" },
+        toolCallId: siblingCall.toolCallId,
+        toolName: "bash",
+        type: "tool-result" as const,
+      };
+      let session = appendPendingInputBatch({
+        requests: [pendingApprovalInputRequest],
+        // The parked shape when a gated call shares a step with an ungated one.
+        responseMessages: [
+          { content: [toolCall, approvalRequest, siblingCall], role: "assistant" },
+          { content: [siblingResult], role: "tool" },
+        ],
+        session: createBaseSession(),
+      });
+      const ctx = new ContextContainer();
+      const runtimeContextAnnouncement =
+        historyKey === "taskState"
+          ? '[Task state]\n{"tasks":[{"name":"analysis","status":"pending","taskId":"analysis"}]}'
+          : "Available skills\n- policy: Tenant policy";
+      if (historyKey === "taskState") {
+        ctx.set(TurnTaskDeliveryKey, "initiating");
+        session = recordSessionTask(session, {
+          createdByTurnId: "turn-1",
+          executor: { data: {}, kind: "workflow-tool" },
+          metadata: { kind: "report-probe", name: "analysis" },
+          taskId: "analysis",
+          taskInboxToken: "task-token",
+          taskRunId: "task-run",
+        });
+      } else {
+        ctx.set(PendingSkillAnnouncementKey, runtimeContextAnnouncement);
+      }
+      const execute = vi.fn(async () => "/workspace");
+      const model = createModel();
+      const runStep = createToolLoopHarness(createConfig(model, execute));
+
+      const result = await contextStorage.run(ctx, () =>
+        runStep(
+          setHarnessEmissionState(
+            restoredAnchor
+              ? setTurnClientContextState(session, {
+                  insertionIndex: 0,
+                  messages: [],
+                  turnId: "turn-1",
+                })
+              : session,
+            {
+              sequence: 1,
+              sessionStarted: true,
+              stepIndex: 1,
+              turnId: "turn-1",
+            },
+          ),
+          { inputResponses: [{ optionId: "approve", requestId: approvalRequest.approvalId }] },
+        ),
+      );
+
+      expect(execute).toHaveBeenCalledExactlyOnceWith(
+        toolCall.input,
+        expect.objectContaining({ toolCallId: toolCall.toolCallId }),
+      );
+
+      const providerPrompt = model.doGenerateCalls[0]?.prompt ?? [];
+      const answered = new Set<string>();
+      const called: string[] = [];
+      for (const message of providerPrompt) {
+        if (!Array.isArray(message.content)) continue;
+        for (const part of message.content) {
+          if (part.type === "tool-call") called.push(part.toolCallId);
+          if (part.type === "tool-result") answered.add(part.toolCallId);
+        }
+      }
+      expect(called).toEqual([toolCall.toolCallId, siblingCall.toolCallId]);
+      expect(called.filter((id) => !answered.has(id))).toEqual([]);
+      expect(providerPrompt.at(-1)?.role).toBe("tool");
+      expect(ctx.get(HistoryStateKey)).toEqual({});
+      expect(result.session.history.at(-1)).toMatchObject({
+        content: [{ text: "The command returned /workspace.", type: "text" }],
+        role: "assistant",
+      });
+
+      const continued = await contextStorage.run(ctx, () =>
+        runStep(result.session, { message: "Continue." }),
+      );
+      expect(
+        continued.session.history.filter(
+          (message) => message.content === runtimeContextAnnouncement,
+        ),
+      ).toHaveLength(1);
+      expect(ctx.get(HistoryStateKey)).toMatchObject({ [historyKey]: runtimeContextAnnouncement });
+    },
+  );
+
   // Acceptance gate for the HITL non-blocking plan (research/hitl-request-lifecycle.md):
   // once messages run as normal turns while an approval is open, the approval batch is
   // restored *after* that intervening exchange. This proves the AI SDK accepts the
   // late-spliced transcript shape before any behavior change lands.
   it("splices the approved batch after an intervening conversation turn", async () => {
-    const interveningHistory: readonly ModelMessage[] = [
-      { content: "Run pwd.", role: "user" },
-      { content: "Any update on that command?", role: "user" },
+    const interveningHistory: readonly HarnessModelMessage[] = [
+      { content: "Run pwd.", kind: "user", role: "user" },
+      { content: "Any update on that command?", kind: "user", role: "user" },
       {
         content: [{ text: "Still waiting for approval to run pwd.", type: "text" }],
         role: "assistant",

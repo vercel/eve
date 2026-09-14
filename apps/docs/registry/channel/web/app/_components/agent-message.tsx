@@ -4,10 +4,14 @@ import type {
   EveAuthorizationPart,
   EveDynamicToolPart,
   EveMessage,
+  EveMessageInputRequest,
   EveMessagePart,
 } from "eve/react";
+import { useState } from "react";
 import {
+  ArrowRightIcon,
   CheckCircleIcon,
+  CheckIcon,
   ExternalLinkIcon,
   FileIcon,
   ImageIcon,
@@ -15,8 +19,19 @@ import {
   XCircleIcon,
 } from "lucide-react";
 import { Message, MessageContent, MessageResponse } from "@/components/ai-elements/message";
+import {
+  Question,
+  QuestionInput,
+  QuestionOption,
+  QuestionOptions,
+  QuestionPrompt,
+  type QuestionResponse,
+  QuestionSubmit,
+  type QuestionValue,
+} from "@/components/ai-elements/question";
 import { Reasoning, ReasoningContent, ReasoningTrigger } from "@/components/ai-elements/reasoning";
 import {
+  BashToolContent,
   Tool,
   ToolContent,
   ToolHeader,
@@ -49,6 +64,9 @@ export function AgentMessage({
     (last, part, index) => (part.type === "text" ? index : last),
     -1,
   );
+  const hasAssistantText =
+    message.role === "assistant" &&
+    message.parts.some((part) => part.type === "text" && part.text.length > 0);
 
   return (
     <Message
@@ -56,15 +74,17 @@ export function AgentMessage({
       from={message.role}
     >
       <MessageContent>
-        {message.parts.map((part, index) => (
-          <AgentMessagePart
-            canRespond={canRespond}
-            key={partKey(part, index)}
-            onInputResponses={onInputResponses}
-            part={part}
-            showCaret={isStreaming && message.role === "assistant" && index === lastTextIndex}
-          />
-        ))}
+        {message.parts.map((part, index) =>
+          hasAssistantText && part.type === "reasoning" ? null : (
+            <AgentMessagePart
+              canRespond={canRespond}
+              key={partKey(part, index)}
+              onInputResponses={onInputResponses}
+              part={part}
+              showCaret={isStreaming && message.role === "assistant" && index === lastTextIndex}
+            />
+          ),
+        )}
       </MessageContent>
     </Message>
   );
@@ -101,7 +121,19 @@ function AgentMessagePart({
       return <AttachmentPart part={part} />;
     case "authorization":
       return <AuthorizationPrompt part={part} />;
-    case "dynamic-tool":
+    case "dynamic-tool": {
+      const inputRequest = part.toolMetadata?.eve?.inputRequest;
+      if (inputRequest?.kind === "question") {
+        return (
+          <QuestionRequest
+            canRespond={canRespond}
+            inputRequest={inputRequest}
+            inputResponse={part.toolMetadata?.eve?.inputResponse}
+            onInputResponses={onInputResponses}
+          />
+        );
+      }
+
       return (
         <Tool
           defaultOpen={part.state === "approval-requested" || part.state === "approval-responded"}
@@ -113,17 +145,122 @@ function AgentMessagePart({
             type="dynamic-tool"
           />
           <ToolContent>
-            <ToolInput input={part.input} />
+            {part.toolName === "bash" ? (
+              <BashToolContent errorText={part.errorText} input={part.input} output={part.output} />
+            ) : (
+              <ToolInput input={part.input} />
+            )}
             <InputRequestActions
               canRespond={canRespond}
               part={part}
               onInputResponses={onInputResponses}
             />
-            <ToolOutput errorText={part.errorText} output={part.output} />
+            {part.toolName === "bash" ? null : (
+              <ToolOutput errorText={part.errorText} output={part.output} />
+            )}
           </ToolContent>
         </Tool>
       );
+    }
   }
+}
+
+function QuestionRequest({
+  canRespond,
+  inputRequest,
+  inputResponse,
+  onInputResponses,
+}: {
+  readonly canRespond: boolean;
+  readonly inputRequest: EveMessageInputRequest;
+  readonly inputResponse?: AgentInputResponse;
+  readonly onInputResponses: (responses: readonly AgentInputResponse[]) => void | Promise<void>;
+}) {
+  const hasOptions = (inputRequest.options?.length ?? 0) > 0;
+  const acceptsFreeform = inputRequest.allowFreeform === true || !hasOptions;
+  const [questionValue, setQuestionValue] = useState<QuestionValue>({
+    selectedValues: inputResponse?.optionId ? [inputResponse.optionId] : [],
+    text: inputResponse?.text ?? "",
+  });
+
+  const submitOption = (optionId: string) => {
+    setQuestionValue((value) => ({ ...value, selectedValues: [optionId] }));
+    return onInputResponses([
+      {
+        optionId,
+        requestId: inputRequest.requestId,
+      },
+    ]);
+  };
+
+  const submitResponse = ({ selectedValues, text }: QuestionResponse) =>
+    onInputResponses([
+      {
+        optionId: selectedValues[0],
+        requestId: inputRequest.requestId,
+        text,
+      },
+    ]);
+
+  return (
+    <Question
+      disabled={!canRespond || inputResponse !== undefined}
+      onSubmit={submitResponse}
+      onValueChange={setQuestionValue}
+      value={questionValue}
+    >
+      <QuestionPrompt>{inputRequest.prompt}</QuestionPrompt>
+      {hasOptions ? (
+        <QuestionOptions className="flex-col items-stretch" aria-label={inputRequest.prompt}>
+          {inputRequest.options?.map((option, index) => (
+            <QuestionOption
+              className="justify-start px-3 py-2 text-left"
+              key={option.id}
+              onClick={() => void submitOption(option.id)}
+              value={option.id}
+            >
+              <span className="min-w-0 flex-1">
+                <span className="block text-foreground text-sm leading-tight">{option.label}</span>
+                {option.description ? (
+                  <span className="block text-sm text-muted-foreground leading-tight">
+                    {option.description}
+                  </span>
+                ) : null}
+              </span>
+              {inputResponse === undefined ? (
+                <span aria-hidden="true" className="relative size-6 shrink-0">
+                  <span className="absolute inset-0 flex items-center justify-center rounded-full bg-foreground/8 text-xs text-muted-foreground transition-opacity group-hover/option:opacity-0 group-focus-visible/option:opacity-0">
+                    {index + 1}
+                  </span>
+                  <ArrowRightIcon className="absolute top-1/2 left-1/2 size-4 -translate-x-1/2 -translate-y-1/2 text-muted-foreground opacity-0 transition-[color,opacity] group-hover/option:text-foreground group-hover/option:opacity-100 group-focus-visible/option:opacity-100" />
+                </span>
+              ) : (
+                <CheckIcon className="size-4 shrink-0 opacity-0 transition-opacity group-data-[state=checked]/option:opacity-100" />
+              )}
+            </QuestionOption>
+          ))}
+        </QuestionOptions>
+      ) : null}
+      {acceptsFreeform ? (
+        <div className="relative">
+          <QuestionInput
+            aria-label="Answer"
+            className={inputResponse === undefined ? "pr-12 pb-12" : undefined}
+            placeholder="Type your answer…"
+          />
+          {inputResponse === undefined && questionValue.text.trim().length > 0 ? (
+            <QuestionSubmit
+              aria-label="Answer"
+              className="absolute right-2 bottom-2"
+              size="icon-sm"
+            >
+              <ArrowRightIcon />
+            </QuestionSubmit>
+          ) : null}
+        </div>
+      ) : null}
+    </Question>
+  );
 }
 
 function AttachmentPart({ part }: { readonly part: EveFilePart }) {

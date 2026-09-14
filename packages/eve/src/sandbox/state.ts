@@ -1,5 +1,6 @@
 import type { SandboxSession } from "#public/definitions/sandbox.js";
 import type { SandboxBackendSessionState } from "#public/definitions/sandbox-backend.js";
+import type { SandboxDeleteOptions } from "#public/definitions/sandbox-backend.js";
 
 /**
  * Serializable sandbox reconnect record stored on the harness session.
@@ -31,6 +32,7 @@ export interface SandboxState {
  */
 export interface SandboxAccess {
   captureState(): Promise<SandboxState>;
+  delete?(options?: SandboxDeleteOptions): Promise<void>;
   get(): Promise<SandboxSession | null>;
   stop(): Promise<void>;
 }

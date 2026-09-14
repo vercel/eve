@@ -26,13 +26,24 @@ class TestLogger implements LinkCliLogger {
   }
 }
 
+async function createWorkspaceProject(): Promise<string> {
+  const projectRoot = await mkdtemp(join(tmpdir(), "eve-link-workspace-"));
+  await mkdir(join(projectRoot, "agents/support/agent"), { recursive: true });
+  await writeFile(
+    join(projectRoot, "package.json"),
+    JSON.stringify({ dependencies: { eve: "*" }, private: true }),
+    "utf8",
+  );
+  return projectRoot;
+}
+
 async function createAgentProject(): Promise<string> {
   const projectRoot = await mkdtemp(join(tmpdir(), "eve-link-command-"));
   await mkdir(join(projectRoot, "agent"), { recursive: true });
   await writeFile(join(projectRoot, "agent/agent.ts"), "export default {};\n", "utf8");
   await writeFile(
     join(projectRoot, "package.json"),
-    `${JSON.stringify({ name: "my-agent", dependencies: {} }, null, 2)}\n`,
+    `${JSON.stringify({ name: "my-agent", dependencies: { eve: "*" } }, null, 2)}\n`,
     "utf8",
   );
   return projectRoot;
@@ -123,12 +134,24 @@ describe("runLinkCommand", () => {
     expect(process.exitCode).toBe(1);
   });
 
+  test("refuses to link one member of a workspace", async () => {
+    const projectRoot = await createWorkspaceProject();
+    const logger = new TestLogger();
+
+    await runLinkCommand(logger, join(projectRoot, "agents/support"), {
+      isEveProject,
+      hasInteractiveTerminal: () => true,
+    });
+
+    expect(logger.errors[0]).toContain("workspace root");
+    expect(process.exitCode).toBe(1);
+  });
+
   test("refuses without an interactive terminal", async () => {
     const projectRoot = await createAgentProject();
     const logger = new TestLogger();
 
     await runLinkCommand(logger, projectRoot, {
-      isEveProject,
       hasInteractiveTerminal: () => false,
     });
 
@@ -149,7 +172,6 @@ describe("runLinkCommand", () => {
 
     await runLinkCommand(logger, projectRoot, {
       createPrompter: () => fake.prompter,
-      isEveProject,
       hasInteractiveTerminal: () => true,
       flowDeps,
     });
