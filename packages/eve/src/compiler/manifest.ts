@@ -13,6 +13,7 @@ import type { ChannelRouteMethod } from "#public/definitions/channel.js";
 import type { NormalizedChannelCorsOptions } from "#channel/cors.js";
 import type { InternalInstructionsDefinition } from "#shared/instructions-definition.js";
 import { jsonObjectSchema } from "#shared/json-schemas.js";
+import type { JsonObject } from "#shared/json.js";
 import type { Node } from "#shared/node.js";
 import type {
   MarkdownSourceRef,
@@ -90,6 +91,7 @@ export interface CompiledChannelDefinition {
    * channel leaves CORS untouched.
    */
   readonly cors?: NormalizedChannelCorsOptions;
+  readonly slackAppManifest?: JsonObject;
   readonly vercelConnect?: VercelConnectMetadata;
 }
 
@@ -513,6 +515,7 @@ const compiledChannelDefinitionSchema = z
     exportName: z.string().optional(),
     adapterKind: z.string().optional(),
     cors: compiledChannelCorsSchema.optional(),
+    slackAppManifest: jsonObjectSchema.optional(),
     vercelConnect: compiledVercelConnectMetadataSchema.optional(),
   })
   .strict();

@@ -1,10 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  buildSlackAppManifests,
   buildVercelConnectRequirements,
   createVercelConnectManifest,
-  slackAppManifestPath,
   type VercelConnectRequirement,
 } from "#internal/vercel-connect-manifest.js";
 
@@ -102,6 +100,7 @@ describe("buildVercelConnectRequirements", () => {
             name: "slack",
             logicalPath: "channels/slack.ts",
             method: "POST",
+            slackAppManifest: { display_information: { name: "slack" } },
             urlPath: "/eve/v1/slack",
             vercelConnect: {
               connector: "slack/my-agent",
@@ -128,16 +127,20 @@ describe("buildVercelConnectRequirements", () => {
     ]);
   });
 
-  it("does not reference a Slack app manifest for a non-Slack adapter", () => {
+  it.each([
+    { adapterKind: "custom", slackAppManifest: { display_information: { name: "custom" } } },
+    { adapterKind: "slack", slackAppManifest: undefined },
+  ])("does not reference a missing Slack app manifest", ({ adapterKind, slackAppManifest }) => {
     const manifest = {
       connections: [],
       channelRoutes: {
         effective: [
           {
-            adapterKind: "custom",
+            adapterKind,
             name: "custom",
             logicalPath: "channels/custom.ts",
             method: "POST",
+            slackAppManifest,
             urlPath: "/custom",
             vercelConnect: {
               connector: "slack/custom",
@@ -158,57 +161,6 @@ describe("buildVercelConnectRequirements", () => {
         uses: [{ kind: "channel", name: "custom", logicalPath: "channels/custom.ts" }],
       },
     ]);
-  });
-
-  it("derives separate Slack manifest paths from channel source paths", () => {
-    expect(slackAppManifestPath("channels/slack.ts")).toBe(
-      "channels/slack.slack-app-manifest.json",
-    );
-    expect(slackAppManifestPath("channels/support/slack.tsx")).toBe(
-      "channels/support/slack.slack-app-manifest.json",
-    );
-  });
-
-  it("builds a Slack-native app manifest for each Slack channel", () => {
-    const manifests = buildSlackAppManifests({
-      channelRoutes: {
-        effective: [
-          {
-            adapterKind: "slack",
-            name: "support",
-            logicalPath: "channels/support.ts",
-          },
-          {
-            adapterKind: "slack",
-            name: "portable",
-            logicalPath: "channels/portable.ts",
-          },
-        ],
-      },
-    } as const);
-
-    expect(Object.fromEntries(manifests)).toEqual({
-      "channels/support.slack-app-manifest.json": {
-        display_information: { name: "support" },
-        features: {
-          app_home: {
-            home_tab_enabled: false,
-            messages_tab_enabled: true,
-            messages_tab_read_only_enabled: false,
-          },
-          bot_user: { display_name: "support", always_online: false },
-        },
-        oauth_config: { scopes: { bot: ["app_mentions:read", "chat:write"] } },
-        settings: {
-          event_subscriptions: { bot_events: ["app_mention"] },
-          interactivity: { is_enabled: true },
-          org_deploy_enabled: false,
-          socket_mode_enabled: false,
-          token_rotation_enabled: false,
-        },
-      },
-      "channels/portable.slack-app-manifest.json": expect.any(Object),
-    });
   });
 
   it("ignores connections without Connect metadata", () => {

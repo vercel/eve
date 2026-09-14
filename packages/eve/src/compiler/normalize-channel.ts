@@ -2,6 +2,7 @@ import { stripLogicalPathExtension } from "#discover/filesystem.js";
 import type { ChannelSourceRef } from "#discover/manifest.js";
 import { normalizeChannelDefinition } from "#internal/authored-definition/channel.js";
 import { extractVercelConnectMetadata } from "#shared/vercel-connect-metadata.js";
+import { buildSlackAppManifest } from "#public/channels/slack/app-manifest.js";
 import { type ChannelRouteMethod, isDisabledRouteSentinel } from "#public/definitions/channel.js";
 import type { CompiledChannelDefinition } from "#compiler/manifest.js";
 import { readWorkflowFunctionId } from "#internal/workflow/reference.js";
@@ -70,6 +71,12 @@ export async function compileChannelDefinition(
       exportName: source.exportName,
       adapterKind: extractAdapterKind(definition.adapter),
       cors: definition.cors,
+      slackAppManifest: buildSlackAppManifest(
+        rawValue === null || typeof rawValue !== "object"
+          ? undefined
+          : (rawValue as { readonly slackAppManifest?: unknown }).slackAppManifest,
+        channelName,
+      ),
       vercelConnect: extractVercelConnectMetadata(
         rawValue === null || typeof rawValue !== "object"
           ? undefined

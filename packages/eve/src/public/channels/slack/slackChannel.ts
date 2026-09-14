@@ -66,6 +66,7 @@ import {
 } from "#public/channels/slack/thread.js";
 import { buildSlackAuthContext, slackUserIdFromAuthContext } from "#public/channels/slack/auth.js";
 import { SLACK_CHANNEL_DEFAULT_ROUTE } from "#public/channels/slack/constants.js";
+import { defineSlackAppManifest } from "#public/channels/slack/app-manifest.js";
 import { handleInteractionPost } from "#public/channels/slack/interactions.js";
 import {
   bindSlackSessionOperations,
@@ -1047,6 +1048,7 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
   });
   const credentials = config.credentials as { readonly vercelConnect?: unknown } | undefined;
   return Object.assign(channel, {
+    slackAppManifest: defineSlackAppManifest({ botName: config.botName }),
     vercelConnect: credentials?.vercelConnect,
   });
 }

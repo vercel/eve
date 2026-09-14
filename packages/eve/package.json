@@ -485,6 +485,7 @@
     "@opentelemetry/otlp-transformer": "0.214.0",
     "@opentelemetry/sdk-trace-base": "catalog:",
     "@photon-ai/chat-adapter-imessage": "3.2.0",
+    "@slack/web-api": "7.19.0",
     "@standard-schema/spec": "1.1.0",
     "@sveltejs/kit": "^2.0.0",
     "@types/json-schema": "7.0.15",
