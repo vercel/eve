@@ -1,6 +1,7 @@
 {
   "pages": [
     "---Introduction---",
+    "project-structure",
     "getting-started",
     "concepts",
     "---Build---",

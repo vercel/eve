@@ -1,6 +1,6 @@
 ---
 title: "Getting Started"
-description: "Create an eve project, configure a model, understand its filesystem layout, and run your first agent."
+description: "Create and run a single-root eve project, then understand the files inside its agent directory."
 contentType: "How-to"
 ---
 
@@ -17,6 +17,8 @@ Connect a ChatGPT subscription, a Vercel account, or an AI Gateway, OpenAI, or A
 Choose a model, provider, and channel that meet your data-processing and compliance requirements.
 
 ## Create a project
+
+This guide creates one root agent. If you need several independently addressed root agents, start with [Project Structure](./project-structure) and create an agent workspace instead.
 
 Run `eve init` with a project name:
 
@@ -162,8 +164,6 @@ Prefer the nested layout because it keeps application files separate from the au
 
 Run `eve info` when eve does not discover a file. It lists the discovered surface and diagnostics so you can check the authored slot and root-versus-subagent boundary. eve also writes inspectable artifacts under `.eve/`; see [Instrumentation](./observability/instrumentation) and the [CLI](./reference/cli) reference.
 
-For several independently addressed agents in one project, see [Multiple Root Agents](./getting-started/multiple-root-agents).
-
 ## Install manually
 
 If you do not want to use the scaffold, install the runtime dependencies:
@@ -186,7 +186,7 @@ After the tutorial, continue with the task you need:
 | Connect the agent to an external MCP or OpenAPI service            | [Connections](/docs/connections)                                                                                 |
 | Communicate with users through Slack, Discord, or another platform | [Channels](/docs/channels/overview)                                                                              |
 | Build a browser interface                                          | [Add a Web App](/docs/guides/frontend/add-a-web-app), then [Frontend Frameworks](/docs/guides/frontend/overview) |
-| Organize several independently addressed root agents               | [Multiple Root Agents](/docs/getting-started/multiple-root-agents)                                               |
+| Organize several independently addressed root agents               | [Project Structure](/docs/project-structure)                                                                     |
 | Test agent behavior                                                | [Evals](/docs/evals/overview)                                                                                    |
 | Secure and deploy the agent                                        | [Authentication](/docs/guides/auth-and-route-protection), then [Deployment](/docs/guides/deployment/overview)    |
 
