@@ -40,6 +40,7 @@ const { buildDynamicTools, buildResponseAuthorizationTools } =
 import { ContextContainer } from "#context/container.js";
 import { deserializeContext, serializeContext } from "#context/serialize.js";
 import {
+  StaticModelReferenceKey,
   SessionIdKey,
   SessionDynamicToolMetadataKey,
   SessionDynamicToolRuntimeRevisionKey,
@@ -403,6 +404,7 @@ function createResolver(
 let contextCounter = 0;
 function createCtx(sessionId = `test-session-${++contextCounter}`): ContextContainer {
   const ctx = new ContextContainer();
+  ctx.set(StaticModelReferenceKey, null);
   ctx.set(SessionIdKey, sessionId);
   return ctx;
 }

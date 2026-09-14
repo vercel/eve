@@ -1,5 +1,18 @@
 # eve
 
+## 0.54.4
+
+### Patch Changes
+
+- da8f4fd: Use an installed Codex CLI's app-server for ChatGPT subscription credentials, while retaining eve's direct sign-in and owned credential store as a fallback only when the `codex` binary is not found. Codex login output remains inside the model setup panel instead of writing directly over the TUI.
+- 3576e0a: Classify known `eve init` target and workspace-input failures into bounded telemetry categories. Telemetry continues to exclude target paths, directory contents, and error messages.
+- 7829116: Add `withEve` from `eve/vercel` for composing native workspace agents with authored services in `vercel.ts`. Vercel resolves the generated agent services and transport routes before independently building each service.
+- 2d0bad9: Expose the effective model ID to model, subagent, tool, skill, and instruction resolvers through `ctx.model?.id`.
+- 7fa514b: Add a self-modification option to the interactive `eve init` flow. Selecting it scaffolds the self-modification subagent and continues to `eve dev` without offering an external coding-agent handoff.
+- a34ecf0: Preserve remote subagent caller spans across platform HTTP ingress so schema v4 `agent.dispatch` links target the dispatching `agent.action` rather than the request span. Remote dispatch now records the prior eve parent in W3C `tracestate` while retaining standard `traceparent` transport correlation.
+- 871332a: Keep Vercel Agent Runs spans indexed under the root session while recording each activation's run ID and immediate parent lineage separately. Remote-created sessions retain that root when the receiver trusts the authenticated forwarder.
+- 4567151: Update workflow SDK dependencies to their latest beta releases.
+
 ## 0.54.3
 
 ### Patch Changes

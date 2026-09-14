@@ -6,7 +6,13 @@ import {
   dispatchDynamicToolEvent,
   rebindMissingCompiledDynamicToolCallbacks,
 } from "#context/dynamic-tool-lifecycle.js";
-import { AuthKey, SessionIdKey, SessionKey, TurnMemoryLocksKey } from "#context/keys.js";
+import {
+  AuthKey,
+  SessionIdKey,
+  SessionKey,
+  StaticModelReferenceKey,
+  TurnMemoryLocksKey,
+} from "#context/keys.js";
 import { createMemoryToolDynamicDefinition } from "#context/memory-tools.js";
 import { resolveApprovalPolicy } from "#approval/definition.js";
 import { defineTool } from "#tools/definition.js";
@@ -27,6 +33,7 @@ function createContext(scope: string) {
     principalType: "user",
   };
   const ctx = new ContextContainer();
+  ctx.set(StaticModelReferenceKey, null);
   ctx.set(AuthKey, auth);
   ctx.set(SessionIdKey, "session_1");
   ctx.set(SessionKey, {
@@ -143,6 +150,7 @@ describe("memory provider tools", () => {
       async () =>
         await dynamic.events["turn.started"]?.(event, {
           channel: {},
+          model: null,
           messages: [],
           session: { auth: { current: null, initiator: null }, id: "session_1" },
         }),

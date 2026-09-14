@@ -71,7 +71,13 @@ function dependencies(
   runPackageManagerInstall: ReturnType<
     typeof vi.fn<InitCommandDependencies["runPackageManagerInstall"]>
   >;
+  installSelfModification: ReturnType<
+    typeof vi.fn<InitCommandDependencies["installSelfModification"]>
+  >;
   selectInitHandoff: ReturnType<typeof vi.fn<InitCommandDependencies["selectInitHandoff"]>>;
+  selectInitSelfModification: ReturnType<
+    typeof vi.fn<InitCommandDependencies["selectInitSelfModification"]>
+  >;
   spawnCodingAgentRepl: ReturnType<typeof vi.fn<InitCommandDependencies["spawnCodingAgentRepl"]>>;
   spawnPackageManager: ReturnType<typeof vi.fn<InitCommandDependencies["spawnPackageManager"]>>;
   tryInitializeGit: ReturnType<typeof vi.fn<InitCommandDependencies["tryInitializeGit"]>>;
@@ -106,7 +112,9 @@ function dependencies(
         webPackageVersions: { ...WEB_VERSIONS, ...options.webPackageVersions },
       }),
     runPackageManagerInstall: vi.fn(async () => packageInstallResult()),
+    installSelfModification: vi.fn(async () => {}),
     selectInitHandoff: vi.fn(async () => "eve-dev"),
+    selectInitSelfModification: vi.fn(async () => false),
     spawnCodingAgentRepl: vi.fn(async () => true),
     spawnPackageManager: vi.fn(async () => packageProcessResult()),
     tryInitializeGit: vi.fn(async () => gitResult),
@@ -192,6 +200,37 @@ describe("runInitCommand", () => {
     );
     expect(deps.runPackageManagerInstall).not.toHaveBeenCalled();
     expect(deps.tryInitializeGit).not.toHaveBeenCalled();
+  });
+
+  it("reports a target conflict when a workspace agent already exists", async () => {
+    const workspaceRoot = await mkdtemp(join(tmpdir(), "eve-init-workspace-conflict-"));
+    await mkdir(join(workspaceRoot, "agents", "support", "agent"), { recursive: true });
+    await writeFile(
+      join(workspaceRoot, "package.json"),
+      '{"name":"workspace","dependencies":{"eve":"*"}}\n',
+    );
+    const output = logger();
+    const deps = dependencies();
+    const terminalEvents: Array<{ failureCode?: string; result: string; step: string }> = [];
+
+    await expect(
+      runInitCommand(
+        output,
+        workspaceRoot,
+        "support",
+        {},
+        deps,
+        undefined,
+        (step, result, failureCode) => {
+          terminalEvents.push({ failureCode, result, step });
+        },
+      ),
+    ).rejects.toThrow('Cannot create agent "support"');
+
+    expect(terminalEvents).toEqual([
+      { step: "resolve_target", result: "error", failureCode: "target_conflict" },
+    ]);
+    expect(deps.runPackageManagerInstall).not.toHaveBeenCalled();
   });
 
   it("creates the base agent with the runtime default model and invoking eve dependency", async () => {
@@ -304,6 +343,42 @@ describe("runInitCommand", () => {
 
     await expect(pathExists(join(parentDirectory, "my-agent"))).resolves.toBe(false);
     expect(deps.runPackageManagerInstall).not.toHaveBeenCalled();
+  });
+
+  it("installs self-modification before Git initialization and skips the coding-agent handoff", async () => {
+    const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-self-modification-"));
+    const output = logger();
+    const deps = dependencies();
+    deps.selectInitSelfModification.mockResolvedValue(true);
+
+    await runInitCommand(output, parentDirectory, "my-agent", {}, deps);
+
+    const projectPath = join(parentDirectory, "my-agent");
+    expect(deps.installSelfModification).toHaveBeenCalledWith(projectPath);
+    expect(deps.installSelfModification.mock.invocationCallOrder[0]).toBeLessThan(
+      deps.tryInitializeGit.mock.invocationCallOrder[0]!,
+    );
+    expect(deps.selectInitHandoff).not.toHaveBeenCalled();
+    expect(deps.spawnCodingAgentRepl).not.toHaveBeenCalled();
+    expect(deps.spawnPackageManager).toHaveBeenCalledWith("pnpm", projectPath, [
+      "exec",
+      "eve",
+      "dev",
+      "--onboard",
+    ]);
+    expect(stripAnsi(output.messages.join("\n"))).toContain("✓ Enabled self-modification");
+  });
+
+  it("does not offer self-modification when init was launched by a coding agent", async () => {
+    const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-agent-launched-selfmod-"));
+    const output = logger();
+    const deps = dependencies();
+    deps.isCodingAgentLaunch.mockResolvedValue(true);
+
+    await runInitCommand(output, parentDirectory, "my-agent", {}, deps);
+
+    expect(deps.selectInitSelfModification).not.toHaveBeenCalled();
+    expect(deps.installSelfModification).not.toHaveBeenCalled();
   });
 
   it("opens the selected coding-agent REPL instead of starting eve dev", async () => {
@@ -430,20 +505,26 @@ describe("runInitCommand", () => {
     },
   );
 
-  it("refuses arbitrary non-empty current directories without prompting or writing", async () => {
+  it("reports a target conflict for arbitrary non-empty current directories", async () => {
     const projectPath = await mkdtemp(join(tmpdir(), "eve-init-nonempty-"));
     await writeFile(join(projectPath, "notes.md"), "keep me\n", "utf8");
     const output = logger();
     const deps = dependencies();
+    const terminalEvents: Array<{ failureCode?: string; result: string; step: string }> = [];
 
-    await expect(runInitCommand(output, projectPath, ".", {}, deps)).rejects.toThrow(
-      "Cannot initialize an agent in the non-empty directory",
-    );
+    await expect(
+      runInitCommand(output, projectPath, ".", {}, deps, undefined, (step, result, failureCode) => {
+        terminalEvents.push({ failureCode, result, step });
+      }),
+    ).rejects.toThrow("Cannot initialize an agent in the non-empty directory");
 
     await expect(readFile(join(projectPath, "notes.md"), "utf8")).resolves.toBe("keep me\n");
     await expect(pathExists(join(projectPath, "package.json"))).resolves.toBe(false);
     await expect(pathExists(join(projectPath, "agent"))).resolves.toBe(false);
     expect(deps.runPackageManagerInstall).not.toHaveBeenCalled();
+    expect(terminalEvents).toEqual([
+      { step: "resolve_target", result: "error", failureCode: "target_conflict" },
+    ]);
   });
 
   it.each([

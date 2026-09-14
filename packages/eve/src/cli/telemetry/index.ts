@@ -38,6 +38,10 @@ export type EveCliSetupTerminalResult = "completed" | "cancelled" | "error";
 /** A bounded, non-sensitive reason for a failed setup terminal event. */
 export type EveCliSetupFailureCode =
   | "target_resolution"
+  | "target_conflict"
+  | "target_invalid"
+  | "target_filesystem"
+  | "workspace_input"
   | "scaffolding"
   | "package_manager_not_found"
   | "package_manager_start_failed"

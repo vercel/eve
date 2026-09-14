@@ -1,11 +1,6 @@
-import { defineAgent } from "#public/index.js";
+import { defineWorkspaceAgent } from "#public/index.js";
 
-export default defineAgent({
-  description: "Delegate persistent research tasks.",
-  experimental: {
-    workflow: {
-      retention: 0,
-    },
-  },
-  model: "anthropic/claude-sonnet-5",
+/** Epoch 13 added name-addressed workspace agents. */
+export default defineWorkspaceAgent({
+  name: "research",
 });

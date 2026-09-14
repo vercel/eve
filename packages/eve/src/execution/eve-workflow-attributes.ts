@@ -163,7 +163,7 @@ export function readParentSessionId(
  * site (see {@link "#channel/types.js".SessionParent}) so a subagent
  * five levels deep can still attribute itself to the top user-facing
  * session without walking the chain. Returns `undefined` for top-level
- * runs, which carry no `eve.parentSession`.
+ * runs, which carry no verified `eve.parentSession`.
  */
 export function readRootSessionId(serializedContext: Record<string, unknown>): string | undefined {
   return readParentLineage(serializedContext).rootSessionId;

@@ -4,11 +4,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { ROOT_COMPILED_AGENT_NODE_ID } from "#compiler/manifest.js";
 import type { CompiledModuleMap } from "#compiler/module-map.js";
 import { ContextContainer } from "#context/container.js";
+import { dispatchDynamicModelEvent } from "#context/dynamic-model-lifecycle.js";
+import { getEffectiveModelSelection } from "#context/effective-model.js";
 import {
-  dispatchDynamicModelEvent,
-  getActiveDynamicModelSelection,
-} from "#context/dynamic-model-lifecycle.js";
-import {
+  StaticModelReferenceKey,
   LiveStepDynamicModelSelectionKey,
   SessionDynamicModelReferenceKey,
   TurnDynamicModelReferenceKey,
@@ -21,6 +20,8 @@ import {
   createTurnStartedEvent,
 } from "#protocol/message.js";
 import type { RuntimeDynamicModelReference } from "#runtime/agent/bootstrap.js";
+
+const FALLBACK = { id: "openai/gpt-5.5" } as const;
 
 const DYNAMIC_MODEL_SOURCE: RuntimeDynamicModelReference = {
   eventNames: ["session.started", "turn.started", "step.started"],
@@ -35,7 +36,7 @@ afterEach(() => {
 
 describe("dynamic model lifecycle", () => {
   it("persists session-scoped model references", async () => {
-    const ctx = new ContextContainer();
+    const ctx = createCtx();
     const moduleMap = createModuleMap({
       default: {
         model: defineDynamic({
@@ -57,7 +58,7 @@ describe("dynamic model lifecycle", () => {
       scope: { moduleMap, nodeId: undefined },
     });
 
-    expect(getActiveDynamicModelSelection(ctx)).toEqual({
+    expect(getEffectiveModelSelection(ctx)).toEqual({
       reference: {
         contextWindowTokens: 128_000,
         id: "openai/gpt-5.5-mini",
@@ -65,10 +66,11 @@ describe("dynamic model lifecycle", () => {
         providerOptions: undefined,
       },
     });
+    expect(ctx.get(StaticModelReferenceKey)?.id).toBe(FALLBACK.id);
   });
 
   it("prefers step, then turn, then session selections", () => {
-    const ctx = new ContextContainer();
+    const ctx = createCtx();
     ctx.set(SessionDynamicModelReferenceKey, {
       contextWindowTokens: 100_000,
       id: "openai/session",
@@ -78,16 +80,48 @@ describe("dynamic model lifecycle", () => {
       id: "openai/turn",
     });
 
-    expect(getActiveDynamicModelSelection(ctx)?.reference.id).toBe("openai/turn");
+    expect(getEffectiveModelSelection(ctx)?.reference.id).toBe("openai/turn");
 
     ctx.setVirtualContext(LiveStepDynamicModelSelectionKey, {
       reference: { contextWindowTokens: 100_000, id: "openai/step" },
     });
-    expect(getActiveDynamicModelSelection(ctx)?.reference.id).toBe("openai/step");
+    expect(getEffectiveModelSelection(ctx)?.reference.id).toBe("openai/step");
+  });
+
+  it("exposes the lower-precedence model to a resolver", async () => {
+    const ctx = createCtx();
+    ctx.set(SessionDynamicModelReferenceKey, { id: "openai/session" });
+    ctx.set(TurnDynamicModelReferenceKey, { id: "openai/previous-turn" });
+    const observed: Array<string | undefined> = [];
+    const moduleMap = createModuleMap({
+      default: {
+        model: defineDynamic({
+          events: {
+            "turn.started": (_event, resolveCtx) => {
+              observed.push(resolveCtx.model?.id);
+              return {
+                model: "openai/next-turn",
+                modelContextWindowTokens: 100_000,
+              };
+            },
+          },
+        }),
+      },
+    });
+
+    await dispatchDynamicModelEvent({
+      ctx,
+      dynamicModel: DYNAMIC_MODEL_SOURCE,
+      event: createTurnStartedEvent({ sequence: 0, turnId: "turn_0" }),
+      messages: [],
+      scope: { moduleMap, nodeId: undefined },
+    });
+
+    expect(observed).toEqual(["openai/session"]);
   });
 
   it("replaces turn-scoped selections on each matching turn", async () => {
-    const ctx = new ContextContainer();
+    const ctx = createCtx();
     let turnModel = "openai/first-turn";
     const moduleMap = createModuleMap({
       default: {
@@ -112,16 +146,16 @@ describe("dynamic model lifecycle", () => {
       });
 
     await dispatch(0);
-    expect(getActiveDynamicModelSelection(ctx)?.reference.id).toBe("openai/first-turn");
+    expect(getEffectiveModelSelection(ctx)?.reference.id).toBe("openai/first-turn");
 
     turnModel = "openai/second-turn";
     await dispatch(1);
-    expect(getActiveDynamicModelSelection(ctx)?.reference.id).toBe("openai/second-turn");
+    expect(getEffectiveModelSelection(ctx)?.reference.id).toBe("openai/second-turn");
   });
 
   it("keeps step-scoped live provider instances outside mock mode", async () => {
     vi.stubEnv("NODE_ENV", "production");
-    const ctx = new ContextContainer();
+    const ctx = createCtx();
     const stepModel = createLanguageModel("openai.responses", "gpt-step");
     const moduleMap = createModuleMap({
       default: {
@@ -149,7 +183,7 @@ describe("dynamic model lifecycle", () => {
       scope: { moduleMap, nodeId: undefined },
     });
 
-    expect(getActiveDynamicModelSelection(ctx)).toEqual({
+    expect(getEffectiveModelSelection(ctx)).toEqual({
       model: stepModel,
       reference: {
         contextWindowTokens: 64_000,
@@ -161,7 +195,7 @@ describe("dynamic model lifecycle", () => {
   });
 
   it("strips step-scoped live provider instances in mock mode", async () => {
-    const ctx = new ContextContainer();
+    const ctx = createCtx();
     const stepModel = createLanguageModel("openai.responses", "gpt-step");
     const moduleMap = createModuleMap({
       default: {
@@ -189,7 +223,7 @@ describe("dynamic model lifecycle", () => {
       scope: { moduleMap, nodeId: undefined },
     });
 
-    expect(getActiveDynamicModelSelection(ctx)).toEqual({
+    expect(getEffectiveModelSelection(ctx)).toEqual({
       reference: {
         contextWindowTokens: 64_000,
         id: "openai/gpt-step",
@@ -208,6 +242,7 @@ describe("dynamic model lifecycle", () => {
       vi.stubEnv("NODE_ENV", nodeEnv);
       vi.stubEnv("EVE_MOCK_AUTHORED_MODELS", mockAuthored);
       const ctx = new ContextContainer();
+      ctx.set(StaticModelReferenceKey, null);
       const stepModel = mockModel({
         modelId: "scripted-dispatcher",
         provider: "custom-fixture",
@@ -239,7 +274,7 @@ describe("dynamic model lifecycle", () => {
         scope: { moduleMap, nodeId: undefined },
       });
 
-      const selected = getActiveDynamicModelSelection(ctx);
+      const selected = getEffectiveModelSelection(ctx);
       expect(selected?.model).toBe(stepModel);
       expect(selected?.reference.id).toBe("custom-fixture/scripted-dispatcher");
       if (selected?.model === undefined) throw new Error("Expected the explicit mock model.");
@@ -252,7 +287,7 @@ describe("dynamic model lifecycle", () => {
   );
 
   it("rejects live provider instances at durable scopes", async () => {
-    const ctx = new ContextContainer();
+    const ctx = createCtx();
     const liveModel = createLanguageModel("openai.responses", "gpt-live");
     const moduleMap = createModuleMap({
       default: {
@@ -281,7 +316,7 @@ describe("dynamic model lifecycle", () => {
   });
 
   it("propagates resolver exceptions without selecting a fallback", async () => {
-    const ctx = new ContextContainer();
+    const ctx = createCtx();
     ctx.set(TurnDynamicModelReferenceKey, {
       contextWindowTokens: 100_000,
       id: "openai/previous-turn",
@@ -309,11 +344,11 @@ describe("dynamic model lifecycle", () => {
     ).rejects.toThrow("flag service unavailable");
 
     expect(ctx.get(TurnDynamicModelReferenceKey)).toBeNull();
-    expect(getActiveDynamicModelSelection(ctx)).toBeNull();
+    expect(getEffectiveModelSelection(ctx)?.reference).toEqual(FALLBACK);
   });
 
   it("rejects null and malformed selections", async () => {
-    const ctx = new ContextContainer();
+    const ctx = createCtx();
     let result: unknown = null;
     const moduleMap = createModuleMap({
       default: {
@@ -343,6 +378,12 @@ describe("dynamic model lifecycle", () => {
     await expect(dispatch()).rejects.toThrow(/unknown key\(s\): contextWindowTokens/);
   });
 });
+
+function createCtx(): ContextContainer {
+  const ctx = new ContextContainer();
+  ctx.set(StaticModelReferenceKey, FALLBACK);
+  return ctx;
+}
 
 function createModuleMap(moduleNamespace: Record<string, unknown>): CompiledModuleMap {
   return {

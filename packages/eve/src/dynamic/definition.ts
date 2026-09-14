@@ -45,6 +45,8 @@ export const ALLOWED_DYNAMIC_CONNECTION_EVENTS: ReadonlySet<string> = new Set<Dy
  * the session context inside tool `execute` functions.
  */
 export interface DynamicResolveContext {
+  /** Effective model for this resolver, or `null` before dynamic model selection. */
+  readonly model: { readonly id: string } | null;
   readonly session: {
     readonly id: string;
     readonly auth: SessionAuth;
