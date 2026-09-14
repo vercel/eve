@@ -206,6 +206,9 @@ Activation roots also carry `agent.run.type`, `agent.session.origin`,
 `agent.trace.content.output` policy results, and `agent.schedule.id` when a
 schedule started the session. `agent.session.title` is present only when input
 content is allowed and is removed by destination input-redaction policies.
+`agent.run.type` is `session` or `subagent`; `agent.session.origin` is
+`schedule`, `channel`, or `unknown`; and the content-policy attributes are
+booleans from the resolved trace capture decision.
 Only activations use the `invoke_agent` operation. A workflow tool invocation
 that coordinates at least one nested agent uses `invoke_workflow`, with its
 path-derived tool name in `gen_ai.workflow.name`. Durable workflow tools without

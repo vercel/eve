@@ -782,6 +782,39 @@ describe("createAgentOtelInstrumentation", () => {
     expect(invocation.attributes).not.toHaveProperty("vercel.session_id");
   });
 
+  it("enriches activation metadata after early session preparation", async () => {
+    const runtime = createRuntime();
+    const sessionId = "session-early";
+    await runtime.prepareSessionTrace({
+      agentName: "weather",
+      channelAudience: "public",
+      channelKind: "http",
+      idempotencyKey: sessionIdempotencyKey(sessionId),
+      rootSessionId: sessionId,
+      sessionId,
+      type: "session.started",
+    });
+
+    await publishTurnStarted({
+      hooks: runtime.hooks,
+      scheduleId: "daily-report",
+      sessionId,
+      title: "Prepared after trace allocation",
+      turnId: "turn-1",
+      turnSequence: 0,
+    });
+    await completeTurn(runtime.hooks, sessionId, "turn-1");
+    await runtime.provider.forceFlush();
+
+    expect(
+      byName(runtime.exporter.getFinishedSpans(), "invoke_agent weather")[0]?.attributes,
+    ).toMatchObject({
+      "agent.schedule.id": "daily-report",
+      "agent.session.origin": "schedule",
+      "agent.session.title": "Prepared after trace allocation",
+    });
+  });
+
   it("falls back to fresh ids when no trace seed is present", async () => {
     const runtime = createRuntime();
     const sessionEvent = {

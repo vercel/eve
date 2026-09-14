@@ -73,6 +73,16 @@ export function createAgentOtelSessionContext(
         title: event.title,
       };
       await input.stateStore.setSession(event.sessionId, state);
+    } else if (
+      (state.scheduleId === undefined && event.scheduleId !== undefined) ||
+      (state.title === undefined && event.title !== undefined)
+    ) {
+      state = {
+        ...state,
+        scheduleId: state.scheduleId ?? event.scheduleId,
+        title: state.title ?? event.title,
+      };
+      await input.stateStore.setSession(event.sessionId, state);
     }
     return state;
   };
