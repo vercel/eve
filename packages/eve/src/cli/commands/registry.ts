@@ -333,6 +333,14 @@ async function searchRegistryCatalog(
     : new Map<string, RegistrySearchMetadata>();
   const official = resultsBySource.get(OFFICIAL_CATALOG);
   if (official !== undefined) {
+    const visibleItems = official.items.filter(
+      (item) => metadataByAddress.get(searchItemAddress(item))?.hidden !== true,
+    );
+    official.items = visibleItems;
+    official.pagination = {
+      ...official.pagination,
+      total: visibleItems.length,
+    };
     official.items.sort((left, right) => {
       const rank = (item: RegistrySearchItem) =>
         metadataByAddress.get(searchItemAddress(item))?.implementation === "native" ? 0 : 1;

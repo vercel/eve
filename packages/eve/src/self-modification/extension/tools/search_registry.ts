@@ -227,6 +227,7 @@ export function parseRegistryIndex(value: unknown): readonly CatalogEntry[] {
     const address = optionalString(item.name);
     if (address === undefined) continue;
     const eve = eveMetadata(item);
+    if (eve.hidden === true) continue;
 
     const entry: {
       address: string;

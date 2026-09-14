@@ -1221,6 +1221,44 @@ describe("registry commands", () => {
     );
   });
 
+  it("omits official items marked hidden from registry search", async () => {
+    readFile.mockResolvedValue(JSON.stringify({ name: "project" }));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              items: [
+                { name: "eve/self-modification" },
+                { name: "experimental/self-modification", meta: { eve: { hidden: true } } },
+              ],
+            }),
+          ),
+      ),
+    );
+    searchRegistries.mockResolvedValue({
+      items: [
+        {
+          registry: "https://eve.dev/r/registry.json",
+          name: "eve/self-modification",
+          addCommandArgument: "https://eve.dev/r/eve/self-modification.json",
+        },
+        {
+          registry: "https://eve.dev/r/registry.json",
+          name: "experimental/self-modification",
+          addCommandArgument: "https://eve.dev/r/experimental/self-modification.json",
+        },
+      ],
+      pagination: { total: 2, offset: 0, limit: 2, hasMore: false },
+    });
+
+    await expect(browseRegistryCatalog("/project")).resolves.toMatchObject({
+      items: [{ name: "eve/self-modification" }],
+      total: 1,
+    });
+  });
+
   it("lists the official registry without configured namespaces", async () => {
     const logger = createLogger();
     readFile.mockResolvedValue(JSON.stringify({ name: "project" }));

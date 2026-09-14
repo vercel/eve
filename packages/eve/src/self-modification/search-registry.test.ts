@@ -111,6 +111,17 @@ describe("parseRegistryIndex", () => {
     expect(parseRegistryIndex({ items: "nope" })).toEqual([]);
   });
 
+  it("omits items hidden from registry search", () => {
+    expect(
+      parseRegistryIndex({
+        items: [
+          { name: "eve/self-modification" },
+          { name: "experimental/self-modification", meta: { eve: { hidden: true } } },
+        ],
+      }).map((entry) => entry.address),
+    ).toEqual(["eve/self-modification"]);
+  });
+
   it("reads whether an item declares a setup flow, used by selfmod__registry_add's split rule", () => {
     const entries = parseRegistryIndex({
       items: [
