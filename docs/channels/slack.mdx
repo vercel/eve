@@ -33,7 +33,7 @@ export default slackChannel({
 
 `connectSlackCredentials` returns `{ botToken, webhookVerifier }`, keeping token rotation, multi-workspace tenancy, and request verification inside Connect rather than your code.
 
-A production build generates a Slack app manifest for each Slack channel, whether you use Vercel Connect or manage credentials yourself. `agent/channels/slack.ts` emits `channels/slack.slack-app-manifest.json` under `.output` locally or `.vercel/output` on Vercel. You can apply that file manually through Slack's app manifest tools; Connect-backed requirements reference the same file automatically.
+A production build generates a Slack app manifest for each Slack channel, whether you use Vercel Connect or manage credentials yourself. `agent/channels/slack.ts` emits `channels/slack.slack-app-manifest.json` under `.output` locally or `.vercel/output` on Vercel. You can apply that file manually through Slack's app manifest tools. For Connect-backed channels, eve also embeds the Slack manifest in the Vercel Connect requirement with Connect-managed callback and trigger URLs.
 
 The manifest always includes the `app_mentions:read` and `chat:write` bot scopes, the `app_mention` event, interactivity, and an App Home Messages tab. Configure the bot's presentation and add requirements for your authored handlers on `slackChannel()`; eve deduplicates events and scopes against the baseline:
 
