@@ -31,6 +31,7 @@ import {
 import { applyWorkflowTransform } from "#internal/workflow-bundle/workflow-builders.js";
 import { useTemporaryDirectories } from "#internal/testing/use-temporary-app-roots.js";
 import { defineChannel, WS } from "#public/definitions/channel.js";
+import defaultWorkflow from "#tools/framework/workflow.js";
 
 const configureDevelopmentNitroRoutes = vi.fn(async () => undefined);
 const configureProductionNitroRoutes = vi.fn(async () => undefined);
@@ -92,27 +93,33 @@ function createNitroStub(input: { buildDir?: string; dev?: boolean } = {}): Nitr
 }
 
 async function createPreparedHost(
-  input: { readonly websocket?: boolean } = {},
+  input: { readonly websocket?: boolean; readonly workflow?: boolean } = {},
 ): Promise<PreparedDevelopmentApplicationHost> {
   const appRoot = "/tmp/weather-agent";
   const paths = resolveCompilerArtifactPaths(appRoot);
+  const modules: Array<NonNullable<Parameters<typeof compileFromMemory>[0]["modules"]>[number]> =
+    [];
+  if (input.websocket === true) {
+    modules.push({
+      logicalPath: "channels/voice.ts",
+      loadNamespace: async () => ({
+        default: defineChannel({
+          routes: [WS("/eve/v1/voice/ws", async () => ({ open() {} }))],
+        }),
+      }),
+    });
+  }
+  if (input.workflow === true) {
+    modules.push({
+      logicalPath: "tools/workflow.ts",
+      loadNamespace: async () => ({ default: defaultWorkflow }),
+    });
+  }
   const { manifest } = await compileFromMemory({
     agentRoot: `${appRoot}/agent`,
     appRoot,
     model: "openai/gpt-5.4",
-    modules:
-      input.websocket === true
-        ? [
-            {
-              logicalPath: "channels/voice.ts",
-              loadNamespace: async () => ({
-                default: defineChannel({
-                  routes: [WS("/eve/v1/voice/ws", async () => ({ open() {} }))],
-                }),
-              }),
-            },
-          ]
-        : [],
+    modules,
     name: "weather-agent",
   });
   const metadata: CompileMetadata = {
@@ -705,10 +712,7 @@ describe("application Nitro creation", () => {
       await import("#internal/nitro/host/create-application-nitro.js");
 
     const directHost = await createPreparedHost();
-    const workflowHost = await createPreparedHost();
-    (workflowHost.compileResult.manifest.tools as unknown as Array<{ readonly name: string }>).push(
-      { name: "workflow" },
-    );
+    const workflowHost = await createPreparedHost({ workflow: true });
 
     await createProductionApplicationNitro(directHost, createProductionOptions(directHost));
     await createProductionApplicationNitro(workflowHost, createProductionOptions(workflowHost));

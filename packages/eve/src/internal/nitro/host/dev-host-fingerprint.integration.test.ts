@@ -8,6 +8,7 @@ import { computeDevelopmentHostFingerprint } from "#internal/nitro/host/dev-host
 import type { PreparedDevelopmentApplicationHost } from "#internal/nitro/host/types.js";
 import { defineChannel, GET } from "#public/definitions/channel.js";
 import { defineSchedule } from "#public/definitions/schedule.js";
+import defaultWorkflow from "#tools/framework/workflow.js";
 
 const temporaryDirectories: string[] = [];
 
@@ -42,7 +43,7 @@ async function createHost(variant: HostVariant = {}): Promise<PreparedDevelopmen
     await writeFile(instrumentationSourcePath, variant.instrumentationSource);
   }
 
-  const modules = [
+  const modules: Array<NonNullable<Parameters<typeof compileFromMemory>[0]["modules"]>[number]> = [
     ...(variant.channel === undefined
       ? []
       : [
@@ -66,6 +67,12 @@ async function createHost(variant: HostVariant = {}): Promise<PreparedDevelopmen
           },
         ]),
   ];
+  if (variant.workflowTool === true) {
+    modules.push({
+      logicalPath: "tools/workflow.ts",
+      loadNamespace: async () => ({ default: defaultWorkflow }),
+    });
+  }
   const { manifest } = await compileFromMemory({
     agentRoot,
     appRoot,
@@ -79,10 +86,6 @@ async function createHost(variant: HostVariant = {}): Promise<PreparedDevelopmen
     modules,
     name: "fingerprint-host",
   });
-  if (variant.workflowTool === true) {
-    (manifest.tools as unknown as Array<{ readonly name: string }>).push({ name: "workflow" });
-  }
-
   return {
     appRoot,
     compiledArtifacts: {

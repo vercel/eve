@@ -2,8 +2,10 @@
   "kind": "eve-extension-capability-contract",
   "capability": "tool",
   "epoch": 37,
-  "sha256": "edd72cb9a9b5fa934b494174b60eb83a0adaeccdb9bebd7e6d170a4eaacd20b6",
+  "sha256": "4973f11228765a1d1d25d999d06b2b7fadb1fac0be667c01d063e79f6d0a2346",
   "exports": [
+    "DynamicWorkflowToolOptions",
+    "default",
     "defaultWebSearch",
     "defineTool",
     "defineWorkflowTool",
@@ -13,6 +15,7 @@
     "toolOutput",
     "toolOutputPart",
     "toolResultFrom",
-    "webSearch"
+    "webSearch",
+    "workflow"
   ]
 }
