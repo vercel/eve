@@ -1441,6 +1441,39 @@ describe("turnStep", () => {
     expect(workflowWritesByNamespace.get(DEFAULT_WORKFLOW_STREAM_NAMESPACE) ?? []).toEqual([]);
   });
 
+  it("releases the parent stream writer when the deliver hook throws", async () => {
+    const adapter: ChannelAdapter = {
+      kind: "deliver-failure",
+      deliver: vi.fn(async () => {
+        throw new Error("deliver failed");
+      }),
+    };
+    vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue({
+      ...createStubBundle(),
+      adapterRegistry: { adaptersByKind: new Map([[adapter.kind, adapter]]) },
+    } as never);
+    installSessionStoreMocks([createStubSession()]);
+
+    const ctx = new ContextContainer();
+    ctx.set(AuthKey, null);
+    ctx.set(BundleKey, createStubBundle());
+    ctx.set(ChannelKey, adapter);
+    ctx.set(ContinuationTokenKey, "deliver-failure");
+    ctx.set(ModeKey, "conversation");
+    ctx.set(SessionIdKey, "session-1");
+    const parentWritable = createTestWritable();
+
+    await expect(
+      turnStep({
+        input: { kind: "deliver", payloads: [{ message: "hello" }] },
+        parentWritable,
+        serializedContext: serializeContext(ctx),
+        sessionState: createStubSessionState(),
+      }),
+    ).rejects.toThrow("deliver failed");
+    expect(parentWritable.locked).toBe(false);
+  });
+
   it.each([
     {
       expected: {

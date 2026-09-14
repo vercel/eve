@@ -43,7 +43,7 @@ export interface SessionEventSink {
   readonly handleEvent: HandleEventFn;
   /** Closes the parent stream; only a terminal `done` step does this. */
   close(): Promise<void>;
-  /** Releases the writer lock so the next step can acquire it. */
+  /** Releases the writer lock so the next step can acquire it. Safe after `close()`. */
   release(): void;
 }
 
@@ -116,12 +116,21 @@ export function createSessionEventSink(input: SessionEventSinkInput): SessionEve
     });
   };
 
+  let released = false;
+  const release = (): void => {
+    if (released) return;
+    released = true;
+    writer.releaseLock();
+  };
   return {
     adapterCtx,
-    close: () => writer.close(),
+    close: async () => {
+      await writer.close();
+      release();
+    },
     dynamicConnections,
     effectiveNode,
     handleEvent,
-    release: () => writer.releaseLock(),
+    release,
   };
 }
