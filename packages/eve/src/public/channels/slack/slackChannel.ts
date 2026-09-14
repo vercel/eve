@@ -665,6 +665,8 @@ export interface SlackChannelConfig {
   readonly eventSubscriptions?: readonly string[];
   /** Additional Slack bot OAuth scopes required by this channel. */
   readonly scopes?: readonly string[];
+  /** Public webhook URL written to the generated Slack app manifest. */
+  readonly requestUrl?: string;
 
   /**
    * Chooses where each input request is delivered. Direct-message requests go to the
@@ -1077,6 +1079,7 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
       description: config.bot?.description,
       displayName: config.bot?.name,
       longDescription: config.bot?.longDescription,
+      requestUrl: config.requestUrl,
     }),
     vercelConnect: credentials?.vercelConnect,
   });

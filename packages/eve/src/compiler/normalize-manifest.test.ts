@@ -754,6 +754,7 @@ describe("compileAgentManifest source graph", () => {
               name: "Support agent",
             },
             eventSubscriptions: ["message.channels"],
+            requestUrl: "https://agent.example.com/eve/v1/slack",
             scopes: ["channels:history"],
           }),
         }),
@@ -784,8 +785,14 @@ describe("compileAgentManifest source graph", () => {
         scopes: { bot: ["app_mentions:read", "chat:write", "channels:history"] },
       },
       settings: {
-        event_subscriptions: { bot_events: ["app_mention", "message.channels"] },
-        interactivity: { is_enabled: true },
+        event_subscriptions: {
+          bot_events: ["app_mention", "message.channels"],
+          request_url: "https://agent.example.com/eve/v1/slack",
+        },
+        interactivity: {
+          is_enabled: true,
+          request_url: "https://agent.example.com/eve/v1/slack",
+        },
         org_deploy_enabled: false,
         socket_mode_enabled: false,
         token_rotation_enabled: false,
