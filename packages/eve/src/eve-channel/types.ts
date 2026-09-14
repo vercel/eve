@@ -96,12 +96,13 @@ export interface EveChannelInput {
   readonly auth: AuthFn<Request> | readonly AuthFn<Request>[];
   /**
    * The trusted-forwarders policy: which transport-authenticated callers may
-   * assert a forwarded principal or callback-marked public trace audience. The predicate
-   * receives the *verified* route-auth principal of the forwarder — who is
-   * asserting, never what is asserted — and must match it precisely (for example
-   * `(forwarder) => forwarder.subject === vercelSubject({ teamSlug, projectName })`).
-   * A permissive predicate lets any authenticated forwarder assert any
-   * principal and public trace audience.
+   * assert a forwarded principal, callback-marked public trace audience, or
+   * remote parent lineage. The predicate receives the *verified* route-auth
+   * principal of the forwarder — who is asserting, never what is asserted —
+   * and must match it precisely (for example `(forwarder) =>
+   * forwarder.subject === vercelSubject({ teamSlug, projectName })`). A
+   * permissive predicate lets any authenticated forwarder assert any principal,
+   * public trace audience, or remote lineage.
    *
    * When a trusted forwarder's assertion is accepted on session creation, the
    * forwarded principal replaces `session.auth.current` and
@@ -110,7 +111,8 @@ export interface EveChannelInput {
    * forwarder is recorded on accepted contexts as the `eve:forwarded-by`
    * attribute. An accepted public audience is evaluated by this deployment's
    * trace policies; the default records model and tool content. Omit the option
-   * to reject forwarded principals with 403 and ignore forwarded audience.
+   * to reject forwarded principals with 403 and ignore forwarded audience and
+   * remote lineage.
    */
   readonly trustedForwarders?: TrustedForwarders;
   /**

@@ -6,7 +6,19 @@ import { setTimeout as delay } from "node:timers/promises";
 
 import { secrets } from "#compiled/just-secrets/index.js";
 import { isErrnoCode, isObject } from "#shared/guards.js";
-import type { ChatGptCredentials, ChatGptRefreshCredentials } from "./oauth.js";
+import {
+  CHATGPT_LOGIN_HINT,
+  ChatGptSignInRequiredError,
+  requestChatGptTokens,
+  type ChatGptCredentials,
+  type ChatGptRefreshCredentials,
+} from "./oauth.js";
+import {
+  ChatGptSignedOutError,
+  isChatGptTokenFresh,
+  type ChatGptToken,
+  type ChatGptTokenResolutionInput,
+} from "./token.js";
 
 const SECRET_ID = { service: "eve", name: "chatgpt" };
 const MAX_SECRET_BYTES = 2560;
@@ -21,6 +33,9 @@ export class ChatGptInvalidStoredSessionError extends Error {
 
 export interface ChatGptCredentialStore {
   read(): Promise<ChatGptRefreshCredentials | ChatGptCredentials | undefined>;
+  resolveToken(
+    input: ChatGptTokenResolutionInput & { readonly fetch?: typeof fetch },
+  ): Promise<ChatGptToken>;
   update(
     callback: (
       current: ChatGptRefreshCredentials | ChatGptCredentials | undefined,
@@ -95,9 +110,45 @@ export function createChatGptCredentialStore(
     return { sessionId: value.sessionId, credentials };
   }
 
-  return {
+  const store: ChatGptCredentialStore = {
     async read() {
       return (await load())?.credentials;
+    },
+    async resolveToken(input) {
+      let credentials = await store.read();
+      if (!credentials) {
+        if (input.forceRefresh) throw new ChatGptSignInRequiredError();
+        throw new ChatGptSignedOutError(
+          `ChatGPT subscription is not signed in. ${CHATGPT_LOGIN_HINT}`,
+        );
+      }
+      const rejectedToken = tokenFromCredentials(credentials)?.token;
+      if (
+        input.forceRefresh ||
+        !isChatGptTokenFresh(tokenFromCredentials(credentials), input.now())
+      ) {
+        credentials = await store.update(async (current) => {
+          if (!current) throw new ChatGptSignInRequiredError();
+          if (
+            "accessToken" in current &&
+            isChatGptTokenFresh(tokenFromCredentials(current), input.now()) &&
+            (!input.forceRefresh || current.accessToken !== rejectedToken)
+          ) {
+            return current;
+          }
+          return requestChatGptTokens(
+            { grant_type: "refresh_token", refresh_token: current.refreshToken },
+            {
+              fetch: input.fetch,
+              previous: current,
+              now: input.now,
+            },
+          );
+        });
+      }
+      const token = tokenFromCredentials(credentials);
+      if (!token) throw new Error(`ChatGPT access token is unavailable. ${CHATGPT_LOGIN_HINT}`);
+      return token;
     },
     async update(callback, options) {
       await mkdir(dirname(path), { recursive: true, mode: 0o700 });
@@ -151,12 +202,25 @@ export function createChatGptCredentialStore(
       }
     },
   };
+  return store;
 }
 
 let defaultStore: ChatGptCredentialStore | undefined;
 
 export function getDefaultChatGptCredentialStore(): ChatGptCredentialStore {
   return (defaultStore ??= createChatGptCredentialStore());
+}
+
+function tokenFromCredentials(
+  credentials: ChatGptCredentials | ChatGptRefreshCredentials,
+): ChatGptToken | undefined {
+  if (!("accessToken" in credentials)) return undefined;
+  return {
+    token: credentials.accessToken,
+    expiresAt: credentials.expiresAt,
+    ...(credentials.accountId && { accountId: credentials.accountId }),
+    ...(credentials.accountLabel && { accountLabel: credentials.accountLabel }),
+  };
 }
 
 function secretStoreError(): Error {

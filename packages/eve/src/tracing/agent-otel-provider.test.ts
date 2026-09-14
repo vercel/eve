@@ -751,15 +751,16 @@ describe("createAgentOtelInstrumentation", () => {
       },
     ]);
     expect(invocation.attributes).toMatchObject({
+      "agent.parent_call.id": "call-child",
+      "agent.parent_run.id": "parent-session",
       "agent.principal.current.id": "user-123",
       "agent.principal.current.type": "user",
       "agent.principal.initiator.type": "none",
+      "agent.run.id": "child-session",
       "gen_ai.conversation.id": "root-session",
       "gen_ai.operation.name": "invoke_agent",
     });
     expect(invocation.attributes).not.toHaveProperty("agent.principal.initiator.id");
-    expect(invocation.attributes).not.toHaveProperty("agent.parent_call.id");
-    expect(invocation.attributes).not.toHaveProperty("agent.parent_run.id");
     expect(invocation.attributes).not.toHaveProperty("agent.root_run.id");
     expect(invocation.attributes).not.toHaveProperty("agent.session.id");
     expect(invocation.attributes).not.toHaveProperty("vercel.session_id");
@@ -3066,9 +3067,10 @@ describe("createAgentOtelInstrumentation", () => {
       },
     ]);
     expect(childTurn.attributes["agent.subagent.name"]).toBe("researcher");
+    expect(childTurn.attributes["agent.parent_call.id"]).toBe("call-1");
+    expect(childTurn.attributes["agent.parent_run.id"]).toBe("session-1");
+    expect(childTurn.attributes["agent.run.id"]).toBe("child-1");
     expect(childTurn.attributes["gen_ai.conversation.id"]).toBe("session-1");
-    expect(childTurn.attributes).not.toHaveProperty("agent.parent_call.id");
-    expect(childTurn.attributes).not.toHaveProperty("agent.parent_run.id");
     expect(childTurn.attributes).not.toHaveProperty("agent.root_run.id");
     expect(childTurn.attributes).not.toHaveProperty("agent.session.id");
     expect(childTurn.attributes).not.toHaveProperty("vercel.session_id");
@@ -3120,6 +3122,7 @@ describe("createAgentOtelInstrumentation", () => {
     const turn = byName(runtime.exporter.getFinishedSpans(), "invoke_agent weather")[0]!;
     expect(byName(runtime.exporter.getFinishedSpans(), "agent.session")).toHaveLength(0);
     expect(turn.attributes).toMatchObject({
+      "agent.run.id": "child-1",
       "gen_ai.conversation.id": "session-1",
     });
     expect(turn.attributes).not.toHaveProperty("agent.session.id");

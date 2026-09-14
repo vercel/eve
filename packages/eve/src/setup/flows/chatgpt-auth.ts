@@ -1,6 +1,9 @@
+import { spawn } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
 import { createServer } from "node:http";
 import { setTimeout as delay } from "node:timers/promises";
+
+import { createProcessOutputBuffer } from "#setup/primitives/process-output.js";
 
 import {
   ChatGptInvalidStoredSessionError,
@@ -28,6 +31,7 @@ const REDIRECT_URI = "http://localhost:1455/auth/callback";
 interface ChatGptAuthOptions {
   readonly signal?: AbortSignal;
   readonly broker?: CodexTokenBroker;
+  readonly codexLogin?: (signal?: AbortSignal) => Promise<void>;
   readonly store?: ChatGptCredentialStore;
   readonly fetch?: typeof fetch;
   readonly open?: (url: string) => void;
@@ -35,18 +39,49 @@ interface ChatGptAuthOptions {
   readonly headless?: boolean;
 }
 
-/** Signs in directly with OpenAI; credentials belong to eve, independently of Codex. */
+/** Signs in through the credential owner selected by the ChatGPT auth facade. */
 export async function ensureChatGptAuth(options: ChatGptAuthOptions = {}): Promise<void> {
   const broker = options.broker ?? getDefaultCodexTokenBroker();
   const store = options.store ?? getDefaultChatGptCredentialStore();
   options.signal?.throwIfAborted();
   const state = await broker.refreshState();
   if (state.kind === "ready") return;
+  const owner = broker.credentialOwner();
+  if (owner === undefined) {
+    throw new Error("ChatGPT credential owner could not be resolved.");
+  }
+  if (owner === "codex") {
+    if (state.kind === "unavailable") throw new Error(state.reason);
+    try {
+      const log = options.log ?? ((message: string) => process.stdout.write(`${message}\n`));
+      await (options.codexLogin ?? ((signal) => loginWithCodex(signal, log)))(options.signal);
+      await assertChatGptAuthReady(
+        broker,
+        "Codex login completed without a usable ChatGPT session.",
+      );
+      return;
+    } catch (error) {
+      if (!isErrnoCode(error, "ENOENT")) throw error;
+      const reprobed = await broker.refreshState();
+      if (broker.credentialOwner() !== "eve") throw error;
+      if (reprobed.kind === "ready") return;
+      if (reprobed.kind === "unavailable") throw new Error(reprobed.reason);
+    }
+  }
+
   try {
     await store.read();
   } catch (error) {
     if (!(error instanceof ChatGptInvalidStoredSessionError)) throw error;
   }
+  await signInWithOwnedCredentials(options, broker, store);
+}
+
+async function signInWithOwnedCredentials(
+  options: ChatGptAuthOptions,
+  broker: CodexTokenBroker,
+  store: ChatGptCredentialStore,
+): Promise<void> {
   const controller = new AbortController();
   const cancel = (): void => controller.abort(new WizardCancelledError());
   process.once("SIGINT", cancel);
@@ -70,9 +105,10 @@ export async function ensureChatGptAuth(options: ChatGptAuthOptions = {}): Promi
       },
       { replace: true },
     );
-    const refreshed = await broker.refreshState();
-    if (refreshed.kind !== "ready")
-      throw new Error("ChatGPT sign-in could not be verified. Retry from /model.");
+    await assertChatGptAuthReady(
+      broker,
+      "ChatGPT sign-in could not be verified. Retry from /model.",
+    );
     log("ChatGPT subscription connected.");
   } catch (error) {
     signal.throwIfAborted();
@@ -80,6 +116,35 @@ export async function ensureChatGptAuth(options: ChatGptAuthOptions = {}): Promi
   } finally {
     clearTimeout(timeout);
     process.removeListener("SIGINT", cancel);
+  }
+}
+
+async function assertChatGptAuthReady(broker: CodexTokenBroker, message: string): Promise<void> {
+  const refreshed = await broker.refreshState();
+  if (refreshed.kind !== "ready") throw new Error(message);
+}
+
+async function loginWithCodex(
+  signal: AbortSignal | undefined,
+  log: (message: string) => void,
+): Promise<void> {
+  const child = spawn("codex", ["login"], {
+    stdio: ["ignore", "pipe", "pipe"],
+    ...(signal !== undefined && { signal }),
+  });
+  const output = createProcessOutputBuffer(({ text }) => log(text));
+  child.stdout.on("data", (chunk: Buffer) => output.write("stdout", chunk));
+  child.stderr.on("data", (chunk: Buffer) => output.write("stderr", chunk));
+  try {
+    await new Promise<void>((resolve, reject) => {
+      child.once("error", reject);
+      child.once("close", (code, signal) => {
+        if (code === 0) resolve();
+        else reject(new Error(`codex login failed (${signal ?? code ?? "unknown"}).`));
+      });
+    });
+  } finally {
+    output.flush();
   }
 }
 

@@ -255,7 +255,7 @@ describe("createSession", () => {
     );
   });
 
-  it("leaves delegated subagent sessions uncapped by default", () => {
+  it("keeps the default cap when remote lineage has no inherited budget", () => {
     const session = createSession({
       continuationToken: "subagent-token",
       rootSessionId: "sess-root",
@@ -263,7 +263,9 @@ describe("createSession", () => {
       turnAgent: createTestTurnAgent(),
     });
 
-    expect(session.limits).toEqual({});
+    expect(session.limits?.maxInputTokensPerSession).toBe(
+      DEFAULT_ROOT_MAX_INPUT_TOKENS_PER_SESSION,
+    );
   });
 
   it("uncaps a root session when the authored limit is false", () => {

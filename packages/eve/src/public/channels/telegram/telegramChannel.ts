@@ -1,6 +1,11 @@
 import type { TelegramInstrumentationMetadata } from "#public/channels/telegram/index.js";
 import { defaultDeliverResult, type ChannelAdapterContext } from "#channel/adapter.js";
-import type { ChannelFrom, ChannelResolveSession } from "#channel/channel-operations.js";
+import {
+  INTERNAL_CHANNEL_DELIVER,
+  type ChannelFrom,
+  type ChannelResolveSession,
+  type InternalChannelSource,
+} from "#channel/channel-operations.js";
 import type { SessionHandle } from "#channel/session.js";
 import type { DeliverPayload, SessionAuthContext, TurnPolicy } from "#channel/types.js";
 import type { SessionContext } from "#public/definitions/callback-context.js";
@@ -578,7 +583,6 @@ async function dispatchMessage(input: {
     username: input.message.from?.username,
   });
   const channelContext = result.context ?? [];
-
   const replyText = input.message.text || input.message.caption;
   const replyInputResponses =
     input.message.replyToMessage?.from?.isBot === true && replyText.trim().length > 0
@@ -591,20 +595,17 @@ async function dispatchMessage(input: {
       : undefined;
 
   try {
-    const source = input.from(telegramContinuationTokenFromState(state));
-    if (replyInputResponses === undefined) {
-      await source.send(turnMessage, {
-        auth: result.auth,
+    const source = input.from(
+      telegramContinuationTokenFromState(state),
+    ) as InternalChannelSource<TelegramChannelState>;
+    await source[INTERNAL_CHANNEL_DELIVER](
+      {
         context: [contextBlock, ...channelContext],
-        state,
-        title: result.title,
-      });
-    } else {
-      await source.respond(replyInputResponses, {
-        auth: result.auth,
-        context: [contextBlock, ...channelContext],
-      });
-    }
+        inputResponses: replyInputResponses,
+        message: turnMessage,
+      },
+      { auth: result.auth, state, title: result.title },
+    );
   } catch (error) {
     log.error("message delivery failed", { error });
   }

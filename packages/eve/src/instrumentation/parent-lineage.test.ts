@@ -28,14 +28,14 @@ describe("parent trace lineage", () => {
   });
 
   it("uses the current callback for remote continuations", () => {
-    expect(
-      resolveParentLineage(parent, undefined, {
-        callId: "continued-remote-call",
-        subagentName: "research",
-        token: "callback-token",
-        url: "https://parent.example/callback",
-      })?.callId,
-    ).toBe("continued-remote-call");
+    const lineage = resolveParentLineage(parent, undefined, {
+      callId: "continued-remote-call",
+      subagentName: "research",
+      token: "callback-token",
+      url: "https://parent.example/callback",
+    });
+    expect(lineage?.callId).toBe("continued-remote-call");
+    expect(lineage?.subagentName).toBe("research");
   });
 
   it("does not invent delegated lineage from callback metadata", () => {

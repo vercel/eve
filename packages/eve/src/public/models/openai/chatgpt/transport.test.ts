@@ -150,6 +150,7 @@ function fakeBroker(
   tokens: Array<{ readonly accountId?: string; readonly token: string }>,
 ): CodexTokenBroker {
   return {
+    credentialOwner: () => undefined,
     getToken: vi.fn(async () => {
       const token = tokens.shift();
       if (token === undefined) throw new Error("No token configured.");
