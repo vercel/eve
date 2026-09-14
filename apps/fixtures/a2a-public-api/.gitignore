@@ -1,0 +1,6 @@
+node_modules/
+.eve/
+.output/
+.nitro/
+dist/
+*.log
