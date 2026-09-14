@@ -14,7 +14,8 @@ export interface CodexTransportOptions {
 
 /**
  * Routes OpenAI Responses requests through the Codex backend. Authentication is
- * resolved and refreshed from eve's local ChatGPT session.
+ * resolved through Codex app-server when available, with eve-owned credentials
+ * used only when the Codex binary is not installed.
  */
 export function createCodexFetch(options: CodexTransportOptions = {}): Fetch {
   const httpFetch = options.fetch ?? fetch;

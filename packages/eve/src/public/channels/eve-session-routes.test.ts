@@ -4,6 +4,7 @@ import type { RouteHandlerArgs } from "#channel/routes.js";
 import type { Session } from "#channel/session.js";
 import { attachRouteSessionCreator } from "#internal/nitro/routes/channel-route-context.js";
 import { mockChannelContext } from "#internal/testing/mocks/mock-channel-operations.js";
+import { writeForwardedParentSessionBaggage } from "#protocol/baggage.js";
 import { none } from "#public/channels/auth.js";
 import { eveChannel } from "#public/channels/eve.js";
 
@@ -273,6 +274,55 @@ describe("eve ID-addressed session routes", () => {
         }),
       );
       expect(trustedForwarders).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([true, false])(
+    "promotes remote parent lineage only from a trusted forwarder (%s)",
+    async (trusted) => {
+      const createSession = vi.fn().mockResolvedValue({
+        events: new ReadableStream(),
+        sessionId: "wrun_A",
+      });
+      const args = attachRouteSessionCreator(createArgs(), createSession);
+      const trustedForwarders = vi.fn(() => trusted);
+      const parent = {
+        callId: "call-1",
+        rootSessionId: "root-session",
+        sessionId: "parent-session",
+        turn: { id: "turn-1", sequence: 2 },
+      } as const;
+
+      const response = await route("POST", "/eve/v1/session", {
+        auth: none(),
+        trustedForwarders,
+      })(
+        new Request("https://eve.test/eve/v1/session", {
+          body: JSON.stringify({
+            callback: {
+              callId: "call-1",
+              subagentName: "research",
+              token: "tok123",
+              url: "https://caller.example.com/eve/v1/callback/tok123",
+            },
+            message: "hello",
+          }),
+          headers: {
+            "content-type": "application/json",
+            baggage: writeForwardedParentSessionBaggage(undefined, parent)!,
+          },
+          method: "POST",
+        }),
+        args,
+      );
+
+      expect(response.status).toBe(202);
+      expect(trustedForwarders).toHaveBeenCalledTimes(1);
+      expect(createSession).toHaveBeenCalledWith(
+        expect.objectContaining({
+          parent: trusted ? parent : undefined,
+        }),
+      );
     },
   );
 

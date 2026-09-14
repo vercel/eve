@@ -23,6 +23,8 @@ export function agentActivationAttributes(input: {
     "agent.channel.kind": input.turn.channelDelivery?.channelKind,
     "agent.channel.name": input.turn.channelDelivery?.channelName,
     "agent.channel.request.id": input.turn.channelDelivery?.requestId,
+    "agent.parent_call.id": input.turn.parentLineage?.callId,
+    "agent.parent_run.id": input.turn.parentLineage?.sessionId,
     "agent.subagent.name": input.turn.subagentName,
     "agent.turn.id": input.turnId,
     "agent.turn.sequence": input.turn.sequence,

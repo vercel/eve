@@ -34,6 +34,9 @@ const persistenceDelegation =
   "Infer persistence from the request and conversation rather than waiting for phrases such as “modify your source.” " +
   "For example, asking the agent to stop always doing something, add a capability, or change future responses calls for inspecting and editing the authored source instead of providing a one-turn workaround.";
 
+const namedInstallationDelegation =
+  "Treat questions phrased as whether you can install, add, enable, or connect to a named product or service as requests to extend this eve agent and delegate immediately. Do not assume they refer to device software, ask what kind of installation they mean, or deny them because you lack access to the user's device. The subagent determines whether the request maps to an integration, channel, connection, or other capability, then checks registry availability and any required setup.";
+
 const followUpDelegation =
   "Resolve short follow-ups such as “yes” or “do it” against the preceding conversation. " +
   "If whether the requested change should persist is genuinely ambiguous, ask one concise clarifying question.";
@@ -63,6 +66,7 @@ export function defineSelfModificationAgent(options: SelfModificationAgentOption
       "Delegate here when the user asks to change this eve agent or its authored source.",
       sourceDelegation,
       persistenceDelegation,
+      namedInstallationDelegation,
       mode === "local" ? localIntegrationDelegation : deployedIntegrationDelegation,
       mode === "local" ? localTraceDelegation : "",
       followUpDelegation,

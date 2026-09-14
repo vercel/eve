@@ -589,12 +589,7 @@ describe("exported agent telemetry contract", () => {
         expect(span.attributes["operation.name"]).toBe(
           span.attributes["gen_ai.operation.name"] ?? span.name,
         );
-        for (const legacy of [
-          "agent.parent_call.id",
-          "agent.parent_run.id",
-          "agent.root_run.id",
-          "agent.session.id",
-        ]) {
+        for (const legacy of ["agent.root_run.id", "agent.session.id"]) {
           expect(span.attributes).not.toHaveProperty(legacy);
         }
         expect(span.attributes).not.toHaveProperty("vercel.session_id");
@@ -626,6 +621,9 @@ describe("exported agent telemetry contract", () => {
         "agent.channel.name": "web",
       });
       expect(activation.attributes).toMatchObject({
+        "agent.parent_call.id": "nested",
+        "agent.parent_run.id": "parent",
+        "agent.run.id": "child",
         "gen_ai.usage.input_tokens": 10,
         "gen_ai.usage.output_tokens": 5,
         "agent.usage.input_tokens": 10,

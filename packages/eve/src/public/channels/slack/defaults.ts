@@ -1,6 +1,6 @@
 import type { SessionAuthContext } from "#channel/types.js";
 
-import { createLogger, extractErrorId, formatErrorHint } from "#internal/logging.js";
+import { createLogger, extractErrorId, formatErrorHint, logError } from "#internal/logging.js";
 import { describeActionRequests } from "#public/channels/slack/action-status.js";
 import { buildSlackAuthContext, slackUserIdFromAuthContext } from "#public/channels/slack/auth.js";
 import {
@@ -12,10 +12,12 @@ import {
 } from "#public/channels/slack/connections.js";
 import {
   buildAnsweredBlocks,
+  decodeHitlActionId,
   renderInputRequestPostParts,
   type SlackInputRequestPostPart,
 } from "#public/channels/slack/hitl.js";
 import type { SlackMessage } from "#public/channels/slack/inbound.js";
+import { deliverPrivateInputRequest } from "#public/channels/slack/private-approval-delivery.js";
 import {
   SLACK_MARKDOWN_TEXT_MAX_LENGTH,
   SLACK_MAX_BLOCKS_PER_MESSAGE,
@@ -23,6 +25,7 @@ import {
   truncateTypingStatus,
 } from "#public/channels/slack/limits.js";
 import type {
+  SlackApprovalChannelResolver,
   SlackChannelEvents,
   SlackChannelInternalEvents,
   SlackChannelState,
@@ -120,8 +123,6 @@ function formatSemanticErrorReply(input: {
 function blockContainsRequestAction(block: unknown, requestId: string): boolean {
   if (typeof block !== "object" || block === null) return false;
   const candidate = block as { actions?: unknown; elements?: unknown };
-  const requestActionPrefix = `eve_input:${requestId}`;
-  const approvalActionPrefix = `eve_input:tool-approval:${requestId}`;
   return [candidate.actions, candidate.elements].some(
     (entries) =>
       Array.isArray(entries) &&
@@ -129,8 +130,7 @@ function blockContainsRequestAction(block: unknown, requestId: string): boolean 
         if (typeof entry !== "object" || entry === null) return false;
         const actionId = (entry as { action_id?: unknown }).action_id;
         return (
-          typeof actionId === "string" &&
-          (actionId.startsWith(requestActionPrefix) || actionId.startsWith(approvalActionPrefix))
+          typeof actionId === "string" && decodeHitlActionId(actionId)?.requestId === requestId
         );
       }),
   );
@@ -208,23 +208,74 @@ function firstNonEmptyLine(text: string): string | undefined {
  * Slack's 50-block message cap. Override by declaring
  * `events["input.requested"]`.
  */
-export function defaultInputRequestedHandler(): NonNullable<SlackChannelEvents["input.requested"]> {
-  return async (data, channel, _ctx) => {
-    for (const post of buildInputRequestPosts(data.requests)) {
-      const message = await channel.thread.post({ blocks: post.blocks, text: post.text });
-      if (!message.id) continue;
-      const cards = { ...channel.state.pendingApprovalCards };
-      for (const request of post.requests) {
-        if (request.kind === "tool-approval") {
-          cards[request.requestId] = {
-            messageBlocks: post.blocks,
-            messageTs: message.id,
-          };
-        }
+export function defaultInputRequestedHandler(
+  approvalChannel?: SlackApprovalChannelResolver,
+): NonNullable<SlackChannelEvents["input.requested"]> {
+  return async (data, channel, ctx) => {
+    const directMessageRequests: InputRequest[] = [];
+    const threadRequests: InputRequest[] = [];
+    for (const request of data.requests) {
+      const destination =
+        approvalChannel === undefined ? "thread" : await approvalChannel(request, ctx);
+      (destination === "direct-message" ? directMessageRequests : threadRequests).push(request);
+    }
+
+    await postPublicInputRequests(threadRequests, channel);
+    for (const request of directMessageRequests) {
+      const reviewer =
+        slackUserIdFromAuthContext(ctx.session.auth.current) ?? channel.state.triggeringUserId;
+      if (!reviewer) {
+        log.warn("direct-message input request not delivered because no reviewer was resolved", {
+          requestId: request.requestId,
+          sessionId: ctx.session.id,
+        });
+        continue;
       }
-      channel.state.pendingApprovalCards = cards;
+      const card = await deliverPrivateInputRequest({
+        previewMessageTs: channel.state.triggeringMessageTs ?? channel.slack.threadTs,
+        request,
+        reviewer,
+        slack: channel.slack,
+      });
+      recordApprovalCards(channel.state, [request], card);
+      try {
+        await channel.thread.post(
+          `Waiting on ${request.kind === "tool-approval" ? "approval" : "a response"} from <@${reviewer}>…`,
+        );
+      } catch (error) {
+        logError(log, "failed to announce private input request", error, {
+          requestId: request.requestId,
+          sessionId: ctx.session.id,
+        });
+      }
     }
   };
+}
+
+async function postPublicInputRequests(
+  requests: readonly InputRequest[],
+  channel: Parameters<NonNullable<SlackChannelEvents["input.requested"]>>[1],
+): Promise<void> {
+  for (const post of buildInputRequestPosts(requests)) {
+    const message = await channel.thread.post({ blocks: post.blocks, text: post.text });
+    recordApprovalCards(channel.state, post.requests, {
+      messageBlocks: post.blocks,
+      messageTs: message.id,
+    });
+  }
+}
+
+function recordApprovalCards(
+  state: SlackChannelState,
+  requests: readonly InputRequest[],
+  card: NonNullable<SlackChannelState["pendingApprovalCards"]>[string],
+): void {
+  if (!card.messageTs) return;
+  const cards = { ...state.pendingApprovalCards };
+  for (const request of requests) {
+    if (request.kind === "tool-approval") cards[request.requestId] = card;
+  }
+  state.pendingApprovalCards = cards;
 }
 
 /**
@@ -328,7 +379,9 @@ export const defaultEvents: SlackChannelInternalEvents = {
   async "approval.settled"(event, channel, _ctx) {
     const cards = channel.state.pendingApprovalCards ?? {};
     const card = cards[event.requestId];
-    if (card === undefined || channel.state.channelId === null) return;
+    if (card === undefined) return;
+    const messageChannelId = card.messageChannelId ?? channel.state.channelId;
+    if (messageChannelId === null) return;
     const answerLabel = event.outcome === "approved" ? "Approve" : "Cancel";
     const userId = channel.state.approvalResponderUsers?.[event.responderPrincipalId];
     const blocks = card.messageBlocks.flatMap((block) => {
@@ -347,7 +400,7 @@ export const defaultEvents: SlackChannelInternalEvents = {
     });
     await channel.slack.request("chat.update", {
       blocks,
-      channel: channel.state.channelId,
+      channel: messageChannelId,
       text: `Answered: ${answerLabel}`,
       ts: card.messageTs,
     });

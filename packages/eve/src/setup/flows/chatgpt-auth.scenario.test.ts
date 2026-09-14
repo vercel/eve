@@ -4,7 +4,15 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createCodexTokenBroker } from "#public/models/openai/chatgpt/token-broker.js";
 import type { ChatGptCredentialStore } from "#public/models/openai/chatgpt/credential-store.js";
-import type { ChatGptCredentials } from "#public/models/openai/chatgpt/oauth.js";
+import {
+  CodexBinaryNotFoundError,
+  type CodexAppServer,
+} from "#public/models/openai/chatgpt/codex-app-server.js";
+import {
+  ChatGptSignInRequiredError,
+  type ChatGptCredentials,
+} from "#public/models/openai/chatgpt/oauth.js";
+import { ChatGptSignedOutError } from "#public/models/openai/chatgpt/token.js";
 import { ensureChatGptAuth } from "./chatgpt-auth.js";
 
 const controllers: AbortController[] = [];
@@ -16,6 +24,13 @@ function setup() {
   let credentials: ChatGptCredentials | undefined;
   const store: ChatGptCredentialStore = {
     read: async () => credentials,
+    resolveToken: vi.fn(async ({ forceRefresh }) => {
+      if (!credentials) {
+        if (forceRefresh) throw new ChatGptSignInRequiredError();
+        throw new ChatGptSignedOutError();
+      }
+      return { token: credentials.accessToken, expiresAt: credentials.expiresAt };
+    }),
     update: vi.fn<ChatGptCredentialStore["update"]>(async (callback) => {
       credentials = await callback(credentials);
       return credentials;
@@ -30,9 +45,17 @@ function setup() {
     store,
     controller,
     fetch,
-    broker: createCodexTokenBroker({ store, fetch }),
+    broker: createCodexTokenBroker({ appServer: missingCodexAppServer(), store, fetch }),
     log: vi.fn(),
     headless: false,
+  };
+}
+
+function missingCodexAppServer(): CodexAppServer {
+  return {
+    resolveToken: vi.fn(async () => {
+      throw new CodexBinaryNotFoundError();
+    }),
   };
 }
 
