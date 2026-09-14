@@ -3164,9 +3164,7 @@ describe("runProxySubagentEventStep", () => {
       },
     });
     expect(result.serializedContext[ChannelInstrumentationKey.name]).toMatchObject({
-      metadata: {
-        audience: "unknown",
-      },
+      metadata: {},
     });
 
     // And the parent session's proxy-entry map is reflected on the

@@ -27,6 +27,7 @@ import { AgentSpanIdGenerator } from "#tracing/agent-span-id-generator.js";
 import type { RuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
 import { markAgentTraceContext } from "#tracing/agent-trace-context.js";
+import type { TraceCaptureContext } from "#shared/trace-policy.js";
 
 const getHookByTokenMock = vi.fn();
 const world = {
@@ -1025,7 +1026,10 @@ describe("createWorkflowRuntime#createSession", () => {
 });
 
 describe("createWorkflowRuntime#createSession trace seed allocation", () => {
-  const adapter: ChannelAdapter = { kind: "http" };
+  const adapter: ChannelAdapter = {
+    kind: "http",
+    instrumentation: { audience: () => "public" },
+  };
 
   function buildRuntime() {
     return createWorkflowRuntime({ compiledArtifactsSource: {} as RuntimeCompiledArtifactsSource });
@@ -1089,7 +1093,7 @@ describe("createWorkflowRuntime#createSession trace seed allocation", () => {
     await buildRuntime().createSession({
       adapter,
       auth: null,
-      channelMetadata: { kind: "http", metadata: { audience: "public" } },
+      channelMetadata: { kind: "http", metadata: {} },
       input: { message: "hello" },
       mode: "conversation",
     });
@@ -1112,15 +1116,15 @@ describe("createWorkflowRuntime#createSession trace seed allocation", () => {
     expect(tracePolicy).toHaveBeenCalledOnce();
   });
 
-  it("passes the channel adapter kind as channelType to the policy", async () => {
+  it("passes the conversation channel to the policy", async () => {
     const idGenerator = new AgentSpanIdGenerator();
-    let captured: { channelType?: string } | undefined;
+    let captured: TraceCaptureContext | undefined;
     registerInstrumentationRuntime({
       forceFlush: async () => undefined,
       hooks: undefined as never,
       idGenerator,
       otelSettings: {
-        tracePolicy: (trace: { channelType?: string }) => {
+        tracePolicy: (trace: TraceCaptureContext) => {
           captured = trace;
           return true;
         },
@@ -1138,12 +1142,12 @@ describe("createWorkflowRuntime#createSession trace seed allocation", () => {
     await buildRuntime().createSession({
       adapter: { kind: "slack" },
       auth: null,
-      channelMetadata: { kind: "slack", metadata: { audience: "public" } },
+      channelMetadata: { kind: "slack", metadata: {} },
       input: { message: "hello" },
       mode: "conversation",
     });
 
-    expect(captured?.channelType).toBe("slack");
+    expect(captured?.channel.kind).toBe("channel:slack");
   });
 
   it("allocates an unsampled trace seed when the policy is unsampled", async () => {

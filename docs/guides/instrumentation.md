@@ -62,7 +62,7 @@ You are responsible for ensuring any observability or eval provider is approved 
 
 The third configurable surface, [runtime context events](#runtime-context), attaches per-model-call values to these spans.
 
-Built-in messaging channels classify their instrumentation metadata with an `audience`: `public`, `private`, or `unknown`. Slack public channels and Chat SDK workspace-visible threads are public; direct and private conversations are private; platform surfaces without enough visibility evidence remain unknown. Proactive Slack `receive` / `ctx.send` handoffs stay `unknown` unless the caller passes `audience` on the target, for example when a webhook or schedule already knows the destination channel is public.
+Channels classify their conversation with an `audience`: `public`, `private`, or `unknown`. The eve channel classifies anonymous callers as public and authenticated `user`, `service`, or `runtime` callers as private. Slack public-channel handoffs and Chat SDK workspace-visible threads are public; direct and private conversations are private; platform surfaces without enough visibility evidence remain unknown. Inbound Slack webhooks remain `unknown`; proactive Slack `receive` / `ctx.send` handoffs also stay `unknown` unless the caller passes `audience` on the target, for example when a webhook or schedule already knows the destination channel is public.
 
 ## Channel delivery traces
 
@@ -244,7 +244,7 @@ Agent Runs activation metadata includes bounded principal summaries:
 
 Types are limited to `user`, `service`, `runtime`, `app`, `anonymous`, `local-dev`, `unknown`, `none`, and `other`. Types are emitted for every audience when a principal is present. An absent type means no authentication context was set; `none` means an explicitly null principal and has no ID. The auth layer's `unknown` type stays `unknown`; unrecognized authored types become `other`.
 
-Principal IDs require a content-visible audience and a resolved trace decision that allows both `recordInputs` and `recordOutputs`. Public turns and unknown turns under `eve dev` can include IDs; private and hosted-unknown turns omit them. A user-configured trace policy or forwarded content ceiling that denies either direction omits both principal IDs before turn state is stored or sampled. Empty IDs and IDs larger than 1 KiB of UTF-8 data are omitted, not truncated; authentication records are unchanged. eve does not copy other authentication fields, such as claims, email attributes, issuers, or subjects, into these summaries.
+Principal IDs require content-visible capture and a resolved trace decision that allows both `recordInputs` and `recordOutputs`. Public turns and every audience in a development environment can include IDs; private and unknown turns omit them in preview and production. A user-configured trace policy or forwarded content ceiling that denies either direction omits both principal IDs before turn state is stored or sampled. Empty IDs and IDs larger than 1 KiB of UTF-8 data are omitted, not truncated; authentication records are unchanged. eve does not copy other authentication fields, such as claims, email attributes, issuers, or subjects, into these summaries.
 
 ## Query exported traces
 

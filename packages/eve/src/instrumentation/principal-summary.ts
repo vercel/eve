@@ -5,15 +5,17 @@ import {
   isInstrumentationPrincipalType,
   type InstrumentationPrincipalSummary,
 } from "#instrumentation/lifecycle.js";
-import type { ChannelAudience } from "#shared/channel-audience.js";
-import { shouldCaptureInstrumentationContent } from "#shared/instrumentation-content.js";
+import {
+  shouldCaptureInstrumentationContent,
+  type InstrumentationContentContext,
+} from "#shared/instrumentation-content.js";
 import type { InstrumentationDecision } from "#shared/instrumentation-decision.js";
 import { resolveTracePolicyDecision } from "#shared/trace-policy.js";
 import { boundedPrincipalId } from "#tracing/telemetry-budget.js";
 
 export function summarizeInstrumentationPrincipal(
   principal: SessionAuthContext | null | undefined,
-  audience: ChannelAudience,
+  content: InstrumentationContentContext,
 ): InstrumentationPrincipalSummary | undefined {
   if (principal === undefined) return undefined;
   if (principal === null) return { type: "none" };
@@ -21,7 +23,7 @@ export function summarizeInstrumentationPrincipal(
     isInstrumentationPrincipalType(principal.principalType) && principal.principalType !== "none"
       ? principal.principalType
       : "other";
-  const id = shouldCaptureInstrumentationContent(audience)
+  const id = shouldCaptureInstrumentationContent(content)
     ? boundedPrincipalId(principal.principalId)
     : undefined;
   return id === undefined ? { type } : { id, type };
@@ -42,19 +44,19 @@ export function applyPrincipalTraceDecision(
 
 export function readInstrumentationPrincipals(
   context: ContextReader,
-  audience: ChannelAudience,
-  decision: InstrumentationDecision = resolveTracePolicyDecision(true, audience),
+  content: InstrumentationContentContext,
+  decision: InstrumentationDecision = resolveTracePolicyDecision(true, content),
 ): {
   readonly currentPrincipal?: InstrumentationPrincipalSummary;
   readonly initiatorPrincipal?: InstrumentationPrincipalSummary;
 } {
   return {
     currentPrincipal: applyPrincipalTraceDecision(
-      summarizeInstrumentationPrincipal(context.get(AuthKey), audience),
+      summarizeInstrumentationPrincipal(context.get(AuthKey), content),
       decision,
     ),
     initiatorPrincipal: applyPrincipalTraceDecision(
-      summarizeInstrumentationPrincipal(context.get(InitiatorAuthKey), audience),
+      summarizeInstrumentationPrincipal(context.get(InitiatorAuthKey), content),
       decision,
     ),
   };

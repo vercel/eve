@@ -2,6 +2,22 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { resolveTracePolicy, resolveTracePolicyDecision } from "#tracing/sampled-trace.js";
 
+const contentContext = (
+  audience: "public" | "private" | "unknown",
+  environment: "development" | "preview" | "production" = "production",
+) => ({ audience, environment });
+
+const traceContext = (
+  audience: "public" | "private" | "unknown",
+  environment: "development" | "preview" | "production" = "production",
+) => ({
+  agentName: "weather",
+  ...contentContext(audience, environment),
+  channel: { kind: "http" as const },
+  mode: "conversation" as const,
+  principalType: "anonymous",
+});
+
 describe("resolveTracePolicyDecision", () => {
   afterEach(() => vi.unstubAllEnvs());
 
@@ -24,28 +40,31 @@ describe("resolveTracePolicyDecision", () => {
       { action: "record", recordInputs: true, recordOutputs: true },
     ],
   ] as const)("normalizes the explicit $decision.emit decision", (decision, expected) => {
-    expect(resolveTracePolicyDecision(decision, "private")).toEqual(expected);
+    expect(resolveTracePolicyDecision(decision, contentContext("private"))).toEqual(expected);
   });
 
   it("maps false to the legacy drop behavior", () => {
-    expect(resolveTracePolicyDecision(false, "public")).toEqual({ action: "drop" });
+    expect(resolveTracePolicyDecision(false, contentContext("public"))).toEqual({
+      action: "drop",
+    });
   });
 
   it.each([
-    ["public", true],
-    ["private", false],
-    ["unknown", false],
-  ] as const)("maps true through the hosted %s audience ceiling", (audience, content) => {
-    expect(resolveTracePolicyDecision(true, audience)).toEqual({
+    ["public", "production", true],
+    ["private", "production", false],
+    ["unknown", "production", false],
+    ["unknown", "development", true],
+    ["unknown", "preview", false],
+  ] as const)("maps true through the %s %s content ceiling", (audience, environment, content) => {
+    expect(resolveTracePolicyDecision(true, contentContext(audience, environment))).toEqual({
       action: "record",
       recordInputs: content,
       recordOutputs: content,
     });
   });
 
-  it("preserves unknown local content for a legacy true decision", () => {
-    vi.stubEnv("EVE_DEV", "1");
-    expect(resolveTracePolicyDecision(true, "unknown")).toEqual({
+  it("preserves unknown development content for a legacy true decision", () => {
+    expect(resolveTracePolicyDecision(true, contentContext("unknown", "development"))).toEqual({
       action: "record",
       recordInputs: true,
       recordOutputs: true,
@@ -54,12 +73,9 @@ describe("resolveTracePolicyDecision", () => {
 
   it("fails closed when the policy throws", () => {
     expect(
-      resolveTracePolicy(
-        () => {
-          throw new Error("boom");
-        },
-        { agentName: "weather", audience: "public" },
-      ),
+      resolveTracePolicy(() => {
+        throw new Error("boom");
+      }, traceContext("public")),
     ).toEqual({ action: "drop" });
   });
 
@@ -69,7 +85,7 @@ describe("resolveTracePolicyDecision", () => {
         () => {
           throw new Error("policy failed");
         },
-        { agentName: "weather", audience: "public" },
+        traceContext("public"),
         () => {
           throw new Error("reporting failed");
         },
@@ -78,14 +94,19 @@ describe("resolveTracePolicyDecision", () => {
   });
 
   it.each([
-    ["public", true],
-    ["private", false],
-    ["unknown", false],
-  ] as const)("emits the default %s trace with the expected content", (audience, content) => {
-    expect(resolveTracePolicy(undefined, { agentName: "weather", audience })).toEqual({
-      action: "record",
-      recordInputs: content,
-      recordOutputs: content,
-    });
-  });
+    ["public", "production", true],
+    ["private", "production", false],
+    ["unknown", "production", false],
+    ["unknown", "development", true],
+    ["unknown", "preview", false],
+  ] as const)(
+    "emits the default %s %s trace with the expected content",
+    (audience, environment, content) => {
+      expect(resolveTracePolicy(undefined, traceContext(audience, environment))).toEqual({
+        action: "record",
+        recordInputs: content,
+        recordOutputs: content,
+      });
+    },
+  );
 });

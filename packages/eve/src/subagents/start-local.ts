@@ -23,6 +23,9 @@ export async function startLocalSubagent(input: {
   readonly bundle: CompiledBundle;
   readonly capabilities: Parameters<typeof buildSubagentRunInput>[0]["capabilities"];
   readonly channelMetadata: Parameters<typeof buildSubagentRunInput>[0]["channelMetadata"];
+  readonly inheritedConversation?: Parameters<
+    typeof buildSubagentRunInput
+  >[0]["inheritedConversation"];
   readonly currentSession: RuntimeSession;
   readonly dynamicSubagentAgentConfig?: DynamicSubagentAgentConfig;
   readonly fanoutSize: number;
@@ -46,6 +49,7 @@ export async function startLocalSubagent(input: {
     auth: input.auth,
     capabilities: input.capabilities,
     channelMetadata: input.channelMetadata,
+    inheritedConversation: input.inheritedConversation,
     fanoutSize: input.fanoutSize,
     initiatorAuth: input.initiatorAuth,
     graph: input.bundle.graph,

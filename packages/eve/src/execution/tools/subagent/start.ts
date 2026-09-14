@@ -37,6 +37,9 @@ export async function startSubagent(input: {
   readonly callbackBaseUrl: string | undefined;
   readonly capabilities: Parameters<typeof buildSubagentRunInput>[0]["capabilities"];
   readonly channelMetadata: Parameters<typeof buildSubagentRunInput>[0]["channelMetadata"];
+  readonly inheritedConversation?: Parameters<
+    typeof buildSubagentRunInput
+  >[0]["inheritedConversation"];
   readonly currentSession: RuntimeSession;
   readonly fanoutSize: number;
   readonly initiatorAuth: Parameters<typeof buildSubagentRunInput>[0]["initiatorAuth"];
@@ -75,6 +78,7 @@ export async function startSubagent(input: {
         bundle: input.bundle,
         capabilities: input.capabilities,
         channelMetadata: input.channelMetadata,
+        inheritedConversation: input.inheritedConversation,
         currentSession: input.currentSession,
         dynamicSubagentAgentConfig: input.target.dynamicSubagentAgentConfig,
         fanoutSize: input.fanoutSize,

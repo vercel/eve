@@ -144,7 +144,7 @@ describe("installInstrumentationRuntime", () => {
         providers: [],
         serviceName: "weather",
       });
-      const hooks = runtime.hooks.forTrace!({ agentName: "weather", audience: "unknown" });
+      const hooks = runtime.hooks.forTrace!(traceContext("unknown"));
       const event = {
         idempotencyKey: sessionIdempotencyKey(sessionId),
         sessionId,
@@ -178,7 +178,7 @@ describe("installInstrumentationRuntime", () => {
       serviceName: "weather",
     });
     const idempotencyKey = turnIdempotencyKey("session-1", "turn-1");
-    const hooks = runtime.hooks.forTrace!({ agentName: "weather", audience: "unknown" });
+    const hooks = runtime.hooks.forTrace!(traceContext("unknown"));
 
     await contextStorage.run(new ContextContainer(), async () => {
       await hooks.publish({
@@ -200,4 +200,13 @@ describe("installInstrumentationRuntime", () => {
     expect(internalTerminalState).toHaveBeenCalledExactlyOnceWith("framework");
     expect(authoredTerminalState).toHaveBeenCalledExactlyOnceWith("authored");
   });
+});
+
+const traceContext = (audience: "public" | "private" | "unknown") => ({
+  agentName: "weather",
+  audience,
+  channel: { kind: "http" as const },
+  environment: "production" as const,
+  mode: "conversation" as const,
+  principalType: "anonymous",
 });

@@ -23,6 +23,15 @@ import {
 const REGISTRY_GLOBAL_KEY = Symbol.for("eve.harness-instrumentation-providers");
 const RUNTIME_GLOBAL_KEY = Symbol.for("eve.instrumentation-runtime");
 
+const traceContext = (audience: "public" | "private" | "unknown") => ({
+  agentName: "weather",
+  audience,
+  channel: { kind: "http" as const },
+  environment: "production" as const,
+  mode: "conversation" as const,
+  principalType: "anonymous",
+});
+
 function register(slot: string, value: unknown): Promise<void> {
   return registerInstrumentationProvider({ agentName: "weather-agent", slot, value });
 }
@@ -217,9 +226,7 @@ describe("finalizeInstrumentationProviders", () => {
     await register("rows", defineInstrumentation({ events: { "turn.started": started } }));
 
     const runtime = finalizeInstrumentationProviders({ serviceName: "weather-agent" });
-    await runtime.hooks.forTrace!({ agentName: "weather-agent", audience: "unknown" }).publish(
-      turnStarted,
-    );
+    await runtime.hooks.forTrace!(traceContext("unknown")).publish(turnStarted);
 
     expect(runtime.instrumentationProviders).toBe(true);
     expect(started).toHaveBeenCalledOnce();
@@ -236,9 +243,7 @@ describe("finalizeInstrumentationProviders", () => {
 
       const runtime = finalizeInstrumentationProviders({ serviceName: "weather-agent" });
 
-      expect(
-        runtime.hooks.forTrace?.({ agentName: "weather", audience: "private" }).capturesContent,
-      ).toBe(expected);
+      expect(runtime.hooks.forTrace?.(traceContext("private")).capturesContent).toBe(expected);
     },
   );
 
@@ -253,9 +258,7 @@ describe("finalizeInstrumentationProviders", () => {
 
     const runtime = finalizeInstrumentationProviders({ serviceName: "weather-agent" });
 
-    expect(
-      runtime.hooks.forTrace?.({ agentName: "weather", audience: "private" }).capturesContent,
-    ).toBe(true);
+    expect(runtime.hooks.forTrace?.(traceContext("private")).capturesContent).toBe(true);
   });
 
   it("still runs execution when no destination was declared", async () => {

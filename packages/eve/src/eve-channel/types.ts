@@ -5,11 +5,13 @@ import type { TrustedForwarders } from "#channel/forwarded-principal.js";
 import type { AuthFn } from "#public/channels/auth.js";
 import type { UploadPolicyInput } from "#public/channels/upload-policy.js";
 import type {
+  AudienceInput,
   Channel,
   ChannelContinuationOps,
   ChannelEvents,
   ChannelMethod,
 } from "#public/definitions/channel.js";
+import type { ChannelAudience } from "#shared/channel-audience.js";
 
 /**
  * Event-handler channel context exposed by `eveChannel({ events })`. The default eve HTTP channel
@@ -94,6 +96,20 @@ export interface EveChannelInput {
    * the next; exhaustion (including the empty array) rejects with 401. Include `none()` last for anonymous traffic.
    */
   readonly auth: AuthFn<Request> | readonly AuthFn<Request>[];
+  /**
+   * Conversation audience classification, fixed when the session is created.
+   *
+   * By default, anonymous callers are `public` and `user`, `service`, or
+   * `runtime` principals are `private`. Every other principal type is
+   * `unknown`, which trace consumers treat as non-public.
+   *
+   * Pass a constant audience, or a function receiving the authenticated
+   * principal, channel, run mode, and deployment environment. Continuation
+   * turns from a different caller do not reclassify an existing session.
+   */
+  readonly audience?:
+    | ChannelAudience
+    | ((input: Omit<AudienceInput<undefined>, "state">) => ChannelAudience);
   /**
    * The trusted-forwarders policy: which transport-authenticated callers may
    * assert a forwarded principal, callback-marked public trace audience, or

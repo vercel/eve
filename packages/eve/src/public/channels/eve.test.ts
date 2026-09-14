@@ -709,6 +709,20 @@ describe("eveChannel — onMessage", () => {
     expect(options.auth).toEqual(OVERRIDE_AUTH);
   });
 
+  it("keeps route authentication separate from onMessage session auth", async () => {
+    const handler = createEveCreateHandler({
+      auth: () => ACCEPTED_AUTH,
+      onMessage: () => ({ auth: null, context: ["anonymous session projection"] }),
+    });
+
+    const response = await handler.fetch(createJsonMessageRequest({ message: "hi" }));
+
+    expect(response.status).toBe(202);
+    const runInput = handler.createSession.mock.calls[0]?.[0] as RunInput;
+    expect(runInput.auth).toBeNull();
+    expect(runInput.audienceAuth).toEqual(ACCEPTED_AUTH);
+  });
+
   it("does not run onMessage when auth rejects", async () => {
     const onMessage = vi.fn(() => ({ auth: null, context: ["never"] }));
     const handler = createEveCreateHandler({
