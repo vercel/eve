@@ -65,7 +65,6 @@ import {
   encodeMessageStreamEvent,
   type UnstampedMessageStreamEvent,
   stampMessageStreamEvent,
-  type MessageStreamEvent,
 } from "#protocol/message.js";
 import {
   CallbackBaseUrlKey,
@@ -387,27 +386,29 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
   }
 
   const writer = input.parentWritable.getWriter();
-  const emit = async (event: UnstampedMessageStreamEvent): Promise<MessageStreamEvent> => {
+  const emit = async (event: UnstampedMessageStreamEvent) => {
     const deliverableEvent = scheduledLaunchDeliveryEvent(event, {
+      isFirstTurn: initialEmissionState.sequence === 0,
       isScheduled: ctx.get(ScheduleIdKey) !== undefined,
       taskPhase: ctx.get(TurnTaskDeliveryKey),
     });
     if (deliverableEvent === undefined)
-      return stampMessageStreamEvent(event, ctx.get(TurnDeliveryIdsKey));
+      return {
+        event: stampMessageStreamEvent(event, ctx.get(TurnDeliveryIdsKey)),
+        suppressed: true,
+      };
     const toEmit = await callAdapterEventHandler(adapter, deliverableEvent, adapterCtx);
     setChannelContext(ctx, { ...adapter, state: { ...adapterCtx.state } });
     const stamped = stampMessageStreamEvent(toEmit, ctx.get(TurnDeliveryIdsKey));
     await writer.write(encodeMessageStreamEvent(stamped));
-    return stamped;
+    return { event: stamped, suppressed: false };
   };
   const handleEvent: HandleEventFn = async (event, messages): Promise<void> => {
     activityCohort.updateActivityBlockers(ctx, event);
-    // A remote task's parent owns its HITL. Forward blocking events over
-    // the task callback and keep them out of the child's local channel;
-    // otherwise two TUIs can present and answer the same request.
+    // A remote task's parent owns its blocking events.
     const forwardedToTaskParent = await forwardTaskEventToSessionCallback(ctx, event);
     const emitted = forwardedToTaskParent
-      ? stampMessageStreamEvent(event, ctx.get(TurnDeliveryIdsKey))
+      ? { event: stampMessageStreamEvent(event, ctx.get(TurnDeliveryIdsKey)), suppressed: false }
       : await emit(event);
     const lifecycleMessages = await dispatchMemoryLifecycleEvent({
       abortSignal: input.abortSignal,
@@ -419,13 +420,14 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
       messages,
       nodeId: bundle.nodeId ?? "__root__",
     });
-    void observeSessionActivity({ ctx, event: emitted, sessionId: initialSession.sessionId });
-    await dispatchStreamEventHooks({ ctx, registry: hookRegistry, event: emitted });
-    if (emitted.type !== "step.started") {
+    void observeSessionActivity({ ctx, event: emitted.event, sessionId: initialSession.sessionId });
+    if (!emitted.suppressed)
+      await dispatchStreamEventHooks({ ctx, registry: hookRegistry, event: emitted.event });
+    if (emitted.event.type !== "step.started") {
       await dispatchDynamicModelEvent({
         ctx,
         dynamicModel: effectiveAgent.turnAgent.dynamicModel,
-        event: emitted,
+        event: emitted.event,
         messages: lifecycleMessages,
         scope: {
           moduleMap: bundle.moduleMap,
@@ -433,29 +435,29 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
         },
       });
     }
-    await dynamicConnections.dispatch(emitted);
+    await dynamicConnections.dispatch(emitted.event);
     await dispatchDynamicSubagentEvent({
       ctx,
       resolvers: dynamicSubagentResolvers,
-      event: emitted,
+      event: emitted.event,
       messages: lifecycleMessages,
     });
     await dispatchDynamicToolEvent({
       ctx,
       resolvers: dynamicToolResolvers,
-      event: emitted,
+      event: emitted.event,
       messages: lifecycleMessages,
     });
     await dispatchDynamicSkillEvent({
       ctx,
       resolvers: dynamicSkillResolvers,
-      event: emitted,
+      event: emitted.event,
       messages: lifecycleMessages,
     });
     await dispatchDynamicInstructionEvent({
       ctx,
       resolvers: dynamicInstructionsResolvers,
-      event: emitted,
+      event: emitted.event,
       messages: lifecycleMessages,
     });
   };

@@ -196,6 +196,10 @@ class BackgroundToolExecutionScope implements BackgroundToolExecutor {
     });
   }
 
+  hasPendingTasks(): boolean {
+    return this.records.some((record) => record.settled && record.task !== undefined);
+  }
+
   async commit(session: HarnessSession): Promise<HarnessSession> {
     const incomplete = this.records.filter((record) => !record.settled);
     if (incomplete.length > 0) {

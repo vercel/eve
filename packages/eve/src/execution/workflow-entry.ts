@@ -526,7 +526,7 @@ async function runDriverLoop(input: {
           caller: input.crashCleanupState.caller,
           sessionId: stateCursor.sessionState.sessionId,
         };
-        const usage = addTokenUsage(input.crashCleanupState.callerUsage, settled.usage);
+        const usage = settled.usage;
         await notifyCancelledTaskCallerStep(
           usage === undefined ? cancelledCaller : { ...cancelledCaller, usage },
         );
@@ -654,7 +654,7 @@ async function runDriverLoop(input: {
           caller: input.crashCleanupState.caller,
           sessionId: stateCursor.sessionState.sessionId,
         };
-        const usage = addTokenUsage(input.crashCleanupState.callerUsage, cancelled.usage);
+        const usage = cancelled.usage;
         await notifyCancelledTaskCallerStep(
           usage === undefined ? cancelledCaller : { ...cancelledCaller, usage },
         );

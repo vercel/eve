@@ -1396,7 +1396,7 @@ describe("workflowEntry", () => {
     vi.mocked(settleCancelledTurnStep).mockResolvedValueOnce({
       serializedContext: { "eve.sessionId": "wrun_test_123" },
       sessionState: pending,
-      usage: usage(5, 1),
+      usage: usage(15, 3),
     });
     const first = turnResult({
       action: "park",
