@@ -8,10 +8,16 @@ const mocks = vi.hoisted(() => ({
 }));
 vi.mock("./store.js", () => ({ readVercelSession: mocks.read, writeVercelSession: mocks.write }));
 vi.mock("node:fs/promises", () => ({ mkdir: mocks.mkdir, rm: mocks.rm, stat: vi.fn() }));
-import { resolveVercelSession } from "./vercel.js";
+import { authJson, vercelOAuthEndpoints, resolveVercelSession } from "./vercel.js";
 beforeEach(() => {
   vi.resetAllMocks();
   vi.stubGlobal("fetch", mocks.fetch);
+  mocks.fetch.mockResolvedValueOnce(
+    Response.json({
+      device_authorization_endpoint: "https://api.vercel.com/login/oauth/device-authorization",
+      token_endpoint: "https://api.vercel.com/login/oauth/token",
+    }),
+  );
 });
 it("refreshes expired OAuth access and saves rotation before releasing the lock", async () => {
   mocks.read.mockResolvedValue({
@@ -29,8 +35,8 @@ it("refreshes expired OAuth access and saves rotation before releasing the lock"
     refreshToken: "rotated",
     teamId: "team_a",
   });
-  const [url, init] = mocks.fetch.mock.calls[0]!;
-  expect(url).toBe("https://vercel.com/oauth/token");
+  const [url, init] = mocks.fetch.mock.calls[1]!;
+  expect(url).toBe("https://api.vercel.com/login/oauth/token");
   expect(init.body.get("refresh_token")).toBe("refresh");
   expect(mocks.write).toHaveBeenCalledOnce();
   expect(mocks.rm.mock.invocationCallOrder[0]).toBeGreaterThan(
@@ -51,3 +57,27 @@ it("releases the lock after a failed refresh without replacing the session", asy
 });
 
 afterEach(() => vi.unstubAllGlobals());
+
+it("uses the published OAuth endpoints", async () => {
+  expect(await vercelOAuthEndpoints()).toEqual({
+    device: "https://api.vercel.com/login/oauth/device-authorization",
+    token: "https://api.vercel.com/login/oauth/token",
+  });
+});
+it("rejects discovery endpoints outside Vercel", async () => {
+  mocks.fetch.mockReset().mockResolvedValue(
+    Response.json({
+      device_authorization_endpoint: "https://untrusted.example/device",
+      token_endpoint: "https://api.vercel.com/login/oauth/token",
+    }),
+  );
+  await expect(vercelOAuthEndpoints()).rejects.toThrow("unexpected OAuth endpoint");
+});
+it("allows bounded model catalogs larger than OAuth responses", async () => {
+  const catalog = { models: [{ slug: "test", instructions: "x".repeat(300_000) }] };
+  mocks.fetch.mockReset().mockImplementation(async () => Response.json(catalog));
+  await expect(authJson("https://chatgpt.com/models", {}, 8 * 1024 * 1024)).resolves.toEqual(
+    catalog,
+  );
+  await expect(authJson("https://vercel.com/token")).rejects.toThrow("too large");
+});

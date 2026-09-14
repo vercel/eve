@@ -13,6 +13,7 @@ export const VERCEL_TEAM_HEADER = "x-vercel-ai-gateway-team";
 export async function authJson(
   url: string,
   init: RequestInit = {},
+  maxBytes = 256_000,
 ): Promise<Record<string, unknown>> {
   const timeout = AbortSignal.timeout(15_000);
   const response = await fetch(url, {
@@ -30,7 +31,7 @@ export async function authJson(
         const result = await reader.read();
         if (result.done) break;
         bytes += result.value.byteLength;
-        if (bytes > 256_000)
+        if (bytes > maxBytes)
           throw new Error("Authentication response was too large. Retry /login.");
         raw += decoder.decode(result.value, { stream: true });
       }
@@ -50,6 +51,30 @@ export async function authJson(
   if (!response.ok && typeof value.error !== "string")
     throw new Error(`Authentication failed (${response.status}). Retry /login.`);
   return value;
+}
+
+export async function vercelOAuthEndpoints(signal?: AbortSignal): Promise<{
+  device: string;
+  token: string;
+}> {
+  const metadata = await authJson(`${VERCEL_OAUTH_ISSUER}/.well-known/openid-configuration`, {
+    signal,
+  });
+  const endpoint = (value: unknown): string => {
+    const url = typeof value === "string" ? URL.parse(value) : null;
+    if (
+      !url ||
+      ![VERCEL_OAUTH_ISSUER, "https://api.vercel.com"].includes(url.origin) ||
+      url.username ||
+      url.password
+    )
+      throw new Error("Vercel returned an unexpected OAuth endpoint. Retry /login.");
+    return url.href;
+  };
+  return {
+    device: endpoint(metadata.device_authorization_endpoint),
+    token: endpoint(metadata.token_endpoint),
+  };
 }
 
 export function sessionFromToken(
@@ -105,7 +130,8 @@ export async function resolveVercelSession(rejectedToken?: string): Promise<Verc
     if (!session) throw new Error("Sign in to Vercel with /login.");
     if (session.expiresAt > Date.now() + 60_000 && session.accessToken !== rejectedToken)
       return session;
-    const token = await authJson(`${VERCEL_OAUTH_ISSUER}/oauth/token`, {
+    const endpoints = await vercelOAuthEndpoints();
+    const token = await authJson(endpoints.token, {
       method: "POST",
       body: new URLSearchParams({
         client_id: VERCEL_MODEL_CLIENT_ID,

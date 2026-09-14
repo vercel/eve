@@ -2,6 +2,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { isObject } from "#shared/guards.js";
 import {
   authJson,
+  vercelOAuthEndpoints,
   sessionFromToken,
   validateVercelAccess,
   VERCEL_MODEL_CLIENT_ID,
@@ -17,7 +18,8 @@ export async function loginVercelModel(
   signal?: AbortSignal,
   preferredTeamId?: string,
 ): Promise<void> {
-  const device = await authJson(`${VERCEL_OAUTH_ISSUER}/oauth/device`, {
+  const endpoints = await vercelOAuthEndpoints(signal);
+  const device = await authJson(endpoints.device, {
     method: "POST",
     body: new URLSearchParams({
       client_id: VERCEL_MODEL_CLIENT_ID,
@@ -49,7 +51,7 @@ export async function loginVercelModel(
   try {
     while (Date.now() < deadline) {
       await delay(interval * 1000, undefined, { signal });
-      const token = await authJson(`${VERCEL_OAUTH_ISSUER}/oauth/token`, {
+      const token = await authJson(endpoints.token, {
         method: "POST",
         body: new URLSearchParams({
           client_id: VERCEL_MODEL_CLIENT_ID,

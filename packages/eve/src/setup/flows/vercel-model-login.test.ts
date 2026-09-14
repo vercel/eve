@@ -11,6 +11,10 @@ vi.mock("node:timers/promises", () => ({ setTimeout: vi.fn(async () => {}) }));
 vi.mock("#internal/model-auth/vercel.js", async (original) => ({
   ...(await original<typeof import("#internal/model-auth/vercel.js")>()),
   authJson: mocks.json,
+  vercelOAuthEndpoints: async () => ({
+    device: "https://api.vercel.com/login/oauth/device-authorization",
+    token: "https://api.vercel.com/login/oauth/token",
+  }),
   validateVercelAccess: mocks.validate,
 }));
 vi.mock("#internal/model-auth/store.js", () => ({ writeVercelSession: mocks.write }));

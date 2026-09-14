@@ -3,6 +3,8 @@ import { getDefaultCodexTokenBroker } from "#public/models/openai/chatgpt/token-
 import { authJson } from "./vercel.js";
 import { resolveModelApiKey } from "./transport.js";
 
+const MODEL_CATALOG_MAX_BYTES = 8 * 1024 * 1024;
+
 export async function availableDirectModels(
   provider: "openai" | "anthropic",
   key: string,
@@ -19,6 +21,7 @@ export async function availableDirectModels(
           : { "x-api-key": key, "anthropic-version": "2023-06-01" },
       signal,
     },
+    MODEL_CATALOG_MAX_BYTES,
   );
   if (!Array.isArray(value.data))
     throw new Error("The provider could not validate this key. Check it and retry /login.");
@@ -42,6 +45,7 @@ export async function availableHelperModels(
   const value = await authJson(
     "https://chatgpt.com/backend-api/codex/models?client_version=0.148.0",
     { headers, signal },
+    MODEL_CATALOG_MAX_BYTES,
   );
   if (!Array.isArray(value.models))
     throw new Error("Could not load ChatGPT models. Check your connection and retry /login.");
