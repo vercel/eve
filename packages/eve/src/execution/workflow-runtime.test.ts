@@ -411,10 +411,11 @@ describe("createWorkflowRuntime#createSession", () => {
     return createWorkflowRuntime({ compiledArtifactsSource });
   }
 
-  function activityAdapter(): ChannelAdapter {
+  function activityAdapter(periodicRefreshIntervalMs?: number): ChannelAdapter {
     const adapter: ChannelAdapter = { kind: "slack" };
     attachChannelActivityPresentation(adapter, {
       destination: () => ({}),
+      periodicRefreshIntervalMs,
       renderers: [{ id: "status", render: vi.fn() }],
     });
     return adapter;
@@ -596,7 +597,7 @@ describe("createWorkflowRuntime#createSession", () => {
       .mockResolvedValueOnce({ runId: "driver-run" });
 
     await buildRuntime(compiledArtifactsSource).createSession({
-      adapter: activityAdapter(),
+      adapter: activityAdapter(5_000),
       auth: null,
       input: { message: "hello" },
       mode: "conversation",
@@ -605,6 +606,7 @@ describe("createWorkflowRuntime#createSession", () => {
     expect(startMock.mock.calls[0]?.[0]).toBe(activityCollectorWorkflowReference);
     const collectorInput = startMock.mock.calls[0]?.[1][0];
     expect(collectorInput).toMatchObject({
+      periodicRefreshIntervalMs: 5_000,
       serializedContext: expect.any(Object),
       token: expect.any(String),
     });

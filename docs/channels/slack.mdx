@@ -417,6 +417,21 @@ The default handlers reply in-thread and show activity. Typing indicators post a
 
 The built-in `message.completed` handler renders responses up to 12,000 characters inline. Longer responses are uploaded unchanged as a Markdown snippet named `eve-response.md` with a short in-thread note, which requires the `files:write` bot scope. Upload failures are logged by the channel dispatcher; they do not trigger a model retry. An authored `events["message.completed"]` handler replaces this behavior and owns its own delivery limits.
 
+Activity renderers update after activity events by default. Set `activity.periodicRefreshIntervalMs` to re-render active activity on a timer in addition to those event-driven renders. Periodic refreshes stop when the snapshot has no running work, running actions, or blocked input:
+
+```ts title="agent/channels/slack.ts"
+import { experimental_slackActivityStatus, slackChannel } from "eve/channels/slack";
+
+export default slackChannel({
+  activity: {
+    periodicRefreshIntervalMs: 5_000,
+    renderers: [experimental_slackActivityStatus()],
+  },
+});
+```
+
+Use periodic refreshes when a custom renderer displays elapsed time or another time-based value that must advance while work emits no events. The interval must be between 1,000 milliseconds and 24 hours. Provider writes and rate limits still apply, so choose the slowest interval that meets the presentation need.
+
 Outbound text preserves bare `@` tokens as literal text. To mention a user, embed Slack's `<@USER_ID>` syntax directly or use `channel.thread.mentionUser(userId)`.
 
 When a session starts without a `threadTs` (say, from a schedule's `to(slack, target).send(...)`), eve gives it a unique temporary continuation token. The first agent post anchors the session to the Slack message timestamp, and later posts and mentions resume that same session. Pass `initialMessage` with a `Card` to land a structured anchor first instead. `threadTs` and `initialMessage` are mutually exclusive.

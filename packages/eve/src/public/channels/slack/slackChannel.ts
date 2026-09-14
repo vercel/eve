@@ -636,6 +636,12 @@ export interface SlackChannelConfig {
 
   /** Optional presentation-only activity rendered without starting parent turns. */
   readonly activity?: {
+    /**
+     * Re-renders active activity at this interval in addition to event-driven renders.
+     * Useful for time-based presentation that must advance while work emits no events.
+     * Must be between 1,000 milliseconds and 24 hours when set.
+     */
+    readonly periodicRefreshIntervalMs?: number;
     readonly renderers: readonly SlackActivityRenderer[];
   };
 
@@ -850,6 +856,7 @@ export interface SlackChannel extends Channel<
  * fields keep their defaults.
  */
 export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
+  validateActivityRefreshInterval(config.activity?.periodicRefreshIntervalMs);
   const uploadPolicy = mergeUploadPolicy(config.uploadPolicy);
   const slackFetchFile = createSlackFetchFile({ botToken: config.credentials?.botToken });
   const activityRenderers = buildSlackActivityRenderers({
@@ -1018,9 +1025,19 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
         triggeringUserId: slack?.triggeringUserId ?? null,
       };
     },
+    periodicRefreshIntervalMs: config.activity?.periodicRefreshIntervalMs,
     renderers: activityRenderers,
   });
   return channel;
+}
+
+function validateActivityRefreshInterval(value: number | undefined): void {
+  if (value === undefined) return;
+  if (!Number.isSafeInteger(value) || value < 1_000 || value > 86_400_000) {
+    throw new TypeError(
+      "Slack activity periodicRefreshIntervalMs must be an integer between 1,000 and 86,400,000.",
+    );
+  }
 }
 
 function defaultOnInputResponse(ctx: SlackInputResponseContext): SlackInputResponseResult {

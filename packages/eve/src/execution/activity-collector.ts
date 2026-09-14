@@ -12,6 +12,7 @@ const RENDER_DEBOUNCE_MS = 350;
 
 export interface ActivityCollectorInput {
   readonly expiresAt: string;
+  readonly periodicRefreshIntervalMs?: number;
   readonly serializedContext: Record<string, unknown>;
   readonly token: string;
 }
@@ -26,6 +27,7 @@ export async function activityCollectorWorkflow(input: ActivityCollectorInput): 
   const expiry = sleep(new Date(input.expiresAt)).then(() => ({ kind: "expired" as const }));
   let snapshot = createActivitySnapshot();
   let rendererStates: Readonly<Record<string, unknown>> = {};
+  let periodicRefresh: Promise<{ readonly kind: "refresh" }> | undefined;
 
   try {
     await claimHookOwnership(batches);
@@ -39,9 +41,24 @@ export async function activityCollectorWorkflow(input: ActivityCollectorInput): 
       pendingRead ??= iterator.next();
       const next = await Promise.race([
         pendingRead.then((value) => ({ kind: "batch" as const, value })),
+        ...(periodicRefresh === undefined ? [] : [periodicRefresh]),
         expiry,
       ]);
-      if (next.kind === "expired" || next.value.done === true) break;
+      if (next.kind === "expired") break;
+      if (next.kind === "refresh") {
+        periodicRefresh = undefined;
+        if (hasActiveActivity(snapshot)) {
+          const rendered = await renderSessionActivityStep({
+            rendererStates,
+            serializedContext: input.serializedContext,
+            snapshot,
+          });
+          rendererStates = rendered.rendererStates;
+          periodicRefresh = createPeriodicRefresh(input.periodicRefreshIntervalMs);
+        }
+        continue;
+      }
+      if (next.value.done === true) break;
       pendingRead = undefined;
       const reduced = reduceCollectorActivity(snapshot, next.value.value);
       snapshot = reduced.snapshot;
@@ -68,6 +85,9 @@ export async function activityCollectorWorkflow(input: ActivityCollectorInput): 
         snapshot,
       });
       rendererStates = rendered.rendererStates;
+      periodicRefresh ??= hasActiveActivity(snapshot)
+        ? createPeriodicRefresh(input.periodicRefreshIntervalMs)
+        : undefined;
     }
   } finally {
     await disposeSessionActivityStep({
@@ -75,6 +95,21 @@ export async function activityCollectorWorkflow(input: ActivityCollectorInput): 
       serializedContext: input.serializedContext,
     }).catch(() => {});
   }
+}
+
+function createPeriodicRefresh(
+  intervalMs: number | undefined,
+): Promise<{ readonly kind: "refresh" }> | undefined {
+  if (intervalMs === undefined) return undefined;
+  return sleep(intervalMs).then(() => ({ kind: "refresh" as const }));
+}
+
+export function hasActiveActivity(snapshot: ActivitySnapshotV1): boolean {
+  return (
+    Object.values(snapshot.work).some((entry) => entry.phase === "running") ||
+    Object.values(snapshot.actions).some((entry) => entry.phase === "running") ||
+    Object.values(snapshot.blockers).some((entry) => entry.phase === "blocked")
+  );
 }
 
 export function reduceCollectorActivity(
