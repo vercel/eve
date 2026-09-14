@@ -365,6 +365,8 @@ async function runDriverLoop(input: {
         bufferedSessionControls,
         cancelledTaskIds,
         commandInbox,
+        deferCallerDeliveries:
+          input.crashCleanupState.caller !== undefined && pendingInvocationTaskIds.size > 0,
         deferDeliveries: input.mode === "task" && expectedAttemptIds.size > 0,
         driverWritable: input.driverWritable,
         seenTaskDeliveries,

@@ -1503,6 +1503,95 @@ describe("workflowEntry", () => {
     });
   });
 
+  it("finishes a deferred caller before starting the next caller delivery", async () => {
+    const firstCaller = {
+      callId: "call-first",
+      replyTo: { kind: "hook" as const, token: "parent-first" },
+      subagentName: "researcher",
+    };
+    const nextCaller = {
+      callId: "call-next",
+      replyTo: { kind: "hook" as const, token: "parent-next" },
+      subagentName: "researcher",
+    };
+    const pending = createNestedTaskSessionState();
+    const completed = createNestedTaskSessionState({ completed: true, sequence: 2 });
+    vi.mocked(createSessionStep).mockResolvedValue(
+      createSessionStepResultForMock(createBaseSessionState()),
+    );
+    vi.mocked(resolveInitialTurnCallerStep).mockResolvedValueOnce(firstCaller);
+    installHookMocks({
+      deliveryHooks: [
+        {
+          token: "http:test",
+          values: [
+            {
+              caller: nextCaller,
+              kind: "send",
+              payload: { message: "next request" },
+            },
+            {
+              kind: "deliver",
+              payloads: [
+                {
+                  message: "Background task task_nested is completed.",
+                  task: { views: [nestedTaskTerminalView()] },
+                },
+              ],
+              taskDeliveryId: "task_nested:ready:completed",
+            },
+          ],
+        },
+      ],
+      turnControls: [
+        turnResult({
+          action: "park",
+          sessionState: pending,
+          settled: { output: "Reviewing...", usage: usage(10, 2) },
+        }),
+        turnResult({
+          action: "park",
+          sessionState: completed,
+          settled: { output: "First review", usage: usage(20, 4) },
+        }),
+        turnResult({
+          action: "park",
+          sessionState: completed,
+          settled: { output: "Next review", usage: usage(5, 1) },
+        }),
+      ],
+    });
+
+    await expect(
+      workflowEntry({
+        input: { message: "delegate" },
+        serializedContext: createSerializedContext({
+          "eve.channel": {
+            kind: "subagent",
+            state: {
+              callId: "call-first",
+              parentContinuationToken: "parent-first",
+              subagentName: "researcher",
+            },
+          },
+        }),
+      }),
+    ).resolves.toEqual({ output: "" });
+
+    expect(notifyTurnCallerStep).toHaveBeenNthCalledWith(1, {
+      caller: firstCaller,
+      lifecycle: "parked",
+      sessionId: "wrun_test_123",
+      settled: { output: "First review", usage: usage(30, 6) },
+    });
+    expect(notifyTurnCallerStep).toHaveBeenNthCalledWith(2, {
+      caller: nextCaller,
+      lifecycle: "parked",
+      sessionId: "wrun_test_123",
+      settled: { output: "Next review", usage: usage(5, 1) },
+    });
+  });
+
   it("passes the resumed channel request id to the next turn", async () => {
     const sessionState = createBaseSessionState();
     vi.mocked(createSessionStep).mockResolvedValue(createSessionStepResultForMock(sessionState));
