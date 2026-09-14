@@ -34,10 +34,10 @@ describe("validateSessionCheckpointStep", () => {
   });
 
   it("rejects a checkpoint written by a different contract version", async () => {
-    const checkpoint: SessionCheckpoint = { ...createCheckpoint(), version: 2 as never };
+    const checkpoint: SessionCheckpoint = { ...createCheckpoint(), version: 3 as never };
 
     await expect(validateSessionCheckpointStep({ checkpoint })).rejects.toThrow(
-      /Unsupported session checkpoint version 2.*Start a new session/,
+      /Unsupported session checkpoint version 3.*Start a new session/,
     );
     expect(deserializeContextMock).not.toHaveBeenCalled();
   });
@@ -60,10 +60,8 @@ describe("validateSessionCheckpointStep", () => {
 function createCheckpoint(input: { readonly session?: readonly string[] } = {}): SessionCheckpoint {
   return {
     anchorToken: "session-1:anchor",
-    version: 1,
-    hooks: {
-      session: input.session ?? ["stable", "channel:old", "channel:current"],
-    },
+    version: 2,
+    hooks: toHookClaims(input.session ?? ["stable", "channel:old", "channel:current"]),
     mode: "conversation",
     ownership: {
       anchorRunId: "anchor-1",
@@ -80,4 +78,9 @@ function createCheckpoint(input: { readonly session?: readonly string[] } = {}):
       version: 1,
     }),
   };
+}
+
+function toHookClaims(tokens: readonly string[]) {
+  const [stable = "", ...aliases] = tokens;
+  return { aliases, stable };
 }

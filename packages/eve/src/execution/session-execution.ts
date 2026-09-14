@@ -1,11 +1,11 @@
 import { getWorkflowMetadata } from "#compiled/@workflow/core/index.js";
 
 import type { DeliverHookPayload, SessionCapabilities } from "#channel/types.js";
-import { cancelAllIndexedSessionTasksStep } from "#execution/cancel-indexed-session-tasks-step.js";
 import { cancelDescendantTurnsStep } from "#execution/cancel-descendant-turns-step.js";
 import { dispatchCoordinationStep } from "#execution/coordination-dispatch-step.js";
-import type { SessionBacklog } from "#execution/session-backlog.js";
-import type { SessionInbox } from "#execution/session-inbox/inbox.js";
+import type { SessionInputLedger } from "#execution/session-input-ledger.js";
+import type { SessionInputQueue } from "#execution/session-input-queue.js";
+import type { SessionInboxOwnership, SessionInboxReader } from "#execution/session-inbox/inbox.js";
 import type { SessionStateCursor } from "#execution/session-state-cursor.js";
 import { TurnRouting } from "#execution/turn-routing.js";
 import { acknowledgeDelegatedTasksStep } from "#execution/tasks/parent/delegate.js";
@@ -42,11 +42,12 @@ type RuntimeEvent =
  * and settles locally. There is no child run and no transport protocol.
  */
 export interface SessionExecutionInput {
-  readonly backlog: SessionBacklog;
   readonly capabilities?: SessionCapabilities;
-  readonly commandInbox: SessionInbox;
+  readonly commandInbox: SessionInboxReader & Pick<SessionInboxOwnership, "hookClaims">;
   readonly cursor: SessionStateCursor;
+  readonly ledger: SessionInputLedger;
   readonly mode: RunMode;
+  readonly queue: SessionInputQueue;
 }
 
 export class SessionExecution {
@@ -61,13 +62,14 @@ export class SessionExecution {
   }
 
   async runTurn(delivery: TurnStepPayload): Promise<TurnOutcome> {
-    const { backlog, commandInbox, cursor } = this.input;
+    const { commandInbox, cursor, ledger, queue } = this.input;
     const control = new TurnRouting({
-      backlog,
       callerCallId: delivery.kind === "deliver" ? delivery.caller?.callId : undefined,
       commandInbox,
       cursor,
       expectedTurnId: activeTurnId(cursor.sessionState.emissionState),
+      ledger,
+      queue,
     });
     let nextStepInput: TurnStepPayload | undefined = delivery;
 
@@ -88,14 +90,14 @@ export class SessionExecution {
         if (result.backgroundTaskState === undefined) {
           throw new Error("Background tasks were returned without their committed session state.");
         }
-        await cursor.adopt({
+        await cursor.apply({
           serializedContext: result.backgroundTaskContext ?? beforeStepContext,
           sessionState: result.backgroundTaskState,
         });
         await acknowledgeDelegatedTasksStep({ tasks: result.backgroundTasks ?? [] });
       }
 
-      await cursor.adopt({
+      await cursor.apply({
         serializedContext: result.serializedContext,
         sessionState:
           result.action === "cancelled" || control.signal.aborted
@@ -104,20 +106,20 @@ export class SessionExecution {
       });
       await control.admitBoundary();
 
-      if (result.action === "cancelled") return await this.finishCancelledTurn(control);
+      if (result.action === "cancelled") return await this.finishCancelledTurn();
       if (control.signal.aborted && (pendingCallIds === undefined || hasBackgroundTasks)) {
-        return await this.finishCancelledTurn(control);
+        return await this.finishCancelledTurn();
       }
 
       if (result.action === "done") {
         await this.commitSettlement(result);
-        return this.outcome({
+        return {
           isError: result.isError,
           kind: "done",
           output: result.output ?? "",
           usage: result.usage,
           usageDelta: result.usageDelta,
-        });
+        };
       }
 
       if (
@@ -127,13 +129,13 @@ export class SessionExecution {
         const dispatchResult = await dispatchCoordinationStep({
           action: result.action,
           callbackBaseUrl: resolveWorkflowCallbackBaseUrl(getWorkflowMetadata().url),
-          workflowToolRunOwner: { inbox: commandInbox.sessionHookTokens[0]! },
+          workflowToolRunOwner: { inbox: commandInbox.hookClaims.stable },
           parentWritable: cursor.parentWritable,
           serializedContext: cursor.serializedContext,
           sessionState: cursor.sessionState,
         });
         const initialAcceptedAtMs = dispatchResult.results.length === 0 ? undefined : Date.now();
-        await cursor.adopt(dispatchResult);
+        await cursor.apply(dispatchResult);
         await acknowledgeDelegatedTasksStep({ tasks: dispatchResult.pendingTasks });
 
         const results = await this.waitForRuntimeActionResults({
@@ -142,7 +144,7 @@ export class SessionExecution {
           initialResults: dispatchResult.results,
           pendingCallIds,
         });
-        if (results === "cancelled") return await this.finishCancelledTurn(control);
+        if (results === "cancelled") return await this.finishCancelledTurn();
         nextStepInput = results;
         continue;
       }
@@ -157,21 +159,21 @@ export class SessionExecution {
           this.input.mode === "task" &&
           (result.hasPendingAuthorization || result.hasPendingInputBatch)
             ? undefined
-            : control.takeSteering();
+            : await control.takeSteering();
         if (steering !== undefined) {
           nextStepInput = steering;
           continue;
         }
         await this.commitSettlement(result);
-        return this.outcome({
+        return {
           authorizationAttemptIds: result.authorizationAttemptIds,
           authorizationNames: result.authorizationNames,
           kind: "park",
           settled: result.settled,
-        });
+        };
       }
 
-      nextStepInput = control.takeSteering();
+      nextStepInput = await control.takeSteering();
     }
   }
 
@@ -188,7 +190,7 @@ export class SessionExecution {
   /** Commits terminal turn events only after steering had its chance at the boundary. */
   private async commitSettlement(result: DurableStepResult): Promise<void> {
     if (result.settlement === undefined) return;
-    await this.input.cursor.adopt(
+    await this.input.cursor.apply(
       await commitSettlementStep({
         ...this.input.cursor.createStepInput(undefined),
         settlement: result.settlement,
@@ -196,29 +198,13 @@ export class SessionExecution {
     );
   }
 
-  private async finishCancelledTurn(control: TurnRouting): Promise<TurnOutcome> {
+  private async finishCancelledTurn(): Promise<TurnOutcome> {
     const { cursor } = this.input;
-    if (control.cancellation?.tasks === true) {
-      await cancelAllIndexedSessionTasksStep({
-        serializedContext: cursor.serializedContext,
-        sessionState: cursor.sessionState,
-      });
-    }
     await cancelDescendantTurnsStep({
       serializedContext: cursor.serializedContext,
       sessionState: cursor.sessionState,
     });
-    return this.outcome({ cancelled: true, kind: "park" });
-  }
-
-  private outcome<T extends Omit<TurnOutcome, "serializedContext" | "sessionState">>(
-    value: T,
-  ): TurnOutcome {
-    return {
-      ...value,
-      serializedContext: this.input.cursor.serializedContext,
-      sessionState: this.input.cursor.sessionState,
-    } as TurnOutcome;
+    return { cancelled: true, kind: "park" };
   }
 
   private async waitForRuntimeActionResults(input: {
@@ -288,10 +274,11 @@ export class SessionExecution {
       if (result !== undefined) return result;
       const message = control.takeWorkflowMessage();
       if (message !== undefined) return { kind: "workflow", message };
-      const read = await commandInbox.next("runtime");
-      if (read.done) throw new Error("Session inbox closed before runtime actions completed.");
-      commandInbox.consumeNext("runtime");
-      await control.handle(read.value, true);
+      const lease = await commandInbox.read("runtime");
+      if (lease === undefined)
+        throw new Error("Session inbox closed before runtime actions completed.");
+      lease.consume();
+      await control.admit(lease.value);
     }
   }
 }

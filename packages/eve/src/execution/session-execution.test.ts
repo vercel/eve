@@ -2,7 +2,8 @@ import { createTestSessionState } from "#internal/testing/session-state.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import type { SessionInbox } from "#execution/session-inbox/inbox.js";
-import { SessionBacklog } from "#execution/session-backlog.js";
+import { SessionInputLedger } from "#execution/session-input-ledger.js";
+import { SessionInputQueue } from "#execution/session-input-queue.js";
 import { SessionExecution } from "#execution/session-execution.js";
 import { SessionStateCursor } from "#execution/session-state-cursor.js";
 import { cancelDescendantTurnsStep } from "#execution/cancel-descendant-turns-step.js";
@@ -35,16 +36,15 @@ describe("SessionExecution background task checkpoints", () => {
     const sessionState = state("");
     const inbox: SessionInbox = {
       claimSessionHook: vi.fn(),
-      consumeNext: vi.fn(),
       drain: vi
         .fn()
         .mockReturnValueOnce([{ kind: "cancel" }])
         .mockReturnValue([]),
+      hookClaims: { aliases: [], stable: "parent-inbox" },
       hasPending: vi.fn(() => false),
       hasReadyAuthorization: vi.fn(() => false),
-      next: vi.fn(() => new Promise<never>(() => {})),
+      read: vi.fn(() => new Promise<never>(() => {})),
       restore: vi.fn(),
-      sessionHookTokens: ["parent-inbox"],
       setAuthorizationWindow: vi.fn(),
     };
     const execution = createExecution({ inbox, sessionState });
@@ -68,7 +68,7 @@ describe("SessionExecution background task checkpoints", () => {
       execution.runTurn({ kind: "deliver", payloads: [{ message: "Start Alice's deployment" }] }),
     ).resolves.toMatchObject({ cancelled: true, kind: "park" });
     expect(dispatchCoordinationStep).toHaveBeenCalledTimes(1);
-    expect(inbox.next).not.toHaveBeenCalledWith("runtime");
+    expect(inbox.read).not.toHaveBeenCalledWith("runtime");
     expect(cancelDescendantTurnsStep).toHaveBeenCalledWith({ serializedContext: {}, sessionState });
   });
 
@@ -82,19 +82,18 @@ describe("SessionExecution background task checkpoints", () => {
       kind: "deliver",
       payloads: [{ message: "Include Alice's update." }],
     };
-    const backlog = new SessionBacklog();
+    const queue = new SessionInputQueue();
     const inbox: SessionInbox = {
       claimSessionHook: vi.fn(),
-      consumeNext: vi.fn(),
       drain: vi.fn().mockReturnValueOnce([background, steering]).mockReturnValue([]),
+      hookClaims: { aliases: [], stable: "parent-inbox" },
       hasPending: vi.fn(() => false),
       hasReadyAuthorization: vi.fn(() => false),
-      next: vi.fn(() => new Promise<never>(() => {})),
+      read: vi.fn(() => new Promise<never>(() => {})),
       restore: vi.fn(),
-      sessionHookTokens: [],
       setAuthorizationWindow: vi.fn(),
     };
-    const execution = createExecution({ backlog, inbox, sessionState: state("") });
+    const execution = createExecution({ inbox, queue, sessionState: state("") });
     vi.mocked(turnStep)
       .mockReset()
       .mockImplementation(async (input) => ({
@@ -109,7 +108,7 @@ describe("SessionExecution background task checkpoints", () => {
 
     expect(turnStep).toHaveBeenCalledTimes(2);
     expect(vi.mocked(turnStep).mock.calls[1]?.[0].input).toEqual(steering);
-    expect(backlog.deliveries).toEqual([background]);
+    expect(queue.pendingCount).toBe(1);
   });
 
   it.each(["cancelled", "done"] as const)(
@@ -133,16 +132,15 @@ describe("SessionExecution background task checkpoints", () => {
       const completedContext = { ...observability, state: "completed" };
       const inbox: SessionInbox = {
         claimSessionHook: vi.fn(),
-        consumeNext: vi.fn(),
         drain: vi.fn(() => []),
+        hookClaims: { aliases: [], stable: "parent-inbox" },
         hasPending: vi.fn(() => false),
         hasReadyAuthorization: vi.fn(() => false),
-        next: vi
+        read: vi
           .fn()
-          .mockResolvedValueOnce({ done: false, value: { kind: "cancel" } })
+          .mockResolvedValueOnce({ consume() {}, value: { kind: "cancel" } })
           .mockImplementation(() => new Promise(() => {})),
         restore: vi.fn(),
-        sessionHookTokens: [],
         setAuthorizationWindow: vi.fn(),
       };
       const execution = createExecution({
@@ -150,7 +148,7 @@ describe("SessionExecution background task checkpoints", () => {
         serializedContext: { state: "before" },
         sessionState: initialState,
       });
-      const adopt = vi.spyOn(SessionStateCursor.prototype, "adopt");
+      const apply = vi.spyOn(SessionStateCursor.prototype, "apply");
       vi.mocked(acknowledgeDelegatedTasksStep).mockImplementation(async () => {
         expect(execution.cursor.serializedContext).toEqual(backgroundContext);
         expect(execution.cursor.sessionState).toBe(backgroundState);
@@ -174,10 +172,8 @@ describe("SessionExecution background task checkpoints", () => {
       expect(result).toEqual({
         cancelled: true,
         kind: "park",
-        serializedContext: completedContext,
-        sessionState: backgroundState,
       });
-      expect(adopt.mock.calls[0]?.[0]).toEqual({
+      expect(apply.mock.calls[0]?.[0]).toEqual({
         serializedContext: backgroundContext,
         sessionState: backgroundState,
       });
@@ -192,21 +188,23 @@ describe("SessionExecution background task checkpoints", () => {
 });
 
 function createExecution(input: {
-  readonly backlog?: SessionBacklog;
   readonly inbox: SessionInbox;
+  readonly queue?: SessionInputQueue;
   readonly serializedContext?: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
 }): SessionExecution {
-  return new SessionExecution({
-    backlog: input.backlog ?? new SessionBacklog(),
+  const cursor = new SessionStateCursor({
     commandInbox: input.inbox,
-    cursor: new SessionStateCursor({
-      commandInbox: input.inbox,
-      parentWritable: new WritableStream<Uint8Array>(),
-      serializedContext: input.serializedContext ?? {},
-      sessionState: input.sessionState,
-    }),
+    parentWritable: new WritableStream<Uint8Array>(),
+    serializedContext: input.serializedContext ?? {},
+    sessionState: input.sessionState,
+  });
+  return new SessionExecution({
+    commandInbox: input.inbox,
+    cursor,
+    ledger: new SessionInputLedger(cursor),
     mode: "conversation",
+    queue: input.queue ?? new SessionInputQueue(),
   });
 }
 

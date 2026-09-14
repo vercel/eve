@@ -10,7 +10,6 @@ describe("SessionStateCursor", () => {
     const claimSessionHook = vi.fn(async () => {});
     const commandInbox = {
       claimSessionHook,
-      sessionHookTokens: ["stable", "channel:initial"],
     };
     const initialState = state("channel:initial");
     const cursor = new SessionStateCursor({
@@ -23,7 +22,7 @@ describe("SessionStateCursor", () => {
     });
     const nextState = state("channel:third");
 
-    await cursor.adopt({
+    await cursor.apply({
       serializedContext: {
         [ContinuationHookTokensKey.name]: ["channel:initial", "channel:second", "channel:third"],
       },
@@ -43,14 +42,13 @@ describe("SessionStateCursor", () => {
     const cursor = new SessionStateCursor({
       commandInbox: {
         claimSessionHook,
-        sessionHookTokens: ["stable"],
       },
       parentWritable: new WritableStream<Uint8Array>(),
       serializedContext: {},
       sessionState: state(""),
     });
 
-    await cursor.adopt({ sessionState: state("channel:current") });
+    await cursor.apply({ sessionState: state("channel:current") });
 
     expect(claimSessionHook).toHaveBeenCalledWith("channel:current");
   });

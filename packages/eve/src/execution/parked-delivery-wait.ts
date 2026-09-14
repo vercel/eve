@@ -1,38 +1,32 @@
-import type { DeliverHookPayload, DeliverPayload } from "#channel/types.js";
-import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
-import type { SessionBacklog, SessionControl } from "#execution/session-backlog.js";
-import type { SessionInbox } from "#execution/session-inbox/inbox.js";
-import { routeSessionPayload } from "#execution/session-routing.js";
+import type { DeliverPayload } from "#channel/types.js";
+import { routeSelectedDelivery } from "#execution/selected-delivery-router.js";
+import type { SessionInputLedger } from "#execution/session-input-ledger.js";
+import type {
+  SessionControl,
+  SessionInputQueue,
+  TurnSelection,
+} from "#execution/session-input-queue.js";
+import type { SessionInboxReader } from "#execution/session-inbox/inbox.js";
+import { admitSessionInboxPayload, applySessionCancellation } from "#execution/session-routing.js";
 import type { SessionStateCursor } from "#execution/session-state-cursor.js";
 import type { WorkflowToolRunMessage } from "#execution/tools/workflow/messages.js";
 import { getSessionTaskCohorts } from "#tasks/session-task-cohorts.js";
 
-/** What the parked owner should do with the next session activity. */
 export type NextTurnInstruction =
   | { readonly kind: "workflow"; readonly message: WorkflowToolRunMessage }
   | { readonly kind: "authorization"; readonly payloads: readonly DeliverPayload[] }
   | { readonly kind: SessionControl }
   | { readonly kind: "closed" }
   | { readonly kind: "cancel-turn" }
-  | { readonly kind: "turn"; readonly delivery: DeliverHookPayload };
+  | TurnSelection;
 
-/**
- * Awaits the next activity that requires owner action while the session is
- * parked. Deliveries fully routed to a descendant leave the parent with no
- * turn to run, so this keeps waiting until a delivery produces a parent turn,
- * a control, a cancellation, or hook closure. The wait is unbounded by design.
- *
- * With `awaitAuthorizationCallbacks`, the inbox's authorization window stays
- * open for the whole wait — including iterations that consume activity
- * without producing a parent turn — so an open challenge's callback surfaces
- * as an `"authorization"` instruction no matter when it arrives.
- */
 export async function nextTurnDelivery(input: {
   readonly awaitAuthorizationCallbacks?: boolean;
-  readonly backlog: SessionBacklog;
-  readonly commandInbox: SessionInbox;
+  readonly commandInbox: SessionInboxReader;
   readonly cursor: SessionStateCursor;
   readonly deferDeliveries?: boolean;
+  readonly ledger: SessionInputLedger;
+  readonly queue: SessionInputQueue;
 }): Promise<NextTurnInstruction> {
   if (input.awaitAuthorizationCallbacks !== true) return await awaitNextTurnDelivery(input);
 
@@ -45,59 +39,48 @@ export async function nextTurnDelivery(input: {
 }
 
 async function awaitNextTurnDelivery(input: {
-  readonly backlog: SessionBacklog;
-  readonly commandInbox: SessionInbox;
+  readonly commandInbox: SessionInboxReader;
   readonly cursor: SessionStateCursor;
   readonly deferDeliveries?: boolean;
+  readonly ledger: SessionInputLedger;
+  readonly queue: SessionInputQueue;
 }): Promise<NextTurnInstruction> {
-  const { backlog, commandInbox, cursor } = input;
-  const control = backlog.takeControl();
-  if (control !== undefined) return { kind: control };
-
+  const { commandInbox, cursor, queue } = input;
   while (true) {
-    if (input.deferDeliveries !== true && !commandInbox.hasReadyAuthorization()) {
-      const delivery = backlog.takeTurn(
+    if (!commandInbox.hasReadyAuthorization()) {
+      const selected = queue.takeNext(
         getSessionTaskCohorts(cursor.sessionState.snapshot.session.state),
+        {
+          deferDeliveries: input.deferDeliveries,
+          isTaskCancelled: (taskId) => input.ledger.isTaskCancelled(taskId),
+        },
       );
-      if (delivery !== undefined) {
-        const routed = await routeDeliverToChildren({
-          delivery,
-          parentWritable: cursor.parentWritable,
-          serializedContext: cursor.serializedContext,
-          sessionState: cursor.sessionState,
-        });
-        cursor.adoptState(routed);
-        if (routed.kind === "cancel-turn") return { kind: "cancel-turn" };
-        if (routed.remainder === undefined) continue;
-        return { delivery: routed.remainder, kind: "turn" };
+      if (selected?.kind === "control") return { kind: selected.control };
+      if (selected?.kind === "turn") {
+        const routed = await routeSelectedDelivery(selected, cursor);
+        if (routed.kind === "cancel-turn") return routed;
+        if (routed.kind === "consumed") continue;
+        return routed;
       }
     }
 
-    const read = await commandInbox.next("runtime");
-    if (read.done) return { kind: "closed" };
-    commandInbox.consumeNext("runtime");
+    const lease = await commandInbox.read("runtime");
+    if (lease === undefined) return { kind: "closed" };
+    lease.consume();
 
-    // Parked deliveries are routed to children only once they are selected as
-    // a turn above, so cohort batching sees the whole notification.
-    const routed = await routeSessionPayload(read.value, {
-      backlog,
-      cursor,
-      routeDeliveries: false,
-    });
-    switch (routed.kind) {
+    const admitted = await admitSessionInboxPayload(lease.value, input);
+    switch (admitted.kind) {
       case "workflow":
-        return { kind: "workflow", message: routed.message };
+        return { kind: "workflow", message: admitted.message };
       case "authorization":
-        return { kind: "authorization", payloads: routed.payload.payloads };
+        return { kind: "authorization", payloads: admitted.payload.payloads };
       case "cancel":
-      case "buffered":
+        await applySessionCancellation(admitted.command, input);
+        break;
+      case "delivery":
       case "consumed":
       case "runtime-action-result":
-        // A parked session has no active turn to cancel; a late runtime result
-        // arriving through an old alias has always been ignored here.
         break;
     }
-    const buffered = backlog.takeControl();
-    if (buffered !== undefined) return { kind: buffered };
   }
 }

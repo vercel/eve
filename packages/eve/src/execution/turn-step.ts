@@ -60,24 +60,19 @@ export type DurableStepResult = (
 ) &
   DurableStepResultFields;
 
-interface TurnOutcomeState {
-  readonly serializedContext: Record<string, unknown>;
-  readonly sessionState: DurableSessionState;
-}
-
 /** The only two ways a locally executed conversational turn can settle. */
 export type TurnOutcome =
-  | (TurnOutcomeState & {
+  | {
       readonly kind: "done";
       readonly output: unknown;
       readonly isError?: boolean;
       readonly usage?: TokenUsage;
       readonly usageDelta?: TokenUsage;
-    })
-  | (TurnOutcomeState & {
+    }
+  | {
       readonly authorizationAttemptIds?: readonly string[];
       readonly authorizationNames?: readonly string[];
       readonly cancelled?: true;
       readonly kind: "park";
       readonly settled?: SettledTurn;
-    });
+    };

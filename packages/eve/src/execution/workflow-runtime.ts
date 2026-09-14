@@ -58,8 +58,7 @@ import type {
   HandoffWorkflowEntryInput,
   InitialWorkflowEntryInput,
 } from "#execution/workflow-entry-input.js";
-import type { SessionCheckpoint } from "#execution/session-handoff.js";
-import type { DeliverHookPayload } from "#channel/types.js";
+import type { SessionCheckpoint, SessionHandoffTrigger } from "#execution/session-handoff.js";
 import type { ActivityCollectorInput } from "#execution/activity-collector.js";
 import { createEveActivityRoutePath } from "#protocol/routes.js";
 import {
@@ -343,24 +342,22 @@ export function createWorkflowRuntime(config: {
 export interface SessionOwnerStartInput {
   readonly activationToken: string;
   readonly checkpoint: SessionCheckpoint;
-  readonly delivery: DeliverHookPayload;
   readonly targetDeploymentId: string;
+  readonly trigger: SessionHandoffTrigger;
 }
 
 /** Starts a successor owner and binds its output to the original session stream. */
-export async function startSessionOwnerStep(
-  input: SessionOwnerStartInput,
-): Promise<{ readonly runId: string }> {
+export async function startSessionOwnerStep(input: SessionOwnerStartInput): Promise<void> {
   "use step";
   const workflowInput: HandoffWorkflowEntryInput = {
     activationToken: input.activationToken,
     checkpoint: input.checkpoint,
-    delivery: input.delivery,
     kind: "handoff",
     ownerDeploymentId: input.targetDeploymentId,
     parentWritable: getRun(input.checkpoint.ownership.anchorRunId).getWritable<Uint8Array>(),
+    trigger: input.trigger,
   };
-  const run = await startWorkflowOnDeployment(
+  await startWorkflowOnDeployment(
     workflowEntryReference,
     [workflowInput],
     input.targetDeploymentId,
@@ -368,7 +365,6 @@ export async function startSessionOwnerStep(
       ? undefined
       : { experimental_retention: input.checkpoint.retention },
   );
-  return { runId: run.runId };
 }
 
 function normalizePersistedEvent(value: unknown): MessageStreamEvent {

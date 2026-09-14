@@ -1,5 +1,5 @@
-import type { DeliverHookPayload, RunInput, SessionCommand } from "#channel/types.js";
-import type { SessionCheckpoint } from "#execution/session-handoff.js";
+import type { RunInput, SessionCommand } from "#channel/types.js";
+import type { SessionCheckpoint, SessionHandoffTrigger } from "#execution/session-handoff.js";
 import type { AgentWorkflowRetentionDefinition } from "#shared/agent-definition.js";
 
 /**
@@ -23,10 +23,10 @@ export interface InitialWorkflowEntryInput {
 export interface HandoffWorkflowEntryInput {
   readonly activationToken: string;
   readonly checkpoint: SessionCheckpoint;
-  readonly delivery: DeliverHookPayload;
   readonly kind: "handoff";
   readonly ownerDeploymentId: string;
   readonly parentWritable: WritableStream<Uint8Array>;
+  readonly trigger: SessionHandoffTrigger;
 }
 
 export type WorkflowEntryInput = InitialWorkflowEntryInput | HandoffWorkflowEntryInput;

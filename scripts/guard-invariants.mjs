@@ -277,7 +277,10 @@ const SUBAGENT_IMPORT_RE =
   /from ["'](?:#|(?:\.\.?\/)+(?:[\w-]+\/)*)(?:subagents|execution\/tools\/subagent|tools\/subagent)(?:\/|\.js|["'])/;
 
 const RULE43_GENERIC_SESSION_FILES = new Set([
-  "packages/eve/src/execution/session-command-inbox.ts",
+  "packages/eve/src/execution/session-hook-claims.ts",
+  "packages/eve/src/execution/session-inbox/inbox.ts",
+  "packages/eve/src/execution/session-input-ledger.ts",
+  "packages/eve/src/execution/session-input-queue.ts",
   "packages/eve/src/execution/session-state-cursor.ts",
 ]);
 

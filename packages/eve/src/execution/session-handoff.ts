@@ -1,16 +1,17 @@
 import { createHook, type Hook } from "#compiled/@workflow/core/index.js";
 
-import type { DeliverHookPayload, SessionCapabilities, TurnCaller } from "#channel/types.js";
+import type { DeliverHookPayload, SessionCapabilities } from "#channel/types.js";
 import { readAcceptedDeploymentId } from "#execution/accepted-delivery-deployment.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import { claimHookOwnership, disposeHook } from "#execution/hook-ownership.js";
-import type { SessionBacklog } from "#execution/session-backlog.js";
+import type { TurnSelection } from "#execution/session-input-queue.js";
 import { isSessionIdleForHandoffStep } from "#execution/session-handoff-eligibility-step.js";
 import {
   claimSessionHooks,
   type SessionInboxHandle,
   type SessionInboxPayload,
 } from "#execution/session-inbox/inbox.js";
+import type { SessionHookClaims } from "#execution/session-hook-claims.js";
 import { startSessionOwnerStep } from "#execution/workflow-runtime.js";
 import type { AgentWorkflowRetentionDefinition } from "#shared/agent-definition.js";
 import type { RunMode } from "#shared/run-mode.js";
@@ -23,23 +24,16 @@ export interface SessionOwnership {
   readonly deploymentId: string;
 }
 
-/** Complete hook set a successor must claim before it can own the session. */
-export interface SessionHookClaims {
-  /** The stable session inbox followed by every additive continuation address. */
-  readonly session: readonly string[];
-}
-
 /**
  * Cross-deployment checkpoint contract. The successor may run a different eve
  * build than the owner that produced it; bump when any field changes shape so
  * an incompatible successor rejects the handoff instead of misreading state.
  */
-export const SESSION_CHECKPOINT_VERSION = 1;
+export const SESSION_CHECKPOINT_VERSION = 2;
 
 export interface SessionCheckpoint {
   readonly version: typeof SESSION_CHECKPOINT_VERSION;
   readonly anchorToken: string;
-  readonly caller?: TurnCaller;
   readonly capabilities?: SessionCapabilities;
   readonly hooks: SessionHookClaims;
   readonly mode: RunMode;
@@ -50,17 +44,21 @@ export interface SessionCheckpoint {
   readonly sessionTimeoutDeadline?: Date;
 }
 
-export type SessionHandoffCheckpoint =
+type SessionHandoffCheckpoint =
   | {
       readonly kind: "ready";
       readonly checkpoint: SessionCheckpoint;
-      readonly delivery: DeliverHookPayload;
+      readonly trigger: SessionHandoffTrigger;
       readonly targetDeploymentId: string;
     }
   | {
       readonly kind: "skipped";
       readonly reason: "same-deployment" | "missing-deployment" | "not-idle" | "busy";
     };
+
+interface SessionHandoffCandidate {
+  readonly activation: Hook<SessionOwnerActivation>;
+}
 
 export type SessionOwnerActivation =
   | { readonly kind: "active" }
@@ -73,19 +71,31 @@ export type SessionOwnerActivation =
 
 /** Settled session facts the owner supplies when it considers a handoff. */
 export interface SessionHandoffSnapshot {
-  readonly caller?: TurnCaller;
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
 }
 
+export interface SessionHandoffTrigger {
+  readonly delivery: DeliverHookPayload;
+}
+
+export type SessionTransferOutcome =
+  | { readonly kind: "transferred" }
+  | {
+      readonly kind: "retained";
+      readonly reason:
+        | Extract<SessionHandoffCheckpoint, { readonly kind: "skipped" }>["reason"]
+        | "accepted-during-release"
+        | "activation-failed";
+    };
+
 /**
  * The sole boundary for moving an idle session to another exact deployment.
- * Constructed once per owner; `transfer()` is attempted per eligible delivery.
+ * Constructed once per owner; `tryTransfer()` is attempted per eligible selection.
  * When the upstream atomic hook-handoff primitive lands, only this class changes.
  */
 export interface SessionHandoffInput {
   readonly anchorToken: string;
-  readonly backlog: SessionBacklog;
   readonly capabilities?: SessionCapabilities;
   readonly commandInbox: SessionInboxHandle;
   readonly isInitialOwner: boolean;
@@ -98,37 +108,40 @@ export interface SessionHandoffInput {
 export class SessionHandoff {
   private readonly input: SessionHandoffInput;
   private anchor: Hook<{ readonly output: unknown }> | undefined;
-  private releasedHookTokens: readonly string[] = [];
+  private releasedHookClaims: SessionHookClaims | undefined;
 
   constructor(input: SessionHandoffInput) {
     this.input = input;
   }
 
   /**
-   * Attempts to move the session to the delivery's deployment. Returns `true`
-   * once a successor has activated; otherwise this owner keeps the session and
-   * must process the delivery itself. Never throws for a failed candidate.
+   * Attempts to move the session to the selected delivery's deployment. The
+   * outcome states whether the successor activated or this owner retained the
+   * session. Candidate failures recover locally rather than escaping.
    */
-  async transfer(delivery: DeliverHookPayload, snapshot: SessionHandoffSnapshot): Promise<boolean> {
-    const staged = await this.checkpoint(delivery, snapshot);
-    if (staged.kind === "skipped") return false;
+  async tryTransfer(
+    selection: TurnSelection,
+    snapshot: SessionHandoffSnapshot,
+  ): Promise<SessionTransferOutcome> {
+    const staged = await this.checkpoint(selection, snapshot);
+    if (staged.kind === "skipped") return { kind: "retained", reason: staged.reason };
 
     await this.ensureAnchor();
     const acceptedDuringRelease = await this.release();
     if (acceptedDuringRelease.length > 0) {
       await this.recover(acceptedDuringRelease);
-      return false;
+      return { kind: "retained", reason: "accepted-during-release" };
     }
     let acceptedByFailedCandidate: readonly SessionInboxPayload[] = [];
     try {
       const activation = await this.activate(await this.start(staged));
-      if (activation.kind === "active") return true;
+      if (activation.kind === "active") return { kind: "transferred" };
       acceptedByFailedCandidate = activation.payloads;
     } catch {
       // The current owner remains authoritative until activation.
     }
     await this.recover(acceptedByFailedCandidate);
-    return false;
+    return { kind: "retained", reason: "activation-failed" };
   }
 
   /** After a transfer, the original run parks until the final owner reports the session result. */
@@ -148,17 +161,22 @@ export class SessionHandoff {
     await disposeHook(anchor);
   }
 
-  async checkpoint(
-    delivery: DeliverHookPayload,
+  private async checkpoint(
+    selection: TurnSelection,
     snapshot: SessionHandoffSnapshot,
   ): Promise<SessionHandoffCheckpoint> {
-    const { backlog, commandInbox, mode, ownership } = this.input;
+    const { commandInbox, mode, ownership } = this.input;
+    const { delivery } = selection;
     const targetDeploymentId = readAcceptedDeploymentId(delivery);
     if (targetDeploymentId === undefined) return { kind: "skipped", reason: "missing-deployment" };
     if (targetDeploymentId === ownership.deploymentId) {
       return { kind: "skipped", reason: "same-deployment" };
     }
-    if (mode !== "conversation" || !backlog.isEmpty() || commandInbox.hasPending()) {
+    if (
+      mode !== "conversation" ||
+      !selection.provenance.handoffEligible ||
+      commandInbox.hasPending()
+    ) {
       return { kind: "skipped", reason: "busy" };
     }
     if (!(await isSessionIdleForHandoffStep({ sessionState: snapshot.sessionState }))) {
@@ -167,9 +185,8 @@ export class SessionHandoff {
     return {
       checkpoint: {
         anchorToken: this.input.anchorToken,
-        caller: snapshot.caller,
         capabilities: this.input.capabilities,
-        hooks: { session: [...commandInbox.sessionHookTokens] },
+        hooks: commandInbox.hookClaims,
         mode,
         ownership,
         retention: this.input.retention,
@@ -178,19 +195,19 @@ export class SessionHandoff {
         sessionTimeoutDeadline: this.input.sessionTimeoutDeadline,
         version: SESSION_CHECKPOINT_VERSION,
       },
-      delivery,
       kind: "ready",
       targetDeploymentId,
+      trigger: { delivery },
     };
   }
 
   /** Releases every session hook, remembering the exact set so `recover` can reclaim it. */
-  async release(): Promise<readonly SessionInboxPayload[]> {
-    this.releasedHookTokens = [...this.input.commandInbox.sessionHookTokens];
+  private async release(): Promise<readonly SessionInboxPayload[]> {
+    this.releasedHookClaims = this.input.commandInbox.hookClaims;
     return await this.input.commandInbox.release();
   }
 
-  async start(
+  private async start(
     ready: Extract<SessionHandoffCheckpoint, { readonly kind: "ready" }>,
   ): Promise<SessionHandoffCandidate> {
     const activation = createHook<SessionOwnerActivation>({
@@ -198,20 +215,20 @@ export class SessionHandoff {
     });
     await claimHookOwnership(activation);
     try {
-      const started = await startSessionOwnerStep({
+      await startSessionOwnerStep({
         activationToken: activation.token,
         checkpoint: ready.checkpoint,
-        delivery: ready.delivery,
+        trigger: ready.trigger,
         targetDeploymentId: ready.targetDeploymentId,
       });
-      return { activation, runId: started.runId };
+      return { activation };
     } catch (error) {
       await disposeHook(activation);
       throw error;
     }
   }
 
-  async activate(candidate: SessionHandoffCandidate): Promise<SessionOwnerActivation> {
+  private async activate(candidate: SessionHandoffCandidate): Promise<SessionOwnerActivation> {
     try {
       return await candidate.activation;
     } finally {
@@ -220,9 +237,12 @@ export class SessionHandoff {
   }
 
   /** Reclaims the exact hook set and replays payloads accepted while it was released. */
-  async recover(payloads: readonly SessionInboxPayload[]): Promise<void> {
+  private async recover(payloads: readonly SessionInboxPayload[]): Promise<void> {
     const { commandInbox } = this.input;
-    await claimSessionHooks(commandInbox, this.releasedHookTokens);
+    if (this.releasedHookClaims === undefined) {
+      throw new Error("Cannot recover session hooks before releasing ownership.");
+    }
+    await claimSessionHooks(commandInbox, this.releasedHookClaims);
     commandInbox.restore(payloads);
   }
 
@@ -232,9 +252,4 @@ export class SessionHandoff {
     this.anchor = createHook<{ readonly output: unknown }>({ token: this.input.anchorToken });
     await claimHookOwnership(this.anchor);
   }
-}
-
-export interface SessionHandoffCandidate {
-  readonly activation: Hook<SessionOwnerActivation>;
-  readonly runId: string;
 }

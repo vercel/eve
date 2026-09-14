@@ -137,8 +137,8 @@ describe("session owner starts", () => {
       startSessionOwnerStep({
         activationToken: "owner-1:handoff",
         checkpoint: { ownership: { anchorRunId: "anchor-1" } } as never,
-        delivery: { kind: "deliver", payloads: [] },
         targetDeploymentId: "latest",
+        trigger: { delivery: { kind: "deliver", payloads: [] } },
       }),
     ).rejects.toThrow("exact deployment id");
     expect(startMock).not.toHaveBeenCalled();
@@ -150,10 +150,10 @@ describe("session owner starts", () => {
     startMock.mockResolvedValue({ runId: "owner-2" });
     const checkpoint = {
       anchorToken: "session-1:anchor",
-      version: 1,
+      version: 2,
       hooks: {
-        authorization: "custom-auth",
-        session: ["custom-stable", "continuation-1", "continuation-2"],
+        aliases: ["continuation-1", "continuation-2"],
+        stable: "custom-stable",
       },
       mode: "conversation",
       ownership: {
@@ -171,10 +171,10 @@ describe("session owner starts", () => {
       startSessionOwnerStep({
         activationToken: "owner-1:handoff",
         checkpoint,
-        delivery,
         targetDeploymentId: "deployment-b",
+        trigger: { delivery },
       }),
-    ).resolves.toEqual({ runId: "owner-2" });
+    ).resolves.toBeUndefined();
 
     expect(getRunMock).toHaveBeenCalledWith("anchor-1");
     expect(startMock).toHaveBeenCalledWith(
@@ -183,10 +183,10 @@ describe("session owner starts", () => {
         expect.objectContaining({
           activationToken: "owner-1:handoff",
           checkpoint,
-          delivery,
           kind: "handoff",
           ownerDeploymentId: "deployment-b",
           parentWritable,
+          trigger: { delivery },
         }),
       ],
       { deploymentId: "deployment-b" },

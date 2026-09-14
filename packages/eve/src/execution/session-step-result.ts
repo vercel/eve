@@ -5,7 +5,7 @@ import { hasPendingInputBatch } from "#harness/input-requests.js";
 import { getPendingWorkflowInterrupt } from "#harness/workflow-interrupt-state.js";
 import { getWorkflowTaskCallIds, isWorkflowTaskInterrupt } from "#harness/workflow-task-state.js";
 import { getTurnUsageState, takeSessionUsageDelta, toUsage } from "#harness/turn-tag-state.js";
-import type { HarnessSettlement, StepResult } from "#harness/types.js";
+import type { StepResult } from "#harness/types.js";
 import type { RunMode } from "#shared/run-mode.js";
 import { preserveSerializedBackgroundTaskObservabilityState } from "#shared/serialized-observability-state.js";
 
@@ -13,12 +13,11 @@ export function resolveSessionStepResult(
   stepResult: StepResult,
   nextSerializedContext: Record<string, unknown>,
   mode: RunMode,
-  settlement: HarnessSettlement | undefined,
   beforeStepContext: Record<string, unknown>,
 ): DurableStepResult {
   const nextState = createDurableSessionState({ session: stepResult.session });
   const backgroundTransition = {
-    settlement,
+    settlement: stepResult.settlement,
     ...(stepResult.backgroundTasks === undefined || stepResult.backgroundTaskSession === undefined
       ? {}
       : {

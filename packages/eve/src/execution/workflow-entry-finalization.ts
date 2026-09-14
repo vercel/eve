@@ -55,14 +55,17 @@ export async function finalizeDone(input: {
   readonly action: TurnOutcome & { readonly kind: "done" };
   readonly caller: TurnCaller | undefined;
   readonly mode: RunMode;
+  readonly serializedContext: Record<string, unknown>;
+  readonly sessionState: DurableSessionState;
   readonly terminalState?: { terminalEmitted: boolean };
 }): Promise<{ readonly output: unknown }> {
-  const { output, serializedContext } = input.action;
+  const { output } = input.action;
+  const { serializedContext, sessionState } = input;
   const failed = input.action.isError === true;
 
   await terminateChildSessionsStep({
     serializedContext,
-    sessionState: input.action.sessionState,
+    sessionState,
   });
   if (input.terminalState !== undefined) input.terminalState.terminalEmitted = true;
   if (input.mode === "task") {
@@ -93,7 +96,7 @@ export async function finalizeDone(input: {
       await notifyTurnCallerStep({
         caller: input.caller,
         lifecycle: "terminal",
-        sessionId: input.action.sessionState.sessionId,
+        sessionId: sessionState.sessionId,
         settled,
       });
     }

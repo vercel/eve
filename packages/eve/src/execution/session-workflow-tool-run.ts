@@ -85,7 +85,7 @@ async function handleWorkflowToolRunOutcome(
     ownerId: message.from.runId,
     sessionState: cursor.sessionState,
   });
-  await cursor.adopt({
+  await cursor.apply({
     serializedContext: cursor.serializedContext,
     sessionState: released.sessionState,
   });
@@ -105,7 +105,7 @@ async function settleSubagentOutcome(
   const { cursor, message } = input;
   const result = workflowToolRunOutcomeToSubagentResult(message);
   if (result.origin === "child") {
-    await cursor.adopt(
+    await cursor.apply(
       await applyTaskAgentRequest(
         {
           accumulateUsage: false,
@@ -150,7 +150,7 @@ async function handleWorkflowToolRunRequest(
       }
       return;
     }
-    await cursor.adopt(
+    await cursor.apply(
       await applyTaskAgentRequest(
         {
           accumulateUsage: message.from.resultKind !== "subagent",
@@ -164,7 +164,7 @@ async function handleWorkflowToolRunRequest(
     return;
   }
   if (message.request.kind === "authorization-request") {
-    await cursor.adopt(
+    await cursor.apply(
       await runProxySubagentEventStep({
         hookPayload: message.request.event,
         parentWritable: cursor.parentWritable,
@@ -176,7 +176,7 @@ async function handleWorkflowToolRunRequest(
       await resumeHookStep(message.replyTo, null, { ifPresent: true });
     return;
   }
-  await cursor.adopt(
+  await cursor.apply(
     await runProxySubagentEventStep({
       ...(message.requestCoordinates === undefined
         ? { answerHook: { runId: message.from.runId } }

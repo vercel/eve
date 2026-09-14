@@ -2,8 +2,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { DeliverHookPayload } from "#channel/types.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
-import { SessionBacklog } from "#execution/session-backlog.js";
 import { SessionHandoff, type SessionOwnerActivation } from "#execution/session-handoff.js";
+import type { TurnSelection } from "#execution/session-input-queue.js";
 import type { SessionInboxHandle, SessionInboxPayload } from "#execution/session-inbox/inbox.js";
 
 const isSessionIdleForHandoffStepMock = vi.fn(async (..._args: unknown[]) => true);
@@ -25,91 +25,80 @@ afterEach(() => {
   isSessionIdleForHandoffStepMock.mockResolvedValue(true);
 });
 
-const HOOKS = ["custom-stable", "continuation-1", "continuation-2"];
+const HOOKS = {
+  aliases: ["continuation-1", "continuation-2"],
+  stable: "custom-stable",
+} as const;
 
 describe("SessionHandoff", () => {
-  it("stages only one idle conversational delivery for a different exact deployment", async () => {
+  it("transfers one eligible conversational trigger with a structural checkpoint", async () => {
     const handoff = createHandoff(createInbox());
+    installActivation({ kind: "active" });
+    startSessionOwnerStepMock.mockResolvedValue(undefined);
+    const trigger = selection("deployment-b");
 
-    await expect(handoff.checkpoint(delivery("deployment-b"), snapshot())).resolves.toMatchObject({
-      kind: "ready",
-      targetDeploymentId: "deployment-b",
-      checkpoint: {
+    await expect(handoff.tryTransfer(trigger, snapshot())).resolves.toEqual({
+      kind: "transferred",
+    });
+    expect(startSessionOwnerStepMock).toHaveBeenCalledWith({
+      activationToken: "owner-1:handoff",
+      checkpoint: expect.objectContaining({
         anchorToken: "session-1:anchor",
-        hooks: { session: HOOKS },
+        hooks: HOOKS,
         ownership: {
           anchorRunId: "anchor-1",
           deploymentId: "deployment-a",
           ownerRunId: "owner-1",
           sessionId: "session-1",
         },
-        version: 1,
+        version: 2,
+      }),
+      targetDeploymentId: "deployment-b",
+      trigger: { delivery: trigger.delivery },
+    });
+    await expect(handoff.awaitAnchoredResult()).resolves.toEqual({ output: "done" });
+  });
+
+  it.each([
+    ["same-deployment", "deployment-a", true],
+    ["missing-deployment", "latest", true],
+    ["busy", "deployment-b", false],
+  ] as const)("retains ownership for %s", async (reason, deployment, eligible) => {
+    const handoff = createHandoff(createInbox());
+    await expect(handoff.tryTransfer(selection(deployment, eligible), snapshot())).resolves.toEqual(
+      {
+        kind: "retained",
+        reason,
       },
-    });
-    await expect(handoff.checkpoint(delivery("deployment-a"), snapshot())).resolves.toEqual({
-      kind: "skipped",
-      reason: "same-deployment",
-    });
-    await expect(handoff.checkpoint(delivery("latest"), snapshot())).resolves.toEqual({
-      kind: "skipped",
-      reason: "missing-deployment",
-    });
+    );
+    expect(startSessionOwnerStepMock).not.toHaveBeenCalled();
   });
 
-  it("skips a delivery when another accepted command is pending or buffered", async () => {
-    const pendingInbox = createHandoff(createInbox({ pending: true }));
-    await expect(pendingInbox.checkpoint(delivery("deployment-b"), snapshot())).resolves.toEqual({
-      kind: "skipped",
-      reason: "busy",
-    });
-
-    const backlog = new SessionBacklog();
-    backlog.deliveries.push(delivery("deployment-b"));
-    const buffered = createHandoff(createInbox(), backlog);
-    await expect(buffered.checkpoint(delivery("deployment-b"), snapshot())).resolves.toEqual({
-      kind: "skipped",
-      reason: "busy",
-    });
-    expect(isSessionIdleForHandoffStepMock).not.toHaveBeenCalled();
-  });
-
-  it("keeps ownership and restores accepted payloads when the candidate fails to activate", async () => {
+  it("keeps ownership and restores accepted payloads when activation fails", async () => {
     const inbox = createInbox();
-    const handoff = createHandoff(inbox);
     const payloads: SessionInboxPayload[] = [{ kind: "clear" }];
     installActivation({ error: new Error("bundle mismatch"), kind: "failed", payloads });
-    startSessionOwnerStepMock.mockResolvedValue({ runId: "owner-2" });
+    startSessionOwnerStepMock.mockResolvedValue(undefined);
 
-    await expect(handoff.transfer(delivery("deployment-b"), snapshot())).resolves.toBe(false);
-
-    expect(inbox.release).toHaveBeenCalledOnce();
-    expect(vi.mocked(inbox.claimSessionHook).mock.calls.map(([token]) => token)).toEqual(HOOKS);
+    await expect(
+      createHandoff(inbox).tryTransfer(selection("deployment-b"), snapshot()),
+    ).resolves.toEqual({ kind: "retained", reason: "activation-failed" });
+    expect(vi.mocked(inbox.claimSessionHook).mock.calls.map(([token]) => token)).toEqual([
+      HOOKS.stable,
+      ...HOOKS.aliases,
+    ]);
     expect(inbox.restore).toHaveBeenCalledWith(payloads);
   });
 
-  it("abandons the transfer when a command arrives during release", async () => {
+  it("abandons transfer when input was accepted during release", async () => {
     const accepted: SessionInboxPayload[] = [{ kind: "send", payload: { message: "late" } }];
     const inbox = createInbox({ released: accepted });
-    const handoff = createHandoff(inbox);
 
-    await expect(handoff.transfer(delivery("deployment-b"), snapshot())).resolves.toBe(false);
+    await expect(
+      createHandoff(inbox).tryTransfer(selection("deployment-b"), snapshot()),
+    ).resolves.toEqual({ kind: "retained", reason: "accepted-during-release" });
     expect(startSessionOwnerStepMock).not.toHaveBeenCalled();
     expect(inbox.restore).toHaveBeenCalledWith(accepted);
-  });
-
-  it("reports a transfer once the successor activates", async () => {
-    const handoff = createHandoff(createInbox());
-    installActivation({ kind: "active" });
-    startSessionOwnerStepMock.mockResolvedValue({ runId: "owner-2" });
-
-    await expect(handoff.transfer(delivery("deployment-b"), snapshot())).resolves.toBe(true);
-    expect(startSessionOwnerStepMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        activationToken: "owner-1:handoff",
-        targetDeploymentId: "deployment-b",
-      }),
-    );
-    await expect(handoff.awaitAnchoredResult()).resolves.toEqual({ output: "done" });
   });
 });
 
@@ -126,17 +115,33 @@ function installActivation(activation: SessionOwnerActivation): void {
 
 function delivery(acceptedDeploymentId: string): DeliverHookPayload {
   return {
-    deliveryMetadata: [
-      {
-        acceptedDeploymentId,
-        channelKind: "http",
-        channelName: "http",
-        deliveryId: `delivery-${acceptedDeploymentId}`,
-        payloadIndex: 0,
-      },
-    ],
+    deliveryMetadata:
+      acceptedDeploymentId === "latest"
+        ? undefined
+        : [
+            {
+              acceptedDeploymentId,
+              channelKind: "http",
+              channelName: "http",
+              deliveryId: `delivery-${acceptedDeploymentId}`,
+              payloadIndex: 0,
+            },
+          ],
     kind: "deliver",
     payloads: [{ message: "hello" }],
+  };
+}
+
+function selection(acceptedDeploymentId: string, handoffEligible = true): TurnSelection {
+  const selected = delivery(acceptedDeploymentId);
+  return {
+    delivery: selected,
+    kind: "turn",
+    provenance: {
+      admissions: [{ delivery: selected, sequence: 0 }],
+      handoffEligible,
+      source: "conversation",
+    },
   };
 }
 
@@ -150,13 +155,9 @@ function snapshot() {
   };
 }
 
-function createHandoff(
-  commandInbox: SessionInboxHandle,
-  backlog = new SessionBacklog(),
-): SessionHandoff {
+function createHandoff(commandInbox: SessionInboxHandle): SessionHandoff {
   return new SessionHandoff({
     anchorToken: "session-1:anchor",
-    backlog,
     commandInbox,
     isInitialOwner: true,
     mode: "conversation",
@@ -174,15 +175,14 @@ function createInbox(
 ): SessionInboxHandle {
   return {
     claimSessionHook: vi.fn(async () => {}),
-    consumeNext: vi.fn(),
     dispose: vi.fn(async () => {}),
     drain: vi.fn(() => []),
+    hookClaims: HOOKS,
     hasPending: vi.fn(() => input.pending === true),
     hasReadyAuthorization: vi.fn(() => false),
-    next: vi.fn(),
+    read: vi.fn(),
     release: vi.fn(async () => input.released ?? []),
     restore: vi.fn(),
-    sessionHookTokens: HOOKS,
     setAuthorizationWindow: vi.fn(),
   };
 }

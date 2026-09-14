@@ -2,6 +2,10 @@ import { createHook, type Hook } from "#compiled/@workflow/core/index.js";
 
 import type { DeliverPayload, HookPayload, SessionCommand } from "#channel/types.js";
 import { claimHookOwnership, disposeHook } from "#execution/hook-ownership.js";
+import {
+  flattenSessionHookClaims,
+  type SessionHookClaims,
+} from "#execution/session-hook-claims.js";
 import type { WorkflowToolRunMessage } from "#execution/tools/workflow/messages.js";
 
 /** All session addresses accept the same protocol. Callback routes construct
@@ -28,21 +32,29 @@ interface Read {
   readonly value: SessionInboxPayload;
 }
 interface PendingRead {
-  readonly promise: Promise<IteratorResult<SessionInboxPayload>>;
+  readonly promise: Promise<SessionInboxLease | undefined>;
   read?: Read;
 }
 
-export interface SessionInbox {
-  readonly sessionHookTokens: readonly string[];
-  claimSessionHook(token: string): Promise<void>;
-  next(mode?: ReadMode): Promise<IteratorResult<SessionInboxPayload>>;
-  consumeNext(mode?: ReadMode): void;
+export interface SessionInboxLease {
+  readonly value: SessionInboxPayload;
+  consume(): void;
+}
+
+export interface SessionInboxReader {
+  read(mode?: ReadMode): Promise<SessionInboxLease | undefined>;
   drain(): SessionInboxPayload[];
   hasPending(): boolean;
   hasReadyAuthorization(): boolean;
   setAuthorizationWindow(open: boolean): void;
   restore(payloads: readonly SessionInboxPayload[]): void;
 }
+
+export interface SessionInboxOwnership {
+  readonly hookClaims: SessionHookClaims;
+  claimSessionHook(token: string): Promise<void>;
+}
+export interface SessionInbox extends SessionInboxReader, SessionInboxOwnership {}
 export interface SessionInboxHandle extends SessionInbox {
   dispose(): Promise<void>;
   release(): Promise<SessionInboxPayload[]>;
@@ -51,12 +63,22 @@ export interface SessionInboxHandle extends SessionInbox {
 /** Commit one registration batch and settle every claim before rollback. */
 export async function claimSessionHooks(
   inbox: Pick<SessionInbox, "claimSessionHook">,
-  tokens: readonly string[],
+  claims: SessionHookClaims,
 ): Promise<void> {
-  const claims = await Promise.allSettled(
-    [...new Set(tokens)].map((token) => inbox.claimSessionHook(token)),
+  const outcomes = await Promise.allSettled(
+    [...new Set(flattenSessionHookClaims(claims))].map((token) => inbox.claimSessionHook(token)),
   );
-  for (const claim of claims) if (claim.status === "rejected") throw claim.reason;
+  for (const outcome of outcomes) if (outcome.status === "rejected") throw outcome.reason;
+}
+
+export async function claimSessionHookAliases(
+  inbox: Pick<SessionInbox, "claimSessionHook">,
+  aliases: readonly string[],
+): Promise<void> {
+  const outcomes = await Promise.allSettled(
+    [...new Set(aliases)].map((token) => inbox.claimSessionHook(token)),
+  );
+  for (const outcome of outcomes) if (outcome.status === "rejected") throw outcome.reason;
 }
 
 /** One queue for the session lifetime. Reads only select entries; consumption
@@ -104,7 +126,15 @@ export function createSessionInbox(sessionId: string): SessionInboxHandle {
       notify();
     }
   };
-  const nextRead = (mode: ReadMode = "session"): Promise<IteratorResult<SessionInboxPayload>> => {
+  const consume = (mode: ReadMode, read: Read): void => {
+    const entry = pending.get(mode);
+    if (entry?.read !== read) throw new Error("Session message lease is no longer current.");
+    const index = queue.indexOf(read);
+    if (index === -1) throw new Error("Session message was already consumed.");
+    queue.splice(index, 1);
+    invalidate([read]);
+  };
+  const nextRead = (mode: ReadMode = "session"): Promise<SessionInboxLease | undefined> => {
     const existing = pending.get(mode);
     if (existing !== undefined) return existing.promise;
     const entry: PendingRead = {
@@ -114,10 +144,9 @@ export function createSessionInbox(sessionId: string): SessionInboxHandle {
           const read = queue.find(({ value }) => eligible(value, mode));
           if (read !== undefined) {
             entry.read = read;
-            return { done: false, value: read.value };
+            return { consume: () => consume(mode, read), value: read.value };
           }
-          if (sources.every((source) => source.closed || source.stopping))
-            return { done: true, value: undefined };
+          if (sources.every((source) => source.closed || source.stopping)) return undefined;
           await wait();
         }
       }),
@@ -127,8 +156,10 @@ export function createSessionInbox(sessionId: string): SessionInboxHandle {
   };
 
   return {
-    get sessionHookTokens() {
-      return sources.map(({ hook }) => hook.token);
+    get hookClaims() {
+      const [stable, ...aliases] = sources.map(({ hook }) => hook.token);
+      if (stable === undefined) throw new Error("Session inbox has no stable hook claim.");
+      return { aliases, stable };
     },
     async claimSessionHook(token) {
       if (!token) throw new Error("A session alias requires a nonempty continuation token.");
@@ -152,16 +183,7 @@ export function createSessionInbox(sessionId: string): SessionInboxHandle {
         throw error;
       }
     },
-    next: nextRead,
-    consumeNext(mode = "session") {
-      const entry = pending.get(mode);
-      if (entry?.read === undefined)
-        throw new Error("Cannot consume a session message before it resolves.");
-      const index = queue.indexOf(entry.read);
-      if (index === -1) throw new Error("Session message was already consumed.");
-      queue.splice(index, 1);
-      invalidate([entry.read]);
-    },
+    read: nextRead,
     drain() {
       if (failure !== undefined) throw failure.error;
       const reads = queue.filter(({ value }) => eligible(value, "session"));

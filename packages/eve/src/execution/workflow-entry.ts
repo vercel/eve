@@ -28,7 +28,8 @@ import { createDelegatedSubagentErrorResult } from "#subagents/parent-result.js"
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import { nextTurnDelivery, type NextTurnInstruction } from "#execution/parked-delivery-wait.js";
 import { cancelDescendantTurnsStep } from "#execution/cancel-descendant-turns-step.js";
-import { SessionBacklog } from "#execution/session-backlog.js";
+import { SessionInputLedger } from "#execution/session-input-ledger.js";
+import { SessionInputQueue } from "#execution/session-input-queue.js";
 import { SessionExecution } from "#execution/session-execution.js";
 import { SessionStateCursor } from "#execution/session-state-cursor.js";
 import type { TurnOutcome, TurnStepPayload } from "#execution/turn-step.js";
@@ -127,7 +128,6 @@ export async function workflowEntry(input: WorkflowEntryInput): Promise<Workflow
     terminalEmitted: false,
   };
   const commandInbox = createSessionInbox(sessionId);
-  const backlog = new SessionBacklog();
   let handoff: SessionHandoff | undefined;
   let activated = input.kind === "initial";
 
@@ -156,7 +156,6 @@ export async function workflowEntry(input: WorkflowEntryInput): Promise<Workflow
 
       handoff = new SessionHandoff({
         anchorToken: boot.anchorToken,
-        backlog,
         capabilities: boot.capabilities,
         commandInbox,
         isInitialOwner: boot.isInitialOwner,
@@ -165,7 +164,7 @@ export async function workflowEntry(input: WorkflowEntryInput): Promise<Workflow
         retention: boot.retention,
         sessionTimeoutDeadline: boot.sessionTimeoutDeadline,
       });
-      outcome = await runSessionLoop(boot, { backlog, commandInbox, crashCleanupState, handoff });
+      outcome = await runSessionLoop(boot, { commandInbox, crashCleanupState, handoff });
     } finally {
       if (activated) await commandInbox.dispose();
     }
@@ -344,16 +343,16 @@ async function bootHandoffOwner(
 ): Promise<SessionBoot> {
   const { checkpoint } = input;
   await validateSessionCheckpointStep({ checkpoint });
-  await claimSessionHooks(context.commandInbox, checkpoint.hooks.session);
+  await claimSessionHooks(context.commandInbox, checkpoint.hooks);
   await signalSessionOwnerActivationStep({
     activation: { kind: "active" },
     token: input.activationToken,
   });
   return {
     anchorToken: checkpoint.anchorToken,
-    caller: checkpoint.caller,
+    caller: input.trigger.delivery.caller,
     capabilities: checkpoint.capabilities,
-    initialDelivery: input.delivery,
+    initialDelivery: input.trigger.delivery,
     isInitialOwner: false,
     mode: checkpoint.mode,
     ownership: {
@@ -401,32 +400,32 @@ function createInitialDelivery(
 async function runSessionLoop(
   boot: SessionBoot,
   deps: {
-    readonly backlog: SessionBacklog;
     readonly commandInbox: SessionInboxHandle;
     readonly crashCleanupState: CrashCleanupState;
     readonly handoff: SessionHandoff;
   },
 ): Promise<SessionLoopOutcome> {
-  const { backlog, commandInbox, crashCleanupState, handoff } = deps;
+  const { commandInbox, crashCleanupState, handoff } = deps;
   const cursor = new SessionStateCursor({
     commandInbox,
     parentWritable: boot.sessionWritable,
     serializedContext: boot.serializedContext,
     sessionState: boot.sessionState,
   });
+  const queue = new SessionInputQueue();
+  const ledger = new SessionInputLedger(cursor);
   const execution = new SessionExecution({
-    backlog,
     capabilities: boot.capabilities,
     commandInbox,
     cursor,
+    ledger,
     mode: boot.mode,
+    queue,
   });
   // One payload per exact authorization attempt accumulates across
   // intervening turns. Replaced attempts are pruned at each park.
   const collectedAuthPayloads = new Map<string, DeliverPayload>();
-  const stableCommandToken = commandInbox.sessionHookTokens[0];
-  if (stableCommandToken === undefined)
-    throw new Error("Session owner requires a stable inbox hook.");
+  const stableCommandToken = commandInbox.hookClaims.stable;
   const sessionTimeout =
     boot.sessionTimeoutDeadline === undefined
       ? undefined
@@ -464,10 +463,11 @@ async function runSessionLoop(
       }
       const next = await nextTurnDelivery({
         awaitAuthorizationCallbacks: expectedAttemptIds.size > 0,
-        backlog,
         commandInbox,
         cursor,
         deferDeliveries: boot.mode === "task" && expectedAttemptIds.size > 0,
+        ledger,
+        queue,
       });
       if (next.kind === "workflow") {
         await execution.handleWorkflowMessage(next.message);
@@ -492,15 +492,14 @@ async function runSessionLoop(
   let turnIndex = 0;
   const runTurn = async (delivery: TurnStepPayload): Promise<TurnOutcome> => {
     const caller = crashCleanupState.caller;
-    if (caller?.taskId !== undefined) backlog.markTaskSeen(caller.taskId);
+    if (caller?.taskId !== undefined) await ledger.rememberTask(caller.taskId);
     if (caller !== undefined) {
-      cursor.adoptState(
+      await cursor.apply(
         await bindTurnCallerContextStep({ caller, serializedContext: cursor.serializedContext }),
       );
     }
     crashCleanupState.turnId = `turn_${String(turnIndex++)}`;
     const outcome = await execution.runTurn(delivery);
-    cursor.adoptState(outcome);
     crashCleanupState.lastSessionState = cursor.sessionState;
     crashCleanupState.serializedContext = cursor.serializedContext;
     return outcome;
@@ -511,7 +510,7 @@ async function runSessionLoop(
       serializedContext: cursor.serializedContext,
       sessionState: cursor.sessionState,
     });
-    cursor.adoptState(settled);
+    await cursor.apply(settled);
     crashCleanupState.serializedContext = cursor.serializedContext;
     crashCleanupState.lastSessionState = cursor.sessionState;
     crashCleanupState.caller = undefined;
@@ -546,6 +545,8 @@ async function runSessionLoop(
             action,
             caller: crashCleanupState.caller,
             mode: boot.mode,
+            serializedContext: cursor.serializedContext,
+            sessionState: cursor.sessionState,
             terminalState: crashCleanupState,
           }),
         };
@@ -610,12 +611,11 @@ async function runSessionLoop(
           action = { ...action, settled: undefined };
           continue;
         case "turn": {
-          const transferred = await handoff.transfer(next.delivery, {
-            caller: crashCleanupState.caller,
+          const transfer = await handoff.tryTransfer(next, {
             serializedContext: cursor.serializedContext,
             sessionState: cursor.sessionState,
           });
-          if (transferred) return { kind: "transferred" };
+          if (transfer.kind === "transferred") return { kind: "transferred" };
           if (next.delivery.caller !== undefined) crashCleanupState.caller = next.delivery.caller;
           action = await runTurn(next.delivery);
           continue;

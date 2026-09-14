@@ -20,8 +20,8 @@ export const DURABLE_SESSION_VERSION = 1;
  * descendant subagent is active), and `emissionState` (so workflow-body
  * framework steps can stamp protocol events
  * with `{ turnId, sequence, stepIndex }` without reading the full
- * durable session). All other control-plane state travels via
- * {@link import("#execution/turn-step.js").TurnOutcome}.
+ * durable session). Turn steps return state transitions to the owning
+ * `SessionStateCursor`; policy-only turn outcomes never carry snapshots.
  */
 export interface DurableSessionState {
   readonly version: typeof DURABLE_SESSION_VERSION;

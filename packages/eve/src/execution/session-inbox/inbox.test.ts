@@ -1,6 +1,37 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { createSessionInbox, type SessionInboxPayload } from "#execution/session-inbox/inbox.js";
+import {
+  createSessionInbox,
+  type SessionInboxHandle,
+  type SessionInboxLease,
+  type SessionInboxPayload,
+} from "#execution/session-inbox/inbox.js";
+
+type TestReadMode = "session" | "interrupt" | "runtime";
+const offeredLeases = new WeakMap<SessionInboxHandle, Map<TestReadMode, SessionInboxLease>>();
+
+async function readResult(
+  inbox: SessionInboxHandle,
+  mode: TestReadMode = "session",
+): Promise<IteratorResult<SessionInboxPayload>> {
+  const lease = await inbox.read(mode);
+  if (lease === undefined) return { done: true, value: undefined };
+  const leases = offeredLeases.get(inbox) ?? new Map();
+  leases.set(mode, lease);
+  offeredLeases.set(inbox, leases);
+  return { done: false, value: lease.value };
+}
+
+function consumeLease(inbox: SessionInboxHandle, mode: TestReadMode = "session"): void {
+  const lease = offeredLeases.get(inbox)?.get(mode);
+  if (lease === undefined) throw new Error("No offered test lease to consume.");
+  offeredLeases.get(inbox)!.delete(mode);
+  lease.consume();
+}
+
+function hookTokens(inbox: SessionInboxHandle): readonly string[] {
+  return [inbox.hookClaims.stable, ...inbox.hookClaims.aliases];
+}
 
 const createHookMock = vi.fn();
 
@@ -27,10 +58,10 @@ describe("createSessionInbox", () => {
     await inbox.claimSessionHook("stable");
     await inbox.claimSessionHook("channel");
 
-    await expect(inbox.next()).resolves.toEqual(resolved(send("by id")));
-    inbox.consumeNext();
-    await expect(inbox.next()).resolves.toEqual(resolved({ kind: "clear" }));
-    inbox.consumeNext();
+    await expect(readResult(inbox)).resolves.toEqual(resolved(send("by id")));
+    consumeLease(inbox);
+    await expect(readResult(inbox)).resolves.toEqual(resolved({ kind: "clear" }));
+    consumeLease(inbox);
     await inbox.dispose();
   });
 
@@ -46,10 +77,10 @@ describe("createSessionInbox", () => {
     );
     const inbox = createSessionInbox("session-1");
     await inbox.claimSessionHook("stable");
-    await expect(inbox.next("interrupt")).resolves.toEqual(
+    await expect(readResult(inbox, "interrupt")).resolves.toEqual(
       resolved({ kind: "cancel", turnId: "turn-1" }),
     );
-    inbox.consumeNext("interrupt");
+    consumeLease(inbox, "interrupt");
     expect(inbox.drain()).toEqual([send("steer me")]);
     await inbox.dispose();
   });
@@ -81,13 +112,13 @@ describe("createSessionInbox", () => {
     );
     const inbox = createSessionInbox("session-1");
     await inbox.claimSessionHook("stable");
-    await expect(inbox.next()).resolves.toEqual(resolved(send("hello")));
+    await expect(readResult(inbox)).resolves.toEqual(resolved(send("hello")));
     expect(inbox.drain()).toEqual([send("hello")]);
-    await expect(inbox.next("runtime")).resolves.toEqual(resolved(report));
-    inbox.consumeNext("runtime");
+    await expect(readResult(inbox, "runtime")).resolves.toEqual(resolved(report));
+    consumeLease(inbox, "runtime");
     inbox.setAuthorizationWindow(true);
-    await expect(inbox.next()).resolves.toEqual(resolved(authCallback("weather")));
-    inbox.consumeNext();
+    await expect(readResult(inbox)).resolves.toEqual(resolved(authCallback("weather")));
+    consumeLease(inbox);
     expect(createHookMock).toHaveBeenCalledOnce();
     expect(await inbox.release()).toEqual([]);
   });
@@ -97,7 +128,7 @@ describe("createSessionInbox", () => {
     installHooks(createMockHook({ token: "stable", reads: [input.promise] }));
     const inbox = createSessionInbox("session-1");
     await inbox.claimSessionHook("stable");
-    const losingRead = inbox.next("interrupt");
+    const losingRead = readResult(inbox, "interrupt");
     input.resolve(resolved({ kind: "cancel" }));
     await losingRead;
     expect(inbox.drain()).toEqual([{ kind: "cancel" }]);
@@ -131,7 +162,7 @@ describe("createSessionInbox", () => {
     installHooks(createMockHook({ token: "stable", reads: [read.promise] }));
     const inbox = createSessionInbox("session-1");
     await inbox.claimSessionHook("stable");
-    const pending = expect(inbox.next()).rejects.toThrow("reader failed");
+    const pending = expect(readResult(inbox)).rejects.toThrow("reader failed");
     read.reject(new Error("reader failed"));
     await pending;
     await inbox.dispose();
@@ -164,7 +195,7 @@ describe("createSessionInbox", () => {
     expect(released).toEqual([send("released")]);
 
     await inbox.claimSessionHook("stable");
-    await expect(inbox.next()).resolves.toEqual(resolved(send("after reclaim")));
+    await expect(readResult(inbox)).resolves.toEqual(resolved(send("after reclaim")));
     inbox.restore(released);
 
     expect(inbox.drain()).toEqual([send("released"), send("after reclaim")]);
@@ -185,16 +216,16 @@ describe("createSessionInbox", () => {
 
     await inbox.claimSessionHook("stable");
     await inbox.claimSessionHook("old");
-    const pending = inbox.next();
+    const pending = readResult(inbox);
     await inbox.claimSessionHook("replacement");
 
     oldRead.resolve(resolved(send("old")));
     await expect(pending).resolves.toEqual(resolved(send("old")));
-    inbox.consumeNext();
+    consumeLease(inbox);
 
     replacementRead.resolve(resolved(send("replacement")));
-    await expect(inbox.next()).resolves.toEqual(resolved(send("replacement")));
-    inbox.consumeNext();
+    await expect(readResult(inbox)).resolves.toEqual(resolved(send("replacement")));
+    consumeLease(inbox);
     await inbox.dispose();
 
     expect(stable.dispose).toHaveBeenCalledOnce();
@@ -213,11 +244,11 @@ describe("createSessionInbox", () => {
     const inbox = createSessionInbox("session-1");
 
     await inbox.claimSessionHook("stable");
-    const pending = inbox.next();
+    const pending = readResult(inbox);
     await inbox.claimSessionHook("channel");
 
     await expect(pending).resolves.toEqual(resolved(send("anchored")));
-    inbox.consumeNext();
+    consumeLease(inbox);
     await inbox.dispose();
   });
 
@@ -254,7 +285,7 @@ describe("createSessionInbox", () => {
     await inbox.claimSessionHook("stable");
     await inbox.claimSessionHook("stable");
     await inbox.claimSessionHook("channel");
-    expect(inbox.sessionHookTokens).toEqual(["stable", "channel"]);
+    expect(hookTokens(inbox)).toEqual(["stable", "channel"]);
     expect(createHookMock).toHaveBeenCalledTimes(2);
     expect(createHookMock).toHaveBeenCalledWith({
       metadata: { sessionId: "session-1" },
@@ -295,7 +326,7 @@ describe("createSessionInbox", () => {
     for (const token of tokens) await inbox.claimSessionHook(token);
     await inbox.claimSessionHook(tokens[0]!);
     await expect(inbox.claimSessionHook("one-too-many")).rejects.toThrow("at most 256");
-    expect(inbox.sessionHookTokens).toEqual(tokens);
+    expect(hookTokens(inbox)).toEqual(tokens);
     await inbox.dispose();
   });
 
@@ -307,7 +338,7 @@ describe("createSessionInbox", () => {
 
     await inbox.claimSessionHook("stable");
     await inbox.claimSessionHook("channel");
-    void inbox.next();
+    void inbox.read();
     await inbox.dispose();
     await inbox.dispose();
 
@@ -331,14 +362,14 @@ describe("createSessionInbox", () => {
     await inbox.claimSessionHook("alias");
 
     // The callback resolves first, but only session activity surfaces.
-    const pending = inbox.next();
+    const pending = readResult(inbox);
     sessionRead.resolve(resolved(send("while closed")));
     await expect(pending).resolves.toEqual(resolved(send("while closed")));
-    inbox.consumeNext();
+    consumeLease(inbox);
 
     inbox.setAuthorizationWindow(true);
-    await expect(inbox.next()).resolves.toEqual(resolved(authCallback("weather")));
-    inbox.consumeNext();
+    await expect(readResult(inbox)).resolves.toEqual(resolved(authCallback("weather")));
+    consumeLease(inbox);
     inbox.setAuthorizationWindow(false);
     await inbox.dispose();
   });
@@ -358,13 +389,13 @@ describe("createSessionInbox", () => {
     // Window open: the session read arrives first and is offered; the
     // callback read resolves behind it and waits enqueued.
     inbox.setAuthorizationWindow(true);
-    await expect(inbox.next()).resolves.toEqual(resolved(send("first")));
+    await expect(readResult(inbox)).resolves.toEqual(resolved(send("first")));
     expect(inbox.hasReadyAuthorization()).toBe(false);
     inbox.setAuthorizationWindow(false);
-    inbox.consumeNext();
+    consumeLease(inbox);
 
     // Window closed: the stashed callback never surfaces as session activity.
-    const closedRead = inbox.next();
+    const closedRead = readResult(inbox);
     let settled = false;
     void closedRead.then(() => {
       settled = true;
@@ -375,7 +406,7 @@ describe("createSessionInbox", () => {
     // Reopening surfaces the same stashed callback exactly once.
     inbox.setAuthorizationWindow(true);
     await expect(closedRead).resolves.toEqual(resolved(authCallback("weather")));
-    inbox.consumeNext();
+    consumeLease(inbox);
     await inbox.dispose();
   });
 
@@ -392,19 +423,19 @@ describe("createSessionInbox", () => {
     await inbox.claimSessionHook("stable");
     await inbox.claimSessionHook("alias");
 
-    const losingRead = inbox.next();
+    const losingRead = readResult(inbox);
     await Promise.resolve();
     sessionRead.resolve(resolved(send("later session read")));
     await expect(losingRead).resolves.toEqual(resolved(send("later session read")));
 
     inbox.setAuthorizationWindow(true);
     expect(inbox.hasReadyAuthorization()).toBe(true);
-    await expect(inbox.next()).resolves.toEqual(resolved(authCallback("weather")));
-    inbox.consumeNext();
+    await expect(readResult(inbox)).resolves.toEqual(resolved(authCallback("weather")));
+    consumeLease(inbox);
     inbox.setAuthorizationWindow(false);
 
-    await expect(inbox.next()).resolves.toEqual(resolved(send("later session read")));
-    inbox.consumeNext();
+    await expect(readResult(inbox)).resolves.toEqual(resolved(send("later session read")));
+    consumeLease(inbox);
     await inbox.dispose();
   });
 

@@ -1,20 +1,20 @@
 import { buildAdapterContext } from "#channel/adapter-context.js";
 import { callAdapterEventHandler, type ChannelAdapter } from "#channel/adapter.js";
 import type { ContextContainer } from "#context/container.js";
-import { dispatchStreamEventHooks } from "#context/hook-lifecycle.js";
 import { dispatchDynamicInstructionEvent } from "#context/dynamic-instruction-lifecycle.js";
 import { dispatchDynamicModelEvent } from "#context/dynamic-model-lifecycle.js";
 import { dispatchDynamicSkillEvent } from "#context/dynamic-skill-lifecycle.js";
 import { dispatchDynamicSubagentEvent } from "#context/dynamic-subagent-lifecycle.js";
 import { dispatchDynamicToolEvent } from "#context/dynamic-tool-lifecycle.js";
-import { dispatchMemoryLifecycleEvent } from "#context/memory-event-lifecycle.js";
+import { dispatchStreamEventHooks } from "#context/hook-lifecycle.js";
 import { TurnDeliveryIdsKey } from "#context/keys.js";
-import { bindDynamicConnections } from "#execution/dynamic-connections.js";
+import { dispatchMemoryLifecycleEvent } from "#context/memory-event-lifecycle.js";
+import * as activityCohort from "#execution/activity-cohort.js";
 import { setChannelContext } from "#execution/channel-context.js";
+import { bindDynamicConnections } from "#execution/dynamic-connections.js";
 import type { resolveEffectiveAgentRuntime } from "#execution/effective-agent-config.js";
 import { observeSessionActivity } from "#execution/session-activity-projection.js";
 import { forwardTaskEventToSessionCallback } from "#execution/task-event-callback.js";
-import * as activityCohort from "#execution/activity-cohort.js";
 import type { HandleEventFn } from "#harness/types.js";
 import type { ExecutionInstrumentation } from "#instrumentation/runtime.js";
 import {
@@ -24,7 +24,8 @@ import {
   type UnstampedMessageStreamEvent,
 } from "#protocol/message.js";
 import type { CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
-export interface SessionEventPipelineInput {
+
+export interface SessionEventSinkInput {
   readonly abortSignal: AbortSignal | undefined;
   readonly adapter: ChannelAdapter;
   readonly bundle: CompiledBundle;
@@ -35,8 +36,19 @@ export interface SessionEventPipelineInput {
   readonly sessionId: string;
 }
 
-/** Per-step event fan-out: channel adapter, stream writer, memory, hooks, and dynamic resolvers. */
-export function createSessionEventPipeline(input: SessionEventPipelineInput) {
+export interface SessionEventSink {
+  readonly adapterCtx: ReturnType<typeof buildAdapterContext>;
+  readonly dynamicConnections: ReturnType<typeof bindDynamicConnections>;
+  readonly effectiveNode: CompiledBundle["graph"]["root"];
+  readonly handleEvent: HandleEventFn;
+  close(): Promise<void>;
+}
+
+/** Owns every resource used by per-step event fan-out for exactly one scope. */
+export async function withSessionEventSink<T>(
+  input: SessionEventSinkInput,
+  run: (sink: SessionEventSink) => Promise<T>,
+): Promise<T> {
   const { adapter, bundle, ctx, effectiveAgent, instrumentation } = input;
   const adapterCtx = buildAdapterContext(adapter, ctx);
   const dynamicConnections = bindDynamicConnections(ctx, bundle.resolvedAgent);
@@ -52,9 +64,6 @@ export function createSessionEventPipeline(input: SessionEventPipelineInput) {
   };
   const handleEvent: HandleEventFn = async (event, messages): Promise<void> => {
     activityCohort.updateActivityBlockers(ctx, event);
-    // A remote task's parent owns its HITL. Forward blocking events over
-    // the task callback and keep them out of the child's local channel;
-    // otherwise two TUIs can present and answer the same request.
     const forwardedToTaskParent = await forwardTaskEventToSessionCallback(ctx, event);
     const emitted = forwardedToTaskParent
       ? stampMessageStreamEvent(event, ctx.get(TurnDeliveryIdsKey))
@@ -107,5 +116,15 @@ export function createSessionEventPipeline(input: SessionEventPipelineInput) {
     });
   };
 
-  return { adapterCtx, dynamicConnections, effectiveNode, handleEvent, writer };
+  try {
+    return await run({
+      adapterCtx,
+      close: () => writer.close(),
+      dynamicConnections,
+      effectiveNode,
+      handleEvent,
+    });
+  } finally {
+    writer.releaseLock();
+  }
 }
