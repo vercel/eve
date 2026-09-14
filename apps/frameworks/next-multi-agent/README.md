@@ -1,7 +1,7 @@
 # Next.js multi-agent eve demo
 
-This app demonstrates `withEve({ agents })` with three independent eve agents
-mounted into one Next.js app:
+This app demonstrates `withEve()` discovering three independent eve agents
+from the project-level `agents/` workspace and mounting them into one Next.js app:
 
 - `support` at `/eve/agents/support/eve/v1/*`
 - `billing` at `/eve/agents/billing/eve/v1/*`

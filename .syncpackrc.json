@@ -25,11 +25,11 @@
       "pinVersion": "workspace:^"
     },
     {
-      "label": "Compatibility shim accepts compatible eve patch releases",
+      "label": "Compatibility shim accepts every newer eve release",
       "dependencies": ["eve"],
       "packages": ["@eve/self-modification"],
       "dependencyTypes": ["peer"],
-      "pinVersion": "workspace:^"
+      "pinVersion": "workspace:>=0.54.0"
     },
     {
       "label": "Blooio is an externally published integration",

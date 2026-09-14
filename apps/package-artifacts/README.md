@@ -1,28 +1,56 @@
 # eve package artifacts
 
-Git-linked Vercel project that builds an eve tarball from each `vercel/eve` `main` commit and uploads immutable SHA-addressed package and manifest artifacts to private Vercel Blob using deployment OIDC.
+A stable, read-only Vercel app at `pkg.eve.dev` proxies private Blob artifacts published by GitHub Actions. The app itself never packages source or writes Blob objects.
 
 ```text
 /main/eve.tgz
 /main/latest.json
+/pr/<number>/eve.tgz
+/pr/<number>/latest.json
 /<full-sha>/eve.tgz
 ```
 
-The publisher uses Vercel's `VERCEL_PROJECT_PRODUCTION_URL` system environment variable as the public package domain. For example, if the production domain is `packages.example.com`, initialize an agent from the current `main` build with:
+Initialize an agent from the current `main` build with:
 
 ```bash
-npm exec --yes --package=https://packages.example.com/main/eve.tgz -- eve init my-agent
+npm exec --yes --package=https://pkg.eve.dev/main/eve.tgz -- eve init my-agent
 ```
 
-The production deployment resolves `main` to its checked-out commit. Its `latest.json` exposes metadata for that package, including the source SHA, immutable package URL, and checksum. The packaged CLI stamps its immutable commit URL into generated projects, so a project created through the moving `main` URL remains pinned to the package used to create it. The package route reads private Blob objects with deployment OIDC and streams them through the public project domain.
+A same-repository pull-request build is available at `/pr/<number>/eve.tgz` after its **Package artifact** commit status succeeds. Fork pull requests never build or publish package artifacts. The status is reported only after publication finishes, and no manual publishing step is required. Both moving routes redirect to an immutable `/<sha>/eve.tgz` artifact, and the packaged CLI stamps that immutable URL into generated projects.
 
-The Vercel project must:
+For example, after the package check passes on PR #123:
+
+```bash
+npm exec --yes --package=https://pkg.eve.dev/pr/123/eve.tgz -- eve init my-agent
+```
+
+## Publishing
+
+[Build tarball](../../.github/workflows/build-tarball.yml) runs for `main` pushes and same-repository pull requests without credentials. It checks out the exact source SHA, packages eve, and uploads the tarball and metadata as a short-lived GitHub Actions artifact.
+
+[Publish tarball](../../.github/workflows/publish-tarball.yml) is an automatic internal trust boundary. GitHub loads it from the default branch on successful package builds. It verifies that the build still represents the current `main` or pull-request head, downloads the artifact on a fresh runner, and uploads the bytes without executing or extracting them. It then reports the user-facing **Package artifact** commit status. Keeping publishing separate prevents pull-request code from changing the credentialed workflow or reading the Blob token.
+
+The publisher writes:
+
+```text
+packages/<sha>/eve.tgz
+packages/<sha>/manifest.json
+packages/refs/main.json
+packages/refs/pr/<number>.json
+```
+
+SHA objects are immutable. Main and PR pointer objects are mutable and short-cached.
+
+## Project setup
+
+The Vercel package project must:
 
 - use this directory as its project root;
-- enable access to Vercel system environment variables;
+- connect the private package Blob store for reads;
 - deploy `main` to Production;
-- connect a private Blob store to Production;
-- omit `BLOB_READ_WRITE_TOKEN` so Blob writes use Vercel OIDC; and
-- disable Deployment Protection so npm can reach the production origin anonymously.
+- set its Ignored Build Step to `test "$VERCEL_GIT_COMMIT_REF" != "main"`; and
+- disable Deployment Protection so package managers can reach the public proxy.
 
-Only production builds of `main` publish artifacts. Other builds produce a placeholder deployment; configure the project's Ignored Build Step as `test "$VERCEL_GIT_COMMIT_REF" != "main"` to skip non-`main` deployments before install and build. The smoke check verifies public access and the downloaded artifact's gzip signature.
+Set the repository Actions secret `EVE_PACKAGE_BLOB_READ_WRITE_TOKEN` to the package store's write token. The user-facing workflow never references this secret. Successful same-repository pull-request builds publish automatically through the trusted default-branch publisher.
+
+The smoke check verifies public access and the downloaded main artifact's gzip signature.

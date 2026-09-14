@@ -2778,10 +2778,22 @@ async function handleStepResult(input: {
     return { next: runStep, session: nextSession };
   }
 
-  // `mode` is the fundamental terminal split: a task run must finish (an unmet
-  // schema becomes an error), a conversation run may park. Whether a schema is
-  // in effect is mode-independent — it is resolved once at the execution layer
-  // and read straight off the session here.
+  if (
+    config.mode === "task" &&
+    contextStorage.getStore()?.get(ScheduleIdKey) !== undefined &&
+    contextStorage.getStore()?.get(BackgroundToolExecutorKey)?.hasPendingTasks?.() === true
+  ) {
+    return deferTaskTurn({
+      emissionState,
+      emit,
+      history: promptMessages,
+      result,
+      schema: nextSession.outputSchema,
+      session: nextSession,
+      stepOutput,
+    });
+  }
+
   if (config.mode === "task") {
     return finishTaskTurn({
       emissionState,
@@ -2803,6 +2815,37 @@ async function handleStepResult(input: {
     session: nextSession,
     stepOutput,
   });
+}
+
+/** Keeps a scheduled task session open until its background work settles. */
+async function deferTaskTurn(input: {
+  readonly emissionState: ReturnType<typeof getHarnessEmissionState>;
+  readonly emit?: ToolLoopHarnessConfig["handleEvent"];
+  readonly history: readonly HarnessModelMessage[];
+  readonly result: HarnessStepResult;
+  readonly schema: JsonObject | undefined;
+  readonly session: HarnessSession;
+  readonly stepOutput: string | null;
+}): Promise<StepResult> {
+  const { emit, history, result, schema, stepOutput } = input;
+  let { emissionState, session } = input;
+  session = clearTurnClientContextState(session);
+  const structured = schema === undefined ? undefined : extractFinalOutput(result);
+  if (structured !== undefined) {
+    session = {
+      ...persistStructuredAssistantTurn(session, history, structured),
+      outputSchema: schema,
+    };
+  }
+  if (emit) {
+    emissionState = await emitTurnEpilogue(emit, emissionState, "conversation");
+    session = setHarnessEmissionState(session, emissionState);
+  }
+  return {
+    next: null,
+    session,
+    settledTurn: { output: structured ?? stepOutput ?? "" },
+  };
 }
 
 function isDeferredHarnessTool(tool: HarnessToolDefinition | undefined): boolean {

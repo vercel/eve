@@ -79,7 +79,7 @@ export default defineWorkspaceAgent({
 });
 ```
 
-The helper uses the peer's root `defineAgent({ description })` value as the model-visible tool description. Pass `description` to override it for this caller. When `transport` is omitted, eve selects the built-in transport for the runtime environment. Vercel deployments route through the current deployment and authenticate with the caller's Vercel OIDC token. Outside Vercel, provide an explicit transport with `url` and optional `auth` or `headers`:
+The helper uses the peer's root `defineAgent({ description })` value as the model-visible tool description. Pass `description` to override it for this caller. When `transport` is omitted, eve selects the built-in transport for the runtime environment. Vercel deployments route through the current deployment and authenticate with the caller's Vercel OIDC token. A workspace hosted through `withEve()` in a Next.js app uses its `/eve/agents/<name>` mount; a hostless workspace uses `/<name>`. Outside Vercel, provide an explicit transport with `url` and optional `auth` or `headers`:
 
 ```ts title="agents/foreman/agent/subagents/research.ts"
 import { defineWorkspaceAgent } from "eve";
@@ -216,6 +216,8 @@ Because the name lives in the same runtime tool namespace as authored tools, a s
 Do not rely on subagent delegation by itself as an approval boundary. Put sensitive tools behind `approval`, connection approval, route/session authorization, or other controls wherever those tools can be called.
 
 Each delegated subagent spins up its own child session and stream. The parent stream carries the control-plane events `subagent.called` and `subagent.completed`, plus interactive `input.requested`, `authorization.required`, and `authorization.completed` events proxied from descendants so the root channel can prompt the user. To follow the child's other progress, read `subagent.called.data.childSessionId` and subscribe at `GET /eve/v1/session/:childSessionId/stream`.
+
+Channels with activity reporting attribute the backing agent's tool activity to its background task. Local and remote subagents share the task's progress item rather than adding a separate agent item. Continuing or steering a child with `agentId` attaches its new activity to the new task; the previous task keeps its completed or cancelled status. This applies to the built-in `agent` and declared subagent tools, not to child invocations inside custom workflow tools. Activity reporting is best-effort and does not change task execution or result delivery.
 
 A background task that was already admitted survives cancellation of the turn that started it; background work that has not yet been admitted is rejected with the cancelled step. Use `task_cancel` to stop an admitted task. Cancellation delivers the task's final notification to an active parent even if the task must be stopped forcibly. Parent-session finalization cancels remaining live tasks.
 

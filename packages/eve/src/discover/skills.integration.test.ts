@@ -32,6 +32,8 @@ describe("discoverSkills (memory)", () => {
         ].join("\n"),
         "skills/handoff.mjs":
           'throw new Error("skill modules should not execute during discovery");\n',
+        "skills/handoff.mjs.map": "generated source map",
+        "skills/handoff.d.ts.map": "generated declaration source map",
         "skills/weather-research.md": [
           "---",
           "description: Research complex weather questions before replying.",

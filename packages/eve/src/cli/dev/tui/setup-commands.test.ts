@@ -122,7 +122,7 @@ describe("runTuiSetupCommand", () => {
     const flows = fakeFlows({
       runRegistryFlow: vi.fn<TuiSetupFlows["runRegistryFlow"]>(async ({ prompter }) => {
         await prompter.select({
-          message: "Add experimental/self-modification?",
+          message: "Add eve/self-modification?",
           options: [{ value: "install", label: "Install and set up" }],
         });
         return registryResult();

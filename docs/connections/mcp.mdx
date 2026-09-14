@@ -24,6 +24,20 @@ export default defineMcpClientConnection({
 
 The `url` must speak Streamable HTTP or SSE. Write the `description` for the model, not for yourself: it is the main signal `connection_search` uses when deciding which connection to query.
 
+## Configure protocol discovery
+
+eve discovers the server's MCP protocol by default. If a server requires the older `initialize` handshake, disable discovery for that connection:
+
+```ts
+export default defineMcpClientConnection({
+  url: "https://mcp.example.com/mcp",
+  description: "Search support cases",
+  protocolVersionDiscovery: false,
+});
+```
+
+With `protocolVersionDiscovery: false`, the client skips `server/discover` and starts with `initialize`, proposing `2025-11-25` and negotiating a supported handshake-based version. This is a per-connection setting; omitting it or setting it to `true` keeps discovery enabled. Remove the override when the server supports discovery. The setting also applies to connections returned by dynamic resolvers.
+
 ## Use Vercel Connect for OAuth
 
 For OAuth-backed MCP servers, use the shared [Vercel Connect flow](../connections#interactive-oauth-via-vercel-connect), then pass the returned connector UID to `connect()`. Keep the MCP runtime URL and Connect service identifier distinct. For example, Linear uses `https://mcp.linear.app/mcp` as the MCP endpoint and `mcp.linear.app` when creating the connector.

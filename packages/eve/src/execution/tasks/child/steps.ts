@@ -54,7 +54,7 @@ export async function appendTaskViewStep(input: {
     settledAt: new Date().toISOString(),
     view: input.view,
   });
-  void submitActivity({ events, sink: input.activityObserver?.sink });
+  await submitActivity({ events, sink: input.activityObserver?.sink });
 }
 
 export function projectTaskActivity(input: {

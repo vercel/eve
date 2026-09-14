@@ -2,6 +2,7 @@ import { defineEval } from "eve/evals";
 import { equals, satisfies } from "eve/evals/expect";
 
 const RESULT = "EXPORT-COMPLETE";
+const FINAL = "SCHEDULED-EXPORT-DONE";
 
 /**
  * A schedule-launched turn that dispatches a background task sends no launch
@@ -19,6 +20,7 @@ export default defineEval({
       t.skip("Target has no dev routes; schedule dispatch is dev-only.");
     }
 
+    // Scheduled root dispatch: the schedule, not an inbound turn, creates the session.
     const dispatch = await t.target.dispatchSchedule("scheduled-export");
     await t.require(dispatch.scheduleId, equals("scheduled-export"));
     await t.require(
@@ -63,13 +65,18 @@ export default defineEval({
       satisfies((message) => message === undefined, "the pending message wake is silent"),
     );
 
-    // Only the settled wake produces a user-facing report.
+    // Agent receives background task result after turn ended.
+    // Only the settled wake produces the single final non-null delivery.
     const doneLive = t.target.watchTurn(sessionId, {
       startIndex: requireStreamIndex(updateLive.session, "completion wait"),
     });
     const doneTurn = await doneLive.result();
     doneTurn.expectOk();
-    doneTurn.messageIncludes("SCHEDULED-EXPORT-DONE");
+    doneTurn.messageIncludes(FINAL);
+    doneTurn.event("message.completed", {
+      data: (data) => data.finishReason !== "tool-calls" && data.message !== null,
+      count: 1,
+    });
     await t.require(
       doneTurn.events,
       satisfies(
@@ -81,6 +88,39 @@ export default defineEval({
               messageText(event.data.message).includes(RESULT),
           ),
         "the report follows the executor completion",
+      ),
+    );
+
+    // Replay all three durable turns. Only the late report survives as assistant output.
+    const replayedLaunch = await t.target.attachSession(sessionId);
+    const replayedUpdateLive = t.target.watchTurn(sessionId, {
+      startIndex: requireStreamIndex(replayedLaunch, "replayed update"),
+    });
+    await replayedUpdateLive.result();
+    const replayedDoneLive = t.target.watchTurn(sessionId, {
+      startIndex: requireStreamIndex(replayedUpdateLive.session, "replayed completion"),
+    });
+    await replayedDoneLive.result();
+    const replayedEvents = [
+      ...replayedLaunch.events,
+      ...replayedUpdateLive.events,
+      ...replayedDoneLive.events,
+    ];
+    await t.require(
+      replayedEvents,
+      satisfies(
+        (events: typeof replayedEvents) =>
+          events.some(
+            (event) =>
+              event.type === "message.received" && messageText(event.data.message).includes(RESULT),
+          ) &&
+          events.filter(
+            (event) =>
+              event.type === "message.completed" &&
+              event.data.message !== null &&
+              JSON.stringify(event.data.message).includes(FINAL),
+          ).length === 1,
+        "replay retains one final export report",
       ),
     );
     t.noFailedActions();

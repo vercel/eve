@@ -29,6 +29,12 @@ export interface McpClientConnectionDefinition {
    */
   readonly url: string;
   /**
+   * Whether to discover the server's protocol before initialization.
+   * Defaults to enabled. Set to false for servers that require the older
+   * initialize handshake; that handshake still negotiates a supported version.
+   */
+  readonly protocolVersionDiscovery?: boolean;
+  /**
    * Human-readable summary of the connection and its tools.
    *
    * The system prompt layer uses it to describe the connection to

@@ -219,6 +219,7 @@ async function runSessionStep(rawInput: TurnStepInput): Promise<DurableStepResul
     ctx,
     effectiveAgent,
     instrumentation,
+    isFirstTurn: initialEmissionState.sequence === 0,
     parentWritable: input.parentWritable,
     sessionId: initialSession.sessionId,
   });
