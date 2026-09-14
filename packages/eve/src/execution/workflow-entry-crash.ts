@@ -1,5 +1,6 @@
 import type { TurnCaller } from "#channel/types.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
+import type { TokenUsage } from "#shared/token-usage.js";
 import { resolveInitialTurnCallerStep } from "#subagents/parent-notification.js";
 
 const SAFE_OUTER_WORKFLOW_FAILURE_MESSAGE =
@@ -26,6 +27,9 @@ export interface CrashCleanupState {
   // reject it with the error instead of leaving it parked forever.
   // Populated for every session; only conversation-mode paths read it.
   caller: TurnCaller | undefined;
+  // Usage consumed by successful child turns whose caller notification is
+  // deferred until their nested task results are available.
+  callerUsage?: TokenUsage;
   // Whether `resolveInitialTurnCallerStep` has run. `caller: undefined` is
   // ambiguous on its own: it also means "resolved and later cleared because
   // its reply settled". This flag lets the crash path tell that apart from

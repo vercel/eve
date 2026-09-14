@@ -26,6 +26,7 @@ import {
   ChannelDeliveryKey,
   HandleEventKey,
   ModeKey,
+  ScheduleIdKey,
   SessionDynamicSubagentRuntimeRevisionKey,
   SessionDynamicToolRuntimeRevisionKey,
   StaticModelReferenceKey,
@@ -84,6 +85,7 @@ import {
   resolveInitiatingTaskContext,
   resolveTaskDeliveryContext,
 } from "#tasks/delivery-context.js";
+import { scheduledLaunchDeliveryEvent } from "#execution/scheduled-launch-delivery.js";
 import {
   readRetainedBackgroundToolResult,
   runBackgroundStep,
@@ -385,9 +387,14 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
   }
 
   const writer = input.parentWritable.getWriter();
-
   const emit = async (event: UnstampedMessageStreamEvent): Promise<MessageStreamEvent> => {
-    const toEmit = await callAdapterEventHandler(adapter, event, adapterCtx);
+    const deliverableEvent = scheduledLaunchDeliveryEvent(event, {
+      isScheduled: ctx.get(ScheduleIdKey) !== undefined,
+      taskPhase: ctx.get(TurnTaskDeliveryKey),
+    });
+    if (deliverableEvent === undefined)
+      return stampMessageStreamEvent(event, ctx.get(TurnDeliveryIdsKey));
+    const toEmit = await callAdapterEventHandler(adapter, deliverableEvent, adapterCtx);
     setChannelContext(ctx, { ...adapter, state: { ...adapterCtx.state } });
     const stamped = stampMessageStreamEvent(toEmit, ctx.get(TurnDeliveryIdsKey));
     await writer.write(encodeMessageStreamEvent(stamped));

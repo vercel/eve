@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createHook } from "#compiled/@workflow/core/index.js";
 import { resumeHook } from "#internal/workflow/runtime.js";
 
-import type { HookPayload } from "#channel/types.js";
+import type { DeliverPayload } from "#channel/types.js";
 import { ChannelRequestIdKey } from "#context/keys.js";
 import { createSessionStep } from "#execution/create-session-step.js";
 import {
@@ -30,6 +30,7 @@ import type { SessionInboxPayload } from "#execution/session-command-inbox.js";
 import { sessionCommandHookToken } from "#execution/session-command-token.js";
 import { SESSION_INBOX_WIRE_VERSION } from "#execution/wire/session-inbox-contract.js";
 import { settleContinuationConflictStep } from "#execution/continuation-conflict-step.js";
+import type { TokenUsage } from "#shared/token-usage.js";
 
 vi.mock("#compiled/@workflow/core/index.js", () => ({
   createHook: vi.fn(),
@@ -73,12 +74,19 @@ vi.mock("./create-session-step.js", () => ({
 vi.mock("./route-child-delivery.js", () => ({
   routeDeliverToChildren: vi
     .fn()
-    .mockImplementation(async ({ delivery, serializedContext = {}, sessionState }) => ({
-      kind: "continue",
-      remainder: delivery,
-      serializedContext,
-      sessionState,
-    })),
+    .mockImplementation(async ({ delivery, serializedContext = {}, sessionState }) => {
+      const payloads = delivery.payloads.flatMap((payload: DeliverPayload) => {
+        const ordinary = { ...payload };
+        delete ordinary.task;
+        return Object.keys(ordinary).length === 0 ? [] : [ordinary];
+      });
+      return {
+        kind: "continue",
+        remainder: payloads.length === 0 ? undefined : { ...delivery, payloads },
+        serializedContext,
+        sessionState,
+      };
+    }),
 }));
 
 vi.mock("../subagents/parent-notification.js", () => ({
@@ -155,7 +163,8 @@ interface DeliveryHookConfig {
 interface AuthHookConfig {
   readonly dispose?: () => void;
   readonly getConflict?: () => Promise<{ readonly runId: string } | null>;
-  readonly return?: () => Promise<IteratorResult<HookPayload>>;
+  readonly next?: () => Promise<IteratorResult<SessionInboxPayload>>;
+  readonly return?: () => Promise<IteratorResult<SessionInboxPayload>>;
 }
 
 describe("workflowEntry", () => {
@@ -1015,6 +1024,429 @@ describe("workflowEntry", () => {
     });
   });
 
+  it("keeps delivered nested results across an authorization continuation", async () => {
+    const caller = {
+      callId: "call-1",
+      replyTo: { kind: "hook" as const, token: "parent-turn" },
+      subagentName: "researcher",
+    };
+    const pending = createNestedTaskSessionState();
+    const completed = createNestedTaskSessionState({ completed: true, sequence: 2 });
+    const resumed = createNestedTaskSessionState({ completed: true, sequence: 3 });
+    const acknowledgementUsage = usage(10, 2, 1);
+    const finalUsage = usage(20, 4, 2);
+    vi.mocked(createSessionStep).mockResolvedValue(
+      createSessionStepResultForMock(createBaseSessionState()),
+    );
+    vi.mocked(resolveInitialTurnCallerStep).mockResolvedValueOnce(caller);
+    const first = turnResult({
+      action: "park",
+      sessionState: pending,
+      settled: { output: "Reviewing...", usage: acknowledgementUsage },
+    });
+    if (first.kind !== "turn-result") throw new Error("Expected a turn result.");
+    let closeContinuation: ((result: IteratorResult<SessionInboxPayload>) => void) | undefined;
+    const continuationRead = new Promise<IteratorResult<SessionInboxPayload>>((resolve) => {
+      closeContinuation = resolve;
+    });
+    let authorizationReadCount = 0;
+    installHookMocks({
+      authHook: {
+        next: async () => {
+          authorizationReadCount += 1;
+          if (authorizationReadCount === 1) {
+            return {
+              done: false,
+              value: {
+                kind: "deliver",
+                payloads: [{ authorizationCallback: { attemptId: "approval-1" } }],
+              },
+            };
+          }
+          closeContinuation?.({ done: true, value: undefined });
+          return await new Promise<IteratorResult<SessionInboxPayload>>(() => {});
+        },
+      },
+      deliveryHooks: [{ next: async () => await continuationRead, token: "http:test" }],
+      turnControls: [
+        {
+          ...first,
+          bufferedDeliveries: [
+            {
+              kind: "deliver",
+              payloads: [
+                {
+                  message: "Background task task_nested is completed.",
+                  task: { views: [nestedTaskTerminalView()] },
+                },
+              ],
+              // Agent receives background task result before turn ended
+              taskDeliveryId: "task_nested:ready:completed",
+            },
+          ],
+        },
+        turnResult({
+          action: "park",
+          authorizationAttemptIds: ["approval-1"],
+          sessionState: completed,
+        }),
+        turnResult({
+          action: "park",
+          sessionState: resumed,
+          settled: { output: "Final review", usage: finalUsage },
+        }),
+      ],
+    });
+
+    await expect(
+      workflowEntry({
+        input: { message: "delegate" },
+        serializedContext: createSerializedContext({
+          "eve.channel": {
+            kind: "subagent",
+            state: {
+              callId: "call-1",
+              parentContinuationToken: "parent-turn",
+              subagentName: "researcher",
+            },
+          },
+        }),
+      }),
+    ).resolves.toEqual({ output: "" });
+
+    expect(dispatchTurnStep).toHaveBeenCalledTimes(3);
+    expect(notifyTurnCallerStep).toHaveBeenCalledExactlyOnceWith({
+      caller,
+      lifecycle: "parked",
+      sessionId: "wrun_test_123",
+      settled: {
+        output: "Final review",
+        usage: usage(30, 6, 3),
+      },
+    });
+  });
+
+  it("discovers nested tasks from a non-settled approval park", async () => {
+    const caller = {
+      callId: "call-1",
+      replyTo: { kind: "hook" as const, token: "parent-turn" },
+      subagentName: "researcher",
+    };
+    const pending = createNestedTaskSessionState();
+    const completed = createNestedTaskSessionState({ completed: true, sequence: 3 });
+    vi.mocked(createSessionStep).mockResolvedValue(
+      createSessionStepResultForMock(createBaseSessionState()),
+    );
+    vi.mocked(resolveInitialTurnCallerStep).mockResolvedValueOnce(caller);
+    const approvalPark = turnResult({ action: "park", sessionState: pending });
+    if (approvalPark.kind !== "turn-result") throw new Error("Expected a turn result.");
+    const acknowledgement = turnResult({
+      action: "park",
+      sessionState: createNestedTaskSessionState({ sequence: 2 }),
+      settled: { output: "Reviewing...", usage: usage(10, 2) },
+    });
+    if (acknowledgement.kind !== "turn-result") throw new Error("Expected a turn result.");
+    installHookMocks({
+      deliveryHooks: [{ token: "http:test", values: [] }],
+      turnControls: [
+        {
+          ...approvalPark,
+          bufferedDeliveries: [
+            {
+              kind: "deliver",
+              payloads: [{ inputResponses: [{ optionId: "approve", requestId: "approval-1" }] }],
+            },
+          ],
+        },
+        {
+          ...acknowledgement,
+          bufferedDeliveries: [
+            {
+              kind: "deliver",
+              payloads: [
+                {
+                  message: "Background task task_nested is completed.",
+                  task: { views: [nestedTaskTerminalView()] },
+                },
+              ],
+              // Agent receives background task result after turn ended
+              taskDeliveryId: "task_nested:ready:completed",
+            },
+          ],
+        },
+        turnResult({
+          action: "park",
+          sessionState: completed,
+          settled: { output: "Final review", usage: usage(20, 4) },
+        }),
+      ],
+    });
+
+    await expect(
+      workflowEntry({
+        input: { message: "delegate" },
+        serializedContext: createSerializedContext({
+          "eve.channel": {
+            kind: "subagent",
+            state: {
+              callId: "call-1",
+              parentContinuationToken: "parent-turn",
+              subagentName: "researcher",
+            },
+          },
+        }),
+      }),
+    ).resolves.toEqual({ output: "" });
+
+    expect(dispatchTurnStep).toHaveBeenCalledTimes(3);
+    expect(notifyTurnCallerStep).toHaveBeenCalledExactlyOnceWith({
+      caller,
+      lifecycle: "parked",
+      sessionId: "wrun_test_123",
+      settled: { output: "Final review", usage: usage(30, 6) },
+    });
+  });
+
+  it("defers terminal settlement until an invocation-owned background task is delivered", async () => {
+    const pending = createNestedTaskSessionState();
+    const completed = createNestedTaskSessionState({ completed: true, sequence: 2 });
+    const first = turnResult({
+      action: "done",
+      output: "Premature fallback",
+      sessionState: pending,
+      usageDelta: usage(4, 1),
+    });
+    if (first.kind !== "turn-result") throw new Error("Expected a turn result.");
+    vi.mocked(createSessionStep).mockResolvedValue(
+      createSessionStepResultForMock(createBaseSessionState()),
+    );
+    installHookMocks({
+      deliveryHooks: [{ token: "http:test", values: [] }],
+      turnControls: [
+        {
+          ...first,
+          bufferedDeliveries: [
+            {
+              kind: "deliver",
+              payloads: [
+                {
+                  message: "Background task task_nested is completed.",
+                  task: { views: [nestedTaskTerminalView()] },
+                },
+              ],
+              taskDeliveryId: "task_nested:ready:completed",
+            },
+          ],
+        },
+        turnResult({ action: "done", output: "Final review", sessionState: completed }),
+      ],
+    });
+
+    await expect(
+      workflowEntry({
+        input: { message: "scheduled work" },
+        serializedContext: createSerializedContext(),
+      }),
+    ).resolves.toEqual({ output: "Final review" });
+
+    expect(dispatchTurnStep).toHaveBeenCalledTimes(2);
+    expect(terminateChildSessionsStep).toHaveBeenCalledExactlyOnceWith({
+      serializedContext: { "eve.sessionId": "wrun_test_123" },
+      sessionState: completed,
+    });
+  });
+
+  it("records owned siblings when a coalesced delivery starts with an older task", async () => {
+    const caller = {
+      callId: "call-1",
+      replyTo: { kind: "hook" as const, token: "parent-turn" },
+      subagentName: "researcher",
+    };
+    const taskIds = ["task_first", "task_second", "task_third"];
+    const cohortIds = { task_second: "review_pair", task_third: "review_pair" };
+    const createdByTurnIds = { task_second: "turn_previous" };
+    const pending = createNestedTaskSessionState({ cohortIds, createdByTurnIds, taskIds });
+    const completed = createNestedTaskSessionState({
+      cohortIds,
+      completed: true,
+      createdByTurnIds,
+      sequence: 2,
+      taskIds,
+    });
+    vi.mocked(createSessionStep).mockResolvedValue(
+      createSessionStepResultForMock(createBaseSessionState()),
+    );
+    vi.mocked(resolveInitialTurnCallerStep).mockResolvedValueOnce(caller);
+    const first = turnResult({
+      action: "park",
+      sessionState: pending,
+      settled: { output: "Reviews started", usage: usage(4, 1) },
+    });
+    if (first.kind !== "turn-result") throw new Error("Expected a turn result.");
+    installHookMocks({
+      deliveryHooks: [{ token: "http:test", values: [] }],
+      turnControls: [
+        {
+          ...first,
+          bufferedDeliveries: taskIds.map((taskId) => ({
+            kind: "deliver" as const,
+            payloads: [
+              {
+                message: `Background task ${taskId} is completed.`,
+                task: { views: [nestedTaskTerminalView(taskId)] },
+              },
+            ],
+            taskDeliveryId: `${taskId}:ready:completed`,
+          })),
+        },
+        turnResult({
+          action: "park",
+          sessionState: completed,
+          settled: { output: "First review", usage: usage(5, 1) },
+        }),
+        turnResult({
+          action: "park",
+          sessionState: completed,
+          settled: { output: "All reviews", usage: usage(6, 2) },
+        }),
+      ],
+    });
+
+    await expect(
+      workflowEntry({
+        input: { message: "delegate" },
+        serializedContext: createSerializedContext({
+          "eve.channel": {
+            kind: "subagent",
+            state: {
+              callId: "call-1",
+              parentContinuationToken: "parent-turn",
+              subagentName: "researcher",
+            },
+          },
+        }),
+      }),
+    ).resolves.toEqual({ output: "" });
+
+    expect(notifyTurnCallerStep).toHaveBeenCalledExactlyOnceWith({
+      caller,
+      lifecycle: "parked",
+      sessionId: "wrun_test_123",
+      settled: { output: "All reviews", usage: usage(15, 4) },
+    });
+  });
+
+  it("reports a delegated failure without waiting for turn-owned nested work", async () => {
+    const caller = {
+      callId: "call-1",
+      replyTo: { kind: "hook" as const, token: "parent-turn" },
+      subagentName: "researcher",
+    };
+    const pending = createNestedTaskSessionState();
+    vi.mocked(createSessionStep).mockResolvedValue(
+      createSessionStepResultForMock(createBaseSessionState()),
+    );
+    vi.mocked(resolveInitialTurnCallerStep).mockResolvedValueOnce(caller);
+    installHookMocks({
+      deliveryHooks: [{ token: "http:test", values: [] }],
+      turnControls: [
+        turnResult({
+          action: "park",
+          sessionState: pending,
+          settled: { isError: true, output: "child failed", usage: usage(10, 2) },
+        }),
+      ],
+    });
+
+    await expect(
+      workflowEntry({
+        input: { message: "delegate" },
+        serializedContext: createSerializedContext({
+          "eve.channel": {
+            kind: "subagent",
+            state: {
+              callId: "call-1",
+              parentContinuationToken: "parent-turn",
+              subagentName: "researcher",
+            },
+          },
+        }),
+      }),
+    ).resolves.toEqual({ output: "" });
+
+    expect(notifyTurnCallerStep).toHaveBeenCalledExactlyOnceWith({
+      caller,
+      lifecycle: "parked",
+      sessionId: "wrun_test_123",
+      settled: { isError: true, output: "child failed", usage: usage(10, 2) },
+    });
+  });
+
+  it("reports cancellation after a deferred delegated acknowledgement", async () => {
+    const caller = {
+      callId: "call-1",
+      replyTo: { kind: "hook" as const, token: "parent-turn" },
+      subagentName: "researcher",
+    };
+    const pending = createNestedTaskSessionState();
+    vi.mocked(createSessionStep).mockResolvedValue(
+      createSessionStepResultForMock(createBaseSessionState()),
+    );
+    vi.mocked(resolveInitialTurnCallerStep).mockResolvedValueOnce(caller);
+    vi.mocked(settleCancelledTurnStep).mockResolvedValueOnce({
+      serializedContext: { "eve.sessionId": "wrun_test_123" },
+      sessionState: pending,
+      usage: usage(5, 1),
+    });
+    const first = turnResult({
+      action: "park",
+      sessionState: pending,
+      settled: { output: "Reviewing...", usage: usage(10, 2) },
+    });
+    if (first.kind !== "turn-result") throw new Error("Expected a turn result.");
+    installHookMocks({
+      deliveryHooks: [{ token: "http:test", values: [] }],
+      turnControls: [
+        {
+          ...first,
+          bufferedDeliveries: [{ kind: "deliver", payloads: [{ message: "cancel" }] }],
+        },
+        {
+          action: {
+            cancelled: true,
+            kind: "park",
+            serializedContext: { "eve.sessionId": "wrun_test_123" },
+            sessionState: pending,
+          },
+          kind: "turn-result",
+        },
+      ],
+    });
+
+    await expect(
+      workflowEntry({
+        input: { message: "delegate" },
+        serializedContext: createSerializedContext({
+          "eve.channel": {
+            kind: "subagent",
+            state: {
+              callId: "call-1",
+              parentContinuationToken: "parent-turn",
+              subagentName: "researcher",
+            },
+          },
+        }),
+      }),
+    ).resolves.toEqual({ output: "" });
+
+    expect(notifyCancelledTaskCallerStep).toHaveBeenCalledExactlyOnceWith({
+      caller,
+      sessionId: "wrun_test_123",
+      usage: usage(15, 3),
+    });
+    expect(notifyTurnCallerStep).not.toHaveBeenCalled();
+  });
+
   it("keeps the turn caller across a callerless continuation", async () => {
     const sessionState = createBaseSessionState();
     const caller = {
@@ -1833,15 +2265,82 @@ function createBaseSessionState(overrides: Partial<DurableSessionState> = {}): D
   };
 }
 
+function createNestedTaskSessionState(
+  input: {
+    readonly cohortIds?: Readonly<Record<string, string>>;
+    readonly completed?: boolean;
+    readonly createdByTurnIds?: Readonly<Record<string, string>>;
+    readonly sequence?: number;
+    readonly taskIds?: readonly string[];
+  } = {},
+): DurableSessionState {
+  const taskIds = input.taskIds ?? ["task_nested"];
+  return createBaseSessionState({
+    emissionState: {
+      sequence: input.sequence ?? 1,
+      sessionStarted: true,
+      stepIndex: 0,
+      turnId: "",
+    },
+    snapshot: {
+      session: {
+        agent: { system: "" },
+        continuationToken: "http:test",
+        history: [],
+        sessionId: "wrun_test_123",
+        state: {
+          "eve.tasks": {
+            tasks: taskIds.map((taskId) => {
+              return {
+                cohortId: input.cohortIds?.[taskId],
+                createdByTurnId: input.createdByTurnIds?.[taskId] ?? "turn_0",
+                metadata: { kind: "subagent", name: "gated-reviewer" },
+                taskId,
+                taskInboxToken: `task:${taskId}:inbox`,
+                taskRunId: `run_${taskId}`,
+                terminalView: input.completed ? nestedTaskTerminalView(taskId) : undefined,
+              };
+            }),
+            version: 2,
+          },
+        },
+      },
+      version: 1,
+    },
+  });
+}
+
+function nestedTaskTerminalView(taskId = "task_nested") {
+  return {
+    lastOutput: { data: "REVIEW_RESULT", type: "result" as const },
+    metadata: { kind: "subagent", name: "gated-reviewer" },
+    status: "completed" as const,
+    taskId,
+  };
+}
+
+function usage(inputTokens: number, outputTokens: number, costUsd?: number): TokenUsage {
+  return {
+    cacheReadTokens: 0,
+    cacheWriteTokens: 0,
+    costUsd,
+    inputTokens,
+    outputTokens,
+  };
+}
+
 function turnResult(input: {
   readonly action: "done" | "park";
+  readonly authorizationAttemptIds?: readonly string[];
   readonly output?: string;
   readonly serializedContext?: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
   readonly settled?: {
     readonly output: unknown;
     readonly isError?: boolean;
+    readonly usage?: TokenUsage;
   };
+  readonly usageDelta?: TokenUsage;
 }): TurnControlPayload {
   const serializedContext = input.serializedContext ?? { "eve.sessionId": "wrun_test_123" };
   if (input.action === "done") {
@@ -1851,11 +2350,13 @@ function turnResult(input: {
         output: input.output ?? "",
         serializedContext,
         sessionState: input.sessionState,
+        usageDelta: input.usageDelta,
       },
       kind: "turn-result",
     };
   }
   const park = {
+    authorizationAttemptIds: input.authorizationAttemptIds,
     kind: "park" as const,
     serializedContext,
     sessionState: input.sessionState,
@@ -1891,6 +2392,7 @@ function installHookMocks(input: {
       return createMockHook({
         dispose: input.authHook?.dispose,
         getConflict: input.authHook?.getConflict,
+        next: input.authHook?.next,
         return: input.authHook?.return,
         token,
         values: [],

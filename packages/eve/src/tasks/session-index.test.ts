@@ -148,9 +148,9 @@ describe("session task index", () => {
         "task_a",
       ]);
       expect([...getSessionTaskCohorts(session.state).values()]).toEqual([
-        { cohortId: "task_a", settled: true },
-        { cohortId: "task_a", settled: false },
-        { cohortId: "task_a", settled: false },
+        { cohortId: "task_a", createdByTurnId: "turn-1", settled: true },
+        { cohortId: "task_a", createdByTurnId: "turn-1", settled: false },
+        { cohortId: "task_a", createdByTurnId: "turn-2", settled: false },
       ]);
       for (const taskId of ["task_b", "task_c"]) {
         session = {
