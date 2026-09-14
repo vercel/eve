@@ -1,5 +1,10 @@
 import type { DynamicResolveContext } from "#dynamic/definition.js";
-import { defineAgent, defineDynamic, type AgentStaticModelDefinition } from "#public/index.js";
+import {
+  defineAgent,
+  defineDynamic,
+  type AgentReasoningDefinition,
+  type AgentStaticModelDefinition,
+} from "#public/index.js";
 
 import { resolveSelfModificationConfig, type SelfModificationConfig } from "./config.js";
 import { hasGitHubCredential } from "./credentials.js";
@@ -18,6 +23,10 @@ export interface SelfModificationAgentOptions {
    * @default "anthropic/claude-sonnet-5"
    */
   readonly model?: AgentStaticModelDefinition;
+  /**
+   * Reasoning effort used by the self-modification subagent.
+   */
+  readonly reasoning?: AgentReasoningDefinition;
 }
 
 function renderDescription(sections: readonly string[]): string {
@@ -58,6 +67,7 @@ const deployedEffectiveEdits =
 /** Defines the environment-aware self-modification dynamic subagent. */
 export function defineSelfModificationAgent(options: SelfModificationAgentOptions = {}) {
   const model = options.model ?? DEFAULT_SELF_MODIFICATION_MODEL;
+  const reasoning = options.reasoning;
   const config = resolveSelfModificationConfig(options.config);
 
   const resolve = async (_event: unknown, ctx: DynamicResolveContext) => {
@@ -72,7 +82,7 @@ export function defineSelfModificationAgent(options: SelfModificationAgentOption
       followUpDelegation,
       mode === "local" ? localEffectiveEdits : deployedEffectiveEdits,
     ]);
-    if (mode === "local") return defineAgent({ description, model });
+    if (mode === "local") return defineAgent({ description, model, reasoning });
     if (mode !== "deployed" || config.deployed === undefined) return null;
     if (config.deployed.credentials.kind === "pat" && !hasGitHubCredential()) return null;
     try {
@@ -87,7 +97,7 @@ export function defineSelfModificationAgent(options: SelfModificationAgentOption
     } catch {
       return null;
     }
-    return defineAgent({ description, model });
+    return defineAgent({ description, model, reasoning });
   };
 
   return defineDynamic({
