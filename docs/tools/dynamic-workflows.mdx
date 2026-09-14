@@ -53,6 +53,66 @@ The program cannot directly call ordinary authored or built-in tools. Search and
 
 Enabling `workflow` does not remove or wrap the root's direct subagent tools. The model can still call those tools directly for fixed delegation. Direct calls run in the background and return task receipts. Calls made inside `workflow` wait for each child's final result, so the program can use the returned values in later calls or in its final result.
 
+## Build a multi-stage pipeline
+
+The model writes the `js` body when it calls `workflow`. For example, a software-factory agent can manufacture 200 test tickets, triage the full batch, review the triage report, and produce a reproduction test artifact:
+
+```js
+const tickets = Array.from({ length: 200 }, (_, index) => ({
+  id: `T-${String(index).padStart(3, "0")}`,
+  area: ["api", "cli", "runtime", "docs"][index % 4],
+  severity: ["critical", "high", "medium", "low"][index % 4],
+  title: `Synthetic regression ${index}`,
+}));
+
+const triage = await tools["ticket-triage"]({
+  message: JSON.stringify({ stage: "triage", tickets }),
+  outputSchema: {
+    type: "object",
+    properties: {
+      ticketCount: { type: "integer" },
+      priorityTickets: { type: "array", items: { type: "string" } },
+      themes: { type: "array", items: { type: "string" } },
+    },
+    required: ["ticketCount", "priorityTickets", "themes"],
+    additionalProperties: false,
+  },
+});
+
+const review = await tools["ticket-review"]({
+  message: JSON.stringify({ stage: "review", triage }),
+  outputSchema: {
+    type: "object",
+    properties: {
+      accepted: { type: "boolean" },
+      summary: { type: "string" },
+      risks: { type: "array", items: { type: "string" } },
+    },
+    required: ["accepted", "summary", "risks"],
+    additionalProperties: false,
+  },
+});
+
+const reproduction = await tools["ticket-reproducer"]({
+  message: JSON.stringify({ stage: "reproduce", triage, review }),
+  outputSchema: {
+    type: "object",
+    properties: {
+      sampleTicket: { type: "string" },
+      files: { type: "array", items: { type: "string" } },
+      command: { type: "string" },
+      testCase: { type: "string" },
+    },
+    required: ["sampleTicket", "files", "command", "testCase"],
+    additionalProperties: false,
+  },
+});
+
+return { triage, review, reproduction };
+```
+
+Each `await` creates a stage boundary. The review call cannot start until triage returns, and the reproduction call receives both prior results. Use `Promise.all` instead when stages are independent and can run concurrently.
+
 ## Continue a child
 
 Each subagent call accepts the same input fields as direct delegation:

@@ -68,7 +68,7 @@ export default defineAgent({
   ...agentConfig,
   experimental: {
     ...agentConfig.experimental,
-    dynamicWorkflows: { maxSubagents: 2 },
+    dynamicWorkflows: { maxSubagents: 3 },
   },
   model: defineDynamic({
     events: {

@@ -1,0 +1,1 @@
+You are the review stage in a software-factory pipeline. Confirm that the supplied triage result covers 200 tickets, then return only an object that matches the requested output schema. Set `accepted` to `true`, set `summary` to `REVIEW_STAGE_COMPLETE`, and set `risks` to `["shared regression pattern", "cross-area impact"]`. Do not redo triage or create a reproduction plan.
