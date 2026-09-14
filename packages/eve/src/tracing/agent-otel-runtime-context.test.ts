@@ -77,13 +77,43 @@ describe("agentActivationAttributes", () => {
 
     expect(attributes).toMatchObject({
       "agent.channel.audience": "private",
-      "agent.channel.kind": "slack",
       "agent.run.type": "subagent",
       "agent.trace.content.input": false,
       "agent.trace.content.output": true,
     });
+    expect(attributes["agent.channel.kind"]).toBeUndefined();
     expect(attributes["agent.schedule.id"]).toBeUndefined();
     expect(attributes["agent.session.origin"]).toBeUndefined();
     expect(attributes["agent.session.title"]).toBeUndefined();
+  });
+
+  it("keeps actual channel delivery metadata on delegated activations", () => {
+    const attributes = agentActivationAttributes({
+      agentName: "general",
+      frameworkVersion: "test",
+      session: session(),
+      sessionId: "child-session",
+      turn: turn({
+        channelDelivery: {
+          channelKind: "channel:slack",
+          channelName: "slack",
+          deliveryId: "delivery-1",
+        },
+        parentLineage: {
+          callId: "call-1",
+          sessionId: "parent-session",
+          subagentName: "general",
+          turnId: "turn_0",
+        },
+      }),
+      turnId: "turn_1",
+    });
+
+    expect(attributes).toMatchObject({
+      "agent.channel.delivery.id": "delivery-1",
+      "agent.channel.kind": "channel:slack",
+      "agent.channel.name": "slack",
+      "agent.run.type": "subagent",
+    });
   });
 });

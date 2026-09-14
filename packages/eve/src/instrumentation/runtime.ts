@@ -494,7 +494,7 @@ export function bindInstrumentationRuntime(
       const sessionContext = readSessionContext();
       return createInstrumentationHandleEvent({
         agentName: boundSession.agentName,
-        channelKind: sessionContext.instrumentation?.kind,
+        channelKind: sessionContext.conversation.channel.kind,
         handleEvent: input.handleEvent,
         hooks: bindHooks(sessionContext),
         scheduleId: sessionContext.scheduleId,

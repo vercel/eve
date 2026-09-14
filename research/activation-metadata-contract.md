@@ -1,5 +1,5 @@
 ---
-issue: https://github.com/vercel/eve/pull/3338
+issue: "None (maintainer-requested in PR #3338)"
 status: in-progress
 last_updated: "2026-09-14"
 ---
@@ -15,12 +15,13 @@ trace-content and destination-redaction boundaries.
 
 ## Attribute ownership
 
-Every activation carries its run type, agent identity, channel kind and
-audience, turn identity, and directional content-policy results. Root-session
-activations additionally carry their origin, authored schedule ID when
-applicable, and bounded initial title when input capture permits. Subagent
-activations omit those root-only attributes and use parent lineage to describe
-delegation.
+Every activation carries its run type, agent identity, audience, turn identity,
+and directional content-policy results. Root-session activations additionally
+carry their initiating channel kind, origin, authored schedule ID when
+applicable, and bounded initial title when input capture permits. An actual
+channel delivery carries its own channel kind, name, and delivery ID.
+Delivery-less subagent activations omit the root-only attributes and use parent
+lineage to describe delegation.
 
 The session title is derived once from the initial session input, stored in the
 run context, and repeated on each turn activation. It never describes a later

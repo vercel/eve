@@ -19,7 +19,9 @@ export function agentActivationAttributes(input: {
   const recordsOutputs = recordsTrace && input.session?.decision?.recordOutputs === true;
   const parentLineage = input.turn.parentLineage ?? input.session?.parentLineage;
   const isSubagent = parentLineage !== undefined;
-  const channelKind = input.turn.channelDelivery?.channelKind ?? input.session?.channelKind;
+  const channelKind =
+    input.turn.channelDelivery?.channelKind ??
+    (isSubagent ? undefined : input.session?.channelKind);
   const scheduleId = isSubagent ? undefined : input.session?.scheduleId;
   const origin =
     isSubagent || channelKind === undefined

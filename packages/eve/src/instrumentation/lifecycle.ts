@@ -11,13 +11,9 @@ import type {
 } from "#shared/trace-policy.js";
 
 /**
- * Stable eve identity for one actual model attempt.
- *
- * A step retried three times produces three of these, all sharing `stepIndex`
- * and separated by `attemptIndex` — which is why the events carrying this
- * scope are named `step.attempt.*` and not `step.*`. The protocol's `step.*`
- * and the `events["step.started"]` resolver hook fire once per step; these
- * fire once per attempt.
+ * Stable eve identity for one model attempt. Retries share `stepIndex` and
+ * differ by `attemptIndex`, so `step.attempt.*` fires once per attempt while
+ * protocol `step.*` events and the resolver hook fire once per step.
  */
 export interface InstrumentationAttemptScope {
   readonly channelAudience?: ChannelAudience;

@@ -773,6 +773,7 @@ describe("createAgentOtelInstrumentation", () => {
       "gen_ai.conversation.id": "root-session",
       "gen_ai.operation.name": "invoke_agent",
     });
+    expect(invocation.attributes).not.toHaveProperty("agent.channel.kind");
     expect(invocation.attributes).not.toHaveProperty("agent.schedule.id");
     expect(invocation.attributes).not.toHaveProperty("agent.session.origin");
     expect(invocation.attributes).not.toHaveProperty("agent.session.title");
