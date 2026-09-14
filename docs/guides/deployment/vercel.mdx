@@ -51,7 +51,7 @@ See [Sandbox](../../sandbox) for resource limits, network policy, and lifecycle 
 
 ## Deploy the agent
 
-An agent workspace contains several independently addressed root agents. Create and manage that layout as described in [Project Structure](../../project-structure).
+An agent workspace contains several independently addressed root agents. Create and manage that layout as described in [Project Structure](../../getting-started/project-structure).
 
 For an agent-only workspace, run `eve build` from the workspace root. eve discovers direct `agents/<name>/` children without their own `package.json`, then generates one independently built service and a `/<name>/eve/v1/*` transport route for each member. A child with its own `package.json` is a separate package rather than a workspace member.
 

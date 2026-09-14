@@ -14,7 +14,7 @@ Choose the project structure before creating your agent. Most projects have one 
 | Agents independently addressed through their own endpoints, channels, or schedules              | Multiple root agents in an agent workspace                |
 | An agent owned or released independently                                                        | A separate root agent, in this project or another project |
 
-A root agent has its own HTTP surface and lifecycle. A declared subagent is a tool of its parent agent and is not independently addressed by users or channels. See [Subagents](./subagents) for delegation and [Remote Agents](./guides/remote-agents) when a subagent runs in another deployment.
+A root agent has its own HTTP surface and lifecycle. A declared subagent is a tool of its parent agent and is not independently addressed by users or channels. See [Subagents](../subagents) for delegation and [Remote Agents](../guides/remote-agents) when a subagent runs in another deployment.
 
 ## Choose a root-agent layout
 
@@ -50,7 +50,7 @@ operations/
             └── channels/
 ```
 
-Each workspace member uses the same [agent directory layout](./getting-started#agent-directory-layout) as a standalone root agent. Workspace members share the root package, dependencies, and build scripts. An `agents/<name>/` directory with its own `package.json` is a separate package, not a workspace member.
+Each workspace member uses the same [agent directory layout](./#agent-directory-layout) as a standalone root agent. Workspace members share the root package, dependencies, and build scripts. An `agents/<name>/` directory with its own `package.json` is a separate package, not a workspace member.
 
 ## Create an agent workspace
 
@@ -77,7 +77,7 @@ Interactive agent-scoped commands offer a picker when a workspace has several ag
 
 ## Continue configuring the project
 
-- [Getting Started](./getting-started): create and run a single-root project, then learn the files inside each root agent.
-- [Deploy to Vercel](./guides/deployment/vercel): deploy workspace agents as Vercel services and configure their public routes.
-- [Add a Web App](./guides/frontend/add-a-web-app): put one or more root agents behind a browser application.
-- [Subagents](./subagents#vercel-workspace-peers): let one Vercel workspace agent delegate work to another.
+- [Getting Started](./): create and run a single-root project, then learn the files inside each root agent.
+- [Deploy to Vercel](../guides/deployment/vercel): deploy workspace agents as Vercel services and configure their public routes.
+- [Add a Web App](../guides/frontend/add-a-web-app): put one or more root agents behind a browser application.
+- [Subagents](../subagents#vercel-workspace-peers): let one Vercel workspace agent delegate work to another.
