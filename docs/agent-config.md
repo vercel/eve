@@ -130,17 +130,6 @@ which levels are available and how they map to provider-native settings. Use
 `modelOptions.providerOptions` when you need provider-specific reasoning controls.
 Run `eve set --reasoning high` to update this field from the command line.
 
-The built-in self-modification subagent accepts the same setting in its
-agent arguments:
-
-```ts title="agent/subagents/self-modification/agent.ts"
-import { defineSelfModificationAgent } from "eve/self-modification/agent";
-
-export default defineSelfModificationAgent({
-  reasoning: "high",
-});
-```
-
 ## Compaction
 
 Compaction summarizes older turns as you approach the context window. It's on by default, so you only tune when it kicks in. eve adds the estimated fixed checkpoint-prompt envelope to the trigger count, so compaction starts sooner than the conversation-only estimate. Lower `thresholdPercent` to compact sooner:
