@@ -16,5 +16,7 @@ describe("Git identifiers", () => {
   it("rejects Git lock refs", () => {
     expect(() => assertGitRef("main.lock")).toThrow(/valid Git ref/u);
     expect(() => assertGitRef("heads/main.lock/next")).toThrow(/valid Git ref/u);
+    expect(() => assertGitRef(".hidden")).toThrow(/valid Git ref/u);
+    expect(() => assertGitRef("feature/.hidden")).toThrow(/valid Git ref/u);
   });
 });
