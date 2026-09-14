@@ -41,7 +41,7 @@ Enabling `workflow` does not remove or wrap the root's direct subagent tools. Th
 
 ## Build a multi-stage pipeline
 
-The model writes the `js` body when it calls `workflow`. For example, a software-factory agent can manufacture 200 test tickets, triage the full batch, review the triage report, and produce a reproduction test artifact:
+The model writes the `js` body when it calls `workflow`. For example, a software-factory agent can manufacture 200 test tickets, triage and review the full batch in parallel, then feed both reports into a reproduction test artifact:
 
 ```js
 const tickets = Array.from({ length: 200 }, (_, index) => ({
@@ -51,33 +51,35 @@ const tickets = Array.from({ length: 200 }, (_, index) => ({
   title: `Synthetic regression ${index}`,
 }));
 
-const triage = await tools["ticket-triage"]({
-  message: JSON.stringify({ stage: "triage", tickets }),
-  outputSchema: {
-    type: "object",
-    properties: {
-      ticketCount: { type: "integer" },
-      priorityTickets: { type: "array", items: { type: "string" } },
-      themes: { type: "array", items: { type: "string" } },
+const [triage, review] = await Promise.all([
+  tools["ticket-triage"]({
+    message: JSON.stringify({ stage: "triage", tickets }),
+    outputSchema: {
+      type: "object",
+      properties: {
+        ticketCount: { type: "integer" },
+        priorityTickets: { type: "array", items: { type: "string" } },
+        themes: { type: "array", items: { type: "string" } },
+      },
+      required: ["ticketCount", "priorityTickets", "themes"],
+      additionalProperties: false,
     },
-    required: ["ticketCount", "priorityTickets", "themes"],
-    additionalProperties: false,
-  },
-});
-
-const review = await tools["ticket-review"]({
-  message: JSON.stringify({ stage: "review", triage }),
-  outputSchema: {
-    type: "object",
-    properties: {
-      accepted: { type: "boolean" },
-      summary: { type: "string" },
-      risks: { type: "array", items: { type: "string" } },
+  }),
+  tools["ticket-review"]({
+    message: JSON.stringify({ stage: "review", tickets }),
+    outputSchema: {
+      type: "object",
+      properties: {
+        ticketCount: { type: "integer" },
+        accepted: { type: "boolean" },
+        summary: { type: "string" },
+        risks: { type: "array", items: { type: "string" } },
+      },
+      required: ["ticketCount", "accepted", "summary", "risks"],
+      additionalProperties: false,
     },
-    required: ["accepted", "summary", "risks"],
-    additionalProperties: false,
-  },
-});
+  }),
+]);
 
 const reproduction = await tools["ticket-reproducer"]({
   message: JSON.stringify({ stage: "reproduce", triage, review }),
@@ -97,7 +99,7 @@ const reproduction = await tools["ticket-reproducer"]({
 return { triage, review, reproduction };
 ```
 
-Each `await` creates a stage boundary. The review call cannot start until triage returns, and the reproduction call receives both prior results. Use `Promise.all` instead when stages are independent and can run concurrently.
+`Promise.all` starts triage and review before either result is available. The later `await` creates a fan-in boundary: reproduction cannot start until both reports finish, and it receives both outputs.
 
 ## Continue a child
 
