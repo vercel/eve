@@ -20,14 +20,8 @@ export function getTaskCohortId(task: {
  */
 export function getSessionTaskCohorts(
   state: SessionStateMap | undefined,
-): ReadonlyMap<
-  string,
-  { readonly cohortId: string; readonly createdByTurnId: string; readonly settled: boolean }
-> {
-  const cohorts = new Map<
-    string,
-    { readonly cohortId: string; readonly createdByTurnId: string; readonly settled: boolean }
-  >();
+): ReadonlyMap<string, { readonly cohortId: string; readonly settled: boolean }> {
+  const cohorts = new Map<string, { readonly cohortId: string; readonly settled: boolean }>();
   const raw = state?.[SESSION_TASKS_STATE_KEY];
   if (raw === undefined) return cohorts;
 
@@ -55,7 +49,6 @@ export function getSessionTaskCohorts(
     }
     cohorts.set(task.taskId, {
       cohortId: getTaskCohortId({ taskId: task.taskId, cohortId: task.cohortId }),
-      createdByTurnId: task.createdByTurnId,
       settled: task.terminalView !== undefined,
     });
   }

@@ -68,7 +68,6 @@ export async function nextTurnDelivery(input: {
   readonly bufferedSessionControls: Array<"clear" | "compact" | "expired" | "reset">;
   readonly cancelledTaskIds?: Set<string>;
   readonly commandInbox: SessionCommandInbox;
-  readonly deferCallerDeliveries?: boolean;
   readonly deferDeliveries?: boolean;
   readonly driverWritable: WritableStream<Uint8Array>;
   readonly seenTaskDeliveries?: Set<string>;
@@ -91,7 +90,6 @@ async function awaitNextTurnDelivery(input: {
   readonly bufferedSessionControls: Array<"clear" | "compact" | "expired" | "reset">;
   readonly cancelledTaskIds?: Set<string>;
   readonly commandInbox: SessionCommandInbox;
-  readonly deferCallerDeliveries?: boolean;
   readonly deferDeliveries?: boolean;
   readonly driverWritable: WritableStream<Uint8Array>;
   readonly seenTaskDeliveries?: Set<string>;
@@ -105,7 +103,6 @@ async function awaitNextTurnDelivery(input: {
       bufferedSessionControls: input.bufferedSessionControls,
       cancelledTaskIds,
       commandInbox: input.commandInbox,
-      deferCallerDeliveries: input.deferCallerDeliveries,
       deferDeliveries: input.deferDeliveries,
       seenTaskDeliveries,
       stateCursor: input.stateCursor,
@@ -150,7 +147,6 @@ async function waitForNextSessionAction(input: {
   readonly bufferedSessionControls: Array<"clear" | "compact" | "expired" | "reset">;
   readonly cancelledTaskIds: Set<string>;
   readonly commandInbox: SessionCommandInbox;
-  readonly deferCallerDeliveries?: boolean;
   readonly deferDeliveries?: boolean;
   readonly seenTaskDeliveries: Set<string>;
   readonly stateCursor: SessionStateCursor;
@@ -166,7 +162,6 @@ async function waitForNextSessionAction(input: {
         input.bufferedDeliveries,
         getSessionTaskCohorts(input.stateCursor.sessionState.snapshot?.session.state),
         input.cancelledTaskIds,
-        input.deferCallerDeliveries,
       );
       if (delivery !== undefined) return { delivery, kind: "delivery" };
     }
@@ -266,7 +261,6 @@ function takeBufferedTurnDelivery(
   bufferedDeliveries: DeliverHookPayload[],
   cohorts: ReturnType<typeof getSessionTaskCohorts>,
   cancelledTaskIds: ReadonlySet<string>,
-  deferCallerDeliveries = false,
 ): DeliverHookPayload | undefined {
   const retained = bufferedDeliveries.filter(
     (delivery) => !isCancelledTaskDelivery(delivery, cancelledTaskIds),
@@ -286,7 +280,6 @@ function takeBufferedTurnDelivery(
     }
   }
   let index = bufferedDeliveries.findIndex((delivery) => {
-    if (deferCallerDeliveries && delivery.caller !== undefined) return false;
     const cohort = completionCohort(delivery, cohorts);
     return cohort === undefined || !pendingCohorts.has(cohort);
   });

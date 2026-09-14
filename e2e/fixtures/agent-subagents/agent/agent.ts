@@ -3,8 +3,6 @@ import { defineAgent, defineDynamic } from "eve";
 import { mockModel } from "eve/evals";
 
 import {
-  NESTED_COMPLETION_CHILD_SCENARIO,
-  NESTED_COMPLETION_PARENT_SCENARIO,
   SCHEDULED_REMOTE_CHILD_SCENARIO,
   SCHEDULED_REMOTE_ROOT_SCENARIO,
   WORKSPACE_FORWARDING_MARKER,
@@ -70,45 +68,6 @@ const workspaceDispatcher = mockModel({
     };
   },
 });
-const nestedCompletionModel = mockModel({
-  modelId: "nested-background-completion",
-  respond(request) {
-    if (
-      request.userMessages.some((message) => message.includes(NESTED_COMPLETION_CHILD_SCENARIO))
-    ) {
-      const review = completedTaskOutput(request.userMessages, "gated-reviewer");
-      if (review !== undefined) return `Final review: ${review}`;
-      if (!request.toolResults.some((result) => result.id === "nested-review")) {
-        return {
-          toolCalls: [
-            {
-              id: "nested-review",
-              input: { message: "Review Alice's launch draft and return your exact verdict." },
-              name: "gated-reviewer",
-            },
-          ],
-        };
-      }
-      return "Reviewing...";
-    }
-
-    const remote = completedTaskOutput(request.userMessages, "remote-loopback");
-    if (remote !== undefined) return remote;
-    if (!request.toolResults.some((result) => result.id === "remote-review")) {
-      return {
-        toolCalls: [
-          {
-            id: "remote-review",
-            input: { message: NESTED_COMPLETION_CHILD_SCENARIO },
-            name: "remote-loopback",
-          },
-        ],
-      };
-    }
-    return "Remote review started.";
-  },
-});
-
 const scheduledRemoteModel = mockModel({
   modelId: "scheduled-remote-completion",
   respond(request) {
@@ -177,15 +136,6 @@ export default defineAgent({
         }
         if (messages.some((message) => message.includes(WORKSPACE_FORWARDING_MARKER))) {
           return { model: workspaceDispatcher, modelContextWindowTokens: 1_000_000 };
-        }
-        if (
-          messages.some(
-            (message) =>
-              message.includes(NESTED_COMPLETION_PARENT_SCENARIO) ||
-              message.includes(NESTED_COMPLETION_CHILD_SCENARIO),
-          )
-        ) {
-          return { model: nestedCompletionModel, modelContextWindowTokens: 1_000_000 };
         }
         if (
           messages.some(

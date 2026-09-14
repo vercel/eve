@@ -2664,7 +2664,7 @@ describe("createToolLoopHarness", () => {
     expect(result.next).toEqual({ done: true, output: { summary: "Done" } });
   });
 
-  it("parks a structured task turn while its launched background task is pending", async () => {
+  it("parks a scheduled task turn while its launched background task is pending", async () => {
     const schema = {
       properties: { summary: { type: "string" } },
       required: ["summary"],
@@ -2674,6 +2674,7 @@ describe("createToolLoopHarness", () => {
     const { emit, events } = createEventCollector();
     const runStep = createToolLoopHarness(createTestConfig("task", emit));
     const ctx = new ContextContainer();
+    ctx.set(ScheduleIdKey, "scheduled-report");
     ctx.set(BackgroundToolExecutorKey, {
       execute: vi.fn(),
       hasPendingTasks: () => true,

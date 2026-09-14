@@ -2780,6 +2780,7 @@ async function handleStepResult(input: {
 
   if (
     config.mode === "task" &&
+    contextStorage.getStore()?.get(ScheduleIdKey) !== undefined &&
     contextStorage.getStore()?.get(BackgroundToolExecutorKey)?.hasPendingTasks?.() === true
   ) {
     return deferTaskTurn({
@@ -2816,7 +2817,7 @@ async function handleStepResult(input: {
   });
 }
 
-/** Parks a task invocation until the background work it launched settles. */
+/** Keeps a scheduled task session open until its background work settles. */
 async function deferTaskTurn(input: {
   readonly emissionState: ReturnType<typeof getHarnessEmissionState>;
   readonly emit?: ToolLoopHarnessConfig["handleEvent"];
