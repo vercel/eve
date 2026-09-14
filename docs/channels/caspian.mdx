@@ -1,0 +1,133 @@
+---
+title: "Caspian"
+description: "Give your agent one identity across email, Telegram, Discord, Slack, Instagram DM, Messenger, and X through a poll-based Caspian bridge — no public webhook endpoint required."
+type: integration
+---
+
+[Caspian](https://github.com/TryCaspian/caspian-sdk) gives an agent a single communication identity across channels humans use — email, Telegram, Discord, Slack, Instagram DM, Facebook Messenger, X — behind one message handler, on your own platform credentials. This guide bridges it to eve with the [custom channel](./custom) contract: a small route on the eve side, and a poll-based bridge process that forwards each inbound Caspian message into an eve session and delivers the completed reply back on the channel it arrived from. Because the bridge polls, nothing here needs a public webhook URL. See [Channels](./overview) for the contract this builds on.
+
+## Install
+
+```bash
+npm install caspian-sdk
+```
+
+Mint an API key with `POST {base}/v1/projects/sandbox` (no signup) against a Caspian gateway, or run `caspian init` from the [`caspian-cli`](https://pypi.org/project/caspian-cli/) package. Either writes `CASPIAN_API_KEY` and `CASPIAN_BASE_URL` to `./.env`, which the SDK reads automatically.
+
+## Add the channel
+
+The eve side is a custom channel with one route. It starts or resumes a session keyed by Caspian's `conversationId` — stable per thread on every channel — and answers the request with the turn's final message:
+
+```ts title="agent/channels/caspian.ts"
+import { defineChannel, POST } from "eve/channels";
+
+export default defineChannel({
+  routes: [
+    POST("/message", async (req, { send }) => {
+      const { text, conversationId } = await req.json();
+
+      const session = await send(text, {
+        auth: null,
+        continuationToken: conversationId,
+      });
+
+      return Response.json({ reply: await finalMessage(session) });
+    }),
+  ],
+});
+
+async function finalMessage(session: {
+  getEventStream(): Promise<ReadableStream<Uint8Array>>;
+}): Promise<string | null> {
+  const reader = (await session.getEventStream()).getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) return null;
+    buffer += decoder.decode(value, { stream: true });
+
+    const lines = buffer.split("\n");
+    buffer = lines.pop() ?? "";
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      const event = JSON.parse(line);
+      if (event.type === "message.completed" && event.data.finishReason !== "tool-calls") {
+        await reader.cancel();
+        return event.data.message;
+      }
+      if (event.type === "session.failed") {
+        await reader.cancel();
+        return null;
+      }
+    }
+  }
+}
+```
+
+The file stem is the channel id, so this mounts `POST /eve/v1/caspian/message`.
+
+## Run the bridge
+
+The bridge is a small long-running process. It connects the channels you want, forwards every inbound message to the route above, and replies on the arriving channel — threading, typing indicators, and platform quirks are Caspian's job:
+
+```js title="caspian-bridge.mjs"
+import { CommClient } from "caspian-sdk";
+
+const EVE_URL =
+  process.env.EVE_CHANNEL_URL ?? "http://localhost:3000/eve/v1/caspian/message";
+
+const client = new CommClient();
+
+await client.connectEmail({ displayName: "Eve Agent" }); // instant, no setup
+// await client.connectTelegram({ botToken: process.env.TELEGRAM_BOT_TOKEN });
+
+client.onMessage(async (message) => {
+  const res = await fetch(EVE_URL, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      text: message.text,
+      conversationId: message.conversationId,
+    }),
+  });
+
+  const { reply } = await res.json();
+  if (reply) await message.reply(reply);
+});
+
+await client.listen();
+```
+
+```bash
+node caspian-bridge.mjs
+```
+
+```bash
+CASPIAN_API_KEY=...        # from caspian init / the sandbox endpoint
+CASPIAN_BASE_URL=...       # your Caspian gateway
+EVE_CHANNEL_URL=...        # the mounted route; defaults to localhost:3000
+```
+
+## How the channel handles messages
+
+- **Continuation.** `message.conversationId` is stable per thread per channel, so a DM thread, an email thread, and a Slack thread each map to their own eve session, and follow-ups resume it.
+- **Delivery.** `message.reply()` answers on whichever channel the message arrived from, in the right thread. Replies wait for the turn's final `message.completed`; intermediate tool-call turns are skipped.
+- **More channels, same handler.** Each additional `connect*()`/`install*()` call adds a surface without touching the bridge logic. `installDiscord()` / `installSlack()` / `installX()` return an `authorize_url` to open in a browser.
+- **Auth.** The bridge forwards messages with `auth: null` — inbound traffic is unauthenticated end-user conversation. Gate on `message.sender` or `message.channel` in the bridge before forwarding if you need an allowlist, the same way [Twilio's](./twilio) `allowFrom` gates inbound numbers.
+- **Resilience.** `listen()` retries failed polls with exponential backoff and skips handler errors without dropping the loop.
+
+## Channels
+
+| Channel | Connect call | Notes |
+| --- | --- | --- |
+| Email | `connectEmail({ displayName })` | Instant; custom domains supported |
+| Telegram | `connectTelegram({ botToken })` | Token from @BotFather |
+| Discord | `connectDiscord(...)` / `installDiscord(...)` | Install flow returns `authorize_url` |
+| Slack | `connectSlack(...)` / `installSlack(...)` | Own Slack app credentials |
+| Instagram DM / Messenger | `connectInstagram(...)` / `connectFacebook(...)` | Own Meta app + Page |
+| X | `connectX(...)` / `installX()` | Reactive DMs only; X API paid tier |
+| WhatsApp, voice, iMessage, RCS | `connectWhatsapp()` etc. | Hosted-gateway channels; `400` when unavailable on your deployment |
+
+`GET {base}/v1/channels` lists what the connected gateway can actually provision — only offer those.
