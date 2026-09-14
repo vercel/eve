@@ -5,9 +5,11 @@ import { dynamicWorkflowReference } from "#execution/dynamic-workflow/workflow-r
 import { attachToolBehavior, readToolBehavior } from "#tools/behavior.js";
 import { defineTool } from "#tools/definition.js";
 import { defaultWorkflow, workflow } from "#tools/framework/workflow.js";
+import { isWorkflowToolDefinition } from "#tools/workflow-definition.js";
 
 describe("framework workflow tool", () => {
   it("provides a lowercase blocking workflow tool", () => {
+    expect(isWorkflowToolDefinition(defaultWorkflow)).toBe(true);
     expect(defaultWorkflow.execution).toBeUndefined();
     expect(Reflect.get(defaultWorkflow.execute, "workflowId")).toBe(
       dynamicWorkflowReference.workflowId,

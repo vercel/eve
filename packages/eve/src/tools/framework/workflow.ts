@@ -5,7 +5,7 @@ import {
 import { dynamicWorkflow } from "#execution/dynamic-workflow/workflow.js";
 import { dynamicWorkflowReference } from "#execution/dynamic-workflow/workflow-reference.js";
 import { attachToolBehavior } from "#tools/behavior.js";
-import { defineTool } from "#tools/definition.js";
+import { defineWorkflowTool } from "#tools/workflow-definition.js";
 
 const execute = Object.assign(dynamicWorkflow, dynamicWorkflowReference);
 
@@ -27,7 +27,7 @@ export function workflow(options: DynamicWorkflowToolOptions = {}) {
     );
   }
   return attachToolBehavior(
-    defineTool({
+    defineWorkflowTool({
       description: "Run a durable JavaScript program that coordinates child agents.",
       execute,
       inputSchema: dynamicWorkflowInputSchema,

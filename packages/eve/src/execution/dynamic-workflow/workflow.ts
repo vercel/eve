@@ -7,13 +7,15 @@ import {
   runDynamicWorkflowProgramStep,
   type DynamicWorkflowProgramOutcome,
 } from "#execution/dynamic-workflow/program-step.js";
-import { invokeAgent } from "#execution/tools/subagent/invoke-agent.js";
 import { toErrorMessage } from "#shared/errors.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
-import type { ToolContext } from "#tools/definition.js";
+import type { WorkflowToolContext } from "#tools/workflow-definition.js";
 
 /** Durable subagent-only JavaScript orchestration body behind `workflow`. */
-export async function dynamicWorkflow(rawInput: unknown, ctx: ToolContext): Promise<JsonValue> {
+export async function dynamicWorkflow(
+  rawInput: unknown,
+  ctx: WorkflowToolContext,
+): Promise<JsonValue> {
   "use workflow";
 
   const program = parseDynamicWorkflowInput(rawInput);
@@ -34,11 +36,7 @@ export async function dynamicWorkflow(rawInput: unknown, ctx: ToolContext): Prom
         }
         try {
           const input = readAgentInput(call.toolInput);
-          const output = await invokeAgent(
-            ctx,
-            { ...input, target: call.toolName },
-            { invocationId: `${ctx.callId}:${String(invocationIndex)}` },
-          );
+          const output = await ctx.agent(call.toolName, input);
           return { status: "completed" as const, output };
         } catch (error) {
           ctx.abortSignal.throwIfAborted();

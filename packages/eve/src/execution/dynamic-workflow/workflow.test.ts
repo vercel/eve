@@ -1,11 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
-  invokeAgent: vi.fn(),
   runDynamicWorkflowProgramStep: vi.fn(),
 }));
-
-vi.mock("#execution/tools/subagent/invoke-agent.js", () => ({ invokeAgent: mocks.invokeAgent }));
 vi.mock("#execution/dynamic-workflow/program-step.js", async (importOriginal) => ({
   ...(await importOriginal()),
   runDynamicWorkflowProgramStep: mocks.runDynamicWorkflowProgramStep,
@@ -34,8 +31,10 @@ const pending = {
     toolName: "researcher",
   },
 } as never;
+const agent = vi.fn();
 const ctx = {
   abortSignal: new AbortController().signal,
+  agent,
   callId: "workflow-call",
 } as never;
 
@@ -46,14 +45,10 @@ describe("dynamicWorkflow", () => {
     mocks.runDynamicWorkflowProgramStep
       .mockResolvedValueOnce({ interrupt: pending, pending: [pending], status: "interrupted" })
       .mockResolvedValueOnce({ output: { result: "done" }, status: "completed" });
-    mocks.invokeAgent.mockResolvedValue({ result: "child" });
+    agent.mockResolvedValue({ result: "child" });
 
     await expect(dynamicWorkflow(input, ctx)).resolves.toEqual({ result: "done" });
-    expect(mocks.invokeAgent).toHaveBeenCalledWith(
-      ctx,
-      { message: "one", target: "researcher" },
-      { invocationId: "workflow-call:0" },
-    );
+    expect(agent).toHaveBeenCalledWith("researcher", { message: "one" });
     expect(mocks.runDynamicWorkflowProgramStep).toHaveBeenLastCalledWith(
       expect.objectContaining({
         resume: {
@@ -81,12 +76,12 @@ describe("dynamicWorkflow", () => {
         status: "interrupted",
       })
       .mockResolvedValueOnce({ output: ["one", "two"], status: "completed" });
-    mocks.invokeAgent.mockImplementation((_ctx, call: { readonly message: string }) =>
+    agent.mockImplementation((_target, call: { readonly message: string }) =>
       call.message === "one" ? first.promise : second.promise,
     );
 
     const result = dynamicWorkflow(input, ctx);
-    await vi.waitFor(() => expect(mocks.invokeAgent).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() => expect(agent).toHaveBeenCalledTimes(2));
     expect(mocks.runDynamicWorkflowProgramStep).toHaveBeenCalledTimes(1);
     first.resolve("one");
     await Promise.resolve();
@@ -108,7 +103,7 @@ describe("dynamicWorkflow", () => {
         output: ["one", "two", "limited", "limited"],
         status: "completed",
       });
-    mocks.invokeAgent.mockResolvedValueOnce("one").mockResolvedValueOnce("two");
+    agent.mockResolvedValueOnce("one").mockResolvedValueOnce("two");
 
     await expect(dynamicWorkflow(input, ctx)).resolves.toEqual([
       "one",
@@ -116,7 +111,7 @@ describe("dynamicWorkflow", () => {
       "limited",
       "limited",
     ]);
-    expect(mocks.invokeAgent).toHaveBeenCalledTimes(2);
+    expect(agent).toHaveBeenCalledTimes(2);
     expect(mocks.runDynamicWorkflowProgramStep).toHaveBeenLastCalledWith(
       expect.objectContaining({
         resume: {
