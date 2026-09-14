@@ -73,6 +73,40 @@ describe("McpConnectionClient", () => {
     createMCPClient.mockReset();
   });
 
+  it("paginates tool list", async () => {
+    const listTools = vi
+      .fn()
+      .mockResolvedValueOnce({
+        nextCursor: "page-2",
+        tools: [{ description: "First tool", inputSchema: {}, name: "first" }],
+      })
+      .mockResolvedValueOnce({
+        tools: [{ description: "Second tool", inputSchema: {}, name: "second" }],
+      });
+    const toolsFromDefinitions = vi.fn().mockReturnValue({});
+    createMCPClient.mockResolvedValue({
+      close: vi.fn(),
+      listTools,
+      toolsFromDefinitions,
+    });
+
+    const mcpClient = new McpConnectionClient(makeConnection());
+
+    await expect(mcpClient.getToolMetadata()).resolves.toEqual([
+      expect.objectContaining({ name: "first" }),
+      expect.objectContaining({ name: "second" }),
+    ]);
+    expect(listTools).toHaveBeenNthCalledWith(1, { params: { cursor: undefined } });
+    expect(listTools).toHaveBeenNthCalledWith(2, { params: { cursor: "page-2" } });
+    expect(listTools).toHaveBeenCalledTimes(2);
+    expect(toolsFromDefinitions).toHaveBeenCalledWith({
+      tools: [
+        expect.objectContaining({ name: "first" }),
+        expect.objectContaining({ name: "second" }),
+      ],
+    });
+  });
+
   it("hides provided arguments from schemas and adds resolved values at execution", async () => {
     const execute = vi.fn().mockResolvedValue({ ok: true });
     const toolsFromDefinitions = vi.fn().mockReturnValue({ lookup: { execute } });
