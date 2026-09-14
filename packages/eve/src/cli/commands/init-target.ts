@@ -76,9 +76,10 @@ async function isExistingEveProject(
   }).catch(() => []);
   if (!entries.includes("package.json")) return false;
   for (const entry of agentDirectories) {
-    if (entry.isDirectory() && !entry.name.startsWith(".")) {
-      if (await isAgentRoot(resolve(projectPath, "agents", entry.name))) return true;
-    }
+    if (!entry.isDirectory() || entry.name.startsWith(".")) continue;
+    const agentRoot = resolve(projectPath, "agents", entry.name);
+    if ((await pathKind(resolve(agentRoot, "agent"))) === "directory") return true;
+    if (await isAgentRoot(agentRoot)) return true;
   }
   return false;
 }
