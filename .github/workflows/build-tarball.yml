@@ -1,4 +1,4 @@
-name: Package artifact build
+name: Build tarball
 
 on:
   push:
@@ -11,6 +11,9 @@ permissions:
 
 jobs:
   build:
+    if: >-
+      github.event_name == 'push' ||
+      github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     steps:
       - name: Select source
@@ -23,13 +26,17 @@ jobs:
           PR_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           if [ "$EVENT_NAME" = "push" ]; then
-            echo "repository=${{ github.repository }}" >> "$GITHUB_OUTPUT"
-            echo "sha=$MAIN_SHA" >> "$GITHUB_OUTPUT"
-            echo "ref=main" >> "$GITHUB_OUTPUT"
+            {
+              echo "repository=${{ github.repository }}"
+              echo "sha=$MAIN_SHA"
+              echo "ref=main"
+            } >> "$GITHUB_OUTPUT"
           else
-            echo "repository=$PR_REPOSITORY" >> "$GITHUB_OUTPUT"
-            echo "sha=$PR_SHA" >> "$GITHUB_OUTPUT"
-            echo "ref=$PR_NUMBER" >> "$GITHUB_OUTPUT"
+            {
+              echo "repository=$PR_REPOSITORY"
+              echo "sha=$PR_SHA"
+              echo "ref=$PR_NUMBER"
+            } >> "$GITHUB_OUTPUT"
           fi
 
       - name: Checkout source

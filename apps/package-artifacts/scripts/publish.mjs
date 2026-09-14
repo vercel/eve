@@ -4,6 +4,7 @@ import { join, resolve } from "node:path";
 
 import { get, put } from "@vercel/blob";
 
+import { assertCurrentPublicationTarget } from "../lib/publication-current.mjs";
 import {
   PULL_REQUEST_PATTERN,
   SHA_PATTERN,
@@ -53,6 +54,12 @@ const manifest = {
 };
 await putImmutableArtifact(packageArtifactPath(expectedSha), tarball, sha256);
 await putImmutableManifest(packageManifestPath(expectedSha), manifest);
+await assertCurrentPublicationTarget({
+  repository: process.env.GITHUB_REPOSITORY,
+  ref: expectedRef,
+  sourceSha: expectedSha,
+  token: process.env.GITHUB_TOKEN,
+});
 await put(packagePointerPath(expectedRef), JSON.stringify(manifest), {
   access: "private",
   addRandomSuffix: false,
