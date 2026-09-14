@@ -2,6 +2,16 @@ import { describe, expect, it, vi } from "vitest";
 import { createFakePrompter } from "#internal/testing/fake-prompter.js";
 import { runModelFlow, type CurrentAgentModel, type ModelFlowDeps } from "./model.js";
 
+const provenance = vi.hoisted(() => ({ inspect: vi.fn(), authored: vi.fn(), models: vi.fn() }));
+vi.mock("#services/inspect-application.js", () => ({ inspectApplication: provenance.inspect }));
+vi.mock("./model-source-change.js", async (original) => ({
+  ...(await original<typeof import("./model-source-change.js")>()),
+  readAuthoredModelSelection: provenance.authored,
+}));
+vi.mock("#internal/model-auth/available-models.js", () => ({
+  availableHelperModels: provenance.models,
+}));
+
 function deps(overrides: Partial<ModelFlowDeps> = {}): Partial<ModelFlowDeps> {
   return {
     readCurrentModel: vi.fn(async (): Promise<CurrentAgentModel> => ({
@@ -77,4 +87,64 @@ describe("runModelFlow", () => {
       }),
     );
   });
+});
+
+it.each(["openai", "anthropic"])(
+  "keeps a foreign %s call fixed without requesting eve credentials",
+  async (provider) => {
+    provenance.models.mockClear();
+    provenance.authored.mockResolvedValue(undefined);
+    provenance.inspect.mockResolvedValue({
+      compiledState: {
+        manifest: {
+          config: {
+            source: {},
+            model: { id: "custom-model", source: {}, routing: { kind: "external", provider } },
+          },
+        },
+      },
+    });
+    const picker = vi.fn(async () => undefined);
+    await runModelFlow({
+      appRoot: "/agent",
+      prompter: createFakePrompter().prompter,
+      deps: { pickModelSettings: picker, selectModel: { fetchModels: async () => [] } },
+    });
+    expect(picker).toHaveBeenCalledWith(
+      expect.objectContaining({
+        model: expect.objectContaining({ kind: "fixed", current: "custom-model" }),
+      }),
+    );
+    expect(provenance.models).not.toHaveBeenCalled();
+  },
+);
+it("loads a proven eve helper's model catalog", async () => {
+  provenance.authored.mockResolvedValue("openai-api/custom-model");
+  provenance.models.mockResolvedValue(["custom-model"]);
+  provenance.inspect.mockResolvedValue({
+    compiledState: {
+      manifest: {
+        config: {
+          source: {},
+          model: {
+            id: "custom-model",
+            source: {},
+            routing: { kind: "external", provider: "openai" },
+          },
+        },
+      },
+    },
+  });
+  const picker = vi.fn(async () => undefined);
+  await runModelFlow({
+    appRoot: "/agent",
+    prompter: createFakePrompter().prompter,
+    deps: { pickModelSettings: picker, selectModel: { fetchModels: async () => [] } },
+  });
+  expect(provenance.models).toHaveBeenCalledWith("openai", undefined);
+  expect(picker).toHaveBeenCalledWith(
+    expect.objectContaining({
+      model: expect.objectContaining({ kind: "pick", current: "openai-api/custom-model" }),
+    }),
+  );
 });

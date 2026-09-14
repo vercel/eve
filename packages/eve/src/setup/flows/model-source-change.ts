@@ -1,5 +1,8 @@
 import { parseModelHelper } from "#shared/model-helper.js";
 import { join } from "node:path";
+import { readFile } from "node:fs/promises";
+import { resolveDiscoveryProject } from "#discover/project.js";
+import { readModelSelectionFromSource } from "#source-change/apply-model-selection.js";
 
 import { createCompiledRuntimeModelCatalogLoader } from "#compiler/model-catalog.js";
 import { discoverAgent } from "#discover/discover-agent.js";
@@ -72,8 +75,8 @@ export async function changeAgentModelSettings(input: {
     if (rejection !== null) return { kind: "rejected", message: rejection };
   }
 
-  const agentRoot = join(appRoot, "agent");
-  const { manifest } = await discoverAgent({ agentRoot, appRoot });
+  const project = await resolveDiscoveryProject(appRoot);
+  const { manifest } = await discoverAgent(project);
   const result = await createStaticSourceChange(manifest).updateModelSettings(patch);
   if (result.kind === "bail") {
     return {
@@ -106,8 +109,8 @@ export async function changeAgentModel(input: {
   const rejection = await validateModelSlug(appRoot, slug);
   if (rejection !== null) return { kind: "rejected", message: rejection };
 
-  const agentRoot = join(appRoot, "agent");
-  const { manifest } = await discoverAgent({ agentRoot, appRoot });
+  const project = await resolveDiscoveryProject(appRoot);
+  const { manifest } = await discoverAgent(project);
   const result = await createStaticSourceChange(manifest).updateModelName(slug);
   if (result.kind === "bail") {
     return {
@@ -139,4 +142,13 @@ export async function validateModelSlug(appRoot: string, slug: string): Promise<
     return null;
   }
   return null;
+}
+
+/** Uses the same source grammar as model edits, never the provider endpoint. */
+export async function readAuthoredModelSelection(startPath: string): Promise<string | undefined> {
+  const project = await resolveDiscoveryProject(startPath);
+  const { manifest } = await discoverAgent(project);
+  if (!manifest.configModule) return undefined;
+  const source = await readFile(join(project.agentRoot, manifest.configModule.logicalPath), "utf8");
+  return readModelSelectionFromSource(source);
 }

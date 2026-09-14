@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { applyModelSelectionToSource } from "./apply-model-selection.js";
+import {
+  applyModelSelectionToSource,
+  readModelSelectionFromSource,
+} from "./apply-model-selection.js";
 
 const SCAFFOLD = `import { defineAgent } from "eve";
 
@@ -158,3 +161,17 @@ it("does not recognize a commented import as an eve helper", async () => {
     "bail",
   );
 });
+
+it.each(["openai", "anthropic"])(
+  "distinguishes eve's %s helper from a foreign provider import",
+  async (helper) => {
+    const config = `export default defineAgent({model: ${helper}("custom-model")});`;
+    const module = helper === "openai" ? "eve/models/openai" : "eve/models/anthropic";
+    await expect(
+      readModelSelectionFromSource(`import { ${helper} } from "${module}"; ${config}`),
+    ).resolves.toBe(`${helper}-api/custom-model`);
+    await expect(
+      readModelSelectionFromSource(`import { ${helper} } from "@ai-sdk/${helper}"; ${config}`),
+    ).resolves.toBeUndefined();
+  },
+);

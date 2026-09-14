@@ -1,6 +1,6 @@
 import { availableHelperModels } from "#internal/model-auth/available-models.js";
 import type { ModelHelper } from "#shared/model-helper.js";
-import { MODEL_HELPERS } from "#shared/model-helper.js";
+import { MODEL_HELPERS, parseModelHelper } from "#shared/model-helper.js";
 import { inspectApplication } from "#services/inspect-application.js";
 import type { ProviderSelection } from "#setup/provider-settings.js";
 import type { AgentModelSettingsPatch } from "#source-change/apply-agent-model-settings.js";
@@ -24,6 +24,7 @@ import type { Prompter, SelectOption } from "../prompter.js";
 import { withSpinner } from "../with-spinner.js";
 import {
   changeAgentModelSettings,
+  readAuthoredModelSelection,
   formatApplyModelSettingsOutcome,
   type ApplyModelSettingsOutcome,
 } from "./model-source-change.js";
@@ -31,6 +32,7 @@ import {
 /** The current model id, its routing, and whether `/model` can rewrite it. */
 export interface CurrentAgentModel {
   id: string | null;
+  helper?: ModelHelper;
   routing: ModelRouting | null;
   reasoning: AgentReasoningDefinition | null;
   serviceTier: GatewayServiceTierState;
@@ -144,12 +146,12 @@ export async function runModelFlow(input: {
       (deps.selectModel?.fetchModels ?? fetchGatewayCatalog)(signal).catch(() => undefined),
     ]),
   );
-  const helper = Object.entries(MODEL_HELPERS).find(
-    ([, spec]) =>
-      currentModel.routing?.kind === "external" && currentModel.routing.provider === spec.provider,
-  );
+  const helper =
+    currentModel.helper === undefined
+      ? undefined
+      : ([currentModel.helper, MODEL_HELPERS[currentModel.helper]] as const);
   const options = helper
-    ? (await availableHelperModels(helper[0] as ModelHelper, signal)).map((id) => ({
+    ? (await availableHelperModels(helper[0], signal)).map((id) => ({
         value: helper[1].prefix + id,
         label: id,
       }))
@@ -219,13 +221,15 @@ async function readCurrentAgentModel(appRoot: string): Promise<CurrentAgentModel
     const { compiledState } = await inspectApplication(appRoot);
     const config = compiledState?.manifest.config;
     const model = config?.model;
-    // A source-backed model (an SDK model call) carries `source`; a string id
-    // does not, and only a string is a literal the editor can rewrite.
-    const helper = Object.values(MODEL_HELPERS).find(
-      (spec) => model?.routing.kind === "external" && model.routing.provider === spec.provider,
-    );
+    const authored =
+      model?.source === undefined ? undefined : await readAuthoredModelSelection(appRoot);
+    const helper = authored === undefined ? undefined : parseModelHelper(authored)?.helper;
     return {
-      id: helper && model !== undefined ? `${helper.prefix}${model.id}` : (model?.id ?? null),
+      id:
+        helper && model !== undefined
+          ? `${MODEL_HELPERS[helper].prefix}${model.id}`
+          : (model?.id ?? null),
+      helper,
       routing: model?.routing ?? null,
       reasoning: config?.reasoning ?? null,
       serviceTier: readGatewayServiceTier(model?.providerOptions),

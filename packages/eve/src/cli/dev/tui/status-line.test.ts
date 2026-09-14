@@ -252,7 +252,7 @@ describe("buildStatusLine", () => {
       theme: plain,
       width: 120,
     });
-    expect(chatgptLogin).toBe("openai/gpt-5.6-sol  ⚠ chatgpt-sub login · /model");
+    expect(chatgptLogin).toBe("openai/gpt-5.6-sol  ⚠ chatgpt-sub login · /login");
 
     const notConnected = buildStatusLine({
       model: "m",

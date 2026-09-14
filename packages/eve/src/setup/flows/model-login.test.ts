@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   writeDefault: vi.fn(),
   inspect: vi.fn(),
   change: vi.fn(),
+  authored: vi.fn(),
   cli: vi.fn(),
   validate: vi.fn(),
   session: vi.fn(),
@@ -35,7 +36,10 @@ vi.mock("#internal/model-auth/store.js", async (original) => ({
   writeDefaultConnection: mocks.writeDefault,
 }));
 vi.mock("#services/inspect-application.js", () => ({ inspectApplication: mocks.inspect }));
-vi.mock("./model-source-change.js", () => ({ changeAgentModel: mocks.change }));
+vi.mock("./model-source-change.js", () => ({
+  changeAgentModel: mocks.change,
+  readAuthoredModelSelection: mocks.authored,
+}));
 vi.mock("#internal/model-auth/vercel-cli.js", () => ({ readVercelCliConnection: mocks.cli }));
 vi.mock("#internal/model-auth/vercel.js", () => ({
   authJson: mocks.models,
@@ -232,3 +236,57 @@ describe("model login", () => {
 });
 
 afterEach(() => vi.unstubAllEnvs());
+
+it.each(["openai", "anthropic"] as const)(
+  "does not mistake a foreign %s model for an eve helper",
+  async (provider) => {
+    mocks.inspect.mockResolvedValue({
+      compiledState: {
+        manifest: {
+          config: {
+            model: { id: "custom-model", source: {}, routing: { kind: "external", provider } },
+          },
+        },
+      },
+    });
+    mocks.change.mockResolvedValue({
+      kind: "rejected",
+      message: "Model is not an eve helper. Edit agent.ts.",
+    });
+    let attempts = 0;
+    const fake = createFakePrompter({
+      single: () => {
+        if (attempts++) throw new WizardCancelledError();
+        return provider;
+      },
+      password: () => "new-key",
+    });
+    await expect(runModelLogin({ appRoot: "/agent", prompter: fake.prompter })).resolves.toEqual({
+      kind: "cancelled",
+    });
+    expect(mocks.change).toHaveBeenCalledOnce();
+    expect(mocks.writeSelection).not.toHaveBeenCalled();
+    expect(mocks.writeDefault).not.toHaveBeenCalled();
+  },
+);
+it("preserves an explicitly authored eve helper's compatible custom model", async () => {
+  mocks.inspect.mockResolvedValue({
+    compiledState: {
+      manifest: {
+        config: {
+          model: {
+            id: "custom-model",
+            source: {},
+            routing: { kind: "external", provider: "openai" },
+          },
+        },
+      },
+    },
+  });
+  mocks.authored.mockResolvedValue("openai-api/custom-model");
+  const fake = createFakePrompter({ single: () => "openai", password: () => "new-key" });
+  await expect(runModelLogin({ appRoot: "/agent", prompter: fake.prompter })).resolves.toEqual({
+    kind: "ready",
+  });
+  expect(mocks.change).not.toHaveBeenCalled();
+});

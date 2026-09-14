@@ -20,7 +20,7 @@ import {
 } from "#internal/model-auth/vercel-cli.js";
 import { resolveVercelSession, validateVercelAccess } from "#internal/model-auth/vercel.js";
 import { getDefaultCodexTokenBroker } from "#public/models/openai/chatgpt/token-broker.js";
-import { MODEL_HELPERS } from "#shared/model-helper.js";
+import { parseModelHelper, MODEL_HELPERS } from "#shared/model-helper.js";
 import {
   readProviderSelection,
   readProviderTeamSync,
@@ -34,7 +34,7 @@ import { withSpinner } from "#setup/with-spinner.js";
 import { validateGatewayApiKey } from "#setup/validate-gateway-key.js";
 import { ensureChatGptAuth } from "./chatgpt-auth.js";
 import { loginVercelModel } from "./vercel-model-login.js";
-import { changeAgentModel } from "./model-source-change.js";
+import { changeAgentModel, readAuthoredModelSelection } from "./model-source-change.js";
 
 const CONNECTION_OPTIONS = [
   { value: "vercel", label: "Vercel Account" },
@@ -119,9 +119,11 @@ async function applyConnection(input: {
     selected === "chatgpt" || selected === "openai" || selected === "anthropic"
       ? selected
       : undefined;
+  const authored =
+    routing?.kind === "external" ? await readAuthoredModelSelection(agentRoot) : undefined;
   const compatible = helper
-    ? routing?.kind === "external" && routing.provider === MODEL_HELPERS[helper].provider
-    : routing?.kind === "gateway";
+    ? authored !== undefined && parseModelHelper(authored)?.helper === helper
+    : routing?.kind === "gateway" && model?.source === undefined;
   const defaultId = helper ? MODEL_HELPERS[helper].defaultModel : "openai/gpt-5.6-luna-fast";
   if (!compatible || model?.id === defaultId) {
     let id: string = defaultId;
@@ -201,17 +203,14 @@ export async function runModelLogin(input: {
     if (input.automatic) {
       const inspection = await inspectApplication(agentRoot).catch(() => undefined);
       const model = inspection?.compiledState?.manifest.config.model;
-      if (
-        model?.routing.kind === "external" &&
-        !Object.values(MODEL_HELPERS).some(
-          (spec) => model.routing.kind === "external" && spec.provider === model.routing.provider,
-        )
-      )
+      const authored =
+        model?.routing.kind === "external"
+          ? await readAuthoredModelSelection(agentRoot)
+          : undefined;
+      const authoredHelper =
+        authored === undefined ? undefined : parseModelHelper(authored)?.helper;
+      if (model?.routing.kind === "external" && authoredHelper === undefined)
         return { kind: "ready" };
-      const authoredHelper = Object.entries(MODEL_HELPERS).find(
-        ([, spec]) =>
-          model?.routing.kind === "external" && model.routing.provider === spec.provider,
-      )?.[0] as "openai" | "anthropic" | "chatgpt" | undefined;
       const existing = (await readProviderSelection(appRoot)) ?? authoredHelper;
       const available = await resolveAvailableProviders(appRoot);
       const selected =
