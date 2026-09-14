@@ -3,6 +3,7 @@ import { isAbsolute, resolve } from "node:path";
 import type { NextConfig } from "next";
 
 import { assertValidPublicAgentName } from "#internal/agent-name.js";
+import { findEveProjectContext } from "#internal/project-context.js";
 import { quoteVercelShellArgument, toVercelRelativePath } from "#internal/vercel/build-command.js";
 import { EVE_ROUTE_PREFIX } from "#protocol/routes.js";
 import { resolveEveBinaryPath } from "#shared/resolve-eve-binary.js";
@@ -110,15 +111,17 @@ export interface WithEveOptions {
   readonly devServerTimeoutMs?: number;
   /**
    * Path to the eve application root, relative to `process.cwd()` unless
-   * absolute. Defaults to the Next.js app root.
+   * absolute. Defaults to the Next.js app root when it is not an eve workspace.
    */
   readonly eveRoot?: string;
   /**
    * Named eve agents to mount under `/eve/agents/<name>/eve/v1/*`.
    *
-   * Use this when one Next.js app needs to talk to multiple eve agents. When
-   * set, do not also set {@link eveRoot}; the single-agent form remains the
-   * shorthand for one unnamed agent mounted at `/eve/v1/*`.
+   * Use this when one Next.js app needs to talk to multiple eve agents outside
+   * a project-level `agents/` workspace. When unset, withEve discovers that
+   * workspace's members automatically. Do not combine with {@link eveRoot};
+   * the single-agent form remains the shorthand for one unnamed agent mounted
+   * at `/eve/v1/*`.
    */
   readonly agents?: WithEveAgentsConfig;
   /**
@@ -146,6 +149,7 @@ interface ResolvedEveNextAgent {
   readonly name?: string;
   readonly publicRoutePrefix: string;
   readonly servicePrefix: string;
+  readonly workspaceMember?: boolean;
 }
 
 function resolveApplicationRoot(appPath: string | undefined): string {
@@ -313,6 +317,18 @@ function assertValidAgentName(name: string): void {
   assertValidPublicAgentName(name, "eve Next.js agent name");
 }
 
+function assertValidWithEveOptions(options: WithEveOptions): void {
+  if (options.agents === undefined) return;
+  if (options.eveRoot !== undefined) {
+    throw new Error("withEve cannot combine eveRoot with agents. Use one configuration form.");
+  }
+  const agentNames = Object.keys(options.agents);
+  if (agentNames.length === 0) {
+    throw new Error("withEve agents must contain at least one named eve agent.");
+  }
+  for (const name of agentNames) assertValidAgentName(name);
+}
+
 function createDefaultBuildCommand(input: { readonly agentRoot: string }): string {
   const eveBinaryPath = toVercelRelativePath(
     input.agentRoot,
@@ -321,12 +337,34 @@ function createDefaultBuildCommand(input: { readonly agentRoot: string }): strin
   return `node ${quoteVercelShellArgument(eveBinaryPath)} build`;
 }
 
-function normalizeAgentsConfig(options: WithEveOptions): readonly ResolvedEveNextAgent[] {
+async function normalizeAgentsConfig(
+  options: WithEveOptions,
+  nextRoot: string,
+): Promise<readonly ResolvedEveNextAgent[]> {
   const servicePrefixBase = normalizeRoutePrefix(options.servicePrefix ?? EVE_NEXT_SERVICE_PREFIX);
   const resolveBuildCommand = (agentRoot: string, buildCommand: string | undefined) =>
     buildCommand ?? options.eveBuildCommand ?? createDefaultBuildCommand({ agentRoot });
 
   if (options.agents === undefined) {
+    if (options.eveRoot === undefined) {
+      const context = await findEveProjectContext(nextRoot);
+      if (
+        context?.kind === "workspace" &&
+        context.workspace.root === nextRoot &&
+        context.workspace.members.length > 0
+      ) {
+        return context.workspace.members.map((member, index) => ({
+          appRoot: member.appRoot,
+          buildCommand: resolveBuildCommand(member.appRoot, undefined),
+          localProductionPortOffset: index,
+          name: member.name,
+          publicRoutePrefix: createNamedAgentRoutePrefix(member.name),
+          servicePrefix: createNamedAgentServicePrefix(servicePrefixBase, member.name),
+          workspaceMember: true,
+        }));
+      }
+    }
+
     const appRoot = resolveApplicationRoot(options.eveRoot);
     return [
       {
@@ -337,10 +375,6 @@ function normalizeAgentsConfig(options: WithEveOptions): readonly ResolvedEveNex
         servicePrefix: servicePrefixBase,
       },
     ];
-  }
-
-  if (options.eveRoot !== undefined) {
-    throw new Error("withEve cannot combine eveRoot with agents. Use one configuration form.");
   }
 
   const entries = Object.entries(options.agents);
@@ -385,19 +419,34 @@ export function withEve<TConfig extends EveNextConfig>(
 ): EveNextConfigFunction<TConfig> {
   const nextRoot = process.cwd();
   const devServerTimeoutMs = resolveDevServerTimeout(options.devServerTimeoutMs);
-  const agents = normalizeAgentsConfig(options);
-
+  assertValidWithEveOptions(options);
   return async function eveNextConfig(phase, context) {
-    const nextConfig = await resolveNextConfig(configOrFunction, phase, context);
+    const [agents, nextConfig] = await Promise.all([
+      normalizeAgentsConfig(options, nextRoot),
+      resolveNextConfig(configOrFunction, phase, context),
+    ]);
     const existingRewrites = nextConfig.rewrites;
     const configuredVercel = await ensureEveVercelOutputConfig({
-      agents: agents.map((agent) => ({
-        appRoot: agent.appRoot,
-        buildCommand: agent.buildCommand,
-        name: agent.name,
-        publicRoutePrefix: agent.publicRoutePrefix,
-        servicePrefix: agent.servicePrefix,
-      })),
+      agents: agents.map((agent) => {
+        const outputAgent: {
+          appRoot: string;
+          buildCommand: string;
+          name?: string;
+          publicRoutePrefix: string;
+          servicePrefix: string;
+          workspaceMember?: boolean;
+        } = {
+          appRoot: agent.appRoot,
+          buildCommand: agent.buildCommand,
+          name: agent.name,
+          publicRoutePrefix: agent.publicRoutePrefix,
+          servicePrefix: agent.servicePrefix,
+        };
+        if (agent.workspaceMember === true) {
+          outputAgent.workspaceMember = true;
+        }
+        return outputAgent;
+      }),
       nextRoot,
     });
 

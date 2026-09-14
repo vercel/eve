@@ -173,7 +173,7 @@ export default eveChannel({
 
 The request must also include a callback and a valid sampled `traceparent`. Those fields identify a remote call, but they do not establish trust. `trustedForwarders` is the authorization boundary.
 
-The receiver combines the incoming ceiling with its own trace policy. Each hop may narrow the result, but it cannot restore inputs or outputs removed earlier. The original audience stays the same across remote and local subagent hops. Public origins may include content by default; private and unknown origins stay metadata-only unless both deployments explicitly allow them.
+The receiver combines the incoming ceiling with its own trace policy. Each hop may narrow the result, but it cannot restore inputs or outputs removed earlier. The original audience stays the same across remote and local subagent hops. Public origins may include content by default. Private and unknown origins stay metadata-only in preview and production unless both deployments explicitly allow them; a receiver running in development still applies the development content default.
 
 The live delivery audience still matters. An unknown callback delivery, or one matching the origin, uses the session decision. A different explicit audience applies its own hard ceiling, so a private delivery stays redacted even when the trace began in public.
 

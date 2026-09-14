@@ -307,11 +307,11 @@ export function teamsChannel(config: TeamsChannelConfig = {}): TeamsChannel {
       credentials: config.credentials,
     }),
     metadata: (state) => ({
-      audience: teamsAudience(state.conversationType),
       channelId: state.channelId,
       conversationType: state.conversationType,
       teamId: state.teamId,
     }),
+    audience: ({ state }) => teamsAudience(state.conversationType),
 
     context(state, session) {
       return rebuildTeamsContext(state, session, config);

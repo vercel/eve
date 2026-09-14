@@ -59,6 +59,7 @@ import {
   formatTraceContentCeiling,
 } from "#shared/forwarded-trace-policy.js";
 import { routeAuth } from "#public/channels/auth.js";
+import { defaultEveAudience } from "#eve-channel/audience.js";
 import { mergeUploadPolicy } from "#public/channels/upload-policy.js";
 import { defineChannel, DELETE, GET, HEAD, PATCH, POST, PUT } from "#public/definitions/channel.js";
 import {
@@ -104,6 +105,10 @@ export function eveChannel(input: EveChannelInput): EveChannel {
   return defineChannel<undefined, EveEventContext>({
     cors: normalizeEveCors(input.cors),
     turnPolicy: input.turnPolicy,
+    audience: (classifierInput) => {
+      const audience = input.audience ?? defaultEveAudience;
+      return typeof audience === "function" ? audience(classifierInput) : audience;
+    },
     routes: [
       GET(EVE_HEALTH_ROUTE_PATH, async () => healthResponse()),
       HEAD(EVE_HEALTH_ROUTE_PATH, async () => healthResponse()),
@@ -295,6 +300,7 @@ export function eveChannel(input: EveChannelInput): EveChannel {
         try {
           handle = await createSession({
             activityObserver: body.activityObserver,
+            audienceAuth: authResult,
             auth: messageResult.auth,
             capabilities:
               body.capabilities ?? (body.mode === "task" ? undefined : { requestInput: true }),

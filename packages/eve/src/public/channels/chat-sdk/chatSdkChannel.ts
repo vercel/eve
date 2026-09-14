@@ -44,8 +44,7 @@ import {
   type RouteHandlerArgs,
   type Session,
 } from "#public/definitions/channel.js";
-import { chatSdkInstrumentationMetadata } from "#public/channels/chat-sdk/audience.js";
-import type { ChannelAudience } from "#shared/channel-audience.js";
+import { chatSdkInstrumentation } from "#public/channels/chat-sdk/audience.js";
 
 const log = createLogger("chat-sdk.channel");
 const DEFAULT_ROUTE = "/eve/v1";
@@ -105,7 +104,6 @@ export interface ChatSdkReceiveTarget {
  * Channel-owned metadata exposed to eve instrumentation.
  */
 export interface ChatSdkInstrumentationMetadata extends Record<string, unknown> {
-  readonly audience: ChannelAudience;
   readonly adapterName: string | null;
   readonly channelId: string | null;
   readonly isDM: boolean | null;
@@ -296,7 +294,7 @@ export function chatSdkChannel<TAdapters extends ChatSdkAdapters>(
     kindHint: "chat-sdk",
     turnPolicy: config.turnPolicy,
     state: initialState(),
-    metadata: chatSdkInstrumentationMetadata,
+    ...chatSdkInstrumentation,
     context(state) {
       return {
         bot,

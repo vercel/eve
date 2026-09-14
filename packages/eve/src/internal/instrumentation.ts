@@ -10,36 +10,12 @@
  * file but not the other).
  */
 import { type Logger, formatError } from "#internal/logging.js";
-import type { InstrumentationChannelKind } from "#public/channels/index.js";
 import { isPlainRecord, isThenable } from "#shared/guards.js";
 import { parseJsonObject } from "#shared/json.js";
-
-/**
- * Framework-owned channel kinds that are not derived from a route file
- * path. Keep in sync with the non-`channel:<name>` keys of
- * {@link InstrumentationChannelKind} (currently every key except
- * `"unknown"`, which is the fallback rather than a real channel).
- */
-const FRAMEWORK_CHANNEL_KINDS: ReadonlySet<string> = new Set(["http", "schedule", "subagent"]);
-
-/**
- * Returns `true` when `kind` is a valid instrumentation channel kind: a
- * framework kind (`"http"`, `"schedule"`, `"subagent"`) or a
- * path-derived `channel:<name>` kind.
- */
-export function isInstrumentationChannelKind(kind: string): kind is InstrumentationChannelKind {
-  return kind.startsWith("channel:") || FRAMEWORK_CHANNEL_KINDS.has(kind);
-}
-
-/**
- * Narrows a raw kind string to the public {@link InstrumentationChannelKind}
- * union, falling back to `"unknown"` for anything unrecognized or absent.
- */
-export function normalizeInstrumentationChannelKind(
-  rawKind: string | undefined,
-): InstrumentationChannelKind {
-  return rawKind !== undefined && isInstrumentationChannelKind(rawKind) ? rawKind : "unknown";
-}
+export {
+  isInstrumentationChannelKind,
+  normalizeInstrumentationChannelKind,
+} from "#shared/instrumentation-channel-kind.js";
 
 /**
  * Invokes a user-authored instrumentation projector defensively.

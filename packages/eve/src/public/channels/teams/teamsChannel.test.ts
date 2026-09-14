@@ -131,9 +131,15 @@ describe("teamsChannel", () => {
     if (!teamsAdapter.state) throw new Error("Expected Teams state.");
     teamsAdapter.state.conversationType = conversationType;
 
-    expect(teamsAdapter.instrumentation?.metadata?.(teamsAdapter.state)).toMatchObject({
-      audience,
-    });
+    expect(
+      teamsAdapter.instrumentation?.audience?.({
+        auth: null,
+        channel: { kind: "channel:teams" },
+        environment: "production",
+        mode: "conversation",
+        state: teamsAdapter.state,
+      }),
+    ).toBe(audience);
   });
 
   it("dispatches verified personal messages with Teams state", async () => {

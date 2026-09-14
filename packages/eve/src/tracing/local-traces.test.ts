@@ -30,6 +30,15 @@ function agentSpan(sessionId: string, traceId: string): unknown {
   };
 }
 
+const traceContext = (audience: "public" | "private" | "unknown") => ({
+  agentName: "weather",
+  audience,
+  channel: { kind: "http" as const },
+  environment: "production" as const,
+  mode: "conversation" as const,
+  principalType: "anonymous",
+});
+
 afterEach(() => {
   vi.unstubAllEnvs();
 });
@@ -105,11 +114,6 @@ describe("localTracePolicy", () => {
     ["unknown", true],
     ["private", false],
   ] as const)("accepts the %s audience: %s", (audience, accepted) => {
-    expect(
-      localTracePolicy({
-        agentName: "weather",
-        audience,
-      }),
-    ).toBe(accepted);
+    expect(localTracePolicy(traceContext(audience))).toBe(accepted);
   });
 });

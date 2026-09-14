@@ -32,6 +32,7 @@ import { withChannelAudience } from "#tracing/channel-audience-context.js";
 import { withErrorContent } from "#tracing/error-content-context.js";
 import { isSampledTrace } from "#tracing/sampled-trace.js";
 import { suppressTracing } from "#tracing/suppress-tracing.js";
+import type { ConversationEnvironment } from "#shared/conversation-context.js";
 
 type SpanState = { readonly context: Context; readonly span: Span };
 
@@ -47,10 +48,12 @@ export interface AgentMemoryInstrumentation {
 }
 
 export function createAgentMemoryInstrumentation(input: {
-  readonly recordOutputs: boolean;
+  readonly environment: ConversationEnvironment;
+  readonly recordOutputs?: boolean;
   readonly stateStore: AgentTraceStateStore;
   readonly tracer: Tracer;
 }): AgentMemoryInstrumentation {
+  const recordOutputs = input.recordOutputs ?? false;
   const spans = new Map<string, SpanState>();
 
   const parentContext = async (
@@ -133,6 +136,7 @@ export function createAgentMemoryInstrumentation(input: {
               decision,
               normalizeChannelAudience(session?.channelAudience),
               seed?.forwardedTracePolicy,
+              input.environment,
             );
       return parent === undefined
         ? await execute()
@@ -140,7 +144,7 @@ export function createAgentMemoryInstrumentation(input: {
             markAgentTraceContext(
               withErrorContent(
                 parent,
-                input.recordOutputs && effective?.action === "record" && effective.recordOutputs,
+                recordOutputs && effective?.action === "record" && effective.recordOutputs,
               ),
             ),
             execute,

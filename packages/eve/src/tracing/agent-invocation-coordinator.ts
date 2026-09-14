@@ -1,10 +1,11 @@
-import type { ChannelInstrumentationProjection, SessionTraceContext } from "#channel/types.js";
+import type { SessionTraceContext } from "#channel/types.js";
 import { ConversationIdKey } from "#context/keys.js";
 import { readConversationId } from "#tracing/conversation-context.js";
 import type { RuntimeSubagentResult } from "#shared/action-types.js";
 import type { SessionStateMap } from "#harness/types.js";
 import { getWorkflowToolRuns } from "#harness/workflow-tool-runs.js";
-import { normalizeChannelAudience, type ChannelAudience } from "#shared/channel-audience.js";
+import { type ChannelAudience } from "#shared/channel-audience.js";
+import type { ConversationContext } from "#shared/conversation-context.js";
 import {
   applyLiveDeliveryAudienceCeiling,
   readForwardedTraceAssertion,
@@ -29,7 +30,7 @@ export interface AgentChildTraceDispatch {
 }
 
 export function prepareAgentInvocationTrace(input: {
-  readonly channelMetadata?: ChannelInstrumentationProjection;
+  readonly conversation?: ConversationContext;
   readonly invocation: {
     readonly callId: string;
     readonly kind: "remote-agent-call" | "subagent-call";
@@ -58,7 +59,9 @@ export function prepareAgentInvocationTrace(input: {
       : taskAction?.callId;
   const turnId = taskAction?.turnId ?? input.turnId;
   const parentTurnContext = readTurnTraceContext(input.serializedContext, input.sessionId, turnId);
-  const liveAudience = normalizeChannelAudience(input.channelMetadata?.metadata.audience);
+  const conversation = input.conversation;
+  const liveAudience = conversation?.audience ?? "unknown";
+  const environment = conversation?.environment ?? "production";
   const outerTrace =
     (parentActionCallId === undefined
       ? undefined
@@ -75,6 +78,7 @@ export function prepareAgentInvocationTrace(input: {
           outerTrace.decision,
           liveAudience,
           outerTrace.forwardedTracePolicy,
+          environment,
         );
   const serializedContext =
     parentActionCallId === undefined
@@ -118,6 +122,7 @@ export function prepareAgentInvocationTrace(input: {
             storedParentTraceContext.decision,
             liveAudience,
             forwardedTracePolicy,
+            environment,
           ),
         };
   return {

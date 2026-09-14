@@ -5,7 +5,8 @@ import type { RouteDefinition } from "#channel/routes.js";
 import type { Session, SessionHandle } from "#channel/session.js";
 import type { DeliverPayload, SessionAuthContext, TurnPolicy } from "#channel/types.js";
 import type { StepInput } from "#harness/types.js";
-import type { ChannelAudienceMetadata } from "#shared/channel-audience.js";
+import type { AudienceInput } from "#shared/conversation-context.js";
+import type { ChannelAudience } from "#shared/channel-audience.js";
 
 /**
  * Enriched return shape from a channel's {@link ChannelAdapter.fetchFile}
@@ -46,8 +47,9 @@ export interface GenericReceiveInput<TReceiveTarget = Record<string, unknown>> {
  * The object passed to {@link defineChannel}. `routes` is required; `state`
  * seeds durable adapter state, `context` builds the per-step `channel` argument
  * for `events` and `deliver`, `events` handle session lifecycle, `receive`
- * accepts cross-channel handoffs, `fetchFile` stages remote file URLs, and
- * `metadata` projects observability data.
+ * accepts cross-channel handoffs, `fetchFile` stages remote file URLs,
+ * `audience` classifies conversation visibility, and `metadata` projects
+ * custom observability data.
  *
  * Generics: `TState` (adapter state), `TCtx` (context factory return type),
  * `TReceiveTarget` (cross-channel target shape), `TMetadata` (instrumentation
@@ -58,7 +60,7 @@ export interface GenericChannelDefinition<
   TState = undefined,
   TCtx = void,
   TReceiveTarget = Record<string, unknown>,
-  TMetadata extends Record<string, unknown> & ChannelAudienceMetadata = Record<string, unknown>,
+  TMetadata extends Record<string, unknown> = Record<string, unknown>,
 > {
   /** Policy used by message sends that do not provide an explicit override. */
   readonly turnPolicy?: TurnPolicy;
@@ -108,6 +110,14 @@ export interface GenericChannelDefinition<
    * values such as `Date` or `Map`.
    */
   readonly metadata?: (state: NonNullable<TState>) => TMetadata;
+
+  /**
+   * Classifies who can observe the originating conversation. The hook runs
+   * after route auth with channel state, the authenticated principal, run mode,
+   * and deployment environment. Return `"unknown"` when classification is not
+   * confident; consumers treat it as non-public.
+   */
+  readonly audience?: (input: AudienceInput<TState>) => ChannelAudience;
 
   /**
    * Identifier of the adapter family this channel belongs to. Set by

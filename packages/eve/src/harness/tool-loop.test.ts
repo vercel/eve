@@ -50,6 +50,11 @@ import type { DynamicResolveContext } from "#dynamic/definition.js";
 import { registerDurableDynamicCallback } from "#tools/durable-callbacks.js";
 import type { RunMode } from "#shared/run-mode.js";
 import type { ChannelAudience } from "#shared/channel-audience.js";
+import {
+  ConversationContextKey,
+  type ConversationEnvironment,
+  type ConversationContext,
+} from "#shared/conversation-context.js";
 import type { InstrumentationDecision } from "#shared/instrumentation-decision.js";
 import { compactMessages, shouldCompact } from "#harness/compaction.js";
 import {
@@ -146,6 +151,7 @@ vi.mock("#instrumentation/ai-sdk-telemetry.js", () => ({
 }));
 
 let declaredAudience: ChannelAudience = "unknown";
+let declaredEnvironment: ConversationEnvironment = "production";
 let declaredDecision: InstrumentationDecision | undefined;
 let declaredInstrumentation: SessionInstrumentation | undefined;
 let declaredRuntime: InstrumentationRuntime | undefined;
@@ -153,12 +159,10 @@ let declaredRuntime: InstrumentationRuntime | undefined;
 function createInstrumentationContext(
   decision: InstrumentationDecision | undefined,
   audience: ChannelAudience,
+  environment: ConversationEnvironment = "production",
 ): ContextContainer {
   const ctx = new ContextContainer();
-  ctx.set(ChannelInstrumentationKey, {
-    kind: "channel:test",
-    metadata: { audience },
-  });
+  setConversationContext(ctx, audience, "channel:test", {}, environment);
   if (decision !== undefined) {
     ctx.set(SessionTraceSeedKey, {
       decision,
@@ -170,14 +174,33 @@ function createInstrumentationContext(
   return ctx;
 }
 
+function setConversationContext(
+  ctx: ContextContainer,
+  audience: ChannelAudience,
+  kind: ConversationContext["channel"]["kind"],
+  metadata: Readonly<Record<string, unknown>> = {},
+  environment: ConversationEnvironment = "production",
+): void {
+  ctx.set(ChannelInstrumentationKey, { kind, metadata });
+  ctx.set(ConversationContextKey, {
+    audience,
+    channel: { kind, name: "test" },
+    environment,
+    mode: "conversation",
+    principalType: "anonymous",
+  });
+}
+
 function declareTelemetry(
   config:
     | (Readonly<Record<string, unknown>> & { readonly events?: InstrumentationEvents })
     | undefined,
   decision?: InstrumentationDecision,
   audience: ChannelAudience = "unknown",
+  environment: ConversationEnvironment = "production",
 ): void {
   declaredAudience = audience;
+  declaredEnvironment = environment;
   declaredDecision = decision;
   declaredRuntime =
     config === undefined
@@ -195,7 +218,7 @@ function declareTelemetry(
         };
   declaredInstrumentation = bindInstrumentationRuntime(
     declaredRuntime,
-    createInstrumentationContext(decision, audience),
+    createInstrumentationContext(decision, audience, environment),
     {
       agentName: "test-agent",
       rootSessionId: "test-session",
@@ -226,6 +249,7 @@ function bindHookInstrumentation(
     createInstrumentationContext(
       useDeclaredRuntime ? declaredDecision : undefined,
       useDeclaredRuntime ? declaredAudience : "unknown",
+      useDeclaredRuntime ? declaredEnvironment : "production",
     ),
     { agentName: "test-agent", rootSessionId: "test-session", sessionId: "test-session" },
   )!.prepareExecution();
@@ -5288,10 +5312,7 @@ describe("createToolLoopHarness", () => {
       const { emit, events } = createEventCollector();
       const runStep = createToolLoopHarness({ ...config, handleEvent: emit });
       const ctx = new ContextContainer();
-      ctx.set(ChannelInstrumentationKey, {
-        kind: "channel:public",
-        metadata: { audience: "public" },
-      });
+      setConversationContext(ctx, "public", "channel:public");
       const result = await contextStorage.run(ctx, () => runStep(session, { message: "Hi" }));
 
       // The second agent was constructed for the retry.
@@ -11455,10 +11476,7 @@ describe("createToolLoopHarness", () => {
         }),
       );
       const ctx = new ContextContainer();
-      ctx.set(ChannelInstrumentationKey, {
-        kind: "channel:private",
-        metadata: { audience: "private" },
-      });
+      setConversationContext(ctx, "private", "channel:private");
 
       await contextStorage.run(ctx, () => runStep(createTestSession(), { message: "private" }));
 
@@ -11540,10 +11558,7 @@ describe("createToolLoopHarness", () => {
       );
       const runStep = createToolLoopHarness(createTestConfig());
       const ctx = new ContextContainer();
-      ctx.set(ChannelInstrumentationKey, {
-        kind: "channel:public",
-        metadata: { audience: "public" },
-      });
+      setConversationContext(ctx, "public", "channel:public");
 
       await contextStorage.run(ctx, () => runStep(createTestSession(), { message: "hello" }));
 
@@ -11582,10 +11597,7 @@ describe("createToolLoopHarness", () => {
       );
       const runStep = createToolLoopHarness(createTestConfig());
       const ctx = new ContextContainer();
-      ctx.set(ChannelInstrumentationKey, {
-        kind: "channel:public",
-        metadata: { audience: "public" },
-      });
+      setConversationContext(ctx, "public", "channel:public");
 
       await contextStorage.run(ctx, () => runStep(createTestSession(), { message: "hello" }));
 
@@ -11839,10 +11851,7 @@ describe("createToolLoopHarness", () => {
       );
 
       const ctx = new ContextContainer();
-      ctx.set(ChannelInstrumentationKey, {
-        kind: "channel:public",
-        metadata: { audience: "public" },
-      });
+      setConversationContext(ctx, "public", "channel:public");
       await contextStorage.run(ctx, () => runStep(createTestSession(), { message: "hi" }));
 
       const bridge = mockCreateAiSdkHookBridge.mock.results[0]!.value;
@@ -11882,8 +11891,7 @@ describe("createToolLoopHarness", () => {
       });
     });
 
-    it("keeps unknown model telemetry content in a local development worker", async () => {
-      vi.stubEnv("EVE_DEV", "1");
+    it("keeps unknown model telemetry content in development", async () => {
       setupMockAgent({
         finishReason: "stop",
         response: { messages: [{ content: "Hello!", role: "assistant" }] },
@@ -11891,11 +11899,16 @@ describe("createToolLoopHarness", () => {
         toolCalls: [],
         toolResults: [],
       });
-      declareTelemetry({
-        recordInputs: true,
-        recordOutputs: true,
-        tracePolicy: () => true,
-      });
+      declareTelemetry(
+        {
+          recordInputs: true,
+          recordOutputs: true,
+          tracePolicy: () => true,
+        },
+        undefined,
+        "unknown",
+        "development",
+      );
 
       const runStep = createToolLoopHarness(createTestConfig("conversation"));
       await runStep(createTestSession(), { message: "hi" });
@@ -11951,12 +11964,8 @@ describe("createToolLoopHarness", () => {
       );
 
       const ctx = new ContextContainer();
-      ctx.set(ChannelInstrumentationKey, {
-        kind: "channel:support",
-        metadata: {
-          audience: "public",
-          triggeringUserId: "U123",
-        },
+      setConversationContext(ctx, "public", "channel:support", {
+        triggeringUserId: "U123",
       });
 
       const hidden = {

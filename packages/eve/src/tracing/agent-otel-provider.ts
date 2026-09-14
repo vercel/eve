@@ -75,10 +75,13 @@ import {
 } from "#tracing/agent-span-contract.js";
 import { withErrorContent } from "#tracing/error-content-context.js";
 import { recordAgentSpanError as recordError } from "#tracing/agent-span-error.js";
+import { resolveInstrumentationEnvironment } from "#internal/application/dev-environment.js";
+import type { ConversationEnvironment } from "#shared/conversation-context.js";
 
 type SpanState = { readonly context: Context; readonly span: Span };
 
 export interface AgentOtelInstrumentationInput {
+  readonly environment?: ConversationEnvironment;
   /** Whether any destination records model and tool inputs. */
   readonly recordInputs?: boolean;
   /** Whether any destination records model and tool outputs. */
@@ -107,6 +110,7 @@ export interface AgentOtelInstrumentation {
 export function createAgentOtelInstrumentation(
   input: AgentOtelInstrumentationInput,
 ): AgentOtelInstrumentation {
+  const environment = input.environment ?? resolveInstrumentationEnvironment();
   const recordInputs = input.recordInputs ?? false;
   const recordOutputs = input.recordOutputs ?? false;
   const executionContexts = new WeakMap<InstrumentationAttemptScope, Map<string, Context>>();
@@ -146,13 +150,9 @@ export function createAgentOtelInstrumentation(
     },
     tracer: input.tracer,
   });
-  const memory = createAgentMemoryInstrumentation({
-    recordOutputs,
-    stateStore: input.stateStore,
-    tracer: input.tracer,
-  });
+  const memory = createAgentMemoryInstrumentation({ ...input, environment });
   const { ensureSessionContext, prepareSessionTrace, prepareTurnTrace } =
-    createAgentOtelSessionContext(input);
+    createAgentOtelSessionContext({ ...input, environment });
 
   const projectEvent = async (event: InstrumentationEvent): Promise<InstrumentationEvent> => {
     const session = await input.stateStore.getSession(sessionIdForEvent(event));
@@ -164,17 +164,17 @@ export function createAgentOtelInstrumentation(
       eventSeed,
       contextTraceState?.forwardedTracePolicy,
     );
+    const decisionForTrace = (trace: { readonly traceFlags: number } | undefined) =>
+      trace === undefined
+        ? undefined
+        : resolveTracePolicyDecision(isSampledTrace(trace), { audience, environment });
     const decision =
       eventTraceState?.decision ??
       contextTraceState?.decision ??
       readInstrumentationDecision(session?.decision) ??
-      (eventSeed !== undefined
-        ? resolveTracePolicyDecision(isSampledTrace(eventSeed), audience)
-        : contextSeed !== undefined
-          ? resolveTracePolicyDecision(isSampledTrace(contextSeed), audience)
-          : session !== undefined
-            ? resolveTracePolicyDecision(isSampledTrace(session.context), audience)
-            : undefined);
+      decisionForTrace(eventSeed) ??
+      decisionForTrace(contextSeed) ??
+      decisionForTrace(session?.context);
     if (decision === undefined) return withoutInstrumentationContent(event);
     const normalizedEvent =
       eventTraceState === undefined || !("traceSeed" in event) || event.traceSeed === undefined
@@ -199,8 +199,9 @@ export function createAgentOtelInstrumentation(
             },
         audience,
         eventTraceState?.forwardedTracePolicy ?? contextTraceState?.forwardedTracePolicy,
+        environment,
       ),
-      audience,
+      { audience, environment },
       { applyAudienceCeiling: false },
     );
   };
@@ -591,6 +592,7 @@ export function createAgentOtelInstrumentation(
               decision,
               normalizeChannelAudience(operation.scope.channelAudience),
               seed?.forwardedTracePolicy,
+              environment,
             );
       return parent === undefined
         ? execute()

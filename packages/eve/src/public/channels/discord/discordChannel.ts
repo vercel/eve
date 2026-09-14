@@ -228,6 +228,7 @@ export function discordChannel(config: DiscordChannelConfig = {}): DiscordChanne
     turnPolicy: config.turnPolicy,
     state: initialDiscordState(),
     metadata: discordInstrumentationMetadata,
+    audience: ({ state }) => state.audience ?? "unknown",
 
     context(state, session) {
       return rebuildDiscordContext(state, session, config);
@@ -300,7 +301,6 @@ export function discordChannel(config: DiscordChannelConfig = {}): DiscordChanne
       return from(discordContinuationToken(channelId, conversationId)).send(input.message, {
         auth: input.auth,
         state: {
-          audience: "unknown",
           applicationId: null,
           channelId,
           conversationId: conversationId || null,
@@ -656,7 +656,6 @@ function stateFromInteraction(
 
 function initialDiscordState(): DiscordChannelState {
   return {
-    audience: "unknown",
     applicationId: null,
     channelId: null,
     conversationId: null,

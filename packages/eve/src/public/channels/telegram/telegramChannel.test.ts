@@ -153,7 +153,15 @@ describe("telegramChannel() inbound route", () => {
   ] as const)("maps %s chats to the %s audience", (chatType, audience) => {
     const adapter = withState(getAdapter(telegramChannel()), { chatType });
 
-    expect(adapter.instrumentation?.metadata?.(adapter.state)).toMatchObject({ audience });
+    expect(
+      adapter.instrumentation?.audience?.({
+        auth: null,
+        channel: { kind: "channel:telegram" },
+        environment: "production",
+        mode: "conversation",
+        state: adapter.state,
+      }),
+    ).toBe(audience);
   });
 
   it("dispatches verified private messages with Telegram auth and chat-wide token", async () => {

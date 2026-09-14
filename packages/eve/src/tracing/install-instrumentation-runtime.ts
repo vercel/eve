@@ -12,6 +12,7 @@ import {
   type InstrumentationRuntime,
 } from "#instrumentation/runtime.js";
 import { createLogger, formatError } from "#internal/logging.js";
+import { resolveInstrumentationEnvironment } from "#internal/application/dev-environment.js";
 import { AgentSpanIdGenerator } from "#tracing/agent-span-id-generator.js";
 import { ContextAgentTraceStateStore } from "#tracing/agent-trace-context-store.js";
 import { createAgentOtelInstrumentation } from "#tracing/agent-otel-provider.js";
@@ -54,6 +55,7 @@ export function installInstrumentationRuntime(input: {
       serviceName: input.serviceName,
     });
     const agentOtel = createAgentOtelInstrumentation({
+      environment: resolveInstrumentationEnvironment(),
       frameworkVersion: input.frameworkVersion,
       idGenerator: otelRuntime.idGenerator,
       recordInputs: input.collected.settings.recordInputs,

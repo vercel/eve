@@ -8,6 +8,7 @@ import {
   type RemoteAgentUrl,
 } from "#public/definitions/remote-agent.js";
 import type { JsonObject } from "#shared/json.js";
+import { normalizePublicRoutePrefix } from "#shared/public-route-prefix.js";
 
 const WORKSPACE_AGENT_NAME = Symbol.for("eve.workspace-agent.name");
 
@@ -75,7 +76,10 @@ function defaultWorkspaceAgentTransport(name: string): WorkspaceAgentTransport {
           "The default workspace-agent transport requires VERCEL_URL, or VERCEL_PROJECT_PRODUCTION_URL in production.",
         );
       }
-      return `https://${host}/${name}`;
+      const callerRoutePrefix = normalizePublicRoutePrefix(process.env.EVE_PUBLIC_ROUTE_PREFIX);
+      const peerRoutePrefix =
+        callerRoutePrefix?.startsWith("/eve/agents/") === true ? `/eve/agents/${name}` : `/${name}`;
+      return `https://${host}${peerRoutePrefix}`;
     },
   };
 }
