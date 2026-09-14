@@ -1565,7 +1565,9 @@ export class TerminalRenderer implements AgentTUIRenderer {
     header.status = "running";
     header.live = true;
     header.updateSeq = ++this.#updateSequence;
+    const wasBackground = this.#backgroundSubagentCallIds.has(update.callId);
     this.#backgroundSubagentCallIds.add(update.callId);
+    if (!wasBackground) this.#moveSubagentCohortToBackgroundTail(update.callId);
     this.#paint();
   }
 
@@ -3482,6 +3484,18 @@ export class TerminalRenderer implements AgentTUIRenderer {
   #removeBlock(id: string) {
     this.#blocks = this.#blocks.filter((candidate) => candidate.id !== id);
     this.#blockById.delete(id);
+  }
+
+  /**
+   * Background children may outlive several foreground turns. Keep their
+   * mutable cohort at the live edge so it cannot hold those settled turns in
+   * the renderer's leading-prefix commit queue.
+   */
+  #moveSubagentCohortToBackgroundTail(callId: string): void {
+    const cohort = this.#blocks.filter((block) => block.subagentCallId === callId);
+    if (cohort.length === 0) return;
+    this.#blocks = this.#blocks.filter((block) => block.subagentCallId !== callId);
+    this.#blocks.push(...cohort);
   }
 
   #finalizeAllBlocks() {
