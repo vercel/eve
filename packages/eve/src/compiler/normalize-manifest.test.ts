@@ -766,13 +766,30 @@ describe("compileAgentManifest source graph", () => {
       (channel) => channel.logicalPath === "channels/support.ts",
     );
     expect(support?.slackAppManifest).toEqual({
-      alwaysOnline: true,
-      backgroundColor: "#000000",
-      botEvents: ["message.channels"],
-      botScopes: ["channels:history"],
-      description: "Answers support questions.",
-      displayName: "Support agent",
-      longDescription: "Answers support questions using the team's knowledge base.",
+      display_information: {
+        background_color: "#000000",
+        description: "Answers support questions.",
+        long_description: "Answers support questions using the team's knowledge base.",
+        name: "Support agent",
+      },
+      features: {
+        app_home: {
+          home_tab_enabled: false,
+          messages_tab_enabled: true,
+          messages_tab_read_only_enabled: false,
+        },
+        bot_user: { display_name: "Support agent", always_online: true },
+      },
+      oauth_config: {
+        scopes: { bot: ["app_mentions:read", "chat:write", "channels:history"] },
+      },
+      settings: {
+        event_subscriptions: { bot_events: ["app_mention", "message.channels"] },
+        interactivity: { is_enabled: true },
+        org_deploy_enabled: false,
+        socket_mode_enabled: false,
+        token_rotation_enabled: false,
+      },
     });
   });
 

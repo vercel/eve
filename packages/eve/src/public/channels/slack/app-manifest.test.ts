@@ -29,7 +29,7 @@ describe("Slack app manifests", () => {
   });
 
   it("uses a configured bot name and enforces Slack's app name limit", () => {
-    const definition = defineSlackAppManifest({ botName: "x".repeat(40) });
+    const definition = defineSlackAppManifest({ displayName: "x".repeat(40) });
 
     expect(buildSlackAppManifest(definition, "support")).toMatchObject({
       display_information: { name: "x".repeat(35) },
