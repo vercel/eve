@@ -39,7 +39,7 @@ describe("applyModelSelectionToSource", () => {
 
     expect(result.kind).toBe("applied");
     if (result.kind !== "applied") return;
-    expect(result.from).toBe("chatgpt/gpt-5.6-sol");
+    expect(result.from).toBe("chatgpt/gpt-5.6-luna-fast");
     expect(result.nextSource).not.toContain("eve/models/openai");
     expect(result.nextSource).toContain('model: "openai/gpt-5.5"');
   });
@@ -126,4 +126,35 @@ describe("applyModelSelectionToSource", () => {
       kind: "bail",
     });
   });
+});
+
+it.each([
+  ["openai-api/gpt-5.6-luna-fast", "openai", "eve/models/openai"],
+  ["anthropic-api/claude-sonnet-5", "anthropic", "eve/models/anthropic"],
+])("switches a Gateway string to %s and back safely", async (selection, helper, module) => {
+  const source =
+    'import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.6-luna-fast" });';
+  const result = await applyModelSelectionToSource(source, selection);
+  expect(result.kind).toBe("applied");
+  if (result.kind !== "applied") return;
+  expect(result.nextSource).toContain(`import { ${helper} } from "${module}";`);
+  const back = await applyModelSelectionToSource(result.nextSource, "anthropic/claude-sonnet-5");
+  expect(back.kind).toBe("applied");
+  if (back.kind === "applied") expect(back.nextSource).not.toContain(`import { ${helper} }`);
+});
+
+it("refuses to shadow a custom provider import", async () => {
+  const result = await applyModelSelectionToSource(
+    'import { openai } from "@ai-sdk/openai";\nexport default defineAgent({ model: "anthropic/claude-sonnet-5" });',
+    "openai-api/gpt-5.6-luna-fast",
+  );
+  expect(result.kind).toBe("bail");
+});
+
+it("does not recognize a commented import as an eve helper", async () => {
+  const source =
+    '// import { openai } from "eve/models/openai";\nconst openai = customProvider;\nexport default defineAgent({ model: openai("example") });';
+  expect((await applyModelSelectionToSource(source, "anthropic/claude-sonnet-5")).kind).toBe(
+    "bail",
+  );
 });

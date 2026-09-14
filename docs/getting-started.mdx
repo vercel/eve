@@ -12,7 +12,7 @@ You need:
 - npm, which Node.js includes
 - A credential for the model your agent uses
 
-The default scaffolded model routes through the Vercel AI Gateway. Set `AI_GATEWAY_API_KEY`, or link a Vercel project to use `VERCEL_OIDC_TOKEN`. To use a model provider directly, install its AI SDK provider package and set the provider's API key.
+Connect a ChatGPT subscription, a Vercel account, or an AI Gateway, OpenAI, or Anthropic API key in the terminal UI. You do not need a Vercel project to start chatting.
 
 Choose a model, provider, and channel that meet your data-processing and compliance requirements.
 
@@ -24,7 +24,7 @@ Run `eve init` with a project name:
 npx eve@latest init my-agent
 ```
 
-The command creates the project, installs dependencies, and initializes Git. After scaffolding, eve offers to start the development server or, if a supported coding agent is installed, to open the project in the coding agent.
+The command creates the project, installs dependencies, initializes Git, and opens the terminal UI. eve reuses an available model connection or opens `/login`. Once connected, type your first message. Channel and integration setup is optional; use `/add` when you need it.
 
 To add eve to a project that already has a `package.json`, run this command from its root before you create any `agent/` files:
 
@@ -44,7 +44,7 @@ npx eve@latest init my-agent --model openai/gpt-5.6-terra --reasoning high
 
 ## Run the agent
 
-Choose **Start eve dev** after scaffolding, or run this from the project root:
+The terminal UI opens after interactive initialization. To return later, run this from the project root:
 
 ```bash
 npm run dev

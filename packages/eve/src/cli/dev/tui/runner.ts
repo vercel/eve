@@ -20,11 +20,7 @@ import {
   ClientSession,
 } from "#client/index.js";
 import { renderApplicationInfo } from "#cli/commands/info.js";
-import type {
-  EveCliSetupStep,
-  EveCliSetupStepEvent,
-  EveCliSetupTerminalEvent,
-} from "#cli/telemetry/index.js";
+import type { EveCliSetupStepEvent, EveCliSetupTerminalEvent } from "#cli/telemetry/index.js";
 import type { OnboardingScreenEvent } from "./setup-commands.js";
 import { loadDevelopmentEnvironmentFiles } from "#cli/dev/environment.js";
 import { subscribeDevelopmentSandboxPrewarmLogs } from "#execution/sandbox/development-prewarm.js";
@@ -534,6 +530,7 @@ export class EveTUIRunner {
   readonly #startup?: TuiStartup;
   /** Explicit fresh-agent onboarding handoff from `eve init`. */
   readonly #onboard: boolean;
+  #reportedFirstResponse = false;
   readonly #onOnboardingStep?: EveTUIRunnerOptions["onOnboardingStep"];
   readonly #onOnboardingTerminal?: EveTUIRunnerOptions["onOnboardingTerminal"];
   #initialOnboardingActive = false;
@@ -750,7 +747,7 @@ export class EveTUIRunner {
       serverUrl,
     };
     if (headerInfo !== undefined) header.info = headerInfo;
-    if (this.#appRoot !== undefined) header.tip = this.#headerTip;
+    if (this.#appRoot !== undefined && !this.#onboard) header.tip = this.#headerTip;
     this.#renderer.renderAgentHeader?.(header);
     return headerInfo;
   }
@@ -806,17 +803,19 @@ export class EveTUIRunner {
     this.#mcpConnectionStatus?.refresh();
 
     const initialAgentOnboarding =
-      this.#onboard &&
+      (this.#onboard ||
+        (this.#agentInfo?.agent.model.endpoint?.kind === "gateway" &&
+          !this.#agentInfo.agent.model.endpoint.connected)) &&
       this.#appRoot !== undefined &&
       this.#promptCommandHandler !== undefined &&
       this.#renderer.setupFlow !== undefined;
     if (initialAgentOnboarding) {
-      initialDraft = undefined;
       this.#initialOnboardingActive = true;
       try {
         await this.#runInitialAgentOnboarding(title);
       } finally {
         this.#initialOnboardingActive = false;
+        this.#replaceAgentInfo(this.#agentInfo);
       }
     }
 
@@ -1593,6 +1592,12 @@ export class EveTUIRunner {
         void this.#requestTurnCancellation(turnState, sourceSession);
       },
       events: eveEventsToTUIStream({
+        onAssistantResponse: () => {
+          if (this.#onboard && !this.#reportedFirstResponse) {
+            this.#reportedFirstResponse = true;
+            this.#onOnboardingStep?.({ flow: "onboarding", step: "first_response" });
+          }
+        },
         events,
         pendingInputRequests: this.#pendingInputRequests,
         turnState,
@@ -1661,7 +1666,7 @@ export class EveTUIRunner {
   /** Checks Vercel auth after boot without delaying the first prompt. */
   async #probeAuthIssue(): Promise<void> {
     const appRoot = this.#appRoot;
-    if (appRoot === undefined) return;
+    if (appRoot === undefined || process.env.EVE_MODEL_CONNECTION !== "ai-gateway-project") return;
     let status: VercelAuthStatus;
     try {
       status = await this.#getVercelAuthStatus(appRoot, { signal: this.#authProbeAbort.signal });
@@ -1687,10 +1692,13 @@ export class EveTUIRunner {
     if (info !== undefined) context.info = info;
     try {
       this.#bootIssues = await detectSetupIssues(context, this.#bootDetections);
-      const status = await this.#getVercelAuthStatus(appRoot, {
-        signal: this.#authProbeAbort.signal,
-      });
-      this.#authIssue = authIssueForStatus(status);
+      this.#authIssue = undefined;
+      if (process.env.EVE_MODEL_CONNECTION === "ai-gateway-project") {
+        const status = await this.#getVercelAuthStatus(appRoot, {
+          signal: this.#authProbeAbort.signal,
+        });
+        this.#authIssue = authIssueForStatus(status);
+      }
     } catch {
       return;
     }
@@ -1815,115 +1823,20 @@ export class EveTUIRunner {
     return outcome;
   }
 
-  #onboardingNavigation(activeStep: number): PlannerNavigation {
-    return {
-      kind: "planner",
-      activeStep,
-      firstNavigableStep: 1,
-      steps: [
-        { label: "Model", complete: activeStep > 0 },
-        { label: "Channels" },
-        { label: "Integrations" },
-        { label: "Review" },
-      ],
-    };
-  }
-
-  /** Runs fresh-agent setup as two cohesive, one-way phases. */
   async #runInitialAgentOnboarding(title: string): Promise<void> {
-    const journey = {
-      keepSetupFlowOpen: true as const,
-      setupFlowTitle: `Set up ${title}`,
-      trigger: "startup" as const,
-    };
-
-    let activeStep: EveCliSetupStep = "model_provider";
-    const onOnboardingScreen: NonNullable<PromptCommandHandlerContext["onOnboardingScreen"]> = (
-      input,
-    ) => {
-      activeStep = input.screen;
-      this.#onOnboardingStep?.({
-        flow: "onboarding",
-        step: input.screen,
-        registrySelectedCount: input.registrySelectedCount,
-      });
-    };
-    onOnboardingScreen({ screen: "model_provider" });
-    let modelOutcome: PromptCommandOutcome | undefined;
-    try {
-      modelOutcome = await this.#executeExtensionCommand(
-        { type: "extension", name: "model", argument: "" },
-        title,
-        {
-          ...journey,
-          suppressSuccessfulTranscript: true,
-          initialModelStep: "provider",
-          setupFlowNavigation: this.#onboardingNavigation(0),
-          onOnboardingScreen,
-        },
-      );
-    } catch (error) {
-      this.#onOnboardingTerminal?.({ flow: "onboarding", step: activeStep, result: "error" });
-      throw error;
-    }
-    if (modelOutcome?.tone === "error" || modelOutcome?.cancelled === true) {
-      this.#onOnboardingTerminal?.({
-        flow: "onboarding",
-        step: activeStep,
-        result: modelOutcome.cancelled === true ? "cancelled" : "error",
-      });
-      this.#renderer.setupFlow?.end({ preserveDiagnostics: modelOutcome.tone === "error" });
-      return;
-    }
-
-    let addOutcome: PromptCommandOutcome | undefined;
-    activeStep = "registry_channels";
-    const onRegistryScreen: NonNullable<PromptCommandHandlerContext["onOnboardingScreen"]> = (
-      input,
-    ) => {
-      activeStep = input.screen;
-      this.#onOnboardingStep?.({
-        flow: "onboarding",
-        step: input.screen,
-        registrySelectedCount: input.registrySelectedCount,
-      });
-    };
-    try {
-      onRegistryScreen({ screen: "registry_channels" });
-      addOutcome = await this.#executeExtensionCommand(
-        { type: "extension", name: "add", argument: "" },
-        title,
-        {
-          ...journey,
-          onOnboardingScreen: onRegistryScreen,
-          registryPlannerContext: {
-            prefixSteps: [{ label: "Model", complete: true }],
-            reviewMessage: "Review your agent",
-            primaryActionLabel: "Install and finish setup",
-            emptyActionLabel: "Finish setup",
-          },
-        },
-      );
-    } catch (error) {
-      this.#onOnboardingTerminal?.({ flow: "onboarding", step: activeStep, result: "error" });
-      throw error;
-    } finally {
-      if (addOutcome !== undefined) {
-        this.#onOnboardingTerminal?.({
-          flow: "onboarding",
-          step: activeStep,
-          result:
-            addOutcome.cancelled === true
-              ? "cancelled"
-              : addOutcome.tone === "error"
-                ? "error"
-                : "completed",
-        });
-      }
-      // `/add` is the final onboarding phase. Release the shared panel so the
-      // ordinary chat prompt can own input, retaining deploy/setup evidence on failure.
-      this.#renderer.setupFlow?.end({ preserveDiagnostics: addOutcome?.tone === "error" });
-    }
+    this.#onOnboardingStep?.({ flow: "onboarding", step: "model_provider" });
+    const outcome = await this.#executeExtensionCommand(
+      { type: "extension", name: "login", argument: "" },
+      title,
+      { trigger: "startup", initialModelStep: "provider" },
+    );
+    if (!outcome?.cancelled && outcome?.tone !== "error")
+      this.#onOnboardingStep?.({ flow: "onboarding", step: "connection_ready" });
+    this.#onOnboardingTerminal?.({
+      flow: "onboarding",
+      step: "model_provider",
+      result: outcome?.cancelled ? "cancelled" : outcome?.tone === "error" ? "error" : "completed",
+    });
   }
 
   #refreshHeaderFromRemoteConnection(): void {
@@ -2154,6 +2067,7 @@ function formatAgentUpdateNotice(
 
 type EveStreamTranslatorInput = {
   events: AsyncIterable<MessageStreamEvent>;
+  onAssistantResponse?: () => void;
   pendingInputRequests: Map<string, InputRequest>;
   turnState: AgentTUITurnState;
   onSubagentCalled?: (event: SubagentCalledStreamEvent) => void;
@@ -2287,6 +2201,7 @@ async function* eveEventsToTUIStream(
         const delta = appended.data.messageDelta;
         if (delta.length === 0) break;
         state.text += delta;
+        if (delta) input.onAssistantResponse?.();
         yield { type: "assistant-delta", id: partGenerationId(base, state.generation), delta };
         break;
       }
@@ -2322,6 +2237,7 @@ async function* eveEventsToTUIStream(
           } else if (message.startsWith(state.text)) {
             const suffix = message.slice(state.text.length);
             if (suffix.length > 0) {
+              if (suffix) input.onAssistantResponse?.();
               yield { type: "assistant-delta", id, delta: suffix };
             }
             state.text = message;

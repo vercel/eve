@@ -30,7 +30,7 @@ export interface QuestionPanelState {
 /** Rows under the cursor paint like the setup panel's selected option. */
 function selectedRow(text: string, theme: Theme): string {
   const c = theme.colors;
-  return `${c.inverse(c.blue(` ${theme.glyph.selectedPointer} ${text} `))} ${c.dim("↵")}`;
+  return `${c.bold(` ${theme.glyph.selectedPointer} ${text}`)} ${c.dim("↵")}`;
 }
 
 export function renderQuestionPanel(
@@ -41,7 +41,7 @@ export function renderQuestionPanel(
   const c = theme.colors;
   const g = theme.glyph;
   // The rule hugs the question — no blank row between them.
-  const rows: string[] = [c.dim(g.hrule.repeat(Math.max(1, width)))];
+  const rows: string[] = [];
 
   // The prompt is model-authored and can span paragraphs. Embedded newlines
   // MUST split before width-wrapping: a row that secretly holds newlines

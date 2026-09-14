@@ -135,7 +135,8 @@ import template from "../../prompts/template.txt?raw";
 | `eve/sandbox`                                                               | `defineSandbox`, backends                                                                               |
 | `eve/instrumentation`                                                       | `defineInstrumentation`, `isChannel`                                                                    |
 | `eve/local-dev`                                                             | `getLocalDevCapability`, `LocalDevCapability`                                                           |
-| `eve/models/openai`                                                         | `chatgpt`, deprecated `experimental_chatgpt`                                                            |
+| `eve/models/openai`                                                         | `openai`, `chatgpt`, deprecated `experimental_chatgpt`                                                  |
+| `eve/models/anthropic`                                                      | `anthropic`                                                                                             |
 | `eve/evals`                                                                 | `defineEval`, `defineEvalConfig`, `mockModel`, eval types                                               |
 | `eve/evals/expect`                                                          | `includes`, `equals`, `matches`, `similarity`                                                           |
 | `eve/evals/reporters`                                                       | `Braintrust`, `JUnit`, `EvalReporter`                                                                   |
@@ -169,9 +170,15 @@ The function returns `LocalDevCapability | undefined`. It returns a capability o
 
 Run source mutations inside `withSuspendedSource()`. It acquires a unique watcher lease, waits for your asynchronous callback to settle, and then releases the lease. Concurrent or nested calls cannot resume each other early, and releasing the final lease rebuilds the runtime artifacts. The callback's return value is returned, and its error is rethrown after release. If suspension cannot be acquired, the callback does not run. If the host cannot confirm release after a retry, the method throws an actionable error; restart `eve dev` before making more source changes.
 
+## Direct provider models
+
+`openai(model?)` from `eve/models/openai` and `anthropic(model?)` from `eve/models/anthropic` return eve-owned model instances using the vendored providers. They accept only an optional model ID. Defaults are `gpt-5.6-luna-fast` and `claude-sonnet-5`, respectively.
+
+Use `/login` for local credentials, or set `OPENAI_API_KEY` or `ANTHROPIC_API_KEY`. Local secret-store discovery is disabled in deployments; provision server credentials explicitly. See [Set the model](../agent-config#set-the-model) for an example.
+
 ## ChatGPT subscription models
 
-`chatgpt()` from `eve/models/openai` serves an OpenAI model through your local ChatGPT login and bills the ChatGPT subscription. With no argument, it selects `gpt-5.6-sol`:
+`chatgpt()` from `eve/models/openai` serves an OpenAI model through your local ChatGPT login and bills the ChatGPT subscription. With no argument, it selects `gpt-5.6-luna-fast`:
 
 ```ts title="agent/agent.ts"
 import { defineAgent } from "eve";
@@ -188,7 +195,7 @@ Pass another bare OpenAI model slug to override the default. `experimental_chatg
 
 eve uses one local authentication path with two credential owners:
 
-1. Run `eve dev`, open `/model`, and select **Provider** → **ChatGPT subscription**.
+1. Run `eve dev`, open `/login`, and select **ChatGPT subscription**.
 2. If `codex` is on `PATH`, eve uses `codex app-server` and launches `codex login` when sign-in is needed. Codex owns credential storage and refresh.
 3. If the Codex binary is not found, eve falls back to direct browser sign-in and owns the saved session and refresh. If the browser does not open, use the URL printed in the terminal.
 
@@ -206,9 +213,9 @@ ChatGPT subscription credentials are local user credentials. `eve deploy` blocks
 
 Troubleshooting:
 
-- **`chatgpt-sub login`**: open `/model` and select **Provider** → **ChatGPT subscription** to sign in again. eve launches `codex login` when Codex is available, or its direct sign-in flow when it is not.
+- **`chatgpt-sub login`**: open `/login` and select **ChatGPT subscription** to sign in again. eve launches `codex login` when Codex is available, or its direct sign-in flow when it is not.
 - **`chatgpt-sub unavailable` with Codex installed**: update or restart Codex and retry. eve does not mask app-server failures by switching to a different saved session.
-- **`chatgpt-sub unavailable` without Codex**: follow the reported OS credential-store recovery steps, or check your network connection if token refresh failed. Retry from `/model`. If eve reports an invalid stored session, sign in again to replace it.
+- **`chatgpt-sub unavailable` without Codex**: follow the reported OS credential-store recovery steps, or check your network connection if token refresh failed. Retry from `/login`. If eve reports an invalid stored session, sign in again to replace it.
 - **Model rejected by the backend**: model availability depends on the signed-in ChatGPT account. Pick another supported OpenAI model.
 - **Device sign-in unavailable**: enable device code authorization in ChatGPT security settings, or sign in from a local terminal with port 1455 available.
 

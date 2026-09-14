@@ -129,6 +129,11 @@ function renderEndpoint(
   if (input.endpoint.credential === "api-key") {
     return { text: clause("ai-gateway", "(api-key)"), standalone: false };
   }
+  if (input.endpoint.credential === "oauth")
+    return {
+      text: clause("Vercel", input.endpoint.team ? ` · ${input.endpoint.team}` : ""),
+      standalone: false,
+    };
   const projectName = input.vercel?.identity?.projectName;
   const scope = projectName === undefined ? "oidc" : `oidc:${projectName}`;
   return { text: clause("ai-gateway", `(${scope})`), standalone: false };

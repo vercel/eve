@@ -186,8 +186,8 @@ describe("TerminalRenderer (inline scrollback)", () => {
     renderer.shutdown();
 
     const snapshot = screen.snapshot();
-    expect(snapshot).toMatch(/☰eve \(v\d+\.\d+\.\d+\).*Weather Agent/u);
-    expect(snapshot).toContain("Tip: Use the /deploy command to deploy your agent.");
+    expect(snapshot).toMatch(/eve v\d+\.\d+\.\d+.*Weather Agent/u);
+    expect(snapshot).toContain("Use the /deploy command to deploy your agent.");
     expect(snapshot).not.toContain("http://localhost:3000");
   });
 
@@ -216,7 +216,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
     const snapshot = screen.snapshot();
     expect(snapshot).toContain("new-model");
     expect(snapshot).not.toContain("old-model");
-    expect(snapshot.match(/☰eve/gu)).toHaveLength(1);
+    expect(snapshot.match(/eve v\d/gu)).toHaveLength(1);
     expect(snapshot).toContain("hello");
     expect(snapshot).toContain("still here");
     renderer.shutdown();
@@ -2443,7 +2443,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
       title: "weather-agent",
     });
     expect(screen.snapshot()).toContain("weather-agent");
-    expect(screen.snapshot()).toContain("Tip: Use the /help command");
+    expect(screen.snapshot()).toContain("Use the /help command");
     expect(screen.snapshot()).not.toContain("model");
     expect(screen.snapshot()).not.toContain("loading");
     expect(screen.snapshot()).toContain("Building your agent");
@@ -2574,7 +2574,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
     renderer.shutdown();
   });
 
-  it("renders the question overlay with numbered rows and an inverse-blue cursor", async () => {
+  it("renders the question overlay with numbered rows and a bold cursor", async () => {
     const { screen, input, renderer } = makeRenderer();
 
     const answer = renderer.readInputQuestion({
@@ -2590,10 +2590,10 @@ describe("TerminalRenderer (inline scrollback)", () => {
     const snapshot = screen.snapshot();
     const lines = snapshot.split("\n");
     const selected = lines.find((line) => line.includes("AI Gateway"));
-    expect(selected).toContain(" ▶ 1. AI Gateway ");
+    expect(selected).toContain(" › 1. AI Gateway ");
     expect(selected).toContain("↵");
-    expect(screen.rawOutput()).toContain("\x1b[7m");
-    expect(screen.rawOutput()).toContain("\x1b[34m");
+    expect(screen.rawOutput()).not.toContain("\x1b[7m");
+    expect(screen.rawOutput()).toContain("\x1b[1m");
     // Every option's description rides its own row, cursor or not.
     expect(lines).toContain("        Managed access");
     expect(lines).toContain("        Direct access");
@@ -2608,7 +2608,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
       .split("\n")
       .find((line) => line.includes("AI Gateway"));
     expect(unselected).toContain("1. AI Gateway");
-    expect(unselected).not.toContain("▶");
+    expect(unselected).not.toContain("›");
     input.send("k");
 
     input.enter();
@@ -3804,7 +3804,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
     renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
     renderer.shutdown();
 
-    expect(countOccurrences(screen.snapshot(), "☰eve (v")).toBe(1);
+    expect(countOccurrences(screen.snapshot(), "eve v")).toBe(1);
   });
 
   it("reset clears committed transcript rows", () => {
@@ -4233,38 +4233,13 @@ describe("TerminalRenderer setup panel", () => {
     });
 
     // The value menu opens on the Model row.
-    expect(screen.snapshot()).toContain("▶ Model");
+    expect(screen.snapshot()).toContain("› Model");
     input.enter();
     expect(screen.snapshot()).toContain("Select the model");
     input.type("grok");
     expect(screen.snapshot()).toContain("xai/grok-4.5");
     input.enter();
-    // Back on the menu, the model hint carries the pick.
-    expect(screen.snapshot()).toContain("xai/grok-4.5");
-
-    // Reasoning adjusts inline on its row: right enters the scale at the
-    // lowest level, another right (via Tab, which mimics it) walks up.
-    input.down();
-    expect(screen.snapshot()).toContain("▶ Reasoning effort");
-    input.right();
-    expect(screen.snapshot()).toContain("◉─○ low");
-    input.send("\t");
-    expect(screen.snapshot()).toContain("●─◉ high");
-
-    input.down();
-    expect(screen.snapshot()).toContain("▶ Service tier");
-    expect(screen.snapshot()).toContain("normal");
-    input.right();
-    expect(screen.snapshot()).toContain("fast ↯");
-
-    input.down();
-    input.enter();
-
-    await expect(answer).resolves.toEqual({
-      model: "xai/grok-4.5",
-      reasoning: "high",
-      serviceTier: "priority",
-    });
+    await expect(answer).resolves.toEqual({ model: "xai/grok-4.5" });
     renderer.setupFlow.end({ preserveDiagnostics: false });
     renderer.shutdown();
   });
@@ -4295,13 +4270,13 @@ describe("TerminalRenderer setup panel", () => {
     await new Promise((resolve) => setTimeout(resolve, 50));
     expect(settled).toBe(false);
     // The first Esc only cleared the filter; the list is still open.
-    expect(screen.snapshot()).toContain("▏ type to search");
+    expect(screen.snapshot()).toContain("type to search");
 
     input.send("\x1b");
     await new Promise((resolve) => setTimeout(resolve, 50));
     expect(settled).toBe(false);
     // Back on the menu.
-    expect(screen.snapshot()).toContain("▶ Model");
+    expect(screen.snapshot()).toContain("› Model");
 
     input.send("\x1b");
     await expect(answer).resolves.toBeUndefined();
@@ -4569,7 +4544,7 @@ describe("TerminalRenderer setup flow session", () => {
     expect(snapshot).not.toContain("Slack channel was not added");
     expect(snapshot).not.toContain("Scaffolding Web Chat channel files");
     // Focused completed row reads inert: a dim pointer, not a check.
-    expect(snapshot).toContain("▷ Terminal UI · Already installed");
+    expect(snapshot).toContain("› Terminal UI · Already installed");
     expect(snapshot).not.toContain("✓ Terminal UI");
     expect(snapshot).toContain("✓ Web Chat");
     expect(snapshot).toContain("Slack       · Creates slackbot and deploys to Vercel");
@@ -4989,7 +4964,7 @@ describe("TerminalRenderer command typeahead", () => {
     const snapshot = screen.snapshot();
     expect(snapshot).toContain("/help");
     expect(snapshot).toContain("Show available commands");
-    expect(snapshot).toContain("Configure the agent's model and provider");
+    expect(snapshot).toContain("Choose a model and its settings");
     const promptLine = snapshot.split("\n").find((line) => line.includes("❯ /"));
     expect(promptLine?.startsWith("❯ /")).toBe(true);
 
@@ -5011,7 +4986,7 @@ describe("TerminalRenderer command typeahead", () => {
     expect(snapshot).toContain("/model");
     expect(snapshot).toContain("[provider/model]");
     // ...and the dropdown (with its description column) is gone.
-    expect(snapshot).not.toContain("Configure the agent's model and provider");
+    expect(snapshot).not.toContain("Choose a model and its settings");
 
     input.enter();
     expect(await prompt).toBe("/model");
@@ -5088,7 +5063,7 @@ describe("TerminalRenderer command typeahead", () => {
     });
 
     input.type("m");
-    expect(screen.snapshot()).toContain("Configure the agent's model and provider");
+    expect(screen.snapshot()).toContain("Choose a model and its settings");
     input.enter();
     expect(await prompt).toBe("/model");
     renderer.shutdown();
@@ -5124,7 +5099,7 @@ describe("TerminalRenderer command typeahead", () => {
     input.type("/");
     const snapshot = screen.snapshot();
     expect(snapshot).toContain("Authenticate with Vercel");
-    expect(snapshot).not.toContain("Configure the agent's model and provider");
+    expect(snapshot).not.toContain("Choose a model and its settings");
     input.enter();
     await prompt;
     renderer.shutdown();

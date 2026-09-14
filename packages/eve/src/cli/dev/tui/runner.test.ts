@@ -886,7 +886,7 @@ describe("EveTUIRunner idle session follow", () => {
     await expect(runner.run()).resolves.toBeUndefined();
 
     expect(handle).toHaveBeenCalledWith(
-      { type: "extension", name: "model", argument: "" },
+      { type: "extension", name: "login", argument: "" },
       expect.objectContaining({ initialModelStep: "provider" }),
     );
     expect(renderIdleStream).not.toHaveBeenCalled();
@@ -3757,7 +3757,7 @@ describe("EveTUIRunner boot setup detection", () => {
       getVercelAuthStatus: vi.fn(async (): Promise<"authenticated"> => "authenticated"),
       promptCommandHandler: {
         handle: async (command) =>
-          command.name === "model"
+          command.name === "login"
             ? {
                 message: "AI Gateway via API key selected.",
                 effect: { kind: "model-access-changed" },
@@ -3777,186 +3777,6 @@ describe("EveTUIRunner boot setup detection", () => {
     await runner.run();
 
     expect(warnings).toEqual(["1 setup issue: AI Gateway credentials · /model"]);
-  });
-
-  it("runs initial onboarding as one-way model and registry phases", async () => {
-    const order: string[] = [];
-    const results: string[] = [];
-    const stages: string[] = [];
-    const handle = vi.fn(async (command: { name: string }) => {
-      order.push(command.name);
-      return command.name === "model"
-        ? { message: "/model failed: provider unavailable", tone: "error" as const }
-        : { message: `/${command.name} dismissed.` };
-    });
-    const renderer = fakeRenderer({
-      readPrompt: vi.fn(async (options?: AgentTUISessionOptions) => {
-        order.push("prompt");
-        expect(options?.initialDraft).toBeUndefined();
-        return undefined;
-      }),
-      renderCommandResult: (message) => results.push(message),
-      setupFlow: createFakeSetupFlowRenderer(),
-    });
-    const runner = new EveTUIRunner({
-      session: sessionYielding([]),
-      renderer,
-      name: "Weather Agent",
-      appRoot: "/tmp/weather-agent",
-      onboard: true,
-      bootDetections: [],
-      onOnboardingStep: ({ step }) => stages.push(step),
-      onOnboardingTerminal: ({ step, result }) => stages.push(`${step}_${result}`),
-      promptCommandHandler: { handle },
-    });
-
-    await runner.run();
-
-    expect(order).toEqual(["model", "prompt"]);
-    expect(stages).toEqual(["model_provider", "model_provider_error"]);
-    expect(results).toContain("/model failed: provider unavailable");
-    expect(handle).toHaveBeenCalledWith(
-      { type: "extension", name: "model", argument: "" },
-      expect.objectContaining({
-        renderer,
-        title: "Weather Agent",
-        initialModelStep: "provider",
-        keepSetupFlowOpen: true,
-        setupFlowNavigation: {
-          kind: "planner",
-          activeStep: 0,
-          firstNavigableStep: 1,
-          steps: [
-            { label: "Model", complete: false },
-            { label: "Channels" },
-            { label: "Integrations" },
-            { label: "Review" },
-          ],
-        },
-      }),
-    );
-    expect(handle).not.toHaveBeenCalledWith(
-      { type: "extension", name: "add", argument: "" },
-      expect.anything(),
-    );
-  });
-
-  it("moves from Model to Channels and preserves diagnostics after a failed registry phase", async () => {
-    const order: string[] = [];
-    const stages: string[] = [];
-    const end = vi.fn(() => order.push("end"));
-    const handle = vi.fn(async (command: { name: string }) => {
-      order.push(command.name);
-      return command.name === "add"
-        ? { message: "/add failed", tone: "error" as const }
-        : { message: "model ready" };
-    });
-    const renderer = fakeRenderer({
-      readPrompt: vi.fn(async () => {
-        order.push("prompt");
-        return undefined;
-      }),
-      setupFlow: createFakeSetupFlowRenderer({ end }),
-    });
-    const runner = new EveTUIRunner({
-      session: sessionYielding([]),
-      renderer,
-      name: "Weather Agent",
-      appRoot: "/tmp/weather-agent",
-      onboard: true,
-      bootDetections: [],
-      onOnboardingStep: ({ step }) => stages.push(step),
-      onOnboardingTerminal: ({ step, result }) => stages.push(`${step}_${result}`),
-      promptCommandHandler: { handle },
-    });
-
-    await runner.run();
-
-    expect(order).toEqual(["model", "add", "end", "prompt"]);
-    expect(stages).toEqual(["model_provider", "registry_channels", "registry_channels_error"]);
-    expect(end).toHaveBeenCalledWith({ preserveDiagnostics: true });
-    expect(handle).toHaveBeenNthCalledWith(
-      2,
-      { type: "extension", name: "add", argument: "" },
-      expect.not.objectContaining({ setupFlowNavigation: expect.anything() }),
-    );
-    expect(handle).toHaveBeenNthCalledWith(
-      2,
-      { type: "extension", name: "add", argument: "" },
-      expect.objectContaining({
-        registryPlannerContext: {
-          prefixSteps: [{ label: "Model", complete: true }],
-          reviewMessage: "Review your agent",
-          primaryActionLabel: "Install and finish setup",
-          emptyActionLabel: "Finish setup",
-        },
-      }),
-    );
-  });
-
-  it("keeps the completed /add result after onboarding", async () => {
-    const renderCommandInvocation = vi.fn();
-    const renderCommandResult = vi.fn();
-    const stages: string[] = [];
-    const runner = new EveTUIRunner({
-      session: sessionYielding([]),
-      renderer: fakeRenderer({
-        readPrompt: vi.fn(async () => undefined),
-        renderCommandInvocation,
-        renderCommandResult,
-        setupFlow: createFakeSetupFlowRenderer(),
-      }),
-      name: "Weather Agent",
-      appRoot: "/tmp/weather-agent",
-      onboard: true,
-      bootDetections: [],
-      onOnboardingStep: ({ step }) => stages.push(step),
-      onOnboardingTerminal: ({ step, result }) => stages.push(`${step}_${result}`),
-      promptCommandHandler: {
-        handle: async (command) =>
-          command.name === "model"
-            ? { message: "Model ready" }
-            : { message: "Added Web Chat", tone: "success" as const },
-      },
-    });
-
-    await runner.run();
-
-    expect(stages).toEqual(["model_provider", "registry_channels", "registry_channels_completed"]);
-    expect(renderCommandInvocation).toHaveBeenCalledWith("/add", undefined);
-    expect(renderCommandResult).toHaveBeenCalledWith("Added Web Chat", "success");
-  });
-
-  it("does not render a detached /add dismissed result when onboarding is cancelled", async () => {
-    const renderCommandResult = vi.fn();
-    const stages: string[] = [];
-    const renderer = fakeRenderer({
-      readPrompt: vi.fn(async () => undefined),
-      renderCommandResult,
-      setupFlow: createFakeSetupFlowRenderer(),
-    });
-    const runner = new EveTUIRunner({
-      session: sessionYielding([]),
-      renderer,
-      name: "Weather Agent",
-      appRoot: "/tmp/weather-agent",
-      onboard: true,
-      bootDetections: [],
-      onOnboardingStep: ({ step }) => stages.push(step),
-      onOnboardingTerminal: ({ step, result }) => stages.push(`${step}_${result}`),
-      getVercelAuthStatus: vi.fn(async () => "authenticated" as const),
-      promptCommandHandler: {
-        handle: async (command) =>
-          command.name === "model"
-            ? { message: "Model ready" }
-            : { message: "/add dismissed.", cancelled: true as const },
-      },
-    });
-
-    await runner.run();
-
-    expect(stages).toEqual(["model_provider", "registry_channels", "registry_channels_cancelled"]);
-    expect(renderCommandResult).not.toHaveBeenCalledWith("/add dismissed.", expect.anything());
   });
 
   it("does not auto-open /model outside the prefilled onboarding launch", async () => {
@@ -4042,6 +3862,7 @@ describe("EveTUIRunner boot setup detection", () => {
     });
     expect(headers.map((header) => header.info?.agent.model.endpoint)).toEqual([
       { kind: "gateway", connected: false },
+      { kind: "gateway", connected: true, credential: "api-key" },
     ]);
   });
 
@@ -4075,7 +3896,7 @@ describe("EveTUIRunner boot setup detection", () => {
 
     expect(client.info).toHaveBeenCalledTimes(2);
     expect(detect.mock.calls.at(-1)?.[0].info).toBeUndefined();
-    expect(headers.at(-1)?.info).toBe(disconnectedGatewayInfo);
+    expect(headers.at(-1)?.info).toBeUndefined();
   });
 
   it("stays quiet without a local setup context, even with issues", async () => {
@@ -4563,4 +4384,32 @@ describe("EveTUIRunner command shutdown", () => {
     await expect(run).resolves.toBeUndefined();
     expect(renderer.requestInterrupt).toHaveBeenCalledOnce();
   });
+});
+
+it("starts onboarding with only login and preserves the input draft", async () => {
+  const order: string[] = [];
+  const handle = vi.fn(async (command: { name: string }) => {
+    order.push(command.name);
+    return { message: "Connected." };
+  });
+  const renderer = fakeRenderer({
+    setupFlow: createFakeSetupFlowRenderer(),
+    readPrompt: vi.fn(async (options?: AgentTUISessionOptions) => {
+      order.push("prompt");
+      expect(options?.initialDraft).toBe("Hello Alice");
+      return undefined;
+    }),
+  });
+  const runner = new EveTUIRunner({
+    session: sessionYielding([]),
+    renderer,
+    name: "Agent",
+    appRoot: "/tmp/agent",
+    onboard: true,
+    initialInput: "Hello Alice",
+    bootDetections: [],
+    promptCommandHandler: { handle },
+  });
+  await runner.run();
+  expect(order).toEqual(["login", "prompt"]);
 });

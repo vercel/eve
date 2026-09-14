@@ -23,7 +23,7 @@ export type ModelEditorScreen =
   | { kind: "menu"; cursor: ModelEditorRowId }
   | { kind: "model"; select: SelectState };
 
-/** The in-progress values; nothing lands in source until the menu's Done. */
+/** The in-progress values; a completed selection is applied immediately. */
 export interface ModelEditorDraft {
   modelId: string | null;
   reasoning: "default" | ReasoningLevel;
@@ -195,7 +195,6 @@ export function modelEditorMenuRows(
     rows.push({ value: "tier", label: "Service tier", disabled: true, description: tier.text });
   }
 
-  rows.push({ value: "done", label: "Done" });
   return rows;
 }
 
@@ -325,8 +324,7 @@ function transitionMenu(
       if (cursor === "done") {
         return { kind: "settle", result: settleResult(request, state.draft) };
       }
-      // Enter on an inline value confirms nothing new — it just walks on.
-      return transitionMenu(state, { type: "move", direction: "down" }, request, cursor);
+      return { kind: "settle", result: settleResult(request, state.draft) };
     }
     case "char":
     case "backspace":
@@ -364,22 +362,14 @@ function transitionModelScreen(
       if (value === undefined) return ignore(state);
       const capabilities = request.capabilitiesFor(value);
       return {
-        kind: "render",
-        state: {
-          screen: { kind: "menu", cursor: "model" },
-          draft: {
-            ...state.draft,
-            modelId: value,
-            // A level the new model cannot serve must not survive the pick.
-            reasoning: snapReasoningToCapabilities(state.draft.reasoning, capabilities),
-            // Nor a priority tier the new model prices no fast mode for — the
-            // hidden tier row would leave it drafted with no way to toggle it
-            // back, and it would leak into the settle result.
-            tier:
-              capabilities !== undefined && !capabilities.fastMode ? "standard" : state.draft.tier,
-          },
-          capabilities,
-        },
+        kind: "settle",
+        result: settleResult(request, {
+          ...state.draft,
+          modelId: value,
+          reasoning: snapReasoningToCapabilities(state.draft.reasoning, capabilities),
+          tier:
+            capabilities !== undefined && !capabilities.fastMode ? "standard" : state.draft.tier,
+        }),
       };
     }
     case "adjust":

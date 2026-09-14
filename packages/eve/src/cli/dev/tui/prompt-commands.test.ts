@@ -110,7 +110,11 @@ describe("parsePromptCommand", () => {
     expect(parsePromptCommand("/models")).toBeNull();
     expect(parsePromptCommand("/vercel")).toBeNull();
     expect(parsePromptCommand("/vc")).toBeNull();
-    expect(parsePromptCommand("/login")).toBeNull();
+    expect(parsePromptCommand("/login")).toEqual({
+      type: "extension",
+      name: "login",
+      argument: "",
+    });
     expect(parsePromptCommand("/vc:auth")).toBeNull();
     expect(parsePromptCommand("/channels")).toBeNull();
     expect(parsePromptCommand("tell me about /channels")).toBeNull();

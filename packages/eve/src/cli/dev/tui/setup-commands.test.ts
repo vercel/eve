@@ -188,6 +188,7 @@ describe("runTuiSetupCommand", () => {
     ).toEqual({
       "vc:install": "pulse",
       "vc:login": "pulse",
+      login: "pulse",
       model: "pulse",
       add: "pulse",
       deploy: "spinner",
@@ -204,7 +205,7 @@ describe("runTuiSetupCommand", () => {
     expect(flows.runModelFlow).toHaveBeenCalledWith(
       expect.objectContaining({
         appRoot: APP_ROOT,
-        deps: expect.objectContaining({ runProviderFlow: expect.any(Function) }),
+        deps: expect.objectContaining({ pickModelSettings: expect.any(Function) }),
       }),
     );
   });

@@ -40,7 +40,7 @@ type ModelProviderAccess =
   | {
       kind: "gateway";
       runtime:
-        | { status: "connected"; credential: "api-key" | "oidc" }
+        | { status: "connected"; credential: "api-key" | "oidc" | "oauth" }
         | { status: "disconnected" }
         | { status: "unknown" };
     };
@@ -146,8 +146,8 @@ const modelProvider: BootDetection = {
         return [
           {
             kind: "attention",
-            label: linked ? "AI Gateway credentials missing" : "model provider not linked",
-            command: "/model",
+            label: linked ? "AI Gateway credentials missing" : "connect a model",
+            command: "/login",
           },
         ];
       }
@@ -155,9 +155,9 @@ const modelProvider: BootDetection = {
 
     const linked = await pathExists(join(appRoot, ".vercel", "project.json"));
     if (linked) {
-      return [{ kind: "attention", label: "AI Gateway credentials missing", command: "/model" }];
+      return [{ kind: "attention", label: "AI Gateway credentials missing", command: "/login" }];
     }
-    return [{ kind: "attention", label: "model provider not linked", command: "/model" }];
+    return [{ kind: "attention", label: "connect a model", command: "/login" }];
   },
 };
 

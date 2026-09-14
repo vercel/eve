@@ -1,3 +1,4 @@
+import { parseModelHelper } from "#shared/model-helper.js";
 import { join } from "node:path";
 
 import { createCompiledRuntimeModelCatalogLoader } from "#compiler/model-catalog.js";
@@ -8,10 +9,7 @@ import type {
   AgentModelSetting,
   AgentModelSettingsPatch,
 } from "#source-change/apply-agent-model-settings.js";
-import {
-  CHATGPT_MODEL_SELECTION_PREFIX,
-  parseChatGptModelSelection,
-} from "#shared/chatgpt-model.js";
+import { CHATGPT_MODEL_SELECTION_PREFIX } from "#shared/chatgpt-model.js";
 import { createStaticSourceChange } from "#source-change/static-source-change.js";
 
 import pc from "#compiled/picocolors/index.js";
@@ -123,7 +121,7 @@ export async function changeAgentModel(input: {
 }
 
 export async function validateModelSlug(appRoot: string, slug: string): Promise<string | null> {
-  if (parseChatGptModelSelection(slug) !== undefined) return null;
+  if (parseModelHelper(slug) !== undefined) return null;
   if (slug.startsWith(CHATGPT_MODEL_SELECTION_PREFIX)) {
     return "Choose a bare OpenAI model id after `chatgpt/`.";
   }

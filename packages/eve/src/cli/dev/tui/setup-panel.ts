@@ -1,26 +1,7 @@
-/**
- * Pure rendering for the bordered setup flow panel — the input-region variant
- * a setup command runs inside for its whole duration (the Claude Code
- * `/model`-panel grammar): a full-width rule, the command as a blue title,
- * the flow's recent progress lines, and the active question (numbered option
- * rows or a text field) or the ephemeral status spinner. Behavior state comes
- * from the shared select reducer (`#setup/cli/select-state.js`); this module
- * only paints rows, so the renderer hosts lifecycle and keys while tests
- * assert on strings.
- *
- * Column grammar: the panel adds a one-space left margin to every row under
- * the rule, while each section contributes two more spaces. Titles, spinners,
- * notices, filter prompts, and option-state glyphs therefore all begin at
- * column 3.
- */
+/** Pure borderless setup menus. Interaction and terminal lifecycle belong to the renderer. */
 
 import type { ChannelSetupAction, PromptOption } from "#setup/cli/index.js";
-import {
-  renderOptionRow,
-  renderOptionRowContinuation,
-  renderCursorRow,
-  resolveOptionRowState,
-} from "#setup/cli/option-row.js";
+import { renderOptionRow, renderCursorRow, resolveOptionRowState } from "#setup/cli/option-row.js";
 import {
   filterOptions,
   submitRowIndex,
@@ -217,49 +198,19 @@ const RAILED_VIEW_SIZE = 5;
 /** The flow panel keeps only the freshest progress in view. */
 const FLOW_PANEL_LINE_CAP = 6;
 
-function questionFooter(hints: readonly string[], theme: Theme): string[] {
+function questionFooter(hints: readonly string[], theme: Theme, width?: number): string[] {
   const c = theme.colors;
-  return ["", `  ${c.dim(c.italic(hints.join(` ${theme.glyph.dot} `)))}`];
+  const text = hints.join(` ${theme.glyph.dot} `);
+  const lines = width === undefined ? [text] : wrapVisibleLine(text, Math.max(1, width - 3));
+  return ["", ...lines.map((line) => `  ${c.dim(line)}`)];
 }
 
 const BOLD_OR_DIM_CLOSE = "\x1b[22m";
 const DIM_OPEN = "\x1b[2m";
-const ANSI_FOREGROUND_COLOR = new RegExp(`${String.fromCharCode(27)}\\[(?:3[0-9]|9[0-7])m`, "g");
-const BLUE_OPEN = "\x1b[34m";
-const FOREGROUND_RESET = "\x1b[39m";
-
-/**
- * Dims a line that may carry embedded bold spans (e.g. a flow bolding a
- * project name inside a hint): SGR 22 closes bold AND dim together, so dim is
- * re-opened after each close or the line's tail would render full-bright.
- */
-function dimWithEmphasis(text: string, theme: Theme): string {
-  return theme.colors.dim(text.replaceAll(BOLD_OR_DIM_CLOSE, `${BOLD_OR_DIM_CLOSE}${DIM_OPEN}`));
-}
-
 /** Restores normal intensity for a span nested inside an otherwise dim hint. */
 function solidWithinDim(text: string, theme: Theme): string {
   if (!theme.color) return text;
   return `${BOLD_OR_DIM_CLOSE}${text}${DIM_OPEN}`;
-}
-
-/** A selected row must not inherit an authored hint color. */
-function foregroundWithEmphasis(text: string): string {
-  // Blue is the accent the selected row keeps (drafted values, adjust hints);
-  // every other authored color normalizes to the highlight's foreground, and a
-  // reset survives only when it closes a kept blue span.
-  let blueOpen = false;
-  return text.replaceAll(DIM_OPEN, "").replace(ANSI_FOREGROUND_COLOR, (code) => {
-    if (code === BLUE_OPEN) {
-      blueOpen = true;
-      return code;
-    }
-    if (code === FOREGROUND_RESET && blueOpen) {
-      blueOpen = false;
-      return code;
-    }
-    return "";
-  });
 }
 
 function toneGlyph(tone: FlowPanelLine["tone"], theme: Theme): string {
@@ -307,7 +258,7 @@ export function renderFlowPanel(state: FlowPanelState, theme: Theme, width: numb
   const c = theme.colors;
   // Avoid the terminal's final column: writing into it can trigger an implicit
   // wrap that the live-region row counter cannot observe, leaking old frames.
-  const rows: string[] = [c.dim(theme.glyph.hrule.repeat(Math.max(1, width - 1)))];
+  const rows: string[] = [];
   if (state.title.length > 0) {
     rows.push(`  ${c.bold(state.title)}`);
   }
@@ -360,9 +311,7 @@ export function renderFlowPanel(state: FlowPanelState, theme: Theme, width: numb
 
   // One breathable left margin for everything under the rule; blank rows
   // stay empty so spacing assertions and trailing-whitespace trims hold.
-  return rows.map((row, index) =>
-    index === 0 || row.length === 0 ? clip(row, width) : clip(` ${row}`, width),
-  );
+  return rows.map((row) => (row.length === 0 ? clip(row, width) : clip(` ${row}`, width)));
 }
 
 function optionRow(input: {
@@ -383,7 +332,7 @@ function optionRow(input: {
       pointer: theme.glyph.pointer,
       selectedPointer: theme.glyph.selectedPointer,
       success: theme.glyph.success,
-      placeholder: railed ? theme.glyph.caret : theme.glyph.option,
+      placeholder: theme.glyph.option,
       dot: railed ? "" : theme.glyph.dot,
       warning: theme.glyph.warning,
     },
@@ -458,7 +407,7 @@ function plannerStepRows(
     const complete = step.complete === true ? `${theme.glyph.success} ` : "";
     const text = `${complete}${step.label}${count}`;
     return index === navigation.activeStep
-      ? theme.colors.inverse(theme.colors.blue(theme.colors.bold(` ${text} `)))
+      ? theme.colors.bold(` ${text}`)
       : step.complete === true
         ? theme.colors.green(text)
         : theme.colors.dim(text);
@@ -498,9 +447,7 @@ function searchFilter(
   let input = caret;
   if (railed) {
     // The railed list's filter line: `▏ query▏`, or the dim placeholder.
-    input = `${caret} ${
-      filter.length > 0 ? filter + caret : theme.colors.dim(placeholder ?? "type to search")
-    }`;
+    input = filter.length > 0 ? filter + caret : theme.colors.dim(placeholder ?? "type to filter");
   } else if (filter.length > 0) {
     input = filter + caret;
   } else if (placeholder !== undefined) {
@@ -632,17 +579,6 @@ function inlineEditOption(
   }
 }
 
-function optionWithoutStackedHint(
-  option: SetupPanelOption,
-  layout: SelectLayout,
-): { option: SetupPanelOption; stackedHint: string | undefined } {
-  if (layout !== "stacked" || option.hint === undefined) {
-    return { option, stackedHint: undefined };
-  }
-  const { hint, ...rest } = option;
-  return { option: rest, stackedHint: hint };
-}
-
 function optionUsesPlaceholder(
   presentation: SelectPresentation,
   isTrailingTaskAction: boolean,
@@ -681,7 +617,6 @@ function appendSelectOptionRows(input: {
     width,
     theme,
   } = input;
-  const c = theme.colors;
   let renderedTrailingTaskAction = false;
 
   for (let index = start; index < end; index += 1) {
@@ -702,10 +637,14 @@ function appendSelectOptionRows(input: {
         ? Math.max(1, width - 6)
         : Math.max(1, width - Math.max(visibleLabelWidth, option.label.length) - 9);
     const rendered = inlineEditOption(option, isCursor, presentation.edit, theme, inlineHintWidth);
-    const { option: rowOption, stackedHint } = optionWithoutStackedHint(
-      rendered,
-      presentation.layout,
-    );
+    const editingKey = presentation.edit?.editor.kind === "key" && isCursor;
+    const rowOption = {
+      ...rendered,
+      hint: (
+        rendered.hint ?? (isCursor || option.disabled ? option.description : undefined)
+      )?.replace(/\s*\n\s*/gu, " "),
+    };
+    if (editingKey) rowOption.hint = undefined;
     const railed = isRailedSearch(presentation);
     // Railed lists carry the Enter affordance on the cursor row by default;
     // an explicit cursorBadge (the provider picker's `↵ change`) still wins.
@@ -727,29 +666,7 @@ function appendSelectOptionRows(input: {
       })}${badge}`,
     );
 
-    if (stackedHint !== undefined) {
-      const editRow = presentation.edit;
-      const isActiveProviderKey =
-        isCursor &&
-        editRow !== undefined &&
-        editRow.optionValue === option.value &&
-        editRow.editor.kind === "key" &&
-        editRow.editor.phase.kind !== "inactive";
-      for (const line of stackedHint.split("\n")) {
-        const renderedHint = !isCursor
-          ? dimWithEmphasis(line, theme)
-          : isActiveProviderKey
-            ? line
-            : foregroundWithEmphasis(line);
-        rows.push(`  ${renderOptionRowContinuation(renderedHint)}`);
-      }
-    }
-    // Disabled descriptions explain why an inert row cannot be selected, so
-    // keep them visible even though the cursor skips that row.
-    if (option.description !== undefined && (option.disabled === true || isCursor)) {
-      rows.push(`  ${renderOptionRowContinuation(c.dim(option.description))}`);
-    }
-    if (presentation.layout === "stacked" && index < end - 1) rows.push("");
+    if (editingKey && rendered.hint) rows.push(`     ${rendered.hint}`);
   }
   return renderedTrailingTaskAction;
 }
@@ -979,9 +896,10 @@ export function renderSelectQuestion(
   rows.push(
     ...questionFooter(
       railed
-        ? ["esc to cancel"]
+        ? ["Enter select", "Esc back"]
         : selectFooterHints(presentation, visible, cursor, plannerNavigation),
       theme,
+      width,
     ),
   );
   return rows.map((row) => clip(row, width));

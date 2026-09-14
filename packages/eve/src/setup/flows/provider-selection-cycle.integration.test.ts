@@ -1,108 +1,78 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it, vi } from "vitest";
-
+import { afterEach, expect, it, vi } from "vitest";
 import { createFakePrompter } from "#internal/testing/fake-prompter.js";
-import { DEFAULT_CHATGPT_MODEL_SELECTION } from "#shared/chatgpt-model.js";
-import { DEFAULT_AGENT_MODEL_ID } from "#shared/default-agent-model.js";
-import {
-  readProviderSelection,
-  writeProviderSelection,
-  type ProviderSelection,
-} from "#setup/provider-settings.js";
-
-import { runModelFlow, type CurrentAgentModel, type ModelFlowDeps } from "./model.js";
-import { runProviderFlow, type ProviderFlowDeps, type ProviderPickerChoice } from "./provider.js";
-
+const mocks = vi.hoisted(() => ({ secrets: new Map<string, string>(), defaults: vi.fn() }));
+vi.mock("#internal/model-auth/store.js", async (original) => ({
+  ...(await original<typeof import("#internal/model-auth/store.js")>()),
+  readModelSecret: async (name: string) => mocks.secrets.get(name),
+  writeModelSecret: async (name: string, key: string) => {
+    mocks.secrets.set(name, key);
+  },
+  writeDefaultConnection: mocks.defaults,
+}));
+vi.mock("#services/inspect-application.js", () => ({
+  inspectApplication: async () => ({
+    compiledState: {
+      manifest: {
+        config: { model: { id: "openai/gpt-5.6-luna-fast", routing: { kind: "gateway" } } },
+      },
+    },
+  }),
+}));
+vi.mock("./model-source-change.js", () => ({
+  changeAgentModel: async () => ({ kind: "changed" }),
+}));
+vi.mock("#internal/model-auth/available-models.js", () => ({
+  availableDirectModels: async () => ["gpt-5.6-luna-fast", "claude-sonnet-5"],
+  availableHelperModels: async () => ["gpt-5.6-luna-fast", "claude-sonnet-5"],
+}));
+vi.mock("#internal/model-auth/vercel.js", () => ({
+  resolveVercelSession: async () => ({
+    accessToken: "account-secret",
+    teamId: "team_alice",
+    teamName: "Alice",
+  }),
+  validateVercelAccess: async () => {},
+}));
+vi.mock("./vercel-model-login.js", () => ({ loginVercelModel: async () => {} }));
+vi.mock("./chatgpt-auth.js", () => ({ ensureChatGptAuth: async () => {} }));
+vi.mock("../boxes/select-model.js", () => ({
+  fetchGatewayCatalog: async () => [{ id: "openai/gpt-5.6-luna-fast", type: "language" }],
+}));
+vi.mock("#setup/validate-gateway-key.js", () => ({
+  validateGatewayApiKey: async () => ({ kind: "valid" }),
+}));
+import { runModelLogin } from "./model-login.js";
+import { readProviderSelection, readProviderTeamSync } from "#setup/provider-settings.js";
 const roots: string[] = [];
-
 afterEach(async () => {
+  vi.unstubAllEnvs();
+  mocks.secrets.clear();
+  vi.clearAllMocks();
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
-
-describe("provider selection", () => {
-  it("cycles among independently available providers", async () => {
-    const root = await mkdtemp(join(tmpdir(), "eve-provider-selection-"));
-    roots.push(root);
-    await writeFile(join(root, ".env.local"), "AI_GATEWAY_API_KEY=key\nVERCEL_OIDC_TOKEN=token\n");
-    await writeProviderSelection(root, "ai-gateway-project");
-
-    let currentModel: CurrentAgentModel = {
-      id: DEFAULT_AGENT_MODEL_ID,
-      routing: { kind: "gateway", target: "openai" },
-      reasoning: null,
-      serviceTier: { kind: "standard" },
-      editable: true,
-      settingsEditable: true,
-    };
-    const choices: ProviderPickerChoice[] = [
-      { kind: "chatgpt" },
-      { kind: "ai-gateway-project" },
-      { kind: "ai-gateway-key", key: "replacement-key", validation: { kind: "valid" } },
-      { kind: "ai-gateway-project" },
-    ];
-    const providerDeps: ProviderFlowDeps = {
-      getVercelAuthStatus: vi.fn<ProviderFlowDeps["getVercelAuthStatus"]>(
-        async () => "authenticated",
-      ),
-      runLinkFlow: vi.fn<ProviderFlowDeps["runLinkFlow"]>(async () => ({ kind: "done" })),
-      appendEnv: vi.fn<ProviderFlowDeps["appendEnv"]>(async () => ({
-        written: ["AI_GATEWAY_API_KEY"],
-        skipped: [],
-      })),
-      validateGatewayApiKey: vi.fn<ProviderFlowDeps["validateGatewayApiKey"]>(async () => ({
-        kind: "valid",
-      })),
-    };
-    const applySettings = vi.fn<ModelFlowDeps["applySettings"]>(async ({ patch }) => {
-      if (patch.model.kind !== "set") return { kind: "unchanged" };
-      const chatGpt = patch.model.value === DEFAULT_CHATGPT_MODEL_SELECTION;
-      currentModel = {
-        ...currentModel,
-        id: patch.model.value,
-        routing: chatGpt
-          ? { kind: "external", provider: "codex" }
-          : { kind: "gateway", target: patch.model.value.split("/")[0] ?? "" },
-      };
-      return { kind: "changed", changed: ["model"], model: patch.model.value };
+it("switches all five connections while keeping keys out of project files", async () => {
+  vi.stubEnv("EVE_DEV", "1");
+  for (const key of ["OPENAI_API_KEY", "ANTHROPIC_API_KEY", "AI_GATEWAY_API_KEY"])
+    vi.stubEnv(key, "");
+  const root = await mkdtemp(join(tmpdir(), "eve-model-login-"));
+  roots.push(root);
+  await writeFile(join(root, ".env.local"), "USER_SETTING=preserved\n");
+  for (const selected of ["chatgpt", "vercel", "ai-gateway-key", "openai", "anthropic"]) {
+    const fake = createFakePrompter({ single: () => selected, password: () => "entered-secret" });
+    expect(await runModelLogin({ appRoot: root, prompter: fake.prompter })).toEqual({
+      kind: "ready",
     });
-    const deps: Partial<ModelFlowDeps> = {
-      readCurrentModel: vi.fn(async () => currentModel),
-      applySettings,
-      selectModel: { fetchModels: async () => [] },
-      runProviderFlow: (input) =>
-        runProviderFlow({
-          ...input,
-          picker: async () => {
-            const choice = choices.shift();
-            if (choice === undefined) throw new Error("Provider choice script exhausted");
-            return choice;
-          },
-          deps: providerDeps,
-        }),
-      ensureChatGptAuth: vi.fn(async () => {}),
-    };
-
-    const selectNextProvider = async (expected: ProviderSelection): Promise<void> => {
-      const { prompter } = createFakePrompter({ single: () => "provider" });
-      await expect(runModelFlow({ appRoot: root, prompter, deps })).resolves.toMatchObject({
-        kind: "done",
-        providerSelection: expected,
-      });
-      await expect(readProviderSelection(root)).resolves.toBe(expected);
-    };
-
-    await selectNextProvider("chatgpt");
-    await selectNextProvider("ai-gateway-project");
-    await selectNextProvider("ai-gateway-key");
-    await selectNextProvider("ai-gateway-project");
-
-    expect(choices).toEqual([]);
-    expect(providerDeps.runLinkFlow).not.toHaveBeenCalled();
-    expect(providerDeps.getVercelAuthStatus).not.toHaveBeenCalled();
-    expect(providerDeps.appendEnv).toHaveBeenCalledOnce();
-    expect(deps.ensureChatGptAuth).toHaveBeenCalledOnce();
-    expect(applySettings).toHaveBeenCalledTimes(2);
-  });
+    expect(await readProviderSelection(root)).toBe(selected);
+    expect(mocks.defaults).toHaveBeenLastCalledWith(selected);
+    const metadata = await readFile(join(root, ".eve/provider.json"), "utf8");
+    expect(metadata).not.toContain("entered-secret");
+    expect(metadata).not.toContain("account-secret");
+    if (selected === "vercel") expect(readProviderTeamSync(root)?.teamId).toBe("team_alice");
+    else expect(readProviderTeamSync(root)).toBeUndefined();
+    expect(await readFile(join(root, ".env.local"), "utf8")).toBe("USER_SETTING=preserved\n");
+  }
+  expect(mocks.secrets.size).toBe(3);
 });

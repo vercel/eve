@@ -83,7 +83,8 @@ const modelEndpoint = z.union([
     .object({
       kind: z.literal("gateway"),
       connected: z.literal(true),
-      credential: z.enum(["api-key", "oidc"]),
+      credential: z.enum(["api-key", "oidc", "oauth"]),
+      team: z.optional(z.string()),
     })
     .strict(),
   z.object({ kind: z.literal("gateway"), connected: z.literal(false) }).strict(),

@@ -43,7 +43,7 @@ import {
   type EvePackageContract,
 } from "#setup/scaffold/create/project.js";
 
-import { initAgentDevHandoff, initAgentReplPrompt } from "./agent-instructions.js";
+import { initAgentDevHandoff } from "./agent-instructions.js";
 import {
   installProgressDetail,
   INSTALL_OUTPUT_FALLBACK_LINES,
@@ -66,8 +66,7 @@ import {
   type PreparedInitProject,
 } from "./init-project.js";
 import { cleanupFreshInitTarget, workspaceFailureNote } from "./init-recovery.js";
-import { selectInitSelfModification } from "./init-self-modification.js";
-import { selectInitHandoff, spawnCodingAgentRepl, type InitHandoff } from "./init-repl.js";
+import { hasInteractiveTerminal } from "./preconditions.js";
 import { resolveInitTarget } from "./init-target.js";
 
 export type { InitCliLogger, InitCommandOptions } from "./init-agent-workspace.js";
@@ -81,10 +80,7 @@ export interface InitCommandDependencies {
   now: () => number;
   runPackageManagerInstall: typeof runPackageManagerInstall;
   scaffoldBaseProject: typeof scaffoldBaseProject;
-  selectInitHandoff: typeof selectInitHandoff;
-  selectInitSelfModification: typeof selectInitSelfModification;
-  installSelfModification(appRoot: string): Promise<void>;
-  spawnCodingAgentRepl: typeof spawnCodingAgentRepl;
+  hasInteractiveTerminal: typeof hasInteractiveTerminal;
   spawnPackageManager: typeof spawnPackageManager;
   tryInitializeGit: typeof tryInitializeGit;
   validateModelSlug: typeof validateModelSlug;
@@ -99,13 +95,7 @@ const defaultDependencies: InitCommandDependencies = {
   now: () => performance.now(),
   runPackageManagerInstall,
   scaffoldBaseProject,
-  selectInitHandoff,
-  selectInitSelfModification,
-  installSelfModification: async (appRoot) => {
-    const { installRegistryItem } = await import("./registry.js");
-    await installRegistryItem(appRoot, "eve/self-modification", { silent: true, skipSetup: true });
-  },
-  spawnCodingAgentRepl,
+  hasInteractiveTerminal,
   spawnPackageManager,
   tryInitializeGit,
   validateModelSlug,
@@ -300,10 +290,7 @@ async function runInitSteps(input: {
   const debug = isLogLevelEnabled("debug");
   const initTarget = await resolveInitTarget({ parentDirectory, target });
   const evePackage = resolveInitEvePackageOverride();
-  const selfModificationEnabled =
-    !agentLaunched && options.agents === undefined
-      ? await dependencies.selectInitSelfModification()
-      : false;
+  const selfModificationEnabled = false;
 
   let progress = startCliLiveRow(logger);
   let activeInitStep: EveCliSetupStep = "scaffold";
@@ -475,13 +462,6 @@ async function runInitSteps(input: {
     }
     initLog.debug("dependencies installed", { ms: installElapsedMs });
 
-    if (selfModificationEnabled) {
-      activeInitStep = "registry_install";
-      trackStep?.(activeInitStep);
-      progress.update("Enabling self-modification");
-      await dependencies.installSelfModification(project.projectPath);
-    }
-
     if (project.kind === "created") {
       activeInitStep = "initialize_git";
       trackStep?.(activeInitStep);
@@ -615,37 +595,8 @@ export async function runInitCommand(
     return;
   }
 
-  let handoff: InitHandoff;
-  if (result.selfModificationEnabled) {
-    handoff = "eve-dev";
-  } else {
-    try {
-      handoff = await dependencies.selectInitHandoff({ agentName: basename(result.projectPath) });
-    } catch (error) {
-      if (error instanceof WizardCancelledError) return;
-      throw error;
-    }
-  }
-  if (handoff === "exit") return;
-  if (handoff !== "eve-dev") {
-    logger.log(pc.dim(`$ ${handoff}`));
-    if (
-      !(await dependencies.spawnCodingAgentRepl({
-        command: handoff,
-        cwd: result.projectPath,
-        prompt: initAgentReplPrompt({ devCommand: agentDevCommand }),
-        // A `.cmd`/`.bat` shim can't take the multi-line prompt on its command
-        // line, so print it for the user to paste once the REPL opens.
-        onPromptUnseeded: (prompt) => {
-          logger.log(
-            pc.yellow(`Could not seed ${handoff} automatically. Paste this prompt into it:`),
-          );
-          logger.log(prompt);
-        },
-      }))
-    ) {
-      throw new Error(`Coding-agent REPL exited unsuccessfully in "${result.projectPath}".`);
-    }
+  if (!dependencies.hasInteractiveTerminal()) {
+    logger.log(agentHandoff);
     return;
   }
 

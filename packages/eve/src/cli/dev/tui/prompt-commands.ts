@@ -1,4 +1,10 @@
-export type PromptCommandExtensionName = "model" | "add" | "deploy" | "vc:install" | "vc:login";
+export type PromptCommandExtensionName =
+  | "login"
+  | "model"
+  | "add"
+  | "deploy"
+  | "vc:install"
+  | "vc:login";
 
 type PromptCommandTarget = "local" | "remote";
 
@@ -111,9 +117,17 @@ const PROMPT_COMMAND_DEFINITIONS = [
     targets: ["local", "remote"],
   },
   {
+    name: "login",
+    aliases: [],
+    description: "Connect a model provider",
+    takesArgument: false,
+    build: () => ({ type: "extension", name: "login", argument: "" }),
+    targets: ["local"],
+  },
+  {
     name: "model",
     aliases: [],
-    description: "Configure the agent's model and provider",
+    description: "Choose a model and its settings",
     argumentHint: "[provider/model]",
     takesArgument: true,
     build: (argument) => ({ type: "extension", name: "model", argument }),
