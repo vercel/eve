@@ -768,13 +768,13 @@ describe("createAgentOtelInstrumentation", () => {
       "agent.principal.initiator.type": "none",
       "agent.run.id": "child-session",
       "agent.run.type": "subagent",
-      "agent.session.origin": "unknown",
       "agent.trace.content.input": true,
       "agent.trace.content.output": true,
       "gen_ai.conversation.id": "root-session",
       "gen_ai.operation.name": "invoke_agent",
     });
     expect(invocation.attributes).not.toHaveProperty("agent.schedule.id");
+    expect(invocation.attributes).not.toHaveProperty("agent.session.origin");
     expect(invocation.attributes).not.toHaveProperty("agent.session.title");
     expect(invocation.attributes).not.toHaveProperty("agent.principal.initiator.id");
     expect(invocation.attributes).not.toHaveProperty("agent.root_run.id");
@@ -782,23 +782,54 @@ describe("createAgentOtelInstrumentation", () => {
     expect(invocation.attributes).not.toHaveProperty("vercel.session_id");
   });
 
-  it("enriches activation metadata after early session preparation", async () => {
-    const runtime = createRuntime();
+  it("samples and exports preamble-prepared activation metadata consistently", async () => {
+    const store = new InMemoryAgentTraceStateStore();
+    const samplesTrace = vi.fn(() => true);
+    const runtime = createRuntime(
+      store,
+      () => ({ emit: true, recordInputs: true, recordOutputs: true }),
+      [],
+      samplesTrace,
+    );
+    const setSession = vi.spyOn(store, "setSession");
     const sessionId = "session-early";
     await runtime.prepareSessionTrace({
       agentName: "weather",
       channelAudience: "public",
+      channelKind: "http",
       idempotencyKey: sessionIdempotencyKey(sessionId),
       rootSessionId: sessionId,
+      scheduleId: "daily-report",
       sessionId,
+      title: "Prepared before sampling",
       type: "session.started",
     });
+    await runtime.prepareTurnTrace({
+      idempotencyKey: turnIdempotencyKey(sessionId, "turn-1"),
+      rootSessionId: sessionId,
+      sequence: 0,
+      sessionId,
+      turnId: "turn-1",
+      type: "turn.started",
+    });
+
+    expect(samplesTrace).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({
+        attributes: expect.objectContaining({
+          "agent.channel.kind": "http",
+          "agent.schedule.id": "daily-report",
+          "agent.session.origin": "schedule",
+          "agent.session.title": "Prepared before sampling",
+        }),
+      }),
+    );
 
     await publishTurnStarted({
       hooks: runtime.hooks,
       scheduleId: "daily-report",
       sessionId,
-      title: "Prepared after trace allocation",
+      title: "Prepared before sampling",
       turnId: "turn-1",
       turnSequence: 0,
     });
@@ -811,8 +842,9 @@ describe("createAgentOtelInstrumentation", () => {
       "agent.channel.kind": "http",
       "agent.schedule.id": "daily-report",
       "agent.session.origin": "schedule",
-      "agent.session.title": "Prepared after trace allocation",
+      "agent.session.title": "Prepared before sampling",
     });
+    expect(setSession).toHaveBeenCalledTimes(1);
   });
 
   it("falls back to fresh ids when no trace seed is present", async () => {

@@ -79,11 +79,11 @@ describe("agentActivationAttributes", () => {
       "agent.channel.audience": "private",
       "agent.channel.kind": "slack",
       "agent.run.type": "subagent",
-      "agent.session.origin": "unknown",
       "agent.trace.content.input": false,
       "agent.trace.content.output": true,
     });
     expect(attributes["agent.schedule.id"]).toBeUndefined();
+    expect(attributes["agent.session.origin"]).toBeUndefined();
     expect(attributes["agent.session.title"]).toBeUndefined();
   });
 });

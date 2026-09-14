@@ -21,13 +21,12 @@ export function agentActivationAttributes(input: {
   const isSubagent = parentLineage !== undefined;
   const channelKind = input.turn.channelDelivery?.channelKind ?? input.session?.channelKind;
   const scheduleId = isSubagent ? undefined : input.session?.scheduleId;
-  const origin = isSubagent
-    ? "unknown"
-    : scheduleId !== undefined
-      ? "schedule"
-      : channelKind !== undefined
-        ? "channel"
-        : "unknown";
+  const origin =
+    isSubagent || channelKind === undefined
+      ? undefined
+      : scheduleId !== undefined
+        ? "schedule"
+        : "channel";
   return {
     "agent.framework.name": "eve",
     "agent.framework.version": input.frameworkVersion,

@@ -238,11 +238,14 @@ export function bindInstrumentationRuntime(
       session: {
         agentName: boundSession.agentName,
         channelAudience: sessionContext.conversation.audience,
+        channelKind: sessionContext.conversation.channel.kind,
         channelType: sessionContext.instrumentation?.channelType,
         parentLineage: sessionContext.parentLineage,
         parentTraceContext: sessionContext.parentTraceContext,
         rootSessionId: sessionContext.parent?.rootSessionId ?? boundSession.rootSessionId,
+        scheduleId: sessionContext.scheduleId,
         sessionId: boundSession.sessionId,
+        title: sessionContext.title,
         traceSeed: sessionContext.traceSeed,
       },
     });

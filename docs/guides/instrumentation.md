@@ -204,14 +204,14 @@ activation roots carry `agent.parent_run.id` and `agent.parent_call.id`.
 Activation roots also carry `agent.run.type`, `agent.channel.kind`,
 `agent.channel.audience`, and directional `agent.trace.content.input` and
 `agent.trace.content.output` policy results. Root-session activations carry
-`agent.session.origin`, plus `agent.schedule.id` when a schedule started the
-session and `agent.session.title` when input capture permits. Subagent
-activations use `agent.session.origin=unknown` and omit the root-only schedule
-and title attributes; their delegation is described by `agent.run.type` and
-the parent attributes. `agent.run.type` is `session` or `subagent`;
-root-session origin is `schedule`, `channel`, or `unknown`; and each exported
-content-policy boolean reflects both the resolved trace capture decision and
-that destination's redaction policy.
+`agent.session.origin` (`schedule` or `channel`), plus `agent.schedule.id` when
+a schedule started the session and `agent.session.title` when input capture
+permits. The title repeats on every turn activation for that session and always
+describes the initial session input, not a later turn. Subagent activations omit
+the root-only origin, schedule, and title attributes; their delegation is
+described by `agent.run.type` and the parent attributes. `agent.run.type` is
+`session` or `subagent`; each exported content-policy boolean reflects both the
+resolved trace capture decision and that destination's redaction policy.
 Only activations use the `invoke_agent` operation. A workflow tool invocation
 that coordinates at least one nested agent uses `invoke_workflow`, with its
 path-derived tool name in `gen_ai.workflow.name`. Durable workflow tools without

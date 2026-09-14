@@ -272,7 +272,6 @@ function collectMessageText(message: unknown): string | undefined {
  * so its own `workflowRunId` already identifies the chain root.
  */
 export function buildSessionAttributes(input: {
-  readonly inputMessage: unknown;
   readonly serializedContext: Record<string, unknown>;
 }): Record<string, EveAttributeValue> {
   const isTraceContentVisible = isWorkflowTraceContentVisible(input.serializedContext);
@@ -285,8 +284,7 @@ export function buildSessionAttributes(input: {
     "$eve.trace_id": readSessionTraceId(input.serializedContext),
     "$eve.type": "session",
     "$eve.trigger": readChannelKind(input.serializedContext),
-    "$eve.title":
-      readSessionTitle(input.serializedContext) ?? deriveSessionTitle(input.inputMessage),
+    "$eve.title": readSessionTitle(input.serializedContext),
   };
 }
 

@@ -9,6 +9,8 @@ import {
   OtelTraceEnabledKey,
   ParentTraceContextKey,
   ParentSessionKey,
+  ScheduleIdKey,
+  SessionTitleKey,
   SessionTraceSeedKey,
 } from "#context/keys.js";
 import { setChannelContext } from "#execution/channel-context.js";
@@ -489,6 +491,45 @@ describe("bindInstrumentationRuntime", () => {
       expect(JSON.stringify(event)).not.toContain("@example.com");
     },
   );
+
+  it("prepares root activation metadata before turn sampling", async () => {
+    const ctx = createContext("public");
+    ctx.set(ScheduleIdKey, "daily-report");
+    ctx.set(SessionTitleKey, "Prepare the daily report");
+    const seed = {
+      spanId: "1".repeat(16),
+      traceFlags: 1,
+      traceId: "2".repeat(32),
+    };
+    const prepareSessionTrace = vi.fn().mockResolvedValue(seed);
+    const prepareTurnTrace = vi.fn().mockResolvedValue(seed);
+    const instrumentation = bindInstrumentationRuntime(
+      {
+        ...createRuntime({ capturesContent: true, publish: vi.fn() }),
+        prepareSessionTrace,
+        prepareTurnTrace,
+      },
+      ctx,
+      boundSession,
+    );
+
+    await instrumentation?.preparePreamble({
+      sequence: 0,
+      sessionStarted: false,
+      turnId: "turn-1",
+    });
+
+    expect(prepareSessionTrace).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channelKind: "channel:test",
+        scheduleId: "daily-report",
+        title: "Prepare the daily report",
+      }),
+    );
+    expect(prepareSessionTrace.mock.invocationCallOrder[0]).toBeLessThan(
+      prepareTurnTrace.mock.invocationCallOrder[0]!,
+    );
+  });
 
   it("keeps the step-entry audience for the rest of the step", async () => {
     const ctx = createContext("private");
