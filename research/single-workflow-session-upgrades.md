@@ -282,7 +282,7 @@ a deleted path, not to wrap the Workflow SDK generally.
 | Contract                                                               | Replaces                                                                                                           | Responsibility                                                                                                                                        |
 | ---------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `SessionExecution`: `runTurn(delivery) → TurnOutcome`                  | `turn-dispatch.ts`, `dispatch-turn-step.ts`, the inline/child split, turn-owned coordination in `turn-workflow.ts` | Own state mutation for a turn and return policy only. Run `turnStep`, service the inbox, coordinate waits, and settle locally.                        |
-| `SessionInbox`: `read() → lease` plus structural hook claims           | Turn-control hooks and `TurnControlReceiver`                                                                       | Merge claimed hooks into one bounded transport queue. A read lease owns consumption; `{ stable, aliases }` owns hook identity. No turn policy.        |
+| `SessionInbox`: `read() → lease` plus structural hook claims           | Turn-control hooks and `TurnControlReceiver`                                                                       | Merge claimed hooks into one transport queue. A read lease owns consumption; `{ stable, aliases }` owns hook identity. No turn policy.                |
 | `SessionInputQueue`: `enqueue(...)`, `takeNext(...) → selection`       | Public delivery/control arrays and in-memory dedupe                                                                | Keep one private ordered admitted-input queue. Selections preserve original admissions and source category; `SessionHandoff` decides eligibility.     |
 | `SessionStateCursor`: `apply(transition)`                              | Split raw state adoption and alias-aware adoption                                                                  | Be the only state-transition authority and claim every continuation alias before publishing the new context/state pair.                               |
 | `SessionHandoff`: `tryTransfer(selection, checkpoint) → typed outcome` | Public checkpoint/release/start/activate/recover staging                                                           | Execute transfer as one transaction. The triggering delivery travels beside the versioned checkpoint; all recovery stages stay private.               |
@@ -331,7 +331,8 @@ all earlier addresses remain valid. There is no rekey API or replacement claim.
 The checkpoint names the stable session inbox explicitly and carries continuation aliases separately.
 
 Each claimed hook has one continuously running iterator reader. Readers merge
-accepted payloads into a bounded queue while model and tool steps run. They
+accepted payloads into one queue while model and tool steps run and never
+pause on queue depth, so a cancel is never held behind unread input. They
 share the same payload contract, and failures wake the consumer. Authorization
 callbacks retain their separate eligibility window. Handoff releases the entire
 claim set and transfers accepted, unconsumed payloads with the exact tokens.
@@ -359,7 +360,7 @@ cancellation followed by new input, and clients following settlement races.
 
 ## Unified inbox and resume-first delivery
 
-`SessionInbox` owns the additive address set and one bounded queue. Commands,
+`SessionInbox` owns the additive address set and one merged queue. Commands,
 authorization callbacks, and workflow-tool messages share that transport.
 Authorization eligibility is a message-routing rule, not a second hook source.
 `TurnRouting` owns turn policy and cancellation, not another transport buffer.

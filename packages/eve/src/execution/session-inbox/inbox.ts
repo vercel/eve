@@ -107,13 +107,13 @@ export function createSessionInbox(sessionId: string): SessionInboxHandle {
       if (entry.read !== undefined && reads.includes(entry.read)) pending.delete(mode);
     notify();
   };
+  // The pump never waits on queue depth: interrupts share each hook's ordered
+  // stream, so any backpressure on ordinary payloads would also hold back the
+  // cancel behind them. Accepted payloads are already durable on the hook.
   const pump = async (source: Source): Promise<void> => {
     const iterator = source.hook[Symbol.asyncIterator]();
     try {
       while (!source.stopping) {
-        // Each source may additionally have one in-flight read.
-        while (queue.length >= 1024 && !source.stopping) await wait();
-        if (source.stopping) break;
         const result = await iterator.next();
         if (result.done) break;
         queue.push({ value: result.value });

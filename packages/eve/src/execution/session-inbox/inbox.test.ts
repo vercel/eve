@@ -157,6 +157,27 @@ describe("createSessionInbox", () => {
     expect(await inbox.release()).toEqual([]);
   });
 
+  it("keeps pumping so a cancel behind a burst of unread messages is still selectable", async () => {
+    const burst = Array.from({ length: 1500 }, (_, index) =>
+      Promise.resolve(resolved(send(`message ${String(index)}`))),
+    );
+    installHooks(
+      createMockHook({
+        token: "stable",
+        reads: [...burst, Promise.resolve(resolved({ kind: "cancel" }))],
+      }),
+    );
+    const inbox = createSessionInbox("session-1");
+    await inbox.claimSessionHook("stable");
+
+    await expect(readResult(inbox, "interrupt")).resolves.toEqual({
+      done: false,
+      value: { kind: "cancel" },
+    });
+    consumeLease(inbox, "interrupt");
+    expect(inbox.drain()).toHaveLength(1500);
+  });
+
   it("surfaces a failed reader instead of silently leaving the owner asleep", async () => {
     const read = createDeferred<IteratorResult<SessionInboxPayload>>();
     installHooks(createMockHook({ token: "stable", reads: [read.promise] }));
