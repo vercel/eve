@@ -379,7 +379,7 @@ defineChannel<{ ref: string | null }>({
 });
 ```
 
-At the next workflow boundary, the runtime adds the new address to the session's merged inbox. If another active session already owns the new token, the aliasing session fails instead of taking it over. Every address claimed by the session remains active, including across deployment handoffs, so senders can continue using an earlier token until the session ends or resets.
+At the next workflow boundary, the runtime adds the new address to the session's merged inbox. If another active session already owns the new token, the aliasing session fails instead of taking it over. Every address claimed by the session remains active until the session ends or resets. Sessions with continuation addresses remain on their current deployment until Workflow supports atomic ownership transfer.
 
 Tokens must be nonempty. A session supports up to 256 addresses, including its stable inbox; repeating an existing alias does not consume another address.
 

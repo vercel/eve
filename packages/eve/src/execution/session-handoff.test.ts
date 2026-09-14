@@ -25,8 +25,13 @@ afterEach(() => {
   isSessionIdleForHandoffStepMock.mockResolvedValue(true);
 });
 
-const HOOKS = {
+const ALIASED_HOOKS = {
   aliases: ["continuation-1", "continuation-2"],
+  stable: "custom-stable",
+} as const;
+
+const STABLE_HOOKS = {
+  aliases: [],
   stable: "custom-stable",
 } as const;
 
@@ -44,7 +49,7 @@ describe("SessionHandoff", () => {
       activationToken: "owner-1:handoff",
       checkpoint: expect.objectContaining({
         anchorToken: "session-1:anchor",
-        hooks: HOOKS,
+        hooks: STABLE_HOOKS,
         ownership: {
           anchorRunId: "anchor-1",
           deploymentId: "deployment-a",
@@ -103,6 +108,16 @@ describe("SessionHandoff", () => {
     expect(startSessionOwnerStepMock).not.toHaveBeenCalled();
   });
 
+  it("retains alias-bearing sessions without releasing their hooks", async () => {
+    const inbox = createInbox({ hookClaims: ALIASED_HOOKS });
+
+    await expect(
+      createHandoff(inbox).tryTransfer(selection("deployment-b"), snapshot()),
+    ).resolves.toEqual({ kind: "retained", reason: "aliases" });
+    expect(inbox.release).not.toHaveBeenCalled();
+    expect(startSessionOwnerStepMock).not.toHaveBeenCalled();
+  });
+
   it("keeps ownership and restores accepted payloads when activation fails", async () => {
     const inbox = createInbox();
     const payloads: SessionInboxPayload[] = [{ kind: "clear" }];
@@ -113,8 +128,8 @@ describe("SessionHandoff", () => {
       createHandoff(inbox).tryTransfer(selection("deployment-b"), snapshot()),
     ).resolves.toEqual({ kind: "retained", reason: "activation-failed" });
     expect(vi.mocked(inbox.claimSessionHook).mock.calls.map(([token]) => token)).toEqual([
-      HOOKS.stable,
-      ...HOOKS.aliases,
+      STABLE_HOOKS.stable,
+      ...STABLE_HOOKS.aliases,
     ]);
     expect(inbox.restore).toHaveBeenCalledWith(payloads);
   });
@@ -175,7 +190,7 @@ function snapshot(queue: { readonly pendingCount: number } = { pendingCount: 0 }
     queue,
     serializedContext: {},
     sessionState: {
-      continuationToken: "continuation-1",
+      continuationToken: "",
       sessionId: "session-1",
     } as DurableSessionState,
   };
@@ -197,13 +212,17 @@ function createHandoff(commandInbox: SessionInboxHandle): SessionHandoff {
 }
 
 function createInbox(
-  input: { pending?: boolean; released?: SessionInboxPayload[] } = {},
+  input: {
+    hookClaims?: SessionInboxHandle["hookClaims"];
+    pending?: boolean;
+    released?: SessionInboxPayload[];
+  } = {},
 ): SessionInboxHandle {
   return {
     claimSessionHook: vi.fn(async () => {}),
     dispose: vi.fn(async () => {}),
     drain: vi.fn(() => []),
-    hookClaims: HOOKS,
+    hookClaims: input.hookClaims ?? STABLE_HOOKS,
     hasPending: vi.fn(() => input.pending === true),
     hasReadyAuthorization: vi.fn(() => false),
     read: vi.fn(),

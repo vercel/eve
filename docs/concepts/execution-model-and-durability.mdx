@@ -23,7 +23,7 @@ replay unit.
 
 The Workflow SDK is not inherently tied to Vercel. In local development and in a self-deployed `eve start` process, eve uses the SDK's local world by default; that world persists workflow runs on disk under `.eve/.workflow-data` and dispatches through the same Nitro-hosted workflow routes. On Vercel, the same workflow code runs against Vercel Workflow instead, which adds deployment-aware routing and dashboard run metadata.
 
-When a Vercel production deployment changes, a new delivery to an idle session hands the session's settled state to the exact deployment that accepted the request. The session keeps its original ID and event stream, while the next model turn uses that deployment's current system-role instructions, model, and tools. Static user-role instructions stay pinned in the durable conversation history and are not seeded again. Identity-based channels such as Telegram private chats and Twilio phone-number conversations therefore adopt agent behavior updates without duplicating or rewriting their existing context.
+When a Vercel production deployment changes, a new ID-addressed delivery to an idle session hands the session's settled state to the exact deployment that accepted the request. The session keeps its original ID and event stream, while the next model turn uses that deployment's current system-role instructions, model, and tools. Static user-role instructions stay pinned in the durable conversation history and are not seeded again.
 
 eve does not move live work between deployments. A session with a running turn, pending human input or authorization, queued messages, or active tasks and subagents stays on its current deployment. After that work settles, a later delivery can move the idle session; the earlier deployment signal is not remembered.
 
@@ -125,11 +125,11 @@ the returned handle. That identity lookup does not block workflow resumption.
 ID-addressed delivery already knows the session ID and needs no hook metadata
 lookup. An ambiguous delivery failure does not trigger session creation.
 
-Deployment handoff currently has a brief interval between releasing and
-reclaiming the addresses. ID-addressed requests retry missing hooks within a
-bounded window. An alias-only request cannot distinguish that interval from an
-unowned address and may start a competing candidate. Continuous alias ownership
-requires an atomic handoff primitive from Workflow.
+Sessions with a channel continuation address stay on their current deployment.
+Moving those sessions safely requires an atomic handoff primitive that keeps
+every address continuously owned. ID-only sessions can hand off because their
+stable session address does not create a replacement session when temporarily
+unowned.
 
 When a session is waiting, a delivery through its ID or any claimed channel address wakes it and starts the next turn. Message sends default to `turnPolicy: "steer"`: while a turn is active, the session owner buffers the message and applies it after the current workflow step commits. The model call and tool work complete safely, and steering continues the same turn with the same turn ID. Before emitting the turn's completion events, the owner checks for steering accepted at that boundary.
 

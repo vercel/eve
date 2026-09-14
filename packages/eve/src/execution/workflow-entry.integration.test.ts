@@ -1193,7 +1193,6 @@ describe("workflowEntry integration", () => {
 
     it("hands an idle session to the accepting deployment and keeps the original stream", async () => {
       const runtime = await createTestRuntime({ agent: { name: "workflow-entry-handoff" } });
-      const continuationToken = "http:workflow-entry-handoff";
 
       await runtime.run(async () => {
         const anchor = await start(workflowEntry, [
@@ -1204,7 +1203,6 @@ describe("workflowEntry integration", () => {
             serializedContext: buildSerializedContext({
               acceptedDeploymentId: "dpl_a",
               channelKind: "http",
-              continuationToken,
               mode: "conversation",
             }),
           },
@@ -1219,9 +1217,9 @@ describe("workflowEntry integration", () => {
           expect((await stream.nextTurn()).at(-1)?.type).toBe("session.waiting");
 
           await expect(
-            workflowRuntime.dispatchContinuation({
+            workflowRuntime.dispatchSession({
               command: followUp("dpl_b", "hello from b", "delivery-b"),
-              continuationToken,
+              sessionId: anchor.runId,
             }),
           ).resolves.toMatchObject({ sessionId: anchor.runId, status: "accepted" });
 
@@ -1235,13 +1233,11 @@ describe("workflowEntry integration", () => {
             ),
           ).toBe(true);
 
-          // The stable inbox and the alias now belong to a successor run; the
-          // original run holds only its anchor (plus the SDK's abort-signal
-          // hook from its own earlier turn).
+          // The stable inbox now belongs to a successor run; the original run
+          // holds only its anchor (plus the SDK's abort-signal hook from its
+          // own earlier turn).
           const successor = await waitForCommandHookOwner(sessionCommandHookToken(anchor.runId));
           expect(successor.runId).not.toBe(anchor.runId);
-          const alias = await waitForCommandHookOwner(continuationToken);
-          expect(alias.runId).toBe(successor.runId);
           const anchorHooks = await world.hooks.list({ runId: anchor.runId });
           expect(
             anchorHooks.data
@@ -1277,6 +1273,59 @@ describe("workflowEntry integration", () => {
         } finally {
           stream.dispose();
           if (!completed) await anchor.cancel();
+        }
+      });
+    });
+
+    it("keeps an alias-bearing session on its owner and executes the accepted delivery", async () => {
+      const runtime = await createTestRuntime({ agent: { name: "workflow-entry-handoff-alias" } });
+      const continuationToken = "http:workflow-entry-handoff-alias";
+
+      await runtime.run(async () => {
+        const owner = await start(workflowEntry, [
+          {
+            kind: "initial",
+            ownerDeploymentId: "dpl_a",
+            input: { message: "hello from a" },
+            serializedContext: buildSerializedContext({
+              acceptedDeploymentId: "dpl_a",
+              channelKind: "http",
+              continuationToken,
+              mode: "conversation",
+            }),
+          },
+        ]);
+        const stream = captureTurnEvents(owner);
+        const workflowRuntime = createWorkflowRuntime({
+          compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
+        });
+        try {
+          expect((await stream.nextTurn()).at(-1)?.type).toBe("session.waiting");
+
+          await expect(
+            workflowRuntime.dispatchContinuation({
+              command: followUp("dpl_b", "hello from b", "delivery-b"),
+              continuationToken,
+            }),
+          ).resolves.toMatchObject({ sessionId: owner.runId, status: "accepted" });
+
+          const secondTurn = await stream.nextTurn();
+          expect(
+            secondTurn.some(
+              (event) =>
+                event.type === "message.completed" &&
+                event.data.message?.includes("hello from b") === true,
+            ),
+          ).toBe(true);
+          await expect(waitForCommandHookOwner(continuationToken)).resolves.toMatchObject({
+            runId: owner.runId,
+          });
+          await expect(
+            waitForCommandHookOwner(sessionCommandHookToken(owner.runId)),
+          ).resolves.toMatchObject({ runId: owner.runId });
+        } finally {
+          stream.dispose();
+          await owner.cancel();
         }
       });
     });

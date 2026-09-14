@@ -53,7 +53,7 @@ type SessionHandoffCheckpoint =
     }
   | {
       readonly kind: "skipped";
-      readonly reason: "same-deployment" | "missing-deployment" | "not-idle" | "busy";
+      readonly reason: "same-deployment" | "missing-deployment" | "aliases" | "not-idle" | "busy";
     };
 
 interface SessionHandoffCandidate {
@@ -173,6 +173,11 @@ export class SessionHandoff {
     if (targetDeploymentId === undefined) return { kind: "skipped", reason: "missing-deployment" };
     if (targetDeploymentId === ownership.deploymentId) {
       return { kind: "skipped", reason: "same-deployment" };
+    }
+    // Until Workflow supports atomic forced claims, releasing an alias lets a
+    // concurrent channel delivery create a replacement session in the gap.
+    if (commandInbox.hookClaims.aliases.length > 0) {
+      return { kind: "skipped", reason: "aliases" };
     }
     // Only a lone, callerless conversational message with nothing else queued
     // or in flight may move the session; anything else is work for this owner.
