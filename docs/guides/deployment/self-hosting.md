@@ -18,6 +18,8 @@ The build writes the Nitro server under `.output/`. `eve start` serves that outp
 
 Run this process under the same process manager or container platform you use for other Node web services. Configure Transport Layer Security (TLS), scaling, restarts, and log collection in that platform.
 
+`eve start` forwards the server's stdout and stderr throughout its lifetime. Once the server is ready, `eve start` releases its startup output buffer and stops retaining subsequent logs in memory.
+
 ## Configure model access and route auth
 
 Set `AI_GATEWAY_API_KEY` to use a string model ID through the Vercel AI Gateway from a non-Vercel host. To call a provider directly, install its [AI SDK provider package](https://ai-sdk.dev/docs/foundations/providers-and-models). Then pass its model object in `agent.ts` and set its API key. See [Agent configuration](../../agent-config#set-the-model) for examples.
