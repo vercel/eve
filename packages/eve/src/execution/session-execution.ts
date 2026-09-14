@@ -72,6 +72,7 @@ export class SessionExecution {
       queue,
     });
     let nextStepInput: TurnStepPayload | undefined = delivery;
+    let deferredRuntimeResults: RuntimeActionResultStepInput | undefined;
 
     while (true) {
       const beforeStepContext = cursor.serializedContext;
@@ -125,6 +126,16 @@ export class SessionExecution {
         pendingCallIds !== undefined &&
         (result.action === "park" || result.action === "dispatch-workflow-tasks")
       ) {
+        if (deferredRuntimeResults !== undefined) {
+          const steering = await control.takeSteering();
+          if (steering === undefined) {
+            nextStepInput = deferredRuntimeResults;
+            deferredRuntimeResults = undefined;
+          } else {
+            nextStepInput = steering;
+          }
+          continue;
+        }
         const dispatchResult = await dispatchCoordinationStep({
           action: result.action,
           callbackBaseUrl: resolveWorkflowCallbackBaseUrl(getWorkflowMetadata().url),
@@ -144,7 +155,15 @@ export class SessionExecution {
           pendingCallIds,
         });
         if (results === "cancelled") return await this.finishCancelledTurn();
-        nextStepInput = results;
+        const steering = await control.takeSteering();
+        if (steering === undefined) {
+          nextStepInput = results;
+        } else {
+          // Let the harness append accepted steering before resolving the
+          // blocking action, then resume with the result without redispatching.
+          deferredRuntimeResults = results;
+          nextStepInput = steering;
+        }
         continue;
       }
 

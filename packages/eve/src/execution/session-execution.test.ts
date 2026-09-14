@@ -129,6 +129,74 @@ describe("SessionExecution background task checkpoints", () => {
     expect(queue.pendingCount).toBe(1);
   });
 
+  it("applies steering accepted during a blocking action before its result continues the turn", async () => {
+    const sessionState = state("");
+    const steering: DeliverHookPayload = {
+      kind: "deliver",
+      payloads: [{ message: "Include Alice's update." }],
+    };
+    const actionResult = {
+      callId: "hold-call",
+      kind: "tool-result" as const,
+      output: { deployed: true },
+      toolName: "deploy",
+    };
+    const inbox: SessionInbox = {
+      claimSessionHook: vi.fn(),
+      drain: vi.fn().mockReturnValueOnce([steering]).mockReturnValue([]),
+      hookClaims: { aliases: [], stable: "parent-inbox" },
+      hasPending: vi.fn(() => false),
+      hasReadyAuthorization: vi.fn(() => false),
+      read: vi.fn(() => new Promise<never>(() => {})),
+      restore: vi.fn(),
+      setAuthorizationWindow: vi.fn(),
+    };
+    const execution = createExecution({ inbox, sessionState });
+    vi.mocked(turnStep)
+      .mockReset()
+      .mockResolvedValueOnce({
+        action: "park",
+        hasPendingAuthorization: false,
+        hasPendingInputBatch: false,
+        pendingCoordinationCallIds: ["hold-call"],
+        serializedContext: {},
+        sessionState,
+      })
+      .mockResolvedValueOnce({
+        action: "park",
+        hasPendingAuthorization: false,
+        hasPendingInputBatch: false,
+        pendingCoordinationCallIds: ["hold-call"],
+        serializedContext: {},
+        sessionState,
+      })
+      .mockResolvedValueOnce({
+        action: "done",
+        output: "done",
+        serializedContext: {},
+        sessionState,
+      });
+    vi.mocked(dispatchCoordinationStep)
+      .mockReset()
+      .mockResolvedValue({
+        pendingTasks: [],
+        results: [actionResult],
+        sessionState,
+      });
+
+    await expect(
+      execution.runTurn({ kind: "deliver", payloads: [{ message: "Start the work." }] }),
+    ).resolves.toMatchObject({ kind: "done", output: "done" });
+
+    expect(turnStep).toHaveBeenCalledTimes(3);
+    expect(vi.mocked(turnStep).mock.calls[1]?.[0].input).toEqual(steering);
+    expect(vi.mocked(turnStep).mock.calls[2]?.[0].input).toMatchObject({
+      kind: "runtime-action-result",
+      results: [actionResult],
+    });
+    expect(dispatchCoordinationStep).toHaveBeenCalledTimes(1);
+  });
+
   it("treats input that arrives after a settled turn as the next turn", async () => {
     const followUp: DeliverHookPayload = {
       kind: "deliver",
