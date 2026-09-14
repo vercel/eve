@@ -12,6 +12,8 @@ const use = {
   logicalPath: "connections/linear.ts",
 };
 
+const rfc7591Manifest = { $type: "https://datatracker.ietf.org/doc/html/rfc7591" };
+
 describe("createVercelConnectManifest", () => {
   it("omits an empty manifest", () => {
     expect(
@@ -27,7 +29,7 @@ describe("createVercelConnectManifest", () => {
         subjectTypes: ["user"],
         service: "linear",
         type: "oauth",
-        manifest: { $type: "https://datatracker.ietf.org/doc/html/rfc7591" },
+        manifest: rfc7591Manifest,
       },
       uses: [use],
     },
@@ -61,7 +63,7 @@ describe("createVercelConnectManifest", () => {
 });
 
 describe("buildVercelConnectRequirements", () => {
-  it.each(["app", "user"] as const)("emits a direct %s OAuth connection", (principalType) => {
+  it.each(["app", "user"] as const)("emits a direct %s OAuth connection", (subjectType) => {
     const manifest = {
       connections: [
         {
@@ -72,7 +74,7 @@ describe("buildVercelConnectRequirements", () => {
           vercelConnect: {
             connector: "connector:oauth/linear",
             connectorType: "oauth",
-            principalTypes: [principalType],
+            principalTypes: [subjectType],
           },
         },
       ],
@@ -82,15 +84,27 @@ describe("buildVercelConnectRequirements", () => {
     expect(buildVercelConnectRequirements(manifest)).toEqual([
       {
         target: "connector:oauth/linear",
-        connector: { type: "oauth" },
-        interface: { protocol: "mcp", url: "https://mcp.linear.app/mcp" },
-        access: { principalTypes: [principalType] },
+        interfaces: [{ protocol: "mcp", url: "https://mcp.linear.app/mcp" }],
+        connect: {
+          subjectTypes: [subjectType],
+          service: "linear",
+          type: "oauth",
+          manifest: rfc7591Manifest,
+        },
         uses: [use],
       },
     ]);
   });
 
-  it("emits a Slack requirement with its trigger route", () => {
+  it("embeds a Connect-managed Slack app manifest", () => {
+    const slackAppManifest = {
+      display_information: { name: "slack" },
+      oauth_config: { scopes: { bot: ["chat:write"] } },
+      settings: {
+        event_subscriptions: { bot_events: ["app_mention"] },
+        interactivity: { is_enabled: true },
+      },
+    } as const;
     const manifest = {
       connections: [],
       channelRoutes: {
@@ -99,8 +113,7 @@ describe("buildVercelConnectRequirements", () => {
             adapterKind: "slack",
             name: "slack",
             logicalPath: "channels/slack.ts",
-            method: "POST",
-            slackAppManifest: { display_information: { name: "slack" } },
+            slackAppManifest,
             urlPath: "/eve/v1/slack",
             vercelConnect: {
               connector: "connector:slack/my-agent",
@@ -115,22 +128,47 @@ describe("buildVercelConnectRequirements", () => {
     expect(buildVercelConnectRequirements(manifest)).toEqual([
       {
         target: "connector:slack/my-agent",
-        connector: { type: "slack" },
-        access: { principalTypes: ["app"] },
-        providerConfiguration: {
-          format: "slack-app-manifest",
-          path: "channels/slack.slack-app-manifest.json",
+        interfaces: [
+          {
+            protocol: "custom",
+            url: "https://docs.slack.dev/apis/web-api/",
+            npm: "@slack/web-api",
+          },
+        ],
+        connect: {
+          subjectTypes: ["app"],
+          service: "slack",
+          type: "slack",
+          manifest: {
+            $type: "https://docs.slack.dev/reference/app-manifest/",
+            display_information: { name: "slack" },
+            oauth_config: {
+              redirect_urls: ["https://connect.vercel.com/callback"],
+              scopes: { bot: ["chat:write"] },
+            },
+            settings: {
+              event_subscriptions: {
+                bot_events: ["app_mention"],
+                request_url: "https://connect.vercel.com/trigger?path=/eve/v1/slack",
+              },
+              interactivity: {
+                is_enabled: true,
+                request_url: "https://connect.vercel.com/trigger?path=/eve/v1/slack",
+              },
+            },
+          },
         },
-        trigger: { method: "POST", path: "/eve/v1/slack" },
         uses: [{ kind: "channel", name: "slack", logicalPath: "channels/slack.ts" }],
       },
     ]);
+    expect(slackAppManifest).not.toHaveProperty("$type");
+    expect(slackAppManifest.oauth_config).not.toHaveProperty("redirect_urls");
   });
 
   it.each([
     { adapterKind: "custom", slackAppManifest: { display_information: { name: "custom" } } },
     { adapterKind: "slack", slackAppManifest: undefined },
-  ])("does not reference a missing Slack app manifest", ({ adapterKind, slackAppManifest }) => {
+  ])("does not emit an incomplete Slack requirement", ({ adapterKind, slackAppManifest }) => {
     const manifest = {
       connections: [],
       channelRoutes: {
@@ -139,7 +177,6 @@ describe("buildVercelConnectRequirements", () => {
             adapterKind,
             name: "custom",
             logicalPath: "channels/custom.ts",
-            method: "POST",
             slackAppManifest,
             urlPath: "/custom",
             vercelConnect: {
@@ -152,15 +189,7 @@ describe("buildVercelConnectRequirements", () => {
       },
     } as const;
 
-    expect(buildVercelConnectRequirements(manifest)).toEqual([
-      {
-        target: "connector:slack/custom",
-        connector: { type: "slack" },
-        access: { principalTypes: ["app"] },
-        trigger: { method: "POST", path: "/custom" },
-        uses: [{ kind: "channel", name: "custom", logicalPath: "channels/custom.ts" }],
-      },
-    ]);
+    expect(buildVercelConnectRequirements(manifest)).toEqual([]);
   });
 
   it("ignores connections without Connect metadata", () => {
