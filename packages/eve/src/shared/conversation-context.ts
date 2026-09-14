@@ -4,6 +4,7 @@ import { normalizeInstrumentationChannelKind } from "#shared/instrumentation-cha
 import { isNonEmptyString } from "#shared/guards.js";
 import { normalizeChannelAudience, type ChannelAudience } from "#shared/channel-audience.js";
 import type { RunMode } from "#shared/run-mode.js";
+import type { ForwardedTraceAssertion } from "#shared/forwarded-trace-policy.js";
 
 export type ConversationEnvironment = "development" | "preview" | "production";
 
@@ -40,6 +41,41 @@ export const UNKNOWN_CONVERSATION_CONTEXT: ConversationContext = {
   mode: "conversation",
   principalType: "anonymous",
 };
+
+export interface ConversationContextFallback {
+  readonly channelKind?: string;
+  readonly environment: ConversationEnvironment;
+  readonly forwardedTracePolicy?: ForwardedTraceAssertion;
+  readonly mode?: RunMode;
+  readonly principalType?: string;
+}
+
+/**
+ * Reconstructs a durable conversation when its key predates the key itself.
+ * All callers must use this helper so legacy sessions resolve privacy fields
+ * from one source of truth.
+ */
+export function resolveConversationContext(
+  stored: ConversationContext | undefined,
+  fallback: ConversationContextFallback,
+  options: { readonly forwardedOverridesStored?: boolean } = {},
+): ConversationContext {
+  if (stored !== undefined) {
+    return !options.forwardedOverridesStored || fallback.forwardedTracePolicy === undefined
+      ? stored
+      : { ...stored, audience: fallback.forwardedTracePolicy.originAudience };
+  }
+  return {
+    ...UNKNOWN_CONVERSATION_CONTEXT,
+    audience: fallback.forwardedTracePolicy?.originAudience ?? "unknown",
+    channel: {
+      kind: normalizeInstrumentationChannelKind(fallback.channelKind),
+    },
+    environment: fallback.environment,
+    mode: fallback.mode ?? "conversation",
+    principalType: fallback.principalType ?? "anonymous",
+  };
+}
 
 interface SerializedConversationContext {
   readonly audience?: unknown;

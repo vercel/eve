@@ -62,7 +62,7 @@ export function applyLiveDeliveryAudienceCeiling(
   decision: InstrumentationDecision,
   liveAudience: ChannelAudience,
   forwardedTracePolicy: ForwardedTraceAssertion | undefined,
-  environment: InstrumentationContentContext["environment"] = "production",
+  environment: InstrumentationContentContext["environment"],
 ): InstrumentationDecision {
   return forwardedTracePolicy !== undefined &&
     (liveAudience === "unknown" || liveAudience === forwardedTracePolicy.originAudience)

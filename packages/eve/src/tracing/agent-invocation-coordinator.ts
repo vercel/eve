@@ -61,6 +61,7 @@ export function prepareAgentInvocationTrace(input: {
   const parentTurnContext = readTurnTraceContext(input.serializedContext, input.sessionId, turnId);
   const conversation = input.conversation;
   const liveAudience = conversation?.audience ?? "unknown";
+  const environment = conversation?.environment ?? "production";
   const outerTrace =
     (parentActionCallId === undefined
       ? undefined
@@ -77,7 +78,7 @@ export function prepareAgentInvocationTrace(input: {
           outerTrace.decision,
           liveAudience,
           outerTrace.forwardedTracePolicy,
-          conversation?.environment,
+          environment,
         );
   const serializedContext =
     parentActionCallId === undefined
@@ -121,7 +122,7 @@ export function prepareAgentInvocationTrace(input: {
             storedParentTraceContext.decision,
             liveAudience,
             forwardedTracePolicy,
-            conversation?.environment,
+            environment,
           ),
         };
   return {

@@ -97,6 +97,22 @@ describe("buildConversationContext", () => {
     expect(context).toMatchObject({ audience: "private", principalType: "user" });
   });
 
+  it("treats an explicit null route principal as unauthenticated", () => {
+    const context = buildConversationContext(
+      run({
+        adapter: {
+          kind: "http",
+          instrumentation: { audience: ({ auth }) => (auth === null ? "public" : "private") },
+        },
+        audienceAuth: null,
+        auth,
+      }),
+      "production",
+    );
+
+    expect(context).toMatchObject({ audience: "public", principalType: "anonymous" });
+  });
+
   it("inherits the parent audience for local subagents", () => {
     const context = buildConversationContext(
       run({

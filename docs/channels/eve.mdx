@@ -194,7 +194,7 @@ export default eveChannel({
 });
 ```
 
-The function receives the authenticated principal, channel, run mode, and deployment environment. Classification is fixed at session creation; a continuation turn from a different caller does not reclassify the session. A custom [trace policy](../guides/instrumentation-providers#control-inputs-and-outputs) can still admit or deny content independently.
+The function receives the authenticated principal, channel, run mode, and deployment environment. Classification is fixed at session creation; a continuation turn from a different caller does not reclassify the session. When another eve deployment forwards a request without an accepted forwarded trace assertion, the calling deployment's principal is used for classification, so the session remains `private`. A custom [trace policy](../guides/instrumentation-providers#control-inputs-and-outputs) can still admit or deny content independently.
 
 ## Customization
 

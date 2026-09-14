@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { ChannelAdapter } from "#channel/adapter.js";
 import { buildChannelInstrumentationProjection } from "#channel/instrumentation.js";
@@ -12,6 +12,10 @@ const audienceInput: AudienceInput<Record<string, unknown>> = {
   mode: "conversation",
   state: {},
 };
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 describe("channel instrumentation", () => {
   it("uses the registered path-derived channel name as the instrumentation kind", () => {
@@ -61,10 +65,42 @@ describe("channel instrumentation", () => {
     });
   });
 
+  it("uses deprecated metadata audience as the v19 compatibility fallback", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const adapter: ChannelAdapter = {
+      instrumentation: { metadata: () => ({ audience: "public", threadId: "thread-1" }) },
+      kind: "legacy-kind",
+      state: {},
+    };
+
+    expect(resolveAudience(adapter, audienceInput)).toBe("public");
+    expect(warn).toHaveBeenCalledExactlyOnceWith(
+      "channel legacy-kind uses deprecated metadata audience; move it to the audience() hook",
+    );
+    expect(buildChannelInstrumentationProjection({ adapter }).metadata).toEqual({
+      threadId: "thread-1",
+    });
+  });
+
+  it("prefers the audience hook over deprecated metadata audience", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const adapter: ChannelAdapter = {
+      instrumentation: {
+        audience: () => "private",
+        metadata: () => ({ audience: "public" }),
+      },
+      kind: "legacy-hook-wins",
+      state: {},
+    };
+
+    expect(resolveAudience(adapter, audienceInput)).toBe("private");
+    expect(warn).not.toHaveBeenCalled();
+  });
+
   it("ignores an asynchronous audience classifier", () => {
     const adapter: ChannelAdapter = {
       instrumentation: { audience: () => Promise.resolve("public") as never },
-      kind: "slack",
+      kind: "failing-classifier",
       state: {},
     };
 

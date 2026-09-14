@@ -164,29 +164,17 @@ describe("initializeSessionInstrumentation", () => {
   ] as const)(
     "applies the live %s delivery audience independently from a public origin",
     async (deliveryAudience, recordsContent) => {
-      const ctx = initializeRemoteSession(() => true);
-      ctx.set(ChannelInstrumentationKey, {
-        kind: "channel:test",
-        metadata: {},
-      });
-      ctx.set(ConversationContextKey, {
-        audience: deliveryAudience,
-        channel: { kind: "channel:test", name: "test" },
-        environment: "production",
-        mode: "conversation",
-        principalType: "anonymous",
-      });
+      const ctx = initializeRemoteSession(() => true, { liveAudience: deliveryAudience });
 
-      expect(
-        await readTelemetry(
-          bindSessionInstrumentation({
-            agentName: "remote-agent",
-            ctx,
-            rootSessionId: "session-1",
-            sessionId: "session-1",
-          }),
-        ),
-      ).toMatchObject({
+      const telemetry = await readTelemetry(
+        bindSessionInstrumentation({
+          agentName: "remote-agent",
+          ctx,
+          rootSessionId: "session-1",
+          sessionId: "session-1",
+        }),
+      );
+      expect(telemetry).toMatchObject({
         recordInputs: recordsContent,
         recordOutputs: recordsContent,
       });

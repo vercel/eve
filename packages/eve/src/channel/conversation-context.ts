@@ -2,13 +2,19 @@ import type { RunInput } from "#channel/types.js";
 import { resolveAudience } from "#channel/audience.js";
 import { buildChannelInstrumentationProjection } from "#channel/instrumentation.js";
 import { normalizeInstrumentationChannelKind } from "#shared/instrumentation-channel-kind.js";
-import type { ConversationContext, ConversationEnvironment } from "#shared/conversation-context.js";
+import {
+  resolveConversationContext,
+  type ConversationContext,
+  type ConversationEnvironment,
+} from "#shared/conversation-context.js";
+import { readForwardedTraceAssertion } from "#shared/forwarded-trace-policy.js";
 
 export function buildConversationContext(
   run: RunInput,
   environment: ConversationEnvironment,
 ): ConversationContext {
-  const auth = run.audienceAuth ?? run.auth;
+  const hasRouteAuth = Object.hasOwn(run, "audienceAuth");
+  const auth = hasRouteAuth ? (run.audienceAuth ?? null) : run.auth;
   const projection = buildChannelInstrumentationProjection({
     adapter: run.adapter,
     channelName: run.channelName,
@@ -17,10 +23,13 @@ export function buildConversationContext(
     kind: normalizeInstrumentationChannelKind(projection.kind),
     name: run.channelName,
   };
-  const originAudience = run.parentTraceContext?.forwardedTracePolicy?.originAudience;
+  const inherited = run.inheritedConversation;
+  const forwardedTracePolicy = readForwardedTraceAssertion(
+    run.parentTraceContext?.forwardedTracePolicy,
+  );
   const audience =
-    originAudience ??
-    run.inheritedConversation?.audience ??
+    forwardedTracePolicy?.originAudience ??
+    inherited?.audience ??
     resolveAudience(run.adapter, {
       state: run.adapter.state,
       auth,
@@ -30,10 +39,14 @@ export function buildConversationContext(
     });
 
   return {
+    ...resolveConversationContext(undefined, {
+      channelKind: projection.kind,
+      environment,
+      forwardedTracePolicy,
+      mode: run.mode,
+      principalType: auth?.principalType,
+    }),
     audience,
     channel,
-    environment,
-    mode: run.mode,
-    principalType: auth?.principalType ?? "anonymous",
   };
 }

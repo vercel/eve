@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { SessionAuthContext } from "#channel/types.js";
 import { ContextContainer } from "#context/container.js";
@@ -7,6 +7,7 @@ import {
   ChannelInstrumentationKey,
   InitiatorAuthKey,
   ParentSessionKey,
+  ModeKey,
 } from "#context/keys.js";
 import { readInstrumentationSessionContext } from "#instrumentation/session-context.js";
 import { ConversationContextKey } from "#shared/conversation-context.js";
@@ -37,6 +38,8 @@ function setConversation(context: ContextContainer, audience: "public" | "privat
 }
 
 describe("readInstrumentationSessionContext", () => {
+  afterEach(() => vi.unstubAllEnvs());
+
   it("keeps the initiator stable while the current principal changes", () => {
     const context = new ContextContainer();
     context.set(AuthKey, current);
@@ -89,6 +92,24 @@ describe("readInstrumentationSessionContext", () => {
     expect(readInstrumentationSessionContext(context).principals).toEqual({
       currentPrincipal: { type: "service" },
       initiatorPrincipal: { type: "user" },
+    });
+  });
+
+  it("resolves legacy sessions consistently in development", () => {
+    vi.stubEnv("EVE_DEV", "1");
+    const context = new ContextContainer();
+    context.set(ChannelInstrumentationKey, { kind: "channel:test", metadata: {} });
+    context.set(AuthKey, current);
+    context.set(ModeKey, "task");
+
+    const { conversation } = readInstrumentationSessionContext(context);
+
+    expect(conversation).toEqual({
+      audience: "unknown",
+      channel: { kind: "channel:test", name: undefined },
+      environment: "development",
+      mode: "task",
+      principalType: "service",
     });
   });
 });
