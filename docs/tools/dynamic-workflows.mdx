@@ -27,7 +27,7 @@ import { workflow } from "eve/tools/workflow";
 export default workflow({ maxSubagents: 20 });
 ```
 
-`maxSubagents` must be a positive integer. Parallel and sequential calls count toward the same per-program limit. A call over the limit fails with `WORKFLOW_SUBAGENT_LIMIT_REACHED` and does not start a child. Remove `agent/tools/workflow.ts` to remove the tool.
+`maxSubagents` must be an integer from `1` through `128`. Parallel and sequential calls count toward the same per-program limit. Each call over the limit fails with `WORKFLOW_SUBAGENT_LIMIT_REACHED` and does not start a child, including when a parallel batch contains multiple over-budget calls. A program may attempt at most `256` child calls in total; exceeding that sandbox safety limit fails the program. Remove `agent/tools/workflow.ts` to remove the tool.
 
 The `workflow` tool is available only in a root session and only when at least one subagent is visible for the current model step. Runtime subagent sessions do not receive it.
 

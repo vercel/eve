@@ -2,11 +2,11 @@ import { asSchema, jsonSchema, type ToolSet } from "ai";
 
 import {
   DEFAULT_DYNAMIC_WORKFLOW_MAX_SUBAGENTS,
+  DYNAMIC_WORKFLOW_BRIDGE_REQUEST_LIMIT,
   serializeDynamicWorkflowInput,
   type DynamicWorkflowAgent,
   type DynamicWorkflowInput,
 } from "#execution/dynamic-workflow/schema.js";
-import { dynamicWorkflowBridgeRequestLimit } from "#execution/dynamic-workflow/program-step.js";
 import type { HarnessToolMap } from "#harness/types.js";
 import { parseJsonObject } from "#shared/json.js";
 import {
@@ -110,7 +110,7 @@ async function buildDynamicWorkflowDescription(input: {
     } as ToolSet[string];
   }
   const generated = await createWorkflowSandboxTool({
-    bridgeRequestLimit: dynamicWorkflowBridgeRequestLimit(input.maxSubagents),
+    bridgeRequestLimit: DYNAMIC_WORKFLOW_BRIDGE_REQUEST_LIMIT,
     continuationSecurity: input.continuationSecurity,
     hostTools: hostTools as ToolSet,
   });

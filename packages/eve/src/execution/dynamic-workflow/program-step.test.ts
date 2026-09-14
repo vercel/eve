@@ -11,11 +11,9 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("#shared/workflow-sandbox.js", () => mocks);
 
+import { runDynamicWorkflowProgramStep } from "#execution/dynamic-workflow/program-step.js";
 import {
-  dynamicWorkflowBridgeRequestLimit,
-  runDynamicWorkflowProgramStep,
-} from "#execution/dynamic-workflow/program-step.js";
-import {
+  DYNAMIC_WORKFLOW_BRIDGE_REQUEST_LIMIT,
   DYNAMIC_WORKFLOW_CALL_INTERRUPT_KIND,
   readDynamicWorkflowCallInterrupt,
   type DynamicWorkflowInput,
@@ -58,7 +56,10 @@ describe("runDynamicWorkflowProgramStep", () => {
       status: "interrupted",
     });
     expect(mocks.createWorkflowSandboxTool).toHaveBeenCalledWith(
-      expect.objectContaining({ continuationSecurity: program.continuationSecurity }),
+      expect.objectContaining({
+        bridgeRequestLimit: DYNAMIC_WORKFLOW_BRIDGE_REQUEST_LIMIT,
+        continuationSecurity: program.continuationSecurity,
+      }),
     );
     expect(execute).toHaveBeenCalledWith({ js: program.js }, { toolCallId: "call" });
   });
@@ -77,6 +78,9 @@ describe("runDynamicWorkflowProgramStep", () => {
         resume: { interrupt, resolutions: [{ answer: 1 }] },
       }),
     ).resolves.toEqual({ output: { ok: true }, status: "completed" });
+    expect(mocks.continueWorkflowSandboxInterrupt).toHaveBeenCalledWith(
+      expect.objectContaining({ bridgeRequestLimit: DYNAMIC_WORKFLOW_BRIDGE_REQUEST_LIMIT }),
+    );
   });
 
   it("validates interrupt payloads", () => {
@@ -84,10 +88,5 @@ describe("runDynamicWorkflowProgramStep", () => {
     expect(() => readDynamicWorkflowCallInterrupt({ payload: { kind: "other" } } as never)).toThrow(
       'Unsupported workflow interrupt kind "other"',
     );
-  });
-
-  it("leaves room for a rejected over-budget call", () => {
-    expect(dynamicWorkflowBridgeRequestLimit(100)).toBe(256);
-    expect(dynamicWorkflowBridgeRequestLimit(256)).toBe(257);
   });
 });

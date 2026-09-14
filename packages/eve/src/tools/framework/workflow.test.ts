@@ -23,12 +23,14 @@ describe("framework workflow tool", () => {
     expect(() => normalizeToolDefinition(defaultWorkflow, "Invalid workflow.")).not.toThrow();
   });
 
-  it("configures the child-call budget", () => {
+  it("configures and bounds the child-call budget", () => {
     expect(readToolBehavior(workflow({ maxSubagents: 7 }))?.handling).toMatchObject({
       kind: "workflow-tool",
       maxSubagents: 7,
     });
-    expect(() => workflow({ maxSubagents: 0 })).toThrow("positive integer");
+    expect(() => workflow({ maxSubagents: 0 })).toThrow("between 1 and 128");
+    expect(() => workflow({ maxSubagents: 129 })).toThrow("between 1 and 128");
+    expect(() => workflow({ maxSubagents: Number.MAX_SAFE_INTEGER })).toThrow("between 1 and 128");
   });
 
   it("rejects an attached workflow id that differs from the executor", () => {

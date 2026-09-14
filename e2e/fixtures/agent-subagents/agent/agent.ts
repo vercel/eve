@@ -3,6 +3,7 @@ import { defineAgent, defineDynamic } from "eve";
 import { mockModel } from "eve/evals";
 
 import { WORKSPACE_FORWARDING_MARKER, WORKSPACE_LOOKUP_MESSAGE } from "../constants";
+import { SOFTWARE_FACTORY_EVAL_MARKER, softwareFactoryRootModel } from "./software-factory";
 
 if (process.env.EVE_E2E_MODEL === "mock") {
   process.env.EVE_MOCK_AUTHORED_MODELS = "1";
@@ -77,6 +78,12 @@ export default defineAgent({
               : message.content.map((part) => (part.type === "text" ? part.text : "")).join(""),
           ];
         });
+        if (
+          process.env.EVE_E2E_MODEL === "mock" &&
+          messages.some((message) => message.includes(SOFTWARE_FACTORY_EVAL_MARKER))
+        ) {
+          return { model: softwareFactoryRootModel, modelContextWindowTokens: 1_000_000 };
+        }
         // Both models must reach the real authorization boundary, including denied lookups.
         if (messages.includes(WORKSPACE_LOOKUP_MESSAGE)) {
           return { model: workspaceReader, modelContextWindowTokens: 1_000_000 };

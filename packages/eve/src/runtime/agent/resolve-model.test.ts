@@ -7,6 +7,8 @@ import { ContextContainer } from "#context/container.js";
 import { RuntimeModelMetadataCacheKey } from "#context/keys.js";
 import { deserializeContext, serializeContext } from "#context/serialize.js";
 import { defineDynamic } from "#dynamic/definition.js";
+import { mockModel } from "#evals/mock-model.js";
+import { defineAgent } from "#public/definitions/agent.js";
 import type { RuntimeModelCatalog } from "#runtime/agent/model-catalog.js";
 import {
   loadDynamicRuntimeModelDefinition,
@@ -45,6 +47,25 @@ describe("dynamic runtime model resolution", () => {
     if (typeof model === "string") throw new Error("expected a mock model instance");
     expect(model.provider).toBe("eve-runtime-mock");
     expect(model.modelId).toBe("eve-mock/dynamic-subagent");
+  });
+
+  it("prefers a source-backed authored mock over the source-free test seam", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("EVE_MOCK_AUTHORED_MODELS", "1");
+    const authored = mockModel({ modelId: "source-backed", respond: () => "authored" });
+    const moduleMap = createModuleMap({
+      default: defineAgent({
+        model: authored,
+        modelContextWindowTokens: 1_000,
+      }),
+    });
+
+    const resolved = await resolveRuntimeModelReference(
+      { id: "eve-mock/source-backed", source: DYNAMIC_MODEL_SOURCE },
+      { moduleMap, nodeId: undefined },
+    );
+
+    expect(resolved).toBe(authored);
   });
 
   it("loads resolver-only definitions and normalizes explicit metadata", async () => {

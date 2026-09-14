@@ -3,6 +3,8 @@ import { z } from "#compiled/zod/index.js";
 import { parseJsonObject, type JsonObject, type JsonValue } from "#shared/json.js";
 
 export const DEFAULT_DYNAMIC_WORKFLOW_MAX_SUBAGENTS = 100;
+export const MAX_DYNAMIC_WORKFLOW_MAX_SUBAGENTS = 128;
+export const DYNAMIC_WORKFLOW_BRIDGE_REQUEST_LIMIT = 256;
 export const DYNAMIC_WORKFLOW_CALL_INTERRUPT_KIND = "eve.dynamic-workflow-call";
 
 export interface DynamicWorkflowCallInterrupt {
@@ -60,8 +62,13 @@ export function parseDynamicWorkflowInput(value: unknown): DynamicWorkflowInput 
   if (typeof input.js !== "string") {
     throw new TypeError('workflow input requires a "js" string.');
   }
-  if (!isPositiveInteger(input.maxSubagents)) {
-    throw new TypeError('workflow input requires "maxSubagents" as a positive integer.');
+  if (
+    !isPositiveInteger(input.maxSubagents) ||
+    input.maxSubagents > MAX_DYNAMIC_WORKFLOW_MAX_SUBAGENTS
+  ) {
+    throw new TypeError(
+      `workflow input requires "maxSubagents" as an integer between 1 and ${String(MAX_DYNAMIC_WORKFLOW_MAX_SUBAGENTS)}.`,
+    );
   }
   if (!Array.isArray(input.agents)) {
     throw new TypeError('workflow input requires an "agents" array.');

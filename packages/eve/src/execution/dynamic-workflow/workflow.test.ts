@@ -64,17 +64,58 @@ describe("dynamicWorkflow", () => {
     );
   });
 
+  it("keeps parallel subagent calls in flight before resuming the program", async () => {
+    const secondPending = {
+      payload: {
+        kind: "eve.dynamic-workflow-call",
+        toolInput: { message: "two" },
+        toolName: "researcher",
+      },
+    } as never;
+    const first = Promise.withResolvers<unknown>();
+    const second = Promise.withResolvers<unknown>();
+    mocks.runDynamicWorkflowProgramStep
+      .mockResolvedValueOnce({
+        interrupt: pending,
+        pending: [pending, secondPending],
+        status: "interrupted",
+      })
+      .mockResolvedValueOnce({ output: ["one", "two"], status: "completed" });
+    mocks.invokeAgent.mockImplementation((_ctx, call: { readonly message: string }) =>
+      call.message === "one" ? first.promise : second.promise,
+    );
+
+    const result = dynamicWorkflow(input, ctx);
+    await vi.waitFor(() => expect(mocks.invokeAgent).toHaveBeenCalledTimes(2));
+    expect(mocks.runDynamicWorkflowProgramStep).toHaveBeenCalledTimes(1);
+    first.resolve("one");
+    await Promise.resolve();
+    expect(mocks.runDynamicWorkflowProgramStep).toHaveBeenCalledTimes(1);
+    second.resolve("two");
+
+    await expect(result).resolves.toEqual(["one", "two"]);
+    expect(mocks.runDynamicWorkflowProgramStep).toHaveBeenCalledTimes(2);
+  });
+
   it("returns a failed resolution for calls over the subagent budget", async () => {
     mocks.runDynamicWorkflowProgramStep
       .mockResolvedValueOnce({
         interrupt: pending,
-        pending: [pending, pending, pending],
+        pending: [pending, pending, pending, pending],
         status: "interrupted",
       })
-      .mockResolvedValueOnce({ output: ["one", "two", "limited"], status: "completed" });
+      .mockResolvedValueOnce({
+        output: ["one", "two", "limited", "limited"],
+        status: "completed",
+      });
     mocks.invokeAgent.mockResolvedValueOnce("one").mockResolvedValueOnce("two");
 
-    await expect(dynamicWorkflow(input, ctx)).resolves.toEqual(["one", "two", "limited"]);
+    await expect(dynamicWorkflow(input, ctx)).resolves.toEqual([
+      "one",
+      "two",
+      "limited",
+      "limited",
+    ]);
     expect(mocks.invokeAgent).toHaveBeenCalledTimes(2);
     expect(mocks.runDynamicWorkflowProgramStep).toHaveBeenLastCalledWith(
       expect.objectContaining({
@@ -83,6 +124,10 @@ describe("dynamicWorkflow", () => {
           resolutions: [
             { status: "completed", output: "one" },
             { status: "completed", output: "two" },
+            expect.objectContaining({
+              status: "failed",
+              error: expect.stringContaining("WORKFLOW_SUBAGENT_LIMIT_REACHED"),
+            }),
             expect.objectContaining({
               status: "failed",
               error: expect.stringContaining("WORKFLOW_SUBAGENT_LIMIT_REACHED"),

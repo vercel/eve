@@ -1,6 +1,7 @@
 import { jsonSchema, type ToolSet } from "ai";
 
 import {
+  DYNAMIC_WORKFLOW_BRIDGE_REQUEST_LIMIT,
   DYNAMIC_WORKFLOW_CALL_INTERRUPT_KIND,
   readDynamicWorkflowCallInterrupt,
   type DynamicWorkflowCallInterrupt,
@@ -42,7 +43,7 @@ export async function runDynamicWorkflowProgramStep(
 
   const tools = buildDynamicWorkflowProgramTools(input.program);
   const security = input.program.continuationSecurity as WorkflowSandboxContinuationSecurity;
-  const bridgeRequestLimit = dynamicWorkflowBridgeRequestLimit(input.program.maxSubagents);
+  const bridgeRequestLimit = DYNAMIC_WORKFLOW_BRIDGE_REQUEST_LIMIT;
   let raw: unknown;
   if (input.resume === undefined) {
     const tool = await createWorkflowSandboxTool({
@@ -88,10 +89,6 @@ export async function runDynamicWorkflowProgramStep(
   }
   for (const interrupt of pending) readDynamicWorkflowCallInterrupt(interrupt);
   return { interrupt: pending[0]!, pending, status: "interrupted" };
-}
-
-export function dynamicWorkflowBridgeRequestLimit(maxSubagents: number): number {
-  return Math.max(256, maxSubagents + 1);
 }
 
 function buildDynamicWorkflowProgramTools(program: DynamicWorkflowInput): ToolSet {

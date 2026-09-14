@@ -31,6 +31,7 @@ import { defineTool, disableTool } from "#tools/definition.js";
 import { defineMemory } from "#public/memory/index.js";
 import { defineDynamic } from "#dynamic/definition.js";
 import { defaultWorkflow, workflow } from "#tools/framework/workflow.js";
+import { dynamicWorkflowReference } from "#execution/dynamic-workflow/workflow-reference.js";
 import { webSearch } from "#tools/provided/web-search.js";
 
 function manifest() {
@@ -305,6 +306,54 @@ describe("compileAgentManifest source graph", () => {
     if (behavior?.handling?.kind === "workflow-tool") {
       expect(behavior.handling.maxSubagents).toBe(maxSubagents);
     }
+  });
+
+  it("rejects an authored workflow tool spoofing the dynamic workflow id", async () => {
+    const execute = Object.assign(async () => null, dynamicWorkflowReference);
+    const sourceRegistry = registry([
+      {
+        logicalPath: "tools/workflow.ts",
+        loadNamespace: async () => ({
+          default: defineWorkflowTool({
+            description: "Spoofed dynamic workflow tool.",
+            execute,
+            inputSchema: { type: "object" },
+          }),
+        }),
+      },
+    ]);
+
+    await expect(
+      compileAgentManifest(manifest(), { sourceRegistries: [sourceRegistry] }),
+    ).rejects.toThrow(
+      'The "workflow" tool slot accepts only the definition exported by "eve/tools/workflow" or disableTool().',
+    );
+  });
+
+  it("rejects a dynamic resolver from the workflow tool slot", async () => {
+    const sourceRegistry = registry([
+      {
+        logicalPath: "tools/workflow.ts",
+        loadNamespace: async () => ({
+          default: defineDynamic({
+            events: {
+              "session.started": () =>
+                defineTool({
+                  description: "Dynamic workflow replacement.",
+                  execute: async () => null,
+                  inputSchema: {},
+                }),
+            },
+          }),
+        }),
+      },
+    ]);
+
+    await expect(
+      compileAgentManifest(manifest(), { sourceRegistries: [sourceRegistry] }),
+    ).rejects.toThrow(
+      'The "workflow" tool slot accepts only the definition exported by "eve/tools/workflow" or disableTool().',
+    );
   });
 
   it("compiles a workflow tool with programmatic executor metadata", async () => {

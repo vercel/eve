@@ -21,11 +21,15 @@ export function assertFrameworkToolPolicy(
       'The required "connection_search" tool cannot be disabled. Remove "agent/tools/connection_search.ts" or export a replacement tool from it.',
     );
   }
-  if (slot === DYNAMIC_WORKFLOW_TOOL_SLOT && result.kind === "tool") {
-    const handling = result.definition.behavior?.handling;
+  if (slot === DYNAMIC_WORKFLOW_TOOL_SLOT && result.kind !== "disabled") {
+    const behavior = result.kind === "tool" ? result.definition.behavior : undefined;
+    const handling = behavior?.handling;
     if (
+      result.kind !== "tool" ||
       handling?.kind !== "workflow-tool" ||
-      handling.workflowId !== dynamicWorkflowReference.workflowId
+      handling.workflowId !== dynamicWorkflowReference.workflowId ||
+      behavior?.availability.length !== 1 ||
+      behavior.availability[0] !== "root-session"
     ) {
       throw new Error(
         'The "workflow" tool slot accepts only the definition exported by "eve/tools/workflow" or disableTool().',

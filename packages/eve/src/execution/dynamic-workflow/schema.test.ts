@@ -28,6 +28,11 @@ describe("dynamic workflow schema", () => {
   it.each([
     [{ ...serializeDynamicWorkflowInput(input), js: 1 }, 'requires a "js" string'],
     [{ ...serializeDynamicWorkflowInput(input), maxSubagents: 0 }, 'requires "maxSubagents"'],
+    [{ ...serializeDynamicWorkflowInput(input), maxSubagents: 129 }, "between 1 and 128"],
+    [
+      { ...serializeDynamicWorkflowInput(input), maxSubagents: Number.MAX_SAFE_INTEGER },
+      "between 1 and 128",
+    ],
     [{ ...serializeDynamicWorkflowInput(input), agents: {} }, 'requires an "agents" array'],
   ])("rejects malformed input", (value, message) => {
     expect(() => parseDynamicWorkflowInput(value)).toThrow(message);
