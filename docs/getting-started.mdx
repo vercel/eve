@@ -158,11 +158,7 @@ Prefer the nested layout because it keeps application files separate from the au
 
 Run `eve info` when eve does not discover a file. It lists the discovered surface and diagnostics so you can check the authored slot and root-versus-subagent boundary. eve also writes inspectable artifacts under `.eve/`; see [Observability](./guides/instrumentation) and the [CLI](./reference/cli) reference.
 
-## When to use multiple root agents
-
-Start with one root agent. Use a [declared subagent](./subagents) when one agent needs to delegate specialized work with a different prompt, tool surface, or sandbox.
-
-Use a multi-agent project only when agents need separate public endpoints, channels, schedules, deployments, or ownership boundaries. See [Multi-Agent Projects](./multi-agent-projects) to create a workspace or add another root agent.
+For several independently addressed agents in one project, see [Multiple Root Agents](./getting-started/multiple-root-agents).
 
 ## Install manually
 
@@ -186,6 +182,7 @@ After the tutorial, continue with the task you need:
 | Connect the agent to an external MCP or OpenAPI service            | [Connections](/docs/connections)                                                                                 |
 | Communicate with users through Slack, Discord, or another platform | [Channels](/docs/channels/overview)                                                                              |
 | Build a browser interface                                          | [Add a Web App](/docs/guides/frontend/add-a-web-app), then [Frontend Frameworks](/docs/guides/frontend/overview) |
+| Organize several independently addressed root agents               | [Multiple Root Agents](/docs/getting-started/multiple-root-agents)                                               |
 | Test agent behavior                                                | [Evals](/docs/evals/overview)                                                                                    |
 | Secure and deploy the agent                                        | [Authentication](/docs/guides/auth-and-route-protection), then [Deployment](/docs/guides/deployment/overview)    |
 

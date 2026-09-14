@@ -72,6 +72,7 @@ export const docsRedirects: DocsRedirect[] = [
   ...createDocsRedirects("/advanced/evals", "/evals/overview"),
   ...createDocsRedirects("/getting-started/installation", "/getting-started"),
   ...createDocsRedirects("/getting-started/project-structure", "/getting-started"),
+  ...createDocsRedirects("/multi-agent-projects", "/getting-started/multiple-root-agents"),
   ...createDocsRedirects("/getting-started/first-agent", "/tutorial/first-agent"),
 ];
 

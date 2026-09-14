@@ -1,0 +1,69 @@
+---
+title: "Multiple Root Agents"
+description: "Organize independently addressed eve agents in one project."
+---
+
+Most projects need one root agent. Add another root agent when it needs its own public endpoint, channels, schedules, or ownership boundary. For specialized work delegated by one root agent, use [declared subagents](../subagents) instead.
+
+## Choose the agent boundary
+
+| Need                                                                                          | Use                                                       |
+| --------------------------------------------------------------------------------------------- | --------------------------------------------------------- |
+| A specialist with a different prompt, tool surface, or sandbox that a root agent delegates to | A declared subagent under `agent/subagents/`              |
+| One public agent with several tools, skills, channels, or subagents                           | One root agent                                            |
+| Agents independently addressed through their own endpoints, channels, or schedules            | Multiple root agents                                      |
+| An agent owned or released independently                                                      | A separate root agent, in this project or another project |
+
+A root agent has its own HTTP surface and lifecycle. A declared subagent is a tool of its parent agent and is not independently addressed by users or channels. See [Subagents](../subagents) for delegation and [Remote Agents](../guides/remote-agents) when a subagent runs in another deployment.
+
+## Create a project with multiple root agents
+
+Pass comma-separated agent names to `eve init`:
+
+```bash
+eve init operations --agents support,research
+```
+
+This creates an agent workspace with one root package and one agent directory for each name:
+
+```text
+operations/
+├── package.json
+├── tsconfig.json
+└── agents/
+    ├── support/
+    │   └── agent/
+    │       ├── agent.ts
+    │       ├── instructions.md
+    │       └── channels/
+    └── research/
+        └── agent/
+            ├── agent.ts
+            ├── instructions.md
+            └── channels/
+```
+
+Workspace members share the root package, dependencies, and build scripts. An `agents/<name>/` directory with its own `package.json` is a separate package, not a workspace member. Each member uses the same [agent directory layout](../#agent-directory-layout) as a standalone root agent.
+
+## Add another root agent
+
+Run `eve init <name>` from the workspace root:
+
+```bash
+cd operations
+eve init billing
+```
+
+The command adds `agents/billing/agent/`. Run an agent-scoped command from that member directory, or select it from the workspace root with `--agent`:
+
+```bash
+eve info --agent billing
+```
+
+Interactive agent-scoped commands offer a picker when a workspace has several agents and you do not name one.
+
+## Continue configuring the project
+
+- [Deploy to Vercel](../guides/deployment/vercel): deploy workspace agents as Vercel services and configure their public routes.
+- [Add a Web App](../guides/frontend/add-a-web-app): put one or more root agents behind a browser application.
+- [Subagents](../subagents#vercel-workspace-peers): let one Vercel workspace agent delegate work to another.
