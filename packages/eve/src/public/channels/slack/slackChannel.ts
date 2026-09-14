@@ -10,6 +10,7 @@ import { defaultDeliverResult } from "#channel/adapter.js";
 import type { Session, SessionHandle } from "#channel/session.js";
 import { setChannelActivityRenderers } from "#channel/compiled-channel.js";
 import type { SessionAuthContext, TurnPolicy } from "#channel/types.js";
+import type { VercelConnectMetadata } from "#shared/vercel-connect-metadata.js";
 import type { CardElement } from "#compiled/chat/index.js";
 import type { SessionContext } from "#public/definitions/callback-context.js";
 import type { ChannelContinuationOps } from "#public/definitions/channel.js";
@@ -300,6 +301,8 @@ export interface SlackChannelCredentials {
    * integrations (e.g. Connect) that authenticate webhooks out-of-band.
    */
   readonly webhookVerifier?: SlackWebhookVerifier;
+  /** Build-time metadata supplied by Vercel Connect credential helpers. */
+  readonly vercelConnect?: VercelConnectMetadata;
 }
 
 /** Target accepted by `ctx.to(slack, target)` from route and schedule handlers. */
