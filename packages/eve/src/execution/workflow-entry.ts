@@ -612,6 +612,7 @@ async function runSessionLoop(
           continue;
         case "turn": {
           const transfer = await handoff.tryTransfer(next, {
+            queue,
             serializedContext: cursor.serializedContext,
             sessionState: cursor.sessionState,
           });

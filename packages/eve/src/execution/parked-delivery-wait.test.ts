@@ -167,14 +167,13 @@ describe("nextTurnDelivery", () => {
       },
       provenance: {
         admissions: [{ delivery: first }, { delivery: second }],
-        handoffEligible: false,
         source: "conversation",
       },
     });
     expect(input.queue.pendingCount).toBe(0);
   });
 
-  it("marks only a sole callerless conversation delivery as handoff eligible", async () => {
+  it("reports a sole conversation delivery with its single admission", async () => {
     const delivery: DeliverHookPayload = {
       kind: "deliver",
       payloads: [{ message: "continue on the accepting deployment" }],
@@ -184,11 +183,7 @@ describe("nextTurnDelivery", () => {
     await expect(nextTurnDelivery(input)).resolves.toMatchObject({
       delivery,
       kind: "turn",
-      provenance: {
-        admissions: [{ delivery, sequence: 0 }],
-        handoffEligible: true,
-        source: "conversation",
-      },
+      provenance: { admissions: [{ delivery, sequence: 0 }], source: "conversation" },
     });
   });
 

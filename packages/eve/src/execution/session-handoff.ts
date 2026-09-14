@@ -4,7 +4,7 @@ import type { DeliverHookPayload, SessionCapabilities } from "#channel/types.js"
 import { readAcceptedDeploymentId } from "#execution/accepted-delivery-deployment.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import { claimHookOwnership, disposeHook } from "#execution/hook-ownership.js";
-import type { TurnSelection } from "#execution/session-input-queue.js";
+import type { SessionInputQueue, TurnSelection } from "#execution/session-input-queue.js";
 import { isSessionIdleForHandoffStep } from "#execution/session-handoff-eligibility-step.js";
 import {
   claimSessionHooks,
@@ -70,7 +70,9 @@ export type SessionOwnerActivation =
     };
 
 /** Settled session facts the owner supplies when it considers a handoff. */
+/** The owner's committed state plus whatever input it still holds. */
 export interface SessionHandoffSnapshot {
+  readonly queue: Pick<SessionInputQueue, "pendingCount">;
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
 }
@@ -166,15 +168,20 @@ export class SessionHandoff {
     snapshot: SessionHandoffSnapshot,
   ): Promise<SessionHandoffCheckpoint> {
     const { commandInbox, mode, ownership } = this.input;
-    const { delivery } = selection;
+    const { delivery, provenance } = selection;
     const targetDeploymentId = readAcceptedDeploymentId(delivery);
     if (targetDeploymentId === undefined) return { kind: "skipped", reason: "missing-deployment" };
     if (targetDeploymentId === ownership.deploymentId) {
       return { kind: "skipped", reason: "same-deployment" };
     }
+    // Only a lone, callerless conversational message with nothing else queued
+    // or in flight may move the session; anything else is work for this owner.
     if (
       mode !== "conversation" ||
-      !selection.provenance.handoffEligible ||
+      provenance.source !== "conversation" ||
+      provenance.admissions.length !== 1 ||
+      delivery.caller !== undefined ||
+      snapshot.queue.pendingCount > 0 ||
       commandInbox.hasPending()
     ) {
       return { kind: "skipped", reason: "busy" };

@@ -26,7 +26,6 @@ type QueuedSessionInput = QueuedDelivery | QueuedControl;
 
 export interface TurnInputProvenance {
   readonly admissions: readonly DeliveryAdmission[];
-  readonly handoffEligible: boolean;
   readonly source: "conversation" | "task";
 }
 
@@ -88,7 +87,7 @@ export class SessionInputQueue {
     return {
       delivery: combine(steering),
       kind: "turn",
-      provenance: { admissions, handoffEligible: false, source: "conversation" },
+      provenance: { admissions, source: "conversation" },
     };
   }
 
@@ -198,15 +197,7 @@ export class SessionInputQueue {
     return {
       delivery: combine(turnEntries),
       kind: "turn",
-      provenance: {
-        admissions,
-        handoffEligible:
-          source === "conversation" &&
-          admissions.length === 1 &&
-          admissions[0]!.delivery.caller === undefined &&
-          this.entries.length === 0,
-        source,
-      },
+      provenance: { admissions, source },
     };
   }
 

@@ -60,17 +60,46 @@ describe("SessionHandoff", () => {
   });
 
   it.each([
-    ["same-deployment", "deployment-a", true],
-    ["missing-deployment", "latest", true],
-    ["busy", "deployment-b", false],
-  ] as const)("retains ownership for %s", async (reason, deployment, eligible) => {
+    ["same-deployment", "deployment-a", 0],
+    ["missing-deployment", "latest", 0],
+    ["busy", "deployment-b", 1],
+  ] as const)("retains ownership for %s", async (reason, deployment, pendingCount) => {
     const handoff = createHandoff(createInbox());
-    await expect(handoff.tryTransfer(selection(deployment, eligible), snapshot())).resolves.toEqual(
-      {
-        kind: "retained",
-        reason,
+    await expect(
+      handoff.tryTransfer(selection(deployment), snapshot({ pendingCount })),
+    ).resolves.toEqual({ kind: "retained", reason });
+    expect(startSessionOwnerStepMock).not.toHaveBeenCalled();
+  });
+
+  it("retains ownership when the selection carries a delegated caller or several admissions", async () => {
+    const handoff = createHandoff(createInbox());
+    const solo = selection("deployment-b");
+    const withCaller: TurnSelection = {
+      ...solo,
+      delivery: {
+        ...solo.delivery,
+        caller: {
+          callId: "call-1",
+          replyTo: { kind: "hook", token: "reply-1" },
+          subagentName: "helper",
+        },
       },
-    );
+    };
+    const batched: TurnSelection = {
+      ...solo,
+      provenance: {
+        ...solo.provenance,
+        admissions: [...solo.provenance.admissions, ...solo.provenance.admissions],
+      },
+    };
+    await expect(handoff.tryTransfer(withCaller, snapshot())).resolves.toEqual({
+      kind: "retained",
+      reason: "busy",
+    });
+    await expect(handoff.tryTransfer(batched, snapshot())).resolves.toEqual({
+      kind: "retained",
+      reason: "busy",
+    });
     expect(startSessionOwnerStepMock).not.toHaveBeenCalled();
   });
 
@@ -132,21 +161,18 @@ function delivery(acceptedDeploymentId: string): DeliverHookPayload {
   };
 }
 
-function selection(acceptedDeploymentId: string, handoffEligible = true): TurnSelection {
+function selection(acceptedDeploymentId: string): TurnSelection {
   const selected = delivery(acceptedDeploymentId);
   return {
     delivery: selected,
     kind: "turn",
-    provenance: {
-      admissions: [{ delivery: selected, sequence: 0 }],
-      handoffEligible,
-      source: "conversation",
-    },
+    provenance: { admissions: [{ delivery: selected, sequence: 0 }], source: "conversation" },
   };
 }
 
-function snapshot() {
+function snapshot(queue: { readonly pendingCount: number } = { pendingCount: 0 }) {
   return {
+    queue,
     serializedContext: {},
     sessionState: {
       continuationToken: "continuation-1",
