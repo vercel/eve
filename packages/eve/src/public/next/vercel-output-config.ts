@@ -36,6 +36,7 @@ export interface EnsureVercelOutputConfigAgentInput {
   readonly name?: string;
   readonly publicRoutePrefix: string;
   readonly servicePrefix: string;
+  readonly workspaceMember?: boolean;
 }
 
 export interface EnsureVercelOutputConfigAgentResult {

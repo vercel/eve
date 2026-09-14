@@ -451,13 +451,15 @@ function startEveDevServer(
 function startEveProductionServer(input: {
   readonly appRoot: string;
   readonly origin: string;
-}): Promise<EveProcessHandle> | undefined {
+}): Promise<EveProcessHandle> {
   const parsedOrigin = new URL(input.origin);
   const port = parsedOrigin.port;
   const serverEntry = join(input.appRoot, ".output", "server", "index.mjs");
 
   if (!existsSync(serverEntry)) {
-    return undefined;
+    throw new Error(
+      `eve production output is missing at ${serverEntry}. Run eve build from ${input.appRoot} before starting Next.js.`,
+    );
   }
 
   return startServerProcess({

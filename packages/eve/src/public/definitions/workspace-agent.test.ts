@@ -27,6 +27,19 @@ describe("defineWorkspaceAgent", () => {
     });
   });
 
+  it("uses the Next.js named-agent route when the caller is mounted through eve/next", async () => {
+    vi.stubEnv("EVE_PUBLIC_ROUTE_PREFIX", "/eve/agents/support");
+    vi.stubEnv("VERCEL", "1");
+    vi.stubEnv("VERCEL_ENV", "preview");
+    vi.stubEnv("VERCEL_URL", "preview.example.com");
+
+    const subagent = defineWorkspaceAgent({ name: "research" });
+
+    expect((subagent.url as () => string)()).toBe(
+      "https://preview.example.com/eve/agents/research",
+    );
+  });
+
   it("requires an explicit transport outside Vercel", async () => {
     vi.stubEnv("VERCEL", undefined);
     const subagent = defineWorkspaceAgent({ name: "research" });

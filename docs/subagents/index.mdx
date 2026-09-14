@@ -79,7 +79,7 @@ export default defineWorkspaceAgent({
 });
 ```
 
-The helper uses the peer's root `defineAgent({ description })` value as the model-visible tool description. Pass `description` to override it for this caller. When `transport` is omitted, eve selects the built-in transport for the runtime environment. Vercel deployments route through the current deployment and authenticate with the caller's Vercel OIDC token. Outside Vercel, provide an explicit transport with `url` and optional `auth` or `headers`:
+The helper uses the peer's root `defineAgent({ description })` value as the model-visible tool description. Pass `description` to override it for this caller. When `transport` is omitted, eve selects the built-in transport for the runtime environment. Vercel deployments route through the current deployment and authenticate with the caller's Vercel OIDC token. A workspace hosted through `withEve()` in a Next.js app uses its `/eve/agents/<name>` mount; a hostless workspace uses `/<name>`. Outside Vercel, provide an explicit transport with `url` and optional `auth` or `headers`:
 
 ```ts title="agents/foreman/agent/subagents/research.ts"
 import { defineWorkspaceAgent } from "eve";
