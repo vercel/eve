@@ -5,10 +5,30 @@ import { EVE_PACKAGE_NAME } from "#internal/package-name.js";
 import {
   createEveVercelOptions,
   EVE_WORKFLOW_FLOW_ROUTE_PATH,
+  parseVercelBunVersion,
 } from "#internal/nitro/host/vercel-build-output-config.js";
 import { deriveEveWorkflowQueueTopic } from "#internal/workflow/queue-namespace.js";
 
 describe("createEveVercelOptions", () => {
+  it("derives the function runtime from the vercel.json bunVersion", () => {
+    expect(
+      createEveVercelOptions({ agentName: "test-agent", enabled: true, bunVersion: "1.4.x" })
+        ?.functions,
+    ).toEqual({ runtime: "bun1.4.x" });
+    expect(
+      createEveVercelOptions({ agentName: "test-agent", enabled: true, bunVersion: "1.x" })
+        ?.functions,
+    ).toEqual({ runtime: "bun1.x" });
+  });
+
+  it("leaves the runtime to Nitro when no Bun version is selected", () => {
+    for (const bunVersion of [undefined, "", "latest", "1.4.1"]) {
+      expect(
+        createEveVercelOptions({ agentName: "test-agent", enabled: true, bunVersion }),
+      ).not.toHaveProperty("functions");
+    }
+  });
+
   it("returns undefined when the Vercel build output is disabled", () => {
     expect(createEveVercelOptions({ agentName: "test-agent", enabled: false })).toBeUndefined();
   });
@@ -90,5 +110,27 @@ describe("createEveVercelOptions", () => {
     expect(workspaceMember?.functionRules[EVE_WORKFLOW_FLOW_ROUTE_PATH].environment).toMatchObject({
       EVE_INTERNAL_AGENT_WORKSPACE_MEMBER: "1",
     });
+  });
+});
+
+describe("parseVercelBunVersion", () => {
+  it("accepts the values Vercel documents", () => {
+    expect(parseVercelBunVersion({ bunVersion: "1.4.x" })).toBe("1.4.x");
+    expect(parseVercelBunVersion({ bunVersion: "1.x" })).toBe("1.x");
+  });
+
+  it("ignores missing and malformed values", () => {
+    for (const config of [
+      undefined,
+      null,
+      "1.4.x",
+      {},
+      { framework: "eve" },
+      { bunVersion: 1.4 },
+      { bunVersion: "1.4.1" },
+      { bunVersion: "latest" },
+    ]) {
+      expect(parseVercelBunVersion(config)).toBeUndefined();
+    }
   });
 });
