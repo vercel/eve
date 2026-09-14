@@ -15,6 +15,7 @@ Important naming note:
 | To do this                                               | Read this                                                                              |
 | -------------------------------------------------------- | -------------------------------------------------------------------------------------- |
 | Create a project, or understand the file layout          | [Getting Started](./getting-started.mdx)                                               |
+| Create or extend a project with several root agents      | [Multi-Agent Projects](./multi-agent-projects.mdx)                                     |
 | Set the model, reasoning, or other agent-wide config     | [Agents](./agent-config.md)                                                            |
 | Change what the agent does and how it behaves            | [Instructions](./instructions.mdx)                                                     |
 | Give the agent a typed capability it can call            | [Tools](./tools/overview.mdx)                                                          |
@@ -31,7 +32,8 @@ Important naming note:
 | Link a Vercel project and deploy to production           | [Deploy to Vercel](./guides/deployment/vercel.mdx)                                     |
 | Self-host, or compare hosting strategies                 | [Deployment](./guides/deployment/overview.md)                                          |
 | Authorize routes, sessions, and per-user access          | [Authentication](./guides/auth-and-route-protection.md)                                |
-| Build a web UI, or stream a session to a client          | [Client SDK](./guides/client/overview.mdx), [Frontend](./guides/frontend/overview.mdx) |
+| Add a browser application                                | [Add a Web App](./guides/frontend/add-a-web-app.mdx)                                   |
+| Build a custom web UI, or stream a session to a client   | [Client SDK](./guides/client/overview.mdx), [Frontend](./guides/frontend/overview.mdx) |
 | Test the agent's behavior                                | [Evals](./evals/overview.mdx)                                                          |
 | Look up a CLI command or an exported type                | [CLI](./reference/cli.md), [TypeScript API](./reference/typescript-api.md)             |
 
