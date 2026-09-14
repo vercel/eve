@@ -113,7 +113,7 @@ function waitInput(inbox: SessionInbox): WaitInput {
     awaitAuthorizationCallbacks: true,
     commandInbox: inbox,
     cursor,
-    ledger: new SessionInputLedger(cursor),
+    ledger: new SessionInputLedger(),
     queue: new SessionInputQueue(),
   };
 }
@@ -427,7 +427,7 @@ describe("nextTurnDelivery routing", () => {
     const result = await nextTurnDelivery({
       commandInbox,
       cursor,
-      ledger: new SessionInputLedger(cursor),
+      ledger: new SessionInputLedger(),
       queue: new SessionInputQueue(),
     });
 
@@ -507,7 +507,7 @@ function batchingInput(count = 100, crossTurn = false) {
     },
   };
   input.cursor = createCursor({ claimSessionHook: async () => {} }, taskSessionState);
-  input.ledger = new SessionInputLedger(input.cursor);
+  input.ledger = new SessionInputLedger();
   vi.mocked(routeDeliverToChildren).mockImplementation(
     async ({ delivery, sessionState, serializedContext }) => ({
       kind: "continue",

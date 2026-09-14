@@ -76,7 +76,7 @@ export async function admitSessionInboxPayload(
 
   switch (command.kind) {
     case "deliver":
-      if (!(await input.ledger.admit(command))) return { kind: "consumed" };
+      if (!input.ledger.admit(command)) return { kind: "consumed" };
       return { admission: input.queue.enqueueDelivery(command), kind: "delivery" };
     case "clear":
     case "compact":
@@ -109,7 +109,7 @@ export async function applySessionCancellation(
     });
   }
   if (command.taskId !== undefined) {
-    await input.ledger.cancelTask(command.taskId);
+    input.ledger.cancelTask(command.taskId);
     input.queue.discardTask(command.taskId);
   }
 }

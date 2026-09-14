@@ -240,7 +240,7 @@ function createExecution(input: {
   return new SessionExecution({
     commandInbox: input.inbox,
     cursor,
-    ledger: new SessionInputLedger(cursor),
+    ledger: new SessionInputLedger(),
     mode: "conversation",
     queue: input.queue ?? new SessionInputQueue(),
   });

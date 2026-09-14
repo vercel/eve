@@ -413,7 +413,7 @@ async function runSessionLoop(
     sessionState: boot.sessionState,
   });
   const queue = new SessionInputQueue();
-  const ledger = new SessionInputLedger(cursor);
+  const ledger = new SessionInputLedger();
   const execution = new SessionExecution({
     capabilities: boot.capabilities,
     commandInbox,
@@ -492,7 +492,7 @@ async function runSessionLoop(
   let turnIndex = 0;
   const runTurn = async (delivery: TurnStepPayload): Promise<TurnOutcome> => {
     const caller = crashCleanupState.caller;
-    if (caller?.taskId !== undefined) await ledger.rememberTask(caller.taskId);
+    if (caller?.taskId !== undefined) ledger.rememberTask(caller.taskId);
     if (caller !== undefined) {
       await cursor.apply(
         await bindTurnCallerContextStep({ caller, serializedContext: cursor.serializedContext }),

@@ -1,95 +1,43 @@
 import type { DeliverHookPayload } from "#channel/types.js";
-import type { SessionStateCursor } from "#execution/session-state-cursor.js";
 
-const SESSION_INPUT_LEDGER_KEY = "eve.sessionInputLedger.v1";
-
-interface SessionInputLedgerState {
-  readonly cancelledTaskIds: readonly string[];
-  readonly seenTaskDeliveryIds: readonly string[];
-}
-
-/** Durable idempotency and cancellation facts for admitted task deliveries. */
+/**
+ * Idempotency and cancellation facts for task deliveries admitted by this
+ * owner. In-memory on purpose: the workflow body rebuilds it deterministically
+ * on replay, and a successor never inherits in-flight tasks because handoff
+ * requires every indexed task to be terminal.
+ */
 export class SessionInputLedger {
-  private readonly cursor: SessionStateCursor;
+  private readonly cancelledTaskIds = new Set<string>();
+  private readonly seenTaskDeliveryIds = new Set<string>();
 
-  constructor(cursor: SessionStateCursor) {
-    this.cursor = cursor;
-  }
-
-  async admit(delivery: DeliverHookPayload): Promise<boolean> {
+  admit(delivery: DeliverHookPayload): boolean {
     const deliveryId = taskDeliveryId(delivery);
     if (deliveryId === undefined) return true;
-    const state = this.read();
-    if (
-      state.seenTaskDeliveryIds.includes(deliveryId) ||
-      state.cancelledTaskIds.some(
-        (taskId) => deliveryId === taskId || deliveryId.startsWith(`${taskId}:`),
-      )
-    ) {
+    if (this.seenTaskDeliveryIds.has(deliveryId) || this.isCancelledDelivery(deliveryId)) {
       return false;
     }
-    await this.write({
-      ...state,
-      seenTaskDeliveryIds: [...state.seenTaskDeliveryIds, deliveryId],
-    });
+    this.seenTaskDeliveryIds.add(deliveryId);
     return true;
   }
 
-  async rememberTask(taskId: string): Promise<void> {
-    const state = this.read();
-    if (state.seenTaskDeliveryIds.includes(taskId)) return;
-    await this.write({
-      ...state,
-      seenTaskDeliveryIds: [...state.seenTaskDeliveryIds, taskId],
-    });
+  rememberTask(taskId: string): void {
+    this.seenTaskDeliveryIds.add(taskId);
   }
 
-  async cancelTask(taskId: string): Promise<void> {
-    const state = this.read();
-    if (state.cancelledTaskIds.includes(taskId)) return;
-    await this.write({
-      ...state,
-      cancelledTaskIds: [...state.cancelledTaskIds, taskId],
-    });
+  cancelTask(taskId: string): void {
+    this.cancelledTaskIds.add(taskId);
   }
 
   isTaskCancelled(taskId: string): boolean {
-    return this.read().cancelledTaskIds.includes(taskId);
+    return this.cancelledTaskIds.has(taskId);
   }
 
-  private read(): SessionInputLedgerState {
-    const value = this.cursor.sessionState.snapshot.session.state?.[SESSION_INPUT_LEDGER_KEY];
-    if (typeof value !== "object" || value === null) {
-      return { cancelledTaskIds: [], seenTaskDeliveryIds: [] };
+  private isCancelledDelivery(deliveryId: string): boolean {
+    for (const taskId of this.cancelledTaskIds) {
+      if (deliveryId === taskId || deliveryId.startsWith(`${taskId}:`)) return true;
     }
-    const candidate = value as Partial<SessionInputLedgerState>;
-    return {
-      cancelledTaskIds: strings(candidate.cancelledTaskIds),
-      seenTaskDeliveryIds: strings(candidate.seenTaskDeliveryIds),
-    };
+    return false;
   }
-
-  private async write(ledger: SessionInputLedgerState): Promise<void> {
-    const durable = this.cursor.sessionState;
-    const session = durable.snapshot.session;
-    await this.cursor.apply({
-      sessionState: {
-        ...durable,
-        snapshot: {
-          session: {
-            ...session,
-            state: { ...session.state, [SESSION_INPUT_LEDGER_KEY]: ledger },
-          },
-        },
-      },
-    });
-  }
-}
-
-function strings(value: unknown): readonly string[] {
-  return Array.isArray(value)
-    ? value.filter((entry): entry is string => typeof entry === "string")
-    : [];
 }
 
 function taskDeliveryId(delivery: DeliverHookPayload): string | undefined {
