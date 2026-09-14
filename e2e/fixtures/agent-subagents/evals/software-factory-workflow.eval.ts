@@ -3,18 +3,13 @@ import { randomUUID } from "node:crypto";
 import { defineEval } from "eve/evals";
 import { equals } from "eve/evals/expect";
 
-import {
-  SOFTWARE_FACTORY_EVAL_MARKER,
-  expectedFactoryOutput,
-  type FactoryOutput,
-} from "../agent/software-factory";
-
 const TRIAGE = "ticket-triage";
 const REVIEW = "ticket-review";
 const REPRODUCE = "ticket-reproducer";
 
 /** A workflow fans out ticket analysis and feeds both derived results into reproduction. */
 export default defineEval({
+  tags: ["real-model"],
   description:
     "The root agent runs parallel triage and review over 200 tickets, then passes both derived outputs into reproduction.",
   async test(t) {
@@ -22,7 +17,7 @@ export default defineEval({
     const expected = expectedFactoryOutput(token);
     const turn = await t.send(
       [
-        `${SOFTWARE_FACTORY_EVAL_MARKER} FACTORY_RUN_TOKEN=${token}.`,
+        `FACTORY_RUN_TOKEN=${token}.`,
         "Alice is processing a manufactured software-factory backlog. Use the workflow tool exactly once, and do not call any of its subagents outside workflow.",
         "Create 200 synthetic tickets with unique zero-padded T- ids. Put the value FACTORY_RUN_TOKEN:triage in `triageKey` on the first ticket and FACTORY_RUN_TOKEN:review in `reviewKey` on the last ticket, replacing FACTORY_RUN_TOKEN with the supplied token.",
         "Use Promise.all to run ticket-triage and ticket-review concurrently, passing the complete tickets array to both calls with structured output schemas.",
@@ -60,14 +55,40 @@ export default defineEval({
   },
 });
 
-function exactOutput(expected: FactoryOutput) {
+function expectedFactoryOutput(token: string) {
+  const triage = {
+    derivedKey: `${token}:triage`,
+    priorityTicket: "T-000",
+    ticketCount: 200,
+  };
+  const review = {
+    accepted: true,
+    derivedKey: `${token}:review`,
+    ticketCount: 200,
+  };
+  return {
+    reproduction: {
+      combinedKey: `${triage.derivedKey}|${review.derivedKey}`,
+      sampleTicket: triage.priorityTicket,
+      testCase: `test("${token}", () => expect(runSyntheticRegression()).not.toThrow());`,
+    },
+    review,
+    triage,
+  };
+}
+
+function exactOutput(expected: ReturnType<typeof expectedFactoryOutput>) {
   return (observed: unknown) => JSON.stringify(observed) === JSON.stringify(expected);
 }
 
 function parseJsonMessage(message: string | undefined): unknown {
   if (message === undefined) return undefined;
+  const trimmed = message.trim();
+  const source = trimmed.startsWith("```json")
+    ? trimmed.slice("```json".length, trimmed.endsWith("```") ? -3 : undefined).trim()
+    : trimmed;
   try {
-    return JSON.parse(message.trim());
+    return JSON.parse(source);
   } catch {
     return undefined;
   }
