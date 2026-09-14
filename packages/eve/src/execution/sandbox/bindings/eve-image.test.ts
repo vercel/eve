@@ -23,8 +23,12 @@ describe("eve sandbox image", () => {
   });
 
   it("uses the versioned VCR image for Vercel Sandbox", () => {
-    expect(resolveVercelEveSandboxImage()).toBe("vcr.vercel.com/vercel/eve/base:1.2.3");
-    expect(VERCEL_EVE_SANDBOX_IMAGE).toBe("vcr.vercel.com/vercel/eve/base:1.2.3");
+    expect(resolveVercelEveSandboxImage()).toBe(
+      "vercel/eve/base@sha256:d8d53829d9f05d54a889619603121499e911c467ea22345c28e572a60f613329",
+    );
+    expect(VERCEL_EVE_SANDBOX_IMAGE).toBe(
+      "vercel/eve/base@sha256:d8d53829d9f05d54a889619603121499e911c467ea22345c28e572a60f613329",
+    );
   });
 
   it("uses EVE_SANDBOX_IMAGE_TAG for both registries", async () => {
@@ -34,7 +38,11 @@ describe("eve sandbox image", () => {
     const images = await import("#execution/sandbox/bindings/eve-image.js");
     expect(images.resolveEveSandboxImage()).toBe("ghcr.io/vercel/eve:latest");
     expect(images.DEFAULT_EVE_SANDBOX_IMAGE).toBe("ghcr.io/vercel/eve:latest");
-    expect(images.resolveVercelEveSandboxImage()).toBe("vcr.vercel.com/vercel/eve/base:latest");
-    expect(images.VERCEL_EVE_SANDBOX_IMAGE).toBe("vcr.vercel.com/vercel/eve/base:latest");
+    expect(images.resolveVercelEveSandboxImage()).toBe(
+      "vercel/eve/base@sha256:d8d53829d9f05d54a889619603121499e911c467ea22345c28e572a60f613329",
+    );
+    expect(images.VERCEL_EVE_SANDBOX_IMAGE).toBe(
+      "vercel/eve/base@sha256:d8d53829d9f05d54a889619603121499e911c467ea22345c28e572a60f613329",
+    );
   });
 });
