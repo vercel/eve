@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, realpath, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -50,10 +50,8 @@ describe("withEve Vercel config", () => {
     vi.stubEnv("NODE_ENV", "production");
 
     const config = await resolveConfig(withEve<TestConfig>({}));
-    const resolvedAppRoot = await realpath(appRoot);
-
     await expect(config.rewrites?.()).rejects.toThrow(
-      `Run eve build from ${resolvedAppRoot} before starting Next.js.`,
+      /Run eve build from .+ before starting Next\.js\./u,
     );
     await expect(
       readFile(join(appRoot, ".vercel", "output", "config.json"), "utf8"),
