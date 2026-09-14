@@ -69,6 +69,18 @@ Create this layout with `eve init my-project --agents support,research`, or add 
 
 For an agent-only workspace, run `eve build`. eve owns the Vercel Build Output and generates one independently built service and a `/<name>/eve/v1/*` transport route for each workspace member.
 
+## Run the workspace locally
+
+Run `eve dev` from the workspace root to start every agent behind one local Vercel service router. Starting the complete graph lets agents declared with `defineWorkspaceAgent` call their peers through the same public paths used by a deployment. eve asks which agent to open in the interactive TUI; the selection does not limit which agents run.
+
+```bash
+npm exec eve dev
+```
+
+The command requires Vercel CLI 59.16.0 or newer, but not a linked Vercel project: eve runs `vercel dev --local`. If the installed CLI is older, an interactive terminal offers to run the Vercel CLI's native upgrader and continue. In a non-interactive terminal, upgrade with `vercel upgrade` before retrying.
+
+Without a root `vercel.json` or `vercel.ts`, eve writes an invocation-local service graph for the workspace and removes it when development stops. When either configuration file exists, Vercel uses that authored configuration unchanged. Each agent is available at `http://localhost:3000/<agent>/`. Pass `--agent <name>` to choose the TUI agent without a prompt, and pass `--host` or `--port` to select the local router address. Run `eve dev` from an agent directory to develop only that agent; default `defineWorkspaceAgent` calls require the complete graph started from the workspace root.
+
 ### Compose agents with other Vercel services
 
 Use Vercel's programmatic configuration when a workspace also deploys a frontend, private API, or another non-eve service. Replace `vercel.json` with a root `vercel.ts` and compose the authored graph with `withEve`:

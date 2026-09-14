@@ -1,9 +1,4 @@
-import {
-  Command,
-  CommanderError,
-  InvalidArgumentError,
-  Option,
-} from "#compiled/commander/index.js";
+import { Command, CommanderError, InvalidArgumentError } from "#compiled/commander/index.js";
 import { registerBuildCommand, type BuildHost } from "#cli/commands/build.js";
 import { resolveApplicationRoot } from "#internal/application/paths.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
@@ -11,6 +6,7 @@ import { isCodingAgentLaunch } from "#cli/agent-detection.js";
 import type { CliApplicationContext } from "#cli/application-command.js";
 import { agentCommand } from "#cli/agent-command.js";
 import { findCliApplicationRoot, resolveCliApplicationProject } from "#cli/application-root.js";
+import { DiscoveryProjectResolutionError } from "#discover/project.js";
 import { eveCliBanner } from "#cli/banner.js";
 import { registerIntegrationCommands } from "#cli/commands/register-integration-commands.js";
 import { registerProjectCommands } from "#cli/commands/register-project-commands.js";
@@ -28,8 +24,12 @@ import {
   waitForShutdownSignal,
 } from "#cli/shutdown.js";
 import { waitForServerOrStop, waitForUiOrServer } from "#cli/dev/wait-for-ui.js";
-import { parseDevelopmentHeaderOption, resolveDevelopmentUrlTarget } from "#cli/dev/url-target.js";
-import type { DevelopmentCliOptions, ProductionCliOptions } from "#cli/dev/command-options.js";
+import { resolveDevelopmentUrlTarget } from "#cli/dev/url-target.js";
+import {
+  configureDevelopmentCommand,
+  type DevelopmentCliOptions,
+  type ProductionCliOptions,
+} from "#cli/dev/command-options.js";
 import type { DevelopmentTuiStartup, RunDevelopmentTuiInput } from "#cli/dev/tui/tui.js";
 import type { EvalCliOptions } from "#evals/cli/eval.js";
 import {
@@ -38,12 +38,8 @@ import {
 } from "#cli/invoke/command.js";
 import {
   parseAgentNamesOption,
-  parseContextSizeOption,
-  parseDisplayMode,
-  parseLogsMode,
   parsePortOption,
   parseReasoningOption,
-  parseStatsMode,
 } from "#cli/option-parsers.js";
 import type { AgentReasoningDefinition } from "#shared/agent-definition.js";
 import { findEveProjectContext, resolveEveProjectContext } from "#internal/project-context.js";
@@ -324,92 +320,168 @@ export function createCliProgram(
     startHost: runtime.startHost,
   });
 
-  agentCommand(program.command("dev"), applicationContext, (command) => {
-    const options = command.opts<DevelopmentCliOptions>();
-    return (
-      resolveDevelopmentUrlTarget(options, command.processedArgs[0] as string | undefined) ===
-      undefined
-    );
-  })
-    .description("Start the eve development server or connect to an existing URL.")
-    .argument("[url]", "Connect to an existing server URL", parseDevelopmentServerUrl)
-    .option("--host <host>", "Host interface to bind")
-    .option("--port <port>", "Port to listen on (defaults to $PORT, then 2000)", parsePortOption)
-    .option("-u, --url <url>", "Connect to an existing server URL", parseDevelopmentServerUrl)
-    .option(
-      "-H, --header <header>",
-      'Request header for a URL target, in "Name: value" form (repeatable)',
-      parseDevelopmentHeaderOption,
-    )
-    .option("--no-ui", "Start the server without an interactive UI")
-    .option("--name <name>", "Title shown in the terminal UI (defaults to the app folder name)")
-    .option("--input <text>", "Pre-fill the prompt input")
-    .addOption(new Option("--onboard", "Start fresh-agent onboarding").hideHelp())
-    .option(
-      "--tools <mode>",
-      "How tool calls render: full | collapsed | auto-collapsed | hidden",
-      parseDisplayMode,
-    )
-    .option(
-      "--reasoning <mode>",
-      "How reasoning renders: full | collapsed | auto-collapsed | hidden",
-      parseDisplayMode,
-    )
-    .option(
-      "--subagents <mode>",
-      "How subagent sections render: full | collapsed | auto-collapsed | hidden",
-      parseDisplayMode,
-    )
-    .option(
-      "--connection-auth <mode>",
-      "How connection authorization renders: full | collapsed | auto-collapsed | hidden",
-      parseDisplayMode,
-    )
-    .option(
-      "--assistant-response-stats <mode>",
-      "Assistant header statistic: tokens | tokensPerSecond",
-      parseStatsMode,
-    )
-    .option(
-      "--context-size <tokens>",
-      "Model context window size, shown as a usage percentage",
-      parseContextSizeOption,
-    )
-    .option(
-      "--logs <mode>",
-      "Which server/agent logs to show: all | stderr | sandbox | none",
-      parseLogsMode,
-    )
-    .addHelpText(
-      "after",
-      "\nYou can also pass a bare URL, for example: eve dev https://example.com\n",
-    )
-    .action(async (positionalUrl: string | undefined, options: DevelopmentCliOptions) => {
-      const remoteTarget = resolveDevelopmentUrlTarget(options, positionalUrl);
-      const remoteServerUrl = remoteTarget?.serverUrl;
-      const interactive = hasInteractiveTerminal();
-      const mode = resolveDevUiMode({ options, interactive });
-      telemetry.trackDevContext({ target: remoteTarget ? "remote" : "local", ui: mode });
-      if (mode === "headless") logger.log(eveCliBanner());
-      if (options.input !== undefined && mode === "headless") {
-        throw new InvalidArgumentError("--input requires the interactive UI.");
-      }
-      let existingLocalDevelopmentServer = false;
-      if (remoteServerUrl !== undefined) {
-        const isActive =
-          runtime.isActiveDevelopmentServerForApp ?? (await loadIsActiveDevelopmentServerForApp());
-        existingLocalDevelopmentServer = await isActive({
-          appRoot: applicationContext.root,
-          serverUrl: remoteServerUrl,
-        });
-      }
-      if (remoteServerUrl) {
-        const { loadDevelopmentEnvironmentFiles } = await import("#cli/dev/environment.js");
-        await loadDevelopmentEnvironmentFiles(applicationContext.root);
-        logger.log(
-          `↗ ${existingLocalDevelopmentServer ? "local" : "remote"} mode targeting ${theme.info(new URL(remoteServerUrl).host)}`,
+  configureDevelopmentCommand(
+    agentCommand(
+      program.command("dev"),
+      applicationContext,
+      (command) => {
+        const options = command.opts<DevelopmentCliOptions>();
+        return (
+          resolveDevelopmentUrlTarget(options, command.processedArgs[0] as string | undefined) ===
+          undefined
         );
-        if (mode === "headless") {
+      },
+      { workspace: "preserve" },
+    ),
+  ).action(async (positionalUrl: string | undefined, options: DevelopmentCliOptions) => {
+    const remoteTarget = resolveDevelopmentUrlTarget(options, positionalUrl);
+    const projectContext =
+      remoteTarget === undefined ? await applicationContext.resolveAgent() : undefined;
+    if (projectContext?.kind === "workspace") {
+      if (
+        options.assistantResponseStats !== undefined ||
+        options.connectionAuth !== undefined ||
+        options.contextSize !== undefined ||
+        options.input !== undefined ||
+        options.logs !== undefined ||
+        options.name !== undefined ||
+        options.onboard === true ||
+        options.reasoning !== undefined ||
+        options.subagents !== undefined ||
+        options.tools !== undefined ||
+        options.ui === false
+      ) {
+        throw new InvalidArgumentError(
+          "This option requires an individual agent. Run `eve dev --agent <name>` instead.",
+        );
+      }
+      const { runWorkspaceDevelopment } = await import("#cli/dev/workspace-dev.js");
+      await runWorkspaceDevelopment({ options, workspace: projectContext.workspace });
+      return;
+    }
+
+    const remoteServerUrl = remoteTarget?.serverUrl;
+    const interactive = hasInteractiveTerminal();
+    const mode = resolveDevUiMode({ options, interactive });
+    telemetry.trackDevContext({ target: remoteTarget ? "remote" : "local", ui: mode });
+    if (mode === "headless") logger.log(eveCliBanner());
+    if (options.input !== undefined && mode === "headless") {
+      throw new InvalidArgumentError("--input requires the interactive UI.");
+    }
+    let existingLocalDevelopmentServer = false;
+    if (remoteServerUrl !== undefined) {
+      const isActive =
+        runtime.isActiveDevelopmentServerForApp ?? (await loadIsActiveDevelopmentServerForApp());
+      existingLocalDevelopmentServer = await isActive({
+        appRoot: applicationContext.root,
+        serverUrl: remoteServerUrl,
+      });
+    }
+    if (remoteServerUrl) {
+      const { loadDevelopmentEnvironmentFiles } = await import("#cli/dev/environment.js");
+      await loadDevelopmentEnvironmentFiles(applicationContext.root);
+      logger.log(
+        `↗ ${existingLocalDevelopmentServer ? "local" : "remote"} mode targeting ${theme.info(new URL(remoteServerUrl).host)}`,
+      );
+      if (mode === "headless") {
+        logger.log(
+          renderCliTaggedLine(theme, {
+            message: "Interactive UI disabled because the current terminal is not a TTY.",
+            tag: "dev",
+            tone: "warning",
+          }),
+        );
+        return;
+      }
+
+      logger.log("");
+      const lifecycle = installShutdownSignal({ exitAfterMs: FORCED_EXIT_BACKSTOP_MS });
+      try {
+        await runInteractiveDevelopmentUi({
+          applicationRoot: applicationContext.root,
+          existingLocalServer: existingLocalDevelopmentServer,
+          lifecycle,
+          onOnboardingStep: telemetry.trackSetupStep,
+          onOnboardingTerminal: telemetry.trackSetupTerminal,
+          options,
+          remoteTarget,
+          runDevelopmentTui: runtime.runDevelopmentTui,
+          server: { serverUrl: remoteServerUrl },
+        });
+      } finally {
+        lifecycle.dispose();
+      }
+      return;
+    }
+
+    const buildProgress = mode === "tui" ? startCliLiveRow(logger) : undefined;
+    const onBootProgress = createDevBootProgressReporter(buildProgress);
+    buildProgress?.update("Building your agent");
+
+    let server: DevelopmentServer | undefined;
+    let closePromise: Promise<void> | undefined;
+    const closeServer = () => {
+      if (server === undefined) return Promise.resolve();
+      closePromise ??= server.close();
+      void closePromise.catch(() => undefined);
+      return closePromise;
+    };
+    const lifecycle = installShutdownSignal({
+      exitAfterMs: FORCED_EXIT_BACKSTOP_MS,
+      onStop: () => {
+        void closeServer();
+      },
+    });
+
+    let tuiStartup: DevelopmentTuiStartup | undefined;
+    const tuiStartupPromise =
+      mode === "tui" && options.onboard !== true && runtime.runDevelopmentTui === undefined
+        ? loadDevelopmentTuiModule().then((module) => {
+            onBootProgress({ type: "before-first-paint" });
+            return module.startDevelopmentTuiStartup({
+              appRoot: applicationContext.root,
+              initialInput: options.input,
+              onExitRequest: lifecycle.requestStop,
+              ...resolveTuiDisplayOptions(options),
+            });
+          })
+        : undefined;
+
+    try {
+      const startHost = runtime.startHost ?? (await loadStartHost());
+      server = startHost(applicationContext.root, {
+        existing: mode === "tui" ? "attach-if-unconfigured" : "reject",
+        host: options.host,
+        onBootProgress,
+        port: options.port,
+      });
+      const [outcome, startup] = await Promise.all([
+        Promise.race([
+          server.start().then((handle) => ({ handle })),
+          lifecycle.stopped.then(() => ({ handle: undefined })),
+        ]),
+        tuiStartupPromise,
+      ]);
+      const handle = outcome.handle;
+      if (handle === undefined) {
+        tuiStartup = startup;
+        await tuiStartup?.shutdown();
+        return;
+      }
+      tuiStartup = startup;
+
+      if (mode !== "tui") {
+        logger.log(
+          renderCliTaggedLine(theme, {
+            message: `server listening at ${handle.url}`,
+            tag: "dev",
+            tone: "success",
+          }),
+        );
+      }
+
+      if (mode === "headless") {
+        if (options.ui !== false && !interactive) {
           logger.log(
             renderCliTaggedLine(theme, {
               message: "Interactive UI disabled because the current terminal is not a TTY.",
@@ -417,138 +489,40 @@ export function createCliProgram(
               tone: "warning",
             }),
           );
-          return;
         }
 
-        logger.log("");
-        const lifecycle = installShutdownSignal({ exitAfterMs: FORCED_EXIT_BACKSTOP_MS });
-        try {
+        await waitForServerOrStop(server, lifecycle);
+        return;
+      }
+
+      await waitForUiOrServer({
+        handle,
+        lifecycle,
+        server,
+        runUi: async () =>
           await runInteractiveDevelopmentUi({
             applicationRoot: applicationContext.root,
-            existingLocalServer: existingLocalDevelopmentServer,
+            existingLocalServer: false,
             lifecycle,
             onOnboardingStep: telemetry.trackSetupStep,
             onOnboardingTerminal: telemetry.trackSetupTerminal,
             options,
-            remoteTarget,
+            report: onBootProgress,
             runDevelopmentTui: runtime.runDevelopmentTui,
-            server: { serverUrl: remoteServerUrl },
-          });
-        } finally {
-          lifecycle.dispose();
-        }
-        return;
-      }
-
-      const buildProgress = mode === "tui" ? startCliLiveRow(logger) : undefined;
-      const onBootProgress = createDevBootProgressReporter(buildProgress);
-      buildProgress?.update("Building your agent");
-
-      let server: DevelopmentServer | undefined;
-      let closePromise: Promise<void> | undefined;
-      const closeServer = () => {
-        if (server === undefined) return Promise.resolve();
-        closePromise ??= server.close();
-        void closePromise.catch(() => undefined);
-        return closePromise;
-      };
-      const lifecycle = installShutdownSignal({
-        exitAfterMs: FORCED_EXIT_BACKSTOP_MS,
-        onStop: () => {
-          void closeServer();
-        },
+            server: { appRoot: handle.appRoot, serverUrl: handle.url },
+            startup: tuiStartup,
+          }),
       });
-
-      let tuiStartup: DevelopmentTuiStartup | undefined;
-      const tuiStartupPromise =
-        mode === "tui" && options.onboard !== true && runtime.runDevelopmentTui === undefined
-          ? loadDevelopmentTuiModule().then((module) => {
-              onBootProgress({ type: "before-first-paint" });
-              return module.startDevelopmentTuiStartup({
-                appRoot: applicationContext.root,
-                initialInput: options.input,
-                onExitRequest: lifecycle.requestStop,
-                ...resolveTuiDisplayOptions(options),
-              });
-            })
-          : undefined;
-
-      try {
-        const startHost = runtime.startHost ?? (await loadStartHost());
-        server = startHost(applicationContext.root, {
-          existing: mode === "tui" ? "attach-if-unconfigured" : "reject",
-          host: options.host,
-          onBootProgress,
-          port: options.port,
-        });
-        const [outcome, startup] = await Promise.all([
-          Promise.race([
-            server.start().then((handle) => ({ handle })),
-            lifecycle.stopped.then(() => ({ handle: undefined })),
-          ]),
-          tuiStartupPromise,
-        ]);
-        const handle = outcome.handle;
-        if (handle === undefined) {
-          tuiStartup = startup;
-          await tuiStartup?.shutdown();
-          return;
-        }
-        tuiStartup = startup;
-
-        if (mode !== "tui") {
-          logger.log(
-            renderCliTaggedLine(theme, {
-              message: `server listening at ${handle.url}`,
-              tag: "dev",
-              tone: "success",
-            }),
-          );
-        }
-
-        if (mode === "headless") {
-          if (options.ui !== false && !interactive) {
-            logger.log(
-              renderCliTaggedLine(theme, {
-                message: "Interactive UI disabled because the current terminal is not a TTY.",
-                tag: "dev",
-                tone: "warning",
-              }),
-            );
-          }
-
-          await waitForServerOrStop(server, lifecycle);
-          return;
-        }
-
-        await waitForUiOrServer({
-          handle,
-          lifecycle,
-          server,
-          runUi: async () =>
-            await runInteractiveDevelopmentUi({
-              applicationRoot: applicationContext.root,
-              existingLocalServer: false,
-              lifecycle,
-              onOnboardingStep: telemetry.trackSetupStep,
-              onOnboardingTerminal: telemetry.trackSetupTerminal,
-              options,
-              report: onBootProgress,
-              runDevelopmentTui: runtime.runDevelopmentTui,
-              server: { appRoot: handle.appRoot, serverUrl: handle.url },
-              startup: tuiStartup,
-            }),
-        });
-      } finally {
-        buildProgress?.stop();
-        if (tuiStartup === undefined) {
-          tuiStartup = await tuiStartupPromise?.catch(() => undefined);
-          await tuiStartup?.shutdown();
-        }
-        await closeServer();
-        lifecycle.dispose();
+    } finally {
+      buildProgress?.stop();
+      if (tuiStartup === undefined) {
+        tuiStartup = await tuiStartupPromise?.catch(() => undefined);
+        await tuiStartup?.shutdown();
       }
-    });
+      await closeServer();
+      lifecycle.dispose();
+    }
+  });
 
   const logs = program
     .command("logs")
@@ -639,11 +613,18 @@ export async function runCli(
   const applicationContext: CliApplicationContext = {
     root: resolveApplicationRoot(),
     async resolve() {
-      const project = await (runtime.resolveApplicationProject ?? resolveCliApplicationProject)(
-        applicationContext.root,
-      );
-      applicationContext.project = project;
-      applicationContext.root = project.appRoot;
+      try {
+        const project = await (runtime.resolveApplicationProject ?? resolveCliApplicationProject)(
+          applicationContext.root,
+        );
+        applicationContext.project = project;
+        applicationContext.root = project.appRoot;
+      } catch (error) {
+        if (!(error instanceof DiscoveryProjectResolutionError)) throw error;
+        const projectContext = await resolveEveProjectContext(applicationContext.root);
+        if (projectContext.kind !== "workspace") throw error;
+        applicationContext.root = projectContext.workspace.root;
+      }
     },
     async resolveAgent() {
       return resolveEveProjectContext(applicationContext.root);

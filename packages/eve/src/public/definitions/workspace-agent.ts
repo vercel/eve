@@ -63,10 +63,11 @@ function defaultWorkspaceAgentTransport(name: string): WorkspaceAgentTransport {
   return {
     auth: async () => {
       requireVercelWorkspaceEnvironment();
-      return auth();
+      return process.env.VERCEL_ENV === "development" ? { headers: {} } : auth();
     },
     url: () => {
       requireVercelWorkspaceEnvironment();
+      const development = process.env.VERCEL_ENV === "development";
       const host =
         process.env.VERCEL_ENV === "production"
           ? process.env.VERCEL_PROJECT_PRODUCTION_URL
@@ -79,7 +80,7 @@ function defaultWorkspaceAgentTransport(name: string): WorkspaceAgentTransport {
       const callerRoutePrefix = normalizePublicRoutePrefix(process.env.EVE_PUBLIC_ROUTE_PREFIX);
       const peerRoutePrefix =
         callerRoutePrefix?.startsWith("/eve/agents/") === true ? `/eve/agents/${name}` : `/${name}`;
-      return `https://${host}${peerRoutePrefix}`;
+      return `${development ? "http" : "https"}://${host}${peerRoutePrefix}`;
     },
   };
 }
