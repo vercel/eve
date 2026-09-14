@@ -13,7 +13,10 @@ export type TaskStatus = "working" | "input_required" | "completed" | "failed" |
 /** Executor-neutral identity shown for one task. */
 export interface TaskMetadata {
   readonly kind: string;
+  /** Stable tool or subagent identity used for routing and handle matching. */
   readonly name: string;
+  /** Per-call presentation text derived from the called tool's label. */
+  readonly label?: string;
   readonly [key: string]: JsonValue | undefined;
 }
 

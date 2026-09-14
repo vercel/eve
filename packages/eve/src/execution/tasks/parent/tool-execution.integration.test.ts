@@ -98,9 +98,11 @@ async function createScope(session = createSession(), activityObserver?: Activit
       agentId: string | undefined = identity.id,
       name = identity.name,
       resultKind: "subagent" | "tool" = "subagent",
+      label?: (input: unknown) => string,
     ) {
       const definition = {
         execute: vi.fn(),
+        label: label === undefined ? undefined : { start: label },
         name,
         nodeId: identity.nodeId,
         resultKind,
@@ -190,6 +192,36 @@ describe("background subagent steering", () => {
       });
     },
   );
+
+  it("persists a tool-derived task label without changing its subagent identity", async () => {
+    const activityObserver = {
+      sink: { url: "https://parent.example/activity", version: 1 as const },
+      workIdentity: {
+        id: "work:root",
+        kind: "root-turn" as const,
+        rootSessionId: "parent",
+        rootTurnId: "turn-2",
+      },
+    };
+    const scope = await createScope(createSession(), activityObserver);
+
+    await scope.execute(
+      "steering-call",
+      identity.id,
+      identity.name,
+      "subagent",
+      () => "Investigator",
+    );
+    const committed = await scope.commit();
+    const task = getSessionTaskIndex(committed.state).find(
+      (candidate) => candidate.taskId !== entry.taskId,
+    );
+
+    expect(task).toMatchObject({
+      activityWorkIdentity: { name: "Investigator" },
+      metadata: { label: "Investigator", name: "research" },
+    });
+  });
 
   it("cancels the old task before starting a new task in the same child", async () => {
     const scope = await createScope();
