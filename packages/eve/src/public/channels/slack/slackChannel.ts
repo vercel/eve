@@ -144,6 +144,18 @@ type SlackEventHandler<T extends UnstampedMessageStreamEvent["type"]> = (
   ctx: SessionContext,
 ) => void | Promise<void>;
 
+export type SlackInputRequestedEvent = EventData<"input.requested">;
+
+/** Bound access to eve's standard Slack input delivery. */
+export type SlackInputRequestedDefaultDeliver = (data: SlackInputRequestedEvent) => Promise<void>;
+
+export type SlackInputRequestedHandler = (
+  data: SlackInputRequestedEvent,
+  channel: SlackEventContext,
+  ctx: SessionContext,
+  defaultDeliver: SlackInputRequestedDefaultDeliver,
+) => void | Promise<void>;
+
 /**
  * Delivery surface handed to `authorization.required` overrides. The
  * connection challenge is a credential: anyone who completes the sign-in
@@ -580,7 +592,11 @@ export interface SlackChannelEvents {
   readonly "message.appended"?: SlackEventHandler<"message.appended">;
   readonly "reasoning.appended"?: SlackEventHandler<"reasoning.appended">;
   readonly "reasoning.completed"?: SlackEventHandler<"reasoning.completed">;
-  readonly "input.requested"?: SlackEventHandler<"input.requested">;
+  /**
+   * An override may pass selected requests to `defaultDeliver()` while
+   * rendering the rest itself. The default delivery honors `approvalChannel`.
+   */
+  readonly "input.requested"?: SlackInputRequestedHandler;
   readonly "turn.failed"?: SlackEventHandler<"turn.failed">;
   readonly "turn.completed"?: SlackEventHandler<"turn.completed">;
   readonly "turn.cancelled"?: SlackEventHandler<"turn.cancelled">;
@@ -607,9 +623,10 @@ export interface SlackChannelEvents {
  */
 export interface SlackChannelInternalEvents extends Omit<
   SlackChannelEvents,
-  "authorization.required"
+  "authorization.required" | "input.requested"
 > {
   readonly "authorization.required"?: SlackEventHandler<"authorization.required">;
+  readonly "input.requested"?: SlackEventHandler<"input.requested">;
 }
 
 export type SlackApprovalChannel = "direct-message" | "thread";
@@ -875,6 +892,15 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
     (activityOwnsTypingStatus
       ? activityOwnedMessageCompleted
       : defaultEvents["message.completed"]!);
+  const defaultInputRequested = defaultInputRequestedHandler(config.approvalChannel);
+  const inputRequestedOverride = config.events?.["input.requested"];
+  const inputRequestedHandler =
+    inputRequestedOverride === undefined
+      ? defaultInputRequested
+      : async (data: SlackInputRequestedEvent, channel: SlackEventContext, ctx: SessionContext) =>
+          inputRequestedOverride(data, channel, ctx, async (nextData) => {
+            await defaultInputRequested(nextData, channel, ctx);
+          });
   const mergedEvents: SlackChannelInternalEvents = {
     ...defaultEvents,
     ...config.events,
@@ -903,8 +929,7 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
     "reasoning.appended": reasoningHandler,
     "actions.requested": actionsHandler,
     "message.completed": messageCompletedHandler,
-    "input.requested":
-      config.events?.["input.requested"] ?? defaultInputRequestedHandler(config.approvalChannel),
+    "input.requested": inputRequestedHandler,
     "authorization.required":
       authorizationRequiredOverride === undefined
         ? defaultEvents["authorization.required"]
