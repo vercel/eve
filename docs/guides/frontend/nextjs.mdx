@@ -134,7 +134,7 @@ See [Resumable sessions](./overview#resumable-sessions) for persistence and repl
   EVE_NEXT_PRODUCTION_PORT=5000 npm run build && npm start
   ```
 
-- **Non-Vercel hosts.** `withEve()` retains the Next.js rewrite interface, but it does not generate a host-neutral service graph. Run each built eve service yourself. When the service lives on a separate origin, tell Next.js where to find the service that serves its private route prefix with `EVE_NEXT_PRODUCTION_ORIGIN`:
+- **Non-Vercel hosts.** `withEve()` retains the Next.js rewrite interface, but it does not generate a host-neutral service graph. By default, `next start` runs each built eve service on its derived loopback port and proxies its routes. For a host that must supervise the eve services itself, run each service separately and set `EVE_NEXT_PRODUCTION_ORIGIN` to the origin that serves its private route prefix:
 
   ```bash
   EVE_NEXT_PRODUCTION_ORIGIN=https://agent.example.com npm run build
