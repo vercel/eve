@@ -26,9 +26,9 @@ npm exec --yes --package=https://pkg.eve.dev/pr/123/eve.tgz -- eve init my-agent
 
 ## Publishing
 
-[Package artifact build](../../.github/workflows/package-artifact-build.yml) runs for `main` pushes and same-repository pull requests without credentials. It checks out the exact source SHA, packages eve, and uploads the tarball and metadata as a short-lived GitHub Actions artifact.
+[Build tarball](../../.github/workflows/build-tarball.yml) runs for `main` pushes and same-repository pull requests without credentials. It checks out the exact source SHA, packages eve, and uploads the tarball and metadata as a short-lived GitHub Actions artifact.
 
-[Package artifact publisher](../../.github/workflows/package-artifact-publish.yml) is an automatic internal trust boundary. GitHub loads it from the default branch on successful package builds. It verifies that the build still represents the current `main` or pull-request head, downloads the artifact on a fresh runner, and uploads the bytes without executing or extracting them. It then reports the user-facing **Package artifact** commit status. Keeping publishing separate prevents pull-request code from changing the credentialed workflow or reading the Blob token.
+[Publish tarball](../../.github/workflows/publish-tarball.yml) is an automatic internal trust boundary. GitHub loads it from the default branch on successful package builds. It verifies that the build still represents the current `main` or pull-request head, downloads the artifact on a fresh runner, and uploads the bytes without executing or extracting them. It then reports the user-facing **Package artifact** commit status. Keeping publishing separate prevents pull-request code from changing the credentialed workflow or reading the Blob token.
 
 The publisher writes:
 

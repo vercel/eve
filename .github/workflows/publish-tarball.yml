@@ -1,8 +1,8 @@
-name: Package artifact publisher (internal)
+name: Publish tarball
 
 on:
   workflow_run:
-    workflows: [Package artifact build]
+    workflows: [Build tarball]
     types: [completed]
 
 permissions:
