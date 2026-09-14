@@ -45,7 +45,7 @@ If no connection is ready, `/login` offers:
 
 Vercel account login opens a browser. eve reuses the current CLI team when valid, selects a sole available team automatically, or shows a searchable team picker. Account-token access to Gateway depends on availability for your account and team; if it is unavailable, choose an API key or another connection.
 
-Type to filter a menu, press `Enter` to select, or `Esc` to return to chat. Arrow navigation is also available. Cancelling login preserves your draft. If a connection fails, retry `/login`; eve does not silently switch providers.
+Type to filter a menu, press `Enter` to select, or `Esc` to return to chat. Dismissing a setup menu adds no cancellation message to the transcript; completed work and failures still appear. Arrow navigation is also available. Cancelling login preserves your draft. If a connection fails, retry `/login`; eve does not silently switch providers.
 
 ### Credentials and deployment
 

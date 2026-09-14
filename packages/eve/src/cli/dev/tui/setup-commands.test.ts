@@ -336,7 +336,7 @@ describe("runTuiSetupCommand", () => {
       runModelFlow: vi.fn<TuiSetupFlows["runModelFlow"]>(async () => ({ kind: "cancelled" })),
     });
     await expect(run({ command: "model", flows })).resolves.toEqual({
-      message: "/model dismissed.",
+      message: "",
       cancelled: true,
       preserveFlowDiagnostics: false,
     });
@@ -443,11 +443,14 @@ describe("runTuiSetupCommand", () => {
     ],
     ["empty", registryResult(), "No integrations selected."],
     ["deployed", registryResult({ deployed: "production" }), "No integrations selected."],
-    ["cancelled", { kind: "cancelled" as const }, "/add dismissed."],
+    ["cancelled", { kind: "cancelled" as const }, ""],
   ] as const)("reports a %s registry flow", async (_case, result, message) => {
     const runRegistryFlow = vi.fn(async () => result);
     const outcome = await run({ command: "add", flows: fakeFlows({ runRegistryFlow }) });
-    expect(outcome).toMatchObject({ message, preserveFlowDiagnostics: true });
+    expect(outcome).toMatchObject({
+      message,
+      preserveFlowDiagnostics: result.kind !== "cancelled",
+    });
     if (result.kind === "done" && result.result.items.length > 0)
       expect(outcome.tone).toBe("success");
     if (result.kind === "done" && result.result.deployed === "production") {
@@ -577,10 +580,10 @@ describe("runTuiSetupCommand", () => {
     renderer.fireInterrupt("ctrl-c");
 
     await expect(result).resolves.toEqual({
-      message: "/add interrupted.",
+      message: "",
       cancelled: true,
-      tone: "error",
-      preserveFlowDiagnostics: true,
+      tone: undefined,
+      preserveFlowDiagnostics: false,
     });
   });
 
@@ -599,10 +602,10 @@ describe("runTuiSetupCommand", () => {
     renderer.fireInterrupt();
 
     await expect(result).resolves.toEqual({
-      message: "/add interrupted.",
+      message: "",
       cancelled: true,
-      tone: "error",
-      preserveFlowDiagnostics: true,
+      tone: undefined,
+      preserveFlowDiagnostics: false,
     });
   });
 
@@ -630,9 +633,10 @@ describe("runTuiSetupCommand", () => {
     renderer.fireInterrupt();
 
     await expect(result).resolves.toEqual({
-      message: "/model interrupted.",
-      tone: "error",
-      preserveFlowDiagnostics: true,
+      message: "",
+      cancelled: true,
+      tone: undefined,
+      preserveFlowDiagnostics: false,
       effect: { kind: "model-access-changed" },
     });
   });

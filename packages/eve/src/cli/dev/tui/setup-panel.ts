@@ -22,7 +22,6 @@ import { maskLine, visibleLine, type LineState } from "./line-editor.js";
 import type { Theme } from "./theme.js";
 import {
   clipVisible,
-  stripAnsi,
   renderInputText,
   renderInputWithBlockCursor,
   visibleLength,
@@ -167,6 +166,7 @@ export type FlowPanelStatus =
 export type FlowPanelContent =
   | {
       kind: "question";
+      title?: string;
       rows: readonly string[];
       /** The install wait keeps its indicator above the concurrent actions. */
       status?: FlowPanelStatus;
@@ -260,13 +260,9 @@ export function renderFlowPanel(state: FlowPanelState, theme: Theme, width: numb
   // Avoid the terminal's final column: writing into it can trigger an implicit
   // wrap that the live-region row counter cannot observe, leaking old frames.
   const rows: string[] = [];
-  const questionOwnsTitle =
-    state.content.kind === "question" &&
-    stripAnsi(state.content.rows[0] ?? "").trim() === state.title.trim();
-  if (state.title.length > 0 && !questionOwnsTitle) {
-    rows.push(`  ${c.bold(state.title)}`);
-  }
-  rows.push("");
+  const title =
+    state.content.kind === "question" ? (state.content.title ?? state.title) : state.title;
+  if (title.length > 0) rows.push(`  ${c.bold(title)}`, "");
   if (state.navigation?.kind === "planner") {
     rows.push(...plannerStepRows(state.navigation, undefined, theme));
   }
@@ -965,13 +961,14 @@ export function renderModelEditorQuestion(
   input: ModelEditorPanelInput,
   theme: Theme,
   width: number,
+  message = MODEL_EDITOR_MESSAGE,
 ): string[] {
   const { request, state } = input;
   switch (state.screen.kind) {
     case "menu":
       return renderModelEditorMenu(input, state.screen.cursor, theme, width);
     case "model":
-      return renderModelEditorModelScreen(request, state.screen.select, theme, width);
+      return renderModelEditorModelScreen(request, state.screen.select, theme, width, message);
   }
 }
 
@@ -1043,13 +1040,14 @@ function renderModelEditorModelScreen(
   select: SelectState,
   theme: Theme,
   width: number,
+  message: string,
 ): string[] {
   // The catalog list IS the shared railed searchable select — the same
   // component behind the team and project pickers.
   return renderSelectQuestion(
     {
       kind: "search",
-      message: MODEL_EDITOR_MESSAGE,
+      message,
       options: request.model.kind === "pick" ? request.model.options : [],
       placeholder: "type to search",
       select,
@@ -1072,7 +1070,8 @@ export function renderTextQuestion(
     const body = notice.tone === "info" ? c.dim(notice.text) : notice.text;
     rows.push(`${toneGlyph(notice.tone, theme)} ${body}`);
   }
-  rows.push(...state.message.split("\n").map((line) => `  ${c.bold(line)}`));
+  if (state.message !== "")
+    rows.push(...state.message.split("\n").map((line) => `  ${c.bold(line)}`));
 
   const budget = Math.max(4, width - 4);
   const display = state.mask ? maskLine(state.editor) : state.editor;
@@ -1106,7 +1105,7 @@ export function renderAcknowledgeQuestion(
   width: number,
 ): string[] {
   const c = theme.colors;
-  const rows: string[] = [`  ${c.bold(state.message)}`];
+  const rows: string[] = state.message === "" ? [] : [`  ${c.bold(state.message)}`];
   if (state.lines.length > 0) {
     rows.push("");
     for (const line of state.lines) {

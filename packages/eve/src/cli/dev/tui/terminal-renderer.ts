@@ -253,6 +253,7 @@ type SetupFlowState = {
   /** Recent subprocess output, flushed as context when a warning settles it. */
   outputBuffer: string[];
   question?: (width: number) => string[];
+  questionTitle?: string;
   /** First line produced after the previous task-list question settled. */
   taskListLineStart?: number;
   /** Task-list questions render their latest outcomes inside the question. */
@@ -1889,7 +1890,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
    * resolve.
    */
   async #readSetupSelect(opts: SetupSelectRequest): Promise<SetupSelectResult> {
-    const flow = this.#beginSetupQuestion();
+    const flow = this.#beginSetupQuestion(opts.message);
     const multiple = isMultiSelectRequest(opts);
     const searchAction = opts.kind === "search" ? opts.searchAction : undefined;
     let selectOptions: readonly SetupPanelOption[] = opts.options;
@@ -1974,7 +1975,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
       flow.hideLinesWhileQuestion = true;
     }
     const panelState = (): SetupOptionPanelState => {
-      const state: SetupOptionPanelState = { ...opts, options: selectOptions, select };
+      const state: SetupOptionPanelState = { ...opts, message: "", options: selectOptions, select };
       if (notices !== undefined && notices.length > 0) state.notices = notices;
       if (error !== undefined) state.error = error;
       if (loading) state.loadingFrame = this.#spinnerFrame();
@@ -2130,7 +2131,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
       validate?: (value: string) => string | undefined;
     };
   }): Promise<SetupEditableSelectResult | undefined> {
-    const flow = this.#beginSetupQuestion();
+    const flow = this.#beginSetupQuestion(opts.message);
 
     const initial: Parameters<typeof initialSelectState>[0] = { options: opts.options };
     if (opts.initialValue !== undefined) initial.defaultValue = opts.initialValue;
@@ -2142,7 +2143,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
       const state: SetupSelectPanelState = {
         kind: "inline-edit",
         layout: "task-list",
-        message: opts.message,
+        message: "",
         options: opts.options,
         select,
         edit: {
@@ -2240,7 +2241,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
   async #readProviderPicker(
     opts: ProviderPickerRequest,
   ): Promise<ProviderPickerChoice | undefined> {
-    const flow = this.#beginSetupQuestion();
+    const flow = this.#beginSetupQuestion(opts.message);
     let interaction = initialProviderPickerState(opts.options, opts.initialValue);
     let validation: AbortController | undefined;
 
@@ -2260,7 +2261,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
       const panel: SetupSelectPanelState = {
         kind: "inline-edit",
         layout: "stacked",
-        message: opts.message,
+        message: "",
         options: opts.options,
         select: interaction.select,
         edit: {
@@ -2381,11 +2382,11 @@ export class TerminalRenderer implements AgentTUIRenderer {
    * on Esc/Ctrl-C.
    */
   async #readModelEditor(opts: ModelSettingsRequest): Promise<ModelSettingsResult | undefined> {
-    const flow = this.#beginSetupQuestion();
+    const flow = this.#beginSetupQuestion("Select the model");
     let interaction = initialModelEditorState(opts);
 
     flow.question = (width) =>
-      renderModelEditorQuestion({ request: opts, state: interaction }, this.#theme, width);
+      renderModelEditorQuestion({ request: opts, state: interaction }, this.#theme, width, "");
     this.#paint();
 
     const question = this.#captureSetupQuestion<ModelSettingsResult | undefined>((key, settle) => {
@@ -2464,14 +2465,14 @@ export class TerminalRenderer implements AgentTUIRenderer {
     validate?: (value: string) => string | undefined;
     notices?: readonly SelectNotice[];
   }): Promise<string | undefined> {
-    const flow = this.#beginSetupQuestion();
+    const flow = this.#beginSetupQuestion(opts.message);
 
     let editor: LineState = lineOf("");
     let error: string | undefined;
 
     flow.question = (width) => {
       const state: Parameters<typeof renderTextQuestion>[0] = {
-        message: opts.message,
+        message: "",
         editor,
         mask: opts.mask === true,
       };
@@ -2532,10 +2533,10 @@ export class TerminalRenderer implements AgentTUIRenderer {
    * is nothing to cancel, so this never returns a cancellation.
    */
   async #readSetupAcknowledge(opts: { message: string; lines: readonly string[] }): Promise<void> {
-    const flow = this.#beginSetupQuestion();
+    const flow = this.#beginSetupQuestion(opts.message);
 
     flow.question = (width) =>
-      renderAcknowledgeQuestion({ message: opts.message, lines: opts.lines }, this.#theme, width);
+      renderAcknowledgeQuestion({ message: "", lines: opts.lines }, this.#theme, width);
     this.#paint();
 
     const question = this.#captureSetupQuestion<void>((key, settle) => {
@@ -2556,12 +2557,13 @@ export class TerminalRenderer implements AgentTUIRenderer {
   }
 
   /** Enters the common inactive-input state owned by an open setup question. */
-  #beginSetupQuestion(): SetupFlowState {
+  #beginSetupQuestion(title: string): SetupFlowState {
     this.#start();
     this.#inputActive = false;
     this.#turnIndicator = { kind: "idle" };
     this.#status = "";
     const flow = this.#requireSetupFlow();
+    flow.questionTitle = stripTerminalControls(title);
     // A standard question means the preceding background operation settled.
     // Clear its transient item summary and timer before painting the prompt.
     if (flow.status !== undefined) {
@@ -2594,6 +2596,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
       this.#setupFlow = undefined;
     } else if (this.#setupFlow !== undefined) {
       this.#setupFlow.question = undefined;
+      this.#setupFlow.questionTitle = undefined;
       this.#setupFlow.hideLinesWhileQuestion = false;
     }
     this.#consumeKey = undefined;
@@ -2601,7 +2604,8 @@ export class TerminalRenderer implements AgentTUIRenderer {
     // Back to the working state: the interrupt trap covers the gap until the
     // next question (or the flow's end).
     if (this.#setupFlow !== undefined) this.#armFlowIdleTrap();
-    this.#paint();
+    // The next phase paints its complete state; the flow ticker covers slow work.
+    if (this.#setupFlow === undefined) this.#paint();
   }
 
   /**
@@ -4177,9 +4181,9 @@ export class TerminalRenderer implements AgentTUIRenderer {
       // so their panels stay status-free as before.
       if (flow.question !== undefined) {
         const rows = flow.question(width);
-        content = { kind: "question", rows };
+        content = { kind: "question", title: flow.questionTitle, rows };
         if (status !== undefined) {
-          content = { kind: "question", rows, status };
+          content = { kind: "question", title: flow.questionTitle, rows, status };
         }
       } else if (status !== undefined) {
         content = { kind: "status", status };

@@ -156,6 +156,10 @@ function muteableRenderer(
   };
 }
 
+function cancelledSetupResult(): TuiSetupCommandResult {
+  return { message: "", cancelled: true, preserveFlowDiagnostics: false };
+}
+
 /**
  * Runs one TUI setup command (/model, /add, /deploy) over the
  * shared setup flows, asking through the TUI's own bordered panel. Never throws:
@@ -219,9 +223,8 @@ export async function runTuiSetupCommand(
             ? outcome
             : {
                 ...outcome,
-                message: `/${command} interrupted.`,
-                tone: "error",
-                preserveFlowDiagnostics: true,
+                ...cancelledSetupResult(),
+                tone: undefined,
               };
         }
       } finally {
@@ -293,11 +296,7 @@ async function executeSetupCommand(
         }
         const result = await flows.runModelFlow(modelInput);
         if (result.kind === "cancelled") {
-          return {
-            message: result.discardedDraft === true ? "/model dismissed." : "/model dismissed.",
-            cancelled: true,
-            preserveFlowDiagnostics: false,
-          };
+          return cancelledSetupResult();
         }
         // One line per completed menu action: the apply line (it already
         // distinguishes success from a rejected slug), then the provider
@@ -330,7 +329,7 @@ async function executeSetupCommand(
           runItem: runRegistryItem,
         });
         if (flow.kind === "cancelled") {
-          return { message: "/add dismissed.", cancelled: true, preserveFlowDiagnostics: true };
+          return cancelledSetupResult();
         }
         const result = flow.result;
         const tone = registryResultTone(result);
@@ -352,7 +351,7 @@ async function executeSetupCommand(
       case "deploy": {
         const result = await flows.runDeployFlow({ appRoot, prompter, interactive: true, signal });
         if (result.kind === "cancelled") {
-          return { message: "/deploy dismissed.", preserveFlowDiagnostics: true };
+          return cancelledSetupResult();
         }
         if (result.kind === "needs-link") {
           return {
@@ -378,11 +377,7 @@ async function executeSetupCommand(
     }
   } catch (error) {
     if (error instanceof WizardCancelledError) {
-      return {
-        message: `/${command} dismissed.`,
-        cancelled: true,
-        preserveFlowDiagnostics: command !== "model",
-      };
+      return cancelledSetupResult();
     }
     const actionableError = error instanceof RegistryFlowFailedError ? error.cause : error;
     const upgrade = await vercelCliUpgradeOutcome(actionableError, command, flows, {

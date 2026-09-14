@@ -4462,7 +4462,7 @@ describe("TerminalRenderer setup flow session", () => {
     expect(snapshot).toContain("Project linked. Connected to AI Gateway via VERCEL_OIDC_TOKEN.");
   });
 
-  it("renders questions inside the open flow panel under its title", async () => {
+  it("gives the active question the flow heading", async () => {
     const { screen, input, renderer } = makeRenderer();
 
     renderer.setupFlow.begin("/deploy");
@@ -4474,7 +4474,7 @@ describe("TerminalRenderer setup flow session", () => {
     });
 
     const snapshot = screen.snapshot();
-    expect(snapshot).toContain("/deploy");
+    expect(snapshot).not.toContain("/deploy");
     expect(snapshot).toContain("This directory is not linked yet.");
     expect(snapshot).toContain("Vercel project");
 
@@ -5229,12 +5229,9 @@ describe("TerminalRenderer status line", () => {
     });
 
     const lines = screen.snapshot().split("\n");
-    const title = lines.indexOf("   Authenticate via Vercel OIDC");
-    expect(lines.slice(title, title + 3)).toEqual([
-      "   Authenticate via Vercel OIDC",
-      "",
-      "   Select your team",
-    ]);
+    const title = lines.indexOf("   Select your team");
+    expect(title).toBeGreaterThanOrEqual(0);
+    expect(lines).not.toContain("   Authenticate via Vercel OIDC");
     const status = lines.indexOf("   ↗ vpoke.playground-vercel.tools  Authenticating via OIDC…");
     expect(status).toBeGreaterThan(title);
     expect(lines[status - 1]).toBe("");
@@ -5348,4 +5345,41 @@ describe("TerminalRenderer status line", () => {
     expect(snapshot).not.toContain("hello");
     renderer.shutdown();
   });
+});
+
+describe("setup interaction transitions", () => {
+  it.each([32, 80])(
+    "anchors the heading from loading through filtering at %i columns",
+    async (columns) => {
+      const { screen, input, renderer } = makeRenderer(columns);
+      renderer.setupFlow.begin("Add to your agent");
+      const titleRow = () =>
+        screen
+          .snapshot()
+          .split("\n")
+          .findIndex((row) => row.includes("Add to your agent"));
+      const initialRow = titleRow();
+      renderer.setupFlow.setStatus("Loading catalog…");
+      expect(titleRow()).toBe(initialRow);
+      const answer = renderer.setupFlow.readSelect({
+        kind: "search",
+        message: "Add to your agent",
+        options: [
+          { value: "slack", label: "Slack" },
+          { value: "linear", label: "Linear" },
+        ],
+      });
+      expect(titleRow()).toBe(initialRow);
+      expect(screen.snapshot().split("Add to your agent")).toHaveLength(2);
+      input.type("sl");
+      expect(titleRow()).toBe(initialRow);
+      input.send("\x1b");
+      input.send("\x1b");
+      await expect(answer).resolves.toBeUndefined();
+      expect(screen.snapshot()).not.toContain("Working…");
+      renderer.setupFlow.end({ preserveDiagnostics: false });
+      renderer.shutdown();
+      expect(screen.snapshot()).not.toContain("Add to your agent");
+    },
+  );
 });

@@ -33,7 +33,8 @@ describe("renderFlowPanel", () => {
         lines: [],
         content: {
           kind: "question",
-          rows: [`  ${colorTheme.colors.bold(title)}`, "  type to filter"],
+          title,
+          rows: ["  type to filter"],
         },
       },
       colorTheme,
