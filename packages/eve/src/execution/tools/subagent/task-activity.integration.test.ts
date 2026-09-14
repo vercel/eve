@@ -117,14 +117,13 @@ async function start(kind: Kind, task?: Observer): Promise<ActivityObserverConfi
     fanoutSize: 1,
     initiatorAuth: null,
     parentContinuationToken: "parent-token",
-    parentTraceContext: undefined,
     activityObserver: task === undefined ? undefined : parentObserver,
     taskActivityObserver: task,
     sandboxSessionId: "sandbox",
-    serializedContext: {},
     session,
     taskId: "task-a",
     target: target(kind, "task-a"),
+    trace: { originAudience: "private", parentTraceContext: undefined },
   });
   expect(result.kind).toBe("called");
   if (kind === "local") return createSession.mock.calls[0]![0].activityObserver;
@@ -136,7 +135,7 @@ async function start(kind: Kind, task?: Observer): Promise<ActivityObserverConfi
       validateActivityObserverBinding(parsed, {
         callId: request.action.callId,
         subagentName: request.action.remoteAgentName,
-        token: request.callbackToken!,
+        token: "parent-token",
         url: `${request.callbackBaseUrl}/eve/v1/callback/parent-token`,
       }),
     ).toBeUndefined();
