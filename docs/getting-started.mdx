@@ -52,9 +52,9 @@ npm run dev
 
 This starts an interactive session where you can send messages to your agent.
 
-## Project layout
+## Agent directory layout
 
-eve builds an agent by walking the filesystem under `agent/`. Each directory is an authored slot, and the slot a file lands in determines how eve loads it.
+eve builds an agent by walking the filesystem under `agent/`. Each directory is an authored slot, and the slot a file lands in determines how eve loads it. For choosing a layout that includes a Next.js app or several root agents, see [Project structures](./project-structures).
 
 ### Naming from paths
 
@@ -69,9 +69,9 @@ eve derives names from file paths, so you do not configure them separately.
 
 The root agent uses its `package.json` `name`, or its app directory name if none is set. A subagent uses its directory name.
 
-### Recommended layout
+### Nested layout
 
-A minimal agent needs `instructions.md`; `agent.ts` is optional when the default config is sufficient. Framework defaults occupy ordinary agent slots, so authoring the same path replaces the default before eve compiles the agent. Add other slots as the agent needs them:
+For one standalone agent, use the nested layout below. A minimal agent needs `instructions.md`; `agent.ts` is optional when the default config is sufficient. Framework defaults occupy ordinary agent slots, so authoring the same path replaces the default before eve compiles the agent. Add other slots as the agent needs them:
 
 ```text
 my-agent/

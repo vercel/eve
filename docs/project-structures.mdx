@@ -1,0 +1,198 @@
+---
+title: "Project Structures"
+description: "Choose a filesystem and deployment structure for one eve agent, a Next.js app, or several independently addressed agents."
+---
+
+Choose a project structure based on whether you have one independently addressed agent or several, whether a Next.js app owns the public routes, and where you deploy. Start with one root agent unless separate agents need separate public endpoints, deployments, or ownership boundaries.
+
+## Choose a structure
+
+| You are building                                             | Recommended structure                                              | Why                                                                               |
+| ------------------------------------------------------------ | ------------------------------------------------------------------ | --------------------------------------------------------------------------------- |
+| One agent without an application                             | [Standalone agent](#standalone-agent)                              | It has the fewest deployment and routing concerns.                                |
+| One agent with a Next.js UI                                  | [Next.js app with one agent](#nextjs-app-with-one-agent)           | The app owns same-origin agent routes for browser clients.                        |
+| Several agents behind one Next.js UI                         | [Next.js app with several agents](#nextjs-app-with-several-agents) | One app routes browser requests to each named agent.                              |
+| Several agents and independently deployed services on Vercel | [Vercel peer services](#vercel-peer-services)                      | Vercel builds and routes the app, APIs, and agents as separate services.          |
+| Several agents and other services outside Vercel             | [Self-hosted peer services](#self-hosted-peer-services)            | Your deployment platform owns service discovery, routing, and process management. |
+
+A [declared subagent](./subagents) is not another root agent. Put a specialist under `agent/subagents/<name>/` when one root agent delegates work to it. Create separate root agents only when callers need to address them independently, or when they need distinct deployment or ownership boundaries.
+
+## Standalone agent
+
+Use one agent directory when the agent is your application, or when channels, schedules, and server-to-server clients can call it directly.
+
+```text
+support-agent/
+├── package.json
+├── agent/
+│   ├── agent.ts
+│   ├── instructions.md
+│   ├── tools/
+│   └── subagents/
+└── evals/
+```
+
+Keep all authored agent files under `agent/` and keep evals beside it. The nested layout keeps deployment files and ordinary application code outside the authored agent surface. See [Agent directory layout](./getting-started#agent-directory-layout) for every supported path.
+
+Deploy the agent as one eve Node service with [Vercel](./guides/deployment/vercel) or [your own infrastructure](./guides/deployment/self-hosting).
+
+## Next.js app with one agent
+
+Use this structure when a Next.js application is the user-facing product and its browser UI talks to one agent.
+
+```text
+my-app/
+├── app/
+├── components/
+├── next.config.ts
+├── package.json
+├── agent/
+│   ├── agent.ts
+│   └── instructions.md
+└── evals/
+```
+
+Wrap the Next.js configuration with `withEve()`. The integration makes the agent available on the application's origin at `/eve/v1/*`, so `useEveAgent()` does not need an explicit host.
+
+```ts title="next.config.ts"
+import type { NextConfig } from "next";
+import { withEve } from "eve/next";
+
+const nextConfig: NextConfig = {};
+
+export default withEve(nextConfig);
+```
+
+In development, `withEve()` starts an eve development server and Next.js rewrites agent requests to it. On Vercel, it also generates the Vercel Build Output service and route for the agent. On another host, run the built eve service yourself and configure `EVE_NEXT_PRODUCTION_ORIGIN` when it is on a separate origin. See [Next.js](./guides/frontend/nextjs) for the production topologies.
+
+## Next.js app with several agents
+
+Use this structure when one Next.js app is the public browser surface for several independently addressed agents.
+
+```text
+my-app/
+├── app/
+├── next.config.ts
+├── package.json
+└── agents/
+    ├── support/
+    │   └── agent/
+    │       └── instructions.md
+    └── research/
+        └── agent/
+            └── instructions.md
+```
+
+Mount each agent by name in `next.config.ts`:
+
+```ts title="next.config.ts"
+import type { NextConfig } from "next";
+import { withEve } from "eve/next";
+
+const nextConfig: NextConfig = {};
+
+export default withEve(nextConfig, {
+  agents: {
+    support: "./agents/support",
+    research: "./agents/research",
+  },
+});
+```
+
+Each agent is available on the Next.js origin at `/eve/agents/<name>/eve/v1/*`. Select one from the UI with its name:
+
+```tsx
+import { useEveAgent } from "eve/react";
+
+const support = useEveAgent({ agent: "support" });
+```
+
+Use this when the web app should own the public routes, browser authentication boundary, and UI for all agents. On Vercel, `withEve({ agents })` generates a service for each agent. On another host, it retains the Next.js routing interface, but you operate the built agent services and configure the origin that serves their private route prefixes.
+
+Do not combine `eveRoot` and `agents`; the former is the one unnamed-agent form, and the latter mounts named agents. See [Next.js](./guides/frontend/nextjs) for per-agent build and routing options.
+
+## Vercel peer services
+
+Use peer services when a Next.js app, private API, worker, or another application is independently built and deployed alongside several agents. In this structure, Vercel's service graph—not a Next.js configuration—owns public routing.
+
+```text
+my-platform/
+├── package.json
+├── vercel.ts
+├── agents/
+│   ├── support/
+│   │   └── agent/
+│   └── research/
+│       └── agent/
+├── apps/
+│   └── web/
+│       └── app/
+└── services/
+    └── api/
+```
+
+Compose the workspace agents into the root `vercel.ts` with `withEve` from `eve/vercel`. Define the other services and their routes in the same configuration:
+
+```ts title="vercel.ts"
+import { withEve } from "eve/vercel";
+
+export default await withEve({
+  services: {
+    web: {
+      framework: "nextjs",
+      root: "apps/web",
+    },
+  },
+  routes: [
+    {
+      src: "^(.*)$",
+      destination: { type: "service", service: "web" },
+    },
+  ],
+});
+```
+
+`withEve` discovers direct `agents/<name>/` workspace members, adds their Vercel services, and adds their transport routes. Each agent has a public `/<name>/eve/v1/*` route, such as `/support/eve/v1/health`. The web service must use an explicit agent host or provide its own proxy if its browser UI calls an agent.
+
+Choose this instead of `withEve({ agents })` in `next.config.ts` when the web app is one peer among several services rather than the application that owns agent routing. This composition API and Vercel service graph are Vercel-specific. See [Deploy to Vercel](./guides/deployment/vercel#compose-agents-with-other-vercel-services).
+
+## Self-hosted peer services
+
+Outside Vercel, eve does not provide a platform-neutral service graph composer. Run the Next.js app and each root agent as services that your platform deploys and supervises, then configure an ingress, reverse proxy, or API gateway to route requests.
+
+```text
+my-platform/
+├── apps/
+│   └── web/                 # Next.js service
+└── agents/
+    ├── support/             # eve Node service
+    └── research/            # eve Node service
+```
+
+Build and start every agent independently. Run the commands from the agent directory so eve builds that agent rather than the workspace:
+
+```bash
+cd agents/support
+eve build
+PORT=4001 eve start --host 0.0.0.0
+```
+
+Repeat with a distinct port for every agent. See [Self-host eve](./guides/deployment/self-hosting) for runtime requirements.
+
+Your platform can expose each agent on its own origin:
+
+```text
+app.example.com                  → Next.js
+support-agent.example.com        → support agent
+research-agent.example.com       → research agent
+```
+
+In that case, the application calls an agent with an explicit `host`, or provides an application-owned server-side proxy. If an ingress mounts an agent below a public path, set `EVE_PUBLIC_ROUTE_PREFIX` in that agent's build and runtime environments so callback URLs use the externally routable prefix. Route both the mounted agent's `/eve/` and `/.well-known/workflow/` paths to that agent; [Self-host eve](./guides/deployment/self-hosting#configure-proxy-routes) describes why both paths are required.
+
+This differs from a Next.js-fronted deployment: the reverse proxy or gateway owns routes to every service. A Next.js-fronted deployment uses `withEve()` in `next.config.ts` to own the public agent routes, even though eve still runs as a separate process in production.
+
+## Choose who owns routing
+
+Use `eve/next` when a Next.js app should present one same-origin browser surface and route requests to its agent or agents. The routing interface works in local development and can be used outside Vercel, but automatic production service generation is specific to Vercel.
+
+Use `eve/vercel` only when deploying a Vercel workspace with peer services. For another host, compose services with that platform's routing and deployment tools. For agents that call one another across independently deployed service boundaries, configure an explicit [remote-agent transport](./guides/remote-agents).
