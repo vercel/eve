@@ -10,7 +10,7 @@ import type {
   FetchFileResult,
   FetchFileFunction,
 } from "#shared/channel-definition.js";
-import type { ChannelAudienceMetadata } from "#shared/channel-audience.js";
+import type { ChannelAudienceProjector } from "#channel/audience.js";
 
 const log = createLogger("channel.adapter");
 
@@ -103,9 +103,7 @@ export type ChannelEventHandlers<TCtx extends ChannelAdapterContext<any> = Chann
  */
 export type { FetchFileContext, FetchFileResult };
 
-export type ChannelInstrumentationMetadata = Readonly<
-  Record<string, unknown> & ChannelAudienceMetadata
->;
+export type ChannelInstrumentationMetadata = Readonly<Record<string, unknown>>;
 
 export type ChannelInstrumentationMetadataProjector = (
   state: Record<string, unknown> | undefined,
@@ -177,6 +175,7 @@ export type ChannelAdapter<TCtx extends ChannelAdapterContext<any> = ChannelAdap
    */
   readonly instrumentation?: {
     readonly metadata?: ChannelInstrumentationMetadataProjector;
+    readonly audience?: ChannelAudienceProjector;
   };
 } & ChannelEventHandlers<TCtx>;
 

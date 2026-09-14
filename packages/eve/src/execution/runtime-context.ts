@@ -21,6 +21,9 @@ import {
 import { BundleKey, type CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
 import type { DynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agent-config.js";
 import { readConversationId } from "#tracing/conversation-context.js";
+import { buildConversationContext } from "#channel/conversation-context.js";
+import { ConversationContextKey } from "#shared/conversation-context.js";
+import { resolveInstrumentationEnvironment } from "#internal/application/dev-environment.js";
 
 /**
  * Builds the bootstrap {@link ContextContainer} for one run.
@@ -38,6 +41,10 @@ export function buildRunContext(input: {
 
   ctx.set(BundleKey, bundle);
   setChannelContext(ctx, run.adapter, { channelName: run.channelName });
+  ctx.set(
+    ConversationContextKey,
+    buildConversationContext(run, resolveInstrumentationEnvironment()),
+  );
 
   if (run.channelMetadata !== undefined) {
     const existing = ctx.get(ChannelInstrumentationKey);

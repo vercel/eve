@@ -15,6 +15,7 @@ import type { AgentLimitsDefinition } from "#shared/agent-definition.js";
 import type { JsonObject } from "#shared/json.js";
 import type { InstrumentationDecision } from "#shared/instrumentation-decision.js";
 import type { ForwardedTraceAssertion } from "#shared/forwarded-trace-policy.js";
+import type { ConversationContext } from "#shared/conversation-context.js";
 import type {
   TaskAgentRequestDelivery,
   TaskAuthorizationEventDelivery,
@@ -463,6 +464,8 @@ export interface RunInput {
    */
   readonly channelName?: string;
   readonly channelMetadata?: ChannelInstrumentationProjection;
+  /** Parent conversation classification inherited by a local subagent. */
+  readonly inheritedConversation?: ConversationContext;
   /** Inbound channel operation that created this session. */
   readonly delivery?: ChannelDeliveryMetadata;
   /**
@@ -470,6 +473,12 @@ export interface RunInput {
    * request was accepted with no credentials.
    */
   readonly auth: SessionAuthContext | null;
+  /**
+   * Route-authenticated principal used to classify the conversation. This
+   * stays separate from `auth` because a channel may project a different
+   * principal into session auth after route authentication.
+   */
+  readonly audienceAuth?: SessionAuthContext | null;
   /**
    * Session-level capabilities. When omitted, every flag is
    * interpreted as `false`. Channel routes that can reach a human

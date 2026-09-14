@@ -1,5 +1,10 @@
 import type { DynamicResolveContext } from "#dynamic/definition.js";
-import { defineAgent, defineDynamic, type AgentStaticModelDefinition } from "#public/index.js";
+import {
+  defineAgent,
+  defineDynamic,
+  type AgentReasoningDefinition,
+  type AgentStaticModelDefinition,
+} from "#public/index.js";
 
 import { resolveSelfModificationConfig, type SelfModificationConfig } from "./config.js";
 import { hasGitHubCredential } from "./credentials.js";
@@ -18,6 +23,10 @@ export interface SelfModificationAgentOptions {
    * @default "anthropic/claude-sonnet-5"
    */
   readonly model?: AgentStaticModelDefinition;
+  /**
+   * Reasoning effort used by the self-modification subagent.
+   */
+  readonly reasoning?: AgentReasoningDefinition;
 }
 
 function renderDescription(sections: readonly string[]): string {
@@ -33,6 +42,9 @@ const persistenceDelegation =
   "Treat requests for persistent changes to future behavior or capabilities as source-modification requests, even when the requester does not mention files or source code. " +
   "Infer persistence from the request and conversation rather than waiting for phrases such as “modify your source.” " +
   "For example, asking the agent to stop always doing something, add a capability, or change future responses calls for inspecting and editing the authored source instead of providing a one-turn workaround.";
+
+const namedInstallationDelegation =
+  "Treat questions phrased as whether you can install, add, enable, or connect to a named product or service as requests to extend this eve agent and delegate immediately. Do not assume they refer to device software, ask what kind of installation they mean, or deny them because you lack access to the user's device. The subagent determines whether the request maps to an integration, channel, connection, or other capability, then checks registry availability and any required setup.";
 
 const followUpDelegation =
   "Resolve short follow-ups such as “yes” or “do it” against the preceding conversation. " +
@@ -55,6 +67,7 @@ const deployedEffectiveEdits =
 /** Defines the environment-aware self-modification dynamic subagent. */
 export function defineSelfModificationAgent(options: SelfModificationAgentOptions = {}) {
   const model = options.model ?? DEFAULT_SELF_MODIFICATION_MODEL;
+  const reasoning = options.reasoning;
   const config = resolveSelfModificationConfig(options.config);
 
   const resolve = async (_event: unknown, ctx: DynamicResolveContext) => {
@@ -63,12 +76,13 @@ export function defineSelfModificationAgent(options: SelfModificationAgentOption
       "Delegate here when the user asks to change this eve agent or its authored source.",
       sourceDelegation,
       persistenceDelegation,
+      namedInstallationDelegation,
       mode === "local" ? localIntegrationDelegation : deployedIntegrationDelegation,
       mode === "local" ? localTraceDelegation : "",
       followUpDelegation,
       mode === "local" ? localEffectiveEdits : deployedEffectiveEdits,
     ]);
-    if (mode === "local") return defineAgent({ description, model });
+    if (mode === "local") return defineAgent({ description, model, reasoning });
     if (mode !== "deployed" || config.deployed === undefined) return null;
     if (config.deployed.credentials.kind === "pat" && !hasGitHubCredential()) return null;
     try {
@@ -83,7 +97,7 @@ export function defineSelfModificationAgent(options: SelfModificationAgentOption
     } catch {
       return null;
     }
-    return defineAgent({ description, model });
+    return defineAgent({ description, model, reasoning });
   };
 
   return defineDynamic({

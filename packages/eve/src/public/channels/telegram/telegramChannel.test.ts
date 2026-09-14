@@ -153,7 +153,15 @@ describe("telegramChannel() inbound route", () => {
   ] as const)("maps %s chats to the %s audience", (chatType, audience) => {
     const adapter = withState(getAdapter(telegramChannel()), { chatType });
 
-    expect(adapter.instrumentation?.metadata?.(adapter.state)).toMatchObject({ audience });
+    expect(
+      adapter.instrumentation?.audience?.({
+        auth: null,
+        channel: { kind: "channel:telegram" },
+        environment: "production",
+        mode: "conversation",
+        state: adapter.state,
+      }),
+    ).toBe(audience);
   });
 
   it("dispatches verified private messages with Telegram auth and chat-wide token", async () => {
@@ -330,7 +338,7 @@ describe("telegramChannel() inbound route", () => {
     });
   });
 
-  it("marks replies to bot messages as possible freeform HITL answers", async () => {
+  it("keeps direct approval replies as fallback text for option prompts", async () => {
     const channel = telegramChannel({
       api: { fetch: fakeTelegramFetch() },
       credentials: { botToken: "bot-token", webhookSecretToken: SECRET },
@@ -346,13 +354,14 @@ describe("telegramChannel() inbound route", () => {
           from: { id: 99, is_bot: true, username: "testbot" },
           chat: { id: 42, type: "private" },
         },
-        text: "approved",
+        text: "approve",
       },
     });
 
     const [, input] = send.mock.calls[0]!;
     expect(input).toMatchObject({
-      inputResponses: [{ requestId: "telegram_reply:55", text: "approved" }],
+      inputResponses: [{ requestId: "telegram_reply:55", text: "approve" }],
+      message: expect.stringContaining("approve"),
     });
   });
 

@@ -20,6 +20,12 @@ Use selfmod__edit_file for localized changes; include only the unique matching t
 
 Once paths are known, batch independent file reads and edits to different files. Never edit the same file concurrently.`;
 
+const toolAuthoring = `## Add model-callable actions
+
+When the requester wants this agent to gain a reusable action or capability that it can invoke in future turns, implement it as an authored eve tool under /source/tools. This applies even when the request describes the action without using the word “tool.” Follow the path-derived naming and defineTool conventions in the mounted eve tools documentation and existing source.
+
+Do not substitute a loose Python, shell, or JavaScript file for a model-callable tool. A support script is acceptable only when an authored eve tool invokes it as an implementation detail, or when the requester explicitly asks for a standalone script instead of an agent capability.`;
+
 const registryWorkflow = `## Add integrations
 
 Before adding a new eve-managed channel, connection, extension, instrumentation, or memory integration, call selfmod__search_registry alongside source discovery. If an item fulfills the requirement, install it with selfmod__registry_add using its exact address. If no matching item fulfills the requirement, or if the developer asks for a custom implementation, write the integration yourself.
@@ -52,7 +58,7 @@ For investigation tasks, report the findings and supporting evidence requested b
 
 const localGuidance = `## Local environment
 
-The selfmod__registry_add tool will complete installation for items that need no setup. In the local dev TUI, a \`needs-terminal\` result from the tool call automatically opens the existing setup panel for the user to complete setup there. In headless development, relay the terminal command the tool names.
+The selfmod__registry_add tool will complete installation for items that need no setup. In the local dev TUI, a \`needs-terminal\` result from the tool call automatically opens the existing setup panel for the user to complete setup there. In headless development, if a \`needs-terminal\` result includes \`nextCommand\`, present that exact value as the only shell command in your response. Never infer, construct, or rewrite a command: installing an item uses \`eve add <item>\`; \`eve registry add\` configures registry namespace mappings and does not install items.
 
 Local eve dev logs are available read-only at /logs.
 Local trace segments are mounted read-only at /traces when available. Inspect other traces only when the user asks about another session or broader behavior.
@@ -116,6 +122,7 @@ export default defineDynamic({
           sourceWorkspace,
           readSubagentSourceGuidance(event),
           sourceEditing,
+          toolAuthoring,
           registryWorkflow,
           documentationGuidance,
           mode === "local" ? localGuidance : deployedGuidance,

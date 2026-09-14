@@ -10,6 +10,22 @@ import {
   bindInstrumentationRuntime,
   type InstrumentationRuntime,
 } from "#instrumentation/runtime.js";
+import { ConversationContextKey, type ConversationContext } from "#shared/conversation-context.js";
+
+function setConversation(
+  ctx: ContextContainer,
+  audience: "public" | "private",
+  kind: ConversationContext["channel"]["kind"] = "channel:slack",
+): void {
+  ctx.set(ChannelInstrumentationKey, { kind, metadata: {} });
+  ctx.set(ConversationContextKey, {
+    audience,
+    channel: { kind, name: "slack" },
+    environment: "production",
+    mode: "conversation",
+    principalType: "anonymous",
+  });
+}
 
 function bindHooks(
   hooks: InstrumentationRuntime["hooks"],
@@ -60,10 +76,7 @@ describe("channel delivery instrumentation", () => {
       traceFlags: 1,
       traceId: "11111111111111111111111111111111",
     };
-    ctx.set(ChannelInstrumentationKey, {
-      kind: "channel:slack",
-      metadata: { audience: "public" },
-    });
+    setConversation(ctx, "public");
     ctx.set(ParentTraceContextKey, parentTraceContext);
     const instrumentation = bindHooks(hooks, ctx);
 
@@ -115,10 +128,7 @@ describe("channel delivery instrumentation", () => {
       },
     ]);
     const ctx = new ContextContainer();
-    ctx.set(ChannelInstrumentationKey, {
-      kind: "channel:slack",
-      metadata: { audience: "private" },
-    });
+    setConversation(ctx, "private");
     const instrumentation = bindHooks(hooks, ctx);
     await contextStorage.run(ctx, () =>
       instrumentation?.instrumentChannelDelivery({
@@ -156,11 +166,7 @@ describe("channel delivery instrumentation", () => {
       },
     ]);
     const ctx = new ContextContainer();
-    ctx.set(ChannelInstrumentationKey, {
-      channelType: "slack",
-      kind: "channel:slack",
-      metadata: { audience: "public" },
-    });
+    setConversation(ctx, "public");
     const instrumentation = bindHooks(hooks, ctx, "Weather Display Name");
 
     await contextStorage.run(ctx, async () => {
@@ -184,11 +190,7 @@ describe("channel delivery instrumentation", () => {
         sessionId: "session-1",
         turnId: "turn_0",
       });
-      ctx.set(ChannelInstrumentationKey, {
-        channelType: "slack",
-        kind: "channel:slack",
-        metadata: { audience: "private" },
-      });
+      setConversation(ctx, "private");
       await instrumentation?.instrumentChannelDelivery({
         ctx,
         includeTurn: true,
@@ -201,7 +203,10 @@ describe("channel delivery instrumentation", () => {
     expect(tracePolicy.mock.calls[0]?.[0]).toEqual({
       agentName: "Weather Display Name",
       audience: "public",
-      channelType: "slack",
+      channel: { kind: "channel:slack", name: "slack" },
+      environment: "production",
+      mode: "conversation",
+      principalType: "anonymous",
     });
   });
 });

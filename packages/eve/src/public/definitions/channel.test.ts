@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { buildAdapterContext } from "#channel/adapter-context.js";
 import { callAdapterEventHandler, type ChannelAdapter } from "#channel/adapter.js";
@@ -157,6 +157,59 @@ describe("defineChannel", () => {
     const adapter = getAdapter(channel);
     expect(adapter.kind).toBe("defineChannel");
     expect(adapter.instrumentation?.metadata?.(adapter.state)).toEqual({ threadTs: null });
+  });
+
+  it("keeps the HTTP fast path when only an audience classifier is declared", () => {
+    const channel = defineChannel({
+      audience: () => "public",
+      routes: [POST("/x", async () => new Response("ok"))],
+    });
+
+    const adapter = getAdapter(channel);
+    expect(adapter.kind).toBe("http");
+    expect(adapter.instrumentation?.metadata).toBeUndefined();
+    expect(
+      adapter.instrumentation?.audience?.({
+        auth: null,
+        channel: { kind: "http" },
+        environment: "production",
+        mode: "conversation",
+        state: undefined,
+      }),
+    ).toBe("public");
+  });
+
+  it("drops the former audience key from custom metadata", () => {
+    const channel = defineChannel({
+      metadata: () => ({ audience: "public", custom: "value" }),
+      routes: [POST("/x", async () => new Response("ok"))],
+    });
+
+    const adapter = getAdapter(channel);
+    expect(adapter.instrumentation?.metadata?.(adapter.state)).toEqual({ custom: "value" });
+  });
+
+  it("classifies legacy metadata audience after defineChannel strips it", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const channel = defineChannel({
+      metadata: () => ({ audience: "public", custom: "value" }),
+      routes: [POST("/x", async () => new Response("ok"))],
+    });
+    const adapter = getAdapter(channel);
+
+    expect(
+      adapter.instrumentation?.audience?.({
+        auth: null,
+        channel: { kind: "channel:legacy" },
+        environment: "production",
+        mode: "conversation",
+        state: adapter.state,
+      }),
+    ).toBe("public");
+    expect(adapter.instrumentation?.metadata?.(adapter.state)).toEqual({ custom: "value" });
+    expect(warn).toHaveBeenCalledExactlyOnceWith(
+      "channel defineChannel uses deprecated metadata audience; move it to the audience() hook",
+    );
   });
 
   it("infers channel metadata from metadata() return values", () => {

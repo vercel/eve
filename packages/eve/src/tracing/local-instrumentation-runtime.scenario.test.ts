@@ -28,6 +28,15 @@ import { LocalTraceSpanProcessor } from "#tracing/local-trace-span-processor.js"
 const temporaryDirectories: string[] = [];
 const require = createRequire(import.meta.url);
 
+const traceContext = (audience: "public" | "private" | "unknown") => ({
+  agentName: "weather",
+  audience,
+  channel: { kind: "http" as const },
+  environment: "production" as const,
+  mode: "conversation" as const,
+  principalType: "anonymous",
+});
+
 afterEach(async () => {
   await Promise.all(
     temporaryDirectories.splice(0).map((path) => rm(path, { force: true, recursive: true })),
@@ -59,7 +68,7 @@ describe("local instrumentation runtime", () => {
     };
     const delivery = runtimeTrace.getTracer("workflow").startSpan("workflow.delivery");
     const activeContext = runtimeTrace.setSpan(COMPILED_ROOT_CONTEXT, delivery);
-    const hooks = runtime.hooks.forTrace!({ agentName: "weather", audience: "unknown" });
+    const hooks = runtime.hooks.forTrace!(traceContext("unknown"));
 
     const exerciseRuntime = async () => {
       await hooks.publish({

@@ -63,11 +63,25 @@ async function isExistingEveProject(
   entries: readonly string[],
 ): Promise<boolean> {
   if (await isAgentRoot(projectPath)) return true;
-  return (
+  if (
     (entries.includes("package.json") || entries.includes("vercel.json")) &&
     entries.includes("agent") &&
     (await isAgentRoot(resolve(projectPath, "agent")))
-  );
+  ) {
+    return true;
+  }
+  if (!entries.includes("agents")) return false;
+  const agentDirectories = await readdir(resolve(projectPath, "agents"), {
+    withFileTypes: true,
+  }).catch(() => []);
+  if (!entries.includes("package.json")) return false;
+  for (const entry of agentDirectories) {
+    if (!entry.isDirectory() || entry.name.startsWith(".")) continue;
+    const agentRoot = resolve(projectPath, "agents", entry.name);
+    if ((await pathKind(resolve(agentRoot, "agent"))) === "directory") return true;
+    if (await isAgentRoot(agentRoot)) return true;
+  }
+  return false;
 }
 
 function listEntries(entries: readonly string[]): string {
@@ -89,7 +103,6 @@ function assertTargetStaysWithinParent(
 /** Classifies the target itself without walking ancestor projects. */
 export async function resolveInitTarget(input: ResolveInitTargetInput): Promise<InitTarget> {
   const parentPath = resolve(input.parentDirectory);
-  const targetProvided = input.target !== undefined;
   const projectPath = resolve(parentPath, input.target ?? ".");
   assertTargetStaysWithinParent(parentPath, input.target, projectPath);
   const createInPlace = projectPath === parentPath;
@@ -164,17 +177,11 @@ export async function resolveInitTarget(input: ResolveInitTargetInput): Promise<
   if (await isExistingEveProject(projectPath, entries)) {
     throw new InitTargetError(
       "target_conflict",
-      `An eve project already exists at "${projectPath}". Run an existing-project command from that directory instead.`,
+      `An eve project already exists at "${projectPath}". Run \`eve dev\` from that directory, or use an existing-project command.`,
     );
   }
 
   if (entries.includes("package.json")) {
-    if (!targetProvided || input.target !== ".") {
-      throw new InitTargetError(
-        "target_conflict",
-        `Adding eve to an existing package requires an explicit \`eve init .\` from "${projectPath}".`,
-      );
-    }
     return { kind: "existing", projectPath };
   }
 

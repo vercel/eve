@@ -28,6 +28,7 @@ import type {
 import type { ResolvedToolDefinition } from "#runtime/types.js";
 import { toInputSchema } from "#tools/schema.js";
 import { defineHook } from "#public/definitions/hook.js";
+import { ConversationContextKey } from "#shared/conversation-context.js";
 
 function buildSerializedContext(overrides: {
   acceptedDeploymentId?: string;
@@ -47,19 +48,25 @@ function buildSerializedContext(overrides: {
     };
   };
 }): Record<string, unknown> {
-  const channel: { kind: unknown; state: unknown; audience?: unknown } = {
+  const channel: { kind: unknown; state: unknown } = {
     kind: overrides.channelKind,
     state: overrides.channelState ?? {},
   };
-  if (overrides.audience !== undefined) {
-    channel.audience = overrides.audience;
-  }
   const context: Record<string, unknown> = {
     "eve.auth": overrides.auth ?? null,
     "eve.bundle": { source: createBundledRuntimeCompiledArtifactsSource() },
     "eve.channel": channel,
     "eve.mode": overrides.mode,
   };
+  if (overrides.audience !== undefined) {
+    context[ConversationContextKey.name] = {
+      audience: overrides.audience,
+      channel: { kind: overrides.channelKind },
+      environment: "production",
+      mode: overrides.mode,
+      principalType: "anonymous",
+    };
+  }
   if (overrides.acceptedDeploymentId !== undefined) {
     context["eve.channelDelivery"] = {
       acceptedDeploymentId: overrides.acceptedDeploymentId,

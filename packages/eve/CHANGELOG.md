@@ -1,5 +1,15 @@
 # eve
 
+## 0.54.5
+
+### Patch Changes
+
+- c112e13: Self-modifying agents now relay the exact `eve add` command required to finish an interactive registry installation instead of substituting a registry configuration command.
+- 4652b5d: Slack channels can route each input request, including tool approvals and `ctx.ask()` questions, to the shared thread or the triggering user's direct messages with the `approvalChannel` callback. Direct-message requests include a preview of the Slack message that triggered the turn, while the original thread names the reviewer without exposing the request.
+- 7ba0c77: Preserve the text of replies to Telegram approval prompts so typed approval responses resume the pending tool.
+- 956205d: Teach root agents with self-modification to treat named product installation questions as requests to add capabilities, so they delegate registry discovery instead of denying device access or asking what kind of installation the user means.
+- eef5381: Teach self-modification to implement reusable, model-callable actions as authored eve tools instead of standalone scripts, including when the request describes a capability without calling it a tool.
+
 ## 0.54.4
 
 ### Patch Changes

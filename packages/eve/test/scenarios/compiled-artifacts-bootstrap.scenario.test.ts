@@ -17,6 +17,15 @@ import { useTemporaryAppRoots } from "../../src/internal/testing/use-temporary-a
 
 const createAppRoot = useTemporaryAppRoots();
 
+const traceContext = (audience: "public" | "private" | "unknown") => ({
+  agentName: "weather",
+  audience,
+  channel: { kind: "http" as const },
+  environment: "production" as const,
+  mode: "conversation" as const,
+  principalType: "anonymous",
+});
+
 describe("writeCompiledArtifactsFiles", () => {
   afterEach(() => {
     delete (globalThis as Record<string, unknown>).__eveInstrumentationLoaded;
@@ -213,9 +222,7 @@ describe("writeCompiledArtifactsFiles", () => {
     ]);
     const providers = getInstrumentationProviders();
     expect(providers.map((entry) => entry.slot)).toEqual(["local", "otel"]);
-    expect(
-      providers[0]?.provider.tracePolicy?.({ agentName: "weather", audience: "public" }),
-    ).toEqual({
+    expect(providers[0]?.provider.tracePolicy?.(traceContext("public"))).toEqual({
       emit: true,
       recordInputs: true,
       recordOutputs: false,

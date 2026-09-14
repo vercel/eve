@@ -12,6 +12,7 @@ import {
 } from "#context/keys.js";
 import { ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 import { getAdapterKind } from "#channel/adapter.js";
+import { ConversationContextKey } from "#shared/conversation-context.js";
 
 type ReadableContext = Pick<AlsContext, "get">;
 
@@ -47,6 +48,9 @@ export function buildResolveContext(
       continuationToken,
       metadata: channelInstrumentation?.metadata,
     },
+    ...(ctx.get(ConversationContextKey) === undefined
+      ? undefined
+      : { conversation: ctx.get(ConversationContextKey) }),
     messages,
   };
 }

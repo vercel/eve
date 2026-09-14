@@ -24,8 +24,11 @@ import {
 import { agentActivationAttributes } from "#tracing/agent-otel-runtime-context.js";
 import type { AgentTurnTraceState } from "#tracing/agent-trace-state.js";
 import { applyPrincipalTraceDecision } from "#instrumentation/principal-summary.js";
+import { normalizeInstrumentationChannelKind } from "#internal/instrumentation.js";
+import type { ConversationEnvironment } from "#shared/conversation-context.js";
 
 interface AgentOtelSessionContextInput {
+  readonly environment: ConversationEnvironment;
   readonly frameworkVersion: string;
   readonly idGenerator: AgentSpanIdGenerator;
   readonly samplesTrace?: (traceId: string, operation?: AgentSamplingOperation) => boolean;
@@ -52,7 +55,12 @@ export function createAgentOtelSessionContext(
     let state = await input.stateStore.getSession(event.sessionId);
     if (state === undefined) {
       const channelAudience = normalizeChannelAudience(event.channelAudience);
-      const decision = resolveSessionTraceDecision(event, channelAudience, input.tracePolicy);
+      const decision = resolveSessionTraceDecision(
+        event,
+        channelAudience,
+        input.environment,
+        input.tracePolicy,
+      );
       state = {
         agentName: event.agentName,
         channelAudience,
@@ -186,8 +194,10 @@ function freshTurnContext(
 function resolveSessionTraceDecision(
   event: SessionMetadata,
   audience: ChannelAudience,
+  environment: ConversationEnvironment,
   policy: TraceCapturePolicy | undefined,
 ): ReturnType<typeof resolveTracePolicy> {
+  const content = { audience, environment };
   if (event.parentTraceContext !== undefined && !isSampledTrace(event.parentTraceContext)) {
     return { action: "drop" };
   }
@@ -195,19 +205,24 @@ function resolveSessionTraceDecision(
     return readInstrumentationDecision(event.traceSeed.decision) ?? { action: "drop" };
   }
   if (event.traceSeed !== undefined) {
-    return resolveTracePolicyDecision(isSampledTrace(event.traceSeed), audience);
+    return resolveTracePolicyDecision(isSampledTrace(event.traceSeed), content);
   }
   if (event.parentTraceContext !== undefined) {
-    return resolveTracePolicyDecision(isSampledTrace(event.parentTraceContext), audience);
+    return resolveTracePolicyDecision(isSampledTrace(event.parentTraceContext), content);
   }
   if (event.agentName === undefined) {
-    return policy === undefined ? resolveTracePolicyDecision(true, audience) : { action: "drop" };
+    return policy === undefined ? resolveTracePolicyDecision(true, content) : { action: "drop" };
   }
   // The tool loop can evaluate the same policy before this first-session
   // preparation path; the persisted decision removes that window on replay.
   return resolveTracePolicy(policy, {
     agentName: event.agentName,
     audience,
-    channelType: event.channelType,
+    channel: {
+      kind: normalizeInstrumentationChannelKind(event.channelKind ?? event.channelType),
+    },
+    environment,
+    mode: "conversation",
+    principalType: "unknown",
   });
 }

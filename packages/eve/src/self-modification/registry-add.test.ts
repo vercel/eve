@@ -48,6 +48,13 @@ const INDEX = {
       },
     },
     {
+      name: "connection/linear",
+      title: "Linear MCP",
+      meta: {
+        eve: { setup: { package: "eve", bin: "eve", args: ["integration", "setup", "linear"] } },
+      },
+    },
+    {
       name: "@acme/widget",
       title: "Acme Widget",
     },
@@ -215,6 +222,19 @@ describe("addLocalRegistryItem", () => {
     expect(result.status).toBe("needs-terminal");
     expect(result.reason).toContain("channel/linear-agent");
     expect(calls).toHaveLength(0);
+  });
+
+  it("returns the exact installation command for a headless Linear handoff", async () => {
+    const result = await addLocalRegistryItem("connection/linear", {
+      getCapability: () => capability(),
+    });
+
+    expect(result).toMatchObject({
+      address: "connection/linear",
+      nextCommand: "eve add connection/linear",
+      status: "needs-terminal",
+    });
+    expect(result.message).toContain("`eve add connection/linear`");
   });
 
   it("leaves the automatically queued setup to an interactive client", async () => {

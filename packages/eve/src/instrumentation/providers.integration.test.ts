@@ -10,6 +10,15 @@ import { defineInstrumentation } from "#public/instrumentation/index.js";
 const REGISTRY_GLOBAL_KEY = Symbol.for("eve.harness-instrumentation-providers");
 const RUNTIME_GLOBAL_KEY = Symbol.for("eve.instrumentation-runtime");
 
+const traceContext = (audience: "public" | "private" | "unknown") => ({
+  agentName: "weather",
+  audience,
+  channel: { kind: "http" as const },
+  environment: "production" as const,
+  mode: "conversation" as const,
+  principalType: "anonymous",
+});
+
 function deferred(): { readonly promise: Promise<void>; readonly resolve: () => void } {
   let resolve!: () => void;
   const promise = new Promise<void>((complete) => {
@@ -69,7 +78,7 @@ describe("authored instrumentation provider dispatch", () => {
     expect(order).toEqual(["first:setup", "first:setup-complete", "second:setup"]);
 
     const runtime = finalizeInstrumentationProviders({ serviceName: "weather" });
-    const hooks = runtime.hooks.forTrace!({ agentName: "weather", audience: "unknown" });
+    const hooks = runtime.hooks.forTrace!(traceContext("unknown"));
     const publication = hooks.publish({
       idempotencyKey: turnIdempotencyKey("session-1", "turn-1"),
       rootSessionId: "session-1",

@@ -60,6 +60,7 @@ import { resolveEffectiveOutputSchema } from "#execution/effective-output-schema
 import { turnStep } from "#execution/workflow-steps.js";
 import { routeProxiedDeliverStep } from "#execution/proxied-deliver-step.js";
 import { turnWorkflowReference } from "#execution/workflow-runtime.js";
+import { ConversationContextKey } from "#shared/conversation-context.js";
 
 const bindSessionInstrumentationSpy = vi.hoisted(() => vi.fn());
 vi.mock("#instrumentation/runtime.js", async (importOriginal) => {
@@ -851,6 +852,13 @@ describe("dispatchTurnStep", () => {
   it("lets the development world retain its stamped generation", async () => {
     vi.stubEnv("EVE_DEV", "1");
     const input = createTurnInput();
+    input.serializedContext[ConversationContextKey.name] = {
+      audience: "unknown",
+      channel: { kind: "http" },
+      environment: "development",
+      mode: "conversation",
+      principalType: "anonymous",
+    };
     startMock.mockResolvedValue({ runId: "turn-run" });
 
     await expect(dispatchTurnStep(input)).resolves.toEqual({ runId: "turn-run" });
@@ -3467,9 +3475,7 @@ describe("runProxySubagentEventStep", () => {
       },
     });
     expect(result.serializedContext[ChannelInstrumentationKey.name]).toMatchObject({
-      metadata: {
-        audience: "unknown",
-      },
+      metadata: {},
     });
 
     // And the parent session's proxy-entry map is reflected on the

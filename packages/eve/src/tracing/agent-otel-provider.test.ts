@@ -58,6 +58,7 @@ import {
 } from "#tracing/span-export-policy.js";
 import { CONTENT_ATTRIBUTE_LIMIT } from "#tracing/agent-otel-content.js";
 import type { TraceCapturePolicy } from "#tracing/otel-declaration.js";
+import type { TraceCaptureContext } from "#shared/trace-policy.js";
 import {
   actionIdempotencyKey,
   attemptIdempotencyKey,
@@ -73,6 +74,15 @@ import {
 } from "#instrumentation/state.js";
 import { preserveSerializedBackgroundTaskObservabilityState } from "#shared/serialized-observability-state.js";
 import { isRuntimeWorkflowToolAction } from "#shared/action-types.js";
+
+const traceContext = (audience: ChannelAudience = "public") => ({
+  agentName: "weather",
+  audience,
+  channel: { kind: "http" as const },
+  environment: "production" as const,
+  mode: "conversation" as const,
+  principalType: "anonymous",
+});
 
 interface TestRuntime {
   readonly exporter: InMemorySpanExporter;
@@ -121,10 +131,7 @@ function createRuntime(
   };
   if (tracePolicy !== null) agentOtelInput.tracePolicy = tracePolicy;
   const agentOtel = createAgentOtelInstrumentation(agentOtelInput);
-  const hooks = createInstrumentationHooks([agentOtel.hook]).forTrace!({
-    agentName: "weather",
-    audience: "public",
-  });
+  const hooks = createInstrumentationHooks([agentOtel.hook]).forTrace!(traceContext());
   return {
     exporter,
     hooks,
@@ -167,10 +174,7 @@ async function emitAttempt(input: {
     turnId: input.turnId,
   };
   const hooks =
-    input.hooks.forTrace?.({
-      agentName: "weather",
-      audience: scope.channelAudience ?? "unknown",
-    }) ?? input.hooks;
+    input.hooks.forTrace?.(traceContext(scope.channelAudience ?? "unknown")) ?? input.hooks;
   if (input.turnAlreadyStarted !== true) {
     await publishTurnStarted({ ...input, hooks });
   }
@@ -802,15 +806,15 @@ describe("createAgentOtelInstrumentation", () => {
     expect(turn.parentSpanContext).toBeUndefined();
   });
 
-  it("passes channelType to the policy on the seedless fallback path", async () => {
-    let captured: { channelType?: string } | undefined;
+  it("passes the channel to the policy on the seedless fallback path", async () => {
+    let captured: TraceCaptureContext | undefined;
     const runtime = createRuntime(undefined, (trace) => {
       captured = trace;
       return true;
     });
     const sessionEvent = {
       agentName: "weather",
-      channelType: "slack",
+      channelKind: "channel:slack",
       idempotencyKey: sessionIdempotencyKey("session-noseed-kind"),
       rootSessionId: "session-noseed-kind",
       sessionId: "session-noseed-kind",
@@ -819,7 +823,7 @@ describe("createAgentOtelInstrumentation", () => {
 
     await runtime.prepareSessionTrace(sessionEvent);
 
-    expect(captured?.channelType).toBe("slack");
+    expect(captured?.channel.kind).toBe("channel:slack");
   });
 
   it("allocates independent trace context for delegated agents", async () => {
@@ -2696,7 +2700,7 @@ describe("createAgentOtelInstrumentation", () => {
       stepIndex: 0,
       turnId: "turn-1",
     };
-    const hooks = runtime.hooks.forTrace!({ agentName: "weather", audience: "public" });
+    const hooks = runtime.hooks.forTrace!(traceContext("public"));
     await hooks.publish({
       agentName: "weather",
       channelAudience: "public",
@@ -2765,10 +2769,7 @@ describe("createAgentOtelInstrumentation", () => {
       stateStore: new InMemoryAgentTraceStateStore(),
       tracer: provider.getTracer("eve.agent"),
     });
-    const hooks = createInstrumentationHooks([agentOtel.hook]).forTrace!({
-      agentName: "weather",
-      audience: "public",
-    });
+    const hooks = createInstrumentationHooks([agentOtel.hook]).forTrace!(traceContext("public"));
     await emitAttempt({
       hooks,
       runInContext: agentOtel.runInContext,
