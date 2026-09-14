@@ -5,7 +5,6 @@
 export {
   type AgentCompactionDefinition,
   type AgentDefinition,
-  type AgentDynamicWorkflowsDefinition,
   type AgentExperimentalDefinition,
   type AgentLimitsDefinition,
   type AgentModelDefinition,

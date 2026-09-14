@@ -26,6 +26,7 @@ interface HostVariant {
   readonly instrumentationSource?: string;
   readonly schedule?: { readonly cron: string; readonly markdown: string };
   readonly workflowSourceFingerprint?: string;
+  readonly workflowTool?: boolean;
   readonly workflowWorld?: "local" | "vercel";
 }
 
@@ -78,6 +79,9 @@ async function createHost(variant: HostVariant = {}): Promise<PreparedDevelopmen
     modules,
     name: "fingerprint-host",
   });
+  if (variant.workflowTool === true) {
+    (manifest.tools as unknown as Array<{ readonly name: string }>).push({ name: "workflow" });
+  }
 
   return {
     appRoot,
@@ -167,6 +171,15 @@ describe("computeDevelopmentHostFingerprint", () => {
     );
 
     expect(vercel).not.toBe(local);
+  });
+
+  it("treats workflow tool presence as structural", async () => {
+    const withoutWorkflowTool = await computeDevelopmentHostFingerprint(await createHost());
+    const withWorkflowTool = await computeDevelopmentHostFingerprint(
+      await createHost({ workflowTool: true }),
+    );
+
+    expect(withWorkflowTool).not.toBe(withoutWorkflowTool);
   });
 
   it("treats authored workflow sources as structural", async () => {

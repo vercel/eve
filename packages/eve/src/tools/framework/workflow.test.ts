@@ -4,17 +4,31 @@ import { normalizeToolDefinition } from "#internal/authored-definition/schema-ba
 import { dynamicWorkflowReference } from "#execution/dynamic-workflow/workflow-reference.js";
 import { attachToolBehavior, readToolBehavior } from "#tools/behavior.js";
 import { defineTool } from "#tools/definition.js";
-import { workflow } from "#tools/framework/workflow.js";
+import { defaultWorkflow, workflow } from "#tools/framework/workflow.js";
 
 describe("framework workflow tool", () => {
-  it("is a lowercase blocking workflow tool", () => {
-    expect(workflow.execution).toBeUndefined();
-    expect(Reflect.get(workflow.execute, "workflowId")).toBe(dynamicWorkflowReference.workflowId);
-    expect(readToolBehavior(workflow)).toEqual({
+  it("provides a lowercase blocking workflow tool", () => {
+    expect(defaultWorkflow.execution).toBeUndefined();
+    expect(Reflect.get(defaultWorkflow.execute, "workflowId")).toBe(
+      dynamicWorkflowReference.workflowId,
+    );
+    expect(readToolBehavior(defaultWorkflow)).toEqual({
       availability: ["root-session"],
-      handling: { kind: "workflow-tool", workflowId: dynamicWorkflowReference.workflowId },
+      handling: {
+        kind: "workflow-tool",
+        maxSubagents: undefined,
+        workflowId: dynamicWorkflowReference.workflowId,
+      },
     });
-    expect(() => normalizeToolDefinition(workflow, "Invalid workflow.")).not.toThrow();
+    expect(() => normalizeToolDefinition(defaultWorkflow, "Invalid workflow.")).not.toThrow();
+  });
+
+  it("configures the child-call budget", () => {
+    expect(readToolBehavior(workflow({ maxSubagents: 7 }))?.handling).toMatchObject({
+      kind: "workflow-tool",
+      maxSubagents: 7,
+    });
+    expect(() => workflow({ maxSubagents: 0 })).toThrow("positive integer");
   });
 
   it("rejects an attached workflow id that differs from the executor", () => {

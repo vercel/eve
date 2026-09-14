@@ -25,6 +25,7 @@ import { eveChannel } from "#public/channels/eve.js";
 import { defineMemory } from "#public/memory/index.js";
 import type { ToolContext } from "#tools/definition.js";
 import type { ResolvedToolDefinition } from "#runtime/types.js";
+import defaultWorkflow from "#tools/framework/workflow.js";
 import { toInputSchema } from "#tools/schema.js";
 
 /**
@@ -108,7 +109,13 @@ async function createWaitToolRuntime(agentName: string): Promise<WaitToolFixture
     },
   );
   const runtime = await createTestRuntime({
-    agent: { experimental: { dynamicWorkflows: true }, name: agentName },
+    agent: { name: agentName },
+    modules: [
+      {
+        logicalPath: "tools/workflow.ts",
+        loadNamespace: async () => ({ default: defaultWorkflow }),
+      },
+    ],
     tools: [waitTool],
   });
   const manifestTool = runtime.manifest.tools.find((tool) => tool.name === WAIT_TOOL_NAME);
@@ -820,9 +827,14 @@ describe("turn cancellation integration", () => {
   it("cancels a turn parked on a child HITL request without corrupting the stream", async () => {
     const runtime = await createTestRuntime({
       agent: {
-        experimental: { dynamicWorkflows: true },
         name: "turn-cancel-hitl",
       },
+      modules: [
+        {
+          logicalPath: "tools/workflow.ts",
+          loadNamespace: async () => ({ default: defaultWorkflow }),
+        },
+      ],
     });
     const continuationToken = "http:turn-cancel-hitl";
 

@@ -7,11 +7,13 @@ import type { PreparedToolBehavior } from "#tools/behavior.js";
 /** Grouped durable workflow metadata for one prepared harness tool. */
 export type PreparedRuntimeWorkflowTask =
   | {
+      readonly maxSubagents?: number;
       readonly nodeId?: never;
       readonly resultKind?: "tool";
       readonly workflowId: string;
     }
   | {
+      readonly maxSubagents?: number;
       readonly nodeId: string;
       readonly resultKind: "subagent";
       readonly workflowId: string;

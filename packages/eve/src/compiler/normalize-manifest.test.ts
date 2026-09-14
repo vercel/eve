@@ -30,6 +30,7 @@ import { defineWorkflowTool } from "#tools/workflow-definition.js";
 import { defineTool, disableTool } from "#tools/definition.js";
 import { defineMemory } from "#public/memory/index.js";
 import { defineDynamic } from "#dynamic/definition.js";
+import { defaultWorkflow, workflow } from "#tools/framework/workflow.js";
 import { webSearch } from "#tools/provided/web-search.js";
 
 function manifest() {
@@ -74,14 +75,13 @@ describe("compileAgentManifest source graph", () => {
     ).toThrow('Remove "experimental.workflow.world" from "child".');
   });
 
-  it("preserves dynamic workflow config alongside Workflow SDK config", async () => {
+  it("preserves Workflow SDK config", async () => {
     const sourceRegistry = registry([
       {
         logicalPath: "agent.ts",
         loadNamespace: async () => ({
           default: defineAgent({
             experimental: {
-              dynamicWorkflows: { maxSubagents: 4 },
               workflow: { modelCallsPerStep: 2, retention: 0 },
             },
             model: "openai/gpt-5.4",
@@ -95,7 +95,6 @@ describe("compileAgentManifest source graph", () => {
     });
 
     expect(compiled.config.experimental).toEqual({
-      dynamicWorkflows: { maxSubagents: 4 },
       workflow: { modelCallsPerStep: 2, retention: 0, world: undefined },
     });
   });
@@ -230,11 +229,12 @@ describe("compileAgentManifest source graph", () => {
     );
   });
 
-  it("does not install task_update from the framework registry", async () => {
+  it("does not install opt-in tools from the framework registry", async () => {
     const compiled = await compileAgentManifest(manifest());
 
     expect(compiled.tools.map((tool) => tool.name)).toContain("task_cancel");
     expect(compiled.tools.map((tool) => tool.name)).not.toContain("task_update");
+    expect(compiled.tools.map((tool) => tool.name)).not.toContain("workflow");
     expect(Object.values(compiled.bindings).map((binding) => binding.logicalPath)).not.toContain(
       "tools/task_update.ts",
     );
@@ -281,8 +281,30 @@ describe("compileAgentManifest source graph", () => {
     await expect(
       compileAgentManifest(manifest(), { sourceRegistries: [sourceRegistry] }),
     ).rejects.toThrow(
-      'The framework "workflow" tool cannot be overridden. Remove "agent/tools/workflow.ts" or disable it with disableTool().',
+      'The "workflow" tool slot accepts only the definition exported by "eve/tools/workflow" or disableTool().',
     );
+  });
+
+  it.each([
+    ["default", defaultWorkflow, undefined],
+    ["configured", workflow({ maxSubagents: 7 }), 7],
+  ])("compiles the %s provided workflow tool", async (_label, definition, maxSubagents) => {
+    const sourceRegistry = registry([
+      {
+        logicalPath: "tools/workflow.ts",
+        loadNamespace: async () => ({ default: definition }),
+      },
+    ]);
+
+    const compiled = await compileAgentManifest(manifest(), {
+      sourceRegistries: [sourceRegistry],
+    });
+    const behavior = compiled.tools.find((tool) => tool.name === "workflow")?.behavior;
+    expect(behavior?.availability).toEqual(["root-session"]);
+    expect(behavior?.handling?.kind).toBe("workflow-tool");
+    if (behavior?.handling?.kind === "workflow-tool") {
+      expect(behavior.handling.maxSubagents).toBe(maxSubagents);
+    }
   });
 
   it("compiles a workflow tool with programmatic executor metadata", async () => {

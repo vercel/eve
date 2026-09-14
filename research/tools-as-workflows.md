@@ -8,7 +8,7 @@ last_updated: "2026-09-11"
 
 `defineWorkflowTool` is the authoring boundary for durable tools, and its executor context owns
 `agent` and `ask`. The executor must explicitly start with `"use workflow"`; the definition
-selects the eve tool contract and the directive marks the function's replay semantics. This authored API is separate from the model-facing `workflow` tool enabled by `experimental.dynamicWorkflows` and from the Workflow SDK settings under `experimental.workflow`.
+selects the eve tool contract and the directive marks the function's replay semantics. This authored API is separate from the model-facing `workflow` tool added through `agent/tools/workflow.ts` and from the Workflow SDK settings under `experimental.workflow`.
 
 ## Authoring API
 

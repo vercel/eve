@@ -77,10 +77,9 @@ function resolveProductionNitroPreset(): "vercel" | undefined {
   return process.env.VERCEL ? "vercel" : undefined;
 }
 
-/** Whether any agent needs the dynamic Workflow sandbox runtime. */
+/** Whether any agent needs the dynamic workflow sandbox runtime. */
 function manifestEnablesWorkflow(manifest: CompiledAgentManifest): boolean {
-  const dynamicWorkflows = manifest.config.experimental?.dynamicWorkflows;
-  return dynamicWorkflows === true || typeof dynamicWorkflows === "object";
+  return manifest.tools.some((tool) => tool.name === "workflow");
 }
 
 function manifestHasWebSocketChannel(manifest: CompiledAgentManifest): boolean {

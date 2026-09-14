@@ -237,10 +237,6 @@ function createResolvedAgentConfig(
 
   if (manifest.config.experimental !== undefined) {
     config.experimental = {
-      dynamicWorkflows:
-        typeof manifest.config.experimental.dynamicWorkflows === "object"
-          ? { ...manifest.config.experimental.dynamicWorkflows }
-          : manifest.config.experimental.dynamicWorkflows,
       instrumentationProviders: manifest.config.experimental.instrumentationProviders,
       workflow:
         manifest.config.experimental.workflow === undefined

@@ -559,12 +559,6 @@ const compiledAgentBuildDefinitionSchema: z.ZodType<CompiledAgentBuildDefinition
   })
   .strict();
 
-const compiledAgentDynamicWorkflowsDefinitionSchema = z
-  .object({
-    maxSubagents: z.number().int().positive().optional(),
-  })
-  .strict();
-
 const compiledAgentWorkflowWorldDefinitionSchema = z.string();
 
 const compiledAgentWorkflowDefinitionSchema = z
@@ -602,9 +596,6 @@ const compiledAgentConfigBaseFields = {
   description: z.string().optional(),
   experimental: z
     .object({
-      dynamicWorkflows: z
-        .union([z.boolean(), compiledAgentDynamicWorkflowsDefinitionSchema])
-        .optional(),
       instrumentationProviders: z.boolean().optional(),
       workflow: compiledAgentWorkflowDefinitionSchema.optional(),
     })
@@ -844,6 +835,7 @@ const compiledToolBehaviorSchema: z.ZodType<CompiledToolBehavior> = z
         z
           .object({
             kind: z.literal("workflow-tool"),
+            maxSubagents: z.number().int().positive().optional(),
             workflowId: z.string(),
           })
           .strict(),
@@ -1200,11 +1192,6 @@ function cloneCompiledAgentDefinition(config: CompiledAgentDefinition): Compiled
       config.experimental === undefined
         ? undefined
         : {
-            dynamicWorkflows:
-              config.experimental.dynamicWorkflows === undefined ||
-              typeof config.experimental.dynamicWorkflows === "boolean"
-                ? config.experimental.dynamicWorkflows
-                : { maxSubagents: config.experimental.dynamicWorkflows.maxSubagents },
             instrumentationProviders: config.experimental.instrumentationProviders,
             workflow:
               config.experimental.workflow === undefined

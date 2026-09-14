@@ -28,6 +28,8 @@ export interface HarnessToolDefinition {
   readonly execution?: "background";
   readonly frameworkAction?: "load-skill";
   readonly inputSchema: FlexibleSchema;
+  /** Child-call budget for the provided dynamic workflow tool. */
+  readonly maxSubagents?: number;
   readonly name: string;
   /** Runtime graph node for a framework subagent workflow body. */
   readonly nodeId?: string;

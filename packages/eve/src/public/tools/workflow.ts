@@ -1,2 +1,1 @@
-// Retained as an empty source tombstone for historical extension-contract reports.
-export {};
+export { default, workflow, type DynamicWorkflowToolOptions } from "#tools/framework/workflow.js";

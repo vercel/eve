@@ -77,8 +77,4 @@ const base = e2eAgentConfig({ mock: respond });
 
 export default defineAgent({
   ...base,
-  experimental: {
-    ...base.experimental,
-    dynamicWorkflows: true,
-  },
 });

@@ -12,3 +12,8 @@ export {
   isWebSearchToolDefinition,
   webSearch,
 } from "../../src/public/tools/web-search.ts";
+export {
+  default,
+  workflow,
+  type DynamicWorkflowToolOptions,
+} from "../../src/public/tools/workflow.ts";

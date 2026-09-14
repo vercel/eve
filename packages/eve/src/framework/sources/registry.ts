@@ -50,10 +50,6 @@ const localDefaults = defineProgrammaticAgentSource({
       loadNamespace: () => import("#tools/framework/connection-search.js"),
     },
     {
-      logicalPath: "tools/workflow.ts",
-      loadNamespace: () => import("#tools/framework/workflow.js"),
-    },
-    {
       logicalPath: "tools/ask_question.ts",
       loadNamespace: () => import("#tools/framework/ask-question.js"),
     },

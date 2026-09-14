@@ -23,9 +23,6 @@ type AdvertisedModelToolsInput = {
   readonly modelTools: ToolSet;
   readonly session: HarnessSession;
   readonly tools: HarnessToolMap;
-  readonly dynamicWorkflows?: {
-    readonly maxSubagents?: number;
-  };
 };
 
 type AdvertisedModelTools = {
@@ -64,22 +61,17 @@ async function getAdvertisedModelTools(
 ): Promise<AdvertisedModelTools> {
   const tools = filterUnavailableToolMap(input.tools, input.session);
   const visibleModelTools = { ...input.modelTools };
-  if (!tools.has(DYNAMIC_WORKFLOW_TOOL_NAME)) {
+  const workflowTool = tools.get(DYNAMIC_WORKFLOW_TOOL_NAME);
+  if (workflowTool === undefined) {
     delete visibleModelTools[DYNAMIC_WORKFLOW_TOOL_NAME];
-  }
-  if (input.dynamicWorkflows === undefined) {
-    const harnessTools = new Map(tools);
-    harnessTools.delete(DYNAMIC_WORKFLOW_TOOL_NAME);
-    const modelTools = { ...visibleModelTools };
-    delete modelTools[DYNAMIC_WORKFLOW_TOOL_NAME];
-    return { harnessTools, modelTools, session: input.session };
+    return { harnessTools: tools, modelTools: visibleModelTools, session: input.session };
   }
 
   const session = ensureWorkflowContinuationSecurity(input.session);
   const applied = await applyDynamicWorkflows({
     continuationSecurity: getWorkflowContinuationSecurity(session),
     harnessTools: tools,
-    maxSubagents: input.dynamicWorkflows.maxSubagents,
+    maxSubagents: workflowTool.maxSubagents,
     tools: visibleModelTools,
   });
 

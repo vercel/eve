@@ -85,11 +85,13 @@ async function createPreparedRuntimeTool(
 ): Promise<PreparedRuntimeAuthoredTool> {
   const isFrameworkAgent =
     definition.owner.kind === "framework" && definition.name === AGENT_TOOL_NAME;
+  const workflowHandling =
+    definition.behavior?.handling?.kind === "workflow-tool"
+      ? definition.behavior.handling
+      : undefined;
   const workflowId = isFrameworkAgent
     ? subagentToolExecuteWorkflowReference.workflowId
-    : definition.behavior?.handling?.kind === "workflow-tool"
-      ? definition.behavior.handling.workflowId
-      : undefined;
+    : workflowHandling?.workflowId;
   return {
     behavior: prepareToolBehavior(
       definition.behavior,
@@ -115,7 +117,7 @@ async function createPreparedRuntimeTool(
               resultKind: "subagent",
               workflowId,
             }
-          : { workflowId },
+          : { maxSubagents: workflowHandling?.maxSubagents, workflowId },
   };
 }
 
@@ -150,6 +152,7 @@ function prepareToolBehavior(
       kind: "dispatch",
       target: {
         kind: "workflow-tool-call",
+        maxSubagents: behavior.handling.maxSubagents,
         workflowId: workflowIdOverride ?? behavior.handling.workflowId,
       },
     };

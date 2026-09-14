@@ -4,44 +4,30 @@ description: "Enable the root-only workflow tool to coordinate subagents from a 
 url: /tools/dynamic-workflows
 ---
 
-Dynamic workflows let the root agent run one model-authored JavaScript program that coordinates child-agent calls and returns one JSON-serializable result. Enable the experimental `workflow` tool when the model needs loops, fan-out, dependent calls, filtering, or aggregation across subagents.
+Dynamic workflows let the root agent run one model-authored JavaScript program that coordinates child-agent calls and returns one JSON-serializable result. Add the `workflow` tool when the model needs loops, fan-out, dependent calls, filtering, or aggregation across subagents.
 
-The built-in `workflow` tool is distinct from both:
+The model-facing `workflow` tool is distinct from both:
 
 - [`defineWorkflowTool`](./workflows), which authors a named tool whose implementation you write and run with the Workflow SDK.
 - `experimental.workflow`, which configures the Workflow SDK runtime used by eve, including its world, checkpoint batching, and retention.
 
 ## Enable dynamic workflows
 
-Set `experimental.dynamicWorkflows` on the root agent:
+Create `agent/tools/workflow.ts` and export the default tool:
 
-```ts title="agent/agent.ts"
-import { defineAgent } from "eve";
-
-export default defineAgent({
-  model: "openai/gpt-5.6-luna-fast",
-  experimental: {
-    dynamicWorkflows: true,
-  },
-});
+```ts title="agent/tools/workflow.ts"
+export { default } from "eve/tools/workflow";
 ```
 
-`true` uses the runtime defaults. Pass an object to set the maximum number of subagent calls allowed in one program:
+The default allows up to `100` subagent calls in one program. Import the factory to set a different limit:
 
-```ts title="agent/agent.ts"
-import { defineAgent } from "eve";
+```ts title="agent/tools/workflow.ts"
+import { workflow } from "eve/tools/workflow";
 
-export default defineAgent({
-  model: "openai/gpt-5.6-luna-fast",
-  experimental: {
-    dynamicWorkflows: {
-      maxSubagents: 20,
-    },
-  },
-});
+export default workflow({ maxSubagents: 20 });
 ```
 
-`maxSubagents` defaults to `100` and must be a positive integer. Parallel and sequential calls count toward the same per-program limit. A call over the limit fails with `WORKFLOW_SUBAGENT_LIMIT_REACHED` and does not start a child. Set `dynamicWorkflows: false` or omit the field to disable the tool.
+`maxSubagents` must be a positive integer. Parallel and sequential calls count toward the same per-program limit. A call over the limit fails with `WORKFLOW_SUBAGENT_LIMIT_REACHED` and does not start a child. Remove `agent/tools/workflow.ts` to remove the tool.
 
 The `workflow` tool is available only in a root session and only when at least one subagent is visible for the current model step. Runtime subagent sessions do not receive it.
 

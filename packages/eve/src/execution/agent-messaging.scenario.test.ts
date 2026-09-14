@@ -78,7 +78,6 @@ const model = mockModel((request) => {
 });
 
 export default defineAgent({
-  experimental: { dynamicWorkflows: true },
   model,
   modelContextWindowTokens: 32_000,
 });

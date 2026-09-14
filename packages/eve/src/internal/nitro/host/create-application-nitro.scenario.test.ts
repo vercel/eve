@@ -695,7 +695,7 @@ describe("application Nitro creation", () => {
     expect(createNitroMock.mock.calls[0]?.[0].traceDeps).toEqual([]);
   });
 
-  it("includes the Workflow sandbox runtime plugin only when Dynamic Workflows are enabled", async () => {
+  it("includes the Workflow sandbox runtime plugin only when the workflow tool is present", async () => {
     const directNitroStub = createNitroStub();
     const workflowNitroStub = createNitroStub();
     createNitroMock.mockResolvedValueOnce(directNitroStub.nitro);
@@ -706,9 +706,9 @@ describe("application Nitro creation", () => {
 
     const directHost = await createPreparedHost();
     const workflowHost = await createPreparedHost();
-    workflowHost.compileResult.manifest.config.experimental = {
-      dynamicWorkflows: true,
-    };
+    (workflowHost.compileResult.manifest.tools as unknown as Array<{ readonly name: string }>).push(
+      { name: "workflow" },
+    );
 
     await createProductionApplicationNitro(directHost, createProductionOptions(directHost));
     await createProductionApplicationNitro(workflowHost, createProductionOptions(workflowHost));

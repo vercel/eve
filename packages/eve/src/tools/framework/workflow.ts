@@ -6,16 +6,36 @@ import { defineTool } from "#tools/definition.js";
 
 const execute = Object.assign(dynamicWorkflow, dynamicWorkflowReference);
 
-export const workflow = attachToolBehavior(
-  defineTool({
-    description: "Run a durable JavaScript program that coordinates child agents.",
-    execute,
-    inputSchema: dynamicWorkflowInputSchema,
-  }),
-  {
-    availability: ["root-session"],
-    handling: { kind: "workflow-tool", workflowId: dynamicWorkflowReference.workflowId },
-  },
-);
+export interface DynamicWorkflowToolOptions {
+  /** Maximum child-agent calls one generated program may make. Defaults to 100. */
+  readonly maxSubagents?: number;
+}
 
-export default workflow;
+/** Creates the opt-in `workflow` tool with an optional per-program child-call budget. */
+export function workflow(options: DynamicWorkflowToolOptions = {}) {
+  if (
+    options.maxSubagents !== undefined &&
+    (!Number.isSafeInteger(options.maxSubagents) || options.maxSubagents <= 0)
+  ) {
+    throw new TypeError("workflow maxSubagents must be a positive integer.");
+  }
+  return attachToolBehavior(
+    defineTool({
+      description: "Run a durable JavaScript program that coordinates child agents.",
+      execute,
+      inputSchema: dynamicWorkflowInputSchema,
+    }),
+    {
+      availability: ["root-session"],
+      handling: {
+        kind: "workflow-tool",
+        maxSubagents: options.maxSubagents,
+        workflowId: dynamicWorkflowReference.workflowId,
+      },
+    },
+  );
+}
+
+export const defaultWorkflow = workflow();
+
+export default defaultWorkflow;

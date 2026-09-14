@@ -2,4 +2,4 @@
 "eve": minor
 ---
 
-Replace the uppercase `Workflow` tool and `experimental_workflow()` helper with the experimental, root-only `workflow` tool, enabled through `experimental.dynamicWorkflows`. Dynamic workflows run model-authored JavaScript that coordinates visible subagents, awaits their final results, and enforces an optional per-program `maxSubagents` limit.
+Replace the uppercase `Workflow` tool and `experimental_workflow()` helper with the root-only `workflow` tool, enabled by creating `agent/tools/workflow.ts`. Dynamic workflows run model-authored JavaScript that coordinates visible subagents and awaits their final results; import the `workflow` factory from `eve/tools/workflow` to set a per-program `maxSubagents` limit.

@@ -8,6 +8,7 @@ import { UNSPECIFIED_INPUT_SCHEMA, toInputSchema, toOutputSchema } from "#tools/
 export interface WorkflowToolHarnessDefinitionInput {
   readonly definition: HarnessToolDefinition;
   readonly executeInput?: (input: unknown) => JsonValue;
+  readonly maxSubagents?: number;
   readonly nodeId?: string;
   readonly resultKind?: "subagent" | "tool";
   readonly workflowId: string;
@@ -19,6 +20,7 @@ export function createWorkflowToolHarnessDefinition(
   const definition = input.definition;
   const workflow = {
     executeInput: input.executeInput,
+    maxSubagents: input.maxSubagents,
     nodeId: input.nodeId,
     resultKind: input.resultKind,
     workflowId: input.workflowId,
@@ -56,6 +58,7 @@ export function createPreparedWorkflowToolHarnessDefinition(
       outputSchema: toOutputSchema(tool.outputSchema),
       rootOnly: tool.rootOnly,
     },
+    maxSubagents: tool.task.maxSubagents,
     nodeId: tool.task.nodeId,
     resultKind: tool.task.resultKind,
     workflowId: tool.task.workflowId,

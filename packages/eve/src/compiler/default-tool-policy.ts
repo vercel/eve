@@ -1,6 +1,7 @@
 import type { CompiledAgentDefinition } from "#compiler/manifest.js";
 import type { PhaseOneNodeSourceState } from "#compiler/node-source-state.js";
 import type { CompiledToolEntry } from "#compiler/normalize-tool.js";
+import { dynamicWorkflowReference } from "#execution/dynamic-workflow/workflow-reference.js";
 import {
   canonicalSourceSlot,
   composeAgentModuleCandidates,
@@ -20,14 +21,16 @@ export function assertFrameworkToolPolicy(
       'The required "connection_search" tool cannot be disabled. Remove "agent/tools/connection_search.ts" or export a replacement tool from it.',
     );
   }
-  if (
-    slot === DYNAMIC_WORKFLOW_TOOL_SLOT &&
-    candidate.layer !== "framework-default" &&
-    result.kind === "tool"
-  ) {
-    throw new Error(
-      'The framework "workflow" tool cannot be overridden. Remove "agent/tools/workflow.ts" or disable it with disableTool().',
-    );
+  if (slot === DYNAMIC_WORKFLOW_TOOL_SLOT && result.kind === "tool") {
+    const handling = result.definition.behavior?.handling;
+    if (
+      handling?.kind !== "workflow-tool" ||
+      handling.workflowId !== dynamicWorkflowReference.workflowId
+    ) {
+      throw new Error(
+        'The "workflow" tool slot accepts only the definition exported by "eve/tools/workflow" or disableTool().',
+      );
+    }
   }
   const closedDispatchSlots = {
     "tools/agent": "self-agent",
@@ -51,22 +54,7 @@ export function applyDefaultToolPolicy(
   phaseOne: PhaseOneNodeSourceState,
   config: CompiledAgentDefinition,
 ): void {
-  const dynamicWorkflows = config.experimental?.dynamicWorkflows;
-  const dynamicWorkflowsEnabled =
-    dynamicWorkflows === true ||
-    (typeof dynamicWorkflows === "object" && dynamicWorkflows !== null);
-  const candidates = phaseOne.graph.orderedCandidates.filter((candidate) => {
-    const slot = canonicalSourceSlot(candidate.logicalPath);
-    return (
-      slot !== DYNAMIC_WORKFLOW_TOOL_SLOT ||
-      candidate.layer !== "framework-default" ||
-      dynamicWorkflowsEnabled
-    );
-  });
-  if (config.defaultTools !== false) {
-    phaseOne.graph.composed = composeAgentModuleCandidates(candidates);
-    return;
-  }
+  if (config.defaultTools !== false) return;
 
   const overriddenSlots = new Set(
     phaseOne.graph.orderedCandidates
@@ -74,13 +62,12 @@ export function applyDefaultToolPolicy(
       .map((candidate) => canonicalSourceSlot(candidate.logicalPath)),
   );
   phaseOne.graph.composed = composeAgentModuleCandidates(
-    candidates.filter((candidate) => {
+    phaseOne.graph.orderedCandidates.filter((candidate) => {
       const slot = canonicalSourceSlot(candidate.logicalPath);
       return (
         candidate.layer !== "framework-default" ||
         !slot.startsWith("tools/") ||
         REQUIRED_FRAMEWORK_TOOL_SLOTS.has(slot) ||
-        (dynamicWorkflowsEnabled && slot === DYNAMIC_WORKFLOW_TOOL_SLOT) ||
         overriddenSlots.has(slot)
       );
     }),

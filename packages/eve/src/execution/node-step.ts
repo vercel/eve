@@ -94,7 +94,6 @@ export function createExecutionNodeStep(input: CreateExecutionNodeStepInput): St
           input.node.turnAgent.dynamicModel,
         );
   const tools = createNodeHarnessTools({ node: input.node });
-  const dynamicWorkflows = input.node.agent.config?.experimental?.dynamicWorkflows;
   const instrumentation = input.instrumentation;
   const sessionInstrumentation = instrumentation?.prepareExecution();
   const step = createToolLoopHarness({
@@ -102,8 +101,6 @@ export function createExecutionNodeStep(input: CreateExecutionNodeStepInput): St
     capabilities: input.capabilities,
     clearOnly: input.clearOnly,
     compactOnly: input.compactOnly,
-    dynamicWorkflows:
-      dynamicWorkflows === true ? {} : dynamicWorkflows === false ? undefined : dynamicWorkflows,
     handleEvent: input.handleEvent,
     historyProjector: input.historyProjector,
     historyView: input.historyView,
@@ -223,6 +220,7 @@ function resolveHarnessToolDefinition(input: {
         definition: registeredTool.definition,
         rootOnly: input.tool.rootOnly,
       }),
+      maxSubagents: input.tool.task.maxSubagents,
       nodeId: input.tool.task.nodeId,
       resultKind: input.tool.task.resultKind,
       workflowId: input.tool.task.workflowId,

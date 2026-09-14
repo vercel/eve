@@ -106,6 +106,13 @@ export async function compileToolEntry(
     lifetime: entry.definition.execution === "background" ? ("task" as const) : ("step" as const),
     suspend: workflowId === undefined ? ("none" as const) : ("workflow" as const),
   };
+  const attachedHandling = entry.definition.behavior?.handling;
+  const workflowHandling =
+    workflowId === undefined
+      ? undefined
+      : attachedHandling?.kind === "workflow-tool"
+        ? { ...attachedHandling, workflowId }
+        : { kind: "workflow-tool" as const, workflowId };
   return {
     kind: "tool",
     definition: {
@@ -117,7 +124,7 @@ export async function compileToolEntry(
           : {
               ...entry.definition.behavior,
               availability: entry.definition.behavior?.availability ?? [],
-              handling: { kind: "workflow-tool", workflowId },
+              handling: workflowHandling,
               shape,
             },
       description: entry.definition.description,

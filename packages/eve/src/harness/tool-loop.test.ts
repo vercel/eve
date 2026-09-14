@@ -1913,7 +1913,6 @@ describe("createToolLoopHarness", () => {
     });
 
     const config = createTestConfig("conversation", undefined, {
-      dynamicWorkflows: {},
       tools: new Map([
         [
           "delegate",
@@ -1949,7 +1948,6 @@ describe("createToolLoopHarness", () => {
     });
 
     const config = createTestConfig("conversation", undefined, {
-      dynamicWorkflows: {},
       tools: createDelegationToolMap(),
     });
     const runStep = createToolLoopHarness(config);

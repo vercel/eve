@@ -1380,7 +1380,6 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       }
 
       const advertisedModelTools = await getAdvertisedTools({
-        dynamicWorkflows: config.dynamicWorkflows,
         modelTools: flatTools,
         session,
         tools: advertisedHarnessTools,

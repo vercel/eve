@@ -285,10 +285,6 @@ export interface ToolLoopHarnessConfig {
   readonly clearOnly?: boolean;
   /** Forces one context-compaction pass without running a model turn. */
   readonly compactOnly?: boolean;
-  /** Enables the root-only `workflow` tool over the effective subagent catalog. */
-  readonly dynamicWorkflows?: {
-    readonly maxSubagents?: number;
-  };
   readonly handleEvent?: HandleEventFn;
   /** Projects raw durable history before it crosses a message-bearing boundary. */
   readonly historyProjector?: HistoryViewProjector;

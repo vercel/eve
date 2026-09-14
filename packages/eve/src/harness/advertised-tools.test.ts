@@ -71,7 +71,6 @@ describe("getAdvertisedTools", () => {
       modelTools: buildToolSet({ tools }),
       session: createSession({ rootSessionId: "root-session" }),
       tools,
-      dynamicWorkflows: {},
     });
 
     expect(Object.keys(advertisedTools.modelTools)).toEqual(["delegate"]);
@@ -80,7 +79,7 @@ describe("getAdvertisedTools", () => {
 
   it("configures workflow in root sessions", async () => {
     const tools = new Map([
-      ["workflow", createWorkflowTool()],
+      ["workflow", createWorkflowTool(7)],
       ["add", createTool("add")],
       ["delegate", createSubagentTool("delegate")],
     ]) satisfies HarnessToolMap;
@@ -89,7 +88,6 @@ describe("getAdvertisedTools", () => {
       modelTools: buildToolSet({ tools }),
       session: createSession(),
       tools,
-      dynamicWorkflows: {},
     });
 
     expect([...advertisedTools.harnessTools.keys()]).toEqual(["workflow", "add", "delegate"]);
@@ -157,9 +155,10 @@ function createTool(name: string): HarnessToolDefinition {
   };
 }
 
-function createWorkflowTool(): HarnessToolDefinition {
+function createWorkflowTool(maxSubagents?: number): HarnessToolDefinition {
   return {
     ...createAvailableTool("workflow", ["root-session"]),
+    maxSubagents,
     workflowId: "workflow//eve//dynamicWorkflow",
   };
 }

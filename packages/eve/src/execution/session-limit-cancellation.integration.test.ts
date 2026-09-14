@@ -10,6 +10,7 @@ import {
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { workflowEntry } from "#execution/workflow-entry.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
+import defaultWorkflow from "#tools/framework/workflow.js";
 
 /**
  * Declining a session-limit continuation prompt cancels the in-flight turn
@@ -145,10 +146,15 @@ describe("session-limit continuation decline integration", () => {
   it("fails a zero-quota delegation fast and declines the root's own prompt", async () => {
     const runtime = await createTestRuntime({
       agent: {
-        experimental: { dynamicWorkflows: true },
         limits: { maxInputTokensPerSession: 1 },
         name: "limit-decline-child",
       },
+      modules: [
+        {
+          logicalPath: "tools/workflow.ts",
+          loadNamespace: async () => ({ default: defaultWorkflow }),
+        },
+      ],
     });
     expect(runtime.manifest.tools.map((tool) => tool.name)).toContain("agent");
     expect(runtime.manifest.tools.find((tool) => tool.name === "workflow")).toMatchObject({

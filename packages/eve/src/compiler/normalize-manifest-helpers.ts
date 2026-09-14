@@ -29,11 +29,6 @@ export function assertRootOnlyConfig(
   agentId: string,
 ): void {
   if (isRoot) return;
-  if (config.experimental?.dynamicWorkflows !== undefined) {
-    throw new Error(
-      `Dynamic Workflows are only supported on the root agent config. Remove "experimental.dynamicWorkflows" from "${agentId}".`,
-    );
-  }
   if (config.experimental?.workflow?.world !== undefined) {
     throw new Error(
       `Workflow world configuration is only supported on the root agent config. Remove "experimental.workflow.world" from "${agentId}".`,

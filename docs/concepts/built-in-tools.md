@@ -357,12 +357,6 @@ export default disableTool();
 
 An authored `agent/tools/connection_search.ts` replaces the framework behavior. Import the framework definition from `eve/tools/connection_search` when you need to reference it directly. Exporting `disableTool()` from this slot is an error because agents with connections require connection discovery.
 
-### `workflow`
-
-`workflow` is an experimental, root-only tool that runs a model-authored JavaScript program to coordinate child agents. Enable it with `experimental.dynamicWorkflows: true` in the root `agent.ts`; no tool file or import is required. The program can call only the subagents visible to that root model step. Ordinary tools, connections, approvals, authentication helpers, and session state are not available inside it.
-
-Subagent tools remain directly available to the root model after you enable `workflow`. Direct calls run in the background and return task receipts; calls made inside `workflow` wait for each child's final result. See [Dynamic workflows](../tools/dynamic-workflows) for configuration, limits, and continuation behavior.
-
 Review these tools before production use. Disable, wrap, restrict, or require approval for any tool that can access the filesystem, network, shell, or sensitive data.
 
 You can also add the opt-in framework tools described below.
@@ -370,6 +364,18 @@ You can also add the opt-in framework tools described below.
 ## Opt-in framework tools
 
 These framework-provided tools are not added by default. Add only the ones the agent needs.
+
+### `workflow`
+
+`workflow` is a root-only tool that runs a model-authored JavaScript program to coordinate child agents. Add it with an explicit tool file:
+
+```ts title="agent/tools/workflow.ts"
+export { default } from "eve/tools/workflow";
+```
+
+The program can call only the subagents visible to that root model step. Ordinary tools, connections, approvals, authentication helpers, and session state are not available inside it. Subagent tools remain directly available to the root model. Direct calls run in the background and return task receipts; calls made inside `workflow` wait for each child's final result.
+
+Import the `workflow` factory from `eve/tools/workflow` to customize its subagent-call budget. See [Dynamic workflows](../tools/dynamic-workflows) for configuration, limits, and continuation behavior.
 
 ### `glob`
 
