@@ -45,9 +45,18 @@ describe("startRemoteSubagent", () => {
       callbackBaseUrl: "https://parent.example",
       currentSession: { sessionId: "parent-session" },
       initiatorAuth: null,
-      originAudience: { kind: "unknown" },
-      parentContinuationToken: "parent-token",
-      parentTraceContext: undefined,
+      parent: {
+        continuationToken: "parent-token",
+        conversationId: "root-session",
+        lineage: {
+          callId: "call-remote",
+          rootSessionId: "root-session",
+          sessionId: "parent-session",
+          turn: { id: "parent-turn", sequence: 0 },
+        },
+        originAudience: { kind: "unknown" },
+        traceContext: undefined,
+      },
       session: { sessionId: "parent-session" },
       taskId: "task-1",
     } as never);
