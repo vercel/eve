@@ -61,13 +61,7 @@ import { createOrderedStreamEmitter } from "#harness/ordered-stream-emitter.js";
 import { interruptStreamOnFailure } from "#harness/interruptible-stream.js";
 import { isInlineAuthorizationToolResult } from "#harness/inline-tool-authorization.js";
 import type { HarnessEmissionState } from "#harness/emission-state.js";
-import type {
-  HarnessEmitFn,
-  HarnessSettlement,
-  HarnessToolMap,
-  StepInput,
-} from "#harness/types.js";
-import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
+import type { HarnessEmitFn, HarnessToolMap, StepInput } from "#harness/types.js";
 import { normalizeAssistantStepFinishReason } from "#harness/finish-reason.js";
 
 export {
@@ -88,14 +82,18 @@ export async function emitTurnPreamble(
   runtimeIdentity?: RuntimeIdentity,
   traceContext?: RuntimeTraceContext,
 ): Promise<HarnessEmissionState> {
-  const turnId = state.turnId || `turn_${state.sequence}`;
+  // Steering re-enters an open turn: keep its id and step index and skip the
+  // `turn.started` it already emitted.
+  const steering = state.turnId !== "";
+  const turnId = steering ? state.turnId : `turn_${state.sequence}`;
 
   if (!state.sessionStarted) {
     await emitFn(createSessionStartedEvent({ runtime: runtimeIdentity, trace: traceContext }));
   }
 
-  if (!state.turnId)
+  if (!steering) {
     await emitFn(createTurnStartedEvent({ sequence: state.sequence, trace: traceContext, turnId }));
+  }
 
   if (input.message !== undefined) {
     await emitFn(
@@ -110,7 +108,7 @@ export async function emitTurnPreamble(
   return {
     sessionStarted: true,
     sequence: state.sequence,
-    stepIndex: state.turnId ? state.stepIndex : 0,
+    stepIndex: steering ? state.stepIndex : 0,
     turnId,
   };
 }
@@ -142,42 +140,34 @@ interface FailedStepPayload {
 }
 
 /**
- * The shared head of both failure cascades: `step.failed` →
+ * Emits the shared head of both failure cascades: `step.failed` →
  * `turn.failed`. Both terminal and recoverable paths diverge only on
  * the third event (`session.failed` vs. `session.waiting`).
  */
-function failedStepEvents(
+async function emitStepAndTurnFailed(
+  emitFn: HarnessEmitFn,
   state: HarnessEmissionState,
   input: FailedStepPayload,
-): UnstampedMessageStreamEvent[] {
-  return [
+): Promise<void> {
+  await emitFn(
     createStepFailedEvent({
       ...input,
       sequence: state.sequence,
       stepIndex: state.stepIndex,
       turnId: state.turnId,
     }),
+  );
+  await emitFn(
     createTurnFailedEvent({
       ...input,
       sequence: state.sequence,
       turnId: state.turnId,
     }),
-  ];
+  );
 }
 
 /**
- * A proposed settlement plus the emission state the harness keeps while the
- * turn is still open. The owner commits `settlement.events` and adopts
- * `settlement.emissionAfter`; until then `emissionState` lets steering
- * continue the same turn without repeating the preamble.
- */
-export interface ProposedSettlement {
-  readonly emissionState: HarnessEmissionState;
-  readonly settlement: HarnessSettlement;
-}
-
-/**
- * Proposes the full terminal failure cascade: `step.failed` →
+ * Emits the full terminal failure cascade: `step.failed` →
  * `turn.failed` → `session.failed`.
  *
  * Use this when the session cannot be salvaged (structural config
@@ -185,25 +175,33 @@ export interface ProposedSettlement {
  * `session.failed` tail tells adapters the session is dead and no
  * further follow-up is possible on the same continuation token.
  */
-export function proposeFailedStep(
+export async function emitFailedStep(
+  emitFn: HarnessEmitFn,
   state: HarnessEmissionState,
   input: FailedStepPayload & { readonly sessionId: string },
-): ProposedSettlement {
-  return proposeSettlement(state, [
-    ...failedStepEvents(state, input),
-    createSessionFailedEvent(input),
-  ]);
+): Promise<void> {
+  await emitStepAndTurnFailed(emitFn, state, input);
+  await emitFn(createSessionFailedEvent(input));
 }
 
 /**
- * Proposes the recoverable failure cascade: `step.failed` →
+ * Emits the recoverable failure cascade: `step.failed` →
  * `turn.failed` → `session.waiting`.
  */
-export function proposeRecoverableFailedTurn(
+export async function emitRecoverableFailedTurn(
+  emitFn: HarnessEmitFn,
   state: HarnessEmissionState,
   input: FailedStepPayload & { readonly continuationToken: string },
-): ProposedSettlement {
-  return proposeSettlement(state, [...failedStepEvents(state, input), createSessionWaitingEvent()]);
+): Promise<HarnessEmissionState> {
+  await emitStepAndTurnFailed(emitFn, state, input);
+  await emitFn(createSessionWaitingEvent());
+
+  return {
+    sessionStarted: state.sessionStarted,
+    sequence: state.sequence + 1,
+    stepIndex: 0,
+    turnId: "",
+  };
 }
 
 /**
@@ -216,65 +214,33 @@ export function advanceStep(state: HarnessEmissionState): HarnessEmissionState {
   };
 }
 
-/** The `turn.completed` → `session.waiting` | `session.completed` tail for `mode`. */
-function turnEpilogueEvents(
-  state: HarnessEmissionState,
-  mode: RunMode,
-): UnstampedMessageStreamEvent[] {
-  return [
-    createTurnCompletedEvent({
-      sequence: state.sequence,
-      turnId: state.turnId,
-    }),
-    mode === "conversation" ? createSessionWaitingEvent() : createSessionCompletedEvent(),
-  ];
-}
-
 /**
  * Emits `turn.completed` and either `session.waiting` or `session.completed`.
  * Returns updated emission state with an incremented sequence.
- *
- * For owners that emit directly rather than committing a proposal (proxy
- * steps that relay a child's boundary on the parent stream).
  */
 export async function emitTurnEpilogue(
   emitFn: HarnessEmitFn,
   state: HarnessEmissionState,
   mode: RunMode,
 ): Promise<HarnessEmissionState> {
-  const { settlement } = proposeSettlement(state, turnEpilogueEvents(state, mode));
-  for (const event of settlement.events) await emitFn(event);
-  return settlement.emissionAfter;
-}
+  await emitFn(
+    createTurnCompletedEvent({
+      sequence: state.sequence,
+      turnId: state.turnId,
+    }),
+  );
 
-/**
- * Proposes `turn.completed` and either `session.waiting` or
- * `session.completed`, optionally preceded by turn-scoped events such as
- * `result.completed`.
- */
-export function proposeTurnEpilogue(
-  state: HarnessEmissionState,
-  mode: RunMode,
-  precedingEvents: readonly UnstampedMessageStreamEvent[] = [],
-): ProposedSettlement {
-  return proposeSettlement(state, [...precedingEvents, ...turnEpilogueEvents(state, mode)]);
-}
+  if (mode === "conversation") {
+    await emitFn(createSessionWaitingEvent());
+  } else {
+    await emitFn(createSessionCompletedEvent());
+  }
 
-function proposeSettlement(
-  before: HarnessEmissionState,
-  events: readonly UnstampedMessageStreamEvent[],
-): ProposedSettlement {
   return {
-    emissionState: { ...before, stepIndex: before.stepIndex + 1 },
-    settlement: {
-      emissionAfter: {
-        sessionStarted: before.sessionStarted,
-        sequence: before.sequence + 1,
-        stepIndex: 0,
-        turnId: "",
-      },
-      events,
-    },
+    sessionStarted: state.sessionStarted,
+    sequence: state.sequence + 1,
+    stepIndex: 0,
+    turnId: "",
   };
 }
 

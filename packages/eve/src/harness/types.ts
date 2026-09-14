@@ -234,12 +234,6 @@ export interface StepResult {
    * across the park boundary so a delegated parent can be notified.
    */
   readonly settledTurn?: SettledTurn;
-  /**
-   * Terminal turn events the harness proposes instead of emitting. The
-   * execution owner commits them after admitting boundary input, so steering
-   * that arrives before the commit continues the same turn.
-   */
-  readonly settlement?: HarnessSettlement;
 }
 
 /**
@@ -281,13 +275,9 @@ export type HandleEventFn = (
   messages?: readonly import("ai").ModelMessage[],
 ) => Promise<void>;
 
-/** Terminal effects proposed by the harness for the execution owner to commit. */
-export interface HarnessSettlement {
-  readonly events: readonly UnstampedMessageStreamEvent[];
-  readonly emissionAfter: import("#harness/emission-state.js").HarnessEmissionState;
-}
-
-/** Dependencies injected into the tool-loop harness at construction time. */
+/**
+ * Dependencies injected into the tool-loop harness at construction time.
+ */
 export interface ToolLoopHarnessConfig {
   /** Cancellation signal for the active turn. */
   readonly abortSignal?: AbortSignal;

@@ -82,7 +82,6 @@ loop:
   pump every claimed hook continuously into a merged inbox
   run turnStep; buffer incoming messages and respond to explicit cancellation
   admit steering against committed state, preserving the active turn
-  commit the proposed settlement only when no eligible steering remains
   apply coordination: task acks, workflow-tool and subagent results, input,
     authorization, cancellation rollback, caller settlement
   adopt state through the one SessionStateCursor
@@ -287,7 +286,7 @@ a deleted path, not to wrap the Workflow SDK generally.
 | `SessionInputQueue`: `enqueue(...)`, `takeNext(...) → selection`       | Public delivery/control arrays and in-memory dedupe                                                                | Keep one private ordered admitted-input queue. Selections preserve original admissions, source category, and handoff eligibility.                     |
 | `SessionStateCursor`: `apply(transition)`                              | Split raw state adoption and alias-aware adoption                                                                  | Be the only state-transition authority and claim every continuation alias before publishing the new context/state pair.                               |
 | `SessionHandoff`: `tryTransfer(selection, checkpoint) → typed outcome` | Public checkpoint/release/start/activate/recover staging                                                           | Execute transfer as one transaction. The triggering delivery travels beside the versioned checkpoint; all recovery stages stay private.               |
-| `withSessionEventSink(scope, run)`                                     | Raw stream-writer ownership in workflow steps                                                                      | Scope adapter context, dynamic connections, event fan-out, and writer close/release to one callback.                                                  |
+| `createSessionEventSink(scope)`                                        | Raw stream-writer ownership in workflow steps                                                                      | Bind adapter context, dynamic connections, and event fan-out to one step's stream writer; the step closes or releases it at its exit.                 |
 | Session-owner start operations in `workflow-runtime.ts`                | Per-turn `start()` of the child turn workflow                                                                      | Start an exact-deployment owner with a separate checkpoint and handoff trigger while keeping workflow-body and step-side execution contexts distinct. |
 
 `workflowEntry` remains the composition root and owns lifecycle and cleanup. `SessionExecution`
@@ -343,13 +342,15 @@ claim set and transfers accepted, unconsumed payloads with the exact tokens.
 waits for its own turn. Runtime results and addressed responses retain their
 existing routing. Explicit cancellation uses the abort signal; steering does not.
 
-The harness proposes settlement events and the next emission state. The owner
-may admit steering before committing a conversational settlement; once it starts
-the commit step, later messages belong to a later turn. Model-call batching defines
-the checkpoint interval and therefore the steering latency.
+Steering applies only while the turn is still open: `turnStep` returned
+`continue` and the model wants another step. The harness emits `turn.completed`
+and `session.waiting` itself inside the settling step, so a message that arrives
+after the model produced its answer starts the next turn. This matches what
+other harnesses do and costs no extra durable step per turn. Model-call batching
+defines the checkpoint interval and therefore the steering latency.
 
-This follows the holder attempt's continuous-reader and settlement-proposal
-boundaries without adopting its separate holder and turn topology. Upstream
+This follows the holder attempt's continuous-reader boundary without adopting
+its separate holder and turn topology or its deferred settlement. Upstream
 `step-delivery-ordering.test.ts`, `step-delivery-hop-count.test.ts`, and
 `delivery-barrier-coverage.test.ts` cover iterator delivery order against cached
 step results and other hooks, including layered async consumers. eve additionally

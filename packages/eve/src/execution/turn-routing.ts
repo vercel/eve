@@ -19,7 +19,12 @@ interface TurnRoutingInput {
   readonly queue: SessionInputQueue;
 }
 
-/** Owns admission policy, cancellation, and steering for one active turn. */
+/**
+ * Owns admission policy, cancellation, and steering for one active turn.
+ * Deliveries admitted while a model step runs stay in the shared queue until
+ * the turn reaches a committed boundary; a runtime-action wait routes them
+ * eagerly so a proxied child can receive the answer it is blocked on.
+ */
 export class TurnRouting {
   private readonly admittedDeliveries = new Set<number>();
   private readonly runtimeResults: RuntimeActionResultStepInput[] = [];
@@ -37,13 +42,14 @@ export class TurnRouting {
   }
 
   async takeSteering(): Promise<DeliverHookPayload | undefined> {
-    await this.routeAdmittedSteering();
+    await this.routeAdmitted();
     if (this.routedSteering.length === 0) return undefined;
     const steering = this.routedSteering.splice(0);
     return steering.length === 1 ? steering[0] : coalesceDeliveries(steering);
   }
 
-  private async routeAdmittedSteering(): Promise<void> {
+  /** Routes each delivery admitted during this turn exactly once. Never runs while a model step is in flight. */
+  async routeAdmitted(): Promise<void> {
     while (true) {
       const selection = this.input.queue.takeSteering(
         this.admittedDeliveries,
@@ -104,7 +110,6 @@ export class TurnRouting {
     switch (admitted.kind) {
       case "delivery":
         this.admittedDeliveries.add(admitted.admission.sequence);
-        await this.routeAdmittedSteering();
         return;
       case "runtime-action-result":
         this.runtimeResults.push({

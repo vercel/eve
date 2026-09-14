@@ -1,6 +1,6 @@
 import { getWorkflowMetadata } from "#compiled/@workflow/core/index.js";
 
-import type { DeliverHookPayload, SessionCapabilities } from "#channel/types.js";
+import type { SessionCapabilities } from "#channel/types.js";
 import { cancelDescendantTurnsStep } from "#execution/cancel-descendant-turns-step.js";
 import { dispatchCoordinationStep } from "#execution/coordination-dispatch-step.js";
 import type { SessionInputLedger } from "#execution/session-input-ledger.js";
@@ -18,7 +18,7 @@ import type {
   TurnStepPayload,
 } from "#execution/turn-step.js";
 import { resolveWorkflowCallbackBaseUrl } from "#execution/workflow-callback-url.js";
-import { commitSettlementStep, turnStep } from "#execution/workflow-steps.js";
+import { turnStep } from "#execution/workflow-steps.js";
 import { activeTurnId } from "#harness/active-turn-id.js";
 import {
   isInboxSubagentResultFromRecordedWorkflowToolRun,
@@ -112,7 +112,6 @@ export class SessionExecution {
       }
 
       if (result.action === "done") {
-        await this.commitSettlement(result);
         return {
           isError: result.isError,
           kind: "done",
@@ -155,16 +154,6 @@ export class SessionExecution {
           (result.hasPendingInputBatch && this.input.capabilities?.requestInput === true) ||
           this.input.mode === "conversation";
         if (!canPark) throw new Error(TASK_MODE_WAIT_ERROR_MESSAGE);
-        const steering: DeliverHookPayload | undefined =
-          this.input.mode === "task" &&
-          (result.hasPendingAuthorization || result.hasPendingInputBatch)
-            ? undefined
-            : await control.takeSteering();
-        if (steering !== undefined) {
-          nextStepInput = steering;
-          continue;
-        }
-        await this.commitSettlement(result);
         return {
           authorizationAttemptIds: result.authorizationAttemptIds,
           authorizationNames: result.authorizationNames,
@@ -185,17 +174,6 @@ export class SessionExecution {
       cursor: this.input.cursor,
       message,
     });
-  }
-
-  /** Commits terminal turn events only after steering had its chance at the boundary. */
-  private async commitSettlement(result: DurableStepResult): Promise<void> {
-    if (result.settlement === undefined) return;
-    await this.input.cursor.apply(
-      await commitSettlementStep({
-        ...this.input.cursor.createStepInput(undefined),
-        settlement: result.settlement,
-      }),
-    );
   }
 
   private async finishCancelledTurn(): Promise<TurnOutcome> {
@@ -279,6 +257,7 @@ export class SessionExecution {
         throw new Error("Session inbox closed before runtime actions completed.");
       lease.consume();
       await control.admit(lease.value);
+      await control.routeAdmitted();
     }
   }
 }

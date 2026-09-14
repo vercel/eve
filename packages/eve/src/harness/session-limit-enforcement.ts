@@ -13,8 +13,8 @@
  */
 import { createInputRequestedEvent } from "#protocol/message.js";
 import {
-  proposeFailedStep,
-  proposeTurnEpilogue,
+  emitFailedStep,
+  emitTurnEpilogue,
   setHarnessEmissionState,
   type HarnessEmissionState,
 } from "#harness/emission.js";
@@ -163,15 +163,13 @@ async function parkOnSessionUsageLimit(input: {
     }),
   );
 
-  if (input.config.mode !== "conversation") {
-    return { next: null, session: setHarnessEmissionState(parkedSession, emissionState) };
+  if (input.config.mode === "conversation") {
+    emissionState = await emitTurnEpilogue(input.emit, emissionState, input.config.mode);
   }
 
-  const proposed = proposeTurnEpilogue(emissionState, input.config.mode);
   return {
     next: null,
-    session: setHarnessEmissionState(parkedSession, proposed.emissionState),
-    settlement: proposed.settlement,
+    session: setHarnessEmissionState(parkedSession, emissionState),
   };
 }
 
@@ -210,18 +208,17 @@ async function failSessionUsageLimit(input: {
           usedTokens: input.violation.usedTokens,
         };
 
-  const proposed =
-    input.emit === undefined
-      ? undefined
-      : proposeFailedStep(input.emissionState, {
-          code:
-            input.violation.kind === "token-cost"
-              ? SESSION_TOKEN_COST_LIMIT_REACHED_CODE
-              : SESSION_TOKEN_LIMIT_REACHED_CODE,
-          details,
-          message,
-          sessionId: input.session.sessionId,
-        });
+  if (input.emit) {
+    await emitFailedStep(input.emit, input.emissionState, {
+      code:
+        input.violation.kind === "token-cost"
+          ? SESSION_TOKEN_COST_LIMIT_REACHED_CODE
+          : SESSION_TOKEN_LIMIT_REACHED_CODE,
+      details,
+      message,
+      sessionId: input.session.sessionId,
+    });
+  }
 
   return {
     next: {
@@ -230,6 +227,5 @@ async function failSessionUsageLimit(input: {
       output: input.config.mode === "task" ? message : "",
     },
     session: input.session,
-    settlement: proposed?.settlement,
   };
 }

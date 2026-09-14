@@ -16,9 +16,8 @@ export function resolveSessionStepResult(
   beforeStepContext: Record<string, unknown>,
 ): DurableStepResult {
   const nextState = createDurableSessionState({ session: stepResult.session });
-  const backgroundTransition = {
-    settlement: stepResult.settlement,
-    ...(stepResult.backgroundTasks === undefined || stepResult.backgroundTaskSession === undefined
+  const backgroundTransition =
+    stepResult.backgroundTasks === undefined || stepResult.backgroundTaskSession === undefined
       ? {}
       : {
           backgroundTaskContext: preserveSerializedBackgroundTaskObservabilityState(
@@ -30,8 +29,7 @@ export function resolveSessionStepResult(
             session: stepResult.backgroundTaskSession,
           }),
           backgroundTasks: stepResult.backgroundTasks,
-        }),
-  };
+        };
 
   if (
     stepResult.next !== null &&
@@ -70,15 +68,16 @@ export function resolveSessionStepResult(
 
     // `settledTurn` is the harness's explicit settlement verdict. Pending
     // state may predate this turn, while newly created parks omit the verdict.
-    // Usage is only proposed here; committing settlement marks it reported.
+    // `usage` carries only this turn's delta: the take marks the totals
+    // reported, so a persistent child never re-reports earlier spend.
     if (stepResult.settledTurn !== undefined) {
-      const { delta } = takeSessionUsageDelta(stepResult.session);
+      const { delta, session: reportedSession } = takeSessionUsageDelta(stepResult.session);
       return {
         action: "park",
         ...backgroundTransition,
         ...pending,
         serializedContext: nextSerializedContext,
-        sessionState: nextState,
+        sessionState: createDurableSessionState({ session: reportedSession }),
         settled: {
           output: stepResult.settledTurn.output,
           isError: stepResult.settledTurn.isError,

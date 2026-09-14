@@ -56,9 +56,7 @@ describe("content-filter reporting (real AI SDK)", () => {
       const result = await step(session(), { message: "Help Alice prepare Bob's inventory list." });
       expect(calls).toBe(1);
       expect(result.next).toBeNull();
-      // The failure cascade is proposed on the result for the owner to commit.
-      const allEvents = [...events, ...(result.settlement?.events ?? [])];
-      expect(allEvents.find((event) => event.type === "step.failed")).toMatchObject({
+      expect(events.find((event) => event.type === "step.failed")).toMatchObject({
         data: {
           message: "The model provider filtered this response.",
           details: {
@@ -69,14 +67,14 @@ describe("content-filter reporting (real AI SDK)", () => {
         },
       });
       expect(
-        allEvents.some(
+        events.some(
           (event) =>
             event.type === "message.completed" ||
             event.type === "step.completed" ||
             event.type === "turn.completed",
         ),
       ).toBe(false);
-      expect(allEvents.some((event) => event.type === "session.waiting")).toBe(true);
+      expect(events.some((event) => event.type === "session.waiting")).toBe(true);
     },
   );
 

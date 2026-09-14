@@ -8,7 +8,7 @@ import { SessionExecution } from "#execution/session-execution.js";
 import { SessionStateCursor } from "#execution/session-state-cursor.js";
 import { cancelDescendantTurnsStep } from "#execution/cancel-descendant-turns-step.js";
 import { acknowledgeDelegatedTasksStep } from "#execution/tasks/parent/delegate.js";
-import { turnStep, commitSettlementStep } from "#execution/workflow-steps.js";
+import { turnStep } from "#execution/workflow-steps.js";
 import type { DeliverHookPayload } from "#channel/types.js";
 import { dispatchCoordinationStep } from "#execution/coordination-dispatch-step.js";
 
@@ -20,7 +20,6 @@ vi.mock("#execution/coordination-dispatch-step.js", () => ({ dispatchCoordinatio
 
 vi.mock("#execution/workflow-steps.js", () => ({
   turnStep: vi.fn(),
-  commitSettlementStep: vi.fn(),
 }));
 vi.mock("#execution/tasks/parent/delegate.js", () => ({
   acknowledgeDelegatedTasksStep: vi.fn(),
@@ -72,7 +71,7 @@ describe("SessionExecution background task checkpoints", () => {
     expect(cancelDescendantTurnsStep).toHaveBeenCalledWith({ serializedContext: {}, sessionState });
   });
 
-  it("retains background notifications for parked cohort routing while admitting user steering", async () => {
+  it("steers a continuing turn with user input while retaining background notifications for cohort routing", async () => {
     const background: DeliverHookPayload = {
       kind: "deliver",
       taskDeliveryId: "task-1:completed",
@@ -96,6 +95,11 @@ describe("SessionExecution background task checkpoints", () => {
     const execution = createExecution({ inbox, queue, sessionState: state("") });
     vi.mocked(turnStep)
       .mockReset()
+      .mockImplementationOnce(async (input) => ({
+        action: "continue",
+        serializedContext: input.serializedContext,
+        sessionState: input.sessionState,
+      }))
       .mockImplementation(async (input) => ({
         action: "park",
         hasPendingAuthorization: false,
@@ -111,10 +115,45 @@ describe("SessionExecution background task checkpoints", () => {
     expect(queue.pendingCount).toBe(1);
   });
 
+  it("treats input that arrives after a settled turn as the next turn", async () => {
+    const followUp: DeliverHookPayload = {
+      kind: "deliver",
+      payloads: [{ message: "One more thing." }],
+    };
+    const queue = new SessionInputQueue();
+    const inbox: SessionInbox = {
+      claimSessionHook: vi.fn(),
+      drain: vi.fn().mockReturnValueOnce([followUp]).mockReturnValue([]),
+      hookClaims: { aliases: [], stable: "parent-inbox" },
+      hasPending: vi.fn(() => false),
+      hasReadyAuthorization: vi.fn(() => false),
+      read: vi.fn(() => new Promise<never>(() => {})),
+      restore: vi.fn(),
+      setAuthorizationWindow: vi.fn(),
+    };
+    const execution = createExecution({ inbox, queue, sessionState: state("") });
+    vi.mocked(turnStep)
+      .mockReset()
+      .mockImplementation(async (input) => ({
+        action: "park",
+        hasPendingAuthorization: false,
+        hasPendingInputBatch: false,
+        serializedContext: input.serializedContext,
+        sessionState: input.sessionState,
+        settled: { output: "Done." },
+      }));
+
+    await expect(
+      execution.runTurn({ kind: "deliver", payloads: [{ message: "Start the work." }] }),
+    ).resolves.toMatchObject({ kind: "park", settled: { output: "Done." } });
+
+    expect(turnStep).toHaveBeenCalledTimes(1);
+    expect(queue.pendingCount).toBe(1);
+  });
+
   it.each(["cancelled", "done"] as const)(
     "retains task observability when a %s step races cancellation",
     async (action) => {
-      vi.mocked(commitSettlementStep).mockClear();
       const initialState = state("");
       const backgroundState = state("http:background");
       const completedState = state("http:completed");
@@ -182,7 +221,6 @@ describe("SessionExecution background task checkpoints", () => {
         serializedContext: completedContext,
         sessionState: backgroundState,
       });
-      expect(commitSettlementStep).not.toHaveBeenCalled();
     },
   );
 });

@@ -41,14 +41,14 @@ export interface SessionEventSink {
   readonly dynamicConnections: ReturnType<typeof bindDynamicConnections>;
   readonly effectiveNode: CompiledBundle["graph"]["root"];
   readonly handleEvent: HandleEventFn;
+  /** Closes the parent stream; only a terminal `done` step does this. */
   close(): Promise<void>;
+  /** Releases the writer lock so the next step can acquire it. */
+  release(): void;
 }
 
-/** Owns every resource used by per-step event fan-out for exactly one scope. */
-export async function withSessionEventSink<T>(
-  input: SessionEventSinkInput,
-  run: (sink: SessionEventSink) => Promise<T>,
-): Promise<T> {
+/** Binds adapter context, dynamic connections, and event fan-out to one step's stream writer. */
+export function createSessionEventSink(input: SessionEventSinkInput): SessionEventSink {
   const { adapter, bundle, ctx, effectiveAgent, instrumentation } = input;
   const adapterCtx = buildAdapterContext(adapter, ctx);
   const dynamicConnections = bindDynamicConnections(ctx, bundle.resolvedAgent);
@@ -116,15 +116,12 @@ export async function withSessionEventSink<T>(
     });
   };
 
-  try {
-    return await run({
-      adapterCtx,
-      close: () => writer.close(),
-      dynamicConnections,
-      effectiveNode,
-      handleEvent,
-    });
-  } finally {
-    writer.releaseLock();
-  }
+  return {
+    adapterCtx,
+    close: () => writer.close(),
+    dynamicConnections,
+    effectiveNode,
+    handleEvent,
+    release: () => writer.releaseLock(),
+  };
 }

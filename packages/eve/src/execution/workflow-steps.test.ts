@@ -54,7 +54,7 @@ import { readLatestTaskView, sendTaskInboundPayload } from "#execution/tasks/par
 import { recordTaskInputRequestStep } from "#execution/tasks/parent/hitl-proxy-steps.js";
 import { emitTerminalSessionFailureStep } from "#execution/terminal-session-failure-step.js";
 import { resolveEffectiveOutputSchema } from "#execution/effective-output-schema.js";
-import { commitSettlementStep, turnStep } from "#execution/workflow-steps.js";
+import { turnStep } from "#execution/workflow-steps.js";
 import { routeProxiedDeliverStep } from "#execution/proxied-deliver-step.js";
 
 const bindSessionInstrumentationSpy = vi.hoisted(() => vi.fn());
@@ -1964,33 +1964,6 @@ describe("turnStep", () => {
     });
   });
 
-  it.each(["session.completed", "session.failed"] as const)(
-    "closes the stream only when committing %s",
-    async (type) => {
-      installSessionStoreMocks([createStubSession()]);
-      const close = vi.fn();
-      const parentWritable = new WritableStream<Uint8Array>({ write() {}, close });
-      await commitSettlementStep({
-        parentWritable,
-        serializedContext: createSerializedContext(),
-        sessionState: createStubSessionState(),
-        settlement: {
-          events: [
-            type === "session.completed"
-              ? { type }
-              : {
-                  type,
-                  data: { code: "TEST_FAILURE", message: "Failed", sessionId: "test-session" },
-                },
-          ],
-          emissionAfter: { sequence: 1, sessionStarted: true, stepIndex: 0, turnId: "" },
-        },
-      });
-      expect(close).toHaveBeenCalledOnce();
-      expect(parentWritable.locked).toBe(false);
-    },
-  );
-
   it("reports each settled turn's usage as a delta, not the cumulative session totals", async () => {
     const usageStateAfterTurn = (
       totals: Readonly<Record<string, number>>,
@@ -2048,21 +2021,6 @@ describe("turnStep", () => {
     // Second turn: session totals are cumulative (150/60), but the settled
     // answer must only report what this turn added (50/20).
     installSessionStoreMocks([first.sessionState.snapshot.session as HarnessSession]);
-    const committed = await commitSettlementStep({
-      parentWritable: createTestWritable(),
-      serializedContext: first.serializedContext,
-      sessionState: first.sessionState,
-      settlement: {
-        events: [
-          {
-            type: "session.waiting",
-            data: { continuationToken: "test-token", wait: "next-user-message" },
-          },
-        ],
-        emissionAfter: { sequence: 1, sessionStarted: true, stepIndex: 0, turnId: "" },
-      },
-    });
-    installSessionStoreMocks([committed.sessionState.snapshot.session as HarnessSession]);
     vi.mocked(createExecutionNodeStep).mockImplementation(() => {
       return async (stepSession): Promise<StepResult> => ({
         next: null,
@@ -2081,7 +2039,7 @@ describe("turnStep", () => {
       input: { kind: "deliver", payloads: [{ message: "again" }] },
       parentWritable: createTestWritable(),
       serializedContext: createSerializedContext(),
-      sessionState: committed.sessionState,
+      sessionState: first.sessionState,
     });
 
     expect(second).toMatchObject({

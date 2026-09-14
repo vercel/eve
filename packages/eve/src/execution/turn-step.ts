@@ -1,6 +1,6 @@
 import type { HookPayload, RuntimeActionResultHookPayload } from "#channel/types.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
-import type { HarnessSettlement, SettledTurn, StepResult } from "#harness/types.js";
+import type { SettledTurn, StepResult } from "#harness/types.js";
 import type { RuntimeActionResult } from "#shared/action-types.js";
 import type { TokenUsage } from "#shared/token-usage.js";
 
@@ -27,7 +27,6 @@ export interface TurnStepInput {
 interface DurableStepResultFields {
   /** Pre-step context plus the observability state owned by committed background tasks. */
   readonly backgroundTaskContext?: Record<string, unknown>;
-  readonly settlement?: HarnessSettlement;
   readonly backgroundTaskState?: DurableSessionState;
   readonly backgroundTasks?: StepResult["backgroundTasks"];
   readonly serializedContext: Record<string, unknown>;
