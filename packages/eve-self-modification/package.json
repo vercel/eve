@@ -66,9 +66,6 @@
     "eve": "workspace:*",
     "typescript": "catalog:"
   },
-  "peerDependencies": {
-    "eve": "workspace:>=0.54.0"
-  },
   "engines": {
     "node": ">=24"
   },
