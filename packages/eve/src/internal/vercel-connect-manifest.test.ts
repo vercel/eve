@@ -20,14 +20,14 @@ describe("createVercelConnectManifest", () => {
 
   it.each<VercelConnectRequirement>([
     {
-      target: { mode: "direct", locator: "oauth/linear" },
+      target: "connector:oauth/linear",
       connector: { type: "oauth" },
       interface: { protocol: "mcp", url: "https://mcp.linear.app/mcp" },
       access: { principalTypes: ["user"] },
       uses: [use],
     },
     {
-      target: { mode: "binding", reference: "connections/linear" },
+      target: "binding:connections/linear",
       connector: { type: "oauth", configuration: { service: "mcp.linear.app" } },
       providerConfiguration: {
         format: "slack-app-manifest",
@@ -37,7 +37,7 @@ describe("createVercelConnectManifest", () => {
       access: { principalTypes: ["user"] },
       uses: [use],
     },
-  ])("preserves the $target.mode target shape", (requirement) => {
+  ])("preserves the opaque $target reference", (requirement) => {
     expect(
       createVercelConnectManifest({ generatorVersion: "1.2.3", requirements: [requirement] }),
     ).toEqual({

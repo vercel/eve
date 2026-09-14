@@ -4,12 +4,8 @@ export const VERCEL_CONNECT_MANIFEST_FILENAME = "vercel-connect-manifest.json";
 export const VERCEL_CONNECT_MANIFEST_KIND = "vercel-connect-manifest";
 export const VERCEL_CONNECT_MANIFEST_SCHEMA_VERSION = 1;
 
-export type VercelConnectTarget =
-  | { readonly mode: "direct"; readonly locator: string }
-  | { readonly mode: "binding"; readonly reference: string };
-
 export interface VercelConnectRequirement {
-  readonly target: VercelConnectTarget;
+  readonly target: string;
   readonly connector: {
     readonly type: string;
     readonly configuration?: JsonObject;
