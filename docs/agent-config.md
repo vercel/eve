@@ -165,10 +165,13 @@ export default defineAgent({
 
 `sessionTimeoutMs` sets an absolute lifetime for every session, including
 delegated sessions. It defaults to 30 days, starts at creation, and survives
-restarts and redeployments. At the deadline, eve lets an active turn settle,
-then emits `session.completed` and releases the continuation; the next
-qualifying channel message starts fresh. Set it to `false` to disable the
-timeout. Expiration does not delete stored session data.
+restarts and redeployments. At the deadline, eve cancels the active turn,
+terminates owned child sessions, emits `session.completed`, and releases the
+continuation. Expiration does not start another turn, deliver a result to a
+parent agent, or invoke a session callback. The next qualifying channel message
+starts fresh. Cancellation is cooperative: work already running must observe
+its abort signal to stop early. Set the limit to `false` to disable the timeout.
+Expiration does not delete stored session data.
 
 Input tokens, output tokens, and model token cost are checked independently.
 The model call that crosses a limit is allowed to finish because exact usage

@@ -148,8 +148,8 @@ export interface AgentLimitsDefinition {
    * Maximum lifetime of one durable session, in milliseconds.
    *
    * The deadline starts when the session is created and survives process
-   * restarts and redeployments. If it elapses during an active turn, eve lets
-   * that turn settle before completing the session normally.
+   * restarts and redeployments. At expiry, eve cancels the active turn and
+   * completes the session without starting another turn or notifying callers.
    *
    * `false` disables the timeout.
    *

@@ -208,6 +208,10 @@ export async function runTurnOwnedWorkflow(
         (result.action === "park" || result.action === "dispatch-workflow-tasks")
       ) {
         await cursor.adopt(result);
+        if (cancellation?.signal.aborted === true) {
+          await finishCancelledTurn({ bufferedDeliveries, cancellation, cursor });
+          return;
+        }
         const dispatchResult = await dispatchCoordinationStep({
           action: result.action,
           callbackBaseUrl: resolveWorkflowCallbackBaseUrl(getWorkflowMetadata().url),

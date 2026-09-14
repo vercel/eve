@@ -18,8 +18,9 @@ by the eve HTTP session API. See [Custom channels](../channels/custom#channel-op
 
 Sessions last 30 days by default; configure `limits.sessionTimeoutMs` in
 `agent.ts`, or set it to `false` to disable the deadline. At expiration, eve
-lets an active turn settle, emits `session.completed`, and releases the
-continuation so the next qualifying channel message starts fresh. Stored
+cooperatively cancels the active turn, emits `session.completed`, and releases
+the continuation so the next qualifying channel message starts fresh. Expiry
+does not resume agent execution or send a completion result to a parent. Stored
 session data is not deleted. See [Agent config](../agent-config#runtime-limits).
 
 React, Vue, and Svelte apps reach for [`useEveAgent()`](../guides/frontend/overview) instead of calling these routes by hand. Next.js and Nuxt apps can proxy them to the eve runtime from the same origin.

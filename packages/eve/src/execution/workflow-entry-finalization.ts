@@ -13,6 +13,7 @@ import type { RunMode } from "#shared/run-mode.js";
 import type { TokenUsage } from "#shared/token-usage.js";
 
 export async function finalizeExpiredSession(input: {
+  readonly reason: "expired" | "reset" | "closed";
   readonly caller: TurnCaller | undefined;
   readonly driverWritable: WritableStream<Uint8Array>;
   readonly mode: RunMode;
@@ -29,6 +30,8 @@ export async function finalizeExpiredSession(input: {
     serializedContext: input.serializedContext,
   });
   if (input.terminalState !== undefined) input.terminalState.terminalEmitted = true;
+
+  if (input.reason === "expired") return { output: "" };
 
   if (input.mode === "task") {
     await fireSessionCallbackStep({

@@ -449,6 +449,53 @@ describe("turn cancellation integration", () => {
     });
   });
 
+  it.each([false, true])(
+    "expires active work without another turn (delegated: %s)",
+    async (delegated) => {
+      const fixture = await createWaitToolRuntime(`session-expiry-${String(delegated)}`);
+      const continuationToken = `http:session-expiry-${String(delegated)}`;
+
+      await fixture.runtime.run(async () => {
+        const run = await start(workflowEntry, [
+          {
+            input: {
+              message: `${delegated ? "Delegate through Workflow to a subagent: " : ""}Use the ${WAIT_TOOL_NAME} tool.`,
+            },
+            serializedContext: buildSerializedContext({
+              channelKind: "http",
+              continuationToken,
+              mode: "conversation",
+            }),
+          },
+        ]);
+        const stream = captureTurnEvents(run);
+        try {
+          await fixture.toolStarted;
+          const turnToken = `${run.runId}:turn-control:0`;
+          const turn = await waitForHookByToken(turnCancellationHookToken(turnToken));
+          await resumeHook(sessionCommandHookToken(run.runId), { kind: "session-timeout" });
+
+          const events = await stream.nextTurn();
+          expect(events.at(-1)?.type).toBe("session.completed");
+          expect(filterEventsByType(events, "turn.started")).toHaveLength(1);
+          expect(filterEventsByType(events, "turn.completed")).toHaveLength(0);
+          expect(filterEventsByType(events, "subagent.called")).toHaveLength(delegated ? 1 : 0);
+          expectNoFailureEvents(events);
+          await expect(run.returnValue).resolves.toEqual({ output: "" });
+          await waitForRunCompletion(turn.runId);
+          await expectNoStepRetries(turn.runId);
+          await waitForHookSweep(continuationToken);
+          expect(fixture.toolStarts()).toBe(1);
+          expect(fixture.toolAborts()).toBe(1);
+        } finally {
+          stream.dispose();
+          if ((await run.status) === "running") await run.cancel();
+        }
+      });
+    },
+    60_000,
+  );
+
   it("buffers a default steering message before replacing the active turn", async () => {
     const fixture = await createWaitToolRuntime("turn-steer-message");
     const rawToken = "turn-steer-message";
