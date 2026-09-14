@@ -1157,11 +1157,13 @@ See the [Email (Resend) adapter documentation](https://chat-sdk.dev/adapters/ven
       "lock screen",
       "on-call",
     ],
-    install: `Install the channel package:
+    install: `Install the channel package (Node.js 24 or newer; eve 0.31 or newer):
 
 \`\`\`bash
 npm install @pushary/eve
 \`\`\`
+
+Use a Pushary Partner account and enroll the customer who will receive decisions. The customer needs the Pushary app and notification permission, but no Pushary account or API key.
 
 Set your Pushary credentials. The webhook secret comes from \`decisions.getWebhookSecret()\`, and the callback origin is the public URL this agent is deployed at, so answers can be routed back:
 
@@ -1179,9 +1181,9 @@ import { pusharyChannel } from "@pushary/eve";
 export default pusharyChannel();
 \`\`\`
 
-That is the whole integration. Every approval and every \`ask_question\` the agent raises is delivered as a push notification, and the answer resolves the parked turn. Because the session parks durably, nothing is held open while it waits — a decision can be answered minutes or hours later.
+With credentials, callback routing, and customer enrollment configured, the channel forwards approvals and \`ask_question\` requests to Pushary. Confirm notifications offer lock-screen actions; choices and text answers open the app. A verified answer resumes the parked turn. The session can wait durably until the decision expires, without holding a request open.
 
-By default the channel asks the session principal, so user-scoped auth gives each end-user their own approver. Pass \`externalId\` to bind a fixed person for single-user agents and scheduled runs.`,
+By default the channel asks the session principal. Bind that identity through trusted user-scoped authentication and enroll the same customer ID. Pass \`externalId\` from trusted configuration to bind a fixed test user or single-user agent; never let model input choose the recipient.`,
     configure: `The channel mounts four routes. \`POST /pushary/answer\` receives the answer and is the URL Pushary calls back; it verifies the Pushary webhook signature and a per-request routing signature before resuming the session. \`POST /pushary/message\`, \`/pushary/stop\`, and \`/pushary/reset\` let the same person send a follow-up, cancel the in-flight turn, or start a fresh session from their phone, mapping onto \`send\`, \`cancel\`, and \`reset\`.
 
 Options are matched back by label and then by id, so an approval resolves to eve's \`approve\` or \`deny\` and a select resolves to the option the human tapped. Each decision carries an idempotency key derived from the session and request id, so a replayed step never asks the same person twice. Set \`requireReachable: true\` to fail loudly when the end-user has no connected device instead of opening a decision that will expire unanswered.
