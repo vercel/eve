@@ -34,6 +34,20 @@ describe("SteeringStream", () => {
     expect(await collect(stream)).toEqual([events[0], events[2], events[3]]);
   });
 
+  it("skips an overlapping settled boundary before following the accepted turn", async () => {
+    const events = stampTestEvents([
+      createMessageReceivedEvent({ message: "first", sequence: 0, turnId: "turn_0" }),
+      createSessionWaitingEvent(),
+      createMessageReceivedEvent({ message: "later", sequence: 1, turnId: "turn_1" }),
+      createSessionWaitingEvent(),
+    ]);
+    const stream = new SteeringStream(iterate(events.slice(0, 2)), {
+      send: async () => iterate(events.slice(1)),
+    });
+    await stream.send("later");
+    expect(await collect(stream)).toEqual([events[0], events[2], events[3]]);
+  });
+
   it("aborts all accepted follow-up responses when the consumer detaches", async () => {
     const signals: AbortSignal[] = [];
     const stream = new SteeringStream(iterate([]), {

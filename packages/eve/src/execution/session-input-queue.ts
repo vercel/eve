@@ -61,6 +61,26 @@ export class SessionInputQueue {
     this.entries.push({ control, kind: "control", sequence: this.nextSequence++ });
   }
 
+  delivery(sequence: number): DeliverHookPayload | undefined {
+    const entry = this.entries.find(
+      (candidate): candidate is QueuedDelivery =>
+        candidate.kind === "delivery" && candidate.sequence === sequence,
+    );
+    return entry?.delivery;
+  }
+
+  replaceDelivery(sequence: number, delivery: DeliverHookPayload | undefined): void {
+    const index = this.entries.findIndex(
+      (entry) => entry.kind === "delivery" && entry.sequence === sequence,
+    );
+    if (index < 0) return;
+    if (delivery === undefined) {
+      this.entries.splice(index, 1);
+      return;
+    }
+    this.entries[index] = { delivery, kind: "delivery", sequence };
+  }
+
   discardTask(taskId: string): void {
     this.retain(
       (entry) =>

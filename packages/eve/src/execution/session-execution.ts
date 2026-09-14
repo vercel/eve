@@ -257,7 +257,7 @@ export class SessionExecution {
         throw new Error("Session inbox closed before runtime actions completed.");
       lease.consume();
       await control.admit(lease.value);
-      await control.routeAdmitted();
+      await control.routeAdmittedToChildren();
     }
   }
 }

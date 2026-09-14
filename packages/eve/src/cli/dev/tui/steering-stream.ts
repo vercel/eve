@@ -50,11 +50,12 @@ export class SteeringStream implements AsyncIterable<MessageStreamEvent> {
         const stream = await this.streams.shift()!;
         if (stream === undefined) continue;
         for await (const event of stream) {
+          if (!seen.admit(event)) continue;
           if (isCurrentTurnBoundaryEvent(event)) {
             boundary = event;
             break;
           }
-          if (seen.admit(event)) yield event;
+          yield event;
         }
       }
       if (boundary !== undefined) yield boundary;

@@ -1,4 +1,5 @@
 import type { DeliverHookPayload } from "#channel/types.js";
+import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
 import { routeSelectedDelivery } from "#execution/selected-delivery-router.js";
 import type { SessionInputLedger } from "#execution/session-input-ledger.js";
 import type { SessionInputQueue } from "#execution/session-input-queue.js";
@@ -27,6 +28,7 @@ interface TurnRoutingInput {
  */
 export class TurnRouting {
   private readonly admittedDeliveries = new Set<number>();
+  private readonly descendantRoutedDeliveries = new Set<number>();
   private readonly runtimeResults: RuntimeActionResultStepInput[] = [];
   private readonly routedSteering: DeliverHookPayload[] = [];
   private readonly workflowMessages: WorkflowToolRunMessage[] = [];
@@ -42,14 +44,14 @@ export class TurnRouting {
   }
 
   async takeSteering(): Promise<DeliverHookPayload | undefined> {
-    await this.routeAdmitted();
+    await this.routeAdmittedSteering();
     if (this.routedSteering.length === 0) return undefined;
     const steering = this.routedSteering.splice(0);
     return steering.length === 1 ? steering[0] : coalesceDeliveries(steering);
   }
 
   /** Routes each delivery admitted during this turn exactly once. Never runs while a model step is in flight. */
-  async routeAdmitted(): Promise<void> {
+  private async routeAdmittedSteering(): Promise<void> {
     while (true) {
       const selection = this.input.queue.takeSteering(
         this.admittedDeliveries,
@@ -65,6 +67,33 @@ export class TurnRouting {
         return;
       }
       if (routed.kind === "turn") this.routedSteering.push(routed.delivery);
+    }
+  }
+
+  async routeAdmittedToChildren(): Promise<void> {
+    for (const sequence of this.admittedDeliveries) {
+      if (this.descendantRoutedDeliveries.has(sequence)) continue;
+      const delivery = this.input.queue.delivery(sequence);
+      if (delivery === undefined) {
+        this.admittedDeliveries.delete(sequence);
+        continue;
+      }
+      this.descendantRoutedDeliveries.add(sequence);
+      const routed = await routeDeliverToChildren({
+        delivery,
+        parentWritable: this.input.cursor.parentWritable,
+        serializedContext: this.input.cursor.serializedContext,
+        sessionState: this.input.cursor.sessionState,
+      });
+      await this.input.cursor.apply(routed);
+      if (routed.kind === "cancel-turn") {
+        this.input.queue.replaceDelivery(sequence, undefined);
+        this.admittedDeliveries.delete(sequence);
+        this.abort();
+        return;
+      }
+      this.input.queue.replaceDelivery(sequence, routed.remainder);
+      if (routed.remainder === undefined) this.admittedDeliveries.delete(sequence);
     }
   }
 

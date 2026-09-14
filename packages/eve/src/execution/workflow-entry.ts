@@ -494,9 +494,12 @@ async function runSessionLoop(
     const caller = crashCleanupState.caller;
     if (caller?.taskId !== undefined) ledger.rememberTask(caller.taskId);
     if (caller !== undefined) {
-      await cursor.apply(
-        await bindTurnCallerContextStep({ caller, serializedContext: cursor.serializedContext }),
-      );
+      await cursor.apply({
+        serializedContext: await bindTurnCallerContextStep({
+          caller,
+          serializedContext: cursor.serializedContext,
+        }),
+      });
     }
     crashCleanupState.turnId = `turn_${String(turnIndex++)}`;
     const outcome = await execution.runTurn(delivery);
