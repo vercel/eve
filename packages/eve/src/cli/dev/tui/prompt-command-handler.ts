@@ -7,7 +7,6 @@ import type {
   PromptCommandOutcome,
 } from "./runner.js";
 import { isPromptCommandAvailableFor, type PromptCommand } from "./prompt-commands.js";
-import type { RemoteAuthFlow } from "./remote-auth.js";
 import type { TuiSetupCommandInput, TuiSetupFlows } from "./setup-commands.js";
 import type { DevelopmentTuiTarget } from "./target.js";
 
@@ -21,8 +20,6 @@ export interface PromptCommandHandlerOptions {
   readonly modelChangeRefusal?: (appRoot: string) => Promise<string | null>;
   /** Test seam; forwarded to runTuiSetupCommand's injectable flows. */
   readonly flows?: Partial<TuiSetupFlows>;
-  /** Test seam for remote authentication. */
-  readonly remoteAuthFlow?: RemoteAuthFlow;
 }
 
 export function createPromptCommandHandler(
@@ -81,26 +78,6 @@ export function createPromptCommandHandler(
         return { message: `/${command.name} is not supported by this renderer.` };
       }
 
-      if (command.name === "vc:login" && target.kind === "remote") {
-        if (context.remoteConnection === undefined) {
-          return { message: "/vc:login is not available in this session." };
-        }
-        let runRemoteAuthCommand: (typeof import("./remote-auth-command.js"))["runRemoteAuthCommand"];
-        try {
-          ({ runRemoteAuthCommand } = await import("./remote-auth-command.js"));
-        } catch (error) {
-          return { message: `/vc:login failed: ${toErrorMessage(error)}` };
-        }
-        const message = await runRemoteAuthCommand({
-          connection: context.remoteConnection,
-          flow: options.remoteAuthFlow,
-          renderer: flow,
-        });
-        return { message };
-      }
-
-      // The remaining setup commands run against the local workspace, except
-      // `/vc:install`, which needs only a working directory on a remote session.
       let setupCommands: typeof import("./setup-commands.js");
       try {
         setupCommands = await import("./setup-commands.js");

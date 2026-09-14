@@ -13,23 +13,21 @@ The transcript remains in your terminal scrollback after you exit. Run `/help` i
 
 ## Commands
 
-| Command       | Description                                                                                                                                                  |
-| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `/login`      | Connect a ChatGPT subscription, Vercel account, or provider API key.                                                                                         |
-| `/model`      | Choose the model and its settings. Pass a model ID to set it directly: `/model provider/model-id`.                                                           |
-| `/add`        | Select and install channels, MCP connections, extensions, and observability integrations. Pass an item address to install it directly: `/add channel/slack`. |
-| `/deploy`     | Deploy the agent to Vercel production. Links the directory first if needed.                                                                                  |
-| `/vc:install` | Install the Vercel CLI.                                                                                                                                      |
-| `/vc:login`   | Log in to Vercel or restore access to a remote deployment.                                                                                                   |
-| `/info`       | Show the resolved application, compiled artifacts, discovery diagnostics, and messaging routes.                                                              |
-| `/loglevel`   | Choose which server and agent logs appear in the transcript.                                                                                                 |
-| `/traces`     | Open the local trace viewer. Pass a trace ID prefix to open a specific trace.                                                                                |
-| `/reset`      | Start a fresh session.                                                                                                                                       |
-| `/cancel`     | Cancel the current turn without discarding settled context.                                                                                                  |
-| `/clear`      | Clear the session's model-message history. `/new` is an alias.                                                                                               |
-| `/compact`    | Compact the current session's context.                                                                                                                       |
-| `/exit`       | Quit the UI.                                                                                                                                                 |
-| `/help`       | List available commands.                                                                                                                                     |
+| Command     | Description                                                                                                                                                  |
+| ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `/login`    | Connect a ChatGPT subscription, Vercel account, or provider API key.                                                                                         |
+| `/model`    | Choose the model and its settings. Pass a model ID to set it directly: `/model provider/model-id`.                                                           |
+| `/add`      | Select and install channels, MCP connections, extensions, and observability integrations. Pass an item address to install it directly: `/add channel/slack`. |
+| `/deploy`   | Deploy the agent to Vercel production. Installs the Vercel CLI, signs in, and links the directory if needed.                                                 |
+| `/info`     | Show the resolved application, compiled artifacts, discovery diagnostics, and messaging routes.                                                              |
+| `/loglevel` | Choose which server and agent logs appear in the transcript.                                                                                                 |
+| `/traces`   | Open the local trace viewer. Pass a trace ID prefix to open a specific trace.                                                                                |
+| `/reset`    | Start a fresh session.                                                                                                                                       |
+| `/cancel`   | Cancel the current turn without discarding settled context.                                                                                                  |
+| `/clear`    | Clear the session's model-message history. `/new` is an alias.                                                                                               |
+| `/compact`  | Compact the current session's context.                                                                                                                       |
+| `/exit`     | Quit the UI.                                                                                                                                                 |
+| `/help`     | List available commands.                                                                                                                                     |
 
 `/login`, `/model`, `/add`, `/deploy`, `/info`, and `/traces` are available when `eve dev` runs locally. They are unavailable when the UI connects to a server with `--url`.
 
@@ -53,7 +51,7 @@ Type to filter a menu, press `Enter` to select, or `Esc` to return to chat. Arro
 
 eve saves API keys and eve-owned OAuth refresh credentials in the OS secret store through just-secrets. It saves the last successful login as the machine default and records the project's connection and team separately as nonsecret metadata in `.eve/provider.json`. Newly entered keys are never written into project files. A key explicitly selected through `/login` takes precedence over another key for that provider in your shell; a project connected through environment credentials continues to use its environment. Vercel CLI retains ownership of its credentials and refresh tokens.
 
-Local discovery runs only in development. Deployments need explicitly provisioned `AI_GATEWAY_API_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, or supported project OIDC credentials. ChatGPT subscription models are local-only. `/login` does not link a deployment or authenticate a remote server; use `/deploy` for deployment and `/vc:login` for remote Vercel access.
+Local discovery runs only in development. Deployments need explicitly provisioned `AI_GATEWAY_API_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, or supported project OIDC credentials. ChatGPT subscription models are local-only. `/login` does not link a deployment or authenticate a remote server; `/deploy` handles Vercel CLI installation and account login when needed.
 
 ### Models and settings
 
@@ -125,7 +123,7 @@ eve dev https://user:pass@your-app.example.com
 eve dev https://your-app.example.com -H 'Authorization: Bearer your_token_here'
 ```
 
-For a Vercel deployment that needs authentication, run `/vc:login` and follow the prompt. Remote sessions do not modify the local project's Vercel link or `.env.local`.
+Remote Vercel sessions reuse an existing authorized CLI session. They do not open an account login flow or modify the local project's Vercel link or `.env.local`. If deployment protection blocks access, provide `VERCEL_AUTOMATION_BYPASS_SECRET` or configure access in the target project's Deployment Protection settings.
 
 ## What to read next
 

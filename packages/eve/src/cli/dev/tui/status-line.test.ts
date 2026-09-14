@@ -398,8 +398,8 @@ describe("buildStatusLine", () => {
       "\x1b[7m\x1b[33m ↗ vpoke.playground-vercel.tools \x1b[39m\x1b[27m",
     );
     expect(notConnected).not.toContain("\x1b[43m");
-    expect(notConnected).not.toContain("/vc:login");
-    expect(disconnected).not.toContain("/vc:login");
+    expect(notConnected).not.toContain("/deploy");
+    expect(disconnected).not.toContain("/deploy");
     expect(connectedLine).toContain("\x1b[7m\x1b[34m ↗ inbound (production) \x1b[39m\x1b[27m");
     const badges = `${disconnected}${notConnected}${connectedLine}`;
     expect(badges).not.toContain("\x1b[44m");

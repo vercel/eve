@@ -541,7 +541,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
   #questionPanel?: (width: number) => string[];
   /** The active setup flow's bordered panel: progress, question, status. */
   #setupFlow?: SetupFlowState;
-  /** The clearable setup attention line (`⚠ … · /vc:login`), rendered in the live footer. */
+  /** The clearable setup attention line (`⚠ … · /deploy`), rendered in the live footer. */
   #setupAttention?: string;
   /**
    * The pinned todo panel above the input, replaced wholesale by each `todo`
@@ -1755,7 +1755,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
   /**
    * Sets the setup attention line (yellow `⚠`, commands blue) as a live footer
    * element above the prompt. Unlike committed scrollback, it can be cleared:
-   * once the underlying issue is fixed (e.g. `/vc:login` succeeds) the runner calls
+   * once the underlying issue is fixed (e.g. `/deploy` succeeds) the runner calls
    * {@link clearSetupWarning} and the line disappears rather than lingering
    * stale in the transcript.
    */

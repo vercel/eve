@@ -5,7 +5,7 @@ import {
   runInstallVercelCliFlow,
   type InstallVercelCliResult,
 } from "#setup/flows/install-vercel-cli.js";
-import { runLoginFlow, type LoginFlowResult } from "#setup/flows/login.js";
+
 import { runModelFlow } from "#setup/flows/model.js";
 import type { ProviderSelection } from "#setup/provider-settings.js";
 import {
@@ -35,8 +35,6 @@ export type TuiSetupCommand = PromptCommandExtensionName;
  */
 export const SETUP_FLOW_CONFIG = {
   login: { title: "Connect a model", indicator: "pulse" },
-  "vc:install": { title: "Install the Vercel CLI", indicator: "pulse" },
-  "vc:login": { title: "Log in to Vercel", indicator: "pulse" },
   model: { title: "Configure the agent model", indicator: "pulse" },
   add: { title: "Add to your agent", indicator: "pulse" },
   deploy: { title: "Deploy to Vercel", indicator: "spinner" },
@@ -89,7 +87,6 @@ export interface TuiSetupCommandInput {
 export interface TuiSetupFlows {
   runModelLogin?: typeof runModelLogin;
   runInstallVercelCliFlow: typeof runInstallVercelCliFlow;
-  runLoginFlow: typeof runLoginFlow;
   runModelFlow: typeof runModelFlow;
   runRegistryFlow: typeof runRegistryFlow;
   runDeployFlow: typeof runDeployFlow;
@@ -249,7 +246,6 @@ async function executeSetupCommand(
   const { command, appRoot } = input;
   const flows: TuiSetupFlows = {
     runInstallVercelCliFlow,
-    runLoginFlow,
     runModelFlow,
     runRegistryFlow,
     runDeployFlow,
@@ -277,14 +273,6 @@ async function executeSetupCommand(
               effect: { kind: "model-access-changed" },
               preserveFlowDiagnostics: false,
             };
-      }
-      case "vc:install": {
-        return installVercelCliResultMessage(
-          await flows.runInstallVercelCliFlow({ appRoot, prompter, signal }),
-        );
-      }
-      case "vc:login": {
-        return loginResultMessage(await flows.runLoginFlow({ appRoot, prompter, signal }));
       }
       case "model": {
         const modelInput: Parameters<TuiSetupFlows["runModelFlow"]>[0] = {
@@ -553,72 +541,15 @@ function vercelActionOutcome(error: unknown, command: string): TuiSetupCommandRe
 function vercelActionMessage(kind: string, command: string): string | undefined {
   switch (kind) {
     case "vercel-login":
-      return `You're not logged in to Vercel — run /vc:login, then retry /${command}.`;
+      return `You're not logged in to Vercel — run /deploy to connect your Vercel account, then retry /${command}.`;
     case "vercel-forbidden":
-      return `Vercel denied access to that team — run /vc:login to re-authenticate (for example to complete SSO), or pick a team you can access, then retry /${command}.`;
+      return `Vercel denied access to that team — check your team access and SSO, then retry /${command}.`;
     case "vercel-cli-missing":
-      return `The Vercel CLI isn't installed — run /vc:install to install it, then retry /${command}.`;
+      return `The Vercel CLI isn't installed — run /deploy to install it, then retry /${command}.`;
     case "vercel-cli-upgrade":
       return `The Vercel CLI needs an update — run \`vercel upgrade\`, then retry /${command}.`;
     default:
       return undefined;
-  }
-}
-
-/** Folds an {@link InstallVercelCliResult} into the command's one-line outcome. */
-function installVercelCliResultMessage(result: InstallVercelCliResult): TuiSetupCommandResult {
-  switch (result.kind) {
-    case "cancelled":
-      return { message: "/vc:install dismissed.", preserveFlowDiagnostics: false };
-    case "already":
-      return { message: "The Vercel CLI is already installed.", preserveFlowDiagnostics: false };
-    case "failed":
-      return {
-        message:
-          "Couldn't install the Vercel CLI — install it manually with `npm i -g vercel@latest`.",
-        preserveFlowDiagnostics: true,
-      };
-    case "installed":
-      return {
-        message: "Installed the Vercel CLI. Run /vc:login next.",
-        preserveFlowDiagnostics: false,
-        // The CLI now resolves, so the status line's identity probe can run.
-        effect: { kind: "refresh-identity" },
-      };
-  }
-}
-
-/** Folds a {@link LoginFlowResult} into the command's one-line outcome. */
-function loginResultMessage(result: LoginFlowResult): TuiSetupCommandResult {
-  switch (result.kind) {
-    case "cancelled":
-      return { message: "/vc:login dismissed.", preserveFlowDiagnostics: false };
-    case "already":
-      return { message: "You're already logged in to Vercel.", preserveFlowDiagnostics: false };
-    case "cli-missing":
-      return {
-        message:
-          "The Vercel CLI isn't installed — run /vc:install to install it, then retry /vc:login.",
-        preserveFlowDiagnostics: true,
-      };
-    case "failed":
-      return {
-        message: "Vercel login didn't complete — run /vc:login to try again.",
-        preserveFlowDiagnostics: true,
-      };
-    case "logged-in":
-      return {
-        message: "Logged in to Vercel.",
-        preserveFlowDiagnostics: false,
-        // A now-valid `whoami` lets a previously-linked directory resolve its
-        // project identity for the status line.
-        effect: { kind: "refresh-identity" },
-      };
-    case "unavailable":
-      return {
-        message: "Couldn't reach Vercel — check your connection, then retry /vc:login.",
-        preserveFlowDiagnostics: true,
-      };
   }
 }
 

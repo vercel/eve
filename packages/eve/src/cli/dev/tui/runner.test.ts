@@ -3021,13 +3021,12 @@ describe("EveTUIRunner remote authentication", () => {
       availablePromptCommands: promptCommandsFor("remote"),
       promptCommandHandler: createPromptCommandHandler({
         target,
-        remoteAuthFlow: input.flow,
       }),
       remote: remoteOptions(input.resolveDeployment),
     }).run();
   }
 
-  it("runs /vc:login after an unresolved host returns an authentication challenge", async () => {
+  it("does not open login after a remote authentication challenge", async () => {
     const client = stubClient();
     const order: string[] = [];
     let infoCalls = 0;
@@ -3056,11 +3055,11 @@ describe("EveTUIRunner remote authentication", () => {
       },
     });
 
-    expect(order).toEqual(["info", "login", "info"]);
-    expect(commandInvocations).toEqual([{ text: "/vc:login", status: undefined }]);
+    expect(order).toEqual(["info"]);
+    expect(commandInvocations).toEqual([]);
   });
 
-  it("runs /vc:login once at startup after Vercel redirects to its SSO challenge", async () => {
+  it("does not open login for a remote SSO challenge", async () => {
     const client = stubClient();
     vi.spyOn(client, "info")
       .mockRejectedValueOnce(new ClientError(302, "Redirecting...", { location: VERCEL_SSO_URL }))
@@ -3076,58 +3075,8 @@ describe("EveTUIRunner remote authentication", () => {
       },
     });
 
-    expect(flow).toHaveBeenCalledOnce();
-    expect(flow).toHaveBeenCalledWith(expect.objectContaining({ configureTrustedSources: true }));
-    expect(commandInvocations).toEqual([{ text: "/vc:login", status: undefined }]);
-  });
-
-  it("requests Trusted Sources repair for an environment mismatch", async () => {
-    const client = stubClient();
-    const mismatch = new ClientError(
-      403,
-      "The caller environment is not permitted.\n\n" +
-        "TRUSTED_SOURCES_ENVIRONMENT_MISMATCH\n\niad1::request-id",
-    );
-    vi.spyOn(client, "info").mockRejectedValueOnce(mismatch).mockResolvedValueOnce(AGENT_INFO);
-    const flow = successfulAuth();
-
-    await runRemoteAuth({ client, flow });
-
-    expect(flow).toHaveBeenCalledWith(expect.objectContaining({ configureTrustedSources: true }));
-  });
-
-  it("renders a failed automatic /vc:login as one command result without the request id", async () => {
-    const client = stubClient();
-    vi.spyOn(client, "info")
-      .mockRejectedValueOnce(unauthorized())
-      .mockRejectedValueOnce(
-        new ClientError(
-          403,
-          "Your trusted sources OIDC token's environment is not permitted to access this deployment\n\n" +
-            "TRUSTED_SOURCES_ENVIRONMENT_MISMATCH\n\niad1::zgc5p-1781730251155-85842c28901b",
-        ),
-      );
-    const commandInvocations: Array<{ text: string; status: "failed" | undefined }> = [];
-    const commandResults: string[] = [];
-    const flow = successfulAuth([
-      { kind: "trusted-sources-updated", targetProjectName: "remote-agent" },
-    ]);
-
-    await runRemoteAuth({
-      client,
-      flow,
-      renderer: {
-        renderCommandInvocation: (text, status) => commandInvocations.push({ text, status }),
-        renderCommandResult: (message) => commandResults.push(message),
-      },
-    });
-
-    expect(commandInvocations).toEqual([{ text: "/vc:login", status: "failed" }]);
-    expect(commandResults).toEqual([
-      "Authentication was refreshed, but vpoke.playground-vercel.tools is unavailable: " +
-        "Your trusted sources OIDC token's environment is not permitted to access this deployment.\n\n" +
-        "TRUSTED_SOURCES_ENVIRONMENT_MISMATCH Completed before the failure: updated Trusted Sources for remote-agent.",
-    ]);
+    expect(flow).not.toHaveBeenCalled();
+    expect(commandInvocations).toEqual([]);
   });
 
   it("does not start authentication for an ordinary remote HTTP failure", async () => {

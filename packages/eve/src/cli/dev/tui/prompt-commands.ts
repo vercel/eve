@@ -1,10 +1,4 @@
-export type PromptCommandExtensionName =
-  | "login"
-  | "model"
-  | "add"
-  | "deploy"
-  | "vc:install"
-  | "vc:login";
+export type PromptCommandExtensionName = "login" | "model" | "add" | "deploy";
 
 type PromptCommandTarget = "local" | "remote";
 
@@ -98,22 +92,6 @@ const PROMPT_COMMAND_DEFINITIONS = [
     description: "Compact the current session context",
     takesArgument: false,
     build: () => ({ type: "compact" }),
-    targets: ["local", "remote"],
-  },
-  {
-    name: "vc:install",
-    aliases: [],
-    description: "Install the Vercel CLI",
-    takesArgument: false,
-    build: () => ({ type: "extension", name: "vc:install", argument: "" }),
-    targets: ["local", "remote"],
-  },
-  {
-    name: "vc:login",
-    aliases: [],
-    description: "Authenticate with Vercel",
-    takesArgument: false,
-    build: () => ({ type: "extension", name: "vc:login", argument: "" }),
     targets: ["local", "remote"],
   },
   {

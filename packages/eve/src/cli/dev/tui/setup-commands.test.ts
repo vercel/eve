@@ -61,7 +61,6 @@ function fakeFlows(overrides: Partial<TuiSetupFlows> = {}): TuiSetupFlows {
     runInstallVercelCliFlow: vi.fn<TuiSetupFlows["runInstallVercelCliFlow"]>(async () => ({
       kind: "installed",
     })),
-    runLoginFlow: vi.fn<TuiSetupFlows["runLoginFlow"]>(async () => ({ kind: "logged-in" })),
     runModelFlow: vi.fn<TuiSetupFlows["runModelFlow"]>(async () => ({
       kind: "done",
       accessChanged: true,
@@ -77,7 +76,7 @@ function fakeFlows(overrides: Partial<TuiSetupFlows> = {}): TuiSetupFlows {
 }
 
 function run(input: {
-  command: "vc:install" | "vc:login" | "model" | "add" | "deploy";
+  command: "model" | "add" | "deploy";
   flows: TuiSetupFlows;
   renderer?: TuiSetupCommandRenderer;
   initialModelStep?: "provider";
@@ -186,8 +185,6 @@ describe("runTuiSetupCommand", () => {
         Object.entries(SETUP_FLOW_CONFIG).map(([command, config]) => [command, config.indicator]),
       ),
     ).toEqual({
-      "vc:install": "pulse",
-      "vc:login": "pulse",
       login: "pulse",
       model: "pulse",
       add: "pulse",
@@ -640,48 +637,6 @@ describe("runTuiSetupCommand", () => {
     });
   });
 
-  it("reports a completed login and refreshes the link identity", async () => {
-    const flows = fakeFlows({
-      runLoginFlow: vi.fn<TuiSetupFlows["runLoginFlow"]>(async () => ({ kind: "logged-in" })),
-    });
-    await expect(run({ command: "vc:login", flows })).resolves.toEqual({
-      message: "Logged in to Vercel.",
-      preserveFlowDiagnostics: false,
-      effect: { kind: "refresh-identity" },
-    });
-  });
-
-  it("reports an already-authenticated login as a no-op", async () => {
-    const flows = fakeFlows({
-      runLoginFlow: vi.fn<TuiSetupFlows["runLoginFlow"]>(async () => ({ kind: "already" })),
-    });
-    await expect(run({ command: "vc:login", flows })).resolves.toEqual({
-      message: "You're already logged in to Vercel.",
-      preserveFlowDiagnostics: false,
-    });
-  });
-
-  it("routes a missing CLI from /vc:login to /vc:install", async () => {
-    const flows = fakeFlows({
-      runLoginFlow: vi.fn<TuiSetupFlows["runLoginFlow"]>(async () => ({ kind: "cli-missing" })),
-    });
-    await expect(run({ command: "vc:login", flows })).resolves.toEqual({
-      message:
-        "The Vercel CLI isn't installed — run /vc:install to install it, then retry /vc:login.",
-      preserveFlowDiagnostics: true,
-    });
-  });
-
-  it("reports an unavailable Vercel API without asking the user to log in again", async () => {
-    const flows = fakeFlows({
-      runLoginFlow: vi.fn<TuiSetupFlows["runLoginFlow"]>(async () => ({ kind: "unavailable" })),
-    });
-    await expect(run({ command: "vc:login", flows })).resolves.toEqual({
-      message: "Couldn't reach Vercel — check your connection, then retry /vc:login.",
-      preserveFlowDiagnostics: true,
-    });
-  });
-
   it("routes a vercel-login action error without dropping completed registry items", async () => {
     const cause = new HumanActionRequiredError({
       kind: "vercel-login",
@@ -698,13 +653,13 @@ describe("runTuiSetupCommand", () => {
     });
 
     await expect(run({ command: "add", flows })).resolves.toMatchObject({
-      message: expect.stringMatching(/^Added Web Chat[\s\S]*run \/vc:login/),
+      message: expect.stringMatching(/^Added Web Chat[\s\S]*run \/deploy/),
       partial: true,
       tone: "error",
     });
   });
 
-  it("routes a forbidden (SSO) scope error to /vc:login with a re-auth message", async () => {
+  it("routes a forbidden (SSO) scope error to /deploy with a re-auth message", async () => {
     const flows = fakeFlows({
       runDeployFlow: vi.fn<TuiSetupFlows["runDeployFlow"]>(async () => {
         throw new HumanActionRequiredError({
@@ -716,7 +671,7 @@ describe("runTuiSetupCommand", () => {
     });
     await expect(run({ command: "deploy", flows })).resolves.toEqual({
       message:
-        "Vercel denied access to that team — run /vc:login to re-authenticate (for example to complete SSO), or pick a team you can access, then retry /deploy.",
+        "Vercel denied access to that team — check your team access and SSO, then retry /deploy.",
       tone: "error",
       preserveFlowDiagnostics: true,
     });
@@ -737,7 +692,7 @@ describe("runTuiSetupCommand", () => {
     });
   });
 
-  it("routes a missing-CLI action to the install command instead of /vc:login", async () => {
+  it("routes a missing-CLI action to the install command instead of /deploy", async () => {
     const flows = fakeFlows({
       runDeployFlow: vi.fn<TuiSetupFlows["runDeployFlow"]>(async () => {
         throw new HumanActionRequiredError({
@@ -748,35 +703,9 @@ describe("runTuiSetupCommand", () => {
       }),
     });
     await expect(run({ command: "deploy", flows })).resolves.toEqual({
-      message:
-        "The Vercel CLI isn't installed — run /vc:install to install it, then retry /deploy.",
+      message: "The Vercel CLI isn't installed — run /deploy to install it, then retry /deploy.",
       tone: "error",
       preserveFlowDiagnostics: true,
-    });
-  });
-
-  it("reports an installed CLI and refreshes the link identity", async () => {
-    const flows = fakeFlows({
-      runInstallVercelCliFlow: vi.fn<TuiSetupFlows["runInstallVercelCliFlow"]>(async () => ({
-        kind: "installed",
-      })),
-    });
-    await expect(run({ command: "vc:install", flows })).resolves.toEqual({
-      message: "Installed the Vercel CLI. Run /vc:login next.",
-      preserveFlowDiagnostics: false,
-      effect: { kind: "refresh-identity" },
-    });
-  });
-
-  it("reports an already-installed CLI as a no-op", async () => {
-    const flows = fakeFlows({
-      runInstallVercelCliFlow: vi.fn<TuiSetupFlows["runInstallVercelCliFlow"]>(async () => ({
-        kind: "already",
-      })),
-    });
-    await expect(run({ command: "vc:install", flows })).resolves.toEqual({
-      message: "The Vercel CLI is already installed.",
-      preserveFlowDiagnostics: false,
     });
   });
 });

@@ -2,7 +2,6 @@ import pc from "picocolors";
 import { describe, expect, it, vi } from "vitest";
 
 import { createPromptCommandHandler } from "./prompt-command-handler.js";
-import type { RemoteAuthCompletion, RemoteConnectionController } from "./remote-connection.js";
 import type { AgentTUIRenderer, PromptCommandHandlerContext } from "./runner.js";
 import type { SetupFlowRenderer } from "./setup-flow.js";
 
@@ -221,7 +220,7 @@ describe("createPromptCommandHandler", () => {
     }));
     vi.doMock("./setup-commands.js", () => ({
       SETUP_FLOW_CONFIG: {
-        "vc:install": { title: "Install the Vercel CLI", indicator: "pulse" },
+        login: { title: "Connect a model", indicator: "pulse" },
       },
       runTuiSetupCommand,
     }));
@@ -233,106 +232,14 @@ describe("createPromptCommandHandler", () => {
         keepSetupFlowOpen: true,
       });
 
-      await handler.handle({ type: "extension", name: "vc:install", argument: "" }, handoffContext);
+      await handler.handle({ type: "extension", name: "login", argument: "" }, handoffContext);
 
-      expect(setupFlow.begin).toHaveBeenCalledWith("Install the Vercel CLI", "pulse");
+      expect(setupFlow.begin).toHaveBeenCalledWith("Connect a model", "pulse");
       expect(setupFlow.end).not.toHaveBeenCalled();
     } finally {
       vi.doUnmock("./setup-commands.js");
       vi.resetModules();
     }
-  });
-
-  it("reports a login that completed before remote authentication was cancelled", async () => {
-    const setupFlow = setupFlowRenderer();
-    const runLoginFlow = vi.fn(async () => ({ kind: "cancelled" as const }));
-    const remoteConnection: RemoteConnectionController = {
-      current: () => ({
-        target: REMOTE_TARGET,
-        connection: {
-          state: "auth-required",
-          challenge: { kind: "eve-oidc" },
-        },
-      }),
-      check: async () => ({
-        state: "auth-required",
-        challenge: { kind: "eve-oidc" },
-      }),
-      authenticate: async () => ({
-        kind: "cancelled",
-        completedMutations: [{ kind: "vercel-login" }],
-      }),
-      reportFailure: () => ({ state: "checking" }),
-      dispose() {},
-    };
-    const handler = createPromptCommandHandler({
-      target: REMOTE_TARGET,
-      flows: { runLoginFlow },
-    });
-
-    await expect(
-      handler.handle(
-        { type: "extension", name: "vc:login", argument: "" },
-        {
-          ...context({ setupFlow }),
-          remoteConnection,
-        },
-      ),
-    ).resolves.toEqual({
-      message: "/vc:login dismissed after logging in to Vercel.",
-    });
-    expect(runLoginFlow).not.toHaveBeenCalled();
-    expect(setupFlow.begin).toHaveBeenCalledWith("Authenticate via Vercel OIDC", "pulse");
-    expect(setupFlow.end).toHaveBeenCalledWith({ preserveDiagnostics: true });
-  });
-
-  it("reports mutations that completed before remote /vc:login was interrupted", async () => {
-    const setupFlow = {
-      ...setupFlowRenderer(),
-      waitForInterrupt: () => ({ promise: Promise.resolve("ctrl-c" as const), dispose: vi.fn() }),
-    } satisfies SetupFlowRenderer;
-    const runLoginFlow = vi.fn(async () => ({ kind: "cancelled" as const }));
-    const remoteConnection: RemoteConnectionController = {
-      current: () => ({
-        target: REMOTE_TARGET,
-        connection: { state: "auth-required", challenge: { kind: "eve-oidc" } },
-      }),
-      check: async () => ({
-        state: "auth-required",
-        challenge: { kind: "eve-oidc" },
-      }),
-      authenticate: async (_attempt, signal) =>
-        await new Promise<RemoteAuthCompletion>((resolve) => {
-          signal?.addEventListener(
-            "abort",
-            () =>
-              resolve({
-                kind: "cancelled" as const,
-                completedMutations: [
-                  { kind: "trusted-sources-updated", targetProjectName: "remote-agent" },
-                ],
-              }),
-            { once: true },
-          );
-        }),
-      reportFailure: () => ({ state: "checking" }),
-      dispose() {},
-    };
-    const handler = createPromptCommandHandler({
-      target: REMOTE_TARGET,
-      flows: { runLoginFlow },
-    });
-
-    await expect(
-      handler.handle(
-        { type: "extension", name: "vc:login", argument: "" },
-        { ...context({ setupFlow }), remoteConnection },
-      ),
-    ).resolves.toEqual({
-      message:
-        "/vc:login interrupted. Completed before interruption: updated Trusted Sources for remote-agent.",
-    });
-    expect(runLoginFlow).not.toHaveBeenCalled();
   });
 
   it("folds setup-module load failures at the command adapter boundary", async () => {

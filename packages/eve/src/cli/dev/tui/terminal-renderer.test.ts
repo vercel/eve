@@ -1660,7 +1660,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
 
   it("clears the setup attention line once its issue is resolved", () => {
     const { screen, renderer } = makeRenderer();
-    renderer.renderSetupWarning("1 setup issue: not logged in · /vc:login");
+    renderer.renderSetupWarning("1 setup issue: not logged in · /deploy");
     expect(screen.snapshot()).toContain("not logged in");
 
     renderer.clearSetupWarning();
@@ -1718,7 +1718,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
 
   it("marks a failed automatic command and keeps its multiline outcome in one result block", () => {
     const { screen, renderer } = makeRenderer();
-    renderer.renderCommandInvocation("/vc:login", "failed");
+    renderer.renderCommandInvocation("/deploy", "failed");
     renderer.renderCommandResult(
       "Authentication was refreshed, but example.vercel.app is unavailable: Access denied.\n\n" +
         "TRUSTED_SOURCES_ENVIRONMENT_MISMATCH",
@@ -1727,7 +1727,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
     renderer.shutdown();
 
     const snapshot = screen.snapshot();
-    expect(snapshot).toContain("│ ⨯ /vc:login");
+    expect(snapshot).toContain("│ ⨯ /deploy");
     expect(snapshot).toContain("⎿  Authentication was refreshed");
     expect(snapshot).toContain("TRUSTED_SOURCES_ENVIRONMENT_MISMATCH");
     expect(snapshot).not.toContain("· Authentication was refreshed");
@@ -5098,7 +5098,7 @@ describe("TerminalRenderer command typeahead", () => {
     const prompt = renderer.readPrompt();
     input.type("/");
     const snapshot = screen.snapshot();
-    expect(snapshot).toContain("Authenticate with Vercel");
+    expect(snapshot).not.toContain("Authenticate with Vercel");
     expect(snapshot).not.toContain("Choose a model and its settings");
     input.enter();
     await prompt;

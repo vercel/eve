@@ -278,7 +278,7 @@ export type AgentTUIRenderer = {
   renderSetupWarning?(text: string): void;
   /** Clears the setup attention line once its issue is resolved. */
   clearSetupWarning?(): void;
-  /** Commits the startup `/vc:login` invocation to the transcript. */
+  /** Commits the startup `/deploy` invocation to the transcript. */
   renderCommandInvocation?(text: string, status?: "failed"): void;
   renderCommandResult?(text: string, tone?: "success" | "error"): void;
   readonly setupFlow?: SetupFlowRenderer;
@@ -789,13 +789,6 @@ export class EveTUIRunner {
     let followCurrentSession = false;
     let streamWithoutPrompt = false;
     let initialDraft = await this.#renderAgentHeader();
-    if (this.#remoteConnection?.current().connection.state === "auth-required") {
-      await this.#executeExtensionCommand(
-        { type: "extension", name: "vc:login", argument: "" },
-        title,
-        { trigger: "startup" },
-      );
-    }
     this.#subscribeDevelopmentSandboxLogs();
     // Fire-and-forget: the link identity is network-bound to resolve, and the
     // first prompt must not wait on it. The segment appears when it lands.
@@ -1680,8 +1673,8 @@ export class EveTUIRunner {
 
   /**
    * Re-evaluates the attention line after a setup command changed local state,
-   * so a fixed issue clears (e.g. the `not logged in · /vc:login` line disappears
-   * once `/vc:login` succeeds) instead of lingering stale. Authoritative: unlike
+   * so a fixed issue clears (e.g. the `not logged in · /deploy` line disappears
+   * once `/deploy` succeeds) instead of lingering stale. Authoritative: unlike
    * the boot probe it re-reads detections and auth and is not stale-guarded.
    */
   async #refreshSetupAttention(info: AgentInfoResult | undefined): Promise<void> {

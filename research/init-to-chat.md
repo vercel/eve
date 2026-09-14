@@ -15,3 +15,5 @@ A project's choice wins over discovery. New connections prefer explicit environm
 Menus retain eve's renderer and scrollback with borderless rows, a `›` marker, bold selection, dim secondary text, filtering, and Enter/Esc navigation. Authorization semantics and required setup remain intact. Connection-ready and first-response telemetry contains timing and state only.
 
 Release acceptance requires projectless Gateway account-token support for the intended audience; this backend capability is feature-gated. The OAuth client ID is isolated and temporarily shared with fx pending registration of eve's own application. Deterministic tests cover routing and failure behavior. Local acceptance on 2026-09-14 also validated the existing CLI account/team and streamed a `gpt-5.6-luna-fast` response without a linked project. CI fixture evals remain the end-to-end gate.
+
+Vercel CLI installation and account login belong to interactive deployment, including already-linked projects. `/vc:install` and `/vc:login` are removed. Remote chat reuses existing credentials without starting a browser login; noninteractive deployment remains nonblocking.

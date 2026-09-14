@@ -67,9 +67,8 @@ function summarizeUpgradeFailure(stderr: readonly string[]): string | undefined 
 }
 
 /**
- * THE INSTALL FLOW for the dev TUI's `/vc:install`: the fix command for the
- * "Vercel CLI not found" diagnostic, so every diagnostic has a matching
- * command. Short-circuits when the CLI already resolves; otherwise runs a
+ * Prepares the Vercel CLI during deployment. Short-circuits when the CLI
+ * already resolves; otherwise runs a
  * global install with the project's package manager, streaming output to the
  * rail, then re-probes. A global install can exit clean yet leave the binary
  * off PATH (pnpm/yarn global bins commonly aren't), so success is confirmed by
