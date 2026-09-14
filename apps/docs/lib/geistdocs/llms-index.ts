@@ -12,9 +12,8 @@ Documentation links below point directly to Markdown. Remove the \`.md\` suffix 
 
 ## Introduction
 
-- [Getting Started](${EVE_ORIGIN}/docs/getting-started.md): Create a project, configure a model, understand its layout, and run it locally.
-
-- [Multiple Root Agents](${EVE_ORIGIN}/docs/getting-started/multiple-root-agents.md): Organize independently addressed eve agents in one project.
+- [Project Structure](${EVE_ORIGIN}/docs/project-structure.md): Choose a single root agent, an agent workspace, or declared subagents before you create a project.
+- [Getting Started](${EVE_ORIGIN}/docs/getting-started.md): Create and run a single-root project, then understand the files inside its agent directory.
 
 ## Core Concepts
 

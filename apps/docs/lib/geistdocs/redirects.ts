@@ -47,7 +47,6 @@ export const createIntegrationRedirects = (source: string, destination: string):
 export const docsRedirects: DocsRedirect[] = [
   ...createDocsRedirects("/introduction", "/getting-started"),
   ...createDocsRedirects("/installation", "/getting-started"),
-  ...createDocsRedirects("/project-structure", "/getting-started"),
   ...createDocsRedirects("/channels", "/channels/overview"),
   ...createDocsRedirects("/channels/http", "/channels/eve"),
   ...createDocsRedirects("/reference/http-api", "/channels/eve"),
@@ -71,8 +70,9 @@ export const docsRedirects: DocsRedirect[] = [
   ...createDocsRedirects("/evals", "/evals/overview"),
   ...createDocsRedirects("/advanced/evals", "/evals/overview"),
   ...createDocsRedirects("/getting-started/installation", "/getting-started"),
-  ...createDocsRedirects("/getting-started/project-structure", "/getting-started"),
-  ...createDocsRedirects("/multi-agent-projects", "/getting-started/multiple-root-agents"),
+  ...createDocsRedirects("/getting-started/project-structure", "/project-structure"),
+  ...createDocsRedirects("/getting-started/multiple-root-agents", "/project-structure"),
+  ...createDocsRedirects("/multi-agent-projects", "/project-structure"),
   ...createDocsRedirects("/getting-started/first-agent", "/tutorial/first-agent"),
 ];
 
@@ -80,7 +80,7 @@ export const rootMarkdownRedirects: DocsRedirect[] = [
   ["/getting-started", "/getting-started"],
   ["/install-integrations", "/install-integrations"],
   ["/installation", "/getting-started"],
-  ["/project-structure", "/getting-started"],
+  ["/project-structure", "/project-structure"],
   ["/instructions", "/instructions"],
   ["/tools/overview", "/tools"],
   ["/skills", "/skills"],
