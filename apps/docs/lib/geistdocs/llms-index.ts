@@ -14,6 +14,8 @@ Documentation links below point directly to Markdown. Remove the \`.md\` suffix 
 
 - [Getting Started](${EVE_ORIGIN}/docs/getting-started.md): Create a project, configure a model, understand its layout, and run it locally.
 
+- [Multiple Root Agents](${EVE_ORIGIN}/docs/getting-started/multiple-root-agents.md): Organize independently addressed eve agents in one project.
+
 ## Core Concepts
 
 - [Execution Model and Durability](${EVE_ORIGIN}/docs/concepts/execution-model-and-durability.md): Understand sessions, checkpointed steps, and parked work.

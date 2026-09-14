@@ -2,7 +2,6 @@
   "pages": [
     "---Introduction---",
     "getting-started",
-    "multi-agent-projects",
     "concepts",
     "---Build---",
     "agent-config",

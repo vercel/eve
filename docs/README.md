@@ -15,7 +15,7 @@ Important naming note:
 | To do this                                               | Read this                                                                              |
 | -------------------------------------------------------- | -------------------------------------------------------------------------------------- |
 | Create a project, or understand the file layout          | [Getting Started](./getting-started.mdx)                                               |
-| Create or extend a project with several root agents      | [Multi-Agent Projects](./multi-agent-projects.mdx)                                     |
+| Organize several independently addressed root agents     | [Multiple Root Agents](./getting-started/multiple-root-agents.mdx)                     |
 | Set the model, reasoning, or other agent-wide config     | [Agents](./agent-config.md)                                                            |
 | Change what the agent does and how it behaves            | [Instructions](./instructions.mdx)                                                     |
 | Give the agent a typed capability it can call            | [Tools](./tools/overview.mdx)                                                          |

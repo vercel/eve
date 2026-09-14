@@ -51,23 +51,9 @@ See [Sandbox](../../sandbox) for resource limits, network policy, and lifecycle 
 
 ## Deploy the agent
 
-A project containing only several independently addressed root agents can use eve's hostless workspace layout:
+An agent workspace contains several independently addressed root agents. Create and manage that layout as described in [Multiple Root Agents](../../getting-started/multiple-root-agents).
 
-```text
-my-project/
-├── package.json
-└── agents/
-    ├── support/
-    │   └── agent/
-    └── research/
-        └── agent/
-```
-
-In an eve workspace, eve discovers direct `agents/<name>/` children that contain nested or flat agent files and do not have their own `package.json`. Their directory names become their public identities, exposed at `/<name>/eve/v1/*`. A child with its own `package.json` is a separate package rather than a member of the parent eve workspace. Run an agent-specific command from a member directory or pass `--agent <name>` at the workspace root; interactive commands open a picker when the name is omitted. Run project-level build, link, and deploy commands from the workspace root. Workspace members share the root package, dependencies, and build scripts.
-
-Create this layout with `eve init my-project --agents support,research`, or add one agent to an existing workspace with `eve init billing`.
-
-For an agent-only workspace, run `eve build`. eve owns the Vercel Build Output and generates one independently built service and a `/<name>/eve/v1/*` transport route for each workspace member.
+For an agent-only workspace, run `eve build` from the workspace root. eve discovers direct `agents/<name>/` children without their own `package.json`, then generates one independently built service and a `/<name>/eve/v1/*` transport route for each member. A child with its own `package.json` is a separate package rather than a workspace member.
 
 ### Compose agents with other Vercel services
 

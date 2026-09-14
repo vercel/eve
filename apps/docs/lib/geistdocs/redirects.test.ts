@@ -109,6 +109,8 @@ describe("docsRedirects", () => {
     ["/docs/installation.md", "/docs/getting-started.md"],
     ["/docs/project-structure", "/docs/getting-started"],
     ["/docs/project-structure.md", "/docs/getting-started.md"],
+    ["/docs/multi-agent-projects", "/docs/getting-started/multiple-root-agents"],
+    ["/docs/multi-agent-projects.mdx", "/docs/getting-started/multiple-root-agents.mdx"],
     ["/docs/reference/http-api", "/docs/channels/eve"],
     ["/docs/project-layout", "/docs/getting-started"],
     ["/docs/reference/project-layout", "/docs/getting-started"],
