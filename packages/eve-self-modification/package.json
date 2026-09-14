@@ -1,6 +1,7 @@
 {
   "name": "@eve/self-modification",
   "version": "0.0.13",
+  "private": true,
   "description": "Compatibility entrypoints for eve self-modification.",
   "keywords": [
     "agents",
