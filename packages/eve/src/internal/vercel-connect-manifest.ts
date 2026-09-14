@@ -4,16 +4,19 @@ export const VERCEL_CONNECT_MANIFEST_FILENAME = "vercel-connect-manifest.json";
 export const VERCEL_CONNECT_MANIFEST_KIND = "vercel-connect-manifest";
 export const VERCEL_CONNECT_MANIFEST_SCHEMA_VERSION = 1;
 
+export type VercelConnectInterface =
+  | { readonly protocol: "mcp" | "openapi"; readonly url: string }
+  | { readonly npm: string; readonly protocol: "custom"; readonly url: string };
+
 export interface VercelConnectRequirement {
   readonly target: string;
-  readonly connector: {
+  readonly interfaces: readonly VercelConnectInterface[];
+  readonly connect: {
+    readonly subjectTypes: readonly ("app" | "user")[];
+    readonly service: string;
     readonly type: string;
-    readonly configuration?: JsonObject;
+    readonly manifest: JsonObject;
   };
-  readonly interface?: { readonly protocol: "mcp" | "openapi"; readonly url: string };
-  readonly providerConfiguration?: { readonly format: string; readonly path: string };
-  readonly access: { readonly principalTypes: readonly ("app" | "user")[] };
-  readonly trigger?: { readonly method: string; readonly path: string };
   readonly uses: readonly {
     readonly kind: "channel" | "connection";
     readonly name: string;

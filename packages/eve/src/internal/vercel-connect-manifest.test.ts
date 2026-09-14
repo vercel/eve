@@ -21,23 +21,33 @@ describe("createVercelConnectManifest", () => {
   it.each<VercelConnectRequirement>([
     {
       target: "connector:oauth/linear",
-      connector: { type: "oauth" },
-      interface: { protocol: "mcp", url: "https://mcp.linear.app/mcp" },
-      access: { principalTypes: ["user"] },
+      interfaces: [{ protocol: "mcp", url: "https://mcp.linear.app/mcp" }],
+      connect: {
+        subjectTypes: ["user"],
+        service: "linear",
+        type: "oauth",
+        manifest: { $type: "https://datatracker.ietf.org/doc/html/rfc7591" },
+      },
       uses: [use],
     },
     {
-      target: "binding:connections/linear",
-      connector: { type: "oauth", configuration: { service: "mcp.linear.app" } },
-      providerConfiguration: {
-        format: "slack-app-manifest",
-        path: "channels/support.slack-app-manifest.json",
+      target: "connector:slack/support",
+      interfaces: [
+        {
+          protocol: "custom",
+          url: "https://docs.slack.dev/apis/web-api/",
+          npm: "@slack/web-api",
+        },
+      ],
+      connect: {
+        subjectTypes: ["app"],
+        service: "slack",
+        type: "slack",
+        manifest: { $type: "https://docs.slack.dev/reference/app-manifest/" },
       },
-      trigger: { method: "POST", path: "/eve/v1/slack" },
-      access: { principalTypes: ["user"] },
       uses: [use],
     },
-  ])("preserves the opaque $target reference", (requirement) => {
+  ])("preserves the opaque target reference", (requirement) => {
     expect(
       createVercelConnectManifest({ generatorVersion: "1.2.3", requirements: [requirement] }),
     ).toEqual({
