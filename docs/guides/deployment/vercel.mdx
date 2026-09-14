@@ -71,7 +71,9 @@ For an agent-only workspace, run `eve build`. eve owns the Vercel Build Output a
 
 ### Compose agents with other Vercel services
 
-Use Vercel's programmatic configuration when a workspace also deploys a frontend, private API, or another non-eve service. Replace `vercel.json` with a root `vercel.ts` and compose the authored graph with `withEve`:
+Use Vercel's programmatic configuration when agents, a frontend, private API, worker, or another application are peer services that Vercel builds and deploys independently. In this topology, Vercel's service graph owns routing; a Next.js app is not the agent routing layer. Replace `vercel.json` with a root `vercel.ts` and compose the authored graph with `withEve`:
+
+If one Next.js app should own same-origin browser routes to one or more agents, use [`withEve()` in `next.config.ts`](../frontend/nextjs) instead. See [Project structures](../../project-structures#vercel-peer-services) for the layouts and decision guide.
 
 ```typescript title="vercel.ts"
 import { withEve } from "eve/vercel";
