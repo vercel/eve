@@ -19,6 +19,7 @@ import {
 import { deriveBackgroundTaskActivityObserver } from "#execution/activity-work.js";
 import { isAsyncIterable } from "#shared/async-iterable.js";
 import { parseJsonValue } from "#shared/json.js";
+import { projectToolStartLabel } from "#harness/action-presentation.js";
 import type { ToolExecuteOptions } from "#tools/definition.js";
 import { createTaskMessage, isTaskMessage, type TaskExec } from "#tools/task.js";
 import { findSessionTaskEntry, recordSessionTask } from "#tasks/session-index.js";
@@ -196,6 +197,10 @@ class BackgroundToolExecutionScope implements BackgroundToolExecutor {
     });
   }
 
+  hasPendingTasks(): boolean {
+    return this.records.some((record) => record.settled && record.task !== undefined);
+  }
+
   async commit(session: HarnessSession): Promise<HarnessSession> {
     const incomplete = this.records.filter((record) => !record.settled);
     if (incomplete.length > 0) {
@@ -327,7 +332,10 @@ class BackgroundToolExecutionScope implements BackgroundToolExecutor {
       readonly toolInput: unknown;
     };
     readonly record: BackgroundToolExecutionRecord;
-  }): Promise<{ readonly receipt?: { readonly agentId: string }; readonly task: BackgroundTask }> {
+  }): Promise<{
+    readonly receipt?: { readonly agentId: string };
+    readonly task: BackgroundTask;
+  }> {
     const workflow =
       input.input.definition.workflowId === undefined
         ? undefined
@@ -377,10 +385,12 @@ class BackgroundToolExecutionScope implements BackgroundToolExecutor {
       kind: "tool" as const,
       name: input.input.definition.name,
     };
+    const activityLabel = projectToolStartLabel(input.input.definition, input.input.toolInput);
     const taskInput = {
       activityObserver: deriveBackgroundTaskActivityObserver({
         activityObserver: input.ctx.get(ActivityObserverKey),
         callId: input.input.options.toolCallId,
+        label: activityLabel,
         name: metadata.name,
         parentSessionId: this.initialSession.sessionId,
         parentTurnId,
@@ -410,7 +420,11 @@ class BackgroundToolExecutionScope implements BackgroundToolExecutor {
       throw new Error(`Background workflow tool "${input.input.definition.name}" has no input.`);
     }
 
-    const task = prepareBackgroundTask(taskInput);
+    const task: Omit<BackgroundTask, "taskRunId"> = {
+      ...prepareBackgroundTask(taskInput),
+      activityWorkIdentity:
+        workflow.resultKind === "subagent" ? taskInput.activityObserver?.workIdentity : undefined,
+    };
     if (
       workflow.resultKind === "subagent" &&
       subagentProjection !== undefined &&

@@ -25,6 +25,20 @@ function authProvider(auth: ConnectionAuthDefinition | undefined): ConnectionAut
 }
 
 describe("normalizeMcpClientConnectionDefinition", () => {
+  it.each([undefined, true, false])("preserves protocolVersionDiscovery %s", (value) => {
+    const result = normalizeMcpClientConnectionDefinition(
+      validInput({ protocolVersionDiscovery: value }),
+      MSG,
+    );
+    expect(result.protocolVersionDiscovery).toBe(value);
+  });
+
+  it.each([null, "false", 0, {}])("rejects a non-boolean protocolVersionDiscovery: %j", (value) => {
+    expect(() =>
+      normalizeMcpClientConnectionDefinition(validInput({ protocolVersionDiscovery: value }), MSG),
+    ).toThrow('"protocolVersionDiscovery" must be a boolean.');
+  });
+
   describe("happy path", () => {
     it("accepts a valid definition with a getToken function", () => {
       const result = normalizeMcpClientConnectionDefinition(validInput(), MSG);

@@ -16,6 +16,7 @@ import {
   ContinuationTokenKey,
   DynamicSubagentAgentConfigKey,
   ModeKey,
+  ScheduleIdKey,
   SessionCallbackKey,
   SessionDynamicSubagentRuntimeRevisionKey,
   SessionDynamicModelReferenceKey,
@@ -35,8 +36,15 @@ import { getPendingAuthorization, setPendingAuthorization } from "#harness/autho
 import { getProxyInputRequests, upsertProxyInputRequests } from "#harness/proxy-input-requests.js";
 import { appendPendingInputBatch } from "#harness/input-requests.js";
 import type { HarnessSession, StepFn, StepResult } from "#harness/types.js";
-import { createEmptyHookRegistry } from "#runtime/hooks/registry.js";
-import { createActionsRequestedEvent, createInputRequestedEvent } from "#protocol/message.js";
+import { createEmptyHookRegistry, createRuntimeHookRegistry } from "#runtime/hooks/registry.js";
+import {
+  createActionsRequestedEvent,
+  createInputRequestedEvent,
+  createMessageAppendedEvent,
+  createMessageCompletedEvent,
+  createResultCompletedEvent,
+  type UnstampedMessageStreamEvent,
+} from "#protocol/message.js";
 import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
 import {
   createDurableSessionState,
@@ -1199,6 +1207,188 @@ describe("dispatchCoordinationStep", () => {
 });
 
 describe("turnStep", () => {
+  it("keeps one task stream open while hiding a scheduled fallback from delivery hooks", async () => {
+    const appended: string[] = [];
+    const delivered: Array<string | null> = [];
+    const hookEvents: string[] = [];
+    const adapter: ChannelAdapter = {
+      kind: "scheduled-output-capture",
+      "message.appended"(data) {
+        appended.push(data.messageDelta);
+      },
+      "message.completed"(data) {
+        delivered.push(data.message);
+      },
+    };
+    const bundle = Object.assign({}, createTurnStepTestBundle() as object, {
+      adapterRegistry: { adaptersByKind: new Map([[adapter.kind, adapter]]) },
+      hookRegistry: createRuntimeHookRegistry([
+        {
+          events: {
+            "*": async (event: UnstampedMessageStreamEvent) => {
+              hookEvents.push(JSON.stringify(event));
+            },
+          },
+          logicalPath: "hooks/audit.ts",
+          slug: "audit",
+          sourceId: "hooks/audit.ts",
+          sourceKind: "module",
+        } as never,
+      ]),
+    }) as never;
+    vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue(bundle);
+
+    const task = {
+      createdByTurnId: "turn_0",
+      executor: { data: {}, kind: "workflow-tool" },
+      metadata: { kind: "report", name: "daily_report" },
+      taskId: "task_report",
+      taskInboxToken: "task-token",
+      taskRunId: "task-run",
+    };
+    const emissionState = {
+      sequence: 0,
+      sessionStarted: true,
+      stepIndex: 0,
+      turnId: "turn_0",
+    };
+    const pending = createStubSession({
+      state: {
+        "eve.harness.emission": emissionState,
+        "eve.tasks": { tasks: [task], version: 2 },
+      },
+    });
+    const terminalView = {
+      lastOutput: { data: "report complete", type: "result" as const },
+      metadata: task.metadata,
+      status: "completed" as const,
+      taskId: task.taskId,
+    };
+    const settled = createStubSession({
+      state: {
+        "eve.harness.emission": { ...emissionState, sequence: 1, turnId: "turn_1" },
+        "eve.tasks": {
+          tasks: [{ ...task, terminalView }],
+          version: 2,
+        },
+      },
+    });
+    installSessionStoreMocks([pending, settled]);
+
+    let modelTurn = 0;
+    vi.mocked(createExecutionNodeStep).mockImplementation((input) => {
+      return async (session): Promise<StepResult> => {
+        const message = modelTurn++ === 0 ? "Premature fallback" : "Final report";
+        await input.handleEvent?.(
+          createMessageAppendedEvent({
+            messageDelta: message,
+            sequence: modelTurn - 1,
+            stepIndex: 0,
+            turnId: `turn_${String(modelTurn - 1)}`,
+          }),
+          session.history,
+        );
+        await input.handleEvent?.(
+          createMessageCompletedEvent({
+            message,
+            sequence: modelTurn - 1,
+            stepIndex: 0,
+            turnId: `turn_${String(modelTurn - 1)}`,
+          }),
+          session.history,
+        );
+        await input.handleEvent?.(
+          createResultCompletedEvent({
+            result: { report: message },
+            sequence: modelTurn - 1,
+            stepIndex: 0,
+            turnId: `turn_${String(modelTurn - 1)}`,
+          }),
+          session.history,
+        );
+        return modelTurn === 1
+          ? { next: null, session, settledTurn: { output: { report: message } } }
+          : { next: { done: true, output: { report: message } }, session };
+      };
+    });
+
+    const ctx = new ContextContainer();
+    ctx.set(AuthKey, null);
+    ctx.set(BundleKey, bundle);
+    ctx.set(ChannelKey, adapter);
+    ctx.set(ContinuationTokenKey, "http:scheduled-output-capture");
+    ctx.set(ModeKey, "task");
+    ctx.set(ScheduleIdKey, "daily-report");
+    ctx.set(SessionIdKey, "session-1");
+    const serializedContext = serializeContext(ctx);
+    const writable = createTestWritable("scheduled-task");
+
+    const launch = await turnStep({
+      input: {
+        kind: "deliver",
+        payloads: [
+          {
+            message: "Run the daily report",
+            outputSchema: {
+              properties: { report: { type: "string" } },
+              required: ["report"],
+              type: "object",
+            },
+          },
+        ],
+      },
+      parentWritable: writable,
+      serializedContext,
+      sessionState: createStubSessionState({ emissionState }),
+    });
+    expect(appended).toEqual([]);
+    expect(delivered).toEqual([null]);
+    const launchEvents = (workflowWritesByNamespace.get("scheduled-task") ?? []).map((chunk) =>
+      JSON.parse(new TextDecoder().decode(chunk as Uint8Array)),
+    );
+    expect(launchEvents).toEqual([
+      expect.objectContaining({
+        data: expect.objectContaining({ message: null }),
+        type: "message.completed",
+      }),
+    ]);
+    expect(JSON.stringify(launchEvents)).not.toContain("Premature fallback");
+    expect(hookEvents.join("\n")).not.toContain("Premature fallback");
+
+    await turnStep({
+      input: {
+        kind: "deliver",
+        payloads: [{ message: "Background task task_report is completed." }],
+        taskDeliveryId: "task_report:ready:completed",
+      },
+      parentWritable: writable,
+      serializedContext: launch.serializedContext,
+      sessionState: launch.sessionState,
+    });
+
+    expect(appended).toEqual(["Final report"]);
+    expect(delivered).toEqual([null, "Final report"]);
+    const settledEvents = (workflowWritesByNamespace.get("scheduled-task") ?? []).map((chunk) =>
+      JSON.parse(new TextDecoder().decode(chunk as Uint8Array)),
+    );
+    expect(settledEvents.filter((event) => event.type === "message.completed")).toEqual([
+      expect.objectContaining({
+        data: expect.objectContaining({ message: null }),
+        type: "message.completed",
+      }),
+      expect.objectContaining({
+        data: expect.objectContaining({ message: "Final report" }),
+        type: "message.completed",
+      }),
+    ]);
+    expect(settledEvents.filter((event) => event.type === "result.completed")).toEqual([
+      expect.objectContaining({
+        data: expect.objectContaining({ result: { report: "Final report" } }),
+        type: "result.completed",
+      }),
+    ]);
+  });
+
   it("runs the configured number of model calls inside one Workflow step", async () => {
     const bundle = createTurnStepTestBundle(3);
     vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue(bundle);

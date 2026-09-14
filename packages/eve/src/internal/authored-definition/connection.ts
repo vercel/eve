@@ -20,6 +20,7 @@ const KNOWN_TOP_LEVEL_KEYS = [
   "description",
   "headers",
   "instanceKey",
+  "protocolVersionDiscovery",
   "toolCall",
   "tools",
   "url",
@@ -92,6 +93,13 @@ export function normalizeMcpClientConnectionDefinition(
     description: record.description as string,
     url: record.url as string,
   };
+
+  if (record.protocolVersionDiscovery !== undefined) {
+    if (typeof record.protocolVersionDiscovery !== "boolean") {
+      throw new Error(`${message} "protocolVersionDiscovery" must be a boolean.`);
+    }
+    result.protocolVersionDiscovery = record.protocolVersionDiscovery;
+  }
 
   if (record.instanceKey !== undefined) {
     result.instanceKey = record.instanceKey as string;

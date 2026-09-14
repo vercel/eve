@@ -65,6 +65,12 @@ function slackRespondTypeChecks(
 
 void slackRespondTypeChecks;
 
+slackChannel({
+  events: {
+    "input.requested"(_event, _channel, _ctx) {},
+  },
+});
+
 function getAdapter(channel: unknown): ChannelAdapter<any> {
   if (!isCompiledChannel(channel)) {
     throw new Error("Expected a CompiledChannel.");
@@ -716,6 +722,86 @@ describe("slackChannel() default event handlers", () => {
     const [url, init] = fetchMock.mock.calls[0]!;
     expect(String(url)).toBe("https://slack.com/api/assistant.threads.setStatus");
     expect(parseSlackRequestBody(init as RequestInit)).toMatchObject({ status: "" });
+  });
+
+  it("lets an input override delegate selected requests to default delivery", async () => {
+    fetchMock.mockImplementation(async (input: string | URL | Request, init?: RequestInit) => {
+      const operation = String(input).split("/").at(-1);
+      if (operation === "conversations.open") {
+        return Response.json({ channel: { id: "D01" }, ok: true });
+      }
+      if (operation === "chat.getPermalink") {
+        return Response.json({ ok: true, permalink: "https://example.slack.com/message" });
+      }
+      if (operation === "chat.postMessage") {
+        return Response.json({ ok: true, ts: "1700000001.000001" });
+      }
+      throw new Error(`Unexpected Slack request: ${String(input)} ${String(init?.body)}`);
+    });
+    const customPrompts: string[] = [];
+    const adapter = withState(
+      getAdapter(
+        slackChannel({
+          approvalChannel: (request) =>
+            request.prompt.startsWith("Sensitive") ? "direct-message" : "thread",
+          credentials: { botToken: "xoxb-test" },
+          events: {
+            async "input.requested"(event, _channel, _ctx, defaultDeliver) {
+              const privateRequests = event.requests.filter((request) =>
+                request.prompt.startsWith("Sensitive"),
+              );
+              customPrompts.push(
+                ...event.requests
+                  .filter((request) => !privateRequests.includes(request))
+                  .map((request) => request.prompt),
+              );
+              await defaultDeliver({ ...event, requests: privateRequests });
+            },
+          },
+        }),
+      ),
+      {
+        ...THREAD_STATE,
+        triggeringMessageTs: "1700000000.000002",
+        triggeringUserId: "U01",
+      },
+    );
+    const ctx = buildAdapterContext(adapter, stubAccessor());
+
+    await callEvent(
+      adapter,
+      makeEvent("input.requested", {
+        requests: [
+          {
+            allowFreeform: true,
+            display: "select",
+            kind: "question",
+            prompt: "Ordinary follow-up",
+            requestId: "ordinary",
+          },
+          {
+            allowFreeform: false,
+            display: "select",
+            kind: "question",
+            options: [{ id: "approve", label: "Approve" }],
+            prompt: "Sensitive review",
+            requestId: "sensitive",
+          },
+        ],
+        sequence: 0,
+        stepIndex: 0,
+        turnId: "t1",
+      }),
+      ctx,
+    );
+
+    expect(customPrompts).toEqual(["Ordinary follow-up"]);
+    const posts = fetchMock.mock.calls
+      .filter(([input]) => String(input).endsWith("/chat.postMessage"))
+      .map(([, init]) => parseSlackRequestBody(init as RequestInit));
+    expect(posts.some((body) => body.channel === "D01")).toBe(true);
+    expect(JSON.stringify(posts)).toContain("eve_input:route:C01:1700000000.000001:sensitive");
+    expect(posts.some((body) => JSON.stringify(body).includes("Ordinary follow-up"))).toBe(false);
   });
 
   it("input.requested keeps tool input out of the interactive approval message", async () => {

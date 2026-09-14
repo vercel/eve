@@ -210,7 +210,7 @@ function firstNonEmptyLine(text: string): string | undefined {
  */
 export function defaultInputRequestedHandler(
   approvalChannel?: SlackApprovalChannelResolver,
-): NonNullable<SlackChannelEvents["input.requested"]> {
+): NonNullable<SlackChannelInternalEvents["input.requested"]> {
   return async (data, channel, ctx) => {
     const directMessageRequests: InputRequest[] = [];
     const threadRequests: InputRequest[] = [];

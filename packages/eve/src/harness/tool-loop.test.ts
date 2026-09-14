@@ -2664,6 +2664,33 @@ describe("createToolLoopHarness", () => {
     expect(result.next).toEqual({ done: true, output: { summary: "Done" } });
   });
 
+  it("parks a scheduled task turn while its launched background task is pending", async () => {
+    const schema = {
+      properties: { summary: { type: "string" } },
+      required: ["summary"],
+      type: "object",
+    } as const;
+    setupMockAgent(finalOutputResult("Starting.", { summary: "Pending" }));
+    const { emit, events } = createEventCollector();
+    const runStep = createToolLoopHarness(createTestConfig("task", emit));
+    const ctx = new ContextContainer();
+    ctx.set(ScheduleIdKey, "scheduled-report");
+    ctx.set(BackgroundToolExecutorKey, {
+      execute: vi.fn(),
+      hasPendingTasks: () => true,
+    });
+
+    const result = await contextStorage.run(ctx, () =>
+      runStep(createTestSession({ outputSchema: schema }), { message: "Run the report" }),
+    );
+
+    expect(result.next).toBeNull();
+    expect(result.settledTurn).toEqual({ output: { summary: "Pending" } });
+    expect(result.session.outputSchema).toBe(schema);
+    expect(events.some((event) => event.type === "result.completed")).toBe(false);
+    expect(events.at(-1)?.type).toBe("session.waiting");
+  });
+
   it("fails a task turn as an error when structured output is not produced", async () => {
     setupMockAgent({
       finishReason: "stop",
