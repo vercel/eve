@@ -1,0 +1,95 @@
+---
+title: "Add a Web App"
+description: "Connect one or more eve agents to a browser application."
+---
+
+Add a web app when users should interact with an eve agent in a browser. A web app can serve one root agent or several independently addressed root agents. To connect a browser UI you already have, see [Frontend Frameworks](./overview).
+
+## Choose a web app arrangement
+
+| Your project                                 | Recommended arrangement                                                             |
+| -------------------------------------------- | ----------------------------------------------------------------------------------- |
+| One root agent                               | Mount the agent in the application with a framework integration.                    |
+| Several root agents with one browser product | Mount the selected agents in one application and make the UI choose a target agent. |
+| Several root agents with separate products   | Add separate applications or route each agent independently.                        |
+| An existing Next.js application              | Configure the existing application; do not scaffold a second one.                   |
+
+A browser UI is an HTTP client of an agent's [eve channel](../../channels/overview). A framework integration can mount that channel on the application's origin, which lets browser requests use the application's cookies without CORS configuration.
+
+## Add Web Chat to one agent
+
+Install the generated Next.js Web Chat application in a single-agent project:
+
+```bash
+eve add channel/web
+```
+
+The installer adds the Next.js application and wraps `next.config.ts` with `withEve()`. The generated chat calls the unnamed agent at same-origin `/eve/v1/*`.
+
+Before accepting production browser traffic, replace the generated placeholder authorization policy. See [Authenticate browser requests](./overview#authenticate-browser-requests).
+
+Web Chat cannot currently be installed directly into a multi-agent workspace. To add a browser app to that layout, create or configure a root Next.js application and mount the required agents manually, as described in [Mount several agents](#mount-several-agents).
+
+## Connect an existing Next.js app
+
+Use [`withEve()`](./nextjs) when a Next.js app should own browser-facing routes to an agent. For one agent, its default `agent/` directory is mounted at `/eve/v1/*`:
+
+```ts title="next.config.ts"
+import type { NextConfig } from "next";
+import { withEve } from "eve/next";
+
+const nextConfig: NextConfig = {};
+
+export default withEve(nextConfig);
+```
+
+If the agent lives outside the Next.js app directory, set `eveRoot`:
+
+```ts title="next.config.ts"
+export default withEve(nextConfig, {
+  eveRoot: "../support-agent",
+});
+```
+
+## Mount several agents
+
+Use `agents` when one Next.js application should route requests to several named agent roots:
+
+```ts title="next.config.ts"
+import type { NextConfig } from "next";
+import { withEve } from "eve/next";
+
+const nextConfig: NextConfig = {};
+
+export default withEve(nextConfig, {
+  agents: {
+    support: "./agents/support",
+    research: "./agents/research",
+  },
+});
+```
+
+Named agents mount on the application origin at `/eve/agents/<name>/eve/v1/*`. The application selects the target agent explicitly:
+
+```tsx
+import { useEveAgent } from "eve/react";
+
+const support = useEveAgent({ agent: "support" });
+```
+
+Your UI needs its own agent-selection design. For example, link users to routes such as `/agents/support` and `/agents/research`, and bind the chat on each route to the matching `agent` name. Keep an agent identity in durable-session URLs so the UI does not restore a session through the wrong agent route.
+
+Configure browser authorization for every agent the application exposes. An agent that is not configured to accept the application's credentials remains unavailable to browser traffic.
+
+## Use another framework
+
+eve provides framework integrations for [Nuxt](./nuxt) and [SvelteKit](./sveltekit), in addition to Next.js. For another frontend stack, configure the application or its ingress to proxy same-origin `/eve/v1/*` requests, or pass the agent URL as `host` to the client hook.
+
+When several independently deployed agents and applications are peers, the routing layer is your application platform rather than one framework integration. On Vercel, compose the services in [`vercel.ts`](../deployment/vercel#compose-agents-with-other-vercel-services). On another host, configure your ingress, reverse proxy, or API gateway; see [Self-Host eve](../deployment/self-hosting).
+
+## What to read next
+
+- [Next.js](./nextjs): configure local development and production routing
+- [Frontend Frameworks](./overview): `useEveAgent` and browser authentication
+- [Multi-Agent Projects](../../multi-agent-projects): decide whether independent root agents are needed
+- [Deploy to Vercel](../deployment/vercel): compose agents with peer services on Vercel

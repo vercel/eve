@@ -56,7 +56,7 @@ npm run dev
 
 This starts an interactive session where you can send messages to your agent.
 
-## Project layout
+## Agent directory layout
 
 eve builds an agent by walking the filesystem under `agent/`. Each directory is an authored slot, and the slot a file lands in determines how eve loads it.
 
@@ -73,9 +73,9 @@ eve derives names from file paths, so you do not configure them separately.
 
 The root agent uses its `package.json` `name`, or its app directory name if none is set. A subagent uses its directory name.
 
-### Recommended layout
+### Nested layout
 
-A minimal agent needs `instructions.md`; `agent.ts` is optional when the default config is sufficient. Framework defaults occupy ordinary agent slots, so authoring the same path replaces the default before eve compiles the agent. Add other slots as the agent needs them:
+For one standalone agent, use the nested layout below. A minimal agent needs `instructions.md`; `agent.ts` is optional when the default config is sufficient. Framework defaults occupy ordinary agent slots, so authoring the same path replaces the default before eve compiles the agent. Add other slots as the agent needs them:
 
 ```text
 my-agent/
@@ -162,6 +162,12 @@ Prefer the nested layout because it keeps application files separate from the au
 
 Run `eve info` when eve does not discover a file. It lists the discovered surface and diagnostics so you can check the authored slot and root-versus-subagent boundary. eve also writes inspectable artifacts under `.eve/`; see [Instrumentation](./observability/instrumentation) and the [CLI](./reference/cli) reference.
 
+## When to use multiple root agents
+
+Start with one root agent. Use a [declared subagent](./subagents) when one agent needs to delegate specialized work with a different prompt, tool surface, or sandbox.
+
+Use a multi-agent project only when agents need separate public endpoints, channels, schedules, deployments, or ownership boundaries. See [Multi-Agent Projects](./multi-agent-projects) to create a workspace or add another root agent.
+
 ## Install manually
 
 If you do not want to use the scaffold, install the runtime dependencies:
@@ -178,13 +184,13 @@ The [Tutorial](/docs/tutorial/first-agent) builds a data analytics agent step by
 
 After the tutorial, continue with the task you need:
 
-| Goal                                                               | Read                                                                                                          |
-| ------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------- |
-| Give the model some code it can run                                | [Tools](/docs/tools)                                                                                          |
-| Connect the agent to an external MCP or OpenAPI service            | [Connections](/docs/connections)                                                                              |
-| Communicate with users through Slack, Discord, or another platform | [Channels](/docs/channels/overview)                                                                           |
-| Build a browser interface                                          | [Frontend Frameworks](/docs/guides/frontend/overview)                                                         |
-| Test agent behavior                                                | [Evals](/docs/evals/overview)                                                                                 |
-| Secure and deploy the agent                                        | [Authentication](/docs/guides/auth-and-route-protection), then [Deployment](/docs/guides/deployment/overview) |
+| Goal                                                               | Read                                                                                                             |
+| ------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------- |
+| Give the model some code it can run                                | [Tools](/docs/tools)                                                                                             |
+| Connect the agent to an external MCP or OpenAPI service            | [Connections](/docs/connections)                                                                                 |
+| Communicate with users through Slack, Discord, or another platform | [Channels](/docs/channels/overview)                                                                              |
+| Build a browser interface                                          | [Add a Web App](/docs/guides/frontend/add-a-web-app), then [Frontend Frameworks](/docs/guides/frontend/overview) |
+| Test agent behavior                                                | [Evals](/docs/evals/overview)                                                                                    |
+| Secure and deploy the agent                                        | [Authentication](/docs/guides/auth-and-route-protection), then [Deployment](/docs/guides/deployment/overview)    |
 
 Read [Execution Model and Durability](/docs/concepts/execution-model-and-durability) for the mental model behind sessions, turns, durable steps, and parked work.

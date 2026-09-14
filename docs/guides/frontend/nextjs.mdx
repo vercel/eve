@@ -3,7 +3,9 @@ title: "Next.js"
 description: "Run an eve agent and a Next.js app as one project with withEve."
 ---
 
-`eve/next` ships a Next.js frontend and an eve agent as a single project. Wrap your config with `withEve()` to run both from one dev server and one Vercel deploy. [`useEveAgent`](./overview) finds the mounted routes on its own, so there's no CORS to configure and no URL env vars to keep in sync.
+`eve/next` lets a Next.js app own the public routes for one or more eve agents. Wrap your config with `withEve()` to run the app and agents from one development command and deploy them as one Vercel project. [`useEveAgent`](./overview) finds the mounted routes on its own, so there's no CORS to configure and no URL env vars to keep in sync.
+
+Use `withEve()` for a Next.js app that is the browser-facing routing layer. Use `withEve({ agents })` when that app routes to several named agents. See [Add a Web App](./add-a-web-app) to choose an application arrangement. When the app is one independently deployed service among agents, APIs, or workers, use a Vercel peer-service graph in [`vercel.ts`](../deployment/vercel#compose-agents-with-other-vercel-services) instead.
 
 ## Prerequisites
 
@@ -132,11 +134,13 @@ See [Resumable sessions](./overview#resumable-sessions) for persistence and repl
   EVE_NEXT_PRODUCTION_PORT=5000 npm run build && npm start
   ```
 
-- **Non-Vercel hosts.** When the eve service lives on a separate origin, tell Next.js where to find it with `EVE_NEXT_PRODUCTION_ORIGIN`:
+- **Non-Vercel hosts.** `withEve()` retains the Next.js rewrite interface, but it does not generate a host-neutral service graph. Run each built eve service yourself. When the service lives on a separate origin, tell Next.js where to find the service that serves its private route prefix with `EVE_NEXT_PRODUCTION_ORIGIN`:
 
   ```bash
   EVE_NEXT_PRODUCTION_ORIGIN=https://agent.example.com npm run build
   ```
+
+  For a self-hosted multi-agent application, configure the agent services and the production routing layer together. If the public routing layer mounts an agent below a path, set `EVE_PUBLIC_ROUTE_PREFIX` in that agent's build and runtime environments so callback URLs use the public path. See [Add a Web App](./add-a-web-app#use-another-framework).
 
 ## What to read next
 
