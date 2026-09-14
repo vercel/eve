@@ -665,6 +665,8 @@ export interface SlackChannelConfig {
   readonly eventSubscriptions?: readonly string[];
   /** Additional Slack bot OAuth scopes required by this channel. */
   readonly scopes?: readonly string[];
+  /** Slack bot OAuth scopes an installer may decline without blocking installation. */
+  readonly optionalScopes?: readonly string[];
   /** Public webhook URL written to the generated Slack app manifest. */
   readonly requestUrl?: string;
 
@@ -1079,6 +1081,7 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
       description: config.bot?.description,
       displayName: config.bot?.name,
       longDescription: config.bot?.longDescription,
+      optionalBotScopes: config.optionalScopes,
       requestUrl: config.requestUrl,
     }),
     vercelConnect: credentials?.vercelConnect,

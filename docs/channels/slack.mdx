@@ -52,10 +52,11 @@ export default slackChannel({
   },
   eventSubscriptions: ["message.channels", "message.groups"],
   scopes: ["channels:history", "groups:history"],
+  optionalScopes: ["reactions:write"],
 });
 ```
 
-`bot` configures Slack's app and bot presentation. `eventSubscriptions` adds Slack Events API bot events, and `scopes` adds bot OAuth scopes. eve does not infer requirements from an open-ended `onEvent` handler, so add every event the handler accepts and the corresponding Slack scope. Scope changes may require reinstalling the Slack app.
+`bot` configures Slack's app and bot presentation. `eventSubscriptions` adds Slack Events API bot events, `scopes` adds required bot OAuth scopes, and `optionalScopes` adds scopes that an installer may decline. A scope listed in both `scopes` and `optionalScopes` remains required. eve does not infer requirements from an open-ended `onEvent` handler, so add every event the handler accepts and the corresponding Slack scope. Scope changes may require reinstalling the Slack app.
 
 By default, the generated manifest omits request URLs. Set `requestUrl` when you want a self-managed manifest that you can apply to Slack without adding the Event Subscriptions and Interactivity request URLs manually. Vercel Connect replaces these fields with its managed trigger URL during installation, so you can omit `requestUrl` for Connect-backed channels.
 

@@ -754,6 +754,7 @@ describe("compileAgentManifest source graph", () => {
               name: "Support agent",
             },
             eventSubscriptions: ["message.channels"],
+            optionalScopes: ["reactions:write"],
             requestUrl: "https://agent.example.com/eve/v1/slack",
             scopes: ["channels:history"],
           }),
@@ -782,7 +783,10 @@ describe("compileAgentManifest source graph", () => {
         bot_user: { display_name: "Support agent", always_online: true },
       },
       oauth_config: {
-        scopes: { bot: ["app_mentions:read", "chat:write", "channels:history"] },
+        scopes: {
+          bot: ["app_mentions:read", "chat:write", "channels:history"],
+          bot_optional: ["reactions:write"],
+        },
       },
       settings: {
         event_subscriptions: {
