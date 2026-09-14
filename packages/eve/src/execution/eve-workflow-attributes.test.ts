@@ -95,6 +95,52 @@ describe("isWorkflowTraceContentVisible", () => {
     });
   });
 
+  it("uses the inherited decision for a verified local subagent", () => {
+    const serializedContext = {
+      [CHANNEL_CONTEXT_KEY_NAME]: { audience: "unknown", kind: "agent/local" },
+      [SessionTraceSeedKey.name]: {
+        decision: { action: "record", recordInputs: true, recordOutputs: true },
+        spanId: "1".repeat(16),
+        traceFlags: 1,
+        traceId: "2".repeat(32),
+      },
+      "eve.parentSession": {
+        callId: "call-1",
+        rootSessionId: "root-session",
+        sessionId: "parent-session",
+        turn: { id: "turn-1", sequence: 0 },
+      },
+    };
+
+    expect(isWorkflowTraceContentVisible(serializedContext)).toBe(true);
+    expect(
+      buildSubagentRootAttributes({
+        identity: { nodeId: "subagents/general" },
+        parentCallId: "call-1",
+        parentSessionId: "parent-session",
+        parentTurnId: "turn-1",
+        rootSessionId: "root-session",
+        serializedContext,
+      }),
+    ).toMatchObject({
+      "$eve.is_trace_content_visible": true,
+    });
+  });
+
+  it("does not trust an unbound serialized trace decision", () => {
+    expect(
+      isWorkflowTraceContentVisible({
+        [CHANNEL_CONTEXT_KEY_NAME]: { audience: "unknown", kind: "http" },
+        [SessionTraceSeedKey.name]: {
+          decision: { action: "record", recordInputs: true, recordOutputs: true },
+          spanId: "1".repeat(16),
+          traceFlags: 1,
+          traceId: "2".repeat(32),
+        },
+      }),
+    ).toBe(false);
+  });
+
   it("does not infer forwarded acceptance from projected metadata", () => {
     const serializedContext = {
       [CHANNEL_CONTEXT_KEY_NAME]: { audience: "unknown", kind: "http" },

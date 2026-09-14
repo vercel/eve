@@ -103,7 +103,10 @@ export function isWorkflowTraceContentVisible(serializedContext: Record<string, 
   const seed = serializedContext[SessionTraceSeedKey.name] as SessionTraceSeed | undefined;
   if (seed !== undefined) {
     const traceState = resolveForwardedTraceSeed(seed)!;
-    if (traceState.forwardedTracePolicy !== undefined) {
+    if (
+      traceState.forwardedTracePolicy !== undefined ||
+      readParentSessionId(serializedContext) !== undefined
+    ) {
       const decision = traceState.decision;
       return decision?.action === "record" && decision.recordInputs && decision.recordOutputs;
     }
