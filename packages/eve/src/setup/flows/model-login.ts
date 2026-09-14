@@ -37,11 +37,11 @@ import { loginVercelModel } from "./vercel-model-login.js";
 import { changeAgentModel } from "./model-source-change.js";
 
 const CONNECTION_OPTIONS = [
-  { value: "chatgpt", label: "ChatGPT subscription" },
-  { value: "vercel", label: "Vercel account" },
-  { value: "ai-gateway-key", label: "AI Gateway API key" },
-  { value: "openai", label: "OpenAI API key" },
-  { value: "anthropic", label: "Anthropic API key" },
+  { value: "vercel", label: "Vercel Account" },
+  { value: "ai-gateway-key", label: "Vercel AI Gateway API Key" },
+  { value: "chatgpt", label: "ChatGPT Subscription" },
+  { value: "openai", label: "OpenAI API Key" },
+  { value: "anthropic", label: "Anthropic API Key" },
 ] as const;
 
 export function environmentConnection(

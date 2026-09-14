@@ -39,11 +39,11 @@ After interactive `eve init`, the TUI opens directly. eve keeps the project's se
 
 If no connection is ready, `/login` offers:
 
-1. ChatGPT subscription
-2. Vercel account
-3. AI Gateway API key
-4. OpenAI API key
-5. Anthropic API key
+1. Vercel Account
+2. Vercel AI Gateway API Key
+3. ChatGPT Subscription
+4. OpenAI API Key
+5. Anthropic API Key
 
 Vercel account login opens a browser. eve reuses the current CLI team when valid, selects a sole available team automatically, or shows a searchable team picker. Account-token access to Gateway depends on availability for your account and team; if it is unavailable, choose an API key or another connection.
 

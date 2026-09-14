@@ -90,7 +90,7 @@ beforeEach(() => {
 });
 
 describe("model login", () => {
-  it.each(["chatgpt", "vercel", "ai-gateway-key", "openai", "anthropic"])(
+  it.each(["vercel", "ai-gateway-key", "chatgpt", "openai", "anthropic"])(
     "connects %s and returns directly to chat",
     async (selected) => {
       const fake = createFakePrompter({ single: () => selected, password: () => "new-key" });
