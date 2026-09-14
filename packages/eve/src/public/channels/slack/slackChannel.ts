@@ -645,7 +645,7 @@ export type SlackApprovalChannelResolver = (
 ) => SlackApprovalChannel | Promise<SlackApprovalChannel>;
 
 export interface SlackBotConfig {
-  /** Whether the Slack bot always appears online. Defaults to `false`. */
+  /** Whether the Slack bot always appears online. Omitted from the manifest by default. */
   readonly alwaysOnline?: boolean;
   /** Hex color used behind the Slack app's information hovercard. */
   readonly backgroundColor?: string;

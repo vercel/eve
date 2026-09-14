@@ -52,6 +52,10 @@ export function defineSlackAppManifest(
         eventSubscriptions.request_url = input.requestUrl;
         interactivity.request_url = input.requestUrl;
       }
+      const botUser: { always_online?: boolean; display_name: string } = {
+        display_name: name,
+      };
+      if (input.alwaysOnline !== undefined) botUser.always_online = input.alwaysOnline;
       const displayInformation: {
         background_color?: string;
         description?: string;
@@ -73,7 +77,7 @@ export function defineSlackAppManifest(
             messages_tab_enabled: true,
             messages_tab_read_only_enabled: false,
           },
-          bot_user: { display_name: name, always_online: input.alwaysOnline ?? false },
+          bot_user: botUser,
         },
         oauth_config: { scopes: oauthScopes },
         settings: {
