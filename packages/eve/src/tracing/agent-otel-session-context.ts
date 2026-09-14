@@ -67,8 +67,10 @@ export function createAgentOtelSessionContext(
         channelKind: event.channelKind,
         decision,
         context: initialSessionContext(input, event, decision),
-        rootSessionId: event.rootSessionId,
         parentLineage: event.parentLineage,
+        rootSessionId: event.rootSessionId,
+        scheduleId: event.scheduleId,
+        title: event.title,
       };
       await input.stateStore.setSession(event.sessionId, state);
     }
@@ -116,6 +118,7 @@ export function createAgentOtelSessionContext(
           attributes: agentActivationAttributes({
             agentName,
             frameworkVersion: input.frameworkVersion,
+            session,
             sessionId: event.sessionId,
             turnId: event.turnId,
             turn,

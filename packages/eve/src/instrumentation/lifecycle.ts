@@ -283,7 +283,9 @@ export interface InstrumentationSessionStartedEvent {
   readonly parentLineage?: InstrumentationParentLineage;
   readonly parentTraceContext?: InstrumentationTraceContext;
   readonly rootSessionId: string;
+  readonly scheduleId?: string;
   readonly sessionId: string;
+  readonly title?: string;
   readonly traceSeed?: InstrumentationTraceSeed;
 }
 

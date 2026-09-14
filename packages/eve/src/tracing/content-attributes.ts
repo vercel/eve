@@ -16,6 +16,7 @@
 /** Prompts, instructions, tool arguments — what went in. */
 const INPUT_CONTENT_ATTRIBUTES: ReadonlySet<string> = new Set([
   "agent.channel.delivery.input",
+  "agent.session.title",
   "agent.approval.request",
   "ai.documents",
   "ai.prompt",

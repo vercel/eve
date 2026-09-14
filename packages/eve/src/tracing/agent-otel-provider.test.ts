@@ -341,7 +341,9 @@ async function publishTurnStarted(input: {
   readonly parentLineage?: InstrumentationParentLineage;
   readonly parentTraceContext?: InstrumentationTraceContext;
   readonly rootSessionId?: string;
+  readonly scheduleId?: string;
   readonly sessionId: string;
+  readonly title?: string;
   readonly traceSeed?: InstrumentationTraceContext;
   readonly turnId: string;
   readonly turnSequence: number;
@@ -355,7 +357,9 @@ async function publishTurnStarted(input: {
     parentLineage: input.parentLineage,
     parentTraceContext: input.parentTraceContext,
     rootSessionId,
+    scheduleId: input.scheduleId,
     sessionId: input.sessionId,
+    title: input.title,
     traceSeed: input.traceSeed,
     type: "session.started",
   });
@@ -735,7 +739,9 @@ describe("createAgentOtelInstrumentation", () => {
       parentLineage,
       parentTraceContext: parent,
       rootSessionId: "root-session",
+      scheduleId: "daily-report",
       sessionId: "child-session",
+      title: "Research the incident",
       traceSeed: seed,
       turnId: "child-turn",
       turnSequence: 0,
@@ -761,6 +767,12 @@ describe("createAgentOtelInstrumentation", () => {
       "agent.principal.current.type": "user",
       "agent.principal.initiator.type": "none",
       "agent.run.id": "child-session",
+      "agent.run.type": "subagent",
+      "agent.schedule.id": "daily-report",
+      "agent.session.origin": "schedule",
+      "agent.session.title": "Research the incident",
+      "agent.trace.content.input": true,
+      "agent.trace.content.output": true,
       "gen_ai.conversation.id": "root-session",
       "gen_ai.operation.name": "invoke_agent",
     });
@@ -1192,8 +1204,11 @@ describe("createAgentOtelInstrumentation", () => {
     ).toBe(true);
     expect(action.parentSpanContext?.spanId).toBe(step.spanContext().spanId);
     expect(tool.parentSpanContext?.spanId).toBe(action.spanContext().spanId);
-    for (const span of [turn, step, model, action, tool]) {
+    expect(turn.attributes["agent.channel.audience"]).toBe("public");
+    for (const span of [step, model, action, tool]) {
       expect(span.attributes).not.toHaveProperty("agent.channel.audience");
+    }
+    for (const span of [turn, step, model, action, tool]) {
       expect(span.attributes).toMatchObject({
         "gen_ai.conversation.id": "session-1",
       });

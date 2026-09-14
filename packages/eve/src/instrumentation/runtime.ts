@@ -400,7 +400,9 @@ export function bindInstrumentationRuntime(
                 parentLineage: sessionContext.parentLineage,
                 parentTraceContext: sessionContext.parentTraceContext,
                 rootSessionId: sessionContext.parent?.rootSessionId,
+                scheduleId: sessionContext.scheduleId,
                 sessionId: boundSession.sessionId,
+                title: sessionContext.title,
               }),
             prepareAttempt: (attemptInput) => {
               const scope: InstrumentationAttemptScope = {
@@ -492,7 +494,9 @@ export function bindInstrumentationRuntime(
         channelKind: sessionContext.instrumentation?.kind,
         handleEvent: input.handleEvent,
         hooks: bindHooks(sessionContext),
+        scheduleId: sessionContext.scheduleId,
         sessionId: boundSession.sessionId,
+        title: sessionContext.title,
         turnId: input.turnId,
       });
     },

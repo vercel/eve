@@ -26,6 +26,7 @@ import { serializeContext } from "#context/serialize.js";
 import {
   buildSessionAttributes,
   buildSubagentRootAttributes,
+  deriveSessionTitle,
   readParentLineage,
 } from "#execution/eve-workflow-attributes.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
@@ -152,6 +153,7 @@ export function createWorkflowRuntime(config: {
       initializeSessionInstrumentation({
         agentName: effectiveAgent.turnAgent.id,
         ctx,
+        title: deriveSessionTitle(input.title ?? input.input.message),
       });
       const sessionTimeoutMs = effectiveAgent.limits?.sessionTimeoutMs;
       // Retention is always the authored value: `experimental` cannot be

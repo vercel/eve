@@ -201,6 +201,11 @@ exception. Vercel deployments additionally carry
 trusted remote subagents. Remote lineage is accepted only when the receiver's
 `trustedForwarders` predicate approves the authenticated caller. Child
 activation roots carry `agent.parent_run.id` and `agent.parent_call.id`.
+Activation roots also carry `agent.run.type`, `agent.session.origin`,
+`agent.channel.audience`, directional `agent.trace.content.input` and
+`agent.trace.content.output` policy results, and `agent.schedule.id` when a
+schedule started the session. `agent.session.title` is present only when input
+content is allowed and is removed by destination input-redaction policies.
 Only activations use the `invoke_agent` operation. A workflow tool invocation
 that coordinates at least one nested agent uses `invoke_workflow`, with its
 path-derived tool name in `gen_ai.workflow.name`. Durable workflow tools without

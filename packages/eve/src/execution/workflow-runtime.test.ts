@@ -9,7 +9,7 @@ import {
 } from "#compiled/@opentelemetry/api/index.js";
 import type { ChannelAdapter } from "#channel/adapter.js";
 import { attachChannelActivityPresentation } from "#channel/activity-renderer.js";
-import { ChannelRequestIdKey, ActivityObserverKey } from "#context/keys.js";
+import { ActivityObserverKey, ChannelRequestIdKey, SessionTitleKey } from "#context/keys.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import {
   createWorkflowRuntime,
@@ -566,6 +566,7 @@ describe("createWorkflowRuntime#createSession", () => {
     expect(startOptions.attributes["$eve.is_trace_content_visible"]).toBe("false");
     expect(startOptions.attributes["$eve.is_otel_trace_enabled"]).toBe("false");
     expect(startOptions.attributes["$eve.title"]).toBe("ship it");
+    expect(workflowInput[0].serializedContext[SessionTitleKey.name]).toBe("ship it");
   });
 
   it("passes the configured session timeout to the durable workflow", async () => {

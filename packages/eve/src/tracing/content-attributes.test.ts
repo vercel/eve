@@ -4,6 +4,7 @@ import { withoutDeclinedContent } from "#tracing/content-attributes.js";
 
 const ATTRIBUTES = {
   "agent.channel.delivery.input": '{"message":"private"}',
+  "agent.session.title": "Private title",
   "gen_ai.input.messages": "what the user said",
   "ai.response.finish_reason": "stop",
   "ai.response.text": "what the model said",
@@ -46,6 +47,7 @@ describe("withoutDeclinedContent", () => {
       withoutDeclinedContent(ATTRIBUTES, { recordInputs: true, recordOutputs: false }),
     ).toEqual({
       "agent.channel.delivery.input": '{"message":"private"}',
+      "agent.session.title": "Private title",
       "gen_ai.input.messages": "what the user said",
       "ai.response.finish_reason": "stop",
       "gen_ai.request.model": "test-model",
