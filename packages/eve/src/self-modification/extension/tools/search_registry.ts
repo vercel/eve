@@ -134,7 +134,7 @@ function isCategory(value: string): value is Category {
  * Derives the category from the item address.
  *
  * eve registry addresses carry their category as the leading path segment.
- * Bundles (`linear`) and package-scoped items (`experimental/self-modification`)
+ * Bundles (`linear`) and package-scoped items (`eve/self-modification`)
  * have none, so the field stays absent rather than being guessed.
  */
 function categoryOf(address: string): Category | undefined {
@@ -227,7 +227,6 @@ export function parseRegistryIndex(value: unknown): readonly CatalogEntry[] {
     const address = optionalString(item.name);
     if (address === undefined) continue;
     const eve = eveMetadata(item);
-    if (eve.hidden === true) continue;
 
     const entry: {
       address: string;
