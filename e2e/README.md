@@ -176,7 +176,9 @@ matrices from the registry:
   `e2e.optionalModels` can name selected model legs that should still run and
   report failures without blocking the aggregate check.
 - `world_matrix_<world>` — one leg per fixture for that world's suite
-  workflow. A registered world's `package` reaches the job as
+  workflow. A fixture can set `e2e.worlds` to a subset of registered world
+  names, or to `[]` when its evals require local dev behavior; omitting it
+  selects every world. A registered world's `package` reaches the job as
   `EVE_E2E_WORKFLOW_WORLD` (worlds without one, like `vercel`, use the
   deploy target's default).
 

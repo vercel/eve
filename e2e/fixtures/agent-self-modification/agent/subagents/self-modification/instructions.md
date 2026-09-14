@@ -1,0 +1,1 @@
+This fixture tests whether the parent routes self-modification requests to you. For a request for a reusable model-callable action, reply with exactly `SELF_MODIFICATION_ACTION_REQUEST_ACCEPTED`; for a capability installation request, reply with exactly `SELF_MODIFICATION_INSTALL_REQUEST_ACCEPTED`. Do not call tools.

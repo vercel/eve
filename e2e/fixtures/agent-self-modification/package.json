@@ -1,0 +1,68 @@
+{
+  "name": "agent-self-modification",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "eve build",
+    "dev": "eve dev",
+    "start": "eve start",
+    "typecheck": "eve build && tsc",
+    "test:e2e": "eve eval --strict"
+  },
+  "dependencies": {
+    "@eve-e2e/config": "workspace:*",
+    "@vercel/connect": "catalog:",
+    "@workflow/world-postgres": "catalog:",
+    "eve": "workspace:*",
+    "just-bash": "3.1.0",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "typescript": "catalog:"
+  },
+  "e2e": {
+    "modelMatrix": "full",
+    "worlds": [],
+    "additionalModels": [
+      {
+        "name": "anthropic-fable",
+        "id": "anthropic/claude-fable-5.1"
+      },
+      {
+        "name": "anthropic-sonnet",
+        "id": "anthropic/claude-sonnet-5"
+      },
+      {
+        "name": "google-gemini",
+        "id": "google/gemini-3.1-pro-preview"
+      },
+      {
+        "name": "moonshot-kimi",
+        "id": "moonshotai/kimi-k3"
+      },
+      {
+        "name": "openai-terra",
+        "id": "openai/gpt-5.6-terra"
+      },
+      {
+        "name": "xai-grok",
+        "id": "xai/grok-4.6"
+      },
+      {
+        "name": "zai-glm",
+        "id": "zai/glm-5.3"
+      }
+    ],
+    "optionalModels": [
+      "anthropic-fable",
+      "anthropic-sonnet",
+      "google-gemini",
+      "moonshot-kimi",
+      "openai-terra",
+      "xai-grok",
+      "zai-glm"
+    ]
+  }
+}
