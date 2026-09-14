@@ -1,6 +1,7 @@
 import type { ModelMessage } from "ai";
 
 import { ALLOWED_DYNAMIC_SKILL_EVENTS } from "#dynamic/definition.js";
+import { BoundaryHookError } from "#shared/boundary-hook-error.js";
 import { isBrandedSkillEntry, type SkillPackageDefinition } from "#shared/skill-definition.js";
 import {
   type MaterializableSkillPackage,
@@ -11,8 +12,6 @@ import {
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import type { ResolvedDynamicSkillResolver } from "#runtime/types.js";
 import { formatAvailableSkillsSection } from "#execution/skills/instructions.js";
-import { createLogger } from "#internal/logging.js";
-import { toErrorMessage } from "#shared/errors.js";
 import type { ContextContainer } from "#context/container.js";
 import {
   type DurableDynamicSkillMetadata,
@@ -21,8 +20,6 @@ import {
 } from "#context/keys.js";
 import { buildResolveContext } from "#context/dynamic-resolve-context.js";
 import { resolveSandboxSkillRoot } from "#shared/skill-paths.js";
-
-const log = createLogger("dynamic-skills");
 
 // ---------------------------------------------------------------------------
 // Name qualification
@@ -158,10 +155,10 @@ export async function dispatchDynamicSkillEvent(input: {
 
   for (const outcome of outcomes) {
     if (outcome.status === "rejected") {
-      log.error(`Dynamic skill resolver (${event.type}) threw — skipping.`, {
-        error: toErrorMessage(outcome.reason),
-      });
-      continue;
+      if (event.type === "turn.started") {
+        throw new BoundaryHookError(outcome.reason);
+      }
+      throw outcome.reason;
     }
     if (outcome.value === null) continue;
     updates.push({
