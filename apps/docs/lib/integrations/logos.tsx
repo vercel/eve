@@ -77,6 +77,19 @@ export const BuzzLogo = (props: LogoProps) => (
   </svg>
 );
 
+export const stacktreeLogo = (props: LogoProps) => (
+  <svg fill="none" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg" {...props}>
+    <defs>
+      <linearGradient id="stacktree-logo-g" x1="0" y1="0" x2="0" y2="64" gradientUnits="userSpaceOnUse">
+        <stop offset="0" stopColor="#bd9af4" />
+        <stop offset="1" stopColor="#4a32f9" />
+      </linearGradient>
+    </defs>
+    <path d="M32 26 L54 42 L32 58 L10 42 Z" fill="url(#stacktree-logo-g)" opacity="0.55" />
+    <path d="M32 6 L54 22 L32 38 L10 22 Z" fill="url(#stacktree-logo-g)" opacity="0.95" />
+  </svg>
+);
+
 export const browserUseLogo = (props: LogoProps) => (
   <svg fill="none" viewBox="0 0 1000 1000" xmlns="http://www.w3.org/2000/svg" {...props}>
     <path
@@ -756,6 +769,7 @@ export const logos = {
   web: webLogo,
   buzz: BuzzLogo,
   "browser-use": browserUseLogo,
+  stacktree: stacktreeLogo,
   github: githubLogo,
   slack: slackLogo,
   discord: discordLogo,
