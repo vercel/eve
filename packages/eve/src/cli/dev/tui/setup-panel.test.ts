@@ -26,6 +26,21 @@ const PLANNER_NAVIGATION = {
 };
 
 describe("renderFlowPanel", () => {
+  it.each(["Add to your agent", "Connect a model"])("renders %s only once", (title) => {
+    const rows = renderFlowPanel(
+      {
+        title,
+        lines: [],
+        content: {
+          kind: "question",
+          rows: [`  ${colorTheme.colors.bold(title)}`, "  type to filter"],
+        },
+      },
+      colorTheme,
+      80,
+    );
+    expect(stripAnsi(rows.join("\n")).split(title)).toHaveLength(2);
+  });
   it("aligns the base-foreground title, progress, and question content", () => {
     const rows = renderFlowPanel(
       {

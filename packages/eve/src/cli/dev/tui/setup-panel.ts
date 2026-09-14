@@ -22,6 +22,7 @@ import { maskLine, visibleLine, type LineState } from "./line-editor.js";
 import type { Theme } from "./theme.js";
 import {
   clipVisible,
+  stripAnsi,
   renderInputText,
   renderInputWithBlockCursor,
   visibleLength,
@@ -259,7 +260,10 @@ export function renderFlowPanel(state: FlowPanelState, theme: Theme, width: numb
   // Avoid the terminal's final column: writing into it can trigger an implicit
   // wrap that the live-region row counter cannot observe, leaking old frames.
   const rows: string[] = [];
-  if (state.title.length > 0) {
+  const questionOwnsTitle =
+    state.content.kind === "question" &&
+    stripAnsi(state.content.rows[0] ?? "").trim() === state.title.trim();
+  if (state.title.length > 0 && !questionOwnsTitle) {
     rows.push(`  ${c.bold(state.title)}`);
   }
   rows.push("");
