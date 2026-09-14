@@ -2256,6 +2256,7 @@ async function* eveEventsToTUIStream(
         // Recorded so key-driven cancellation can scope its request to the
         // turn the user is watching; a cancel that arrives after the
         // boundary then no-ops instead of hitting the next turn.
+        if (event.data.turnId !== turnState.turnId) visibleTurnCompleted = false;
         turnState.turnId = event.data.turnId;
         break;
 

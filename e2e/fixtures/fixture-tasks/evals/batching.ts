@@ -29,7 +29,7 @@ export async function startBlockedFanout(t: EveEvalContext, count: number) {
   const setupEvents: EveEvalTurn["events"][number][] = [];
   const requests = new Map<string, InputRequest>();
   collectRequests(started);
-  for (let attempt = 0; requests.size < count && attempt < count; attempt += 1) {
+  while (requests.size < count) {
     collectRequests(await nextTurn());
   }
 
