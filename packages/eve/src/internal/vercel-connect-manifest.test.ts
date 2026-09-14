@@ -70,7 +70,7 @@ describe("buildVercelConnectRequirements", () => {
           protocol: "mcp",
           url: "https://mcp.linear.app/mcp",
           vercelConnect: {
-            connector: "oauth/linear",
+            connector: "connector:oauth/linear",
             connectorType: "oauth",
             principalTypes: [principalType],
           },
@@ -81,7 +81,7 @@ describe("buildVercelConnectRequirements", () => {
 
     expect(buildVercelConnectRequirements(manifest)).toEqual([
       {
-        target: { mode: "direct", locator: "oauth/linear" },
+        target: "connector:oauth/linear",
         connector: { type: "oauth" },
         interface: { protocol: "mcp", url: "https://mcp.linear.app/mcp" },
         access: { principalTypes: [principalType] },
@@ -103,7 +103,7 @@ describe("buildVercelConnectRequirements", () => {
             slackAppManifest: { display_information: { name: "slack" } },
             urlPath: "/eve/v1/slack",
             vercelConnect: {
-              connector: "slack/my-agent",
+              connector: "connector:slack/my-agent",
               connectorType: "slack",
               principalTypes: ["app"],
             },
@@ -114,7 +114,7 @@ describe("buildVercelConnectRequirements", () => {
 
     expect(buildVercelConnectRequirements(manifest)).toEqual([
       {
-        target: { mode: "direct", locator: "slack/my-agent" },
+        target: "connector:slack/my-agent",
         connector: { type: "slack" },
         access: { principalTypes: ["app"] },
         providerConfiguration: {
@@ -143,7 +143,7 @@ describe("buildVercelConnectRequirements", () => {
             slackAppManifest,
             urlPath: "/custom",
             vercelConnect: {
-              connector: "slack/custom",
+              connector: "connector:slack/custom",
               connectorType: "slack",
               principalTypes: ["app"],
             },
@@ -154,7 +154,7 @@ describe("buildVercelConnectRequirements", () => {
 
     expect(buildVercelConnectRequirements(manifest)).toEqual([
       {
-        target: { mode: "direct", locator: "slack/custom" },
+        target: "connector:slack/custom",
         connector: { type: "slack" },
         access: { principalTypes: ["app"] },
         trigger: { method: "POST", path: "/custom" },

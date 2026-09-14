@@ -62,7 +62,7 @@ export function buildVercelConnectRequirements(manifest: {
       }
       return [
         {
-          target: { mode: "direct" as const, locator: vercelConnect.connector },
+          target: vercelConnect.connector,
           connector: { type: vercelConnect.connectorType },
           access: { principalTypes: vercelConnect.principalTypes },
           interface: { protocol: connection.protocol, url: connection.url },
@@ -94,7 +94,7 @@ export function buildVercelConnectRequirements(manifest: {
             }
           : undefined;
       const requirement = {
-        target: { mode: "direct" as const, locator: vercelConnect.connector },
+        target: vercelConnect.connector,
         connector: { type: vercelConnect.connectorType },
         access: { principalTypes: vercelConnect.principalTypes },
         trigger: { method: channel.method, path: channel.urlPath },
