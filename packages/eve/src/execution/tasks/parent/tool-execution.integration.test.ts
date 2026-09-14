@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import type { ActivityObserverConfig } from "#channel/types.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
-import { SessionKey } from "#context/keys.js";
+import { ActivityObserverKey, SessionKey } from "#context/keys.js";
 import { cancelOwnedTask } from "#execution/tasks/parent/dispatch.js";
 import { startTaskRun, waitForTaskCommandOwner } from "#execution/tasks/parent/run-parent.js";
 import {
@@ -76,13 +77,16 @@ function createSession(owned = true): HarnessSession {
   return owned ? recordSessionTask(session, entry) : session;
 }
 
-async function createScope(session = createSession()) {
+async function createScope(session = createSession(), activityObserver?: ActivityObserverConfig) {
   const ctx = new ContextContainer();
   ctx.setVirtualContext(SessionKey, {
     auth: { current: null, initiator: null },
     sessionId: session.sessionId,
     turn: { id: "turn-2", sequence: 2 },
   });
+  if (activityObserver !== undefined) {
+    ctx.setVirtualContext(ActivityObserverKey, activityObserver);
+  }
   const created = await backgroundToolExecutionProvider.create(ctx, session);
   if (created === undefined) throw new Error("Expected background executor");
   const executor = created.value;
@@ -93,12 +97,15 @@ async function createScope(session = createSession()) {
       callId = "steering-call",
       agentId: string | undefined = identity.id,
       name = identity.name,
+      resultKind: "subagent" | "tool" = "subagent",
+      label?: (input: unknown) => string,
     ) {
       const definition = {
         execute: vi.fn(),
+        label: label === undefined ? undefined : { start: label },
         name,
         nodeId: identity.nodeId,
-        resultKind: "subagent" as const,
+        resultKind,
         workflowId: "research-workflow",
       };
       const toolInput = { agentId, message: "Use the updated instruction" };
@@ -149,6 +156,76 @@ describe("background subagent steering", () => {
       );
     },
   );
+
+  it.each(["subagent", "tool"] as const)(
+    "persists agent-backed activity identity only (%s)",
+    async (resultKind) => {
+      const activityObserver = {
+        sink: { url: "https://parent.example/activity", version: 1 as const },
+        workIdentity: {
+          id: "work:root",
+          kind: "root-turn" as const,
+          rootSessionId: "parent",
+          rootTurnId: "turn-2",
+        },
+      };
+      const scope = await createScope(createSession(), activityObserver);
+
+      await scope.execute("steering-call", identity.id, identity.name, resultKind);
+      const committed = await scope.commit();
+      const task = getSessionTaskIndex(committed.state).find(
+        (candidate) => candidate.taskId !== entry.taskId,
+      );
+
+      expect(task).toBeDefined();
+      if (resultKind === "tool") {
+        expect(task?.activityWorkIdentity).toBeUndefined();
+        return;
+      }
+      expect(task?.activityWorkIdentity).toMatchObject({
+        callId: "steering-call",
+        kind: "task",
+        name: "research",
+        parentId: "work:root",
+        rootSessionId: "parent",
+        rootTurnId: "turn-2",
+      });
+    },
+  );
+
+  it("persists a tool-derived task label without changing its subagent identity", async () => {
+    const activityObserver = {
+      sink: { url: "https://parent.example/activity", version: 1 as const },
+      workIdentity: {
+        id: "work:root",
+        kind: "root-turn" as const,
+        rootSessionId: "parent",
+        rootTurnId: "turn-2",
+      },
+    };
+    const scope = await createScope(createSession(), activityObserver);
+
+    await scope.execute("steering-call", identity.id, identity.name, "subagent", (input) => {
+      (input as { message: string }).message = "Mutated";
+      return "Investigator";
+    });
+    expect(startTaskRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        workflow: expect.objectContaining({
+          input: { agentId: identity.id, message: "Use the updated instruction" },
+        }),
+      }),
+    );
+    const committed = await scope.commit();
+    const task = getSessionTaskIndex(committed.state).find(
+      (candidate) => candidate.taskId !== entry.taskId,
+    );
+
+    expect(task).toMatchObject({
+      activityWorkIdentity: { label: "Investigator", name: "research" },
+      metadata: { name: "research" },
+    });
+  });
 
   it("cancels the old task before starting a new task in the same child", async () => {
     const scope = await createScope();

@@ -92,6 +92,7 @@ function startWork(
       : "running");
   const work: ActivityWorkStateV1 = {
     ...event.work,
+    label: event.work.label === undefined ? undefined : normalizePresentationText(event.work.label),
     name: event.work.name === undefined ? undefined : normalizePresentationText(event.work.name),
     phase: phase as ActivityWorkPhase,
     settledAt: pending?.settledAt ?? (phase === "cancelled" ? parent?.settledAt : undefined),

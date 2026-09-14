@@ -5,6 +5,7 @@
  */
 import type { ActivityObserverConfig } from "#channel/types.js";
 import type { HarnessSession } from "#harness/types.js";
+import type { ActivityWorkIdentityV1 } from "#protocol/activity.js";
 import {
   readLatestTaskView,
   sendTaskCommand,
@@ -20,6 +21,7 @@ import { isTerminalTaskStatus, type TaskMetadata } from "#tasks/types.js";
 
 /** A prepared background task: identity plus its started durable run. */
 export interface BackgroundTask {
+  readonly activityWorkIdentity?: ActivityWorkIdentityV1;
   readonly taskInboxToken: string;
   readonly createdByStepIndex?: number;
   readonly createdByTurnId: string;
