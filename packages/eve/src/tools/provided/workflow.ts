@@ -25,11 +25,14 @@ export interface WorkflowToolInput {
 
 export type WorkflowTool = BlockingWorkflowToolDefinition<WorkflowToolInput, JsonValue>;
 
+const workflowProgramAgentContract =
+  "Call ctx.agent(name, { message: string, agentId?: string, outputSchema?: object }). It resolves directly to the child's JSON-serializable output; when outputSchema is provided, the output matches that schema. It does not return an agent metadata wrapper. Use an agentId from the conversation's <agents> block to continue that child.";
+
 const workflowInputSchema = z.strictObject({
   js: z
     .string()
     .describe(
-      "Async JavaScript function body. Use ctx.agent(name, input) and return one JSON-serializable value.",
+      `Async JavaScript function body. ${workflowProgramAgentContract} Return one JSON-serializable value.`,
     ),
 });
 
@@ -41,7 +44,8 @@ export function workflow(options: WorkflowToolOptions): WorkflowTool {
     maxSubagents: candidate?.maxSubagents ?? DEFAULT_WORKFLOW_PROGRAM_MAX_SUBAGENTS,
   });
   const description = [
-    "Run an async JavaScript function body that coordinates allowlisted agents through ctx.agent(name, input) and returns one JSON-serializable value.",
+    "Run an async JavaScript function body that coordinates allowlisted agents and returns one JSON-serializable value.",
+    workflowProgramAgentContract,
     `Available agents: ${normalized.agents.join(", ")}.`,
     `The program may invoke at most ${String(normalized.maxSubagents)} agents.`,
   ].join(" ");

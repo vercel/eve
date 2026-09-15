@@ -20,14 +20,38 @@ describe("workflow", () => {
     const definition = workflow({ agents: ["researcher", "reviewer"], maxSubagents: 7 });
 
     expect(isWorkflowToolDefinition(definition)).toBe(true);
+    expect(definition.description).toContain(
+      "ctx.agent(name, { message: string, agentId?: string, outputSchema?: object })",
+    );
+    expect(definition.description).toContain(
+      "resolves directly to the child's JSON-serializable output",
+    );
+    expect(definition.description).toContain("does not return an agent metadata wrapper");
     expect(definition.description).toContain("Available agents: researcher, reviewer.");
     expect(definition.description).toContain("at most 7 agents");
     expect(definition.execute).toBe(executeWorkflowProgram);
-    expect(serializeInputSchema(definition.inputSchema)).toMatchObject({
+    const inputSchema = serializeInputSchema(definition.inputSchema);
+    expect(inputSchema).toMatchObject({
       additionalProperties: false,
-      properties: { js: { type: "string" } },
+      properties: {
+        js: {
+          description: expect.stringContaining(
+            "ctx.agent(name, { message: string, agentId?: string, outputSchema?: object })",
+          ),
+          type: "string",
+        },
+      },
       required: ["js"],
       type: "object",
+    });
+    expect(inputSchema).toMatchObject({
+      properties: {
+        js: {
+          description: expect.stringContaining(
+            "resolves directly to the child's JSON-serializable output",
+          ),
+        },
+      },
     });
     expect(readWorkflowProgramOptions(definition)).toEqual({
       agents: ["researcher", "reviewer"],

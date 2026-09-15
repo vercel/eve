@@ -34,7 +34,7 @@ export default defineEval({
 
     t.succeeded();
     t.calledTool("workflow", { count: 2 });
-    t.calledSubagent("echo-marker", { count: 4 });
+    t.calledSubagent("echo-marker", { count: 4, status: "pending" });
     t.eventsSatisfy("all workflow-program calls continue one child session", (events) => {
       const childSessionIds = events.flatMap((event) =>
         event.type === "subagent.called" && event.data.name === "echo-marker"
@@ -42,7 +42,7 @@ export default defineEval({
           : [],
       );
       return (
-        childSessionIds.length === 3 &&
+        childSessionIds.length === 4 &&
         childSessionIds[0] !== undefined &&
         childSessionIds.every((sessionId) => sessionId === childSessionIds[0])
       );
