@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { getWorld, resumeHook, start } from "#internal/workflow/runtime.js";
-import { hydrateWorkflowArguments } from "@workflow/core/serialization";
+import { hydrateWorkflowArguments, hydrateStepReturnValue } from "@workflow/core/serialization";
 
 import { createChannelAddress } from "#channel/channel-address.js";
 import { captureTurnEvents, filterEventsByType } from "#internal/testing/events.js";
@@ -1290,6 +1290,111 @@ describe("workflowEntry integration", () => {
       });
     });
 
+    it("retains a message accepted just before durable hook disposal", async () => {
+      const runtime = await createTestRuntime({ agent: { name: "workflow-entry-handoff" } });
+
+      await runtime.run(async () => {
+        const anchor = await start(workflowEntry, [
+          {
+            kind: "initial",
+            ownerDeploymentId: "dpl_a",
+            input: { message: "hello from a" },
+            serializedContext: buildSerializedContext({
+              acceptedDeploymentId: "dpl_a",
+              channelKind: "http",
+              mode: "conversation",
+            }),
+          },
+        ]);
+        const stream = captureTurnEvents(anchor);
+        const world = await getWorld();
+        const workflowRuntime = createWorkflowRuntime({
+          compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
+        });
+        let injected = false;
+        const createEvent = world.events.create.bind(world.events);
+        const spy = vi.spyOn(world.events, "create").mockImplementation(async (...args) => {
+          const [runId, event] = args;
+          if (
+            !injected &&
+            runId === anchor.runId &&
+            event.eventType === "hook_disposed" &&
+            event.eventData?.token === sessionCommandHookToken(anchor.runId)
+          ) {
+            injected = true;
+            for (let index = 0; index < 3; index++) {
+              await resumeHook(sessionCommandHookToken(anchor.runId), {
+                kind: "send",
+                payload: { message: `Alice sends input ${index} during release.` },
+              });
+            }
+          }
+          return await createEvent(...args);
+        });
+        try {
+          expect((await stream.nextTurn()).at(-1)?.type).toBe("session.waiting");
+
+          await expect(
+            workflowRuntime.dispatchSession({
+              command: followUp("dpl_b", "hello from b", "delivery-b"),
+              sessionId: anchor.runId,
+            }),
+          ).resolves.toMatchObject({ sessionId: anchor.runId, status: "accepted" });
+
+          const secondTurn = await stream.nextTurn();
+          expect(secondTurn.at(-1)?.type).toBe("session.waiting");
+          expect(
+            secondTurn.some(
+              (event) =>
+                event.type === "message.completed" &&
+                event.data.message?.includes("hello from b") === true,
+            ),
+          ).toBe(true);
+
+          expect(injected).toBe(true);
+          spy.mockRestore();
+          const owner = await waitForCommandHookOwner(sessionCommandHookToken(anchor.runId));
+          expect(owner.runId).toBe(anchor.runId);
+          await workflowRuntime.dispatchSession({
+            command: followUp("dpl_b", "Bob sends a later sentinel.", "sentinel"),
+            sessionId: anchor.runId,
+          });
+          await stream.nextTurn();
+          let saved: string | undefined;
+          await vi.waitFor(
+            async () => {
+              const steps = await world.steps.list({
+                runId: owner.runId,
+                resolveData: "all",
+                pagination: { limit: 1000 },
+              });
+              for (const step of steps.data) {
+                if (!step.stepName.endsWith("//turnStep") || step.output === undefined) continue;
+                const result = await hydrateStepReturnValue(step.output, owner.runId, undefined);
+                const history = JSON.stringify(result.sessionState.snapshot.session.history);
+                if (history.includes("Bob sends a later sentinel.")) saved = history;
+              }
+              expect(saved).toBeDefined();
+            },
+            { timeout: 5000 },
+          );
+          for (let index = 0; index < 3; index++) {
+            expect(saved).toContain(`Alice sends input ${index} during release.`);
+          }
+          expect(saved!.indexOf("Alice sends input 0")).toBeLessThan(
+            saved!.indexOf("Alice sends input 1"),
+          );
+          expect(saved!.indexOf("Alice sends input 1")).toBeLessThan(
+            saved!.indexOf("Alice sends input 2"),
+          );
+        } finally {
+          spy.mockRestore();
+          stream.dispose();
+          if ((await anchor.status) === "running") await anchor.cancel();
+        }
+      });
+    });
+
     it("keeps an alias-bearing session on its owner and executes the accepted delivery", async () => {
       const runtime = await createTestRuntime({ agent: { name: "workflow-entry-handoff-alias" } });
       const continuationToken = "http:workflow-entry-handoff-alias";
@@ -1382,6 +1487,7 @@ describe("workflowEntry integration", () => {
           ]);
           const turn = await stream.nextTurn();
           expect(turn.at(-1)?.type).toBe("session.waiting");
+          expect((await stream.nextTurn()).at(-1)?.type).toBe("session.waiting");
           const owner = await waitForCommandHookOwner(sessionCommandHookToken(run.runId));
           expect(owner.runId).toBe(run.runId);
         } finally {

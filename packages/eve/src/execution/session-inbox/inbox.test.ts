@@ -36,9 +36,14 @@ function hookTokens(inbox: SessionInboxHandle): readonly string[] {
 
 const createHookMock = vi.fn();
 
+vi.mock("#execution/session-inbox/release-step.js", () => ({
+  releaseSessionHooksStep: vi.fn(async () => {}),
+}));
+
 vi.mock("#compiled/@workflow/core/index.js", () => ({
   createHook: (...args: unknown[]) => createHookMock(...args),
   getWritable: vi.fn(),
+  getWorkflowMetadata: () => ({ workflowRunId: "owner-1" }),
 }));
 
 describe("createSessionInbox", () => {

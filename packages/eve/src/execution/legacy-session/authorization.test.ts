@@ -41,6 +41,17 @@ describe("authorization cutover", () => {
       expect.objectContaining({ kind: "deliver", version: 3, payloads: payload.payloads }),
     );
   });
+  it("preserves the payload array for an unversioned workflow-tool callback", async () => {
+    mocks.resolve.mockResolvedValue({
+      current: false,
+      hook: { token: "workflow-tool-callback", metadata: undefined },
+    });
+    await resumeAuthorizationCallback("workflow-tool-callback", payload);
+    expect(mocks.resume).toHaveBeenCalledWith(
+      "workflow-tool-callback",
+      expect.objectContaining({ kind: "deliver", payloads: payload.payloads }),
+    );
+  });
   it("expires historical URLs that do not identify an authorization attempt", async () => {
     expect((await handleExpiredLegacyAuthorization()).status).toBe(410);
   });

@@ -46,6 +46,7 @@ async function awaitNextTurnDelivery(input: {
   readonly queue: SessionInputQueue;
 }): Promise<NextTurnInstruction> {
   const { commandInbox, cursor, queue } = input;
+  let handoffAdmission: number | undefined;
   while (true) {
     if (!commandInbox.hasReadyAuthorization()) {
       const selected = queue.takeNext(
@@ -60,15 +61,29 @@ async function awaitNextTurnDelivery(input: {
         const routed = await routeSelectedDelivery(selected, cursor);
         if (routed.kind === "cancel-turn") return routed;
         if (routed.kind === "consumed") continue;
-        return routed;
+        return {
+          ...routed,
+          handoffEligible:
+            routed.provenance.admissions.length === 1 &&
+            routed.provenance.admissions[0]?.sequence === handoffAdmission,
+        };
       }
     }
 
+    const pendingBeforeRead = queue.pendingCount;
+    const waitingForFreshDelivery = pendingBeforeRead === 0 && !commandInbox.hasPending();
     const lease = await commandInbox.read("runtime");
     if (lease === undefined) return { kind: "closed" };
     lease.consume();
 
     const admitted = await admitSessionInboxPayload(lease.value, input);
+    handoffAdmission =
+      waitingForFreshDelivery &&
+      admitted.kind === "delivery" &&
+      queue.pendingCount === 1 &&
+      !commandInbox.hasPending()
+        ? admitted.admission.sequence
+        : undefined;
     switch (admitted.kind) {
       case "workflow":
         return { kind: "workflow", message: admitted.message };

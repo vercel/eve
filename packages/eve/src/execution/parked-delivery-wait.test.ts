@@ -182,10 +182,26 @@ describe("nextTurnDelivery", () => {
 
     await expect(nextTurnDelivery(input)).resolves.toMatchObject({
       delivery,
+      handoffEligible: false,
       kind: "turn",
       provenance: { admissions: [{ delivery, sequence: 0 }], source: "conversation" },
     });
   });
+
+  it.each([false, true])(
+    "only considers a fresh idle delivery for handoff (buffered: %s)",
+    async (buffered) => {
+      const input = batchingInputFor([]);
+      const inbox = createMockInbox([messageRead("next turn")]);
+      if (!buffered) inbox.hasPending = () => false;
+
+      await expect(nextTurnDelivery({ ...input, commandInbox: inbox })).resolves.toMatchObject({
+        kind: "turn",
+        handoffEligible: !buffered,
+        delivery: { payloads: [{ message: "next turn" }] },
+      });
+    },
+  );
 
   it("keeps different principals in FIFO turns without regrouping later messages", async () => {
     const alice = slackAuth("alice");

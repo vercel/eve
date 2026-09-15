@@ -118,6 +118,17 @@ describe("SessionHandoff", () => {
     expect(startSessionOwnerStepMock).not.toHaveBeenCalled();
   });
 
+  it("does not upgrade previously buffered input after the queue drains", async () => {
+    const inbox = createInbox();
+    await expect(
+      createHandoff(inbox).tryTransfer(
+        { ...selection("deployment-b"), handoffEligible: false },
+        snapshot(),
+      ),
+    ).resolves.toEqual({ kind: "retained", reason: "busy" });
+    expect(inbox.release).not.toHaveBeenCalled();
+  });
+
   it("keeps ownership and restores accepted payloads when activation fails", async () => {
     const inbox = createInbox();
     const payloads: SessionInboxPayload[] = [{ kind: "clear" }];
@@ -180,6 +191,7 @@ function selection(acceptedDeploymentId: string): TurnSelection {
   const selected = delivery(acceptedDeploymentId);
   return {
     delivery: selected,
+    handoffEligible: true,
     kind: "turn",
     provenance: { admissions: [{ delivery: selected, sequence: 0 }], source: "conversation" },
   };

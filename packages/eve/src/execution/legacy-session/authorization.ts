@@ -23,6 +23,7 @@ export async function resumeAuthorizationCallback(
     encodeLegacyCommand(
       { kind: "deliver", payloads: payload.payloads },
       isObject(metadata) ? metadata.sessionInboxWireVersion : undefined,
+      "deliver",
     ),
   );
 }

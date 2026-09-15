@@ -184,6 +184,7 @@ export class SessionHandoff {
     // or in flight may move the session; anything else is work for this owner.
     if (
       mode !== "conversation" ||
+      selection.handoffEligible !== true ||
       provenance.source !== "conversation" ||
       provenance.admissions.length !== 1 ||
       delivery.caller !== undefined ||

@@ -31,6 +31,8 @@ export interface TurnInputProvenance {
 
 export interface TurnSelection {
   readonly delivery: DeliverHookPayload;
+  /** Only a fresh parked-inbox admission may request a deployment handoff. */
+  readonly handoffEligible?: boolean;
   readonly kind: "turn";
   readonly provenance: TurnInputProvenance;
 }

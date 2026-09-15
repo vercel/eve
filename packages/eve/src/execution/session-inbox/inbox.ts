@@ -1,5 +1,6 @@
 import { sessionInboxHookToken } from "#execution/session-inbox/address.js";
-import { createHook, type Hook } from "#compiled/@workflow/core/index.js";
+import { createHook, getWorkflowMetadata, type Hook } from "#compiled/@workflow/core/index.js";
+import { releaseSessionHooksStep } from "#execution/session-inbox/release-step.js";
 
 import type { DeliverPayload, HookPayload, SessionCommand } from "#channel/types.js";
 import { claimHookOwnership, disposeHook } from "#execution/hook-ownership.js";
@@ -157,6 +158,17 @@ export function createSessionInbox(sessionId: string): SessionInboxHandle {
     return entry.promise;
   };
 
+  const stop = async (): Promise<SessionInboxPayload[]> => {
+    const released = sources.splice(0);
+    for (const source of released) source.stopping = true;
+    notify();
+    await Promise.all(released.map(({ hook }) => disposeHook(hook)));
+    const accepted = queue.splice(0).map(({ value }) => value);
+    pending.clear();
+    notify();
+    return accepted;
+  };
+
   return {
     get hookClaims() {
       const [stable, ...aliases] = sources.map(({ token }) => token);
@@ -229,18 +241,16 @@ export function createSessionInbox(sessionId: string): SessionInboxHandle {
     },
     async dispose() {
       // Accepted-but-unread payloads are dropped: disposal ends the session.
-      await this.release();
+      await stop();
     },
     async release() {
-      const released = sources.splice(0);
-      for (const source of released) source.stopping = true;
-      notify();
-      await Promise.all(released.map(({ hook }) => disposeHook(hook)));
-      await Promise.resolve();
-      const accepted = queue.splice(0).map(({ value }) => value);
-      pending.clear();
-      notify();
-      return accepted;
+      if (sources.length > 0) {
+        await releaseSessionHooksStep({
+          ownerRunId: getWorkflowMetadata().workflowRunId,
+          tokens: sources.map(({ hook }) => hook.token),
+        });
+      }
+      return await stop();
     },
   };
 }
