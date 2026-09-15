@@ -1,5 +1,8 @@
 import type { MessageStreamEvent } from "#protocol/message.js";
-import { EVE_STREAM_TAIL_INDEX_HEADER } from "#protocol/message.js";
+import {
+  EVE_SESSION_STREAM_READ_IDLE_TIMEOUT_MS,
+  EVE_STREAM_TAIL_INDEX_HEADER,
+} from "#protocol/message.js";
 import type { MessageStreamVersion } from "#protocol/message-version.js";
 import { createEveSessionStreamRoutePath } from "#protocol/routes.js";
 import { ClientError } from "#client/client-error.js";
@@ -24,8 +27,6 @@ interface ResolvedStreamReconnectPolicy {
   readonly streamIdleReconnectPolicy: RetryPolicy;
   readonly streamOpenReconnectPolicy: RetryPolicy;
 }
-
-const DEFAULT_STREAM_READ_IDLE_TIMEOUT_MS = 15_000;
 
 const DEFAULT_STREAM_RECONNECT_POLICY: ResolvedStreamReconnectPolicy = {
   retryableErrorStatuses: new Set([404, 409, 425, 500, 502, 503, 504]),
@@ -103,10 +104,12 @@ interface OpenStreamInput extends FollowStreamInput {
  * Follows a session's durable event stream from an absolute cursor,
  * transparently reconnecting whenever the transport ends.
  *
- * Transport endings reconnect from the advanced cursor. Progress resets the
- * idle budget; repeated empty streams eventually stop the follow. Callers own
- * boundary handling. Negative tail-relative cursors use one connection because
- * they cannot be advanced safely.
+ * Transport endings reconnect from the advanced cursor. The server closes an
+ * idle live response on purpose, so a connection that ends cleanly reconnects
+ * at once and never counts against the idle budget. Progress resets that
+ * budget; repeated empty connections that end abnormally eventually stop the
+ * follow. Callers own boundary handling. Negative tail-relative cursors use
+ * one connection because they cannot be advanced safely.
  *
  * With `follow: false`, the first connection fixes the bound: the iterator
  * yields events until the cursor passes that tail, reconnecting as needed,
@@ -162,9 +165,10 @@ export async function* followStreamIterable(
     }
 
     let deliveredEvent = false;
+    let closedCleanly = false;
     try {
       for await (const event of readNdjsonStream(connection.body, {
-        idleTimeoutMs: input.streamReadIdleTimeoutMs ?? DEFAULT_STREAM_READ_IDLE_TIMEOUT_MS,
+        idleTimeoutMs: input.streamReadIdleTimeoutMs ?? EVE_SESSION_STREAM_READ_IDLE_TIMEOUT_MS,
         streamVersion: connection.streamVersion,
       })) {
         startIndex += 1;
@@ -177,6 +181,7 @@ export async function* followStreamIterable(
           return;
         }
       }
+      closedCleanly = true;
     } catch (error) {
       if (!isStreamDisconnectError(error)) throw error;
     } finally {
@@ -187,16 +192,21 @@ export async function* followStreamIterable(
       return;
     }
 
+    const firstConnection = initialConnection;
+    initialConnection = false;
+    if (closedCleanly) {
+      continue;
+    }
+
     if (
       input.keepAlive !== true &&
       !deliveredEvent &&
-      !initialConnection &&
+      !firstConnection &&
       (idleReconnects += 1) >= idleRetryPolicy.maxAttempts
     ) {
       return;
     }
 
-    initialConnection = false;
     await sleep(reconnectDelayMs, input.signal);
     if (input.signal?.aborted) {
       return;

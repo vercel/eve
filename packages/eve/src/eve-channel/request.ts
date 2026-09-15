@@ -19,6 +19,7 @@ import {
   EVE_MESSAGE_STREAM_FORMAT,
   EVE_MESSAGE_STREAM_VERSION,
   EVE_SESSION_ID_HEADER,
+  EVE_SESSION_STREAM_IDLE_CLOSE_MS,
   EVE_STREAM_FORMAT_HEADER,
   EVE_STREAM_TAIL_INDEX_HEADER,
   EVE_STREAM_VERSION_HEADER,
@@ -618,17 +619,48 @@ function serializeAsNdjson(
 ): ReadableStream<Uint8Array> {
   const encoder = new TextEncoder();
   let eventCount = 0;
+  let idleTimeout: ReturnType<typeof setTimeout> | undefined;
+  const clearIdleTimeout = () => {
+    clearTimeout(idleTimeout);
+    idleTimeout = undefined;
+  };
+  const scheduleIdleTimeout = (controller: TransformStreamDefaultController<Uint8Array>) => {
+    clearIdleTimeout();
+    idleTimeout = setTimeout(() => {
+      idleTimeout = undefined;
+      try {
+        controller.terminate();
+      } catch {
+        // The response was cancelled while the timer callback was already queued.
+      }
+    }, EVE_SESSION_STREAM_IDLE_CLOSE_MS);
+  };
   const transform = new TransformStream<unknown, Uint8Array>({
     start(controller) {
       controller.enqueue(encoder.encode("\n"));
-      if (eventLimit === 0) controller.terminate();
+      if (eventLimit === 0) {
+        controller.terminate();
+        return;
+      }
+      scheduleIdleTimeout(controller);
     },
     transform(event, controller) {
       controller.enqueue(encoder.encode(`${JSON.stringify(event)}\n`));
       eventCount += 1;
-      if (eventCount === eventLimit) controller.terminate();
+      if (eventCount === eventLimit) {
+        clearIdleTimeout();
+        controller.terminate();
+        return;
+      }
+      scheduleIdleTimeout(controller);
+    },
+    flush() {
+      clearIdleTimeout();
     },
   });
-  void events.pipeTo(transform.writable, { signal }).catch(() => {});
+  void events
+    .pipeTo(transform.writable, { signal })
+    .catch(() => {})
+    .finally(clearIdleTimeout);
   return transform.readable;
 }

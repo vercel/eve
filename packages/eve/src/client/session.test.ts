@@ -90,6 +90,20 @@ function createStreamResponse(events: readonly unknown[]) {
   );
 }
 
+/** A stream whose socket drops before any event arrives. */
+function createDisconnectedStreamResponse() {
+  return new Response(
+    new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.error(new DOMException("The operation was aborted.", "AbortError"));
+      },
+    }),
+    {
+      headers: { [EVE_STREAM_VERSION_HEADER]: EVE_MESSAGE_STREAM_VERSION },
+    },
+  );
+}
+
 function createBoundedStreamResponse(events: readonly unknown[]) {
   const response = createStreamResponse(events);
   response.headers.set("x-eve-stream-tail-index", String(events.length - 1));
@@ -1142,7 +1156,7 @@ describe("ClientSession", () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (_request, init) => {
       return (init?.method ?? "GET") === "POST"
         ? createAcceptedResponse()
-        : createStreamResponse([]);
+        : createDisconnectedStreamResponse();
     });
     const session = createSession();
 

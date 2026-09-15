@@ -30,6 +30,20 @@ export const EVE_MESSAGE_STREAM_FORMAT = "ndjson";
 export const EVE_MESSAGE_STREAM_VERSION = "25";
 
 /**
+ * The stream route ends a live response after this many milliseconds without
+ * an event. Clients reconnect from their cursor; that keeps a stream request
+ * bounded on hosts that never signal client disconnects to the handler.
+ */
+export const EVE_SESSION_STREAM_IDLE_CLOSE_MS = 10_000;
+
+/**
+ * A client treats an open stream response as stalled after this many
+ * milliseconds without bytes. It must exceed {@link EVE_SESSION_STREAM_IDLE_CLOSE_MS}
+ * so the server closes an idle response before the client abandons it.
+ */
+export const EVE_SESSION_STREAM_READ_IDLE_TIMEOUT_MS = EVE_SESSION_STREAM_IDLE_CLOSE_MS * 2;
+
+/**
  * eve-owned finish reason for one completed assistant step.
  *
  * `tool-calls` is the only non-terminal assistant step in the current
