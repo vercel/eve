@@ -1,7 +1,34 @@
 # Self-modification e2e fixture
 
-This fixture exercises the complete local self-modification loop: the root agent decides whether to delegate a persistent change, a fixed self-modification agent edits `/source`, and a later turn uses the rebuilt agent.
+This fixture uses `eve eval` to test a parent delegating a source change to the real self-modification child, rebuilding the agent, and using the result in a new conversation. CI runs the default root model; the child remains pinned to `anthropic/claude-sonnet-5`. Independent parent/child model selection is not part of this fixture.
 
-The root agent follows the fixture model matrix while the self-modification agent stays pinned to `anthropic/claude-sonnet-5`. This isolates routing differences between root models from source-authoring differences in the child. The routing eval spans the full matrix. The slower tool-authoring eval runs once with the default root model. Required e2e models remain blocking; additional models shared with the authoring benchmarks run as optional matrix legs while the coverage matures.
+The workspace root declares `@vercel/connect` as a development dependency so the bundler can resolve the self-modification extension's optional deployed credential provider through the workspace-linked `eve` package. These local cases do not use Connect credentials.
 
-Self-modification evals use `evals/self-modification/harness.ts` to reset changed source, follow the background child, rebuild runtime artifacts, and clean up after the case.
+Routing-only cases remain in [`agent-subagents`](../agent-subagents/evals/self-modification/), where an acceptance-only child avoids performing real integration installs.
+
+## Cases
+
+- `create-native-tool.eval.ts` creates a greeting tool and checks structured output for several names, including Unicode and literal angle brackets.
+- `create-shipping-quote.eval.ts` creates a quote calculator and checks prices below and at the free-shipping threshold, with and without expedited delivery.
+- `repair-order-total.eval.ts` first reproduces a quantity-calculation bug in the fixture's existing tool, asks self-mod to investigate the symptom, and verifies both the fix and single-item/empty-order regressions.
+
+Each case checks actual tool inputs and outputs, not the assistant's claim that the work succeeded. Cases also reject source changes outside their specified tool file. The arithmetic cases use synthetic data and do not require external services. These checks cover the specified behavior; they are not a general security audit of generated code.
+
+## Adding a case
+
+Wrap source-mutating cases in `withSelfModification(t, async (selfMod) => { ... })` from `evals/self-modification/harness.ts`:
+
+1. Establish the initial state. For a repair, invoke the existing tool and assert its known incorrect output before asking for a fix.
+2. Use `selfMod.request(prompt)` to start the parent and follow the delegated child. Describe the user-visible requirement or symptom, not a prescribed patch.
+3. Use `selfMod.assertOnlyChanged(paths)` to check the permitted edit scope, then `selfMod.apply()` to force a runtime rebuild.
+4. Use `selfMod.verify(prompt)` to invoke the tool in a fresh session. Assert the call's input and structured output with `requireToolCall`, including boundary cases and previously working behavior.
+
+The harness snapshots the complete `agent/` tree, tracks sessions, and retires them before restoring source. Restoration removes unexpected files and restores deleted files, binary contents, and file modes. Source watching is suspended during restoration. If session retirement or restoration fails, later mutation cases fail instead of continuing against uncertain state; failed retirement retains the backup path in the error.
+
+Keep `maxConcurrency: 1`. The harness also serializes cleanup that continues after an eval timeout. It protects cases within one runner, not concurrent `eve eval` processes sharing the same checkout. Do not run another source-mutating process against this fixture while its evals run.
+
+Forced rebuilds isolate source-authoring and runtime correctness. These cases do not verify automatic hot-reload timing or deployed proposal/merge behavior. Real-model e2e runs belong in CI. The fixture-only cleanup tests need no model or running server:
+
+```sh
+pnpm --filter agent-self-modification test:scenario
+```

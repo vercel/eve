@@ -148,6 +148,12 @@ high-volume session execution and repeated session resumption respectively.
 
 ## Fixtures
 
+The [`agent-self-modification`](./fixtures/agent-self-modification/README.md)
+fixture contains source-generation and repair examples using `eve eval`. It
+checks generated tools through real calls in fresh sessions and restores source
+after retiring the parent and child sessions. Routing-only self-modification
+coverage stays in `agent-subagents`.
+
 E2E fixtures live under `e2e/fixtures/*`. Fixture discovery also accepts
 `apps/fixtures/*` apps with an `evals/` directory, but shared development apps
 should stay out of the e2e matrix unless they intentionally own evals.
