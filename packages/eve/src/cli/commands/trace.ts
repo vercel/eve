@@ -5,8 +5,8 @@ import {
   formatTokenSummary,
   renderSpanDetailTree,
   spanMetricChips,
-  summarizeLocalTrace,
 } from "#cli/commands/trace-detail.js";
+import { summarizeLocalTrace } from "#tracing/local-trace-summary.js";
 import { formatElapsed } from "#cli/format-elapsed.js";
 import { createCliTheme, renderCliSection, sanitizeForTerminal } from "#cli/ui/output.js";
 import type { LocalTrace, LocalTraceSpan } from "#tracing/local-trace-reader.js";
@@ -164,17 +164,17 @@ export async function runTraceShowCommand(
 }
 
 function traceHeaderRows(trace: LocalTrace): { label: string; value: string }[] {
-  const summary = summarizeLocalTrace(trace.spans);
+  const summary = summarizeLocalTrace(trace.traceId, trace.spans);
   return [
     { label: "Trace ID", value: trace.traceId },
     { label: "Conversation ID", value: trace.conversationId ?? "unknown" },
     { label: "Agent", value: trace.agentName ?? "unknown" },
-    { label: "Started", value: toDate(trace.startTimeNs).toISOString() },
+    { label: "Started", value: summary.startedAt },
     {
       label: "Duration",
-      value: formatElapsed(durationMs(trace.startTimeNs, trace.endTimeNs)),
+      value: formatElapsed(summary.durationMs),
     },
-    { label: "Spans", value: String(trace.spans.length) },
+    { label: "Spans", value: String(summary.spanCount) },
     ...(summary.models.length === 0 ? [] : [{ label: "Models", value: summary.models.join(", ") }]),
     ...(summary.inputTokens === 0 && summary.outputTokens === 0
       ? []
@@ -182,12 +182,12 @@ function traceHeaderRows(trace: LocalTrace): { label: string; value: string }[] 
     ...(summary.costUsd === undefined
       ? []
       : [{ label: "Cost", value: formatCostUsd(summary.costUsd) }]),
-    ...(summary.errorCount === 0
+    ...(summary.errorSpanCount === 0
       ? []
       : [
           {
             label: "Errors",
-            value: `${summary.errorCount} span${summary.errorCount === 1 ? "" : "s"}`,
+            value: `${summary.errorSpanCount} span${summary.errorSpanCount === 1 ? "" : "s"}`,
           },
         ]),
   ];

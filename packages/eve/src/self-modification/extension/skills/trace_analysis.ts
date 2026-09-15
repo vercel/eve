@@ -21,6 +21,8 @@ Use this workflow when the user asks to review, diagnose, or optimize behavior f
 
 Prefer three analysis rounds or fewer. Do not read raw trace segments, search the whole filesystem, or enumerate broad documentation when the bounded tools answer the question.
 
+Search and inspection share the same summary. Its durationMs is elapsed time; inspection's modelWorkMs and toolWorkMs sum operation time and may exceed elapsed time when calls overlap. errorSpanCount counts error-bearing spans, not independent failures or final activation outcome; failures ranking uses this count. Token totals sum step usage without counting repeated model counters.
+
 For latency, distinguish tool execution time from model round-trip time. Repeated tool counts are leads, not proof that calls are independent; inspect the compact timeline before recommending batching. Report the highest-impact opportunities first.
 `,
 });

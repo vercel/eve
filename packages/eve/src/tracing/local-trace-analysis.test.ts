@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
 
+import type { LocalTraceSpan } from "./local-trace-reader.js";
 import { analyzeLocalTrace } from "./local-trace-analysis.js";
+import { summarizeLocalTrace } from "./local-trace-summary.js";
 
 const traceId = "1".repeat(32);
 
-function source(input: {
+function span(input: {
   readonly attributes?: Record<string, unknown>;
   readonly endMs: number;
   readonly name: string;
@@ -13,28 +15,25 @@ function source(input: {
   readonly startMs: number;
   readonly statusCode?: number;
   readonly statusMessage?: string;
-}): Parameters<typeof analyzeLocalTrace>[0][number] {
+}): LocalTraceSpan {
   return {
-    segmentFile: `${input.spanId}.otlp.json`,
-    span: {
-      attributes: input.attributes ?? {},
-      endTimeNs: BigInt(input.endMs) * 1_000_000n,
-      events: [],
-      name: input.name,
-      parentSpanId: input.parentSpanId,
-      spanId: input.spanId,
-      startTimeNs: BigInt(input.startMs) * 1_000_000n,
-      statusCode: input.statusCode ?? 0,
-      statusMessage: input.statusMessage,
-      traceId,
-    },
+    attributes: input.attributes ?? {},
+    endTimeNs: BigInt(input.endMs) * 1_000_000n,
+    events: [],
+    name: input.name,
+    parentSpanId: input.parentSpanId,
+    spanId: input.spanId,
+    startTimeNs: BigInt(input.startMs) * 1_000_000n,
+    statusCode: input.statusCode ?? 0,
+    statusMessage: input.statusMessage,
+    traceId,
   };
 }
 
 describe("analyzeLocalTrace", () => {
-  it("returns an ordered structural timeline with span ids", () => {
-    const analysis = analyzeLocalTrace([
-      source({
+  it("returns an ordered structural timeline and the same summary as search", () => {
+    const spans = [
+      span({
         attributes: {
           "agent.session.id": "child",
           "agent.turn.id": "turn-1",
@@ -46,7 +45,7 @@ describe("analyzeLocalTrace", () => {
         spanId: "b".repeat(16),
         startMs: 20,
       }),
-      source({
+      span({
         attributes: {
           "agent.model.id": "test-model",
           "agent.session.id": "child",
@@ -58,14 +57,14 @@ describe("analyzeLocalTrace", () => {
         spanId: "a".repeat(16),
         startMs: 0,
       }),
-    ]);
+    ];
+    const analysis = analyzeLocalTrace(traceId, spans);
 
+    expect(analysis.summary).toEqual(summarizeLocalTrace(traceId, spans));
     expect(analysis).toMatchObject({
-      durationMs: 25,
-      modelCalls: 1,
-      modelDurationMs: 15,
-      toolCalls: 1,
-      toolDurationMs: 5,
+      summary: { durationMs: 25, modelCalls: 1, toolCalls: 1 },
+      modelWorkMs: 15,
+      toolWorkMs: 5,
     });
     expect(analysis.records).toEqual([
       expect.objectContaining({
@@ -84,7 +83,7 @@ describe("analyzeLocalTrace", () => {
   });
 
   it("collapses action wrappers, retaining execution timing and inherited selectors", () => {
-    const action = source({
+    const action = span({
       attributes: {
         "agent.action.kind": "tool-call",
         "agent.action.name": "read_file",
@@ -99,23 +98,24 @@ describe("analyzeLocalTrace", () => {
       statusCode: 2,
       statusMessage: "Read failed",
     });
-    const execution = source({
-      attributes: {
-        "gen_ai.operation.name": "execute_tool",
-        "gen_ai.tool.name": "read_file",
-      },
+    const execution = span({
+      attributes: { "gen_ai.operation.name": "execute_tool", "gen_ai.tool.name": "read_file" },
       endMs: 25,
       name: "execute_tool read_file",
-      parentSpanId: action.span.spanId,
+      parentSpanId: action.spanId,
       spanId: "b".repeat(16),
       startMs: 20,
+      statusCode: 2,
     });
-    const analysis = analyzeLocalTrace([execution, action], {
+    const analysis = analyzeLocalTrace(traceId, [execution, action], {
       sessionId: "target",
       turnId: "turn-1",
     });
 
-    expect(analysis).toMatchObject({ durationMs: 30, toolCalls: 1, toolDurationMs: 5 });
+    expect(analysis).toMatchObject({
+      summary: { durationMs: 30, toolCalls: 1, errorSpanCount: 2 },
+      toolWorkMs: 5,
+    });
     expect(analysis.records).toEqual([
       expect.objectContaining({
         callId: "call-1",
@@ -123,7 +123,7 @@ describe("analyzeLocalTrace", () => {
         error: "Read failed",
         outcome: "failed",
         sessionId: "target",
-        spanId: execution.span.spanId,
+        spanId: execution.spanId,
         startOffsetMs: 20,
         turnId: "turn-1",
       }),
@@ -131,33 +131,29 @@ describe("analyzeLocalTrace", () => {
   });
 
   it("keeps repeated calls distinct and counts tools without execution spans", () => {
-    const action = source({
+    const action = span({
       attributes: { "agent.action.kind": "tool-call", "agent.action.name": "web_search" },
       endMs: 10,
       name: "agent.action",
       spanId: "a".repeat(16),
       startMs: 0,
     });
-    const analysis = analyzeLocalTrace([
-      action,
-      { ...action, span: { ...action.span, spanId: "b".repeat(16) } },
-    ]);
-
-    expect(analysis.toolCalls).toBe(2);
+    const analysis = analyzeLocalTrace(traceId, [action, { ...action, spanId: "b".repeat(16) }]);
+    expect(analysis.summary.toolCalls).toBe(2);
     expect(analysis.records).toHaveLength(2);
     expect(analysis.records[0]).toMatchObject({ category: "tool", toolName: "web_search" });
   });
 
-  it("preserves a background action lifetime without adding it to tool execution time", () => {
-    const analysis = analyzeLocalTrace([
-      source({
+  it("preserves a background action lifetime without adding it to tool work", () => {
+    const analysis = analyzeLocalTrace(traceId, [
+      span({
         attributes: { "agent.action.kind": "subagent-call", "agent.action.name": "worker" },
         endMs: 100,
         name: "agent.action",
         spanId: "a".repeat(16),
         startMs: 0,
       }),
-      source({
+      span({
         attributes: { "gen_ai.operation.name": "execute_tool", "gen_ai.tool.name": "worker" },
         endMs: 10,
         name: "execute_tool worker",
@@ -166,15 +162,14 @@ describe("analyzeLocalTrace", () => {
         startMs: 5,
       }),
     ]);
-
-    expect(analysis).toMatchObject({ durationMs: 100, toolCalls: 1, toolDurationMs: 5 });
+    expect(analysis).toMatchObject({ summary: { durationMs: 100, toolCalls: 1 }, toolWorkMs: 5 });
     expect(analysis.records).toEqual([
       expect.objectContaining({ actionDurationMs: 100, durationMs: 5 }),
     ]);
   });
 
-  it("reports per-model token usage without adding turn totals or inventing missing metrics", () => {
-    const model = source({
+  it("reports per-model token usage without inventing missing metrics", () => {
+    const model = span({
       attributes: {
         "gen_ai.operation.name": "chat",
         "agent.usage.input_tokens": 100,
@@ -187,31 +182,24 @@ describe("analyzeLocalTrace", () => {
       spanId: "a".repeat(16),
       startMs: 0,
     });
-    const analysis = analyzeLocalTrace([
+    const analysis = analyzeLocalTrace(traceId, [
       model,
       {
         ...model,
-        span: {
-          ...model.span,
-          name: "invoke_agent",
-          attributes: { "agent.usage.input_tokens": 100 },
-          spanId: "b".repeat(16),
-        },
+        name: "invoke_agent",
+        attributes: { "agent.usage.input_tokens": 100 },
+        spanId: "b".repeat(16),
       },
       {
         ...model,
-        span: {
-          ...model.span,
-          attributes: {
-            "gen_ai.operation.name": "chat",
-            "agent.usage.input_tokens": -1,
-            "agent.usage.output_tokens": Infinity,
-          },
-          spanId: "c".repeat(16),
+        attributes: {
+          "gen_ai.operation.name": "chat",
+          "agent.usage.input_tokens": -1,
+          "agent.usage.output_tokens": Infinity,
         },
+        spanId: "c".repeat(16),
       },
     ]);
-
     expect(analysis.records).toHaveLength(2);
     expect(analysis.records[0]?.usage).toEqual({
       inputTokens: 100,
@@ -222,10 +210,11 @@ describe("analyzeLocalTrace", () => {
     expect(analysis.records[1]?.usage).toBeUndefined();
   });
 
-  it("counts failures on structural spans and uses the current run identity", () => {
+  it("counts errors outside the timeline and uses the current run identity", () => {
     const analysis = analyzeLocalTrace(
+      traceId,
       [
-        source({
+        span({
           attributes: { "agent.run.id": "run-1" },
           endMs: 10,
           name: "agent.step",
@@ -233,7 +222,7 @@ describe("analyzeLocalTrace", () => {
           startMs: 0,
           statusCode: 2,
         }),
-        source({
+        span({
           attributes: { "agent.run.id": "run-1", "gen_ai.operation.name": "chat" },
           endMs: 20,
           name: "chat",
@@ -243,15 +232,14 @@ describe("analyzeLocalTrace", () => {
       ],
       { sessionId: "run-1" },
     );
-
-    expect(analysis.failedOperations).toBe(1);
+    expect(analysis.summary.errorSpanCount).toBe(1);
     expect(analysis.records).toEqual([
       expect.objectContaining({ category: "model", sessionId: "run-1" }),
     ]);
   });
 
   it("filters structurally and ignores duplicate span ids", () => {
-    const shared = source({
+    const shared = span({
       attributes: {
         "agent.session.id": "target",
         "agent.turn.id": "turn-1",
@@ -263,10 +251,11 @@ describe("analyzeLocalTrace", () => {
       startMs: 0,
     });
     const analysis = analyzeLocalTrace(
+      traceId,
       [
         shared,
-        { ...shared, segmentFile: "duplicate.otlp.json" },
-        source({
+        shared,
+        span({
           attributes: { "agent.session.id": "analyzer", "gen_ai.operation.name": "chat" },
           endMs: 30,
           name: "ai.chat",
@@ -276,8 +265,43 @@ describe("analyzeLocalTrace", () => {
       ],
       { excludeSessionId: "analyzer" },
     );
-
-    expect(analysis.modelCalls).toBe(1);
+    expect(analysis.summary.modelCalls).toBe(1);
     expect(analysis.records[0]?.sessionId).toBe("target");
+  });
+
+  it("distinguishes overlapping work from elapsed time and other actions from tools", () => {
+    const model = span({
+      attributes: { "agent.run.id": "run", "gen_ai.operation.name": "chat" },
+      endMs: 10,
+      name: "chat",
+      spanId: "a".repeat(16),
+      startMs: 0,
+    });
+    const analysis = analyzeLocalTrace(traceId, [
+      model,
+      { ...model, spanId: "b".repeat(16) },
+      span({
+        attributes: {
+          "agent.run.id": "run",
+          "agent.action.kind": "subagent-call",
+          "agent.action.name": "worker",
+        },
+        endMs: 10,
+        name: "agent.action",
+        spanId: "c".repeat(16),
+        startMs: 0,
+      }),
+    ]);
+    expect(analysis).toMatchObject({
+      summary: { durationMs: 10, modelCalls: 2, toolCalls: 0, toolNames: [] },
+      modelWorkMs: 20,
+      toolWorkMs: 0,
+    });
+    expect(analysis.groups).toEqual([
+      { sessionId: "run", modelCalls: 2, modelWorkMs: 20, toolCalls: 0, toolWorkMs: 0 },
+    ]);
+    expect(analysis.records.find((record) => record.category === "other")).toMatchObject({
+      actionName: "worker",
+    });
   });
 });

@@ -1,11 +1,8 @@
 import { defineTool } from "eve/tools";
 
 import { context, trace } from "#compiled/@opentelemetry/api/index.js";
-import {
-  analyzeLocalTrace,
-  traceSessionId,
-  type LocalTraceSpanSource,
-} from "#self-modification/local-trace-analysis.js";
+import { queryLocalTraceSummaries, type LocalTraceSortBy } from "#tracing/local-trace-query.js";
+import { summarizeLocalTrace, type LocalTraceSummary } from "#tracing/local-trace-summary.js";
 import { resolveConversationId } from "#tracing/conversation-context.js";
 import {
   localTraceConversationMarker,
@@ -14,25 +11,39 @@ import {
 
 import type { ResolvedSelfModificationConfig } from "../../../../config.js";
 import { defineLocalOnlyDynamic, resolveLocalOnly } from "../../../local-only.js";
-import { readTraceSources, TRACE_ID } from "../../../trace-inspection.js";
+import {
+  readTraceSources,
+  TRACE_ID,
+  type LocalTraceSpanSource,
+} from "../../../trace-inspection.js";
 
 const MAX_ANALYZED_TRACES = 200;
 const MAX_UNINDEXED_TRACES = 100;
 const DEFAULT_LIMIT = 20;
 const MAX_RESULTS = 50;
 
-type SortBy = "duration" | "failures" | "inputTokens" | "latest";
-
 const inputSchema = {
   type: "object",
   additionalProperties: false,
   properties: {
     agentName: { type: "string", minLength: 1 },
-    failedOnly: { type: "boolean" },
+    failedOnly: {
+      type: "boolean",
+      description: "Only traces containing error spans; this does not imply the activation failed.",
+    },
     limit: { type: "integer", minimum: 1, maximum: MAX_RESULTS },
     sessionId: { type: "string", minLength: 1 },
-    sortBy: { enum: ["duration", "failures", "inputTokens", "latest"], type: "string" },
-    toolName: { type: "string", minLength: 1 },
+    sortBy: {
+      enum: ["duration", "failures", "inputTokens", "latest"],
+      type: "string",
+      description:
+        "Rank examined traces by elapsed time, error-span count, summed step input tokens, or start time.",
+    },
+    toolName: {
+      type: "string",
+      minLength: 1,
+      description: "Match tool operations, not other named actions such as subagent lifetimes.",
+    },
   },
 } as const;
 
@@ -41,23 +52,8 @@ interface SearchInput {
   readonly failedOnly?: boolean;
   readonly limit: number;
   readonly sessionId?: string;
-  readonly sortBy: SortBy;
+  readonly sortBy: LocalTraceSortBy;
   readonly toolName?: string;
-}
-
-interface TraceSummary {
-  readonly agentNames: readonly string[];
-  readonly durationMs: number;
-  readonly failedOperations: number;
-  readonly inputTokens: number;
-  readonly modelCalls: number;
-  readonly models: readonly string[];
-  readonly outputTokens: number;
-  readonly sessionIds: readonly string[];
-  readonly startedAt: string;
-  readonly toolCalls: number;
-  readonly toolNames: readonly string[];
-  readonly traceId: string;
 }
 
 const searchTracesTool = defineTool({
@@ -87,7 +83,7 @@ const searchTracesTool = defineTool({
     const matchingIds = new Set(traceIds(conversation.stdout));
     const unindexed = eligible.filter((traceId) => !indexedIds.has(traceId));
     const scannedUnindexed = unindexed.slice(0, MAX_UNINDEXED_TRACES);
-    const digests = new Map<string, TraceSummary>();
+    const digests = new Map<string, LocalTraceSummary>();
     let readFailures = 0;
     const read = async (traceId: string): Promise<LocalTraceSpanSource[] | undefined> => {
       try {
@@ -105,26 +101,35 @@ const searchTracesTool = defineTool({
       if (sources === undefined || !contains(sources, "gen_ai.conversation.id", conversationId))
         continue;
       matchingIds.add(traceId);
-      digests.set(traceId, summarize(traceId, sources));
+      digests.set(
+        traceId,
+        summarizeLocalTrace(
+          traceId,
+          sources.map(({ span }) => span),
+        ),
+      );
     }
 
     const matched = eligible.filter((traceId) => matchingIds.has(traceId));
     const considered = matched.slice(0, MAX_ANALYZED_TRACES);
-    const summaries: TraceSummary[] = [];
+    const summaries: LocalTraceSummary[] = [];
     for (const traceId of considered) {
       if (ctx.abortSignal.aborted) throw new Error("Trace search was cancelled.");
       const cached = digests.get(traceId);
       if (cached !== undefined) {
-        if (matches(cached, parsed)) summaries.push(cached);
+        summaries.push(cached);
         continue;
       }
       const sources = await read(traceId);
-      if (sources === undefined) continue;
-      const readSummary = summarize(traceId, sources);
-      if (matches(readSummary, parsed)) summaries.push(readSummary);
+      if (sources !== undefined)
+        summaries.push(
+          summarizeLocalTrace(
+            traceId,
+            sources.map(({ span }) => span),
+          ),
+        );
     }
-    sort(summaries, parsed.sortBy);
-    const results = summaries.slice(0, parsed.limit);
+    const results = queryLocalTraceSummaries(summaries, parsed);
     const omitted = unindexed.length - scannedUnindexed.length + matched.length - considered.length;
     const coverage: {
       complete: boolean;
@@ -145,8 +150,8 @@ const searchTracesTool = defineTool({
     return {
       conversationId,
       coverage,
-      matches: results,
-      truncated: summaries.length > results.length,
+      matches: results.matches,
+      truncated: results.truncated,
     };
   },
 });
@@ -187,7 +192,7 @@ function parseInput(value: unknown): SearchInput {
     failedOnly: input.failedOnly as boolean | undefined,
     limit: (input.limit as number | undefined) ?? DEFAULT_LIMIT,
     sessionId: input.sessionId as string | undefined,
-    sortBy: (input.sortBy as SortBy | undefined) ?? "latest",
+    sortBy: (input.sortBy as LocalTraceSortBy | undefined) ?? "latest",
     toolName: input.toolName as string | undefined,
   };
 }
@@ -202,55 +207,6 @@ function traceIds(value: string): Set<string> {
     if (id !== undefined) ids.add(id);
   }
   return ids;
-}
-
-function summarize(traceId: string, sources: readonly LocalTraceSpanSource[]): TraceSummary {
-  const analysis = analyzeLocalTrace(sources);
-  const names = (attribute: string) => [
-    ...new Set(
-      sources.flatMap(({ span }) =>
-        typeof span.attributes[attribute] === "string"
-          ? [span.attributes[attribute] as string]
-          : [],
-      ),
-    ),
-  ];
-  const maximum = (attribute: string) =>
-    sources.reduce((maximum, { span }) => {
-      const value = Number(span.attributes[attribute]);
-      return Number.isFinite(value) ? Math.max(maximum, value) : maximum;
-    }, 0);
-  return {
-    agentNames: names("agent.name"),
-    durationMs: analysis.durationMs,
-    failedOperations: analysis.failedOperations,
-    inputTokens: maximum("agent.usage.input_tokens"),
-    modelCalls: analysis.modelCalls,
-    models: [
-      ...new Set(
-        analysis.records.flatMap((record) => (record.model === undefined ? [] : [record.model])),
-      ),
-    ],
-    outputTokens: maximum("agent.usage.output_tokens"),
-    sessionIds: [
-      ...new Set(
-        sources.flatMap(({ span }) => {
-          const sessionId = traceSessionId(span);
-          return sessionId === undefined ? [] : [sessionId];
-        }),
-      ),
-    ],
-    startedAt: new Date(Number(analysis.startTimeNs / 1_000_000n)).toISOString(),
-    toolCalls: analysis.toolCalls,
-    toolNames: [
-      ...new Set(
-        analysis.records.flatMap((record) =>
-          record.toolName === undefined ? [] : [record.toolName],
-        ),
-      ),
-    ],
-    traceId,
-  };
 }
 
 function isEmptyTraceListing(result: {
@@ -272,31 +228,8 @@ function contains(
   return sources.some(({ span }) => span.attributes[attribute] === expected);
 }
 
-function matches(summary: TraceSummary, input: SearchInput): boolean {
-  return (
-    (input.agentName === undefined || summary.agentNames.includes(input.agentName)) &&
-    (input.sessionId === undefined || summary.sessionIds.includes(input.sessionId)) &&
-    (input.toolName === undefined || summary.toolNames.includes(input.toolName)) &&
-    (input.failedOnly !== true || summary.failedOperations > 0)
-  );
-}
-
 export function resolveSearchTracesTool(config: ResolvedSelfModificationConfig) {
   return resolveLocalOnly(config, searchTracesTool);
 }
 
 export default defineLocalOnlyDynamic(searchTracesTool);
-
-function sort(summaries: TraceSummary[], sortBy: SortBy): void {
-  summaries.sort((left, right) => {
-    const difference =
-      sortBy === "duration"
-        ? right.durationMs - left.durationMs
-        : sortBy === "failures"
-          ? right.failedOperations - left.failedOperations
-          : sortBy === "inputTokens"
-            ? right.inputTokens - left.inputTokens
-            : Date.parse(right.startedAt) - Date.parse(left.startedAt);
-    return difference || left.traceId.localeCompare(right.traceId);
-  });
-}

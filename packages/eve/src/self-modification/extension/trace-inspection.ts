@@ -1,7 +1,11 @@
 import type { ToolContext } from "eve/tools";
 
-import type { LocalTraceSpanSource } from "#self-modification/local-trace-analysis.js";
-import { parseLocalTraceSegment } from "#tracing/local-trace-reader.js";
+import { parseLocalTraceSegment, type LocalTraceSpan } from "#tracing/local-trace-reader.js";
+
+export interface LocalTraceSpanSource {
+  readonly segmentFile: string;
+  readonly span: LocalTraceSpan;
+}
 
 export const TRACE_ID = /^[0-9a-f]{32}$/u;
 export const SPAN_ID = /^[0-9a-f]{16}$/u;

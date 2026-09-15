@@ -28,6 +28,7 @@ function segment(
     runId?: string;
     sessionId?: string;
     status?: { code: number; message?: string };
+    stepInputTokens?: readonly number[];
     toolName?: string;
   } = {},
 ): string {
@@ -68,6 +69,17 @@ function segment(
       traceId: id,
     });
   }
+  for (const [index, tokens] of (input.stepInputTokens ?? []).entries()) {
+    spans.push({
+      attributes: [{ key: "agent.usage.input_tokens", value: { intValue: tokens } }],
+      endTimeUnixNano: "30000000",
+      name: "agent.step",
+      spanId: (index + 1).toString(16).padStart(16, "0"),
+      startTimeUnixNano: "10000000",
+      status: { code: 0 },
+      traceId: id,
+    });
+  }
   return JSON.stringify({ resourceSpans: [{ scopeSpans: [{ spans }] }] });
 }
 
@@ -78,17 +90,52 @@ function traceContext(contents: Record<string, string>) {
       readTextFile: async ({ path }: { path: string }) =>
         Object.entries(contents).find(([id]) => path.includes(id))?.[1] ?? null,
       run: async ({ command }: { command: string }) => {
+        if (command === "ls -1dt /traces/*") {
+          return {
+            exitCode: 0,
+            stderr: "",
+            stdout: Object.keys(contents)
+              .map((id) => `/traces/${id}`)
+              .join("\n"),
+          };
+        }
         if (command.includes("/segments")) {
           return { exitCode: 0, stderr: "", stdout: `${spanId}.otlp.json\n` };
         }
         return { exitCode: 2, stderr: "", stdout: "" };
       },
     }),
-    session: { id: "analyzer" },
+    session: { id: "root" },
   } as never;
 }
 
 describe("selfmod trace inspection tools", () => {
+  it("ranks summed step usage and returns the same summary from search and paged inspection", async () => {
+    const ctx = traceContext({
+      [traceId]: segment({ stepInputTokens: [100, 100], toolName: "read", status: { code: 2 } }),
+      [otherTraceId]: segment({ id: otherTraceId, stepInputTokens: [150] }),
+    });
+    const search = await resolveSearchTracesTool({ localEnabled: true })!.execute(
+      { sortBy: "inputTokens", limit: 1 },
+      ctx,
+    );
+    const inspection = await resolveInspectTraceTool({ localEnabled: true })!.execute(
+      { traceId, limit: 1 },
+      ctx,
+    );
+    if (!("matches" in search) || !("summary" in inspection)) {
+      throw new Error("Expected non-streaming trace tools.");
+    }
+    expect(search).toMatchObject({
+      matches: [{ traceId, inputTokens: 200, errorSpanCount: 1, toolNames: ["read"] }],
+      truncated: true,
+    });
+    expect(inspection).toMatchObject({ summary: search.matches[0], hasMore: true });
+    expect(inspection.summary).toEqual(search.matches[0]);
+    expect(inspection).not.toHaveProperty("totals");
+    expect(inspection.summary).not.toHaveProperty("failedOperations");
+  });
+
   it("searches structural trace metadata with session, agent, tool, and failure filters", async () => {
     const ctx = {
       abortSignal: new AbortController().signal,
@@ -240,7 +287,7 @@ describe("selfmod trace inspection tools", () => {
           spanId: toolSpanId,
         },
       ],
-      totals: { modelCalls: 1, toolCalls: 1 },
+      summary: { modelCalls: 1, toolCalls: 1 },
     });
 
     const page = await resolveInspectTraceTool({ localEnabled: true })!.execute(

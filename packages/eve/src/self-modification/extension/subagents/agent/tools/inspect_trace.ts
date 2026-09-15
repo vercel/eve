@@ -1,6 +1,6 @@
 import { defineTool } from "eve/tools";
 
-import { analyzeLocalTrace } from "#self-modification/local-trace-analysis.js";
+import { analyzeLocalTrace } from "#tracing/local-trace-analysis.js";
 
 import type { ResolvedSelfModificationConfig } from "../../../../config.js";
 import { defineLocalOnlyDynamic, resolveLocalOnly } from "../../../local-only.js";
@@ -35,7 +35,10 @@ const inspectTraceTool = defineTool({
   async execute(input, ctx) {
     const { limit, offset, traceId } = parseInput(input);
     const sources = await readTraceSources(traceId, ctx);
-    const analysis = analyzeLocalTrace(sources);
+    const analysis = analyzeLocalTrace(
+      traceId,
+      sources.map(({ span }) => span),
+    );
     const byId = new Map(sources.map((source) => [source.span.spanId, source]));
     const records = analysis.records.slice(offset, offset + limit).map((record) => {
       const source = byId.get(record.spanId);
@@ -59,14 +62,9 @@ const inspectTraceTool = defineTool({
       traceId,
       offset,
       timeline: records,
-      totals: {
-        durationMs: analysis.durationMs,
-        failedOperations: analysis.failedOperations,
-        modelCalls: analysis.modelCalls,
-        modelDurationMs: analysis.modelDurationMs,
-        toolCalls: analysis.toolCalls,
-        toolDurationMs: analysis.toolDurationMs,
-      },
+      summary: analysis.summary,
+      modelWorkMs: analysis.modelWorkMs,
+      toolWorkMs: analysis.toolWorkMs,
       groups: analysis.groups,
       total: analysis.records.length,
       hasMore: offset + records.length < analysis.records.length,
