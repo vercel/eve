@@ -529,6 +529,12 @@ export type AuthFn<TEvent = Request> = (
  */
 export type OAuthResourceOptions = {
   readonly metadataPath?: string;
+  /**
+   * OAuth scopes every accepted principal must carry in its verified `scope`
+   * claim. A space-delimited string and a string array are both supported.
+   * Also advertised through protected-resource metadata when `scopes` is omitted.
+   */
+  readonly requiredScopes?: readonly string[];
   readonly resource?: string;
   readonly scopes?: readonly string[];
 } & (
@@ -543,6 +549,9 @@ export type OAuthResourceOptions = {
 );
 
 const OAUTH_RESOURCE_SYMBOL = Symbol.for("eve.channels.auth.oauthResource");
+const EXPLICIT_PUBLIC_AUTH_SYMBOL = Symbol.for("eve.channels.auth.public");
+const OIDC_AUTH_SYMBOL = Symbol.for("eve.channels.auth.oidc");
+const OAUTH_RESOURCE_OIDC_SYMBOL = Symbol.for("eve.channels.auth.oauthResourceOidc");
 
 /**
  * An ordinary route authenticator decorated with OAuth protected-resource
@@ -565,6 +574,23 @@ export function oauthResource(
 ): OAuthResourceAuth {
   const authorizationServers =
     options.issuer !== undefined ? [options.issuer] : options.authorizationServers;
+  if (options.requiredScopes !== undefined) {
+    if (
+      options.requiredScopes.length === 0 ||
+      options.requiredScopes.some((scope) => scope.length === 0 || /\s/.test(scope))
+    ) {
+      throw new Error(
+        "oauthResource requiredScopes must contain non-empty individual scope names.",
+      );
+    }
+    const advertisedScopes = options.scopes;
+    if (
+      advertisedScopes !== undefined &&
+      options.requiredScopes.some((scope) => !advertisedScopes.includes(scope))
+    ) {
+      throw new Error("oauthResource scopes must include every required scope.");
+    }
+  }
   if (
     authorizationServers.length === 0 ||
     authorizationServers.some((value) => !isValidOAuthIdentifierUrl(value))
@@ -587,10 +613,25 @@ export function oauthResource(
   const list: readonly AuthFn<Request>[] = Array.isArray(auth)
     ? (auth as readonly AuthFn<Request>[])
     : [auth as AuthFn<Request>];
+  const requiredScopes = options.requiredScopes;
   const composed: AuthFn<Request> = async (request) => {
     for (const fn of list) {
       const result = await fn(request);
-      if (result) return result;
+      if (!result) continue;
+      if (requiredScopes === undefined || hasRequiredScopes(result, requiredScopes)) {
+        return result;
+      }
+      throw new ForbiddenError({
+        challenges: [
+          {
+            parameters: {
+              error: "insufficient_scope",
+              scope: requiredScopes.join(" "),
+            },
+            scheme: "Bearer",
+          },
+        ],
+      });
     }
     return null;
   };
@@ -601,9 +642,25 @@ export function oauthResource(
   ) as OAuthResourceAuth;
   Object.defineProperty(wrapped, OAUTH_RESOURCE_SYMBOL, {
     enumerable: false,
-    value: options,
+    value:
+      options.scopes === undefined && requiredScopes !== undefined
+        ? { ...options, scopes: requiredScopes }
+        : options,
   });
+  const oidc = list.length === 1 ? readOidcAuthMetadata(list[0]!) : undefined;
+  if (oidc !== undefined) {
+    Object.defineProperty(wrapped, OAUTH_RESOURCE_OIDC_SYMBOL, {
+      enumerable: false,
+      value: oidc,
+    });
+  }
   return wrapped;
+}
+
+function hasRequiredScopes(auth: SessionAuthContext, requiredScopes: readonly string[]): boolean {
+  const claim = auth.attributes.scope;
+  const scopes = typeof claim === "string" ? claim.split(/\s+/) : (claim ?? []);
+  return requiredScopes.every((scope) => scopes.includes(scope));
 }
 
 /** @internal Reads OAuth resource metadata without widening `AuthFn`. */
@@ -612,6 +669,20 @@ export function readOAuthResourceOptions(
 ): OAuthResourceOptions | undefined {
   if (Array.isArray(auth)) return undefined;
   return (auth as Partial<OAuthResourceAuth>)[OAUTH_RESOURCE_SYMBOL];
+}
+
+/** @internal Reads the verified OIDC discovery URL carried through `oauthResource`. */
+export function readOAuthResourceOidcDiscoveryUrl(
+  auth: AuthFn<Request> | readonly AuthFn<Request>[],
+): string | undefined {
+  if (Array.isArray(auth)) return undefined;
+  return (auth as Partial<Record<typeof OAUTH_RESOURCE_OIDC_SYMBOL, string>>)[
+    OAUTH_RESOURCE_OIDC_SYMBOL
+  ];
+}
+
+function readOidcAuthMetadata(auth: AuthFn<Request>): string | undefined {
+  return (auth as Partial<Record<typeof OIDC_AUTH_SYMBOL, string>>)[OIDC_AUTH_SYMBOL];
 }
 
 /**
@@ -806,7 +877,27 @@ export function placeholderAuth(): AuthFn<Request> {
  * argument.
  */
 export function none<TEvent = unknown>(): AuthFn<TEvent> {
-  return () => ANONYMOUS_SESSION_AUTH_CONTEXT;
+  const auth: AuthFn<TEvent> = () => ANONYMOUS_SESSION_AUTH_CONTEXT;
+  Object.defineProperty(auth, EXPLICIT_PUBLIC_AUTH_SYMBOL, {
+    enumerable: false,
+    value: true,
+  });
+  return auth;
+}
+
+/** @internal Returns whether `none()` explicitly makes this auth walk public. */
+export function isExplicitPublicAuth<TEvent>(
+  auth: AuthFn<TEvent> | readonly AuthFn<TEvent>[],
+): boolean {
+  const list: readonly AuthFn<TEvent>[] = Array.isArray(auth)
+    ? (auth as readonly AuthFn<TEvent>[])
+    : [auth as AuthFn<TEvent>];
+  return list.some(
+    (item) =>
+      (item as Partial<Record<typeof EXPLICIT_PUBLIC_AUTH_SYMBOL, boolean>>)[
+        EXPLICIT_PUBLIC_AUTH_SYMBOL
+      ] === true,
+  );
 }
 
 /**
@@ -1198,7 +1289,7 @@ export function jwtEcdsa(config: VerifyJwtEcdsaConfig): AuthFn<Request> {
  * for {@link routeAuth}'s 401.
  */
 export function oidc(config: VerifyOidcConfig): AuthFn<Request> {
-  return withAuthChallenges(
+  const auth = withAuthChallenges<Request>(
     async (request) => {
       const token = extractBearerToken(request.headers.get("authorization"));
       const result = await verifyOidc(token, config);
@@ -1206,6 +1297,12 @@ export function oidc(config: VerifyOidcConfig): AuthFn<Request> {
     },
     [{ scheme: "Bearer" }],
   );
+  Object.defineProperty(auth, OIDC_AUTH_SYMBOL, {
+    enumerable: false,
+    value:
+      config.discoveryUrl ?? `${config.issuer.replace(/\/$/, "")}/.well-known/openid-configuration`,
+  });
+  return auth;
 }
 
 // ---------------------------------------------------------------------------
