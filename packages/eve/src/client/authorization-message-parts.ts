@@ -73,7 +73,7 @@ function normalizeAuthorizationDescription(
   displayName: string,
 ): string {
   if (description === `Authorization required for ${name}`) {
-    return `Authorization required for ${displayName}`;
+    return `Authorize ${displayName} to continue this agent session.`;
   }
 
   return description;
