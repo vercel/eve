@@ -75,7 +75,7 @@ describe("eve dist single-chunk module evaluation", () => {
       "src/internal/workflow/builtins.ts",
       "src/subagents/callback-step.ts",
       "src/subagents/adapter.ts",
-      "src/execution/turn-workflow.ts",
+      "src/execution/session-execution.ts",
       "src/execution/workflow-entry.ts",
       "src/execution/workflow-steps.ts",
     ].map((relative) => resolvePackageSourceFilePath(relative));

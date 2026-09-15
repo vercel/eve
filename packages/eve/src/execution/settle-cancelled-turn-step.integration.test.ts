@@ -142,7 +142,7 @@ describe("settleCancelledTurnStep handle store", () => {
         }),
       });
 
-      expect(getAgentHandleStore(result.sessionState.snapshot?.session.state)).toEqual({
+      expect(getAgentHandleStore(result.sessionState.snapshot.session.state)).toEqual({
         handles: [
           {
             address: RUNNING_HANDLE.address,
@@ -153,7 +153,7 @@ describe("settleCancelledTurnStep handle store", () => {
           PARKED_HANDLE,
         ],
       });
-      expect(result.sessionState.snapshot?.session.outputSchema).toBeUndefined();
+      expect(result.sessionState.snapshot.session.outputSchema).toBeUndefined();
       expect(bindSessionInstrumentationSpy).toHaveBeenCalledWith(
         expect.objectContaining({ agentName: "settle-cancel-handles" }),
       );
@@ -177,7 +177,7 @@ describe("settleCancelledTurnStep handle store", () => {
         sessionState: createDurableSessionState({ session }),
       });
 
-      expect(getAgentHandleStore(result.sessionState.snapshot?.session.state)).toEqual({
+      expect(getAgentHandleStore(result.sessionState.snapshot.session.state)).toEqual({
         handles: [
           {
             address: CLAIMED_HANDLE.address,

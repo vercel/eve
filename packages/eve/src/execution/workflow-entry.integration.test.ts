@@ -1,6 +1,12 @@
+import type { RunCreatedEventRequest } from "@workflow/world";
+import { DEFAULT_SESSION_TIMEOUT_MS } from "#execution/session-timeout.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { getWorld, resumeHook, start } from "#internal/workflow/runtime.js";
-import { hydrateWorkflowArguments } from "@workflow/core/serialization";
+import {
+  dehydrateWorkflowArguments,
+  hydrateWorkflowArguments,
+  hydrateStepReturnValue,
+} from "@workflow/core/serialization";
 
 import { createChannelAddress } from "#channel/channel-address.js";
 import { captureTurnEvents, filterEventsByType } from "#internal/testing/events.js";
@@ -8,12 +14,14 @@ import { createTestRuntime } from "#internal/testing/app-harness.js";
 import { waitForHook } from "#internal/testing/workflow-test-helpers.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { workflowEntry } from "#execution/workflow-entry.js";
+import { sessionInboxHookToken } from "#execution/session-inbox/address.js";
+import { sessionCommandHookToken } from "#execution/session-command-token.js";
 import {
   buildSessionAttributes,
   buildSubagentRootAttributes,
 } from "#execution/eve-workflow-attributes.js";
 import { createToolExecuteWithAuth } from "#execution/tool-auth.js";
-import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
+import { createWorkflowRuntime, waitForCommandHookOwner } from "#execution/workflow-runtime.js";
 import { normalizeEveAttributes } from "#runtime/attributes/normalize.js";
 import { ROOT_COMPILED_AGENT_NODE_ID } from "#compiler/manifest.js";
 import { ConnectionAuthorizationRequiredError } from "#connections/errors.js";
@@ -99,7 +107,7 @@ interface WeatherAuthRuntime {
  * A get_weather tool behind an interactive authorization: getToken always
  * requires sign-in, and completeAuthorization mints `weather-token` from the
  * `oauth-code` callback. Shared by the callback-resume and
- * challenge-stays-open driver tests.
+ * challenge-stays-open owner tests.
  */
 async function createWeatherAuthRuntime(agentName: string): Promise<WeatherAuthRuntime> {
   let completeCalls = 0;
@@ -210,6 +218,49 @@ function expectSingleTurn(events: readonly MessageStreamEvent[], turnId: string)
 }
 
 describe("workflowEntry integration", () => {
+  it("persists model output before settlement when a stream append exceeds the SDK flush window", async () => {
+    const runtime = await createTestRuntime({ agent: { name: "workflow-stream-order" } });
+    const world = await getWorld();
+    const append = world.streams.writeMulti!.bind(world.streams);
+    let delayedAppend: Promise<void> | undefined;
+    const write = vi.spyOn(world.streams, "writeMulti").mockImplementation(async (...args) => {
+      if (args[1].endsWith("_user") && delayedAppend === undefined) {
+        delayedAppend = new Promise((resolve) => setTimeout(resolve, 1_200));
+        await delayedAppend;
+      }
+      return await append(...args);
+    });
+    try {
+      await runtime.run(async () => {
+        const run = await start(workflowEntry, [
+          {
+            kind: "initial",
+            ownerDeploymentId: "dpl_inline",
+            input: { message: "Say hello to Alice." },
+            serializedContext: buildSerializedContext({
+              channelKind: "http",
+              mode: "conversation",
+            }),
+          },
+        ]);
+        const stream = captureTurnEvents(run);
+        try {
+          const events = await stream.nextTurn();
+          expect(delayedAppend).toBeDefined();
+          expect(filterEventsByType(events, "message.completed")).toHaveLength(1);
+          expectSingleTurn(events, "turn_0");
+          expect(events.at(-1)?.type).toBe("session.waiting");
+        } finally {
+          await delayedAppend;
+          stream.dispose();
+          await run.cancel();
+        }
+      });
+    } finally {
+      write.mockRestore();
+    }
+  });
+
   it("resumes normal follow-ups after an interactive authorization callback", async () => {
     const { completeCalls, runtime } = await createWeatherAuthRuntime(
       "workflow-entry-auth-followup",
@@ -219,6 +270,8 @@ describe("workflowEntry integration", () => {
     await runtime.run(async () => {
       const run = await start(workflowEntry, [
         {
+          kind: "initial",
+          ownerDeploymentId: "dpl_inline",
           input: { message: "Use the get_weather tool to check the weather in Lisbon." },
           serializedContext: buildSerializedContext({
             auth: {
@@ -258,9 +311,10 @@ describe("workflowEntry integration", () => {
           (event) => event.type === "session.waiting",
         );
         expect(parkBoundary.at(-1)?.type).toBe("session.waiting");
+        await expectHookClaims(run.runId, [sessionCommandHookToken(run.runId), continuationToken]);
 
-        await resumeHook(`${run.runId}:auth`, {
-          kind: "deliver",
+        await resumeHook(sessionCommandHookToken(run.runId), {
+          kind: "authorization-callback",
           payloads: [
             {
               authorizationCallback: {
@@ -300,10 +354,10 @@ describe("workflowEntry integration", () => {
         await waitForHook(
           { runId: run.runId },
           {
-            token: continuationToken,
+            token: sessionInboxHookToken(continuationToken),
           },
         );
-        await resumeHook(continuationToken, {
+        await resumeHook(sessionInboxHookToken(continuationToken), {
           kind: "send",
           payload: { message: "follow up after auth" },
         });
@@ -337,6 +391,8 @@ describe("workflowEntry integration", () => {
     await runtime.run(async () => {
       const run = await start(workflowEntry, [
         {
+          kind: "initial",
+          ownerDeploymentId: "dpl_inline",
           input: { message: "Use the get_weather tool to check the weather in Lisbon." },
           serializedContext: buildSerializedContext({
             auth: {
@@ -369,8 +425,11 @@ describe("workflowEntry integration", () => {
 
         // An ordinary message while the challenge is open runs as a normal
         // turn instead of queueing behind the callback.
-        await waitForHook({ runId: run.runId }, { token: continuationToken });
-        await resumeHook(continuationToken, {
+        await waitForHook(
+          { runId: run.runId },
+          { token: sessionInboxHookToken(continuationToken) },
+        );
+        await resumeHook(sessionInboxHookToken(continuationToken), {
           auth: {
             attributes: {},
             authenticator: "test-idp",
@@ -398,8 +457,8 @@ describe("workflowEntry integration", () => {
 
         // The callback still lands on the retained read and closes the
         // challenge exactly once.
-        await resumeHook(`${run.runId}:auth`, {
-          kind: "deliver",
+        await resumeHook(sessionCommandHookToken(run.runId), {
+          kind: "authorization-callback",
           payloads: [
             {
               authorizationCallback: {
@@ -429,7 +488,7 @@ describe("workflowEntry integration", () => {
         // The granted authorization serves the next explicit tool request.
         // (No waitForHook here: it only reports never-received hooks, and
         // the continuation hook already received the intervening message.)
-        await resumeHook(continuationToken, {
+        await resumeHook(sessionInboxHookToken(continuationToken), {
           auth: {
             attributes: {},
             authenticator: "test-idp",
@@ -473,6 +532,8 @@ describe("workflowEntry integration", () => {
     await runtime.run(async () => {
       const run = await start(workflowEntry, [
         {
+          kind: "initial",
+          ownerDeploymentId: "dpl_inline",
           input: { message: "Use the get_weather tool to check the weather in Lisbon." },
           serializedContext: buildSerializedContext({
             auth: {
@@ -496,13 +557,16 @@ describe("workflowEntry integration", () => {
           (event) => event.type === "authorization.required",
         );
 
-        await waitForHook({ runId: run.runId }, { token: continuationToken });
-        await resumeHook(continuationToken, {
+        await waitForHook(
+          { runId: run.runId },
+          { token: sessionInboxHookToken(continuationToken) },
+        );
+        await resumeHook(sessionInboxHookToken(continuationToken), {
           kind: "send",
           payload: { message: "This must not become a second task turn." },
         });
-        await resumeHook(`${run.runId}:auth`, {
-          kind: "deliver",
+        await resumeHook(sessionCommandHookToken(run.runId), {
+          kind: "authorization-callback",
           payloads: [
             {
               authorizationCallback: {
@@ -540,6 +604,8 @@ describe("workflowEntry integration", () => {
     await runtime.run(async () => {
       const run = await start(workflowEntry, [
         {
+          kind: "initial",
+          ownerDeploymentId: "dpl_inline",
           input: { message: "Use the get_weather tool to check the weather in Lisbon." },
           serializedContext: buildSerializedContext({
             auth: {
@@ -567,8 +633,11 @@ describe("workflowEntry integration", () => {
           (event) => event.type === "session.waiting",
         );
 
-        await waitForHook({ runId: run.runId }, { token: continuationToken });
-        await resumeHook(continuationToken, {
+        await waitForHook(
+          { runId: run.runId },
+          { token: sessionInboxHookToken(continuationToken) },
+        );
+        await resumeHook(sessionInboxHookToken(continuationToken), {
           kind: "send",
           payload: { message: "Use the get_weather tool to check the weather in Lisbon." },
         });
@@ -591,11 +660,17 @@ describe("workflowEntry integration", () => {
             connectionName: "weather",
           },
         };
-        await resumeHook(`${run.runId}:auth`, { kind: "deliver", payloads: [stalePayload] });
-        await resumeHook(`${run.runId}:auth`, { kind: "deliver", payloads: [stalePayload] });
+        await resumeHook(sessionCommandHookToken(run.runId), {
+          kind: "authorization-callback",
+          payloads: [stalePayload],
+        });
+        await resumeHook(sessionCommandHookToken(run.runId), {
+          kind: "authorization-callback",
+          payloads: [stalePayload],
+        });
 
-        await resumeHook(`${run.runId}:auth`, {
-          kind: "deliver",
+        await resumeHook(sessionCommandHookToken(run.runId), {
+          kind: "authorization-callback",
           payloads: [
             {
               authorizationCallback: {
@@ -627,6 +702,8 @@ describe("workflowEntry integration", () => {
     await runtime.run(async () => {
       const run = await start(workflowEntry, [
         {
+          kind: "initial",
+          ownerDeploymentId: "dpl_inline",
           input: { message: "Use the get_weather tool to check the weather in Lisbon." },
           serializedContext: buildSerializedContext({
             auth: {
@@ -658,17 +735,20 @@ describe("workflowEntry integration", () => {
         // A cancel with no active turn is consumed by the parked wait
         // without producing a parent turn. The callback must still surface
         // in the continued wait instead of stalling until unrelated
-        // session activity re-parks the driver.
-        await waitForHook({ runId: run.runId }, { token: continuationToken });
-        await resumeHook(continuationToken, { kind: "cancel" });
-        // Let the driver consume the no-op cancel and re-enter the parked
+        // session activity re-parks the owner.
+        await waitForHook(
+          { runId: run.runId },
+          { token: sessionInboxHookToken(continuationToken) },
+        );
+        await resumeHook(sessionInboxHookToken(continuationToken), { kind: "cancel" });
+        // Let the owner consume the no-op cancel and re-enter the parked
         // wait before the callback fires; back-to-back resumes could
         // otherwise surface the callback in the first wait iteration and
         // mask a wait that ignores callbacks after a consumed cancel.
         await new Promise((resolve) => setTimeout(resolve, 250));
 
-        await resumeHook(`${run.runId}:auth`, {
-          kind: "deliver",
+        await resumeHook(sessionCommandHookToken(run.runId), {
+          kind: "authorization-callback",
           payloads: [
             {
               authorizationCallback: {
@@ -711,6 +791,8 @@ describe("workflowEntry integration", () => {
     await runtime.run(async () => {
       const run = await start(workflowEntry, [
         {
+          kind: "initial",
+          ownerDeploymentId: "dpl_inline",
           input: { message: "hello there" },
           serializedContext: buildSerializedContext({
             acceptedDeploymentId: "dpl_inline",
@@ -726,14 +808,14 @@ describe("workflowEntry integration", () => {
       const hook = await waitForHook(
         { runId: run.runId },
         {
-          token: continuationToken,
+          token: sessionInboxHookToken(continuationToken),
         },
       );
 
       try {
         const firstTurn = await stream.nextTurn();
 
-        expect(hook.token).toBe(continuationToken);
+        expect(hook.token).toBe(sessionInboxHookToken(continuationToken));
         expect(firstTurn.at(-1)).toMatchObject({
           data: { continuationToken: "workflow-entry-conversation" },
           type: "session.waiting",
@@ -806,6 +888,8 @@ describe("workflowEntry integration", () => {
     await runtime.run(async () => {
       const run = await start(workflowEntry, [
         {
+          kind: "initial",
+          ownerDeploymentId: "dpl_inline",
           input: { message: "hello there" },
           serializedContext: buildSerializedContext({
             channelKind: "http",
@@ -820,6 +904,7 @@ describe("workflowEntry integration", () => {
           data: { continuationToken: run.runId },
           type: "session.waiting",
         });
+        await expectHookClaims(run.runId, [sessionCommandHookToken(run.runId)]);
       } finally {
         stream.dispose();
         await run.cancel();
@@ -834,6 +919,8 @@ describe("workflowEntry integration", () => {
     await runtime.run(async () => {
       const run = await start(workflowEntry, [
         {
+          kind: "initial",
+          ownerDeploymentId: "dpl_inline",
           input: { message: "identify these events" },
           serializedContext: buildSerializedContext({
             channelKind: "http",
@@ -900,6 +987,8 @@ describe("workflowEntry integration", () => {
     await runtime.run(async () => {
       const run = await start(workflowEntry, [
         {
+          kind: "initial",
+          ownerDeploymentId: "dpl_inline",
           input: { message: "hello there" },
           serializedContext: buildSerializedContext({
             channelKind: "http",
@@ -938,7 +1027,7 @@ describe("workflowEntry integration", () => {
         await waitForHook(
           { runId: replacement.id },
           {
-            token: continuationToken,
+            token: sessionInboxHookToken(continuationToken),
           },
         );
       } finally {
@@ -965,12 +1054,14 @@ describe("workflowEntry integration", () => {
     await runtime.run(async () => {
       const child = await start(workflowEntry, [
         {
+          kind: "initial",
+          ownerDeploymentId: "dpl_inline",
           input: { message: "delegated first turn" },
           serializedContext: buildSerializedContext({
             channelKind: "subagent",
             channelState: {
               callId: "call-1",
-              parentContinuationToken: childContinuationToken,
+              parentContinuationToken: sessionInboxHookToken(childContinuationToken),
               parentSessionId: "parent-session",
               subagentName: "researcher",
             },
@@ -1001,7 +1092,7 @@ describe("workflowEntry integration", () => {
             command: {
               caller: {
                 callId: "call-2",
-                replyTo: { kind: "hook", token: childContinuationToken },
+                replyTo: { kind: "hook", token: sessionInboxHookToken(childContinuationToken) },
                 subagentName: "researcher",
               },
               kind: "send",
@@ -1041,6 +1132,580 @@ describe("workflowEntry integration", () => {
     });
   });
 
+  it("forwards continued-turn HITL through the rebound caller", async () => {
+    const runtime = await createTestRuntime({
+      agent: { name: "workflow-entry-delegated-hitl-rebind" },
+    });
+    const workflowRuntime = createWorkflowRuntime({
+      compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
+    });
+    const firstCallerToken = "subagent:parent-session:call-1";
+
+    await runtime.run(async () => {
+      const child = await start(workflowEntry, [
+        {
+          kind: "initial",
+          ownerDeploymentId: "dpl_inline",
+          input: { message: "delegated first turn" },
+          serializedContext: {
+            ...buildSerializedContext({
+              channelKind: "subagent",
+              channelState: {
+                callId: "call-1",
+                parentContinuationToken: sessionInboxHookToken(firstCallerToken),
+                parentSessionId: "parent-session",
+                subagentName: "researcher",
+              },
+              continuationToken: firstCallerToken,
+              mode: "conversation",
+            }),
+            "eve.capabilities": { requestInput: true },
+          },
+        },
+      ]);
+      const stream = captureTurnEvents(child);
+
+      try {
+        await withTimeout(stream.nextTurn(), "delegated first turn");
+        await waitForRuntimeActionResult(child.runId, "call-1");
+
+        await expect(
+          workflowRuntime.dispatchSession({
+            command: {
+              caller: {
+                callId: "call-2",
+                replyTo: { kind: "hook", token: sessionCommandHookToken(child.runId) },
+                subagentName: "researcher",
+              },
+              kind: "send",
+              payload: { message: "Use the ask_question tool exactly once to ask for a color." },
+            },
+            sessionId: child.runId,
+          }),
+        ).resolves.toEqual({ sessionId: child.runId, status: "accepted" });
+
+        const secondTurn = await withTimeout(stream.nextTurn(), "delegated HITL turn");
+        expect(filterEventsByType(secondTurn, "input.requested")).toHaveLength(1);
+        await expect(waitForSubagentInputRequest(child.runId, "call-2")).resolves.toMatchObject({
+          callId: "call-2",
+          kind: "subagent-input-request",
+          subagentName: "researcher",
+        });
+      } finally {
+        stream.dispose();
+        await child.cancel();
+      }
+    });
+  }, 60_000);
+
+  describe("deployment handoff", () => {
+    const followUp = (acceptedDeploymentId: string, message: string, deliveryId: string) => ({
+      auth: null,
+      delivery: {
+        acceptedDeploymentId,
+        channelKind: "http",
+        channelName: "test",
+        deliveryId,
+      },
+      kind: "send" as const,
+      payload: { message },
+    });
+
+    it.each([undefined, 60_000, false] as const)(
+      "renews the configured lifetime across handoffs and keeps the original stream (%s)",
+      async (sessionTimeoutMs) => {
+        const runtime = await createTestRuntime({ agent: { name: "workflow-entry-handoff" } });
+
+        await runtime.run(async () => {
+          const anchor = await start(workflowEntry, [
+            {
+              kind: "initial",
+              sessionTimeoutMs,
+              ownerDeploymentId: "dpl_a",
+              input: { message: "hello from a" },
+              serializedContext: buildSerializedContext({
+                acceptedDeploymentId: "dpl_a",
+                channelKind: "http",
+                mode: "conversation",
+              }),
+            },
+          ]);
+          const stream = captureTurnEvents(anchor);
+          const world = await getWorld();
+          const workflowRuntime = createWorkflowRuntime({
+            compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
+          });
+          let completed = false;
+          try {
+            expect((await stream.nextTurn()).at(-1)?.type).toBe("session.waiting");
+
+            const originalTimer =
+              sessionTimeoutMs === false ? undefined : await readSessionTimer(anchor.runId);
+
+            await expect(
+              workflowRuntime.dispatchSession({
+                command: followUp("dpl_b", "hello from b", "delivery-b"),
+                sessionId: anchor.runId,
+              }),
+            ).resolves.toMatchObject({ sessionId: anchor.runId, status: "accepted" });
+
+            const secondTurn = await stream.nextTurn();
+            expect(secondTurn.at(-1)?.type).toBe("session.waiting");
+            expect(
+              secondTurn.some(
+                (event) =>
+                  event.type === "message.completed" &&
+                  event.data.message?.includes("hello from b") === true,
+              ),
+            ).toBe(true);
+
+            // The stable inbox now belongs to a successor run; the original run
+            // holds only its anchor (plus the SDK's abort-signal hook from its
+            // own earlier turn).
+            const successor = await waitForCommandHookOwner(sessionCommandHookToken(anchor.runId));
+            expect(successor.runId).not.toBe(anchor.runId);
+            const successorTimer =
+              sessionTimeoutMs === false ? undefined : await readSessionTimer(successor.runId);
+            if (
+              sessionTimeoutMs !== false &&
+              originalTimer !== undefined &&
+              successorTimer !== undefined
+            ) {
+              expect(successorTimer.deadline.getTime()).toBeGreaterThan(
+                originalTimer.deadline.getTime(),
+              );
+              const owner = await world.runs.get(successor.runId);
+              expect(successorTimer.deadline.getTime()).toBeGreaterThanOrEqual(
+                (owner.startedAt ?? owner.createdAt).getTime() +
+                  (sessionTimeoutMs ?? DEFAULT_SESSION_TIMEOUT_MS),
+              );
+              await vi.waitFor(async () =>
+                expect((await world.runs.get(originalTimer.runId)).status).toBe("cancelled"),
+              );
+            }
+            // A timer from the old owner can win its race with cancellation.
+            await resumeHook(sessionCommandHookToken(anchor.runId), { kind: "session-timeout" });
+            const anchorHooks = await world.hooks.list({ runId: anchor.runId });
+            expect(
+              anchorHooks.data
+                .map((hook) => hook.token)
+                .filter((token) => !token.startsWith("abrt_")),
+            ).toEqual([`${anchor.runId}:anchor`]);
+
+            // A third delivery through the stable session id reaches the successor
+            // and still streams on the original run.
+            await expect(
+              workflowRuntime.dispatchSession({
+                command: followUp("dpl_b", "third message", "delivery-c"),
+                sessionId: anchor.runId,
+              }),
+            ).resolves.toMatchObject({ status: "accepted" });
+            const thirdTurn = await stream.nextTurn();
+            expect(
+              thirdTurn.some(
+                (event) =>
+                  event.type === "message.completed" &&
+                  event.data.message?.includes("third message") === true,
+              ),
+            ).toBe(true);
+
+            if (successorTimer !== undefined) {
+              expect(await readSessionTimer(successor.runId)).toEqual(successorTimer);
+            }
+            await workflowRuntime.dispatchSession({
+              command: followUp("dpl_c", "fourth message", "delivery-d"),
+              sessionId: anchor.runId,
+            });
+            expect((await stream.nextTurn()).at(-1)?.type).toBe("session.waiting");
+            const nextOwner = await waitForCommandHookOwner(sessionCommandHookToken(anchor.runId));
+            expect(nextOwner.runId).not.toBe(successor.runId);
+            if (sessionTimeoutMs !== false && successorTimer !== undefined) {
+              const nextTimer = await readSessionTimer(nextOwner.runId);
+              const owner = await world.runs.get(nextOwner.runId);
+              expect(nextTimer.deadline.getTime()).toBeGreaterThan(
+                successorTimer.deadline.getTime(),
+              );
+              expect(nextTimer.deadline.getTime()).toBeGreaterThanOrEqual(
+                (owner.startedAt ?? owner.createdAt).getTime() +
+                  (sessionTimeoutMs ?? DEFAULT_SESSION_TIMEOUT_MS),
+              );
+              await vi.waitFor(async () =>
+                expect((await world.runs.get(successorTimer.runId)).status).toBe("cancelled"),
+              );
+            } else {
+              for (const runId of [anchor.runId, successor.runId, nextOwner.runId]) {
+                const steps = await world.steps.list({ runId });
+                expect(
+                  steps.data.some((step) => step.stepName.endsWith("//startSessionTimeoutStep")),
+                ).toBe(false);
+              }
+            }
+
+            // Reset ends the session on the successor; the anchor closes the stream once.
+            await workflowRuntime.dispatchSession({
+              command: { kind: "reset", reason: "handoff test" },
+              sessionId: anchor.runId,
+            });
+            await expect(anchor.returnValue).resolves.toEqual({ output: "" });
+            completed = true;
+            expect(await listCallerStepNames(anchor.runId)).toEqual([]);
+          } finally {
+            stream.dispose();
+            if (!completed) await anchor.cancel();
+          }
+        });
+      },
+    );
+
+    it("recovers the original owner when target nested-state validation fails", async () => {
+      const runtime = await createTestRuntime({ agent: { name: "handoff-validation" } });
+      await runtime.run(async () => {
+        const anchor = await start(workflowEntry, [
+          {
+            kind: "initial",
+            ownerDeploymentId: "dpl_a",
+            sessionTimeoutMs: false,
+            input: { message: "Alice opens a research session." },
+            serializedContext: buildSerializedContext({
+              acceptedDeploymentId: "dpl_a",
+              channelKind: "http",
+              mode: "conversation",
+            }),
+          },
+        ]);
+        const stream = captureTurnEvents(anchor);
+        const world = await getWorld();
+        const workflowRuntime = createWorkflowRuntime({
+          compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
+        });
+        const rewritten = new Map<string, Promise<unknown>>();
+        let candidateId: string | undefined;
+        // Model a value readable by the source but incompatible with the target.
+        // Only the candidate snapshot changes; the source retains its healthy state.
+        const incompatibleInput = (runId: string, encoded: unknown): Promise<unknown> => {
+          let pending = rewritten.get(runId);
+          if (pending === undefined) {
+            pending = (async () => {
+              const args = (await hydrateWorkflowArguments(encoded, runId, undefined)) as [
+                import("./workflow-entry-input.js").HandoffWorkflowEntryInput,
+              ];
+              expect(args[0].kind).toBe("handoff");
+              candidateId = runId;
+              const session = args[0].checkpoint.sessionState.snapshot.session;
+              Object.assign(session, {
+                state: {
+                  ...session.state,
+                  "eve.tasks": {
+                    version: 2,
+                    tasks: [
+                      {
+                        taskId: "task",
+                        taskRunId: "run",
+                        taskInboxToken: 42,
+                        createdByTurnId: "turn",
+                        metadata: { kind: "tool", name: "research" },
+                        terminalView: {
+                          taskId: "task",
+                          metadata: { kind: "tool", name: "research" },
+                          status: "cancelled",
+                        },
+                      },
+                    ],
+                  },
+                },
+              });
+              const operations: Promise<void>[] = [];
+              const result = await dehydrateWorkflowArguments(args, runId, undefined, operations);
+              await Promise.all(operations);
+              return result;
+            })();
+            rewritten.set(runId, pending);
+          }
+          return pending;
+        };
+        const createEvent = world.events.create.bind(world.events);
+        const created = vi.spyOn(world.events, "create").mockImplementation(async (...args) => {
+          const [runId] = args;
+          const event = args[1] as (typeof args)[1] | RunCreatedEventRequest;
+          if (event.eventType === "run_created" && event.eventData.deploymentId === "dpl_b") {
+            event.eventData.input = await incompatibleInput(runId, event.eventData.input);
+          }
+          return createEvent(...args);
+        });
+        const queue = world.queue.bind(world);
+        const queued = vi.spyOn(world, "queue").mockImplementation(async (...args) => {
+          const message = args[1] as {
+            runId?: string;
+            runInput?: { deploymentId?: string; input: unknown };
+          };
+          if (message.runId !== undefined && message.runInput?.deploymentId === "dpl_b") {
+            message.runInput.input = await incompatibleInput(message.runId, message.runInput.input);
+          }
+          return queue(...args);
+        });
+        try {
+          await stream.nextTurn();
+          await workflowRuntime.dispatchSession({
+            command: followUp(
+              "dpl_b",
+              "Bob requests the next research step.",
+              "validation-trigger",
+            ),
+            sessionId: anchor.runId,
+          });
+          expect((await stream.nextTurn()).at(-1)?.type).toBe("session.waiting");
+          expect(candidateId).toBeDefined();
+          expect((await waitForCommandHookOwner(sessionCommandHookToken(anchor.runId))).runId).toBe(
+            anchor.runId,
+          );
+          expect(
+            created.mock.calls.some(
+              ([runId, event]) => runId === candidateId && event.eventType === "hook_created",
+            ),
+          ).toBe(false);
+          const candidateHooks = await world.hooks.list({ runId: candidateId! });
+          expect(candidateHooks.data).toEqual([]);
+          const steps = await world.steps.list({ runId: anchor.runId, resolveData: "all" });
+          const turns = steps.data.filter((step) => step.stepName.endsWith("//turnStep"));
+          expect(turns).toHaveLength(2);
+          const histories = await Promise.all(
+            turns.map(async (step) => {
+              const output = await hydrateStepReturnValue(step.output, anchor.runId, undefined);
+              return output.sessionState.snapshot.session.history as Array<{
+                role: string;
+                content: unknown;
+              }>;
+            }),
+          );
+          const deliveries = histories.map((history) =>
+            history.filter(
+              (message) =>
+                message.role === "user" &&
+                JSON.stringify(message.content).includes("Bob requests the next research step."),
+            ),
+          );
+          expect(deliveries.map((messages) => messages.length).sort()).toEqual([0, 1]);
+        } finally {
+          created.mockRestore();
+          queued.mockRestore();
+          await workflowRuntime.dispatchSession({
+            command: { kind: "reset", reason: "validation test" },
+            sessionId: anchor.runId,
+          });
+          await anchor.returnValue;
+          stream.dispose();
+        }
+      });
+    });
+
+    it("retains a message accepted just before durable hook disposal", async () => {
+      const runtime = await createTestRuntime({ agent: { name: "workflow-entry-handoff" } });
+
+      await runtime.run(async () => {
+        const anchor = await start(workflowEntry, [
+          {
+            kind: "initial",
+            ownerDeploymentId: "dpl_a",
+            input: { message: "hello from a" },
+            serializedContext: buildSerializedContext({
+              acceptedDeploymentId: "dpl_a",
+              channelKind: "http",
+              mode: "conversation",
+            }),
+          },
+        ]);
+        const stream = captureTurnEvents(anchor);
+        const world = await getWorld();
+        const workflowRuntime = createWorkflowRuntime({
+          compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
+        });
+        let injected = false;
+        const createEvent = world.events.create.bind(world.events);
+        const spy = vi.spyOn(world.events, "create").mockImplementation(async (...args) => {
+          const [runId, event] = args;
+          if (
+            !injected &&
+            runId === anchor.runId &&
+            event.eventType === "hook_disposed" &&
+            event.eventData?.token === sessionCommandHookToken(anchor.runId)
+          ) {
+            injected = true;
+            for (let index = 0; index < 3; index++) {
+              await resumeHook(sessionCommandHookToken(anchor.runId), {
+                kind: "send",
+                payload: { message: `Alice sends input ${index} during release.` },
+              });
+            }
+          }
+          return await createEvent(...args);
+        });
+        try {
+          expect((await stream.nextTurn()).at(-1)?.type).toBe("session.waiting");
+
+          await expect(
+            workflowRuntime.dispatchSession({
+              command: followUp("dpl_b", "hello from b", "delivery-b"),
+              sessionId: anchor.runId,
+            }),
+          ).resolves.toMatchObject({ sessionId: anchor.runId, status: "accepted" });
+
+          const secondTurn = await stream.nextTurn();
+          expect(secondTurn.at(-1)?.type).toBe("session.waiting");
+          expect(
+            secondTurn.some(
+              (event) =>
+                event.type === "message.completed" &&
+                event.data.message?.includes("hello from b") === true,
+            ),
+          ).toBe(true);
+
+          expect(injected).toBe(true);
+          spy.mockRestore();
+          const owner = await waitForCommandHookOwner(sessionCommandHookToken(anchor.runId));
+          expect(owner.runId).toBe(anchor.runId);
+          await workflowRuntime.dispatchSession({
+            command: followUp("dpl_b", "Bob sends a later sentinel.", "sentinel"),
+            sessionId: anchor.runId,
+          });
+          await stream.nextTurn();
+          let saved: string | undefined;
+          await vi.waitFor(
+            async () => {
+              const steps = await world.steps.list({
+                runId: owner.runId,
+                resolveData: "all",
+                pagination: { limit: 1000 },
+              });
+              for (const step of steps.data) {
+                if (!step.stepName.endsWith("//turnStep") || step.output === undefined) continue;
+                const result = await hydrateStepReturnValue(step.output, owner.runId, undefined);
+                const history = JSON.stringify(result.sessionState.snapshot.session.history);
+                if (history.includes("Bob sends a later sentinel.")) saved = history;
+              }
+              expect(saved).toBeDefined();
+            },
+            { timeout: 5000 },
+          );
+          for (let index = 0; index < 3; index++) {
+            expect(saved).toContain(`Alice sends input ${index} during release.`);
+          }
+          expect(saved!.indexOf("Alice sends input 0")).toBeLessThan(
+            saved!.indexOf("Alice sends input 1"),
+          );
+          expect(saved!.indexOf("Alice sends input 1")).toBeLessThan(
+            saved!.indexOf("Alice sends input 2"),
+          );
+        } finally {
+          spy.mockRestore();
+          stream.dispose();
+          if ((await anchor.status) === "running") await anchor.cancel();
+        }
+      });
+    });
+
+    it("keeps an alias-bearing session on its owner and executes the accepted delivery", async () => {
+      const runtime = await createTestRuntime({ agent: { name: "workflow-entry-handoff-alias" } });
+      const continuationToken = "http:workflow-entry-handoff-alias";
+
+      await runtime.run(async () => {
+        const owner = await start(workflowEntry, [
+          {
+            kind: "initial",
+            ownerDeploymentId: "dpl_a",
+            input: { message: "hello from a" },
+            serializedContext: buildSerializedContext({
+              acceptedDeploymentId: "dpl_a",
+              channelKind: "http",
+              continuationToken,
+              mode: "conversation",
+            }),
+          },
+        ]);
+        const stream = captureTurnEvents(owner);
+        const workflowRuntime = createWorkflowRuntime({
+          compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
+        });
+        try {
+          expect((await stream.nextTurn()).at(-1)?.type).toBe("session.waiting");
+
+          await expect(
+            workflowRuntime.dispatchContinuation({
+              command: followUp("dpl_b", "hello from b", "delivery-b"),
+              continuationToken,
+            }),
+          ).resolves.toMatchObject({ sessionId: owner.runId, status: "accepted" });
+
+          const secondTurn = await stream.nextTurn();
+          expect(
+            secondTurn.some(
+              (event) =>
+                event.type === "message.completed" &&
+                event.data.message?.includes("hello from b") === true,
+            ),
+          ).toBe(true);
+          await expect(
+            waitForCommandHookOwner(sessionInboxHookToken(continuationToken)),
+          ).resolves.toMatchObject({
+            runId: owner.runId,
+          });
+          await expect(
+            waitForCommandHookOwner(sessionCommandHookToken(owner.runId)),
+          ).resolves.toMatchObject({ runId: owner.runId });
+        } finally {
+          stream.dispose();
+          await owner.cancel();
+        }
+      });
+    });
+
+    it("keeps the session on the current owner when it is not idle", async () => {
+      const runtime = await createTestRuntime({ agent: { name: "workflow-entry-handoff-busy" } });
+
+      await runtime.run(async () => {
+        const run = await start(workflowEntry, [
+          {
+            kind: "initial",
+            ownerDeploymentId: "dpl_a",
+            input: { message: "hello from a" },
+            serializedContext: buildSerializedContext({
+              acceptedDeploymentId: "dpl_a",
+              channelKind: "http",
+              mode: "conversation",
+            }),
+          },
+        ]);
+        const stream = captureTurnEvents(run);
+        const workflowRuntime = createWorkflowRuntime({
+          compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
+        });
+        try {
+          expect((await stream.nextTurn()).at(-1)?.type).toBe("session.waiting");
+
+          // Two deliveries accepted back to back: the second is pending when the
+          // first is evaluated, so neither may trigger a handoff.
+          await Promise.all([
+            workflowRuntime.dispatchSession({
+              command: followUp("dpl_b", "first burst", "delivery-1"),
+              sessionId: run.runId,
+            }),
+            workflowRuntime.dispatchSession({
+              command: followUp("dpl_b", "second burst", "delivery-2"),
+              sessionId: run.runId,
+            }),
+          ]);
+          const turn = await stream.nextTurn();
+          expect(turn.at(-1)?.type).toBe("session.waiting");
+          expect((await stream.nextTurn()).at(-1)?.type).toBe("session.waiting");
+          const owner = await waitForCommandHookOwner(sessionCommandHookToken(run.runId));
+          expect(owner.runId).toBe(run.runId);
+        } finally {
+          stream.dispose();
+          await run.cancel();
+        }
+      });
+    });
+  });
+
   it("exits a competing continuation owner before its first turn", async () => {
     const runtime = await createTestRuntime({ agent: { name: "workflow-entry-hook-owner" } });
     const continuationToken = "http:workflow-entry-hook-owner";
@@ -1048,6 +1713,8 @@ describe("workflowEntry integration", () => {
     await runtime.run(async () => {
       const owner = await start(workflowEntry, [
         {
+          kind: "initial",
+          ownerDeploymentId: "dpl_inline",
           input: { message: "owner message" },
           serializedContext: buildSerializedContext({
             channelKind: "http",
@@ -1057,13 +1724,18 @@ describe("workflowEntry integration", () => {
         },
       ]);
       const ownerStream = captureTurnEvents(owner);
-      await waitForHook({ runId: owner.runId }, { token: continuationToken });
+      await waitForHook(
+        { runId: owner.runId },
+        { token: sessionInboxHookToken(continuationToken) },
+      );
 
       const firstTurn = await ownerStream.nextTurn();
       expect(firstTurn.at(-1)?.type).toBe("session.waiting");
 
       const contender = await start(workflowEntry, [
         {
+          kind: "initial",
+          ownerDeploymentId: "dpl_inline",
           continuationConflictCommand: {
             auth: null,
             kind: "send",
@@ -1111,6 +1783,8 @@ describe("workflowEntry integration", () => {
     await runtime.run(async () => {
       const run = await start(workflowEntry, [
         {
+          kind: "initial",
+          ownerDeploymentId: "dpl_inline",
           input: { message: "summarize this", outputSchema },
           serializedContext: buildSerializedContext({
             channelKind: "http",
@@ -1124,7 +1798,7 @@ describe("workflowEntry integration", () => {
       await waitForHook(
         { runId: run.runId },
         {
-          token: continuationToken,
+          token: sessionInboxHookToken(continuationToken),
         },
       );
 
@@ -1139,7 +1813,7 @@ describe("workflowEntry integration", () => {
         });
         expect(firstTurn.at(-1)?.type).toBe("session.waiting");
 
-        await resumeHook(continuationToken, {
+        await resumeHook(sessionInboxHookToken(continuationToken), {
           kind: "send",
           payload: { message: "follow up without structured output" },
         });
@@ -1161,6 +1835,8 @@ describe("workflowEntry integration", () => {
     await runtime.run(async () => {
       const run = await start(workflowEntry, [
         {
+          kind: "initial",
+          ownerDeploymentId: "dpl_inline",
           input: { message: "hello there" },
           serializedContext: buildSerializedContext({
             channelKind: "http",
@@ -1202,6 +1878,8 @@ describe("workflowEntry integration", () => {
     await runtime.run(async () => {
       const run = await start(workflowEntry, [
         {
+          kind: "initial",
+          ownerDeploymentId: "dpl_inline",
           input: { message: "hello there" },
           serializedContext: buildSerializedContext({
             channelKind: "http",
@@ -1233,6 +1911,8 @@ describe("workflowEntry integration", () => {
     await runtime.run(async () => {
       const run = await start(workflowEntry, [
         {
+          kind: "initial",
+          ownerDeploymentId: "dpl_inline",
           input: { message: "hello there" },
           serializedContext: buildSerializedContext({
             channelKind: "http",
@@ -1267,6 +1947,8 @@ describe("workflowEntry integration", () => {
         workflowEntry,
         [
           {
+            kind: "initial",
+            ownerDeploymentId: "dpl_inline",
             input: { message: "session tag round-trip" },
             serializedContext,
           },
@@ -1323,6 +2005,8 @@ describe("workflowEntry integration", () => {
         workflowEntry,
         [
           {
+            kind: "initial",
+            ownerDeploymentId: "dpl_inline",
             input: { message: "subagent tag round-trip" },
             serializedContext,
           },
@@ -1472,6 +2156,24 @@ async function withTimeout<T>(promise: Promise<T>, label: string): Promise<T> {
   }
 }
 
+async function expectHookClaims(runId: string, tokens: string[]): Promise<void> {
+  const events = await (
+    await getWorld()
+  ).events.list({
+    runId,
+    pagination: { limit: 1000 },
+    resolveData: "all",
+  });
+  const claims = events.data.flatMap((event) =>
+    event.eventType === "hook_created" ? [event.eventData.token] : [],
+  );
+  const cancellation = claims.filter((token) => token.startsWith("abrt_"));
+  expect(cancellation).toHaveLength(1);
+  expect(claims.filter((token) => !token.startsWith("abrt_")).sort()).toEqual(
+    tokens.map(sessionInboxHookToken).sort(),
+  );
+}
+
 async function waitForRuntimeActionResult(runId: string, callId: string): Promise<unknown> {
   const world = await getWorld();
   const deadline = Date.now() + 10_000;
@@ -1503,6 +2205,36 @@ async function waitForRuntimeActionResult(runId: string, callId: string): Promis
   );
 }
 
+async function waitForSubagentInputRequest(runId: string, callId: string): Promise<unknown> {
+  const world = await getWorld();
+  const deadline = Date.now() + 10_000;
+
+  while (Date.now() < deadline) {
+    const events = await world.events.list({
+      pagination: { limit: 1000 },
+      resolveData: "all",
+      runId,
+    });
+    for (const event of events.data) {
+      if (event.eventType !== "hook_received") continue;
+      const payload = await hydrateWorkflowArguments(event.eventData.payload, runId, undefined);
+      if (
+        typeof payload === "object" &&
+        payload !== null &&
+        "kind" in payload &&
+        payload.kind === "subagent-input-request" &&
+        "callId" in payload &&
+        payload.callId === callId
+      ) {
+        return payload;
+      }
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+
+  throw new Error(`Timed out waiting for a subagent input request from caller "${callId}".`);
+}
+
 function hasSubagentResult(value: unknown, callId: string): boolean {
   if (
     typeof value !== "object" ||
@@ -1522,4 +2254,23 @@ function hasSubagentResult(value: unknown, callId: string): boolean {
       "callId" in result &&
       result.callId === callId,
   );
+}
+
+async function readSessionTimer(ownerRunId: string): Promise<{ runId: string; deadline: Date }> {
+  const world = await getWorld();
+  let timer: { runId: string; deadline: Date } | undefined;
+  await vi.waitFor(async () => {
+    const steps = await world.steps.list({ runId: ownerRunId, resolveData: "all" });
+    const start = steps.data.find((step) => step.stepName.endsWith("//startSessionTimeoutStep"));
+    expect(start?.output).toBeDefined();
+    const result = (await hydrateStepReturnValue(start!.output, ownerRunId, undefined)) as {
+      runId: string;
+    };
+    const run = await world.runs.get(result.runId);
+    const [input] = (await hydrateWorkflowArguments(run.input, run.runId, undefined)) as [
+      { deadline: Date },
+    ];
+    timer = { runId: run.runId, deadline: input.deadline };
+  });
+  return timer!;
 }

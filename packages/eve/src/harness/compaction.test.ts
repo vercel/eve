@@ -786,22 +786,6 @@ describe("compactMessages: summarization fallback", () => {
     expect(result.at(-1)).toEqual(task);
   });
 
-  it("does not replay unknown legacy provenance as the user's latest request", async () => {
-    const task = user("Summarize the report.");
-    const legacy = {
-      content: "A background task completed.",
-      kind: "legacy.unknown",
-      role: "user",
-    } as const;
-    const [call, resultMsg] = toolExchange({ callId: "call-1", payloadChars: 100 });
-    const { result } = await compact(
-      [user("old notes ".repeat(4_000)), task, legacy, call, resultMsg],
-      { recentWindowSize: 2, threshold: 2_048 },
-    );
-
-    expect(result.at(-1)).toEqual(task);
-  });
-
   it("makes room for the original task before keeping a large tool-result tail", async () => {
     const task = user("Keep these requirements. ".repeat(25));
     const [call, resultMsg] = toolExchange({ callId: "call-1", payloadChars: 600 });

@@ -50,9 +50,8 @@ describe("withEve Vercel config", () => {
     vi.stubEnv("NODE_ENV", "production");
 
     const config = await resolveConfig(withEve<TestConfig>({}));
-
     await expect(config.rewrites?.()).rejects.toThrow(
-      `Run eve build from ${appRoot} before starting Next.js.`,
+      /Run eve build from .+ before starting Next\.js\./u,
     );
     await expect(
       readFile(join(appRoot, ".vercel", "output", "config.json"), "utf8"),

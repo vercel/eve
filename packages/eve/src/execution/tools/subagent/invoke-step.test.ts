@@ -83,7 +83,7 @@ const called = {
 };
 beforeEach(() => {
   vi.clearAllMocks();
-  vi.mocked(readDurableSession).mockResolvedValue(session as never);
+  vi.mocked(readDurableSession).mockReturnValue(session as never);
 });
 
 describe("owner agent invocation dispatch", () => {
@@ -103,12 +103,11 @@ describe("owner agent invocation dispatch", () => {
           phase: "claimed",
           ownerId: "task-1",
         }),
-        parentToken: "agent-reply",
-        taskId: "task-1",
+        reply: { kind: "reply", parentToken: "agent-reply", taskId: "task-1" },
       }),
     );
     expect(dispatched).toMatchObject({ agentId: "agent-1", kind: "dispatched" });
-    expect(getAgentHandleStore(dispatched.sessionState.snapshot?.session.state)?.handles).toEqual([
+    expect(getAgentHandleStore(dispatched.sessionState.snapshot.session.state)?.handles).toEqual([
       expect.objectContaining({
         identity: availableRecord.identity,
         phase: "claimed",
@@ -129,7 +128,7 @@ describe("owner agent invocation dispatch", () => {
       ...session,
       state: setAgentHandleStore(undefined, { handles: [claimed] }),
     };
-    vi.mocked(readDurableSession).mockResolvedValue(claimedSession as never);
+    vi.mocked(readDurableSession).mockReturnValue(claimedSession as never);
     vi.mocked(prepareOwnerAgentInvocation).mockResolvedValue({
       ...prepared,
       session: claimedSession,
@@ -166,7 +165,7 @@ describe("owner agent invocation dispatch", () => {
     expect(first.kind).toBe("dispatched");
     const firstHandle =
       first.kind === "dispatched"
-        ? getAgentHandleStore(first.sessionState.snapshot?.session.state)?.handles[0]
+        ? getAgentHandleStore(first.sessionState.snapshot.session.state)?.handles[0]
         : undefined;
     expect(firstHandle).toMatchObject({
       identity: { id: "agent-1" },
@@ -174,7 +173,7 @@ describe("owner agent invocation dispatch", () => {
       phase: "claimed",
     });
 
-    vi.mocked(readDurableSession).mockResolvedValue({
+    vi.mocked(readDurableSession).mockReturnValue({
       ...session,
       state: setAgentHandleStore(undefined, { handles: [availableRecord] }),
     } as never);
@@ -227,7 +226,7 @@ describe("owner agent invocation dispatch", () => {
         taskInboxToken: "task-token",
         taskRunId: "task-run",
       });
-      vi.mocked(readDurableSession).mockResolvedValue(indexedSession as never);
+      vi.mocked(readDurableSession).mockReturnValue(indexedSession as never);
       vi.mocked(readLatestTaskView).mockResolvedValue({
         metadata: { kind: "subagent", name: "research" },
         status: "working",
@@ -293,7 +292,7 @@ describe("owner agent invocation dispatch", () => {
       phase: "reserved" as const,
       ownerId: "task-1",
     };
-    vi.mocked(readDurableSession).mockResolvedValue({
+    vi.mocked(readDurableSession).mockReturnValue({
       ...session,
       state: setAgentHandleStore(undefined, { handles: [reserved] }),
     } as never);
@@ -325,7 +324,7 @@ describe("owner agent invocation dispatch", () => {
         }),
       }),
     );
-    expect(getAgentHandleStore(dispatched.sessionState.snapshot?.session.state)?.handles).toEqual(
+    expect(getAgentHandleStore(dispatched.sessionState.snapshot.session.state)?.handles).toEqual(
       expect.arrayContaining([expect.objectContaining({ ownerId: "task-1", phase: "claimed" })]),
     );
   });
@@ -339,7 +338,7 @@ describe("task-owned agent settlement", () => {
       phase: "claimed" as const,
       ownerId: "task-1",
     };
-    vi.mocked(readDurableSession).mockResolvedValue({
+    vi.mocked(readDurableSession).mockReturnValue({
       ...session,
       state: setAgentHandleStore(undefined, { handles: [claimed] }),
     } as never);
@@ -368,8 +367,7 @@ describe("task-owned agent settlement", () => {
       taskId: "task-1",
     });
 
-    const handles =
-      getAgentHandleStore(settled.sessionState.snapshot?.session.state)?.handles ?? [];
+    const handles = getAgentHandleStore(settled.sessionState.snapshot.session.state)?.handles ?? [];
     expect(handles).toEqual(
       kind === "parked" ? [expect.objectContaining({ phase: "available" })] : [],
     );
@@ -382,7 +380,7 @@ describe("task-owned agent settlement", () => {
       ownerId: "workflow-run-1",
       phase: "claimed" as const,
     };
-    vi.mocked(readDurableSession).mockResolvedValue({
+    vi.mocked(readDurableSession).mockReturnValue({
       ...session,
       state: setAgentHandleStore(undefined, { handles: [claimed] }),
     } as never);
@@ -392,7 +390,7 @@ describe("task-owned agent settlement", () => {
       sessionState: {} as never,
     });
 
-    expect(getAgentHandleStore(released.sessionState.snapshot?.session.state)?.handles).toEqual([
+    expect(getAgentHandleStore(released.sessionState.snapshot.session.state)?.handles).toEqual([
       availableRecord,
     ]);
   });
@@ -404,7 +402,7 @@ describe("task-owned agent settlement", () => {
       ownerId: "workflow-run-1",
       phase: "claimed" as const,
     };
-    vi.mocked(readDurableSession).mockResolvedValue({
+    vi.mocked(readDurableSession).mockReturnValue({
       ...session,
       state: setAgentHandleStore(undefined, { handles: [claimed] }),
     } as never);
@@ -415,7 +413,7 @@ describe("task-owned agent settlement", () => {
       sessionState: {} as never,
     });
 
-    expect(getAgentHandleStore(released.sessionState.snapshot?.session.state)?.handles).toEqual([
+    expect(getAgentHandleStore(released.sessionState.snapshot.session.state)?.handles).toEqual([
       {
         address: availableRecord.address,
         identity: availableRecord.identity,
@@ -432,7 +430,7 @@ describe("task-owned agent settlement", () => {
       phase: "claimed" as const,
       ownerId: "workflow-run-1",
     };
-    vi.mocked(readDurableSession).mockResolvedValue({
+    vi.mocked(readDurableSession).mockReturnValue({
       ...session,
       state: setAgentHandleStore(undefined, { handles: [claimed] }),
     } as never);
@@ -460,7 +458,7 @@ describe("task-owned agent settlement", () => {
       sessionState: {} as never,
     });
 
-    expect(getAgentHandleStore(settled.sessionState.snapshot?.session.state)?.handles).toEqual([
+    expect(getAgentHandleStore(settled.sessionState.snapshot.session.state)?.handles).toEqual([
       {
         address: availableRecord.address,
         identity: availableRecord.identity,

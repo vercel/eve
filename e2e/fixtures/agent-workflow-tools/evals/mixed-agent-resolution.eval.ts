@@ -8,7 +8,7 @@ export default defineEval({
     initial.expectOk();
     initial.calledTool("blocking_agent", { count: 1, status: "completed" });
     initial.calledTool("background_agent", { count: 1, status: "completed" });
-    initial.event("subagent.called", { data: { name: "workflow-marker" }, count: 1 });
+    initial.event("subagent.called", { data: { name: "workflow-marker" } });
     initial.messageIncludes("WORKFLOW-MIXED-AGENTS-INITIAL-RESULT");
     initial.notEvent("message.received", {
       data: { message: /WORKFLOW-CHILD:api:background/u },

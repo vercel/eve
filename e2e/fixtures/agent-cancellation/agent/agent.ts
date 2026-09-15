@@ -7,6 +7,11 @@ const HITL_REQUEST = "GENERATED-PROGRAM-CHILD-HITL";
 
 function respond(request: MockModelRequest): MockModelResponse | string {
   const message = request.lastUserMessage ?? "";
+  if (message.includes("Please complete work before answering.")) {
+    return request.toolResults.some((result) => result.id === "complete-work")
+      ? "The work item is complete."
+      : { toolCalls: [{ id: "complete-work", input: {}, name: "complete-work" }] };
+  }
   if (message.includes("Please wait for cancellation.")) {
     return {
       toolCalls: [{ id: "wait-for-cancellation", input: {}, name: "wait-for-cancellation" }],

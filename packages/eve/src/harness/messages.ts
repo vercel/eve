@@ -21,7 +21,7 @@ export type FrameworkMessageKind =
   | "execution.retry";
 
 /** Semantic classification for every user-role message in model history. */
-export type UserMessageKind = "user" | "legacy.unknown" | FrameworkMessageKind;
+export type UserMessageKind = "user" | FrameworkMessageKind;
 
 /** A user-role message that is safe to retain in framework model history. */
 export type UserModelMessage = Extract<ModelMessage, { readonly role: "user" }> & {
@@ -69,7 +69,7 @@ export function createFrameworkUserMessage(
 
 /** True when a value is a recognized classification for a user-role message. */
 export function isUserMessageKind(value: unknown): value is UserMessageKind {
-  return value === "user" || value === "legacy.unknown" || isFrameworkMessageKind(value);
+  return value === "user" || isFrameworkMessageKind(value);
 }
 
 /** True when a user-role model message has the required semantic classification. */
@@ -81,7 +81,7 @@ export function isUserModelMessage(message: ModelMessage): message is UserModelM
 
 /** True when a user-role message was authored by the framework. */
 export function isFrameworkUserMessage(message: ModelMessage): message is FrameworkUserMessage {
-  return isUserModelMessage(message) && isFrameworkMessageKind(message.kind);
+  return isUserModelMessage(message) && message.kind !== "user";
 }
 
 /** Validates that every user-role message is classified before history retains it. */

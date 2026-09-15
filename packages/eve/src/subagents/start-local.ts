@@ -1,3 +1,4 @@
+import { sessionInboxHookToken } from "#execution/session-inbox/address.js";
 import type { DispatchOutcome, RuntimeSession } from "#subagents/handle-dispatch.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import type { LocalDevRequestProvenance } from "#context/keys.js";
@@ -68,7 +69,8 @@ export async function startLocalSubagent(input: {
     await contextStorage.run(new ContextContainer({ localDevRequest: input.localDevRequest }), () =>
       childRuntime.createSession(runInput),
     );
-    childSessionId = (await waitForCommandHookOwner(childContinuationToken)).runId;
+    childSessionId = (await waitForCommandHookOwner(sessionInboxHookToken(childContinuationToken)))
+      .runId;
   } catch (error) {
     logError(log, "local subagent start failed", error, {
       callId: action.callId,

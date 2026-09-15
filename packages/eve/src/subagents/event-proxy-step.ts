@@ -54,7 +54,7 @@ export async function runProxySubagentEventStep(input: {
 }): Promise<ProxySubagentEventResult> {
   "use step";
 
-  const durableSession = await readDurableSession(input.sessionState);
+  const durableSession = readDurableSession(input.sessionState);
   const ctx = await deserializeContext(input.serializedContext);
 
   return emitProxiedSubagentEvent({
@@ -75,7 +75,7 @@ export async function emitRecordedTaskInputRequestStep(input: {
 }): Promise<ProxySubagentEventResult> {
   "use step";
 
-  const durableSession = await readDurableSession(input.sessionState);
+  const durableSession = readDurableSession(input.sessionState);
   const ctx = await deserializeContext(input.serializedContext);
   return await emitProxiedSubagentEvent({
     ctx,

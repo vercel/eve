@@ -129,7 +129,6 @@ describe("dynamic tool cold replay", () => {
     async () => {
       const app = await scenarioApp(DYNAMIC_TOOL_COLD_REPLAY_DESCRIPTOR);
       const pinnedEnv = {
-        VERCEL_DEPLOYMENT_ID: "dynamic-tool-cold-replay",
         WORKFLOW_INLINE_OWNERSHIP_LEASE_SECONDS: "1",
       };
       let server = await startEveDev(app.appRoot, { env: pinnedEnv });

@@ -56,9 +56,7 @@ export function restoreAuthorizationActivity(input: {
   readonly matches: readonly MatchedAuthorizationCallback[];
   readonly pending: PendingAuthorizationState;
 }): readonly string[] {
-  const ids = input.matches.map(
-    (match) => match.result.attemptId ?? match.candidateId ?? match.result.name,
-  );
+  const ids = input.matches.map((match) => match.result.attemptId);
   const rootTurnId = ids.map((id) => input.pending.activityRootTurnIds?.[id]).find(Boolean);
   if (rootTurnId !== undefined) {
     input.ctx.set(ActivityRootTurnIdKey, rootTurnId);

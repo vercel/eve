@@ -468,7 +468,6 @@ function makeSessionState(
                 [SESSION_TASKS_STATE_KEY]: { tasks, version: 2 },
               },
       },
-      version: 1,
     },
     version: 1,
   };

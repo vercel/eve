@@ -838,7 +838,7 @@ function rebuildSlackContext(
     onThreadTsChanged(ts) {
       state.threadTs = ts;
       if (state.channelId) {
-        session.continuation?.rekey(slackContinuationToken(state.channelId, ts));
+        session.continuation?.alias(slackContinuationToken(state.channelId, ts));
       }
     },
   });
@@ -1112,7 +1112,7 @@ async function receiveOnSlack(
   }
 
   // Threadless proactive runs need distinct identities until their first
-  // Slack post supplies the real thread timestamp and re-keys the session.
+  // Slack post supplies the real thread timestamp and aliases the session.
   const continuationThreadTs = threadTs || crypto.randomUUID();
   const audience =
     receiveTarget.audience === undefined

@@ -560,7 +560,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         sequence: emissionState.sequence,
         sessionStarted: emissionState.sessionStarted,
         traceContext: stepInstrumentation?.traceContext,
-        turnId: `turn_${emissionState.sequence}`,
+        turnId: activeTurnId(emissionState),
       });
     };
 
@@ -868,7 +868,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
             sessionStarted: true,
             sequence: emissionState.sequence,
             stepIndex: 0,
-            turnId: `turn_${emissionState.sequence}`,
+            turnId: activeTurnId(emissionState),
           });
         }
         instructionMessages = store === undefined ? [] : drainDynamicInstructionUserMessages(store);
@@ -1010,7 +1010,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
           sessionStarted: true,
           sequence: emissionState.sequence,
           stepIndex: 0,
-          turnId: `turn_${emissionState.sequence}`,
+          turnId: activeTurnId(emissionState),
         });
       }
       instructionMessages = store === undefined ? [] : drainDynamicInstructionUserMessages(store);

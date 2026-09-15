@@ -821,13 +821,54 @@ describe("EveAgentStore session resume", () => {
 });
 
 describe("EveAgentStore steering", () => {
-  it("accepts an in-flight steer and follows its replacement turn", async () => {
+  it.each([true, false])(
+    "completes steering received in the active turn (optimistic=%s)",
+    async (optimistic) => {
+      const active = controlledStreamResponse();
+      const events = stampTestEvents([
+        createTurnStartedEvent({ sequence: 0, turnId: "turn_1" }),
+        createMessageReceivedEvent({ message: "First", sequence: 0, turnId: "turn_1" }),
+        createMessageReceivedEvent({ message: "Instead", sequence: 0, turnId: "turn_1" }),
+        createMessageCompletedEvent({
+          finishReason: "stop",
+          message: "Updated reply.",
+          sequence: 0,
+          stepIndex: 1,
+          turnId: "turn_1",
+        }),
+        createSessionWaitingEvent(),
+      ] as UnstampedMessageStreamEvent[]).map((event) => ({
+        ...event,
+        meta: { ...event.meta, deliveryIds: ["delivery_1"] },
+      }));
+      const fetchMock = vi
+        .spyOn(globalThis, "fetch")
+        .mockResolvedValueOnce(startedResponse())
+        .mockResolvedValueOnce(active.response)
+        .mockResolvedValueOnce(startedResponse());
+      const store = new EveAgentStore({ optimistic, reducer: defaultMessageReducer() });
+      const initial = store.send({ message: "First" });
+      await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+      active.emit(events[0]!);
+      active.emit(events[1]!);
+      const steering = store.send({ message: "Instead", turnPolicy: "steer" });
+      await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+      for (const event of events.slice(2)) active.emit(event);
+      active.close();
+      await Promise.all([initial, steering]);
+      expect(store.snapshot.status).toBe("ready");
+      expect(store.snapshot.events).toEqual(events);
+      expect(fetchMock).toHaveBeenCalledTimes(3);
+    },
+  );
+
+  it("follows a late steering delivery after the active turn settles", async () => {
     const activeStream = controlledStreamResponse();
-    const replacementStream = controlledStreamResponse();
+    const followUpStream = controlledStreamResponse();
     const [
       firstReceived,
       firstStarted,
-      firstCancelled,
+      firstCompleted,
       firstWaiting,
       secondReceived,
       secondStarted,
@@ -836,13 +877,19 @@ describe("EveAgentStore steering", () => {
     ] = stampTestEvents([
       createMessageReceivedEvent({ message: "First", sequence: 0, turnId: "turn_1" }),
       createTurnStartedEvent({ sequence: 1, turnId: "turn_1" }),
-      createTurnCancelledEvent({ sequence: 2, turnId: "turn_1" }),
+      createMessageCompletedEvent({
+        finishReason: "stop",
+        message: "First reply.",
+        sequence: 2,
+        stepIndex: 0,
+        turnId: "turn_1",
+      }),
       createSessionWaitingEvent(),
       createMessageReceivedEvent({ message: "Instead", sequence: 0, turnId: "turn_2" }),
       createTurnStartedEvent({ sequence: 1, turnId: "turn_2" }),
       createMessageCompletedEvent({
         finishReason: "stop",
-        message: "Replacement reply.",
+        message: "Follow-up reply.",
         sequence: 2,
         stepIndex: 0,
         turnId: "turn_2",
@@ -857,7 +904,7 @@ describe("EveAgentStore steering", () => {
       .mockResolvedValueOnce(startedResponse())
       .mockResolvedValueOnce(activeStream.response)
       .mockResolvedValueOnce(startedResponse())
-      .mockResolvedValueOnce(replacementStream.response);
+      .mockResolvedValueOnce(followUpStream.response);
     const store = new EveAgentStore({ reducer: defaultMessageReducer() });
 
     const firstSend = store.send({ message: "First" });
@@ -872,22 +919,22 @@ describe("EveAgentStore steering", () => {
       turnPolicy: "steer",
     });
 
-    activeStream.emit(firstCancelled!);
+    activeStream.emit(firstCompleted!);
     activeStream.emit(firstWaiting!);
     activeStream.close();
     await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(4));
-    replacementStream.emit(secondReceived!);
-    replacementStream.emit(secondStarted!);
-    replacementStream.emit(secondCompleted!);
-    replacementStream.emit(secondWaiting!);
-    replacementStream.close();
+    followUpStream.emit(secondReceived!);
+    followUpStream.emit(secondStarted!);
+    followUpStream.emit(secondCompleted!);
+    followUpStream.emit(secondWaiting!);
+    followUpStream.close();
 
     await Promise.all([firstSend, steering]);
     expect(store.snapshot.status).toBe("ready");
     expect(store.snapshot.events).toEqual([
       firstReceived,
       firstStarted,
-      firstCancelled,
+      firstCompleted,
       firstWaiting,
       secondReceived,
       secondStarted,
@@ -897,7 +944,7 @@ describe("EveAgentStore steering", () => {
     expect(store.snapshot.data.messages.at(-1)?.parts).toContainEqual({
       state: "done",
       stepIndex: 0,
-      text: "Replacement reply.",
+      text: "Follow-up reply.",
       type: "text",
     });
   });

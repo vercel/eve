@@ -23,7 +23,7 @@ import { applyTaskAgentRequest } from "#execution/tools/subagent/task-agent-requ
  *
  * Short-circuits via `hasProxyInputRequests` so the common no-active-descendant
  * path skips a durable step boundary. Lives in its own non-step module so both
- * the driver and the active turn can share it (a `"use step"` module cannot
+ * the owner and the active turn can share it (a `"use step"` module cannot
  * re-export plain helpers into a workflow body).
  */
 export async function routeDeliverToChildren(input: {

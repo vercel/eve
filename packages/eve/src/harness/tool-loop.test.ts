@@ -652,6 +652,12 @@ function setupMockAgentSequence(results: readonly Record<string, unknown>[]): vo
       if (onStepEnd) await onStepEnd(result);
       return createMockGenerateResult(result);
     });
+    this.stream = vi.fn().mockImplementation(async (options: { messages: unknown[] }) => {
+      await invokeMockStepStart(settings, options);
+      const mockResult = createMockStreamResult(result);
+      if (onStepEnd) void Promise.resolve().then(() => onStepEnd(result));
+      return mockResult;
+    });
     return this;
   } as MockAgentConstructor);
 }
@@ -969,6 +975,84 @@ describe("createToolLoopHarness", () => {
       { content: "Hi", kind: "user" as const, role: "user" },
       { content: "Hello!", role: "assistant" },
     ]);
+  });
+
+  it("steers an open turn with a new message without repeating the turn preamble", async () => {
+    const toolCall = {
+      input: { query: "weather in ny" },
+      toolCallId: "call-1",
+      toolName: "web_search",
+      type: "tool-call",
+    };
+    const toolResult = { ...toolCall, output: { temperature: "41 F" }, type: "tool-result" };
+    setupMockAgentSequence([
+      {
+        finishReason: "tool-calls",
+        response: {
+          messages: [
+            { content: [toolCall], role: "assistant" },
+            { content: [toolResult], role: "tool" },
+          ],
+        },
+        text: "",
+        toolCalls: [toolCall],
+        toolResults: [toolResult],
+      },
+      {
+        finishReason: "stop",
+        response: { messages: [{ content: "It is 41 F in NY.", role: "assistant" }] },
+        text: "It is 41 F in NY.",
+        toolCalls: [],
+        toolResults: [],
+      },
+    ]);
+    const { emit, events } = createEventCollector();
+    const config = createTestConfig("conversation", emit, {
+      tools: new Map([
+        [
+          "web_search",
+          {
+            description: "Search the web",
+            inputSchema: jsonSchema({ type: "object" }),
+            name: "web_search",
+          },
+        ],
+      ]),
+    });
+    const runStep = createToolLoopHarness(config);
+    const session = createTestSession({
+      agent: {
+        modelReference: { id: "openai/gpt-5.4" },
+        system: "You are a test assistant.",
+        tools: [
+          { description: "Search the web", name: "web_search", inputSchema: { type: "object" } },
+        ],
+      },
+    });
+
+    const first = await runStep(session, { message: "What's the weather in NY?" });
+    expect(typeof first.next).toBe("function");
+    expect(getHarnessEmissionState(first.session.state)).toMatchObject({
+      turnId: "turn_0",
+      stepIndex: 1,
+    });
+
+    const second = await runStep(first.session, { message: "Use Fahrenheit." });
+
+    expect(second.next).toBeNull();
+    expect(events.filter((event) => event.type === "turn.started")).toHaveLength(1);
+    expect(events.filter((event) => event.type === "message.received")).toHaveLength(2);
+    expect(events.filter((event) => event.type === "turn.completed")).toHaveLength(1);
+    expect(second.session.history.at(-2)).toEqual({
+      content: "Use Fahrenheit.",
+      kind: "user",
+      role: "user",
+    });
+    expect(getHarnessEmissionState(second.session.state)).toMatchObject({
+      sequence: 1,
+      stepIndex: 0,
+      turnId: "",
+    });
   });
 
   it("omits user messages with no model-visible content", async () => {

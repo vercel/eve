@@ -52,10 +52,11 @@ const taskMetadataSchema = z.looseObject({
 }) as z.ZodType<TaskMetadata>;
 
 const taskViewBaseShape = {
+  inputRequests: z.never().optional(),
   executor: z
-    .strictObject({
+    .looseObject({
       binding: z
-        .strictObject({
+        .looseObject({
           data: z.record(z.string(), z.custom<JsonValue>()),
           kind: z.string().min(1),
         })
@@ -65,9 +66,10 @@ const taskViewBaseShape = {
   metadata: taskMetadataSchema,
   taskId: z.string().min(1),
   usage: z
-    .strictObject({
+    .looseObject({
       cacheReadTokens: z.number().nonnegative(),
       cacheWriteTokens: z.number().nonnegative(),
+      costUsd: z.number().finite().nonnegative().optional(),
       inputTokens: z.number().nonnegative(),
       outputTokens: z.number().nonnegative(),
     })
@@ -77,24 +79,28 @@ const taskViewBaseShape = {
 /**
  * Terminal views only, on purpose: the index caches a view solely as
  * the expired-run fallback, and the discriminated arms encode the terminal
- * status/output invariants structurally (strict objects reject
- * `inputRequests` and mismatched outputs).
+ * status/output invariants structurally (explicit fields reject
+ * `inputRequests` and mismatched outputs while preserving additive metadata).
  */
 const taskViewSchema: z.ZodType<TaskView> = z.discriminatedUnion("status", [
-  z.strictObject({
+  z.looseObject({
     ...taskViewBaseShape,
-    lastOutput: z.strictObject({ data: z.custom<JsonValue>(), type: z.literal("result") }),
+    lastOutput: z.looseObject({ data: z.custom<JsonValue>(), type: z.literal("result") }),
     status: z.literal("completed"),
   }),
-  z.strictObject({
+  z.looseObject({
     ...taskViewBaseShape,
-    lastOutput: z.strictObject({ data: z.custom<JsonValue>(), type: z.literal("error") }),
+    lastOutput: z.looseObject({ data: z.custom<JsonValue>(), type: z.literal("error") }),
     status: z.literal("failed"),
   }),
-  z.strictObject({ ...taskViewBaseShape, status: z.literal("cancelled") }),
+  z.looseObject({
+    ...taskViewBaseShape,
+    lastOutput: z.never().optional(),
+    status: z.literal("cancelled"),
+  }),
 ]);
 
-const sessionTaskIndexEntrySchema: z.ZodType<SessionTaskIndexEntry> = z.strictObject({
+const sessionTaskIndexEntrySchema: z.ZodType<SessionTaskIndexEntry> = z.looseObject({
   activityWorkIdentity: z
     .custom<ActivityWorkIdentityV1>((value) => parseActivityWorkIdentityV1(value) !== undefined)
     .optional(),
@@ -103,7 +109,7 @@ const sessionTaskIndexEntrySchema: z.ZodType<SessionTaskIndexEntry> = z.strictOb
   createdByTurnId: z.string().min(1),
   cohortId: z.string().min(1).optional(),
   executor: z
-    .strictObject({
+    .looseObject({
       data: z.record(z.string(), z.custom<JsonValue>()),
       kind: z.string().min(1),
     })
@@ -115,7 +121,7 @@ const sessionTaskIndexEntrySchema: z.ZodType<SessionTaskIndexEntry> = z.strictOb
 });
 
 const sessionTaskIndexSchema = z
-  .strictObject({
+  .looseObject({
     tasks: z.array(sessionTaskIndexEntrySchema),
     version: z.literal(SESSION_TASKS_STATE_VERSION),
   })
@@ -137,6 +143,7 @@ const sessionTaskIndexSchema = z
   );
 
 interface SessionTaskIndex {
+  readonly [key: string]: unknown;
   readonly tasks: readonly SessionTaskIndexEntry[];
   readonly version: typeof SESSION_TASKS_STATE_VERSION;
 }
@@ -150,9 +157,13 @@ interface SessionTaskIndex {
 export function getSessionTaskIndex(
   state: SessionStateMap | undefined,
 ): readonly SessionTaskIndexEntry[] {
+  return readSessionTaskIndex(state).tasks;
+}
+
+function readSessionTaskIndex(state: SessionStateMap | undefined): SessionTaskIndex {
   const raw = state?.[SESSION_TASKS_STATE_KEY];
   if (raw === undefined) {
-    return [];
+    return { tasks: [], version: SESSION_TASKS_STATE_VERSION };
   }
   const version = typeof raw === "object" && raw !== null ? Reflect.get(raw, "version") : undefined;
   if (version !== SESSION_TASKS_STATE_VERSION) {
@@ -166,7 +177,7 @@ export function getSessionTaskIndex(
       `Corrupt task index under session state key "${SESSION_TASKS_STATE_KEY}": ${parsed.error.message}`,
     );
   }
-  return parsed.data.tasks;
+  return parsed.data;
 }
 
 /** Caches one terminal view beside its task-run address. */
@@ -177,17 +188,48 @@ export function cacheTerminalTaskView(
   if (!isValidTerminalView(view)) {
     throw new Error(`Cannot cache invalid terminal task "${view.taskId}".`);
   }
-  const entries = getSessionTaskIndex(state);
+  const stored = readSessionTaskIndex(state);
+  const entries = stored.tasks;
   const index = entries.findIndex((entry) => entry.taskId === view.taskId);
   if (index < 0) return state;
   if (!sameTaskMetadata(entries[index]!.metadata, view.metadata)) {
     throw new Error(`Task view metadata does not match index entry "${view.taskId}".`);
   }
   const tasks = [...entries];
-  tasks[index] = { ...tasks[index]!, terminalView: view };
+  const previous = tasks[index]!.terminalView;
+  tasks[index] = {
+    ...tasks[index]!,
+    terminalView: taskViewSchema.parse({
+      ...previous,
+      ...view,
+      metadata: { ...previous?.metadata, ...view.metadata },
+      lastOutput:
+        view.lastOutput === undefined
+          ? undefined
+          : {
+              ...previous?.lastOutput,
+              ...view.lastOutput,
+            },
+      usage: view.usage === undefined ? undefined : { ...previous?.usage, ...view.usage },
+      executor:
+        view.executor === undefined
+          ? undefined
+          : {
+              ...previous?.executor,
+              ...view.executor,
+              binding:
+                view.executor.binding === undefined
+                  ? undefined
+                  : {
+                      ...previous?.executor?.binding,
+                      ...view.executor.binding,
+                    },
+            },
+    }),
+  };
   return {
     ...state,
-    [SESSION_TASKS_STATE_KEY]: { tasks, version: SESSION_TASKS_STATE_VERSION },
+    [SESSION_TASKS_STATE_KEY]: { ...stored, tasks },
   };
 }
 
@@ -223,12 +265,26 @@ export function recordSessionTask(
   session: HarnessSession,
   entry: Omit<SessionTaskIndexEntry, "cohortId">,
 ): HarnessSession {
-  const tasks = [...getSessionTaskIndex(session.state)];
+  const stored = readSessionTaskIndex(session.state);
+  const tasks = [...stored.tasks];
   const index = tasks.findIndex((candidate) => candidate.taskId === entry.taskId);
   const previous = tasks[index];
   if (previous !== undefined) {
     tasks[index] = {
+      ...previous,
       ...entry,
+      metadata: { ...previous.metadata, ...entry.metadata },
+      activityWorkIdentity:
+        entry.activityWorkIdentity === undefined
+          ? previous.activityWorkIdentity
+          : {
+              ...previous.activityWorkIdentity,
+              ...entry.activityWorkIdentity,
+            },
+      executor:
+        entry.executor === undefined
+          ? previous.executor
+          : { ...previous.executor, ...entry.executor },
       cohortId: previous.cohortId,
       createdByStepIndex: previous.createdByStepIndex,
       createdByTurnId: previous.createdByTurnId,
@@ -246,6 +302,7 @@ export function recordSessionTask(
     state: {
       ...session.state,
       [SESSION_TASKS_STATE_KEY]: {
+        ...stored,
         tasks,
         version: SESSION_TASKS_STATE_VERSION,
       } satisfies SessionTaskIndex,

@@ -82,13 +82,18 @@ export async function emitTurnPreamble(
   runtimeIdentity?: RuntimeIdentity,
   traceContext?: RuntimeTraceContext,
 ): Promise<HarnessEmissionState> {
-  const turnId = `turn_${state.sequence}`;
+  // Steering re-enters an open turn: keep its id and step index and skip the
+  // `turn.started` it already emitted.
+  const steering = state.turnId !== "";
+  const turnId = steering ? state.turnId : `turn_${state.sequence}`;
 
   if (!state.sessionStarted) {
     await emitFn(createSessionStartedEvent({ runtime: runtimeIdentity, trace: traceContext }));
   }
 
-  await emitFn(createTurnStartedEvent({ sequence: state.sequence, trace: traceContext, turnId }));
+  if (!steering) {
+    await emitFn(createTurnStartedEvent({ sequence: state.sequence, trace: traceContext, turnId }));
+  }
 
   if (input.message !== undefined) {
     await emitFn(
@@ -103,7 +108,7 @@ export async function emitTurnPreamble(
   return {
     sessionStarted: true,
     sequence: state.sequence,
-    stepIndex: 0,
+    stepIndex: steering ? state.stepIndex : 0,
     turnId,
   };
 }

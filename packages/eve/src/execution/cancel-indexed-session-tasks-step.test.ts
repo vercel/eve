@@ -86,7 +86,6 @@ function makeSessionState(tasks: readonly SessionTaskIndexEntry[]): DurableSessi
         sessionId: "parent-session",
         state: { [SESSION_TASKS_STATE_KEY]: { tasks, version: 2 } },
       },
-      version: 1,
     },
     version: 1,
   };

@@ -145,10 +145,11 @@ export interface PublicAgentCompactionDefinition {
  */
 export interface AgentLimitsDefinition {
   /**
-   * Maximum lifetime of one durable session, in milliseconds.
+   * Session lifetime from creation or the latest ownership handoff, in milliseconds.
    *
-   * The deadline starts when the session is created and survives process
-   * restarts and redeployments. If it elapses during an active turn, eve lets
+   * A successful deployment handoff or legacy-session import restarts the
+   * original configured duration. Process restarts and failed or skipped
+   * handoffs preserve the deadline. If it elapses during an active turn, eve lets
    * that turn settle before completing the session normally.
    *
    * `false` disables the timeout.
@@ -287,7 +288,8 @@ export interface AgentWorkflowDefinition {
   readonly modelCallsPerStep?: number;
   /**
    * How long the agent's run data is kept after the run finishes.
-   * Applied to both the session run and every turn run.
+   * Applied to every run that owns the session, including successors created
+   * by deployment handoff.
    *
    * - `"default"`: same as omission. The Workflow SDK World decides.
    *   On Vercel this follows your team's plan.

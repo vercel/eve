@@ -384,7 +384,7 @@ describe("defineChannel", () => {
     }
 
     const captured: {
-      sessions: Array<{ continuation?: { rekey(token: string): void } }>;
+      sessions: Array<{ continuation?: { alias(token: string): void } }>;
     } = {
       sessions: [],
     };
@@ -401,7 +401,7 @@ describe("defineChannel", () => {
     const adapter = getAdapter(channel);
 
     // Stand up a minimal accessor whose `set` calls are captured so the
-    // session handle's continuation rekey is observable.
+    // session handle's additive continuation claim is observable.
     const writes: Array<[string, unknown]> = [];
     let continuationToken = "slack:C123:";
     const accessor: ContextAccessor = {
@@ -433,8 +433,11 @@ describe("defineChannel", () => {
     // The session is the one ctx.session exposes (same reference).
     expect(adapterCtx.session).toBe(captured.sessions[0]);
 
-    captured.sessions[0]!.continuation?.rekey("C123:T456");
-    expect(writes).toEqual([["eve.continuationToken", "slack:C123:T456"]]);
+    captured.sessions[0]!.continuation?.alias("C123:T456");
+    expect(writes).toEqual([
+      ["eve.continuationHookTokens", ["slack:C123:", "slack:C123:T456"]],
+      ["eve.continuationToken", "slack:C123:T456"],
+    ]);
   });
 
   it("passes SessionContext as third arg to event handlers inside the ALS scope", async () => {

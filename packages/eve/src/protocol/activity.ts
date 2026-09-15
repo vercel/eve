@@ -127,22 +127,7 @@ export interface ActivitySnapshotV1 {
 }
 
 export function parseActivityWorkIdentityV1(value: unknown): ActivityWorkIdentityV1 | undefined {
-  if (
-    !isRecord(value) ||
-    !hasOnlyKeys(value, [
-      "callId",
-      "id",
-      "kind",
-      "label",
-      "name",
-      "parentId",
-      "rootSessionId",
-      "rootTurnId",
-      "sessionId",
-      "turnId",
-    ])
-  )
-    return undefined;
+  if (!isRecord(value)) return undefined;
   const kind = value.kind;
   if (
     !isOneOf(kind, ["root-turn", "subagent", "remote-agent", "task"] as const) ||
@@ -158,6 +143,7 @@ export function parseActivityWorkIdentityV1(value: unknown): ActivityWorkIdentit
   )
     return undefined;
   return {
+    ...value,
     callId: value.callId,
     id: value.id,
     kind,

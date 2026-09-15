@@ -3,6 +3,59 @@ import { matchAuthorizationCallbacks } from "#execution/authorization-callback-m
 import type { PendingAuthorizationState } from "#harness/authorization.js";
 
 describe("matchAuthorizationCallbacks", () => {
+  it.each([undefined, "another-attempt"])("ignores an unmatched attempt %s", (attemptId) => {
+    const result = matchAuthorizationCallbacks(
+      {
+        challenges: [
+          {
+            attemptId: "attempt-1",
+            name: "crm",
+            hookUrl: "https://app.example/callback",
+            challenge: {},
+            principal: { type: "app" },
+          },
+        ],
+      },
+      [
+        {
+          authorizationCallback: {
+            attemptId,
+            connectionName: "crm",
+            callback: { params: {} },
+          },
+        },
+      ],
+    );
+    expect(result.matches).toEqual([]);
+  });
+
+  it("consumes one callback per attempt and preserves unrelated delivery", () => {
+    const callback = {
+      authorizationCallback: {
+        attemptId: "attempt-1",
+        connectionName: "crm",
+        callback: { params: {} },
+      },
+    };
+    const message = { message: "Continue after signing in" };
+    const result = matchAuthorizationCallbacks(
+      {
+        challenges: [
+          {
+            attemptId: "attempt-1",
+            name: "crm",
+            hookUrl: "https://app.example/callback",
+            challenge: {},
+            principal: { type: "app" },
+          },
+        ],
+      },
+      [callback, message, callback],
+    );
+    expect(result.matches).toHaveLength(1);
+    expect(result.remainingPayloads).toEqual([message]);
+  });
+
   it("carries the resolved connection instance into the callback result", () => {
     const pending: PendingAuthorizationState = {
       challenges: [

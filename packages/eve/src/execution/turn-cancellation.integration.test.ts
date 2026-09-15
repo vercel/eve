@@ -1,3 +1,4 @@
+import { sessionInboxHookToken } from "#execution/session-inbox/address.js";
 import { describe, expect, it } from "vitest";
 import { getWorld, resumeHook, start } from "#internal/workflow/runtime.js";
 
@@ -12,7 +13,6 @@ import { waitForHook } from "#internal/testing/workflow-test-helpers.js";
 import { ROOT_COMPILED_AGENT_NODE_ID } from "#compiler/manifest.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { sessionCommandHookToken } from "#execution/session-command-token.js";
-import { turnCancellationHookToken } from "#execution/turn-cancellation-token.js";
 import { workflowEntry } from "#execution/workflow-entry.js";
 import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
 import { createEveSessionCancelRoutePath } from "#protocol/routes.js";
@@ -57,13 +57,17 @@ function buildSerializedContext(overrides: {
  * aborts, then rejects with the signal's reason — the deterministic
  * mid-turn anchor for cancellation tests.
  */
-function buildWaitForCancelTool(onStart: () => void, onAbort: () => void): ResolvedToolDefinition {
+function buildWaitForCancelTool(
+  onStart: () => void,
+  onAbort: () => void,
+  completion?: Promise<void>,
+): ResolvedToolDefinition {
   return {
     description: "Waits until the turn is cancelled.",
     execute: (_input: unknown, rawCtx: unknown) => {
       const ctx = rawCtx as ToolContext;
       onStart();
-      return new Promise((_resolve, reject) => {
+      return new Promise((resolve, reject) => {
         const abort = (): void => {
           onAbort();
           reject(ctx.abortSignal.reason);
@@ -73,6 +77,10 @@ function buildWaitForCancelTool(onStart: () => void, onAbort: () => void): Resol
           return;
         }
         ctx.abortSignal.addEventListener("abort", abort, { once: true });
+        void completion?.then(() => {
+          ctx.abortSignal.removeEventListener("abort", abort);
+          resolve("Work completed successfully.");
+        });
       });
     },
     inputSchema: toInputSchema({ additionalProperties: false, properties: {}, type: "object" }),
@@ -91,7 +99,10 @@ interface WaitToolFixture {
   toolStarts(): number;
 }
 
-async function createWaitToolRuntime(agentName: string): Promise<WaitToolFixture> {
+async function createWaitToolRuntime(
+  agentName: string,
+  completion?: Promise<void>,
+): Promise<WaitToolFixture> {
   let aborts = 0;
   let starts = 0;
   let resolveStarted: (() => void) | undefined;
@@ -106,6 +117,7 @@ async function createWaitToolRuntime(agentName: string): Promise<WaitToolFixture
     () => {
       aborts += 1;
     },
+    completion,
   );
   const runtime = await createTestRuntime({
     agent: { name: agentName },
@@ -209,7 +221,7 @@ async function waitForHookByToken(token: string, timeout = 15_000): Promise<{ ru
 
 /**
  * The retry canary: an aborted `turnStep` settles by *returning*, so the
- * turn workflow run must record no `step_failed`/`step_retrying` events
+ * owning session run must record no `step_failed`/`step_retrying` events
  * (nothing thrown ever crosses the step boundary) and at most one
  * `step_completed` per correlation id. Duplicate `step_started` entries
  * are allowed: the runtime may supersede an aborted attempt and
@@ -313,7 +325,7 @@ async function expectCancelResponse(
 }
 
 describe("turn cancellation integration", () => {
-  it("settles an abort-shaped memory recall error as cancellation after steering", async () => {
+  it("settles an abort-shaped memory recall error after explicit cancellation", async () => {
     const fixture = await createAbortRecallRuntime("turn-steer-memory-recall", {
       waitForAbort: true,
     });
@@ -332,6 +344,8 @@ describe("turn cancellation integration", () => {
     await fixture.runtime.run(async () => {
       const run = await start(workflowEntry, [
         {
+          kind: "initial",
+          ownerDeploymentId: "dpl_inline",
           input: { message: "remember this interrupted request" },
           serializedContext: buildSerializedContext({
             channelKind: "http",
@@ -343,12 +357,10 @@ describe("turn cancellation integration", () => {
       const stream = captureTurnEvents(run);
 
       try {
-        await waitForHookByToken(continuationToken);
-        const cancelHook = await waitForHookByToken(
-          turnCancellationHookToken(`${run.runId}:turn-control:0`),
-        );
+        await waitForHookByToken(sessionInboxHookToken(continuationToken));
         await fixture.recallStarted;
 
+        await resumeHook(sessionCommandHookToken(run.runId), { kind: "cancel" });
         await expect(
           address.send("replacement after recall abort", { auth: null }),
         ).resolves.toMatchObject({ id: run.runId });
@@ -362,7 +374,7 @@ describe("turn cancellation integration", () => {
           ]),
         ).toBe(true);
         expectNoFailureEvents(cancelledTurn);
-        await expectNoStepRetries(cancelHook.runId);
+        await expectNoStepRetries(run.runId);
 
         const replacementTurn = await stream.nextTurn();
         expect(filterEventsByType(replacementTurn, "turn.started")).toHaveLength(1);
@@ -395,6 +407,8 @@ describe("turn cancellation integration", () => {
     await fixture.runtime.run(async () => {
       const run = await start(workflowEntry, [
         {
+          kind: "initial",
+          ownerDeploymentId: "dpl_inline",
           input: { message: "fail memory recall" },
           serializedContext: buildSerializedContext({
             channelKind: "http",
@@ -417,69 +431,77 @@ describe("turn cancellation integration", () => {
     });
   });
 
-  it("buffers a default steering message before replacing the active turn", async () => {
-    const fixture = await createWaitToolRuntime("turn-steer-message");
-    const rawToken = "turn-steer-message";
-    const continuationToken = `http:${rawToken}`;
-    const workflowRuntime = createWorkflowRuntime({
-      compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
-    });
-    const address = createChannelAddress({
-      adapter: { kind: "http" },
-      channelName: "http",
-      continuationToken: rawToken,
-      runtime: workflowRuntime,
-    });
+  it.each([
+    { turnPolicy: undefined, turnCount: 1 },
+    { turnPolicy: "steer" as const, turnCount: 1 },
+    { turnPolicy: "queue" as const, turnCount: 2 },
+  ])(
+    "admits $turnPolicy deliveries without aborting ($turnCount turns)",
+    async ({ turnPolicy, turnCount }) => {
+      let finishWork!: () => void;
+      const completion = new Promise<void>((resolve) => {
+        finishWork = resolve;
+      });
+      const fixture = await createWaitToolRuntime("turn-steer-message", completion);
+      const rawToken = "turn-steer-message";
+      const continuationToken = `http:${rawToken}`;
+      const workflowRuntime = createWorkflowRuntime({
+        compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
+      });
+      const address = createChannelAddress({
+        adapter: { kind: "http" },
+        channelName: "http",
+        continuationToken: rawToken,
+        runtime: workflowRuntime,
+      });
 
-    await fixture.runtime.run(async () => {
-      const run = await start(workflowEntry, [
-        {
-          input: { message: `Use the ${WAIT_TOOL_NAME} tool.` },
-          serializedContext: buildSerializedContext({
-            channelKind: "http",
-            continuationToken,
-            mode: "conversation",
-          }),
-        },
-      ]);
-      const stream = captureTurnEvents(run);
+      await fixture.runtime.run(async () => {
+        const run = await start(workflowEntry, [
+          {
+            kind: "initial",
+            ownerDeploymentId: "dpl_inline",
+            input: { message: `Use the ${WAIT_TOOL_NAME} tool.` },
+            serializedContext: buildSerializedContext({
+              channelKind: "http",
+              continuationToken,
+              mode: "conversation",
+            }),
+          },
+        ]);
+        const stream = captureTurnEvents(run);
 
-      try {
-        await waitForHookByToken(continuationToken);
-        await fixture.toolStarted;
+        try {
+          await waitForHookByToken(sessionInboxHookToken(continuationToken));
+          await fixture.toolStarted;
 
-        await expect(
-          address.send("replacement after steer", { auth: null }),
-        ).resolves.toMatchObject({ id: run.runId });
+          await expect(
+            address.send("follow-up after work", { auth: null, turnPolicy }),
+          ).resolves.toMatchObject({ id: run.runId });
 
-        const cancelledTurn = await stream.nextTurn();
-        expect(
-          containsEventSequence(cancelledTurn, [
-            "turn.started",
-            "turn.cancelled",
-            "session.waiting",
-          ]),
-        ).toBe(true);
-        expect(fixture.toolAborts()).toBe(1);
-
-        const replacementTurn = await stream.nextTurn();
-        expect(filterEventsByType(replacementTurn, "turn.started")).toHaveLength(1);
-        expect(filterEventsByType(replacementTurn, "turn.cancelled")).toHaveLength(0);
-        expectNoFailureEvents(replacementTurn);
-        expect(
-          replacementTurn.some(
-            (event) =>
-              event.type === "message.received" &&
-              typeof event.data.message === "string" &&
-              event.data.message.includes("replacement after steer"),
-          ),
-        ).toBe(true);
-      } finally {
-        stream.dispose();
-        await run.cancel();
-      }
-    });
-  }, 60_000);
+          finishWork();
+          const events = await stream.nextTurn();
+          if (turnCount === 2) events.push(...(await stream.nextTurn()));
+          expect(fixture.toolAborts()).toBe(0);
+          expect(filterEventsByType(events, "turn.started")).toHaveLength(turnCount);
+          expect(filterEventsByType(events, "turn.cancelled")).toHaveLength(0);
+          expectNoFailureEvents(events);
+          expect(
+            events.some(
+              (event) =>
+                event.type === "message.received" &&
+                typeof event.data.message === "string" &&
+                event.data.message.includes("follow-up after work"),
+            ),
+          ).toBe(true);
+        } finally {
+          finishWork();
+          stream.dispose();
+          await run.cancel();
+        }
+      });
+    },
+    60_000,
+  );
 
   it("cancels a turn mid-tool and accepts the next message normally", async () => {
     const fixture = await createWaitToolRuntime("turn-cancel-tool");
@@ -488,6 +510,8 @@ describe("turn cancellation integration", () => {
     await fixture.runtime.run(async () => {
       const run = await start(workflowEntry, [
         {
+          kind: "initial",
+          ownerDeploymentId: "dpl_inline",
           input: { message: `Use the ${WAIT_TOOL_NAME} tool.` },
           serializedContext: buildSerializedContext({
             channelKind: "http",
@@ -500,9 +524,6 @@ describe("turn cancellation integration", () => {
 
       try {
         const commandToken = sessionCommandHookToken(run.runId);
-        const cancelHook = await waitForHookByToken(
-          turnCancellationHookToken(`${run.runId}:turn-control:0`),
-        );
         await waitForHookByToken(commandToken);
         await fixture.toolStarted;
         // A matching turn guard cancels the observed turn (the first
@@ -512,7 +533,7 @@ describe("turn cancellation integration", () => {
         const cancelledTurn = await stream.nextTurn();
 
         // A duplicate cancel after the turn settled is consumed by the
-        // parked driver and must not disturb the session.
+        // parked owner and must not disturb the session.
         await resumeHook(commandToken, { kind: "cancel" });
 
         expect(cancelledTurn.at(-1)?.type).toBe("session.waiting");
@@ -531,10 +552,13 @@ describe("turn cancellation integration", () => {
         expectNoFailureEvents(cancelledTurn);
         expect(fixture.toolStarts()).toBe(1);
 
-        await expectNoStepRetries(cancelHook.runId);
+        await expectNoStepRetries(run.runId);
 
-        await waitForHook({ runId: run.runId }, { token: continuationToken });
-        await resumeHook(continuationToken, {
+        await waitForHook(
+          { runId: run.runId },
+          { token: sessionInboxHookToken(continuationToken) },
+        );
+        await resumeHook(sessionInboxHookToken(continuationToken), {
           kind: "send",
           payload: { message: "follow up after cancel" },
         });
@@ -570,6 +594,8 @@ describe("turn cancellation integration", () => {
 
       const run = await start(workflowEntry, [
         {
+          kind: "initial",
+          ownerDeploymentId: "dpl_inline",
           input: { message: `Use the ${WAIT_TOOL_NAME} tool.` },
           serializedContext: buildSerializedContext({
             channelKind: "http",
@@ -609,8 +635,11 @@ describe("turn cancellation integration", () => {
         const duplicate = await cancelViaRoute(run.runId, { turnId: started.data.turnId });
         await expectCancelResponse(duplicate, { sessionId: run.runId, status: "accepted" });
 
-        await waitForHook({ runId: run.runId }, { token: continuationToken });
-        await resumeHook(continuationToken, {
+        await waitForHook(
+          { runId: run.runId },
+          { token: sessionInboxHookToken(continuationToken) },
+        );
+        await resumeHook(sessionInboxHookToken(continuationToken), {
           kind: "send",
           payload: { message: "follow up after route cancel" },
         });
@@ -658,6 +687,8 @@ describe("turn cancellation integration", () => {
 
       const run = await start(workflowEntry, [
         {
+          kind: "initial",
+          ownerDeploymentId: "dpl_inline",
           input: { message: `Use the ${WAIT_TOOL_NAME} tool.` },
           serializedContext: buildSerializedContext({
             channelKind: "http",
@@ -669,7 +700,7 @@ describe("turn cancellation integration", () => {
       const stream = captureTurnEvents(run);
 
       try {
-        await waitForHookByToken(continuationToken);
+        await waitForHookByToken(sessionInboxHookToken(continuationToken));
         await fixture.toolStarted;
 
         await expect(address(rawToken).cancel()).resolves.toEqual({
@@ -731,6 +762,8 @@ describe("turn cancellation integration", () => {
     await fixture.runtime.run(async () => {
       const run = await start(workflowEntry, [
         {
+          kind: "initial",
+          ownerDeploymentId: "dpl_inline",
           input: { message: `Use the ${WAIT_TOOL_NAME} tool.` },
           serializedContext: buildSerializedContext({
             channelKind: "http",
@@ -778,6 +811,8 @@ describe("turn cancellation integration", () => {
     await runtime.run(async () => {
       const run = await start(workflowEntry, [
         {
+          kind: "initial",
+          ownerDeploymentId: "dpl_inline",
           input: { message: "hello there" },
           serializedContext: buildSerializedContext({
             channelKind: "http",
@@ -793,11 +828,14 @@ describe("turn cancellation integration", () => {
         expect(firstTurn.at(-1)?.type).toBe("session.waiting");
         expect(filterEventsByType(firstTurn, "turn.completed")).toHaveLength(1);
 
-        // The stable inbox accepts a late cancel and the parked driver consumes it as a no-op.
+        // The stable inbox accepts a late cancel and the parked owner consumes it as a no-op.
         await resumeHook(sessionCommandHookToken(run.runId), { kind: "cancel" });
 
-        await waitForHook({ runId: run.runId }, { token: continuationToken });
-        await resumeHook(continuationToken, {
+        await waitForHook(
+          { runId: run.runId },
+          { token: sessionInboxHookToken(continuationToken) },
+        );
+        await resumeHook(sessionInboxHookToken(continuationToken), {
           kind: "send",
           payload: { message: "follow up after late cancel" },
         });
@@ -820,65 +858,4 @@ describe("turn cancellation integration", () => {
       }
     });
   });
-
-  it("completes settled turn runs so the world sweeps their hooks", async () => {
-    const runtime = await createTestRuntime({ agent: { name: "turn-cancel-sweep" } });
-    const continuationToken = "http:turn-cancel-sweep";
-
-    await runtime.run(async () => {
-      const run = await start(workflowEntry, [
-        {
-          input: { message: "first turn" },
-          serializedContext: buildSerializedContext({
-            channelKind: "http",
-            continuationToken,
-            mode: "conversation",
-          }),
-        },
-      ]);
-      const stream = captureTurnEvents(run);
-
-      try {
-        expect((await stream.nextTurn()).at(-1)?.type).toBe("session.waiting");
-
-        await waitForHook({ runId: run.runId }, { token: continuationToken });
-        await resumeHook(continuationToken, {
-          kind: "send",
-          payload: { message: "second turn" },
-        });
-        expect((await stream.nextTurn()).at(-1)?.type).toBe("session.waiting");
-
-        // Teardown must not await the cancel hook's outstanding read: a
-        // turn run that never returns stays `running` forever and its
-        // hooks are never swept. With the session parked, no cancel hook
-        // may remain in the world.
-        const world = await getWorld();
-        const deadline = Date.now() + 15_000;
-        let completedTurnRuns = 0;
-        let cancelHooks = 0;
-        while (Date.now() < deadline) {
-          const cancelToken0 = turnCancellationHookToken(`${run.runId}:turn-control:0`);
-          const cancelHook0 = await world.hooks.getByToken(cancelToken0).catch(() => null);
-          cancelHooks = cancelHook0 === null ? 0 : 1;
-
-          const runsPage = await world.runs.list({ pagination: { limit: 100 } });
-          completedTurnRuns = runsPage.data.filter(
-            (row: { status?: string; workflowName?: string }) =>
-              row.workflowName?.includes("turnWorkflow") === true && row.status === "completed",
-          ).length;
-
-          if (completedTurnRuns >= 1 && cancelHooks === 0) break;
-          await new Promise((resolve) => setTimeout(resolve, 100));
-        }
-
-        // The first turn settled a full turn ago: its run must have
-        // completed and its cancel hook must be gone from the world.
-        expect(completedTurnRuns).toBeGreaterThanOrEqual(1);
-        expect(cancelHooks).toBe(0);
-      } finally {
-        stream.dispose();
-        await run.cancel();
-      }
-    });
-  }, 60_000);
 });

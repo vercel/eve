@@ -12,7 +12,7 @@ export async function acceptTaskAuthorizationEventStep(input: {
   "use step";
 
   const { hookPayload, taskId } = input.delivery;
-  const durableSession = await readDurableSession(input.sessionState);
+  const durableSession = readDurableSession(input.sessionState);
   const entry = findSessionTaskEntry(durableSession.state, taskId);
   if (entry === undefined) return false;
 

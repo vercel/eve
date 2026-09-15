@@ -3,6 +3,7 @@ import { ContextContainer, contextStorage, loadContext } from "#context/containe
 import {
   AuthKey,
   ChannelInstrumentationKey,
+  ContinuationHookTokensKey,
   ContinuationTokenKey,
   ParentTraceContextKey,
   type Session,
@@ -166,6 +167,7 @@ describe("buildRunContext", () => {
     });
 
     expect(ctx.require(AuthKey)).toEqual(testAuth);
+    expect(ctx.require(ContinuationHookTokensKey)).toEqual(["t"]);
     expect(ctx.get(SessionIdKey)).toBeUndefined();
   });
 
@@ -246,6 +248,7 @@ describe("buildRunContext", () => {
     });
 
     expect(ctx.get(ContinuationTokenKey)).toBeUndefined();
+    expect(ctx.get(ContinuationHookTokensKey)).toBeUndefined();
   });
 
   it("does not throw when channel has no onContext", () => {

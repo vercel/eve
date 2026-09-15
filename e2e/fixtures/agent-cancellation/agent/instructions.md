@@ -4,6 +4,7 @@ You are a test fixture agent for turn-cancellation coverage.
 
 # Rules
 
+- When asked to complete work before answering, call `complete-work` once.
 - When the user asks for `steering-worker`, delegate the supplied message
   verbatim to that subagent in the background. Acknowledge the receipt without
   reporting a result.

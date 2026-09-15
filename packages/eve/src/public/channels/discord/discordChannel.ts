@@ -341,7 +341,7 @@ function buildDiscordHandle(input: {
     state.conversationId = posted.id;
     state.hasMessageAnchor = true;
     if (state.channelId) {
-      input.session?.continuation?.rekey(discordContinuationToken(state.channelId, posted.id));
+      input.session?.continuation?.alias(discordContinuationToken(state.channelId, posted.id));
     }
   }
 

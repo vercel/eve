@@ -76,7 +76,6 @@ describe("getAgentHandleStore", () => {
       null,
       { handles: "not-an-array" },
       { handles: [{ phase: "starting" }] },
-      { extra: true, handles: [] },
       {
         handles: [
           {
