@@ -11,8 +11,12 @@ import {
   type TraceCapturePolicy,
 } from "#tracing/otel-declaration.js";
 
-/** Zero-config local tracing keeps public and unclassified sessions observable. @internal */
-export const localTracePolicy: TraceCapturePolicy = ({ audience }) => audience !== "private";
+/** Local traces are a local debugging surface, so every conversation is public here. @internal */
+export const localTracePolicy: TraceCapturePolicy = () => ({
+  emit: true,
+  recordInputs: true,
+  recordOutputs: true,
+});
 
 /** Installs the zero-config local OTel runtime once in an `eve dev` worker. */
 export function installLocalInstrumentationRuntime(input: {
