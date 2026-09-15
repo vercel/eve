@@ -27,7 +27,7 @@ export async function turnWorkflow(rawInput: unknown): Promise<void> {
     if (isHookConflictError(error)) return;
     throw error;
   }
-  const { mode, parentWritable: sessionWritable } = prepared.input;
+  const { mode, sessionWritable } = prepared.input;
   let interrupted;
   try {
     await inbox.claimSessionHooks(sessionHookTokens(prepared));

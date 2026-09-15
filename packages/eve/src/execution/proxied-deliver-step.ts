@@ -46,7 +46,7 @@ interface ChildBucket {
 /** Splits an envelope and validates task routes before forwarding descendant input. */
 export async function routeProxiedDeliverStep(input: {
   readonly delivery: DeliverHookPayload;
-  readonly parentWritable: WritableStream<Uint8Array>;
+  readonly sessionWritable: WritableStream<Uint8Array>;
   readonly serializedContext?: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
 }): Promise<RoutedDeliverResult> {

@@ -16,7 +16,7 @@ export interface SessionStateTransition {
  * the session answers to is registered before the next step runs.
  */
 export class SessionStateCursor {
-  readonly parentWritable: WritableStream<Uint8Array>;
+  readonly sessionWritable: WritableStream<Uint8Array>;
 
   private readonly inbox: Pick<SessionInboxOwnership, "claimSessionHooks">;
   private currentSerializedContext: Record<string, unknown>;
@@ -24,12 +24,12 @@ export class SessionStateCursor {
 
   constructor(input: {
     readonly inbox: Pick<SessionInboxOwnership, "claimSessionHooks">;
-    readonly parentWritable: WritableStream<Uint8Array>;
+    readonly sessionWritable: WritableStream<Uint8Array>;
     readonly serializedContext: Record<string, unknown>;
     readonly sessionState: DurableSessionState;
   }) {
     this.inbox = input.inbox;
-    this.parentWritable = input.parentWritable;
+    this.sessionWritable = input.sessionWritable;
     this.currentSerializedContext = input.serializedContext;
     this.currentSessionState = input.sessionState;
   }
@@ -55,7 +55,7 @@ export class SessionStateCursor {
     return {
       abortSignal,
       input,
-      parentWritable: this.parentWritable,
+      sessionWritable: this.sessionWritable,
       serializedContext: this.currentSerializedContext,
       sessionState: this.currentSessionState,
     };

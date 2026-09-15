@@ -39,7 +39,7 @@ function fixture(turnId = ""): PreparedLegacySession {
       retention: undefined,
       mode: "conversation",
       completionToken: "old:completion",
-      parentWritable: new WritableStream(),
+      sessionWritable: new WritableStream(),
       serializedContext: {},
       sessionState: { sessionId: "original" },
       delivery: undefined,
@@ -73,7 +73,7 @@ describe("legacy pending work", () => {
     mocks.settle.mockResolvedValue({ sessionState: prepared.sessionState, serializedContext: {} });
     await interruptLegacySessionStep(prepared);
     expect(mocks.settle).toHaveBeenCalledExactlyOnceWith({
-      parentWritable: prepared.input.parentWritable,
+      sessionWritable: prepared.input.sessionWritable,
       sessionState: prepared.sessionState,
       serializedContext: {},
     });

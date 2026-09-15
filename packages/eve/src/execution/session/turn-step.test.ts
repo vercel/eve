@@ -336,7 +336,7 @@ describe("routeProxiedDeliverStep", () => {
     installSessionStoreMocks([session]);
 
     await routeProxiedDeliverStep({
-      parentWritable: createTestWritable(),
+      sessionWritable: createTestWritable(),
       delivery: {
         kind: "deliver",
         payloads: [{ inputResponses: [{ requestId: "request-1", text: "yes" }] }],
@@ -378,7 +378,7 @@ describe("routeProxiedDeliverStep", () => {
     installSessionStoreMocks([session]);
 
     const result = await routeProxiedDeliverStep({
-      parentWritable: createTestWritable(),
+      sessionWritable: createTestWritable(),
       delivery: {
         kind: "deliver",
         auth,
@@ -456,7 +456,7 @@ describe("routeProxiedDeliverStep", () => {
 
     const result = await routeProxiedDeliverStep({
       delivery,
-      parentWritable: createTestWritable(),
+      sessionWritable: createTestWritable(),
       sessionState: createStubSessionState({ hasProxyInputRequests: true }),
     });
 
@@ -558,7 +558,7 @@ describe("routeProxiedDeliverStep", () => {
 
     const result = await routeProxiedDeliverStep({
       ...taskRouteInput,
-      parentWritable: createTestWritable(),
+      sessionWritable: createTestWritable(),
     });
     expect(result).toMatchObject({ kind: "continue", remainder: undefined });
     expect(sendTaskInboundPayload).toHaveBeenCalledWith({
@@ -580,7 +580,7 @@ describe("routeProxiedDeliverStep", () => {
       createTaskRouteSession({ childContinuationToken: "eve:workflow-tool-run-answer:run-1:0" }),
     ]);
 
-    await routeProxiedDeliverStep({ ...taskRouteInput, parentWritable: createTestWritable() });
+    await routeProxiedDeliverStep({ ...taskRouteInput, sessionWritable: createTestWritable() });
 
     expect(sendTaskInboundPayload).toHaveBeenCalledWith({
       payload: expect.objectContaining({
@@ -597,7 +597,7 @@ describe("routeProxiedDeliverStep", () => {
       createTaskRouteSession({ childResponseUrl: "https://child.example/eve/v1/task-input/token" }),
     ]);
 
-    await routeProxiedDeliverStep({ ...taskRouteInput, parentWritable: createTestWritable() });
+    await routeProxiedDeliverStep({ ...taskRouteInput, sessionWritable: createTestWritable() });
 
     expect(sendTaskInboundPayload).toHaveBeenCalledWith({
       payload: expect.objectContaining({
@@ -612,7 +612,7 @@ describe("routeProxiedDeliverStep", () => {
     installSessionStoreMocks([createTaskRouteSession({ owned: false })]);
 
     await expect(
-      routeProxiedDeliverStep({ ...taskRouteInput, parentWritable: createTestWritable() }),
+      routeProxiedDeliverStep({ ...taskRouteInput, sessionWritable: createTestWritable() }),
     ).resolves.toMatchObject({
       kind: "continue",
       remainder: {
@@ -628,7 +628,7 @@ describe("routeProxiedDeliverStep", () => {
     vi.mocked(sendTaskInboundPayload).mockResolvedValueOnce("unreachable");
 
     await expect(
-      routeProxiedDeliverStep({ ...taskRouteInput, parentWritable: createTestWritable() }),
+      routeProxiedDeliverStep({ ...taskRouteInput, sessionWritable: createTestWritable() }),
     ).resolves.toMatchObject({
       kind: "continue",
       remainder: {
@@ -646,10 +646,10 @@ describe("routeProxiedDeliverStep", () => {
       .mockResolvedValueOnce("delivered");
 
     await expect(
-      routeProxiedDeliverStep({ ...taskRouteInput, parentWritable: createTestWritable() }),
+      routeProxiedDeliverStep({ ...taskRouteInput, sessionWritable: createTestWritable() }),
     ).rejects.toThrow("transient");
     await expect(
-      routeProxiedDeliverStep({ ...taskRouteInput, parentWritable: createTestWritable() }),
+      routeProxiedDeliverStep({ ...taskRouteInput, sessionWritable: createTestWritable() }),
     ).resolves.toMatchObject({ kind: "continue", remainder: undefined });
     expect(sendTaskInboundPayload).toHaveBeenCalledTimes(2);
   });
@@ -800,7 +800,7 @@ describe("dispatchCoordinationStep", () => {
     const result = await dispatchCoordinationStep({
       action: "park",
       workflowToolRunOwner: { inbox: "generated-owner-token" },
-      parentWritable: createTestWritable(),
+      sessionWritable: createTestWritable(),
       serializedContext: createSerializedContext(),
       sessionState,
     });
@@ -863,7 +863,7 @@ describe("dispatchCoordinationStep", () => {
       dispatchCoordinationStep({
         action: "park",
         workflowToolRunOwner: { inbox: "generated-owner-token" },
-        parentWritable: createTestWritable(),
+        sessionWritable: createTestWritable(),
         serializedContext: createSerializedContext(),
         sessionState,
       }),
@@ -927,7 +927,7 @@ describe("dispatchCoordinationStep", () => {
       dispatchCoordinationStep({
         action: "park",
         workflowToolRunOwner: { inbox: "generated-owner-token" },
-        parentWritable: createTestWritable(),
+        sessionWritable: createTestWritable(),
         serializedContext: createSerializedContext(),
         sessionState,
       }),
@@ -1004,7 +1004,7 @@ describe("dispatchCoordinationStep", () => {
       dispatchCoordinationStep({
         action: "park",
         workflowToolRunOwner: { inbox: "generated-owner-token" },
-        parentWritable: createTestWritable(),
+        sessionWritable: createTestWritable(),
         serializedContext: createSerializedContext(),
         sessionState,
       }),
@@ -1144,7 +1144,7 @@ describe("turnStep", () => {
           },
         ],
       },
-      parentWritable: writable,
+      sessionWritable: writable,
       serializedContext,
       sessionState: createStubSessionState({ emissionState }),
     });
@@ -1168,7 +1168,7 @@ describe("turnStep", () => {
         payloads: [{ message: "Background task task_report is completed." }],
         taskDeliveryId: "task_report:ready:completed",
       },
-      parentWritable: writable,
+      sessionWritable: writable,
       serializedContext: launch.serializedContext,
       sessionState: launch.sessionState,
     });
@@ -1224,7 +1224,7 @@ describe("turnStep", () => {
 
     const result = await turnStep({
       input: { kind: "deliver", payloads: [{ message: "run the chain" }] },
-      parentWritable: createTestWritable(),
+      sessionWritable: createTestWritable(),
       serializedContext: createSerializedContext(),
       sessionState: createStubSessionState(),
     });
@@ -1285,7 +1285,7 @@ describe("turnStep", () => {
     const result = await turnStep({
       abortSignal: controller.signal,
       input: { kind: "deliver", payloads: [{ message: "run a long chain" }] },
-      parentWritable: createTestWritable(),
+      sessionWritable: createTestWritable(),
       serializedContext: createSerializedContext(),
       sessionState: createStubSessionState(),
     });
@@ -1314,7 +1314,7 @@ describe("turnStep", () => {
 
     const result = await turnStep({
       input: { kind: "deliver", payloads: [{ message: "one call" }] },
-      parentWritable: createTestWritable(),
+      sessionWritable: createTestWritable(),
       serializedContext: createSerializedContext(),
       sessionState: createStubSessionState(),
     });
@@ -1348,7 +1348,7 @@ describe("turnStep", () => {
 
     const result = await turnStep({
       input: { kind: "deliver", payloads: [{ message: "ask first" }] },
-      parentWritable: createTestWritable(),
+      sessionWritable: createTestWritable(),
       serializedContext: createSerializedContext(),
       sessionState: createStubSessionState(),
     });
@@ -1374,7 +1374,7 @@ describe("turnStep", () => {
 
     const result = await turnStep({
       input: { kind: "deliver", payloads: [{ message: "delegate" }] },
-      parentWritable: createTestWritable(),
+      sessionWritable: createTestWritable(),
       serializedContext: createSerializedContext(),
       sessionState: createStubSessionState(),
     });
@@ -1434,14 +1434,14 @@ describe("turnStep", () => {
 
     const first = await turnStep({
       input: delivery(["delivery-a", "delivery-b"]),
-      parentWritable: createTestWritable("first"),
+      sessionWritable: createTestWritable("first"),
       serializedContext: createSerializedContext(),
       sessionState: createStubSessionState(),
     });
     expect(first.serializedContext[TurnDeliveryIdsKey.name]).toEqual(["delivery-a", "delivery-b"]);
     const resumed = await turnStep({
       input: undefined,
-      parentWritable: createTestWritable("resumed"),
+      sessionWritable: createTestWritable("resumed"),
       serializedContext: first.serializedContext,
       sessionState: first.sessionState,
     });
@@ -1451,7 +1451,7 @@ describe("turnStep", () => {
     ]);
     const next = await turnStep({
       input: delivery(["delivery-c"]),
-      parentWritable: createTestWritable("next"),
+      sessionWritable: createTestWritable("next"),
       serializedContext: resumed.serializedContext,
       sessionState: resumed.sessionState,
     });
@@ -1569,7 +1569,7 @@ describe("turnStep", () => {
 
     await turnStep({
       input: { kind: "deliver", payloads: [{ message: "follow up" }] },
-      parentWritable: createTestWritable(),
+      sessionWritable: createTestWritable(),
       serializedContext: serializeContext(ctx),
       sessionState: createStubSessionState({
         emissionState: {
@@ -1642,7 +1642,7 @@ describe("turnStep", () => {
     await expect(
       turnStep({
         input: { kind: "deliver", payloads: [{ message: "hello" }] },
-        parentWritable: createTestWritable(),
+        sessionWritable: createTestWritable(),
         serializedContext: serializeContext(ctx),
         sessionState: createStubSessionState(),
       }),
@@ -1673,17 +1673,17 @@ describe("turnStep", () => {
     ctx.set(ContinuationTokenKey, "deliver-failure");
     ctx.set(ModeKey, "conversation");
     ctx.set(SessionIdKey, "session-1");
-    const parentWritable = createTestWritable();
+    const sessionWritable = createTestWritable();
 
     await expect(
       turnStep({
         input: { kind: "deliver", payloads: [{ message: "hello" }] },
-        parentWritable,
+        sessionWritable,
         serializedContext: serializeContext(ctx),
         sessionState: createStubSessionState(),
       }),
     ).rejects.toThrow("deliver failed");
-    expect(parentWritable.locked).toBe(false);
+    expect(sessionWritable.locked).toBe(false);
   });
 
   it.each([
@@ -1748,7 +1748,7 @@ describe("turnStep", () => {
 
     await turnStep({
       input: { auth: expected, kind: "deliver", payloads: [{ message: "follow up" }] },
-      parentWritable: createTestWritable(),
+      sessionWritable: createTestWritable(),
       serializedContext: serializeContext(ctx),
       sessionState: createStubSessionState(),
     });
@@ -1869,7 +1869,7 @@ describe("turnStep", () => {
 
     await turnStep({
       input: { kind: "deliver", payloads: [{ message: "run the task" }] },
-      parentWritable: createTestWritable(),
+      sessionWritable: createTestWritable(),
       serializedContext: serializeContext(ctx),
       sessionState: createStubSessionState(),
     });
@@ -1947,7 +1947,7 @@ describe("turnStep", () => {
           },
         ],
       },
-      parentWritable: createTestWritable(),
+      sessionWritable: createTestWritable(),
       serializedContext: {
         ...createSerializedContext(),
         [TurnDeliveryIdsKey.name]: ["previous-delivery"],
@@ -2007,7 +2007,7 @@ describe("turnStep", () => {
         kind: "deliver",
         payloads: [{ message: "attach:look at this" }],
       },
-      parentWritable: createTestWritable(),
+      sessionWritable: createTestWritable(),
       serializedContext: createSerializedContext(),
       sessionState: createStubSessionState(),
     });
@@ -2057,7 +2057,7 @@ describe("turnStep", () => {
           kind: "deliver",
           payloads: [{ message: "unrelated message" }],
         },
-        parentWritable: createTestWritable(),
+        sessionWritable: createTestWritable(),
         serializedContext: createSerializedContext("task"),
         sessionState: createStubSessionState(),
       }),
@@ -2112,7 +2112,7 @@ describe("turnStep", () => {
         kind: "deliver",
         payloads: [{ message: "research this" }],
       },
-      parentWritable: createTestWritable(),
+      sessionWritable: createTestWritable(),
       serializedContext: serializeContext(ctx),
       sessionState: createStubSessionState(),
     });
@@ -2171,7 +2171,7 @@ describe("turnStep", () => {
         kind: "deliver",
         payloads: [{ message: "check background work" }],
       },
-      parentWritable: createTestWritable(),
+      sessionWritable: createTestWritable(),
       serializedContext: createSerializedContext(),
       sessionState: createStubSessionState(),
     });
@@ -2198,7 +2198,7 @@ describe("turnStep", () => {
         kind: "deliver",
         payloads: [{ message: "hello" }],
       },
-      parentWritable: createTestWritable(),
+      sessionWritable: createTestWritable(),
       serializedContext: createSerializedContext(),
       sessionState: createStubSessionState(),
     });
@@ -2249,7 +2249,7 @@ describe("turnStep", () => {
 
     const first = await turnStep({
       input: { kind: "deliver", payloads: [{ message: "hello" }] },
-      parentWritable: createTestWritable(),
+      sessionWritable: createTestWritable(),
       serializedContext: createSerializedContext(),
       sessionState: createStubSessionState(),
     });
@@ -2282,7 +2282,7 @@ describe("turnStep", () => {
 
     const second = await turnStep({
       input: { kind: "deliver", payloads: [{ message: "again" }] },
-      parentWritable: createTestWritable(),
+      sessionWritable: createTestWritable(),
       serializedContext: createSerializedContext(),
       sessionState: first.sessionState,
     });
@@ -2328,7 +2328,7 @@ describe("turnStep", () => {
         kind: "deliver",
         payloads: [{ message: "unrelated message" }],
       },
-      parentWritable: createTestWritable(),
+      sessionWritable: createTestWritable(),
       serializedContext: createSerializedContext(),
       sessionState: createStubSessionState(),
     });
@@ -2415,7 +2415,7 @@ describe("turnStep", () => {
         kind: "deliver",
         payloads: [{ message: "hello" }],
       },
-      parentWritable: createTestWritable(),
+      sessionWritable: createTestWritable(),
       serializedContext: createSerializedContext(),
       sessionState: createStubSessionState(),
     });
@@ -2448,7 +2448,7 @@ describe("turnStep", () => {
         kind: "deliver",
         payloads: [{ message: "hello from turn step" }],
       },
-      parentWritable: createTestWritable(),
+      sessionWritable: createTestWritable(),
       serializedContext: createSerializedContext(),
       sessionState,
     });
@@ -2510,7 +2510,7 @@ describe("turnStep", () => {
         payloads: [{ message: "Background task task_1 is completed." }],
         taskDeliveryId: "task_1:ready:completed",
       },
-      parentWritable: createTestWritable(),
+      sessionWritable: createTestWritable(),
       serializedContext: initialSerializedContext,
       sessionState: createStubSessionState(),
     });
@@ -2520,13 +2520,13 @@ describe("turnStep", () => {
         payloads: [{ message: "Background task task_unknown is completed." }],
         taskDeliveryId: "task_unknown:ready:completed",
       },
-      parentWritable: createTestWritable(),
+      sessionWritable: createTestWritable(),
       serializedContext: first.serializedContext,
       sessionState: first.sessionState,
     });
     await turnStep({
       input: { kind: "deliver", payloads: [{ message: "What happened?" }] },
-      parentWritable: createTestWritable(),
+      sessionWritable: createTestWritable(),
       serializedContext: second.serializedContext,
       sessionState: second.sessionState,
     });
@@ -2606,7 +2606,7 @@ describe("turnStep", () => {
 
     await turnStep({
       input: undefined,
-      parentWritable: createTestWritable(),
+      sessionWritable: createTestWritable(),
       serializedContext,
       sessionState: createStubSessionState({
         emissionState: {
@@ -2667,14 +2667,14 @@ describe("turnStep", () => {
       };
     });
 
-    const parentWritable = createTestWritable();
+    const sessionWritable = createTestWritable();
     const sessionState = createStubSessionState();
     const first = await turnStep({
       input: {
         kind: "deliver",
         payloads: [{ message: "seed:alpha" }],
       },
-      parentWritable,
+      sessionWritable,
       serializedContext: createSerializedContext(),
       sessionState,
     });
@@ -2688,7 +2688,7 @@ describe("turnStep", () => {
         kind: "deliver",
         payloads: [{ message: "follow up" }],
       },
-      parentWritable,
+      sessionWritable,
       serializedContext: first.serializedContext,
       sessionState: first.sessionState,
     });
@@ -2751,7 +2751,7 @@ describe("turnStep", () => {
         kind: "deliver",
         payloads: [{ message: "finish up" }],
       },
-      parentWritable: createTestWritable(),
+      sessionWritable: createTestWritable(),
       serializedContext: createSerializedContext(),
       sessionState: createStubSessionState(),
     });
@@ -2824,7 +2824,7 @@ describe("turnStep", () => {
         kind: "deliver",
         payloads: [{ message: "follow up" }],
       },
-      parentWritable: createTestWritable(),
+      sessionWritable: createTestWritable(),
       serializedContext: serializeContext(ctx),
       sessionState: createStubSessionState(),
     });
@@ -2948,7 +2948,7 @@ describe("turnStep", () => {
         kind: "deliver",
         payloads: [{ message: "follow up" }],
       },
-      parentWritable: createTestWritable(),
+      sessionWritable: createTestWritable(),
       serializedContext: serializeContext(ctx),
       sessionState: createStubSessionState({
         emissionState: {
@@ -3059,7 +3059,7 @@ describe("turnStep", () => {
           },
         ],
       },
-      parentWritable: createTestWritable(),
+      sessionWritable: createTestWritable(),
       serializedContext: createSerializedContext(),
       sessionState: createStubSessionState(),
     });
@@ -3155,7 +3155,7 @@ describe("emitTerminalSessionFailureStep", () => {
 
     await emitTerminalSessionFailureStep({
       error,
-      parentWritable: createTestWritable(),
+      sessionWritable: createTestWritable(),
       serializedContext: serialized,
     });
 
@@ -3203,7 +3203,7 @@ describe("emitTerminalSessionFailureStep", () => {
 
     await emitTerminalSessionFailureStep({
       error,
-      parentWritable: createTestWritable(),
+      sessionWritable: createTestWritable(),
       serializedContext: serialized,
     });
 
@@ -3244,7 +3244,7 @@ describe("emitTerminalSessionFailureStep", () => {
     await expect(
       emitTerminalSessionFailureStep({
         error: new Error("inner"),
-        parentWritable: createTestWritable(),
+        sessionWritable: createTestWritable(),
         serializedContext: serialized,
       }),
     ).resolves.toBeUndefined();
@@ -3379,7 +3379,7 @@ describe("runProxySubagentEventStep", () => {
 
     const result = await runProxySubagentEventStep({
       hookPayload: buildHookPayload(),
-      parentWritable: createTestWritable(),
+      sessionWritable: createTestWritable(),
       serializedContext: buildSerializedContextForAdapter(cachingAdapter, {
         acceptedForwardedTracePolicy: true,
       }),
@@ -3449,7 +3449,7 @@ describe("runProxySubagentEventStep", () => {
 
     const result = await runProxySubagentEventStep({
       hookPayload: buildHookPayload(),
-      parentWritable: createTestWritable(),
+      sessionWritable: createTestWritable(),
       serializedContext: buildSerializedContextForAdapter(aliasingAdapter),
       sessionState,
     });

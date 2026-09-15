@@ -14,7 +14,7 @@ export async function routeSelectedDelivery(
 ): Promise<RoutedTurnSelection> {
   const routed = await routeDeliverToChildren({
     delivery: selection.delivery,
-    parentWritable: cursor.parentWritable,
+    sessionWritable: cursor.sessionWritable,
     serializedContext: cursor.serializedContext,
     sessionState: cursor.sessionState,
   });

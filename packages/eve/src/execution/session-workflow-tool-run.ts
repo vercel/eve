@@ -46,7 +46,7 @@ export async function handleWorkflowToolRunMessage(
     case "report":
       await emitWorkflowToolRunReportStep({
         from: message.from,
-        parentWritable: input.cursor.parentWritable,
+        sessionWritable: input.cursor.sessionWritable,
         update: message.update,
       });
       return undefined;
@@ -167,7 +167,7 @@ async function handleWorkflowToolRunRequest(
     await cursor.apply(
       await runProxySubagentEventStep({
         hookPayload: message.request.event,
-        parentWritable: cursor.parentWritable,
+        sessionWritable: cursor.sessionWritable,
         serializedContext: cursor.serializedContext,
         sessionState: cursor.sessionState,
       }),
@@ -182,7 +182,7 @@ async function handleWorkflowToolRunRequest(
         ? { answerHook: { runId: message.from.runId } }
         : {}),
       hookPayload: workflowToolRunRequestToInputRequestPayload(message),
-      parentWritable: cursor.parentWritable,
+      sessionWritable: cursor.sessionWritable,
       serializedContext: cursor.serializedContext,
       sessionState: cursor.sessionState,
     }),
@@ -192,7 +192,7 @@ async function handleWorkflowToolRunRequest(
 function requestContext(input: HandlerInput<unknown>) {
   return {
     callbackBaseUrl: resolveWorkflowCallbackBaseUrl(input.callbackMetadataUrl),
-    parentWritable: input.cursor.parentWritable,
+    sessionWritable: input.cursor.sessionWritable,
     serializedContext: input.cursor.serializedContext,
     sessionState: input.cursor.sessionState,
   };

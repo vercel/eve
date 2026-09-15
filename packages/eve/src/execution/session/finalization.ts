@@ -46,13 +46,13 @@ export async function finalizeSession(
   }
   if (outcome.kind === "expired") {
     await emitTerminalSessionCompletionStep({
-      parentWritable: context.sessionWritable,
+      sessionWritable: context.sessionWritable,
       serializedContext,
     });
   } else if (outcome.kind === "failed") {
     await emitTerminalSessionFailureStep({
       error: normalizeSerializableError(outcome.error),
-      parentWritable: context.sessionWritable,
+      sessionWritable: context.sessionWritable,
       serializedContext,
       turnId: outcome.turnId,
     });

@@ -34,7 +34,7 @@ export interface SessionEventSinkInput {
   readonly effectiveAgent: ReturnType<typeof resolveEffectiveAgentRuntime>;
   readonly instrumentation: ExecutionInstrumentation | undefined;
   readonly isFirstTurn: boolean;
-  readonly parentWritable: WritableStream<Uint8Array>;
+  readonly sessionWritable: WritableStream<Uint8Array>;
   readonly sessionId: string;
 }
 
@@ -55,7 +55,7 @@ export function createSessionEventSink(input: SessionEventSinkInput): SessionEve
   const adapterCtx = buildAdapterContext(adapter, ctx);
   const dynamicConnections = bindDynamicConnections(ctx, bundle.resolvedAgent);
   const effectiveNode = { ...bundle.graph.root, turnAgent: effectiveAgent.turnAgent };
-  const writer = input.parentWritable.getWriter();
+  const writer = input.sessionWritable.getWriter();
 
   const emit = async (
     event: UnstampedMessageStreamEvent,

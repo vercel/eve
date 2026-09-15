@@ -217,7 +217,7 @@ async function runSessionStep(input: TurnStepInput): Promise<DurableStepResult> 
     effectiveAgent,
     instrumentation,
     isFirstTurn: initialEmissionState.sequence === 0,
-    parentWritable: input.parentWritable,
+    sessionWritable: input.sessionWritable,
     sessionId: initialSession.sessionId,
   });
   const { adapterCtx, dynamicConnections, effectiveNode, handleEvent } = sink;

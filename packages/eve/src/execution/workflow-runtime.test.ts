@@ -155,8 +155,8 @@ describe("session owner starts", () => {
   });
 
   it("starts a successor on the accepted deployment with the original stream", async () => {
-    const parentWritable = new WritableStream<Uint8Array>();
-    getRunMock.mockReturnValue({ getWritable: () => parentWritable });
+    const sessionWritable = new WritableStream<Uint8Array>();
+    getRunMock.mockReturnValue({ getWritable: () => sessionWritable });
     startMock.mockResolvedValue({ runId: "owner-2" });
     const checkpoint = {
       version: 4,
@@ -187,7 +187,7 @@ describe("session owner starts", () => {
           delivery,
           kind: "handoff",
           ownerDeploymentId: "deployment-b",
-          parentWritable,
+          sessionWritable,
           sessionId: "anchor-1",
         }),
       ],

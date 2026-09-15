@@ -111,7 +111,7 @@ function createCursor(
 ): SessionStateCursor {
   return new SessionStateCursor({
     inbox: inbox,
-    parentWritable: new WritableStream<Uint8Array>(),
+    sessionWritable: new WritableStream<Uint8Array>(),
     serializedContext: {},
     sessionState: state,
   });

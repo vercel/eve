@@ -54,7 +54,7 @@ export async function admitSessionInboxPayload(
       await input.cursor.apply(
         await runProxySubagentEventStep({
           hookPayload: value,
-          parentWritable: input.cursor.parentWritable,
+          sessionWritable: input.cursor.sessionWritable,
           serializedContext: input.cursor.serializedContext,
           sessionState: input.cursor.sessionState,
         }),

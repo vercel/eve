@@ -29,7 +29,7 @@ export interface HandoffWorkflowEntryInput {
   readonly delivery: DeliverHookPayload;
   readonly kind: "handoff";
   readonly ownerDeploymentId: string;
-  readonly parentWritable: WritableStream<Uint8Array>;
+  readonly sessionWritable: WritableStream<Uint8Array>;
   /** Stable public identity; also the original run that anchors the stream. */
   readonly sessionId: string;
 }

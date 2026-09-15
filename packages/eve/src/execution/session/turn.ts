@@ -133,7 +133,7 @@ export class SessionExecution {
           workflowToolRunOwner: {
             inbox: sessionInboxHookToken(sessionCommandHookToken(this.input.sessionId)),
           },
-          parentWritable: cursor.parentWritable,
+          sessionWritable: cursor.sessionWritable,
           serializedContext: cursor.serializedContext,
           sessionState: cursor.sessionState,
         });
@@ -379,7 +379,7 @@ class ActiveTurn {
       this.routedToChildren.add(sequence);
       const routed = await routeDeliverToChildren({
         delivery,
-        parentWritable: this.input.cursor.parentWritable,
+        sessionWritable: this.input.cursor.sessionWritable,
         serializedContext: this.input.cursor.serializedContext,
         sessionState: this.input.cursor.sessionState,
       });

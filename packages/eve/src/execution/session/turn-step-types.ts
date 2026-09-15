@@ -25,7 +25,7 @@ export interface TurnStepPayload {
 export interface TurnStepInput {
   readonly abortSignal?: AbortSignal;
   readonly input: TurnStepPayload | undefined;
-  readonly parentWritable: WritableStream<Uint8Array>;
+  readonly sessionWritable: WritableStream<Uint8Array>;
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
 }

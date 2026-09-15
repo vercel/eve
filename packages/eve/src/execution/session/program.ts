@@ -78,7 +78,7 @@ export async function runPreparedSession(
 ): Promise<WorkflowEntryResult> {
   const cursor = new SessionStateCursor({
     inbox,
-    parentWritable: boot.sessionWritable,
+    sessionWritable: boot.sessionWritable,
     serializedContext: boot.serializedContext,
     sessionState: boot.sessionState,
   });
@@ -238,7 +238,7 @@ async function runSessionLoop(
   };
   const settleCancelledTurn = async () => {
     const settled = await settleCancelledTurnStep({
-      parentWritable: boot.sessionWritable,
+      sessionWritable: boot.sessionWritable,
       serializedContext: cursor.serializedContext,
       sessionState: cursor.sessionState,
     });

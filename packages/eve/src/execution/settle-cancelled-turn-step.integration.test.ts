@@ -135,7 +135,7 @@ describe("settleCancelledTurnStep handle store", () => {
 
     await runtime.run(async () => {
       const result = await settleCancelledTurnStep({
-        parentWritable: new WritableStream<Uint8Array>({ write() {} }),
+        sessionWritable: new WritableStream<Uint8Array>({ write() {} }),
         serializedContext: buildSerializedContext(),
         sessionState: createDurableSessionState({
           session: createCancelledTurnSession([RUNNING_HANDLE, PARKED_HANDLE]),
@@ -172,7 +172,7 @@ describe("settleCancelledTurnStep handle store", () => {
         toolName: "Workflow",
       });
       const result = await settleCancelledTurnStep({
-        parentWritable: new WritableStream<Uint8Array>({ write() {} }),
+        sessionWritable: new WritableStream<Uint8Array>({ write() {} }),
         serializedContext: buildSerializedContext(),
         sessionState: createDurableSessionState({ session }),
       });

@@ -354,7 +354,7 @@ export async function startSessionOwnerStep(input: SessionOwnerStartInput): Prom
     delivery: input.delivery,
     kind: "handoff",
     ownerDeploymentId: input.targetDeploymentId,
-    parentWritable: getRun(input.anchorRunId).getWritable<Uint8Array>(),
+    sessionWritable: getRun(input.anchorRunId).getWritable<Uint8Array>(),
     sessionId: input.anchorRunId,
   };
   await startWorkflowOnDeployment(

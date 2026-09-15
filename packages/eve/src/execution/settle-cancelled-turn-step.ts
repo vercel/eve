@@ -56,7 +56,7 @@ export interface CancelledTurnSettleResult {
  * cancel hook, so a queued cancel wake cannot re-dispatch it.
  */
 export async function settleCancelledTurnStep(input: {
-  readonly parentWritable: WritableStream<Uint8Array>;
+  readonly sessionWritable: WritableStream<Uint8Array>;
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
 }): Promise<CancelledTurnSettleResult> {
@@ -97,7 +97,7 @@ export async function settleCancelledTurnStep(input: {
     !stoppedAtDescendantLimit;
 
   if (!alreadyEpilogued) {
-    const writer = input.parentWritable.getWriter();
+    const writer = input.sessionWritable.getWriter();
     try {
       const scoped = await withContextScope(ctx, session, async (enrichedSession) => {
         const baseEmit = async (event: UnstampedMessageStreamEvent): Promise<void> => {

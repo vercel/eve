@@ -58,7 +58,7 @@ export type DispatchPlanEntry =
 export interface CoordinationDispatchInput {
   readonly callbackBaseUrl?: string;
   readonly workflowToolRunOwner: WorkflowToolRunOwner;
-  readonly parentWritable: WritableStream<Uint8Array>;
+  readonly sessionWritable: WritableStream<Uint8Array>;
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
 }

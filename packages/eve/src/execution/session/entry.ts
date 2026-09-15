@@ -199,7 +199,7 @@ async function bootHandoffOwner(
       sessionState: checkpoint.sessionState,
       sessionTimeoutMs: checkpoint.sessionTimeoutMs,
       sessionTimeoutDeadline: sessionTimeoutDeadline(checkpoint.sessionTimeoutMs, Date.now()),
-      sessionWritable: input.parentWritable,
+      sessionWritable: input.sessionWritable,
     },
   };
 }

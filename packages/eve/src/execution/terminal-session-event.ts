@@ -24,7 +24,7 @@ type TerminalSessionEvent = Extract<
 export async function emitTerminalSessionEvent(input: {
   readonly errorId?: string;
   readonly event: TerminalSessionEvent;
-  readonly parentWritable: WritableStream<Uint8Array>;
+  readonly sessionWritable: WritableStream<Uint8Array>;
   readonly serializedContext: Record<string, unknown>;
   readonly turnId?: string;
 }): Promise<void> {
@@ -58,7 +58,7 @@ export async function emitTerminalSessionEvent(input: {
     }
 
     try {
-      const writer = input.parentWritable.getWriter();
+      const writer = input.sessionWritable.getWriter();
       try {
         await writer.write(encodeMessageStreamEvent(stampMessageStreamEvent(event)));
       } finally {

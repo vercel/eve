@@ -371,7 +371,7 @@ function createExecution(input: {
 }): SessionExecution {
   const cursor = new SessionStateCursor({
     inbox: input.inbox,
-    parentWritable: new WritableStream<Uint8Array>(),
+    sessionWritable: new WritableStream<Uint8Array>(),
     serializedContext: input.serializedContext ?? {},
     sessionState: input.sessionState,
   });

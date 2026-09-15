@@ -85,7 +85,7 @@ describe("task HITL delivery routing", () => {
         kind: "deliver",
         payloads: [{ task: { inputRequests: [taskRequest] } }],
       },
-      parentWritable: new WritableStream<Uint8Array>(),
+      sessionWritable: new WritableStream<Uint8Array>(),
       serializedContext: {},
       sessionState: state(false),
     });
@@ -122,7 +122,7 @@ describe("task HITL delivery routing", () => {
         kind: "deliver",
         payloads: [{ task: { views: [view] } }],
       },
-      parentWritable: new WritableStream<Uint8Array>(),
+      sessionWritable: new WritableStream<Uint8Array>(),
       serializedContext: { trace: "open" },
       sessionState: state(false),
     });
@@ -151,7 +151,7 @@ describe("task HITL delivery routing", () => {
         kind: "deliver",
         payloads: [{ task: { inputRequests: [{ ...taskRequest, taskId: "foreign-task" }] } }],
       },
-      parentWritable: new WritableStream<Uint8Array>(),
+      sessionWritable: new WritableStream<Uint8Array>(),
       serializedContext: {},
       sessionState: state(false),
     });
@@ -196,7 +196,7 @@ describe("task HITL delivery routing", () => {
           },
         ],
       },
-      parentWritable: new WritableStream<Uint8Array>(),
+      sessionWritable: new WritableStream<Uint8Array>(),
       serializedContext: {},
       sessionState: state(false),
     });
@@ -253,7 +253,7 @@ describe("task HITL delivery routing", () => {
           },
         ],
       },
-      parentWritable: new WritableStream<Uint8Array>(),
+      sessionWritable: new WritableStream<Uint8Array>(),
       serializedContext: { source: "parent" },
       sessionState: state(false),
     });
@@ -305,7 +305,7 @@ describe("task HITL delivery routing", () => {
         taskDeliveryId: "task-delivery-1",
         turnPolicy: "queue",
       },
-      parentWritable: new WritableStream<Uint8Array>(),
+      sessionWritable: new WritableStream<Uint8Array>(),
       serializedContext: {},
       sessionState: routedState,
     });

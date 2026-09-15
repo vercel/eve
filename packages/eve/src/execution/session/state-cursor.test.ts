@@ -16,7 +16,7 @@ describe("SessionStateCursor", () => {
     const initialState = state("channel:initial");
     const cursor = new SessionStateCursor({
       inbox,
-      parentWritable: new WritableStream<Uint8Array>(),
+      sessionWritable: new WritableStream<Uint8Array>(),
       serializedContext: {
         [ContinuationHookTokensKey.name]: ["channel:initial"],
       },
@@ -43,7 +43,7 @@ describe("SessionStateCursor", () => {
       inbox: {
         claimSessionHooks,
       },
-      parentWritable: new WritableStream<Uint8Array>(),
+      sessionWritable: new WritableStream<Uint8Array>(),
       serializedContext: {},
       sessionState: state(""),
     });

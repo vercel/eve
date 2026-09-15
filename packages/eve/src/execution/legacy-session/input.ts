@@ -8,7 +8,7 @@ export interface LegacyTurnInput {
   readonly capabilities?: SessionCapabilities;
   readonly mode: RunMode;
   readonly retention?: AgentWorkflowRetentionDefinition;
-  readonly parentWritable: WritableStream<Uint8Array>;
+  readonly sessionWritable: WritableStream<Uint8Array>;
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: Record<string, unknown> & { sessionId: string };
   /** Only an uncommitted `deliver` continues as the first turn; controls and results were the driver's. */
@@ -65,7 +65,8 @@ export function readLegacyTurnInput(value: unknown): LegacyTurnInput {
     mode: value.mode,
     capabilities: value.capabilities as SessionCapabilities | undefined,
     retention: value.retention as AgentWorkflowRetentionDefinition | undefined,
-    parentWritable: step.parentWritable as WritableStream<Uint8Array>,
+    // The former driver's wire field; the stream is the session's, not a parent's.
+    sessionWritable: step.parentWritable as WritableStream<Uint8Array>,
     serializedContext: context,
     sessionState: state as LegacyTurnInput["sessionState"],
     delivery: uncommittedDelivery as DeliverHookPayload | undefined,
