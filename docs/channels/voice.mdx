@@ -1,0 +1,69 @@
+---
+title: "Voice"
+description: "Talk to your agent in real time over a WebSocket with Gateway speech-to-text and text-to-speech."
+type: integration
+---
+
+The voice channel lets a client talk to your agent over a single WebSocket. eve stays the brain: an incoming utterance is transcribed (AI Gateway speech-to-text), the transcript feeds a normal durable session, and the streamed reply is spoken back one sentence at a time (AI Gateway text-to-speech). Because the durable agent runs the turn, the full framework — instructions, tools, skills, subagents, and multi-turn memory — is available by voice. See [Channels](./overview) for the contract this builds on.
+
+**Beta.** Gateway voice support is in beta. Speech-to-text and text-to-speech are OpenAI-only today, and your `AI_GATEWAY_API_KEY` (or Vercel OIDC token) must have voice access enabled.
+
+## Add the channel
+
+```ts title="agent/channels/voice.ts"
+import { localDev, placeholderAuth, vercelOidc } from "eve/channels/auth";
+import { voiceChannel } from "eve/channels/voice";
+
+export default voiceChannel({
+  auth: [vercelOidc(), localDev(), placeholderAuth()],
+  greeting: "Hi! I'm your eve agent. What can I help you with?",
+});
+```
+
+This mounts one WebSocket route at `/eve/v1/voice`. Auth is evaluated on the upgrade with the shared [auth helpers](./eve#authentication); a failed walk rejects the handshake. Credentials for transcription and synthesis are resolved by the Gateway provider the same way your agent's language model is, so there is nothing extra to wire.
+
+## Configuration
+
+| Option                | Default            | Description                                       |
+| --------------------- | ------------------ | ------------------------------------------------- |
+| `auth`                | —                  | Route auth evaluated on the WebSocket upgrade.    |
+| `route`               | `/eve/v1/voice`    | WebSocket route path.                             |
+| `transcription.model` | `openai/whisper-1` | Gateway speech-to-text model id.                  |
+| `speech.model`        | `openai/tts-1`     | Gateway text-to-speech model id.                  |
+| `speech.voice`        | `alloy`            | Provider voice.                                   |
+| `speech.outputFormat` | `mp3`              | Audio container sent to the client.               |
+| `speech.instructions` | —                  | Free-form delivery guidance for the speech model. |
+| `speech.speed`        | —                  | Playback speed multiplier.                        |
+| `greeting`            | —                  | Line spoken as soon as the socket opens.          |
+
+## Wire protocol
+
+One WebSocket is one conversation. The two frame kinds are the discriminator, so audio needs no envelope:
+
+- **Binary frames** carry raw audio. Client → server: one complete spoken utterance. Server → client: synthesized speech in the configured `audioFormat`.
+- **Text frames** carry JSON control messages.
+
+Server → client control messages:
+
+- `{ "type": "ready", "audioFormat": "mp3" }` — sent once when the socket opens.
+- `{ "type": "user_transcript", "text": "..." }` — what the agent heard.
+- `{ "type": "assistant_text", "text": "..." }` — a chunk of the reply, sent with the audio frame that speaks it.
+- `{ "type": "status", "state": "thinking" | "speaking" | "idle" }`
+- `{ "type": "error", "message": "..." }` — recoverable; the socket stays open.
+
+Client → server control messages:
+
+- `{ "type": "barge_in" }` — interrupt the in-flight turn so the user can talk over the agent.
+- `{ "type": "text", "text": "..." }` — send typed text as if spoken (skips transcription).
+
+## How turns work
+
+Transcription and synthesis are **batch, not streaming**, which shapes the client:
+
+- **The client decides where an utterance ends.** Send one complete utterance per binary frame — typically push-to-talk (hold to record, release to send). There is no server-side voice-activity detection.
+- **Replies are synthesized per sentence.** As the agent streams text, the channel splits it on sentence boundaries and synthesizes each sentence as soon as it is complete, so the first sentence plays while later ones are still being written.
+- **Barge-in is client-led.** When the user starts talking again, stop local playback and send `barge_in` (or just a new utterance); the server aborts the rest of the current turn.
+
+## Browser client
+
+A push-to-talk browser client ships with the [Next.js web template](../guides/frontend/nextjs) at `/voice`. It captures the microphone, streams each utterance as a binary frame, plays the returned audio, and renders the transcript from the control messages above. In local development the client connects straight to the agent origin (from `EVE_BASE_URL`) because WebSocket upgrades do not reliably survive the Next.js rewrite.
