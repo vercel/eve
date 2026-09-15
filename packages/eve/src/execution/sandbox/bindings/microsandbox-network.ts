@@ -24,10 +24,6 @@ interface MicrosandboxSecretBuilderShape {
 interface MicrosandboxNetworkBuilderShape {
   enabled(enabled: boolean): this;
   policyJson(json: string): this;
-  secret(
-    configure: (secret: MicrosandboxSecretBuilderShape) => MicrosandboxSecretBuilderShape,
-  ): this;
-  trustHostCAs(enabled: boolean): this;
 }
 
 interface MicrosandboxTransformHeaderRule {
@@ -81,48 +77,45 @@ export function applyMicrosandboxNetwork(
     return builder;
   }
 
-  return builder.network((network: MicrosandboxNetworkBuilderShape) => {
+  let next = builder.network((network: MicrosandboxNetworkBuilderShape) => {
     let next = network.enabled(true);
     if (networkPlan.policy !== null) {
       next = next.policyJson(serializeMicrosandboxNetworkPolicyJson(networkPlan.policy));
     }
-    if (networkPlan.transformHeaderRules.length === 0) {
-      return next;
-    }
-
-    next = next.trustHostCAs(true);
-    for (const rule of networkPlan.transformHeaderRules) {
-      for (const [headerName, headerValue] of Object.entries(rule.headers)) {
-        const placeholder = rule.placeholderHeaders[headerName];
-        if (placeholder === undefined) {
-          continue;
-        }
-        const secretEnvName = createSecretEnvName(rule.domain, headerName, headerValue);
-        next = next.secret((secret) => {
-          let configured = secret
-            .env(secretEnvName)
-            .value(headerValue)
-            .placeholder(placeholder)
-            .injectHeaders(true)
-            .injectBasicAuth(true)
-            .injectQuery(false)
-            .injectBody(false)
-            .requireTlsIdentity(true);
-
-          if (rule.domain === "*") {
-            configured = configured.allowAnyHostDangerous(true);
-          } else if (rule.domain.startsWith("*.")) {
-            configured = configured.allowHostPattern(rule.domain);
-          } else {
-            configured = configured.allowHost(rule.domain);
-          }
-
-          return configured;
-        });
-      }
-    }
     return next;
   });
+
+  for (const rule of networkPlan.transformHeaderRules) {
+    for (const [headerName, headerValue] of Object.entries(rule.headers)) {
+      const placeholder = rule.placeholderHeaders[headerName];
+      if (placeholder === undefined) {
+        continue;
+      }
+      const secretEnvName = createSecretEnvName(rule.domain, headerName, headerValue);
+      next = next.secret((secret: MicrosandboxSecretBuilderShape) => {
+        let configured = secret
+          .env(secretEnvName)
+          .value(headerValue)
+          .placeholder(placeholder)
+          .injectHeaders(true)
+          .injectBasicAuth(true)
+          .injectQuery(false)
+          .injectBody(false)
+          .requireTlsIdentity(true);
+
+        if (rule.domain === "*") {
+          configured = configured.allowAnyHostDangerous(true);
+        } else if (rule.domain.startsWith("*.")) {
+          configured = configured.allowHostPattern(rule.domain);
+        } else {
+          configured = configured.allowHost(rule.domain);
+        }
+
+        return configured;
+      });
+    }
+  }
+  return next;
 }
 
 export function serializeMicrosandboxNetworkPolicyJson(policy: MicrosandboxNetworkPolicy): string {
