@@ -1913,6 +1913,26 @@ const connectionPresentations: Record<string, ConnectionPresentation> = {
     authModes: ["user", "app"],
     relatedResources: [softwareFactoryGuide],
   },
+  sent: {
+    logo: "sent",
+    docsHref: "https://docs.sent.dm/start/llm-docs/mcp-server",
+    keywords: [
+      "mcp",
+      "sms",
+      "whatsapp",
+      "rcs",
+      "business messaging",
+      "deliverability",
+      "oauth",
+      "connect",
+    ],
+    authModes: ["user"],
+    connectors: {
+      user: { service: "mcp.sent.dm", name: "sent" },
+    },
+    configureNote:
+      "Authorization requires an authenticated eve user and selects one Sent organization and Sender Profile. Reauthorize to change scope, or revoke the grant from Sent Dashboard → Settings → MCP Connections. The registry connection allow-lists 19 reviewed tools and requires user approval for message sends, contact creation, contact deletion, and template deletion; Sent's skills also direct the agent to preview the organization, Sender Profile, target, and payload first.",
+  },
   notion: {
     logo: "notion",
     docsHref: "/docs/connections",
