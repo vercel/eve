@@ -29,6 +29,7 @@ export interface VercelRouteConfig {
 
 export interface VercelServiceConfig {
   readonly buildCommand?: string;
+  readonly devCommand?: string;
   readonly entrypoint?: string;
   readonly framework?: string;
   readonly mount?: string | VercelServiceMount;
@@ -132,6 +133,7 @@ function parseServiceConfig(value: JsonValue, path: string): VercelServiceConfig
   return {
     ...service,
     buildCommand: optionalString(service.buildCommand, `${path}.buildCommand`),
+    devCommand: optionalString(service.devCommand, `${path}.devCommand`),
     entrypoint: optionalString(service.entrypoint, `${path}.entrypoint`),
     framework: optionalString(service.framework, `${path}.framework`),
     mount: parseMount(service.mount, `${path}.mount`),
