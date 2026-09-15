@@ -190,8 +190,9 @@ type NonInteractiveCredentialOwner =
  *
  * Identical to {@link AuthorizationDefinition} except the
  * non-interactive form may omit `credentialOwner`; normalization
- * defaults it to `"app"`. `principalType` remains supported for
- * compatibility. The resolved token is sent as
+ * defaults it to `"app"`. Its legacy `principalType` remains supported
+ * and deprecated for compatibility. Interactive definitions continue to
+ * use `principalType: "user"`. The resolved token is sent as
  * `Authorization: Bearer <token>`.
  */
 export type ConnectionAuthProvider =
@@ -233,8 +234,8 @@ interface AuthorizationDefinitionBase {
    * - `"user"`: the framework projects the active session's user
    *   principal into `{ type: "user", id, issuer, ... }` and fails
    *   fast with `reason: "principal_required"` when the session has
-   *   no authenticated user. The token cache keys on
-   *   `user:${issuer}:${id}` so concurrent users never share tokens.
+   *   no authenticated user. The token cache keys on a JSON tuple of
+   *   the issuer and id so concurrent users never share tokens.
    */
   readonly principalType: "app" | "user";
 

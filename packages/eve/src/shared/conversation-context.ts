@@ -38,13 +38,14 @@ export type AudienceCaller =
 
 export interface AudienceInput<TState> {
   readonly state: TState;
-  /** @deprecated Use `caller`; it omits identity values unnecessary for audience classification. */
+  /** @deprecated Use `caller`; it excludes `principalId`, `issuer`, and `subject`. */
   readonly auth: AudiencePrincipal | null;
   readonly channel: ConversationContext["channel"];
   readonly mode: RunMode;
   readonly environment: ConversationEnvironment;
 }
 
+/** Preferred input type for new audience callback annotations. */
 export interface AudienceContext<TState> extends AudienceInput<TState> {
   readonly caller: AudienceCaller;
 }

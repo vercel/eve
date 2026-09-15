@@ -33,8 +33,8 @@ export function validateAuthorizationSpec(
 
   const hasStart = auth.startAuthorization !== undefined;
   const hasComplete = auth.completeAuthorization !== undefined;
-  const hasCredentialOwner = Object.hasOwn(auth, "credentialOwner");
-  const hasPrincipalType = Object.hasOwn(auth, "principalType");
+  const hasCredentialOwner = auth.credentialOwner !== undefined;
+  const hasPrincipalType = auth.principalType !== undefined;
 
   if (hasCredentialOwner && hasPrincipalType) {
     return `The "${fieldName}" field must not provide both "credentialOwner" and "principalType".`;
@@ -58,8 +58,12 @@ export function validateAuthorizationSpec(
     return `The "${fieldName}.completeAuthorization" field must be a function when provided.`;
   }
 
-  if (hasStart && credentialOwner !== "user") {
-    return `Interactive authorization (startAuthorization + completeAuthorization) is restricted to "${credentialOwnerField}": "user" in v1. App-level credentials must use a getToken-only definition.`;
+  if (hasStart && hasCredentialOwner) {
+    return `The "${fieldName}.credentialOwner" field is only supported by getToken-only authorization. Interactive authorization is restricted to "principalType": "user" in v1.`;
+  }
+
+  if (hasStart && auth.principalType !== "user") {
+    return `Interactive authorization (startAuthorization + completeAuthorization) is restricted to "principalType": "user" in v1. App-level credentials must use a getToken-only definition.`;
   }
 
   if (

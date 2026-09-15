@@ -328,7 +328,9 @@ export default defineChannel({
 });
 ```
 
-The input contains the channel's `state`, `caller`, `channel`, `mode`, and `environment`. A principal caller exposes only `kind`, `authenticator`, and `attributes`; it deliberately omits identifiers, issuers, and subjects. Return `"public"`, `"private"`, or `"unknown"`. Return `"unknown"` when the channel does not have enough evidence to classify confidently; consumers treat it as non-public. A missing, throwing, asynchronous, or malformed classifier also fails closed to `"unknown"`.
+The input contains the channel's `state`, `caller`, `channel`, `mode`, and `environment`. A principal caller omits `principalId`, `issuer`, and `subject`, but its `attributes` come from route auth and can still contain identifying values. Return `"public"`, `"private"`, or `"unknown"`. Return `"unknown"` when the channel does not have enough evidence to classify confidently; consumers treat it as non-public. A missing, throwing, asynchronous, or malformed classifier also fails closed to `"unknown"`.
+
+When you explicitly annotate a callback, use `AudienceContext<TState>`. `AudienceInput<TState>` remains supported for existing callbacks while you migrate.
 
 Existing callbacks can continue using `auth?.principalType` while you migrate:
 

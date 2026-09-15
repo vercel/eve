@@ -74,6 +74,16 @@ describe("validateAuthorizationSpec", () => {
         validateAuthorizationSpec({ credentialOwner: "user", getToken, principalType: "user" }),
       ).toMatch(/must not provide both "credentialOwner" and "principalType"/);
     });
+
+    it("treats an undefined credentialOwner as omitted", () => {
+      expect(
+        validateAuthorizationSpec({
+          credentialOwner: undefined,
+          getToken,
+          principalType: "user",
+        }),
+      ).toBeUndefined();
+    });
   });
 
   describe("getToken rejection", () => {
@@ -137,6 +147,17 @@ describe("validateAuthorizationSpec", () => {
         }),
       ).toMatch(/Interactive authorization .* restricted to "principalType": "user"/);
     });
+  });
+
+  it("rejects credentialOwner on interactive authorization", () => {
+    expect(
+      validateAuthorizationSpec({
+        completeAuthorization,
+        credentialOwner: "user",
+        getToken,
+        startAuthorization,
+      }),
+    ).toMatch(/credentialOwner.*only supported by getToken-only authorization/);
   });
 
   describe("displayName validation", () => {
