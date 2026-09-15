@@ -13,7 +13,7 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
-import type { EveEvalContext, EveEvalLiveTurn, EveEvalTurn } from "eve/evals";
+import type { EveEvalContext, EveEvalLiveTurn, EveEvalSession, EveEvalTurn } from "eve/evals";
 
 const SELF_MODIFICATION_AGENT = "self-modification";
 const CLEANUP_TIMEOUT_MS = 30_000;
@@ -29,6 +29,7 @@ const isolation = (shared.__eveSelfModificationEvalIsolation ??= {
 export interface SelfModificationRun {
   readonly child: EveEvalTurn;
   readonly parent: EveEvalTurn;
+  readonly session: EveEvalSession;
 }
 
 /** Serializes source mutation, including cleanup that outlives an eval timeout. */
@@ -125,8 +126,11 @@ export class SelfModificationHarness {
     }
   }
 
-  async request(prompt: string): Promise<SelfModificationRun> {
-    const liveParent = await this.#t.start(prompt);
+  async request(
+    prompt: string,
+    session: Pick<EveEvalSession, "start"> = this.#t,
+  ): Promise<SelfModificationRun> {
+    const liveParent = await session.start(prompt);
     this.#turns.add(liveParent);
     let continuation: EveEvalLiveTurn | undefined;
     const called = await liveParent
@@ -156,7 +160,15 @@ export class SelfModificationHarness {
     parent.expectOk();
     this.#t.calledSubagent(SELF_MODIFICATION_AGENT);
     child.expectOk();
-    return { child, parent };
+    return { child, parent, session: liveParent.session };
+  }
+
+  async followUp(session: EveEvalSession, prompt: string): Promise<EveEvalTurn> {
+    const live = await session.start(prompt);
+    this.#turns.add(live);
+    const turn = await live.result();
+    turn.expectOk();
+    return turn;
   }
 
   /** Uses a fresh conversation so the model cannot answer from the authoring exchange alone. */
