@@ -18,6 +18,18 @@ async function sourceTree() {
   return root;
 }
 
+async function temporaryCheckout(t, prefix) {
+  const root = await mkdtemp(join(tmpdir(), prefix));
+  const cwd = process.cwd();
+  await mkdir(join(root, "agent"));
+  process.chdir(root);
+  t.after(async () => {
+    process.chdir(cwd);
+    await rm(root, { recursive: true, force: true });
+  });
+  return root;
+}
+
 function response(body = {}) {
   return new Response(JSON.stringify(body), { status: 200 });
 }
@@ -44,6 +56,16 @@ function completedTurn(sessionId, events = []) {
     expectOk() {},
     calledSubagent() {},
     requireToolCall() {},
+  };
+}
+
+function liveTurn(sessionId, events = []) {
+  return {
+    sessionId,
+    events,
+    async result() {
+      return completedTurn(sessionId, events);
+    },
   };
 }
 
@@ -87,53 +109,36 @@ async function assertTreeRestored(root) {
   await assert.rejects(readFile(join(root, "unexpected.txt")));
 }
 
-test("close restores the complete source tree, including deleted, changed, binary, and unexpected files", async () => {
-  await withHarness(async ({ root, close }) => {
-    await writeFile(join(root, "keep.txt"), "changed");
-    await rm(join(root, "nested", "delete.txt"));
-    await writeFile(join(root, "nested", "binary.bin"), Buffer.from([9, 8, 7]));
-    await writeFile(join(root, "unexpected.txt"), "not in baseline");
-    await close();
-    await assertTreeRestored(root);
-  });
-});
-
-test("request tracks the parent and child, and close retires both before restoring", async () => {
-  const childLive = {
-    sessionId: "child",
-    events: [],
-    async result() {
-      return completedTurn("child");
-    },
-  };
+test("close retires every session before restoring the complete source tree", async () => {
+  const child = liveTurn("child");
+  const verification = liveTurn("verification");
   const parentEvent = {
     type: "subagent.called",
-    data: { name: "self-modification", childSessionId: "child" },
+    data: { name: "self-modification", childSessionId: child.sessionId },
   };
-  const parentLive = {
-    sessionId: "parent",
-    events: [parentEvent],
-    async waitForEvent() {
-      return { data: parentEvent.data };
-    },
-    async result() {
-      return completedTurn("parent", [parentEvent]);
-    },
-  };
+  const parent = liveTurn("parent", [parentEvent]);
+
   await withHarness(
     async ({ harness, root, calls, target, close }) => {
       let parentFinished = false;
-      parentLive.result = async () => {
+      parent.result = async () => {
         await new Promise((resolve) => setTimeout(resolve, 10));
         parentFinished = true;
-        return completedTurn("parent", [parentEvent]);
+        return completedTurn(parent.sessionId, [parentEvent]);
       };
+      parent.waitForEvent = async () => ({ data: parentEvent.data });
       target.watchTurn = () => {
         assert.equal(parentFinished, false);
-        return childLive;
+        return child;
       };
+
       await harness.request("make a change");
+      await harness.verify("verify it");
+      await writeFile(join(root, "keep.txt"), "changed");
+      await rm(join(root, "nested", "delete.txt"));
+      await writeFile(join(root, "nested", "binary.bin"), Buffer.from([9, 8, 7]));
       await writeFile(join(root, "unexpected.txt"), "mutation");
+
       const retiring = Promise.withResolvers();
       const released = Promise.withResolvers();
       const fetch = target.fetch;
@@ -154,12 +159,17 @@ test("request tracks the parent and child, and close retires both before restori
       released.resolve();
       await closing;
 
-      const resetPaths = calls
-        .filter((call) => call.path.endsWith("/reset"))
-        .map((call) => call.path);
-      assert.deepEqual(resetPaths, ["/eve/v1/session/parent/reset", "/eve/v1/session/child/reset"]);
+      assert.deepEqual(
+        calls
+          .filter((call) => call.path.endsWith("/reset"))
+          .map((call) => call.path)
+          .sort(),
+        [parent, child, verification]
+          .map((turn) => `/eve/v1/session/${turn.sessionId}/reset`)
+          .sort(),
+      );
       assert.ok(
-        calls.findIndex((call) => call.path.endsWith("/reset")) <
+        calls.findLastIndex((call) => call.path.endsWith("/reset")) <
           calls.findIndex((call) => call.path.includes("/suspend?lease=")),
       );
       await assertTreeRestored(root);
@@ -167,34 +177,8 @@ test("request tracks the parent and child, and close retires both before restori
     {},
     (target) => {
       const t = context(target);
-      t.start = async () => parentLive;
-      return t;
-    },
-  );
-});
-
-test("verification sessions are retired before restore", async () => {
-  const live = {
-    sessionId: "verification",
-    events: [],
-    async result() {
-      return completedTurn("verification");
-    },
-  };
-  await withHarness(
-    async ({ harness, calls, close }) => {
-      await harness.verify("verify it");
-      await close();
-      assert.ok(calls.some((call) => call.path === "/eve/v1/session/verification/reset"));
-      assert.ok(
-        calls.findIndex((call) => call.path.includes("verification/reset")) <
-          calls.findIndex((call) => call.path.includes("/suspend?")),
-      );
-    },
-    {},
-    (target) => {
-      const t = context(target);
-      t.newSession = () => ({ start: async () => live });
+      t.start = async () => parent;
+      t.newSession = () => ({ start: async () => verification });
       return t;
     },
   );
@@ -290,11 +274,9 @@ test("assertOnlyChanged allows listed modifications and rejects unexpected or de
   });
 });
 
-test("separate eval bundles serialize cleanup before the next source snapshot", async () => {
+test("separate eval bundles serialize cleanup before the next source snapshot", async (t) => {
   const otherBundle = await import("../evals/self-modification/harness.ts?other-eval");
-  const root = await mkdtemp(join(tmpdir(), "eve-selfmod-serial-"));
-  const cwd = process.cwd();
-  await mkdir(join(root, "agent"));
+  const root = await temporaryCheckout(t, "eve-selfmod-serial-");
   await writeFile(join(root, "agent", "instructions.md"), "baseline");
   const restoring = Promise.withResolvers();
   const release = Promise.withResolvers();
@@ -307,75 +289,52 @@ test("separate eval bundles serialize cleanup before the next source snapshot", 
     }
     return fetch(path, options);
   };
-  process.chdir(root);
-  try {
-    const first = withSelfModification(context(target), async (harness) => {
-      await harness.writeSource("instructions.md", "changed");
-    });
-    await restoring.promise;
-    let secondStarted = false;
-    const second = otherBundle.withSelfModification(context(targetFor()), async (harness) => {
-      secondStarted = true;
-      assert.equal(await harness.readSource("instructions.md"), "baseline");
-    });
-    await new Promise((resolve) => setImmediate(resolve));
-    assert.equal(secondStarted, false);
-    release.resolve();
-    await Promise.all([first, second]);
-    assert.equal(secondStarted, true);
-  } finally {
-    release.resolve();
-    process.chdir(cwd);
-    await rm(root, { recursive: true, force: true });
-  }
+  const first = withSelfModification(context(target), async (harness) => {
+    await harness.writeSource("instructions.md", "changed");
+  });
+  await restoring.promise;
+  let secondStarted = false;
+  const second = otherBundle.withSelfModification(context(targetFor()), async (harness) => {
+    secondStarted = true;
+    assert.equal(await harness.readSource("instructions.md"), "baseline");
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(secondStarted, false);
+  release.resolve();
+  await Promise.all([first, second]);
+  assert.equal(secondStarted, true);
 });
 
-test("checkout lock rejects another eval process before source mutation", async () => {
-  const root = await mkdtemp(join(tmpdir(), "eve-selfmod-locked-"));
-  const cwd = process.cwd();
-  await mkdir(join(root, "agent"));
+test("checkout lock rejects another eval process before source mutation", async (t) => {
+  const root = await temporaryCheckout(t, "eve-selfmod-locked-");
   await mkdir(join(root, ".eve-self-modification-eval.lock"));
   await writeFile(join(root, "agent", "instructions.md"), "baseline");
-  process.chdir(root);
-  try {
-    let started = false;
-    await assert.rejects(
-      withSelfModification(context(targetFor()), async () => {
-        started = true;
-      }),
-      /Another self-modification eval owns this checkout/,
-    );
-    assert.equal(started, false);
-    assert.equal(await readFile(join(root, "agent", "instructions.md"), "utf8"), "baseline");
-  } finally {
-    process.chdir(cwd);
-    await rm(root, { recursive: true, force: true });
-  }
+  let started = false;
+  await assert.rejects(
+    withSelfModification(context(targetFor()), async () => {
+      started = true;
+    }),
+    /Another self-modification eval owns this checkout/,
+  );
+  assert.equal(started, false);
+  assert.equal(await readFile(join(root, "agent", "instructions.md"), "utf8"), "baseline");
 });
 
-test("a failed eval restores source, releases its checkout lock, and preserves the failure", async () => {
-  const root = await mkdtemp(join(tmpdir(), "eve-selfmod-failed-"));
-  const cwd = process.cwd();
-  await mkdir(join(root, "agent"));
+test("a failed eval restores source, releases its checkout lock, and preserves the failure", async (t) => {
+  const root = await temporaryCheckout(t, "eve-selfmod-failed-");
   await writeFile(join(root, "agent", "instructions.md"), "baseline");
   const failure = new Error("authoring failed");
-  process.chdir(root);
-  try {
-    await assert.rejects(
-      withSelfModification(context(targetFor()), async (harness) => {
-        await harness.writeSource("instructions.md", "changed");
-        await harness.writeSource("tools/unexpected.ts", "unexpected");
-        throw failure;
-      }),
-      (error) => error === failure,
-    );
-    assert.equal(await readFile(join(root, "agent", "instructions.md"), "utf8"), "baseline");
-    await assert.rejects(readFile(join(root, "agent", "tools", "unexpected.ts")));
-    await assert.rejects(readFile(join(root, ".eve-self-modification-eval.lock", "owner.json")));
-  } finally {
-    process.chdir(cwd);
-    await rm(root, { recursive: true, force: true });
-  }
+  await assert.rejects(
+    withSelfModification(context(targetFor()), async (harness) => {
+      await harness.writeSource("instructions.md", "changed");
+      await harness.writeSource("tools/unexpected.ts", "unexpected");
+      throw failure;
+    }),
+    (error) => error === failure,
+  );
+  assert.equal(await readFile(join(root, "agent", "instructions.md"), "utf8"), "baseline");
+  await assert.rejects(readFile(join(root, "agent", "tools", "unexpected.ts")));
+  await assert.rejects(readFile(join(root, ".eve-self-modification-eval.lock", "owner.json")));
 });
 
 test("apply rejects a rebuild response without a runtime revision", async () => {
@@ -433,34 +392,26 @@ test("request falls back to a parent-boundary watch when the initial event is mi
   await rm(root, { recursive: true, force: true });
 });
 
-test("cleanup failure retains a lock that identifies the source backup", async () => {
-  const root = await mkdtemp(join(tmpdir(), "eve-selfmod-cleanup-failed-"));
-  const cwd = process.cwd();
-  await mkdir(join(root, "agent"));
+test("cleanup failure retains a lock that identifies the source backup", async (t) => {
+  const root = await temporaryCheckout(t, "eve-selfmod-cleanup-failed-");
   await writeFile(join(root, "agent", "instructions.md"), "baseline");
   const target = targetFor();
   target.fetch = async (path) =>
     path.includes("/suspend?")
       ? new Response("no", { status: 500 })
       : response({ revision: "revision" });
-  process.chdir(root);
-  let backupRoot;
-  try {
-    await assert.rejects(
-      withSelfModification(context(target), async (harness) => {
-        await harness.writeSource("instructions.md", "changed");
-      }),
-      /suspend.*failed: 500/,
-    );
-    const owner = JSON.parse(
-      await readFile(join(root, ".eve-self-modification-eval.lock", "owner.json"), "utf8"),
-    );
-    backupRoot = owner.backupRoot;
-    assert.equal(typeof backupRoot, "string");
-    assert.equal(await readFile(join(backupRoot, "agent", "instructions.md"), "utf8"), "baseline");
-  } finally {
-    process.chdir(cwd);
-    await rm(root, { recursive: true, force: true });
-    if (backupRoot) await rm(backupRoot, { recursive: true, force: true });
-  }
+  await assert.rejects(
+    withSelfModification(context(target), async (harness) => {
+      await harness.writeSource("instructions.md", "changed");
+    }),
+    /suspend.*failed: 500/,
+  );
+  const owner = JSON.parse(
+    await readFile(join(root, ".eve-self-modification-eval.lock", "owner.json"), "utf8"),
+  );
+  t.after(() => rm(owner.backupRoot, { recursive: true, force: true }));
+  assert.equal(
+    await readFile(join(owner.backupRoot, "agent", "instructions.md"), "utf8"),
+    "baseline",
+  );
 });
