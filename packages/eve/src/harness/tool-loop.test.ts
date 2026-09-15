@@ -38,7 +38,7 @@ import { invocationOwnerKey } from "#internal/invocation/metadata.js";
 import { decodeSandboxRef, isSandboxRefUrl } from "#internal/attachments/sandbox-refs.js";
 import { attachClientContext } from "#internal/client-context.js";
 import { mockSandbox } from "#internal/testing/mocks/mock-sandbox.js";
-import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
+import { createSessionWaitingEvent, type UnstampedMessageStreamEvent } from "#protocol/message.js";
 import type {
   InstrumentationEvents,
   InstrumentationStepStartedEventInput,
@@ -12824,7 +12824,12 @@ describe("createToolLoopHarness", () => {
 
     it("adds initiating task-reporting guidance without enabling silent delivery", async () => {
       setupMockAgent(defaultModelResult());
-      const runStep = createToolLoopHarness(createTestConfig("conversation"));
+      const events: UnstampedMessageStreamEvent[] = [];
+      const runStep = createToolLoopHarness(
+        createTestConfig("conversation", async (event) => {
+          events.push(event);
+        }),
+      );
       const ctx = new ContextContainer();
       ctx.set(TurnTaskDeliveryKey, "initiating");
 
@@ -12834,6 +12839,7 @@ describe("createToolLoopHarness", () => {
         }),
       );
 
+      expect(events.at(-1)).toEqual(createSessionWaitingEvent("", { backgroundTasks: "pending" }));
       const { instructions, messages } = getLastAgentSettings();
       expect(instructions).toBe("You are a test assistant.");
       expect(messages.slice(0, 2)).toEqual([

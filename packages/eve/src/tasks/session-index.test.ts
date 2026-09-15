@@ -7,6 +7,7 @@ import {
   findSessionTaskEntry,
   getSessionTaskIndex,
   recordSessionTask,
+  sessionBackgroundTaskState,
 } from "#tasks/session-index.js";
 import { getTaskCohortId, getSessionTaskCohorts } from "#tasks/session-task-cohorts.js";
 import { deriveTaskId } from "#tasks/task-id.js";
@@ -35,6 +36,29 @@ describe("session task index", () => {
   it("returns an empty index when the key is absent", () => {
     expect(getSessionTaskIndex({})).toEqual([]);
     expect(getSessionTaskIndex(undefined)).toEqual([]);
+    expect(sessionBackgroundTaskState(undefined)).toBeUndefined();
+  });
+
+  it("projects pending and settled background task state", () => {
+    const pending = recordSessionTask(createSession(), {
+      taskInboxToken: "task:token-1",
+      createdByTurnId: "turn-1",
+      executor: { data: {}, kind: "workflow-tool" },
+      metadata,
+      taskId: "task_a",
+      taskRunId: "run-1",
+    });
+    expect(sessionBackgroundTaskState(pending.state)).toBe("pending");
+
+    const terminalView = {
+      lastOutput: { data: "done", type: "result" as const },
+      metadata,
+      status: "completed" as const,
+      taskId: "task_a",
+    };
+    expect(sessionBackgroundTaskState(cacheTerminalTaskView(pending.state, terminalView))).toBe(
+      "settled",
+    );
   });
 
   it("records a task and finds it by id", () => {

@@ -876,7 +876,12 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
           ...parkedSession,
           history: validateHarnessModelMessages([...parkedSession.history, ...instructionMessages]),
         };
-        emissionState = await emitTurnEpilogue(emit, emissionState, config.mode);
+        emissionState = await emitTurnEpilogue(
+          emit,
+          emissionState,
+          config.mode,
+          parkedSession.state,
+        );
         return {
           next: null,
           session: setHarnessEmissionState(parkedSession, emissionState),
@@ -885,7 +890,12 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
 
       if (resolvedCoordination.outcome === "resolved") {
         if (emit && config.mode === "conversation") {
-          emissionState = await emitTurnEpilogue(emit, emissionState, config.mode);
+          emissionState = await emitTurnEpilogue(
+            emit,
+            emissionState,
+            config.mode,
+            parkedSession.state,
+          );
           parkedSession = setHarnessEmissionState(parkedSession, emissionState);
         }
         return { next: null, session: parkedSession };
@@ -2599,7 +2609,12 @@ async function handleStepResult(input: {
       );
 
       if (config.mode === "conversation") {
-        emissionState = await emitTurnEpilogue(emit, emissionState, config.mode);
+        emissionState = await emitTurnEpilogue(
+          emit,
+          emissionState,
+          config.mode,
+          parkedSession.state,
+        );
         parkedSession = setHarnessEmissionState(parkedSession, emissionState);
       }
     }
@@ -2657,7 +2672,7 @@ async function handleStepResult(input: {
       // is open, so the stream must close its turn boundary — clients wait
       // on `session.waiting` and would otherwise hang on the parked turn.
       if (config.mode === "conversation") {
-        emissionState = await emitTurnEpilogue(emit, emissionState, config.mode);
+        emissionState = await emitTurnEpilogue(emit, emissionState, config.mode, baseSession.state);
       }
     }
 
@@ -2822,6 +2837,7 @@ async function emitStructuredResult(
   emissionState: ReturnType<typeof getHarnessEmissionState>,
   structured: JsonValue,
   mode: RunMode,
+  sessionState?: HarnessSession["state"],
 ): Promise<ReturnType<typeof getHarnessEmissionState>> {
   await emit(
     createResultCompletedEvent({
@@ -2831,7 +2847,7 @@ async function emitStructuredResult(
       turnId: emissionState.turnId,
     }),
   );
-  return emitTurnEpilogue(emit, emissionState, mode);
+  return emitTurnEpilogue(emit, emissionState, mode, sessionState);
 }
 
 /**
@@ -2854,7 +2870,7 @@ async function finishTaskTurn(input: {
 
   if (schema === undefined) {
     if (emit) {
-      emissionState = await emitTurnEpilogue(emit, emissionState, "task");
+      emissionState = await emitTurnEpilogue(emit, emissionState, "task", session.state);
       session = setHarnessEmissionState(session, emissionState);
     }
     return { next: { done: true, output: stepOutput ?? "" }, session };
@@ -2904,7 +2920,7 @@ async function finishConversationTurn(input: {
 
   if (schema === undefined) {
     if (emit) {
-      emissionState = await emitTurnEpilogue(emit, emissionState, "conversation");
+      emissionState = await emitTurnEpilogue(emit, emissionState, "conversation", session.state);
       session = setHarnessEmissionState(session, emissionState);
     }
     const settledTurn = { output: stepOutput ?? "" } satisfies SettledTurn;
@@ -2932,7 +2948,13 @@ async function finishConversationTurn(input: {
 
   session = persistStructuredAssistantTurn(session, history, structured);
   if (emit) {
-    emissionState = await emitStructuredResult(emit, emissionState, structured, "conversation");
+    emissionState = await emitStructuredResult(
+      emit,
+      emissionState,
+      structured,
+      "conversation",
+      session.state,
+    );
     session = setHarnessEmissionState(session, emissionState);
   }
   const settledTurn = { output: structured } satisfies SettledTurn;

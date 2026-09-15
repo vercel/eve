@@ -206,6 +206,15 @@ function isValidTerminalView(view: TaskView): boolean {
   }
 }
 
+/** Projects owned durable work into the public state used at a waiting boundary. */
+export function sessionBackgroundTaskState(
+  state: SessionStateMap | undefined,
+): "pending" | "settled" | undefined {
+  const tasks = getSessionTaskIndex(state).filter((entry) => entry.executor !== undefined);
+  if (tasks.length === 0) return undefined;
+  return tasks.some((entry) => entry.terminalView === undefined) ? "pending" : "settled";
+}
+
 /** Finds one owned task; `undefined` enforces parent-session ownership. */
 export function findSessionTaskEntry(
   state: SessionStateMap | undefined,

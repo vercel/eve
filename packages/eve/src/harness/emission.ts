@@ -61,8 +61,10 @@ import { createOrderedStreamEmitter } from "#harness/ordered-stream-emitter.js";
 import { interruptStreamOnFailure } from "#harness/interruptible-stream.js";
 import { isInlineAuthorizationToolResult } from "#harness/inline-tool-authorization.js";
 import type { HarnessEmissionState } from "#harness/emission-state.js";
-import type { HarnessEmitFn, HarnessToolMap, StepInput } from "#harness/types.js";
+import type { HarnessEmitFn, HarnessToolMap, SessionStateMap, StepInput } from "#harness/types.js";
 import { normalizeAssistantStepFinishReason } from "#harness/finish-reason.js";
+import { frameworkMessageKindForStepInput } from "#harness/messages.js";
+import { sessionBackgroundTaskState } from "#tasks/session-index.js";
 
 export {
   getHarnessEmissionState,
@@ -91,8 +93,10 @@ export async function emitTurnPreamble(
   await emitFn(createTurnStartedEvent({ sequence: state.sequence, trace: traceContext, turnId }));
 
   if (input.message !== undefined) {
+    const kind = frameworkMessageKindForStepInput(input);
     await emitFn(
       createMessageReceivedEvent({
+        ...(kind === "execution.background_task" ? { kind } : {}),
         message: input.message,
         sequence: state.sequence,
         turnId,
@@ -217,6 +221,7 @@ export async function emitTurnEpilogue(
   emitFn: HarnessEmitFn,
   state: HarnessEmissionState,
   mode: RunMode,
+  sessionState?: SessionStateMap,
 ): Promise<HarnessEmissionState> {
   await emitFn(
     createTurnCompletedEvent({
@@ -226,7 +231,13 @@ export async function emitTurnEpilogue(
   );
 
   if (mode === "conversation") {
-    await emitFn(createSessionWaitingEvent());
+    const backgroundTasks = sessionBackgroundTaskState(sessionState);
+    await emitFn(
+      createSessionWaitingEvent(
+        "",
+        backgroundTasks === undefined ? undefined : { backgroundTasks },
+      ),
+    );
   } else {
     await emitFn(createSessionCompletedEvent());
   }

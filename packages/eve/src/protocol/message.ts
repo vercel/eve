@@ -193,6 +193,8 @@ export interface TurnStartedStreamEvent {
  */
 export interface MessageReceivedStreamEvent {
   data: {
+    /** Present when eve, rather than a channel participant, authored the input. */
+    kind?: "execution.background_task";
     message: string;
     parts?: readonly MessageReceivedPart[];
     sequence: number;
@@ -708,6 +710,8 @@ export interface AuthorizationCompletedStreamEvent {
  */
 export interface SessionWaitingStreamEvent {
   data: {
+    /** Durable background-work state at this boundary, when the session has owned tasks. */
+    backgroundTasks?: "pending" | "settled";
     /** Channel-local continuation token, or the immutable session ID for an ID-only session. */
     continuationToken: string;
     wait: "next-user-message";
@@ -888,12 +892,15 @@ export function createTurnStartedEvent(input: {
  * consumers while preserving the authored turn content upstream.
  */
 export function createMessageReceivedEvent(input: {
+  /** Present when eve, rather than a channel participant, authored the input. */
+  readonly kind?: "execution.background_task";
   readonly message: string | UserContent;
   readonly sequence: number;
   readonly turnId: string;
 }): MessageReceivedStreamEvent {
   return {
     data: {
+      ...(input.kind === undefined ? {} : { kind: input.kind }),
       message: summarizeUserContent(input.message),
       parts: projectUserContentParts(input.message),
       sequence: input.sequence,
@@ -903,7 +910,7 @@ export function createMessageReceivedEvent(input: {
   };
 }
 
-function summarizeUserContent(message: string | UserContent): string {
+export function summarizeUserContent(message: string | UserContent): string {
   if (typeof message === "string") {
     return message;
   }
@@ -1672,9 +1679,13 @@ export function createCompactionCompletedEvent(input: {
  */
 export function createSessionWaitingEvent(
   namespacedContinuationToken: string = "",
+  options?: { readonly backgroundTasks?: "pending" | "settled" },
 ): SessionWaitingStreamEvent {
   return {
     data: {
+      ...(options?.backgroundTasks === undefined
+        ? {}
+        : { backgroundTasks: options.backgroundTasks }),
       continuationToken: toChannelLocalContinuationToken(namespacedContinuationToken),
       wait: "next-user-message",
     },

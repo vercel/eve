@@ -1,6 +1,5 @@
 import type { SendTurnPayload } from "#client/types.js";
 import { isCurrentTurnBoundaryEvent, type MessageStreamEvent } from "#protocol/message.js";
-import type { UserContent } from "ai";
 
 export function isSettledSessionTail(events: readonly MessageStreamEvent[]): boolean {
   const tail = events.at(-1);
@@ -50,20 +49,6 @@ export function createAbortSignal(
   second: AbortSignal,
 ): AbortSignal {
   return first ? AbortSignal.any([first, second]) : second;
-}
-
-export function summarizeUserContent(message: string | UserContent): string {
-  if (typeof message === "string") return message;
-
-  const parts: string[] = [];
-  for (const part of message) {
-    if (part.type === "text") {
-      parts.push(part.text);
-    } else if (part.type === "file") {
-      parts.push(part.filename ? `[file: ${part.filename}]` : "[file]");
-    }
-  }
-  return parts.join("\n");
 }
 
 export function isAbortError(error: unknown): boolean {

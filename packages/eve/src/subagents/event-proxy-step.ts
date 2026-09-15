@@ -199,6 +199,6 @@ async function closeStandaloneAuthorizationEvent(input: {
   }
 
   const state = getHarnessEmissionState(input.session.state);
-  const nextState = await emitTurnEpilogue(input.emit, state, input.mode);
+  const nextState = await emitTurnEpilogue(input.emit, state, input.mode, input.session.state);
   return setHarnessEmissionState(input.session, nextState);
 }

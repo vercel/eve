@@ -316,6 +316,17 @@ describe("message stream protocol", () => {
     });
   });
 
+  it("publishes background task state on session.waiting", () => {
+    expect(createSessionWaitingEvent("", { backgroundTasks: "pending" })).toEqual({
+      data: {
+        backgroundTasks: "pending",
+        continuationToken: "",
+        wait: "next-user-message",
+      },
+      type: "session.waiting",
+    });
+  });
+
   it("creates turn.cancelled events", () => {
     expect(createTurnCancelledEvent({ sequence: 2, turnId: "turn_2" })).toEqual({
       data: { sequence: 2, turnId: "turn_2" },
