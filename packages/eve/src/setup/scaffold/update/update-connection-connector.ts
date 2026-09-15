@@ -1,17 +1,37 @@
 import { readFile, writeFile } from "node:fs/promises";
 
+const CONNECT_STRING_AUTH = /^(\s*auth\s*:\s*connect\(\s*)(["'`])([^"'`]+)\2/gm;
+const CONNECT_OBJECT_AUTH =
+  /^(\s*auth\s*:\s*connect\(\s*\{[^}\r\n]*?\bconnector\s*:\s*)(["'`])([^"'`]+)\2/gm;
+
 /**
- * Matches the connector UID literal inside the `connect("…")` call emitted by
- * the connection scaffolder. `connect` is only ever called with a single string
- * argument in generated connection files, so a narrow anchored match is safe.
+ * Replaces the connector UID in the one generated connection auth declaration.
+ * An expected UID can make registry-authored source updates fail closed when the
+ * installed source no longer matches its declared connector.
  */
-const CONNECT_CONNECTOR_REGEX = /(\bconnect\(\s*)(["'`])([^"'`]+)\2/;
-const CONNECT_OBJECT_CONNECTOR_REGEX = /(\bconnector\s*:\s*)(["'`])([^"'`]+)\2/;
+export function replaceConnectionConnectorUid(
+  source: string,
+  connectorUid: string,
+  expectedConnectorUid?: string,
+): string | undefined {
+  const matches = [
+    ...source.matchAll(CONNECT_STRING_AUTH),
+    ...source.matchAll(CONNECT_OBJECT_AUTH),
+  ];
+  const candidate = matches.length === 1 ? matches[0] : undefined;
+  if (candidate?.index === undefined) return undefined;
+
+  const [match, prefix, quote, currentConnectorUid] = candidate;
+  if (expectedConnectorUid !== undefined && currentConnectorUid !== expectedConnectorUid) {
+    return undefined;
+  }
+  return `${source.slice(0, candidate.index)}${prefix}${quote}${connectorUid}${quote}${source.slice(candidate.index + match.length)}`;
+}
 
 /**
  * Replaces the connector UID literal in a scaffolded Connect connection
- * definition (`auth: connect("…")`). Returns `{ patched: false }` when the file
- * is missing or contains no `connect("…")` call to rewrite.
+ * definition. Returns `{ patched: false }` when the file is missing or its
+ * generated auth declaration cannot be identified unambiguously.
  */
 export async function updateConnectionConnectorUid(
   connectionFilePath: string,
@@ -24,17 +44,9 @@ export async function updateConnectionConnectorUid(
     return { patched: false };
   }
 
-  const pattern = CONNECT_CONNECTOR_REGEX.test(source)
-    ? CONNECT_CONNECTOR_REGEX
-    : CONNECT_OBJECT_CONNECTOR_REGEX.test(source)
-      ? CONNECT_OBJECT_CONNECTOR_REGEX
-      : undefined;
-  if (pattern === undefined) return { patched: false };
+  const next = replaceConnectionConnectorUid(source, connectorUid);
+  if (next === undefined) return { patched: false };
 
-  const next = source.replace(
-    pattern,
-    (_match, prefix: string, quote: string) => `${prefix}${quote}${connectorUid}${quote}`,
-  );
   await writeFile(connectionFilePath, next, "utf8");
   return { patched: true };
 }

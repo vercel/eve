@@ -20,11 +20,12 @@ describe("classifyCatalogEntry", () => {
     const result = classifyCatalogEntry(
       entry({
         address: "channel/slack",
-        setup: { commands: [{ package: "eve", bin: "eve", args: [] }] },
+        declaresSetup: true,
       }),
     );
     expect(result.kind).toBe("needs-terminal");
     expect(result).toHaveProperty("reason", expect.stringContaining("setup flow"));
   });
+
 
 });

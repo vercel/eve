@@ -1,21 +1,13 @@
 import { describe, expect, it } from "vitest";
 
 import { planSelfModificationRegistryInstall } from "./registry-install-plan.js";
-import { parseRegistryIndex, type CatalogEntry } from "./tools/search_registry.js";
+import type { CatalogEntry } from "./tools/search_registry.js";
 
 const lazyEntry: CatalogEntry = {
   address: "connection/linear",
   authoredTarget: "agent/connections/linear.ts",
   selfModification: { lazyConnect: true },
-  setup: {
-    commands: [
-      {
-        package: "eve",
-        bin: "eve",
-        args: ["integration", "connect", "linear", "mcp.linear.app", "linear"],
-      },
-    ],
-  },
+  declaresSetup: true,
   title: "Linear",
 };
 
@@ -31,8 +23,8 @@ describe("self-modification registry install planning", () => {
     expect(plan.kind).toBe("install-with-transform");
     if (plan.kind !== "install-with-transform") throw new Error("Expected a source transform.");
     expect(plan.transform.target).toBe("agent/connections/linear.ts");
-    expect(plan.transform.apply('const auth = connect("linear");')).toContain(
-      'connect({ connector: "linear-prj_abc123", autoProvision: true })',
+    expect(plan.transform.apply('  auth: connect("linear"),')).toContain(
+      'connect("linear-prj_abc123")',
     );
   });
 
@@ -67,32 +59,6 @@ describe("self-modification registry install planning", () => {
     expect(
       planSelfModificationRegistryInstall({
         entry: { ...lazyEntry, selfModification: undefined },
-        missingProject: "requires-user-setup",
-        setupHandling: "requires-user-setup",
-        projectId: "prj_abc123",
-      }).kind,
-    ).toBe("requires-user-setup");
-  });
-
-  it("fails closed to ordinary setup when an opted-in declaration is malformed", () => {
-    const [entry] = parseRegistryIndex({
-      items: [
-        {
-          name: "connection/linear",
-          files: [{ target: "agent/connections/linear.ts" }],
-          meta: {
-            eve: {
-              selfModification: { lazyConnect: true },
-              setup: { package: "eve", bin: "eve", args: "invalid" },
-            },
-          },
-        },
-      ],
-    });
-    expect(entry).toBeDefined();
-    expect(
-      planSelfModificationRegistryInstall({
-        entry: entry!,
         missingProject: "requires-user-setup",
         setupHandling: "requires-user-setup",
         projectId: "prj_abc123",

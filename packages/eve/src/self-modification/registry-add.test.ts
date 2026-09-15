@@ -261,8 +261,8 @@ describe("addLocalRegistryItem", () => {
     expect(result).toMatchObject({ status: "installed" });
     const transform = installLocal.mock.calls[0]?.[0].transform;
     expect(transform?.target).toBe("agent/connections/linear.ts");
-    expect(transform?.apply('const auth = connect("linear");')).toContain(
-      'connect({ connector: "linear-prj_abc123", autoProvision: true })',
+    expect(transform?.apply('  auth: connect("linear"),')).toContain(
+      'connect("linear-prj_abc123")',
     );
   });
 

@@ -81,11 +81,7 @@ describe("production registry addresses", () => {
       address: "connection/linear",
       transform: {
         target: "agent/connections/linear.ts",
-        apply: (source) =>
-          source.replace(
-            'connect("linear")',
-            'connect({ connector: "linear-prj_abc123", autoProvision: true })',
-          ),
+        apply: (source) => source.replace('connect("linear")', 'connect("linear-prj_abc123")'),
       },
       sandbox: {
         readTextFile: async () =>
@@ -135,7 +131,7 @@ describe("production registry addresses", () => {
     expect(writes).toEqual([
       {
         content:
-          'import { connect } from "@vercel/connect/eve";\nconst auth = connect({ connector: "linear-prj_abc123", autoProvision: true });\n',
+          'import { connect } from "@vercel/connect/eve";\nconst auth = connect("linear-prj_abc123");\n',
         path: "/repository/agent/connections/linear.ts",
       },
     ]);

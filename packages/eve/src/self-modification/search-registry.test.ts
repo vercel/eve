@@ -132,7 +132,7 @@ describe("parseRegistryIndex", () => {
     ).toEqual(["eve/self-modification"]);
   });
 
-  it("reads generic setup descriptors used by selfmod__registry_add's planner", () => {
+  it("records whether an item declares setup", () => {
     const entries = parseRegistryIndex({
       items: [
         {
@@ -145,20 +145,18 @@ describe("parseRegistryIndex", () => {
       ],
     });
 
-    expect(entries.find((entry) => entry.address === "channel/slack")?.setup).toEqual({
-      commands: [{ package: "eve", bin: "eve", args: ["integration", "setup", "slack"] }],
-    });
+    expect(entries.find((entry) => entry.address === "channel/slack")?.declaresSetup).toBe(true);
     expect(
-      entries.find((entry) => entry.address === "extension/browserbase")?.setup,
+      entries.find((entry) => entry.address === "extension/browserbase")?.declaresSetup,
     ).toBeUndefined();
   });
 
-  it("preserves malformed setup as declared but unreadable", () => {
+  it("preserves malformed setup as declared", () => {
     const [entry] = parseRegistryIndex({
       items: [{ name: "channel/slack", meta: { eve: { setup: { package: "eve" } } } }],
     });
 
-    expect(entry?.setup).toEqual({ commands: [] });
+    expect(entry?.declaresSetup).toBe(true);
   });
 
   it("reads an item's declared environment variable names", () => {

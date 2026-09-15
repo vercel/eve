@@ -97,8 +97,8 @@ export interface CatalogEntry {
   readonly requires?: string;
   /** Authored path this item installs, used to detect an existing install. */
   readonly authoredTarget?: string;
-  /** Setup metadata declared by `meta.eve.setup`. */
-  readonly setup?: { readonly commands: readonly RegistrySetupDescriptor[] };
+  /** Whether `meta.eve.setup` declares one or more setup commands. */
+  readonly declaresSetup?: boolean;
   /** Self-modification behavior declared by `meta.eve.selfModification`. */
   readonly selfModification?: { readonly lazyConnect: true };
   /** Names of environment variables the item declares. */
@@ -106,12 +106,6 @@ export interface CatalogEntry {
 }
 
 /** One row returned to the model. */
-export interface RegistrySetupDescriptor {
-  readonly package: string;
-  readonly bin: string;
-  readonly args: readonly string[];
-}
-
 export interface FoundIntegration {
   readonly address: string;
   readonly title: string;
@@ -186,26 +180,6 @@ function authoredTargetOf(entry: Record<string, unknown>): string | undefined {
   return undefined;
 }
 
-function setupDescriptors(
-  eve: Record<string, unknown>,
-): readonly RegistrySetupDescriptor[] | undefined {
-  if (eve.setup === undefined || eve.setup === null) return undefined;
-  const values = Array.isArray(eve.setup) ? eve.setup : [eve.setup];
-  const setups: RegistrySetupDescriptor[] = [];
-  for (const value of values) {
-    if (!isRecord(value) || !Array.isArray(value.args)) continue;
-    if (
-      typeof value.package !== "string" ||
-      typeof value.bin !== "string" ||
-      value.args.some((argument) => typeof argument !== "string")
-    ) {
-      continue;
-    }
-    setups.push({ package: value.package, bin: value.bin, args: value.args as string[] });
-  }
-  return setups;
-}
-
 /** Names of environment variables the item declares, used to report unset ones after install. */
 function declaredEnvVars(entry: Record<string, unknown>): readonly string[] {
   const envVars = entry.envVars;
@@ -233,11 +207,11 @@ export function parseRegistryIndex(value: unknown): readonly CatalogEntry[] {
       address: string;
       authoredTarget?: string;
       category?: Category;
+      declaresSetup?: boolean;
       description?: string;
       envVars?: readonly string[];
       requires?: string;
       selfModification?: { readonly lazyConnect: true };
-      setup?: { readonly commands: readonly RegistrySetupDescriptor[] };
       title: string;
     } = { address, title: optionalString(item.title) ?? titleFromAddress(address) };
 
@@ -249,8 +223,7 @@ export function parseRegistryIndex(value: unknown): readonly CatalogEntry[] {
     if (requires !== undefined) entry.requires = requires;
     const authoredTarget = authoredTargetOf(item);
     if (authoredTarget !== undefined) entry.authoredTarget = authoredTarget;
-    const setup = setupDescriptors(eve);
-    if (setup !== undefined) entry.setup = { commands: setup };
+    if (eve.setup !== undefined && eve.setup !== null) entry.declaresSetup = true;
     if (isRecord(eve.selfModification) && eve.selfModification.lazyConnect === true) {
       entry.selfModification = { lazyConnect: true };
     }
