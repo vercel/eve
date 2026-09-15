@@ -8,16 +8,7 @@ import type {
   EveMessagePart,
 } from "eve/react";
 import { useState } from "react";
-import {
-  ArrowRightIcon,
-  CheckCircleIcon,
-  CheckIcon,
-  ExternalLinkIcon,
-  FileIcon,
-  ImageIcon,
-  KeyRoundIcon,
-  XCircleIcon,
-} from "lucide-react";
+import { ArrowRightIcon, CheckIcon, ExternalLinkIcon, FileIcon, ImageIcon } from "lucide-react";
 import { Message, MessageContent, MessageResponse } from "@/components/ai-elements/message";
 import {
   Question,
@@ -39,7 +30,6 @@ import {
   ToolOutput,
 } from "@/components/ai-elements/tool";
 import { Button } from "@/components/ui/button";
-import { cn } from "@/lib/utils";
 
 export type AgentInputResponse = {
   readonly optionId?: string;
@@ -269,7 +259,7 @@ function AttachmentPart({ part }: { readonly part: EveFilePart }) {
   const isImage = part.mediaType.startsWith("image/") && part.url !== undefined;
   const Icon = isImage ? ImageIcon : FileIcon;
   const body = (
-    <span className="flex max-w-sm items-center gap-3 rounded-md border bg-background/60 p-2 text-sm">
+    <span className="flex max-w-sm items-center gap-3 rounded-xl border bg-card p-3 text-sm">
       {isImage ? (
         <img alt={label} className="size-12 shrink-0 rounded-sm object-cover" src={part.url} />
       ) : (
@@ -295,60 +285,60 @@ function AttachmentPart({ part }: { readonly part: EveFilePart }) {
 }
 
 function AuthorizationPrompt({ part }: { readonly part: EveAuthorizationPart }) {
-  const isAuthorized = part.state === "completed" && part.outcome === "authorized";
-  const isCompleted = part.state === "completed";
-  const Icon = isAuthorized ? CheckCircleIcon : isCompleted ? XCircleIcon : KeyRoundIcon;
+  const isRequired = part.state === "required";
+  const description = isRequired ? part.description : part.reason;
   const instructions = part.authorization?.instructions;
   const shouldShowInstructions = instructions !== undefined && instructions !== part.description;
+  const authorization = isRequired ? part.authorization : undefined;
 
   return (
-    <div
-      className={cn(
-        "space-y-3 rounded-md border p-3",
-        isAuthorized
-          ? "border-emerald-500/30 bg-emerald-500/5"
-          : isCompleted
-            ? "border-destructive/30 bg-destructive/5"
-            : "border-blue-500/30 bg-blue-500/5",
-      )}
-    >
-      <div className="flex items-start gap-3">
-        <span
-          className={cn(
-            "mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-full",
-            isAuthorized
-              ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
-              : isCompleted
-                ? "bg-destructive/10 text-destructive"
-                : "bg-blue-500/10 text-blue-700 dark:text-blue-300",
-          )}
-        >
-          <Icon className="size-4" />
-        </span>
-        <div className="min-w-0 flex-1 space-y-2">
-          <p className="font-medium text-sm">{authorizationTitle(part)}</p>
-          <p className="text-muted-foreground text-sm">{authorizationDescription(part)}</p>
-          {shouldShowInstructions ? (
-            <p className="text-muted-foreground text-sm">{instructions}</p>
+    <div className="min-w-0 space-y-3 rounded-xl border bg-card p-4 [overflow-wrap:anywhere]">
+      <div className="space-y-1.5">
+        <p className="flex items-center gap-2 font-medium text-sm leading-snug">
+          {part.state === "completed" ? (
+            <span
+              aria-hidden="true"
+              className={
+                part.outcome === "authorized"
+                  ? "size-1.5 shrink-0 rounded-full bg-emerald-600 dark:bg-emerald-400"
+                  : part.outcome === "failed"
+                    ? "size-1.5 shrink-0 rounded-full bg-destructive"
+                    : "size-1.5 shrink-0 rounded-full bg-muted-foreground"
+              }
+            />
           ) : null}
-          {part.state === "required" && part.authorization?.userCode ? (
-            <div className="flex flex-wrap items-center gap-2 text-sm">
-              <span className="text-muted-foreground">Code</span>
-              <code className="rounded-md bg-background px-2 py-1 font-mono">
-                {part.authorization.userCode}
-              </code>
-            </div>
-          ) : null}
-          {part.state === "required" && part.authorization?.url ? (
-            <Button asChild size="sm">
-              <a href={part.authorization.url} rel="noreferrer" target="_blank">
-                <ExternalLinkIcon className="size-4" />
-                Sign in with {part.displayName}
+          <span className="min-w-0">{authorizationTitle(part)}</span>
+        </p>
+        {description ? (
+          <p className="text-muted-foreground text-sm leading-relaxed">{description}</p>
+        ) : null}
+        {shouldShowInstructions ? (
+          <p className="text-muted-foreground text-sm leading-relaxed">{instructions}</p>
+        ) : null}
+      </div>
+      {authorization?.userCode || authorization?.url ? (
+        <div className="flex flex-wrap items-center gap-2">
+          {authorization.url ? (
+            <Button
+              asChild
+              className="h-auto min-h-8 max-w-full whitespace-normal py-1.5 text-sm! shadow-none"
+              size="sm"
+            >
+              <a href={authorization.url} rel="noreferrer" target="_blank">
+                <span className="min-w-0">Connect {part.displayName}</span>
               </a>
             </Button>
           ) : null}
+          {authorization.userCode ? (
+            <div className="flex min-h-8 min-w-0 max-w-full flex-wrap items-center gap-x-2 gap-y-1 px-1 py-1.5 text-sm leading-5">
+              <span className="text-muted-foreground">Code</span>
+              <code className="min-w-0 select-all font-mono text-sm leading-5">
+                {authorization.userCode}
+              </code>
+            </div>
+          ) : null}
         </div>
-      </div>
+      ) : null}
     </div>
   );
 }
@@ -361,17 +351,6 @@ function authorizationTitle(part: EveAuthorizationPart): string {
     return `${part.displayName} connected`;
   }
   return `${part.displayName} authorization ${formatAuthorizationOutcome(part.outcome)}`;
-}
-
-function authorizationDescription(part: EveAuthorizationPart): string {
-  if (part.state === "required") {
-    return part.description;
-  }
-  if (part.outcome === "authorized") {
-    return `${part.displayName} connected.`;
-  }
-  const tail = part.reason !== undefined ? ` (${part.reason})` : "";
-  return `${part.displayName} authorization ${formatAuthorizationOutcome(part.outcome)}${tail}.`;
 }
 
 function formatAuthorizationOutcome(outcome: NonNullable<EveAuthorizationPart["outcome"]>): string {
@@ -420,16 +399,17 @@ function InputRequestActions({
   );
 
   return (
-    <div className="space-y-3 rounded-md border border-yellow-500/30 bg-yellow-500/5 p-3">
-      <p className="text-muted-foreground text-sm">{inputRequest.prompt}</p>
+    <div className="space-y-3 rounded-xl border bg-card p-4 [overflow-wrap:anywhere]">
+      <p className="font-medium text-sm leading-snug">{inputRequest.prompt}</p>
       {inputResponse ? (
-        <p className="font-medium text-sm">
+        <p className="text-muted-foreground text-sm">
           Responded: {selectedOption?.label ?? inputResponse.text ?? inputResponse.optionId}
         </p>
       ) : (
         <div className="flex flex-wrap gap-2">
           {inputRequest.options?.map((option) => (
             <Button
+              className="h-auto min-h-8 max-w-full whitespace-normal py-1.5 text-sm! shadow-none"
               disabled={!canRespond}
               key={option.id}
               onClick={() => {
@@ -442,7 +422,7 @@ function InputRequestActions({
               }}
               size="sm"
               type="button"
-              variant={option.style === "danger" ? "destructive" : "default"}
+              variant={option.style === "danger" ? "outline" : "default"}
             >
               {option.label}
             </Button>
