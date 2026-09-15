@@ -49,7 +49,7 @@ Pass an item address to `/add` to confirm and install that exact address without
 ```text
 /add channel/slack
 /add extension/agent-browser
-/add linear
+/add channel/linear
 /add @acme/analytics
 ```
 

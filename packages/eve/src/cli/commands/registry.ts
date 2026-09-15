@@ -28,7 +28,6 @@ import {
   parseOfficialRegistrySearchMetadata,
   type RegistrySearchMetadata,
 } from "./registry-metadata.js";
-import { runRegistryPackage } from "./registry-package.js";
 import { prepareDeclaredPnpmBuildPolicy } from "./registry-pnpm-build-policy-flow.js";
 import {
   printRegistrySearchResults,
@@ -496,45 +495,6 @@ export async function runAddCommand(
       ? eveMetadataFromRegistryItem(registryItem)
       : undefined;
     assertCompatibleEveVersion(eveMetadata?.requires);
-
-    if (eveMetadata?.components !== undefined) {
-      if (!isOfficialItemAddress(address))
-        throw new Error("Registry packages require the official eve registry.");
-      const completion = await runRegistryPackage({
-        logger,
-        appRoot,
-        item,
-        components: eveMetadata.components,
-        config,
-        options,
-        dependencies,
-        operations: {
-          itemAddress,
-          metadata: eveMetadataFromRegistryItem,
-          assertCompatibleVersion: assertCompatibleEveVersion,
-          runSetups: ({ item: packageItem, setups, prompter }) =>
-            runDeclaredSetups({
-              logger,
-              appRoot,
-              item: packageItem,
-              setups,
-              options: {
-                yes: options.yes,
-                force: options.overwrite,
-                nonInteractive: options.nonInteractive,
-                answers: options.answers,
-                prompter,
-                signal: options.signal,
-              },
-              dependencies,
-              cancelledReminder: setupReminder(packageItem, "cancelled"),
-              resumeCommand: setupResumeCommand(packageItem),
-            }),
-          setupReminder: (packageItem) => setupReminder(packageItem, "skipped"),
-        },
-      });
-      return reportCompletion(logger, item, completion, options);
-    }
 
     if (options.skipInstall === true) {
       if (eveMetadata?.setup === undefined) {
