@@ -24,6 +24,7 @@ vi.mock("#internal/workflow/runtime.js", () => ({
 
 const entry = {
   createdByTurnId: "turn-1",
+  dispatchContext: { auth: { current: null, initiator: null } },
   executor: { data: { hookToken: "run-hook", runId: "run-1" }, kind: "workflow-tool" },
   metadata: { kind: "tool", name: "export" },
   taskId: "task-1",

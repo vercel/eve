@@ -208,6 +208,7 @@ function taskEntry(
 ): SessionTaskIndexEntry {
   return {
     createdByTurnId,
+    dispatchContext: { auth: { current: null, initiator: null } },
     executor,
     metadata,
     taskId,

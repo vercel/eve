@@ -471,6 +471,7 @@ function batchingInput(count = 100, crossTurn = false) {
                 taskRunId: `run-${index}`,
                 taskInboxToken: `inbox-${index}`,
                 createdByTurnId: crossTurn ? `turn-${index + 1}` : "turn-1",
+                dispatchContext: { auth: { current: null, initiator: null } },
                 metadata: { kind: "subagent", name: "worker" },
               })).concat([
                 {
@@ -479,6 +480,7 @@ function batchingInput(count = 100, crossTurn = false) {
                   taskRunId: "other-run",
                   taskInboxToken: "other-inbox",
                   createdByTurnId: "turn-2",
+                  dispatchContext: { auth: { current: null, initiator: null } },
                   metadata: { kind: "subagent", name: "worker" },
                 },
               ]),

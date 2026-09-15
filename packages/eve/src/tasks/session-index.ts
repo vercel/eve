@@ -5,6 +5,7 @@ import { parseActivityWorkIdentityV1, type ActivityWorkIdentityV1 } from "#proto
 import type { JsonValue } from "#shared/json.js";
 import type { TaskExecutorBinding } from "#tools/task.js";
 import { sameTaskMetadata, type TaskMetadata, type TaskView } from "#tasks/types.js";
+import { type DurableDynamicSubagentSelection, type SessionAuth } from "#context/keys.js";
 import {
   getTaskCohortId,
   SESSION_TASKS_STATE_KEY,
@@ -33,6 +34,7 @@ export { SESSION_TASKS_STATE_KEY } from "#tasks/session-task-cohorts.js";
  */
 export interface SessionTaskIndexEntry {
   readonly activityWorkIdentity?: ActivityWorkIdentityV1;
+  readonly dispatchContext: SessionTaskDispatchContext;
   readonly taskId: string;
   readonly taskRunId: string;
   /** Immutable fallback once the owning workflow run expires. */
@@ -50,6 +52,47 @@ const taskMetadataSchema = z.looseObject({
   kind: z.string().min(1),
   name: z.string().min(1),
 }) as z.ZodType<TaskMetadata>;
+
+export interface TaskAgentDispatchContext {
+  readonly auth: SessionAuth;
+  readonly sessionDynamicSubagentSelections?: Readonly<
+    Record<string, DurableDynamicSubagentSelection>
+  >;
+  readonly turnDynamicSubagentSelections?: Readonly<
+    Record<string, DurableDynamicSubagentSelection>
+  >;
+}
+
+export const LEGACY_TASK_AGENT_DISPATCH_CONTEXT = { legacy: true } as const;
+export type SessionTaskDispatchContext =
+  | TaskAgentDispatchContext
+  | typeof LEGACY_TASK_AGENT_DISPATCH_CONTEXT;
+
+const sessionAuthContextSchema = z.strictObject({
+  attributes: z.record(z.string(), z.union([z.string(), z.array(z.string()).readonly()])),
+  authenticator: z.string(),
+  issuer: z.string().optional(),
+  principalId: z.string(),
+  principalType: z.string(),
+  subject: z.string().optional(),
+});
+const dynamicSubagentSelectionsSchema = z.record(
+  z.string(),
+  z.custom<DurableDynamicSubagentSelection>(),
+);
+
+const taskAgentDispatchContextSchema: z.ZodType<TaskAgentDispatchContext> = z.strictObject({
+  auth: z.strictObject({
+    current: sessionAuthContextSchema.nullable(),
+    initiator: sessionAuthContextSchema.nullable(),
+  }),
+  sessionDynamicSubagentSelections: dynamicSubagentSelectionsSchema.optional(),
+  turnDynamicSubagentSelections: dynamicSubagentSelectionsSchema.optional(),
+});
+const sessionTaskDispatchContextSchema = z.union([
+  taskAgentDispatchContextSchema,
+  z.strictObject({ legacy: z.literal(true) }),
+]);
 
 const taskViewBaseShape = {
   executor: z
@@ -94,7 +137,7 @@ const taskViewSchema: z.ZodType<TaskView> = z.discriminatedUnion("status", [
   z.strictObject({ ...taskViewBaseShape, status: z.literal("cancelled") }),
 ]);
 
-const sessionTaskIndexEntrySchema: z.ZodType<SessionTaskIndexEntry> = z.strictObject({
+const storedSessionTaskIndexEntrySchema = z.strictObject({
   activityWorkIdentity: z
     .custom<ActivityWorkIdentityV1>((value) => parseActivityWorkIdentityV1(value) !== undefined)
     .optional(),
@@ -102,6 +145,7 @@ const sessionTaskIndexEntrySchema: z.ZodType<SessionTaskIndexEntry> = z.strictOb
   createdByStepIndex: z.number().int().nonnegative().optional(),
   createdByTurnId: z.string().min(1),
   cohortId: z.string().min(1).optional(),
+  dispatchContext: sessionTaskDispatchContextSchema.optional(),
   executor: z
     .strictObject({
       data: z.record(z.string(), z.custom<JsonValue>()),
@@ -116,7 +160,7 @@ const sessionTaskIndexEntrySchema: z.ZodType<SessionTaskIndexEntry> = z.strictOb
 
 const sessionTaskIndexSchema = z
   .strictObject({
-    tasks: z.array(sessionTaskIndexEntrySchema),
+    tasks: z.array(storedSessionTaskIndexEntrySchema),
     version: z.literal(SESSION_TASKS_STATE_VERSION),
   })
   .refine(
@@ -166,7 +210,10 @@ export function getSessionTaskIndex(
       `Corrupt task index under session state key "${SESSION_TASKS_STATE_KEY}": ${parsed.error.message}`,
     );
   }
-  return parsed.data.tasks;
+  return parsed.data.tasks.map((entry): SessionTaskIndexEntry => ({
+    ...entry,
+    dispatchContext: entry.dispatchContext ?? LEGACY_TASK_AGENT_DISPATCH_CONTEXT,
+  }));
 }
 
 /** Caches one terminal view beside its task-run address. */
@@ -232,6 +279,7 @@ export function recordSessionTask(
       cohortId: previous.cohortId,
       createdByStepIndex: previous.createdByStepIndex,
       createdByTurnId: previous.createdByTurnId,
+      dispatchContext: previous.dispatchContext,
       terminalView: previous.terminalView ?? entry.terminalView,
     };
   } else {

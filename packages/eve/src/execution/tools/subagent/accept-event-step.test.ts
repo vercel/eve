@@ -36,6 +36,7 @@ const taskIndex = {
     tasks: [
       {
         createdByTurnId: "turn-1",
+        dispatchContext: { auth: { current: null, initiator: null } },
         metadata: { kind: "tool", name: "export" },
         taskId: "task-1",
         taskInboxToken: "task-token",

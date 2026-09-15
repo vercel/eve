@@ -64,6 +64,7 @@ describe("trace retention by live work", () => {
       new ContextAgentTraceStateStore().setActionAnchor("key", anchor),
     );
     const task = {
+      dispatchContext: { auth: { current: null, initiator: null } },
       taskId: deriveTaskId({ callId: "call", parentSessionId: "session", parentTurnId: "turn" }),
       taskRunId: "task-run",
       taskInboxToken: "task-token",

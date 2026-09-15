@@ -18,6 +18,7 @@ describe("workflow task cohort lookup", () => {
           taskRunId: `run-${index}`,
           taskInboxToken: `inbox-${index}`,
           createdByTurnId,
+          dispatchContext: { auth: { current: null, initiator: null } },
           metadata: { kind: "subagent", name: "worker" },
         })),
       },

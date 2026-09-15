@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { HarnessSession } from "#harness/types.js";
 import {
+  LEGACY_TASK_AGENT_DISPATCH_CONTEXT,
   SESSION_TASKS_STATE_KEY,
   cacheTerminalTaskView,
   findSessionTaskEntry,
@@ -32,6 +33,7 @@ describe("session task index", () => {
     kind: "tool" as const,
     name: "research",
   };
+  const dispatchContext = { auth: { current: null, initiator: null } } as const;
   it("returns an empty index when the key is absent", () => {
     expect(getSessionTaskIndex({})).toEqual([]);
     expect(getSessionTaskIndex(undefined)).toEqual([]);
@@ -39,6 +41,7 @@ describe("session task index", () => {
 
   it("records a task and finds it by id", () => {
     const session = recordSessionTask(createSession(), {
+      dispatchContext,
       taskInboxToken: "task:token-1",
       createdByTurnId: "turn-1",
       metadata,
@@ -47,6 +50,7 @@ describe("session task index", () => {
     });
 
     expect(findSessionTaskEntry(session.state, "task_a")).toEqual({
+      dispatchContext,
       taskInboxToken: "task:token-1",
       createdByTurnId: "turn-1",
       metadata,
@@ -68,6 +72,7 @@ describe("session task index", () => {
     };
     const session = recordSessionTask(createSession(), {
       activityWorkIdentity,
+      dispatchContext,
       taskInboxToken: "task:token-1",
       createdByTurnId: "turn-1",
       metadata,
@@ -90,6 +95,7 @@ describe("session task index", () => {
     } as const;
 
     const session = recordSessionTask(createSession(), {
+      dispatchContext,
       taskInboxToken: "task:token-1",
       createdByTurnId: "turn-1",
       metadata: subagentMetadata,
@@ -112,6 +118,7 @@ describe("session task index", () => {
         rootSessionId: "root-session",
         rootTurnId: "root-turn",
       },
+      dispatchContext,
       taskInboxToken: "task:token-1",
       createdByTurnId: "turn-1",
       metadata,
@@ -133,6 +140,7 @@ describe("session task index", () => {
         rootSessionId: "root-session",
         rootTurnId: "root-turn",
       },
+      dispatchContext,
       taskInboxToken: "task:token-2",
       createdByTurnId: "turn-1",
       metadata,
@@ -148,6 +156,7 @@ describe("session task index", () => {
 
   it("replaces the entry on replayed creation instead of duplicating it", () => {
     let session = recordSessionTask(createSession(), {
+      dispatchContext,
       taskInboxToken: "task:token-1",
       createdByTurnId: "turn-1",
       metadata,
@@ -155,6 +164,7 @@ describe("session task index", () => {
       taskRunId: "run-1",
     });
     session = recordSessionTask(session, {
+      dispatchContext,
       taskInboxToken: "task:token-2",
       createdByTurnId: "turn-1",
       metadata,
@@ -171,6 +181,7 @@ describe("session task index", () => {
     return {
       createdByStepIndex: 0,
       createdByTurnId,
+      dispatchContext,
       metadata,
       taskId,
       taskInboxToken: `inbox-${taskId}`,
@@ -290,6 +301,7 @@ describe("session task index", () => {
 
   it("retains only terminal views as expired-run fallbacks", () => {
     const base = {
+      dispatchContext,
       taskInboxToken: "task:token-1",
       createdByTurnId: "turn-1",
       metadata,
@@ -344,6 +356,48 @@ describe("session task index", () => {
     expect(() =>
       getSessionTaskIndex({
         [SESSION_TASKS_STATE_KEY]: { tasks: [{ taskId: 42 }], version: 2 },
+      }),
+    ).toThrow(`Corrupt task index under session state key "${SESSION_TASKS_STATE_KEY}"`);
+  });
+
+  it("normalizes a task without creator context to an explicit legacy state", () => {
+    expect(
+      getSessionTaskIndex({
+        [SESSION_TASKS_STATE_KEY]: {
+          tasks: [
+            {
+              createdByTurnId: "turn-1",
+              metadata,
+              taskId: "task_a",
+              taskInboxToken: "task:token-1",
+              taskRunId: "run-1",
+            },
+          ],
+          version: 2,
+        },
+      })[0]?.dispatchContext,
+    ).toEqual(LEGACY_TASK_AGENT_DISPATCH_CONTEXT);
+  });
+
+  it("rejects unrecognized task dispatch context fields", () => {
+    expect(() =>
+      getSessionTaskIndex({
+        [SESSION_TASKS_STATE_KEY]: {
+          tasks: [
+            {
+              createdByTurnId: "turn-1",
+              dispatchContext: {
+                auth: { current: null, initiator: null },
+                unexpected: "receiver-context",
+              },
+              metadata,
+              taskId: "task_a",
+              taskInboxToken: "task:token-1",
+              taskRunId: "run-1",
+            },
+          ],
+          version: 2,
+        },
       }),
     ).toThrow(`Corrupt task index under session state key "${SESSION_TASKS_STATE_KEY}"`);
   });
