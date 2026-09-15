@@ -76,6 +76,20 @@ describe("withEve", () => {
     ).resolves.toBeUndefined();
   });
 
+  it("discovers the workspace when Vercel evaluates config from .vercel", async () => {
+    const root = await createWorkspace();
+    const configDirectory = join(root, ".vercel");
+    await mkdir(configDirectory);
+    const originalCwd = process.cwd();
+    process.chdir(configDirectory);
+    try {
+      const config = await withEve({});
+      expect(config.services["eve-support"]).toBeDefined();
+    } finally {
+      process.chdir(originalCwd);
+    }
+  });
+
   it("does not modify the root Build Output", async () => {
     const root = await createWorkspace();
     const marker = join(root, ".vercel", "output", "services", "web", "config.json");
