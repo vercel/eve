@@ -75,9 +75,9 @@ describe("eve dist single-chunk module evaluation", () => {
       "src/internal/workflow/builtins.ts",
       "src/subagents/callback-step.ts",
       "src/subagents/adapter.ts",
-      "src/execution/session-execution.ts",
-      "src/execution/workflow-entry.ts",
-      "src/execution/workflow-steps.ts",
+      "src/execution/session/turn.ts",
+      "src/execution/session/entry.ts",
+      "src/execution/session/turn-step.ts",
     ].map((relative) => resolvePackageSourceFilePath(relative));
 
     const entryFile = join(scratch, "entry.mjs");
