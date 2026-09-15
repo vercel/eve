@@ -2,4 +2,4 @@
 "eve": patch
 ---
 
-Allow Slack channels to configure bot presentation, required and optional OAuth scopes, Events API subscriptions, and an optional request URL for their generated Slack app manifests.
+Allow Connect-backed Slack channels to configure bot presentation, required and optional OAuth scopes, and Events API subscriptions for their generated app manifests.

@@ -33,7 +33,7 @@ export default slackChannel({
 
 `connectSlackCredentials` returns `{ botToken, webhookVerifier }`, keeping token rotation, multi-workspace tenancy, and request verification inside Connect rather than your code.
 
-A production build generates a Slack app manifest for each Slack channel, whether you use Vercel Connect or manage credentials yourself. `agent/channels/slack.ts` emits `channels/slack.slack-app-manifest.json` under `.output` locally or `.vercel/output` on Vercel. You can apply that file manually through Slack's app manifest tools. For Connect-backed channels, eve also embeds the Slack manifest in the Vercel Connect requirement with Connect-managed callback and trigger URLs.
+For Connect-backed channels, a production build embeds a Slack app manifest in the Vercel Connect requirement. Connect adds its managed callback and trigger URLs when it installs the app.
 
 The manifest always includes the `app_mentions:read` and `chat:write` bot scopes, the `app_mention` event, interactivity, and an App Home Messages tab. Configure the bot's presentation and add requirements for your authored handlers on `slackChannel()`; eve deduplicates events and scopes against the baseline:
 
@@ -58,8 +58,6 @@ export default slackChannel({
 
 `bot` configures Slack's app and bot presentation. `eventSubscriptions` adds Slack Events API bot events, `scopes` adds required bot OAuth scopes, and `optionalScopes` adds scopes that an installer may decline. A scope listed in both `scopes` and `optionalScopes` remains required. eve does not infer requirements from an open-ended `onEvent` handler, so add every event the handler accepts and the corresponding Slack scope. Scope changes may require reinstalling the Slack app.
 
-By default, the generated manifest omits request URLs. Set `requestUrl` when you want a self-managed manifest that you can apply to Slack without adding the Event Subscriptions and Interactivity request URLs manually. Vercel Connect replaces these fields with its managed trigger URL during installation, so you can omit `requestUrl` for Connect-backed channels.
-
 Function-form bot tokens receive `{ teamId }` when Slack supplies the app installation workspace. Use it to select an installation in a self-managed multi-workspace app. The id can differ from the actor or content workspace for Slack Connect events:
 
 ```ts title="agent/channels/slack.ts"
@@ -78,23 +76,7 @@ Literal tokens and zero-argument token functions remain supported. A multi-works
 
 Use this fallback when the agent does not run on Vercel or Vercel Connect is unavailable. In the setup command, **Use portable credentials** is the environment-variable option; eve adds `SLACK_BOT_TOKEN` and `SLACK_SIGNING_SECRET` to `.env.example`.
 
-This option does not create or install the Slack app. To include your public webhook URL in its generated manifest, set `requestUrl`:
-
-```ts title="agent/channels/slack.ts"
-import { slackChannel } from "eve/channels/slack";
-
-export default slackChannel({
-  credentials: {
-    botToken: process.env.SLACK_BOT_TOKEN,
-    signingSecret: process.env.SLACK_SIGNING_SECRET,
-  },
-  requestUrl: "https://your-agent.example/eve/v1/slack",
-});
-```
-
-`requestUrl` populates both `settings.event_subscriptions.request_url` and `settings.interactivity.request_url`. Omit it when you prefer to configure those URLs in Slack or transform the manifest before applying it.
-
-Configure the app in [Slack app settings](https://api.slack.com/apps):
+This option does not create or install the Slack app. Configure it in [Slack app settings](https://api.slack.com/apps):
 
 1. Add the `app_mentions:read` and `chat:write` bot scopes. Add `im:history` for DMs, `files:read` for inbound attachments, and `files:write` for explicit uploads and automatic long-response snippets.
 2. Install or reinstall the app, copy its Bot User OAuth Token to `SLACK_BOT_TOKEN`, and copy the signing secret from **Basic Information** to `SLACK_SIGNING_SECRET`.

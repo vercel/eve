@@ -63,23 +63,6 @@ describe("Slack app manifests", () => {
     ).not.toHaveProperty("bot_optional");
   });
 
-  it("adds an explicitly configured request URL", () => {
-    const definition = defineSlackAppManifest({
-      requestUrl: "https://agent.example.com/eve/v1/slack",
-    });
-
-    expect(buildSlackAppManifest(definition, "support")).toMatchObject({
-      settings: {
-        event_subscriptions: {
-          request_url: "https://agent.example.com/eve/v1/slack",
-        },
-        interactivity: {
-          request_url: "https://agent.example.com/eve/v1/slack",
-        },
-      },
-    });
-  });
-
   it("uses a configured bot name and enforces Slack's app name limit", () => {
     const definition = defineSlackAppManifest({ displayName: "x".repeat(40) });
 

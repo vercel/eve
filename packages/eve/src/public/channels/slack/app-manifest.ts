@@ -19,7 +19,6 @@ export interface SlackAppManifestOptions {
   readonly displayName?: string;
   readonly longDescription?: string;
   readonly optionalBotScopes?: readonly string[];
-  readonly requestUrl?: string;
 }
 
 export interface SlackAppManifestBuildDefinition {
@@ -43,15 +42,8 @@ export function defineSlackAppManifest(
       };
       if (optionalBotScopes.length > 0) oauthScopes.bot_optional = optionalBotScopes;
       const botEvents = [...unique(["app_mention"], input.botEvents)] as SlackBotEvent[];
-      const eventSubscriptions: {
-        bot_events: SlackBotEvent[];
-        request_url?: string;
-      } = { bot_events: botEvents };
-      const interactivity: { is_enabled: true; request_url?: string } = { is_enabled: true };
-      if (input.requestUrl !== undefined) {
-        eventSubscriptions.request_url = input.requestUrl;
-        interactivity.request_url = input.requestUrl;
-      }
+      const eventSubscriptions = { bot_events: botEvents };
+      const interactivity = { is_enabled: true } as const;
       const botUser: { always_online?: boolean; display_name: string } = {
         display_name: name,
       };
