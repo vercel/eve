@@ -35,7 +35,6 @@ import {
 import { createProductionApplicationNitro } from "#internal/nitro/host/create-application-nitro.js";
 import { emitVercelAgentSummary } from "#internal/nitro/host/build-vercel-agent-summary.js";
 import { emitVercelConnectManifest } from "#internal/vercel-connect-manifest.js";
-import { emitSlackAppManifests } from "#internal/slack-app-manifest.js";
 import { tryReadExtensionBuildConfig } from "#internal/nitro/host/build-extension.js";
 import { copyHostMiddlewareFunctions } from "#internal/nitro/host/copy-host-middleware.js";
 import { normalizeVercelServiceCrons } from "#internal/nitro/host/normalize-vercel-service-crons.js";
@@ -379,12 +378,6 @@ async function buildApplicationInWorkspace(
       emitVercelAgentSummary({
         manifest: preparedHost.compileResult.manifest,
         outputPath: workspace.publication.summary.stagedPath,
-      }),
-    );
-    await measureBuildPhase(profiler, "slack-app-manifests.emit", () =>
-      emitSlackAppManifests({
-        manifest: preparedHost.compileResult.manifest,
-        outputDirectory: workspace.publication.output.stagedDir,
       }),
     );
     await measureBuildPhase(profiler, "connect-manifest.emit", () =>
