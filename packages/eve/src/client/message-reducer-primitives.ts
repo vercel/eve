@@ -48,7 +48,7 @@ export function upsertMessage(data: EveMessageData, next: EveMessage): EveMessag
   };
 }
 
-export function removeStreamingToolPartsForTurn(
+export function removeUnsettledToolPartsForTurn(
   data: EveMessageData,
   turnId: string,
 ): EveMessageData {
@@ -60,10 +60,15 @@ export function removeStreamingToolPartsForTurn(
 
   return upsertMessage(data, {
     ...message,
-    parts: message.parts.filter(
-      (part) => part.type !== "dynamic-tool" || part.state !== "input-streaming",
-    ),
+    parts: message.parts.filter((part) => !isUnsettledToolPart(part)),
   });
+}
+
+export function isUnsettledToolPart(part: EveMessagePart): boolean {
+  return (
+    part.type === "dynamic-tool" &&
+    (part.state === "input-streaming" || part.state === "input-available")
+  );
 }
 
 export function optimisticUserMessageId(submissionId: string): string {

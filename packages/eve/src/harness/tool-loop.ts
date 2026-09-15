@@ -99,6 +99,7 @@ import {
   emitTurnPreamble,
   getHarnessEmissionState,
   setHarnessEmissionState,
+  type HarnessEmissionState,
 } from "#harness/emission.js";
 import {
   extractQuestionInputRequests,
@@ -108,7 +109,10 @@ import {
   renderPendingApprovalsInstruction,
   renderPendingApprovalsSnippet,
 } from "#harness/hitl/approval-prompt.js";
-import { createToolResultMessagePartFromToolError } from "#harness/action-result-helpers.js";
+import {
+  createRuntimeToolResultFromValue,
+  createToolResultMessagePartFromToolError,
+} from "#harness/action-result-helpers.js";
 import { activeTurnId } from "#harness/active-turn-id.js";
 import {
   clearTurnClientContextState,
@@ -226,6 +230,7 @@ import {
 import {
   type CompactionConfig,
   type HarnessSession,
+  type HarnessEmitFn,
   type HarnessToolMap,
   requireSessionModelReference,
   type SettledTurn,
@@ -1317,7 +1322,10 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     let modelCallCoordinationTools = config.tools;
 
     const runSingleModelCall = async (
-      opts: ModelCallOptions & { readonly attemptIndex: number },
+      opts: ModelCallOptions & {
+        readonly attemptIndex: number;
+        readonly unsettledActionToolNames?: Map<string, string>;
+      },
     ): Promise<HarnessStepResult> => {
       const { instructions, telemetryRuntimeContext = {} } =
         opts.preparedInput ?? prepareModelCallInput(opts.extraSystemNote);
@@ -1478,6 +1486,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
           } = await emitStreamContent(emit, emissionState, streamResult.fullStream, {
             excludedActionToolNames,
             tools: advertisedHarnessTools,
+            unsettledActionToolNames: opts.unsettledActionToolNames,
           });
           throwIfTurnAborted(config.abortSignal);
           const [stepResult, accumulatedResponseMessages] = await Promise.all([
@@ -1555,21 +1564,33 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     };
 
     let nextModelAttemptIndex = 0;
-    const runOneModelCall = async (opts: ModelCallOptions): Promise<HarnessStepResult> =>
-      runModelCallWithRetries(
-        (attempt) =>
-          runSingleModelCall({
+    const runOneModelCall = async (opts: ModelCallOptions): Promise<HarnessStepResult> => {
+      let unsettledActionToolNames = new Map<string, string>();
+      return runModelCallWithRetries(
+        async (attempt) => {
+          if (attempt > 1) {
+            await emitRetriedModelCallActionResults({
+              emissionState,
+              emit,
+              unsettledActionToolNames,
+            });
+            unsettledActionToolNames = new Map<string, string>();
+          }
+          return runSingleModelCall({
             ...opts,
             attemptIndex: nextModelAttemptIndex++,
             preparedInput: attempt === 1 ? opts.preparedInput : undefined,
             suppressStepStartedEmission: attempt === 1 ? opts.suppressStepStartedEmission : true,
-          }),
+            unsettledActionToolNames,
+          });
+        },
         {
           sessionId: session.sessionId,
           turnId: emissionState.turnId,
         },
         config.abortSignal,
       );
+    };
 
     // Resolve first-attempt instrumentation after step.started dynamic
     // capabilities have updated the effective prompt and toolset.
@@ -3155,5 +3176,31 @@ async function runModelCallWithRetries<T>(
       });
       await new Promise((resolve) => setTimeout(resolve, delayMs));
     }
+  }
+}
+
+async function emitRetriedModelCallActionResults(input: {
+  readonly emissionState: HarnessEmissionState;
+  readonly emit: HarnessEmitFn | undefined;
+  readonly unsettledActionToolNames: Map<string, string>;
+}): Promise<void> {
+  for (const [callId, toolName] of input.unsettledActionToolNames) {
+    await input.emit?.(
+      createActionResultEvent({
+        result: createRuntimeToolResultFromValue({
+          callId,
+          isError: true,
+          output: {
+            code: "MODEL_CALL_ATTEMPT_RETRIED",
+            message: "The model call attempt was retried before this tool could run.",
+          },
+          toolName,
+        }),
+        sequence: input.emissionState.sequence,
+        stepIndex: input.emissionState.stepIndex,
+        turnId: input.emissionState.turnId,
+      }),
+    );
+    input.unsettledActionToolNames.delete(callId);
   }
 }
