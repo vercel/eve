@@ -1,7 +1,11 @@
 import { createHash } from "node:crypto";
+import { setTimeout as sleep } from "node:timers/promises";
 
 import { hydrateSandboxFromImmutableResources } from "#execution/sandbox/bindings/immutable-resources.js";
-import { createVercelNetworkPolicySetter } from "#execution/sandbox/bindings/vercel-base-runtime.js";
+import {
+  createVercelNetworkPolicySetter,
+  ensureVercelSandboxBaseRuntime,
+} from "#execution/sandbox/bindings/vercel-base-runtime.js";
 import type { OciImagePublisher } from "#execution/sandbox/bindings/oci-image-publisher.js";
 import {
   getVercelSandboxCredentials,
@@ -11,7 +15,10 @@ import {
   ensureVercelSandboxTags,
   resolveVercelSandboxTags,
 } from "#execution/sandbox/bindings/vercel-options.js";
-import { isVercelImageUnavailableError } from "#execution/sandbox/bindings/vercel-errors.js";
+import {
+  isVercelImageUnavailableError,
+  isVercelResourcePendingError,
+} from "#execution/sandbox/bindings/vercel-errors.js";
 import { getNamedVercelSandbox } from "#execution/sandbox/bindings/vercel-lookup.js";
 import {
   createVercelInternalSandboxSession,
@@ -61,10 +68,12 @@ export interface CreateVercelImageProviderInput {
     readonly registry: string;
     readonly username: string;
   }) => OciImagePublisher;
+  readonly ensureBaseRuntime?: typeof ensureVercelSandboxBaseRuntime;
   readonly hydrateResources?: typeof hydrateSandboxFromImmutableResources;
   readonly loadDeleteModule?: () => Promise<VercelDeleteModule>;
   readonly loadModule?: () => Promise<VercelModule>;
   readonly resourcePublisher?: VercelImageResourcePublisher;
+  readonly waitForImage?: () => Promise<void>;
 }
 
 export function createVercelImageSandboxProvider(
@@ -76,6 +85,7 @@ export function createVercelImageSandboxProvider(
   VercelImagePreparedArtifact
 > {
   const createImagePublisher = input.createImagePublisher ?? createLazyOciImagePublisher;
+  const ensureBaseRuntime = input.ensureBaseRuntime ?? ensureVercelSandboxBaseRuntime;
   const hydrateResources = input.hydrateResources ?? hydrateSandboxFromImmutableResources;
   const loadModule =
     input.loadModule ?? (async () => await import("#compiled/@vercel/sandbox-drives/index.js"));
@@ -83,6 +93,7 @@ export function createVercelImageSandboxProvider(
     input.loadDeleteModule ?? (async () => await import("#compiled/@vercel/sandbox/index.js"));
   const resourcePublisher =
     input.resourcePublisher ?? createVercelImageResourcePublisher({ loadModule });
+  const waitForImage = input.waitForImage ?? (async () => await sleep(2_000));
   const createOptions: VercelCreateOptions = {
     timeout: DEFAULT_SANDBOX_TIMEOUT_MS,
     ...environmentOptions,
@@ -130,7 +141,12 @@ export function createVercelImageSandboxProvider(
       };
     },
     async getOrCreate(context, source) {
-      const artifact = requirePreparedArtifact(source, context.session.name);
+      if (source.kind === "base") {
+        throw new Error(
+          `Sandbox session "${context.session.name}" requires a prepared Vercel image artifact.`,
+        );
+      }
+      const artifact = requirePreparedArtifact(source);
       const module = await loadModule();
       const tags = resolveVercelSandboxTags(createOptions.tags, context.tags);
       let sandbox = await getNamedVercelSandbox({
@@ -139,11 +155,6 @@ export function createVercelImageSandboxProvider(
         sandboxName: context.session.name,
       });
       if (sandbox === null) {
-        if (source.kind !== "prepared") {
-          throw new Error(
-            `Sandbox session "${context.session.name}" requires a prepared artifact.`,
-          );
-        }
         try {
           const credentials = await getVercelSandboxCredentials(createOptions);
           const mounts = await resourcePublisher.resolveMounts({
@@ -157,21 +168,26 @@ export function createVercelImageSandboxProvider(
             source: _source,
             ...imageCreateOptions
           } = createOptions;
-          sandbox = await module.Sandbox.create({
-            ...imageCreateOptions,
-            ...context.options,
-            ...credentials,
-            fetch: getVercelSandboxFetch(createOptions),
-            image: artifact.image,
-            mounts,
-            name: context.session.name,
-            persistent: true,
-            tags,
+          sandbox = await createImageSandboxWithRetry({
+            create: async () =>
+              await module.Sandbox.create({
+                ...imageCreateOptions,
+                ...context.options,
+                ...credentials,
+                fetch: getVercelSandboxFetch(createOptions),
+                image: artifact.image,
+                mounts,
+                name: context.session.name,
+                persistent: true,
+                tags,
+              }),
+            wait: waitForImage,
           });
         } catch (error) {
           if (
             error instanceof VercelImageResourceUnavailableError ||
-            isVercelImageUnavailableError(error)
+            isVercelImageUnavailableError(error) ||
+            isVercelResourcePendingError(error)
           ) {
             throw new SandboxTemplateNotProvisionedError({
               providerName: VERCEL_IMAGE_PROVIDER_NAME,
@@ -185,6 +201,7 @@ export function createVercelImageSandboxProvider(
           createVercelNetworkPolicySetter(sandbox),
         );
         try {
+          await ensureBaseRuntime(sandbox);
           await hydrateResources(session);
         } catch (error) {
           try {
@@ -199,6 +216,7 @@ export function createVercelImageSandboxProvider(
           throw error;
         }
       } else {
+        await ensureBaseRuntime(sandbox);
         const expectedConfig = tags?.sandboxConfig;
         if (expectedConfig !== undefined && sandbox.tags?.sandboxConfig !== expectedConfig) {
           throw new Error(
@@ -217,6 +235,21 @@ export function createVercelImageSandboxProvider(
   };
 }
 
+async function createImageSandboxWithRetry<T>(input: {
+  readonly create: () => Promise<T>;
+  readonly wait: () => Promise<void>;
+}): Promise<T> {
+  for (let attempt = 0; attempt < 45; attempt += 1) {
+    try {
+      return await input.create();
+    } catch (error) {
+      if (!isVercelResourcePendingError(error) || attempt === 44) throw error;
+      await input.wait();
+    }
+  }
+  throw new Error("Vercel image readiness retry exhausted unexpectedly.");
+}
+
 function createLazyOciImagePublisher(input: {
   readonly authToken: string;
   readonly registry: string;
@@ -231,19 +264,11 @@ function createLazyOciImagePublisher(input: {
   };
 }
 
-function requirePreparedArtifact(
-  source:
-    | { readonly kind: "base" }
-    | {
-        readonly artifact: VercelImagePreparedArtifact;
-        readonly kind: "prepared";
-        readonly templateName: string;
-      },
-  sessionName: string,
-): VercelImagePreparedArtifact {
-  if (source.kind === "base") {
-    throw new Error(`Sandbox session "${sessionName}" requires a prepared Vercel image artifact.`);
-  }
+function requirePreparedArtifact(source: {
+  readonly artifact: VercelImagePreparedArtifact;
+  readonly kind: "prepared";
+  readonly templateName: string;
+}): VercelImagePreparedArtifact {
   const artifact: SandboxPreparedArtifact = source.artifact;
   if (
     !isSandboxPreparedArtifactRecord(artifact) ||

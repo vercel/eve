@@ -14,6 +14,10 @@ export function isVercelImageUnavailableError(error: unknown): boolean {
   return errorChainContainsStatus(error, 404) || errorChainContainsStatus(error, 410);
 }
 
+export function isVercelResourcePendingError(error: unknown): boolean {
+  return errorChainContainsStatus(error, 409);
+}
+
 function errorChainContainsStatus(error: unknown, expectedStatus: number): boolean {
   for (const candidate of walkErrorChain(error)) {
     if (readErrorStatus(candidate) === expectedStatus) return true;
