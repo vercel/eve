@@ -159,7 +159,8 @@ For the full auth model and helper list, see [Auth & route protection](../guides
 
 ## Audience
 
-The eve channel classifies who can observe a session when that session is created:
+The eve channel assigns an observability audience when it creates a session. The
+audience controls whether instrumentation may capture session content:
 
 | Session creator                           | Default audience |
 | ----------------------------------------- | ---------------- |
@@ -169,32 +170,31 @@ The eve channel classifies who can observe a session when that session is create
 
 Anonymous HTTP surfaces are `unknown` by default because reachability does not establish that their content is safe to record. Authenticated `user`, `service`, and `runtime` sessions are private because they belong to one identified party. Other authenticated principal types also remain `unknown`: trace consumers record metadata but omit content by default in preview and production. Set an explicit `audience: "public"` only for intentionally public traffic.
 
-Pass a constant or a function to override the default:
-
-```ts title="agent/channels/eve.ts"
-import { none, vercelOidc } from "eve/channels/auth";
-import { eveChannel } from "eve/channels/eve";
-
-export default eveChannel({
-  auth: [vercelOidc()],
-  audience: "private",
-});
-```
+For a production endpoint whose conversations are all intentionally public,
+set a constant audience:
 
 ```ts title="agent/channels/eve.ts"
 import { vercelOidc } from "eve/channels/auth";
 import { eveChannel } from "eve/channels/eve";
 
 export default eveChannel({
-  auth: [vercelOidc(), none()],
-  audience({ caller, environment }) {
-    if (caller.type === "anonymous") return environment === "development" ? "public" : "unknown";
-    return "private";
-  },
+  auth: [vercelOidc()],
+  audience: "public",
 });
 ```
 
-The function receives `caller`, channel, run mode, and deployment environment. `caller` is either `{ type: "anonymous" }` or a principal projection with `kind`, `authenticator`, and `attributes`. Classification is fixed at session creation; a continuation turn from a different caller does not reclassify the session. When another eve deployment forwards a request without an accepted forwarded trace assertion, the calling deployment's principal is used for classification, so the session remains `private`. A custom [trace policy](../guides/instrumentation-providers#control-inputs-and-outputs) can still admit or deny content independently.
+`audience` controls observability content capture; it does not change who may
+call the endpoint. `auth` still controls access. For a classification that
+depends on channel state or application-specific verified data, use a [custom
+channel audience](./custom#conversation-audience).
+
+You can also pass a function that receives `caller`, channel, run mode, and
+deployment environment. Classification is fixed at session creation, so a later
+turn from a different caller does not reclassify the session.
+
+For a remote agent, a trusted dispatch can forward the original audience and
+its trace-content ceiling. See [Preserving trace
+content](../guides/remote-agents#preserving-trace-content).
 
 ## Customization
 

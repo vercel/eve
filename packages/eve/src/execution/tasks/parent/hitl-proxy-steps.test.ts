@@ -78,6 +78,7 @@ describe("recordTaskInputRequestStep", () => {
           tasks: [
             {
               createdByTurnId: "turn-1",
+              dispatchContext: { auth: { current: null, initiator: null } },
               metadata: { kind: "tool", name: "export" },
               taskId: "task-1",
               taskInboxToken: "task-token",
@@ -141,6 +142,7 @@ describe("recordTaskInputRequestStep", () => {
             tasks: [
               {
                 createdByTurnId: "turn-1",
+                dispatchContext: { auth: { current: null, initiator: null } },
                 metadata: { kind: "tool", name: "export" },
                 taskId: "task-1",
                 taskInboxToken: "task-token",
@@ -212,6 +214,7 @@ describe("recordTerminalTaskViewsStep", () => {
             tasks: [
               {
                 createdByTurnId: "turn-1",
+                dispatchContext: { auth: { current: null, initiator: null } },
                 metadata: { agentId: "agent-1", kind: "subagent", mode: "local", name: "research" },
                 taskId: "task-1",
                 taskInboxToken: "task-token",
@@ -279,6 +282,7 @@ describe("recordTerminalTaskViewsStep", () => {
           tasks: [
             {
               createdByTurnId: "turn-1",
+              dispatchContext: { auth: { current: null, initiator: null } },
               metadata: { kind: "tool", name: "export" },
               taskId: "task-1",
               taskInboxToken: "task-token",

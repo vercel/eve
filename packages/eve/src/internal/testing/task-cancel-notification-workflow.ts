@@ -39,6 +39,7 @@ export async function startSlowCancelledTaskStep(input: {
   await waitForCommandHookOwner(taskInboxToken);
   return {
     createdByTurnId: "turn_0",
+    dispatchContext: { auth: { current: null, initiator: null } },
     metadata: { kind: "tool", name: "slow-cancel" },
     taskId,
     taskInboxToken,

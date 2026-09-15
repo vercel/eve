@@ -13,6 +13,12 @@ import { readDurableSession } from "#execution/durable-session-store.js";
 import { getAgentHandleStore, setAgentHandleStore } from "#subagents/handles/store.js";
 import { readLatestTaskView } from "#execution/tasks/parent/run-parent.js";
 import { recordSessionTask } from "#tasks/session-index.js";
+import {
+  AuthKey,
+  InitiatorAuthKey,
+  SessionDynamicSubagentSelectionsKey,
+  TurnDynamicSubagentSelectionsKey,
+} from "#context/keys.js";
 
 vi.mock("#compiled/@workflow/core/index.js", async (importOriginal) => ({
   ...(await importOriginal()),
@@ -45,6 +51,15 @@ const action = {
   nodeId: "subagents/research",
   subagentName: "research",
 };
+const creatorAuth = {
+  attributes: {},
+  authenticator: "test-idp",
+  principalId: "creator-current",
+  principalType: "user" as const,
+};
+const sessionInitiatorAuth = { ...creatorAuth, principalId: "session-initiator" };
+const receiverAuth = { ...creatorAuth, principalId: "receiver-current" };
+const receiverInitiatorAuth = { ...creatorAuth, principalId: "receiver-initiator" };
 const availableRecord = {
   address: { continuationToken: "child", kind: "agent/local" as const, sessionId: "child" },
   identity: { id: "agent-1", name: "research", nodeId: "subagents/research" },
@@ -209,6 +224,25 @@ describe("owner agent invocation dispatch", () => {
   ] as const)(
     "resolves task activity for $dispatchKind ($taskKind, observed=$observed)",
     async ({ dispatchKind, taskKind, observed }) => {
+      const serializedContext = {
+        [AuthKey.name]: receiverAuth,
+        [InitiatorAuthKey.name]: receiverInitiatorAuth,
+        [SessionDynamicSubagentSelectionsKey.name]: { source: "receiver-session" },
+        [TurnDynamicSubagentSelectionsKey.name]: { source: "receiver-turn" },
+        "eve.test": "preserved",
+      };
+      const taskDispatchContext = {
+        auth: { current: creatorAuth, initiator: sessionInitiatorAuth },
+        sessionDynamicSubagentSelections: { source: "creator-session" } as never,
+        turnDynamicSubagentSelections: { source: "creator-turn" } as never,
+      };
+      const planningContext = {
+        ...serializedContext,
+        [AuthKey.name]: creatorAuth,
+        [InitiatorAuthKey.name]: sessionInitiatorAuth,
+        [SessionDynamicSubagentSelectionsKey.name]: { source: "creator-session" },
+        [TurnDynamicSubagentSelectionsKey.name]: { source: "creator-turn" },
+      };
       const taskWork = {
         callId: "task-call",
         id: "work:task",
@@ -221,6 +255,7 @@ describe("owner agent invocation dispatch", () => {
       const indexedSession = recordSessionTask(session as never, {
         activityWorkIdentity: taskWork,
         createdByTurnId: "turn-1",
+        dispatchContext: taskDispatchContext,
         metadata: { kind: taskKind, name: "research" },
         taskId: "task-1",
         taskInboxToken: "task-token",
@@ -234,6 +269,7 @@ describe("owner agent invocation dispatch", () => {
       });
       vi.mocked(prepareOwnerAgentInvocation).mockResolvedValue({
         ...prepared,
+        auth: creatorAuth,
         activityObserver: observed
           ? {
               sink: { url: "https://parent.example/activity", version: 1 },
@@ -245,17 +281,19 @@ describe("owner agent invocation dispatch", () => {
               },
             }
           : undefined,
+        initiatorAuth: sessionInitiatorAuth,
         plan: [
           dispatchKind === "start"
             ? { kind: "start", target: { action, kind: "local", source: { type: "runtime" } } }
             : { kind: "resume", action, agentId: "agent-1" },
         ],
+        serializedContext: planningContext,
         session: indexedSession,
       } as never);
       vi.mocked(startSubagent).mockResolvedValue(called);
       vi.mocked(dispatchToClaimedAgentAddress).mockResolvedValue(called);
 
-      await dispatchTaskAgentInvocationStep({
+      const result = await dispatchTaskAgentInvocationStep({
         ownerId: "task-1",
         replyTo: "agent-reply",
         request: {
@@ -263,7 +301,7 @@ describe("owner agent invocation dispatch", () => {
           invocationId: "call-1",
           kind: "agent-invoke",
         },
-        serializedContext: {},
+        serializedContext,
         sessionState: {} as never,
         taskId: "task-1",
       });
@@ -274,15 +312,130 @@ describe("owner agent invocation dispatch", () => {
           : undefined;
       if (dispatchKind === "start") {
         expect(startSubagent).toHaveBeenCalledWith(
-          expect.objectContaining({ taskActivityObserver: taskObserver }),
+          expect.objectContaining({
+            auth: creatorAuth,
+            initiatorAuth: sessionInitiatorAuth,
+            taskActivityObserver: taskObserver,
+          }),
         );
       } else {
         expect(dispatchToClaimedAgentAddress).toHaveBeenCalledWith(
-          expect.objectContaining({ activityObserver: taskObserver }),
+          expect.objectContaining({ activityObserver: taskObserver, auth: creatorAuth }),
         );
       }
+      expect(prepareOwnerAgentInvocation).toHaveBeenCalledWith(
+        expect.objectContaining({ serializedContext: planningContext }),
+      );
+      expect(result).toMatchObject({ serializedContext });
     },
   );
+
+  it("uses an anonymous task's captured auth despite an authenticated receiving turn", async () => {
+    const serializedContext = {
+      [AuthKey.name]: receiverAuth,
+      [InitiatorAuthKey.name]: receiverInitiatorAuth,
+      [SessionDynamicSubagentSelectionsKey.name]: { source: "receiver-session" },
+      [TurnDynamicSubagentSelectionsKey.name]: { source: "receiver-turn" },
+    };
+    const planningContext = {
+      [AuthKey.name]: null,
+      [InitiatorAuthKey.name]: sessionInitiatorAuth,
+    };
+    const indexedSession = recordSessionTask(session as never, {
+      createdByTurnId: "turn-1",
+      dispatchContext: {
+        auth: { current: null, initiator: sessionInitiatorAuth },
+      },
+      metadata: { kind: "subagent", name: "research" },
+      taskId: "task-1",
+      taskInboxToken: "task-token",
+      taskRunId: "task-run",
+    });
+    vi.mocked(readDurableSession).mockReturnValue(indexedSession as never);
+    vi.mocked(readLatestTaskView).mockResolvedValue({
+      metadata: { kind: "subagent", name: "research" },
+      status: "working",
+      taskId: "task-1",
+    });
+    vi.mocked(prepareOwnerAgentInvocation).mockResolvedValue({
+      ...prepared,
+      auth: null,
+      initiatorAuth: sessionInitiatorAuth,
+      plan: [{ kind: "start", target: { action, kind: "local", source: { type: "runtime" } } }],
+      serializedContext: planningContext,
+      session: indexedSession,
+    } as never);
+    vi.mocked(startSubagent).mockResolvedValue(called);
+
+    const result = await dispatchTaskAgentInvocationStep({
+      ownerId: "task-1",
+      replyTo: "agent-reply",
+      request: {
+        input: { message: "Find it", target: "research" },
+        invocationId: "call-1",
+        kind: "agent-invoke",
+      },
+      serializedContext,
+      sessionState: { sessionId: "parent" } as never,
+      taskId: "task-1",
+    });
+
+    expect(startSubagent).toHaveBeenCalledWith(
+      expect.objectContaining({ auth: null, initiatorAuth: sessionInitiatorAuth }),
+    );
+    expect(prepareOwnerAgentInvocation).toHaveBeenCalledWith(
+      expect.objectContaining({ serializedContext: planningContext }),
+    );
+    expect(result).toMatchObject({ serializedContext });
+  });
+
+  it("rejects only nested dispatch for a legacy task without creator context", async () => {
+    vi.mocked(readDurableSession).mockReturnValue({
+      ...session,
+      state: {
+        ...session.state,
+        "eve.tasks": {
+          tasks: [
+            {
+              createdByTurnId: "turn-1",
+              metadata: { kind: "subagent", name: "research" },
+              taskId: "task-1",
+              taskInboxToken: "task-token",
+              taskRunId: "task-run",
+            },
+          ],
+          version: 2,
+        },
+      },
+    } as never);
+    vi.mocked(readLatestTaskView).mockResolvedValue({
+      metadata: { kind: "subagent", name: "research" },
+      status: "working",
+      taskId: "task-1",
+    });
+
+    await expect(
+      dispatchTaskAgentInvocationStep({
+        ownerId: "task-1",
+        replyTo: "agent-reply",
+        request: {
+          input: { message: "Find it", target: "research" },
+          invocationId: "call-1",
+          kind: "agent-invoke",
+        },
+        serializedContext: { "eve.auth": receiverAuth },
+        sessionState: { sessionId: "parent" } as never,
+        taskId: "task-1",
+      }),
+    ).resolves.toMatchObject({
+      kind: "failed",
+      result: {
+        isError: true,
+        output: { code: "AGENT_INVOCATION_AUTH_UNAVAILABLE" },
+      },
+    });
+    expect(prepareOwnerAgentInvocation).not.toHaveBeenCalled();
+  });
 
   it("starts a fresh agent with task-owned handle semantics", async () => {
     const reserved = {

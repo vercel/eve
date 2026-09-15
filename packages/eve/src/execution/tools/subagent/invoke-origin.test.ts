@@ -55,6 +55,7 @@ describe("background invocation origin", () => {
           taskInboxToken: "task-inbox",
           createdByTurnId: "turn-1",
           createdByStepIndex: 0,
+          dispatchContext: { auth: { current: null, initiator: null } },
           metadata: { kind: "subagent", name: "research", agentId: "agent" },
         },
       );

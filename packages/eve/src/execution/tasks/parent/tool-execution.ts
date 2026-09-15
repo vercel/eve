@@ -25,6 +25,7 @@ import { findSessionTaskEntry, recordSessionTask } from "#tasks/session-index.js
 import type { AgentView } from "#subagents/handles/prompt.js";
 import {
   beginBackgroundTask,
+  createTaskAgentDispatchContext,
   prepareBackgroundTask,
   rejectDelegatedDispatch,
   type BackgroundTask,
@@ -397,6 +398,7 @@ class BackgroundToolExecutionScope implements BackgroundToolExecutor {
       name: input.input.definition.name,
     };
     const activityLabel = projectToolStartLabel(input.input.definition, input.input.toolInput);
+    const callbackSession = buildCallbackContext().session;
     const taskInput = {
       activityObserver: deriveBackgroundTaskActivityObserver({
         activityObserver: input.ctx.get(ActivityObserverKey),
@@ -408,6 +410,7 @@ class BackgroundToolExecutionScope implements BackgroundToolExecutor {
         rootSessionId: this.initialSession.rootSessionId ?? this.initialSession.sessionId,
       }),
       callId: input.input.options.toolCallId,
+      dispatchContext: createTaskAgentDispatchContext(input.ctx, callbackSession.auth),
       metadata,
       parentSessionId: this.initialSession.sessionId,
       parentStepIndex: input.emission.stepIndex,
@@ -420,6 +423,7 @@ class BackgroundToolExecutionScope implements BackgroundToolExecutor {
         task: await beginBackgroundTask({
           activityObserver: taskInput.activityObserver,
           callId: taskInput.callId,
+          dispatchContext: taskInput.dispatchContext,
           metadata: taskInput.metadata,
           parentSessionId: taskInput.parentSessionId,
           parentStepIndex: taskInput.parentStepIndex,
@@ -518,7 +522,7 @@ class BackgroundToolExecutionScope implements BackgroundToolExecutor {
         executeInput: workflow.executeInput?.(workflowInput),
         input: workflowInput,
         resultKind: workflow.resultKind,
-        session: buildCallbackContext().session,
+        session: callbackSession,
         stepIndex: input.emission.stepIndex,
         toolName: input.input.definition.name,
         taskId: task.taskId,

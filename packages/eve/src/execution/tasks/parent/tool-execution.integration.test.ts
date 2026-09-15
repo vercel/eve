@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ActivityObserverConfig } from "#channel/types.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
-import { ActivityObserverKey, SessionKey } from "#context/keys.js";
+import { ActivityObserverKey, SessionKey, type SessionAuth } from "#context/keys.js";
 import {
   sendTaskCommand,
   startTaskRun,
@@ -45,6 +45,7 @@ const handle = {
 };
 const entry = {
   createdByTurnId: "turn-1",
+  dispatchContext: { auth: { current: null, initiator: null } },
   metadata: { agentId: identity.id, kind: "subagent", name: identity.name },
   taskId: handle.ownerId,
   taskInboxToken: "original-task-inbox",
@@ -66,10 +67,14 @@ function createSession(owned = true): HarnessSession {
   return owned ? recordSessionTask(session, entry) : session;
 }
 
-async function createScope(session = createSession(), activityObserver?: ActivityObserverConfig) {
+async function createScope(
+  session = createSession(),
+  activityObserver?: ActivityObserverConfig,
+  auth: SessionAuth = { current: null, initiator: null },
+) {
   const ctx = new ContextContainer();
   ctx.setVirtualContext(SessionKey, {
-    auth: { current: null, initiator: null },
+    auth,
     sessionId: session.sessionId,
     turn: { id: "turn-2", sequence: 2 },
   });
@@ -148,6 +153,69 @@ describe("background subagent steering", () => {
     await expect(scope.execute()).rejects.toThrow("Delivery failed");
     expect(startTaskRun).not.toHaveBeenCalled();
     expect(getAgentHandleStore((await scope.commit()).state)?.handles).toEqual([handle]);
+  });
+
+  it("persists the creating turn's auth on the background task", async () => {
+    const creatorCurrent = {
+      attributes: {},
+      authenticator: "test-idp",
+      issuer: "test-idp",
+      principalId: "creator-current",
+      principalType: "user" as const,
+    };
+    const creatorInitiator = { ...creatorCurrent, principalId: "creator-initiator" };
+    const scope = await createScope(createSession(), undefined, {
+      current: creatorCurrent,
+      initiator: creatorInitiator,
+    });
+
+    await scope.execute("new-call", "");
+    const committed = await scope.commit();
+    const task = getSessionTaskIndex(committed.state).find(
+      (candidate) => candidate.taskId !== entry.taskId,
+    );
+
+    expect(task?.dispatchContext).toEqual({
+      auth: { current: creatorCurrent, initiator: creatorInitiator },
+    });
+    if (task === undefined) throw new Error("Expected created task");
+    const replayed = recordSessionTask(committed, {
+      ...task,
+      dispatchContext: {
+        auth: {
+          current: { ...creatorCurrent, principalId: "later-current" },
+          initiator: { ...creatorInitiator, principalId: "later-initiator" },
+        },
+      },
+    });
+    expect(
+      getSessionTaskIndex(replayed.state).find((candidate) => candidate.taskId === task.taskId)
+        ?.dispatchContext,
+    ).toEqual({ auth: { current: creatorCurrent, initiator: creatorInitiator } });
+  });
+
+  it("persists schedule-shaped auth with no current principal and one session initiator", async () => {
+    const sessionInitiator = {
+      attributes: {},
+      authenticator: "test-idp",
+      issuer: "test-idp",
+      principalId: "session-initiator",
+      principalType: "user" as const,
+    };
+    const scope = await createScope(createSession(), undefined, {
+      current: null,
+      initiator: sessionInitiator,
+    });
+
+    await scope.execute("new-call", "");
+    const committed = await scope.commit();
+    const task = getSessionTaskIndex(committed.state).find(
+      (candidate) => candidate.taskId !== entry.taskId,
+    );
+
+    expect(task?.dispatchContext).toEqual({
+      auth: { current: null, initiator: sessionInitiator },
+    });
   });
 
   it.each(["subagent", "tool"] as const)(

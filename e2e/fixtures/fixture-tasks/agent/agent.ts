@@ -7,6 +7,7 @@ import {
   type MockModelToolResult,
 } from "eve/evals";
 
+import { AUTH_SNAPSHOT_MARKER } from "./lib/lifecycle-control.js";
 import { lifecycleModel } from "./lib/lifecycle-model.js";
 
 const TASK_ID_PATTERN = /task_[a-z0-9]+/iu;
@@ -32,6 +33,21 @@ function respond(request: MockModelRequest): MockModelResponse | string {
   if (message.startsWith("CHILD-TASK-EXCLUSIVITY-LATER ")) {
     return laterBusyWorker(request, message);
   }
+  if (message === "TASK-AUTH-SNAPSHOT-ROOT") {
+    return reportAuthSnapshotTurn(
+      request,
+      "task-auth-snapshot-root",
+      "TASK-AUTH-SNAPSHOT-ROOT-ACK",
+    );
+  }
+  if (message === "TASK-AUTH-SNAPSHOT-LATER") {
+    return reportAuthSnapshotTurn(
+      request,
+      "task-auth-snapshot-later",
+      "TASK-AUTH-SNAPSHOT-LATER-ACK",
+    );
+  }
+  if (message.startsWith("TASK-AUTH-SNAPSHOT ")) return startAuthSnapshotTask(request, message);
   if (message.startsWith("TASK-A2-CHILD-FAILURE-VERIFY ")) {
     return inspectTerminalTask(
       request,
@@ -166,6 +182,43 @@ function respond(request: MockModelRequest): MockModelResponse | string {
   if (message === "TASK-D6-PARTIAL-FANOUT-FAILURE") return partialFailureFanout(request);
 
   return `Mock reply: ${message}`;
+}
+
+function startAuthSnapshotTask(
+  request: MockModelRequest,
+  message: string,
+): MockModelResponse | string {
+  const authCallId = "task-auth-snapshot-creator";
+  if (resultById(request, authCallId) === undefined) {
+    return authSnapshotToolCall(authCallId);
+  }
+  const callId = "task-auth-snapshot";
+  if (resultById(request, callId) !== undefined) return "TASK-AUTH-SNAPSHOT-STARTED";
+  const key = message.split(" ").at(-1);
+  if (key === undefined) throw new Error("Auth snapshot scenario has no lifecycle key.");
+  return {
+    toolCalls: [
+      {
+        id: callId,
+        input: { child: false, delayedAuthChild: true, key, marker: AUTH_SNAPSHOT_MARKER },
+        name: "lifecycle_task",
+      },
+    ],
+  };
+}
+
+function reportAuthSnapshotTurn(
+  request: MockModelRequest,
+  callId: string,
+  acknowledgement: string,
+): MockModelResponse | string {
+  return resultById(request, callId) === undefined ? authSnapshotToolCall(callId) : acknowledgement;
+}
+
+function authSnapshotToolCall(callId: string): MockModelResponse {
+  return {
+    toolCalls: [{ id: callId, input: {}, name: "snapshot_whoami" }],
+  };
 }
 
 function childToolSurfaceReport(request: MockModelRequest): MockModelResponse | string {

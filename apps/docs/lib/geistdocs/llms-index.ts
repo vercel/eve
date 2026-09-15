@@ -63,7 +63,7 @@ Documentation links below point directly to Markdown. Remove the \`.md\` suffix 
 - [Deploy to Vercel](${EVE_ORIGIN}/docs/guides/deployment/vercel.md): Build and deploy with Vercel Workflow and Vercel Sandbox.
 - [Self-Hosting](${EVE_ORIGIN}/docs/guides/deployment/self-hosting.md): Run eve as a Node service or container.
 - [Authentication](${EVE_ORIGIN}/docs/guides/auth-and-route-protection.md): Secure an agent's HTTP routes and establish caller identity.
-- [Observability](${EVE_ORIGIN}/docs/guides/instrumentation.md): Trace agents with OpenTelemetry and inspect workflow metadata.
+- [Instrumentation](${EVE_ORIGIN}/docs/observability/instrumentation.md): Trace agents with OpenTelemetry and inspect workflow metadata.
 - [Terminal UI](${EVE_ORIGIN}/docs/guides/dev-tui.md): Work with a local or deployed agent from the interactive terminal UI.
 
 ## Tutorial

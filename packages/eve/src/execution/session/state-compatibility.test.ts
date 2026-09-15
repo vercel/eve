@@ -67,13 +67,16 @@ describe("additive durable state", () => {
       "eve.tasks": { version: 2, tasks: [task], futureIndex: true },
       authored: { opaque: true },
     };
-    expect(getSessionTaskIndex(restored(state))).toEqual([task]);
+    expect(getSessionTaskIndex(restored(state))).toEqual([
+      { ...task, dispatchContext: { legacy: true } },
+    ]);
     expect(parseActivityWorkIdentityV1(activity)).toEqual(activity);
     const updated = recordSessionTask(session(restored(state)), {
       taskId: "task",
       taskRunId: "new-run",
       taskInboxToken: "inbox",
       createdByTurnId: "turn",
+      dispatchContext: { auth: { current: null, initiator: null } },
       metadata,
       activityWorkIdentity: { id: "work", kind: "task", rootSessionId: "root", rootTurnId: "turn" },
       executor: { kind: "workflow", data: {} },

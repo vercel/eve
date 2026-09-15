@@ -2240,7 +2240,7 @@ type InstrumentationPresentation = ChannelPresentation;
 const instrumentationPresentations: Record<string, InstrumentationPresentation> = {
   braintrust: {
     logo: "braintrust",
-    docsHref: "/docs/guides/instrumentation",
+    docsHref: "/docs/observability/instrumentation",
     keywords: ["otel", "opentelemetry", "tracing", "observability", "evals", "monitoring"],
     install: `Add the Braintrust integration from eve's registry:
 
@@ -2284,11 +2284,11 @@ export default defineInstrumentation(
   }) as Parameters<typeof defineInstrumentation>[0],
 );
 \`\`\``,
-    configure: `Create an API key in the Braintrust dashboard and expose it as \`BRAINTRUST_API_KEY\`. Replace the hook's \`app\` metadata with your app name. Spans land in the Braintrust project named after your agent. See the [instrumentation guide](/docs/guides/instrumentation) for the trace hierarchy and the \`recordInputs\`/\`recordOutputs\` controls.`,
+    configure: `Create an API key in the Braintrust dashboard and expose it as \`BRAINTRUST_API_KEY\`. Replace the hook's \`app\` metadata with your app name. Spans land in the Braintrust project named after your agent. See the [instrumentation guide](/docs/observability/instrumentation) for the trace hierarchy and the \`recordInputs\`/\`recordOutputs\` controls.`,
   },
   "posthog-instrumentation": {
     logo: "posthog",
-    docsHref: "/docs/guides/instrumentation",
+    docsHref: "/docs/observability/instrumentation",
     keywords: ["otel", "opentelemetry", "tracing", "observability", "generations", "analytics"],
     install: `Add PostHog AI Observability from eve's registry:
 
@@ -2333,11 +2333,11 @@ export default defineInstrumentation({
   },
 });
 \`\`\``,
-    configure: `Copy your project token and client API host from PostHog's project settings and expose them as \`POSTHOG_PROJECT_TOKEN\` and \`POSTHOG_HOST\`. Remove the \`events\` handler to capture generations anonymously. PostHog groups turns using \`eve.session.id\` and preserves eve's trace hierarchy. See [PostHog's eve installation guide](https://posthog.com/docs/ai-observability/installation/eve) for verification steps and the [instrumentation guide](/docs/guides/instrumentation) for input and output capture controls.`,
+    configure: `Copy your project token and client API host from PostHog's project settings and expose them as \`POSTHOG_PROJECT_TOKEN\` and \`POSTHOG_HOST\`. Remove the \`events\` handler to capture generations anonymously. PostHog groups turns using \`eve.session.id\` and preserves eve's trace hierarchy. See [PostHog's eve installation guide](https://posthog.com/docs/ai-observability/installation/eve) for verification steps and the [instrumentation guide](/docs/observability/instrumentation) for input and output capture controls.`,
   },
   "sentry-instrumentation": {
     logo: "sentry",
-    docsHref: "/docs/guides/instrumentation",
+    docsHref: "/docs/observability/instrumentation",
     keywords: ["otel", "opentelemetry", "tracing", "observability", "otlp", "errors"],
     install: `Add Sentry instrumentation from eve's registry. Sentry ingests OTLP directly, so no Sentry SDK is required:
 
@@ -2365,11 +2365,11 @@ export default defineInstrumentation({
     }),
 });
 \`\`\``,
-    configure: `Copy the OTLP traces endpoint and public key from your Sentry project under **Settings → Client Keys (DSN)** and expose them as environment variables. Sentry's OTLP intake accepts traces only, and span events are dropped at ingestion. See the [instrumentation guide](/docs/guides/instrumentation) for the trace hierarchy and the \`recordInputs\`/\`recordOutputs\` controls.`,
+    configure: `Copy the OTLP traces endpoint and public key from your Sentry project under **Settings → Client Keys (DSN)** and expose them as environment variables. Sentry's OTLP intake accepts traces only, and span events are dropped at ingestion. See the [instrumentation guide](/docs/observability/instrumentation) for the trace hierarchy and the \`recordInputs\`/\`recordOutputs\` controls.`,
   },
   "datadog-instrumentation": {
     logo: "datadog",
-    docsHref: "/docs/guides/instrumentation",
+    docsHref: "/docs/observability/instrumentation",
     keywords: ["otel", "opentelemetry", "tracing", "observability", "apm", "otlp"],
     install: `Add Datadog instrumentation from eve's registry:
 
@@ -2394,12 +2394,12 @@ export default defineInstrumentation({
     }),
 });
 \`\`\``,
-    configure: `Datadog's direct OTLP trace intake is site-specific (for example \`datadoghq.com\` vs \`datadoghq.eu\`) and currently in Preview; look up the endpoint for your site in Datadog's OTLP intake docs. For production, Datadog recommends routing through an OpenTelemetry Collector with the Datadog exporter instead. See the [instrumentation guide](/docs/guides/instrumentation) for the trace hierarchy and the \`recordInputs\`/\`recordOutputs\` controls.`,
+    configure: `Datadog's direct OTLP trace intake is site-specific (for example \`datadoghq.com\` vs \`datadoghq.eu\`) and currently in Preview; look up the endpoint for your site in Datadog's OTLP intake docs. For production, Datadog recommends routing through an OpenTelemetry Collector with the Datadog exporter instead. See the [instrumentation guide](/docs/observability/instrumentation) for the trace hierarchy and the \`recordInputs\`/\`recordOutputs\` controls.`,
     relatedResources: [incidentResponseGuide],
   },
   "honeycomb-instrumentation": {
     logo: "honeycomb",
-    docsHref: "/docs/guides/instrumentation",
+    docsHref: "/docs/observability/instrumentation",
     keywords: ["otel", "opentelemetry", "tracing", "observability", "queries", "otlp"],
     install: `Add Honeycomb instrumentation from eve's registry. Honeycomb ingests OTLP directly:
 
@@ -2425,11 +2425,11 @@ export default defineInstrumentation({
     }),
 });
 \`\`\``,
-    configure: `Create an ingest key under your Honeycomb environment settings and expose it as \`HONEYCOMB_API_KEY\`. Spans arrive in a dataset named after your agent (the OTel service name). EU teams use \`https://api.eu1.honeycomb.io/v1/traces\`. See the [instrumentation guide](/docs/guides/instrumentation) for the trace hierarchy and the \`recordInputs\`/\`recordOutputs\` controls.`,
+    configure: `Create an ingest key under your Honeycomb environment settings and expose it as \`HONEYCOMB_API_KEY\`. Spans arrive in a dataset named after your agent (the OTel service name). EU teams use \`https://api.eu1.honeycomb.io/v1/traces\`. See the [instrumentation guide](/docs/observability/instrumentation) for the trace hierarchy and the \`recordInputs\`/\`recordOutputs\` controls.`,
   },
   arize: {
     logo: "arize",
-    docsHref: "/docs/guides/instrumentation",
+    docsHref: "/docs/observability/instrumentation",
     keywords: ["otel", "opentelemetry", "tracing", "llm observability", "evaluation", "otlp"],
     install: `Add Arize instrumentation from eve's registry. Arize AX ingests OTLP directly:
 
@@ -2459,11 +2459,11 @@ export default defineInstrumentation({
     }),
 });
 \`\`\``,
-    configure: `Copy the space ID and API key from your Arize AX space settings and expose them as \`ARIZE_SPACE_ID\` and \`ARIZE_API_KEY\`. The \`openinference.project.name\` resource attribute routes spans to a project named after your agent. See the [instrumentation guide](/docs/guides/instrumentation) for the trace hierarchy and the \`recordInputs\`/\`recordOutputs\` controls.`,
+    configure: `Copy the space ID and API key from your Arize AX space settings and expose them as \`ARIZE_SPACE_ID\` and \`ARIZE_API_KEY\`. The \`openinference.project.name\` resource attribute routes spans to a project named after your agent. See the [instrumentation guide](/docs/observability/instrumentation) for the trace hierarchy and the \`recordInputs\`/\`recordOutputs\` controls.`,
   },
   raindrop: {
     logo: "raindrop",
-    docsHref: "/docs/guides/instrumentation",
+    docsHref: "/docs/observability/instrumentation",
     keywords: ["otel", "opentelemetry", "tracing", "observability", "ai issues", "otlp"],
     install: `Add Raindrop instrumentation from eve's registry. Raindrop ingests OTLP directly:
 
@@ -2491,11 +2491,11 @@ export default defineInstrumentation({
     }),
 });
 \`\`\``,
-    configure: `Create a write key in the Raindrop dashboard and expose it as \`RAINDROP_WRITE_KEY\`. Raindrop's Vercel AI SDK integration picks up the AI SDK spans eve emits on every turn. See the [instrumentation guide](/docs/guides/instrumentation) for the trace hierarchy and the \`recordInputs\`/\`recordOutputs\` controls.`,
+    configure: `Create a write key in the Raindrop dashboard and expose it as \`RAINDROP_WRITE_KEY\`. Raindrop's Vercel AI SDK integration picks up the AI SDK spans eve emits on every turn. See the [instrumentation guide](/docs/observability/instrumentation) for the trace hierarchy and the \`recordInputs\`/\`recordOutputs\` controls.`,
   },
   jaeger: {
     logo: "jaeger",
-    docsHref: "/docs/guides/instrumentation",
+    docsHref: "/docs/observability/instrumentation",
     keywords: ["otel", "opentelemetry", "tracing", "observability", "local", "self-hosted"],
     install: `Add Jaeger instrumentation from eve's registry:
 
@@ -2525,7 +2525,7 @@ export default defineInstrumentation({
 docker run --rm -p 16686:16686 -p 4318:4318 jaegertracing/jaeger:latest
 \`\`\`
 
-Point the exporter at your collector's OTLP HTTP endpoint when self-hosting. See the [instrumentation guide](/docs/guides/instrumentation) for the trace hierarchy and the \`recordInputs\`/\`recordOutputs\` controls.`,
+Point the exporter at your collector's OTLP HTTP endpoint when self-hosting. See the [instrumentation guide](/docs/observability/instrumentation) for the trace hierarchy and the \`recordInputs\`/\`recordOutputs\` controls.`,
   },
 };
 

@@ -533,6 +533,7 @@ describe("routeProxiedDeliverStep", () => {
                     {
                       taskInboxToken: "task-token",
                       createdByTurnId: "turn-parent",
+                      dispatchContext: { auth: { current: null, initiator: null } },
                       metadata: { kind: "tool", name: "research" },
                       taskId: "task-1",
                       taskRunId: "run-1",
@@ -686,6 +687,7 @@ describe("recordTaskInputRequestStep", () => {
             {
               taskInboxToken: "task-token",
               createdByTurnId: "turn-parent",
+              dispatchContext: { auth: { current: null, initiator: null } },
               executor: {
                 data: {
                   address: {
@@ -1047,6 +1049,7 @@ describe("turnStep", () => {
 
     const task = {
       createdByTurnId: "turn_0",
+      dispatchContext: { auth: { current: null, initiator: null } },
       executor: { data: {}, kind: "workflow-tool" },
       metadata: { kind: "report", name: "daily_report" },
       taskId: "task_report",
@@ -2471,6 +2474,7 @@ describe("turnStep", () => {
             {
               taskInboxToken: "task-token",
               createdByTurnId: "turn-parent",
+              dispatchContext: { auth: { current: null, initiator: null } },
               metadata,
               taskId: "task_1",
               taskRunId: "run_1",
@@ -2579,6 +2583,7 @@ describe("turnStep", () => {
             {
               createdByStepIndex: 0,
               createdByTurnId: "turn_0",
+              dispatchContext: { auth: { current: null, initiator: null } },
               executor: { data: {}, kind: "workflow-tool" },
               metadata: { kind: "report-probe", name: "report_probe" },
               taskId: "task_1",

@@ -1,5 +1,23 @@
 # eve
 
+## 0.56.0
+
+### Minor Changes
+
+- 8bc931f: Add the `workflow` factory from `eve/tools/workflow` for running model-supplied JavaScript through durable `ctx.agent` calls. Remove the experimental uppercase `Workflow` tool and `experimental_workflow`; migrate its tool file to the new lowercase factory.
+- 6ce61cd: Remove aggregate registry packages and their component-selection flow. Install Linear integrations separately with `eve add channel/linear` and `eve add connection/linear`.
+
+### Patch Changes
+
+- 57d6be5: Add queryable metadata to activation spans, including run type, title when input capture permits, provenance, audience, schedule, and directional trace-content policy.
+- a63fb18: Keep background subagents bound to the authentication context of the turn that created their task, even when another caller starts a later turn first.
+- 51998ab: Automatically ignore the self-modification integration's known optional compression packages instead of prompting for its recommended pnpm build policy.
+- 56cde32: Include conversations classified as private in local `eve dev` traces, including sessions authenticated with the developer's Vercel OIDC token.
+- 7ea3b7a: Classify anonymous eve channel sessions as `unknown` by default, so their content is not recorded in preview or production traces unless you mark the audience public explicitly. Also add `credentialOwner` for raw getToken-only auth and `caller` for audience callbacks while preserving existing `principalType` APIs, and fix token cache keys so user identifiers containing separators or percent sequences cannot collide.
+- 23e2e7c: Allow submitting the initial TUI message while eve is still building the agent. The message is queued and sent automatically as soon as the agent is ready.
+- bca1b4a: Self-modification registry setup now asks whether to enable deployed draft pull requests or keep source editing local before collecting deployment configuration.
+- a7f2387: Improve development TUI Markdown with clearer headings, block spacing, clickable links, responsive bordered tables, and code panels. Set `EVE_TUI_RENDER_MARKDOWN=0` to show assistant and subagent responses without Markdown parsing or styling.
+
 ## 0.55.0
 
 ### Minor Changes
