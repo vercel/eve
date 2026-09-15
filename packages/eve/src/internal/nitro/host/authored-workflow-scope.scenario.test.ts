@@ -77,7 +77,7 @@ describe("authored workflow scope", () => {
     },
   );
 
-  it("excludes host workflows while retaining reachable workflow step helpers", async () => {
+  it("excludes route-owned host workflows while retaining reachable eve workflow helpers", async () => {
     const app = await scenarioApp({
       name: "workflow-agent-scope",
       installDependencies: true,
@@ -90,10 +90,14 @@ describe("authored workflow scope", () => {
           'import { readMarker } from "./step"; export async function run() { "use workflow"; return readMarker(); }',
         "lib/step.ts":
           'import { hostname } from "node:os"; export async function readMarker() { "use step"; return hostname(); }',
+        "app/api/evidence-review/route.ts":
+          'import { start } from "workflow/api"; import { requestEvidenceReviewWorkflow } from "../../../workflows/evidence-review"; export async function POST() { const run = await start(requestEvidenceReviewWorkflow, []); return Response.json({ runId: run.runId }); }',
         "components/layout.js":
           "export default function Layout() { return <div>Host application</div>; }",
-        "workflows/host.ts":
-          'import { readFileSync } from "node:fs"; export async function unrelatedHostWorkflow() { "use workflow"; return readFileSync("host.txt", "utf8"); }',
+        "workflows/evidence-review.ts":
+          'import { checkpoint, persistCheckpoint } from "./mixed-runtime"; export async function requestEvidenceReviewWorkflow() { "use workflow"; const value = checkpoint("review"); await persistCheckpoint(value); return value; }',
+        "workflows/mixed-runtime.ts":
+          'import { randomUUID } from "node:crypto"; export function checkpoint(reviewId: string) { return { reviewId }; } export async function persistCheckpoint(value: { reviewId: string }) { "use step"; return { ...value, checkpointId: randomUUID() }; }',
       },
     });
     const appRoot = await realpath(app.appRoot);
@@ -117,8 +121,10 @@ describe("authored workflow scope", () => {
       expect(steps).toContain("lib/step.ts");
       expect(code).toContain("workflow//./lib/run//run");
       expect(code).toContain("step//./lib/step//readMarker");
-      expect(code).not.toContain("unrelatedHostWorkflow");
-      expect(steps).not.toContain("workflows/host.ts");
+      expect(code).not.toContain("requestEvidenceReviewWorkflow");
+      expect(code).not.toContain("persistCheckpoint");
+      expect(steps).not.toContain("workflows/evidence-review.ts");
+      expect(steps).not.toContain("workflows/mixed-runtime.ts");
     } finally {
       await removeApplicationBuildWorkspace(workspace);
     }
