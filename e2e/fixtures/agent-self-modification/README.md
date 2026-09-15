@@ -18,6 +18,7 @@ This exercises the current standard scaffold without duplicating it in the fixtu
 
 - `create-incident-triage.eval.ts` creates an incident-triage tool and checks precedence and threshold rules across typed inputs.
 - `create-shipping-quote.eval.ts` creates a quote calculator and checks destination, started-kilogram, free-shipping, and expedited pricing boundaries.
+- `offer-repair.eval.ts` reproduces an incorrect reorder recommendation, checks that the parent offers but does not start a repair, confirms it, and verifies the repaired tool.
 - `repair-order-total.eval.ts` first reproduces quantity and discount errors in the fixture's existing tool, asks self-mod to investigate the incorrect invoice, and verifies the fix, cent rounding, and single-item/empty-order regressions.
 
 Each case checks actual tool inputs and outputs, not the assistant's claim that the work succeeded. Cases also reject source changes outside their specified tool file. The arithmetic cases use synthetic data and do not require external services. These checks cover the specified behavior; they are not a general security audit of generated code.
