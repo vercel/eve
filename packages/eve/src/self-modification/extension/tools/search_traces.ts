@@ -1,5 +1,3 @@
-import { defineTool } from "eve/tools";
-
 import { context, trace } from "#compiled/@opentelemetry/api/index.js";
 import { queryLocalTraceSummaries, type LocalTraceSortBy } from "#tracing/local-trace-query.js";
 import { summarizeLocalTrace, type LocalTraceSummary } from "#tracing/local-trace-summary.js";
@@ -9,8 +7,15 @@ import {
   localTraceIndexedMarker,
 } from "#tracing/local-trace-discovery-index.js";
 
+import { defineDynamic, defineTool } from "eve/tools";
+
+import { createVercelConversationTraceReader } from "../../vercel-conversation-trace-reader.js";
 import type { ResolvedSelfModificationConfig } from "../../config.js";
-import { defineLocalOnlyDynamic, resolveLocalOnly } from "../local-only.js";
+import { resolveSelfModificationConfig } from "../../config.js";
+import { resolveSelfModificationMode } from "../../mode.js";
+import { hasVercelTraceBackend } from "../../trace-scope.js";
+import selfModification from "../extension.js";
+import { resolveLocalOnly } from "../local-only.js";
 import { readTraceSources, TRACE_ID, type LocalTraceSpanSource } from "../trace-inspection.js";
 
 const MAX_ANALYZED_TRACES = 200;
@@ -224,8 +229,48 @@ function contains(
   return sources.some(({ span }) => span.attributes[attribute] === expected);
 }
 
-export function resolveSearchTracesTool(config: ResolvedSelfModificationConfig) {
-  return resolveLocalOnly(config, searchTracesTool);
+const vercelInputSchema = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    failedOnly: { type: "boolean" },
+    limit: { type: "integer", minimum: 1, maximum: 5 },
+    sortBy: { enum: ["recent"], type: "string" },
+  },
+} as const;
+
+function vercelSearchTracesTool(config: ResolvedSelfModificationConfig) {
+  if (resolveSelfModificationMode(config) !== "deployed" || !hasVercelTraceBackend()) return null;
+  const reader = createVercelConversationTraceReader(config.deployed!);
+  return defineTool({
+    description:
+      "Inspect the recorded Agent Run for the invoking conversation. Results never include other conversations.",
+    inputSchema: vercelInputSchema,
+    outputSchema: { type: "object", additionalProperties: true },
+    async execute(input, ctx) {
+      if (!isVercelInput(input)) throw new Error("Trace search input must be an object.");
+      return await reader.search(ctx, { failedOnly: input.failedOnly });
+    },
+  }) as typeof searchTracesTool;
 }
 
-export default defineLocalOnlyDynamic(searchTracesTool);
+function isVercelInput(value: unknown): value is { readonly failedOnly?: boolean } {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    !Array.isArray(value) &&
+    ((value as Record<string, unknown>).failedOnly === undefined ||
+      typeof (value as Record<string, unknown>).failedOnly === "boolean")
+  );
+}
+
+export function resolveSearchTracesTool(config: ResolvedSelfModificationConfig) {
+  return resolveLocalOnly(config, searchTracesTool) ?? vercelSearchTracesTool(config);
+}
+
+export default defineDynamic({
+  events: {
+    "session.started": () =>
+      resolveSearchTracesTool(resolveSelfModificationConfig(selfModification.config)),
+  },
+});

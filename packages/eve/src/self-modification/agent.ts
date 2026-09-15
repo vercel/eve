@@ -9,6 +9,7 @@ import {
 import { resolveSelfModificationConfig, type SelfModificationConfig } from "./config.js";
 import { hasGitHubCredential } from "./credentials.js";
 import { resolveSelfModificationMode } from "./mode.js";
+import { hasVercelTraceBackend } from "./trace-scope.js";
 
 /** Default model used by the self-modification subagent. */
 export const DEFAULT_SELF_MODIFICATION_MODEL = "anthropic/claude-sonnet-5";
@@ -61,6 +62,9 @@ const localTraceDelegation =
 
 const localEffectiveEdits =
   "Source edits do not affect the caller’s current turn. After this subagent reports changes, do not invoke edited tools or attempt runtime verification until a new user turn.";
+const vercelTraceDelegation =
+  "Delegate requests to investigate, diagnose, or optimize the invoking conversation from recorded Vercel Agent Runs to this subagent. It can inspect only that conversation and reports incomplete or unavailable recordings explicitly.";
+
 const deployedEffectiveEdits =
   "Source edits do not affect the caller’s current turn. The subagent can publish only a draft pull request, and changes become effective only after review, merge, and redeployment.";
 
@@ -78,7 +82,11 @@ export function defineSelfModificationAgent(options: SelfModificationAgentOption
       persistenceDelegation,
       namedInstallationDelegation,
       mode === "local" ? localIntegrationDelegation : deployedIntegrationDelegation,
-      mode === "local" ? localTraceDelegation : "",
+      mode === "local"
+        ? localTraceDelegation
+        : hasVercelTraceBackend()
+          ? vercelTraceDelegation
+          : "",
       followUpDelegation,
       mode === "local" ? localEffectiveEdits : deployedEffectiveEdits,
     ]);

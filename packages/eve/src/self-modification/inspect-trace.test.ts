@@ -4,12 +4,14 @@ import { resolveInspectTraceTool } from "./extension/tools/inspect_trace.js";
 import { resolveInspectTraceSpansTool } from "./extension/tools/inspect_trace_spans.js";
 import { resolveSearchTracesTool } from "./extension/tools/search_traces.js";
 import { resolveTraceAnalysisSkill } from "./extension/skills/trace_analysis.js";
+import { resolveSelfModificationConfig } from "./config.js";
 
 const traceId = "1".repeat(32);
 const otherTraceId = "2".repeat(32);
 const spanId = "a".repeat(16);
 const toolSpanId = "b".repeat(16);
 const originalEveDev = process.env.EVE_DEV;
+const originalVercel = process.env.VERCEL;
 
 beforeEach(() => {
   process.env.EVE_DEV = "1";
@@ -18,6 +20,8 @@ beforeEach(() => {
 afterEach(() => {
   if (originalEveDev === undefined) delete process.env.EVE_DEV;
   else process.env.EVE_DEV = originalEveDev;
+  if (originalVercel === undefined) delete process.env.VERCEL;
+  else process.env.VERCEL = originalVercel;
 });
 
 function segment(
@@ -267,6 +271,25 @@ describe("selfmod trace inspection tools", () => {
     expect(resolveInspectTraceTool({ localEnabled: true })).toBeNull();
     expect(resolveInspectTraceSpansTool({ localEnabled: true })).toBeNull();
     expect(resolveTraceAnalysisSkill({ localEnabled: true })).toBeNull();
+  });
+
+  it("enables Vercel trace tools for deployed self-modification only on Vercel", () => {
+    delete process.env.EVE_DEV;
+    const config = resolveSelfModificationConfig({
+      deployed: {
+        authorize: () => true,
+        credentials: { pat: true },
+        source: { git: { directory: ".", repository: "github.com/acme/agent" } },
+        target: { branch: "main" },
+      },
+    });
+    expect(resolveSearchTracesTool(config)).toBeNull();
+
+    process.env.VERCEL = "1";
+    expect(resolveSearchTracesTool(config)).not.toBeNull();
+    expect(resolveInspectTraceTool(config)).not.toBeNull();
+    expect(resolveInspectTraceSpansTool(config)).not.toBeNull();
+    expect(resolveTraceAnalysisSkill(config)).not.toBeNull();
   });
 
   it("returns a structural timeline with argument previews and available fields", async () => {
