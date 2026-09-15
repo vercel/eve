@@ -59,16 +59,16 @@ export async function workflowEntry(input: WorkflowEntryInput): Promise<Workflow
     input.kind === "initial" ? getWritable<Uint8Array>() : input.parentWritable;
   const mode: RunMode =
     input.kind === "initial" ? (serializedContext["eve.mode"] as RunMode) : input.checkpoint.mode;
-  const commandInbox = createSessionInbox(sessionId);
+  const sessionInbox = createSessionInbox(sessionId);
   let boot: SessionBoot | undefined;
   try {
-    const context = { commandInbox, ownerRunId, serializedContext, sessionWritable };
+    const context = { sessionInbox, ownerRunId, serializedContext, sessionWritable };
     boot =
       input.kind === "initial"
         ? await bootInitialOwner(input, context)
         : await bootHandoffOwner(input, context);
   } catch (error) {
-    const payloads = await commandInbox.release();
+    const payloads = await sessionInbox.release();
     if (input.kind === "handoff") {
       await signalSessionOwnerActivationStep({
         activation: { error: normalizeSerializableError(error), kind: "failed", payloads },
@@ -91,15 +91,15 @@ export async function workflowEntry(input: WorkflowEntryInput): Promise<Workflow
     });
   }
   if (boot === undefined) {
-    await commandInbox.dispose();
+    await sessionInbox.dispose();
     return { output: "" };
   }
-  const result = await runPreparedSession(boot, commandInbox);
+  const result = await runPreparedSession(boot, sessionInbox);
   return { output: result.output };
 }
 
 interface BootContext {
-  readonly commandInbox: SessionInboxHandle;
+  readonly sessionInbox: SessionInboxHandle;
   readonly ownerRunId: string;
   readonly serializedContext: Record<string, unknown>;
   readonly sessionWritable: WritableStream<Uint8Array>;
@@ -110,7 +110,7 @@ async function bootInitialOwner(
   input: InitialWorkflowEntryInput,
   context: BootContext,
 ): Promise<SessionBoot | undefined> {
-  const { commandInbox, ownerRunId: sessionId, serializedContext } = context;
+  const { sessionInbox, ownerRunId: sessionId, serializedContext } = context;
   const { workflowStartedAt } = getWorkflowMetadata();
   const sessionTimeoutMs = input.sessionTimeoutMs ?? DEFAULT_SESSION_TIMEOUT_MS;
   const continuationToken = (serializedContext["eve.continuationToken"] as string) || "";
@@ -132,8 +132,8 @@ async function bootInitialOwner(
       sessionId,
       taskId: input.taskId,
     }),
-    commandInbox.claimSessionHook(sessionCommandHookToken(sessionId)),
-    continuationToken === "" ? Promise.resolve() : commandInbox.claimSessionHook(continuationToken),
+    sessionInbox.claimSessionHook(sessionCommandHookToken(sessionId)),
+    continuationToken === "" ? Promise.resolve() : sessionInbox.claimSessionHook(continuationToken),
   ]);
   if (sessionCreation.status === "rejected") throw sessionCreation.reason;
   if (stableClaim.status === "rejected") throw stableClaim.reason;
@@ -183,7 +183,7 @@ async function bootHandoffOwner(
 ): Promise<SessionBoot> {
   const { checkpoint } = input;
   await validateSessionCheckpointStep({ checkpoint });
-  await claimSessionHooks(context.commandInbox, checkpoint.hooks);
+  await claimSessionHooks(context.sessionInbox, checkpoint.hooks);
   await signalSessionOwnerActivationStep({
     activation: { kind: "active" },
     token: input.activationToken,
