@@ -1,5 +1,8 @@
 import { normalizePresentationText } from "#shared/presentation-text.js";
 import {
+  MAX_ACTIVITY_ENTITIES,
+  MAX_ACTIVITY_EVENT_IDS,
+  MAX_ACTIVITY_PENDING_SETTLEMENTS,
   type PendingActivitySettlementV1,
   type ActivityActionPhase,
   type ActivityBatchV1,
@@ -9,10 +12,6 @@ import {
   type ActivityWorkPhase,
   type ActivityWorkStateV1,
 } from "#protocol/activity.js";
-
-export const MAX_ACTIVITY_EVENT_IDS = 1_000;
-export const MAX_ACTIVITY_PENDING_SETTLEMENTS = 500;
-export const MAX_ACTIVITY_ENTITIES = 500;
 
 export function createActivitySnapshot(): ActivitySnapshotV1 {
   return {

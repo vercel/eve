@@ -31,6 +31,12 @@ import {
 import { isInputResponse, type ValidatedInputResponse } from "#shared/input.js";
 import { parseJsonObject, type JsonObject } from "#shared/json.js";
 import type { RunMode } from "#shared/run-mode.js";
+import type { SessionActivityReader } from "#internal/nitro/routes/channel-route-context.js";
+import {
+  EVE_ACTIVITY_STREAM_CONTENT_TYPE,
+  EVE_ACTIVITY_STREAM_FORMAT,
+  EVE_ACTIVITY_STREAM_VERSION,
+} from "#protocol/activity.js";
 
 interface ParsedCreateBody {
   activityObserver?: ActivityObserverConfig;
@@ -297,6 +303,36 @@ export function rejectSessionContinuationToken(payload: Record<string, unknown>)
 export function requireSessionId(params: Readonly<Record<string, string>>): string | Response {
   const sessionId = params.sessionId;
   return sessionId || Response.json({ error: "Missing session id.", ok: false }, { status: 400 });
+}
+
+export async function createSessionActivityStreamResponse(
+  request: Request,
+  sessionId: string,
+  activity: SessionActivityReader,
+): Promise<Response> {
+  const startIndex = parseStartIndex(request);
+  if (startIndex instanceof Response) return startIndex;
+  const includeTailIndex = parseIncludeTailIndex(request);
+
+  try {
+    const tailIndex = includeTailIndex ? await activity.getTailIndex(sessionId) : undefined;
+    const snapshots = await activity.getStream(sessionId, { startIndex });
+    const headers = new Headers({
+      "cache-control": "no-store, no-transform",
+      "content-type": EVE_ACTIVITY_STREAM_CONTENT_TYPE,
+      "x-accel-buffering": "no",
+      [EVE_SESSION_ID_HEADER]: sessionId,
+      [EVE_STREAM_FORMAT_HEADER]: EVE_ACTIVITY_STREAM_FORMAT,
+      [EVE_STREAM_VERSION_HEADER]: EVE_ACTIVITY_STREAM_VERSION,
+    });
+    if (tailIndex !== undefined) headers.set(EVE_STREAM_TAIL_INDEX_HEADER, String(tailIndex));
+    return new Response(
+      serializeAsNdjson(snapshots, request.signal, streamEventLimit(startIndex, tailIndex)),
+      { headers },
+    );
+  } catch {
+    return Response.json({ error: "Session activity not found.", ok: false }, { status: 404 });
+  }
 }
 
 export async function createSessionStreamResponse(

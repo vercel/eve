@@ -45,6 +45,16 @@ export async function* readNdjsonStream(
     readonly streamVersion: MessageStreamVersion;
   },
 ): AsyncGenerator<MessageStreamEvent> {
+  yield* readJsonNdjsonStream(body, {
+    idleTimeoutMs: options.idleTimeoutMs,
+    parse: (line) => parseMessageStreamEvent(line, options.streamVersion),
+  });
+}
+
+export async function* readJsonNdjsonStream<T>(
+  body: ReadableStream<Uint8Array>,
+  options: { readonly idleTimeoutMs?: number; readonly parse: (line: string) => T },
+): AsyncGenerator<T> {
   const reader = body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
@@ -72,7 +82,7 @@ export async function* readNdjsonStream(
         buffer = buffer.slice(newlineIndex + 1);
 
         if (line.length > 0) {
-          yield parseMessageStreamEvent(line, options.streamVersion);
+          yield options.parse(line);
         }
 
         newlineIndex = buffer.indexOf("\n");
@@ -82,7 +92,7 @@ export async function* readNdjsonStream(
     // Yield any trailing content without a final newline.
     const trailing = buffer.trim();
     if (trailing.length > 0) {
-      yield parseMessageStreamEvent(trailing, options.streamVersion);
+      yield options.parse(trailing);
     }
   } finally {
     if (!reachedEof) {

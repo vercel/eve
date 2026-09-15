@@ -2,6 +2,7 @@ import type { UserContent } from "ai";
 import type { StandardJSONSchemaV1 } from "#compiled/@standard-schema/spec/index.js";
 
 import type { MessageStreamEvent } from "#protocol/message.js";
+import type { ActivitySnapshotV1 } from "#protocol/activity.js";
 import type { CancelTurnResult } from "#protocol/cancel-turn.js";
 import type { ClearStatus } from "#protocol/clear-session.js";
 import type { CompactStatus } from "#protocol/compact-session.js";
@@ -316,6 +317,15 @@ export interface MessageResult<TOutput = unknown> {
 export interface ClientSessionState {
   readonly sessionId: string;
   readonly streamIndex: number;
+}
+
+/** Latest persisted activity state and its independent stream cursor. */
+export interface ActivitySessionSnapshot {
+  readonly snapshot: ActivitySnapshotV1 | undefined;
+  readonly session: {
+    readonly sessionId: string;
+    readonly streamIndex: number;
+  };
 }
 
 /**

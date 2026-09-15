@@ -3,6 +3,7 @@ import { EVE_SESSION_ID_HEADER, isCurrentTurnBoundaryEvent } from "#protocol/mes
 import { EVE_SESSION_ROUTE_PATH, createEveSessionRoutePath } from "#protocol/routes.js";
 import { ClientError } from "#client/client-error.js";
 import { MessageResponse } from "#client/message-response.js";
+import { ClientSessionActivity } from "#client/session-activity.js";
 import { followStreamIterable, sleep } from "#client/open-stream.js";
 import {
   cancelClientSession,
@@ -46,10 +47,14 @@ export class ClientSession {
   readonly #context: ClientSessionContext;
   #state: ClientSessionState;
 
+  /** Activity snapshots for this fixed root session, when its channel enabled activity. */
+  readonly activity: ClientSessionActivity;
+
   /** @internal */
   constructor(context: ClientSessionContext, state: ClientSessionState) {
     this.#context = context;
     this.#state = state;
+    this.activity = new ClientSessionActivity(context, state.sessionId);
   }
 
   /** @internal */

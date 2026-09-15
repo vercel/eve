@@ -1,5 +1,6 @@
 import type { RouteHandlerArgs } from "#channel/routes.js";
 import type { RunHandle, RunInput } from "#channel/types.js";
+import type { ActivitySnapshotV1 } from "#protocol/activity.js";
 
 type AgentInfoRouteResponse = () => Promise<Response>;
 export interface HomeRouteMetadata {
@@ -25,6 +26,7 @@ const homeRouteMetadataKey = "__eveHomeRouteMetadata";
 const routeChannelNameKey = "__eveRouteChannelName";
 const remoteAgentStreamHeadersResolverKey = "__eveRemoteAgentStreamHeadersResolver";
 const routeSessionCreatorKey = "__eveRouteSessionCreator";
+const sessionActivityReaderKey = "__eveSessionActivityReader";
 
 type InternalRouteArgs = RouteHandlerArgs & {
   [agentInfoRouteResponseKey]?: AgentInfoRouteResponse;
@@ -32,7 +34,16 @@ type InternalRouteArgs = RouteHandlerArgs & {
   [routeChannelNameKey]?: string;
   [remoteAgentStreamHeadersResolverKey]?: RemoteAgentStreamHeadersResolver;
   [routeSessionCreatorKey]?: RouteSessionCreator;
+  [sessionActivityReaderKey]?: SessionActivityReader;
 };
+
+export interface SessionActivityReader {
+  getStream(
+    sessionId: string,
+    options?: { readonly startIndex?: number },
+  ): Promise<ReadableStream<ActivitySnapshotV1>>;
+  getTailIndex(sessionId: string): Promise<number>;
+}
 
 export function attachRouteChannelName<TArgs extends RouteHandlerArgs>(
   args: TArgs,
@@ -90,6 +101,22 @@ export function attachRouteSessionCreator<TArgs extends RouteHandlerArgs>(
 export function readRouteSessionCreator(args: RouteHandlerArgs): RouteSessionCreator | undefined {
   const routeArgs: InternalRouteArgs = args;
   return routeArgs[routeSessionCreatorKey];
+}
+
+export function attachSessionActivityReader<TArgs extends RouteHandlerArgs>(
+  args: TArgs,
+  reader: SessionActivityReader,
+): TArgs {
+  const routeArgs: InternalRouteArgs = args;
+  routeArgs[sessionActivityReaderKey] = reader;
+  return args;
+}
+
+export function readSessionActivityReader(
+  args: RouteHandlerArgs,
+): SessionActivityReader | undefined {
+  const routeArgs: InternalRouteArgs = args;
+  return routeArgs[sessionActivityReaderKey];
 }
 
 export function attachRemoteAgentStreamHeadersResolver<TArgs extends RouteHandlerArgs>(

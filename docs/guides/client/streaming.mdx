@@ -241,6 +241,33 @@ Unlike `stream()`, `snapshot()` does not advance the originating
 `ClientSession`. Its returned cursor contains the fixed session ID and the exact
 stream index after the captured prefix.
 
+## Stream activity snapshots
+
+A root session whose channel enabled activity rendering exposes the same
+channel-neutral progress snapshots to clients:
+
+```ts
+const current = await session.activity.snapshot();
+console.log(current.snapshot?.revision);
+
+for await (const activity of session.activity.stream()) {
+  console.log(activity.work, activity.actions, activity.blockers);
+}
+```
+
+`session.activity` has its own `streamIndex`; reading it does not change
+`session.state.streamIndex`. Its `stream()` method accepts the same
+`startIndex`, `follow`, `signal`, and reconnection options as
+`session.stream()`. `snapshot()` returns the latest snapshot and the matching
+activity cursor without advancing the handle. It returns `snapshot: undefined`
+when collection is enabled but no revision has been published yet.
+
+Activity is available only when the session is a root session and its channel
+already enabled an activity renderer. Disabled, child, unknown, and unmapped
+sessions return `404` as `ClientError`. Activity snapshots describe work,
+actions, and blockers; continue reading the session event stream for assistant
+text, reasoning, and tool details.
+
 ## Abort a request
 
 Pass an `AbortSignal` to cancel the POST or stream. Aborting is local transport cancellation: turns are resumable across disconnects, so detaching never stops server-side work. Use `session.cancel()` to stop the active turn, or `session.cancel({ tasks: true })` to also stop background tasks owned by the session. Cancellation is asynchronous; watch the stream for `turn.cancelled` followed by `session.waiting`, and inspect task state in a later turn to confirm task cancellation.
