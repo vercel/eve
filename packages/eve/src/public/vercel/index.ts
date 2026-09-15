@@ -29,6 +29,7 @@ export interface EveVercelServiceConfig {
   readonly entrypoint?: string;
   readonly framework?: string;
   readonly mount?: string | { readonly path?: string; readonly subdomain?: string };
+  readonly outputDirectory?: string;
   readonly routes?: readonly EveVercelRouteConfig[];
   readonly root?: string;
   readonly type?: string;

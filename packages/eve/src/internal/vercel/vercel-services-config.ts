@@ -137,6 +137,7 @@ function parseServiceConfig(value: JsonValue, path: string): VercelServiceConfig
     entrypoint: optionalString(service.entrypoint, `${path}.entrypoint`),
     framework: optionalString(service.framework, `${path}.framework`),
     mount: parseMount(service.mount, `${path}.mount`),
+    outputDirectory: optionalString(service.outputDirectory, `${path}.outputDirectory`),
     routes: parseArray(service.routes, `${path}.routes`, parseRoute),
     routePrefix: optionalString(service.routePrefix, `${path}.routePrefix`),
     root: optionalString(service.root, `${path}.root`),
