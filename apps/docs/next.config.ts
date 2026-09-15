@@ -13,9 +13,7 @@ const withGeistdocs = createGeistdocs();
 const require = createRequire(import.meta.url);
 const wgslLoader = require.resolve("@vgpu/wgsl/loader-webpack");
 
-const localSiteHost = process.env.PORTLESS_URL
-  ? new URL(process.env.PORTLESS_URL).host
-  : "localhost:3000";
+const localSite = process.env.PORTLESS_URL ?? "localhost:3000";
 
 const config: NextConfig = {
   cacheComponents: true,
@@ -24,7 +22,7 @@ const config: NextConfig = {
 
   env: {
     NEXT_PUBLIC_VERCEL_PROJECT_PRODUCTION_URL:
-      process.env.NEXT_PUBLIC_VERCEL_PROJECT_PRODUCTION_URL ?? localSiteHost,
+      process.env.NEXT_PUBLIC_VERCEL_PROJECT_PRODUCTION_URL ?? localSite,
   },
 
   // The integrations gallery sources identity from the workspace package
