@@ -8,7 +8,12 @@ import { readClientContext } from "#internal/client-context.js";
 import { attachRouteSessionCreator } from "#internal/nitro/routes/channel-route-context.js";
 import { mockChannelContext } from "#internal/testing/mocks/mock-channel-operations.js";
 import { type AuthFn, none } from "#public/channels/auth.js";
-import { eveChannel, defaultEveAuth, type EveChannelInput } from "#public/channels/eve.js";
+import {
+  eveChannel,
+  defaultEveAuth,
+  type EveChannelInput,
+  type EveMessageContext,
+} from "#public/channels/eve.js";
 import type { RunInput, SessionAuthContext } from "#channel/types.js";
 import type { RouteHandlerArgs, SendPayload } from "#channel/routes.js";
 import type { Session } from "#channel/session.js";
@@ -21,6 +26,7 @@ import {
   type Session as RuntimeSession,
 } from "#context/keys.js";
 import { createMessageCompletedEvent } from "#protocol/message.js";
+import { writeForwardedParentSessionBaggage } from "#protocol/baggage.js";
 
 /**
  * Unit coverage for the inbound HTTP route's message-body parser and
@@ -2015,6 +2021,48 @@ describe("eveChannel — forwarded principal", () => {
   function forwardedRequest(forwardedPrincipal: unknown): Request {
     return createJsonMessageRequest({ forwardedPrincipal, message: "hi", mode: "task" });
   }
+
+  it("exposes a trusted remote invocation operation id to onMessage", async () => {
+    const onMessage = vi.fn((ctx: EveMessageContext) => ({ auth: ctx.eve.caller }));
+    const handler = createEveCreateHandler({
+      trustedForwarders: () => true,
+      auth: () => ROUTER_CALLER,
+      onMessage,
+    });
+    const request = createJsonMessageRequest({
+      callback: {
+        callId: "call-1",
+        subagentName: "research",
+        token: "tok123",
+        url: "https://caller.example.com/eve/v1/callback/tok123",
+      },
+      forwardedPrincipal: { current: FORWARDED_CURRENT },
+      message: "hi",
+      mode: "conversation",
+      operationId: "remote-operation-1",
+    });
+    request.headers.set(
+      "baggage",
+      writeForwardedParentSessionBaggage(undefined, {
+        callId: "call-1",
+        rootSessionId: "root-session",
+        sessionId: "parent-session",
+        turn: { id: "parent-turn", sequence: 1 },
+      })!,
+    );
+
+    const response = await handler.fetch(request);
+
+    expect(response.status).toBe(202);
+    expect(onMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eve: expect.objectContaining({
+          invocation: { operationId: "remote-operation-1" },
+        }),
+      }),
+      "hi",
+    );
+  });
 
   it("rejects a forwarded body when the channel has no trustedForwarders", async () => {
     const handler = createEveCreateHandler({ auth: () => ROUTER_CALLER });
