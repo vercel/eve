@@ -1,5 +1,12 @@
 # eve
 
+## 0.56.1
+
+### Patch Changes
+
+- 8bb62e2: Recognize AI Gateway credit-balance and project-budget refusals in semantic error summaries.
+- 1e6437b: Announce when dynamic skills are withdrawn completely so agents do not retain stale skill lists.
+
 ## 0.56.0
 
 ### Minor Changes
