@@ -1,7 +1,16 @@
 import { describe, expect, it } from "vitest";
 
-import { renderMarkdown } from "./markdown.js";
+import { detectMarkdownRendering, renderMarkdown } from "./markdown.js";
 import { stripAnsi } from "#cli/ui/terminal-text.js";
+
+describe("detectMarkdownRendering", () => {
+  it("disables Markdown rendering only for an explicit false override", () => {
+    expect(detectMarkdownRendering({ EVE_TUI_RENDER_MARKDOWN: "0" })).toBe(false);
+    expect(detectMarkdownRendering({ EVE_TUI_RENDER_MARKDOWN: "false" })).toBe(false);
+    expect(detectMarkdownRendering({ EVE_TUI_RENDER_MARKDOWN: "1" })).toBe(true);
+    expect(detectMarkdownRendering({})).toBe(true);
+  });
+});
 
 describe("renderMarkdown", () => {
   it("preserves underscores inside URLs", () => {

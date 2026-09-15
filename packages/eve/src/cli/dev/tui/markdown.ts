@@ -19,6 +19,20 @@ const ansi = {
 
 const tableSeparator = "─";
 
+/**
+ * Whether prose responses should be parsed and styled as Markdown.
+ * `EVE_TUI_RENDER_MARKDOWN=0` bypasses Markdown parsing and styling.
+ */
+export function detectMarkdownRendering(
+  env: { readonly EVE_TUI_RENDER_MARKDOWN?: string } = process.env as unknown as {
+    readonly EVE_TUI_RENDER_MARKDOWN?: string;
+  },
+): boolean {
+  const override = env.EVE_TUI_RENDER_MARKDOWN;
+  if (override === "0" || override === "false") return false;
+  return true;
+}
+
 /** Renders parsed GFM blocks to terminal text, fitting tables to `width`. */
 export function renderMarkdown(input: string, width = Number.POSITIVE_INFINITY): string {
   return trimTrailingBlankRows(renderBlocks(lexer(input), width)).join("\n");

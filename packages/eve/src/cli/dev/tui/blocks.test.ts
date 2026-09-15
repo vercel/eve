@@ -22,6 +22,15 @@ describe("renderBlockLines", () => {
     expect(lines[0]).toBe("▲ all done");
   });
 
+  it("preserves prose Markdown when Markdown rendering is disabled", () => {
+    const lines = renderBlockLines({ kind: "assistant", body: "**bold**\n\n- item" }, 60, theme, {
+      ...ctx,
+      renderMarkdown: false,
+    }).map(stripAnsi);
+
+    expect(lines).toEqual(["▲ **bold**", "  ", "  - item"]);
+  });
+
   it("colors per-item status markers in a mixed command result", () => {
     const colored = createTheme({ color: true, unicode: true });
     const lines = renderBlockLines(
