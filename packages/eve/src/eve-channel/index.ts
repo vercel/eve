@@ -20,6 +20,7 @@ import {
 } from "#internal/nitro/routes/channel-route-context.js";
 import {
   EVE_SESSION_ID_HEADER,
+  EVE_STREAM_CONTROL_VERSION_QUERY,
   EVE_STREAM_FORMAT_HEADER,
   EVE_STREAM_TAIL_INDEX_HEADER,
   EVE_STREAM_VERSION_HEADER,
@@ -638,6 +639,10 @@ export function eveChannel(input: EveChannelInput): EveChannel {
         );
         if (startIndex !== undefined) {
           upstreamUrl.searchParams.set("startIndex", String(startIndex));
+        }
+        const controlVersion = new URL(req.url).searchParams.get(EVE_STREAM_CONTROL_VERSION_QUERY);
+        if (controlVersion !== null) {
+          upstreamUrl.searchParams.set(EVE_STREAM_CONTROL_VERSION_QUERY, controlVersion);
         }
         if (includeTailIndex) {
           upstreamUrl.searchParams.set("includeTailIndex", "1");

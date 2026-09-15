@@ -29,6 +29,15 @@ export const EVE_MESSAGE_STREAM_CONTENT_TYPE = "application/x-ndjson; charset=ut
 export const EVE_MESSAGE_STREAM_FORMAT = "ndjson";
 export const EVE_MESSAGE_STREAM_VERSION = "25";
 
+/** Version of transport control records understood by this eve release. */
+export const EVE_STREAM_CONTROL_VERSION = "1";
+export const EVE_STREAM_CONTROL_VERSION_QUERY = "streamControlVersion";
+/** Internal record emitted when a leased HTTP response should be renewed. */
+export const EVE_STREAM_LEASE_ENDED_CONTROL = {
+  $eve: "stream.lease-ended",
+  version: 1,
+} as const;
+
 /**
  * eve-owned finish reason for one completed assistant step.
  *
