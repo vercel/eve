@@ -1,10 +1,11 @@
 import {
   DEFAULT_WORKFLOW_PROGRAM_MAX_SUBAGENTS,
   MAX_WORKFLOW_PROGRAM_MAX_SUBAGENTS,
-  parseWorkflowProgramInput,
+  parseWorkflowProgramOptions,
   readWorkflowProgramAgentCall,
   readWorkflowProgramCallInterrupt,
-  serializeWorkflowProgramInput,
+  type WorkflowProgramInput,
+  type WorkflowProgramOptions,
 } from "#execution/dynamic-workflow/schema.js";
 import {
   runWorkflowProgramStep,
@@ -15,9 +16,7 @@ import { toErrorMessage } from "#shared/errors.js";
 import type { JsonValue } from "#shared/json.js";
 import type { WorkflowToolContext } from "#tools/workflow-definition.js";
 
-export interface JsProgramOptions {
-  /** Agent names generated code may pass to `ctx.agent`. */
-  readonly agents: readonly string[];
+export interface JsProgramOptions extends Omit<WorkflowProgramOptions, "maxSubagents"> {
   /** Maximum child-agent calls, from 1 to 128. Defaults to 100. */
   readonly maxSubagents?: number;
 }
@@ -28,15 +27,16 @@ export async function runJsProgram(
   ctx: WorkflowToolContext,
   options: JsProgramOptions,
 ): Promise<JsonValue> {
-  const continuationSecurity = await createWorkflowProgramContinuationSecurityStep();
-  const program = parseWorkflowProgramInput(
-    serializeWorkflowProgramInput({
-      agents: options.agents,
-      continuationSecurity,
-      js,
-      maxSubagents: options.maxSubagents ?? DEFAULT_WORKFLOW_PROGRAM_MAX_SUBAGENTS,
-    }),
-  );
+  if (typeof js !== "string") throw new TypeError('workflow requires a "js" string.');
+  const optionsWithDefaults = parseWorkflowProgramOptions({
+    agents: options.agents,
+    maxSubagents: options.maxSubagents ?? DEFAULT_WORKFLOW_PROGRAM_MAX_SUBAGENTS,
+  });
+  const program: WorkflowProgramInput = {
+    ...optionsWithDefaults,
+    continuationSecurity: await createWorkflowProgramContinuationSecurityStep(),
+    js,
+  };
   const allowedAgents = new Set(program.agents);
   const base = { callId: ctx.callId, program };
   let outcome: WorkflowProgramStepOutcome = await runWorkflowProgramStep(base);

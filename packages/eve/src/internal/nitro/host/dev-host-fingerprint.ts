@@ -48,7 +48,7 @@ export async function computeDevelopmentHostFingerprint(
       // host, so their sources are structural, not runtime, state.
       authoredSources: host.generation.workflowSourceFingerprint ?? null,
       enabled: agentNodes.some((node) =>
-        node.tools.some((tool) => tool.behavior?.handling?.kind === "workflow-tool"),
+        node.tools.some((tool) => tool.workflowProgram !== undefined),
       ),
       world: manifest.config.experimental?.workflow?.world ?? "local",
     },

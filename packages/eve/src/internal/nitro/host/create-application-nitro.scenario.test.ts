@@ -31,7 +31,9 @@ import {
 import { applyWorkflowTransform } from "#internal/workflow-bundle/workflow-builders.js";
 import { useTemporaryDirectories } from "#internal/testing/use-temporary-app-roots.js";
 import { defineChannel, WS } from "#public/definitions/channel.js";
+import { defineTool } from "#tools/definition.js";
 import { defineWorkflowTool } from "#tools/workflow-definition.js";
+import { attachWorkflowProgramOptions } from "#tools/workflow-program-input.js";
 
 const configureDevelopmentNitroRoutes = vi.fn(async () => undefined);
 const configureProductionNitroRoutes = vi.fn(async () => undefined);
@@ -93,7 +95,10 @@ function createNitroStub(input: { buildDir?: string; dev?: boolean } = {}): Nitr
 }
 
 async function createPreparedHost(
-  input: { readonly websocket?: boolean; readonly workflowTool?: boolean } = {},
+  input: {
+    readonly tool?: "ordinary" | "workflow" | "workflow-program";
+    readonly websocket?: boolean;
+  } = {},
 ): Promise<PreparedDevelopmentApplicationHost> {
   const appRoot = "/tmp/weather-agent";
   const paths = resolveCompilerArtifactPaths(appRoot);
@@ -109,14 +114,38 @@ async function createPreparedHost(
       }),
     });
   }
-  if (input.workflowTool === true) {
+  if (input.tool === "ordinary") {
+    modules.push({
+      logicalPath: "tools/weather.ts",
+      loadNamespace: async () => ({
+        default: defineTool({
+          description: "Check the weather.",
+          execute: async () => null,
+          inputSchema: {},
+        }),
+      }),
+    });
+  }
+  if (input.tool === "workflow" || input.tool === "workflow-program") {
     const execute = Object.assign(async () => null, {
       workflowId: "workflow//agent/tools/run-program//execute",
     });
+    const definition = defineWorkflowTool({
+      description: "Run a workflow.",
+      execute,
+      inputSchema: {},
+    });
+    const exportedDefinition =
+      input.tool === "workflow-program"
+        ? attachWorkflowProgramOptions(definition, {
+            agents: ["researcher"],
+            maxSubagents: 4,
+          })
+        : definition;
     modules.push({
       logicalPath: "tools/run-program.ts",
       loadNamespace: async () => ({
-        default: defineWorkflowTool({ description: "Run a program.", execute, inputSchema: {} }),
+        default: exportedDefinition,
       }),
     });
   }
@@ -707,28 +736,77 @@ describe("application Nitro creation", () => {
     expect(createNitroMock.mock.calls[0]?.[0].traceDeps).toEqual([]);
   });
 
-  it("includes the workflow sandbox runtime plugin for a standard authored workflow tool", async () => {
-    const directNitroStub = createNitroStub();
+  it("includes the workflow sandbox runtime plugin only for generated-program tools", async () => {
+    const ordinaryNitroStub = createNitroStub();
     const workflowNitroStub = createNitroStub();
-    createNitroMock.mockResolvedValueOnce(directNitroStub.nitro);
+    const workflowProgramNitroStub = createNitroStub();
+    createNitroMock.mockResolvedValueOnce(ordinaryNitroStub.nitro);
     createNitroMock.mockResolvedValueOnce(workflowNitroStub.nitro);
+    createNitroMock.mockResolvedValueOnce(workflowProgramNitroStub.nitro);
 
     const { createProductionApplicationNitro } =
       await import("#internal/nitro/host/create-application-nitro.js");
 
-    const directHost = await createPreparedHost();
-    const workflowHost = await createPreparedHost({ workflowTool: true });
+    const ordinaryHost = await createPreparedHost({ tool: "ordinary" });
+    const workflowHost = await createPreparedHost({ tool: "workflow" });
+    const workflowProgramHost = await createPreparedHost({ tool: "workflow-program" });
 
-    await createProductionApplicationNitro(directHost, createProductionOptions(directHost));
+    await createProductionApplicationNitro(ordinaryHost, createProductionOptions(ordinaryHost));
     await createProductionApplicationNitro(workflowHost, createProductionOptions(workflowHost));
+    await createProductionApplicationNitro(
+      workflowProgramHost,
+      createProductionOptions(workflowProgramHost),
+    );
 
-    const directPlugins = createNitroMock.mock.calls[0]?.[0].plugins as string[];
+    const ordinaryPlugins = createNitroMock.mock.calls[0]?.[0].plugins as string[];
     const workflowPlugins = createNitroMock.mock.calls[1]?.[0].plugins as string[];
+    const workflowProgramPlugins = createNitroMock.mock.calls[2]?.[0].plugins as string[];
 
-    expect(directPlugins).not.toEqual(
+    expect(ordinaryPlugins).not.toEqual(
       expect.arrayContaining([expect.stringContaining("workflow-sandbox-runtime-plugin.ts")]),
     );
-    expect(workflowPlugins).toEqual(
+    expect(workflowPlugins).not.toEqual(
+      expect.arrayContaining([expect.stringContaining("workflow-sandbox-runtime-plugin.ts")]),
+    );
+    expect(workflowProgramPlugins).toEqual(
+      expect.arrayContaining([expect.stringContaining("workflow-sandbox-runtime-plugin.ts")]),
+    );
+  });
+
+  it("includes the workflow sandbox runtime plugin for a subagent generated-program tool", async () => {
+    const nitroStub = createNitroStub();
+    createNitroMock.mockResolvedValueOnce(nitroStub.nitro);
+
+    const { createProductionApplicationNitro } =
+      await import("#internal/nitro/host/create-application-nitro.js");
+    const preparedHost = await createPreparedHost();
+    const generatedProgramHost = await createPreparedHost({ tool: "workflow-program" });
+    const {
+      kind: _kind,
+      subagents: _subagents,
+      version: _version,
+      ...subagentAgent
+    } = generatedProgramHost.compileResult.manifest;
+    preparedHost.compileResult.manifest.subagents = [
+      {
+        agent: subagentAgent,
+        backing: { kind: "resource", sourcePath: "/tmp/weather-agent/agent/subagents/researcher" },
+        description: "Researches questions.",
+        entryPath: "subagents/researcher",
+        logicalPath: "subagents/researcher/agent.ts",
+        name: "researcher",
+        nodeId: "root:subagents/researcher",
+        owner: { kind: "application" },
+        parentNodeId: "__root__",
+        rootPath: "/tmp/weather-agent/agent/subagents/researcher",
+        sourceId: "subagents/researcher/agent.ts",
+        sourceKind: "module",
+      },
+    ];
+
+    await createProductionApplicationNitro(preparedHost, createProductionOptions(preparedHost));
+
+    expect(createNitroMock.mock.calls[0]?.[0].plugins).toEqual(
       expect.arrayContaining([expect.stringContaining("workflow-sandbox-runtime-plugin.ts")]),
     );
   });

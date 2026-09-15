@@ -2,8 +2,7 @@ import { z } from "#compiled/zod/index.js";
 
 import {
   DEFAULT_WORKFLOW_PROGRAM_MAX_SUBAGENTS,
-  MAX_WORKFLOW_PROGRAM_AGENTS,
-  MAX_WORKFLOW_PROGRAM_MAX_SUBAGENTS,
+  parseWorkflowProgramOptions,
 } from "#execution/dynamic-workflow/schema.js";
 import { executeWorkflowProgram } from "#execution/dynamic-workflow/tool.js";
 import type { JsonValue } from "#shared/json.js";
@@ -36,7 +35,11 @@ const workflowInputSchema = z.strictObject({
 
 /** Defines a model-facing workflow tool backed by isolated runtime JavaScript. */
 export function workflow(options: WorkflowToolOptions): WorkflowTool {
-  const normalized = normalizeWorkflowToolOptions(options);
+  const candidate = options as WorkflowToolOptions | null | undefined;
+  const normalized = parseWorkflowProgramOptions({
+    agents: candidate?.agents,
+    maxSubagents: candidate?.maxSubagents ?? DEFAULT_WORKFLOW_PROGRAM_MAX_SUBAGENTS,
+  });
   const description = [
     "Run an async JavaScript function body that coordinates allowlisted agents through ctx.agent(name, input) and returns one JSON-serializable value.",
     `Available agents: ${normalized.agents.join(", ")}.`,
@@ -50,38 +53,4 @@ export function workflow(options: WorkflowToolOptions): WorkflowTool {
     }),
     normalized,
   );
-}
-
-function normalizeWorkflowToolOptions(options: WorkflowToolOptions): {
-  readonly agents: readonly string[];
-  readonly maxSubagents: number;
-} {
-  if (typeof options !== "object" || options === null || !Array.isArray(options.agents)) {
-    throw new TypeError('workflow requires an "agents" allowlist.');
-  }
-  if (options.agents.length === 0 || options.agents.length > MAX_WORKFLOW_PROGRAM_AGENTS) {
-    throw new TypeError(
-      `workflow requires between 1 and ${String(MAX_WORKFLOW_PROGRAM_AGENTS)} allowed agents.`,
-    );
-  }
-  const agents = options.agents.map((agent) => {
-    if (typeof agent !== "string" || agent.trim() === "") {
-      throw new TypeError("workflow agent names must be non-empty strings.");
-    }
-    return agent;
-  });
-  if (new Set(agents).size !== agents.length) {
-    throw new TypeError("workflow agent names must be unique.");
-  }
-  const maxSubagents = options.maxSubagents ?? DEFAULT_WORKFLOW_PROGRAM_MAX_SUBAGENTS;
-  if (
-    !Number.isSafeInteger(maxSubagents) ||
-    maxSubagents < 1 ||
-    maxSubagents > MAX_WORKFLOW_PROGRAM_MAX_SUBAGENTS
-  ) {
-    throw new TypeError(
-      `workflow maxSubagents must be an integer between 1 and ${String(MAX_WORKFLOW_PROGRAM_MAX_SUBAGENTS)}.`,
-    );
-  }
-  return { agents, maxSubagents };
 }

@@ -26,6 +26,8 @@ export interface WorkflowProgramInput {
   readonly maxSubagents: number;
 }
 
+export type WorkflowProgramOptions = Pick<WorkflowProgramInput, "agents" | "maxSubagents">;
+
 export interface WorkflowProgramAgentCall {
   readonly input: {
     readonly agentId?: string;
@@ -35,11 +37,8 @@ export interface WorkflowProgramAgentCall {
   readonly target: string;
 }
 
-export function parseWorkflowProgramInput(value: unknown): WorkflowProgramInput {
+export function parseWorkflowProgramOptions(value: unknown): WorkflowProgramOptions {
   const input = parseJsonObject(value);
-  if (typeof input.js !== "string") {
-    throw new TypeError('workflow requires a "js" string.');
-  }
   if (
     !isPositiveInteger(input.maxSubagents) ||
     input.maxSubagents > MAX_WORKFLOW_PROGRAM_MAX_SUBAGENTS
@@ -65,25 +64,7 @@ export function parseWorkflowProgramInput(value: unknown): WorkflowProgramInput 
   if (new Set(agents).size !== agents.length) {
     throw new TypeError("workflow agent names must be unique.");
   }
-  const continuationSecurity = parseJsonObject(input.continuationSecurity);
-  if (typeof continuationSecurity.signingKey !== "string") {
-    throw new TypeError("Workflow program continuation security is missing a signing key.");
-  }
-  if (
-    continuationSecurity.maxAgeMs !== undefined &&
-    !isPositiveInteger(continuationSecurity.maxAgeMs)
-  ) {
-    throw new TypeError("Workflow program continuation maxAgeMs must be a positive integer.");
-  }
-  return {
-    agents,
-    continuationSecurity: {
-      maxAgeMs: continuationSecurity.maxAgeMs as number | undefined,
-      signingKey: continuationSecurity.signingKey,
-    },
-    js: input.js,
-    maxSubagents: input.maxSubagents,
-  };
+  return { agents, maxSubagents: input.maxSubagents };
 }
 
 export function readWorkflowProgramCallInterrupt(input: {
@@ -123,21 +104,6 @@ export function readWorkflowProgramAgentCall(value: unknown): WorkflowProgramAge
     input.outputSchema = parseJsonObject(rawInput.outputSchema);
   }
   return { input, target: call.target };
-}
-
-export function serializeWorkflowProgramInput(input: WorkflowProgramInput): JsonObject {
-  const continuationSecurity: Record<string, JsonValue> = {
-    signingKey: input.continuationSecurity.signingKey,
-  };
-  if (input.continuationSecurity.maxAgeMs !== undefined) {
-    continuationSecurity.maxAgeMs = input.continuationSecurity.maxAgeMs;
-  }
-  return {
-    agents: [...input.agents],
-    continuationSecurity,
-    js: input.js,
-    maxSubagents: input.maxSubagents,
-  };
 }
 
 export function parseWorkflowProgramOutput(value: unknown): JsonValue {

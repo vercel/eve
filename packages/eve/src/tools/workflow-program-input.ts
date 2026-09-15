@@ -1,11 +1,9 @@
 import type { JsonObject } from "#shared/json.js";
+import type { WorkflowProgramOptions } from "#execution/dynamic-workflow/schema.js";
+
+export type { WorkflowProgramOptions } from "#execution/dynamic-workflow/schema.js";
 
 const WORKFLOW_PROGRAM_OPTIONS = Symbol.for("eve.workflow-program-options");
-
-export interface WorkflowProgramOptions {
-  readonly agents: readonly string[];
-  readonly maxSubagents: number;
-}
 
 type WorkflowProgramOptionsCarrier = {
   readonly [WORKFLOW_PROGRAM_OPTIONS]?: WorkflowProgramOptions;

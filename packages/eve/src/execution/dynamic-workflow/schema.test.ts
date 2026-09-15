@@ -1,34 +1,27 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  parseWorkflowProgramInput,
+  parseWorkflowProgramOptions,
   readWorkflowProgramAgentCall,
-  serializeWorkflowProgramInput,
-  type WorkflowProgramInput,
 } from "#execution/dynamic-workflow/schema.js";
 
-const input: WorkflowProgramInput = {
+const options = {
   agents: ["researcher", "reviewer"],
-  continuationSecurity: { maxAgeMs: 1000, signingKey: "test-key" },
-  js: "return null",
   maxSubagents: 7,
 };
 
 describe("workflow program schema", () => {
-  it("round trips pinned durable input", () => {
-    expect(parseWorkflowProgramInput(serializeWorkflowProgramInput(input))).toEqual(input);
-  });
-
   it("rejects invalid helper bounds and allowlists", () => {
+    expect(parseWorkflowProgramOptions(options)).toEqual(options);
     expect(() =>
-      parseWorkflowProgramInput({
-        ...serializeWorkflowProgramInput(input),
+      parseWorkflowProgramOptions({
+        ...options,
         maxSubagents: 129,
       }),
     ).toThrow("between 1 and 128");
     expect(() =>
-      parseWorkflowProgramInput({
-        ...serializeWorkflowProgramInput(input),
+      parseWorkflowProgramOptions({
+        ...options,
         agents: ["researcher", "researcher"],
       }),
     ).toThrow("must be unique");
