@@ -521,6 +521,10 @@ function resolveResultMetadata(
     eveSubagentCalls: result.result.derived.subagentCalls.map((call) => call.name),
     eveParked: result.result.derived.parked,
   });
+  const runtimeTraceLinks = resolveRuntimeTraceLinks(result.result.traceContexts);
+  if (runtimeTraceLinks.length > 0) {
+    metadata.eveRuntimeTraceLinks = runtimeTraceLinks;
+  }
   if (recordAssertionDetails) {
     const failedAssertions = result.assertions
       .filter((assertion) => !assertion.passed)
@@ -533,6 +537,35 @@ function resolveResultMetadata(
     metadata.eveFailureCode = result.result.derived.failureCode;
   }
   return metadata;
+}
+
+function resolveRuntimeTraceLinks(traceContexts: EveEvalResult["result"]["traceContexts"]) {
+  const links = new Map<
+    string,
+    {
+      relation: "eve_runtime";
+      traceId: string;
+      spanId: string;
+      sessionId: string;
+      primary: boolean;
+    }
+  >();
+
+  for (const traceContext of traceContexts) {
+    const key = `${traceContext.traceId}:${traceContext.spanId}`;
+    const existing = links.get(key);
+    if (existing?.primary || (existing && !traceContext.primary)) continue;
+
+    links.set(key, {
+      relation: "eve_runtime",
+      traceId: traceContext.traceId,
+      spanId: traceContext.spanId,
+      sessionId: traceContext.sessionId,
+      primary: traceContext.primary,
+    });
+  }
+
+  return [...links.values()];
 }
 
 function resolveEvaluationMetrics(
