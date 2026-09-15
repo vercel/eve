@@ -12,6 +12,7 @@ import {
 import { headlessSetupContinuation, serializeHeadlessSetupEvent } from "./setup-headless.js";
 
 const PNPM_BUILD_POLICY_ANSWER_KEY = "install.pnpm.buildScripts";
+const AUTO_ACCEPT_RECOMMENDED_ITEMS = new Set(["eve/self-modification"]);
 type PnpmBuildPolicyChoice = PnpmBuildPolicyAction | "abort";
 
 export interface DeclaredPnpmBuildPolicy {
@@ -72,6 +73,9 @@ export async function prepareDeclaredPnpmBuildPolicy(
       throw new Error(
         `${PNPM_BUILD_POLICY_ANSWER_KEY} must be "ignore-optional", "allow-builds", or "abort".`,
       );
+    }
+    if (choice === undefined && AUTO_ACCEPT_RECOMMENDED_ITEMS.has(input.item)) {
+      choice = policy.recommendedAction;
     }
     if (input.options.nonInteractive && choice === undefined && input.options.yes !== true) {
       const question = {

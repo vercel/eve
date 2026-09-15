@@ -223,7 +223,7 @@ describe("eveChannel forwarded principal → runtime principal", () => {
       type: "user",
     });
     // The audit attribute never enters Connect token-cache keying.
-    expect(principalKey(principal)).toBe("user:slack:slack:U123");
+    expect(principalKey(principal)).toBe('["user","slack","slack:U123"]');
     expect(trustedForwarders).toHaveBeenCalledTimes(1);
   });
 

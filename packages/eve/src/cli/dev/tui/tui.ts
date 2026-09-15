@@ -55,7 +55,7 @@ export interface DevelopmentTuiStartup {
   readonly diagnostics: DevDiagnostics | undefined;
   readonly headerTip: string;
   readonly renderer: TerminalRenderer;
-  finish(): string;
+  finish(): { draft: string; queuedPrompt: string | undefined };
   shutdown(): Promise<void>;
 }
 

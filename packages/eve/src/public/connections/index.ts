@@ -5,6 +5,7 @@
 export type {
   AuthorizationCallback,
   AuthorizationDefinition,
+  CredentialOwner,
   ConnectionAuthDefinition,
   ConnectionAuthProvider,
   ConnectionAuthResolver,

@@ -16,6 +16,8 @@ export {
   type ResetSessionResult,
   type Channel,
   type ChannelAudience,
+  type AudienceCaller,
+  type AudienceContext,
   type AudienceInput,
   type AudiencePrincipal,
   type ConversationEnvironment,

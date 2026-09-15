@@ -45,9 +45,11 @@ describe("principalKey", () => {
     expect(principalKey({ type: "app" })).toBe("app");
   });
 
-  it("prefixes user principals with issuer to avoid cross-IdP collisions", () => {
-    expect(principalKey({ id: "u1", issuer: "google", type: "user" })).toBe("user:google:u1");
-    expect(principalKey({ id: "u1", issuer: "slack", type: "user" })).toBe("user:slack:u1");
+  it("encodes user principals with their issuer to avoid cross-IdP collisions", () => {
+    expect(principalKey({ id: "u1", issuer: "google", type: "user" })).toBe(
+      '["user","google","u1"]',
+    );
+    expect(principalKey({ id: "u1", issuer: "slack", type: "user" })).toBe('["user","slack","u1"]');
   });
 
   it("differentiates two users from the same issuer", () => {
@@ -57,7 +59,21 @@ describe("principalKey", () => {
   });
 
   it("keys an issuerless native Vercel user by its user id", () => {
-    expect(principalKey({ id: "user_123", type: "user" })).toBe("user:user_123");
+    expect(principalKey({ id: "user_123", type: "user" })).toBe('["user",null,"user_123"]');
+  });
+
+  it("does not collide when issuer and id contain separators", () => {
+    const first = principalKey({ id: "c", issuer: "a:b", type: "user" });
+    const second = principalKey({ id: "b:c", issuer: "a", type: "user" });
+
+    expect(first).not.toBe(second);
+  });
+
+  it("does not conflate percent sequences with their decoded separators", () => {
+    const encoded = principalKey({ id: "user%3A1", issuer: "idp", type: "user" });
+    const separator = principalKey({ id: "user:1", issuer: "idp", type: "user" });
+
+    expect(encoded).not.toBe(separator);
   });
 });
 

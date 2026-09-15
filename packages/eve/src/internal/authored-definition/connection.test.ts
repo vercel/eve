@@ -77,6 +77,17 @@ describe("normalizeMcpClientConnectionDefinition", () => {
       expect(result.auth).toMatchObject({ getToken, principalType: "app" });
     });
 
+    it("normalizes credentialOwner into the runtime principalType", () => {
+      const getToken = async () => ({ token: "x" });
+      const result = normalizeMcpClientConnectionDefinition(
+        validInput({ auth: { credentialOwner: "user", getToken } }),
+        MSG,
+      );
+
+      expect(result.auth).toMatchObject({ getToken, principalType: "user" });
+      expect(result.auth).not.toHaveProperty("credentialOwner");
+    });
+
     it("preserves a context-aware auth resolver without invoking it at build time", () => {
       let calls = 0;
       const auth = () => {
@@ -277,6 +288,21 @@ describe("normalizeMcpClientConnectionDefinition", () => {
           MSG,
         ),
       ).toThrow(/"auth\.principalType" field must be "app" or "user"/);
+    });
+
+    it("rejects both credential ownership fields", () => {
+      expect(() =>
+        normalizeMcpClientConnectionDefinition(
+          validInput({
+            auth: {
+              credentialOwner: "app",
+              getToken: async () => ({ token: "x" }),
+              principalType: "app",
+            },
+          }),
+          MSG,
+        ),
+      ).toThrow(/must not provide both "credentialOwner" and "principalType"/);
     });
 
     it('rejects interactive auth with principalType "app"', () => {

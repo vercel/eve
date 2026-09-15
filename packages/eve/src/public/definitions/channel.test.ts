@@ -171,6 +171,7 @@ describe("defineChannel", () => {
     expect(
       adapter.instrumentation?.audience?.({
         auth: null,
+        caller: { type: "anonymous" },
         channel: { kind: "http" },
         environment: "production",
         mode: "conversation",
@@ -200,6 +201,7 @@ describe("defineChannel", () => {
     expect(
       adapter.instrumentation?.audience?.({
         auth: null,
+        caller: { type: "anonymous" },
         channel: { kind: "channel:legacy" },
         environment: "production",
         mode: "conversation",

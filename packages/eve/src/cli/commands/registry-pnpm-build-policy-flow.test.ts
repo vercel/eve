@@ -64,6 +64,37 @@ describe("registry pnpm build policy flow", () => {
     );
   });
 
+  it("automatically applies the recommended policy for self-modification", async () => {
+    const logger = createLogger();
+    const select = vi.fn(() => "allow-builds");
+    const { prompter } = createFakePrompter({ single: select });
+    const context = {
+      filePath: "/project/pnpm-workspace.yaml",
+      packages: policy.packages,
+      satisfied: false,
+    };
+    const applyPnpmBuildPolicy = vi.fn(async () => {});
+
+    await expect(
+      prepareDeclaredPnpmBuildPolicy(
+        {
+          logger,
+          appRoot: "/project",
+          item: "eve/self-modification",
+          policies: [policy],
+          options: { prompter },
+        },
+        {
+          detectPackageManager: pnpm,
+          inspectPnpmBuildPolicy: vi.fn(async () => context),
+          applyPnpmBuildPolicy,
+        },
+      ),
+    ).resolves.toBe(true);
+    expect(applyPnpmBuildPolicy).toHaveBeenCalledWith(context, "ignore-optional");
+    expect(select).not.toHaveBeenCalled();
+  });
+
   it("cancels before changing policy when abort is selected", async () => {
     const logger = createLogger();
     const { prompter } = createFakePrompter({ single: () => "abort" });

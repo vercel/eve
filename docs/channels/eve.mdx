@@ -163,11 +163,11 @@ The eve channel classifies who can observe a session when that session is create
 
 | Session creator                           | Default audience |
 | ----------------------------------------- | ---------------- |
-| Anonymous caller                          | `public`         |
+| Anonymous caller                          | `unknown`        |
 | `user`, `service`, or `runtime` principal | `private`        |
 | Any other principal type                  | `unknown`        |
 
-Anonymous HTTP surfaces are public because anyone who can reach the surface can read it. Authenticated `user`, `service`, and `runtime` sessions are private because they belong to one identified party. Other authenticated principal types remain `unknown`: trace consumers record metadata but omit content by default in preview and production.
+Anonymous HTTP surfaces are `unknown` by default because reachability does not establish that their content is safe to record. Authenticated `user`, `service`, and `runtime` sessions are private because they belong to one identified party. Other authenticated principal types also remain `unknown`: trace consumers record metadata but omit content by default in preview and production. Set an explicit `audience: "public"` only for intentionally public traffic.
 
 Pass a constant or a function to override the default:
 
@@ -187,14 +187,14 @@ import { eveChannel } from "eve/channels/eve";
 
 export default eveChannel({
   auth: [vercelOidc(), none()],
-  audience({ auth, environment }) {
-    if (auth === null) return environment === "development" ? "public" : "unknown";
+  audience({ caller, environment }) {
+    if (caller.type === "anonymous") return environment === "development" ? "public" : "unknown";
     return "private";
   },
 });
 ```
 
-The function receives the authenticated principal, channel, run mode, and deployment environment. Classification is fixed at session creation; a continuation turn from a different caller does not reclassify the session. When another eve deployment forwards a request without an accepted forwarded trace assertion, the calling deployment's principal is used for classification, so the session remains `private`. A custom [trace policy](../guides/instrumentation-providers#control-inputs-and-outputs) can still admit or deny content independently.
+The function receives `caller`, channel, run mode, and deployment environment. `caller` is either `{ type: "anonymous" }` or a principal projection with `kind`, `authenticator`, and `attributes`. Classification is fixed at session creation; a continuation turn from a different caller does not reclassify the session. When another eve deployment forwards a request without an accepted forwarded trace assertion, the calling deployment's principal is used for classification, so the session remains `private`. A custom [trace policy](../guides/instrumentation-providers#control-inputs-and-outputs) can still admit or deny content independently.
 
 ## Customization
 

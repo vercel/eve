@@ -22,8 +22,8 @@ interface ExtensionCapabilityContract {
 const EXTENSION_CAPABILITY_CONTRACTS = {
   extension: { current: 1, supported: [1], dropped: {} },
   tool: {
-    current: 39,
-    supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 28, 29, 30, 31, 32, 34, 35, 39],
+    current: 40,
+    supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 28, 29, 30, 31, 32, 34, 35, 40],
     dropped: {
       14: "TaskExec.delegated was removed; migrate to workflow-backed background tools",
       15: "TaskExec replaces stageEffect with send",
@@ -43,13 +43,14 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
       36: "Legacy session history migration was removed; user-role messages require current provenance kinds.",
       37: "Legacy session history migration was removed; user-role messages require current provenance kinds.",
       38: "Legacy session history migration was removed; user-role messages require current provenance kinds.",
+      39: "Legacy session history migration was removed; user-role messages require current provenance kinds.",
     },
   },
   dynamicTool: {
-    current: 38,
+    current: 39,
     supported: [
       1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 22, 28, 29, 30, 31, 32,
-      33, 38,
+      33, 39,
     ],
     dropped: {
       21: "Message and reasoning append events now expose deltas instead of cumulative snapshots.",
@@ -62,16 +63,18 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
       35: "Legacy session history migration was removed; user-role messages require current provenance kinds.",
       36: "Legacy session history migration was removed; user-role messages require current provenance kinds.",
       37: "Legacy session history migration was removed; user-role messages require current provenance kinds.",
+      38: "Legacy session history migration was removed; user-role messages require current provenance kinds.",
     },
   },
   channel: {
-    current: 22,
-    supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 14, 15, 16, 17, 18, 22],
+    current: 23,
+    supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 14, 15, 16, 17, 18, 23],
     dropped: {
       12: "Message and reasoning append events now expose deltas instead of cumulative snapshots.",
       19: "Continuation rekey was removed; channel extensions must use additive continuation.alias instead.",
       20: "Continuation rekey was removed; channel extensions must use additive continuation.alias instead.",
       21: "Continuation rekey was removed; channel extensions must use additive continuation.alias instead.",
+      22: "Continuation rekey was removed; channel extensions must use additive continuation.alias instead.",
     },
   },
   schedule: {
@@ -91,8 +94,8 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
     },
   },
   connection: {
-    current: 18,
-    supported: [1, 2, 3, 4, 5, 6, 7, 8, 11, 12, 13, 14, 15, 16, 17, 18],
+    current: 19,
+    supported: [1, 2, 3, 4, 5, 6, 7, 8, 11, 12, 13, 14, 15, 16, 17, 18, 19],
     dropped: {
       9: "Dynamic connection resolvers no longer receive conversation or channel continuation data",
       10: "Message and reasoning append events now expose deltas instead of cumulative snapshots.",

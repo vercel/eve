@@ -156,6 +156,7 @@ describe("telegramChannel() inbound route", () => {
     expect(
       adapter.instrumentation?.audience?.({
         auth: null,
+        caller: { type: "anonymous" },
         channel: { kind: "channel:telegram" },
         environment: "production",
         mode: "conversation",
