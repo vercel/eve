@@ -3774,6 +3774,42 @@ describe("EveTUIRunner boot setup detection", () => {
     expect(handle).not.toHaveBeenCalled();
   });
 
+  it("publishes startup success and diagnostics only after the refreshed info settles", async () => {
+    const refreshed = createDeferred<AgentInfoResult>();
+    const renderAgentHeader = vi.fn();
+    const renderCommandResult = vi.fn();
+    const renderSetupWarning = vi.fn();
+    const readPrompt = vi.fn(async () => undefined);
+    const setStartupPhase = vi.fn();
+    const { client, runner } = providerSetupRefreshRunner({
+      refreshInfo: () => refreshed.promise,
+      bootDetections: [],
+      renderer: {
+        renderAgentHeader,
+        renderCommandResult,
+        renderSetupWarning,
+        readPrompt,
+        setStartupPhase,
+      },
+    });
+    const run = runner.run();
+    await vi.waitFor(() => expect(client.info).toHaveBeenCalledTimes(2));
+    expect(renderAgentHeader).not.toHaveBeenCalled();
+    expect(renderCommandResult).not.toHaveBeenCalled();
+    expect(renderSetupWarning).not.toHaveBeenCalled();
+    expect(readPrompt).not.toHaveBeenCalled();
+    expect(setStartupPhase).toHaveBeenLastCalledWith("connecting");
+    refreshed.resolve(AGENT_INFO);
+    await run;
+    expect(renderAgentHeader).toHaveBeenCalledOnce();
+    expect(renderCommandResult).toHaveBeenCalledOnce();
+    expect(readPrompt).toHaveBeenCalledOnce();
+    expect(setStartupPhase).toHaveBeenLastCalledWith(undefined);
+    expect(renderAgentHeader.mock.invocationCallOrder[0]).toBeLessThan(
+      renderCommandResult.mock.invocationCallOrder[0]!,
+    );
+  });
+
   it("normalizes a committed local key after automatic provider setup", async () => {
     const clearSetupWarning = vi.fn();
     const headers: AgentTUIAgentHeader[] = [];
@@ -3810,13 +3846,13 @@ describe("EveTUIRunner boot setup detection", () => {
       credential: "api-key",
     });
     expect(headers.map((header) => header.info?.agent.model.endpoint)).toEqual([
-      { kind: "gateway", connected: false },
       { kind: "gateway", connected: true, credential: "api-key" },
     ]);
   });
 
   it("drops stale disconnected evidence when the post-setup info refresh fails", async () => {
     const clearSetupWarning = vi.fn();
+    const renderCommandResult = vi.fn();
     const headers: AgentTUIAgentHeader[] = [];
     const detect = vi.fn(({ info }: { info?: AgentInfoResult }) =>
       info?.agent.model.endpoint?.kind === "gateway" && !info.agent.model.endpoint.connected
@@ -3836,6 +3872,7 @@ describe("EveTUIRunner boot setup detection", () => {
       bootDetections: [{ id: "test", detect }],
       renderer: {
         clearSetupWarning,
+        renderCommandResult,
         renderAgentHeader: (header) => headers.push(header),
       },
     });
@@ -3843,6 +3880,10 @@ describe("EveTUIRunner boot setup detection", () => {
     await runner.run();
     await vi.waitFor(() => expect(clearSetupWarning).toHaveBeenCalled());
 
+    expect(renderCommandResult).toHaveBeenCalledWith(
+      expect.stringContaining("could not reload"),
+      "error",
+    );
     expect(client.info).toHaveBeenCalledTimes(2);
     expect(detect.mock.calls.at(-1)?.[0].info).toBeUndefined();
     expect(headers.at(-1)?.info).toBeUndefined();

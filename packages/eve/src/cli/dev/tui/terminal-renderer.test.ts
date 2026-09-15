@@ -2446,7 +2446,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
     expect(screen.snapshot()).toContain("Use the /help command");
     expect(screen.snapshot()).not.toContain("model");
     expect(screen.snapshot()).not.toContain("loading");
-    expect(screen.snapshot()).toContain("Building your agent");
+    expect(screen.snapshot()).toContain("Starting your agent");
     expect(screen.snapshot()).toContain("weather");
 
     input.type(" tomorrow");
@@ -2461,6 +2461,23 @@ describe("TerminalRenderer (inline scrollback)", () => {
     expect(requestStop).not.toHaveBeenCalled();
     startupRenderer.shutdown();
   });
+
+  it.each([32, 80])(
+    "defers startup warnings until connection readiness at %i columns",
+    (columns) => {
+      const { renderer, screen } = makeRenderer(columns);
+      renderer.beginStartupDraft({ initialDraft: "Hello Alice", tip: "/help", title: "Agent" });
+      renderer.renderSetupWarning("Model disconnected · /login");
+      expect(screen.snapshot()).not.toContain("Model disconnected");
+      renderer.setStartupPhase("connecting");
+      expect(screen.snapshot()).toContain("Connecting your model");
+      expect(screen.snapshot()).not.toContain("Model disconnected");
+      expect(renderer.finishStartupDraft()).toBe("Hello Alice");
+      renderer.setStartupPhase(undefined);
+      expect(screen.snapshot()).toContain("Model disconnected");
+      renderer.shutdown();
+    },
+  );
 
   it("lets Ctrl-C stop an editing-only startup draft", () => {
     const screen = new MockScreen({ columns: 80, rows: 30 });

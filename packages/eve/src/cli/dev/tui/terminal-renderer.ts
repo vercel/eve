@@ -407,6 +407,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
   readonly #fileContents = new FileContentCache();
   readonly #subagentHeaders = new Set<string>();
   #agentHeader?: AgentHeaderOptions;
+  #startupPhase?: "starting" | "connecting";
   #startupHeader?: { readonly name: string; readonly tip: string };
   #agentHeaderRendered = false;
   /** The last committed header body, to skip re-committing an unchanged banner. */
@@ -643,6 +644,11 @@ export class TerminalRenderer implements AgentTUIRenderer {
     this.#availablePromptCommands = options?.availablePromptCommands ?? PROMPT_COMMANDS;
   }
 
+  setStartupPhase(phase: "starting" | "connecting" | undefined): void {
+    this.#startupPhase = phase;
+    this.#paint();
+  }
+
   /**
    * Commits the startup agent header (brand mark + resolved configuration) to
    * scrollback before the first prompt. Later calls (dev HMR refreshing fields
@@ -652,6 +658,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
    * Committed scrollback is never cleared or replayed.
    */
   renderAgentHeader(options: AgentHeaderOptions): void {
+    this.#startupHeader = undefined;
     this.#title = options.name;
     this.#agentHeader = options;
     this.#start();
@@ -667,16 +674,15 @@ export class TerminalRenderer implements AgentTUIRenderer {
 
     this.#agentHeaderRendered = true;
     this.#agentHeaderBody = body;
-    // Commit the header to scrollback with no footer; the first `readPrompt`
-    // paints the input line beneath it. Startup intentionally preserves the
-    // user's existing scrollback instead of clearing the terminal.
-    this.#live.flush(this.#renderAgentHeaderRows(), []);
+    // Preserve the live presentation when the startup header enters scrollback.
+    this.#live.flush(this.#renderAgentHeaderRows(), this.#footerRows(this.#width()));
   }
 
   beginStartupDraft(options: { initialDraft?: string; tip: string; title: string }): void {
     this.#start({ title: options.title });
     this.#inputActive = true;
     this.#promptPlaceholderActive = true;
+    this.#startupPhase = "starting";
     this.#startupHeader = { name: options.title, tip: options.tip };
     let editor = lineOf(stripPromptControlCharacters(options.initialDraft ?? ""));
     this.#syncInput(editor);
@@ -705,7 +711,6 @@ export class TerminalRenderer implements AgentTUIRenderer {
     this.#detachInput();
     this.#stopCaretBlink();
     this.#inputActive = false;
-    this.#startupHeader = undefined;
     this.#promptPlaceholderActive = false;
     return draft;
   }
@@ -4224,7 +4229,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
     // The setup attention line rides above the pinned panels as a live
     // element, so resolving its issue clears it instead of leaving it stale
     // in scrollback.
-    if (this.#setupAttention !== undefined) {
+    if (this.#startupPhase === undefined && this.#setupAttention !== undefined) {
       rows.push(...renderAttentionRows(this.#setupAttention, width, this.#theme), "");
     }
 
@@ -4278,9 +4283,6 @@ export class TerminalRenderer implements AgentTUIRenderer {
       const isCommand = isPromptControlCommand(this.#inputText);
       const ghost = inlineHint ? c.dim(` ${inlineHint}`) : "";
       const statusRows: string[] = [];
-      if (this.#startupHeader !== undefined) {
-        statusRows.push(clip(c.dim(`${this.#theme.glyph.dot} Building your agent…`), width));
-      }
       this.#pushStatusLine(statusRows, width);
       // Keep one transcript row above the footer and one separator below the
       // prompt. Everything already in `rows` has higher-level footer ownership
@@ -4428,6 +4430,12 @@ export class TerminalRenderer implements AgentTUIRenderer {
 
   /** Appends the persistent bottom status line below the prompt when it has content. */
   #pushStatusLine(rows: string[], width: number): void {
+    if (this.#startupPhase !== undefined) {
+      const label =
+        this.#startupPhase === "starting" ? "Starting your agent…" : "Connecting your model…";
+      rows.push(clip(this.#theme.colors.dim(`${this.#theme.glyph.dot} ${label}`), width));
+      return;
+    }
     const padding = this.#remoteConnection === undefined ? "" : STATUS_LINE_LEFT_PADDING;
     const contentWidth = Math.max(1, width - padding.length);
     const input: Parameters<typeof buildStatusLine>[0] = {

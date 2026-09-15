@@ -115,6 +115,7 @@ export function createPromptCommandHandler(
         const result = await runTuiSetupCommand(commandInput);
         preserveFlowDiagnostics = result.preserveFlowDiagnostics;
         const { preserveFlowDiagnostics: _preserve, partial: _partial, ...outcome } = result;
+        if (context.settleOutcome !== undefined) return await context.settleOutcome(outcome);
         return outcome;
       } finally {
         if (context.keepSetupFlowOpen !== true) {

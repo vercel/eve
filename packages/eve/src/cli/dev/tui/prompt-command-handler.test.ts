@@ -213,6 +213,52 @@ describe("createPromptCommandHandler", () => {
     }
   });
 
+  it.each([false, true])("holds login open through runtime refresh (failure: %s)", async (fail) => {
+    vi.doMock("./setup-commands.js", () => ({
+      SETUP_FLOW_CONFIG: { login: { title: "Connect a model", indicator: "pulse" } },
+      runTuiSetupCommand: async () => ({
+        message: "Connected.",
+        effect: { kind: "model-access-changed" },
+        preserveFlowDiagnostics: false,
+      }),
+    }));
+    try {
+      const setupFlow = setupFlowRenderer();
+      let release!: () => void;
+      const pending = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const settleOutcome = vi.fn(async () => {
+        await pending;
+        return fail
+          ? { tone: "error" as const, message: "The agent could not reload." }
+          : { message: "Connected." };
+      });
+      const handler = createPromptCommandHandler({ target: LOCAL_TARGET });
+      const result = handler.handle(
+        { type: "extension", name: "login", argument: "" },
+        { ...context({ setupFlow }), settleOutcome },
+      );
+      await vi.waitFor(() => expect(settleOutcome).toHaveBeenCalledOnce());
+      expect(setupFlow.end).not.toHaveBeenCalled();
+      release();
+      const outcome = await result;
+      if (outcome === undefined) throw new Error("Expected a login outcome");
+      expect(setupFlow.end).toHaveBeenCalledOnce();
+      expect(outcome.effect).toBeUndefined();
+      if (fail) {
+        expect(outcome.tone).toBe("error");
+        expect(outcome.message).toContain("could not reload");
+        expect(outcome.message).not.toContain("private runtime failure");
+      } else {
+        expect(outcome.message).toBe("Connected.");
+      }
+    } finally {
+      vi.doUnmock("./setup-commands.js");
+      vi.resetModules();
+    }
+  });
+
   it("keeps the setup panel open for an immediate onboarding handoff", async () => {
     const runTuiSetupCommand = vi.fn(async () => ({
       message: "Vercel CLI installed.",

@@ -259,6 +259,8 @@ export type AgentTUIRenderer = {
    * without a header simply skip it.
    */
   renderAgentHeader?(header: AgentTUIAgentHeader): void;
+  /** Keeps preliminary connection diagnostics out of the startup presentation. */
+  setStartupPhase?(phase: "starting" | "connecting" | undefined): void;
   /**
    * Commits a single informational line to the transcript. Used for session
    * recovery and slash-command results. Optional.
@@ -406,6 +408,8 @@ export interface PromptCommandHandlerContext {
    * command. The runner closes it if no next command can proceed.
    */
   readonly keepSetupFlowOpen?: true;
+  /** Settles runtime changes before the setup panel releases the screen. */
+  readonly settleOutcome?: (outcome: PromptCommandOutcome) => Promise<PromptCommandOutcome>;
   readonly remoteConnection?: RemoteConnectionController;
   readonly withExclusiveTerminal?: <T>(task: () => Promise<T>) => Promise<T>;
   readonly disabledConnectionReasons?: Readonly<Record<string, string>>;
@@ -533,7 +537,7 @@ export class EveTUIRunner {
   #reportedFirstResponse = false;
   readonly #onOnboardingStep?: EveTUIRunnerOptions["onOnboardingStep"];
   readonly #onOnboardingTerminal?: EveTUIRunnerOptions["onOnboardingTerminal"];
-  #initialOnboardingActive = false;
+  #startupActive = true;
   readonly #promptCommandHandler?: PromptCommandHandler;
   readonly #availablePromptCommands: readonly PromptCommandSpec[];
   readonly #withExclusiveTerminal?: <T>(task: () => Promise<T>) => Promise<T>;
@@ -740,7 +744,7 @@ export class EveTUIRunner {
       this.#appRoot === undefined ? info : normalizeLocalModelEndpoint(info, process.env);
     this.#agentInfo = headerInfo;
     const serverUrl = this.#serverUrl;
-    if (serverUrl === undefined || this.#initialOnboardingActive) return headerInfo;
+    if (serverUrl === undefined || this.#startupActive) return headerInfo;
 
     const header: AgentTUIAgentHeader = {
       name: this.#name,
@@ -788,6 +792,7 @@ export class EveTUIRunner {
     let hasRunTurn = false;
     let followCurrentSession = false;
     let streamWithoutPrompt = false;
+    this.#renderer.setStartupPhase?.("starting");
     let initialDraft = await this.#renderAgentHeader();
     this.#subscribeDevelopmentSandboxLogs();
     // Fire-and-forget: the link identity is network-bound to resolve, and the
@@ -802,14 +807,23 @@ export class EveTUIRunner {
       this.#appRoot !== undefined &&
       this.#promptCommandHandler !== undefined &&
       this.#renderer.setupFlow !== undefined;
+    let startupOutcome: PromptCommandOutcome | undefined;
     if (initialAgentOnboarding) {
-      this.#initialOnboardingActive = true;
-      try {
-        await this.#runInitialAgentOnboarding(title);
-      } finally {
-        this.#initialOnboardingActive = false;
-        this.#replaceAgentInfo(this.#agentInfo);
-      }
+      this.#renderer.setStartupPhase?.("connecting");
+      startupOutcome = await this.#runInitialAgentOnboarding(title);
+    }
+
+    this.#startupActive = false;
+    this.#replaceAgentInfo(this.#agentInfo);
+    this.#paintSetupAttention();
+    this.#renderer.setStartupPhase?.(undefined);
+    if (initialAgentOnboarding) {
+      this.#renderStartupCommandInvocation(
+        { type: "extension", name: "login", argument: "" },
+        "startup",
+        startupOutcome?.tone,
+      );
+      this.#renderCommandOutcome(startupOutcome?.message, startupOutcome?.tone);
     }
 
     while (true) {
@@ -1648,6 +1662,7 @@ export class EveTUIRunner {
 
   /** Repaints the attention line from the cached detection + auth issues, or clears it. */
   #paintSetupAttention(): void {
+    if (this.#startupActive) return;
     const issues = orderedSetupIssues(this.#bootIssues, this.#authIssue);
     if (issues.length > 0) {
       this.#renderer.renderSetupWarning?.(formatSetupIssuesLine(issues));
@@ -1742,6 +1757,7 @@ export class EveTUIRunner {
     const baseContext: PromptCommandHandlerContext = {
       ...input,
       renderer: this.#renderer,
+      settleOutcome: (outcome) => this.#settleCommandOutcome(outcome),
       chatGptAccountLabel:
         endpoint?.kind === "chatgpt" && endpoint.state === "ready"
           ? endpoint.accountLabel
@@ -1788,6 +1804,21 @@ export class EveTUIRunner {
     void this.#refreshSetupAttention(this.#agentInfo);
   }
 
+  async #settleCommandOutcome(outcome: PromptCommandOutcome): Promise<PromptCommandOutcome> {
+    if (outcome.effect === undefined) return outcome;
+    try {
+      await this.#applyCommandEffect(outcome.effect);
+      const { effect: _effect, ...settled } = outcome;
+      return settled;
+    } catch {
+      return {
+        tone: "error",
+        message:
+          "Settings were saved, but the agent could not reload. Retry the command or restart eve dev.",
+      };
+    }
+  }
+
   async #executeExtensionCommand(
     command: Extract<PromptCommand, { type: "extension" }>,
     title: string,
@@ -1803,20 +1834,19 @@ export class EveTUIRunner {
       readonly suppressCancelledTranscript?: true;
     },
   ): Promise<PromptCommandOutcome | undefined> {
-    const outcome = await this.#handleExtensionCommand(command, { ...input, title });
+    const pendingOutcome = await this.#handleExtensionCommand(command, { ...input, title });
+    const outcome =
+      pendingOutcome === undefined ? undefined : await this.#settleCommandOutcome(pendingOutcome);
     const suppressTranscript =
       (input.suppressSuccessfulTranscript === true && outcome?.tone !== "error") ||
       (input.suppressCancelledTranscript === true && outcome?.cancelled === true);
-    if (!suppressTranscript) {
-      this.#renderStartupCommandInvocation(command, input.trigger, outcome?.tone);
-    }
-    if (!suppressTranscript) this.#renderCommandOutcome(outcome?.message, outcome?.tone);
-    await this.#applyCommandEffect(outcome?.effect);
+    if (!suppressTranscript && input.trigger !== "startup")
+      this.#renderCommandOutcome(outcome?.message, outcome?.tone);
     this.#refreshHeaderFromRemoteConnection();
     return outcome;
   }
 
-  async #runInitialAgentOnboarding(title: string): Promise<void> {
+  async #runInitialAgentOnboarding(title: string): Promise<PromptCommandOutcome | undefined> {
     this.#onOnboardingStep?.({ flow: "onboarding", step: "model_provider" });
     const outcome = await this.#executeExtensionCommand(
       { type: "extension", name: "login", argument: "" },
@@ -1830,10 +1860,11 @@ export class EveTUIRunner {
       step: "model_provider",
       result: outcome?.cancelled ? "cancelled" : outcome?.tone === "error" ? "error" : "completed",
     });
+    return outcome;
   }
 
   #refreshHeaderFromRemoteConnection(): void {
-    if (this.#initialOnboardingActive) return;
+    if (this.#startupActive) return;
     const connection = this.#remoteConnection?.current().connection;
     if (connection?.state !== "ready" || connection.info === this.#agentInfo) return;
     this.#agentInfo = connection.info;
@@ -1919,8 +1950,7 @@ export class EveTUIRunner {
   /**
    * Setup commands can write authored source and env files. Force the local
    * runtime snapshot to catch up, then cache the credential-normalized `/info`
-   * shared by the status bar and setup detector. The Vercel auth probe stays
-   * off the prompt path.
+   * shared by the status bar and setup detector before releasing the panel.
    */
   async #refreshModelAccess(): Promise<void> {
     const appRoot = this.#appRoot;
@@ -1929,7 +1959,10 @@ export class EveTUIRunner {
     await loadDevelopmentEnvironmentFiles(appRoot);
     await this.#runtimeArtifacts?.refreshAfterSourceChange({});
     const refreshedInfo = this.#replaceAgentInfo(await this.#readAgentInfo());
-    void this.#refreshSetupAttention(refreshedInfo);
+    await this.#refreshSetupAttention(refreshedInfo);
+    if (this.#client !== undefined && refreshedInfo === undefined) {
+      throw new Error("Agent information is unavailable after reload.");
+    }
   }
 
   async #readAgentInfo(): Promise<AgentInfoResult | undefined> {
