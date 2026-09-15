@@ -12,6 +12,7 @@ import {
   eveChannel,
   defaultEveAuth,
   type EveChannelInput,
+  type EveMessageContext,
   type ForwardedAssertion,
   type TrustedForwarders,
 } from "#public/channels/eve.js";
@@ -27,6 +28,7 @@ import {
   type Session as RuntimeSession,
 } from "#context/keys.js";
 import { createMessageCompletedEvent } from "#protocol/message.js";
+import { writeForwardedParentSessionBaggage } from "#protocol/baggage.js";
 
 /**
  * Unit coverage for the inbound HTTP route's message-body parser and
@@ -2041,6 +2043,48 @@ describe("eveChannel — forwarded principal", () => {
       current.authenticator === "vercel-passport" && initiator.authenticator === "vercel-passport"
     );
   }
+
+  it("exposes a trusted remote invocation operation id to onMessage", async () => {
+    const onMessage = vi.fn((ctx: EveMessageContext) => ({ auth: ctx.eve.caller }));
+    const handler = createEveCreateHandler({
+      trustedForwarders: () => true,
+      auth: () => ROUTER_CALLER,
+      onMessage,
+    });
+    const request = createJsonMessageRequest({
+      callback: {
+        callId: "call-1",
+        subagentName: "research",
+        token: "tok123",
+        url: "https://caller.example.com/eve/v1/callback/tok123",
+      },
+      forwardedPrincipal: { current: FORWARDED_CURRENT },
+      message: "hi",
+      mode: "conversation",
+      operationId: "remote-operation-1",
+    });
+    request.headers.set(
+      "baggage",
+      writeForwardedParentSessionBaggage(undefined, {
+        callId: "call-1",
+        rootSessionId: "root-session",
+        sessionId: "parent-session",
+        turn: { id: "parent-turn", sequence: 1 },
+      })!,
+    );
+
+    const response = await handler.fetch(request);
+
+    expect(response.status).toBe(202);
+    expect(onMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eve: expect.objectContaining({
+          invocation: { operationId: "remote-operation-1" },
+        }),
+      }),
+      "hi",
+    );
+  });
 
   it("rejects a forwarded body when the channel has no trustedForwarders", async () => {
     const handler = createEveCreateHandler({ auth: () => ROUTER_CALLER });
