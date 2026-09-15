@@ -159,7 +159,8 @@ For the full auth model and helper list, see [Auth & route protection](../guides
 
 ## Audience
 
-The eve channel classifies who can observe a session when that session is created:
+The eve channel assigns an observability audience when it creates a session. The
+audience controls whether instrumentation may capture session content:
 
 | Session creator                           | Default audience |
 | ----------------------------------------- | ---------------- |
@@ -194,7 +195,7 @@ export default eveChannel({
 });
 ```
 
-The function receives `caller`, channel, run mode, and deployment environment. `caller` is either `{ type: "anonymous" }` or a principal projection with `kind`, `authenticator`, and `attributes`. Classification is fixed at session creation; a continuation turn from a different caller does not reclassify the session. When another eve deployment forwards a request without an accepted forwarded trace assertion, the calling deployment's principal is used for classification, so the session remains `private`. A custom [trace policy](../guides/instrumentation-providers#control-inputs-and-outputs) can still admit or deny content independently.
+The function receives `caller`, channel, run mode, and deployment environment. `caller` is either `{ type: "anonymous" }` or a principal projection with `kind`, `authenticator`, and `attributes`. Classification is fixed at session creation; a continuation turn from a different caller does not reclassify the session. When another eve deployment forwards a request without an accepted forwarded trace assertion, the calling deployment's principal is used for classification, so the session remains `private`. A custom [trace policy](../observability/instrumentation-providers#control-inputs-and-outputs) can still admit or deny content independently.
 
 ## Customization
 

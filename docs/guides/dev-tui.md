@@ -77,7 +77,7 @@ By default, the UI shows `stderr` logs. Use `/loglevel <all|stderr|sandbox|none>
 
 Every `eve dev` process writes diagnostic logs to `.eve/logs/`, regardless of the display mode. Read them with [`eve logs`](../reference/cli#eve-logs).
 
-Use `/traces` to inspect traces recorded during local development. See [Instrumentation](instrumentation#local-traces) for trace capture and retention settings.
+Use `/traces` to inspect traces recorded during local development. See [Instrumentation](../observability/instrumentation#local-traces) for trace capture and retention settings.
 
 ## Display options
 
@@ -108,6 +108,6 @@ For a Vercel deployment that needs authentication, run `/vc:login` and follow th
 
 ## What to read next
 
-- [Instrumentation](./instrumentation): traces, OpenTelemetry, and diagnostics.
+- [Instrumentation](../observability/instrumentation): traces, OpenTelemetry, and diagnostics.
 - [CLI](../reference/cli): commands and flags.
 - [Agent Client Protocol (ACP)](../protocols/acp): drive the same agent from ACP clients such as Zed instead of the TUI.

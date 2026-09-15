@@ -145,7 +145,7 @@ eve also carries the original `gen_ai.conversation.id` in `eve.conversation.id` 
 
 eve replaces configured `traceparent` and conversation baggage only when it has a framework value to send. It replaces its own `tracestate` entry while preserving other valid vendor entries; without a valid caller context, eve removes only its entry. Incoming baggage has an 8 KiB limit; the audience and conversation readers share whitespace, percent-decoding, and duplicate-key validation. Conversation IDs are limited to 1 KiB and exclude control characters and line separators. If adding an audience assertion or conversation ID would exceed 8 KiB, eve rejects the dispatch before sending a request instead of dropping the member. Reduce `remote.headers.baggage` to leave room for these framework values.
 
-In the [provider trace contract](./instrumentation#agent-trace-contract), each
+In the [provider trace contract](../observability/instrumentation-providers), each
 child activation starts a separate trace. The first activation uses the
 caller preserved in W3C `tracestate`, falling back to incoming `traceparent`,
 as an `agent.dispatch` span link rather than adopting the caller's trace ID.

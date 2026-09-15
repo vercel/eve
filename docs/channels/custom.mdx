@@ -312,7 +312,9 @@ The projection is re-evaluated whenever adapter state changes after channel even
 
 ### Conversation audience
 
-Use `audience(input)` to classify who can observe the conversation. The hook runs after route authentication and before the session is created:
+Use `audience(input)` to assign an observability audience. The audience controls
+whether instrumentation may capture conversation content. The hook runs after
+route authentication and before the session is created:
 
 ```ts
 import { defineChannel, POST } from "eve/channels";

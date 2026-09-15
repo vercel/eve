@@ -84,5 +84,5 @@ eve dev https://your_agent.example.com
 Use these guides to secure and observe the deployed agent:
 
 - [Authentication](../auth-and-route-protection): configure the host’s route policy
-- [Observability](../instrumentation): export traces and diagnose runtime failures
+- [Instrumentation](../../observability/instrumentation): export traces and diagnose runtime failures
 - [Sandbox](../../sandbox): select and secure a sandbox backend
