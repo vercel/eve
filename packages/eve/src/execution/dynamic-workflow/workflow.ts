@@ -16,8 +16,6 @@ import type { JsonValue } from "#shared/json.js";
 import type { WorkflowToolContext } from "#tools/workflow-definition.js";
 
 export interface JsProgramOptions {
-  /** Agent names generated code may pass to `ctx.agent`. */
-  readonly agents: readonly string[];
   /** Maximum child-agent calls, from 1 to 128. Defaults to 100. */
   readonly maxSubagents?: number;
 }
@@ -31,13 +29,11 @@ export async function runJsProgram(
   const continuationSecurity = await createWorkflowProgramContinuationSecurityStep();
   const program = parseWorkflowProgramInput(
     serializeWorkflowProgramInput({
-      agents: options.agents,
       continuationSecurity,
       js,
       maxSubagents: options.maxSubagents ?? DEFAULT_WORKFLOW_PROGRAM_MAX_SUBAGENTS,
     }),
   );
-  const allowedAgents = new Set(program.agents);
   const base = { callId: ctx.callId, program };
   let outcome: WorkflowProgramStepOutcome = await runWorkflowProgramStep(base);
   let calls = 0;
@@ -47,12 +43,6 @@ export async function runJsProgram(
       outcome.pending.map(async (pending) => {
         const interrupt = readWorkflowProgramCallInterrupt(pending);
         const call = readWorkflowProgramAgentCall(interrupt.toolInput);
-        if (!allowedAgents.has(call.target)) {
-          return {
-            status: "failed" as const,
-            error: `WORKFLOW_PROGRAM_AGENT_NOT_ALLOWED: Agent "${call.target}" is not in the workflow allowlist.`,
-          };
-        }
         const invocationIndex = calls++;
         if (invocationIndex >= program.maxSubagents) {
           return {

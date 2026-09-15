@@ -239,7 +239,6 @@ export type CompiledToolDefinition = InternalToolDefinition &
     readonly hasModelOutputProjection: boolean;
     readonly requiresApproval: boolean;
     readonly workflowProgram?: {
-      readonly agents: readonly string[];
       readonly maxSubagents: number;
     };
   };
@@ -872,7 +871,6 @@ const compiledToolDefinitionSchema = z
     sourceKind: z.literal("module"),
     workflowProgram: z
       .object({
-        agents: z.array(z.string()).readonly(),
         maxSubagents: z.number().int().positive(),
       })
       .strict()

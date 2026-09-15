@@ -15,7 +15,6 @@ const continuationSecurity = {
 
 function program(js: string, maxSubagents = 10): WorkflowProgramInput {
   return {
-    agents: ["researcher", "reviewer"],
     continuationSecurity,
     js,
     maxSubagents,
@@ -110,20 +109,13 @@ try {
     ).resolves.toEqual({ output: { caught: "child failed" }, status: "completed" });
   });
 
-  it("enforces the allowlist and total call budget through the real sandbox", async () => {
+  it("enforces the total call budget through the real sandbox", async () => {
     const agent = vi.fn().mockResolvedValue("ok");
     const ctx = {
       abortSignal: new AbortController().signal,
       agent,
       callId: "policy",
     } as never;
-
-    await expect(
-      runJsProgram('return ctx.agent("agent", { message: "not allowed" });', ctx, {
-        agents: ["researcher"],
-      }),
-    ).rejects.toThrow("WORKFLOW_PROGRAM_AGENT_NOT_ALLOWED");
-    expect(agent).not.toHaveBeenCalled();
 
     await expect(
       runJsProgram(
@@ -136,7 +128,7 @@ try {
   return error.message;
 }`,
         ctx,
-        { agents: ["researcher"], maxSubagents: 1 },
+        { maxSubagents: 1 },
       ),
     ).resolves.toContain("WORKFLOW_PROGRAM_SUBAGENT_LIMIT_REACHED");
     expect(agent).toHaveBeenCalledTimes(1);

@@ -2,7 +2,6 @@ import { parseJsonObject, parseJsonValue, type JsonObject, type JsonValue } from
 
 export const DEFAULT_WORKFLOW_PROGRAM_MAX_SUBAGENTS = 100;
 export const MAX_WORKFLOW_PROGRAM_MAX_SUBAGENTS = 128;
-export const MAX_WORKFLOW_PROGRAM_AGENTS = 128;
 export const WORKFLOW_PROGRAM_BRIDGE_REQUEST_LIMIT = 256;
 export const WORKFLOW_PROGRAM_CALL_INTERRUPT_KIND = "eve.workflow-program-agent-call";
 
@@ -20,7 +19,6 @@ export interface WorkflowProgramContinuationSecurity {
 
 /** Internal durable input pinned for one generated program run. */
 export interface WorkflowProgramInput {
-  readonly agents: readonly string[];
   readonly continuationSecurity: WorkflowProgramContinuationSecurity;
   readonly js: string;
   readonly maxSubagents: number;
@@ -48,23 +46,6 @@ export function parseWorkflowProgramInput(value: unknown): WorkflowProgramInput 
       `workflow maxSubagents must be an integer between 1 and ${String(MAX_WORKFLOW_PROGRAM_MAX_SUBAGENTS)}.`,
     );
   }
-  if (!Array.isArray(input.agents)) {
-    throw new TypeError('workflow requires an "agents" allowlist.');
-  }
-  if (input.agents.length === 0 || input.agents.length > MAX_WORKFLOW_PROGRAM_AGENTS) {
-    throw new TypeError(
-      `workflow requires between 1 and ${String(MAX_WORKFLOW_PROGRAM_AGENTS)} allowed agents.`,
-    );
-  }
-  const agents = input.agents.map((agent) => {
-    if (typeof agent !== "string" || agent.trim() === "") {
-      throw new TypeError("workflow agent names must be non-empty strings.");
-    }
-    return agent;
-  });
-  if (new Set(agents).size !== agents.length) {
-    throw new TypeError("workflow agent names must be unique.");
-  }
   const continuationSecurity = parseJsonObject(input.continuationSecurity);
   if (typeof continuationSecurity.signingKey !== "string") {
     throw new TypeError("Workflow program continuation security is missing a signing key.");
@@ -76,7 +57,6 @@ export function parseWorkflowProgramInput(value: unknown): WorkflowProgramInput 
     throw new TypeError("Workflow program continuation maxAgeMs must be a positive integer.");
   }
   return {
-    agents,
     continuationSecurity: {
       maxAgeMs: continuationSecurity.maxAgeMs as number | undefined,
       signingKey: continuationSecurity.signingKey,
@@ -133,7 +113,6 @@ export function serializeWorkflowProgramInput(input: WorkflowProgramInput): Json
     continuationSecurity.maxAgeMs = input.continuationSecurity.maxAgeMs;
   }
   return {
-    agents: [...input.agents],
     continuationSecurity,
     js: input.js,
     maxSubagents: input.maxSubagents,

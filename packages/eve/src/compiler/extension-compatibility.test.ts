@@ -135,6 +135,7 @@ describe("extension compatibility manifest", () => {
     { capability: "tool", epoch: 38 },
     { capability: "tool", epoch: 39 },
     { capability: "tool", epoch: 40 },
+    { capability: "tool", epoch: 41 },
     { capability: "dynamicTool", epoch: 35 },
     { capability: "dynamicTool", epoch: 36 },
     { capability: "dynamicTool", epoch: 37 },

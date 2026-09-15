@@ -599,7 +599,7 @@ through source composition:
 Every identity above is replaceable and disableable through ordinary slot
 composition. `glob` and `grep` are published at `eve/tools/glob` and
 `eve/tools/grep` but never registered. Runtime-generated programs use an ordinary path-derived tool created with the provided
-`workflow()` factory; there is no framework workflow slot or sentinel. Authored `instrumentation.ts` likewise composes as an ordinary module slot with no
+`workflow()` factory and existing `ctx.agent` target resolution; there is no framework workflow slot or sentinel. Authored `instrumentation.ts` likewise composes as an ordinary module slot with no
 framework default and no dedicated plan artifact. Native behavior outside
 these identities is limited to `final_output` and the closed host inventory.
 

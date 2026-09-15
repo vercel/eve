@@ -19,7 +19,6 @@ import {
 } from "#execution/dynamic-workflow/schema.js";
 
 const program: WorkflowProgramInput = {
-  agents: ["researcher"],
   continuationSecurity: { signingKey: "key" },
   js: "return ctx.agent('researcher', { message: 'x' });",
   maxSubagents: 3,

@@ -26,12 +26,12 @@ const ctx = {
   agent,
   callId: "workflow-call",
 } as never;
-const options = { agents: ["researcher"], maxSubagents: 2 } as const;
+const options = { maxSubagents: 2 } as const;
 
 describe("runJsProgram", () => {
   beforeEach(() => vi.resetAllMocks());
 
-  it("delegates allowlisted interrupts and resumes the sandbox", async () => {
+  it("delegates agent interrupts and resumes the sandbox", async () => {
     mocks.runWorkflowProgramStep
       .mockResolvedValueOnce({ interrupt: pending, pending: [pending], status: "interrupted" })
       .mockResolvedValueOnce({ output: { result: "done" }, status: "completed" });
@@ -98,39 +98,6 @@ describe("runJsProgram", () => {
     );
   });
 
-  it("rejects a valid but non-allowlisted target before ctx.agent", async () => {
-    const disallowed = {
-      payload: {
-        kind: "eve.workflow-program-agent-call",
-        toolInput: { input: { message: "delegate" }, target: "agent" },
-        toolName: "agent",
-      },
-    } as never;
-    mocks.runWorkflowProgramStep
-      .mockResolvedValueOnce({
-        interrupt: disallowed,
-        pending: [disallowed],
-        status: "interrupted",
-      })
-      .mockResolvedValueOnce({ output: "blocked", status: "completed" });
-
-    await expect(runJsProgram("return 1", ctx, options)).resolves.toBe("blocked");
-    expect(agent).not.toHaveBeenCalled();
-    expect(mocks.runWorkflowProgramStep).toHaveBeenLastCalledWith(
-      expect.objectContaining({
-        resume: {
-          interrupt: disallowed,
-          resolutions: [
-            expect.objectContaining({
-              status: "failed",
-              error: expect.stringContaining("WORKFLOW_PROGRAM_AGENT_NOT_ALLOWED"),
-            }),
-          ],
-        },
-      }),
-    );
-  });
-
   it("bounds total calls across resumed batches", async () => {
     mocks.runWorkflowProgramStep
       .mockResolvedValueOnce({ interrupt: pending, pending: [pending], status: "interrupted" })
@@ -159,15 +126,9 @@ describe("runJsProgram", () => {
     );
   });
 
-  it("validates trusted helper options", async () => {
+  it("validates the trusted call budget", async () => {
     await expect(
       runJsProgram("return 1", ctx, {
-        agents: ["researcher", "researcher"],
-      }),
-    ).rejects.toThrow("must be unique");
-    await expect(
-      runJsProgram("return 1", ctx, {
-        agents: [],
         maxSubagents: MAX_WORKFLOW_PROGRAM_MAX_SUBAGENTS + 1,
       }),
     ).rejects.toThrow("between 1 and 128");

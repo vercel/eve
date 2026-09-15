@@ -129,10 +129,10 @@ export default defineAgent({
 });
 `;
 
-function createWorkflowProgramToolSource(agent: string): string {
+function createWorkflowProgramToolSource(): string {
   return `import { workflow } from "eve/tools/workflow";
 
-export default workflow({ agents: [${JSON.stringify(agent)}], maxSubagents: 2 });
+export default workflow({ maxSubagents: 2 });
 `;
 }
 
@@ -141,7 +141,7 @@ const AGENT_MESSAGING_DESCRIPTOR: ScenarioAppDescriptor = {
     "agent/agent.ts": createScriptedParentAgentSource("memory-child"),
     "agent/channels/eve.ts": EVE_CHANNEL_SOURCE,
     "agent/instructions.md": "Run the scripted memory-child exchanges.\n",
-    "agent/tools/run-program.ts": createWorkflowProgramToolSource("memory-child"),
+    "agent/tools/run-program.ts": createWorkflowProgramToolSource(),
     "agent/subagents/memory-child/agent.ts": MEMORY_AGENT_SOURCE,
     "agent/subagents/memory-child/instructions.md":
       "Remember facts from earlier turns and answer follow-up questions from that history.\n",
@@ -167,7 +167,7 @@ function createRemoteAgentMessagingDescriptor(remoteUrl: string): ScenarioAppDes
       "agent/agent.ts": createScriptedParentAgentSource("remote-memory-child"),
       "agent/channels/eve.ts": EVE_CHANNEL_SOURCE,
       "agent/instructions.md": "Run the scripted remote-memory-child exchanges.\n",
-      "agent/tools/run-program.ts": createWorkflowProgramToolSource("remote-memory-child"),
+      "agent/tools/run-program.ts": createWorkflowProgramToolSource(),
       "agent/subagents/remote-memory-child.ts": `import { defineRemoteAgent } from "eve";
 import { bearer } from "eve/agents/auth";
 

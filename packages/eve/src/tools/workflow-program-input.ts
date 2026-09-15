@@ -3,7 +3,6 @@ import type { JsonObject } from "#shared/json.js";
 const WORKFLOW_PROGRAM_OPTIONS = Symbol.for("eve.workflow-program-options");
 
 export interface WorkflowProgramOptions {
-  readonly agents: readonly string[];
   readonly maxSubagents: number;
 }
 
@@ -36,7 +35,6 @@ export function createWorkflowProgramExecuteInput(
   const js = (input as { readonly js?: unknown } | null)?.js;
   if (typeof js !== "string") throw new TypeError('workflow requires a "js" string.');
   return {
-    agents: [...options.agents],
     js,
     maxSubagents: options.maxSubagents,
   };

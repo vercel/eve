@@ -103,7 +103,7 @@ export default defineAgent({
       "agent/instructions.md": "Delegate cancellation waits as requested.\n",
       "agent/tools/workflow.ts": `import { workflow } from "eve/tools/workflow";
 
-export default workflow({ agents: ["local-sleeper", "remote-sleeper"] });
+export default workflow();
 `,
       "agent/subagents/local-sleeper/agent.ts": `import { defineAgent } from "eve";
 import { mockModel } from "eve/evals";

@@ -8,7 +8,6 @@ import {
 } from "#execution/dynamic-workflow/schema.js";
 
 const input: WorkflowProgramInput = {
-  agents: ["researcher", "reviewer"],
   continuationSecurity: { maxAgeMs: 1000, signingKey: "test-key" },
   js: "return null",
   maxSubagents: 7,
@@ -19,19 +18,13 @@ describe("workflow program schema", () => {
     expect(parseWorkflowProgramInput(serializeWorkflowProgramInput(input))).toEqual(input);
   });
 
-  it("rejects invalid helper bounds and allowlists", () => {
+  it("rejects invalid call bounds", () => {
     expect(() =>
       parseWorkflowProgramInput({
         ...serializeWorkflowProgramInput(input),
         maxSubagents: 129,
       }),
     ).toThrow("between 1 and 128");
-    expect(() =>
-      parseWorkflowProgramInput({
-        ...serializeWorkflowProgramInput(input),
-        agents: ["researcher", "researcher"],
-      }),
-    ).toThrow("must be unique");
   });
 
   it("validates bridge payloads before owner dispatch", () => {
