@@ -1,4 +1,4 @@
-import { confirm, text } from "#setup/ask.js";
+import { confirm, select, text } from "#setup/ask.js";
 import {
   classifySelfModificationConfig,
   connectorName,
@@ -47,6 +47,30 @@ export async function prepareSelfModificationSetup(
     );
     return { kind: "authored" };
   }
+
+  const mode = await context.asker.ask(
+    select({
+      key: "self-modification-mode",
+      message: "How should self-modification be enabled?",
+      options: [
+        {
+          id: "deployed",
+          value: "deployed" as const,
+          label: "Enable for deployed",
+          hint: "Let deployed agents propose source changes through draft pull requests",
+        },
+        {
+          id: "local",
+          value: "local" as const,
+          label: "Keep local",
+          hint: "Only enable source editing during local development",
+        },
+      ],
+      recommended: "local" as const,
+      required: true,
+    }),
+  );
+  if (mode === "local") return { kind: "local" };
 
   const [detected, channelNames] = await Promise.all([
     operations.detectGitRepository(),
