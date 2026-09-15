@@ -1,8 +1,8 @@
-const SESSION_COMMAND_NAMESPACE = "eve:session";
+const SESSION_COMMAND_NAMESPACE = "eve:inbox:v1:eve:session";
 
 /** Returns whether a token belongs to eve's framework-reserved session command namespace. */
 export function isReservedSessionCommandToken(token: string): boolean {
-  return token.startsWith(`${SESSION_COMMAND_NAMESPACE}:`);
+  return token.startsWith("eve:session:") || token.startsWith("eve:inbox:");
 }
 
 /** Returns whether a token is the stable command inbox for one workflow run. */

@@ -14,6 +14,7 @@ const startMock = vi.fn();
 
 vi.mock("#compiled/@workflow/core/runtime.js", () => ({
   cancelRun: (...args: unknown[]) => cancelRunMock(...args),
+  getHookByToken: (...args: unknown[]) => resumeHookMock(...args),
   getWorld: (...args: unknown[]) => getWorldMock(...args),
   resumeHook: (...args: unknown[]) => resumeHookMock(...args),
   start: (...args: unknown[]) => startMock(...args),
@@ -57,7 +58,7 @@ describe("session timeout steps", () => {
 
     await signalSessionTimeoutStep({ token: "session-1:session-timeout" });
 
-    expect(resumeHookMock).toHaveBeenCalledWith(TIMEOUT_HOOK.token, {
+    expect(resumeHookMock).toHaveBeenCalledWith(`eve:inbox:v1:${TIMEOUT_HOOK.token}`, {
       kind: "session-timeout",
     });
   });

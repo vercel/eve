@@ -61,10 +61,10 @@ export class SessionExecution {
     return this.input.cursor;
   }
 
-  async runTurn(delivery: TurnStepPayload): Promise<TurnOutcome> {
+  async runTurn(delivery: TurnStepPayload | undefined): Promise<TurnOutcome> {
     const { commandInbox, cursor, ledger, queue } = this.input;
     const control = new TurnRouting({
-      callerCallId: delivery.kind === "deliver" ? delivery.caller?.callId : undefined,
+      callerCallId: delivery?.kind === "deliver" ? delivery.caller?.callId : undefined,
       commandInbox,
       cursor,
       expectedTurnId: activeTurnId(cursor.sessionState.emissionState),

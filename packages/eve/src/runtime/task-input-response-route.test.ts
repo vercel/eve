@@ -30,7 +30,7 @@ describe("task input response capability", () => {
     );
 
     expect(response.status).toBe(202);
-    expect(resumeHookMock).toHaveBeenCalledWith(TARGET_TOKEN, {
+    expect(resumeHookMock).toHaveBeenCalledWith(`eve:inbox:v1:${TARGET_TOKEN}`, {
       kind: "send",
       payload: { inputResponses: [{ optionId: "approve", requestId: "req-1" }] },
     });

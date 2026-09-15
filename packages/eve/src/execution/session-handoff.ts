@@ -1,3 +1,4 @@
+import type { WorkflowEntryResult } from "#execution/workflow-entry-input.js";
 import { createHook, type Hook } from "#compiled/@workflow/core/index.js";
 
 import type { DeliverHookPayload, SessionCapabilities } from "#channel/types.js";
@@ -109,7 +110,7 @@ export interface SessionHandoffInput {
 
 export class SessionHandoff {
   private readonly input: SessionHandoffInput;
-  private anchor: Hook<{ readonly output: unknown }> | undefined;
+  private anchor: Hook<WorkflowEntryResult> | undefined;
   private releasedHookClaims: SessionHookClaims | undefined;
 
   constructor(input: SessionHandoffInput) {
@@ -147,7 +148,7 @@ export class SessionHandoff {
   }
 
   /** After a transfer, the original run parks until the final owner reports the session result. */
-  async awaitAnchoredResult(): Promise<{ readonly output: unknown }> {
+  async awaitAnchoredResult(): Promise<WorkflowEntryResult> {
     if (this.anchor === undefined) throw new Error("Session anchor was never claimed.");
     try {
       return await this.anchor;
@@ -261,7 +262,7 @@ export class SessionHandoff {
   private async ensureAnchor(): Promise<void> {
     // Only the original run outlives successors; intermediate owners exit.
     if (!this.input.isInitialOwner || this.anchor !== undefined) return;
-    this.anchor = createHook<{ readonly output: unknown }>({ token: this.input.anchorToken });
+    this.anchor = createHook<WorkflowEntryResult>({ token: this.input.anchorToken });
     await claimHookOwnership(this.anchor);
   }
 }

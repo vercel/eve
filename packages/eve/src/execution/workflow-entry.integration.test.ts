@@ -8,6 +8,7 @@ import { createTestRuntime } from "#internal/testing/app-harness.js";
 import { waitForHook } from "#internal/testing/workflow-test-helpers.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { workflowEntry } from "#execution/workflow-entry.js";
+import { sessionInboxHookToken } from "#execution/session-inbox/address.js";
 import { sessionCommandHookToken } from "#execution/session-command-token.js";
 import {
   buildSessionAttributes,
@@ -346,10 +347,10 @@ describe("workflowEntry integration", () => {
         await waitForHook(
           { runId: run.runId },
           {
-            token: continuationToken,
+            token: sessionInboxHookToken(continuationToken),
           },
         );
-        await resumeHook(continuationToken, {
+        await resumeHook(sessionInboxHookToken(continuationToken), {
           kind: "send",
           payload: { message: "follow up after auth" },
         });
@@ -417,8 +418,11 @@ describe("workflowEntry integration", () => {
 
         // An ordinary message while the challenge is open runs as a normal
         // turn instead of queueing behind the callback.
-        await waitForHook({ runId: run.runId }, { token: continuationToken });
-        await resumeHook(continuationToken, {
+        await waitForHook(
+          { runId: run.runId },
+          { token: sessionInboxHookToken(continuationToken) },
+        );
+        await resumeHook(sessionInboxHookToken(continuationToken), {
           auth: {
             attributes: {},
             authenticator: "test-idp",
@@ -477,7 +481,7 @@ describe("workflowEntry integration", () => {
         // The granted authorization serves the next explicit tool request.
         // (No waitForHook here: it only reports never-received hooks, and
         // the continuation hook already received the intervening message.)
-        await resumeHook(continuationToken, {
+        await resumeHook(sessionInboxHookToken(continuationToken), {
           auth: {
             attributes: {},
             authenticator: "test-idp",
@@ -546,8 +550,11 @@ describe("workflowEntry integration", () => {
           (event) => event.type === "authorization.required",
         );
 
-        await waitForHook({ runId: run.runId }, { token: continuationToken });
-        await resumeHook(continuationToken, {
+        await waitForHook(
+          { runId: run.runId },
+          { token: sessionInboxHookToken(continuationToken) },
+        );
+        await resumeHook(sessionInboxHookToken(continuationToken), {
           kind: "send",
           payload: { message: "This must not become a second task turn." },
         });
@@ -619,8 +626,11 @@ describe("workflowEntry integration", () => {
           (event) => event.type === "session.waiting",
         );
 
-        await waitForHook({ runId: run.runId }, { token: continuationToken });
-        await resumeHook(continuationToken, {
+        await waitForHook(
+          { runId: run.runId },
+          { token: sessionInboxHookToken(continuationToken) },
+        );
+        await resumeHook(sessionInboxHookToken(continuationToken), {
           kind: "send",
           payload: { message: "Use the get_weather tool to check the weather in Lisbon." },
         });
@@ -719,8 +729,11 @@ describe("workflowEntry integration", () => {
         // without producing a parent turn. The callback must still surface
         // in the continued wait instead of stalling until unrelated
         // session activity re-parks the owner.
-        await waitForHook({ runId: run.runId }, { token: continuationToken });
-        await resumeHook(continuationToken, { kind: "cancel" });
+        await waitForHook(
+          { runId: run.runId },
+          { token: sessionInboxHookToken(continuationToken) },
+        );
+        await resumeHook(sessionInboxHookToken(continuationToken), { kind: "cancel" });
         // Let the owner consume the no-op cancel and re-enter the parked
         // wait before the callback fires; back-to-back resumes could
         // otherwise surface the callback in the first wait iteration and
@@ -788,14 +801,14 @@ describe("workflowEntry integration", () => {
       const hook = await waitForHook(
         { runId: run.runId },
         {
-          token: continuationToken,
+          token: sessionInboxHookToken(continuationToken),
         },
       );
 
       try {
         const firstTurn = await stream.nextTurn();
 
-        expect(hook.token).toBe(continuationToken);
+        expect(hook.token).toBe(sessionInboxHookToken(continuationToken));
         expect(firstTurn.at(-1)).toMatchObject({
           data: { continuationToken: "workflow-entry-conversation" },
           type: "session.waiting",
@@ -1007,7 +1020,7 @@ describe("workflowEntry integration", () => {
         await waitForHook(
           { runId: replacement.id },
           {
-            token: continuationToken,
+            token: sessionInboxHookToken(continuationToken),
           },
         );
       } finally {
@@ -1041,7 +1054,7 @@ describe("workflowEntry integration", () => {
             channelKind: "subagent",
             channelState: {
               callId: "call-1",
-              parentContinuationToken: childContinuationToken,
+              parentContinuationToken: sessionInboxHookToken(childContinuationToken),
               parentSessionId: "parent-session",
               subagentName: "researcher",
             },
@@ -1072,7 +1085,7 @@ describe("workflowEntry integration", () => {
             command: {
               caller: {
                 callId: "call-2",
-                replyTo: { kind: "hook", token: childContinuationToken },
+                replyTo: { kind: "hook", token: sessionInboxHookToken(childContinuationToken) },
                 subagentName: "researcher",
               },
               kind: "send",
@@ -1132,7 +1145,7 @@ describe("workflowEntry integration", () => {
               channelKind: "subagent",
               channelState: {
                 callId: "call-1",
-                parentContinuationToken: firstCallerToken,
+                parentContinuationToken: sessionInboxHookToken(firstCallerToken),
                 parentSessionId: "parent-session",
                 subagentName: "researcher",
               },
@@ -1317,7 +1330,9 @@ describe("workflowEntry integration", () => {
                 event.data.message?.includes("hello from b") === true,
             ),
           ).toBe(true);
-          await expect(waitForCommandHookOwner(continuationToken)).resolves.toMatchObject({
+          await expect(
+            waitForCommandHookOwner(sessionInboxHookToken(continuationToken)),
+          ).resolves.toMatchObject({
             runId: owner.runId,
           });
           await expect(
@@ -1395,7 +1410,10 @@ describe("workflowEntry integration", () => {
         },
       ]);
       const ownerStream = captureTurnEvents(owner);
-      await waitForHook({ runId: owner.runId }, { token: continuationToken });
+      await waitForHook(
+        { runId: owner.runId },
+        { token: sessionInboxHookToken(continuationToken) },
+      );
 
       const firstTurn = await ownerStream.nextTurn();
       expect(firstTurn.at(-1)?.type).toBe("session.waiting");
@@ -1466,7 +1484,7 @@ describe("workflowEntry integration", () => {
       await waitForHook(
         { runId: run.runId },
         {
-          token: continuationToken,
+          token: sessionInboxHookToken(continuationToken),
         },
       );
 
@@ -1481,7 +1499,7 @@ describe("workflowEntry integration", () => {
         });
         expect(firstTurn.at(-1)?.type).toBe("session.waiting");
 
-        await resumeHook(continuationToken, {
+        await resumeHook(sessionInboxHookToken(continuationToken), {
           kind: "send",
           payload: { message: "follow up without structured output" },
         });
@@ -1835,7 +1853,9 @@ async function expectHookClaims(runId: string, tokens: string[]): Promise<void> 
   );
   const cancellation = claims.filter((token) => token.startsWith("abrt_"));
   expect(cancellation).toHaveLength(1);
-  expect(claims.filter((token) => !token.startsWith("abrt_")).sort()).toEqual([...tokens].sort());
+  expect(claims.filter((token) => !token.startsWith("abrt_")).sort()).toEqual(
+    tokens.map(sessionInboxHookToken).sort(),
+  );
 }
 
 async function waitForRuntimeActionResult(runId: string, callId: string): Promise<unknown> {

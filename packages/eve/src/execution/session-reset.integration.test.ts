@@ -1,3 +1,4 @@
+import { sessionInboxHookToken } from "#execution/session-inbox/address.js";
 import { describe, expect, it } from "vitest";
 
 import { ContextContainer, contextStorage } from "#context/container.js";
@@ -25,7 +26,7 @@ describe("session reset integration", () => {
     const first = await start(sessionCommandInboxWorkflow, [{ token: continuationToken }]);
 
     try {
-      await waitForHook(first, { token: continuationToken });
+      await waitForHook(first, { token: sessionInboxHookToken(continuationToken) });
       await expect(sandboxes.open(first.runId)).resolves.toMatchObject({ id: "sandbox-1" });
 
       await expect(
@@ -40,7 +41,9 @@ describe("session reset integration", () => {
 
       const second = await start(sessionCommandInboxWorkflow, [{ token: continuationToken }]);
       try {
-        await expect(waitForHook(second, { token: continuationToken })).resolves.toMatchObject({
+        await expect(
+          waitForHook(second, { token: sessionInboxHookToken(continuationToken) }),
+        ).resolves.toMatchObject({
           runId: second.runId,
         });
         await expect(runtime.resolveContinuation(continuationToken)).resolves.toEqual({

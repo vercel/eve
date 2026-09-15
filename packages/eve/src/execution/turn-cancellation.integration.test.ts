@@ -1,3 +1,4 @@
+import { sessionInboxHookToken } from "#execution/session-inbox/address.js";
 import { describe, expect, it } from "vitest";
 import { getWorld, resumeHook, start } from "#internal/workflow/runtime.js";
 
@@ -372,7 +373,7 @@ describe("turn cancellation integration", () => {
       const stream = captureTurnEvents(run);
 
       try {
-        await waitForHookByToken(continuationToken);
+        await waitForHookByToken(sessionInboxHookToken(continuationToken));
         await fixture.recallStarted;
 
         await resumeHook(sessionCommandHookToken(run.runId), { kind: "cancel" });
@@ -486,7 +487,7 @@ describe("turn cancellation integration", () => {
         const stream = captureTurnEvents(run);
 
         try {
-          await waitForHookByToken(continuationToken);
+          await waitForHookByToken(sessionInboxHookToken(continuationToken));
           await fixture.toolStarted;
 
           await expect(
@@ -569,8 +570,11 @@ describe("turn cancellation integration", () => {
 
         await expectNoStepRetries(run.runId);
 
-        await waitForHook({ runId: run.runId }, { token: continuationToken });
-        await resumeHook(continuationToken, {
+        await waitForHook(
+          { runId: run.runId },
+          { token: sessionInboxHookToken(continuationToken) },
+        );
+        await resumeHook(sessionInboxHookToken(continuationToken), {
           kind: "send",
           payload: { message: "follow up after cancel" },
         });
@@ -647,8 +651,11 @@ describe("turn cancellation integration", () => {
         const duplicate = await cancelViaRoute(run.runId, { turnId: started.data.turnId });
         await expectCancelResponse(duplicate, { sessionId: run.runId, status: "accepted" });
 
-        await waitForHook({ runId: run.runId }, { token: continuationToken });
-        await resumeHook(continuationToken, {
+        await waitForHook(
+          { runId: run.runId },
+          { token: sessionInboxHookToken(continuationToken) },
+        );
+        await resumeHook(sessionInboxHookToken(continuationToken), {
           kind: "send",
           payload: { message: "follow up after route cancel" },
         });
@@ -709,7 +716,7 @@ describe("turn cancellation integration", () => {
       const stream = captureTurnEvents(run);
 
       try {
-        await waitForHookByToken(continuationToken);
+        await waitForHookByToken(sessionInboxHookToken(continuationToken));
         await fixture.toolStarted;
 
         await expect(address(rawToken).cancel()).resolves.toEqual({
@@ -808,8 +815,11 @@ describe("turn cancellation integration", () => {
         expect(fixture.toolAborts()).toBe(1);
 
         // The cleared pending batch must not re-dispatch on the next turn.
-        await waitForHook({ runId: run.runId }, { token: continuationToken });
-        await resumeHook(continuationToken, {
+        await waitForHook(
+          { runId: run.runId },
+          { token: sessionInboxHookToken(continuationToken) },
+        );
+        await resumeHook(sessionInboxHookToken(continuationToken), {
           kind: "send",
           payload: { message: "follow up after subagent cancel" },
         });
@@ -895,8 +905,11 @@ describe("turn cancellation integration", () => {
             message: "answer after hitl cancel",
           },
         };
-        await waitForHook({ runId: run.runId }, { token: continuationToken });
-        await resumeHook(continuationToken, answer);
+        await waitForHook(
+          { runId: run.runId },
+          { token: sessionInboxHookToken(continuationToken) },
+        );
+        await resumeHook(sessionInboxHookToken(continuationToken), answer);
 
         const followUpTurn = await stream.nextTurn();
 
@@ -997,8 +1010,11 @@ describe("turn cancellation integration", () => {
         // The stable inbox accepts a late cancel and the parked owner consumes it as a no-op.
         await resumeHook(sessionCommandHookToken(run.runId), { kind: "cancel" });
 
-        await waitForHook({ runId: run.runId }, { token: continuationToken });
-        await resumeHook(continuationToken, {
+        await waitForHook(
+          { runId: run.runId },
+          { token: sessionInboxHookToken(continuationToken) },
+        );
+        await resumeHook(sessionInboxHookToken(continuationToken), {
           kind: "send",
           payload: { message: "follow up after late cancel" },
         });

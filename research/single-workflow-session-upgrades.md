@@ -305,18 +305,19 @@ The state-level version only rejects incompatible handoffs. Client event-stream
 versions remain separate because stored output survives deployments.
 
 - `turn-dispatch.ts`, `dispatch-turn-step.ts`, and the inline/child split in `inline-turn.ts`.
-- The conversational turn workflow entrypoint, registration, and legacy runner in
-  `turn-workflow.ts`; the coordination it owns moves into `SessionExecution`.
+- The old turn engine in `turn-workflow.ts`; its coordination moves into
+  `SessionExecution`. The stable `turnWorkflow` name remains only as an import entrypoint.
 - `turn-control-protocol.ts`, `turn-control-receiver.ts`, private turn-control hooks, cross-run
   cancellation forwarding, and deferred control-hook disposal. Local abort, rollback, and
   settlement behavior stay.
 - `TurnExecutionCursor` driver reporting and `NextDriverAction` transport. The shared state cursor
   and typed step outcomes stay, minus deployment-skew transport fields.
 - Turn-workflow input migrations, driver-capability branches, and inbox wire versions v0–v6 with
-  their encoders and migration chains. Step types still needed move out of transport modules.
+  their migration chains. Historical decoding and outbound encoding live only in
+  `execution/legacy-session/`. Step types still needed move out of transport modules.
 
 Transport cutover is clean: new sessions use one stable ingress envelope with required deployment
-metadata, and legacy driver/child sessions expire or reset rather than entering a bridge. Ingress
+metadata, and legacy driver/child sessions enter the isolated one-time import in `execution/legacy-session/` on their next turn dispatch. The import preserves committed conversation data and interrupts pending execution; old drivers remain stream anchors until final completion. Ingress
 can still be newer than a busy owner, so the owner validates that one envelope and rejects
 unsupported commands instead of translating them. Nothing deleted here is replaced by wait
 migration, callback rebinding, or cross-version coordination.

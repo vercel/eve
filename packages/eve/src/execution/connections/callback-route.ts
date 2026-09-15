@@ -1,3 +1,4 @@
+import { resumeAuthorizationCallback } from "#execution/legacy-session/authorization.js";
 /**
  * Framework-shipped callback route used by in-turn interactive
  * connection authorization.
@@ -22,7 +23,6 @@
  * internet.
  */
 
-import { resumeHook } from "#internal/workflow/runtime.js";
 import type { RouteContext } from "#public/definitions/channel.js";
 import { buildAuthorizationCompletePage } from "#runtime/connections/authorization-complete-page.js";
 import type { AuthorizationCallback } from "#shared/connection-types.js";
@@ -52,7 +52,7 @@ export async function handleConnectionCallbackRequest(
 
   try {
     const authorizationCallback = { attemptId, callback, connectionName: name };
-    await resumeHook(token, {
+    await resumeAuthorizationCallback(token, {
       kind: "authorization-callback" as const,
       payloads: [{ authorizationCallback }],
     });

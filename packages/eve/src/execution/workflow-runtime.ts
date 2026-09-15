@@ -71,7 +71,7 @@ import { isAgentTraceContext } from "#tracing/agent-trace-context.js";
 import { sessionCommandHookToken } from "#execution/session-command-token.js";
 import {
   AcceptedSessionIdentityError,
-  requireSessionId,
+  resolveSessionInbox,
   resumeSessionInbox,
 } from "#execution/session-inbox/resume.js";
 import type { SessionInboxAddress } from "#execution/session-inbox/address.js";
@@ -322,10 +322,7 @@ export function createWorkflowRuntime(config: {
       continuationToken: string,
     ): Promise<{ sessionId: string } | undefined> {
       try {
-        const hook = await getHookByToken(continuationToken);
-        const metadata: unknown = await hook.metadata;
-        const sessionId = requireSessionId(metadata);
-        return { sessionId };
+        return await resolveSessionInbox(continuationToken);
       } catch (error) {
         if (HookNotFoundError.is(error)) {
           return undefined;

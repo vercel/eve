@@ -1,3 +1,5 @@
+import { handleExpiredLegacyAuthorization } from "#execution/legacy-session/authorization.js";
+import { EVE_ROUTE_PREFIX } from "#protocol/routes.js";
 import type { SessionAuthContext, SessionParent, SessionTraceContext } from "#channel/types.js";
 import type { Session } from "#channel/session.js";
 import { resolveForwardedPrincipal } from "#channel/forwarded-principal.js";
@@ -124,6 +126,14 @@ export function eveChannel(input: EveChannelInput): EveChannel {
         return await respond();
       }),
 
+      GET(
+        `${EVE_ROUTE_PREFIX}/connections/:name/callback/:token`,
+        handleExpiredLegacyAuthorization,
+      ),
+      POST(
+        `${EVE_ROUTE_PREFIX}/connections/:name/callback/:token`,
+        handleExpiredLegacyAuthorization,
+      ),
       GET(EVE_CONNECTION_CALLBACK_ROUTE_PATTERN, handleConnectionCallbackRequest),
       POST(EVE_CONNECTION_CALLBACK_ROUTE_PATTERN, handleConnectionCallbackRequest),
       POST(EVE_ACTIVITY_ROUTE_PATTERN, handleActivityRequest),

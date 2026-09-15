@@ -19,3 +19,8 @@ export function isSessionInboxAddress(value: unknown): value is SessionInboxAddr
     !value.sessionId.includes(":")
   );
 }
+
+/** Physical addresses are disjoint from hooks owned by pre-cutover drivers. */
+export function sessionInboxHookToken(token: string): string {
+  return token.startsWith("eve:inbox:v1:") ? token : `eve:inbox:v1:${token}`;
+}

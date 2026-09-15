@@ -1,3 +1,4 @@
+import { sessionInboxHookToken } from "#execution/session-inbox/address.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { context as apiContext } from "@opentelemetry/api";
 import { AsyncLocalStorageContextManager } from "@opentelemetry/context-async-hooks";
@@ -224,7 +225,7 @@ describe("createWorkflowRuntime command dispatch", () => {
       }),
     ).resolves.toEqual({ sessionId: "owner-run", status: "accepted" });
 
-    expect(resumeHookMock).toHaveBeenCalledWith("test:token", {
+    expect(resumeHookMock).toHaveBeenCalledWith(sessionInboxHookToken("test:token"), {
       auth: null,
       caller,
       kind: "send",
@@ -397,7 +398,7 @@ describe("createWorkflowRuntime command dispatch", () => {
         continuationToken: "eve:token",
       }),
     ).resolves.toEqual({ previousSessionId: "session-1", status: "reset" });
-    expect(resumeHookMock).toHaveBeenCalledWith("eve:token", {
+    expect(resumeHookMock).toHaveBeenCalledWith(sessionInboxHookToken("eve:token"), {
       kind: "reset",
       reason: "User requested /new",
     });
@@ -428,7 +429,7 @@ describe("createWorkflowRuntime#resolveContinuation", () => {
     await expect(buildRuntime().resolveContinuation("test:token")).resolves.toEqual({
       sessionId: "owner-session",
     });
-    expect(getHookByTokenMock).toHaveBeenCalledWith("test:token");
+    expect(getHookByTokenMock).toHaveBeenCalledWith(sessionInboxHookToken("test:token"));
   });
 
   it("returns undefined for an unknown token", async () => {
@@ -456,7 +457,7 @@ describe("waitForCommandHookOwner", () => {
     });
 
     await expect(waitForCommandHookOwner("task:token")).resolves.toEqual({ runId: "winning-run" });
-    expect(getHookByTokenMock).toHaveBeenCalledOnce();
+    expect(getHookByTokenMock).toHaveBeenCalledExactlyOnceWith("task:token");
   });
 
   it("does not turn storage failures into missing ownership", async () => {

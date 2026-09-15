@@ -5,14 +5,17 @@ import { sessionHookPumpWorkflow } from "#internal/testing/session-hook-pump-wor
 import { waitForHook } from "#internal/testing/workflow-test-helpers.js";
 import { getHookByToken, resumeHook, start } from "#internal/workflow/runtime.js";
 import { sessionCommandHookToken } from "#execution/session-command-token.js";
-import { SESSION_INBOX_SESSION_ID_METADATA_KEY } from "#execution/session-inbox/address.js";
+import {
+  SESSION_INBOX_SESSION_ID_METADATA_KEY,
+  sessionInboxHookToken,
+} from "#execution/session-inbox/address.js";
 
 describe("session command inbox integration", () => {
   it("pumps a burst across aliases while the owner waits on an independent hook", async () => {
     const aliases = ["http:pump:first", "http:pump:second"];
     const releaseToken = "pump:release";
     const run = await start(sessionHookPumpWorkflow, [{ aliases, releaseToken }]);
-    const tokens = [sessionCommandHookToken(run.runId), ...aliases];
+    const tokens = [sessionCommandHookToken(run.runId), ...aliases.map(sessionInboxHookToken)];
     try {
       for (const token of [...tokens, releaseToken]) await waitForHook(run, { token });
       const messages = ["one", "two", "three", "four", "five", "six"].map((message) => ({
@@ -36,11 +39,11 @@ describe("session command inbox integration", () => {
     try {
       await Promise.all([
         waitForHook({ runId: run.runId }, { token: stableToken }),
-        waitForHook({ runId: run.runId }, { token: channelToken }),
+        waitForHook({ runId: run.runId }, { token: sessionInboxHookToken(channelToken) }),
       ]);
 
       for (const token of [stableToken, channelToken]) {
-        const hook = await getHookByToken(token);
+        const hook = await getHookByToken(sessionInboxHookToken(token));
         const metadata = (await hook.metadata) as Record<string, unknown> | undefined;
         expect(metadata?.[SESSION_INBOX_SESSION_ID_METADATA_KEY], `hook ${token}`).toBe(run.runId);
       }
@@ -58,11 +61,11 @@ describe("session command inbox integration", () => {
     try {
       await Promise.all([
         waitForHook({ runId: run.runId }, { token: stableToken }),
-        waitForHook({ runId: run.runId }, { token: channelToken }),
+        waitForHook({ runId: run.runId }, { token: sessionInboxHookToken(channelToken) }),
       ]);
 
       await resumeHook(stableToken, { kind: "send", payload: { message: "by id" } });
-      await resumeHook(channelToken, {
+      await resumeHook(sessionInboxHookToken(channelToken), {
         kind: "deliver",
         payloads: [{ message: "by channel" }],
       });
@@ -83,13 +86,19 @@ describe("session command inbox integration", () => {
 
     try {
       await Promise.all([
-        waitForHook({ runId: run.runId }, { token: oldToken }),
-        waitForHook({ runId: run.runId }, { token: replacementToken }),
+        waitForHook({ runId: run.runId }, { token: sessionInboxHookToken(oldToken) }),
+        waitForHook({ runId: run.runId }, { token: sessionInboxHookToken(replacementToken) }),
       ]);
 
-      await resumeHook(replacementToken, { kind: "send", payload: { message: "replacement" } });
-      await resumeHook(oldToken, { kind: "send", payload: { message: "old" } });
-      await resumeHook(replacementToken, {
+      await resumeHook(sessionInboxHookToken(replacementToken), {
+        kind: "send",
+        payload: { message: "replacement" },
+      });
+      await resumeHook(sessionInboxHookToken(oldToken), {
+        kind: "send",
+        payload: { message: "old" },
+      });
+      await resumeHook(sessionInboxHookToken(replacementToken), {
         kind: "send",
         payload: { message: "replacement again" },
       });

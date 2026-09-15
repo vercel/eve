@@ -1,3 +1,6 @@
+import { HookNotFoundError } from "#compiled/@workflow/errors/index.js";
+import { resumeLegacyInbox, resolveLegacyInbox } from "#execution/legacy-session/inbox.js";
+import { sessionInboxHookToken } from "#execution/session-inbox/address.js";
 import type {
   DeliverHookPayload,
   SessionCommand,
@@ -9,7 +12,7 @@ import {
   SESSION_INBOX_SESSION_ID_METADATA_KEY,
   type SessionInboxAddress,
 } from "#execution/session-inbox/address.js";
-import { resumeHook } from "#internal/workflow/runtime.js";
+import { getHookByToken, resumeHook } from "#internal/workflow/runtime.js";
 import { isObject } from "#shared/guards.js";
 
 export interface ResumedSessionInboxHook {
@@ -31,7 +34,13 @@ export async function resumeSessionInbox(
       throw new Error("Session inbox target has an invalid address.");
     token = sessionCommandHookToken(address.sessionId);
   }
-  const hook = await resumeHook(token, command);
+  let hook;
+  try {
+    hook = await resumeHook(sessionInboxHookToken(token), command);
+  } catch (error) {
+    if (!HookNotFoundError.is(error)) throw error;
+    return await resumeLegacyInbox(token, command);
+  }
   let identity: Promise<string> | undefined;
   return {
     ownerRunId: hook.runId,
@@ -62,4 +71,15 @@ export function requireSessionId(metadata: unknown): string {
   if (typeof value !== "string" || value.length === 0)
     throw new Error("Session hook metadata is missing its session ID.");
   return value;
+}
+
+export async function resolveSessionInbox(token: string): Promise<{ sessionId: string }> {
+  try {
+    const hook = await getHookByToken(sessionInboxHookToken(token));
+    return { sessionId: requireSessionId(await hook.metadata) };
+  } catch (error) {
+    if (!HookNotFoundError.is(error)) throw error;
+    const target = await resolveLegacyInbox(token);
+    return { sessionId: target.sessionId };
+  }
 }

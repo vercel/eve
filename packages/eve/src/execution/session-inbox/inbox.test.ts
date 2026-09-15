@@ -1,3 +1,4 @@
+import { sessionInboxHookToken } from "#execution/session-inbox/address.js";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -310,7 +311,7 @@ describe("createSessionInbox", () => {
     expect(createHookMock).toHaveBeenCalledTimes(2);
     expect(createHookMock).toHaveBeenCalledWith({
       metadata: { sessionId: "session-1" },
-      token: "stable",
+      token: sessionInboxHookToken("stable"),
     });
     await inbox.dispose();
   });
@@ -528,7 +529,7 @@ function installHooks(...hooks: readonly MockHook[]): void {
   const queue = [...hooks];
   createHookMock.mockImplementation((options: { readonly token: string }) => {
     const hook = queue.shift();
-    if (hook === undefined || hook.token !== options.token) {
+    if (hook === undefined || sessionInboxHookToken(hook.token) !== options.token) {
       throw new Error(`Unexpected hook token "${options.token}".`);
     }
     return hook.hook;

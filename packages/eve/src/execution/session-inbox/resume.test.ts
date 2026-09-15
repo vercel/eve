@@ -1,3 +1,4 @@
+import { sessionInboxHookToken } from "#execution/session-inbox/address.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { sessionCommandHookToken } from "#execution/session-command-token.js";
@@ -22,7 +23,7 @@ describe("session inbox resume", () => {
     const receipt = await resumeSessionInbox(token, { kind: "clear" });
     expect(receipt.ownerRunId).toBe("owner-2");
     await expect(receipt.sessionId).resolves.toBe("session-1");
-    expect(resumeHookMock).toHaveBeenCalledWith(token, { kind: "clear" });
+    expect(resumeHookMock).toHaveBeenCalledWith(sessionInboxHookToken(token), { kind: "clear" });
   });
 
   it("resolves a saved public address through the stable token", async () => {
@@ -31,7 +32,7 @@ describe("session inbox resume", () => {
     resumeHookMock.mockResolvedValue(hook);
 
     await resumeSessionInbox({ sessionId: "session-1" }, { kind: "compact" });
-    expect(resumeHookMock).toHaveBeenCalledWith(token, { kind: "compact" });
+    expect(resumeHookMock).toHaveBeenCalledWith(sessionInboxHookToken(token), { kind: "compact" });
   });
   it("does not hydrate metadata until an accepted alias caller asks for identity", async () => {
     const metadata = vi.fn(() => Promise.resolve({ sessionId: "anchor" }));

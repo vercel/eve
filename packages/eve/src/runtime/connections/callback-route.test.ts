@@ -52,13 +52,13 @@ describe("handleConnectionCallbackRequest", () => {
 
   it("forwards a GET callback into resumeHook as parsed params with no request headers", async () => {
     resumeHookMock.mockResolvedValueOnce(undefined);
-    const url = `https://app.example.com${createEveConnectionCallbackRoutePath("linear", "attempt-1", "tok123")}?code=abc&state=xyz`;
+    const url = `https://app.example.com${createEveConnectionCallbackRoutePath("linear", "attempt-1", "eve:inbox:v1:tok123")}?code=abc&state=xyz`;
     const response = await handleConnectionCallbackRequest(
       new Request(url, {
         headers: { "x-probe": "1" },
         method: "GET",
       }),
-      buildRouteContext({ attemptId: "attempt-1", name: "linear", token: "tok123" }),
+      buildRouteContext({ attemptId: "attempt-1", name: "linear", token: "eve:inbox:v1:tok123" }),
     );
 
     expect(response.status).toBe(200);
@@ -71,7 +71,7 @@ describe("handleConnectionCallbackRequest", () => {
 
     expect(resumeHookMock).toHaveBeenCalledTimes(1);
     const [token, payload] = resumeHookMock.mock.calls[0] ?? [];
-    expect(token).toBe("tok123");
+    expect(token).toBe("eve:inbox:v1:tok123");
     // Exact match: only parsed params + method cross into the hook
     // payload. The inbound `x-probe` header (and any `Cookie`) is dropped.
     expect(payload).toEqual({
@@ -93,14 +93,14 @@ describe("handleConnectionCallbackRequest", () => {
 
   it("captures form-encoded POST bodies before resuming the hook", async () => {
     resumeHookMock.mockResolvedValueOnce(undefined);
-    const url = `https://app.example.com${createEveConnectionCallbackRoutePath("linear", "attempt-1", "tok123")}`;
+    const url = `https://app.example.com${createEveConnectionCallbackRoutePath("linear", "attempt-1", "eve:inbox:v1:tok123")}`;
     await handleConnectionCallbackRequest(
       new Request(url, {
         body: "code=abc&state=xyz",
         headers: { "content-type": "application/x-www-form-urlencoded" },
         method: "POST",
       }),
-      buildRouteContext({ attemptId: "attempt-1", name: "linear", token: "tok123" }),
+      buildRouteContext({ attemptId: "attempt-1", name: "linear", token: "eve:inbox:v1:tok123" }),
     );
 
     const [, payload] = resumeHookMock.mock.calls[0] ?? [];
@@ -131,7 +131,7 @@ describe("handleConnectionCallbackRequest", () => {
       new Request(
         `https://app.example.com${createEveConnectionCallbackRoutePath("linear", "attempt-1", "tok")}`,
       ),
-      buildRouteContext({ attemptId: "attempt-1", name: "linear", token: "tok" }),
+      buildRouteContext({ attemptId: "attempt-1", name: "linear", token: "eve:inbox:v1:tok" }),
     );
     expect(response.status).toBe(404);
     const body = await response.json();

@@ -1,3 +1,4 @@
+import { sessionInboxHookToken } from "#execution/session-inbox/address.js";
 import { createHook, type Hook } from "#compiled/@workflow/core/index.js";
 
 import type { DeliverPayload, HookPayload, SessionCommand } from "#channel/types.js";
@@ -23,6 +24,7 @@ export type SessionInboxPayload =
 
 type ReadMode = "session" | "interrupt" | "runtime";
 interface Source {
+  readonly token: string;
   readonly hook: Hook<SessionInboxPayload>;
   registered?: Promise<void>;
   stopping: boolean;
@@ -157,17 +159,21 @@ export function createSessionInbox(sessionId: string): SessionInboxHandle {
 
   return {
     get hookClaims() {
-      const [stable, ...aliases] = sources.map(({ hook }) => hook.token);
+      const [stable, ...aliases] = sources.map(({ token }) => token);
       if (stable === undefined) throw new Error("Session inbox has no stable hook claim.");
       return { aliases, stable };
     },
     async claimSessionHook(token) {
       if (!token) throw new Error("A session alias requires a nonempty continuation token.");
-      const existing = sources.find(({ hook }) => hook.token === token);
+      const existing = sources.find((source) => source.token === token);
       if (existing !== undefined) return await existing.registered;
       if (sources.length >= 256) throw new Error("A session may claim at most 256 addresses.");
       const source: Source = {
-        hook: createHook<SessionInboxPayload>({ token, metadata: { sessionId } }),
+        token,
+        hook: createHook<SessionInboxPayload>({
+          token: sessionInboxHookToken(token),
+          metadata: { sessionId },
+        }),
         stopping: false,
         closed: false,
       };

@@ -327,7 +327,7 @@ describe("routeProxiedDeliverStep", () => {
     });
 
     expect(resumeHookMock).toHaveBeenCalledWith(
-      "eve:session:original-child:inbox",
+      "eve:inbox:v1:eve:session:original-child:inbox",
       expect.objectContaining({
         kind: "deliver",
         payloads: [{ inputResponses: [{ requestId: "request-1", text: "yes" }] }],
@@ -374,7 +374,7 @@ describe("routeProxiedDeliverStep", () => {
     });
 
     expect(result).toMatchObject({ kind: "continue", remainder: undefined });
-    expect(resumeHookMock).toHaveBeenCalledWith("child-token", {
+    expect(resumeHookMock).toHaveBeenCalledWith("eve:inbox:v1:child-token", {
       auth,
       deliveryMetadata: undefined,
       kind: "deliver",
@@ -439,7 +439,7 @@ describe("routeProxiedDeliverStep", () => {
     });
 
     expect(resumeHookMock).toHaveBeenCalledWith(
-      "child-token-a",
+      "eve:inbox:v1:child-token-a",
       expect.objectContaining({
         ...delivery,
         deliveryMetadata: [expect.objectContaining({ deliveryId: "delivery-0", payloadIndex: 0 })],
@@ -447,7 +447,7 @@ describe("routeProxiedDeliverStep", () => {
       }),
     );
     expect(resumeHookMock).toHaveBeenCalledWith(
-      "child-token-b",
+      "eve:inbox:v1:child-token-b",
       expect.objectContaining({
         auth,
         caller,

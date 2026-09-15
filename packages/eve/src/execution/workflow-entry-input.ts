@@ -1,3 +1,4 @@
+import type { TokenUsage } from "#shared/token-usage.js";
 import type { RunInput, SessionCommand } from "#channel/types.js";
 import type { SessionCheckpoint, SessionHandoffTrigger } from "#execution/session-handoff.js";
 import type { AgentWorkflowRetentionDefinition } from "#shared/agent-definition.js";
@@ -32,5 +33,8 @@ export interface HandoffWorkflowEntryInput {
 export type WorkflowEntryInput = InitialWorkflowEntryInput | HandoffWorkflowEntryInput;
 
 export interface WorkflowEntryResult {
+  readonly isError?: boolean;
+  readonly usage?: TokenUsage;
+  readonly usageDelta?: TokenUsage;
   readonly output: unknown;
 }

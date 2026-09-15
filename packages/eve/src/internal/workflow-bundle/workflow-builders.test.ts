@@ -46,21 +46,23 @@ describe("applyWorkflowTransform", () => {
     }
   });
 
-  it("keeps eve workflow references stable when eve is the project root", async () => {
-    const filename = "src/execution/workflow-entry.ts";
+  it.each([
+    ["workflowEntry", "src/execution/workflow-entry.ts"],
+    ["turnWorkflow", "src/execution/legacy-session/turn-workflow.ts"],
+  ])("keeps %s stable across package versions and source moves", async (name, filename) => {
     const transformed = await applyWorkflowTransform(
       filename,
-      ["export async function workflowEntry(): Promise<void> {", '  "use workflow";', "}", ""].join(
-        "\n",
-      ),
+      [`export async function ${name}(): Promise<void> {`, '  "use workflow";', "}", ""].join("\n"),
       "workflow",
       resolvePackageSourceFilePath(filename),
       resolvePackageRoot(),
     );
-
-    expect(transformed.workflowManifest.workflows?.[filename]?.workflowEntry).toEqual({
-      workflowId: "workflow//eve//workflowEntry",
+    expect(transformed.workflowManifest.workflows?.[filename]?.[name]).toEqual({
+      workflowId: `workflow//eve//${name}`,
     });
+    expect(transformed.code).toContain(
+      `globalThis.__private_workflows.set("workflow//eve//${name}", ${name});`,
+    );
   });
 
   it("keeps the shared subagent tool workflow stable", async () => {

@@ -1,3 +1,4 @@
+import { sessionInboxHookToken } from "#execution/session-inbox/address.js";
 import { describe, expect, it } from "vitest";
 import { resumeHook, start } from "#internal/workflow/runtime.js";
 
@@ -57,7 +58,11 @@ async function deliver(
   const deadline = Date.now() + timeout;
   while (true) {
     try {
-      await resumeHook(continuationToken, { auth: null, kind: "send", payload });
+      await resumeHook(sessionInboxHookToken(continuationToken), {
+        auth: null,
+        kind: "send",
+        payload,
+      });
       return;
     } catch (error) {
       if (Date.now() > deadline) throw error;

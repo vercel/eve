@@ -206,6 +206,7 @@ function isTsLike(relPath) {
  *   rule37: Violation[];
  *   rule42: Violation[];
  *   rule43: Violation[];
+ *   rule44: Violation[];
  *   symlinks: string[];
  * }} state
  */
@@ -237,6 +238,7 @@ async function scanRepo(state) {
     checkRule37(posix, content, state.rule37);
     checkRule42(posix, lines, state.rule42);
     checkRule43(posix, lines, state.rule43);
+    checkRule44(posix, lines, state.rule44);
   }
 }
 
@@ -300,6 +302,36 @@ function checkRule43(posix, lines, violations) {
       message:
         "generic session plumbing imports the subagent executor. Move executor-specific behavior to composition roots or subagent-owned modules.",
     });
+  });
+}
+
+// Legacy import is reachable only from workflow discovery and ingress.
+const LEGACY_INGRESS_FILES = new Set([
+  "packages/eve/src/execution/session-inbox/resume.ts",
+  "packages/eve/src/execution/connections/callback-route.ts",
+  "packages/eve/src/eve-channel/index.ts",
+]);
+/** @param {string} posix @param {string[]} lines @param {Violation[]} violations */
+function checkRule44(posix, lines, violations) {
+  if (
+    posix.includes("/execution/legacy-session/") ||
+    posix.includes("/internal/testing/") ||
+    /\.(?:test|integration\.test|scenario\.test)\.ts$/.test(posix) ||
+    LEGACY_INGRESS_FILES.has(posix)
+  )
+    return;
+  lines.forEach((line, index) => {
+    if (
+      /from ["'][^"']*legacy-session\//.test(line) ||
+      /import\(["'][^"']*legacy-session\//.test(line)
+    )
+      violations.push({
+        rule: 44,
+        file: posix,
+        line: index + 1,
+        message:
+          "Legacy session import belongs at ingress; current execution must consume only normalized session state.",
+      });
   });
 }
 
@@ -1351,6 +1383,7 @@ async function main() {
     rule37: /** @type {Violation[]} */ ([]),
     rule42: /** @type {Violation[]} */ ([]),
     rule43: /** @type {Violation[]} */ ([]),
+    rule44: /** @type {Violation[]} */ ([]),
     symlinks: /** @type {string[]} */ ([]),
   };
 
@@ -1458,6 +1491,7 @@ async function main() {
 
   // Rule 43
   violations.push(...state.rule43);
+  violations.push(...state.rule44);
 
   if (violations.length === 0) {
     process.stdout.write("[eve:guard:invariants] ok — all mechanical lints passed.\n");
