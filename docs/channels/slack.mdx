@@ -137,6 +137,13 @@ Check the delivery path in order so you can identify where a Slack event stops:
 | A preview request receives an authentication page or protection error | Check whether the branch domain is exempt or the direct Slack request URL includes `x-vercel-protection-bypass`. Slack cannot complete an interactive Vercel Authentication challenge. | Add a Deployment Protection Exception for the branch domain, or add the automation bypass query parameter to a Slack app that uses environment-variable credentials. |
 | The webhook reaches the deployment but the agent does not reply       | Open the project's Vercel runtime logs, then inspect the session in **Agent Runs** when your team has access.                                                                          | Use the first missing or failed stage to narrow the issue to channel dispatch, the agent run, or outbound Slack delivery.                                            |
 
+## Audience
+
+Slack public channels are `public`; DMs, group DMs, and private channels are
+`private`. When Slack does not provide enough visibility information, eve uses
+`unknown`. The audience controls observability content capture, not access to
+the channel. See [Audience](./overview#audience) for the shared channel model.
+
 ## How the channel handles inbound events
 
 ### Message hooks

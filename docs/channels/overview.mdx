@@ -13,6 +13,19 @@ eve ships a base HTTP channel plus first-class platform channels, and you can au
 
 After a channel normalizes input, eve runs the same agent runtime regardless of where the message came from. Tools and instructions do not need channel-specific logic.
 
+## Audience
+
+When a channel creates a session, it assigns an observability audience:
+`public`, `private`, or `unknown`. The audience controls trace content capture,
+not who may call the channel. Each channel uses the visibility information it
+has; `unknown` is the safe default when it cannot classify a conversation.
+
+Route auth controls access and supplies the session principal. See [Auth &
+route protection](../guides/auth-and-route-protection) for principal types and
+authorization. See the [default eve HTTP channel](./eve#audience) for its
+mapping, or [custom channels](./custom#conversation-audience) to classify your
+own.
+
 ## Overlapping messages
 
 Channels default to `turnPolicy: "steer"`. When an accepted message arrives while a turn is active, eve first durably buffers the message, then cooperatively cancels the active turn and starts a replacement turn. The cancelled turn emits `turn.cancelled` followed by `session.waiting`; the replacement starts with a new turn ID. Output already streamed and completed side effects are not rolled back.
