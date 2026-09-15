@@ -185,6 +185,7 @@ describe("twilioChannel() inbound text pipeline", () => {
     expect(
       adapter.instrumentation?.audience?.({
         auth: null,
+        caller: { type: "anonymous" },
         channel: { kind: "channel:twilio" },
         environment: "production",
         mode: "conversation",

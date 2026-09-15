@@ -319,16 +319,24 @@ import { defineChannel, POST } from "eve/channels";
 
 export default defineChannel({
   state: { visibility: "workspace" as "workspace" | "private" | "unknown" },
-  audience({ state, auth }) {
+  audience({ state, caller }) {
     if (state.visibility === "workspace") return "public";
-    if (auth?.principalType === "user") return "private";
+    if (caller.type === "principal" && caller.principal.kind === "user") return "private";
     return "unknown";
   },
   routes: [POST("/webhook", async () => new Response("ok"))],
 });
 ```
 
-The input contains the channel's `state`, authenticated `auth` principal, `channel`, `mode`, and `environment`. Return `"public"`, `"private"`, or `"unknown"`. Return `"unknown"` when the channel does not have enough evidence to classify confidently; consumers treat it as non-public. A missing, throwing, asynchronous, or malformed classifier also fails closed to `"unknown"`.
+The input contains the channel's `state`, `caller`, `channel`, `mode`, and `environment`. A principal caller exposes only `kind`, `authenticator`, and `attributes`; it deliberately omits identifiers, issuers, and subjects. Return `"public"`, `"private"`, or `"unknown"`. Return `"unknown"` when the channel does not have enough evidence to classify confidently; consumers treat it as non-public. A missing, throwing, asynchronous, or malformed classifier also fails closed to `"unknown"`.
+
+Existing callbacks can continue using `auth?.principalType` while you migrate:
+
+```ts
+audience({ auth }) {
+  return auth?.principalType === "user" ? "private" : "unknown";
+}
+```
 
 Classification is fixed when the session is created. Continuation turns from a different caller do not reclassify an existing session. When a parent dispatches a local subagent, the child inherits the parent's audience while the framework forwards the parent's custom channel metadata separately.
 

@@ -118,6 +118,14 @@ describe("localTracePolicy", () => {
         authenticator: "vercel-oidc",
         principalType: "user",
       },
+      caller: {
+        type: "principal",
+        principal: {
+          attributes: {},
+          authenticator: "vercel-oidc",
+          kind: "user",
+        },
+      },
       channel: { kind: "http" },
       environment: "development",
       mode: "conversation",

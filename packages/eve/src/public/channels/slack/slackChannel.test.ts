@@ -440,6 +440,7 @@ describe("slackChannel()", () => {
     expect(
       adapter.instrumentation?.audience?.({
         auth: null,
+        caller: { type: "anonymous" },
         channel: { kind: "channel:slack" },
         environment: "production",
         mode: "conversation",

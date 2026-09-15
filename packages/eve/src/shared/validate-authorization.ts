@@ -33,11 +33,17 @@ export function validateAuthorizationSpec(
 
   const hasStart = auth.startAuthorization !== undefined;
   const hasComplete = auth.completeAuthorization !== undefined;
+  const hasCredentialOwner = Object.hasOwn(auth, "credentialOwner");
+  const hasPrincipalType = Object.hasOwn(auth, "principalType");
 
-  if (!hasStart && !hasComplete && auth.principalType !== undefined) {
-    if (auth.principalType !== "app" && auth.principalType !== "user") {
-      return `The "${fieldName}.principalType" field must be "app" or "user".`;
-    }
+  if (hasCredentialOwner && hasPrincipalType) {
+    return `The "${fieldName}" field must not provide both "credentialOwner" and "principalType".`;
+  }
+
+  const credentialOwnerField = hasCredentialOwner ? "credentialOwner" : "principalType";
+  const credentialOwner = hasCredentialOwner ? auth.credentialOwner : auth.principalType;
+  if (credentialOwner !== undefined && credentialOwner !== "app" && credentialOwner !== "user") {
+    return `The "${fieldName}.${credentialOwnerField}" field must be "app" or "user".`;
   }
 
   if (hasStart !== hasComplete) {
@@ -52,8 +58,8 @@ export function validateAuthorizationSpec(
     return `The "${fieldName}.completeAuthorization" field must be a function when provided.`;
   }
 
-  if (hasStart && auth.principalType !== "user") {
-    return `Interactive authorization (startAuthorization + completeAuthorization) is restricted to "principalType": "user" in v1. App-level credentials must use a getToken-only definition.`;
+  if (hasStart && credentialOwner !== "user") {
+    return `Interactive authorization (startAuthorization + completeAuthorization) is restricted to "${credentialOwnerField}": "user" in v1. App-level credentials must use a getToken-only definition.`;
   }
 
   if (
@@ -104,7 +110,8 @@ export function normalizeAuthorizationSpec(
 
   let nonInteractive: NonInteractiveAuthorizationDefinition = {
     getToken: auth.getToken as NonInteractiveAuthorizationDefinition["getToken"],
-    principalType: (auth.principalType ??
+    principalType: (auth.credentialOwner ??
+      auth.principalType ??
       "app") as NonInteractiveAuthorizationDefinition["principalType"],
   };
   if (vercelConnect !== undefined) nonInteractive = { ...nonInteractive, vercelConnect };

@@ -22,6 +22,10 @@ describe("validateAuthorizationSpec", () => {
       expect(validateAuthorizationSpec({ getToken, principalType: "user" })).toBeUndefined();
     });
 
+    it("returns undefined for a getToken-only definition with credentialOwner", () => {
+      expect(validateAuthorizationSpec({ credentialOwner: "user", getToken })).toBeUndefined();
+    });
+
     it("returns undefined for a getToken-only definition without principalType", () => {
       expect(validateAuthorizationSpec({ getToken })).toBeUndefined();
     });
@@ -55,6 +59,20 @@ describe("validateAuthorizationSpec", () => {
       expect(validateAuthorizationSpec({ getToken, principalType: "service" })).toMatch(
         /"auth\.principalType" field must be "app" or "user"/,
       );
+    });
+  });
+
+  describe("credential owner rejection", () => {
+    it("rejects an unknown credentialOwner value using the authored field name", () => {
+      expect(validateAuthorizationSpec({ credentialOwner: "service", getToken })).toMatch(
+        /"auth\.credentialOwner" field must be "app" or "user"/,
+      );
+    });
+
+    it("rejects both ownership fields even when they agree", () => {
+      expect(
+        validateAuthorizationSpec({ credentialOwner: "user", getToken, principalType: "user" }),
+      ).toMatch(/must not provide both "credentialOwner" and "principalType"/);
     });
   });
 
@@ -155,6 +173,19 @@ describe("normalizeAuthorizationSpec", () => {
       getToken,
       principalType: "user",
     });
+  });
+
+  it("normalizes credentialOwner and legacy principalType identically", () => {
+    const credentialOwner = normalizeAuthorizationSpec(
+      { credentialOwner: "user", getToken },
+      "testPrefix:",
+    );
+    const principalType = normalizeAuthorizationSpec(
+      { getToken, principalType: "user" },
+      "testPrefix:",
+    );
+
+    expect(credentialOwner).toEqual(principalType);
   });
 
   it("carries displayName through the non-interactive branch", () => {

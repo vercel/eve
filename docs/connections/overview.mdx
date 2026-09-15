@@ -69,6 +69,7 @@ export default defineMcpClientConnection({
   url: "https://mcp.linear.app/mcp",
   description: "Linear workspace.",
   auth: {
+    credentialOwner: "app",
     getToken: async () => ({ token: process.env.LINEAR_API_TOKEN! }),
   },
 });
@@ -76,7 +77,7 @@ export default defineMcpClientConnection({
 
 If the token has a known TTL, set `expiresAt` (milliseconds since epoch) and eve refreshes ahead of time rather than waiting for a `401`.
 
-When `getToken` is the only auth, `principalType` defaults to `"app"`: one shared credential keyed across all sessions. Switch to `principalType: "user"` when each end-user carries their own token.
+When `getToken` is the only auth, `credentialOwner` defaults to `"app"`: one shared credential keyed across all sessions. Set `credentialOwner: "user"` when each end-user carries their own token.
 
 eve resolves and caches connection tokens per step; they never land in conversation history or reach the model.
 
@@ -86,11 +87,13 @@ A connection credential can belong to the agent or to the person using it. This 
 
 | Credential owner | Use when                                                                       | Auth shape                                                                                                                                                   |
 | ---------------- | ------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| App              | The agent should use one shared service, bot, installation, or app credential. | `auth: { getToken }` defaults to `principalType: "app"`, or use `connect({ connector: "linear/myagent", principalType: "app" })` with Vercel Connect.        |
-| User             | Each end-user should authorize and use their own third-party account.          | `connect("linear/myagent")`, `connect({ connector: "linear/myagent", principalType: "user" })`, or `auth: { principalType: "user", getToken }`.              |
+| App              | The agent should use one shared service, bot, installation, or app credential. | `auth: { getToken }` defaults to `credentialOwner: "app"`, or use `connect({ connector: "linear/myagent", principalType: "app" })` with Vercel Connect.      |
+| User             | Each end-user should authorize and use their own third-party account.          | `connect("linear/myagent")`, `connect({ connector: "linear/myagent", principalType: "user" })`, or `auth: { credentialOwner: "user", getToken }`.            |
 | User from a job  | Background work should use the same user's OAuth grant that started the work.  | Start or resume the session through a channel whose route auth resolved that user, or pass an explicit user auth context when dispatching through a channel. |
 
-`principalType: "user"` does not mean "ask any human later." It means "key this credential to the authenticated user already attached to the eve session." If the run was started by a schedule, a same-project runtime token, `localDev()`, or another internal runtime path without an end-user principal, a user-scoped connection fails with `reason: "principal_required"` instead of starting OAuth. In that case, either authenticate the inbound channel as a user or configure the connection as app-scoped.
+`credentialOwner: "user"` does not mean "ask any human later." It means "key this credential to the authenticated user already attached to the eve session." If the run was started by a schedule, a same-project runtime token, `localDev()`, or another internal runtime path without an end-user principal, a user-scoped connection fails with `reason: "principal_required"` instead of starting OAuth. In that case, either authenticate the inbound channel as a user or configure the connection as app-scoped.
+
+`credentialOwner` is eve's field for raw connection auth. Existing raw `principalType` definitions still work, but are deprecated. `principalType` remains the correct option for `connect()` from `@vercel/connect/eve`, where it belongs to the external Vercel Connect API, and for route-auth session identities.
 
 ## No auth
 
@@ -132,7 +135,7 @@ export default defineOpenAPIConnection({
   spec: "https://warehouse.example.com/openapi.json",
   description: "The caller's tenant-scoped warehouse.",
   auth: (ctx) => ({
-    principalType: "user",
+    credentialOwner: "user",
     getToken: async () => ({
       token: await tenantToken(ctx.session.auth.current),
     }),
@@ -151,7 +154,7 @@ headers: {
 }
 ```
 
-Use `principalType: "user"` for per-user tokens so eve rejects unauthenticated callers and keys its step-local token cache by user. The resolver supplements route auth; it does not authenticate the inbound request. Static auth objects and header maps remain available when every caller shares the same configuration.
+Use `credentialOwner: "user"` for per-user tokens so eve rejects unauthenticated callers and keys its step-local token cache by user. The resolver supplements route auth; it does not authenticate the inbound request. Static auth objects and header maps remain available when every caller shares the same configuration.
 
 ## Per-connection approval
 

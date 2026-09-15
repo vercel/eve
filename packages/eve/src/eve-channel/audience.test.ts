@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 
 import { defaultEveAudience } from "#eve-channel/audience.js";
-import type { AudienceInput } from "#shared/conversation-context.js";
+import type { AudienceContext } from "#shared/conversation-context.js";
 
-function input(principalType: string | null): Omit<AudienceInput<undefined>, "state"> {
+function input(principalType: string | null): Omit<AudienceContext<undefined>, "state"> {
   return {
     auth:
       principalType === null
@@ -12,6 +12,13 @@ function input(principalType: string | null): Omit<AudienceInput<undefined>, "st
             attributes: {},
             authenticator: "test",
             principalType,
+          },
+    caller:
+      principalType === null || principalType === "anonymous"
+        ? { type: "anonymous" }
+        : {
+            type: "principal",
+            principal: { attributes: {}, authenticator: "test", kind: principalType },
           },
     channel: { kind: "http" },
     environment: "production",

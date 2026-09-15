@@ -125,7 +125,10 @@ const publishesNow = (input: unknown): boolean => {
 export default defineMcpClientConnection({
   url: "https://mcp.example.com/mcp",
   description: "Social publishing: draft, schedule, and manage posts.",
-  auth: { getToken: async () => ({ token: process.env.SOCIAL_API_KEY! }) },
+  auth: {
+    credentialOwner: "app",
+    getToken: async () => ({ token: process.env.SOCIAL_API_KEY! }),
+  },
   approval: ({ toolName, toolInput }) => {
     if (DELETE_TOOLS.some((t) => toolName.includes(t))) return "user-approval";
     if (PUBLISH_TOOLS.some((t) => toolName.includes(t))) {

@@ -25,12 +25,28 @@ export interface AudiencePrincipal {
   readonly attributes: Readonly<Record<string, string | readonly string[]>>;
 }
 
+export type AudienceCaller =
+  | { readonly type: "anonymous" }
+  | {
+      readonly type: "principal";
+      readonly principal: {
+        readonly kind: string;
+        readonly authenticator: string;
+        readonly attributes: Readonly<Record<string, string | readonly string[]>>;
+      };
+    };
+
 export interface AudienceInput<TState> {
   readonly state: TState;
+  /** @deprecated Use `caller`; it omits identity values unnecessary for audience classification. */
   readonly auth: AudiencePrincipal | null;
   readonly channel: ConversationContext["channel"];
   readonly mode: RunMode;
   readonly environment: ConversationEnvironment;
+}
+
+export interface AudienceContext<TState> extends AudienceInput<TState> {
+  readonly caller: AudienceCaller;
 }
 
 /** Safe projection for durable sessions created before `eve.conversation` existed. */

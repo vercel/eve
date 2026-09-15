@@ -5,7 +5,7 @@ import type { TrustedForwarders } from "#channel/forwarded-principal.js";
 import type { AuthFn } from "#public/channels/auth.js";
 import type { UploadPolicyInput } from "#public/channels/upload-policy.js";
 import type {
-  AudienceInput,
+  AudienceContext,
   Channel,
   ChannelContinuationOps,
   ChannelEvents,
@@ -109,7 +109,7 @@ export interface EveChannelInput {
    */
   readonly audience?:
     | ChannelAudience
-    | ((input: Omit<AudienceInput<undefined>, "state">) => ChannelAudience);
+    | ((input: Omit<AudienceContext<undefined>, "state">) => ChannelAudience);
   /**
    * The trusted-forwarders policy: which transport-authenticated callers may
    * assert a forwarded principal, callback-marked public trace audience, or
