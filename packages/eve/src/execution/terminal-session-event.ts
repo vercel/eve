@@ -20,7 +20,7 @@ type TerminalSessionEvent = Extract<
   { type: "session.completed" | "session.failed" }
 >;
 
-/** Delivers one out-of-turn terminal event through the native instrumentation lifecycle. */
+/** Delivers one out-of-turn terminal event, then closes its durable stream. */
 export async function emitTerminalSessionEvent(input: {
   readonly errorId?: string;
   readonly event: TerminalSessionEvent;
@@ -61,11 +61,12 @@ export async function emitTerminalSessionEvent(input: {
       const writer = input.parentWritable.getWriter();
       try {
         await writer.write(encodeMessageStreamEvent(stampMessageStreamEvent(event)));
+        await writer.close();
       } finally {
         writer.releaseLock();
       }
     } catch (error) {
-      log.error(`failed to write terminal ${event.type} event to durable stream`, {
+      log.error(`failed to write or close terminal ${event.type} event on durable stream`, {
         error,
         errorId: input.errorId,
         sessionId,
