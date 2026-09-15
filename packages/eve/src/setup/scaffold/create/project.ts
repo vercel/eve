@@ -301,59 +301,28 @@ dist
 `,
   "AGENTS.md": `# eve Agent App
 
-This project uses the eve framework: an agent is a directory of files under \`agent/\`, and eve compiles and runs it.
+The agent is authored in \`agent/\`; eve compiles and runs it. Names come from paths, so \`agent/tools/weather.ts\`, \`agent/connections/crm.ts\`, and \`agent/channels/support.ts\` are named \`weather\`, \`crm\`, and \`support\`.
 
-For a content-only change to the root agent's identity, purpose, tone, or response guidelines, edit its existing authored instructions. Fresh projects use \`agent/instructions.md\`; a project may instead use \`agent/instructions.ts\` or files under \`agent/instructions/\`. You do not need to read the framework docs for a content-only instructions change. A fresh project already has its selected model in \`agent/agent.ts\`; preserve that file unless the user asks to change the model.
+For a content-only change to the root agent's identity, purpose, tone, or response guidelines, edit its authored instructions (usually \`agent/instructions.md\`, sometimes \`agent/instructions.ts\` or \`agent/instructions/\`). Do not read framework docs or change \`agent/agent.ts\` unless the request changes agent-wide configuration.
 
-## Read the docs before writing code
+## Route framework changes
 
-\`\`\`sh
-ls node_modules/eve/docs
-\`\`\`
+Before authoring a framework capability, read its direct installed page for the file location, imports, and definition shape:
 
-Start with \`docs/README.md\`: it maps each task to the page that covers it. Read that page before authoring tools, connections, channels, skills, subagents, schedules, or deployment. In a workspace or local package install, resolve the installed \`eve\` package location first. If the package docs are missing, use https://eve.dev/docs.
+| Request | Read |
+| --- | --- |
+| Project layout | \`node_modules/eve/docs/getting-started.mdx\` |
+| Agent configuration | \`node_modules/eve/docs/agent-config.md\` |
+| Tool or approval policy | \`node_modules/eve/docs/tools/overview.mdx\` or \`tools/human-in-the-loop.md\` |
+| MCP or OpenAPI service | \`node_modules/eve/docs/connections/mcp.mdx\` or \`connections/openapi.mdx\` |
+| Built-in or custom channel | \`node_modules/eve/docs/channels/overview.mdx\` or \`channels/custom.mdx\` |
+| Skill or schedule | \`node_modules/eve/docs/skills.mdx\` or \`schedules.mdx\` |
+| Subagent, sandbox, auth, or client | \`node_modules/eve/docs/subagents/index.mdx\`, \`sandbox.mdx\`, \`guides/auth-and-route-protection.md\`, or \`guides/client/overview.mdx\` |
+| Vercel or other deployment | \`node_modules/eve/docs/guides/deployment/vercel.mdx\` or \`guides/deployment/overview.md\` |
 
-Use a bounded authoring loop:
+Read \`node_modules/eve/docs/README.md\` only when no row fits. Resolve the installed \`eve\` package first in a workspace or local install; if its docs are unavailable, use https://eve.dev/docs. Read the routed page before coding. Inspect only files you will change or imitate; do not enumerate the docs tree or recursively glob \`node_modules\` when the direct path is known.
 
-1. Read the relevant page and inspect only files you will modify or need to imitate.
-2. Stop discovery once the file location, imports, and definition shape are clear. Implement the smallest complete behavior the user requested.
-3. Run one narrow verification. Expand investigation only when it fails or the request needs project-specific details.
-
-Follow links or inspect public types only when the routed page leaves the task unanswered. Do not recursively glob \`node_modules\`, enumerate the entire docs tree, or read unrelated scaffold files when the direct path is known. Package-manager links can hide files from recursive glob tools even though direct reads work.
-
-## Prefer an existing integration
-
-When a task names an external product or service, search the registry before implementing its integration. For a generic capability, author a tool instead.
-
-\`\`\`sh
-eve registry search <query> --json
-eve registry view <item>
-\`\`\`
-
-Prefer items whose \`implementation\` is \`native\`; use Chat SDK adapters when no native channel fits. \`registry view\` links the item's documentation.
-
-Install without driving interactive prompts:
-
-\`\`\`sh
-eve add <item> --non-interactive
-\`\`\`
-
-Exit code 0 means setup completed, 1 failed, and 2 needs an answer or a prerequisite. On exit 2, run the \`next.command\` from the final NDJSON event. For a non-secret question, replace its \`<JSON value>\` answer placeholder with the answer you collected; string values need JSON quotes. Never pass a secret in \`--answer\`. See \`docs/install-integrations.mdx\` for setup prerequisites.
-
-## Use eve for Vercel operations
-
-Use eve to link and deploy Vercel projects:
-
-\`\`\`sh
-eve link --non-interactive --project <name-or-id> [--team <team-id-or-slug>]
-eve deploy --non-interactive --yes [--project <name-or-id>]
-\`\`\`
-
-A setup may report \`eve link\` as a prerequisite; run it, then retry the continuation. When a completed setup event has \`deploymentRequired: true\`, run the \`next\` command it reports.
-
-## Validate the change
-
-Run the validation the task requests. When it does not establish the behavior you changed, run the narrowest relevant check.
+For a named external product, search \`eve registry search <query> --json\`, inspect a candidate with \`eve registry view <item>\`, and install it with \`eve add <item> --non-interactive\`. For a generic capability, author a tool instead. Use \`eve link\` and \`eve deploy\` for Vercel operations. Implement the smallest complete behavior, then run the requested validation or the narrowest relevant check.
 `,
   "CLAUDE.md": `@AGENTS.md
 `,
