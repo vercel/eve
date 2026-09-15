@@ -2484,7 +2484,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
       renderer.renderSetupWarning("Model disconnected · /login");
       expect(screen.snapshot()).not.toContain("Model disconnected");
       renderer.setStartupPhase("connecting");
-      expect(screen.snapshot()).toContain("Connecting your model");
+      expect(screen.snapshot()).toContain("Checking saved connection");
       expect(screen.snapshot()).not.toContain("Model disconnected");
       expect(renderer.finishStartupDraft()).toEqual({
         draft: "Hello Alice",
@@ -2495,6 +2495,80 @@ describe("TerminalRenderer (inline scrollback)", () => {
       renderer.shutdown();
     },
   );
+
+  it.each([32, 80])(
+    "keeps startup editable across connection work and questions at %i columns",
+    async (columns) => {
+      const { renderer, screen, input } = makeRenderer(columns);
+      renderer.beginStartupDraft({ initialDraft: "Hello", tip: "/help", title: "Agent" });
+      const composerRow = screen
+        .snapshot()
+        .split("\n")
+        .findIndex((line) => line.includes("Hello"));
+      renderer.setStartupPhase("connecting");
+      renderer.setupFlow.begin("Connect a model", "pulse");
+      const interrupt = renderer.setupFlow.waitForInterrupt();
+      renderer.setupFlow.setStatus("Connecting with Vercel…");
+      expect(screen.snapshot()).toContain("Connecting with Vercel");
+      expect(screen.snapshot()).not.toContain("Connect a model");
+      expect(screen.snapshot()).not.toContain("Working");
+      expect(
+        screen
+          .snapshot()
+          .split("\n")
+          .findIndex((line) => line.includes("Hello")),
+      ).toBe(composerRow);
+      input.type(" 世界");
+      expect(screen.snapshot()).toContain("Hello 世界");
+      const answer = renderer.setupFlow.readSelect({
+        kind: "search",
+        message: "Connect a model",
+        options: [
+          { value: "vercel", label: "Vercel Account" },
+          { value: "openai", label: "OpenAI API Key" },
+        ],
+      });
+      expect(screen.snapshot()).toContain("Connect a model");
+      expect(screen.snapshot()).not.toContain("Hello 世界");
+      input.type("OpenAI");
+      input.enter();
+      await expect(answer).resolves.toEqual(["openai"]);
+      renderer.setupFlow.setStatus("Checking connection…");
+      input.type("!");
+      expect(screen.snapshot()).toContain("Hello 世界!");
+      input.enter();
+      renderer.setStartupPhase("preparing");
+      renderer.setupFlow.setStatus("Preparing your chat…");
+      input.type("Next message");
+      expect(screen.snapshot()).toContain("Preparing your chat");
+      expect(screen.snapshot()).not.toContain("Working");
+      interrupt.dispose();
+      renderer.setupFlow.end({ preserveDiagnostics: false });
+      input.type(" too");
+      expect(renderer.finishStartupDraft()).toEqual({
+        draft: "Next message too",
+        queuedPrompt: "Hello 世界!",
+      });
+      renderer.setStartupPhase(undefined);
+      renderer.shutdown();
+    },
+  );
+
+  it("restores the startup draft after a masked key question is cancelled", async () => {
+    const { renderer, input, screen } = makeRenderer();
+    renderer.beginStartupDraft({ initialDraft: "My message", tip: "/help", title: "Agent" });
+    renderer.setupFlow.begin("Connect a model", "pulse");
+    const answer = renderer.setupFlow.readText({ message: "API key", mask: true });
+    input.type("private-test-key");
+    expect(screen.snapshot()).not.toContain("private-test-key");
+    input.send("\x1b");
+    await expect(answer).resolves.toBeUndefined();
+    renderer.setupFlow.end({ preserveDiagnostics: false });
+    expect(screen.snapshot()).toContain("My message");
+    expect(renderer.finishStartupDraft().draft).toBe("My message");
+    renderer.setStartupPhase(undefined);
+    renderer.shutdown();
+  });
 
   it("lets Ctrl-C stop an editing-only startup draft", () => {
     const screen = new MockScreen({ columns: 80, rows: 30 });

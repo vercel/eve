@@ -259,35 +259,6 @@ describe("createPromptCommandHandler", () => {
     }
   });
 
-  it("keeps the setup panel open for an immediate onboarding handoff", async () => {
-    const runTuiSetupCommand = vi.fn(async () => ({
-      message: "Vercel CLI installed.",
-      preserveFlowDiagnostics: false,
-    }));
-    vi.doMock("./setup-commands.js", () => ({
-      SETUP_FLOW_CONFIG: {
-        login: { title: "Connect a model", indicator: "pulse" },
-      },
-      runTuiSetupCommand,
-    }));
-
-    try {
-      const setupFlow = setupFlowRenderer();
-      const handler = createPromptCommandHandler({ target: LOCAL_TARGET });
-      const handoffContext = Object.assign(context({ setupFlow }), {
-        keepSetupFlowOpen: true,
-      });
-
-      await handler.handle({ type: "extension", name: "login", argument: "" }, handoffContext);
-
-      expect(setupFlow.begin).toHaveBeenCalledWith("Connect a model", "pulse");
-      expect(setupFlow.end).not.toHaveBeenCalled();
-    } finally {
-      vi.doUnmock("./setup-commands.js");
-      vi.resetModules();
-    }
-  });
-
   it("folds setup-module load failures at the command adapter boundary", async () => {
     vi.doMock("./setup-commands.js", () => {
       throw new Error("Cannot find package 'oxc-parser'");

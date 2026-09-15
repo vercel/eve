@@ -80,8 +80,6 @@ import {
   type BootDetectionContext,
   type SetupIssue,
 } from "./setup-issues.js";
-import type { RegistryPlannerContext } from "#setup/flows/registry.js";
-import type { PlannerNavigation } from "#setup/prompter.js";
 import type { SetupFlowRenderer } from "./setup-flow.js";
 import type { TraceViewerRenderer } from "./traces/trace-viewer-session.js";
 import type { RemoteDevelopmentTarget } from "./target.js";
@@ -260,7 +258,7 @@ export type AgentTUIRenderer = {
    */
   renderAgentHeader?(header: AgentTUIAgentHeader): void;
   /** Keeps preliminary connection diagnostics out of the startup presentation. */
-  setStartupPhase?(phase: "starting" | "connecting" | undefined): void;
+  setStartupPhase?(phase: "starting" | "connecting" | "preparing" | undefined): void;
   /**
    * Commits a single informational line to the transcript. Used for session
    * recovery and slash-command results. Optional.
@@ -395,19 +393,9 @@ export interface PromptCommandHandlerContext {
   readonly title: string;
   /** Provider entry authorized by confirmed boot-time model-access evidence. */
   readonly initialModelStep?: "provider";
-  readonly registryPlannerContext?: RegistryPlannerContext;
   readonly onOnboardingScreen?: (input: OnboardingScreenEvent) => void;
-  /** Overrides the standalone command title inside a composed setup journey. */
-  readonly setupFlowTitle?: string;
-  /** Progress owned by an enclosing journey while this command runs. */
-  readonly setupFlowNavigation?: PlannerNavigation;
   /** Live ChatGPT identity shown only inside model configuration UI. */
   readonly chatGptAccountLabel?: string;
-  /**
-   * Leaves the current setup panel mounted for the next automatic onboarding
-   * command. The runner closes it if no next command can proceed.
-   */
-  readonly keepSetupFlowOpen?: true;
   /** Settles runtime changes before the setup panel releases the screen. */
   readonly settleOutcome?: (outcome: PromptCommandOutcome) => Promise<PromptCommandOutcome>;
   readonly remoteConnection?: RemoteConnectionController;
@@ -706,12 +694,12 @@ export class EveTUIRunner {
    * header. Never throws: a missing or unauthorized `/eve/v1/info` simply
    * yields a header without the agent's configuration detail.
    */
-  async #renderAgentHeader(): Promise<string | undefined> {
+  async #loadInitialAgentInfo(): Promise<void> {
     const serverUrl = this.#serverUrl;
     if (serverUrl === undefined) {
       this.#reportBeforeFirstPaint();
       if (!this.#onboard) await this.#renderSetupIssues(undefined);
-      return this.#finishStartup();
+      return;
     }
 
     let info: AgentInfoResult | undefined;
@@ -733,11 +721,9 @@ export class EveTUIRunner {
         }
       }
     }
-    const initialDraft = this.#finishStartup();
     this.#reportBeforeFirstPaint();
     const headerInfo = this.#replaceAgentInfo(info);
     if (!this.#onboard) await this.#renderSetupIssues(headerInfo);
-    return initialDraft;
   }
 
   #finishStartup(): string | undefined {
@@ -800,10 +786,7 @@ export class EveTUIRunner {
     let followCurrentSession = false;
     let streamWithoutPrompt = false;
     this.#renderer.setStartupPhase?.("starting");
-    let initialDraft = await this.#renderAgentHeader();
-    if (this.#startupPrompt !== undefined) {
-      prompt = this.#startupPrompt;
-    }
+    await this.#loadInitialAgentInfo();
     this.#subscribeDevelopmentSandboxLogs();
     // Fire-and-forget: the link identity is network-bound to resolve, and the
     // first prompt must not wait on it. The segment appears when it lands.
@@ -823,6 +806,12 @@ export class EveTUIRunner {
       startupOutcome = await this.#runInitialAgentOnboarding(title);
     }
 
+    let initialDraft = this.#finishStartup();
+    if (startupOutcome?.cancelled || startupOutcome?.tone === "error") {
+      initialDraft = [this.#startupPrompt, initialDraft].filter(Boolean).join("\n\n") || undefined;
+    } else {
+      prompt = this.#startupPrompt;
+    }
     this.#startupActive = false;
     this.#replaceAgentInfo(this.#agentInfo);
     this.#paintSetupAttention();
@@ -1749,15 +1738,7 @@ export class EveTUIRunner {
 
   async #handleExtensionCommand(
     command: Extract<PromptCommand, { type: "extension" }>,
-    input: Pick<
-      PromptCommandHandlerContext,
-      | "initialModelStep"
-      | "registryPlannerContext"
-      | "setupFlowTitle"
-      | "setupFlowNavigation"
-      | "keepSetupFlowOpen"
-      | "title"
-    >,
+    input: Pick<PromptCommandHandlerContext, "initialModelStep" | "title">,
   ): Promise<PromptCommandOutcome | undefined> {
     const handler = this.#promptCommandHandler;
     if (handler === undefined)
@@ -1780,9 +1761,6 @@ export class EveTUIRunner {
       disabledConnectionReasons !== undefined && Object.keys(disabledConnectionReasons).length > 0
         ? { ...baseContext, disabledConnectionReasons }
         : baseContext;
-    if (input.keepSetupFlowOpen === true) {
-      return await handler.handle(command, { ...context, keepSetupFlowOpen: true });
-    }
     return await handler.handle(command, context);
   }
 
@@ -1817,6 +1795,10 @@ export class EveTUIRunner {
   async #settleCommandOutcome(outcome: PromptCommandOutcome): Promise<PromptCommandOutcome> {
     if (outcome.effect === undefined) return outcome;
     try {
+      if (outcome.effect.kind === "model-access-changed") {
+        if (this.#startupActive) this.#renderer.setStartupPhase?.("preparing");
+        this.#renderer.setupFlow?.setStatus("Preparing your chat…");
+      }
       await this.#applyCommandEffect(outcome.effect);
       const { effect: _effect, ...settled } = outcome;
       return settled;
@@ -1835,11 +1817,7 @@ export class EveTUIRunner {
     input: {
       readonly trigger: "startup" | "command";
       readonly initialModelStep?: "provider";
-      readonly registryPlannerContext?: RegistryPlannerContext;
       readonly onOnboardingScreen?: PromptCommandHandlerContext["onOnboardingScreen"];
-      readonly setupFlowTitle?: string;
-      readonly setupFlowNavigation?: PlannerNavigation;
-      readonly keepSetupFlowOpen?: true;
       readonly suppressSuccessfulTranscript?: true;
       readonly suppressCancelledTranscript?: true;
     },

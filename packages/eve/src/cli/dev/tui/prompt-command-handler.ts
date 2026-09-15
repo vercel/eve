@@ -86,8 +86,7 @@ export function createPromptCommandHandler(
       }
       const { runTuiSetupCommand, SETUP_FLOW_CONFIG } = setupCommands;
       const flowConfig = SETUP_FLOW_CONFIG[command.name];
-      flow.begin(context.setupFlowTitle ?? flowConfig.title, flowConfig.indicator);
-      flow.setNavigation?.(context.setupFlowNavigation);
+      flow.begin(flowConfig.title, flowConfig.indicator);
       let preserveFlowDiagnostics = true;
       try {
         const commandInput: TuiSetupCommandInput = {
@@ -100,9 +99,6 @@ export function createPromptCommandHandler(
         if (target.agentRoot !== undefined) commandInput.agentRoot = target.agentRoot;
         if (context.initialModelStep !== undefined) {
           commandInput.initialModelStep = context.initialModelStep;
-        }
-        if (context.registryPlannerContext !== undefined) {
-          commandInput.registryPlannerContext = context.registryPlannerContext;
         }
         if (context.onOnboardingScreen !== undefined) {
           commandInput.onOnboardingScreen = context.onOnboardingScreen;
@@ -118,9 +114,7 @@ export function createPromptCommandHandler(
         if (context.settleOutcome !== undefined) return await context.settleOutcome(outcome);
         return outcome;
       } finally {
-        if (context.keepSetupFlowOpen !== true) {
-          flow.end({ preserveDiagnostics: preserveFlowDiagnostics });
-        }
+        flow.end({ preserveDiagnostics: preserveFlowDiagnostics });
       }
     },
   };

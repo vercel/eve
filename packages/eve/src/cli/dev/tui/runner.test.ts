@@ -2056,6 +2056,43 @@ describe("EveTUIRunner initial input", () => {
     );
   });
 
+  it.each(["cancelled", "error"] as const)(
+    "keeps startup input through login and restores queued messages on %s",
+    async (result) => {
+      const login = createDeferred<void>();
+      const startup = {
+        headerTip: "/help",
+        finish: vi.fn(() => ({ draft: "still editing", queuedPrompt: "Hello Alice" })),
+      };
+      const handle = vi.fn(async () => {
+        await login.promise;
+        return result === "cancelled" ? { cancelled: true as const } : { tone: "error" as const };
+      });
+      const session = stubSession();
+      vi.spyOn(session, "send");
+      const renderer = fakeRenderer({ setupFlow: createFakeSetupFlowRenderer() });
+      const runner = new EveTUIRunner({
+        session,
+        renderer,
+        startup,
+        appRoot: "/tmp/agent",
+        onboard: true,
+        bootDetections: [],
+        promptCommandHandler: { handle },
+      });
+      const run = runner.run();
+      await vi.waitFor(() => expect(handle).toHaveBeenCalledOnce());
+      expect(startup.finish).not.toHaveBeenCalled();
+      login.resolve();
+      await run;
+      expect(startup.finish).toHaveBeenCalledOnce();
+      expect(session.send).not.toHaveBeenCalled();
+      expect(renderer.readPrompt).toHaveBeenCalledWith(
+        expect.objectContaining({ initialDraft: "Hello Alice\n\nstill editing" }),
+      );
+    },
+  );
+
   it("sends startup messages queued while the agent builds", async () => {
     const client = stubClient();
     vi.spyOn(client, "info").mockResolvedValue(AGENT_INFO);
@@ -3829,7 +3866,7 @@ describe("EveTUIRunner boot setup detection", () => {
     expect(renderCommandResult).not.toHaveBeenCalled();
     expect(renderSetupWarning).not.toHaveBeenCalled();
     expect(readPrompt).not.toHaveBeenCalled();
-    expect(setStartupPhase).toHaveBeenLastCalledWith("connecting");
+    expect(setStartupPhase).toHaveBeenLastCalledWith("preparing");
     refreshed.resolve(AGENT_INFO);
     await run;
     expect(renderAgentHeader).toHaveBeenCalledOnce();

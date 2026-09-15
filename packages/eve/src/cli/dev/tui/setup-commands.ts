@@ -8,11 +8,7 @@ import {
 
 import { runModelFlow } from "#setup/flows/model.js";
 import type { ProviderSelection } from "#setup/provider-settings.js";
-import {
-  RegistryFlowFailedError,
-  runRegistryFlow,
-  type RegistryPlannerContext,
-} from "#setup/flows/registry.js";
+import { RegistryFlowFailedError, runRegistryFlow } from "#setup/flows/registry.js";
 import type { Prompter } from "#setup/prompter.js";
 import { WizardCancelledError } from "#setup/step.js";
 
@@ -73,7 +69,6 @@ export interface TuiSetupCommandInput {
   /** Registry address supplied by `/add <item>`, confirmed and installed directly. */
   initialRegistryAddress?: string;
   /** Presentation and navigation supplied by an enclosing setup journey. */
-  registryPlannerContext?: RegistryPlannerContext;
   onOnboardingScreen?: (input: OnboardingScreenEvent) => void;
   /** Live ChatGPT identity shown only inside model configuration UI. */
   chatGptAccountLabel?: string;
@@ -323,7 +318,6 @@ async function executeSetupCommand(
           prompter,
           signal,
           initialAddress: input.initialRegistryAddress,
-          plannerContext: input.registryPlannerContext,
           onScreen: input.onOnboardingScreen,
           onItemStart: registryItemProgress(renderer),
           runItem: runRegistryItem,

@@ -38,6 +38,7 @@ import {
 import {
   enterBadge,
   renderFlowPanel,
+  flowMessageRows,
   renderAcknowledgeQuestion,
   renderModelEditorQuestion,
   renderSelectQuestion,
@@ -407,7 +408,10 @@ export class TerminalRenderer implements AgentTUIRenderer {
   readonly #fileContents = new FileContentCache();
   readonly #subagentHeaders = new Set<string>();
   #agentHeader?: AgentHeaderOptions;
-  #startupPhase?: "starting" | "connecting";
+  #startupPhase?: "starting" | "connecting" | "preparing";
+  #startupEditor?: LineState;
+  #startupConsumer?: (key: TerminalKey) => void;
+  #startupStartedAt = 0;
   #startupHeader?: { readonly name: string; readonly tip: string };
   #agentHeaderRendered = false;
   /** The last committed header body, to skip re-committing an unchanged banner. */
@@ -644,8 +648,10 @@ export class TerminalRenderer implements AgentTUIRenderer {
     this.#availablePromptCommands = options?.availablePromptCommands ?? PROMPT_COMMANDS;
   }
 
-  setStartupPhase(phase: "starting" | "connecting" | undefined): void {
+  setStartupPhase(phase: "starting" | "connecting" | "preparing" | undefined): void {
     this.#startupPhase = phase;
+    if (phase === undefined) this.#stopTicker();
+    else this.#startTicker();
     this.#paint();
   }
 
@@ -684,18 +690,31 @@ export class TerminalRenderer implements AgentTUIRenderer {
     this.#promptPlaceholderActive = true;
     this.#startupPhase = "starting";
     this.#startupHeader = { name: options.title, tip: options.tip };
+    this.#startupStartedAt = Date.now();
     let editor = lineOf(stripPromptControlCharacters(options.initialDraft ?? ""));
+    this.#startupEditor = editor;
     this.#syncInput(editor);
     this.#startCaretBlink();
+    this.#startTicker();
     this.#paint();
 
     const apply = (next: LineState) => {
       editor = next;
+      this.#startupEditor = next;
       this.#showCaret();
       this.#syncInput(editor);
       this.#paint();
     };
-    this.#consumeKey = (key) => {
+    this.#startupConsumer = (key) => {
+      if (key.type === "escape" && this.#flowInterrupt !== undefined) {
+        this.#flowInterrupt("escape");
+        return;
+      }
+      if (key.type === "ctrl-c" && this.#flowInterrupt !== undefined) {
+        this.#requestExit();
+        this.#flowInterrupt("ctrl-c");
+        return;
+      }
       const edited = applyLineEditorKey(editor, key, { multiline: true });
       if (edited !== undefined) {
         apply(edited);
@@ -707,14 +726,25 @@ export class TerminalRenderer implements AgentTUIRenderer {
       }
       if (key.type === "ctrl-c") this.#onExitRequest?.();
     };
+    this.#resumeStartupDraft();
+  }
+
+  #resumeStartupDraft(): void {
+    if (this.#startupEditor === undefined || this.#startupConsumer === undefined) return;
+    this.#clearKeyFlush();
+    this.#syncInput(this.#startupEditor);
+    this.#inputActive = true;
+    this.#consumeKey = this.#startupConsumer;
     this.#attachInput();
   }
 
   finishStartupDraft(): { draft: string; queuedPrompt: string | undefined } {
     const result = {
-      draft: this.#inputText,
+      draft: this.#startupEditor?.text ?? this.#inputText,
       queuedPrompt: this.#messageQueue.takePrompt(),
     };
+    this.#startupEditor = undefined;
+    this.#startupConsumer = undefined;
     this.#detachInput();
     this.#stopCaretBlink();
     this.#inputActive = false;
@@ -1824,13 +1854,13 @@ export class TerminalRenderer implements AgentTUIRenderer {
   }
 
   /**
-   * Opens the bordered flow panel for one setup command. Until the flow ends,
+   * Opens the setup flow for one command. Until the flow ends,
    * every flow line, question, and status renders inside it; the transcript
    * above stays untouched.
    */
   #beginSetupFlow(title: string, indicator: SetupFlowIndicator = "spinner"): void {
     this.#start();
-    this.#inputActive = false;
+    if (this.#startupEditor === undefined) this.#inputActive = false;
     this.#turnIndicator = { kind: "idle" };
     this.#status = "";
     const indicatorState: SetupFlowIndicatorState =
@@ -1865,7 +1895,8 @@ export class TerminalRenderer implements AgentTUIRenderer {
     const flow = this.#setupFlow;
     if (flow === undefined) return;
     this.#setupFlow = undefined;
-    this.#stopTicker();
+    if (this.#startupEditor !== undefined) this.#resumeStartupDraft();
+    else this.#stopTicker();
 
     if (preserveDiagnostics) {
       let evidence: string[] = [];
@@ -2615,7 +2646,8 @@ export class TerminalRenderer implements AgentTUIRenderer {
     this.#detachInput();
     // Back to the working state: the interrupt trap covers the gap until the
     // next question (or the flow's end).
-    if (this.#setupFlow !== undefined) this.#armFlowIdleTrap();
+    if (this.#startupEditor !== undefined) this.#resumeStartupDraft();
+    else if (this.#setupFlow !== undefined) this.#armFlowIdleTrap();
     // The next phase paints its complete state; the flow ticker covers slow work.
     if (this.#setupFlow === undefined) this.#paint();
   }
@@ -2696,6 +2728,10 @@ export class TerminalRenderer implements AgentTUIRenderer {
    * re-arms.
    */
   #armFlowIdleTrap(interruptible = true): void {
+    if (this.#startupEditor !== undefined) {
+      this.#resumeStartupDraft();
+      return;
+    }
     if (this.#flowInterrupt === undefined) return;
     const consumer = (key: TerminalKey): void => {
       if (interruptible && (key.type === "ctrl-c" || key.type === "escape")) {
@@ -4174,7 +4210,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
     }
 
     const flow = this.#setupFlow;
-    if (flow !== undefined) {
+    if (flow !== undefined && (this.#startupEditor === undefined || flow.question !== undefined)) {
       // No status line under an open flow panel: the flow is mutating the
       // very state the line shows (link, pending deploy, model), so mid-flow
       // values are guaranteed stale; it reappears, refreshed, when the
@@ -4231,6 +4267,14 @@ export class TerminalRenderer implements AgentTUIRenderer {
       rows.push(...renderFlowPanel(state, this.#theme, width));
       this.#pushRemoteStatusLine(rows, width);
       return rows;
+    }
+
+    if (flow !== undefined) {
+      rows.push(
+        ...flowMessageRows(flow.lines, this.#theme).map((row) =>
+          row.length === 0 ? "" : clip(` ${row}`, width),
+        ),
+      );
     }
 
     // The setup attention line rides above the pinned panels as a live
@@ -4308,9 +4352,12 @@ export class TerminalRenderer implements AgentTUIRenderer {
       // An empty chat prompt always wears the quiet `›`; the rotating
       // invitation text rides it only until the user's first message.
       if (this.#promptPlaceholderActive && this.#inputText.length === 0) {
-        promptRows.placeholder = this.#hasUserMessage
-          ? ""
-          : promptPlaceholder(Date.now() - this.#promptPlaceholderStartedAtMs);
+        promptRows.placeholder =
+          this.#startupEditor !== undefined
+            ? "Message · Enter to queue"
+            : this.#hasUserMessage
+              ? ""
+              : promptPlaceholder(Date.now() - this.#promptPlaceholderStartedAtMs);
       }
       rows.push(...promptInputRows(promptRows));
       rows.push(...statusRows);
@@ -4438,9 +4485,17 @@ export class TerminalRenderer implements AgentTUIRenderer {
   /** Appends the persistent bottom status line below the prompt when it has content. */
   #pushStatusLine(rows: string[], width: number): void {
     if (this.#startupPhase !== undefined) {
-      const label =
-        this.#startupPhase === "starting" ? "Starting your agent…" : "Connecting your model…";
-      rows.push(clip(this.#theme.colors.dim(`${this.#theme.glyph.dot} ${label}`), width));
+      const labels = {
+        starting: "Starting your agent…",
+        connecting: "Checking saved connection…",
+        preparing: "Preparing your chat…",
+      };
+      const label = this.#setupFlow?.status?.text ?? labels[this.#startupPhase];
+      const pulse = this.#progressPulseGlyph(
+        this.#startupStartedAt,
+        this.#theme.unicode ? PROGRESS_PULSE_GLYPH : PROGRESS_PULSE_ASCII_GLYPH,
+      );
+      rows.push(clip(this.#theme.colors.dim(`${pulse} ${label}`), width));
       return;
     }
     const padding = this.#remoteConnection === undefined ? "" : STATUS_LINE_LEFT_PADDING;

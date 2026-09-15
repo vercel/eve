@@ -249,8 +249,27 @@ function renderFlowPanelStatus(status: FlowPanelStatus, theme: Theme): string {
   return `${renderIndicator(status.indicator, theme)} ${renderStatusText(status, theme)}`;
 }
 
+export function flowMessageRows(lines: readonly FlowPanelLine[], theme: Theme): string[] {
+  const c = theme.colors;
+  const rows: string[] = [];
+  const recent = lines.slice(-FLOW_PANEL_LINE_CAP);
+  for (const line of recent) {
+    const text = line.text.split("\n");
+    for (const [index, part] of text.entries()) {
+      const body = line.tone === "info" ? c.dim(part) : part;
+      const prefix = index === 0 ? `${toneGlyph(line.tone, theme)} ` : "  ";
+      rows.push(`  ${prefix}${body}`);
+    }
+  }
+  if (recent.length > 0) {
+    rows.push("");
+  }
+
+  return rows;
+}
+
 /**
- * Paints the bordered flow panel. Everything a running command produces lives
+ * Paints the setup flow panel. Everything a running command produces lives
  * here — progress, questions, the status indicator — and the panel vanishes
  * wholesale when the command resolves; only the command echo and the elbow
  * outcome persist in the transcript.
@@ -267,18 +286,7 @@ export function renderFlowPanel(state: FlowPanelState, theme: Theme, width: numb
     rows.push(...plannerStepRows(state.navigation, undefined, theme));
   }
 
-  const recent = state.lines.slice(-FLOW_PANEL_LINE_CAP);
-  for (const line of recent) {
-    const text = line.text.split("\n");
-    for (const [index, part] of text.entries()) {
-      const body = line.tone === "info" ? c.dim(part) : part;
-      const prefix = index === 0 ? `${toneGlyph(line.tone, theme)} ` : "  ";
-      rows.push(`  ${prefix}${body}`);
-    }
-  }
-  if (recent.length > 0) {
-    rows.push("");
-  }
+  rows.push(...flowMessageRows(state.lines, theme));
 
   switch (state.content.kind) {
     case "question":

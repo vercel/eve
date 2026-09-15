@@ -11,16 +11,6 @@ function label(item: Item): string {
   return item.name;
 }
 
-export interface RegistryPlannerContext {
-  /** Steps owned by an enclosing journey, rendered before the registry steps. */
-  prefixSteps?: readonly { label: string; complete?: boolean }[];
-  /** Facts owned by the enclosing journey, rendered before registry selections. */
-  reviewMetadata?: readonly { label: string; value: string }[];
-  reviewMessage?: string;
-  primaryActionLabel?: string;
-  emptyActionLabel?: string;
-}
-
 export interface RegistryFlowDeps {
   browseRegistryCatalog: (typeof import("#cli/commands/registry.js"))["browseRegistryCatalog"];
   installRegistryItem: (typeof import("#cli/commands/registry.js"))["installRegistryItem"];
@@ -54,11 +44,7 @@ export async function runRegistryFlow(input: {
   signal?: AbortSignal;
   /** Registry item supplied by `/add <item>`, installed directly. */
   initialAddress?: string;
-  plannerContext?: RegistryPlannerContext;
-  onScreen?: (input: {
-    screen: "registry_channels" | "registry_integrations" | "registry_review" | "registry_install";
-    registrySelectedCount?: number;
-  }) => void;
+  onScreen?: (input: { screen: "registry_install"; registrySelectedCount?: number }) => void;
   onItemStart?: (item: Item, index: number, total: number) => void;
   /** Gives each installation its own cancellation boundary without ending the batch. */
   runItem?<T>(task: (signal?: AbortSignal) => Promise<T>): Promise<T>;

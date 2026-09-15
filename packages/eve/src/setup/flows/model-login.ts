@@ -44,6 +44,23 @@ const CONNECTION_OPTIONS = [
   { value: "anthropic", label: "Anthropic API Key" },
 ] as const;
 
+function connectionProgress(selected: ModelConnectionSelection): string {
+  switch (selected) {
+    case "vercel":
+    case "vercel-cli":
+      return "Connecting with Vercel…";
+    case "chatgpt":
+      return "Connecting with ChatGPT…";
+    case "openai":
+      return "Connecting with OpenAI…";
+    case "anthropic":
+      return "Connecting with Anthropic…";
+    case "ai-gateway-key":
+    case "ai-gateway-project":
+      return "Connecting with AI Gateway…";
+  }
+}
+
 export function environmentConnection(
   env: Record<string, string | undefined>,
 ): ModelConnectionSelection | undefined {
@@ -220,15 +237,22 @@ export async function runModelLogin(input: {
         (await readDefaultConnection()) ??
         "vercel-cli";
       try {
-        if (await connectionReady(selected, signal)) {
-          await applyConnection({
-            appRoot,
-            agentRoot,
-            selected,
-            prompter,
-            signal,
-            automatic: true,
-          });
+        if (
+          await withSpinner(prompter, connectionProgress(selected), () =>
+            connectionReady(selected, signal),
+          )
+        ) {
+          prompter.replaceContent?.();
+          await withSpinner(prompter, "Preparing your chat…", () =>
+            applyConnection({
+              appRoot,
+              agentRoot,
+              selected,
+              prompter,
+              signal,
+              automatic: true,
+            }),
+          );
           return { kind: "ready" };
         }
       } catch (error) {
@@ -270,7 +294,10 @@ export async function runModelLogin(input: {
           signal?.throwIfAborted();
           await writeModelSecret(modelKeySecretName(selected), key);
         }
-        await applyConnection({ appRoot, agentRoot, selected, prompter, signal, availableModels });
+        prompter.replaceContent?.();
+        await withSpinner(prompter, "Preparing your chat…", () =>
+          applyConnection({ appRoot, agentRoot, selected, prompter, signal, availableModels }),
+        );
         return { kind: "ready" };
       } catch (error) {
         if (error instanceof WizardCancelledError) return { kind: "cancelled" };
