@@ -793,7 +793,7 @@ describe("resolveHeaders with an active context (principal resolution + cache)",
     });
 
     const cached = ctx.get(ConnectionAuthorizationTokensKey);
-    expect(cached).toEqual({ linear: { "user:idp:alice": { token: "t-1" } } });
+    expect(cached).toEqual({ linear: { '["user","idp","alice"]': { token: "t-1" } } });
   });
 
   it("isolates cached tokens for same-named resolved connection instances", async () => {

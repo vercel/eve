@@ -160,6 +160,7 @@ describe("chatSdkChannel", () => {
     expect(
       adapter.instrumentation?.audience?.({
         auth: null,
+        caller: { type: "anonymous" },
         channel: { kind: "channel:chat-sdk" },
         environment: "production",
         mode: "conversation",

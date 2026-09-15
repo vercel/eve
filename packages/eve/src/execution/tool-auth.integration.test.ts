@@ -204,8 +204,8 @@ describe("tool-hosted authorization", () => {
 
   it("resolves and caches an inline provider on a plain tool", async () => {
     let calls = 0;
-    const inlineAuth: AuthorizationDefinition = {
-      principalType: "app",
+    const inlineAuth = {
+      credentialOwner: "app" as const,
       async getToken(): Promise<TokenResult> {
         calls += 1;
         return { token: `inline-${calls}` };

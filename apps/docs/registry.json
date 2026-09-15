@@ -4,31 +4,6 @@
   "homepage": "https://eve.dev",
   "items": [
     {
-      "name": "linear",
-      "type": "registry:item",
-      "title": "Linear",
-      "description": "Receive delegated Linear work and give your agent tools for issues, projects, and comments.",
-      "meta": {
-        "eve": {
-          "requires": ">=0.30.6",
-          "components": [
-            {
-              "item": "channel/linear-agent",
-              "label": "Linear Channel",
-              "description": "Interact with your eve agent natively in Linear",
-              "default": true
-            },
-            {
-              "item": "connection/linear",
-              "label": "Linear MCP",
-              "description": "Use the Linear MCP",
-              "default": true
-            }
-          ]
-        }
-      }
-    },
-    {
       "name": "eve/self-modification",
       "type": "registry:item",
       "title": "Self-modification",
@@ -1815,7 +1790,7 @@
       "devDependencies": ["vercel@>=58.5.1"]
     },
     {
-      "name": "channel/linear-agent",
+      "name": "channel/linear",
       "type": "registry:item",
       "title": "Linear Agent",
       "description": "Delegate Linear issues and comments through Agent Sessions, with guided Vercel Connect setup.",

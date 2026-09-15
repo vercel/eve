@@ -1,7 +1,7 @@
 import type { ChannelAudience } from "#shared/channel-audience.js";
 import type { TelegramInstrumentationMetadata } from "#public/channels/telegram/index.js";
 import type { TelegramChannelState } from "#public/channels/telegram/telegramChannel.js";
-import type { AudienceInput } from "#shared/conversation-context.js";
+import type { AudienceContext } from "#shared/conversation-context.js";
 
 export function telegramInstrumentationMetadata(
   state: TelegramChannelState,
@@ -18,7 +18,7 @@ export function telegramAudience(state: TelegramChannelState): ChannelAudience {
 }
 
 export const telegramInstrumentation = {
-  audience: (input: AudienceInput<TelegramChannelState>) => telegramAudience(input.state),
+  audience: (input: AudienceContext<TelegramChannelState>) => telegramAudience(input.state),
   metadata: telegramInstrumentationMetadata,
 } as const;
 

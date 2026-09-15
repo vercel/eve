@@ -3,8 +3,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { RunInput, SessionAuthContext } from "#channel/types.js";
 import { ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 import { resolveInstrumentationEnvironment } from "#internal/application/dev-environment.js";
-import { buildConversationContext } from "#channel/conversation-context.js";
+import { buildConversationContext, toAudienceCaller } from "#channel/conversation-context.js";
 import {
+  type AudienceInput,
   ConversationContextKey,
   UNKNOWN_CONVERSATION_CONTEXT,
 } from "#shared/conversation-context.js";
@@ -95,6 +96,75 @@ describe("buildConversationContext", () => {
     );
 
     expect(context).toMatchObject({ audience: "private", principalType: "user" });
+  });
+
+  it("keeps callbacks using the deprecated auth input compatible", () => {
+    const audience = ({ auth }: AudienceInput<Record<string, unknown> | undefined>) =>
+      auth?.principalType === "user" ? "private" : "public";
+    const context = buildConversationContext(
+      run({
+        adapter: { instrumentation: { audience }, kind: "http" },
+        auth,
+      }),
+      "production",
+    );
+
+    expect(context.audience).toBe("private");
+  });
+
+  it("projects only audience-safe caller fields", () => {
+    expect(
+      toAudienceCaller({
+        attributes: { role: ["admin"] },
+        authenticator: "test-idp",
+        issuer: "https://idp.example",
+        principalId: "user-1",
+        principalType: "user",
+        subject: "subject-1",
+      }),
+    ).toEqual({
+      type: "principal",
+      principal: {
+        attributes: { role: ["admin"] },
+        authenticator: "test-idp",
+        kind: "user",
+      },
+    });
+  });
+
+  it.each([
+    [null, { type: "anonymous" }],
+    [
+      {
+        attributes: {},
+        authenticator: "none",
+        principalId: "anonymous",
+        principalType: "anonymous",
+      },
+      { type: "anonymous" },
+    ],
+  ] as const)("projects %j as %j", (input, expected) => {
+    expect(toAudienceCaller(input)).toEqual(expected);
+  });
+
+  it("passes caller alongside auth to audience classifiers", () => {
+    const context = buildConversationContext(
+      run({
+        adapter: {
+          kind: "http",
+          instrumentation: {
+            audience: ({ caller }) =>
+              caller.type === "principal" && caller.principal.kind === "user"
+                ? "private"
+                : "unknown",
+          },
+        },
+        auth,
+      }),
+      "production",
+    );
+
+    expect(context.audience).toBe("private");
   });
 
   it("treats an explicit null route principal as unauthenticated", () => {

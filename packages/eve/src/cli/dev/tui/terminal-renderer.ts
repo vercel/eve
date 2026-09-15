@@ -701,18 +701,25 @@ export class TerminalRenderer implements AgentTUIRenderer {
         apply(edited);
         return;
       }
+      if (key.type === "enter" && editor.text.trim().length > 0) {
+        if (this.#messageQueue.enqueue(editor.text)) apply(EMPTY_LINE);
+        return;
+      }
       if (key.type === "ctrl-c") this.#onExitRequest?.();
     };
     this.#attachInput();
   }
 
-  finishStartupDraft(): string {
-    const draft = this.#inputText;
+  finishStartupDraft(): { draft: string; queuedPrompt: string | undefined } {
+    const result = {
+      draft: this.#inputText,
+      queuedPrompt: this.#messageQueue.takePrompt(),
+    };
     this.#detachInput();
     this.#stopCaretBlink();
     this.#inputActive = false;
     this.#promptPlaceholderActive = false;
-    return draft;
+    return result;
   }
 
   async readPrompt(options?: AgentTUISessionOptions): Promise<string> {

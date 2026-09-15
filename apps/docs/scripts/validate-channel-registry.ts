@@ -39,6 +39,7 @@ const registrySlugsByCatalogSlug: Readonly<Record<string, string>> = {
   eve: "web",
   linq: "linq",
   photon: "photon-imessage",
+  "linear-agent": "linear",
 };
 
 const setupKindsByCatalogSlug: Readonly<Record<string, string>> = {

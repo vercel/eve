@@ -5,7 +5,7 @@ import type { TrustedForwarders } from "#channel/forwarded-principal.js";
 import type { AuthFn } from "#public/channels/auth.js";
 import type { UploadPolicyInput } from "#public/channels/upload-policy.js";
 import type {
-  AudienceInput,
+  AudienceContext,
   Channel,
   ChannelContinuationOps,
   ChannelEvents,
@@ -99,9 +99,9 @@ export interface EveChannelInput {
   /**
    * Conversation audience classification, fixed when the session is created.
    *
-   * By default, anonymous callers are `public` and `user`, `service`, or
-   * `runtime` principals are `private`. Every other principal type is
-   * `unknown`, which trace consumers treat as non-public.
+   * By default, `user`, `service`, and `runtime` principals are `private`.
+   * Anonymous callers and every other principal type are `unknown`, which
+   * trace consumers treat as non-public.
    *
    * Pass a constant audience, or a function receiving the authenticated
    * principal, channel, run mode, and deployment environment. Continuation
@@ -109,7 +109,7 @@ export interface EveChannelInput {
    */
   readonly audience?:
     | ChannelAudience
-    | ((input: Omit<AudienceInput<undefined>, "state">) => ChannelAudience);
+    | ((input: Omit<AudienceContext<undefined>, "state">) => ChannelAudience);
   /**
    * The trusted-forwarders policy: which transport-authenticated callers may
    * assert a forwarded principal, callback-marked public trace audience, or

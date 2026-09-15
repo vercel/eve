@@ -1,5 +1,5 @@
 import type { ChannelAudience } from "#shared/channel-audience.js";
-import type { AudienceInput } from "#shared/conversation-context.js";
+import type { AudienceContext } from "#shared/conversation-context.js";
 import { normalizeChannelAudience } from "#shared/channel-audience.js";
 import { isThenable } from "#shared/guards.js";
 
@@ -21,12 +21,12 @@ function warnDeprecatedMetadataAudience(kind: string): void {
 }
 
 export type ChannelAudienceProjector = (
-  input: AudienceInput<Record<string, unknown> | undefined>,
+  input: AudienceContext<Record<string, unknown> | undefined>,
 ) => ChannelAudience;
 
 export function resolveAudience(
   adapter: ChannelAudienceSource,
-  input: AudienceInput<Record<string, unknown> | undefined>,
+  input: AudienceContext<Record<string, unknown> | undefined>,
 ): ChannelAudience {
   return normalize(adapter, input);
 }
@@ -48,7 +48,7 @@ export function createMetadataAudienceProjector(
 
 function normalize(
   adapter: ChannelAudienceSource,
-  input: AudienceInput<Record<string, unknown> | undefined>,
+  input: AudienceContext<Record<string, unknown> | undefined>,
 ): ChannelAudience {
   const instrumentation = adapter.instrumentation;
   const project = instrumentation?.audience;

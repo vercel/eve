@@ -1,7 +1,7 @@
 ---
 issue: https://github.com/vercel/eve/issues/2331
 status: implemented
-last_updated: "2026-09-13"
+last_updated: "2026-09-15"
 ---
 
 # Audience-aware trace content policy
@@ -187,14 +187,12 @@ policy remains subject to its process-wide audience ceiling.
 The default policy for local tracing for `eve dev` is equivalent to:
 
 ```ts
-({ audience }) =>
-  audience === "private"
-    ? { emit: false }
-    : { emit: true, recordInputs: true, recordOutputs: true },
+() => true,
 ```
 
-This keeps unclassified local HTTP/TUI sessions observable while still rejecting channels classified as `private`.
-Because local tracing runs in development, every emitted trace uses the development content default.
+This admits conversations classified as `private` to the local spool without changing
+the persisted conversation audience or forwarded origin audience. Because local
+tracing runs in development, every emitted trace uses the development content default.
 
 The runtime order is:
 

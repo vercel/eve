@@ -12,7 +12,7 @@ Run `eve add` from an eve agent project. This installs the integration's depende
 
 ```bash
 eve add extension/agent-browser
-eve add linear
+eve add channel/linear
 eve add instrumentation/braintrust
 eve add memory/file
 ```
@@ -25,9 +25,7 @@ If you do not know an item name yet, run `eve add` without an argument. Its help
 
 Extensions may create a mount under `agent/extensions/`. Connections write their initial definition under `agent/connections/` and install `@vercel/connect` when required. Instrumentation providers write `agent/instrumentation.ts`; because an agent has one instrumentation file, compose multiple exporters there by hand. Configure generated files and required environment variables before running your agent.
 
-Some integrations package several independently installable components. For example, `eve add linear` lets you choose the Linear Channel, Linear MCP, or both; both are selected by default. The specific `eve add channel/linear-agent` and `eve add connection/linear` commands remain available.
-
-When an official item declares an interactive setup flow or flows, eve asks whether to run them after installation and runs multiple flows in declaration order. Run the printed `eve add <item> --skip-install` command to resume a skipped or cancelled setup later; it reruns the selected components' declared flows from the beginning.
+When an official item declares an interactive setup flow or flows, eve asks whether to run them after installation and runs multiple flows in declaration order. Run the printed `eve add <item> --skip-install` command to resume a skipped or cancelled setup later; it reruns the item's declared flows from the beginning.
 
 For example, `eve add memory/file` can provision its required storage through the same setup flow. After **Install and set up**, eve creates or reuses a dedicated private Vercel Blob store, connects production, preview, and development with namespaced credentials, pulls the environment, and offers to deploy. The review and setup transcript show the project, store, primary function region, environments, and possible Blob usage charges before provisioning.
 

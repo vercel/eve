@@ -1,12 +1,15 @@
 import type { ChannelAudience } from "#shared/channel-audience.js";
-import type { AudienceInput } from "#shared/conversation-context.js";
+import type { AudienceContext } from "#shared/conversation-context.js";
 
 export function defaultEveAudience(
-  input: Omit<AudienceInput<undefined>, "state">,
+  input: Omit<AudienceContext<undefined>, "state">,
 ): ChannelAudience {
-  const principalType = input.auth?.principalType ?? "anonymous";
-  if (principalType === "anonymous") return "public";
-  if (principalType === "user" || principalType === "service" || principalType === "runtime") {
+  if (
+    input.caller.type === "principal" &&
+    (input.caller.principal.kind === "user" ||
+      input.caller.principal.kind === "service" ||
+      input.caller.principal.kind === "runtime")
+  ) {
     return "private";
   }
   return "unknown";

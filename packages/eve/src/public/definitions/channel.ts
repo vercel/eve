@@ -41,6 +41,8 @@ export type {
 export type { Session, SessionHandle } from "#channel/session.js";
 export type { ChannelAudience } from "#shared/channel-audience.js";
 export type {
+  AudienceCaller,
+  AudienceContext,
   AudienceInput,
   AudiencePrincipal,
   ConversationEnvironment,

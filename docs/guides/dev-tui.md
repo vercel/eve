@@ -68,7 +68,7 @@ Pass an item address to install it directly:
 ```text
 /add channel/slack
 /add extension/agent-browser
-/add linear
+/add channel/linear
 /add @acme/analytics
 ```
 
