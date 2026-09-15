@@ -32,7 +32,7 @@ const workflowInputSchema = z.strictObject({
   js: z
     .string()
     .describe(
-      `Async JavaScript function body. ${workflowProgramAgentContract} Return one JSON-serializable value.`,
+      `JavaScript statements executed inside an async function. Supply only the body, without a surrounding function declaration or arrow function. ${workflowProgramAgentContract} Return one JSON-serializable value.`,
     ),
 });
 
@@ -46,6 +46,7 @@ export function workflow(options: WorkflowToolOptions): WorkflowTool {
   const description = [
     "Run an async JavaScript function body that coordinates allowlisted agents and returns one JSON-serializable value.",
     workflowProgramAgentContract,
+    `Supply the body directly, for example: return await ctx.agent(${JSON.stringify(normalized.agents[0])}, { message: "Describe the task" });`,
     `Available agents: ${normalized.agents.join(", ")}.`,
     `The program may invoke at most ${String(normalized.maxSubagents)} agents.`,
   ].join(" ");
