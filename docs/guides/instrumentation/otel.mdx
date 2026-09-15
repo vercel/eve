@@ -54,6 +54,10 @@ export default otelIntegration({
 });
 ```
 
+Pass `spanProcessors` to `otelIntegration()` when a custom destination needs
+filtering or transformation. `exportPolicy` is for the built-in
+`localTraces()` and `agentRuns()` destinations below.
+
 ## Trace topology
 
 OpenTelemetry destinations receive the following trace topology for an ordinary

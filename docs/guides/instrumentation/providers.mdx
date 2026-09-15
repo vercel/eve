@@ -27,8 +27,9 @@ The provider directory replaces `agent/instrumentation.ts`; the two layouts cann
 
 ## Add a provider
 
-The filename identifies the provider slot. Each file must default-export
-`defineInstrumentation(...)` or `disableInstrumentation()`.
+The filename identifies the provider slot. A lifecycle-event provider file
+must default-export `defineInstrumentation(...)` or `disableInstrumentation()`.
+See [OpenTelemetry](./otel) for the supported OTel declarations.
 
 ```text
 agent/instrumentation/

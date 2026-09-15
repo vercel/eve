@@ -344,8 +344,6 @@ audience({ auth }) {
 
 Classification is fixed when the session is created. Continuation turns from a different caller do not reclassify an existing session. When a parent dispatches a local subagent, the child inherits the parent's audience while the framework forwards the parent's custom channel metadata separately.
 
-`metadata(state)` remains a channel-owned projection of custom observability fields. It no longer carries a reserved `audience` key. Channel extensions built before channel epoch 20 can still use that key; eve accepts it as a deprecated fallback and warns once, then authors should move classification to `audience(input)`.
-
 ## Continuation tokens
 
 Each channel operation accepts a channel-local token. The framework prepends the channel name, derived from the file stem under `agent/channels/`, before handing the token to the runtime.

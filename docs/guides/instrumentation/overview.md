@@ -59,8 +59,8 @@ For the default eve HTTP channel, the audience is:
 
 Set `audience: "public"` only for intentionally public traffic. Other
 built-in channels classify their own conversations. See
-[Audience](/channels/eve#audience) for the `eve` channel or
-[Conversation audience](/channels/custom#conversation-audience) for a
+[Audience](../channels/eve#audience) for the `eve` channel or
+[Conversation audience](../channels/custom#conversation-audience) for a
 custom channel.
 
 ## Add runtime context
@@ -145,6 +145,51 @@ Local traces retain model, tool, and memory-record content by default. Set
 `EVE_TRACES_CONTENT=off` in `.env.local` to omit it. Writing
 `agent/instrumentation.ts` replaces local tracing; its `recordInputs` and
 `recordOutputs` settings control content in the OTel provider you register.
+
+## Workflow run tags
+
+Separately from OpenTelemetry, eve tags every Workflow run with reserved
+`$eve.*` attributes. These framework-owned attributes are queryable in the
+Workflow dashboard, not on OTel spans. eve emits them for every session, turn,
+and subagent run, whether or not `agent/instrumentation.ts` exists.
+
+Structural tags describe a run's place in its tree:
+
+- `$eve.type`: `"session"`, `"turn"`, or `"subagent"`.
+- `$eve.parent`: the immediate parent session ID.
+- `$eve.root`: the root session ID for the tree.
+- `$eve.subagent`: the compiled graph node ID for a subagent run.
+- `$eve.trigger`: the channel kind that started the run.
+- `$eve.schedule`: the schedule that created the session.
+- `$eve.title`: a truncated title from the first user message.
+- `$eve.trace_id`: a sampled trace seed. Use it as a trace link, not a
+  conversation-wide identity.
+
+Each turn also accumulates `$eve.model`, `$eve.input_tokens`,
+`$eve.output_tokens`, `$eve.cache_read_tokens`, and `$eve.tool_count`. These
+tags power the **Agent Runs** tab in Vercel's **Observability** view. See
+[Deploy to Vercel](../guides/deployment/vercel#inspect-agent-runs) for
+enablement.
+
+## Debug discovery
+
+Run `eve info` to see the instrumentation eve discovered and any diagnostics.
+eve also writes these inspectable artifacts under `.eve/`:
+
+| Artifact                        | Tells you                           |
+| ------------------------------- | ----------------------------------- |
+| `agent-discovery-manifest.json` | What eve found on disk.             |
+| `diagnostics.json`              | Authored-shape errors and warnings. |
+| `compiled-agent-manifest.json`  | The surface eve loads at runtime.   |
+| `module-map.mjs`                | Compiled module entry points.       |
+
+### Common failures
+
+| Symptom                               | Next action                                                                                       |
+| ------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| Instrumentation is not discovered.    | Run `eve info`, confirm the file is in the expected slot, and read `.eve/diagnostics.json`.       |
+| A tool is not discovered.             | Confirm it is under `agent/tools/`, default-exports `defineTool(...)`, and appears in `eve info`. |
+| `eve build` reports discovery errors. | Read the printed diagnostics and `.eve/diagnostics.json`.                                         |
 
 ## Instrumentation Providers
 
