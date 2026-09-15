@@ -48,6 +48,7 @@ afterEach(() => vi.unstubAllEnvs());
 
 function createProvider(
   input: {
+    readonly createSandbox?: () => Promise<ReturnType<typeof createSandbox>>;
     readonly hydrateResources?: () => Promise<void>;
     readonly resolveMounts?: () => Promise<
       Record<string, { readonly drive: string; readonly mode: "snapshot" }>
@@ -76,7 +77,7 @@ function createProvider(
       })),
   );
   const sandbox = { ...createSandbox("session-name"), delete: vi.fn(async () => {}) };
-  const create = vi.fn(async () => sandbox);
+  const create = vi.fn(input.createSandbox ?? (async () => sandbox));
   const get = vi.fn(async () => {
     throw Object.assign(new Error("not found"), { status: 404 });
   });
@@ -93,9 +94,11 @@ function createProvider(
     {},
     {
       createImagePublisher: () => ({ publish }),
+      ensureBaseRuntime: vi.fn(async () => {}),
       hydrateResources: input.hydrateResources ?? vi.fn(async () => {}),
       loadModule: async () => ({ Sandbox: { create, get } }) as never,
       resourcePublisher: { prepare: prepareResource, resolveMounts },
+      waitForImage: vi.fn(async () => {}),
     },
   );
   return { create, prepareResource, provider, publish, resolveMounts, sandbox, token };
@@ -210,6 +213,36 @@ describe("createVercelImageSandboxProvider", () => {
         },
       ),
     ).rejects.toThrow("Invalid prepared Vercel image artifact");
+  });
+
+  it("waits for a published image to become available", async () => {
+    let attempts = 0;
+    const sandbox = { ...createSandbox("session-name"), delete: vi.fn(async () => {}) };
+    const { create, provider } = createProvider({
+      createSandbox: async () => {
+        attempts += 1;
+        if (attempts === 1) throw Object.assign(new Error("pending"), { status: 409 });
+        return sandbox;
+      },
+    });
+    const artifact: VercelImagePreparedArtifact = {
+      image: `vcr.vercel.com/account/project/image@sha256:${"a".repeat(64)}`,
+      mounts: [],
+      version: 1,
+    };
+
+    await expect(
+      provider.getOrCreate(
+        {
+          appRoot: "/app",
+          options: {},
+          resources: { source: { kind: "none" } },
+          session: { kind: "create", name: "session-name" },
+        },
+        { artifact, kind: "prepared", templateName: "template-key" },
+      ),
+    ).resolves.toBeTruthy();
+    expect(create).toHaveBeenCalledTimes(2);
   });
 
   it("classifies a missing prepared Drive as an unprovisioned template", async () => {
