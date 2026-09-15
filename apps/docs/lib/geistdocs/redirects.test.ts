@@ -104,6 +104,8 @@ describe("docsRedirects", () => {
   it.each([
     ["/docs/channels", "/docs/channels/overview"],
     ["/docs/guides/deployment.md", "/docs/guides/deployment/overview.md"],
+    ["/docs/guides/frontend/add-a-web-app", "/docs/guides/frontend/nextjs"],
+    ["/docs/guides/frontend/add-a-web-app.mdx", "/docs/guides/frontend/nextjs.mdx"],
     ["/docs/introduction.md", "/docs/getting-started.md"],
     ["/docs/installation", "/docs/getting-started"],
     ["/docs/installation.md", "/docs/getting-started.md"],

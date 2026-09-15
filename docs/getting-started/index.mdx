@@ -18,7 +18,7 @@ Choose a model, provider, and channel that meet your data-processing and complia
 
 ## Create a project
 
-This guide creates one root agent. If you need several independently addressed root agents, start with [Project Structure](./getting-started/project-structure) and create an agent workspace instead.
+This guide creates one root agent. If you need several root agents that users, channels, or schedules can address independently, start with [Project Structure](/docs/getting-started/project-structure) and create an agent workspace instead.
 
 Run `eve init` with a project name:
 
@@ -60,7 +60,7 @@ This starts an interactive session where you can send messages to your agent.
 
 ## Agent directory layout
 
-eve builds an agent by walking the filesystem under `agent/`. Each directory is an authored slot, and the slot a file lands in determines how eve loads it.
+eve builds your agent from the files under `agent/`. Each directory is an authored slot: where you put a file determines how eve loads it.
 
 ### Naming from paths
 
@@ -73,11 +73,11 @@ eve derives names from file paths, so you do not configure them separately.
 | `agent/skills/summarize.md`           | skill `summarize`     |
 | `agent/subagents/researcher/agent.ts` | subagent `researcher` |
 
-The root agent uses its `package.json` `name`, or its app directory name if none is set. A subagent uses its directory name.
+A root agent uses the `name` in its `package.json`, or its app directory name when no name is set. A subagent uses its directory name.
 
 ### Nested layout
 
-For one standalone agent, use the nested layout below. A minimal agent needs `instructions.md`; `agent.ts` is optional when the default config is sufficient. Framework defaults occupy ordinary agent slots, so authoring the same path replaces the default before eve compiles the agent. Add other slots as the agent needs them:
+For a standalone agent, use the nested layout below. A minimal agent needs `instructions.md`; add `agent.ts` only when you need to change the default configuration. Framework defaults use the same slots, so a file at the same path replaces the default when eve compiles the agent. Add the other slots as needed:
 
 ```text
 my-agent/
@@ -104,11 +104,11 @@ Evals live beside `agent/`, not inside it.
 
 ### Agent files and directories
 
-Each path under `agent/` has a specific purpose. Root agents can use every path below. A subagent has its own files and can use only the paths marked **Yes**.
+Each path under `agent/` has a specific purpose. Root agents can use every path below. Subagents have their own files, but can use only the paths marked **Yes**.
 
 | Path                                                    | Use                                       | Available to subagents | Notes                                                                                                                                                                             |
 | ------------------------------------------------------- | ----------------------------------------- | ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `agent.ts`                                              | Runtime config                            | Yes                    | Model, model options, compaction, build, and experimental settings. See [Agents](./agent-config).                                                                                 |
+| `agent.ts`                                              | Runtime config                            | Yes                    | Model, model options, compaction, build, and experimental settings. See [Agents](/docs/agent-config).                                                                             |
 | `instructions.md` / `instructions.ts` / `instructions/` | Base system prompt                        | Optional               | A flat file or directory of `.md` and `.ts` files. Static sources compose at build time. Dynamic sources resolve at runtime. Required on the root, optional on subagents.         |
 | `instrumentation.ts`                                    | Telemetry config                          | No                     | OTel exporter and AI SDK span settings, auto-discovered and run before agent code. Root-only.                                                                                     |
 | `channels/`                                             | HTTP and messaging entry points           | No                     | Root-only.                                                                                                                                                                        |
@@ -143,7 +143,7 @@ agent/subagents/researcher/
 └── subagents/
 ```
 
-A subagent's `agent.ts` is required and must provide a description, while its instructions are optional. Connections, hooks, skills, shared code, sandboxes, tools, and nested subagents are supported. Channels and schedules remain root-only. See [Subagents](./subagents) for inheritance and isolation behavior.
+A subagent's `agent.ts` is required and must include a description; its instructions are optional. Subagents support connections, hooks, skills, shared code, sandboxes, tools, and nested subagents. Channels and schedules are root-only. See [Subagents](/docs/subagents) for inheritance and isolation behavior.
 
 ### Flat layout
 
@@ -158,11 +158,11 @@ my-agent/
 └── skills/
 ```
 
-Prefer the nested layout because it keeps application files separate from the authored agent surface.
+Prefer the nested layout to keep application files separate from the files that define your agent.
 
 ### Debug file discovery
 
-Run `eve info` when eve does not discover a file. It lists the discovered surface and diagnostics so you can check the authored slot and root-versus-subagent boundary. eve also writes inspectable artifacts under `.eve/`; see [Instrumentation](./observability/instrumentation) and the [CLI](./reference/cli) reference.
+If eve does not discover a file, run `eve info`. It lists the discovered surface and diagnostics, so you can check the file's slot and whether it belongs to a root agent or subagent. eve also writes inspectable artifacts under `.eve/`; see [Instrumentation](./observability/instrumentation) and the [CLI](./reference/cli) reference.
 
 ## Install manually
 
@@ -180,14 +180,14 @@ The [Tutorial](/docs/tutorial/first-agent) builds a data analytics agent step by
 
 After the tutorial, continue with the task you need:
 
-| Goal                                                               | Read                                                                                                             |
-| ------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------- |
-| Give the model some code it can run                                | [Tools](/docs/tools)                                                                                             |
-| Connect the agent to an external MCP or OpenAPI service            | [Connections](/docs/connections)                                                                                 |
-| Communicate with users through Slack, Discord, or another platform | [Channels](/docs/channels/overview)                                                                              |
-| Build a browser interface                                          | [Add a Web App](/docs/guides/frontend/add-a-web-app), then [Frontend Frameworks](/docs/guides/frontend/overview) |
-| Organize several independently addressed root agents               | [Project Structure](/docs/getting-started/project-structure)                                                     |
-| Test agent behavior                                                | [Evals](/docs/evals/overview)                                                                                    |
-| Secure and deploy the agent                                        | [Authentication](/docs/guides/auth-and-route-protection), then [Deployment](/docs/guides/deployment/overview)    |
+| Goal                                                               | Read                                                                                                          |
+| ------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------- |
+| Give the model some code it can run                                | [Tools](/docs/tools)                                                                                          |
+| Connect the agent to an external MCP or OpenAPI service            | [Connections](/docs/connections)                                                                              |
+| Communicate with users through Slack, Discord, or another platform | [Channels](/docs/channels/overview)                                                                           |
+| Build a browser interface                                          | [Next.js](/docs/guides/frontend/nextjs), then [Frontend Frameworks](/docs/guides/frontend/overview)           |
+| Organize several independently addressed root agents               | [Project Structure](/docs/getting-started/project-structure)                                                  |
+| Test agent behavior                                                | [Evals](/docs/evals/overview)                                                                                 |
+| Secure and deploy the agent                                        | [Authentication](/docs/guides/auth-and-route-protection), then [Deployment](/docs/guides/deployment/overview) |
 
 Read [Execution Model and Durability](/docs/concepts/execution-model-and-durability) for the mental model behind sessions, turns, durable steps, and parked work.

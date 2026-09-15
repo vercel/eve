@@ -3,7 +3,7 @@ title: "Project Structure"
 description: "Choose a single root agent, an agent workspace, or declared subagents before you create a project."
 ---
 
-Choose the project structure before creating your agent. Most projects have one root agent. Use an agent workspace when several root agents need their own public endpoints, channels, schedules, or ownership boundaries. Use declared subagents when one root agent delegates specialized work.
+Most projects have one root agent: the agent that receives requests through its own HTTP endpoint. Choose an agent workspace when several root agents need their own endpoints, channels, schedules, or ownership boundaries. Choose declared subagents when one root agent needs to delegate specialized work.
 
 ## Choose the agent boundary
 
@@ -14,7 +14,7 @@ Choose the project structure before creating your agent. Most projects have one 
 | Agents independently addressed through their own endpoints, channels, or schedules              | Multiple root agents in an agent workspace                |
 | An agent owned or released independently                                                        | A separate root agent, in this project or another project |
 
-A root agent has its own HTTP surface and lifecycle. A declared subagent is a tool of its parent agent and is not independently addressed by users or channels. See [Subagents](../subagents) for delegation and [Remote Agents](../guides/remote-agents) when a subagent runs in another deployment.
+Each root agent has its own HTTP surface and lifecycle. A declared subagent is a tool of its parent agent, so users and channels cannot address it directly. See [Subagents](../subagents) for delegation, or [Remote Agents](../guides/remote-agents) when a subagent runs in another deployment.
 
 ## Choose a root-agent layout
 
@@ -50,7 +50,7 @@ operations/
             └── channels/
 ```
 
-Each workspace member uses the same [agent directory layout](./#agent-directory-layout) as a standalone root agent. Workspace members share the root package, dependencies, and build scripts. An `agents/<name>/` directory with its own `package.json` is a separate package, not a workspace member.
+Each workspace member uses the same [agent directory layout](./#agent-directory-layout) as a standalone root agent. They share the root package, dependencies, and build scripts. If `agents/<name>/` has its own `package.json`, it is a separate package rather than a workspace member.
 
 ## Create an agent workspace
 
@@ -67,17 +67,17 @@ cd operations
 eve init billing
 ```
 
-The command adds `agents/billing/agent/`. Run an agent-scoped command from that member directory, or select it from the workspace root with `--agent`:
+This adds `agents/billing/agent/`. Run agent-scoped commands from that member directory, or select the agent from the workspace root with `--agent`:
 
 ```bash
 eve info --agent billing
 ```
 
-Interactive agent-scoped commands offer a picker when a workspace has several agents and you do not name one.
+When you run an interactive agent-scoped command without naming an agent, eve offers a picker.
 
 ## Continue configuring the project
 
 - [Getting Started](./): create and run a single-root project, then learn the files inside each root agent.
 - [Deploy to Vercel](../guides/deployment/vercel): deploy workspace agents as Vercel services and configure their public routes.
-- [Add a Web App](../guides/frontend/add-a-web-app): put one or more root agents behind a browser application.
+- [Next.js](../guides/frontend/nextjs): put one or more root agents behind a browser application.
 - [Subagents](../subagents#vercel-workspace-peers): let one Vercel workspace agent delegate work to another.

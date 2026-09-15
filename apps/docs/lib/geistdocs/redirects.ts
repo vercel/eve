@@ -63,6 +63,7 @@ export const docsRedirects: DocsRedirect[] = [
   ...createDocsRedirects("/guides/acp", "/protocols/acp"),
   ...createDocsRedirects("/guides/ucp", "/protocols/ucp"),
   ...createDocsRedirects("/guides/deployment", "/guides/deployment/overview"),
+  ...createDocsRedirects("/guides/frontend/add-a-web-app", "/guides/frontend/nextjs"),
   ...createDocsRedirects("/deployment", "/guides/deployment/overview"),
   ...createDocsRedirects("/deployment/overview", "/guides/deployment/overview"),
   ...createDocsRedirects("/deployment/vercel", "/guides/deployment/vercel"),

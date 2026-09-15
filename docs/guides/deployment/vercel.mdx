@@ -51,15 +51,15 @@ See [Sandbox](../../sandbox) for resource limits, network policy, and lifecycle 
 
 ## Deploy the agent
 
-An agent workspace contains several independently addressed root agents. Create and manage that layout as described in [Project Structure](../../getting-started/project-structure).
+An agent workspace contains several root agents that users, channels, or schedules can address independently. To create and manage this layout, see [Project Structure](../../getting-started/project-structure).
 
-For an agent-only workspace, run `eve build` from the workspace root. eve discovers direct `agents/<name>/` children without their own `package.json`, then generates one independently built service and a `/<name>/eve/v1/*` transport route for each member. A child with its own `package.json` is a separate package rather than a workspace member.
+For an agent-only workspace, run `eve build` from the workspace root. eve finds direct `agents/<name>/` children without their own `package.json`, then generates an independently built service and a `/<name>/eve/v1/*` transport route for each one. A child with its own `package.json` is a separate package rather than a workspace member.
 
 ### Compose agents with other Vercel services
 
-Use Vercel's programmatic configuration when agents, a frontend, private API, worker, or another application are peer services that Vercel builds and deploys independently. In this topology, Vercel's service graph owns routing; a Next.js app is not the agent routing layer. Replace `vercel.json` with a root `vercel.ts` and compose the authored graph with `withEve`:
+Use Vercel's programmatic configuration when agents, a frontend, private API, worker, or another application are peer services that Vercel builds and deploys independently. In this arrangement, Vercel's service graph handles routing instead of a Next.js app. Replace `vercel.json` with a root `vercel.ts`, then compose the service graph with `withEve`:
 
-If one Next.js app should own same-origin browser routes to one or more agents, use [`withEve()` in `next.config.ts`](../frontend/nextjs) instead. See [Add a Web App](../frontend/add-a-web-app) to choose the application arrangement.
+If a single Next.js app should serve same-origin browser routes for one or more agents, use [`withEve()` in `next.config.ts`](../frontend/nextjs) instead.
 
 ```typescript title="vercel.ts"
 import { withEve } from "eve/vercel";
