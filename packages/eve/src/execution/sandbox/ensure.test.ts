@@ -434,6 +434,77 @@ describe("ensureSandboxAccess", () => {
     expect(handle?.stop).toHaveBeenCalledTimes(1);
   });
 
+  it("stops persisted compute without creating or reattaching a handle", async () => {
+    const backend = createBackend();
+    const stopExisting = vi.fn(async () => "stopped" as const);
+    const lifecycleBackend: SandboxBackend = { ...backend, stopExisting };
+    const registry = createTestRegistry({}, lifecycleBackend);
+
+    const first = await ensure({ registry });
+    await first.get();
+    const state = await first.captureState();
+
+    const second = await ensure({ registry, state });
+    await second.stopExisting!();
+
+    expect(backend.create).toHaveBeenCalledTimes(1);
+    expect(stopExisting).toHaveBeenCalledWith({
+      existingState: state.session,
+      runtimeContext: { appRoot: process.cwd() },
+    });
+  });
+
+  it("does not create a sandbox when stopping an unused session", async () => {
+    const backend = createBackend();
+    const stopExisting = vi.fn(async () => "stopped" as const);
+    const access = await ensure({
+      registry: createTestRegistry({}, { ...backend, stopExisting }),
+    });
+
+    await access.stopExisting!();
+
+    expect(backend.create).not.toHaveBeenCalled();
+    expect(stopExisting).not.toHaveBeenCalled();
+  });
+
+  it("coalesces concurrent persisted stop requests", async () => {
+    const backend = createBackend();
+    const deferred = createDeferred<"stopped">();
+    const stopExisting = vi.fn(() => deferred.promise);
+    const lifecycleBackend: SandboxBackend = { ...backend, stopExisting };
+    const first = await ensure({ registry: createTestRegistry({}, lifecycleBackend) });
+    await first.get();
+    const state = await first.captureState();
+    const second = await ensure({
+      registry: createTestRegistry({}, lifecycleBackend),
+      state,
+    });
+
+    const firstStop = second.stopExisting!();
+    const secondStop = second.stopExisting!();
+    expect(stopExisting).toHaveBeenCalledTimes(1);
+    deferred.resolve("stopped");
+    await Promise.all([firstStop, secondStop]);
+  });
+
+  it("does not stop a shared sandbox from a child session", async () => {
+    const backend = createBackend();
+    const stopExisting = vi.fn(async () => "stopped" as const);
+    const access = await ensure({
+      ownsSandbox: false,
+      registry: createTestRegistry({}, { ...backend, stopExisting }),
+      state: {
+        initialized: true,
+        session: { backendName: "test", metadata: {}, sessionKey: "session_1" },
+      },
+    });
+
+    await access.stopExisting!();
+
+    expect(backend.create).not.toHaveBeenCalled();
+    expect(stopExisting).not.toHaveBeenCalled();
+  });
+
   it("deletes the sandbox and reprovisions a fresh handle on the next access", async () => {
     const ctx = new ContextContainer();
     ctx.set(SessionKey, createSession());

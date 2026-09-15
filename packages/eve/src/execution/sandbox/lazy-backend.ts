@@ -33,5 +33,8 @@ export function lazyBackend<BO, SO>(factory: () => SandboxBackend<BO, SO>): Sand
     prewarm(input) {
       return resolve().prewarm(input);
     },
+    stopExisting(input) {
+      return resolve().stopExisting?.(input) ?? Promise.resolve("not-running");
+    },
   };
 }

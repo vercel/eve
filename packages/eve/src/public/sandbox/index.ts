@@ -34,6 +34,8 @@ export type {
   SandboxBackendPrewarmInput,
   SandboxBackendRuntimeContext,
   SandboxBackendSessionState,
+  SandboxBackendStopExistingInput,
+  SandboxBackendStopExistingResult,
   SandboxDeleteOptions,
   SandboxSeedFile,
 } from "#public/definitions/sandbox-backend.js";

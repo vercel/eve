@@ -9,6 +9,7 @@ eve passes a runtime `ctx` to tool executors, hook handlers, channel event handl
 | ---------------------------- | --------------------------------------------------------- | ----------------------------------------------- |
 | `ctx.session`                | Session identity, turn metadata, auth, and parent lineage | This page                                       |
 | `ctx.getSandbox()`           | The current agent's live sandbox handle                   | [Sandbox](../sandbox)                           |
+| `ctx.stopSandbox()`          | Stop owned sandbox compute without opening it             | [Sandbox](../sandbox#lifecycle)                 |
 | `ctx.getSkill(identifier)`   | A handle for a skill visible to the current agent         | [Skills](../skills#read-skill-files-at-runtime) |
 | `defineState(name, initial)` | Durable typed state shared by runtime code in one session | [State](../concepts/state)                      |
 
@@ -60,6 +61,30 @@ const result = await sandbox.run({ command: "npm test" });
 ```
 
 The accessor is asynchronous because eve may need to bind or restore the sandbox. A subagent sees its own sandbox, not its parent's. The returned handle also exposes `stop()` and `delete()`; see [Sandbox lifecycle](../sandbox#lifecycle) for their behavior.
+
+## `ctx.stopSandbox()`
+
+Call `ctx.stopSandbox()` from a lifecycle hook when the session reaches a
+durable boundary and you want to release compute without opening the sandbox:
+
+```ts title="agent/hooks/stop-after-turn.ts"
+import { defineHook } from "eve/hooks";
+
+export default defineHook({
+  events: {
+    async "session.waiting"(_event, ctx) {
+      await ctx.stopSandbox();
+    },
+  },
+});
+```
+
+The method stops compute owned by the current durable session and preserves its
+filesystem and reconnect state. It is safe to call when the session has no
+sandbox, when the sandbox is already stopped, or when a lifecycle event is
+replayed. It does not call `ctx.getSandbox()` and therefore does not provision
+or resume a sandbox just to stop it. A shared child session does not stop its
+parent's sandbox.
 
 ## `ctx.getSkill(identifier)`
 

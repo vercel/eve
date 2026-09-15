@@ -64,26 +64,27 @@ interface HookContext extends SessionContext {
 }
 ```
 
-That means a hook can access the current sandbox and release its backing
-compute at an application-defined boundary:
+That means a hook can release the current session's backing compute at a
+durable lifecycle boundary:
 
 ```ts title="agent/hooks/stop-after-turn.ts"
 import { defineHook } from "eve/hooks";
 
 export default defineHook({
   events: {
-    async "turn.completed"(_event, ctx) {
-      const sandbox = await ctx.getSandbox();
-      await sandbox.stop();
+    async "session.waiting"(_event, ctx) {
+      await ctx.stopSandbox();
     },
   },
 });
 ```
 
-Every built-in backend stops its underlying compute while preserving the
-durable session and filesystem for the next callback. On Vercel, the current
-handle can also automatically resume on later I/O. A hook failure, including a
-failed stop, follows the normal
+`ctx.stopSandbox()` never opens or resumes a sandbox that is not already live in
+the current callback. Every built-in backend that supports durable reconnect
+state stops its underlying compute while preserving the durable session and
+filesystem for the next callback. On Vercel, the next call to
+`ctx.getSandbox()` reopens the same persistent sandbox. A hook failure,
+including a failed stop, follows the normal
 [hook failure behavior](#what-happens-when-a-hook-throws).
 
 ### Narrowing tool results

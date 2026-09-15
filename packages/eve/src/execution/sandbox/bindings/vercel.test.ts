@@ -155,6 +155,122 @@ afterEach(() => {
 });
 
 describe("createVercelSandbox", () => {
+  it("stops an existing sandbox without resuming or creating it", async () => {
+    const sandbox = createMockSandbox({ name: "session", status: "running" });
+    const sandboxModule = {
+      Sandbox: {
+        create: vi.fn(),
+        get: vi.fn().mockResolvedValue(sandbox),
+      },
+    };
+    const backend = createVercelSandbox({
+      createOptions: { fetch: vi.fn() } as never,
+      loadSandboxModule: async () => sandboxModule as never,
+    });
+
+    await expect(
+      backend.stopExisting?.({
+        existingState: {
+          backendName: "vercel",
+          metadata: { sandboxName: "session" },
+          sessionKey: "session-key",
+        },
+        runtimeContext: { appRoot: "/tmp/test-app-root" },
+      }),
+    ).resolves.toBe("stopped");
+
+    expect(sandboxModule.Sandbox.create).not.toHaveBeenCalled();
+    expect(sandboxModule.Sandbox.get).toHaveBeenCalledWith(
+      expect.objectContaining({ name: "session", resume: false }),
+    );
+    expect(sandbox.stop).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not stop a sandbox that is already stopped", async () => {
+    const sandbox = createMockSandbox({ name: "session", status: "stopped" });
+    const sandboxModule = {
+      Sandbox: {
+        create: vi.fn(),
+        get: vi.fn().mockResolvedValue(sandbox),
+      },
+    };
+    const backend = createVercelSandbox({
+      loadSandboxModule: async () => sandboxModule as never,
+    });
+
+    await expect(
+      backend.stopExisting?.({
+        existingState: {
+          backendName: "vercel",
+          metadata: { sandboxName: "session" },
+          sessionKey: "session-key",
+        },
+        runtimeContext: { appRoot: "/tmp/test-app-root" },
+      }),
+    ).resolves.toBe("not-running");
+
+    expect(sandbox.stop).not.toHaveBeenCalled();
+  });
+
+  it("treats a missing sandbox as an idempotent no-op", async () => {
+    const sandboxModule = {
+      Sandbox: {
+        create: vi.fn(),
+        get: vi.fn().mockResolvedValue(null),
+      },
+    };
+    const backend = createVercelSandbox({
+      loadSandboxModule: async () => sandboxModule as never,
+    });
+
+    await expect(
+      backend.stopExisting?.({
+        existingState: {
+          backendName: "vercel",
+          metadata: { sandboxName: "missing" },
+          sessionKey: "session-key",
+        },
+        runtimeContext: { appRoot: "/tmp/test-app-root" },
+      }),
+    ).resolves.toBe("not-found");
+
+    expect(sandboxModule.Sandbox.create).not.toHaveBeenCalled();
+  });
+
+  it("propagates provider lookup failures without creating or clearing state", async () => {
+    const failure = Object.assign(new Error("provider unavailable"), {
+      response: { status: 503 },
+    });
+    const sandboxModule = {
+      Sandbox: {
+        create: vi.fn(),
+        get: vi.fn().mockRejectedValue(failure),
+      },
+    };
+    const backend = createVercelSandbox({
+      loadSandboxModule: async () => sandboxModule as never,
+    });
+    const existingState = {
+      backendName: "vercel",
+      metadata: { sandboxName: "preserved" },
+      sessionKey: "session-key",
+    } as const;
+
+    await expect(
+      backend.stopExisting?.({
+        existingState,
+        runtimeContext: { appRoot: "/tmp/test-app-root" },
+      }),
+    ).rejects.toThrow(/provider unavailable/u);
+
+    expect(sandboxModule.Sandbox.create).not.toHaveBeenCalled();
+    expect(existingState).toEqual({
+      backendName: "vercel",
+      metadata: { sandboxName: "preserved" },
+      sessionKey: "session-key",
+    });
+  });
+
   it("creates fresh Vercel sandboxes with eve's shared base image", async () => {
     const templateSandbox = createMockSandbox({ name: "template-key" });
     const fetch = vi.fn();
