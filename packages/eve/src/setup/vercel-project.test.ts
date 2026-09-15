@@ -114,6 +114,7 @@ describe("getVercelAuthStatus", () => {
 
   it.each([
     "Error: Not authenticated",
+    "Logged out.",
     "Error: The specified token is not valid. Use `vercel login` to generate a new token.",
     "Error: You do not have access to the specified account\nLearn More: https://err.sh/vercel/scope-not-accessible",
   ])("reports logged-out for an authentication-recovery diagnostic: %s", async (stderr) => {
