@@ -13,6 +13,7 @@ import type { ChannelRouteMethod } from "#public/definitions/channel.js";
 import type { NormalizedChannelCorsOptions } from "#channel/cors.js";
 import type { InternalInstructionsDefinition } from "#shared/instructions-definition.js";
 import { jsonObjectSchema } from "#shared/json-schemas.js";
+import type { JsonObject } from "#shared/json.js";
 import type { Node } from "#shared/node.js";
 import type {
   MarkdownSourceRef,
@@ -28,6 +29,7 @@ import {
   type AgentBuildDefinition,
   type ModelRouting,
 } from "#shared/agent-definition.js";
+import type { VercelConnectMetadata } from "#shared/vercel-connect-metadata.js";
 import type { InternalToolDefinition } from "#tools/definition.js";
 import type { CompiledToolBehavior } from "#tools/behavior.js";
 import type {
@@ -89,6 +91,8 @@ export interface CompiledChannelDefinition {
    * channel leaves CORS untouched.
    */
   readonly cors?: NormalizedChannelCorsOptions;
+  readonly slackAppManifest?: JsonObject;
+  readonly vercelConnect?: VercelConnectMetadata;
 }
 
 /**
@@ -488,6 +492,17 @@ const compiledChannelCorsSchema = z
   })
   .strict() satisfies z.ZodType<NormalizedChannelCorsOptions>;
 
+const compiledVercelConnectMetadataSchema = z
+  .object({
+    connector: z.string(),
+    connectorType: z.string().optional(),
+    principalTypes: z
+      .array(z.enum(["app", "user"]))
+      .readonly()
+      .optional(),
+  })
+  .strict() satisfies z.ZodType<VercelConnectMetadata>;
+
 const compiledChannelDefinitionSchema = z
   .object({
     kind: z.literal("channel"),
@@ -500,6 +515,8 @@ const compiledChannelDefinitionSchema = z
     exportName: z.string().optional(),
     adapterKind: z.string().optional(),
     cors: compiledChannelCorsSchema.optional(),
+    slackAppManifest: jsonObjectSchema.optional(),
+    vercelConnect: compiledVercelConnectMetadataSchema.optional(),
   })
   .strict();
 
@@ -789,12 +806,7 @@ const compiledConnectionDefinitionSchema = z
      * or opaque service-connector key (`"scl_..."`); both forms address
      * the same connector on the Vercel Connect side.
      */
-    vercelConnect: z
-      .object({
-        connector: z.string(),
-      })
-      .strict()
-      .optional(),
+    vercelConnect: compiledVercelConnectMetadataSchema.optional(),
   })
   .strict();
 

@@ -10,6 +10,7 @@ import { defaultDeliverResult } from "#channel/adapter.js";
 import type { Session, SessionHandle } from "#channel/session.js";
 import { setChannelActivityRenderers } from "#channel/compiled-channel.js";
 import type { SessionAuthContext, TurnPolicy } from "#channel/types.js";
+import type { VercelConnectMetadata } from "#shared/vercel-connect-metadata.js";
 import type { CardElement } from "#compiled/chat/index.js";
 import type { SessionContext } from "#public/definitions/callback-context.js";
 import type { ChannelContinuationOps } from "#public/definitions/channel.js";
@@ -66,6 +67,7 @@ import {
 } from "#public/channels/slack/thread.js";
 import { buildSlackAuthContext, slackUserIdFromAuthContext } from "#public/channels/slack/auth.js";
 import { SLACK_CHANNEL_DEFAULT_ROUTE } from "#public/channels/slack/constants.js";
+import { defineSlackAppManifest } from "#public/channels/slack/app-manifest.js";
 import { handleInteractionPost } from "#public/channels/slack/interactions.js";
 import {
   bindSlackSessionOperations,
@@ -299,6 +301,8 @@ export interface SlackChannelCredentials {
    * integrations (e.g. Connect) that authenticate webhooks out-of-band.
    */
   readonly webhookVerifier?: SlackWebhookVerifier;
+  /** Build-time metadata supplied by Vercel Connect credential helpers. */
+  readonly vercelConnect?: VercelConnectMetadata;
 }
 
 /** Target accepted by `ctx.to(slack, target)` from route and schedule handlers. */
@@ -1045,7 +1049,11 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
     },
     renderers: activityRenderers,
   });
-  return channel;
+  const credentials = config.credentials as { readonly vercelConnect?: unknown } | undefined;
+  return Object.assign(channel, {
+    slackAppManifest: defineSlackAppManifest({ botName: config.botName }),
+    vercelConnect: credentials?.vercelConnect,
+  });
 }
 
 function defaultOnInputResponse(ctx: SlackInputResponseContext): SlackInputResponseResult {
