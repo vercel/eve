@@ -62,8 +62,10 @@
     "prepack": "pnpm run build",
     "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.scaffold.json --noEmit"
   },
+  "dependencies": {
+    "eve": "workspace:*"
+  },
   "devDependencies": {
-    "eve": "workspace:*",
     "typescript": "catalog:"
   },
   "engines": {
