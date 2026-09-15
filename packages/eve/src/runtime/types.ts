@@ -101,6 +101,7 @@ export type ResolvedScheduleDefinition = Readonly<
  * server that requires no authentication (e.g. localhost) may omit both.
  */
 export interface ResolvedConnectionDefinition extends ResolvedModuleSourceRef {
+  readonly protocolVersionDiscovery?: boolean;
   readonly approval?: Approval;
   readonly authorization?: Readonly<AuthorizationDefinition> | ConnectionAuthResolver;
   readonly connectionName: string;

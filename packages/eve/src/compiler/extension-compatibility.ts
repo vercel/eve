@@ -22,8 +22,8 @@ interface ExtensionCapabilityContract {
 const EXTENSION_CAPABILITY_CONTRACTS = {
   extension: { current: 1, supported: [1], dropped: {} },
   tool: {
-    current: 38,
-    supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 28, 29, 30, 31, 32, 34, 35, 38],
+    current: 40,
+    supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 28, 29, 30, 31, 32, 34, 35, 40],
     dropped: {
       14: "TaskExec.delegated was removed; migrate to workflow-backed background tools",
       15: "TaskExec replaces stageEffect with send",
@@ -42,13 +42,15 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
       33: "ctx.agent now accepts the subagent name as its first argument, derives invocation identity internally, and infers structured output types",
       36: "experimental_workflow and eve/tools/workflow were removed; migrate to defineWorkflowTool with runWorkflowProgram",
       37: "experimental_workflow and eve/tools/workflow were removed; migrate to defineWorkflowTool with runWorkflowProgram",
+      38: "experimental_workflow and eve/tools/workflow were removed; migrate to defineWorkflowTool with runWorkflowProgram",
+      39: "experimental_workflow and eve/tools/workflow were removed; migrate to defineWorkflowTool with runWorkflowProgram",
     },
   },
   dynamicTool: {
-    current: 37,
+    current: 39,
     supported: [
       1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 22, 28, 29, 30, 31, 32,
-      33, 34, 37,
+      33, 34, 39,
     ],
     dropped: {
       21: "Message and reasoning append events now expose deltas instead of cumulative snapshots.",
@@ -59,18 +61,20 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
       27: "TaskExec.delegated was removed; migrate to workflow-backed background tools",
       35: "workflowMaxSubagents was removed with experimental_workflow; configure generated-program limits in runWorkflowProgram",
       36: "workflowMaxSubagents was removed with experimental_workflow; configure generated-program limits in runWorkflowProgram",
+      37: "workflowMaxSubagents was removed with experimental_workflow; configure generated-program limits in runWorkflowProgram",
+      38: "workflowMaxSubagents was removed with experimental_workflow; configure generated-program limits in runWorkflowProgram",
     },
   },
   channel: {
-    current: 20,
-    supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 14, 15, 16, 17, 18, 19, 20],
+    current: 22,
+    supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22],
     dropped: {
       12: "Message and reasoning append events now expose deltas instead of cumulative snapshots.",
     },
   },
   schedule: {
-    current: 11,
-    supported: [1, 2, 3, 4, 6, 7, 8, 9, 10, 11],
+    current: 12,
+    supported: [1, 2, 3, 4, 6, 7, 8, 9, 10, 11, 12],
     dropped: {
       5: "Message and reasoning append events now expose deltas instead of cumulative snapshots.",
     },
@@ -85,8 +89,8 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
     },
   },
   connection: {
-    current: 17,
-    supported: [1, 2, 3, 4, 5, 6, 7, 8, 11, 12, 13, 14, 15, 16, 17],
+    current: 19,
+    supported: [1, 2, 3, 4, 5, 6, 7, 8, 11, 12, 13, 14, 15, 16, 17, 18, 19],
     dropped: {
       9: "Dynamic connection resolvers no longer receive conversation or channel continuation data",
       10: "Message and reasoning append events now expose deltas instead of cumulative snapshots.",

@@ -4,7 +4,7 @@ import type {
   ChatSdkChannelState,
   ChatSdkInstrumentationMetadata,
 } from "#public/channels/chat-sdk/chatSdkChannel.js";
-import type { AudienceInput } from "#shared/conversation-context.js";
+import type { AudienceContext } from "#shared/conversation-context.js";
 
 export function chatSdkInstrumentationMetadata(
   state: ChatSdkChannelState,
@@ -27,6 +27,6 @@ export function chatSdkAudience(thread: SerializedThread | null): ChannelAudienc
 }
 
 export const chatSdkInstrumentation = {
-  audience: (input: AudienceInput<ChatSdkChannelState>) => chatSdkAudience(input.state.thread),
+  audience: (input: AudienceContext<ChatSdkChannelState>) => chatSdkAudience(input.state.thread),
   metadata: chatSdkInstrumentationMetadata,
 } as const;

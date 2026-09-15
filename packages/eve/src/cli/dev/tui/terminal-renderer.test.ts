@@ -1309,6 +1309,54 @@ describe("TerminalRenderer (inline scrollback)", () => {
     renderer.shutdown();
   });
 
+  it("commits completed foreground turns ahead of a live background subagent", async () => {
+    const { screen, renderer } = makeRenderer(48, 8);
+    renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
+    renderer.beginSubagent({ callId: "background", name: "researcher" });
+    // These settled blocks arrive before the parent reports that the child
+    // is background work. Reclassifying the child must release them from its
+    // formerly leading live cohort.
+    renderer.renderNotice("EARLY_SETTLED_FOREGROUND_ONE");
+    renderer.renderNotice("EARLY_SETTLED_FOREGROUND_TWO");
+    renderer.backgroundSubagent({ callId: "background" });
+    renderer.upsertSubagentStep({
+      callId: "background",
+      subagentName: "researcher",
+      sectionKey: 0,
+      reasoning: "",
+      message: "still researching background details",
+      finalized: false,
+    });
+
+    await renderer.renderStream(
+      streamOf([
+        { type: "assistant-complete", id: "answer-1", text: "FIRST_COMPLETED_ANSWER" },
+        { type: "finish" },
+      ]),
+      { continueSession: true, submittedPrompt: "FIRST_COMPLETED_PROMPT" },
+    );
+    await renderer.renderStream(
+      streamOf([
+        { type: "assistant-complete", id: "answer-2", text: "SECOND_COMPLETED_ANSWER" },
+        { type: "finish" },
+      ]),
+      { continueSession: true, submittedPrompt: "SECOND_COMPLETED_PROMPT" },
+    );
+
+    const transcript = screen.snapshot();
+    expect(transcript).toContain("EARLY_SETTLED_FOREGROUND_ONE");
+    expect(transcript).toContain("EARLY_SETTLED_FOREGROUND_TWO");
+    expect(transcript).toContain("FIRST_COMPLETED_PROMPT");
+    expect(transcript).toContain("FIRST_COMPLETED_ANSWER");
+    expect(transcript).toContain("SECOND_COMPLETED_PROMPT");
+    expect(transcript).toContain("SECOND_COMPLETED_ANSWER");
+    expect(transcript).toContain("still researching background details");
+
+    renderer.completeSubagent({ authoritative: true, callId: "background" });
+    expect(screen.snapshot()).not.toContain("hidden while streaming");
+    renderer.shutdown();
+  });
+
   it("keeps parent completion provisional until delayed child output reaches its boundary", async () => {
     const { screen, input, renderer } = makeRenderer();
     renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });

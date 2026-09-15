@@ -103,7 +103,7 @@ const defaultDependencies: InitCommandDependencies = {
   selectInitSelfModification,
   installSelfModification: async (appRoot) => {
     const { installRegistryItem } = await import("./registry.js");
-    await installRegistryItem(appRoot, "experimental/self-modification", { silent: true });
+    await installRegistryItem(appRoot, "eve/self-modification", { silent: true, skipSetup: true });
   },
   spawnCodingAgentRepl,
   spawnPackageManager,

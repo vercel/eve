@@ -6,6 +6,11 @@ import { defineChannel, POST } from "eve/channels";
  * "every channel mounts at least one route" requirement.
  */
 export default defineChannel({
+  audience({ caller }) {
+    return caller.type === "principal" && caller.principal.kind === "service"
+      ? "private"
+      : "unknown";
+  },
   routes: [POST("/target", async () => new Response("ok"))],
   async receive(input, { from }) {
     const sessionRef =

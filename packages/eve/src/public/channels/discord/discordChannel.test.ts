@@ -59,6 +59,7 @@ describe("discordChannel() audience classification", () => {
     expect(
       adapter.instrumentation?.audience?.({
         auth: null,
+        caller: { type: "anonymous" },
         channel: { kind: "channel:discord" },
         environment: "production",
         mode: "conversation",

@@ -76,6 +76,7 @@ export class McpConnectionClient implements ConnectionClient {
 
     try {
       return await createMCPClient({
+        protocolVersionDiscovery: this.#connection.protocolVersionDiscovery,
         transport: { type: "http", url, headers },
       });
     } catch (error) {
@@ -83,6 +84,7 @@ export class McpConnectionClient implements ConnectionClient {
         throw error;
       }
       return await createMCPClient({
+        protocolVersionDiscovery: this.#connection.protocolVersionDiscovery,
         transport: { type: "sse", url, headers },
       });
     }

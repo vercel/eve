@@ -5,7 +5,7 @@ import type { RouteDefinition } from "#channel/routes.js";
 import type { Session, SessionHandle } from "#channel/session.js";
 import type { DeliverPayload, SessionAuthContext, TurnPolicy } from "#channel/types.js";
 import type { StepInput } from "#harness/types.js";
-import type { AudienceInput } from "#shared/conversation-context.js";
+import type { AudienceContext } from "#shared/conversation-context.js";
 import type { ChannelAudience } from "#shared/channel-audience.js";
 
 /**
@@ -117,7 +117,7 @@ export interface GenericChannelDefinition<
    * and deployment environment. Return `"unknown"` when classification is not
    * confident; consumers treat it as non-public.
    */
-  readonly audience?: (input: AudienceInput<TState>) => ChannelAudience;
+  readonly audience?: (input: AudienceContext<TState>) => ChannelAudience;
 
   /**
    * Identifier of the adapter family this channel belongs to. Set by

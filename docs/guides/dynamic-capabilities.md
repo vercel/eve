@@ -179,7 +179,7 @@ export default defineDynamic({
             description: `${account.label} (${account.accountId})`,
             instanceKey: account.accountId,
             auth: {
-              principalType: "user",
+              credentialOwner: "user",
               getToken: ({ principal }) => mintAccountToken(principal, account),
             },
           }),

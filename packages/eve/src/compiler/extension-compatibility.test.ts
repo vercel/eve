@@ -132,8 +132,12 @@ describe("extension compatibility manifest", () => {
   it.each([
     { capability: "tool", epoch: 36 },
     { capability: "tool", epoch: 37 },
+    { capability: "tool", epoch: 38 },
+    { capability: "tool", epoch: 39 },
     { capability: "dynamicTool", epoch: 35 },
     { capability: "dynamicTool", epoch: 36 },
+    { capability: "dynamicTool", epoch: 37 },
+    { capability: "dynamicTool", epoch: 38 },
   ] as const)(
     "rejects removed legacy workflow surface in $capability epoch $epoch",
     ({ capability, epoch }) => {
