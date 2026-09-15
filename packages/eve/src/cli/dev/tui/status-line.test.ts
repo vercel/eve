@@ -37,20 +37,29 @@ function deployedRemote(
 }
 
 describe("buildStatusLine", () => {
-  it("leads local sessions with a gray colon-prefixed port badge", () => {
-    const input = {
-      serverPort: "3000",
-      model: "openai/gpt-5.5",
-    } as const;
-
-    const line = buildStatusLine({ ...input, theme, width: 120 })!;
-    expect(stripAnsi(line)).toBe(" :3000  openai/gpt-5.5");
-    expect(buildStatusLine({ ...input, theme: plain, width: " :3000 ".length })).toBe(" :3000 ");
-    expect(line).toContain("\x1b[7m\x1b[90m :3000 \x1b[39m\x1b[27m");
-    expect(line).not.toContain("\x1b[7m\x1b[34m :3000 ");
+  it("shows a Vercel team slug without a local port or routing prose", () => {
+    const line = buildStatusLine({
+      model: "openai/gpt-5.6-luna-fast",
+      endpoint: { kind: "gateway", connected: true, credential: "oauth", team: "team_internal" },
+      vercel: { modelTeamSlug: "acme" },
+      theme: plain,
+      width: 120,
+    });
+    expect(line).toBe("openai/gpt-5.6-luna-fast · Vercel · acme");
   });
 
-  it("renders all segments in order with whitespace separators", () => {
+  it("omits raw team IDs while the slug is unavailable", () => {
+    expect(
+      buildStatusLine({
+        model: "m",
+        endpoint: { kind: "gateway", connected: true, credential: "oauth", team: "team_internal" },
+        theme: plain,
+        width: 120,
+      }),
+    ).toBe("m · Vercel");
+  });
+
+  it("renders all segments in order with dot separators", () => {
     const line = buildStatusLine({
       model: "anthropic/claude-sonnet-5",
       endpoint: connected,
@@ -59,7 +68,7 @@ describe("buildStatusLine", () => {
       width: 120,
     });
 
-    expect(line).toBe("anthropic/claude-sonnet-5 via ai-gateway(oidc:my-agent)");
+    expect(line).toBe("anthropic/claude-sonnet-5 · ai-gateway(oidc:my-agent)");
   });
 
   it("folds the reasoning level and Fast mode marker into the model segment", () => {
@@ -73,7 +82,7 @@ describe("buildStatusLine", () => {
       width: 120,
     });
 
-    expect(line).toBe("xai/grok-4.5@xhigh ↯ via ai-gateway(oidc:my-agent)");
+    expect(line).toBe("xai/grok-4.5@xhigh ↯ · ai-gateway(oidc:my-agent)");
   });
 
   it("dims the whole model segment, reasoning level and fast marker included", () => {
@@ -132,7 +141,7 @@ describe("buildStatusLine", () => {
       theme: plain,
       width: 120,
     });
-    expect(withProject).toBe("m via ai-gateway(oidc:my-agent)");
+    expect(withProject).toBe("m · ai-gateway(oidc:my-agent)");
 
     // OIDC without a resolved project name: bare scope.
     const noProject = buildStatusLine({
@@ -141,7 +150,7 @@ describe("buildStatusLine", () => {
       theme: plain,
       width: 120,
     });
-    expect(noProject).toBe("m via ai-gateway(oidc)");
+    expect(noProject).toBe("m · ai-gateway(oidc)");
   });
 
   it("right-aligns monochrome build status and preserves it at narrow widths", () => {
@@ -176,7 +185,7 @@ describe("buildStatusLine", () => {
     } as const;
 
     const full = buildStatusLine({ ...input, width: 120 })!;
-    expect(full.startsWith("logs: sandbox  ")).toBe(true);
+    expect(full.startsWith("logs: sandbox · ")).toBe(true);
 
     // Narrow enough that only the leading hint survives.
     expect(buildStatusLine({ ...input, width: 13 })).toBe("logs: sandbox");
@@ -199,7 +208,7 @@ describe("buildStatusLine", () => {
       theme: plain,
     };
     const full = buildStatusLine({ ...input, width: 200 })!;
-    expect(full).toContain("via ai-gateway(oidc:my-agent)");
+    expect(full).toContain("ai-gateway(oidc:my-agent)");
 
     const noEndpoint = buildStatusLine({ ...input, width: visibleLength(full) - 1 })!;
     expect(noEndpoint).not.toContain("ai-gateway");
@@ -216,7 +225,7 @@ describe("buildStatusLine", () => {
       theme: plain,
       width: 120,
     });
-    expect(external).toBe("anthropic/claude-sonnet-5 via anthropic⌝");
+    expect(external).toBe("anthropic/claude-sonnet-5 · anthropic⌝");
 
     const linked = buildStatusLine({
       model: "m",
@@ -225,7 +234,7 @@ describe("buildStatusLine", () => {
       theme: plain,
       width: 120,
     });
-    expect(linked).toBe("m via ai-gateway(oidc:my-agent)");
+    expect(linked).toBe("m · ai-gateway(oidc:my-agent)");
 
     const apiKey = buildStatusLine({
       model: "m",
@@ -236,7 +245,7 @@ describe("buildStatusLine", () => {
       theme: plain,
       width: 120,
     });
-    expect(apiKey).toBe("m via ai-gateway(api-key)");
+    expect(apiKey).toBe("m · ai-gateway(api-key)");
 
     const chatgpt = buildStatusLine({
       model: "openai/gpt-5.6-sol",
@@ -244,7 +253,7 @@ describe("buildStatusLine", () => {
       theme: plain,
       width: 120,
     });
-    expect(chatgpt).toBe("openai/gpt-5.6-sol via chatgpt-sub⌝");
+    expect(chatgpt).toBe("openai/gpt-5.6-sol · chatgpt-sub⌝");
 
     const chatgptLogin = buildStatusLine({
       model: "openai/gpt-5.6-sol",
@@ -252,7 +261,7 @@ describe("buildStatusLine", () => {
       theme: plain,
       width: 120,
     });
-    expect(chatgptLogin).toBe("openai/gpt-5.6-sol  ⚠ chatgpt-sub login · /login");
+    expect(chatgptLogin).toBe("openai/gpt-5.6-sol · ⚠ chatgpt-sub login · /login");
 
     const notConnected = buildStatusLine({
       model: "m",
@@ -260,7 +269,7 @@ describe("buildStatusLine", () => {
       theme: plain,
       width: 120,
     });
-    expect(notConnected).toBe("m  ⚠ ai-gateway");
+    expect(notConnected).toBe("m · ⚠ ai-gateway");
   });
 
   it("paints only the not-connected endpoint yellow", () => {
@@ -277,8 +286,8 @@ describe("buildStatusLine", () => {
       width: 120,
     });
     // Only the gateway stands at the terminal's default foreground — no
-    // explicit white, no bold; via/scope stay dim around it.
-    expect(linked).toContain("\x1b[2mvia \x1b[22mai-gateway\x1b[2m(oidc)\x1b[22m");
+    // explicit white, no bold; the scope stays dim.
+    expect(linked).toContain("ai-gateway\x1b[2m(oidc)\x1b[22m");
     expect(linked).not.toContain("\x1b[97m");
     expect(linked).not.toContain("\x1b[1mai-gateway");
 
@@ -289,7 +298,7 @@ describe("buildStatusLine", () => {
       theme,
       width: 120,
     });
-    expect(external).toContain("\x1b[2mvia chatgpt-sub\x1b[22m⌝");
+    expect(external).toContain("\x1b[2mchatgpt-sub\x1b[22m⌝");
     expect(external).not.toContain("\x1b[1m");
   });
 
@@ -300,7 +309,7 @@ describe("buildStatusLine", () => {
       theme: ascii,
       width: 120,
     });
-    expect(stripAnsi(gateway!)).toBe("m  ! ai-gateway");
+    expect(stripAnsi(gateway!)).toBe("m · ! ai-gateway");
 
     const chatgpt = buildStatusLine({
       model: "openai/gpt-5.6-sol",
@@ -308,7 +317,7 @@ describe("buildStatusLine", () => {
       theme: ascii,
       width: 120,
     });
-    expect(stripAnsi(chatgpt!)).toBe("openai/gpt-5.6-sol via chatgpt-sub^");
+    expect(stripAnsi(chatgpt!)).toBe("openai/gpt-5.6-sol · chatgpt-sub^");
   });
 
   it("renders the remote badge first and projects each authentication state", () => {
@@ -440,7 +449,7 @@ describe("buildStatusLine", () => {
     expect(stripAnsi(line ?? "")).toBe(" ↗ inbou");
   });
 
-  it("keeps whitespace separators when unicode is unavailable", () => {
+  it("keeps dot separators when unicode is unavailable", () => {
     const line = buildStatusLine({
       remote: remote({ state: "checking" }),
       theme: ascii,

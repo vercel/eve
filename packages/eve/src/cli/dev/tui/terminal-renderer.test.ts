@@ -5240,7 +5240,7 @@ describe("TerminalRenderer status line", () => {
     identity: { projectName: "my-agent", teamName: "acme" },
   };
 
-  it("renders the local server, model, and Vercel link under the prompt row", async () => {
+  it("renders the model and Vercel link without the local port under the prompt row", async () => {
     const { screen, input, renderer } = makeRenderer();
     renderer.renderAgentHeader({
       name: "Weather Agent",
@@ -5270,11 +5270,10 @@ describe("TerminalRenderer status line", () => {
     const promptRow = lines.findIndex((line) => line.includes("›"));
     expect(promptRow).toBeGreaterThan(-1);
     const statusRow = lines.slice(promptRow + 1).join("\n");
-    expect(statusRow).toContain(":3000");
+    expect(statusRow).not.toContain(":3000");
     expect(statusRow).toContain("anthropic/claude-sonnet-5");
-    expect(statusRow.indexOf(":3000")).toBeLessThan(statusRow.indexOf("anthropic/claude-sonnet-5"));
     // The linked project folds into the connected gateway label.
-    expect(statusRow).toContain("via ai-gateway(oidc:my-agent)");
+    expect(statusRow).toContain("· ai-gateway(oidc:my-agent)");
     expect(statusRow).not.toContain("⚠ ai-gateway");
     // No token segment before any turn reports usage (↑ 0 ↓ 0 is noise).
     expect(statusRow).not.toContain("↑ 0");
@@ -5300,13 +5299,13 @@ describe("TerminalRenderer status line", () => {
       }),
     });
     renderer.setVercelStatus(vercelStatus);
-    expect(screen.snapshot()).toContain("via ai-gateway(oidc:my-agent)");
+    expect(screen.snapshot()).toContain("· ai-gateway(oidc:my-agent)");
 
     renderer.setupFlow.begin("Connect to Vercel");
-    expect(screen.snapshot()).not.toContain("via ai-gateway(oidc:my-agent)");
+    expect(screen.snapshot()).not.toContain("· ai-gateway(oidc:my-agent)");
 
     renderer.setupFlow.end({ preserveDiagnostics: false });
-    expect(screen.snapshot()).toContain("via ai-gateway(oidc:my-agent)");
+    expect(screen.snapshot()).toContain("· ai-gateway(oidc:my-agent)");
     renderer.shutdown();
   });
 
@@ -5446,7 +5445,7 @@ describe("TerminalRenderer status line", () => {
 
     const snapshot = screen.snapshot();
     expect(snapshot).toContain("anthropic/claude-sonnet-5");
-    expect(snapshot).toContain("via ai-gateway(oidc:my-agent)");
+    expect(snapshot).toContain("· ai-gateway(oidc:my-agent)");
     // A fresh conversation clears the token flow entirely (↑ 0 ↓ 0 is noise).
     expect(snapshot).not.toContain("↑ 0");
     expect(snapshot).not.toContain("↑ 500");

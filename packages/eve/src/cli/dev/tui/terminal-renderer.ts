@@ -4508,11 +4508,6 @@ export class TerminalRenderer implements AgentTUIRenderer {
       input.devBuild = this.#devBuildStatus;
     }
     if (this.#logLevelHintActive) input.logLevel = this.#logs;
-    const serverUrl = this.#agentHeader?.serverUrl;
-    if (serverUrl !== undefined && this.#remoteConnection === undefined) {
-      const serverPort = new URL(serverUrl).port;
-      if (serverPort.length > 0) input.serverPort = serverPort;
-    }
     const agentModel = this.#agentHeader?.info?.agent.model;
     if (agentModel?.id !== undefined) input.model = agentModel.id;
     // "provider-default" is the absent-setting sentinel, not a level worth showing.

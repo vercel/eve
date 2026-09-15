@@ -1,6 +1,10 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { createVercelStatusTracker, type VercelStatusSnapshot } from "./vercel-status.js";
+
+vi.mock("#internal/model-auth/vercel-team.js", () => ({
+  resolveModelTeamSlug: async () => undefined,
+}));
 
 const identity = { projectName: "my-agent", teamName: "acme" };
 
@@ -14,11 +18,38 @@ function collect(): {
 
 async function settled(): Promise<void> {
   // Two microtask hops: one for the probe's await, one for the emit.
-  await Promise.resolve();
-  await Promise.resolve();
+  for (let i = 0; i < 10; i++) await Promise.resolve();
 }
 
 describe("createVercelStatusTracker", () => {
+  it("resolves a projectless model team slug without a deployment identity", async () => {
+    const { snapshots, onChange } = collect();
+    const tracker = createVercelStatusTracker({
+      appRoot: "/app",
+      onChange,
+      detectIdentity: async () => undefined,
+      resolveTeamSlug: async () => "acme",
+    });
+    tracker.refreshIdentity();
+    await settled();
+    expect(snapshots).toEqual([{ modelTeamSlug: "acme" }]);
+  });
+
+  it("keeps deployment status usable when the model team lookup fails", async () => {
+    const { snapshots, onChange } = collect();
+    const tracker = createVercelStatusTracker({
+      appRoot: "/app",
+      onChange,
+      detectIdentity: async () => identity,
+      resolveTeamSlug: async () => {
+        throw new Error("offline");
+      },
+    });
+    tracker.refreshIdentity();
+    await settled();
+    expect(snapshots).toEqual([{ identity }]);
+  });
+
   it("emits the resolved identity after a refresh", async () => {
     const { snapshots, onChange } = collect();
     const tracker = createVercelStatusTracker({

@@ -9,6 +9,8 @@ description: "Use eve locally or connect to a deployed agent from an interactive
 eve dev
 ```
 
+The footer shows the active model and connection separated by dots. Vercel account connections show the team slug once it resolves; the local server port is omitted.
+
 The transcript remains in your terminal scrollback after you exit. Run `/help` in the UI to see the commands available in the current session.
 
 ## Commands
