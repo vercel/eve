@@ -144,7 +144,6 @@ import {
 import { FileContentCache } from "./file-content-cache.js";
 import { groupToolBlocksForDisplay } from "./tool-block-groups.js";
 import { renderQuestionPanel } from "./question-panel.js";
-import { promptPlaceholder } from "./prompt-placeholder.js";
 import { TurnClock } from "./turn-clock.js";
 import {
   allTodoItemsSettled,
@@ -455,7 +454,6 @@ export class TerminalRenderer implements AgentTUIRenderer {
    * must not suggest unrelated things to try.
    */
   #promptPlaceholderActive = false;
-  readonly #promptPlaceholderStartedAtMs = Date.now();
   /** Placeholder retires for good once the user has sent a first message. */
   #hasUserMessage = false;
   /** Armed by a chat submit; the end-of-turn stats line consumes it. */
@@ -4354,7 +4352,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
         ghost,
         maxRows: maxPromptRows,
       };
-      // An empty chat prompt keeps the full-size prompt mark; the rotating
+      // An empty chat prompt keeps the full-size prompt mark; the
       // invitation text rides it only until the user's first message.
       if (this.#promptPlaceholderActive && this.#inputText.length === 0) {
         promptRows.placeholder =
@@ -4362,7 +4360,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
             ? "Message · Enter to queue"
             : this.#hasUserMessage
               ? ""
-              : promptPlaceholder(Date.now() - this.#promptPlaceholderStartedAtMs);
+              : "Send a message…";
       }
       rows.push(...promptInputRows(promptRows));
       rows.push(...statusRows);

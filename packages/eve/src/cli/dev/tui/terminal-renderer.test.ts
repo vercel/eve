@@ -13,7 +13,6 @@ import {
 
 import type { AgentTUIStreamEvent, AgentTUIStreamResult, SubagentToolUpdate } from "./runner.js";
 import { promptCommandsFor } from "./prompt-commands.js";
-import { PROMPT_PLACEHOLDER_MESSAGES } from "./prompt-placeholder.js";
 import { TerminalRenderer } from "./terminal-renderer.js";
 import { MockScreen, MockUserInput } from "./test/mock-terminal.js";
 
@@ -1740,14 +1739,14 @@ describe("TerminalRenderer (inline scrollback)", () => {
     const prompt = renderer.readPrompt();
     // A bare prompt before any info/turn has no status row (no ↑ 0 ↓ 0 counter).
     expect(screen.snapshot()).not.toContain("↑ 0");
-    // Empty buffer: the default-color `❯` gutter with the rotation's first message.
-    expect(screen.snapshot()).toContain(`❯ ${PROMPT_PLACEHOLDER_MESSAGES[0]}`);
+    // Empty buffer: the default-color `❯` gutter with the message invitation.
+    expect(screen.snapshot()).toContain("❯ Send a message…");
     expect(screen.rawOutput()).not.toContain("\x1b[48;5;");
 
     input.type("hello");
     // Typing colors the prompt mark and clears the invitation.
     expect(screen.snapshot()).toContain("❯ hello");
-    expect(screen.snapshot()).not.toContain(PROMPT_PLACEHOLDER_MESSAGES[0]);
+    expect(screen.snapshot()).not.toContain("Send a message…");
     input.enter();
     expect(screen.snapshot()).toContain("W 1s");
     expect(await prompt).toBe("hello");
@@ -1864,7 +1863,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
     const { screen, input, renderer } = makeRenderer();
 
     const first = renderer.readPrompt();
-    expect(screen.snapshot()).toContain(`❯ ${PROMPT_PLACEHOLDER_MESSAGES[0]}`);
+    expect(screen.snapshot()).toContain("❯ Send a message…");
     input.type("hello");
     input.enter();
     expect(await first).toBe("hello");
@@ -1873,7 +1872,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
     // drops the invitation text; typing still colors the active `❯`.
     const second = renderer.readPrompt();
     expect(screen.snapshot()).toContain("❯");
-    expect(screen.snapshot()).not.toContain(PROMPT_PLACEHOLDER_MESSAGES[0]);
+    expect(screen.snapshot()).not.toContain("Send a message…");
     input.type("again");
     expect(screen.snapshot()).toContain("❯ again");
     input.ctrlC();
