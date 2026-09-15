@@ -106,15 +106,22 @@ export default defineTool({
     sort(summaries, parsed.sortBy);
     const results = summaries.slice(0, parsed.limit);
     const omitted = unindexed.length - scannedUnindexed.length + matched.length - considered.length;
+    const coverage: {
+      complete: boolean;
+      considered: number;
+      matched: number;
+      stored: number;
+      warning?: string;
+    } = {
+      complete: omitted === 0,
+      considered: considered.length,
+      matched: matched.length,
+      stored: stored.length,
+    };
+    if (omitted !== 0) coverage.warning = "Some older traces could not be included.";
     return {
       conversationId,
-      coverage: {
-        complete: omitted === 0,
-        considered: considered.length,
-        matched: matched.length,
-        stored: stored.length,
-        ...(omitted === 0 ? {} : { warning: "Some older traces could not be included." }),
-      },
+      coverage,
       matches: results,
       truncated: summaries.length > results.length,
     };
