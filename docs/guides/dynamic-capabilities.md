@@ -219,9 +219,11 @@ same name; namespace one map key to remove the ambiguity.
 
 Dynamic connections support `session.started` and `turn.started`. A turn result
 replaces that file's session result for the turn, including when the turn
-handler returns `null`. A throwing or invalid handler fails the lifecycle
-without rebuilding the registry, so a static connection shadowed by the
-dynamic result cannot reappear as a fallback.
+handler returns `null`. In a conversation, a throwing or invalid handler fails
+the current turn and parks the session, so a later message can retry after the
+dependency recovers; task-mode failures remain terminal. The failed lifecycle
+does not rebuild the registry, so a static connection shadowed by the dynamic
+result cannot reappear as a fallback.
 
 eve may run the active session and turn handlers again when a parked turn
 resumes or a durable step retries. This rebuilds live auth, header, approval,

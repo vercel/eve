@@ -27,6 +27,7 @@ import type {
 } from "#shared/connection-types.js";
 import type { ResolvedToolDefinition } from "#runtime/types.js";
 import { toInputSchema } from "#tools/schema.js";
+import { defineDynamic } from "#dynamic/definition.js";
 import { defineHook } from "#public/definitions/hook.js";
 import { ConversationContextKey } from "#shared/conversation-context.js";
 import { SessionTitleKey } from "#context/keys.js";
@@ -796,6 +797,72 @@ describe("workflowEntry integration", () => {
       } finally {
         stream.dispose();
         if (!completed) await run.cancel();
+      }
+    });
+  });
+
+  it("parks a failed dynamic connection rehydration and accepts the next message", async () => {
+    let shouldFail = false;
+    const continuationToken = "http:workflow-entry-dynamic-connection-failure";
+    const runtime = await createTestRuntime({
+      agent: { name: "workflow-entry-dynamic-connection-failure" },
+      modules: [
+        {
+          logicalPath: "connections/accounts.ts",
+          loadNamespace: async () => ({
+            default: defineDynamic({
+              events: {
+                "session.started": () => {
+                  if (shouldFail) throw new Error("account store unavailable");
+                  return null;
+                },
+              },
+            }),
+          }),
+        },
+      ],
+    });
+
+    await runtime.run(async () => {
+      const run = await start(workflowEntry, [
+        {
+          input: { message: "first message" },
+          serializedContext: buildSerializedContext({
+            channelKind: "http",
+            continuationToken,
+            mode: "conversation",
+          }),
+        },
+      ]);
+      const stream = captureTurnEvents(run);
+
+      try {
+        expect((await stream.nextTurn()).at(-1)?.type).toBe("session.waiting");
+
+        await waitForHook({ runId: run.runId }, { token: continuationToken });
+        shouldFail = true;
+        await resumeHook(continuationToken, {
+          kind: "send",
+          payload: { message: "failed message" },
+        });
+
+        const failedTurn = await stream.nextTurn();
+        expect(failedTurn.at(-1)?.type).toBe("session.waiting");
+        expect(filterEventsByType(failedTurn, "turn.failed")).toHaveLength(1);
+        expect(filterEventsByType(failedTurn, "session.failed")).toHaveLength(0);
+
+        shouldFail = false;
+        await resumeHook(continuationToken, {
+          kind: "send",
+          payload: { message: "recovered message" },
+        });
+
+        const recoveredTurn = await stream.nextTurn();
+        expect(recoveredTurn.at(-1)?.type).toBe("session.waiting");
+        expect(filterEventsByType(recoveredTurn, "session.failed")).toHaveLength(0);
+      } finally {
+        stream.dispose();
+        await run.cancel();
       }
     });
   });

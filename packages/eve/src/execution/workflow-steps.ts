@@ -97,6 +97,7 @@ import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
 import { bindDynamicConnections } from "#execution/dynamic-connections.js";
 import { deferMismatchedInlineTurnStep } from "#execution/accepted-delivery-deployment.js";
 import { runModelCallBatch } from "#execution/model-call-batching.js";
+import { recoverDynamicConnectionRehydration } from "#execution/dynamic-connection-recovery.js";
 import {
   createCancelledModelCallBatchResult,
   type CompletedModelCallCheckpoint,
@@ -521,11 +522,22 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
                 session: enrichedSession,
               })
             : enrichedSession;
-          await dynamicConnections.rehydrate(
-            getHarnessEmissionState(schemaSession.state),
-            runtimeIdentity,
-            isHarnessBetweenTurns(schemaSession),
-          );
+          try {
+            await dynamicConnections.rehydrate(
+              getHarnessEmissionState(schemaSession.state),
+              runtimeIdentity,
+              isHarnessBetweenTurns(schemaSession),
+            );
+          } catch (error) {
+            const recovered = await recoverDynamicConnectionRehydration({
+              emit: handleEvent,
+              error,
+              mode,
+              session: schemaSession,
+            });
+            if (recovered !== undefined) return recovered;
+            throw error;
+          }
           if (firstCall && completedAuths) {
             let emissionState = getHarnessEmissionState(schemaSession.state);
             if (isHarnessBetweenTurns(schemaSession)) {

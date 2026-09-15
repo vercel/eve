@@ -1,4 +1,5 @@
 import { BoundaryHookError } from "#shared/boundary-hook-error.js";
+import { isDynamicConnectionResolutionError } from "#context/dynamic-connection-lifecycle.js";
 import {
   isStepCount,
   type LanguageModelCallEndEvent,
@@ -530,7 +531,11 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       throwIfTurnAborted(config.abortSignal);
       if (isTurnCancellation(error)) throw error;
       if (isDynamicModelSelectionError(error)) return failModelSelection(error, failureState);
-      if (!emit || config.mode !== "conversation" || !(error instanceof BoundaryHookError)) {
+      if (
+        !emit ||
+        config.mode !== "conversation" ||
+        !(error instanceof BoundaryHookError || isDynamicConnectionResolutionError(error))
+      ) {
         throw error;
       }
 

@@ -18,6 +18,27 @@ import type {
 import { toErrorMessage } from "#shared/errors.js";
 
 const log = createLogger("dynamic-connections");
+const DYNAMIC_CONNECTION_RESOLUTION_ERROR_CODE = "EVE_DYNAMIC_CONNECTION_RESOLUTION_FAILED";
+
+export class DynamicConnectionResolutionError extends Error {
+  readonly code = DYNAMIC_CONNECTION_RESOLUTION_ERROR_CODE;
+  override readonly name = "DynamicConnectionResolutionError";
+
+  constructor(error: unknown) {
+    super(toErrorMessage(error), { cause: error });
+  }
+}
+
+export function isDynamicConnectionResolutionError(
+  error: unknown,
+): error is DynamicConnectionResolutionError {
+  return (
+    error instanceof DynamicConnectionResolutionError ||
+    (typeof error === "object" &&
+      error !== null &&
+      (error as { readonly code?: unknown }).code === DYNAMIC_CONNECTION_RESOLUTION_ERROR_CODE)
+  );
+}
 
 function qualifyConnectionNames(
   resolver: ResolvedDynamicConnectionResolver,
@@ -95,6 +116,7 @@ export async function dispatchDynamicConnectionEvent(input: {
   );
   const updates = new Map<string, readonly ResolvedConnectionDefinition[]>();
   let failedResolver: ResolvedDynamicConnectionResolver | undefined;
+  let failedReason: unknown;
   for (let index = 0; index < outcomes.length; index += 1) {
     const outcome = outcomes[index]!;
     const resolver = matching[index]!;
@@ -103,14 +125,20 @@ export async function dispatchDynamicConnectionEvent(input: {
         error: toErrorMessage(outcome.reason),
         logicalPath: resolver.logicalPath,
       });
-      failedResolver ??= resolver;
+      if (failedResolver === undefined) {
+        failedResolver = resolver;
+        failedReason = outcome.reason;
+      }
       continue;
     }
     updates.set(outcome.value.resolver.slug, outcome.value.connections);
   }
   if (failedResolver !== undefined) {
-    throw new Error(
-      `Dynamic connection resolver "${failedResolver.logicalPath}" failed during "${input.event.type}".`,
+    throw new DynamicConnectionResolutionError(
+      new Error(
+        `Dynamic connection resolver "${failedResolver.logicalPath}" failed during "${input.event.type}".`,
+        { cause: failedReason },
+      ),
     );
   }
 
