@@ -46,7 +46,7 @@ export function createSetupContexts(input: {
   }) => SetupExternalAction;
 }): { prepare: SetupPrepareContext; apply: SetupApplyContext } {
   const presenter = createSetupPresenter(input.prompter, input.beginExternalAction);
-  const apply: SetupApplyContext = { appRoot: input.appRoot, presenter };
+  const apply: SetupApplyContext = { appRoot: input.appRoot, asker: input.asker, presenter };
   if (input.signal !== undefined) apply.signal = input.signal;
   if (input.force !== undefined) apply.force = input.force;
   return {

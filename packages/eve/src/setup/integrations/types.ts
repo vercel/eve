@@ -31,6 +31,8 @@ export interface SetupPrepareContext {
 
 export interface SetupApplyContext {
   readonly appRoot: string;
+  /** Used when an external authorization action must complete before setup can continue. */
+  readonly asker: Asker;
   readonly presenter: SetupPresenter;
   signal?: AbortSignal;
   force?: boolean;
