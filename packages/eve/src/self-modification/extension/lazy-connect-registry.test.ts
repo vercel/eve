@@ -22,12 +22,12 @@ describe("self-modification lazy Connect registry installs", () => {
     );
   });
 
-  it("generates a UUID without requiring a project identifier", () => {
+  it("generates 80 random bits as hex without requiring a project identifier", () => {
     const first = selfModificationConnectorUid("linear");
     const second = selfModificationConnectorUid("linear");
 
-    expect(first).toMatch(/^linear-[0-9a-f-]{36}$/u);
-    expect(second).toMatch(/^linear-[0-9a-f-]{36}$/u);
+    expect(first).toMatch(/^linear-[0-9a-f]{20}$/u);
+    expect(second).toMatch(/^linear-[0-9a-f]{20}$/u);
     expect(second).not.toBe(first);
   });
 

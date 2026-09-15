@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { randomBytes } from "node:crypto";
 
 import { replaceConnectionConnectorUid } from "#setup/scaffold/update/update-connection-connector.js";
 
@@ -10,9 +10,13 @@ export function selfModificationLazyConnectName(target: string): string | undefi
 }
 
 /** Builds a stable-in-source, collision-resistant UID without binding to a project. */
+function randomConnectorId(): string {
+  return randomBytes(10).toString("hex");
+}
+
 export function selfModificationConnectorUid(
   name: string,
-  createId: () => string = randomUUID,
+  createId: () => string = randomConnectorId,
 ): string {
   if (!CONNECTOR_PART.test(name)) throw new Error("Invalid Vercel Connect connector name.");
   const id = createId();
