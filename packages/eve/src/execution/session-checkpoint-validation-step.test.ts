@@ -34,13 +34,24 @@ describe("validateSessionCheckpointStep", () => {
   });
 
   it("rejects a checkpoint written by a different contract version", async () => {
-    const checkpoint: SessionCheckpoint = { ...createCheckpoint(), version: 3 as never };
+    const checkpoint: SessionCheckpoint = { ...createCheckpoint(), version: 2 as never };
 
     await expect(validateSessionCheckpointStep({ checkpoint })).rejects.toThrow(
-      /Unsupported session checkpoint version 3.*Start a new session/,
+      /Unsupported session checkpoint version 2.*Start a new session/,
     );
     expect(deserializeContextMock).not.toHaveBeenCalled();
   });
+
+  it.each([undefined, -1, NaN, Infinity, "30000", true])(
+    "rejects an invalid renewal duration (%s)",
+    async (sessionTimeoutMs) => {
+      const checkpoint = { ...createCheckpoint(), sessionTimeoutMs } as SessionCheckpoint;
+      await expect(validateSessionCheckpointStep({ checkpoint })).rejects.toThrow(
+        "invalid timeout duration",
+      );
+      expect(deserializeContextMock).not.toHaveBeenCalled();
+    },
+  );
 
   it.each([
     ["an empty session-hook set", []],
@@ -60,7 +71,8 @@ describe("validateSessionCheckpointStep", () => {
 function createCheckpoint(input: { readonly session?: readonly string[] } = {}): SessionCheckpoint {
   return {
     anchorToken: "session-1:anchor",
-    version: 2,
+    version: 3,
+    sessionTimeoutMs: false,
     hooks: toHookClaims(input.session ?? ["stable", "channel:old", "channel:current"]),
     mode: "conversation",
     ownership: {

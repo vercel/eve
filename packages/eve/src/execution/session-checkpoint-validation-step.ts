@@ -15,6 +15,12 @@ export async function validateSessionCheckpointStep(input: {
       `Unsupported session checkpoint version ${JSON.stringify(checkpoint.version)}; this deployment reads version ${SESSION_CHECKPOINT_VERSION}. Start a new session on this deployment.`,
     );
   }
+  const timeout = checkpoint.sessionTimeoutMs;
+  if (
+    timeout !== false &&
+    (typeof timeout !== "number" || !Number.isFinite(timeout) || timeout < 0)
+  )
+    throw new Error("Session checkpoint contains an invalid timeout duration.");
   const { hooks } = checkpoint;
   const tokens = flattenSessionHookClaims(hooks);
   if (

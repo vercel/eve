@@ -16,7 +16,7 @@ import {
   type SessionInboxHandle,
 } from "#execution/session-inbox/inbox.js";
 import { sessionCommandHookToken } from "#execution/session-command-token.js";
-import { DEFAULT_SESSION_TIMEOUT_MS } from "#execution/session-timeout.js";
+import { DEFAULT_SESSION_TIMEOUT_MS, sessionTimeoutDeadline } from "#execution/session-timeout.js";
 import type { DynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agent-config.js";
 import { attachClientContext, readClientContext } from "#internal/client-context.js";
 import { settleContinuationConflictStep } from "#execution/continuation-conflict-step.js";
@@ -112,6 +112,7 @@ async function bootInitialOwner(
 ): Promise<SessionBoot | undefined> {
   const { commandInbox, ownerRunId: sessionId, serializedContext } = context;
   const { workflowStartedAt } = getWorkflowMetadata();
+  const sessionTimeoutMs = input.sessionTimeoutMs ?? DEFAULT_SESSION_TIMEOUT_MS;
   const continuationToken = (serializedContext["eve.continuationToken"] as string) || "";
   const serializedBundle = serializedContext["eve.bundle"] as {
     source: DurableCompiledArtifactsSource;
@@ -169,12 +170,8 @@ async function bootInitialOwner(
     retention: input.retention,
     serializedContext,
     sessionState: sessionCreation.value.state,
-    sessionTimeoutDeadline:
-      input.sessionTimeoutMs === false
-        ? undefined
-        : new Date(
-            workflowStartedAt.getTime() + (input.sessionTimeoutMs ?? DEFAULT_SESSION_TIMEOUT_MS),
-          ),
+    sessionTimeoutMs,
+    sessionTimeoutDeadline: sessionTimeoutDeadline(sessionTimeoutMs, workflowStartedAt.getTime()),
     sessionWritable: context.sessionWritable,
   };
 }
@@ -206,7 +203,8 @@ async function bootHandoffOwner(
     retention: checkpoint.retention,
     serializedContext: context.serializedContext,
     sessionState: checkpoint.sessionState,
-    sessionTimeoutDeadline: checkpoint.sessionTimeoutDeadline,
+    sessionTimeoutMs: checkpoint.sessionTimeoutMs,
+    sessionTimeoutDeadline: sessionTimeoutDeadline(checkpoint.sessionTimeoutMs, Date.now()),
     sessionWritable: context.sessionWritable,
   };
 }

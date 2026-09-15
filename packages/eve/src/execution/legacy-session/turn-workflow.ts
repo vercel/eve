@@ -5,6 +5,7 @@ import { failSession, runPreparedSession } from "#execution/session-program.js";
 import { prepareLegacySessionStep } from "./prepare-step.js";
 import { interruptLegacySessionStep } from "./interrupt-step.js";
 import { completeLegacyDriverStep } from "./completion-step.js";
+import { sessionTimeoutDeadline } from "#execution/session-timeout.js";
 
 import type { WorkflowEntryResult } from "#execution/workflow-entry-input.js";
 
@@ -46,7 +47,8 @@ export async function turnWorkflow(rawInput: unknown): Promise<void> {
           deploymentId: prepared.deploymentId,
         },
         retention: prepared.input.retention,
-        sessionTimeoutDeadline: prepared.sessionTimeoutDeadline,
+        sessionTimeoutMs: prepared.sessionTimeoutMs,
+        sessionTimeoutDeadline: sessionTimeoutDeadline(prepared.sessionTimeoutMs, Date.now()),
         sessionWritable: prepared.input.parentWritable,
       },
       inbox,

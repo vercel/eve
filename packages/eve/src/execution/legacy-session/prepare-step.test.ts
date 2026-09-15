@@ -1,3 +1,4 @@
+import { DEFAULT_SESSION_TIMEOUT_MS } from "#execution/session-timeout.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { prepareLegacySessionStep } from "./prepare-step.js";
 const mocks = vi.hoisted(() => ({ run: vi.fn(), hydrate: vi.fn(), encryption: vi.fn() }));
@@ -46,16 +47,13 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllEnvs());
 describe("legacy session preparation", () => {
   it.each([false, 5000, undefined])(
-    "retains the original deadline (%s)",
+    "retains the configured timeout duration (%s)",
     async (sessionTimeoutMs) => {
       mocks.hydrate.mockResolvedValue([{ sessionTimeoutMs, retention: 0 }]);
       const result = await prepareLegacySessionStep(input);
       expect(result.input.retention).toBe(0);
       expect(mocks.hydrate).toHaveBeenCalledWith("encrypted", "original", "key");
-      if (sessionTimeoutMs === false) expect(result.sessionTimeoutDeadline).toBeUndefined();
-      else if (sessionTimeoutMs !== undefined)
-        expect(result.sessionTimeoutDeadline).toEqual(new Date(6000));
-      else expect(result.sessionTimeoutDeadline!.getTime()).toBeGreaterThan(1000);
+      expect(result.sessionTimeoutMs).toBe(sessionTimeoutMs ?? DEFAULT_SESSION_TIMEOUT_MS);
       expect(result.serializedContext).toMatchObject({
         "eve.sessionId": "original",
         "eve.sessionInbox": { sessionId: "original" },

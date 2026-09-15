@@ -33,7 +33,7 @@ function fixture(turnId = ""): PreparedLegacySession {
     originalSession: session,
     sessionState: importConversation(session),
     serializedContext: {},
-    sessionTimeoutDeadline: undefined,
+    sessionTimeoutMs: false,
     deploymentId: "new",
     hooks: { stable: "current", aliases: [] },
     input: {

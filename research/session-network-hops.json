@@ -196,7 +196,7 @@
       "modes": ["handoff"],
       "lane": "critical",
       "operations": "activation hook_created + startSessionOwnerStep lifecycle + run_created + publish",
-      "why": "Activation callback is registered before starting a run that can signal it. Successor receives explicit anchorRunId, snapshot, address set, deadline.",
+      "why": "Activation callback is registered before starting a run that can signal it. Successor receives explicit anchorRunId, snapshot, address set, and configured timeout duration. Successful activation restarts that duration.",
       "source": {
         "path": "packages/eve/src/execution/session-handoff.ts",
         "symbol": "async start"

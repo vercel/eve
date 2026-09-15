@@ -1,7 +1,7 @@
 ---
 issue: https://github.com/vercel/eve/issues/876
 status: implemented
-last_updated: "2026-09-11"
+last_updated: "2026-09-15"
 ---
 
 # Single-workflow sessions with ingress-driven upgrades
@@ -165,7 +165,7 @@ context and lifecycle metadata:
 
 - private model history, raw authored state, memory, sandbox attachment;
 - auth and initiator context, output schema, compaction accounting;
-- event sequence, remaining limits, the complete claimed session-hook set, and original deadline.
+- event sequence, remaining limits, the complete claimed session-hook set, and original configured timeout duration.
 
 The single triggering delivery travels alongside the checkpoint. The checkpoint never carries a
 command backlog, live waits, callback ownership, or task/subagent/tool handles; the eligibility rule
@@ -215,7 +215,9 @@ After its first handoff the original run releases the public hooks and parks on 
 hook. It performs no agent execution, command routing, or background processing. Intermediate
 owners exit after handing off, so at most two runs exist per session: the anchor and the current
 owner. At session end the owner runs cleanup and emits its final events, then wakes the anchor to
-close the stream. Upgrades never extend the session deadline.
+close the stream. Each successful handoff or legacy import restarts the original configured
+timeout duration. Disabled timeouts stay disabled; failed or skipped handoffs retain the
+existing deadline. The current owner ignores timeout wakes before its own deadline.
 
 The upstream replacement is a global stream independent of any run's lifetime. Adopt it when
 available and delete the anchor. Keep the anchor mechanics behind the session runtime boundary so
@@ -373,7 +375,8 @@ step. That hook carries explicit cancellation, never steering. The original
 owner creates its terminal anchor hook only when it attempts handoff. Handoff
 activation remains a separate, handoff-only acknowledgement hook. The deadline
 workflow starts concurrently with the initial turn, and both operations are
-settled before leaving startup; the absolute deadline is unchanged.
+settled before leaving startup. A successor starts a new deadline from activation using
+the original configured duration, and the previous owner cancels its timer.
 
 Ingress calls `resumeHook(token, command)` directly. The returned receipt carries
 the owning run ID and lazy `{ sessionId }` metadata. Only alias callers asking
@@ -420,7 +423,7 @@ claim measured latency or a fixed count for arbitrary authored integrations.
 - Same-deployment turns, including coordination waits and cancellation, run on one owner with no
   child turn run or private control hooks. Assert the deleted paths are unreachable.
 - An eligible A→B delivery starts one successor on B and preserves identity, connected stream and
-  cursor, settled state, limits, deadline, and every claimed session hook. Owner and authored code
+  cursor, settled state, limits, timeout duration, and every claimed session hook. Owner and authored code
   report B. An unreadable checkpoint recovers A's ownership and processes the delivery once.
 - Every unsafe category skips: parked HITL, background tasks, batched deliveries, queued commands.
   Work stays on A. Settlement and queue draining trigger nothing; only a fresh eligible delivery

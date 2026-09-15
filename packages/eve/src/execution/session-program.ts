@@ -45,6 +45,7 @@ export interface SessionBoot {
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
   readonly sessionTimeoutDeadline?: Date;
+  readonly sessionTimeoutMs: number | false;
   readonly sessionWritable: WritableStream<Uint8Array>;
 }
 
@@ -237,6 +238,14 @@ async function runSessionLoop(
         ledger,
         queue,
       });
+      // The previous owner's timer may publish while handoff cancels it.
+      // Only this owner's deadline can expire the renewed session.
+      if (
+        next.kind === "expired" &&
+        (boot.sessionTimeoutDeadline === undefined ||
+          Date.now() < boot.sessionTimeoutDeadline.getTime())
+      )
+        continue;
       if (next.kind === "workflow") {
         await execution.handleWorkflowMessage(next.message);
         continue;

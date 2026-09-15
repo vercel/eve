@@ -23,7 +23,7 @@ replay unit.
 
 The Workflow SDK is not inherently tied to Vercel. In local development and in a self-deployed `eve start` process, eve uses the SDK's local world by default; that world persists workflow runs on disk under `.eve/.workflow-data` and dispatches through the same Nitro-hosted workflow routes. On Vercel, the same workflow code runs against Vercel Workflow instead, which adds deployment-aware routing and dashboard run metadata.
 
-When a Vercel production deployment changes, a new ID-addressed delivery to an idle session hands the session's settled state to the exact deployment that accepted the request. The session keeps its original ID and event stream, while the next model turn uses that deployment's current system-role instructions, model, and tools. Static user-role instructions stay pinned in the durable conversation history and are not seeded again.
+When a Vercel production deployment changes, a new ID-addressed delivery to an idle session hands the session's settled state to the exact deployment that accepted the request. The session keeps its original ID and event stream, while the next model turn uses that deployment's current system-role instructions, model, and tools. Static user-role instructions stay pinned in the durable conversation history and are not seeded again. A successful handoff restarts the session's original configured [`sessionTimeoutMs`](../agent-config#runtime-limits) duration; disabled timeouts stay disabled. Failed or skipped handoffs keep the existing deadline.
 
 eve does not move live work between deployments. A session with a running turn, pending human input or authorization, queued messages, or active tasks and subagents stays on its current deployment. After that work settles, a later delivery can move the idle session; the earlier deployment signal is not remembered.
 
@@ -43,7 +43,8 @@ committed tool effects.
 
 Keep the original deployment available until these sessions end. Their old
 drivers remain waiting to keep the original streams open; the current runtime
-owns subsequent turns. Import does not extend the session deadline. A driver
+owns subsequent turns. Import restarts the original configured session timeout;
+disabled timeouts stay disabled. A driver
 that has not reached its next turn dispatch has not migrated yet.
 
 Transparent rollback to the former execution model is unsupported. Retire and

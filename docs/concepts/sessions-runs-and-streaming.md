@@ -22,7 +22,9 @@ That identity stays behind the channel boundary and is never accepted or returne
 by the eve HTTP session API. See [Custom channels](../channels/custom#channel-operations-and-session-handles).
 
 Sessions last 30 days by default; configure `limits.sessionTimeoutMs` in
-`agent.ts`, or set it to `false` to disable the deadline. At expiration, eve
+`agent.ts`, or set it to `false` to disable the deadline. A successful deployment
+handoff or legacy-session import restarts the original configured duration.
+Ordinary messages and process restarts keep the existing deadline. At expiration, eve
 lets an active turn settle, emits `session.completed`, and releases the
 session's continuation addresses so the next qualifying channel message starts fresh. Stored
 session data is not deleted. See [Agent config](../agent-config#runtime-limits).

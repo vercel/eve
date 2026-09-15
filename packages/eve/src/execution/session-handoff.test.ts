@@ -56,7 +56,8 @@ describe("SessionHandoff", () => {
           ownerRunId: "owner-1",
           sessionId: "session-1",
         },
-        version: 2,
+        sessionTimeoutMs: 60_000,
+        version: 3,
       }),
       targetDeploymentId: "deployment-b",
       trigger: { delivery: trigger.delivery },
@@ -211,6 +212,7 @@ function snapshot(queue: { readonly pendingCount: number } = { pendingCount: 0 }
 function createHandoff(commandInbox: SessionInboxHandle): SessionHandoff {
   return new SessionHandoff({
     anchorToken: "session-1:anchor",
+    sessionTimeoutMs: 60_000,
     commandInbox,
     isInitialOwner: true,
     mode: "conversation",

@@ -21,7 +21,7 @@ export async function prepareLegacySessionStep(rawInput: unknown) {
     await resolveRunEncryptionKey(world, run),
   );
   const driverInput = Array.isArray(args) && isObject(args[0]) ? args[0] : undefined;
-  if (driverInput === undefined) throw new Error("Cannot read the original session deadline.");
+  if (driverInput === undefined) throw new Error("Cannot read the original session timeout.");
   const timeout = driverInput.sessionTimeoutMs;
   if (
     timeout !== undefined &&
@@ -29,12 +29,7 @@ export async function prepareLegacySessionStep(rawInput: unknown) {
     (typeof timeout !== "number" || !Number.isFinite(timeout) || timeout < 0)
   )
     throw new Error("Invalid original session timeout.");
-  const sessionTimeoutDeadline =
-    timeout === false
-      ? undefined
-      : new Date(
-          (run.startedAt ?? run.createdAt).getTime() + (timeout ?? DEFAULT_SESSION_TIMEOUT_MS),
-        );
+  const sessionTimeoutMs = timeout ?? DEFAULT_SESSION_TIMEOUT_MS;
   const serializedContext: Record<string, unknown> = {
     ...input.serializedContext,
     "eve.sessionId": sessionState.sessionId,
@@ -56,7 +51,7 @@ export async function prepareLegacySessionStep(rawInput: unknown) {
     originalSession,
     sessionState,
     serializedContext,
-    sessionTimeoutDeadline,
+    sessionTimeoutMs: sessionTimeoutMs as number | false,
     hooks: {
       stable: sessionCommandHookToken(sessionState.sessionId),
       aliases: sessionState.continuationToken ? [sessionState.continuationToken] : [],

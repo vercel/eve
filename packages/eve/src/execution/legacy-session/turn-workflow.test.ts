@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { turnWorkflow } from "./turn-workflow.js";
 
 const mocks = vi.hoisted(() => ({
@@ -35,15 +35,17 @@ const prepared = {
   },
   hooks: { stable: "current-inbox", aliases: [] },
   deploymentId: "new",
-  sessionTimeoutDeadline: new Date(1000),
+  sessionTimeoutMs: 5000,
 };
 beforeEach(() => {
   vi.resetAllMocks();
+  vi.spyOn(Date, "now").mockReturnValue(10_000);
   mocks.prepare.mockResolvedValue(prepared);
   mocks.interrupt.mockResolvedValue({ sessionState: prepared.sessionState, serializedContext: {} });
   mocks.run.mockResolvedValue({ output: "done" });
   mocks.fail.mockRejectedValue(new Error("session failed"));
 });
+afterEach(() => vi.restoreAllMocks());
 describe("legacy import ownership", () => {
   it("prepares before claiming, and waits for the whole session before releasing the driver", async () => {
     let finish!: (value: unknown) => void;
@@ -77,7 +79,8 @@ describe("legacy import ownership", () => {
           deploymentId: "new",
         },
         sessionWritable: prepared.input.parentWritable,
-        sessionTimeoutDeadline: prepared.sessionTimeoutDeadline,
+        sessionTimeoutMs: prepared.sessionTimeoutMs,
+        sessionTimeoutDeadline: new Date(15_000),
       }),
       expect.anything(),
     );

@@ -18,7 +18,7 @@ function fixture() {
     originalSession: session,
     sessionState: importConversation(session),
     serializedContext: {},
-    sessionTimeoutDeadline: undefined,
+    sessionTimeoutMs: false,
     hooks: { stable: "current", aliases: [] },
     deploymentId: "new",
     input: {

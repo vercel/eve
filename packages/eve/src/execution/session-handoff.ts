@@ -30,7 +30,7 @@ export interface SessionOwnership {
  * build than the owner that produced it; bump when any field changes shape so
  * an incompatible successor rejects the handoff instead of misreading state.
  */
-export const SESSION_CHECKPOINT_VERSION = 2;
+export const SESSION_CHECKPOINT_VERSION = 3;
 
 export interface SessionCheckpoint {
   readonly version: typeof SESSION_CHECKPOINT_VERSION;
@@ -42,7 +42,7 @@ export interface SessionCheckpoint {
   readonly retention?: AgentWorkflowRetentionDefinition;
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
-  readonly sessionTimeoutDeadline?: Date;
+  readonly sessionTimeoutMs: number | false;
 }
 
 type SessionHandoffCheckpoint =
@@ -105,7 +105,7 @@ export interface SessionHandoffInput {
   readonly mode: RunMode;
   readonly ownership: SessionOwnership;
   readonly retention?: AgentWorkflowRetentionDefinition;
-  readonly sessionTimeoutDeadline?: Date;
+  readonly sessionTimeoutMs: number | false;
 }
 
 export class SessionHandoff {
@@ -206,7 +206,7 @@ export class SessionHandoff {
         retention: this.input.retention,
         serializedContext: snapshot.serializedContext,
         sessionState: snapshot.sessionState,
-        sessionTimeoutDeadline: this.input.sessionTimeoutDeadline,
+        sessionTimeoutMs: this.input.sessionTimeoutMs,
         version: SESSION_CHECKPOINT_VERSION,
       },
       kind: "ready",

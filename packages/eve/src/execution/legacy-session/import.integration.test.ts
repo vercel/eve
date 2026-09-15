@@ -176,7 +176,7 @@ describe("imported session lifetime", () => {
       }
     });
   });
-  it("expires against the original deadline when import starts after it elapsed", async () => {
+  it("expires after the renewed configured lifetime", async () => {
     const runtime = await createTestRuntime({ agent: { name: "legacy-timeout" } });
     await runtime.run(async () => {
       const driver = await start(legacySessionDriverWorkflow, [
@@ -187,7 +187,7 @@ describe("imported session lifetime", () => {
         await waitForHook(driver, { token: `eve:session:${driver.runId}:inbox` });
         await resumeSessionInbox(
           { sessionId: driver.runId },
-          { kind: "send", payload: { message: "Alice continues after the deadline." } },
+          { kind: "send", payload: { message: "Alice continues the conversation." } },
         );
         const events = await stream.nextTurn();
         if (!events.some((event) => event.type === "session.completed"))
