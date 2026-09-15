@@ -1,19 +1,40 @@
-/** Starts workflow-tool runs and framework controls for pending coordination. */
+/** Starts workflow-tool runs for pending blocking actions from either source. */
 
+import { deserializeContext } from "#context/serialize.js";
 import {
   prepareCoordinationDispatch,
   type CoordinationDispatchInput,
   type CoordinationDispatchResult,
 } from "#execution/coordination-dispatch-shared.js";
-import { createDurableSessionState } from "#execution/durable-session-store.js";
+import { createDurableSessionState, readDurableSession } from "#execution/durable-session-store.js";
+import { resolveEffectiveAgentRuntime } from "#execution/effective-agent-config.js";
+import { hydrateDurableSession } from "#execution/session.js";
 import { executeTaskControlAction } from "#execution/tasks/parent/dispatch.js";
 import type { BackgroundTask } from "#execution/tasks/parent/delegate.js";
 import { cancelBackgroundAgentTask } from "#execution/tools/subagent/task-cancel.js";
 import { startWorkflowTask } from "#execution/tools/workflow/start.js";
-import type { RuntimeActionResult } from "#shared/action-types.js";
+import { setPendingCoordinationBatch } from "#harness/coordination.js";
+import {
+  getPendingWorkflowInterrupt,
+  setPendingWorkflowUsedCalls,
+} from "#harness/workflow-interrupt-state.js";
+import {
+  planWorkflowSubagentDispatch,
+  type WorkflowSubagentDispatchPlan,
+} from "#harness/workflow-subagent-limit.js";
+import { buildWorkflowTasksFromInterrupt } from "#harness/workflow-task-state.js";
+import { createLogger } from "#internal/logging.js";
+import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
+import type {
+  RuntimeActionResult,
+  RuntimeSubagentDispatchFailure,
+  RuntimeWorkflowTaskRequest,
+} from "#shared/action-types.js";
+
+const workflowTaskLog = createLogger("execution.dispatch-workflow-tasks");
 
 type CoordinationDispatchStepInput = CoordinationDispatchInput & {
-  readonly action: "park";
+  readonly action: "park" | "dispatch-workflow-tasks";
 };
 
 export async function dispatchCoordinationStep(
@@ -21,14 +42,20 @@ export async function dispatchCoordinationStep(
 ): Promise<CoordinationDispatchResult> {
   "use step";
 
+  // Model-driven actions already have a coordination batch. Dynamic Workflow
+  // tasks first need their interrupt lowered into that same representation.
+  const normalized =
+    input.action === "dispatch-workflow-tasks"
+      ? await normalizeWorkflowTaskInterrupt(input)
+      : { results: [], sessionState: input.sessionState };
   const prepared = await prepareCoordinationDispatch({
     serializedContext: input.serializedContext,
-    sessionState: input.sessionState,
+    sessionState: normalized.sessionState,
   });
   if (prepared === undefined) {
     return {
-      results: [],
-      sessionState: input.sessionState,
+      results: normalized.results,
+      sessionState: normalized.sessionState,
       pendingTasks: [],
     };
   }
@@ -63,15 +90,103 @@ export async function dispatchCoordinationStep(
       nextSession = control.session;
       if (control.pendingTask !== undefined) pendingTasks.push(control.pendingTask);
       results.push(control.result);
+      continue;
     }
   }
 
   return {
-    results,
+    results: [...results, ...normalized.results],
     sessionState:
       nextSession === session
         ? prepared.sessionState
         : createDurableSessionState({ session: nextSession }),
     pendingTasks,
   };
+}
+
+async function normalizeWorkflowTaskInterrupt(input: CoordinationDispatchInput): Promise<{
+  readonly results: readonly RuntimeActionResult[];
+  readonly sessionState: CoordinationDispatchInput["sessionState"];
+}> {
+  const durableSession = await readDurableSession(input.sessionState);
+  const pending = getPendingWorkflowInterrupt(durableSession.state);
+  if (pending === undefined) {
+    return { results: [], sessionState: input.sessionState };
+  }
+
+  const tasks = buildWorkflowTasksFromInterrupt(pending.interrupt);
+  if (tasks.length === 0) {
+    return { results: [], sessionState: input.sessionState };
+  }
+
+  const ctx = await deserializeContext(input.serializedContext);
+  const bundle = ctx.require(BundleKey);
+  const effectiveAgent = resolveEffectiveAgentRuntime(bundle, ctx);
+  const plan = planWorkflowSubagentDispatch({
+    tasks,
+    maxSubagents: durableSession.workflowMaxSubagents,
+    usedCalls: pending.usedCalls,
+  });
+  const blockedResults = plan.blocked.map((action) => {
+    workflowTaskLog.warn("workflow subagent limit reached; blocking delegated call", {
+      callId: action.callId,
+      maxSubagents: plan.maxSubagents,
+      subagentName: getWorkflowTaskName(action),
+      usedCalls: plan.usedCalls,
+    });
+    return createWorkflowSubagentLimitResult({ action, plan });
+  });
+
+  if (plan.allowed.length === 0) {
+    return { results: blockedResults, sessionState: input.sessionState };
+  }
+
+  const session = hydrateDurableSession({
+    compactionOverrides: {
+      thresholdPercent: effectiveAgent.thresholdPercent,
+    },
+    durable: durableSession,
+    turnAgent: effectiveAgent.turnAgent,
+  });
+  const sessionWithUsage = setPendingWorkflowUsedCalls({
+    session,
+    usedCalls:
+      pending.usedCalls + plan.allowed.filter((task) => task.resultKind === "subagent").length,
+  });
+  const sessionWithBatch = setPendingCoordinationBatch({
+    runtimeActions: [],
+    tasks: plan.allowed,
+    event: { sequence: 0, stepIndex: 0, turnId: "workflow-dispatch" },
+    responseMessages: [],
+    session: sessionWithUsage,
+  });
+
+  return {
+    results: blockedResults,
+    sessionState: createDurableSessionState({ session: sessionWithBatch }),
+  };
+}
+
+function createWorkflowSubagentLimitResult(input: {
+  readonly action: RuntimeWorkflowTaskRequest;
+  readonly plan: WorkflowSubagentDispatchPlan;
+}): RuntimeSubagentDispatchFailure {
+  const subagentName = getWorkflowTaskName(input.action);
+
+  return {
+    callId: input.action.callId,
+    isError: true,
+    kind: "subagent-result",
+    origin: "dispatch",
+    output: {
+      code: "WORKFLOW_SUBAGENT_LIMIT_REACHED",
+      maxSubagents: input.plan.maxSubagents,
+      message: `Workflow subagent limit reached (${String(input.plan.maxSubagents)}); "${subagentName}" was not called.`,
+    },
+    subagentName,
+  };
+}
+
+function getWorkflowTaskName(action: RuntimeWorkflowTaskRequest): string {
+  return action.resultKind === "subagent" ? action.toolName : action.kind;
 }

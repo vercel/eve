@@ -18,6 +18,7 @@ import { readWorkflowFunctionId } from "#internal/workflow/reference.js";
 export type CompiledToolEntry =
   | { readonly kind: "tool"; readonly definition: CompiledToolDefinition }
   | { readonly kind: "disabled"; readonly name: string }
+  | { readonly kind: "workflow-tool"; readonly maxSubagents?: number }
   | {
       readonly definition: CompiledToolDefinition;
       readonly kind: "web-search-tool";
@@ -56,6 +57,10 @@ export async function compileToolEntry(
 
   if (entry.kind === "disabled") {
     return { kind: "disabled", name: toolName };
+  }
+
+  if (entry.kind === "workflow-tool") {
+    return { kind: "workflow-tool", maxSubagents: entry.maxSubagents };
   }
 
   if (entry.kind === "web-search-tool") {
@@ -106,13 +111,6 @@ export async function compileToolEntry(
     lifetime: entry.definition.execution === "background" ? ("task" as const) : ("step" as const),
     suspend: workflowId === undefined ? ("none" as const) : ("workflow" as const),
   };
-  const attachedHandling = entry.definition.behavior?.handling;
-  const workflowHandling =
-    workflowId === undefined
-      ? undefined
-      : attachedHandling?.kind === "workflow-tool"
-        ? { ...attachedHandling, workflowId }
-        : { kind: "workflow-tool" as const, workflowId };
   return {
     kind: "tool",
     definition: {
@@ -121,12 +119,7 @@ export async function compileToolEntry(
           ? entry.definition.behavior === undefined
             ? { availability: [], shape }
             : { ...entry.definition.behavior, shape }
-          : {
-              ...entry.definition.behavior,
-              availability: entry.definition.behavior?.availability ?? [],
-              handling: workflowHandling,
-              shape,
-            },
+          : { availability: [], handling: { kind: "workflow-tool", workflowId }, shape },
       description: entry.definition.description,
       execution: entry.definition.execution,
       exportName: source.exportName,

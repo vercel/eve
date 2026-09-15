@@ -131,7 +131,11 @@ export async function runTurnOwnedWorkflow(
         (await turnStep(cursor.createStepInput(nextStepInput, cancellation?.signal)));
       initialStep = undefined;
       const pendingCallIds =
-        result.action === "park" ? result.pendingCoordinationCallIds : undefined;
+        result.action === "dispatch-workflow-tasks"
+          ? result.pendingTaskCallIds
+          : result.action === "park"
+            ? result.pendingCoordinationCallIds
+            : undefined;
       const hasBackgroundTasks = (result.backgroundTasks?.length ?? 0) > 0;
 
       if (hasBackgroundTasks) {
@@ -196,7 +200,13 @@ export async function runTurnOwnedWorkflow(
         return;
       }
 
-      if (pendingCallIds !== undefined && result.action === "park") {
+      // Both sources converge on coordination dispatch. Model-driven `park`
+      // already carries a coordination batch; a dynamic Workflow interrupt is
+      // normalized into that shape inside the dispatch step.
+      if (
+        pendingCallIds !== undefined &&
+        (result.action === "park" || result.action === "dispatch-workflow-tasks")
+      ) {
         await cursor.adopt(result);
         const dispatchResult = await dispatchCoordinationStep({
           action: result.action,
@@ -487,6 +497,22 @@ async function runLegacyTurnWorkflow(input: TurnWorkflowInput): Promise<void> {
               sessionState: result.sessionState,
               usage: result.usage,
               usageDelta: result.usageDelta,
+            },
+            kind: "turn-result",
+          },
+        });
+        return;
+      }
+
+      if (result.action === "dispatch-workflow-tasks") {
+        await sendTurnControlStep({
+          controlToken: input.completionToken,
+          payload: {
+            action: {
+              kind: "dispatch-workflow-tasks",
+              pendingCallIds: result.pendingTaskCallIds,
+              serializedContext: result.serializedContext,
+              sessionState: result.sessionState,
             },
             kind: "turn-result",
           },

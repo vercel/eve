@@ -1,15 +1,15 @@
 import { defineEval } from "eve/evals";
 
-/** workflow calls block, can continue one child, and share one subagent budget. */
+/** Workflow calls block, can continue one child, and share one subagent budget. */
 export default defineEval({
   tags: ["real-model"],
   description:
-    "workflow sandbox agent calls return inline, reuse agentId, and enforce maxSubagents.",
+    "Workflow sandbox agent calls return inline, reuse agentId, and enforce maxSubagents.",
   async test(t) {
     const started = await t.send(
       [
-        "Use the workflow tool exactly once and call echo-marker inside it with message 'blocking first'.",
-        "Return the inline result and reply with it verbatim. Do not call echo-marker outside workflow.",
+        "Use the Workflow tool exactly once and call echo-marker inside it with message 'blocking first'.",
+        "Return the inline result and reply with it verbatim. Do not call echo-marker outside Workflow.",
       ].join(" "),
     );
     started.expectOk();
@@ -24,25 +24,25 @@ export default defineEval({
 
     const second = await (firstTurn?.session ?? t).send(
       [
-        "Use the workflow tool exactly once. In its JavaScript, call the same echo-marker child three times sequentially",
-        "using the agentId shown in the latest <agents> block, with messages 'blocking second', 'blocking third', and 'blocking fourth'.",
-        "Then attempt a fourth call with that agentId and message 'blocking over limit'.",
-        "Return all four inline results and reply with them verbatim as JSON. Do not call echo-marker outside workflow.",
+        "Use the Workflow tool exactly once. In its JavaScript, call the same echo-marker child twice sequentially",
+        "using the agentId shown in the latest <agents> block, with messages 'blocking second' and 'blocking third'.",
+        "Then attempt a third call with that agentId and message 'blocking over limit'.",
+        "Return all three inline results and reply with them verbatim as JSON. Do not call echo-marker outside Workflow.",
       ].join(" "),
     );
     second.expectOk();
 
     t.succeeded();
-    t.calledTool("workflow", { count: 2 });
-    t.calledSubagent("echo-marker", { count: 4 });
-    t.eventsSatisfy("all workflow calls continue one child session", (events) => {
+    t.calledTool("Workflow", { count: 2 });
+    t.calledSubagent("echo-marker", { count: 3 });
+    t.eventsSatisfy("all Workflow calls continue one child session", (events) => {
       const childSessionIds = events.flatMap((event) =>
         event.type === "subagent.called" && event.data.name === "echo-marker"
           ? [event.data.childSessionId]
           : [],
       );
       return (
-        childSessionIds.length === 4 &&
+        childSessionIds.length === 3 &&
         childSessionIds[0] !== undefined &&
         childSessionIds.every((sessionId) => sessionId === childSessionIds[0])
       );

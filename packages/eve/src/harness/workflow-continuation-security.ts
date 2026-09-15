@@ -45,6 +45,7 @@ export function readWorkflowContinuationSecurity(
 
   return {
     signingKey: (stored as StoredWorkflowContinuationSecurity).signingKey,
+    // A parked workflow can legitimately wait far beyond code mode's one-hour default.
     maxAgeMs: WORKFLOW_CONTINUATION_MAX_AGE_MS,
   };
 }

@@ -8,7 +8,6 @@ import { computeDevelopmentHostFingerprint } from "#internal/nitro/host/dev-host
 import type { PreparedDevelopmentApplicationHost } from "#internal/nitro/host/types.js";
 import { defineChannel, GET } from "#public/definitions/channel.js";
 import { defineSchedule } from "#public/definitions/schedule.js";
-import defaultWorkflow from "#tools/framework/workflow.js";
 
 const temporaryDirectories: string[] = [];
 
@@ -27,7 +26,6 @@ interface HostVariant {
   readonly instrumentationSource?: string;
   readonly schedule?: { readonly cron: string; readonly markdown: string };
   readonly workflowSourceFingerprint?: string;
-  readonly workflowTool?: boolean;
   readonly workflowWorld?: "local" | "vercel";
 }
 
@@ -43,7 +41,7 @@ async function createHost(variant: HostVariant = {}): Promise<PreparedDevelopmen
     await writeFile(instrumentationSourcePath, variant.instrumentationSource);
   }
 
-  const modules: Array<NonNullable<Parameters<typeof compileFromMemory>[0]["modules"]>[number]> = [
+  const modules = [
     ...(variant.channel === undefined
       ? []
       : [
@@ -67,12 +65,6 @@ async function createHost(variant: HostVariant = {}): Promise<PreparedDevelopmen
           },
         ]),
   ];
-  if (variant.workflowTool === true) {
-    modules.push({
-      logicalPath: "tools/workflow.ts",
-      loadNamespace: async () => ({ default: defaultWorkflow }),
-    });
-  }
   const { manifest } = await compileFromMemory({
     agentRoot,
     appRoot,
@@ -86,6 +78,7 @@ async function createHost(variant: HostVariant = {}): Promise<PreparedDevelopmen
     modules,
     name: "fingerprint-host",
   });
+
   return {
     appRoot,
     compiledArtifacts: {
@@ -174,15 +167,6 @@ describe("computeDevelopmentHostFingerprint", () => {
     );
 
     expect(vercel).not.toBe(local);
-  });
-
-  it("treats workflow tool presence as structural", async () => {
-    const withoutWorkflowTool = await computeDevelopmentHostFingerprint(await createHost());
-    const withWorkflowTool = await computeDevelopmentHostFingerprint(
-      await createHost({ workflowTool: true }),
-    );
-
-    expect(withWorkflowTool).not.toBe(withoutWorkflowTool);
   });
 
   it("treats authored workflow sources as structural", async () => {

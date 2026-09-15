@@ -1,6 +1,9 @@
 import type { FlexibleSchema, ToolSet } from "ai";
 import type * as CodeModeModule from "#compiled/@ai-sdk/code-mode/index.js";
 
+/** Model-facing tool name for eve's legacy dynamic orchestration tool. */
+export const WORKFLOW_TOOL_NAME = "Workflow";
+
 const WORKFLOW_SANDBOX_MODULE_KEY = Symbol.for("eve.workflowSandbox.module");
 const WORKFLOW_SANDBOX_MODULE_SPECIFIER = ["#compiled", "@ai-sdk", "code-mode", "index.js"].join(
   "/",
@@ -105,7 +108,7 @@ export function createParkingHostTool(input: {
     outputSchema: input.outputSchema ?? undefined,
     execute: async (toolInput: unknown, options: unknown) => {
       const module = await loadWorkflowSandboxModule();
-      const resolution = readWorkflowSandboxResolution(options);
+      const resolution = readWorkflowProgramResolution(options);
       if (resolution?.status === "failed") throw new module.CodeModeToolError(resolution.error);
       if (resolution?.status === "completed") return resolution.output;
       return module.requestCodeModeInterrupt(input.interrupt(toolInput));
@@ -113,13 +116,15 @@ export function createParkingHostTool(input: {
   } as ToolSet[string];
 }
 
-export function readWorkflowSandboxResolution(
-  options: unknown,
-): WorkflowSandboxResolution | undefined {
+export function readWorkflowSandboxResolution(options: unknown): unknown {
   if (typeof options !== "object" || options === null) return undefined;
   const interrupt = (options as Record<string, unknown>).codeModeInterrupt;
   if (typeof interrupt !== "object" || interrupt === null) return undefined;
-  const resolution = (interrupt as Record<string, unknown>).resolution;
+  return (interrupt as Record<string, unknown>).resolution;
+}
+
+function readWorkflowProgramResolution(options: unknown): WorkflowSandboxResolution | undefined {
+  const resolution = readWorkflowSandboxResolution(options);
   if (typeof resolution !== "object" || resolution === null) return undefined;
   const status = (resolution as Record<string, unknown>).status;
   return status === "completed" || status === "failed"

@@ -40,7 +40,7 @@ function respond(request: MockModelRequest): MockModelResponse | string {
           input: {
             js: 'return await tools["sleeper"]({ message: "Call the wait-for-cancellation tool exactly once and wait until this delegated turn is cancelled." });',
           },
-          name: "workflow",
+          name: "Workflow",
         },
       ],
     };
@@ -65,7 +65,7 @@ function respond(request: MockModelRequest): MockModelResponse | string {
           input: {
             js: `return await tools["sleeper"]({ agentId: ${agentId}, message: ${JSON.stringify(RECOVERY_REQUEST)} });`,
           },
-          name: "workflow",
+          name: "Workflow",
         },
       ],
     };

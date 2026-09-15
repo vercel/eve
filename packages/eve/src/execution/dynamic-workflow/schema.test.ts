@@ -1,40 +1,59 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  parseDynamicWorkflowInput,
-  serializeDynamicWorkflowInput,
-  type DynamicWorkflowInput,
+  parseWorkflowProgramInput,
+  readWorkflowProgramAgentCall,
+  serializeWorkflowProgramInput,
+  type WorkflowProgramInput,
 } from "#execution/dynamic-workflow/schema.js";
 
-const input: DynamicWorkflowInput = {
-  agents: [
-    {
-      description: "Research a topic.",
-      inputSchema: { type: "object" },
-      name: "researcher",
-      outputSchema: null,
-    },
-  ],
-  continuationSecurity: { maxAgeMs: 1_000, signingKey: "test-key" },
-  js: "return await tools.researcher({ message: 'topic' });",
-  maxSubagents: 4,
+const input: WorkflowProgramInput = {
+  agents: ["researcher", "reviewer"],
+  continuationSecurity: { maxAgeMs: 1000, signingKey: "test-key" },
+  js: "return null",
+  maxSubagents: 7,
 };
 
-describe("dynamic workflow schema", () => {
-  it("round trips durable input", () => {
-    expect(parseDynamicWorkflowInput(serializeDynamicWorkflowInput(input))).toEqual(input);
+describe("workflow program schema", () => {
+  it("round trips pinned durable input", () => {
+    expect(parseWorkflowProgramInput(serializeWorkflowProgramInput(input))).toEqual(input);
   });
 
-  it.each([
-    [{ ...serializeDynamicWorkflowInput(input), js: 1 }, 'requires a "js" string'],
-    [{ ...serializeDynamicWorkflowInput(input), maxSubagents: 0 }, 'requires "maxSubagents"'],
-    [{ ...serializeDynamicWorkflowInput(input), maxSubagents: 129 }, "between 1 and 128"],
-    [
-      { ...serializeDynamicWorkflowInput(input), maxSubagents: Number.MAX_SAFE_INTEGER },
-      "between 1 and 128",
-    ],
-    [{ ...serializeDynamicWorkflowInput(input), agents: {} }, 'requires an "agents" array'],
-  ])("rejects malformed input", (value, message) => {
-    expect(() => parseDynamicWorkflowInput(value)).toThrow(message);
+  it("rejects invalid helper bounds and allowlists", () => {
+    expect(() =>
+      parseWorkflowProgramInput({
+        ...serializeWorkflowProgramInput(input),
+        maxSubagents: 129,
+      }),
+    ).toThrow("between 1 and 128");
+    expect(() =>
+      parseWorkflowProgramInput({
+        ...serializeWorkflowProgramInput(input),
+        agents: ["researcher", "researcher"],
+      }),
+    ).toThrow("must be unique");
+  });
+
+  it("validates bridge payloads before owner dispatch", () => {
+    expect(
+      readWorkflowProgramAgentCall({
+        target: "researcher",
+        input: {
+          agentId: "agent-1",
+          message: "continue",
+          outputSchema: { properties: { ok: { type: "boolean" } }, type: "object" },
+        },
+      }),
+    ).toEqual({
+      target: "researcher",
+      input: {
+        agentId: "agent-1",
+        message: "continue",
+        outputSchema: { properties: { ok: { type: "boolean" } }, type: "object" },
+      },
+    });
+    expect(() => readWorkflowProgramAgentCall({ target: "researcher", input: {} })).toThrow(
+      'requires a "message" string',
+    );
   });
 });

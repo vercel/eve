@@ -1,99 +1,73 @@
-import { z } from "#compiled/zod/index.js";
+import { parseJsonObject, parseJsonValue, type JsonObject, type JsonValue } from "#shared/json.js";
 
-import { parseJsonObject, type JsonObject, type JsonValue } from "#shared/json.js";
+export const DEFAULT_WORKFLOW_PROGRAM_MAX_SUBAGENTS = 100;
+export const MAX_WORKFLOW_PROGRAM_MAX_SUBAGENTS = 128;
+export const WORKFLOW_PROGRAM_BRIDGE_REQUEST_LIMIT = 256;
+export const WORKFLOW_PROGRAM_CALL_INTERRUPT_KIND = "eve.workflow-program-agent-call";
 
-export const DEFAULT_DYNAMIC_WORKFLOW_MAX_SUBAGENTS = 100;
-export const MAX_DYNAMIC_WORKFLOW_MAX_SUBAGENTS = 128;
-export const DYNAMIC_WORKFLOW_BRIDGE_REQUEST_LIMIT = 256;
-export const DYNAMIC_WORKFLOW_CALL_INTERRUPT_KIND = "eve.dynamic-workflow-call";
-
-export interface DynamicWorkflowCallInterrupt {
-  readonly kind: typeof DYNAMIC_WORKFLOW_CALL_INTERRUPT_KIND;
+export interface WorkflowProgramCallInterrupt {
+  readonly kind: typeof WORKFLOW_PROGRAM_CALL_INTERRUPT_KIND;
   readonly task: undefined;
   readonly toolInput: unknown;
-  readonly toolName: string;
+  readonly toolName: "agent";
 }
 
-export const dynamicWorkflowInputSchema = z.strictObject({
-  js: z
-    .string()
-    .describe(
-      "Complete JavaScript orchestration program. Call only the agents listed in the workflow description and return one JSON-serializable result.",
-    ),
-});
-
-export interface DynamicWorkflowAgent {
-  readonly description: string;
-  readonly inputSchema: JsonObject;
-  readonly name: string;
-  readonly outputSchema: JsonObject | null;
-}
-
-export interface DynamicWorkflowContinuationSecurity {
+export interface WorkflowProgramContinuationSecurity {
   readonly maxAgeMs?: number;
   readonly signingKey: string;
 }
 
-/** Internal durable input pinned after the model-visible tool input is validated. */
-export interface DynamicWorkflowInput {
-  readonly agents: readonly DynamicWorkflowAgent[];
-  readonly continuationSecurity: DynamicWorkflowContinuationSecurity;
+/** Internal durable input pinned for one generated program run. */
+export interface WorkflowProgramInput {
+  readonly agents: readonly string[];
+  readonly continuationSecurity: WorkflowProgramContinuationSecurity;
   readonly js: string;
   readonly maxSubagents: number;
 }
 
-export function serializeDynamicWorkflowInput(input: DynamicWorkflowInput): JsonObject {
-  const continuationSecurity: Record<string, JsonValue> = {
-    signingKey: input.continuationSecurity.signingKey,
+export interface WorkflowProgramAgentCall {
+  readonly input: {
+    readonly agentId?: string;
+    readonly message: string;
+    readonly outputSchema?: JsonObject;
   };
-  if (input.continuationSecurity.maxAgeMs !== undefined) {
-    continuationSecurity.maxAgeMs = input.continuationSecurity.maxAgeMs;
-  }
-  return {
-    agents: input.agents.map((agent) => ({ ...agent })),
-    continuationSecurity,
-    js: input.js,
-    maxSubagents: input.maxSubagents,
-  };
+  readonly target: string;
 }
 
-export function parseDynamicWorkflowInput(value: unknown): DynamicWorkflowInput {
+export function parseWorkflowProgramInput(value: unknown): WorkflowProgramInput {
   const input = parseJsonObject(value);
   if (typeof input.js !== "string") {
-    throw new TypeError('workflow input requires a "js" string.');
+    throw new TypeError('runWorkflowProgram requires a "js" string.');
   }
   if (
     !isPositiveInteger(input.maxSubagents) ||
-    input.maxSubagents > MAX_DYNAMIC_WORKFLOW_MAX_SUBAGENTS
+    input.maxSubagents > MAX_WORKFLOW_PROGRAM_MAX_SUBAGENTS
   ) {
     throw new TypeError(
-      `workflow input requires "maxSubagents" as an integer between 1 and ${String(MAX_DYNAMIC_WORKFLOW_MAX_SUBAGENTS)}.`,
+      `runWorkflowProgram maxSubagents must be an integer between 1 and ${String(MAX_WORKFLOW_PROGRAM_MAX_SUBAGENTS)}.`,
     );
   }
   if (!Array.isArray(input.agents)) {
-    throw new TypeError('workflow input requires an "agents" array.');
+    throw new TypeError('runWorkflowProgram requires an "agents" allowlist.');
   }
-  const agents = input.agents.map((value): DynamicWorkflowAgent => {
-    const agent = parseJsonObject(value);
-    if (typeof agent.name !== "string" || typeof agent.description !== "string") {
-      throw new TypeError("workflow agent catalog entry is invalid.");
+  const agents = input.agents.map((agent) => {
+    if (typeof agent !== "string" || agent.trim() === "") {
+      throw new TypeError("runWorkflowProgram agent names must be non-empty strings.");
     }
-    return {
-      description: agent.description,
-      inputSchema: parseJsonObject(agent.inputSchema),
-      name: agent.name,
-      outputSchema: agent.outputSchema === null ? null : parseJsonObject(agent.outputSchema),
-    };
+    return agent;
   });
+  if (new Set(agents).size !== agents.length) {
+    throw new TypeError("runWorkflowProgram agent names must be unique.");
+  }
   const continuationSecurity = parseJsonObject(input.continuationSecurity);
   if (typeof continuationSecurity.signingKey !== "string") {
-    throw new TypeError('workflow input requires a continuation security "signingKey".');
+    throw new TypeError("Workflow program continuation security is missing a signing key.");
   }
   if (
     continuationSecurity.maxAgeMs !== undefined &&
     !isPositiveInteger(continuationSecurity.maxAgeMs)
   ) {
-    throw new TypeError('workflow continuation security "maxAgeMs" must be a positive integer.');
+    throw new TypeError("Workflow program continuation maxAgeMs must be a positive integer.");
   }
   return {
     agents,
@@ -106,22 +80,62 @@ export function parseDynamicWorkflowInput(value: unknown): DynamicWorkflowInput 
   };
 }
 
-export function readDynamicWorkflowCallInterrupt(input: {
+export function readWorkflowProgramCallInterrupt(input: {
   readonly payload: unknown;
-}): DynamicWorkflowCallInterrupt {
-  const payload = input.payload as Partial<DynamicWorkflowCallInterrupt>;
-  if (
-    payload.kind !== DYNAMIC_WORKFLOW_CALL_INTERRUPT_KIND ||
-    typeof payload.toolName !== "string"
-  ) {
-    throw new Error(`Unsupported workflow interrupt kind "${String(payload.kind)}".`);
+}): WorkflowProgramCallInterrupt {
+  const payload = input.payload as Partial<WorkflowProgramCallInterrupt>;
+  if (payload.kind !== WORKFLOW_PROGRAM_CALL_INTERRUPT_KIND || payload.toolName !== "agent") {
+    throw new Error(`Unsupported workflow program interrupt kind "${String(payload.kind)}".`);
   }
   return {
-    kind: DYNAMIC_WORKFLOW_CALL_INTERRUPT_KIND,
+    kind: WORKFLOW_PROGRAM_CALL_INTERRUPT_KIND,
     task: undefined,
     toolInput: payload.toolInput,
-    toolName: payload.toolName,
+    toolName: "agent",
   };
+}
+
+export function readWorkflowProgramAgentCall(value: unknown): WorkflowProgramAgentCall {
+  const call = parseJsonObject(value);
+  if (typeof call.target !== "string" || call.target.trim() === "") {
+    throw new TypeError("Workflow program ctx.agent() requires a non-empty agent name.");
+  }
+  const rawInput = parseJsonObject(call.input);
+  if (typeof rawInput.message !== "string") {
+    throw new TypeError('Workflow program ctx.agent() requires a "message" string.');
+  }
+  if (rawInput.agentId !== undefined && typeof rawInput.agentId !== "string") {
+    throw new TypeError('Workflow program ctx.agent() "agentId" must be a string.');
+  }
+  const input: {
+    agentId?: string;
+    message: string;
+    outputSchema?: JsonObject;
+  } = { message: rawInput.message };
+  if (rawInput.agentId !== undefined) input.agentId = rawInput.agentId;
+  if (rawInput.outputSchema !== undefined) {
+    input.outputSchema = parseJsonObject(rawInput.outputSchema);
+  }
+  return { input, target: call.target };
+}
+
+export function serializeWorkflowProgramInput(input: WorkflowProgramInput): JsonObject {
+  const continuationSecurity: Record<string, JsonValue> = {
+    signingKey: input.continuationSecurity.signingKey,
+  };
+  if (input.continuationSecurity.maxAgeMs !== undefined) {
+    continuationSecurity.maxAgeMs = input.continuationSecurity.maxAgeMs;
+  }
+  return {
+    agents: [...input.agents],
+    continuationSecurity,
+    js: input.js,
+    maxSubagents: input.maxSubagents,
+  };
+}
+
+export function parseWorkflowProgramOutput(value: unknown): JsonValue {
+  return parseJsonValue(value ?? null);
 }
 
 function isPositiveInteger(value: unknown): value is number {

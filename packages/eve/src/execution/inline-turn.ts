@@ -108,7 +108,10 @@ export async function runInlineTurn(input: {
       };
     }
 
-    if (result.action === "park" && result.pendingCoordinationCallIds !== undefined) {
+    if (
+      result.action === "dispatch-workflow-tasks" ||
+      (result.action === "park" && result.pendingCoordinationCallIds !== undefined)
+    ) {
       return continueOutcome(control, initialStep);
     }
 

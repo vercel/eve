@@ -5,8 +5,8 @@ url: /tools/workflows
 ---
 
 A workflow tool is a static tool defined with `defineWorkflowTool` from `eve/tools`, with
-`"use workflow"` as the first statement of its executor. Each call starts a durable Workflow SDK run. Use one when a tool must wait for a person, webhook, or timer,
-delegate work to subagents, or coordinate retryable steps over a long period. This authored API is distinct from the model-facing [`workflow` tool](./dynamic-workflows), which you add through `agent/tools/workflow.ts`.
+`"use workflow"` as the first statement of its executor. Each call starts a durable Workflow run. Use one when a tool must wait for a person, webhook, or timer,
+delegate work to subagents, or coordinate retryable steps over a long period.
 
 Durable suspension and background execution are independent. `defineWorkflowTool` lets the body
 suspend at durable waits without holding compute. `execution: "background"` determines whether
@@ -98,6 +98,50 @@ Workflow imports resolve `paths` aliases from your application's `tsconfig.json`
 workflow and step modules reachable from the agent's runtime modules. Unrelated workflows
 in the host application stay outside the agent bundle. An unresolved workflow import fails
 the build with the missing import in the error.
+
+### Run a program supplied at runtime
+
+Call `runWorkflowProgram` inside a workflow tool when the tool's input contains a JavaScript
+function body produced at runtime:
+
+```ts title="agent/tools/run-program.ts"
+import { defineWorkflowTool, runWorkflowProgram } from "eve/tools";
+import { z } from "zod";
+
+const agents = ["ticket-triage", "ticket-review"] as const;
+
+export default defineWorkflowTool({
+  description:
+    "Run JavaScript with ctx.agent(name, input). Available agents: ticket-triage, ticket-review.",
+  inputSchema: z.object({ js: z.string() }),
+  async execute({ js }, ctx) {
+    "use workflow";
+    return runWorkflowProgram(js, ctx, { agents, maxSubagents: 20 });
+  },
+});
+```
+
+The supplied source is an async function body. Its only host capability is
+`ctx.agent(name, { message, agentId?, outputSchema? })`. For example:
+
+```js
+const [triage, review] = await Promise.all([
+  ctx.agent("ticket-triage", { message: JSON.stringify(tickets) }),
+  ctx.agent("ticket-review", { message: JSON.stringify(tickets) }),
+]);
+return { triage, review };
+```
+
+`agents` is a required trusted allowlist. Describing an agent in the tool description does not
+authorize it. `maxSubagents` defaults to `100` and must be an integer from `1` through `128`.
+The generated program cannot access the workflow context, session state, credentials, imports,
+or ordinary tools. Agent authorization, questions, approvals, cancellation, and `agentId`
+continuation use the same owner-managed behavior as direct `ctx.agent` calls.
+
+The sandbox resumes after every pending call in the current batch settles. `Promise.all` supports
+fan-out followed by fan-in, but `Promise.race` does not resume after only the first child settles.
+A child failure is thrown at the corresponding `ctx.agent` call, so generated code can catch it.
+The program must return a JSON-serializable value.
 
 ### Migrate an existing workflow tool
 

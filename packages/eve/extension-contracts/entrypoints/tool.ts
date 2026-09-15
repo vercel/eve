@@ -3,17 +3,17 @@ export {
   defineWorkflowTool,
   disableTool,
   isDisabledToolSentinel,
+  runWorkflowProgram,
   toolOutput,
   toolOutputPart,
   toolResultFrom,
 } from "../../src/public/tools/index.ts";
 export {
+  experimental_workflow,
+  isExperimentalWorkflowToolDefinition,
+} from "../../src/public/tools/workflow.ts";
+export {
   defaultWebSearch,
   isWebSearchToolDefinition,
   webSearch,
 } from "../../src/public/tools/web-search.ts";
-export {
-  default,
-  workflow,
-  type DynamicWorkflowToolOptions,
-} from "../../src/public/tools/workflow.ts";

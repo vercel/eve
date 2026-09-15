@@ -1,3 +1,3 @@
-import { workflow } from "eve/tools/workflow";
+import { experimental_workflow } from "eve/tools/workflow";
 
-export default workflow({ maxSubagents: 3 });
+export default experimental_workflow({ maxSubagents: 2 });

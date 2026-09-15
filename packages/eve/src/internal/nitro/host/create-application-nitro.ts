@@ -77,9 +77,14 @@ function resolveProductionNitroPreset(): "vercel" | undefined {
   return process.env.VERCEL ? "vercel" : undefined;
 }
 
-/** Whether any agent needs the dynamic workflow sandbox runtime. */
+/** Whether any agent can execute code that needs the workflow sandbox runtime. */
 function manifestEnablesWorkflow(manifest: CompiledAgentManifest): boolean {
-  return manifest.tools.some((tool) => tool.name === "workflow");
+  const nodes = [manifest, ...manifest.subagents.map((subagent) => subagent.agent)];
+  return nodes.some(
+    (node) =>
+      node.workflowTool !== undefined ||
+      node.tools.some((tool) => tool.behavior?.handling?.kind === "workflow-tool"),
+  );
 }
 
 function manifestHasWebSocketChannel(manifest: CompiledAgentManifest): boolean {

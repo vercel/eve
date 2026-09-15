@@ -31,7 +31,7 @@ import {
 import { applyWorkflowTransform } from "#internal/workflow-bundle/workflow-builders.js";
 import { useTemporaryDirectories } from "#internal/testing/use-temporary-app-roots.js";
 import { defineChannel, WS } from "#public/definitions/channel.js";
-import defaultWorkflow from "#tools/framework/workflow.js";
+import { defineWorkflowTool } from "#tools/workflow-definition.js";
 
 const configureDevelopmentNitroRoutes = vi.fn(async () => undefined);
 const configureProductionNitroRoutes = vi.fn(async () => undefined);
@@ -93,7 +93,7 @@ function createNitroStub(input: { buildDir?: string; dev?: boolean } = {}): Nitr
 }
 
 async function createPreparedHost(
-  input: { readonly websocket?: boolean; readonly workflow?: boolean } = {},
+  input: { readonly websocket?: boolean; readonly workflowTool?: boolean } = {},
 ): Promise<PreparedDevelopmentApplicationHost> {
   const appRoot = "/tmp/weather-agent";
   const paths = resolveCompilerArtifactPaths(appRoot);
@@ -109,10 +109,15 @@ async function createPreparedHost(
       }),
     });
   }
-  if (input.workflow === true) {
+  if (input.workflowTool === true) {
+    const execute = Object.assign(async () => null, {
+      workflowId: "workflow//agent/tools/run-program//execute",
+    });
     modules.push({
-      logicalPath: "tools/workflow.ts",
-      loadNamespace: async () => ({ default: defaultWorkflow }),
+      logicalPath: "tools/run-program.ts",
+      loadNamespace: async () => ({
+        default: defineWorkflowTool({ description: "Run a program.", execute, inputSchema: {} }),
+      }),
     });
   }
   const { manifest } = await compileFromMemory({
@@ -702,7 +707,7 @@ describe("application Nitro creation", () => {
     expect(createNitroMock.mock.calls[0]?.[0].traceDeps).toEqual([]);
   });
 
-  it("includes the Workflow sandbox runtime plugin only when the workflow tool is present", async () => {
+  it("includes the workflow sandbox runtime plugin for a standard authored workflow tool", async () => {
     const directNitroStub = createNitroStub();
     const workflowNitroStub = createNitroStub();
     createNitroMock.mockResolvedValueOnce(directNitroStub.nitro);
@@ -712,7 +717,7 @@ describe("application Nitro creation", () => {
       await import("#internal/nitro/host/create-application-nitro.js");
 
     const directHost = await createPreparedHost();
-    const workflowHost = await createPreparedHost({ workflow: true });
+    const workflowHost = await createPreparedHost({ workflowTool: true });
 
     await createProductionApplicationNitro(directHost, createProductionOptions(directHost));
     await createProductionApplicationNitro(workflowHost, createProductionOptions(workflowHost));

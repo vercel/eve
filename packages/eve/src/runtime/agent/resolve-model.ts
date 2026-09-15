@@ -56,12 +56,17 @@ export async function resolveRuntimeModelReference(
     return bootstrapModel;
   }
 
+  const mockModel = resolveMockAuthoredRuntimeModel(reference);
+
+  if (mockModel !== null) {
+    return mockModel;
+  }
+
   if (isSourceBackedRuntimeModelReference(reference)) {
     return await loadSourceBackedRuntimeModelReference(reference, scope);
   }
 
-  const mockModel = resolveMockAuthoredRuntimeModel(reference);
-  return mockModel ?? reference.id;
+  return reference.id;
 }
 
 async function loadSourceBackedRuntimeModelReference(

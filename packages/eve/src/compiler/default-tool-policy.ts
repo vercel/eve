@@ -1,7 +1,6 @@
 import type { CompiledAgentDefinition } from "#compiler/manifest.js";
 import type { PhaseOneNodeSourceState } from "#compiler/node-source-state.js";
 import type { CompiledToolEntry } from "#compiler/normalize-tool.js";
-import { dynamicWorkflowReference } from "#execution/dynamic-workflow/workflow-reference.js";
 import {
   canonicalSourceSlot,
   composeAgentModuleCandidates,
@@ -9,7 +8,6 @@ import {
 } from "#compiler/source-graph.js";
 
 const REQUIRED_FRAMEWORK_TOOL_SLOTS = new Set(["tools/connection_search"]);
-const DYNAMIC_WORKFLOW_TOOL_SLOT = "tools/workflow";
 
 export function assertFrameworkToolPolicy(
   candidate: AgentSourceCandidate,
@@ -20,21 +18,6 @@ export function assertFrameworkToolPolicy(
     throw new Error(
       'The required "connection_search" tool cannot be disabled. Remove "agent/tools/connection_search.ts" or export a replacement tool from it.',
     );
-  }
-  if (slot === DYNAMIC_WORKFLOW_TOOL_SLOT && result.kind !== "disabled") {
-    const behavior = result.kind === "tool" ? result.definition.behavior : undefined;
-    const handling = behavior?.handling;
-    if (
-      result.kind !== "tool" ||
-      handling?.kind !== "workflow-tool" ||
-      handling.workflowId !== dynamicWorkflowReference.workflowId ||
-      behavior?.availability.length !== 1 ||
-      behavior.availability[0] !== "root-session"
-    ) {
-      throw new Error(
-        'The "workflow" tool slot accepts only the definition exported by "eve/tools/workflow" or disableTool().',
-      );
-    }
   }
   const closedDispatchSlots = {
     "tools/agent": "self-agent",

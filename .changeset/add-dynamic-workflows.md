@@ -1,5 +1,5 @@
 ---
-"eve": minor
+"eve": patch
 ---
 
-Replace the uppercase `Workflow` tool and `experimental_workflow()` helper with the root-only `workflow` tool, enabled by creating `agent/tools/workflow.ts`. Dynamic workflows run model-authored JavaScript that coordinates visible subagents and awaits their final results; import the `workflow` factory from `eve/tools/workflow` to set a per-program `maxSubagents` limit.
+Add `runWorkflowProgram` for executing a runtime-supplied JavaScript function body inside an authored workflow tool. Generated programs can call only trusted allowlisted agents through the existing durable `ctx.agent` lifecycle.

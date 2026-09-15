@@ -118,6 +118,10 @@ export async function resolveAgent(input: ResolveAgentInput): Promise<ResolvedAg
     channels: resolvedChannels,
     connections: resolvedConnections,
     dynamicConnectionResolvers: resolvedDynamicConnectionResolvers,
+    workflowTool:
+      input.manifest.workflowTool === undefined
+        ? undefined
+        : { maxSubagents: input.manifest.workflowTool.maxSubagents },
     dynamicInstructionsResolvers: resolvedDynamicInstructionsResolvers,
     dynamicSkillResolvers: resolvedDynamicSkillResolvers,
     dynamicToolResolvers: resolvedDynamicToolResolvers,

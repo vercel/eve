@@ -15,9 +15,7 @@ describe("compiled agent manifest v48", () => {
   it("round-trips a real compiled graph through the serialized schema", async () => {
     const { manifest } = await compileFromMemory({
       agent: {
-        experimental: {
-          workflow: { modelCallsPerStep: 4, retention: 0 },
-        },
+        experimental: { workflow: { modelCallsPerStep: 4, retention: 0 } },
         limits: { maxTokenCostUsdPerSession: 1.5 },
         model: "openai/gpt-5.4",
       },

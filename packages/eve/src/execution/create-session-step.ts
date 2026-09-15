@@ -82,6 +82,7 @@ export async function createSessionStep(input: {
     sessionId: input.sessionId,
     taskId: input.taskId,
     turnAgent: effectiveAgent.turnAgent,
+    workflowMaxSubagents: bundle.resolvedAgent.workflowTool?.maxSubagents,
   });
 
   return { state: createDurableSessionState({ session }) };

@@ -25,8 +25,8 @@ import { eveChannel } from "#public/channels/eve.js";
 import { defineMemory } from "#public/memory/index.js";
 import type { ToolContext } from "#tools/definition.js";
 import type { ResolvedToolDefinition } from "#runtime/types.js";
-import defaultWorkflow from "#tools/framework/workflow.js";
 import { toInputSchema } from "#tools/schema.js";
+import { experimental_workflow } from "#tools/workflow.js";
 
 /**
  * Turn cancellation settles as `turn.cancelled` → `session.waiting` with
@@ -112,8 +112,8 @@ async function createWaitToolRuntime(agentName: string): Promise<WaitToolFixture
     agent: { name: agentName },
     modules: [
       {
+        loadNamespace: async () => ({ default: experimental_workflow() }),
         logicalPath: "tools/workflow.ts",
-        loadNamespace: async () => ({ default: defaultWorkflow }),
       },
     ],
     tools: [waitTool],
@@ -826,13 +826,11 @@ describe("turn cancellation integration", () => {
 
   it("cancels a turn parked on a child HITL request without corrupting the stream", async () => {
     const runtime = await createTestRuntime({
-      agent: {
-        name: "turn-cancel-hitl",
-      },
+      agent: { name: "turn-cancel-hitl" },
       modules: [
         {
+          loadNamespace: async () => ({ default: experimental_workflow() }),
           logicalPath: "tools/workflow.ts",
-          loadNamespace: async () => ({ default: defaultWorkflow }),
         },
       ],
     });
@@ -843,7 +841,7 @@ describe("turn cancellation integration", () => {
         {
           input: {
             message:
-              "Delegate through workflow to a subagent: Use the ask_question tool exactly once.",
+              "Delegate through Workflow to a subagent: Use the ask_question tool exactly once.",
           },
           serializedContext: {
             ...buildSerializedContext({

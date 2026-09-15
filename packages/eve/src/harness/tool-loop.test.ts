@@ -1132,7 +1132,7 @@ describe("createToolLoopHarness", () => {
     const agentCall = vi.mocked(ToolLoopAgent).mock.calls[0]?.[0];
     expect(agentCall).toBeDefined();
     expect(agentCall!.tools).toHaveProperty("add");
-    expect(agentCall!.tools).not.toHaveProperty("workflow");
+    expect(agentCall!.tools).not.toHaveProperty("Workflow");
   });
 
   it("registers atomic background tool calls before AI SDK execution", async () => {
@@ -1927,7 +1927,7 @@ describe("createToolLoopHarness", () => {
     expect(events.at(-1)?.type).toBe("session.waiting");
   });
 
-  it("keeps declared subagent tools when workflow is unavailable outside the root", async () => {
+  it("keeps declared subagent tools when Workflow is unavailable outside the root", async () => {
     setupMockAgent({
       finishReason: "stop",
       response: { messages: [{ content: "Hello!", role: "assistant" }] },
@@ -1937,6 +1937,7 @@ describe("createToolLoopHarness", () => {
     });
 
     const config = createTestConfig("conversation", undefined, {
+      workflow: true,
       tools: new Map([
         [
           "delegate",
@@ -1959,10 +1960,10 @@ describe("createToolLoopHarness", () => {
     const agentCall = vi.mocked(ToolLoopAgent).mock.calls[0]?.[0];
     expect(agentCall).toBeDefined();
     expect(agentCall!.tools).toHaveProperty("delegate");
-    expect(agentCall!.tools).not.toHaveProperty("workflow");
+    expect(agentCall!.tools).not.toHaveProperty("Workflow");
   });
 
-  it("omits workflow from runtime subagent sessions", async () => {
+  it("omits Workflow from runtime subagent sessions", async () => {
     setupMockAgent({
       finishReason: "stop",
       response: { messages: [{ content: "Hello!", role: "assistant" }] },
@@ -1972,6 +1973,7 @@ describe("createToolLoopHarness", () => {
     });
 
     const config = createTestConfig("conversation", undefined, {
+      workflow: true,
       tools: createDelegationToolMap(),
     });
     const runStep = createToolLoopHarness(config);
@@ -1986,7 +1988,7 @@ describe("createToolLoopHarness", () => {
     const agentCall = vi.mocked(ToolLoopAgent).mock.calls[0]?.[0];
     expect(agentCall).toBeDefined();
     expect(agentCall!.tools).toHaveProperty("delegate");
-    expect(agentCall!.tools).not.toHaveProperty("workflow");
+    expect(agentCall!.tools).not.toHaveProperty("Workflow");
   });
 
   it("forwards the agent reasoning effort to the model call", async () => {
@@ -2557,7 +2559,7 @@ describe("createToolLoopHarness", () => {
     const agentCall = vi.mocked(ToolLoopAgent).mock.calls[0]?.[0];
     expect(agentCall).toBeDefined();
     expect(agentCall!.tools).toHaveProperty("web_search");
-    expect(agentCall!.tools).not.toHaveProperty("workflow");
+    expect(agentCall!.tools).not.toHaveProperty("Workflow");
   });
 
   it("returns done when task mode finishes with stop", async () => {

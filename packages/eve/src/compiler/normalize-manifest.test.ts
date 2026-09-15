@@ -30,8 +30,7 @@ import { defineWorkflowTool } from "#tools/workflow-definition.js";
 import { defineTool, disableTool } from "#tools/definition.js";
 import { defineMemory } from "#public/memory/index.js";
 import { defineDynamic } from "#dynamic/definition.js";
-import { defaultWorkflow, workflow } from "#tools/framework/workflow.js";
-import { dynamicWorkflowReference } from "#execution/dynamic-workflow/workflow-reference.js";
+import { experimental_workflow } from "#tools/workflow.js";
 import { webSearch } from "#tools/provided/web-search.js";
 
 function manifest() {
@@ -74,30 +73,6 @@ describe("compileAgentManifest source graph", () => {
         "child",
       ),
     ).toThrow('Remove "experimental.workflow.world" from "child".');
-  });
-
-  it("preserves Workflow SDK config", async () => {
-    const sourceRegistry = registry([
-      {
-        logicalPath: "agent.ts",
-        loadNamespace: async () => ({
-          default: defineAgent({
-            experimental: {
-              workflow: { modelCallsPerStep: 2, retention: 0 },
-            },
-            model: "openai/gpt-5.4",
-          }),
-        }),
-      },
-    ]);
-
-    const compiled = await compileAgentManifest(manifest(), {
-      sourceRegistries: [sourceRegistry],
-    });
-
-    expect(compiled.config.experimental).toEqual({
-      workflow: { modelCallsPerStep: 2, retention: 0, world: undefined },
-    });
   });
 
   it("freezes source metadata behind an immutable registry map", () => {
@@ -230,12 +205,11 @@ describe("compileAgentManifest source graph", () => {
     );
   });
 
-  it("does not install opt-in tools from the framework registry", async () => {
+  it("does not install task_update from the framework registry", async () => {
     const compiled = await compileAgentManifest(manifest());
 
     expect(compiled.tools.map((tool) => tool.name)).toContain("task_cancel");
     expect(compiled.tools.map((tool) => tool.name)).not.toContain("task_update");
-    expect(compiled.tools.map((tool) => tool.name)).not.toContain("workflow");
     expect(Object.values(compiled.bindings).map((binding) => binding.logicalPath)).not.toContain(
       "tools/task_update.ts",
     );
@@ -264,97 +238,6 @@ describe("compileAgentManifest source graph", () => {
       );
     },
   );
-
-  it("rejects overriding the dynamic workflow framework tool", async () => {
-    const sourceRegistry = registry([
-      {
-        logicalPath: "tools/workflow.ts",
-        loadNamespace: async () => ({
-          default: defineTool({
-            description: "Replacement tool.",
-            execute: async () => null,
-            inputSchema: {},
-          }),
-        }),
-      },
-    ]);
-
-    await expect(
-      compileAgentManifest(manifest(), { sourceRegistries: [sourceRegistry] }),
-    ).rejects.toThrow(
-      'The "workflow" tool slot accepts only the definition exported by "eve/tools/workflow" or disableTool().',
-    );
-  });
-
-  it.each([
-    ["default", defaultWorkflow, undefined],
-    ["configured", workflow({ maxSubagents: 7 }), 7],
-  ])("compiles the %s provided workflow tool", async (_label, definition, maxSubagents) => {
-    const sourceRegistry = registry([
-      {
-        logicalPath: "tools/workflow.ts",
-        loadNamespace: async () => ({ default: definition }),
-      },
-    ]);
-
-    const compiled = await compileAgentManifest(manifest(), {
-      sourceRegistries: [sourceRegistry],
-    });
-    const behavior = compiled.tools.find((tool) => tool.name === "workflow")?.behavior;
-    expect(behavior?.availability).toEqual(["root-session"]);
-    expect(behavior?.handling?.kind).toBe("workflow-tool");
-    if (behavior?.handling?.kind === "workflow-tool") {
-      expect(behavior.handling.maxSubagents).toBe(maxSubagents);
-    }
-  });
-
-  it("rejects an authored workflow tool spoofing the dynamic workflow id", async () => {
-    const execute = Object.assign(async () => null, dynamicWorkflowReference);
-    const sourceRegistry = registry([
-      {
-        logicalPath: "tools/workflow.ts",
-        loadNamespace: async () => ({
-          default: defineWorkflowTool({
-            description: "Spoofed dynamic workflow tool.",
-            execute,
-            inputSchema: { type: "object" },
-          }),
-        }),
-      },
-    ]);
-
-    await expect(
-      compileAgentManifest(manifest(), { sourceRegistries: [sourceRegistry] }),
-    ).rejects.toThrow(
-      'The "workflow" tool slot accepts only the definition exported by "eve/tools/workflow" or disableTool().',
-    );
-  });
-
-  it("rejects a dynamic resolver from the workflow tool slot", async () => {
-    const sourceRegistry = registry([
-      {
-        logicalPath: "tools/workflow.ts",
-        loadNamespace: async () => ({
-          default: defineDynamic({
-            events: {
-              "session.started": () =>
-                defineTool({
-                  description: "Dynamic workflow replacement.",
-                  execute: async () => null,
-                  inputSchema: {},
-                }),
-            },
-          }),
-        }),
-      },
-    ]);
-
-    await expect(
-      compileAgentManifest(manifest(), { sourceRegistries: [sourceRegistry] }),
-    ).rejects.toThrow(
-      'The "workflow" tool slot accepts only the definition exported by "eve/tools/workflow" or disableTool().',
-    );
-  });
 
   it("compiles a workflow tool with programmatic executor metadata", async () => {
     const execute = async () => ({ ok: true });
@@ -531,6 +414,10 @@ describe("compileAgentManifest source graph", () => {
         }),
       },
       {
+        logicalPath: "tools/workflow.ts",
+        loadNamespace: async () => ({ default: experimental_workflow() }),
+      },
+      {
         logicalPath: "tools/web_search.ts",
         loadNamespace: async () => ({ default: webSearch({ provider: "parallel" }) }),
       },
@@ -593,6 +480,7 @@ describe("compileAgentManifest source graph", () => {
       "tools/dynamic.ts": { compile: true, runtimeEntry: true },
       "tools/executable.ts": { compile: true, runtimeEntry: true },
       "tools/web_search.ts": { compile: true, runtimeEntry: false },
+      "tools/workflow.ts": { compile: true, runtimeEntry: false },
     });
   });
 

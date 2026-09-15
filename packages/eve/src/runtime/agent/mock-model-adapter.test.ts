@@ -73,11 +73,11 @@ describe("createMockAuthoredRuntimeModel", () => {
     ]);
   });
 
-  it("delegates through workflow when the directive requests blocking orchestration", async () => {
+  it("delegates through Workflow when the directive requests blocking orchestration", async () => {
     const result = await generateWithPrompt(
       [
         {
-          content: "Delegate through workflow to a subagent: use the wait_for_cancel tool.",
+          content: "Delegate through Workflow to a subagent: use the wait_for_cancel tool.",
           role: "user",
         },
       ],
@@ -89,7 +89,7 @@ describe("createMockAuthoredRuntimeModel", () => {
             required: ["js"],
             type: "object",
           },
-          name: "workflow",
+          name: "Workflow",
           type: "function",
         },
       ],
@@ -101,7 +101,7 @@ describe("createMockAuthoredRuntimeModel", () => {
           js: 'return await tools.agent({ message: "use the wait_for_cancel tool." });',
         }),
         toolCallId: "call_workflow",
-        toolName: "workflow",
+        toolName: "Workflow",
         type: "tool-call",
       },
     ]);

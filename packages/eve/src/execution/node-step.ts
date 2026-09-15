@@ -78,6 +78,11 @@ export interface CreateExecutionNodeStepInput {
   readonly mode: RunMode;
   readonly modelResolutionScope: RuntimeModelResolutionScope;
   readonly node: ResolvedRuntimeAgentNode;
+  /**
+   * Effective `maxSubagents` cap configured by the experimental Workflow tool
+   * definition and materialized on the session at creation.
+   */
+  readonly workflowMaxSubagents?: number;
 }
 
 /**
@@ -101,6 +106,8 @@ export function createExecutionNodeStep(input: CreateExecutionNodeStepInput): St
     capabilities: input.capabilities,
     clearOnly: input.clearOnly,
     compactOnly: input.compactOnly,
+    workflow: input.node.agent.workflowTool !== undefined,
+    workflowMaxSubagents: input.workflowMaxSubagents,
     handleEvent: input.handleEvent,
     historyProjector: input.historyProjector,
     historyView: input.historyView,
@@ -220,7 +227,6 @@ function resolveHarnessToolDefinition(input: {
         definition: registeredTool.definition,
         rootOnly: input.tool.rootOnly,
       }),
-      maxSubagents: input.tool.task.maxSubagents,
       nodeId: input.tool.task.nodeId,
       resultKind: input.tool.task.resultKind,
       workflowId: input.tool.task.workflowId,

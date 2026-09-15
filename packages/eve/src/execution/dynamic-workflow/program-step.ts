@@ -1,13 +1,13 @@
 import { jsonSchema, type ToolSet } from "ai";
 
 import {
-  DYNAMIC_WORKFLOW_BRIDGE_REQUEST_LIMIT,
-  DYNAMIC_WORKFLOW_CALL_INTERRUPT_KIND,
-  readDynamicWorkflowCallInterrupt,
-  type DynamicWorkflowCallInterrupt,
-  type DynamicWorkflowInput,
+  WORKFLOW_PROGRAM_BRIDGE_REQUEST_LIMIT,
+  WORKFLOW_PROGRAM_CALL_INTERRUPT_KIND,
+  parseWorkflowProgramOutput,
+  readWorkflowProgramCallInterrupt,
+  type WorkflowProgramCallInterrupt,
+  type WorkflowProgramInput,
 } from "#execution/dynamic-workflow/schema.js";
-import { parseJsonValue, type JsonValue } from "#shared/json.js";
 import {
   continueWorkflowSandboxInterrupt,
   createParkingHostTool,
@@ -18,52 +18,68 @@ import {
   type WorkflowSandboxInterrupt,
 } from "#shared/workflow-sandbox.js";
 
-export type DynamicWorkflowProgramOutcome =
-  | { readonly output: JsonValue; readonly status: "completed" }
+export type WorkflowProgramStepOutcome =
+  | { readonly output: ReturnType<typeof parseWorkflowProgramOutput>; readonly status: "completed" }
   | {
       readonly interrupt: WorkflowSandboxInterrupt;
       readonly pending: readonly WorkflowSandboxInterrupt[];
       readonly status: "interrupted";
     };
 
-interface DynamicWorkflowProgramInput {
+interface WorkflowProgramStepInput {
   readonly callId: string;
-  readonly program: DynamicWorkflowInput;
+  readonly program: WorkflowProgramInput;
   readonly resume?: {
     readonly interrupt: WorkflowSandboxInterrupt;
     readonly resolutions: readonly unknown[];
   };
 }
 
+const agentBridgeSchema = jsonSchema({
+  additionalProperties: false,
+  properties: {
+    input: {
+      additionalProperties: false,
+      properties: {
+        agentId: { type: "string" },
+        message: { type: "string" },
+        outputSchema: { type: "object" },
+      },
+      required: ["message"],
+      type: "object",
+    },
+    target: { type: "string" },
+  },
+  required: ["target", "input"],
+  type: "object",
+});
+
 /** Runs or resumes the side-effect-free JavaScript sandbox for one durable workflow. */
-export async function runDynamicWorkflowProgramStep(
-  input: DynamicWorkflowProgramInput,
-): Promise<DynamicWorkflowProgramOutcome> {
+export async function runWorkflowProgramStep(
+  input: WorkflowProgramStepInput,
+): Promise<WorkflowProgramStepOutcome> {
   "use step";
 
-  const tools = buildDynamicWorkflowProgramTools(input.program);
+  const tools = buildWorkflowProgramTools();
   const security = input.program.continuationSecurity as WorkflowSandboxContinuationSecurity;
-  const bridgeRequestLimit = DYNAMIC_WORKFLOW_BRIDGE_REQUEST_LIMIT;
   let raw: unknown;
   if (input.resume === undefined) {
     const tool = await createWorkflowSandboxTool({
-      bridgeRequestLimit,
+      bridgeRequestLimit: WORKFLOW_PROGRAM_BRIDGE_REQUEST_LIMIT,
       continuationSecurity: security,
       hostTools: tools,
     });
-    if (tool.execute === undefined) throw new Error("workflow has no sandbox executor.");
+    if (tool.execute === undefined) throw new Error("Workflow program has no sandbox executor.");
     raw = await tool.execute(
-      { js: input.program.js } as never,
-      {
-        toolCallId: input.callId,
-      } as never,
+      { js: wrapWorkflowProgram(input.program.js) } as never,
+      { toolCallId: input.callId } as never,
     );
   } else {
     let current = input.resume.interrupt;
     raw = current;
     for (const resolution of input.resume.resolutions) {
       raw = await continueWorkflowSandboxInterrupt({
-        bridgeRequestLimit,
+        bridgeRequestLimit: WORKFLOW_PROGRAM_BRIDGE_REQUEST_LIMIT,
         continuationSecurity: security,
         interrupt: current,
         resolution,
@@ -73,7 +89,7 @@ export async function runDynamicWorkflowProgramStep(
       if (unwrapped.status === "completed") break;
       const next = getWorkflowSandboxPendingInterrupts(unwrapped.interrupt)[0];
       if (next === undefined) {
-        throw new Error("workflow continuation contains no pending agent call.");
+        throw new Error("Workflow program continuation contains no pending agent call.");
       }
       current = next;
     }
@@ -81,31 +97,32 @@ export async function runDynamicWorkflowProgramStep(
 
   const unwrapped = await unwrapWorkflowSandboxResult(raw, security);
   if (unwrapped.status === "completed") {
-    return { output: parseJsonValue(unwrapped.output ?? null), status: "completed" };
+    return { output: parseWorkflowProgramOutput(unwrapped.output), status: "completed" };
   }
   const pending = getWorkflowSandboxPendingInterrupts(unwrapped.interrupt);
   if (pending.length === 0) {
-    throw new Error("workflow continuation contains no pending agent call.");
+    throw new Error("Workflow program continuation contains no pending agent call.");
   }
-  for (const interrupt of pending) readDynamicWorkflowCallInterrupt(interrupt);
+  for (const interrupt of pending) readWorkflowProgramCallInterrupt(interrupt);
   return { interrupt: pending[0]!, pending, status: "interrupted" };
 }
 
-function buildDynamicWorkflowProgramTools(program: DynamicWorkflowInput): ToolSet {
-  const tools: Record<string, ToolSet[string]> = {};
-  for (const agent of program.agents) {
-    tools[agent.name] = createParkingHostTool({
-      description: agent.description,
-      inputSchema: jsonSchema(agent.inputSchema),
-      outputSchema: agent.outputSchema === null ? undefined : jsonSchema(agent.outputSchema),
+function buildWorkflowProgramTools(): ToolSet {
+  return {
+    agent: createParkingHostTool({
+      description: "Invoke one allowlisted child agent.",
+      inputSchema: agentBridgeSchema,
       interrupt: (toolInput) =>
         ({
-          kind: DYNAMIC_WORKFLOW_CALL_INTERRUPT_KIND,
+          kind: WORKFLOW_PROGRAM_CALL_INTERRUPT_KIND,
           task: undefined,
           toolInput,
-          toolName: agent.name,
-        }) satisfies DynamicWorkflowCallInterrupt,
-    });
-  }
-  return tools as ToolSet;
+          toolName: "agent",
+        }) satisfies WorkflowProgramCallInterrupt,
+    }),
+  } as ToolSet;
+}
+
+function wrapWorkflowProgram(source: string): string {
+  return `return await (async (ctx) => {\n${source}\n})(Object.freeze({\n  agent: (target, input) => tools.agent({ target, input }),\n}));`;
 }

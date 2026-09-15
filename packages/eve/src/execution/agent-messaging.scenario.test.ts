@@ -17,8 +17,20 @@ const CODEWORD = "LANTERN-COMET-7319";
 const PARENT_RESULT = `PARENT_RECALLED=${CODEWORD}`;
 const REMOTE_MEMORY_TOKEN = "remote-memory-scenario-token";
 
-function createScriptedParentAgentSource(subagentName: string): string {
+function createScriptedParentAgentSource(
+  subagentName: string,
+  options: { readonly workflowProgram?: boolean } = {},
+): string {
   const agentIdPattern = `<agent id="([^"]+)" name="${subagentName}"(?: [^>]*)?>`;
+  const toolName = options.workflowProgram === true ? "run-program" : "Workflow";
+  const firstProgram =
+    options.workflowProgram === true
+      ? `return ctx.agent(${JSON.stringify(subagentName)}, { message: ${JSON.stringify(`Remember the codeword ${CODEWORD}. Confirm that you stored it.`)} });`
+      : `return tools[${JSON.stringify(subagentName)}]({ message: ${JSON.stringify(`Remember the codeword ${CODEWORD}. Confirm that you stored it.`)} });`;
+  const secondProgram = (agentIdExpression: string) =>
+    options.workflowProgram === true
+      ? `return ctx.agent(${JSON.stringify(subagentName)}, { agentId: ${agentIdExpression}, message: "What codeword did I ask you to remember? Reply with the codeword." });`
+      : `return tools[${JSON.stringify(subagentName)}]({ agentId: ${agentIdExpression}, message: "What codeword did I ask you to remember? Reply with the codeword." });`;
 
   return `import { defineAgent } from "eve";
 import { mockModel } from "eve/evals";
@@ -28,17 +40,15 @@ const SUBAGENT_NAME = ${JSON.stringify(subagentName)};
 const AGENT_ID_PATTERN = new RegExp(${JSON.stringify(agentIdPattern)}, "u");
 
 const model = mockModel((request) => {
-  const childResults = request.toolResults.filter((result) => result.name === "workflow");
+  const childResults = request.toolResults.filter((result) => result.name === ${JSON.stringify(toolName)});
 
   if (childResults.length === 0) {
     return {
       toolCalls: [
         {
           id: "memory-exchange-1",
-          input: {
-            js: \`return await tools[\${JSON.stringify(SUBAGENT_NAME)}]({ message: \${JSON.stringify("Remember the codeword " + CODEWORD + ". Confirm that you stored it.")} });\`,
-          },
-          name: "workflow",
+          input: { js: ${JSON.stringify(firstProgram)} },
+          name: ${JSON.stringify(toolName)},
         },
       ],
     };
@@ -58,9 +68,9 @@ const model = mockModel((request) => {
         {
           id: "memory-exchange-2",
           input: {
-            js: \`return await tools[\${JSON.stringify(SUBAGENT_NAME)}]({ agentId: \${JSON.stringify(agentId)}, message: "What codeword did I ask you to remember? Reply with the codeword." });\`,
+            js: ${JSON.stringify(secondProgram("__AGENT_ID__"))}.replace("__AGENT_ID__", JSON.stringify(agentId)),
           },
-          name: "workflow",
+          name: ${JSON.stringify(toolName)},
         },
       ],
     };
@@ -135,9 +145,26 @@ export default defineAgent({
 
 const AGENT_MESSAGING_DESCRIPTOR: ScenarioAppDescriptor = {
   files: {
-    "agent/agent.ts": createScriptedParentAgentSource("memory-child"),
+    "agent/agent.ts": createScriptedParentAgentSource("memory-child", {
+      workflowProgram: true,
+    }),
     "agent/channels/eve.ts": EVE_CHANNEL_SOURCE,
     "agent/instructions.md": "Run the scripted memory-child exchanges.\n",
+    "agent/tools/run-program.ts": `import { defineWorkflowTool, runWorkflowProgram } from "eve/tools";
+
+export default defineWorkflowTool({
+  description: "Run JavaScript with ctx.agent. Available agents: memory-child.",
+  inputSchema: {
+    properties: { js: { type: "string" } },
+    required: ["js"],
+    type: "object",
+  },
+  async execute({ js }, ctx) {
+    "use workflow";
+    return runWorkflowProgram(js, ctx, { agents: ["memory-child"], maxSubagents: 2 });
+  },
+});
+`,
     "agent/subagents/memory-child/agent.ts": MEMORY_AGENT_SOURCE,
     "agent/subagents/memory-child/instructions.md":
       "Remember facts from earlier turns and answer follow-up questions from that history.\n",
@@ -163,6 +190,8 @@ function createRemoteAgentMessagingDescriptor(remoteUrl: string): ScenarioAppDes
       "agent/agent.ts": createScriptedParentAgentSource("remote-memory-child"),
       "agent/channels/eve.ts": EVE_CHANNEL_SOURCE,
       "agent/instructions.md": "Run the scripted remote-memory-child exchanges.\n",
+      "agent/tools/workflow.ts":
+        'import { experimental_workflow } from "eve/tools/workflow";\nexport default experimental_workflow();\n',
       "agent/subagents/remote-memory-child.ts": `import { defineRemoteAgent } from "eve";
 import { bearer } from "eve/agents/auth";
 

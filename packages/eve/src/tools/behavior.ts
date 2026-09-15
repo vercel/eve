@@ -11,11 +11,7 @@ export type CompiledToolHandling =
   | { readonly kind: "dispatch"; readonly action: "self-agent" | "task-cancel" }
   | { readonly kind: "provider-tool"; readonly provider: WebSearchProvider }
   | { readonly kind: "request-input"; readonly request: "question" }
-  | {
-      readonly kind: "workflow-tool";
-      readonly maxSubagents?: number;
-      readonly workflowId: string;
-    };
+  | { readonly kind: "workflow-tool"; readonly workflowId: string };
 
 /** Closed, serializable behavior carried by one selected compiled tool. */
 export interface ToolExecutionShape {
@@ -48,11 +44,7 @@ export type PreparedDispatchTarget =
       readonly subagentName: string;
     }
   | { readonly kind: "task-cancel" }
-  | {
-      readonly kind: "workflow-tool-call";
-      readonly maxSubagents?: number;
-      readonly workflowId: string;
-    };
+  | { readonly kind: "workflow-tool-call"; readonly workflowId: string };
 
 /** Runtime-prepared handling consumed by the harness and execution boundary. */
 export type PreparedToolHandling =

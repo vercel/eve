@@ -365,18 +365,6 @@ You can also add the opt-in framework tools described below.
 
 These framework-provided tools are not added by default. Add only the ones the agent needs.
 
-### `workflow`
-
-`workflow` is a root-only tool that runs a model-authored JavaScript program to coordinate child agents. Add it with an explicit tool file:
-
-```ts title="agent/tools/workflow.ts"
-export { default } from "eve/tools/workflow";
-```
-
-The program can call only the subagents visible to that root model step. Ordinary tools, connections, approvals, authentication helpers, and session state are not available inside it. Subagent tools remain directly available to the root model. Direct calls run in the background and return task receipts; calls made inside `workflow` wait for each child's final result.
-
-Import the `workflow` factory from `eve/tools/workflow` to customize its subagent-call budget. See [Dynamic workflows](../tools/dynamic-workflows) for configuration, limits, and continuation behavior.
-
 ### `glob`
 
 `glob` finds sandbox files by glob pattern. Add it:
@@ -461,6 +449,5 @@ Remove the file to remove the tool. `disableTool()` is unnecessary because `slee
 
 - [Tools](../tools): define your own tools, gate them on approval, and shape their output with `toModelOutput`
 - [Dynamic capabilities](../guides/dynamic-capabilities): generate the tool set per session with `defineDynamic`
-- [Dynamic workflows](../tools/dynamic-workflows): coordinate visible subagents from one model-authored program
 - [Sandbox](../sandbox): configure the sandbox used by shell and file tools
 - [Subagents](../subagents): declare specialists that the model can call as background tasks
