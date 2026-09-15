@@ -36,7 +36,7 @@ import {
   startTaskRun,
   waitForTaskCommandOwner,
 } from "#execution/tasks/parent/run-parent.js";
-import { sessionCommandHookToken } from "#execution/session-command-token.js";
+import { sessionCommandHookToken } from "#execution/session-inbox/address.js";
 import { projectSubagentTask } from "#execution/tasks/parent/subagent-task-projection.js";
 import { deriveAgentOperationId } from "#subagents/handles/operation-id.js";
 import { AGENT_BUSY, AGENT_MISMATCH, AGENT_UNREACHABLE } from "#subagents/agent-handle-errors.js";

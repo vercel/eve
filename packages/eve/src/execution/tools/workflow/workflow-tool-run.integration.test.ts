@@ -2,7 +2,7 @@ import { hydrateWorkflowReturnValue } from "@workflow/core/serialization";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { handleConnectionCallbackRequest } from "#execution/connections/callback-route.js";
-import { sessionCommandHookToken } from "#execution/session-command-token.js";
+import { sessionCommandHookToken } from "#execution/session-inbox/address.js";
 import { executeSleepTool, SLEEP_INPUT_SCHEMA } from "#execution/tools/sleep.js";
 import { resumeSessionInbox } from "#execution/session-inbox/resume.js";
 import { workflowEntry } from "#execution/workflow-entry.js";

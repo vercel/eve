@@ -3,7 +3,6 @@ import { getWorld, resolveRunEncryptionKey } from "#internal/workflow/runtime.js
 import { DEFAULT_SESSION_TIMEOUT_MS } from "#execution/session-timeout.js";
 import { readLegacyTurnInput, type LegacyTurnInput } from "./input.js";
 import { readLegacySnapshot, importConversation } from "./snapshot.js";
-import { sessionCommandHookToken } from "#execution/session-command-token.js";
 import { SESSION_INBOX_CONTEXT_KEY } from "#execution/session-inbox/address.js";
 import { isObject } from "#shared/guards.js";
 
@@ -11,7 +10,7 @@ import { isObject } from "#shared/guards.js";
 export async function prepareLegacySessionStep(rawInput: unknown) {
   "use step";
   const input = readLegacyTurnInput(rawInput);
-  const originalSession = await readLegacySnapshot(input.sessionState);
+  const originalSession = readLegacySnapshot(input.sessionState);
   const sessionState = importConversation(originalSession);
   const world = await getWorld();
   const run = await world.runs.get(sessionState.sessionId);
@@ -52,10 +51,6 @@ export async function prepareLegacySessionStep(rawInput: unknown) {
     sessionState,
     serializedContext,
     sessionTimeoutMs: sessionTimeoutMs as number | false,
-    hooks: {
-      stable: sessionCommandHookToken(sessionState.sessionId),
-      aliases: sessionState.continuationToken ? [sessionState.continuationToken] : [],
-    },
     deploymentId: process.env.VERCEL_DEPLOYMENT_ID?.trim() || (await world.getDeploymentId()),
   };
 }

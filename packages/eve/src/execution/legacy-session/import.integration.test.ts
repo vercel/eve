@@ -7,23 +7,27 @@ import { hydrateStepReturnValue } from "#compiled/@workflow/core/serialization.j
 import type { DurableStepResult } from "#execution/turn-step.js";
 import { getWorld, getHookByToken, start } from "#internal/workflow/runtime.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
+import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
 import { resumeSessionInbox, resolveSessionInbox } from "#execution/session-inbox/resume.js";
-import { sessionCommandHookToken } from "#execution/session-command-token.js";
+import {
+  sessionCommandHookToken,
+  sessionInboxHookToken,
+} from "#execution/session-inbox/address.js";
 
 describe("legacy session import", () => {
   it.each([
-    { inputVersion: 0 as const, inboxVersion: 1, streamSnapshot: true },
-    { inputVersion: 1 as const, inboxVersion: 3, streamSnapshot: false },
-    { inputVersion: 2 as const, inboxVersion: 7, streamSnapshot: false },
-    { inputVersion: 2 as const, inboxVersion: 7, streamSnapshot: true, duplicateImport: true },
-    { inputVersion: 2 as const, inboxVersion: 7, streamSnapshot: false, committedInput: true },
+    { inputVersion: 1 as const, inboxVersion: 1 },
+    { inputVersion: 1 as const, inboxVersion: 3 },
+    { inputVersion: 2 as const, inboxVersion: 7 },
+    { inputVersion: 2 as const, inboxVersion: 7, duplicateImport: true },
+    { inputVersion: 2 as const, inboxVersion: 7, committedInput: true },
   ])(
-    "imports $inputVersion / inbox $inboxVersion / stream $streamSnapshot / committed $committedInput",
+    "imports $inputVersion / inbox $inboxVersion / duplicate $duplicateImport / committed $committedInput",
     async (variant) => {
       const runtime = await createTestRuntime({ agent: { name: "legacy-import-current" } });
       {
         await runtime.run(async () => {
-          const alias = `http:legacy-${variant.inputVersion}-${variant.streamSnapshot}-${variant.committedInput}`;
+          const alias = `http:legacy-${variant.inputVersion}-${variant.inboxVersion}-${variant.duplicateImport}-${variant.committedInput}`;
           const driver = await start(legacySessionDriverWorkflow, [
             {
               alias,
@@ -54,7 +58,9 @@ describe("legacy session import", () => {
             expect(filterEventsByType(first, "message.received")).toHaveLength(
               variant.committedInput ? 0 : 1,
             );
-            const owner = await getHookByToken(sessionCommandHookToken(driver.runId));
+            const owner = await getHookByToken(
+              sessionInboxHookToken(sessionCommandHookToken(driver.runId)),
+            );
             expect(owner.runId).not.toBe(driver.runId);
             expect(await driver.status).toBe("running");
             await expect(resolveSessionInbox(alias)).resolves.toEqual({ sessionId: driver.runId });
@@ -64,9 +70,10 @@ describe("legacy session import", () => {
             });
             const second = await stream.nextTurn();
             expect(filterEventsByType(second, "turn.started")).toHaveLength(1);
-            expect((await getHookByToken(sessionCommandHookToken(driver.runId))).runId).toBe(
-              owner.runId,
-            );
+            expect(
+              (await getHookByToken(sessionInboxHookToken(sessionCommandHookToken(driver.runId))))
+                .runId,
+            ).toBe(owner.runId);
             await vi.waitFor(
               async () => {
                 const steps = await (
@@ -127,12 +134,44 @@ describe("legacy session import", () => {
   );
 });
 
+describe("unsupported drivers", () => {
+  it("reports a pre-0.45 driver as inactive instead of misdelivering", async () => {
+    const runtime = await createTestRuntime({ agent: { name: "legacy-unsupported" } });
+    await runtime.run(async () => {
+      const alias = "http:legacy-unversioned";
+      const driver = await start(legacySessionDriverWorkflow, [
+        { alias, sessionTimeoutMs: false, serializedContext: legacyContext() },
+      ]);
+      try {
+        await waitForHook(driver, { token: `eve:session:${driver.runId}:inbox` });
+        const workflowRuntime = createWorkflowRuntime({
+          compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
+        });
+        await expect(
+          workflowRuntime.dispatchContinuation({
+            command: { kind: "send", payload: { message: "Alice continues." } },
+            continuationToken: alias,
+          }),
+        ).resolves.toEqual({ status: "session_not_active" });
+        expect(await driver.status).toBe("running");
+      } finally {
+        if ((await driver.status) === "running") await driver.cancel();
+      }
+    });
+  });
+});
+
 describe("imported session lifetime", () => {
   it("hands off again using a current checkpoint and completes the original stream", async () => {
     const runtime = await createTestRuntime({ agent: { name: "legacy-handoff" } });
     await runtime.run(async () => {
       const driver = await start(legacySessionDriverWorkflow, [
-        { alias: "", sessionTimeoutMs: 60_000, serializedContext: legacyContext() },
+        {
+          alias: "",
+          inboxVersion: 7,
+          sessionTimeoutMs: 60_000,
+          serializedContext: legacyContext(),
+        },
       ]);
       const stream = captureTurnEvents(driver);
       try {
@@ -142,7 +181,9 @@ describe("imported session lifetime", () => {
           { kind: "send", payload: { message: "Alice continues." } },
         );
         await stream.nextTurn();
-        const importedOwner = await getHookByToken(sessionCommandHookToken(driver.runId));
+        const importedOwner = await getHookByToken(
+          sessionInboxHookToken(sessionCommandHookToken(driver.runId)),
+        );
         await resumeSessionInbox(
           { sessionId: driver.runId },
           {
@@ -157,7 +198,9 @@ describe("imported session lifetime", () => {
           },
         );
         await stream.nextTurn();
-        const successor = await getHookByToken(sessionCommandHookToken(driver.runId));
+        const successor = await getHookByToken(
+          sessionInboxHookToken(sessionCommandHookToken(driver.runId)),
+        );
         expect(successor.runId).not.toBe(importedOwner.runId);
         expect(await driver.status).toBe("running");
         await resumeSessionInbox({ sessionId: driver.runId }, { kind: "cancel" });
@@ -180,7 +223,7 @@ describe("imported session lifetime", () => {
     const runtime = await createTestRuntime({ agent: { name: "legacy-timeout" } });
     await runtime.run(async () => {
       const driver = await start(legacySessionDriverWorkflow, [
-        { alias: "", sessionTimeoutMs: 1, serializedContext: legacyContext() },
+        { alias: "", inboxVersion: 7, sessionTimeoutMs: 1, serializedContext: legacyContext() },
       ]);
       const stream = captureTurnEvents(driver);
       try {

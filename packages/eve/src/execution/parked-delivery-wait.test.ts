@@ -11,6 +11,9 @@ import { SessionStateCursor } from "#execution/session-state-cursor.js";
 import { cacheTerminalTaskView } from "#tasks/session-index.js";
 import type { TaskView } from "#tasks/types.js";
 
+vi.mock("#compiled/@workflow/core/index.js", () => ({
+  getWorkflowMetadata: () => ({ workflowRunId: "owner-1" }),
+}));
 vi.mock("./route-child-delivery.js", () => ({
   routeDeliverToChildren: vi.fn(),
 }));
@@ -43,7 +46,9 @@ function createMockInbox(reads: readonly ScriptedRead[], authorizationReady = fa
 
   return {
     windowTransitions,
+    claimedTokens: [],
     async claimSessionHook() {},
+    async claimSessionHooks() {},
     drain() {
       return remaining.splice(0).map((read) => read.result.value);
     },
@@ -59,7 +64,6 @@ function createMockInbox(reads: readonly ScriptedRead[], authorizationReady = fa
       if (read.result.done) return undefined;
       return { consume() {}, value: read.result.value };
     },
-    hookClaims: { aliases: [], stable: "stable" },
     restore() {},
     setAuthorizationWindow(open: boolean) {
       windowTransitions.push(open);
@@ -111,7 +115,7 @@ function waitInput(inbox: SessionInbox): WaitInput {
   const cursor = createCursor(inbox);
   return {
     awaitAuthorizationCallbacks: true,
-    commandInbox: inbox,
+    inbox: inbox,
     cursor,
     ledger: new SessionInputLedger(),
     queue: new SessionInputQueue(),
@@ -119,11 +123,11 @@ function waitInput(inbox: SessionInbox): WaitInput {
 }
 
 function createCursor(
-  inbox: Pick<SessionInbox, "claimSessionHook">,
+  inbox: Pick<SessionInbox, "claimSessionHooks">,
   state = sessionState,
 ): SessionStateCursor {
   return new SessionStateCursor({
-    commandInbox: inbox,
+    inbox: inbox,
     parentWritable: new WritableStream<Uint8Array>(),
     serializedContext: {},
     sessionState: state,
@@ -165,10 +169,6 @@ describe("nextTurnDelivery", () => {
           { ...second.deliveryMetadata![0], payloadIndex: 1 },
         ],
       },
-      provenance: {
-        admissions: [{ delivery: first }, { delivery: second }],
-        source: "conversation",
-      },
     });
     expect(input.queue.pendingCount).toBe(0);
   });
@@ -184,7 +184,6 @@ describe("nextTurnDelivery", () => {
       delivery,
       handoffEligible: false,
       kind: "turn",
-      provenance: { admissions: [{ delivery, sequence: 0 }], source: "conversation" },
     });
   });
 
@@ -195,7 +194,7 @@ describe("nextTurnDelivery", () => {
       const inbox = createMockInbox([messageRead("next turn")]);
       if (!buffered) inbox.hasPending = () => false;
 
-      await expect(nextTurnDelivery({ ...input, commandInbox: inbox })).resolves.toMatchObject({
+      await expect(nextTurnDelivery({ ...input, inbox: inbox })).resolves.toMatchObject({
         kind: "turn",
         handoffEligible: !buffered,
         delivery: { payloads: [{ message: "next turn" }] },
@@ -425,10 +424,11 @@ describe("nextTurnDelivery routing", () => {
       { kind: "send" as const, payload: { inputResponses: [{ requestId: "task-request" }] } },
       { kind: "send" as const, payload: { message: "ordinary" } },
     ];
-    const commandInbox: SessionInbox = {
+    const inbox: SessionInbox = {
+      claimedTokens: [],
       claimSessionHook: vi.fn(),
+      claimSessionHooks: vi.fn(),
       drain: vi.fn(() => commands.splice(0)),
-      hookClaims: { aliases: [], stable: "stable" },
       hasReadyAuthorization: vi.fn(() => false),
       hasPending: vi.fn(() => commands.length > 0),
       read: vi.fn(async () => {
@@ -439,9 +439,9 @@ describe("nextTurnDelivery routing", () => {
       setAuthorizationWindow: vi.fn(),
     };
 
-    const cursor = createCursor(commandInbox, sessionState);
+    const cursor = createCursor(inbox, sessionState);
     const result = await nextTurnDelivery({
-      commandInbox,
+      inbox,
       cursor,
       ledger: new SessionInputLedger(),
       queue: new SessionInputQueue(),
@@ -522,7 +522,7 @@ function batchingInput(count = 100, crossTurn = false) {
       },
     },
   };
-  input.cursor = createCursor({ claimSessionHook: async () => {} }, taskSessionState);
+  input.cursor = createCursor({ claimSessionHooks: async () => {} }, taskSessionState);
   input.ledger = new SessionInputLedger();
   vi.mocked(routeDeliverToChildren).mockImplementation(
     async ({ delivery, sessionState, serializedContext }) => ({
@@ -602,7 +602,7 @@ describe("buffered task completion batching", () => {
       const second = completion("task_1");
       const last = completion("task_2");
       input.queue.enqueueDelivery(first);
-      input.commandInbox = createMockInbox([
+      input.inbox = createMockInbox([
         { result: { done: false, value: second } },
         messageRead("user question"),
         { result: { done: false, value: last } },
@@ -627,7 +627,7 @@ describe("buffered task completion batching", () => {
   it("batches a whole cohort when every completion arrives after the active turn", async () => {
     const input = batchingInput(3);
     const deliveries = [completion("task_0"), completion("task_1"), completion("task_2")];
-    input.commandInbox = createMockInbox(
+    input.inbox = createMockInbox(
       deliveries.map((value) => ({ result: { done: false, value }, source: "session" })),
     );
     await expect(nextTurnDelivery(input)).resolves.toMatchObject({
@@ -719,7 +719,9 @@ describe("buffered task completion batching", () => {
       const input = batchingInput(2);
       const first = completion("task_0");
       input.queue.enqueueDelivery(first);
-      input.commandInbox = createMockInbox([{ result: { done: false, value: { kind } } }]);
+      const value: SessionInboxPayload =
+        kind === "session-timeout" ? { kind, ownerRunId: "owner-1" } : { kind };
+      input.inbox = createMockInbox([{ result: { done: false, value } }]);
       await expect(nextTurnDelivery(input)).resolves.toEqual({
         kind: kind === "session-timeout" ? "expired" : kind,
       });
@@ -732,7 +734,7 @@ describe("buffered task completion batching", () => {
     const input = batchingInput(2);
     const first = completion("task_0");
     input.queue.enqueueDelivery(first);
-    input.commandInbox = createMockInbox([cancelRead({ taskId: "task_1" })]);
+    input.inbox = createMockInbox([cancelRead({ taskId: "task_1" })]);
     await expect(nextTurnDelivery(input)).resolves.toMatchObject({ kind: "turn", delivery: first });
   });
 
@@ -740,7 +742,7 @@ describe("buffered task completion batching", () => {
     const input = batchingInput(2);
     const first = completion("task_0");
     const last = completion("task_1");
-    input.commandInbox = createMockInbox(
+    input.inbox = createMockInbox(
       [first, first, last].map((value) => ({
         result: { done: false, value },
         source: "session",
@@ -808,7 +810,7 @@ describe("buffered task completion batching", () => {
     const next = await nextTurnDelivery({
       ...input,
       queue,
-      commandInbox: createMockInbox([authorizationRead()], true),
+      inbox: createMockInbox([authorizationRead()], true),
     });
     expect(next.kind).toBe("authorization");
     expect(queue.pendingCount).toBe(2);

@@ -1,4 +1,7 @@
-import { sessionCommandHookToken } from "#execution/session-command-token.js";
+import {
+  sessionCommandHookToken,
+  sessionInboxHookToken,
+} from "#execution/session-inbox/address.js";
 /**
  * Authorization request/result API for tool execution.
  *
@@ -270,12 +273,12 @@ export function isPendingAuthorizationToolOutput(value: unknown): boolean {
 }
 
 /**
- * Deterministic hook token for all authorization callbacks in a
- * session. Both {@link getHookUrl} (inside tool execution) and the
- * workflow body (which creates the hook upfront) use this token.
+ * Physical hook token embedded in a session's authorization callback URLs.
+ * The callback route resumes exactly this hook, so it is the stable inbox's
+ * physical address rather than its logical session token.
  */
 export function authHookToken(sessionId: string): string {
-  return sessionCommandHookToken(sessionId);
+  return sessionInboxHookToken(sessionCommandHookToken(sessionId));
 }
 
 // ---------------------------------------------------------------------------

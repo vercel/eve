@@ -1,7 +1,7 @@
 import { getWorkflowMetadata } from "#compiled/@workflow/core/index.js";
 
 import { createSessionInbox, type SessionInboxPayload } from "#execution/session-inbox/inbox.js";
-import { sessionCommandHookToken } from "#execution/session-command-token.js";
+import { sessionCommandHookToken } from "#execution/session-inbox/address.js";
 
 export async function sessionCommandInboxWorkflow(input: {
   readonly messageCount?: number;

@@ -27,7 +27,11 @@ describe("sessionTimeoutWorkflow", () => {
     );
 
     const deadline = new Date("2026-02-01T00:00:00.000Z");
-    const timer = sessionTimeoutWorkflow({ deadline, token: "session-1:session-timeout" });
+    const timer = sessionTimeoutWorkflow({
+      deadline,
+      ownerRunId: "session-1",
+      token: "session-1:session-timeout",
+    });
     await vi.waitFor(() => {
       expect(sleep).toHaveBeenCalledWith(deadline);
     });
@@ -37,6 +41,7 @@ describe("sessionTimeoutWorkflow", () => {
     await timer;
 
     expect(signalSessionTimeoutStep).toHaveBeenCalledWith({
+      ownerRunId: "session-1",
       token: "session-1:session-timeout",
     });
   });

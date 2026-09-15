@@ -1,3 +1,5 @@
+import { getWorkflowMetadata } from "#compiled/@workflow/core/index.js";
+
 import type { RuntimeActionResultHookPayload, SessionCommand } from "#channel/types.js";
 import { cancelAllIndexedSessionTasksStep } from "#execution/cancel-indexed-session-tasks-step.js";
 import type { SessionInputLedger } from "#execution/session-input-ledger.js";
@@ -83,7 +85,10 @@ export async function admitSessionInboxPayload(
       input.queue.enqueueControl(command.kind);
       return { kind: "consumed" };
     case "session-timeout":
-      input.queue.enqueueControl("expired");
+      // A previous owner's timer may fire after handoff; only this owner's deadline counts.
+      if (command.ownerRunId === getWorkflowMetadata().workflowRunId) {
+        input.queue.enqueueControl("expired");
+      }
       return { kind: "consumed" };
     case "reset":
       input.queue.enqueueControl("reset");

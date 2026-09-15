@@ -8,6 +8,7 @@ import {
   context as otelContext,
   trace as otelTrace,
 } from "#compiled/@opentelemetry/api/index.js";
+import { HookNotFoundError } from "#compiled/@workflow/errors/index.js";
 import type { ChannelAdapter } from "#channel/adapter.js";
 import { attachChannelActivityPresentation } from "#channel/activity-renderer.js";
 import { ActivityObserverKey, ChannelRequestIdKey, SessionTitleKey } from "#context/keys.js";
@@ -22,7 +23,10 @@ import {
   workflowEntryReference,
   workflowToolRunWorkflowReference,
 } from "#execution/workflow-runtime.js";
-import { sessionCommandHookToken } from "#execution/session-command-token.js";
+import {
+  sessionCommandHookToken,
+  sessionHandoffMarkerToken,
+} from "#execution/session-inbox/address.js";
 import { registerInstrumentationRuntime } from "#instrumentation/runtime.js";
 import { AgentSpanIdGenerator } from "#tracing/agent-span-id-generator.js";
 import type { RuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
@@ -55,7 +59,10 @@ vi.mock("#runtime/sessions/compiled-agent-cache.js", () => ({
 
 beforeEach(() => {
   cancelRunMock.mockResolvedValue(undefined);
-  getHookByTokenMock.mockImplementation(async (token: string) => currentSessionHook(token));
+  getHookByTokenMock.mockImplementation(async (token: string) => {
+    if (token.startsWith(sessionHandoffMarkerToken(""))) throw new HookNotFoundError(token);
+    return currentSessionHook(token);
+  });
   getWorldMock.mockResolvedValue(world);
   resumeHookMock.mockImplementation(async (token: string) => currentSessionHook(token));
 });
@@ -138,9 +145,10 @@ describe("session owner starts", () => {
     await expect(
       startSessionOwnerStep({
         activationToken: "owner-1:handoff",
-        checkpoint: { ownership: { anchorRunId: "anchor-1" } } as never,
+        anchorRunId: "anchor-1",
+        checkpoint: {} as never,
+        delivery: { kind: "deliver", payloads: [] },
         targetDeploymentId: "latest",
-        trigger: { delivery: { kind: "deliver", payloads: [] } },
       }),
     ).rejects.toThrow("exact deployment id");
     expect(startMock).not.toHaveBeenCalled();
@@ -151,30 +159,21 @@ describe("session owner starts", () => {
     getRunMock.mockReturnValue({ getWritable: () => parentWritable });
     startMock.mockResolvedValue({ runId: "owner-2" });
     const checkpoint = {
-      anchorToken: "session-1:anchor",
-      version: 2,
-      hooks: {
-        aliases: ["continuation-1", "continuation-2"],
-        stable: "custom-stable",
-      },
+      version: 4,
       mode: "conversation",
-      ownership: {
-        anchorRunId: "anchor-1",
-        deploymentId: "deployment-a",
-        ownerRunId: "owner-1",
-        sessionId: "session-1",
-      },
       serializedContext: {},
       sessionState: { continuationToken: "continuation-1", sessionId: "session-1" },
+      sessionTimeoutMs: 60_000,
     } as never;
     const delivery = { kind: "deliver", payloads: [{ message: "hello" }] } as const;
 
     await expect(
       startSessionOwnerStep({
         activationToken: "owner-1:handoff",
+        anchorRunId: "anchor-1",
         checkpoint,
+        delivery,
         targetDeploymentId: "deployment-b",
-        trigger: { delivery },
       }),
     ).resolves.toBeUndefined();
 
@@ -185,10 +184,11 @@ describe("session owner starts", () => {
         expect.objectContaining({
           activationToken: "owner-1:handoff",
           checkpoint,
+          delivery,
           kind: "handoff",
           ownerDeploymentId: "deployment-b",
           parentWritable,
-          trigger: { delivery },
+          sessionId: "anchor-1",
         }),
       ],
       { deploymentId: "deployment-b" },
@@ -245,9 +245,12 @@ describe("createWorkflowRuntime command dispatch", () => {
       }),
     ).resolves.toEqual({ sessionId: "session-1", status: "accepted" });
 
-    expect(resumeHookMock).toHaveBeenCalledWith(sessionCommandHookToken("session-1"), {
-      kind: "clear",
-    });
+    expect(resumeHookMock).toHaveBeenCalledWith(
+      sessionInboxHookToken(sessionCommandHookToken("session-1")),
+      {
+        kind: "clear",
+      },
+    );
     expect(getHookByTokenMock).not.toHaveBeenCalled();
   });
 
@@ -280,10 +283,13 @@ describe("createWorkflowRuntime command dispatch", () => {
       }),
     ).resolves.toEqual({ sessionId: "session-1", status: "accepted" });
 
-    expect(resumeHookMock).toHaveBeenCalledWith(sessionCommandHookToken("session-1"), {
-      kind: "send",
-      payload: { message: "hello" },
-    });
+    expect(resumeHookMock).toHaveBeenCalledWith(
+      sessionInboxHookToken(sessionCommandHookToken("session-1")),
+      {
+        kind: "send",
+        payload: { message: "hello" },
+      },
+    );
     expect(getHookByTokenMock).not.toHaveBeenCalled();
   });
 
@@ -300,7 +306,7 @@ describe("createWorkflowRuntime command dispatch", () => {
       deliveryId: delivery.deliveryId,
     });
     expect(resumeHookMock).toHaveBeenCalledWith(
-      sessionCommandHookToken("session-1"),
+      sessionInboxHookToken(sessionCommandHookToken("session-1")),
       expect.objectContaining({ delivery }),
     );
   });
@@ -345,10 +351,13 @@ describe("createWorkflowRuntime command dispatch", () => {
         sessionId: "session-1",
       }),
     ).resolves.toEqual({ sessionId: "session-1", status: "accepted" });
-    expect(resumeHookMock).toHaveBeenCalledWith(sessionCommandHookToken("session-1"), {
-      kind: "cancel",
-      turnId: "turn-2",
-    });
+    expect(resumeHookMock).toHaveBeenCalledWith(
+      sessionInboxHookToken(sessionCommandHookToken("session-1")),
+      {
+        kind: "cancel",
+        turnId: "turn-2",
+      },
+    );
     expect(getHookByTokenMock).not.toHaveBeenCalled();
   });
 

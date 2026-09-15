@@ -1,18 +1,13 @@
 import type { DeliverPayload, SessionCapabilities, TurnCaller } from "#channel/types.js";
-import {
-  createSafeOuterWorkflowError,
-  type CrashCleanupState,
-  resolveCallerForCrash,
-} from "#execution/workflow-entry-crash.js";
+import { createSafeOuterWorkflowError } from "#execution/workflow-entry-crash.js";
 import type { AgentWorkflowRetentionDefinition } from "#shared/agent-definition.js";
 import type { RunMode } from "#shared/run-mode.js";
 import {
   bindTurnCallerContextStep,
   notifyCancelledTaskCallerStep,
-  notifyDelegatedParentStep,
   notifyTurnCallerStep,
+  resolveInitialTurnCallerStep,
 } from "#subagents/parent-notification.js";
-import { createDelegatedSubagentErrorResult } from "#subagents/parent-result.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import { nextTurnDelivery, type NextTurnInstruction } from "#execution/parked-delivery-wait.js";
 import { cancelDescendantTurnsStep } from "#execution/cancel-descendant-turns-step.js";
@@ -21,28 +16,37 @@ import { SessionInputQueue } from "#execution/session-input-queue.js";
 import { SessionExecution } from "#execution/session-execution.js";
 import { SessionStateCursor } from "#execution/session-state-cursor.js";
 import type { TurnOutcome, TurnStepPayload } from "#execution/turn-step.js";
-import { normalizeSerializableError } from "#execution/workflow-errors.js";
 import { settleCancelledTurnStep } from "#execution/settle-cancelled-turn-step.js";
-import { emitTerminalSessionFailureStep } from "#execution/terminal-session-failure-step.js";
-import { fireSessionCallbackStep } from "#subagents/callback-step.js";
-import { finalizeDone, finalizeExpiredSession } from "#execution/workflow-entry-finalization.js";
+import { finalizeSession, type SessionTerminalOutcome } from "#execution/session-finalization.js";
 import { type SessionInboxHandle } from "#execution/session-inbox/inbox.js";
 import { createSessionTimeoutControl } from "#execution/session-timeout-control.js";
-import { terminateChildSessionsStep } from "#execution/terminate-child-sessions-step.js";
-import { SessionHandoff, type SessionOwnership } from "#execution/session-handoff.js";
+import { SessionHandoff, sessionAnchorToken } from "#execution/session-handoff.js";
 import { signalSessionAnchorStep } from "#execution/session-handoff-steps.js";
 import type { WorkflowEntryResult } from "#execution/workflow-entry-input.js";
 
+/**
+ * Who to tell when this owner exits. The original run anchors the public
+ * stream itself; a successor signals the original run. A `self` anchor may
+ * also name a `notify` step that runs with the final result, which lets an
+ * importer settle whatever predecessor still holds the stream open.
+ */
+export type SessionAnchor =
+  | {
+      readonly kind: "self";
+      readonly notify?: (result: WorkflowEntryResult) => Promise<void>;
+    }
+  | { readonly kind: "successor" };
+
 export interface SessionBoot {
-  readonly anchorToken: string;
-  readonly capabilities?: SessionCapabilities;
+  readonly anchor: SessionAnchor;
   readonly caller: TurnCaller | undefined;
+  readonly capabilities?: SessionCapabilities;
+  readonly deploymentId: string;
   readonly initialInput: TurnStepPayload | undefined;
-  readonly isInitialOwner: boolean;
   readonly mode: RunMode;
-  readonly ownership: SessionOwnership;
   readonly retention?: AgentWorkflowRetentionDefinition;
   readonly serializedContext: Record<string, unknown>;
+  readonly sessionId: string;
   readonly sessionState: DurableSessionState;
   readonly sessionTimeoutDeadline?: Date;
   readonly sessionTimeoutMs: number | false;
@@ -50,110 +54,106 @@ export interface SessionBoot {
 }
 
 type SessionLoopOutcome =
-  | {
-      readonly kind: "expired";
-      readonly serializedContext: Record<string, unknown>;
-      readonly sessionState: DurableSessionState;
-    }
-  | { readonly kind: "result"; readonly result: WorkflowEntryResult }
+  | { readonly kind: "terminal"; readonly outcome: SessionTerminalOutcome }
   | { readonly kind: "transferred" };
+
+/** Mutable facts the crash path needs that do not live in the state cursor. */
+interface SessionProgress {
+  /** Delegated caller whose awaited reply is still unsettled. */
+  caller: TurnCaller | undefined;
+  terminalEmitted: boolean;
+  /** Last dispatched turn; a crash between turns is attributed to it. */
+  turnId?: string;
+}
 
 /** Runs an already prepared owner against its session's existing stream. */
 export async function runPreparedSession(
   boot: SessionBoot,
-  commandInbox: SessionInboxHandle,
+  inbox: SessionInboxHandle,
 ): Promise<WorkflowEntryResult> {
-  const { serializedContext, sessionWritable, mode } = boot;
-  const sessionId = boot.ownership.sessionId;
-  const crashCleanupState: CrashCleanupState = {
-    caller: boot.caller,
-    callerResolved: true,
-    lastSessionState: boot.sessionState,
-    serializedContext,
-    terminalEmitted: false,
-  };
-  const handoff = new SessionHandoff({ ...boot, commandInbox });
+  const cursor = new SessionStateCursor({
+    inbox,
+    parentWritable: boot.sessionWritable,
+    serializedContext: boot.serializedContext,
+    sessionState: boot.sessionState,
+  });
+  const progress: SessionProgress = { caller: boot.caller, terminalEmitted: false };
+  const handoff = new SessionHandoff({
+    checkpoint: {
+      capabilities: boot.capabilities,
+      mode: boot.mode,
+      retention: boot.retention,
+      sessionTimeoutMs: boot.sessionTimeoutMs,
+    },
+    deploymentId: boot.deploymentId,
+    inbox,
+    isInitialOwner: boot.anchor.kind === "self",
+    sessionId: boot.sessionId,
+  });
+  let result: WorkflowEntryResult = { output: "", isError: true };
   try {
-    let outcome: SessionLoopOutcome;
+    let loop: SessionLoopOutcome;
     try {
-      outcome = await runSessionLoop(boot, { commandInbox, crashCleanupState, handoff });
+      loop = await runSessionLoop(boot, { cursor, handoff, inbox, progress });
     } finally {
-      await commandInbox.dispose();
+      await inbox.dispose();
     }
-    if (outcome.kind === "transferred") {
-      return boot.isInitialOwner ? await handoff.awaitAnchoredResult() : { output: "" };
+    if (loop.kind === "transferred") {
+      if (boot.anchor.kind !== "self") return { output: "" };
+      result = await handoff.awaitAnchoredResult();
+      return result;
     }
-    const result =
-      outcome.kind === "result"
-        ? outcome.result
-        : await finalizeExpiredSession({
-            caller: crashCleanupState.caller,
-            sessionWritable,
-            mode,
-            serializedContext: outcome.serializedContext,
-            sessionState: outcome.sessionState,
-            terminalState: crashCleanupState,
-          });
-    await reportResultToAnchor(boot, result, handoff);
+    result = await finalizeSession(loop.outcome, {
+      caller: progress.caller,
+      cursor,
+      mode: boot.mode,
+      sessionWritable: boot.sessionWritable,
+    });
+    progress.terminalEmitted = true;
     return result;
   } catch (error) {
-    try {
-      await failSession({ error, crashCleanupState, sessionWritable, sessionId, mode });
-    } finally {
-      await reportResultToAnchor(boot, { output: "", isError: true }, handoff);
+    if (!progress.terminalEmitted) {
+      await finalizeSession(
+        { error, kind: "failed", turnId: progress.turnId },
+        { caller: progress.caller, cursor, mode: boot.mode, sessionWritable: boot.sessionWritable },
+      );
     }
     throw createSafeOuterWorkflowError();
+  } finally {
+    await reportResultToAnchor(boot, result, handoff);
   }
 }
 
+/**
+ * Terminal path for a boot that failed before the session loop could run.
+ * The caller is re-resolved from context because no turn ever bound it.
+ */
 export async function failSession(input: {
   readonly error: unknown;
-  readonly crashCleanupState: CrashCleanupState;
-  readonly sessionWritable: WritableStream<Uint8Array>;
-  readonly sessionId: string;
   readonly mode: RunMode;
+  readonly serializedContext: Record<string, unknown>;
+  readonly sessionId: string;
+  readonly sessionState: DurableSessionState | undefined;
+  readonly sessionWritable: WritableStream<Uint8Array>;
 }): Promise<never> {
-  const { error, crashCleanupState, sessionWritable, sessionId, mode } = input;
-  const terminalAlreadyEmitted = crashCleanupState.terminalEmitted;
-  // Safety net for failures the tool-loop harness does not already
-  // surface as `session.failed` (deserialization, runtime-action
-  // throws, adapter `deliver` throws, staging errors, etc.) so the
-  // channel still sees a terminal event.
-  if (!crashCleanupState.terminalEmitted && crashCleanupState.lastSessionState !== undefined) {
-    await terminateChildSessionsStep({
-      serializedContext: crashCleanupState.serializedContext,
-      sessionState: crashCleanupState.lastSessionState,
-    });
+  let caller: TurnCaller | undefined;
+  try {
+    caller = await resolveInitialTurnCallerStep({ serializedContext: input.serializedContext });
+  } catch {
+    // Best effort: when resolution fails again there is no reachable caller to notify.
   }
-  if (!crashCleanupState.terminalEmitted) {
-    await emitTerminalSessionFailureStep({
-      error: normalizeSerializableError(error),
-      parentWritable: sessionWritable,
-      serializedContext: crashCleanupState.serializedContext,
-      turnId: crashCleanupState.turnId,
-    });
-    crashCleanupState.terminalEmitted = true;
-  }
-  if (terminalAlreadyEmitted) throw createSafeOuterWorkflowError();
-  if (mode === "task") {
-    await fireSessionCallbackStep({
-      error: normalizeSerializableError(error),
-      serializedContext: crashCleanupState.serializedContext,
-      status: "failed",
-    });
-    await notifyDelegatedParentStep({
-      result: createDelegatedSubagentErrorResult(crashCleanupState.serializedContext, error),
-      serializedContext: crashCleanupState.serializedContext,
-    });
-  } else if (crashCleanupState.caller !== undefined || !crashCleanupState.callerResolved) {
-    await notifyTurnCallerStep({
-      caller: await resolveCallerForCrash(crashCleanupState, crashCleanupState.serializedContext),
-      lifecycle: "terminal",
-      sessionId,
-      settled: { isError: true, output: error },
-    });
-  }
-
+  await finalizeSession(
+    { error: input.error, kind: "failed" },
+    {
+      caller,
+      cursor: {
+        serializedContext: input.serializedContext,
+        sessionState: input.sessionState,
+      },
+      mode: input.mode,
+      sessionWritable: input.sessionWritable,
+    },
+  );
   throw createSafeOuterWorkflowError();
 }
 
@@ -162,45 +162,47 @@ async function reportResultToAnchor(
   result: WorkflowEntryResult,
   handoff: SessionHandoff,
 ): Promise<void> {
-  if (boot.isInitialOwner) await handoff.disposeAnchor();
-  else await signalSessionAnchorStep({ result, token: boot.anchorToken });
+  switch (boot.anchor.kind) {
+    case "self":
+      await handoff.disposeAnchor();
+      await boot.anchor.notify?.(result);
+      return;
+    case "successor":
+      await signalSessionAnchorStep({ result, token: sessionAnchorToken(boot.sessionId) });
+      return;
+  }
 }
 
 async function runSessionLoop(
   boot: SessionBoot,
   deps: {
-    readonly commandInbox: SessionInboxHandle;
-    readonly crashCleanupState: CrashCleanupState;
+    readonly cursor: SessionStateCursor;
     readonly handoff: SessionHandoff;
+    readonly inbox: SessionInboxHandle;
+    readonly progress: SessionProgress;
   },
 ): Promise<SessionLoopOutcome> {
-  const { commandInbox, crashCleanupState, handoff } = deps;
-  const cursor = new SessionStateCursor({
-    commandInbox,
-    parentWritable: boot.sessionWritable,
-    serializedContext: boot.serializedContext,
-    sessionState: boot.sessionState,
-  });
+  const { cursor, handoff, inbox, progress } = deps;
   const queue = new SessionInputQueue();
   const ledger = new SessionInputLedger();
   const execution = new SessionExecution({
     capabilities: boot.capabilities,
-    commandInbox,
     cursor,
+    inbox,
     ledger,
     mode: boot.mode,
     queue,
+    sessionId: boot.sessionId,
   });
   // One payload per exact authorization attempt accumulates across
   // intervening turns. Replaced attempts are pruned at each park.
   const collectedAuthPayloads = new Map<string, DeliverPayload>();
-  const stableCommandToken = commandInbox.hookClaims.stable;
   const sessionTimeout =
     boot.sessionTimeoutDeadline === undefined
       ? undefined
       : createSessionTimeoutControl({
           deadline: boot.sessionTimeoutDeadline,
-          token: stableCommandToken,
+          sessionId: boot.sessionId,
         });
 
   /**
@@ -232,20 +234,12 @@ async function runSessionLoop(
       }
       const next = await nextTurnDelivery({
         awaitAuthorizationCallbacks: expectedAttemptIds.size > 0,
-        commandInbox,
         cursor,
         deferDeliveries: boot.mode === "task" && expectedAttemptIds.size > 0,
+        inbox,
         ledger,
         queue,
       });
-      // The previous owner's timer may publish while handoff cancels it.
-      // Only this owner's deadline can expire the renewed session.
-      if (
-        next.kind === "expired" &&
-        (boot.sessionTimeoutDeadline === undefined ||
-          Date.now() < boot.sessionTimeoutDeadline.getTime())
-      )
-        continue;
       if (next.kind === "workflow") {
         await execution.handleWorkflowMessage(next.message);
         continue;
@@ -268,7 +262,7 @@ async function runSessionLoop(
 
   let turnIndex = 0;
   const runTurn = async (delivery: TurnStepPayload | undefined): Promise<TurnOutcome> => {
-    const caller = crashCleanupState.caller;
+    const caller = progress.caller;
     if (caller?.taskId !== undefined) ledger.rememberTask(caller.taskId);
     if (caller !== undefined) {
       await cursor.apply({
@@ -278,11 +272,8 @@ async function runSessionLoop(
         }),
       });
     }
-    crashCleanupState.turnId = `turn_${String(turnIndex++)}`;
-    const outcome = await execution.runTurn(delivery);
-    crashCleanupState.lastSessionState = cursor.sessionState;
-    crashCleanupState.serializedContext = cursor.serializedContext;
-    return outcome;
+    progress.turnId = `turn_${String(turnIndex++)}`;
+    return await execution.runTurn(delivery);
   };
   const settleCancelledTurn = async () => {
     const settled = await settleCancelledTurnStep({
@@ -291,22 +282,9 @@ async function runSessionLoop(
       sessionState: cursor.sessionState,
     });
     await cursor.apply(settled);
-    crashCleanupState.serializedContext = cursor.serializedContext;
-    crashCleanupState.lastSessionState = cursor.sessionState;
-    crashCleanupState.caller = undefined;
+    progress.caller = undefined;
     return settled;
   };
-  const finalize = async (): Promise<SessionLoopOutcome> => ({
-    kind: "result",
-    result: await finalizeExpiredSession({
-      caller: crashCleanupState.caller,
-      sessionWritable: boot.sessionWritable,
-      mode: boot.mode,
-      serializedContext: cursor.serializedContext,
-      sessionState: cursor.sessionState,
-      terminalState: crashCleanupState,
-    }),
-  });
 
   try {
     const [actionResult, timerResult] = await Promise.allSettled([
@@ -319,29 +297,11 @@ async function runSessionLoop(
 
     while (true) {
       if (action.kind === "done") {
-        return {
-          kind: "result",
-          result: {
-            ...(await finalizeDone({
-              action,
-              caller: crashCleanupState.caller,
-              mode: boot.mode,
-              serializedContext: cursor.serializedContext,
-              sessionState: cursor.sessionState,
-              terminalState: crashCleanupState,
-            })),
-            isError: action.isError,
-            usage: action.usage,
-            usageDelta: action.usageDelta,
-          },
-        };
+        return { kind: "terminal", outcome: { action, kind: "done" } };
       }
 
       if (action.cancelled === true) {
-        const cancelledCaller = {
-          caller: crashCleanupState.caller,
-          sessionId: cursor.sessionState.sessionId,
-        };
+        const cancelledCaller = { caller: progress.caller, sessionId: boot.sessionId };
         const settled = await settleCancelledTurn();
         await notifyCancelledTaskCallerStep(
           settled.usage === undefined
@@ -349,15 +309,15 @@ async function runSessionLoop(
             : { ...cancelledCaller, usage: settled.usage },
         );
       } else if (action.settled !== undefined) {
-        if (crashCleanupState.caller !== undefined) {
+        if (progress.caller !== undefined) {
           await notifyTurnCallerStep({
-            caller: crashCleanupState.caller,
+            caller: progress.caller,
             lifecycle: "parked",
-            sessionId: cursor.sessionState.sessionId,
+            sessionId: boot.sessionId,
             settled: action.settled,
           });
         }
-        crashCleanupState.caller = undefined;
+        progress.caller = undefined;
       }
 
       // An open authorization challenge must not wedge the session:
@@ -366,21 +326,15 @@ async function runSessionLoop(
       // turns because every park re-derives `authorizationAttemptIds` from
       // durable session state.
       const next = await nextParkedActivity(new Set(action.authorizationAttemptIds ?? []));
-      crashCleanupState.lastSessionState = cursor.sessionState;
 
       switch (next.kind) {
         case "authorization-resume":
           action = await runTurn({ kind: "deliver", payloads: next.payloads });
           continue;
         case "expired":
-          return {
-            kind: "expired",
-            serializedContext: cursor.serializedContext,
-            sessionState: cursor.sessionState,
-          };
         case "reset":
         case "closed":
-          return await finalize();
+          return { kind: "terminal", outcome: { kind: "expired" } };
         case "clear":
         case "compact":
           action = await runTurn({ kind: next.kind });
@@ -397,12 +351,11 @@ async function runSessionLoop(
           continue;
         case "turn": {
           const transfer = await handoff.tryTransfer(next, {
-            queue,
             serializedContext: cursor.serializedContext,
             sessionState: cursor.sessionState,
           });
           if (transfer.kind === "transferred") return { kind: "transferred" };
-          if (next.delivery.caller !== undefined) crashCleanupState.caller = next.delivery.caller;
+          if (next.delivery.caller !== undefined) progress.caller = next.delivery.caller;
           action = await runTurn(next.delivery);
           continue;
         }

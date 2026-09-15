@@ -5,7 +5,11 @@ import { cancelDescendantTurnsStep } from "#execution/cancel-descendant-turns-st
 import { dispatchCoordinationStep } from "#execution/coordination-dispatch-step.js";
 import type { SessionInputLedger } from "#execution/session-input-ledger.js";
 import type { SessionInputQueue } from "#execution/session-input-queue.js";
-import type { SessionInboxOwnership, SessionInboxReader } from "#execution/session-inbox/inbox.js";
+import type { SessionInboxReader } from "#execution/session-inbox/inbox.js";
+import {
+  sessionCommandHookToken,
+  sessionInboxHookToken,
+} from "#execution/session-inbox/address.js";
 import type { SessionStateCursor } from "#execution/session-state-cursor.js";
 import { TurnRouting } from "#execution/turn-routing.js";
 import { acknowledgeDelegatedTasksStep } from "#execution/tasks/parent/delegate.js";
@@ -43,11 +47,12 @@ type RuntimeEvent =
  */
 export interface SessionExecutionInput {
   readonly capabilities?: SessionCapabilities;
-  readonly commandInbox: SessionInboxReader & Pick<SessionInboxOwnership, "hookClaims">;
   readonly cursor: SessionStateCursor;
+  readonly inbox: SessionInboxReader;
   readonly ledger: SessionInputLedger;
   readonly mode: RunMode;
   readonly queue: SessionInputQueue;
+  readonly sessionId: string;
 }
 
 export class SessionExecution {
@@ -62,10 +67,10 @@ export class SessionExecution {
   }
 
   async runTurn(delivery: TurnStepPayload | undefined): Promise<TurnOutcome> {
-    const { commandInbox, cursor, ledger, queue } = this.input;
+    const { inbox, cursor, ledger, queue } = this.input;
     const control = new TurnRouting({
       callerCallId: delivery?.kind === "deliver" ? delivery.caller?.callId : undefined,
-      commandInbox,
+      inbox,
       cursor,
       expectedTurnId: activeTurnId(cursor.sessionState.emissionState),
       ledger,
@@ -132,7 +137,9 @@ export class SessionExecution {
         const dispatchResult = await dispatchCoordinationStep({
           action: result.action,
           callbackBaseUrl: resolveWorkflowCallbackBaseUrl(getWorkflowMetadata().url),
-          workflowToolRunOwner: { inbox: commandInbox.hookClaims.stable },
+          workflowToolRunOwner: {
+            inbox: sessionInboxHookToken(sessionCommandHookToken(this.input.sessionId)),
+          },
           parentWritable: cursor.parentWritable,
           serializedContext: cursor.serializedContext,
           sessionState: cursor.sessionState,
@@ -257,14 +264,14 @@ export class SessionExecution {
   }
 
   private async nextRuntimeEvent(control: TurnRouting): Promise<RuntimeEvent> {
-    const { commandInbox } = this.input;
+    const { inbox } = this.input;
     while (true) {
       if (control.signal.aborted) return "cancelled";
       const result = control.takeRuntimeResult();
       if (result !== undefined) return result;
       const message = control.takeWorkflowMessage();
       if (message !== undefined) return { kind: "workflow", message };
-      const lease = await commandInbox.read("runtime");
+      const lease = await inbox.read("runtime");
       if (lease === undefined)
         throw new Error("Session inbox closed before runtime actions completed.");
       lease.consume();

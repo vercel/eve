@@ -4,10 +4,6 @@ import { releaseSessionHooksStep } from "#execution/session-inbox/release-step.j
 
 import type { DeliverPayload, HookPayload, SessionCommand } from "#channel/types.js";
 import { claimHookOwnership, disposeHook } from "#execution/hook-ownership.js";
-import {
-  flattenSessionHookClaims,
-  type SessionHookClaims,
-} from "#execution/session-hook-claims.js";
 import type { WorkflowToolRunMessage } from "#execution/tools/workflow/messages.js";
 
 /** All session addresses accept the same protocol. Callback routes construct
@@ -54,34 +50,17 @@ export interface SessionInboxReader {
 }
 
 export interface SessionInboxOwnership {
-  readonly hookClaims: SessionHookClaims;
+  /** Logical tokens currently claimed, in claim order. */
+  readonly claimedTokens: readonly string[];
   claimSessionHook(token: string): Promise<void>;
+  /** Registers every token as one batch; all claims settle before the first failure propagates. */
+  claimSessionHooks(tokens: readonly string[]): Promise<void>;
 }
 export interface SessionInbox extends SessionInboxReader, SessionInboxOwnership {}
 export interface SessionInboxHandle extends SessionInbox {
   dispose(): Promise<void>;
+  /** Disposes every hook and returns each payload the hooks accepted but the owner never read. */
   release(): Promise<SessionInboxPayload[]>;
-}
-
-/** Commit one registration batch and settle every claim before rollback. */
-export async function claimSessionHooks(
-  inbox: Pick<SessionInbox, "claimSessionHook">,
-  claims: SessionHookClaims,
-): Promise<void> {
-  const outcomes = await Promise.allSettled(
-    [...new Set(flattenSessionHookClaims(claims))].map((token) => inbox.claimSessionHook(token)),
-  );
-  for (const outcome of outcomes) if (outcome.status === "rejected") throw outcome.reason;
-}
-
-export async function claimSessionHookAliases(
-  inbox: Pick<SessionInbox, "claimSessionHook">,
-  aliases: readonly string[],
-): Promise<void> {
-  const outcomes = await Promise.allSettled(
-    [...new Set(aliases)].map((token) => inbox.claimSessionHook(token)),
-  );
-  for (const outcome of outcomes) if (outcome.status === "rejected") throw outcome.reason;
 }
 
 /** One queue for the session lifetime. Reads only select entries; consumption
@@ -113,6 +92,8 @@ export function createSessionInbox(sessionId: string): SessionInboxHandle {
   // The pump never waits on queue depth: interrupts share each hook's ordered
   // stream, so any backpressure on ordinary payloads would also hold back the
   // cancel behind them. Accepted payloads are already durable on the hook.
+  // The SDK abandons (never settles) a read that is in flight when the hook
+  // is disposed, so the loop exits on `stopping` rather than on `done`.
   const pump = async (source: Source): Promise<void> => {
     const iterator = source.hook[Symbol.asyncIterator]();
     try {
@@ -169,37 +150,41 @@ export function createSessionInbox(sessionId: string): SessionInboxHandle {
     return accepted;
   };
 
+  const claimSessionHook = async (token: string): Promise<void> => {
+    if (!token) throw new Error("A session alias requires a nonempty continuation token.");
+    const existing = sources.find((source) => source.token === token);
+    if (existing !== undefined) return await existing.registered;
+    if (sources.length >= 256) throw new Error("A session may claim at most 256 addresses.");
+    const source: Source = {
+      token,
+      hook: createHook<SessionInboxPayload>({
+        token: sessionInboxHookToken(token),
+        metadata: { sessionId },
+      }),
+      stopping: false,
+      closed: false,
+    };
+    // Reserve the slot before awaiting registration: parallel claims retain
+    // deterministic order and duplicate calls cannot create another hook.
+    sources.push(source);
+    try {
+      source.registered = claimHookOwnership(source.hook);
+      await source.registered;
+      void pump(source);
+    } catch (error) {
+      sources.splice(sources.indexOf(source), 1);
+      throw error;
+    }
+  };
+
   return {
-    get hookClaims() {
-      const [stable, ...aliases] = sources.map(({ token }) => token);
-      if (stable === undefined) throw new Error("Session inbox has no stable hook claim.");
-      return { aliases, stable };
+    get claimedTokens() {
+      return sources.map(({ token }) => token);
     },
-    async claimSessionHook(token) {
-      if (!token) throw new Error("A session alias requires a nonempty continuation token.");
-      const existing = sources.find((source) => source.token === token);
-      if (existing !== undefined) return await existing.registered;
-      if (sources.length >= 256) throw new Error("A session may claim at most 256 addresses.");
-      const source: Source = {
-        token,
-        hook: createHook<SessionInboxPayload>({
-          token: sessionInboxHookToken(token),
-          metadata: { sessionId },
-        }),
-        stopping: false,
-        closed: false,
-      };
-      // Reserve the slot before awaiting registration: parallel claims retain
-      // deterministic order and duplicate calls cannot create another hook.
-      sources.push(source);
-      try {
-        source.registered = claimHookOwnership(source.hook);
-        await source.registered;
-        void pump(source);
-      } catch (error) {
-        sources.splice(sources.indexOf(source), 1);
-        throw error;
-      }
+    claimSessionHook,
+    async claimSessionHooks(tokens) {
+      const outcomes = await Promise.allSettled([...new Set(tokens)].map(claimSessionHook));
+      for (const outcome of outcomes) if (outcome.status === "rejected") throw outcome.reason;
     },
     read: nextRead,
     drain() {
@@ -244,6 +229,9 @@ export function createSessionInbox(sessionId: string): SessionInboxHandle {
       await stop();
     },
     async release() {
+      // Commit disposal durably before the readers stop: the SDK delivers every
+      // hook event accepted before that commit to the iterators first, so the
+      // queue holds each accepted payload when `stop()` drains it.
       if (sources.length > 0) {
         await releaseSessionHooksStep({
           ownerRunId: getWorkflowMetadata().workflowRunId,

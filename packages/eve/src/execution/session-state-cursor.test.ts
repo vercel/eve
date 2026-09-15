@@ -5,15 +5,17 @@ import { ContinuationHookTokensKey } from "#context/keys.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import { SessionStateCursor } from "#execution/session-state-cursor.js";
 
+const stableToken = "eve:session:session-1:inbox";
+
 describe("SessionStateCursor", () => {
   it("claims every new continuation address recorded during a step", async () => {
-    const claimSessionHook = vi.fn(async () => {});
-    const commandInbox = {
-      claimSessionHook,
+    const claimSessionHooks = vi.fn(async () => {});
+    const inbox = {
+      claimSessionHooks,
     };
     const initialState = state("channel:initial");
     const cursor = new SessionStateCursor({
-      commandInbox,
+      inbox,
       parentWritable: new WritableStream<Uint8Array>(),
       serializedContext: {
         [ContinuationHookTokensKey.name]: ["channel:initial"],
@@ -29,19 +31,17 @@ describe("SessionStateCursor", () => {
       sessionState: nextState,
     });
 
-    expect(claimSessionHook.mock.calls).toEqual([
-      ["channel:initial"],
-      ["channel:second"],
-      ["channel:third"],
+    expect(claimSessionHooks.mock.calls).toEqual([
+      [[stableToken, "channel:initial", "channel:second", "channel:third"]],
     ]);
     expect(cursor.sessionState).toBe(nextState);
   });
 
   it("claims the current continuation when no address history was recorded", async () => {
-    const claimSessionHook = vi.fn(async () => {});
+    const claimSessionHooks = vi.fn(async () => {});
     const cursor = new SessionStateCursor({
-      commandInbox: {
-        claimSessionHook,
+      inbox: {
+        claimSessionHooks,
       },
       parentWritable: new WritableStream<Uint8Array>(),
       serializedContext: {},
@@ -50,7 +50,7 @@ describe("SessionStateCursor", () => {
 
     await cursor.apply({ sessionState: state("channel:current") });
 
-    expect(claimSessionHook).toHaveBeenCalledWith("channel:current");
+    expect(claimSessionHooks).toHaveBeenCalledWith([stableToken, "channel:current"]);
   });
 });
 

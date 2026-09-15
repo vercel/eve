@@ -5,19 +5,39 @@ import type {
   SessionTimeoutHookPayload,
 } from "#channel/types.js";
 import { coalesceDeliverPayloads } from "#execution/deliver-payloads.js";
-import { sessionCommandHookToken } from "#execution/session-command-token.js";
-import { sessionInboxHookToken } from "#execution/session-inbox/address.js";
+import {
+  sessionCommandHookToken,
+  sessionInboxHookToken,
+} from "#execution/session-inbox/address.js";
 import { getHookByToken, resumeHook } from "#internal/workflow/runtime.js";
 import { isObject } from "#shared/guards.js";
 
 type Command = DeliverHookPayload | SessionCommand | SessionTimeoutHookPayload;
 type Hook = Awaited<ReturnType<typeof getHookByToken>>;
 
-/** A legacy alias remains owned by the stream anchor after import. */
+/** Reported as an inactive session so the channel starts a fresh one. */
+export class UnsupportedLegacySessionError extends Error {
+  constructor() {
+    super("This session predates eve 0.45 and cannot be continued. Start a new session.");
+    this.name = "UnsupportedLegacySessionError";
+  }
+}
+
+/**
+ * Oldest driver wire version still accepted. Drivers started before eve 0.45
+ * used an unversioned envelope; those sessions report themselves inactive so
+ * the channel starts a fresh session instead of misdelivering.
+ */
+const MIN_LEGACY_WIRE_VERSION = 1;
+const MAX_LEGACY_WIRE_VERSION = 7;
+
+/**
+ * Finds the pre-cutover hook for a logical token. Once that session has been
+ * imported, its current-generation inbox owns delivery and `current` is true.
+ */
 export async function resolveLegacyInbox(
   token: string,
 ): Promise<{ hook: Hook; sessionId: string; current: boolean }> {
-  token = token.replace(/^eve:inbox:v1:/, "");
   const legacy = await getHookByToken(token);
   const metadata = await legacy.metadata;
   const sessionId =
@@ -38,39 +58,33 @@ export async function resumeLegacyInbox(token: string, command: Command) {
   let payload: unknown = command;
   if (!target.current) {
     const metadata = await target.hook.metadata;
-    const version = isObject(metadata) ? metadata.sessionInboxWireVersion : undefined;
-    let variant: "send" | "deliver" = "send";
-    if (version === undefined && token !== legacySessionCommandToken(target.sessionId)) {
-      try {
-        await getHookByToken(legacySessionCommandToken(target.sessionId));
-      } catch (error) {
-        if (!HookNotFoundError.is(error)) throw error;
-        variant = "deliver";
-      }
-    }
-    payload = encodeLegacyCommand(command, version, variant);
+    payload = encodeLegacyCommand(
+      command,
+      isObject(metadata) ? metadata.sessionInboxWireVersion : undefined,
+    );
   }
   const hook = await resumeHook(target.hook.token, payload);
   return { ownerRunId: hook.runId, sessionId: Promise.resolve(target.sessionId) };
 }
 
-/** Frozen producer projection; old consumers perform their own validation. */
-export function encodeLegacyCommand(
-  command: Command,
-  declaredVersion: unknown,
-  variant: "send" | "deliver" = "send",
-): unknown {
-  const version = declaredVersion ?? 0;
-  if (typeof version !== "number" || !Number.isInteger(version) || version < 0 || version > 7)
-    throw new Error("Unsupported legacy session inbox version.");
+/** Frozen producer projection for driver wire versions 1–7; old consumers validate for themselves. */
+export function encodeLegacyCommand(command: Command, declaredVersion: unknown): unknown {
+  const version = declaredVersion;
+  if (
+    typeof version !== "number" ||
+    !Number.isInteger(version) ||
+    version < MIN_LEGACY_WIRE_VERSION ||
+    version > MAX_LEGACY_WIRE_VERSION
+  ) {
+    throw new UnsupportedLegacySessionError();
+  }
   if (command.kind !== "send" && command.kind !== "deliver") {
-    const value: Record<string, unknown> = { ...command };
+    const value: Record<string, unknown> = { ...command, version };
     if (command.kind === "cancel" && version < 6) {
       if (command.tasks === true)
         throw new Error("This session cannot cancel owned tasks before import.");
       delete value.tasks;
     }
-    if (version > 0) value.version = version;
     return value;
   }
   const payloads = (command.kind === "send" ? [command.payload] : command.payloads).map(
@@ -108,32 +122,16 @@ export function encodeLegacyCommand(
       ({ acceptedDeploymentId: _deployment, ...metadata }) => metadata,
     );
   }
-  const delivery = {
+  return {
     auth: command.auth,
     caller,
     deliveryMetadata,
     kind: "deliver",
+    payload: coalesceDeliverPayloads(payloads),
     payloads,
     requestId: command.requestId,
     taskDeliveryId: command.taskDeliveryId,
     turnPolicy: command.turnPolicy,
+    version,
   };
-  if (version > 0) return { ...delivery, payload: coalesceDeliverPayloads(payloads), version };
-  if (variant === "deliver") return delivery;
-  const metadata = deliveryMetadata?.find((value) => value.payloadIndex === 0);
-  const { payloadIndex: _index, ...source } = metadata ?? {};
-  return {
-    auth: command.auth,
-    caller,
-    kind: "send",
-    payload: coalesceDeliverPayloads(payloads),
-    delivery: metadata === undefined ? undefined : source,
-    requestId: command.requestId,
-    taskDeliveryId: command.taskDeliveryId,
-    turnPolicy: command.turnPolicy,
-  };
-}
-
-function legacySessionCommandToken(sessionId: string): string {
-  return `eve:session:${sessionId}:inbox`;
 }

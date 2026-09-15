@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { HookNotFoundError } from "#compiled/@workflow/errors/index.js";
 import { sessionInboxHookToken } from "#execution/session-inbox/address.js";
-import { sessionCommandHookToken } from "#execution/session-command-token.js";
-import { encodeLegacyCommand, resumeLegacyInbox } from "./inbox.js";
+import { sessionCommandHookToken } from "#execution/session-inbox/address.js";
+import { encodeLegacyCommand, resumeLegacyInbox, UnsupportedLegacySessionError } from "./inbox.js";
 const { get, resume } = vi.hoisted(() => ({ get: vi.fn(), resume: vi.fn() }));
 vi.mock("#internal/workflow/runtime.js", () => ({ getHookByToken: get, resumeHook: resume }));
 beforeEach(() => {
@@ -34,13 +34,9 @@ describe("legacy ingress", () => {
       expect(value).toHaveProperty("deliveryMetadata.0.acceptedDeploymentId", "new");
     else expect(value).not.toHaveProperty("deliveryMetadata.0.acceptedDeploymentId");
   });
-  it("supports both unversioned inbox shapes", () => {
+  it.each([undefined, 0])("rejects unversioned inbox generation %s", (version) => {
     const command = { kind: "send" as const, payload: { message: "hello" } };
-    expect(encodeLegacyCommand(command, undefined, "send")).toMatchObject(command);
-    expect(encodeLegacyCommand(command, undefined, "deliver")).toMatchObject({
-      kind: "deliver",
-      payloads: [command.payload],
-    });
+    expect(() => encodeLegacyCommand(command, version)).toThrow(UnsupportedLegacySessionError);
   });
   it("routes an old alias to its imported owner before writing", async () => {
     const token = sessionInboxHookToken(sessionCommandHookToken("old"));

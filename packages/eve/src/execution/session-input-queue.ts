@@ -24,17 +24,17 @@ interface QueuedControl {
 
 type QueuedSessionInput = QueuedDelivery | QueuedControl;
 
-export interface TurnInputProvenance {
-  readonly admissions: readonly DeliveryAdmission[];
-  readonly source: "conversation" | "task";
-}
-
 export interface TurnSelection {
   readonly delivery: DeliverHookPayload;
-  /** Only a fresh parked-inbox admission may request a deployment handoff. */
-  readonly handoffEligible?: boolean;
+  /**
+   * True only for a lone, callerless conversational delivery that arrived
+   * while nothing else was pending. Such a delivery may move the session to
+   * the deployment that accepted it.
+   */
+  readonly handoffEligible: boolean;
   readonly kind: "turn";
-  readonly provenance: TurnInputProvenance;
+  /** Sequences of every admission folded into this turn. */
+  readonly sequences: readonly number[];
 }
 
 export type SessionInputSelection =
@@ -105,11 +105,11 @@ export class SessionInputQueue {
     );
     if (steering.length === 0) return undefined;
     this.retain((entry) => entry.kind === "control" || !steering.includes(entry));
-    const admissions = steering.map(({ delivery, sequence }) => ({ delivery, sequence }));
     return {
       delivery: combine(steering),
+      handoffEligible: false,
       kind: "turn",
-      provenance: { admissions, source: "conversation" },
+      sequences: steering.map(({ sequence }) => sequence),
     };
   }
 
@@ -117,6 +117,8 @@ export class SessionInputQueue {
     cohorts: TaskCohorts,
     options?: {
       readonly deferDeliveries?: boolean;
+      /** Sequence of a delivery admitted while nothing else was pending. */
+      readonly freshSequence?: number;
       readonly isTaskCancelled?: (taskId: string) => boolean;
     },
   ): SessionInputSelection | undefined {
@@ -126,7 +128,7 @@ export class SessionInputQueue {
       options?.isTaskCancelled,
     );
     if (index < 0) return undefined;
-    return this.takeSelectionAt(index, cohorts);
+    return this.takeSelectionAt(index, cohorts, options?.freshSequence);
   }
 
   private nextActionableIndex(
@@ -157,7 +159,11 @@ export class SessionInputQueue {
     });
   }
 
-  private takeSelectionAt(index: number, cohorts: TaskCohorts): SessionInputSelection {
+  private takeSelectionAt(
+    index: number,
+    cohorts: TaskCohorts,
+    freshSequence: number | undefined,
+  ): SessionInputSelection {
     const selected = this.entries[index]!;
     if (selected.kind === "control") {
       this.entries.splice(index, 1);
@@ -175,7 +181,7 @@ export class SessionInputQueue {
           position < lastSibling &&
           (entry.kind === "control" || completionCohort(entry.delivery, cohorts) === undefined),
       );
-      if (boundary >= 0) return this.takeSelectionAt(boundary, cohorts);
+      if (boundary >= 0) return this.takeSelectionAt(boundary, cohorts, freshSequence);
     }
 
     const first = this.entries.splice(index, 1)[0]!;
@@ -212,14 +218,18 @@ export class SessionInputQueue {
       }
     }
 
-    const admissions = turnEntries.map(({ delivery, sequence }) => ({ delivery, sequence }));
-    const source = turnEntries.some(({ delivery }) => taskDeliveryId(delivery) !== undefined)
-      ? "task"
-      : "conversation";
+    const sequences = turnEntries.map(({ sequence }) => sequence);
+    const combined = combine(turnEntries);
     return {
-      delivery: combine(turnEntries),
+      delivery: combined,
+      handoffEligible:
+        sequences.length === 1 &&
+        sequences[0] === freshSequence &&
+        combined.caller === undefined &&
+        taskDeliveryId(combined) === undefined &&
+        this.entries.length === 0,
       kind: "turn",
-      provenance: { admissions, source },
+      sequences,
     };
   }
 

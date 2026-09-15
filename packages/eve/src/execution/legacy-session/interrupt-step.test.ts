@@ -35,7 +35,6 @@ function fixture(turnId = ""): PreparedLegacySession {
     serializedContext: {},
     sessionTimeoutMs: false,
     deploymentId: "new",
-    hooks: { stable: "current", aliases: [] },
     input: {
       retention: undefined,
       mode: "conversation",

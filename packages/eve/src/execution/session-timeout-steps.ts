@@ -25,11 +25,17 @@ export async function startSessionTimeoutStep(
 }
 
 /** Resumes the owning session when its durable timer elapses. */
-export async function signalSessionTimeoutStep(input: { readonly token: string }): Promise<void> {
+export async function signalSessionTimeoutStep(input: {
+  readonly ownerRunId: string;
+  readonly token: string;
+}): Promise<void> {
   "use step";
 
   try {
-    await resumeSessionInbox(input.token, { kind: "session-timeout" });
+    await resumeSessionInbox(input.token, {
+      kind: "session-timeout",
+      ownerRunId: input.ownerRunId,
+    });
   } catch (error) {
     if (!isInactiveTimeoutTarget(error)) {
       throw error;

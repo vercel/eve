@@ -10,7 +10,7 @@ const isSessionIdleForHandoffStepMock = vi.fn(async (..._args: unknown[]) => tru
 const startSessionOwnerStepMock = vi.fn();
 const createHookMock = vi.fn();
 
-vi.mock("#execution/session-handoff-eligibility-step.js", () => ({
+vi.mock("#execution/session-handoff-steps.js", () => ({
   isSessionIdleForHandoffStep: (...args: unknown[]) => isSessionIdleForHandoffStepMock(...args),
 }));
 vi.mock("#execution/workflow-runtime.js", () => ({
@@ -18,22 +18,15 @@ vi.mock("#execution/workflow-runtime.js", () => ({
 }));
 vi.mock("#compiled/@workflow/core/index.js", () => ({
   createHook: (...args: unknown[]) => createHookMock(...args),
+  getWorkflowMetadata: () => ({ workflowRunId: "owner-1" }),
 }));
 
 afterEach(() => {
-  vi.clearAllMocks();
+  vi.resetAllMocks();
   isSessionIdleForHandoffStepMock.mockResolvedValue(true);
 });
 
-const ALIASED_HOOKS = {
-  aliases: ["continuation-1", "continuation-2"],
-  stable: "custom-stable",
-} as const;
-
-const STABLE_HOOKS = {
-  aliases: [],
-  stable: "custom-stable",
-} as const;
+const STABLE = "eve:session:session-1:inbox";
 
 describe("SessionHandoff", () => {
   it("transfers one eligible conversational trigger with a structural checkpoint", async () => {
@@ -42,92 +35,84 @@ describe("SessionHandoff", () => {
     startSessionOwnerStepMock.mockResolvedValue(undefined);
     const trigger = selection("deployment-b");
 
-    await expect(handoff.tryTransfer(trigger, snapshot())).resolves.toEqual({
+    await expect(handoff.tryTransfer(trigger, state())).resolves.toEqual({
       kind: "transferred",
     });
     expect(startSessionOwnerStepMock).toHaveBeenCalledWith({
       activationToken: "owner-1:handoff",
+      anchorRunId: "session-1",
       checkpoint: expect.objectContaining({
-        anchorToken: "session-1:anchor",
-        hooks: STABLE_HOOKS,
-        ownership: {
-          anchorRunId: "anchor-1",
-          deploymentId: "deployment-a",
-          ownerRunId: "owner-1",
-          sessionId: "session-1",
-        },
+        mode: "conversation",
         sessionTimeoutMs: 60_000,
-        version: 3,
+        version: 4,
       }),
+      delivery: trigger.delivery,
       targetDeploymentId: "deployment-b",
-      trigger: { delivery: trigger.delivery },
     });
     await expect(handoff.awaitAnchoredResult()).resolves.toEqual({ output: "done" });
   });
 
   it.each([
-    ["same-deployment", "deployment-a", 0],
-    ["missing-deployment", "latest", 0],
-    ["busy", "deployment-b", 1],
-  ] as const)("retains ownership for %s", async (reason, deployment, pendingCount) => {
+    ["same-deployment", "deployment-a"],
+    ["missing-deployment", "latest"],
+  ] as const)("retains ownership for %s", async (reason, deployment) => {
+    installActivation({ kind: "active" });
     const handoff = createHandoff(createInbox());
-    await expect(
-      handoff.tryTransfer(selection(deployment), snapshot({ pendingCount })),
-    ).resolves.toEqual({ kind: "retained", reason });
-    expect(startSessionOwnerStepMock).not.toHaveBeenCalled();
-  });
-
-  it("retains ownership when the selection carries a delegated caller or several admissions", async () => {
-    const handoff = createHandoff(createInbox());
-    const solo = selection("deployment-b");
-    const withCaller: TurnSelection = {
-      ...solo,
-      delivery: {
-        ...solo.delivery,
-        caller: {
-          callId: "call-1",
-          replyTo: { kind: "hook", token: "reply-1" },
-          subagentName: "helper",
-        },
-      },
-    };
-    const batched: TurnSelection = {
-      ...solo,
-      provenance: {
-        ...solo.provenance,
-        admissions: [...solo.provenance.admissions, ...solo.provenance.admissions],
-      },
-    };
-    await expect(handoff.tryTransfer(withCaller, snapshot())).resolves.toEqual({
+    await expect(handoff.tryTransfer(selection(deployment), state())).resolves.toEqual({
       kind: "retained",
-      reason: "busy",
-    });
-    await expect(handoff.tryTransfer(batched, snapshot())).resolves.toEqual({
-      kind: "retained",
-      reason: "busy",
+      reason,
     });
     expect(startSessionOwnerStepMock).not.toHaveBeenCalled();
   });
 
-  it("retains alias-bearing sessions without releasing their hooks", async () => {
-    const inbox = createInbox({ hookClaims: ALIASED_HOOKS });
-
-    await expect(
-      createHandoff(inbox).tryTransfer(selection("deployment-b"), snapshot()),
-    ).resolves.toEqual({ kind: "retained", reason: "aliases" });
-    expect(inbox.release).not.toHaveBeenCalled();
-    expect(startSessionOwnerStepMock).not.toHaveBeenCalled();
-  });
-
-  it("does not upgrade previously buffered input after the queue drains", async () => {
+  it("retains ownership when the selection was not a lone fresh conversational delivery", async () => {
+    installActivation({ kind: "active" });
     const inbox = createInbox();
     await expect(
       createHandoff(inbox).tryTransfer(
         { ...selection("deployment-b"), handoffEligible: false },
-        snapshot(),
+        state(),
       ),
     ).resolves.toEqual({ kind: "retained", reason: "busy" });
     expect(inbox.release).not.toHaveBeenCalled();
+  });
+
+  it("retains ownership when durable state still holds work", async () => {
+    installActivation({ kind: "active" });
+    isSessionIdleForHandoffStepMock.mockResolvedValue(false);
+    const inbox = createInbox();
+    await expect(
+      createHandoff(inbox).tryTransfer(selection("deployment-b"), state()),
+    ).resolves.toEqual({ kind: "retained", reason: "not-idle" });
+    expect(inbox.release).not.toHaveBeenCalled();
+  });
+
+  it("hands off alias-bearing sessions, marking every address while it is unowned", async () => {
+    const inbox = createInbox();
+    installActivation({ kind: "active" });
+    startSessionOwnerStepMock.mockResolvedValue(undefined);
+    const aliased = state({
+      continuationToken: "channel:current",
+      serializedContext: { "eve.continuationHookTokens": ["channel:old", "channel:current"] },
+    });
+
+    await expect(
+      createHandoff(inbox).tryTransfer(selection("deployment-b"), aliased),
+    ).resolves.toEqual({
+      kind: "transferred",
+    });
+    const markerTokens = createHookMock.mock.calls
+      .map((call) => (call[0] as { token: string }).token)
+      .filter((token) => token.startsWith("eve:inbox:handoff:"));
+    expect(markerTokens).toEqual([
+      `eve:inbox:handoff:${STABLE}`,
+      "eve:inbox:handoff:channel:old",
+      "eve:inbox:handoff:channel:current",
+    ]);
+    // Markers and the activation hook are released; the anchor stays for the parked original run.
+    for (const hook of createdHooks().filter((hook) => !hook.token.endsWith(":anchor"))) {
+      expect(hook.dispose).toHaveBeenCalled();
+    }
   });
 
   it("keeps ownership and restores accepted payloads when activation fails", async () => {
@@ -140,35 +125,44 @@ describe("SessionHandoff", () => {
     startSessionOwnerStepMock.mockResolvedValue(undefined);
 
     await expect(
-      createHandoff(inbox).tryTransfer(selection("deployment-b"), snapshot()),
+      createHandoff(inbox).tryTransfer(
+        selection("deployment-b"),
+        state({ continuationToken: "channel:current" }),
+      ),
     ).resolves.toEqual({ kind: "retained", reason: "activation-failed" });
-    expect(vi.mocked(inbox.claimSessionHook).mock.calls.map(([token]) => token)).toEqual([
-      STABLE_HOOKS.stable,
-      ...STABLE_HOOKS.aliases,
-    ]);
+    expect(inbox.claimSessionHooks).toHaveBeenCalledWith([STABLE, "channel:current"]);
     expect(inbox.restore).toHaveBeenCalledWith(payloads);
   });
 
   it("abandons transfer when input was accepted during release", async () => {
+    installActivation({ kind: "active" });
     const accepted: SessionInboxPayload[] = [{ kind: "send", payload: { message: "late" } }];
     const inbox = createInbox({ released: accepted });
 
     await expect(
-      createHandoff(inbox).tryTransfer(selection("deployment-b"), snapshot()),
+      createHandoff(inbox).tryTransfer(selection("deployment-b"), state()),
     ).resolves.toEqual({ kind: "retained", reason: "accepted-during-release" });
     expect(startSessionOwnerStepMock).not.toHaveBeenCalled();
     expect(inbox.restore).toHaveBeenCalledWith(accepted);
   });
 });
 
+const created: { token: string; dispose: ReturnType<typeof vi.fn> }[] = [];
+function createdHooks() {
+  return created;
+}
+
 function installActivation(activation: SessionOwnerActivation): void {
+  created.length = 0;
   createHookMock.mockImplementation((options: { token: string }) => {
     const resolved = options.token.endsWith(":anchor") ? { output: "done" } : activation;
-    return Object.assign(Promise.resolve(resolved), {
+    const hook = Object.assign(Promise.resolve(resolved), {
       dispose: vi.fn(),
       getConflict: vi.fn(async () => null),
       token: options.token,
     });
+    created.push(hook);
+    return hook;
   });
 }
 
@@ -192,55 +186,47 @@ function delivery(acceptedDeploymentId: string): DeliverHookPayload {
 }
 
 function selection(acceptedDeploymentId: string): TurnSelection {
-  const selected = delivery(acceptedDeploymentId);
   return {
-    delivery: selected,
+    delivery: delivery(acceptedDeploymentId),
     handoffEligible: true,
     kind: "turn",
-    provenance: { admissions: [{ delivery: selected, sequence: 0 }], source: "conversation" },
+    sequences: [0],
   };
 }
 
-function snapshot(queue: { readonly pendingCount: number } = { pendingCount: 0 }) {
+function state(
+  input: {
+    readonly continuationToken?: string;
+    readonly serializedContext?: Record<string, unknown>;
+  } = {},
+) {
   return {
-    queue,
-    serializedContext: {},
+    serializedContext: input.serializedContext ?? {},
     sessionState: {
-      continuationToken: "",
+      continuationToken: input.continuationToken ?? "",
       sessionId: "session-1",
     } as DurableSessionState,
   };
 }
 
-function createHandoff(commandInbox: SessionInboxHandle): SessionHandoff {
+function createHandoff(inbox: SessionInboxHandle): SessionHandoff {
   return new SessionHandoff({
-    anchorToken: "session-1:anchor",
-    sessionTimeoutMs: 60_000,
-    commandInbox,
+    checkpoint: { mode: "conversation", sessionTimeoutMs: 60_000 },
+    deploymentId: "deployment-a",
+    inbox,
     isInitialOwner: true,
-    mode: "conversation",
-    ownership: {
-      anchorRunId: "anchor-1",
-      deploymentId: "deployment-a",
-      ownerRunId: "owner-1",
-      sessionId: "session-1",
-    },
+    sessionId: "session-1",
   });
 }
 
-function createInbox(
-  input: {
-    hookClaims?: SessionInboxHandle["hookClaims"];
-    pending?: boolean;
-    released?: SessionInboxPayload[];
-  } = {},
-): SessionInboxHandle {
+function createInbox(input: { released?: SessionInboxPayload[] } = {}): SessionInboxHandle {
   return {
     claimSessionHook: vi.fn(async () => {}),
+    claimSessionHooks: vi.fn(async () => {}),
+    claimedTokens: [],
     dispose: vi.fn(async () => {}),
     drain: vi.fn(() => []),
-    hookClaims: input.hookClaims ?? STABLE_HOOKS,
-    hasPending: vi.fn(() => input.pending === true),
+    hasPending: vi.fn(() => false),
     hasReadyAuthorization: vi.fn(() => false),
     read: vi.fn(),
     release: vi.fn(async () => input.released ?? []),

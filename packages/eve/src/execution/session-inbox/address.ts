@@ -20,7 +20,26 @@ export function isSessionInboxAddress(value: unknown): value is SessionInboxAddr
   );
 }
 
-/** Physical addresses are disjoint from hooks owned by pre-cutover drivers. */
+/** Returns whether a token belongs to eve's framework-reserved session namespace. */
+export function isReservedSessionCommandToken(token: string): boolean {
+  return token.startsWith("eve:session:") || token.startsWith("eve:inbox:");
+}
+
+/** Logical stable command inbox token for a session. */
+export function sessionCommandHookToken(sessionId: string): string {
+  return `eve:session:${sessionId}:inbox`;
+}
+
+/**
+ * Physical hook token for a logical session address. Applied exactly where a
+ * hook is created or resumed, so current-generation hooks stay disjoint from
+ * hooks owned by pre-cutover drivers that used the logical token directly.
+ */
 export function sessionInboxHookToken(token: string): string {
-  return token.startsWith("eve:inbox:v1:") ? token : `eve:inbox:v1:${token}`;
+  return `eve:inbox:v1:${token}`;
+}
+
+/** Marker a releasing owner leaves so ingress can tell "handoff in progress" from "no session". */
+export function sessionHandoffMarkerToken(token: string): string {
+  return `eve:inbox:handoff:${token}`;
 }

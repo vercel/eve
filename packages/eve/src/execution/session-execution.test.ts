@@ -48,12 +48,13 @@ describe("SessionExecution background task checkpoints", () => {
   it("cancels an admitted workflow action when cancellation already arrived at the step boundary", async () => {
     const sessionState = state("");
     const inbox: SessionInbox = {
+      claimedTokens: [],
       claimSessionHook: vi.fn(),
+      claimSessionHooks: vi.fn(),
       drain: vi
         .fn()
         .mockReturnValueOnce([{ kind: "cancel" }])
         .mockReturnValue([]),
-      hookClaims: { aliases: [], stable: "parent-inbox" },
       hasPending: vi.fn(() => false),
       hasReadyAuthorization: vi.fn(() => false),
       read: vi.fn(() => new Promise<never>(() => {})),
@@ -97,9 +98,10 @@ describe("SessionExecution background task checkpoints", () => {
     };
     const queue = new SessionInputQueue();
     const inbox: SessionInbox = {
+      claimedTokens: [],
       claimSessionHook: vi.fn(),
+      claimSessionHooks: vi.fn(),
       drain: vi.fn().mockReturnValueOnce([background, steering]).mockReturnValue([]),
-      hookClaims: { aliases: [], stable: "parent-inbox" },
       hasPending: vi.fn(() => false),
       hasReadyAuthorization: vi.fn(() => false),
       read: vi.fn(() => new Promise<never>(() => {})),
@@ -142,9 +144,10 @@ describe("SessionExecution background task checkpoints", () => {
       toolName: "deploy",
     };
     const inbox: SessionInbox = {
+      claimedTokens: [],
       claimSessionHook: vi.fn(),
+      claimSessionHooks: vi.fn(),
       drain: vi.fn().mockReturnValueOnce([steering]).mockReturnValue([]),
-      hookClaims: { aliases: [], stable: "parent-inbox" },
       hasPending: vi.fn(() => false),
       hasReadyAuthorization: vi.fn(() => false),
       read: vi.fn(() => new Promise<never>(() => {})),
@@ -204,9 +207,10 @@ describe("SessionExecution background task checkpoints", () => {
     };
     const queue = new SessionInputQueue();
     const inbox: SessionInbox = {
+      claimedTokens: [],
       claimSessionHook: vi.fn(),
+      claimSessionHooks: vi.fn(),
       drain: vi.fn().mockReturnValueOnce([followUp]).mockReturnValue([]),
-      hookClaims: { aliases: [], stable: "parent-inbox" },
       hasPending: vi.fn(() => false),
       hasReadyAuthorization: vi.fn(() => false),
       read: vi.fn(() => new Promise<never>(() => {})),
@@ -243,9 +247,10 @@ describe("SessionExecution background task checkpoints", () => {
     const runtimePayloads = [taskAnswer, { kind: "cancel" as const }];
     const queue = new SessionInputQueue();
     const inbox: SessionInbox = {
+      claimedTokens: [],
       claimSessionHook: vi.fn(),
+      claimSessionHooks: vi.fn(),
       drain: vi.fn(() => []),
-      hookClaims: { aliases: [], stable: "parent-inbox" },
       hasPending: vi.fn(() => false),
       hasReadyAuthorization: vi.fn(() => false),
       read: vi.fn(async (consumer) => {
@@ -306,9 +311,10 @@ describe("SessionExecution background task checkpoints", () => {
       const backgroundContext = { ...observability, state: "before" };
       const completedContext = { ...observability, state: "completed" };
       const inbox: SessionInbox = {
+        claimedTokens: [],
         claimSessionHook: vi.fn(),
+        claimSessionHooks: vi.fn(),
         drain: vi.fn(() => []),
-        hookClaims: { aliases: [], stable: "parent-inbox" },
         hasPending: vi.fn(() => false),
         hasReadyAuthorization: vi.fn(() => false),
         read: vi
@@ -368,17 +374,18 @@ function createExecution(input: {
   readonly sessionState: DurableSessionState;
 }): SessionExecution {
   const cursor = new SessionStateCursor({
-    commandInbox: input.inbox,
+    inbox: input.inbox,
     parentWritable: new WritableStream<Uint8Array>(),
     serializedContext: input.serializedContext ?? {},
     sessionState: input.sessionState,
   });
   return new SessionExecution({
-    commandInbox: input.inbox,
     cursor,
+    inbox: input.inbox,
     ledger: new SessionInputLedger(),
     mode: "conversation",
     queue: input.queue ?? new SessionInputQueue(),
+    sessionId: input.sessionState.sessionId,
   });
 }
 

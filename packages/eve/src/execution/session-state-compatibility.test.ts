@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createTestSessionState } from "#internal/testing/session-state.js";
-import { isSessionStateIdleForHandoff } from "#execution/session-handoff-state.js";
+import { isSessionStateIdleForHandoff } from "#execution/session-handoff-steps.js";
 import {
   cacheTerminalTaskView,
   getSessionTaskIndex,

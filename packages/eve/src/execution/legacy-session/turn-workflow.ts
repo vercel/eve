@@ -1,80 +1,77 @@
-import { getWorkflowMetadata } from "#compiled/@workflow/core/index.js";
-import { createSessionInbox, claimSessionHooks } from "#execution/session-inbox/inbox.js";
 import { isHookConflictError } from "#execution/hook-ownership.js";
+import { sessionHookTokens } from "#execution/session-hook-claims.js";
+import { sessionCommandHookToken } from "#execution/session-inbox/address.js";
+import { createSessionInbox } from "#execution/session-inbox/inbox.js";
 import { failSession, runPreparedSession } from "#execution/session-program.js";
-import { prepareLegacySessionStep } from "./prepare-step.js";
-import { interruptLegacySessionStep } from "./interrupt-step.js";
-import { completeLegacyDriverStep } from "./completion-step.js";
 import { sessionTimeoutDeadline } from "#execution/session-timeout.js";
+import { completeLegacyDriverStep } from "./completion-step.js";
+import { interruptLegacySessionStep } from "./interrupt-step.js";
+import { prepareLegacySessionStep } from "./prepare-step.js";
 
-import type { WorkflowEntryResult } from "#execution/workflow-entry-input.js";
-
-/** Historical dispatch name; imports once, then executes the current owner program. */
+/**
+ * Historical dispatch name. Drivers from the former driver/turn execution
+ * model start this workflow for each turn. It imports the session once —
+ * persisting the conversation, claiming the current-generation inbox, and
+ * interrupting pending work — then runs the current owner program. The old
+ * driver stays parked as the stream anchor and hears the final result.
+ */
 export async function turnWorkflow(rawInput: unknown): Promise<void> {
   "use workflow";
   const prepared = await prepareLegacySessionStep(rawInput);
-  const sessionId = prepared.sessionState.sessionId;
+  const { sessionId } = prepared.sessionState;
   const inbox = createSessionInbox(sessionId);
   try {
-    await inbox.claimSessionHook(prepared.hooks.stable);
+    await inbox.claimSessionHook(sessionCommandHookToken(sessionId));
   } catch (error) {
+    // Another importer already owns this session; its driver will hear from it.
     if (isHookConflictError(error)) return;
     throw error;
   }
-  let result: WorkflowEntryResult = { output: "", isError: true };
-  let running = false;
+  const { mode, parentWritable: sessionWritable } = prepared.input;
+  let interrupted;
   try {
-    await claimSessionHooks(inbox, prepared.hooks);
-    const interrupted = await interruptLegacySessionStep(prepared);
-    const { workflowRunId: ownerRunId } = getWorkflowMetadata();
-    running = true;
-    result = await runPreparedSession(
-      {
-        ...interrupted,
-        anchorToken: `${ownerRunId}:anchor`,
-        capabilities: prepared.input.capabilities,
-        caller: undefined,
-        initialInput:
-          prepared.input.delivery?.kind === "deliver"
-            ? { ...prepared.input.delivery, caller: undefined }
-            : prepared.input.delivery,
-        isInitialOwner: true,
-        mode: prepared.input.mode,
-        ownership: {
-          anchorRunId: sessionId,
-          sessionId,
-          ownerRunId,
-          deploymentId: prepared.deploymentId,
-        },
-        retention: prepared.input.retention,
-        sessionTimeoutMs: prepared.sessionTimeoutMs,
-        sessionTimeoutDeadline: sessionTimeoutDeadline(prepared.sessionTimeoutMs, Date.now()),
-        sessionWritable: prepared.input.parentWritable,
-      },
-      inbox,
-    );
+    await inbox.claimSessionHooks(sessionHookTokens(prepared));
+    interrupted = await interruptLegacySessionStep(prepared);
   } catch (error) {
-    if (!running) {
-      await failSession({
-        error,
-        sessionWritable: prepared.input.parentWritable,
-        sessionId,
-        mode: prepared.input.mode,
-        crashCleanupState: {
-          caller: undefined,
-          callerResolved: true,
-          lastSessionState: prepared.sessionState,
-          serializedContext: prepared.serializedContext,
-          terminalEmitted: false,
-        },
-      });
-    }
-    throw error;
-  } finally {
-    try {
-      await inbox.dispose();
-    } finally {
-      await completeLegacyDriverStep({ prepared, result });
-    }
+    await inbox.dispose();
+    return await failSession({
+      error,
+      mode,
+      serializedContext: prepared.serializedContext,
+      sessionId,
+      sessionState: prepared.sessionState,
+      sessionWritable,
+    });
   }
+  await runPreparedSession(
+    {
+      anchor: {
+        kind: "self",
+        notify: (result) =>
+          completeLegacyDriverStep({
+            completionToken: prepared.input.completionToken,
+            result,
+            serializedContext: prepared.serializedContext,
+            sessionState: prepared.sessionState,
+            sessionWritable,
+          }),
+      },
+      caller: undefined,
+      capabilities: prepared.input.capabilities,
+      deploymentId: prepared.deploymentId,
+      initialInput:
+        prepared.input.delivery?.kind === "deliver"
+          ? { ...prepared.input.delivery, caller: undefined }
+          : prepared.input.delivery,
+      mode,
+      retention: prepared.input.retention,
+      serializedContext: interrupted.serializedContext,
+      sessionId,
+      sessionState: interrupted.sessionState,
+      sessionTimeoutMs: prepared.sessionTimeoutMs,
+      sessionTimeoutDeadline: sessionTimeoutDeadline(prepared.sessionTimeoutMs, Date.now()),
+      sessionWritable,
+    },
+    inbox,
+  );
 }

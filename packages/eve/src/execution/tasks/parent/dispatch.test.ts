@@ -154,17 +154,14 @@ describe("task cancellation", () => {
     await expect(cancelled).resolves.toEqual(view);
 
     expect(cancelRun).toHaveBeenCalledTimes(1);
-    expect(resumeSessionInbox).toHaveBeenCalledExactlyOnceWith(
-      "eve:inbox:v1:eve:session:parent-session:inbox",
-      {
-        kind: "send",
-        payload: {
-          message: "Background task task-1 (export) is cancelled.",
-          task: { views: [view] },
-        },
-        taskDeliveryId: "task-1:ready:cancelled",
+    expect(resumeSessionInbox).toHaveBeenCalledExactlyOnceWith("eve:session:parent-session:inbox", {
+      kind: "send",
+      payload: {
+        message: "Background task task-1 (export) is cancelled.",
+        task: { views: [view] },
       },
-    );
+      taskDeliveryId: "task-1:ready:cancelled",
+    });
     expect(vi.mocked(cancelRun).mock.invocationCallOrder[0]).toBeLessThan(
       vi.mocked(resumeSessionInbox).mock.invocationCallOrder[0]!,
     );

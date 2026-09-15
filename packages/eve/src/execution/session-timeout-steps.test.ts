@@ -44,6 +44,7 @@ describe("session timeout steps", () => {
     startMock.mockResolvedValue({ runId: "timer-run" });
     const input = {
       deadline: new Date("2026-02-01T00:00:00.000Z"),
+      ownerRunId: "session-1",
       token: "session-1:session-timeout",
     };
 
@@ -56,10 +57,11 @@ describe("session timeout steps", () => {
   it("signals the owning session hook", async () => {
     resumeHookMock.mockResolvedValue({ runId: "session-1" });
 
-    await signalSessionTimeoutStep({ token: "session-1:session-timeout" });
+    await signalSessionTimeoutStep({ ownerRunId: "session-1", token: "session-1:session-timeout" });
 
     expect(resumeHookMock).toHaveBeenCalledWith(`eve:inbox:v1:${TIMEOUT_HOOK.token}`, {
       kind: "session-timeout",
+      ownerRunId: "session-1",
     });
   });
 
@@ -68,7 +70,7 @@ describe("session timeout steps", () => {
     resumeHookMock.mockRejectedValue(new HookNotFoundError("session-1:session-timeout"));
 
     await expect(
-      signalSessionTimeoutStep({ token: "session-1:session-timeout" }),
+      signalSessionTimeoutStep({ ownerRunId: "session-1", token: "session-1:session-timeout" }),
     ).resolves.toBeUndefined();
   });
 
@@ -99,9 +101,9 @@ describe("session timeout steps", () => {
   it("propagates unexpected timeout runtime failures", async () => {
     const signalFailure = new Error("resume failed");
     resumeHookMock.mockRejectedValue(signalFailure);
-    await expect(signalSessionTimeoutStep({ token: "session-1:session-timeout" })).rejects.toBe(
-      signalFailure,
-    );
+    await expect(
+      signalSessionTimeoutStep({ ownerRunId: "session-1", token: "session-1:session-timeout" }),
+    ).rejects.toBe(signalFailure);
 
     const cancelFailure = new Error("cancel failed");
     getWorldMock.mockResolvedValue({});

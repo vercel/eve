@@ -13,7 +13,7 @@ import { coalesceDeliveries } from "#harness/messages.js";
 
 interface TurnRoutingInput {
   readonly callerCallId: string | undefined;
-  readonly commandInbox: SessionInboxReader;
+  readonly inbox: SessionInboxReader;
   readonly cursor: SessionStateCursor;
   readonly expectedTurnId: string;
   readonly ledger: SessionInputLedger;
@@ -58,9 +58,7 @@ export class TurnRouting {
         this.input.callerCallId,
       );
       if (selection === undefined) return;
-      for (const admission of selection.provenance.admissions) {
-        this.admittedDeliveries.delete(admission.sequence);
-      }
+      for (const sequence of selection.sequences) this.admittedDeliveries.delete(sequence);
       const routed = await routeSelectedDelivery(selection, this.input.cursor);
       if (routed.kind === "cancel-turn") {
         this.abort();
@@ -110,9 +108,7 @@ export class TurnRouting {
     while (true) {
       const winner = await Promise.race([
         settled,
-        this.input.commandInbox
-          .read("interrupt")
-          .then((lease) => ({ kind: "command" as const, lease })),
+        this.input.inbox.read("interrupt").then((lease) => ({ kind: "command" as const, lease })),
       ]);
       if (winner.kind === "operation") return winner.value;
       if (winner.lease === undefined) {
@@ -124,10 +120,10 @@ export class TurnRouting {
   }
 
   async admitBoundary(): Promise<void> {
-    const pending = this.input.commandInbox.drain();
+    const pending = this.input.inbox.drain();
     for (const [index, payload] of pending.entries()) {
       if (this.signal.aborted) {
-        this.input.commandInbox.restore(pending.slice(index));
+        this.input.inbox.restore(pending.slice(index));
         return;
       }
       await this.admit(payload);

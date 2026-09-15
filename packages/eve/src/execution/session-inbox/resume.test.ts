@@ -1,7 +1,7 @@
 import { sessionInboxHookToken } from "#execution/session-inbox/address.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { sessionCommandHookToken } from "#execution/session-command-token.js";
+import { sessionCommandHookToken } from "#execution/session-inbox/address.js";
 import { resumeSessionInbox } from "#execution/session-inbox/resume.js";
 
 const resumeHookMock = vi.fn();

@@ -12,6 +12,7 @@ import { getChannelActivityPresentation } from "#channel/activity-renderer.js";
 import type {
   CancelTurnInput,
   CancelTurnResult,
+  DeliverHookPayload,
   DispatchContinuationInput,
   DispatchSessionInput,
   GetEventStreamOptions,
@@ -58,7 +59,7 @@ import type {
   HandoffWorkflowEntryInput,
   InitialWorkflowEntryInput,
 } from "#execution/workflow-entry-input.js";
-import type { SessionCheckpoint, SessionHandoffTrigger } from "#execution/session-handoff.js";
+import type { SessionCheckpoint } from "#execution/session-handoff.js";
 import type { ActivityCollectorInput } from "#execution/activity-collector.js";
 import { createEveActivityRoutePath } from "#protocol/routes.js";
 import {
@@ -68,7 +69,7 @@ import {
 import { walkCauseChain } from "#shared/errors.js";
 import { buildInvocationAttributes } from "#internal/invocation/metadata.js";
 import { isAgentTraceContext } from "#tracing/agent-trace-context.js";
-import { sessionCommandHookToken } from "#execution/session-command-token.js";
+import { sessionCommandHookToken } from "#execution/session-inbox/address.js";
 import {
   AcceptedSessionIdentityError,
   resolveSessionInbox,
@@ -337,9 +338,11 @@ export function createWorkflowRuntime(config: {
 
 export interface SessionOwnerStartInput {
   readonly activationToken: string;
+  /** Original run whose stream stays the public session stream. */
+  readonly anchorRunId: string;
   readonly checkpoint: SessionCheckpoint;
+  readonly delivery: DeliverHookPayload;
   readonly targetDeploymentId: string;
-  readonly trigger: SessionHandoffTrigger;
 }
 
 /** Starts a successor owner and binds its output to the original session stream. */
@@ -348,10 +351,11 @@ export async function startSessionOwnerStep(input: SessionOwnerStartInput): Prom
   const workflowInput: HandoffWorkflowEntryInput = {
     activationToken: input.activationToken,
     checkpoint: input.checkpoint,
+    delivery: input.delivery,
     kind: "handoff",
     ownerDeploymentId: input.targetDeploymentId,
-    parentWritable: getRun(input.checkpoint.ownership.anchorRunId).getWritable<Uint8Array>(),
-    trigger: input.trigger,
+    parentWritable: getRun(input.anchorRunId).getWritable<Uint8Array>(),
+    sessionId: input.anchorRunId,
   };
   await startWorkflowOnDeployment(
     workflowEntryReference,
@@ -386,7 +390,8 @@ async function dispatchWorkflowCommand<TCommand extends SessionCommand>(
 ): Promise<SessionCommandResult<TCommand>> {
   let hook: SessionInboxOwnerRecord;
   try {
-    hook = await resumeSessionInboxWithHandoffRetry(token, command);
+    const resumed = await resumeSessionInbox(token, command);
+    hook = { runId: resumed.ownerRunId, sessionId: await resumed.sessionId };
   } catch (error) {
     if (isInactiveCommandTarget(error)) {
       return inactiveCommandResult(command);
@@ -403,23 +408,6 @@ async function dispatchWorkflowCommand<TCommand extends SessionCommand>(
   }
 
   return activeCommandResult(command, hook.sessionId);
-}
-
-async function resumeSessionInboxWithHandoffRetry(
-  token: string | SessionInboxAddress,
-  command: SessionCommand,
-): Promise<SessionInboxOwnerRecord> {
-  const deadline = Date.now() + 1_000;
-  while (true) {
-    try {
-      const resumed = await resumeSessionInbox(token, command);
-      return { runId: resumed.ownerRunId, sessionId: await resumed.sessionId };
-    } catch (error) {
-      if (typeof token === "string" || !HookNotFoundError.is(error) || Date.now() >= deadline)
-        throw error;
-      await new Promise<void>((resolve) => setTimeout(resolve, 20));
-    }
-  }
 }
 
 function activeCommandResult<TCommand extends SessionCommand>(

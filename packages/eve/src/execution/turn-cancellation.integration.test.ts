@@ -12,7 +12,7 @@ import {
 import { waitForHook } from "#internal/testing/workflow-test-helpers.js";
 import { ROOT_COMPILED_AGENT_NODE_ID } from "#compiler/manifest.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
-import { sessionCommandHookToken } from "#execution/session-command-token.js";
+import { sessionCommandHookToken } from "#execution/session-inbox/address.js";
 import { workflowEntry } from "#execution/workflow-entry.js";
 import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
 import { createEveSessionCancelRoutePath } from "#protocol/routes.js";
@@ -360,7 +360,9 @@ describe("turn cancellation integration", () => {
         await waitForHookByToken(sessionInboxHookToken(continuationToken));
         await fixture.recallStarted;
 
-        await resumeHook(sessionCommandHookToken(run.runId), { kind: "cancel" });
+        await resumeHook(sessionInboxHookToken(sessionCommandHookToken(run.runId)), {
+          kind: "cancel",
+        });
         await expect(
           address.send("replacement after recall abort", { auth: null }),
         ).resolves.toMatchObject({ id: run.runId });
@@ -523,7 +525,7 @@ describe("turn cancellation integration", () => {
       const stream = captureTurnEvents(run);
 
       try {
-        const commandToken = sessionCommandHookToken(run.runId);
+        const commandToken = sessionInboxHookToken(sessionCommandHookToken(run.runId));
         await waitForHookByToken(commandToken);
         await fixture.toolStarted;
         // A matching turn guard cancels the observed turn (the first
@@ -607,7 +609,7 @@ describe("turn cancellation integration", () => {
       const stream = captureTurnEvents(run);
 
       try {
-        await waitForHookByToken(sessionCommandHookToken(run.runId));
+        await waitForHookByToken(sessionInboxHookToken(sessionCommandHookToken(run.runId)));
         await fixture.toolStarted;
 
         const cancelled = await cancelViaRoute(run.runId);
@@ -775,7 +777,7 @@ describe("turn cancellation integration", () => {
       const stream = captureTurnEvents(run);
 
       try {
-        const cancelToken = sessionCommandHookToken(run.runId);
+        const cancelToken = sessionInboxHookToken(sessionCommandHookToken(run.runId));
         await waitForHookByToken(cancelToken);
         await fixture.toolStarted;
 
@@ -829,7 +831,9 @@ describe("turn cancellation integration", () => {
         expect(filterEventsByType(firstTurn, "turn.completed")).toHaveLength(1);
 
         // The stable inbox accepts a late cancel and the parked owner consumes it as a no-op.
-        await resumeHook(sessionCommandHookToken(run.runId), { kind: "cancel" });
+        await resumeHook(sessionInboxHookToken(sessionCommandHookToken(run.runId)), {
+          kind: "cancel",
+        });
 
         await waitForHook(
           { runId: run.runId },

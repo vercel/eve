@@ -7,8 +7,8 @@ import type { DurableSession } from "#execution/durable-session-store.js";
 export async function legacySessionDriverWorkflow(input: {
   readonly serializedContext: Record<string, unknown>;
   readonly alias: string;
-  readonly streamSnapshot?: boolean;
-  readonly inputVersion?: 0 | 1 | 2;
+  readonly inputVersion?: 1 | 2;
+  /** `undefined` models a driver older than eve 0.45 that stamped no wire version. */
   readonly inboxVersion?: number;
   readonly committedInput?: boolean;
   readonly duplicateImport?: boolean;
@@ -16,17 +16,13 @@ export async function legacySessionDriverWorkflow(input: {
 }): Promise<unknown> {
   "use workflow";
   const { workflowRunId: sessionId } = getWorkflowMetadata();
+  const metadata =
+    input.inboxVersion === undefined ? {} : { sessionInboxWireVersion: input.inboxVersion };
   const command = createHook<{ kind: string; payload?: unknown; payloads?: unknown[] }>({
     token: `eve:session:${sessionId}:inbox`,
-    metadata: { sessionInboxWireVersion: input.inboxVersion ?? 7 },
+    metadata,
   });
-  const alias =
-    input.alias === ""
-      ? undefined
-      : createHook({
-          token: input.alias,
-          metadata: { sessionInboxWireVersion: input.inboxVersion ?? 7 },
-        });
+  const alias = input.alias === "" ? undefined : createHook({ token: input.alias, metadata });
   const completion = createHook<{ action: { kind: string; output: unknown } }>({
     token: `${sessionId}:turn-control:0`,
   });
@@ -60,16 +56,13 @@ export async function legacySessionDriverWorkflow(input: {
         },
       },
     };
-    const snapshot = { version: 1, session };
-    if (input.streamSnapshot)
-      await writeLegacySnapshotStep(getWritable({ namespace: "eve.session" }), snapshot);
     const sessionState = {
       version: 1,
       sessionId,
       continuationToken: input.alias,
       hasProxyInputRequests: false,
       emissionState: session.state!["eve.harness.emission"],
-      snapshot: input.streamSnapshot ? undefined : snapshot,
+      snapshot: { version: 1, session },
     };
     const turnInput = {
       version: input.inputVersion ?? 2,
@@ -86,23 +79,15 @@ export async function legacySessionDriverWorkflow(input: {
         },
       },
     };
-    const rawInput =
-      input.inputVersion === 0
-        ? {
-            ...turnInput,
-            version: undefined,
-            ...turnInput.stepInput,
-            delivery: turnInput.stepInput.input,
-          }
-        : input.committedInput
-          ? {
-              ...turnInput,
-              initialStep: {
-                beforeStep: turnInput.stepInput,
-                result: { sessionState, serializedContext: turnInput.stepInput.serializedContext },
-              },
-            }
-          : turnInput;
+    const rawInput = input.committedInput
+      ? {
+          ...turnInput,
+          initialStep: {
+            beforeStep: turnInput.stepInput,
+            result: { sessionState, serializedContext: turnInput.stepInput.serializedContext },
+          },
+        }
+      : turnInput;
     await dispatchLegacyTurnStep(rawInput);
     if (input.duplicateImport) await dispatchLegacyTurnStep(rawInput);
     return (await completion).action;
@@ -115,16 +100,4 @@ export async function legacySessionDriverWorkflow(input: {
 async function dispatchLegacyTurnStep(input: unknown): Promise<void> {
   "use step";
   await start(turnWorkflow, [input], { deploymentId: "latest" });
-}
-async function writeLegacySnapshotStep(
-  writable: WritableStream<unknown>,
-  snapshot: unknown,
-): Promise<void> {
-  "use step";
-  const writer = writable.getWriter();
-  try {
-    await writer.write(snapshot);
-  } finally {
-    writer.releaseLock();
-  }
 }

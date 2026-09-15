@@ -404,7 +404,9 @@ describe("background agent invocation routing", () => {
       expect(mocks.resumeHook).toHaveBeenNthCalledWith(2, "owner-inbox", {
         kind: "request",
         from,
-        replyTo: advertiseInbox ? "eve:inbox:v1:eve:session:child-1:inbox" : "child-continuation",
+        replyTo: advertiseInbox
+          ? "eve:inbox:v1:eve:session:child-1:inbox"
+          : "eve:inbox:v1:child-continuation",
         request: {
           kind: "input-batch",
           requests: [expect.objectContaining({ requestId: "approval-1" })],
@@ -414,7 +416,9 @@ describe("background agent invocation routing", () => {
       expect(mocks.resumeHook).toHaveBeenNthCalledWith(3, "owner-inbox", {
         kind: "request",
         from,
-        replyTo: advertiseInbox ? "eve:inbox:v1:eve:session:child-1:inbox" : "child-continuation",
+        replyTo: advertiseInbox
+          ? "eve:inbox:v1:eve:session:child-1:inbox"
+          : "eve:inbox:v1:child-continuation",
         request: {
           kind: "input-batch",
           requests: [expect.objectContaining({ requestId: "approval-2" })],

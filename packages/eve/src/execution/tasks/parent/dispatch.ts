@@ -9,7 +9,7 @@ import {
 import type { BackgroundTask } from "#execution/tasks/parent/delegate.js";
 import { sendTaskCommand } from "#execution/tasks/parent/run-parent.js";
 import { wakeTaskParentStep } from "#execution/tasks/child/steps.js";
-import { sessionCommandHookToken } from "#execution/session-command-token.js";
+import { sessionCommandHookToken } from "#execution/session-inbox/address.js";
 import {
   cancelTaskOwnedWork,
   type TaskExecutorCancel,

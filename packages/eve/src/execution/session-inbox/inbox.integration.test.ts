@@ -4,7 +4,7 @@ import { sessionCommandInboxWorkflow } from "#internal/testing/session-inbox-wor
 import { sessionHookPumpWorkflow } from "#internal/testing/session-hook-pump-workflow.js";
 import { waitForHook } from "#internal/testing/workflow-test-helpers.js";
 import { getHookByToken, resumeHook, start } from "#internal/workflow/runtime.js";
-import { sessionCommandHookToken } from "#execution/session-command-token.js";
+import { sessionCommandHookToken } from "#execution/session-inbox/address.js";
 import {
   SESSION_INBOX_SESSION_ID_METADATA_KEY,
   sessionInboxHookToken,
@@ -15,7 +15,7 @@ describe("session command inbox integration", () => {
     const aliases = ["http:pump:first", "http:pump:second"];
     const releaseToken = "pump:release";
     const run = await start(sessionHookPumpWorkflow, [{ aliases, releaseToken }]);
-    const tokens = [sessionCommandHookToken(run.runId), ...aliases.map(sessionInboxHookToken)];
+    const tokens = [sessionCommandHookToken(run.runId), ...aliases].map(sessionInboxHookToken);
     try {
       for (const token of [...tokens, releaseToken]) await waitForHook(run, { token });
       const messages = ["one", "two", "three", "four", "five", "six"].map((message) => ({
@@ -34,7 +34,7 @@ describe("session command inbox integration", () => {
   it("stamps the public session id onto every inbox hook", async () => {
     const channelToken = "http:session-inbox:session-id";
     const run = await start(sessionCommandInboxWorkflow, [{ token: channelToken }]);
-    const stableToken = sessionCommandHookToken(run.runId);
+    const stableToken = sessionInboxHookToken(sessionCommandHookToken(run.runId));
 
     try {
       await Promise.all([
@@ -42,8 +42,8 @@ describe("session command inbox integration", () => {
         waitForHook({ runId: run.runId }, { token: sessionInboxHookToken(channelToken) }),
       ]);
 
-      for (const token of [stableToken, channelToken]) {
-        const hook = await getHookByToken(sessionInboxHookToken(token));
+      for (const token of [stableToken, sessionInboxHookToken(channelToken)]) {
+        const hook = await getHookByToken(token);
         const metadata = (await hook.metadata) as Record<string, unknown> | undefined;
         expect(metadata?.[SESSION_INBOX_SESSION_ID_METADATA_KEY], `hook ${token}`).toBe(run.runId);
       }
@@ -56,7 +56,7 @@ describe("session command inbox integration", () => {
   it("accepts commands alternately through the stable ID and channel aliases", async () => {
     const channelToken = "http:session-inbox:both-aliases";
     const run = await start(sessionCommandInboxWorkflow, [{ token: channelToken }]);
-    const stableToken = sessionCommandHookToken(run.runId);
+    const stableToken = sessionInboxHookToken(sessionCommandHookToken(run.runId));
 
     try {
       await Promise.all([

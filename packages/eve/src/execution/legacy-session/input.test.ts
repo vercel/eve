@@ -7,13 +7,25 @@ const step = {
   input: { kind: "deliver", payloads: [{ message: "Alice asks to continue." }] },
 };
 describe("legacy turn input", () => {
-  it.each([undefined, 1, 2])("imports version %s", (version) => {
-    const input =
-      version === undefined ? { ...step, delivery: step.input } : { version, stepInput: step };
+  it.each([1, 2])("imports version %s", (version) => {
     expect(
-      readLegacyTurnInput({ ...input, completionToken: "old:turn:0", mode: "conversation" })
-        .delivery,
+      readLegacyTurnInput({
+        version,
+        stepInput: step,
+        completionToken: "old:turn:0",
+        mode: "conversation",
+      }).delivery,
     ).toEqual(step.input);
+  });
+  it("rejects an unversioned driver input", () => {
+    expect(() =>
+      readLegacyTurnInput({
+        ...step,
+        delivery: step.input,
+        completionToken: "old:turn:0",
+        mode: "conversation",
+      }),
+    ).toThrow("Unsupported legacy turn input version.");
   });
   it("adopts a committed inline step without appending its input again", () => {
     const committed = {

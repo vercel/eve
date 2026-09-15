@@ -15,7 +15,7 @@ import { waitForHook } from "#internal/testing/workflow-test-helpers.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { workflowEntry } from "#execution/workflow-entry.js";
 import { sessionInboxHookToken } from "#execution/session-inbox/address.js";
-import { sessionCommandHookToken } from "#execution/session-command-token.js";
+import { sessionCommandHookToken } from "#execution/session-inbox/address.js";
 import {
   buildSessionAttributes,
   buildSubagentRootAttributes,
@@ -313,7 +313,7 @@ describe("workflowEntry integration", () => {
         expect(parkBoundary.at(-1)?.type).toBe("session.waiting");
         await expectHookClaims(run.runId, [sessionCommandHookToken(run.runId), continuationToken]);
 
-        await resumeHook(sessionCommandHookToken(run.runId), {
+        await resumeHook(sessionInboxHookToken(sessionCommandHookToken(run.runId)), {
           kind: "authorization-callback",
           payloads: [
             {
@@ -457,7 +457,7 @@ describe("workflowEntry integration", () => {
 
         // The callback still lands on the retained read and closes the
         // challenge exactly once.
-        await resumeHook(sessionCommandHookToken(run.runId), {
+        await resumeHook(sessionInboxHookToken(sessionCommandHookToken(run.runId)), {
           kind: "authorization-callback",
           payloads: [
             {
@@ -565,7 +565,7 @@ describe("workflowEntry integration", () => {
           kind: "send",
           payload: { message: "This must not become a second task turn." },
         });
-        await resumeHook(sessionCommandHookToken(run.runId), {
+        await resumeHook(sessionInboxHookToken(sessionCommandHookToken(run.runId)), {
           kind: "authorization-callback",
           payloads: [
             {
@@ -660,16 +660,16 @@ describe("workflowEntry integration", () => {
             connectionName: "weather",
           },
         };
-        await resumeHook(sessionCommandHookToken(run.runId), {
+        await resumeHook(sessionInboxHookToken(sessionCommandHookToken(run.runId)), {
           kind: "authorization-callback",
           payloads: [stalePayload],
         });
-        await resumeHook(sessionCommandHookToken(run.runId), {
+        await resumeHook(sessionInboxHookToken(sessionCommandHookToken(run.runId)), {
           kind: "authorization-callback",
           payloads: [stalePayload],
         });
 
-        await resumeHook(sessionCommandHookToken(run.runId), {
+        await resumeHook(sessionInboxHookToken(sessionCommandHookToken(run.runId)), {
           kind: "authorization-callback",
           payloads: [
             {
@@ -747,7 +747,7 @@ describe("workflowEntry integration", () => {
         // mask a wait that ignores callbacks after a consumed cancel.
         await new Promise((resolve) => setTimeout(resolve, 250));
 
-        await resumeHook(sessionCommandHookToken(run.runId), {
+        await resumeHook(sessionInboxHookToken(sessionCommandHookToken(run.runId)), {
           kind: "authorization-callback",
           payloads: [
             {
@@ -1174,7 +1174,10 @@ describe("workflowEntry integration", () => {
             command: {
               caller: {
                 callId: "call-2",
-                replyTo: { kind: "hook", token: sessionCommandHookToken(child.runId) },
+                replyTo: {
+                  kind: "hook",
+                  token: sessionInboxHookToken(sessionCommandHookToken(child.runId)),
+                },
                 subagentName: "researcher",
               },
               kind: "send",
@@ -1262,7 +1265,9 @@ describe("workflowEntry integration", () => {
             // The stable inbox now belongs to a successor run; the original run
             // holds only its anchor (plus the SDK's abort-signal hook from its
             // own earlier turn).
-            const successor = await waitForCommandHookOwner(sessionCommandHookToken(anchor.runId));
+            const successor = await waitForCommandHookOwner(
+              sessionInboxHookToken(sessionCommandHookToken(anchor.runId)),
+            );
             expect(successor.runId).not.toBe(anchor.runId);
             const successorTimer =
               sessionTimeoutMs === false ? undefined : await readSessionTimer(successor.runId);
@@ -1284,7 +1289,10 @@ describe("workflowEntry integration", () => {
               );
             }
             // A timer from the old owner can win its race with cancellation.
-            await resumeHook(sessionCommandHookToken(anchor.runId), { kind: "session-timeout" });
+            await resumeHook(sessionInboxHookToken(sessionCommandHookToken(anchor.runId)), {
+              kind: "session-timeout",
+              ownerRunId: anchor.runId,
+            });
             const anchorHooks = await world.hooks.list({ runId: anchor.runId });
             expect(
               anchorHooks.data
@@ -1317,7 +1325,9 @@ describe("workflowEntry integration", () => {
               sessionId: anchor.runId,
             });
             expect((await stream.nextTurn()).at(-1)?.type).toBe("session.waiting");
-            const nextOwner = await waitForCommandHookOwner(sessionCommandHookToken(anchor.runId));
+            const nextOwner = await waitForCommandHookOwner(
+              sessionInboxHookToken(sessionCommandHookToken(anchor.runId)),
+            );
             expect(nextOwner.runId).not.toBe(successor.runId);
             if (sessionTimeoutMs !== false && successorTimer !== undefined) {
               const nextTimer = await readSessionTimer(nextOwner.runId);
@@ -1455,9 +1465,13 @@ describe("workflowEntry integration", () => {
           });
           expect((await stream.nextTurn()).at(-1)?.type).toBe("session.waiting");
           expect(candidateId).toBeDefined();
-          expect((await waitForCommandHookOwner(sessionCommandHookToken(anchor.runId))).runId).toBe(
-            anchor.runId,
-          );
+          expect(
+            (
+              await waitForCommandHookOwner(
+                sessionInboxHookToken(sessionCommandHookToken(anchor.runId)),
+              )
+            ).runId,
+          ).toBe(anchor.runId);
           expect(
             created.mock.calls.some(
               ([runId, event]) => runId === candidateId && event.eventType === "hook_created",
@@ -1527,11 +1541,11 @@ describe("workflowEntry integration", () => {
             !injected &&
             runId === anchor.runId &&
             event.eventType === "hook_disposed" &&
-            event.eventData?.token === sessionCommandHookToken(anchor.runId)
+            event.eventData?.token === sessionInboxHookToken(sessionCommandHookToken(anchor.runId))
           ) {
             injected = true;
             for (let index = 0; index < 3; index++) {
-              await resumeHook(sessionCommandHookToken(anchor.runId), {
+              await resumeHook(sessionInboxHookToken(sessionCommandHookToken(anchor.runId)), {
                 kind: "send",
                 payload: { message: `Alice sends input ${index} during release.` },
               });
@@ -1561,7 +1575,9 @@ describe("workflowEntry integration", () => {
 
           expect(injected).toBe(true);
           spy.mockRestore();
-          const owner = await waitForCommandHookOwner(sessionCommandHookToken(anchor.runId));
+          const owner = await waitForCommandHookOwner(
+            sessionInboxHookToken(sessionCommandHookToken(anchor.runId)),
+          );
           expect(owner.runId).toBe(anchor.runId);
           await workflowRuntime.dispatchSession({
             command: followUp("dpl_b", "Bob sends a later sentinel.", "sentinel"),
@@ -1603,12 +1619,12 @@ describe("workflowEntry integration", () => {
       });
     });
 
-    it("keeps an alias-bearing session on its owner and executes the accepted delivery", async () => {
+    it("hands off an alias-addressed session and keeps the alias resolving through the gap", async () => {
       const runtime = await createTestRuntime({ agent: { name: "workflow-entry-handoff-alias" } });
       const continuationToken = "http:workflow-entry-handoff-alias";
 
       await runtime.run(async () => {
-        const owner = await start(workflowEntry, [
+        const anchor = await start(workflowEntry, [
           {
             kind: "initial",
             ownerDeploymentId: "dpl_a",
@@ -1621,9 +1637,32 @@ describe("workflowEntry integration", () => {
             }),
           },
         ]);
-        const stream = captureTurnEvents(owner);
+        const stream = captureTurnEvents(anchor);
+        const world = await getWorld();
         const workflowRuntime = createWorkflowRuntime({
           compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
+        });
+        // A channel delivery lands on the alias while the old owner has released
+        // it and the successor has not yet claimed it. The handoff marker must
+        // make ingress wait for the successor instead of reporting the session
+        // gone (which would let the channel start a replacement session).
+        let gapDelivery: Promise<unknown> | undefined;
+        const createEvent = world.events.create.bind(world.events);
+        const spy = vi.spyOn(world.events, "create").mockImplementation(async (...args) => {
+          const [runId, event] = args;
+          const created = await createEvent(...args);
+          if (
+            gapDelivery === undefined &&
+            runId === anchor.runId &&
+            event.eventType === "hook_disposed" &&
+            event.eventData?.token === sessionInboxHookToken(continuationToken)
+          ) {
+            gapDelivery = workflowRuntime.dispatchContinuation({
+              command: followUp("dpl_b", "Alice writes during the gap.", "delivery-gap"),
+              continuationToken,
+            });
+          }
+          return created;
         });
         try {
           expect((await stream.nextTurn()).at(-1)?.type).toBe("session.waiting");
@@ -1633,7 +1672,7 @@ describe("workflowEntry integration", () => {
               command: followUp("dpl_b", "hello from b", "delivery-b"),
               continuationToken,
             }),
-          ).resolves.toMatchObject({ sessionId: owner.runId, status: "accepted" });
+          ).resolves.toMatchObject({ sessionId: anchor.runId, status: "accepted" });
 
           const secondTurn = await stream.nextTurn();
           expect(
@@ -1643,17 +1682,40 @@ describe("workflowEntry integration", () => {
                 event.data.message?.includes("hello from b") === true,
             ),
           ).toBe(true);
+          spy.mockRestore();
+          expect(gapDelivery).toBeDefined();
+          await expect(gapDelivery).resolves.toMatchObject({
+            sessionId: anchor.runId,
+            status: "accepted",
+          });
+          const gapTurn = await stream.nextTurn();
+          expect(
+            gapTurn.some(
+              (event) =>
+                event.type === "message.completed" &&
+                event.data.message?.includes("Alice writes during the gap.") === true,
+            ),
+          ).toBe(true);
+
+          const successor = await waitForCommandHookOwner(
+            sessionInboxHookToken(sessionCommandHookToken(anchor.runId)),
+          );
+          expect(successor.runId).not.toBe(anchor.runId);
           await expect(
             waitForCommandHookOwner(sessionInboxHookToken(continuationToken)),
-          ).resolves.toMatchObject({
-            runId: owner.runId,
+          ).resolves.toMatchObject({ runId: successor.runId });
+          // No marker outlives the handoff.
+          const markers = (await world.hooks.list({ runId: anchor.runId })).data.filter((hook) =>
+            hook.token.startsWith("eve:inbox:handoff:"),
+          );
+          expect(markers).toEqual([]);
+          // Only one session exists for this alias.
+          await expect(workflowRuntime.resolveContinuation(continuationToken)).resolves.toEqual({
+            sessionId: anchor.runId,
           });
-          await expect(
-            waitForCommandHookOwner(sessionCommandHookToken(owner.runId)),
-          ).resolves.toMatchObject({ runId: owner.runId });
         } finally {
           stream.dispose();
-          await owner.cancel();
+          await anchor.cancel();
         }
       });
     });
@@ -1696,7 +1758,9 @@ describe("workflowEntry integration", () => {
           const turn = await stream.nextTurn();
           expect(turn.at(-1)?.type).toBe("session.waiting");
           expect((await stream.nextTurn()).at(-1)?.type).toBe("session.waiting");
-          const owner = await waitForCommandHookOwner(sessionCommandHookToken(run.runId));
+          const owner = await waitForCommandHookOwner(
+            sessionInboxHookToken(sessionCommandHookToken(run.runId)),
+          );
           expect(owner.runId).toBe(run.runId);
         } finally {
           stream.dispose();

@@ -1,6 +1,6 @@
 import { createHook, getWorkflowMetadata } from "#compiled/@workflow/core/index.js";
 import { createSessionInbox } from "#execution/session-inbox/inbox.js";
-import { sessionCommandHookToken } from "#execution/session-command-token.js";
+import { sessionCommandHookToken } from "#execution/session-inbox/address.js";
 
 export async function sessionHookPumpWorkflow(input: {
   readonly aliases: readonly string[];

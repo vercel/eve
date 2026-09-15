@@ -2,7 +2,7 @@ import { createTestSessionState } from "#internal/testing/session-state.js";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { SessionCheckpoint } from "#execution/session-handoff.js";
-import { validateSessionCheckpointStep } from "#execution/session-checkpoint-validation-step.js";
+import { validateSessionCheckpointStep } from "#execution/session-handoff-steps.js";
 import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
 
 const deserializeContextMock = vi.fn();
@@ -80,35 +80,13 @@ describe("validateSessionCheckpointStep", () => {
       expect(deserializeContextMock).not.toHaveBeenCalled();
     },
   );
-
-  it.each([
-    ["an empty session-hook set", []],
-    ["duplicate session hooks", ["stable", "channel:current", "channel:current"]],
-    ["a missing current continuation", ["stable", "channel:old"]],
-  ])("rejects %s before hydration", async (_label, session) => {
-    const checkpoint = createCheckpoint({ session });
-
-    await expect(validateSessionCheckpointStep({ checkpoint })).rejects.toThrow(
-      /hook claim set|current continuation address/,
-    );
-    expect(deserializeContextMock).not.toHaveBeenCalled();
-    expect(readDurableSessionMock).not.toHaveBeenCalled();
-  });
 });
 
-function createCheckpoint(input: { readonly session?: readonly string[] } = {}): SessionCheckpoint {
+function createCheckpoint(): SessionCheckpoint {
   return {
-    anchorToken: "session-1:anchor",
-    version: 3,
+    version: 4,
     sessionTimeoutMs: false,
-    hooks: toHookClaims(input.session ?? ["stable", "channel:old", "channel:current"]),
     mode: "conversation",
-    ownership: {
-      anchorRunId: "anchor-1",
-      deploymentId: "deployment-a",
-      ownerRunId: "owner-1",
-      sessionId: "session-1",
-    },
     serializedContext: {},
     sessionState: createTestSessionState({
       continuationToken: "channel:current",
@@ -118,9 +96,4 @@ function createCheckpoint(input: { readonly session?: readonly string[] } = {}):
       version: 1,
     }),
   };
-}
-
-function toHookClaims(tokens: readonly string[]) {
-  const [stable = "", ...aliases] = tokens;
-  return { aliases, stable };
 }

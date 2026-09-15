@@ -16,18 +16,11 @@ export interface LegacyTurnInput {
   readonly inputCommitted: boolean;
 }
 
+/** Reads a versioned turn-workflow input from a pre-cutover driver (eve 0.45 – 0.55). */
 export function readLegacyTurnInput(value: unknown): LegacyTurnInput {
-  if (!isObject(value) || ![undefined, 1, 2].includes(value.version as number | undefined))
+  if (!isObject(value) || (value.version !== 1 && value.version !== 2))
     throw new Error("Unsupported legacy turn input version.");
-  const step =
-    value.version === undefined
-      ? {
-          input: value.delivery,
-          parentWritable: value.parentWritable,
-          serializedContext: value.serializedContext,
-          sessionState: value.sessionState,
-        }
-      : value.stepInput;
+  const step = value.stepInput;
   if (
     !isObject(step) ||
     typeof value.completionToken !== "string" ||

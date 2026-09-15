@@ -11,6 +11,10 @@ vi.mock("./session-timeout-steps.js", () => ({
   startSessionTimeoutStep: vi.fn(),
 }));
 
+vi.mock("#compiled/@workflow/core/index.js", () => ({
+  getWorkflowMetadata: () => ({ workflowRunId: "owner-1" }),
+}));
+
 afterEach(() => {
   vi.clearAllMocks();
 });
@@ -22,7 +26,7 @@ describe("createSessionTimeoutControl", () => {
 
     const control = createSessionTimeoutControl({
       deadline,
-      token: "eve:session:wrun_1:inbox",
+      sessionId: "wrun_1",
     });
     await control.start();
     await control.start();
@@ -30,6 +34,7 @@ describe("createSessionTimeoutControl", () => {
     expect(startSessionTimeoutStep).toHaveBeenCalledOnce();
     expect(startSessionTimeoutStep).toHaveBeenCalledWith({
       deadline,
+      ownerRunId: "owner-1",
       token: "eve:session:wrun_1:inbox",
     });
   });
@@ -38,7 +43,7 @@ describe("createSessionTimeoutControl", () => {
     vi.mocked(startSessionTimeoutStep).mockResolvedValue({ runId: "timer-run" });
     const control = createSessionTimeoutControl({
       deadline: new Date("2026-02-01T00:00:00.000Z"),
-      token: "eve:session:wrun_1:inbox",
+      sessionId: "wrun_1",
     });
 
     await control.start();
@@ -55,7 +60,7 @@ describe("createSessionTimeoutControl", () => {
 
     const control = createSessionTimeoutControl({
       deadline: new Date("2026-02-01T00:00:00.000Z"),
-      token: "eve:session:wrun_1:inbox",
+      sessionId: "wrun_1",
     });
 
     await expect(control.start()).rejects.toBe(failure);

@@ -31,7 +31,7 @@ function consumeLease(inbox: SessionInboxHandle, mode: TestReadMode = "session")
 }
 
 function hookTokens(inbox: SessionInboxHandle): readonly string[] {
-  return [inbox.hookClaims.stable, ...inbox.hookClaims.aliases];
+  return inbox.claimedTokens;
 }
 
 const createHookMock = vi.fn();

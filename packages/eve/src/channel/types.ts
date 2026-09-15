@@ -291,6 +291,8 @@ export interface DeliverHookPayload {
 /** Internal deadline signal sent through the stable session command inbox. */
 export interface SessionTimeoutHookPayload {
   readonly kind: "session-timeout";
+  /** The owner run that armed this timer; a later owner ignores a predecessor's deadline. */
+  readonly ownerRunId: string;
 }
 
 /** Requests a context compaction without delivering model input. */

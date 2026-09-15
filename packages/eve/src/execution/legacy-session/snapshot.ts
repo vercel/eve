@@ -2,7 +2,6 @@ import type { ModelMessage } from "ai";
 import { getHarnessEmissionState } from "#harness/emission.js";
 import { isUserMessageKind, validateHarnessModelMessages } from "#harness/messages.js";
 import type { DurableSession, DurableSessionState } from "#execution/durable-session-store.js";
-import { getRun } from "#internal/workflow/runtime.js";
 import { isObject } from "#shared/guards.js";
 
 export type LegacySession = Omit<DurableSession, "history"> & { readonly history: ModelMessage[] };
@@ -14,33 +13,11 @@ const PRESERVED_FRAMEWORK_STATE = new Set([
   "eve.harness.sessionRuntimeTokenLimit",
 ]);
 
-export async function readLegacySnapshot(
+/** Reads the driver's embedded snapshot; every supported driver carries one. */
+export function readLegacySnapshot(
   state: Record<string, unknown> & { sessionId: string },
-): Promise<LegacySession> {
-  let snapshot = state.snapshot;
-  if (snapshot === undefined) {
-    const reader = getRun(state.sessionId)
-      .getReadable<unknown>({ namespace: "eve.session", startIndex: -1 })
-      .getReader();
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    try {
-      const result = await Promise.race([
-        reader.read(),
-        new Promise<never>((_, reject) => {
-          timer = setTimeout(
-            () => reject(new Error("Legacy session snapshot read timed out.")),
-            10_000,
-          );
-        }),
-      ]);
-      if (result.done) throw new Error("Legacy session has no durable snapshot.");
-      snapshot = result.value;
-    } finally {
-      clearTimeout(timer);
-      await reader.cancel().catch(() => {});
-      reader.releaseLock();
-    }
-  }
+): LegacySession {
+  const snapshot = state.snapshot;
   if (
     !isObject(snapshot) ||
     snapshot.version !== 1 ||

@@ -4,6 +4,8 @@ import { signalSessionTimeoutStep } from "#execution/session-timeout-steps.js";
 
 export interface SessionTimeoutWorkflowInput {
   readonly deadline: Date;
+  /** Owner run that armed the timer. */
+  readonly ownerRunId: string;
   readonly token: string;
 }
 
@@ -12,5 +14,5 @@ export async function sessionTimeoutWorkflow(input: SessionTimeoutWorkflowInput)
   "use workflow";
 
   await sleep(input.deadline);
-  await signalSessionTimeoutStep({ token: input.token });
+  await signalSessionTimeoutStep({ ownerRunId: input.ownerRunId, token: input.token });
 }
