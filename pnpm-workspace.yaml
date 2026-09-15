@@ -62,6 +62,7 @@ catalog:
 minimumReleaseAge: 2880 # 2 days
 
 minimumReleaseAgeExclude:
+  - eve
   - "@kybernesis/arcana"
   - "@upstash/*"
   - "@vercel/*"
