@@ -1,3 +1,7 @@
+import { isEveDevEnvironment } from "#internal/application/dev-environment.js";
+import { MODEL_CONNECTION_ENV, resolveModelApiKey } from "#internal/model-auth/transport.js";
+import { resolveVercelSession } from "#internal/model-auth/vercel.js";
+import { readVercelCliConnection } from "#internal/model-auth/vercel-cli.js";
 import { getVercelOidcToken } from "#compiled/@vercel/oidc/index.js";
 import { hasEnvValue } from "#internal/resolve-model-endpoint-status.js";
 import { buildAgentInfoResponse } from "#internal/nitro/routes/agent-info/build-agent-info-response.js";
@@ -40,6 +44,33 @@ async function createAgentInfoPayload(input: NitroArtifactsConfig) {
 async function resolveGatewayCredentialPresence(
   routing: ModelRouting,
 ): Promise<GatewayCredentialPresence> {
+  if (routing.kind === "gateway" && isEveDevEnvironment()) {
+    const selected = process.env[MODEL_CONNECTION_ENV];
+    if (selected === "vercel" || selected === "vercel-cli" || selected === "ai-gateway-key") {
+      try {
+        if (selected === "ai-gateway-key") {
+          await resolveModelApiKey("ai-gateway-key");
+          return { apiKey: true, oidc: false };
+        }
+        const session =
+          selected === "vercel" ? await resolveVercelSession() : await readVercelCliConnection();
+        return {
+          apiKey: false,
+          oidc: false,
+          account: session !== undefined,
+          ...(session
+            ? {
+                team:
+                  process.env.EVE_MODEL_TEAM_NAME ??
+                  ("teamName" in session ? session.teamName : session.teamId),
+              }
+            : {}),
+        };
+      } catch {
+        return { apiKey: false, oidc: false };
+      }
+    }
+  }
   const apiKey = hasEnvValue(process.env.AI_GATEWAY_API_KEY);
 
   if (routing.kind === "external" || apiKey) {

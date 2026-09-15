@@ -1,3 +1,4 @@
+import { isModelConnection, type ModelConnectionSelection } from "#shared/model-connection.js";
 import { readFileSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -10,7 +11,7 @@ import { readProjectLink } from "#setup/project-resolution.js";
 
 const PROVIDER_SELECTIONS = ["chatgpt", "ai-gateway-key", "ai-gateway-project"] as const;
 
-export type ProviderSelection = (typeof PROVIDER_SELECTIONS)[number];
+export type ProviderSelection = ModelConnectionSelection;
 
 export function providerSettingsPath(appRoot: string): string {
   return join(appRoot, ".eve", "provider.json");
@@ -68,11 +69,13 @@ export function readProviderSelectionSync(appRoot: string): ProviderSelection | 
 export async function writeProviderSelection(
   appRoot: string,
   selected: ProviderSelection,
+  team?: { teamId: string; teamName: string },
+  keySource?: "environment" | "secret",
 ): Promise<void> {
   await mkdir(join(appRoot, ".eve"), { recursive: true });
   await writeFile(
     providerSettingsPath(appRoot),
-    `${JSON.stringify({ selected }, null, 2)}\n`,
+    `${JSON.stringify({ selected, ...team, keySource }, null, 2)}\n`,
     "utf8",
   );
 }
@@ -82,5 +85,31 @@ function parseProviderSelection(value: unknown): ProviderSelection | undefined {
 }
 
 function isProviderSelection(value: unknown): value is ProviderSelection {
-  return PROVIDER_SELECTIONS.some((selection) => selection === value);
+  return (
+    isModelConnection(value) ||
+    value === "vercel-cli" ||
+    PROVIDER_SELECTIONS.some((selection) => selection === value)
+  );
+}
+
+export function readProviderTeamSync(
+  appRoot: string,
+): { teamId: string; teamName: string } | undefined {
+  try {
+    const value: unknown = JSON.parse(readFileSync(providerSettingsPath(appRoot), "utf8"));
+    if (isObject(value) && typeof value.teamId === "string" && typeof value.teamName === "string")
+      return { teamId: value.teamId, teamName: value.teamName };
+  } catch {
+    /* No team has been selected for this project. */
+  }
+  return undefined;
+}
+
+export function readProviderKeySourceSync(appRoot: string): "environment" | "secret" | undefined {
+  try {
+    const value: unknown = JSON.parse(readFileSync(providerSettingsPath(appRoot), "utf8"));
+    if (isObject(value) && (value.keySource === "environment" || value.keySource === "secret"))
+      return value.keySource;
+  } catch {}
+  return undefined;
 }

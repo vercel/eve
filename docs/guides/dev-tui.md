@@ -9,42 +9,65 @@ description: "Use eve locally or connect to a deployed agent from an interactive
 eve dev
 ```
 
+The footer shows the active model and connection separated by dots. Vercel account connections show the team slug once it resolves; the local server port is omitted.
+
 The transcript remains in your terminal scrollback after you exit. Run `/help` in the UI to see the commands available in the current session.
 
 ## Commands
 
-| Command       | Description                                                                                                                                                              |
-| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `/model`      | Configure the model and its provider. Pass a model ID to set it directly: `/model provider/model-id`.                                                                    |
-| `/add`        | Select and install channels, MCP connections, extensions, and observability integrations. Pass an item address to confirm and install it directly: `/add channel/slack`. |
-| `/deploy`     | Deploy the agent to Vercel production. Links the directory first if needed.                                                                                              |
-| `/vc:install` | Install the Vercel CLI.                                                                                                                                                  |
-| `/vc:login`   | Log in to Vercel or restore access to a remote deployment.                                                                                                               |
-| `/info`       | Show the resolved application, compiled artifacts, discovery diagnostics, and messaging routes.                                                                          |
-| `/loglevel`   | Choose which server and agent logs appear in the transcript.                                                                                                             |
-| `/traces`     | Open the local trace viewer. Pass a trace ID prefix to open a specific trace.                                                                                            |
-| `/reset`      | Start a fresh session.                                                                                                                                                   |
-| `/cancel`     | Cancel the current turn without discarding settled context.                                                                                                              |
-| `/clear`      | Clear the session's model-message history. `/new` is an alias.                                                                                                           |
-| `/compact`    | Compact the current session's context.                                                                                                                                   |
-| `/exit`       | Quit the UI.                                                                                                                                                             |
-| `/help`       | List available commands.                                                                                                                                                 |
+| Command     | Description                                                                                                                                                  |
+| ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `/login`    | Connect a ChatGPT subscription, Vercel account, or provider API key.                                                                                         |
+| `/model`    | Choose the model and its settings. Pass a model ID to set it directly: `/model provider/model-id`.                                                           |
+| `/add`      | Select and install channels, MCP connections, extensions, and observability integrations. Pass an item address to install it directly: `/add channel/slack`. |
+| `/deploy`   | Deploy the agent to Vercel production. Installs the Vercel CLI, signs in, and links the directory if needed.                                                 |
+| `/info`     | Show the resolved application, compiled artifacts, discovery diagnostics, and messaging routes.                                                              |
+| `/loglevel` | Choose which server and agent logs appear in the transcript.                                                                                                 |
+| `/traces`   | Open the local trace viewer. Pass a trace ID prefix to open a specific trace.                                                                                |
+| `/reset`    | Start a fresh session.                                                                                                                                       |
+| `/cancel`   | Cancel the current turn without discarding settled context.                                                                                                  |
+| `/clear`    | Clear the session's model-message history. `/new` is an alias.                                                                                               |
+| `/compact`  | Compact the current session's context.                                                                                                                       |
+| `/exit`     | Quit the UI.                                                                                                                                                 |
+| `/help`     | List available commands.                                                                                                                                     |
 
-`/model`, `/add`, `/deploy`, `/info`, and `/traces` are available when `eve dev` runs locally. They are unavailable when the UI connects to a server with `--url`.
+`/login`, `/model`, `/add`, `/deploy`, `/info`, and `/traces` are available when `eve dev` runs locally. They are unavailable when the UI connects to a server with `--url`.
 
 ## Set up a new agent
 
-After `eve init`, the terminal UI guides you through **Model**, **Channels**, **Integrations**, and **Review** before the first chat prompt. The progress rail keeps the four steps visible throughout onboarding. Model setup can install or upgrade the Vercel CLI, open Vercel login, and resume project linking without leaving the flow.
+After interactive `eve init`, the TUI opens directly. eve keeps the project's selected connection. For a new connection, it checks explicit environment credentials, the saved machine default, and then the Vercel CLI's current team. Existing project OIDC connections remain supported. Automatic Vercel reuse validates account access without creating or linking a project.
 
-Model and Vercel changes take effect when you complete Model, then onboarding continues to Channels. Channel and integration selections remain drafts until you finish Review. You can move back and forth between Channels, Integrations, and Review; use `/model` after onboarding to change the committed model configuration.
+During startup, the composer stays visible while a progress indicator names the connection being checked and shows when eve is preparing your chat. Type a message and press `Enter` to queue it for when the agent is ready. A picker temporarily takes over input when a choice or API key is needed; your draft returns afterward. If setup is cancelled or fails, queued messages return to the draft.
+
+If no connection is ready, `/login` offers:
+
+1. Vercel Account
+2. Vercel AI Gateway API Key
+3. ChatGPT Subscription
+4. OpenAI API Key
+5. Anthropic API Key
+
+Vercel account login opens a browser. When multiple teams are available, `/login` shows a searchable team picker with the current project or CLI team highlighted so you can switch teams. A sole available team is selected automatically. Automatic startup reuses the selected connection without opening this picker. Account-token access to Gateway depends on availability for your account and team; if it is unavailable, choose an API key or another connection.
+
+Type to filter a menu, press `Enter` to select, or `Esc` to return to chat. Dismissing a setup menu adds no cancellation message to the transcript; completed work and failures still appear. Arrow navigation is also available. Cancelling login preserves your draft. If a connection fails, retry `/login`; eve does not silently switch providers.
+
+### Credentials and deployment
+
+eve saves API keys and eve-owned OAuth refresh credentials in the OS secret store through just-secrets. It saves the last successful login as the machine default and records the project's connection and team separately as nonsecret metadata in `.eve/provider.json`. Newly entered keys are never written into project files. A key explicitly selected through `/login` takes precedence over another key for that provider in your shell; a project connected through environment credentials continues to use its environment. Vercel CLI retains ownership of its credentials and refresh tokens.
+
+Local discovery runs only in development. Deployments need explicitly provisioned `AI_GATEWAY_API_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, or supported project OIDC credentials. ChatGPT subscription models are local-only. `/login` does not link a deployment or authenticate a remote server; `/deploy` handles Vercel CLI installation and account login when needed.
+
+### Models and settings
+
+`/model` opens the model picker and settings. Each completed selection applies immediately and returns to chat; there is no final Done step. A successful login or model change takes effect on the next prompt.
+
+OpenAI, ChatGPT, and Gateway connections default to `gpt-5.6-luna-fast`; Anthropic defaults to `claude-sonnet-5`. An explicitly authored compatible model stays selected. If a new default is unavailable, eve offers the connection's available models. Dynamic or custom model expressions must be edited in `agent.ts`.
 
 ## Add an integration
 
-Bare `/add` opens the standalone planner on **Channels**. It does not include model configuration. The progress rail shows selection counts as you move between **Channels**, **Integrations**, and **Review**.
+`/add` opens one searchable catalog of channels, connections, extensions, and integrations. Type to filter and press `Enter` to install one item and run its required setup. The flow returns to chat afterward.
 
-Press `Space` or `Enter` to toggle the highlighted item. Press `Right Arrow` to preserve the current selections and continue, `Left Arrow` to preserve them and go back, or `Esc` to cancel. Installation requires `Enter` on **Install and set up** from Review. During installation, `Esc` cancels only the active item and continues with the remaining selections. The final summary reports installed, cancelled, and failed items separately.
-
-Pass an item address to `/add` to confirm and install that exact address without opening the planner:
+Pass an item address to install it directly:
 
 ```text
 /add channel/slack
@@ -53,7 +76,7 @@ Pass an item address to `/add` to confirm and install that exact address without
 /add @acme/analytics
 ```
 
-The UI installs planner selections in order and offers deployment once after the batch when an installed item requires it.
+Required authorization or deployment setup still runs for the selected item. Press `Esc` to cancel setup; files already installed remain in the project.
 
 ## Work with the agent
 
@@ -104,7 +127,7 @@ eve dev https://user:pass@your-app.example.com
 eve dev https://your-app.example.com -H 'Authorization: Bearer your_token_here'
 ```
 
-For a Vercel deployment that needs authentication, run `/vc:login` and follow the prompt. Remote sessions do not modify the local project's Vercel link or `.env.local`.
+Remote Vercel sessions reuse an existing authorized CLI session. They do not open an account login flow or modify the local project's Vercel link or `.env.local`. If deployment protection blocks access, provide `VERCEL_AUTOMATION_BYPASS_SECRET` or configure access in the target project's Deployment Protection settings.
 
 ## What to read next
 

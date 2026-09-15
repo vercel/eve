@@ -101,7 +101,7 @@ describe("native ChatGPT browser login", () => {
       accessToken: "access",
       refreshToken: "refresh",
     });
-    expect(options.log).toHaveBeenLastCalledWith("ChatGPT subscription connected.");
+    expect(options.log).not.toHaveBeenCalledWith("ChatGPT subscription connected.");
     expect(options.log.mock.calls.flat().join("\n")).not.toContain("refresh");
   });
 

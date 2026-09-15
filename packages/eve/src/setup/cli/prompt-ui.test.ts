@@ -77,9 +77,7 @@ describe("renderSelectPrompt", () => {
       state: "active",
     });
 
-    expect(rendered).toContain(
-      "<inverse><blue> ▶ Yes </blue></inverse><dim>· Create or link a project</dim>",
-    );
+    expect(rendered).toContain("<b> › Yes</b><dim> · Create or link a project</dim>");
     // No check or legacy checkbox glyphs on a single-select row.
     expect(rendered).not.toContain("✓");
     expect(rendered).not.toContain("◻");
@@ -123,9 +121,7 @@ describe("renderSelectPrompt", () => {
     });
 
     // The description indents to the option label column.
-    expect(rendered).toContain(
-      "<inverse><blue> ▶ No </blue></inverse>\n│     <dim>Set up locally and wire yourself</dim>",
-    );
+    expect(rendered).toContain("<b> › No</b>\n│     <dim>Set up locally and wire yourself</dim>");
     // The non-highlighted option keeps its description hidden.
     expect(rendered).not.toContain("Fastest path to production");
   });
@@ -230,7 +226,7 @@ describe("renderMultiselectPrompt", () => {
     });
 
     // Cursor row (Web Chat): the pointer. Selected row off-cursor (Slack): a check.
-    expect(rendered).toContain("<inverse><blue> ▶ Web Chat </blue></inverse>");
+    expect(rendered).toContain(" › Web Chat");
     expect(rendered).toContain("<green>✓</green> Slack");
     // No key legend: the Submit row carries the confirm affordance.
     expect(rendered).not.toContain("space");
@@ -255,9 +251,7 @@ describe("renderMultiselectPrompt", () => {
     expect(render(0)).toContain("│\n│     <dim><b>Submit</b></dim> <green>✓</green>");
     // Cursor one past the options sits on the Submit row: the pointer plus a
     // bright label.
-    expect(render(2)).toContain(
-      "<inverse><blue> ▶ <b>Submit</b> </blue></inverse><green>✓</green>",
-    );
+    expect(render(2)).toContain("<b> › <b>Submit</b></b> <green>✓</green>");
     const visible = (text: string) => text.replaceAll(/<[^>]+>/g, "");
     const unselected = visible(render(0))
       .split("\n")
@@ -296,7 +290,7 @@ describe("renderMultiselectPrompt", () => {
       state: "active",
     });
 
-    expect(rendered).toContain("<inverse><blue> ▶ Web Chat </blue></inverse>");
+    expect(rendered).toContain(" › Web Chat");
     // A locked row is mandatory rather than user-selected, so both its check
     // and label stay dim while the reason remains inline.
     expect(rendered).toContain(
@@ -344,7 +338,7 @@ describe("renderSearchableSelect", () => {
       submitDisplay: "",
     });
 
-    expect(rendered).toContain("<inverse><blue> ▶ alpha </blue></inverse>");
+    expect(rendered).toContain(" › alpha");
     expect(rendered).toContain("<cyan>enter</cyan><dim> to select</dim>");
     expect(rendered).not.toContain("space");
     expect(rendered).not.toContain("◻");
@@ -364,7 +358,7 @@ describe("renderSearchableSelect", () => {
       submitDisplay: "",
     });
 
-    expect(rendered).toContain("<inverse><blue> ▶ alpha </blue></inverse>");
+    expect(rendered).toContain(" › alpha");
     expect(rendered).toContain("<green>✓</green> beta");
     expect(rendered).toContain("<dim><b>Submit</b></dim> <green>✓</green>");
     // The Submit row replaces the key legend; only the filter hint remains.
@@ -386,9 +380,9 @@ describe("renderSearchableSelect", () => {
       submitDisplay: "",
     });
 
-    expect(rendered).toContain("<inverse><blue> ▶ <b>Submit</b> </blue></inverse><green>✓</green>");
+    expect(rendered).toContain("<b> › <b>Submit</b></b> <green>✓</green>");
     // No option row carries the pointer while the cursor sits on Submit.
-    expect(rendered).not.toContain("<inverse><blue> ▶ alpha </blue></inverse>");
+    expect(rendered).not.toContain(" › alpha");
   });
 
   test("a leading featured run sizes the default viewport; scrolling reaches the rest", () => {

@@ -243,9 +243,9 @@ export function vercelAuthBlockerReason(authStatus: VercelAuthStatus): string | 
     case "authenticated":
       return undefined;
     case "cli-missing":
-      return "Vercel CLI not found, see /vc:install";
+      return "Vercel CLI not found, see /deploy";
     case "logged-out":
-      return "Log in to Vercel first, see /vc:login";
+      return "Log in to Vercel first, see /deploy";
     case "unavailable":
       return "Couldn't reach Vercel, check your connection";
     default: {

@@ -20,11 +20,7 @@ import {
   ClientSession,
 } from "#client/index.js";
 import { renderApplicationInfo } from "#cli/commands/info.js";
-import type {
-  EveCliSetupStep,
-  EveCliSetupStepEvent,
-  EveCliSetupTerminalEvent,
-} from "#cli/telemetry/index.js";
+import type { EveCliSetupStepEvent, EveCliSetupTerminalEvent } from "#cli/telemetry/index.js";
 import type { OnboardingScreenEvent } from "./setup-commands.js";
 import { loadDevelopmentEnvironmentFiles } from "#cli/dev/environment.js";
 import { subscribeDevelopmentSandboxPrewarmLogs } from "#execution/sandbox/development-prewarm.js";
@@ -84,8 +80,6 @@ import {
   type BootDetectionContext,
   type SetupIssue,
 } from "./setup-issues.js";
-import type { RegistryPlannerContext } from "#setup/flows/registry.js";
-import type { PlannerNavigation } from "#setup/prompter.js";
 import type { SetupFlowRenderer } from "./setup-flow.js";
 import type { TraceViewerRenderer } from "./traces/trace-viewer-session.js";
 import type { RemoteDevelopmentTarget } from "./target.js";
@@ -263,6 +257,8 @@ export type AgentTUIRenderer = {
    * without a header simply skip it.
    */
   renderAgentHeader?(header: AgentTUIAgentHeader): void;
+  /** Keeps preliminary connection diagnostics out of the startup presentation. */
+  setStartupPhase?(phase: "starting" | "connecting" | "preparing" | undefined): void;
   /**
    * Commits a single informational line to the transcript. Used for session
    * recovery and slash-command results. Optional.
@@ -282,7 +278,7 @@ export type AgentTUIRenderer = {
   renderSetupWarning?(text: string): void;
   /** Clears the setup attention line once its issue is resolved. */
   clearSetupWarning?(): void;
-  /** Commits the startup `/vc:login` invocation to the transcript. */
+  /** Commits the startup `/deploy` invocation to the transcript. */
   renderCommandInvocation?(text: string, status?: "failed"): void;
   renderCommandResult?(text: string, tone?: "success" | "error"): void;
   readonly setupFlow?: SetupFlowRenderer;
@@ -397,19 +393,11 @@ export interface PromptCommandHandlerContext {
   readonly title: string;
   /** Provider entry authorized by confirmed boot-time model-access evidence. */
   readonly initialModelStep?: "provider";
-  readonly registryPlannerContext?: RegistryPlannerContext;
   readonly onOnboardingScreen?: (input: OnboardingScreenEvent) => void;
-  /** Overrides the standalone command title inside a composed setup journey. */
-  readonly setupFlowTitle?: string;
-  /** Progress owned by an enclosing journey while this command runs. */
-  readonly setupFlowNavigation?: PlannerNavigation;
   /** Live ChatGPT identity shown only inside model configuration UI. */
   readonly chatGptAccountLabel?: string;
-  /**
-   * Leaves the current setup panel mounted for the next automatic onboarding
-   * command. The runner closes it if no next command can proceed.
-   */
-  readonly keepSetupFlowOpen?: true;
+  /** Settles runtime changes before the setup panel releases the screen. */
+  readonly settleOutcome?: (outcome: PromptCommandOutcome) => Promise<PromptCommandOutcome>;
   readonly remoteConnection?: RemoteConnectionController;
   readonly withExclusiveTerminal?: <T>(task: () => Promise<T>) => Promise<T>;
   readonly disabledConnectionReasons?: Readonly<Record<string, string>>;
@@ -535,9 +523,10 @@ export class EveTUIRunner {
   #startupPrompt?: string;
   /** Explicit fresh-agent onboarding handoff from `eve init`. */
   readonly #onboard: boolean;
+  #reportedFirstResponse = false;
   readonly #onOnboardingStep?: EveTUIRunnerOptions["onOnboardingStep"];
   readonly #onOnboardingTerminal?: EveTUIRunnerOptions["onOnboardingTerminal"];
-  #initialOnboardingActive = false;
+  #startupActive = true;
   readonly #promptCommandHandler?: PromptCommandHandler;
   readonly #availablePromptCommands: readonly PromptCommandSpec[];
   readonly #withExclusiveTerminal?: <T>(task: () => Promise<T>) => Promise<T>;
@@ -705,12 +694,12 @@ export class EveTUIRunner {
    * header. Never throws: a missing or unauthorized `/eve/v1/info` simply
    * yields a header without the agent's configuration detail.
    */
-  async #renderAgentHeader(): Promise<string | undefined> {
+  async #loadInitialAgentInfo(): Promise<void> {
     const serverUrl = this.#serverUrl;
     if (serverUrl === undefined) {
       this.#reportBeforeFirstPaint();
       if (!this.#onboard) await this.#renderSetupIssues(undefined);
-      return this.#finishStartup();
+      return;
     }
 
     let info: AgentInfoResult | undefined;
@@ -732,11 +721,9 @@ export class EveTUIRunner {
         }
       }
     }
-    const initialDraft = this.#finishStartup();
     this.#reportBeforeFirstPaint();
     const headerInfo = this.#replaceAgentInfo(info);
     if (!this.#onboard) await this.#renderSetupIssues(headerInfo);
-    return initialDraft;
   }
 
   #finishStartup(): string | undefined {
@@ -750,14 +737,14 @@ export class EveTUIRunner {
       this.#appRoot === undefined ? info : normalizeLocalModelEndpoint(info, process.env);
     this.#agentInfo = headerInfo;
     const serverUrl = this.#serverUrl;
-    if (serverUrl === undefined || this.#initialOnboardingActive) return headerInfo;
+    if (serverUrl === undefined || this.#startupActive) return headerInfo;
 
     const header: AgentTUIAgentHeader = {
       name: this.#name,
       serverUrl,
     };
     if (headerInfo !== undefined) header.info = headerInfo;
-    if (this.#appRoot !== undefined) header.tip = this.#headerTip;
+    if (this.#appRoot !== undefined && !this.#onboard) header.tip = this.#headerTip;
     this.#renderer.renderAgentHeader?.(header);
     return headerInfo;
   }
@@ -798,17 +785,8 @@ export class EveTUIRunner {
     let hasRunTurn = false;
     let followCurrentSession = false;
     let streamWithoutPrompt = false;
-    let initialDraft = await this.#renderAgentHeader();
-    if (this.#startupPrompt !== undefined) {
-      prompt = this.#startupPrompt;
-    }
-    if (this.#remoteConnection?.current().connection.state === "auth-required") {
-      await this.#executeExtensionCommand(
-        { type: "extension", name: "vc:login", argument: "" },
-        title,
-        { trigger: "startup" },
-      );
-    }
+    this.#renderer.setStartupPhase?.("starting");
+    await this.#loadInitialAgentInfo();
     this.#subscribeDevelopmentSandboxLogs();
     // Fire-and-forget: the link identity is network-bound to resolve, and the
     // first prompt must not wait on it. The segment appears when it lands.
@@ -816,18 +794,35 @@ export class EveTUIRunner {
     this.#mcpConnectionStatus?.refresh();
 
     const initialAgentOnboarding =
-      this.#onboard &&
+      (this.#onboard ||
+        (this.#agentInfo?.agent.model.endpoint?.kind === "gateway" &&
+          !this.#agentInfo.agent.model.endpoint.connected)) &&
       this.#appRoot !== undefined &&
       this.#promptCommandHandler !== undefined &&
       this.#renderer.setupFlow !== undefined;
+    let startupOutcome: PromptCommandOutcome | undefined;
     if (initialAgentOnboarding) {
-      initialDraft = undefined;
-      this.#initialOnboardingActive = true;
-      try {
-        await this.#runInitialAgentOnboarding(title);
-      } finally {
-        this.#initialOnboardingActive = false;
-      }
+      this.#renderer.setStartupPhase?.("connecting");
+      startupOutcome = await this.#runInitialAgentOnboarding(title);
+    }
+
+    let initialDraft = this.#finishStartup();
+    if (startupOutcome?.cancelled || startupOutcome?.tone === "error") {
+      initialDraft = [this.#startupPrompt, initialDraft].filter(Boolean).join("\n\n") || undefined;
+    } else {
+      prompt = this.#startupPrompt;
+    }
+    this.#startupActive = false;
+    this.#replaceAgentInfo(this.#agentInfo);
+    this.#paintSetupAttention();
+    this.#renderer.setStartupPhase?.(undefined);
+    if (initialAgentOnboarding) {
+      this.#renderStartupCommandInvocation(
+        { type: "extension", name: "login", argument: "" },
+        "startup",
+        startupOutcome?.tone,
+      );
+      this.#renderCommandOutcome(startupOutcome?.message, startupOutcome?.tone);
     }
 
     while (true) {
@@ -1603,6 +1598,12 @@ export class EveTUIRunner {
         void this.#requestTurnCancellation(turnState, sourceSession);
       },
       events: eveEventsToTUIStream({
+        onAssistantResponse: () => {
+          if (this.#onboard && !this.#reportedFirstResponse) {
+            this.#reportedFirstResponse = true;
+            this.#onOnboardingStep?.({ flow: "onboarding", step: "first_response" });
+          }
+        },
         events,
         pendingInputRequests: this.#pendingInputRequests,
         turnState,
@@ -1660,6 +1661,7 @@ export class EveTUIRunner {
 
   /** Repaints the attention line from the cached detection + auth issues, or clears it. */
   #paintSetupAttention(): void {
+    if (this.#startupActive) return;
     const issues = orderedSetupIssues(this.#bootIssues, this.#authIssue);
     if (issues.length > 0) {
       this.#renderer.renderSetupWarning?.(formatSetupIssuesLine(issues));
@@ -1671,7 +1673,7 @@ export class EveTUIRunner {
   /** Checks Vercel auth after boot without delaying the first prompt. */
   async #probeAuthIssue(): Promise<void> {
     const appRoot = this.#appRoot;
-    if (appRoot === undefined) return;
+    if (appRoot === undefined || process.env.EVE_MODEL_CONNECTION !== "ai-gateway-project") return;
     let status: VercelAuthStatus;
     try {
       status = await this.#getVercelAuthStatus(appRoot, { signal: this.#authProbeAbort.signal });
@@ -1685,8 +1687,8 @@ export class EveTUIRunner {
 
   /**
    * Re-evaluates the attention line after a setup command changed local state,
-   * so a fixed issue clears (e.g. the `not logged in · /vc:login` line disappears
-   * once `/vc:login` succeeds) instead of lingering stale. Authoritative: unlike
+   * so a fixed issue clears (e.g. the `not logged in · /deploy` line disappears
+   * once `/deploy` succeeds) instead of lingering stale. Authoritative: unlike
    * the boot probe it re-reads detections and auth and is not stale-guarded.
    */
   async #refreshSetupAttention(info: AgentInfoResult | undefined): Promise<void> {
@@ -1697,10 +1699,13 @@ export class EveTUIRunner {
     if (info !== undefined) context.info = info;
     try {
       this.#bootIssues = await detectSetupIssues(context, this.#bootDetections);
-      const status = await this.#getVercelAuthStatus(appRoot, {
-        signal: this.#authProbeAbort.signal,
-      });
-      this.#authIssue = authIssueForStatus(status);
+      this.#authIssue = undefined;
+      if (process.env.EVE_MODEL_CONNECTION === "ai-gateway-project") {
+        const status = await this.#getVercelAuthStatus(appRoot, {
+          signal: this.#authProbeAbort.signal,
+        });
+        this.#authIssue = authIssueForStatus(status);
+      }
     } catch {
       return;
     }
@@ -1733,15 +1738,7 @@ export class EveTUIRunner {
 
   async #handleExtensionCommand(
     command: Extract<PromptCommand, { type: "extension" }>,
-    input: Pick<
-      PromptCommandHandlerContext,
-      | "initialModelStep"
-      | "registryPlannerContext"
-      | "setupFlowTitle"
-      | "setupFlowNavigation"
-      | "keepSetupFlowOpen"
-      | "title"
-    >,
+    input: Pick<PromptCommandHandlerContext, "initialModelStep" | "title">,
   ): Promise<PromptCommandOutcome | undefined> {
     const handler = this.#promptCommandHandler;
     if (handler === undefined)
@@ -1751,6 +1748,7 @@ export class EveTUIRunner {
     const baseContext: PromptCommandHandlerContext = {
       ...input,
       renderer: this.#renderer,
+      settleOutcome: (outcome) => this.#settleCommandOutcome(outcome),
       chatGptAccountLabel:
         endpoint?.kind === "chatgpt" && endpoint.state === "ready"
           ? endpoint.accountLabel
@@ -1763,9 +1761,6 @@ export class EveTUIRunner {
       disabledConnectionReasons !== undefined && Object.keys(disabledConnectionReasons).length > 0
         ? { ...baseContext, disabledConnectionReasons }
         : baseContext;
-    if (input.keepSetupFlowOpen === true) {
-      return await handler.handle(command, { ...context, keepSetupFlowOpen: true });
-    }
     return await handler.handle(command, context);
   }
 
@@ -1797,147 +1792,67 @@ export class EveTUIRunner {
     void this.#refreshSetupAttention(this.#agentInfo);
   }
 
+  async #settleCommandOutcome(outcome: PromptCommandOutcome): Promise<PromptCommandOutcome> {
+    if (outcome.effect === undefined) return outcome;
+    try {
+      if (outcome.effect.kind === "model-access-changed") {
+        if (this.#startupActive) this.#renderer.setStartupPhase?.("preparing");
+        this.#renderer.setupFlow?.setStatus("Preparing your chat…");
+      }
+      await this.#applyCommandEffect(outcome.effect);
+      const { effect: _effect, ...settled } = outcome;
+      return settled;
+    } catch {
+      return {
+        tone: "error",
+        message:
+          "Settings were saved, but the agent could not reload. Retry the command or restart eve dev.",
+      };
+    }
+  }
+
   async #executeExtensionCommand(
     command: Extract<PromptCommand, { type: "extension" }>,
     title: string,
     input: {
       readonly trigger: "startup" | "command";
       readonly initialModelStep?: "provider";
-      readonly registryPlannerContext?: RegistryPlannerContext;
       readonly onOnboardingScreen?: PromptCommandHandlerContext["onOnboardingScreen"];
-      readonly setupFlowTitle?: string;
-      readonly setupFlowNavigation?: PlannerNavigation;
-      readonly keepSetupFlowOpen?: true;
       readonly suppressSuccessfulTranscript?: true;
       readonly suppressCancelledTranscript?: true;
     },
   ): Promise<PromptCommandOutcome | undefined> {
-    const outcome = await this.#handleExtensionCommand(command, { ...input, title });
+    const pendingOutcome = await this.#handleExtensionCommand(command, { ...input, title });
+    const outcome =
+      pendingOutcome === undefined ? undefined : await this.#settleCommandOutcome(pendingOutcome);
     const suppressTranscript =
       (input.suppressSuccessfulTranscript === true && outcome?.tone !== "error") ||
       (input.suppressCancelledTranscript === true && outcome?.cancelled === true);
-    if (!suppressTranscript) {
-      this.#renderStartupCommandInvocation(command, input.trigger, outcome?.tone);
-    }
-    if (!suppressTranscript) this.#renderCommandOutcome(outcome?.message, outcome?.tone);
-    await this.#applyCommandEffect(outcome?.effect);
+    if (!suppressTranscript && input.trigger !== "startup")
+      this.#renderCommandOutcome(outcome?.message, outcome?.tone);
     this.#refreshHeaderFromRemoteConnection();
     return outcome;
   }
 
-  #onboardingNavigation(activeStep: number): PlannerNavigation {
-    return {
-      kind: "planner",
-      activeStep,
-      firstNavigableStep: 1,
-      steps: [
-        { label: "Model", complete: activeStep > 0 },
-        { label: "Channels" },
-        { label: "Integrations" },
-        { label: "Review" },
-      ],
-    };
-  }
-
-  /** Runs fresh-agent setup as two cohesive, one-way phases. */
-  async #runInitialAgentOnboarding(title: string): Promise<void> {
-    const journey = {
-      keepSetupFlowOpen: true as const,
-      setupFlowTitle: `Set up ${title}`,
-      trigger: "startup" as const,
-    };
-
-    let activeStep: EveCliSetupStep = "model_provider";
-    const onOnboardingScreen: NonNullable<PromptCommandHandlerContext["onOnboardingScreen"]> = (
-      input,
-    ) => {
-      activeStep = input.screen;
-      this.#onOnboardingStep?.({
-        flow: "onboarding",
-        step: input.screen,
-        registrySelectedCount: input.registrySelectedCount,
-      });
-    };
-    onOnboardingScreen({ screen: "model_provider" });
-    let modelOutcome: PromptCommandOutcome | undefined;
-    try {
-      modelOutcome = await this.#executeExtensionCommand(
-        { type: "extension", name: "model", argument: "" },
-        title,
-        {
-          ...journey,
-          suppressSuccessfulTranscript: true,
-          initialModelStep: "provider",
-          setupFlowNavigation: this.#onboardingNavigation(0),
-          onOnboardingScreen,
-        },
-      );
-    } catch (error) {
-      this.#onOnboardingTerminal?.({ flow: "onboarding", step: activeStep, result: "error" });
-      throw error;
-    }
-    if (modelOutcome?.tone === "error" || modelOutcome?.cancelled === true) {
-      this.#onOnboardingTerminal?.({
-        flow: "onboarding",
-        step: activeStep,
-        result: modelOutcome.cancelled === true ? "cancelled" : "error",
-      });
-      this.#renderer.setupFlow?.end({ preserveDiagnostics: modelOutcome.tone === "error" });
-      return;
-    }
-
-    let addOutcome: PromptCommandOutcome | undefined;
-    activeStep = "registry_channels";
-    const onRegistryScreen: NonNullable<PromptCommandHandlerContext["onOnboardingScreen"]> = (
-      input,
-    ) => {
-      activeStep = input.screen;
-      this.#onOnboardingStep?.({
-        flow: "onboarding",
-        step: input.screen,
-        registrySelectedCount: input.registrySelectedCount,
-      });
-    };
-    try {
-      onRegistryScreen({ screen: "registry_channels" });
-      addOutcome = await this.#executeExtensionCommand(
-        { type: "extension", name: "add", argument: "" },
-        title,
-        {
-          ...journey,
-          onOnboardingScreen: onRegistryScreen,
-          registryPlannerContext: {
-            prefixSteps: [{ label: "Model", complete: true }],
-            reviewMessage: "Review your agent",
-            primaryActionLabel: "Install and finish setup",
-            emptyActionLabel: "Finish setup",
-          },
-        },
-      );
-    } catch (error) {
-      this.#onOnboardingTerminal?.({ flow: "onboarding", step: activeStep, result: "error" });
-      throw error;
-    } finally {
-      if (addOutcome !== undefined) {
-        this.#onOnboardingTerminal?.({
-          flow: "onboarding",
-          step: activeStep,
-          result:
-            addOutcome.cancelled === true
-              ? "cancelled"
-              : addOutcome.tone === "error"
-                ? "error"
-                : "completed",
-        });
-      }
-      // `/add` is the final onboarding phase. Release the shared panel so the
-      // ordinary chat prompt can own input, retaining deploy/setup evidence on failure.
-      this.#renderer.setupFlow?.end({ preserveDiagnostics: addOutcome?.tone === "error" });
-    }
+  async #runInitialAgentOnboarding(title: string): Promise<PromptCommandOutcome | undefined> {
+    this.#onOnboardingStep?.({ flow: "onboarding", step: "model_provider" });
+    const outcome = await this.#executeExtensionCommand(
+      { type: "extension", name: "login", argument: "" },
+      title,
+      { trigger: "startup", initialModelStep: "provider" },
+    );
+    if (!outcome?.cancelled && outcome?.tone !== "error")
+      this.#onOnboardingStep?.({ flow: "onboarding", step: "connection_ready" });
+    this.#onOnboardingTerminal?.({
+      flow: "onboarding",
+      step: "model_provider",
+      result: outcome?.cancelled ? "cancelled" : outcome?.tone === "error" ? "error" : "completed",
+    });
+    return outcome;
   }
 
   #refreshHeaderFromRemoteConnection(): void {
-    if (this.#initialOnboardingActive) return;
+    if (this.#startupActive) return;
     const connection = this.#remoteConnection?.current().connection;
     if (connection?.state !== "ready" || connection.info === this.#agentInfo) return;
     this.#agentInfo = connection.info;
@@ -2023,8 +1938,7 @@ export class EveTUIRunner {
   /**
    * Setup commands can write authored source and env files. Force the local
    * runtime snapshot to catch up, then cache the credential-normalized `/info`
-   * shared by the status bar and setup detector. The Vercel auth probe stays
-   * off the prompt path.
+   * shared by the status bar and setup detector before releasing the panel.
    */
   async #refreshModelAccess(): Promise<void> {
     const appRoot = this.#appRoot;
@@ -2033,7 +1947,10 @@ export class EveTUIRunner {
     await loadDevelopmentEnvironmentFiles(appRoot);
     await this.#runtimeArtifacts?.refreshAfterSourceChange({});
     const refreshedInfo = this.#replaceAgentInfo(await this.#readAgentInfo());
-    void this.#refreshSetupAttention(refreshedInfo);
+    await this.#refreshSetupAttention(refreshedInfo);
+    if (this.#client !== undefined && refreshedInfo === undefined) {
+      throw new Error("Agent information is unavailable after reload.");
+    }
   }
 
   async #readAgentInfo(): Promise<AgentInfoResult | undefined> {
@@ -2164,6 +2081,7 @@ function formatAgentUpdateNotice(
 
 type EveStreamTranslatorInput = {
   events: AsyncIterable<MessageStreamEvent>;
+  onAssistantResponse?: () => void;
   pendingInputRequests: Map<string, InputRequest>;
   turnState: AgentTUITurnState;
   onSubagentCalled?: (event: SubagentCalledStreamEvent) => void;
@@ -2297,6 +2215,7 @@ async function* eveEventsToTUIStream(
         const delta = appended.data.messageDelta;
         if (delta.length === 0) break;
         state.text += delta;
+        if (delta) input.onAssistantResponse?.();
         yield { type: "assistant-delta", id: partGenerationId(base, state.generation), delta };
         break;
       }
@@ -2332,6 +2251,7 @@ async function* eveEventsToTUIStream(
           } else if (message.startsWith(state.text)) {
             const suffix = message.slice(state.text.length);
             if (suffix.length > 0) {
+              if (suffix) input.onAssistantResponse?.();
               yield { type: "assistant-delta", id, delta: suffix };
             }
             state.text = message;

@@ -26,7 +26,7 @@ const MAX_SECRET_BYTES = 2560;
 export class ChatGptInvalidStoredSessionError extends Error {
   constructor() {
     super(
-      "The ChatGPT session in the OS secret store is invalid. Sign in again from /model to replace it.",
+      "The ChatGPT session in the OS secret store is invalid. Sign in again from /login to replace it.",
     );
   }
 }
@@ -231,6 +231,6 @@ function secretStoreError(): Error {
         ? "Allow Windows PowerShell and Credential Manager access in your user session."
         : "Unlock your login keychain and allow credential access.";
   return new Error(
-    `Could not access ChatGPT credentials in the OS secret store. ${recovery} Retry from /model.`,
+    `Could not access ChatGPT credentials in the OS secret store. ${recovery} Retry from /login.`,
   );
 }

@@ -378,7 +378,7 @@ export function renderSubmitRow(
   const content = isCursor
     ? `${UNICODE_ROW_GLYPHS.selectedPointer} ${bold}`
     : `  ${colors.dim(bold)}`;
-  const suffixSeparator = isCursor ? "" : " ";
+  const suffixSeparator = " ";
   return `${renderCursorRow(content, isCursor, colors)}${suffixSeparator}${colors.green(UNICODE_ROW_GLYPHS.success)}`;
 }
 

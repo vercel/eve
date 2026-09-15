@@ -37,9 +37,7 @@ function infoWithRouting(
 describe("BOOT_DETECTIONS", () => {
   it("keeps an unavailable runtime diagnostic-only", async () => {
     const issues = await detectSetupIssues(context());
-    expect(issues).toEqual([
-      { kind: "attention", label: "model provider not linked", command: "/model" },
-    ]);
+    expect(issues).toEqual([{ kind: "attention", label: "connect a model", command: "/login" }]);
   });
 
   it("diagnoses a disconnected gateway", async () => {
@@ -52,8 +50,8 @@ describe("BOOT_DETECTIONS", () => {
     expect(issues).toEqual([
       {
         kind: "attention",
-        label: "model provider not linked",
-        command: "/model",
+        label: "connect a model",
+        command: "/login",
       },
     ]);
   });
@@ -96,9 +94,7 @@ describe("BOOT_DETECTIONS", () => {
   ])("does not infer AI Gateway routing from a local credential alone", async (key, value) => {
     const issues = await detectSetupIssues(context({ env: { [key]: value } }));
 
-    expect(issues).toEqual([
-      { kind: "attention", label: "model provider not linked", command: "/model" },
-    ]);
+    expect(issues).toEqual([{ kind: "attention", label: "connect a model", command: "/login" }]);
   });
 
   it("stays quiet for an external-provider model — gateway linking/credentials don't apply", async () => {
@@ -135,18 +131,18 @@ describe("formatSetupIssuesLine", () => {
   it("mirrors the Claude Code attention-line shape", () => {
     expect(
       formatSetupIssuesLine([
-        { kind: "attention", label: "AI Gateway credentials", command: "/model" },
+        { kind: "attention", label: "AI Gateway credentials", command: "/login" },
       ]),
-    ).toBe("1 setup issue: AI Gateway credentials · /model");
+    ).toBe("1 setup issue: AI Gateway credentials · /login");
   });
 
   it("pluralizes and joins multiple issues", () => {
     expect(
       formatSetupIssuesLine([
-        { kind: "attention", label: "AI Gateway credentials", command: "/model" },
+        { kind: "attention", label: "AI Gateway credentials", command: "/login" },
         { kind: "attention", label: "Channels", command: "/channels" },
       ]),
-    ).toBe("2 setup issues: AI Gateway credentials · /model, Channels · /channels");
+    ).toBe("2 setup issues: AI Gateway credentials · /login, Channels · /channels");
   });
 
   it("formats the logged-out hint, which is not a boot detection", () => {
@@ -154,13 +150,13 @@ describe("formatSetupIssuesLine", () => {
     // outside the cheap-and-local BOOT_DETECTIONS and is rendered by the runner.
     expect(BOOT_DETECTIONS.some((detection) => detection.id === "login")).toBe(false);
     expect(formatSetupIssuesLine([LOGIN_SETUP_ISSUE])).toBe(
-      "1 setup issue: not logged in · /vc:login",
+      "1 setup issue: not logged in · /deploy",
     );
   });
 
   it("formats the CLI-missing hint, which points at its own fix command", () => {
     expect(formatSetupIssuesLine([CLI_MISSING_SETUP_ISSUE])).toBe(
-      "1 setup issue: Vercel CLI not found · /vc:install",
+      "1 setup issue: Vercel CLI not found · /deploy",
     );
   });
 });
@@ -169,8 +165,8 @@ describe("orderedSetupIssues", () => {
   it("puts the auth prerequisite before the boot detections", () => {
     const modelIssue = {
       kind: "attention" as const,
-      label: "model provider not linked",
-      command: "/model" as const,
+      label: "connect a model",
+      command: "/login" as const,
     };
     expect(orderedSetupIssues([modelIssue], CLI_MISSING_SETUP_ISSUE)).toEqual([
       CLI_MISSING_SETUP_ISSUE,
@@ -184,7 +180,7 @@ describe("orderedSetupIssues", () => {
 
   it("returns the boot issues unchanged when no auth prerequisite is unmet", () => {
     const boot = [
-      { kind: "attention" as const, label: "AI Gateway credentials missing", command: "/model" },
+      { kind: "attention" as const, label: "AI Gateway credentials missing", command: "/login" },
     ];
     expect(orderedSetupIssues(boot, undefined)).toEqual(boot);
   });

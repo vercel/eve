@@ -132,7 +132,7 @@ describe("runDeployFlow", () => {
     });
 
     expect(result).toEqual({ kind: "deployed", productionUrl: "https://my-agent.vercel.app" });
-    expect(login).not.toHaveBeenCalled();
+    expect(login).toHaveBeenCalledOnce();
     expect(fake.selectMessages).toEqual([]);
     expect(deployDeps.runVercel).toHaveBeenCalledWith(
       ["deploy", "--prod", "--yes"],
@@ -251,4 +251,46 @@ describe("runDeployFlow", () => {
       expect.objectContaining({ cwd: APP_ROOT, nonInteractive: true }),
     );
   });
+});
+
+it("installs the missing CLI and logs in before deploying an already-linked project", async () => {
+  const login = createLoginFlow();
+  login.mockResolvedValueOnce({ kind: "cli-missing" }).mockResolvedValueOnce({ kind: "logged-in" });
+  const install = vi.fn(async () => ({ kind: "installed" as const }));
+  const deploy = createDeployProjectDeps();
+  await expect(
+    runDeployFlow({
+      appRoot: APP_ROOT,
+      prompter: createFakePrompter().prompter,
+      interactive: true,
+      deps: {
+        detectDeployment: async () => LINKED,
+        runLoginFlow: login,
+        runInstallVercelCliFlow: install,
+        deployProject: deploy,
+      },
+    }),
+  ).resolves.toEqual({ kind: "deployed", productionUrl: "https://my-agent.vercel.app" });
+  expect(install).toHaveBeenCalledOnce();
+  expect(login).toHaveBeenCalledTimes(2);
+  expect(deploy.runVercel.mock.invocationCallOrder[0]).toBeGreaterThan(
+    login.mock.invocationCallOrder[1]!,
+  );
+});
+
+it.each(["failed", "unavailable"] as const)("does not deploy when login is %s", async (kind) => {
+  const deploy = createDeployProjectDeps();
+  await expect(
+    runDeployFlow({
+      appRoot: APP_ROOT,
+      prompter: createFakePrompter().prompter,
+      interactive: true,
+      deps: {
+        detectDeployment: async () => LINKED,
+        runLoginFlow: createLoginFlow({ kind }),
+        deployProject: deploy,
+      },
+    }),
+  ).rejects.toThrow(/retry/i);
+  expect(deploy.runVercel).not.toHaveBeenCalled();
 });

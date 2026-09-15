@@ -54,6 +54,18 @@ interface PackedTuiHarness {
 void (async () => {
   const consumerRoot = await mkdtemp(join(tmpdir(), "eve-packed-install-"));
   try {
+    // A packed-install smoke must not discover the developer's real model accounts.
+    process.env.HOME = consumerRoot;
+    process.env.USERPROFILE = consumerRoot;
+    process.env.XDG_DATA_HOME = join(consumerRoot, "data");
+    for (const key of [
+      "OPENAI_API_KEY",
+      "ANTHROPIC_API_KEY",
+      "AI_GATEWAY_API_KEY",
+      "VERCEL_OIDC_TOKEN",
+      "VERCEL_TOKEN",
+    ])
+      delete process.env[key];
     const tarballPath = join(consumerRoot, "eve.tgz");
 
     // `--config.ignore-scripts=true` skips `prepack` (a full rebuild): the
@@ -119,7 +131,7 @@ void (async () => {
             {
               kind: "attention",
               label: "model provider not linked",
-              command: "/model",
+              command: "/login",
             },
           ],
         },
@@ -131,12 +143,10 @@ void (async () => {
       // The provider picker paints inside the shared onboarding journey before
       // the first prompt only when its module graph loads — the exact surface
       // the oxc-parser regression crashed.
-      await screen.waitForText("Set up Packed install model command", 15_000);
-      await screen.waitForText("Which model provider do you want to use?", 15_000);
-      console.log(theme.muted("[tui-packed-install] /model opened provider setup"));
 
-      input.send("\x1b");
-      await screen.waitForText("Change model", 5_000);
+      await screen.waitForText("Connect a model", 15_000);
+      console.log(theme.muted("[tui-packed-install] /login opened connection setup"));
+
       input.send("\x1b");
       // Initial onboarding suppresses the standalone command transcript; cancelling
       // the required model phase returns directly to chat.

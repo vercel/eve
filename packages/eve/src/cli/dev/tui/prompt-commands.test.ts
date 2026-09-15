@@ -43,16 +43,8 @@ describe("parsePromptCommand", () => {
   });
 
   it("parses the setup commands", () => {
-    expect(parsePromptCommand("/vc:install")).toEqual({
-      type: "extension",
-      name: "vc:install",
-      argument: "",
-    });
-    expect(parsePromptCommand("/vc:login")).toEqual({
-      type: "extension",
-      name: "vc:login",
-      argument: "",
-    });
+    expect(parsePromptCommand("/vc:install")).toBeNull();
+    expect(parsePromptCommand("/vc:login")).toBeNull();
     expect(parsePromptCommand("/deploy")).toEqual({
       type: "extension",
       name: "deploy",
@@ -110,7 +102,11 @@ describe("parsePromptCommand", () => {
     expect(parsePromptCommand("/models")).toBeNull();
     expect(parsePromptCommand("/vercel")).toBeNull();
     expect(parsePromptCommand("/vc")).toBeNull();
-    expect(parsePromptCommand("/login")).toBeNull();
+    expect(parsePromptCommand("/login")).toEqual({
+      type: "extension",
+      name: "login",
+      argument: "",
+    });
     expect(parsePromptCommand("/vc:auth")).toBeNull();
     expect(parsePromptCommand("/channels")).toBeNull();
     expect(parsePromptCommand("tell me about /channels")).toBeNull();
@@ -127,15 +123,15 @@ describe("promptCommandsFor", () => {
     expect(names).toContain("model");
     expect(names).toContain("add");
     expect(names).toContain("deploy");
-    expect(names).toContain("vc:install");
-    expect(names).toContain("vc:login");
+    expect(names).not.toContain("vc:install");
+    expect(names).not.toContain("vc:login");
     expect(names).not.toContain("vc:auth");
   });
 
   it("exposes the Vercel CLI commands for remote sessions", () => {
     const names = promptCommandsFor("remote").map((command) => command.name);
-    expect(names).toContain("vc:install");
-    expect(names).toContain("vc:login");
+    expect(names).not.toContain("vc:install");
+    expect(names).not.toContain("vc:login");
     expect(names).not.toContain("vc:auth");
     expect(names).not.toContain("info");
     expect(names).not.toContain("model");
@@ -151,7 +147,7 @@ describe("promptCommandsFor", () => {
       name: "model",
       argument: "",
     });
-    expect(formatPromptCommandHelp(remote)).toContain("/vc:login");
+    expect(formatPromptCommandHelp(remote)).not.toContain("/vc:login");
     expect(formatPromptCommandHelp(remote)).not.toContain("/vc:auth");
     expect(formatPromptCommandHelp(remote)).not.toContain("/model");
   });

@@ -510,7 +510,7 @@ describe("error block coloring", () => {
       {
         kind: "error",
         title: "Error",
-        body: "HookConflictError: token in use\n╰▶ docs: https://workflow-sdk.dev/err/hook-conflict",
+        body: "HookConflictError: token in use\n╰› docs: https://workflow-sdk.dev/err/hook-conflict",
       },
       80,
       colorTheme,

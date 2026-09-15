@@ -27,6 +27,8 @@ export type EveCliSetupStep =
   | "install_dependencies"
   | "initialize_git"
   | "handoff"
+  | "connection_ready"
+  | "first_response"
   | "model_provider"
   | "model_settings"
   | "registry_channels"
@@ -100,6 +102,8 @@ function setupFailureCode(step: EveCliSetupStep): EveCliSetupFailureCode {
       return "git_initialization";
     case "handoff":
       return "handoff";
+    case "connection_ready":
+    case "first_response":
     case "model_provider":
     case "model_settings":
     case "registry_channels":

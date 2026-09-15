@@ -211,6 +211,11 @@
       "eve-source": "./dist/src/public/workflow-modules.d.ts",
       "types": "./dist/src/public/workflow-modules.d.ts"
     },
+    "./models/anthropic": {
+      "types": "./dist/src/public/models/anthropic/index.d.ts",
+      "import": "./dist/src/public/models/anthropic/index.js",
+      "default": "./dist/src/public/models/anthropic/index.js"
+    },
     "./models/openai": {
       "types": "./dist/src/public/models/openai/index.d.ts",
       "import": "./dist/src/public/models/openai/index.js",

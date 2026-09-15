@@ -444,9 +444,8 @@ function paintCommands(line: string, theme: Theme): string {
 
 /**
  * A slash command invocation under the user gutter. Automatic commands use
- * the same row so their result can follow it. The `❯`/`›` glyphs remain
- * exclusive to live input because the TUI tests use `›` (the empty prompt's
- * quiet mark) to detect a ready prompt.
+ * the same row so their result can follow it. The `❯` glyph remains
+ * exclusive to live input because the TUI tests use `❯` to detect a ready prompt.
  */
 function renderCommand(block: Block, theme: Theme): string[] {
   const c = theme.colors;
