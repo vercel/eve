@@ -58,7 +58,11 @@ export async function nextTurnDelivery(input: {
       return routed;
     }
 
-    const wasIdle = queue.pendingCount === 0 && !inbox.hasPending();
+    // A delivery may already be in the pump queue by the time the owner exits
+    // its committed waiting step. It is still an idle arrival when no earlier
+    // input was admitted; the post-read `hasPending()` check below rejects a
+    // burst with later buffered input.
+    const wasIdle = queue.pendingCount === 0;
     const payload = await inbox.next();
     if (payload === undefined) return { kind: "closed" };
 

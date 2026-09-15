@@ -6,7 +6,9 @@ import {
   CHECKS,
   childActivations,
   checkForTask,
+  completedTaskIds,
   eventsForSession,
+  modelStepCount,
   requireOriginalTasksHealthy,
   toolEvidence,
   type Check,
@@ -17,7 +19,6 @@ export const QUESTION =
   "Alice is packing seven boxes with eight jars in each. How many jars is that? Reply with just the number.";
 
 const RESULTS = { first: "oranges", second: "pears", third: "apples" } as const;
-const COMPLETION = /Background task (task_[a-z0-9]+) \([^)]+\) is completed\./giu;
 
 interface Child {
   readonly check: Check;
@@ -297,8 +298,7 @@ export function completeReport() {
 }
 
 export function modelSteps(turns: readonly EveEvalTurn[]): number {
-  return turns.flatMap((turn) => turn.events).filter((event) => event.type === "step.started")
-    .length;
+  return modelStepCount(turns);
 }
 
 export function completedAt(turn: EveEvalTurn): number {
@@ -410,14 +410,6 @@ async function nextParentTurn(t: EveEvalContext, run: ReportingRun): Promise<Eve
 function assertModel(turn: EveEvalTurn, modelId: string) {
   turn.eventsSatisfy("every model step uses the real CI model", (events) =>
     events.every((event) => event.type !== "step.started" || event.data.modelId === modelId),
-  );
-}
-
-function completedTaskIds(turn: EveEvalTurn): string[] {
-  return turn.events.flatMap((event) =>
-    event.type === "message.received"
-      ? [...event.data.message.matchAll(COMPLETION)].map((match) => match[1]!)
-      : [],
   );
 }
 

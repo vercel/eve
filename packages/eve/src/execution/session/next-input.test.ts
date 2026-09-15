@@ -170,20 +170,27 @@ describe("nextTurnDelivery", () => {
     });
   });
 
-  it.each([false, true])(
-    "only considers a fresh idle delivery for handoff (buffered: %s)",
-    async (buffered) => {
-      const input = batchingInputFor([]);
-      const inbox = createMockInbox([messageRead("next turn")]);
-      if (!buffered) inbox.hasPending = () => false;
+  it("considers a sole pumped delivery an idle handoff candidate", async () => {
+    const input = batchingInputFor([]);
+    const inbox = createMockInbox([messageRead("next turn")]);
 
-      await expect(nextTurnDelivery({ ...input, inbox: inbox })).resolves.toMatchObject({
-        kind: "turn",
-        handoffEligible: !buffered,
-        delivery: { payloads: [{ message: "next turn" }] },
-      });
-    },
-  );
+    await expect(nextTurnDelivery({ ...input, inbox })).resolves.toMatchObject({
+      kind: "turn",
+      handoffEligible: true,
+      delivery: { payloads: [{ message: "next turn" }] },
+    });
+  });
+
+  it("does not hand off the first delivery in a buffered burst", async () => {
+    const input = batchingInputFor([]);
+    const inbox = createMockInbox([messageRead("first"), messageRead("second")]);
+
+    await expect(nextTurnDelivery({ ...input, inbox })).resolves.toMatchObject({
+      kind: "turn",
+      handoffEligible: false,
+      delivery: { payloads: [{ message: "first" }] },
+    });
+  });
 
   it("keeps different principals in FIFO turns without regrouping later messages", async () => {
     const alice = slackAuth("alice");

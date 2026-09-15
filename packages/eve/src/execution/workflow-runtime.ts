@@ -69,7 +69,10 @@ import {
 import { walkCauseChain } from "#shared/errors.js";
 import { buildInvocationAttributes } from "#internal/invocation/metadata.js";
 import { isAgentTraceContext } from "#tracing/agent-trace-context.js";
-import { sessionCommandHookToken } from "#execution/session-inbox/address.js";
+import {
+  sessionCommandHookToken,
+  sessionInboxHookToken,
+} from "#execution/session-inbox/address.js";
 import {
   AcceptedSessionIdentityError,
   resolveSessionInbox,
@@ -404,7 +407,14 @@ async function dispatchWorkflowCommand<TCommand extends SessionCommand>(
   }
 
   if (command.kind === "reset") {
-    await waitForCommandHookRelease(sessionCommandHookToken(hook.sessionId), hook.runId);
+    const addressedToken =
+      typeof token === "string" ? token : sessionCommandHookToken(token.sessionId);
+    const tokens = new Set([sessionCommandHookToken(hook.sessionId), addressedToken]);
+    await Promise.all(
+      [...tokens].map((logicalToken) =>
+        waitForHookRelease(sessionInboxHookToken(logicalToken), hook.runId),
+      ),
+    );
   }
 
   return activeCommandResult(command, hook.sessionId);
@@ -480,19 +490,19 @@ export async function waitForCommandHookOwner(token: string): Promise<WorkflowHo
   }
 }
 
-async function waitForCommandHookRelease(token: string, sessionId: string): Promise<void> {
+async function waitForHookRelease(token: string, ownerRunId: string): Promise<void> {
   const deadline = Date.now() + COMMAND_HOOK_READY_TIMEOUT_MS;
   while (true) {
     try {
       const owner = normalizeWorkflowHook(await getHookByToken(token));
-      if (owner.runId !== sessionId) return;
+      if (owner.runId !== ownerRunId) return;
     } catch (error) {
       if (HookNotFoundError.is(error)) return;
       throw error;
     }
 
     if (Date.now() >= deadline) {
-      throw new Error(`Timed out waiting for session "${sessionId}" to release its command inbox.`);
+      throw new Error(`Timed out waiting for session "${ownerRunId}" to release inbox "${token}".`);
     }
     await new Promise<void>((resolve) => setTimeout(resolve, 20));
   }

@@ -397,9 +397,9 @@ describe("createWorkflowRuntime command dispatch", () => {
   it("waits for reset to release the stable command inbox", async () => {
     const { HookNotFoundError } = await import("#compiled/@workflow/errors/index.js");
     resumeHookMock.mockResolvedValue(currentSessionHook("eve:token", "session-1"));
-    getHookByTokenMock.mockRejectedValue(
-      new HookNotFoundError(sessionCommandHookToken("session-1")),
-    );
+    getHookByTokenMock.mockImplementation(async (token: string) => {
+      throw new HookNotFoundError(token);
+    });
 
     await expect(
       buildRuntime().dispatchContinuation({
@@ -411,7 +411,10 @@ describe("createWorkflowRuntime command dispatch", () => {
       kind: "reset",
       reason: "User requested /new",
     });
-    expect(getHookByTokenMock).toHaveBeenCalledWith(sessionCommandHookToken("session-1"));
+    expect(getHookByTokenMock).toHaveBeenCalledWith(
+      sessionInboxHookToken(sessionCommandHookToken("session-1")),
+    );
+    expect(getHookByTokenMock).toHaveBeenCalledWith(sessionInboxHookToken("eve:token"));
   });
 });
 

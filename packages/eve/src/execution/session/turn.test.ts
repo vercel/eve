@@ -86,6 +86,52 @@ describe("SessionExecution background task checkpoints", () => {
     expect(cancelDescendantTurnsStep).toHaveBeenCalledWith({ serializedContext: {}, sessionState });
   });
 
+  it("consumes the cancelling command while retaining accepted follow-ups", async () => {
+    const sessionState = state("");
+    const queue = new SessionInputQueue();
+    const followUp: DeliverHookPayload = {
+      kind: "deliver",
+      payloads: [{ message: "Continue after cancellation." }],
+      turnPolicy: "queue",
+    };
+    let interrupt: ((payload: SessionInboxPayload) => void) | undefined;
+    const inbox: SessionInbox = {
+      claimedTokens: [],
+      claimSessionHook: vi.fn(),
+      claimSessionHooks: vi.fn(),
+      drain: vi
+        .fn()
+        .mockReturnValueOnce([followUp, { kind: "cancel" }])
+        .mockReturnValue([]),
+      hasPending: vi.fn(() => false),
+      next: vi.fn(() => new Promise<never>(() => {})),
+      onInterrupt: vi.fn((handler) => {
+        interrupt = handler;
+        return () => {};
+      }),
+      restore: vi.fn(),
+    };
+    const execution = createExecution({ inbox, queue, sessionState });
+    vi.mocked(turnStep).mockImplementationOnce(async (input) => {
+      interrupt?.({ kind: "cancel" });
+      await vi.waitFor(() => expect(input.abortSignal?.aborted).toBe(true));
+      return {
+        action: "cancelled",
+        serializedContext: input.serializedContext,
+        sessionState: input.sessionState,
+      };
+    });
+
+    await expect(
+      execution.runTurn({
+        delivery: { kind: "deliver", payloads: [{ message: "Start the work." }] },
+      }),
+    ).resolves.toEqual({ cancelled: true, kind: "park" });
+
+    expect(inbox.restore).not.toHaveBeenCalled();
+    expect(queue.takeNext(new Map())).toMatchObject({ delivery: followUp, kind: "turn" });
+  });
+
   it("steers a continuing turn with user input while retaining background notifications for cohort routing", async () => {
     const background: DeliverHookPayload = {
       kind: "deliver",

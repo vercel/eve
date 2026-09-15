@@ -295,13 +295,7 @@ class ActiveTurn {
   /** Admits everything the pump accepted while the last step ran. */
   async admitBoundary(): Promise<void> {
     const pending = this.input.inbox.drain();
-    for (const [index, payload] of pending.entries()) {
-      if (this.signal.aborted) {
-        this.input.inbox.restore(pending.slice(index));
-        return;
-      }
-      await this.admit(payload);
-    }
+    for (const payload of pending) await this.admit(payload);
   }
 
   /** Steering admitted during this turn, routed to children first and coalesced. */

@@ -125,12 +125,12 @@ export async function invokeAgent(
         await resumeHookStep(owner.inbox, {
           kind: "request",
           from: run,
-          // The owner resumes this hook directly, so it needs the physical token.
-          replyTo: sessionInboxHookToken(
+          // Current session inboxes use their physical token. A remote child's
+          // create-once operation hook is already a narrowed reply capability.
+          replyTo:
             reply.childSessionInbox?.sessionId === reply.childSessionId
-              ? sessionCommandHookToken(reply.childSessionInbox.sessionId)
+              ? sessionInboxHookToken(sessionCommandHookToken(reply.childSessionInbox.sessionId))
               : reply.childContinuationToken,
-          ),
           request: {
             kind: "input-batch",
             requests: reply.event.requests,
