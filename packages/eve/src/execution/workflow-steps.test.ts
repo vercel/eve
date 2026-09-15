@@ -62,7 +62,29 @@ import { readLatestTaskView, sendTaskInboundPayload } from "#execution/tasks/par
 import { recordTaskInputRequestStep } from "#execution/tasks/parent/hitl-proxy-steps.js";
 import { emitTerminalSessionFailureStep } from "#execution/terminal-session-failure-step.js";
 import { resolveEffectiveOutputSchema } from "#execution/effective-output-schema.js";
-import { turnStep } from "#execution/workflow-steps.js";
+import { turnStep as runTurnStep } from "#execution/workflow-steps.js";
+import type { TurnStepInput, TurnStepPayload } from "#execution/turn-step.js";
+import type { DeliverHookPayload } from "#channel/types.js";
+import type { RuntimeActionResult } from "#shared/action-types.js";
+
+type LegacyStepPayload =
+  | DeliverHookPayload
+  | { readonly kind: "clear" | "compact" }
+  | { readonly kind: "runtime-action-result"; readonly results: readonly RuntimeActionResult[] };
+
+/** Adapts the older single-kind payload shape these fixtures were written against. */
+function turnStep(input: Omit<TurnStepInput, "input"> & { readonly input?: LegacyStepPayload }) {
+  let payload: TurnStepPayload | undefined;
+  if (input.input !== undefined) {
+    payload =
+      input.input.kind === "deliver"
+        ? { delivery: input.input }
+        : input.input.kind === "runtime-action-result"
+          ? { runtimeResults: { results: input.input.results } }
+          : { control: input.input.kind };
+  }
+  return runTurnStep({ ...input, input: payload });
+}
 import { routeProxiedDeliverStep } from "#execution/proxied-deliver-step.js";
 
 const bindSessionInstrumentationSpy = vi.hoisted(() => vi.fn());
@@ -3049,7 +3071,7 @@ describe("turnStep", () => {
       hasPendingAuthorization: false,
     });
     if (result.action === "park") {
-      expect(result.authorizationNames).toBeUndefined();
+      expect(result.authorizationAttemptIds).toBeUndefined();
     }
     const persistedSession = vi.mocked(createDurableSessionState).mock.calls.at(-1)?.[0].session;
     expect(persistedSession?.state?.retained).toBe("yes");

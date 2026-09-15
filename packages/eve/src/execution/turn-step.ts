@@ -1,4 +1,4 @@
-import type { HookPayload, RuntimeActionResultHookPayload } from "#channel/types.js";
+import type { DeliverHookPayload } from "#channel/types.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import type { SettledTurn, StepResult } from "#harness/types.js";
 import type { RuntimeActionResult } from "#shared/action-types.js";
@@ -7,13 +7,19 @@ import type { TokenUsage } from "#shared/token-usage.js";
 /** Trusted runtime-action results collected by the session owner. */
 export interface RuntimeActionResultStepInput {
   readonly acceptedAtMsByCallId?: Readonly<Record<string, number>>;
-  readonly kind: "runtime-action-result";
   readonly results: readonly RuntimeActionResult[];
 }
 
-export type TurnStepPayload =
-  | Exclude<HookPayload, RuntimeActionResultHookPayload>
-  | RuntimeActionResultStepInput;
+/**
+ * Everything one turn step may consume. A step can carry a delivery and a
+ * set of runtime results together: steering accepted while a blocking action
+ * was in flight is appended ahead of that action's result in the same step.
+ */
+export interface TurnStepPayload {
+  readonly control?: "clear" | "compact";
+  readonly delivery?: DeliverHookPayload;
+  readonly runtimeResults?: RuntimeActionResultStepInput;
+}
 
 /** Input for one atomic, session-owner-executed turn step. */
 export interface TurnStepInput {
@@ -46,7 +52,6 @@ export type DurableStepResult = (
   | {
       readonly action: "park";
       readonly authorizationAttemptIds?: readonly string[];
-      readonly authorizationNames?: readonly string[];
       readonly hasPendingAuthorization: boolean;
       readonly hasPendingInputBatch: boolean;
       readonly pendingCoordinationCallIds?: readonly string[];
@@ -66,7 +71,6 @@ export type TurnOutcome =
     }
   | {
       readonly authorizationAttemptIds?: readonly string[];
-      readonly authorizationNames?: readonly string[];
       readonly cancelled?: true;
       readonly kind: "park";
       readonly settled?: SettledTurn;

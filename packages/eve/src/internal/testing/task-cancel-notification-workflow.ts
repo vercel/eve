@@ -68,10 +68,10 @@ export async function taskCancelNotificationWorkflow() {
     await inbox.claimSessionHook(sessionCommandHookToken(sessionId));
     const entry = await startSlowCancelledTaskStep({ sessionId });
     const cancelled = await cancelSlowTaskFromParentStep({ entry, sessionId });
-    const lease = await inbox.read();
-    if (lease === undefined) throw new Error("Session inbox closed before task cancellation.");
-    lease.consume();
-    return { ...cancelled, notification: lease.value };
+    const notification = await inbox.next();
+    if (notification === undefined)
+      throw new Error("Session inbox closed before task cancellation.");
+    return { ...cancelled, notification };
   } finally {
     await inbox.dispose();
   }

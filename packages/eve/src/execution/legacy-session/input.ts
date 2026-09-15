@@ -1,5 +1,4 @@
-import type { TurnStepPayload } from "#execution/turn-step.js";
-import type { SessionCapabilities } from "#channel/types.js";
+import type { DeliverHookPayload, SessionCapabilities } from "#channel/types.js";
 import type { AgentWorkflowRetentionDefinition } from "#shared/agent-definition.js";
 import type { RunMode } from "#shared/run-mode.js";
 import { isObject } from "#shared/guards.js";
@@ -12,7 +11,8 @@ export interface LegacyTurnInput {
   readonly parentWritable: WritableStream<Uint8Array>;
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: Record<string, unknown> & { sessionId: string };
-  readonly delivery: TurnStepPayload | undefined;
+  /** Only an uncommitted `deliver` continues as the first turn; controls and results were the driver's. */
+  readonly delivery: DeliverHookPayload | undefined;
   readonly inputCommitted: boolean;
 }
 
@@ -56,6 +56,10 @@ export function readLegacyTurnInput(value: unknown): LegacyTurnInput {
       (delivery.kind === "deliver" && !Array.isArray(delivery.payloads)))
   )
     throw new Error("Unsupported legacy turn delivery.");
+  const uncommittedDelivery =
+    committed === undefined && isObject(delivery) && delivery.kind === "deliver"
+      ? (delivery as DeliverHookPayload | Record<string, unknown>)
+      : undefined;
   return {
     completionToken: value.completionToken,
     mode: value.mode,
@@ -64,10 +68,7 @@ export function readLegacyTurnInput(value: unknown): LegacyTurnInput {
     parentWritable: step.parentWritable as WritableStream<Uint8Array>,
     serializedContext: context,
     sessionState: state as LegacyTurnInput["sessionState"],
-    delivery:
-      committed !== undefined || (isObject(delivery) && delivery.kind === "runtime-action-result")
-        ? undefined
-        : (delivery as LegacyTurnInput["delivery"]),
+    delivery: uncommittedDelivery as DeliverHookPayload | undefined,
     inputCommitted: committed !== undefined,
   };
 }

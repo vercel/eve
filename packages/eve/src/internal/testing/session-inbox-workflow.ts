@@ -16,20 +16,19 @@ export async function sessionCommandInboxWorkflow(input: {
   try {
     await inbox.claimSessionHook(sessionCommandHookToken(workflowRunId));
     await inbox.claimSessionHook(input.token);
-    const pending = inbox.read();
+    const pending = inbox.next();
     if (input.nextToken !== undefined) {
       await inbox.claimSessionHook(input.nextToken);
     }
 
     const messages: string[] = [];
-    let lease = await pending;
+    let payload = await pending;
     while (true) {
-      if (lease === undefined) return messages;
-      lease.consume();
-      if (lease.value.kind === "reset") return messages;
-      collectMessage(lease.value, messages);
+      if (payload === undefined) return messages;
+      if (payload.kind === "reset") return messages;
+      collectMessage(payload, messages);
       if (messages.length >= (input.messageCount ?? 2)) return messages;
-      lease = await inbox.read();
+      payload = await inbox.next();
     }
   } finally {
     await inbox.dispose();

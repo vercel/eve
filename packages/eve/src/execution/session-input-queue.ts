@@ -1,4 +1,4 @@
-import type { DeliverHookPayload } from "#channel/types.js";
+import type { DeliverHookPayload, DeliverPayload } from "#channel/types.js";
 import { coalesceDeliveries } from "#harness/messages.js";
 import { jsonValuesEqual } from "#shared/json.js";
 import type { getSessionTaskCohorts } from "#tasks/session-task-cohorts.js";
@@ -22,7 +22,14 @@ interface QueuedControl {
   readonly sequence: number;
 }
 
-type QueuedSessionInput = QueuedDelivery | QueuedControl;
+interface QueuedAuthorization {
+  readonly attemptId: string;
+  readonly kind: "authorization";
+  readonly payload: DeliverPayload;
+  readonly sequence: number;
+}
+
+type QueuedSessionInput = QueuedDelivery | QueuedControl | QueuedAuthorization;
 
 export interface TurnSelection {
   readonly delivery: DeliverHookPayload;
@@ -39,28 +46,71 @@ export interface TurnSelection {
 
 export type SessionInputSelection =
   | TurnSelection
-  | { readonly control: SessionControl; readonly kind: "control" };
+  | { readonly control: SessionControl; readonly kind: "control" }
+  | { readonly kind: "authorization-resume"; readonly payloads: readonly DeliverPayload[] };
 
 /**
- * Ordered, admitted session input. Entries are private; callers receive typed
- * admission and selection values instead of mutating transport-shaped arrays.
+ * Ordered, admitted session input, plus the idempotency and cancellation
+ * facts for task deliveries this owner has seen. Entries are private; callers
+ * receive typed admission and selection values. Everything here is rebuilt
+ * deterministically on replay, and a successor never inherits it because
+ * handoff requires every indexed task to be terminal.
  */
 export class SessionInputQueue {
   private readonly entries: QueuedSessionInput[] = [];
+  private readonly cancelledTaskIds = new Set<string>();
+  private readonly seenTaskDeliveryIds = new Set<string>();
   private nextSequence = 0;
 
   get pendingCount(): number {
     return this.entries.length;
   }
 
-  enqueueDelivery(delivery: DeliverHookPayload): DeliveryAdmission {
+  /** Admits a delivery unless it repeats or belongs to a cancelled task. */
+  enqueueDelivery(delivery: DeliverHookPayload): DeliveryAdmission | undefined {
+    const deliveryId = taskDeliveryId(delivery);
+    if (deliveryId !== undefined) {
+      if (this.seenTaskDeliveryIds.has(deliveryId) || this.isCancelledTaskDelivery(deliveryId)) {
+        return undefined;
+      }
+      this.seenTaskDeliveryIds.add(deliveryId);
+    }
     const admission = { delivery, sequence: this.nextSequence++ };
     this.entries.push({ ...admission, kind: "delivery" });
     return admission;
   }
 
+  /** A caller's own task id counts as seen so its echo is not admitted twice. */
+  rememberTask(taskId: string): void {
+    this.seenTaskDeliveryIds.add(taskId);
+  }
+
+  isTaskCancelled(taskId: string): boolean {
+    return this.cancelledTaskIds.has(taskId);
+  }
+
   enqueueControl(control: SessionControl): void {
     this.entries.push({ control, kind: "control", sequence: this.nextSequence++ });
+  }
+
+  /** Keeps one payload per authorization attempt; a repeated callback for the same attempt is dropped. */
+  enqueueAuthorization(payloads: readonly DeliverPayload[]): void {
+    for (const payload of payloads) {
+      const attemptId = authorizationAttemptId(payload);
+      if (attemptId === undefined) continue;
+      if (
+        this.entries.some(
+          (entry) => entry.kind === "authorization" && entry.attemptId === attemptId,
+        )
+      )
+        continue;
+      this.entries.push({
+        attemptId,
+        kind: "authorization",
+        payload,
+        sequence: this.nextSequence++,
+      });
+    }
   }
 
   delivery(sequence: number): DeliverHookPayload | undefined {
@@ -83,10 +133,12 @@ export class SessionInputQueue {
     this.entries[index] = { delivery, kind: "delivery", sequence };
   }
 
-  discardTask(taskId: string): void {
+  /** Drops queued notifications from a cancelled task and refuses later ones. */
+  cancelTask(taskId: string): void {
+    this.cancelledTaskIds.add(taskId);
     this.retain(
       (entry) =>
-        entry.kind === "control" ||
+        entry.kind !== "delivery" ||
         !isTaskDelivery(entry.delivery, (id) => id === taskId || id.startsWith(`${taskId}:`)),
     );
   }
@@ -104,7 +156,7 @@ export class SessionInputQueue {
         (entry.delivery.caller === undefined || entry.delivery.caller.callId === callerCallId),
     );
     if (steering.length === 0) return undefined;
-    this.retain((entry) => entry.kind === "control" || !steering.includes(entry));
+    this.retain((entry) => entry.kind !== "delivery" || !steering.includes(entry));
     return {
       delivery: combine(steering),
       handoffEligible: false,
@@ -117,25 +169,39 @@ export class SessionInputQueue {
     cohorts: TaskCohorts,
     options?: {
       readonly deferDeliveries?: boolean;
+      /**
+       * Attempt ids of the open authorization challenge. Callbacks for other
+       * attempts are stale and dropped; once every expected attempt has
+       * reported, the collected payloads resume the challenge ahead of
+       * ordinary input.
+       */
+      readonly expectedAttemptIds?: ReadonlySet<string>;
       /** Sequence of a delivery admitted while nothing else was pending. */
       readonly freshSequence?: number;
-      readonly isTaskCancelled?: (taskId: string) => boolean;
     },
   ): SessionInputSelection | undefined {
-    const index = this.nextActionableIndex(
-      cohorts,
-      options?.deferDeliveries === true,
-      options?.isTaskCancelled,
-    );
+    const expected = options?.expectedAttemptIds ?? new Set<string>();
+    this.retain((entry) => entry.kind !== "authorization" || expected.has(entry.attemptId));
+    if (expected.size > 0) {
+      const collected = new Map(
+        this.entries.flatMap((entry) =>
+          entry.kind === "authorization" ? [[entry.attemptId, entry.payload] as const] : [],
+        ),
+      );
+      if ([...expected].every((attemptId) => collected.has(attemptId))) {
+        this.retain((entry) => entry.kind !== "authorization");
+        return {
+          kind: "authorization-resume",
+          payloads: [...expected].map((attemptId) => collected.get(attemptId)!),
+        };
+      }
+    }
+    const index = this.nextActionableIndex(cohorts, options?.deferDeliveries === true);
     if (index < 0) return undefined;
     return this.takeSelectionAt(index, cohorts, options?.freshSequence);
   }
 
-  private nextActionableIndex(
-    cohorts: TaskCohorts,
-    deferDeliveries: boolean,
-    isTaskCancelled: ((taskId: string) => boolean) | undefined,
-  ): number {
+  private nextActionableIndex(cohorts: TaskCohorts, deferDeliveries: boolean): number {
     const deliveries = this.entries.filter(
       (entry): entry is QueuedDelivery => entry.kind === "delivery",
     );
@@ -147,13 +213,13 @@ export class SessionInputQueue {
     );
     const pendingCohorts = new Set<string>();
     for (const [taskId, cohort] of cohorts) {
-      if (!cohort.settled && !completed.has(taskId) && isTaskCancelled?.(taskId) !== true) {
+      if (!cohort.settled && !completed.has(taskId) && !this.cancelledTaskIds.has(taskId)) {
         pendingCohorts.add(cohort.cohortId);
       }
     }
     return this.entries.findIndex((entry) => {
       if (entry.kind === "control") return true;
-      if (deferDeliveries) return false;
+      if (entry.kind === "authorization" || deferDeliveries) return false;
       const cohort = completionCohort(entry.delivery, cohorts);
       return cohort === undefined || !pendingCohorts.has(cohort);
     });
@@ -165,9 +231,10 @@ export class SessionInputQueue {
     freshSequence: number | undefined,
   ): SessionInputSelection {
     const selected = this.entries[index]!;
-    if (selected.kind === "control") {
+    if (selected.kind !== "delivery") {
       this.entries.splice(index, 1);
-      return { control: selected.control, kind: "control" };
+      if (selected.kind === "control") return { control: selected.control, kind: "control" };
+      return { kind: "authorization-resume", payloads: [selected.payload] };
     }
     const readyCohort = completionCohort(selected.delivery, cohorts);
     if (readyCohort !== undefined) {
@@ -179,13 +246,13 @@ export class SessionInputQueue {
         (entry, position) =>
           position > index &&
           position < lastSibling &&
-          (entry.kind === "control" || completionCohort(entry.delivery, cohorts) === undefined),
+          (entry.kind !== "delivery" || completionCohort(entry.delivery, cohorts) === undefined),
       );
       if (boundary >= 0) return this.takeSelectionAt(boundary, cohorts, freshSequence);
     }
 
     const first = this.entries.splice(index, 1)[0]!;
-    if (first.kind === "control") return { control: first.control, kind: "control" };
+    if (first.kind !== "delivery") throw new Error("Selected a non-delivery entry as a turn.");
     const turnEntries = [first];
     const cohort = completionCohort(first.delivery, cohorts);
     if (cohort !== undefined) {
@@ -194,8 +261,9 @@ export class SessionInputQueue {
           entry.kind === "delivery" && completionCohort(entry.delivery, cohorts) === cohort,
       );
       turnEntries.push(...siblings);
-      this.retain((entry) =>
-        entry.kind === "control" ? true : completionCohort(entry.delivery, cohorts) !== cohort,
+      this.retain(
+        (entry) =>
+          entry.kind !== "delivery" || completionCohort(entry.delivery, cohorts) !== cohort,
       );
     } else {
       const authenticated =
@@ -233,6 +301,13 @@ export class SessionInputQueue {
     };
   }
 
+  private isCancelledTaskDelivery(deliveryId: string): boolean {
+    for (const taskId of this.cancelledTaskIds) {
+      if (deliveryId === taskId || deliveryId.startsWith(`${taskId}:`)) return true;
+    }
+    return false;
+  }
+
   private retain(predicate: (entry: QueuedSessionInput) => boolean): void {
     const kept = this.entries.filter(predicate);
     this.entries.splice(0, this.entries.length, ...kept);
@@ -243,6 +318,11 @@ function combine(entries: readonly DeliveryAdmission[]): DeliverHookPayload {
   return entries.length === 1
     ? entries[0]!.delivery
     : coalesceDeliveries(entries.map(({ delivery }) => delivery));
+}
+
+function authorizationAttemptId(payload: DeliverPayload): string | undefined {
+  const callback = payload["authorizationCallback"] as { readonly attemptId?: unknown } | undefined;
+  return typeof callback?.attemptId === "string" ? callback.attemptId : undefined;
 }
 
 function taskDeliveryId(delivery: DeliverHookPayload): string | undefined {

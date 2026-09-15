@@ -1,5 +1,4 @@
 import { defaultDeliverResult } from "#channel/adapter.js";
-import type { DeliverHookPayload } from "#channel/types.js";
 import { contextStorage } from "#context/container.js";
 import {
   drainDynamicInstructionUserMessages,
@@ -98,12 +97,15 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
   return runSessionStep(rawInput);
 }
 
-async function runSessionStep(rawInput: TurnStepInput): Promise<DurableStepResult> {
-  let input = rawInput;
+async function runSessionStep(input: TurnStepInput): Promise<DurableStepResult> {
+  // The delivery as accepted, before authorization callbacks are matched out of it.
+  const rawDelivery = input.input?.delivery;
+  let delivery = rawDelivery;
+  const runtimeResults = input.input?.runtimeResults;
 
   let durableSession = readDurableSession(input.sessionState);
   const ctx = await deserializeContext(input.serializedContext);
-  if (rawInput.input?.kind === "deliver") {
+  if (rawDelivery !== undefined) {
     ctx.set(TurnTaskDeliveryKey, "none");
   }
   const adapter = ctx.require(ChannelKey);
@@ -124,12 +126,12 @@ async function runSessionStep(rawInput: TurnStepInput): Promise<DurableStepResul
 
   const pendingAuth = getPendingAuthorization(durableSession.state);
   let completedAuths: ReturnType<typeof matchAuthorizationCallbacks>["matches"] | undefined;
-  if (pendingAuth && input.input?.kind === "deliver") {
+  if (pendingAuth && delivery !== undefined) {
     const { matches, remainingPayloads } = matchAuthorizationCallbacks(
       pendingAuth,
-      input.input.payloads,
+      delivery.payloads,
     );
-    input = { ...input, input: { ...input.input, payloads: remainingPayloads } };
+    delivery = { ...delivery, payloads: remainingPayloads };
     if (matches.length > 0) {
       const matchedAttemptIds = activityCohort.restoreAuthorizationActivity({
         ctx,
@@ -143,18 +145,16 @@ async function runSessionStep(rawInput: TurnStepInput): Promise<DurableStepResul
         state: clearPendingAuthorization(durableSession.state, matchedAttemptIds),
       };
       completedAuths = matches;
-      if (remainingPayloads.length === 0) {
-        input = { ...input, input: undefined };
-      }
+      if (remainingPayloads.length === 0) delivery = undefined;
     }
   }
 
   // Apply deliver-time auth ferried via `resumeHook` (initial-turn
   // input has no auth; it was seeded by buildRunContext).
-  if (input.input?.kind === "deliver" && input.input.auth !== undefined) {
-    ctx.set(AuthKey, input.input.auth ?? null);
+  if (delivery?.auth !== undefined) {
+    ctx.set(AuthKey, delivery.auth ?? null);
   }
-  const backgroundTaskDelivery = getBackgroundTaskDelivery(input.input);
+  const backgroundTaskDelivery = getBackgroundTaskDelivery(delivery);
   const initialSession = hydrateDurableSession({
     compactionOverrides: {
       thresholdPercent: effectiveAgent.thresholdPercent,
@@ -171,11 +171,8 @@ async function runSessionStep(rawInput: TurnStepInput): Promise<DurableStepResul
   });
   const initialEmissionState = getHarnessEmissionState(initialSession.state);
 
-  if (
-    rawInput.input?.kind === "deliver" &&
-    rawInput.input.payloads.some((payload) => payload.message !== undefined)
-  ) {
-    const ids = rawInput.input.deliveryMetadata?.map((entry) => entry.deliveryId) ?? [];
+  if (rawDelivery?.payloads.some((payload) => payload.message !== undefined)) {
+    const ids = rawDelivery.deliveryMetadata?.map((entry) => entry.deliveryId) ?? [];
     ctx.set(
       TurnDeliveryIdsKey,
       initialEmissionState.turnId
@@ -186,12 +183,12 @@ async function runSessionStep(rawInput: TurnStepInput): Promise<DurableStepResul
     ctx.set(TurnDeliveryIdsKey, [ctx.require(ChannelDeliveryKey).deliveryId]);
   }
 
-  if (rawInput.input?.kind === "deliver") {
+  if (rawDelivery !== undefined) {
     await contextStorage.run(ctx, () =>
       instrumentation?.instrumentChannelDelivery({
         agentName: bundle.turnAgent.id,
         ctx,
-        delivery: rawInput.input as DeliverHookPayload,
+        delivery: rawDelivery,
         rootSessionId: initialSession.rootSessionId ?? initialSession.sessionId,
         sequence: initialEmissionState.sequence,
         sessionId: initialSession.sessionId,
@@ -225,13 +222,13 @@ async function runSessionStep(rawInput: TurnStepInput): Promise<DurableStepResul
   });
   const { adapterCtx, dynamicConnections, effectiveNode, handleEvent } = sink;
   try {
-    // Run the adapter's deliver hook for each queued payload and
-    // coalesce the resulting StepInput values.
+    // Run the adapter's deliver hook for each queued payload and coalesce
+    // the resulting StepInput values; runtime results ride the same input.
     let resolved: StepInput | undefined;
-    if (input.input?.kind === "deliver") {
+    if (delivery !== undefined) {
       const results: StepInput[] = [];
       try {
-        for (const payload of input.input.payloads) {
+        for (const payload of delivery.payloads) {
           const result = adapter.deliver
             ? await adapter.deliver(payload, adapterCtx)
             : defaultDeliverResult(payload);
@@ -247,11 +244,12 @@ async function runSessionStep(rawInput: TurnStepInput): Promise<DurableStepResul
         throw error;
       }
       resolved = results.length === 0 ? undefined : results.reduce(coalesceTurnInputs);
-    } else if (input.input?.kind === "runtime-action-result") {
-      if (input.input.acceptedAtMsByCallId !== undefined) {
-        ctx.set(RuntimeActionSettlementTimesKey, input.input.acceptedAtMsByCallId);
+    }
+    if (runtimeResults !== undefined) {
+      if (runtimeResults.acceptedAtMsByCallId !== undefined) {
+        ctx.set(RuntimeActionSettlementTimesKey, runtimeResults.acceptedAtMsByCallId);
       }
-      resolved = { runtimeActionResults: input.input.results };
+      resolved = { ...resolved, runtimeActionResults: runtimeResults.results };
     }
 
     let taskRootTurnId: string | undefined;
@@ -273,7 +271,7 @@ async function runSessionStep(rawInput: TurnStepInput): Promise<DurableStepResul
     activityCohort.updateActivityRootForDelivery({
       activeTurnId: activeTurnId(initialEmissionState),
       ctx,
-      delivery: rawInput.input?.kind === "deliver" ? rawInput.input : undefined,
+      delivery: rawDelivery,
       sessionState: durableSession.state,
       taskRootTurnId,
     });
@@ -289,12 +287,12 @@ async function runSessionStep(rawInput: TurnStepInput): Promise<DurableStepResul
       }
     }
 
-    if (input.input?.kind === "deliver") {
+    if (rawDelivery !== undefined) {
       const updatedAdapter = { ...adapter, state: { ...adapterCtx.state } };
       setChannelContext(ctx, updatedAdapter);
     }
 
-    if (input.input?.kind === "deliver" && resolved === undefined) {
+    if (delivery !== undefined && resolved === undefined) {
       await contextStorage.run(ctx, () =>
         instrumentation?.instrumentChannelDelivery({
           ctx,
@@ -386,8 +384,8 @@ async function runSessionStep(rawInput: TurnStepInput): Promise<DurableStepResul
       const step = createExecutionNodeStep({
         abortSignal: input.abortSignal,
         capabilities,
-        clearOnly: input.input?.kind === "clear",
-        compactOnly: input.input?.kind === "compact",
+        clearOnly: input.input?.control === "clear",
+        compactOnly: input.input?.control === "compact",
         createRuntime: createWorkflowRuntime,
         handleEvent,
         historyProjector: history.projector,

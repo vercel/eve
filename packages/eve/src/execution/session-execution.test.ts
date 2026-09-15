@@ -1,8 +1,7 @@
 import { createTestSessionState } from "#internal/testing/session-state.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
-import type { SessionInbox } from "#execution/session-inbox/inbox.js";
-import { SessionInputLedger } from "#execution/session-input-ledger.js";
+import type { SessionInbox, SessionInboxPayload } from "#execution/session-inbox/inbox.js";
 import { SessionInputQueue } from "#execution/session-input-queue.js";
 import { SessionExecution } from "#execution/session-execution.js";
 import { SessionStateCursor } from "#execution/session-state-cursor.js";
@@ -56,10 +55,9 @@ describe("SessionExecution background task checkpoints", () => {
         .mockReturnValueOnce([{ kind: "cancel" }])
         .mockReturnValue([]),
       hasPending: vi.fn(() => false),
-      hasReadyAuthorization: vi.fn(() => false),
-      read: vi.fn(() => new Promise<never>(() => {})),
+      next: vi.fn(() => new Promise<never>(() => {})),
+      onInterrupt: vi.fn(() => () => {}),
       restore: vi.fn(),
-      setAuthorizationWindow: vi.fn(),
     };
     const execution = createExecution({ inbox, sessionState });
     vi.mocked(turnStep)
@@ -79,10 +77,12 @@ describe("SessionExecution background task checkpoints", () => {
     });
 
     await expect(
-      execution.runTurn({ kind: "deliver", payloads: [{ message: "Start Alice's deployment" }] }),
+      execution.runTurn({
+        delivery: { kind: "deliver", payloads: [{ message: "Start Alice's deployment" }] },
+      }),
     ).resolves.toMatchObject({ cancelled: true, kind: "park" });
     expect(dispatchCoordinationStep).toHaveBeenCalledTimes(1);
-    expect(inbox.read).not.toHaveBeenCalledWith("runtime");
+    expect(inbox.next).not.toHaveBeenCalled();
     expect(cancelDescendantTurnsStep).toHaveBeenCalledWith({ serializedContext: {}, sessionState });
   });
 
@@ -103,10 +103,9 @@ describe("SessionExecution background task checkpoints", () => {
       claimSessionHooks: vi.fn(),
       drain: vi.fn().mockReturnValueOnce([background, steering]).mockReturnValue([]),
       hasPending: vi.fn(() => false),
-      hasReadyAuthorization: vi.fn(() => false),
-      read: vi.fn(() => new Promise<never>(() => {})),
+      next: vi.fn(() => new Promise<never>(() => {})),
+      onInterrupt: vi.fn(() => () => {}),
       restore: vi.fn(),
-      setAuthorizationWindow: vi.fn(),
     };
     const execution = createExecution({ inbox, queue, sessionState: state("") });
     vi.mocked(turnStep)
@@ -124,10 +123,12 @@ describe("SessionExecution background task checkpoints", () => {
         sessionState: input.sessionState,
       }));
 
-    await execution.runTurn({ kind: "deliver", payloads: [{ message: "Start the work." }] });
+    await execution.runTurn({
+      delivery: { kind: "deliver", payloads: [{ message: "Start the work." }] },
+    });
 
     expect(turnStep).toHaveBeenCalledTimes(2);
-    expect(vi.mocked(turnStep).mock.calls[1]?.[0].input).toEqual(steering);
+    expect(vi.mocked(turnStep).mock.calls[1]?.[0].input).toEqual({ delivery: steering });
     expect(queue.pendingCount).toBe(1);
   });
 
@@ -149,22 +150,13 @@ describe("SessionExecution background task checkpoints", () => {
       claimSessionHooks: vi.fn(),
       drain: vi.fn().mockReturnValueOnce([steering]).mockReturnValue([]),
       hasPending: vi.fn(() => false),
-      hasReadyAuthorization: vi.fn(() => false),
-      read: vi.fn(() => new Promise<never>(() => {})),
+      next: vi.fn(() => new Promise<never>(() => {})),
+      onInterrupt: vi.fn(() => () => {}),
       restore: vi.fn(),
-      setAuthorizationWindow: vi.fn(),
     };
     const execution = createExecution({ inbox, sessionState });
     vi.mocked(turnStep)
       .mockReset()
-      .mockResolvedValueOnce({
-        action: "park",
-        hasPendingAuthorization: false,
-        hasPendingInputBatch: false,
-        pendingCoordinationCallIds: ["hold-call"],
-        serializedContext: {},
-        sessionState,
-      })
       .mockResolvedValueOnce({
         action: "park",
         hasPendingAuthorization: false,
@@ -188,14 +180,16 @@ describe("SessionExecution background task checkpoints", () => {
       });
 
     await expect(
-      execution.runTurn({ kind: "deliver", payloads: [{ message: "Start the work." }] }),
+      execution.runTurn({
+        delivery: { kind: "deliver", payloads: [{ message: "Start the work." }] },
+      }),
     ).resolves.toMatchObject({ kind: "done", output: "done" });
 
-    expect(turnStep).toHaveBeenCalledTimes(3);
-    expect(vi.mocked(turnStep).mock.calls[1]?.[0].input).toEqual(steering);
-    expect(vi.mocked(turnStep).mock.calls[2]?.[0].input).toMatchObject({
-      kind: "runtime-action-result",
-      results: [actionResult],
+    // Steering and the blocking action's result travel in one step, steering first.
+    expect(turnStep).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(turnStep).mock.calls[1]?.[0].input).toMatchObject({
+      delivery: steering,
+      runtimeResults: { results: [actionResult] },
     });
     expect(dispatchCoordinationStep).toHaveBeenCalledTimes(1);
   });
@@ -212,10 +206,9 @@ describe("SessionExecution background task checkpoints", () => {
       claimSessionHooks: vi.fn(),
       drain: vi.fn().mockReturnValueOnce([followUp]).mockReturnValue([]),
       hasPending: vi.fn(() => false),
-      hasReadyAuthorization: vi.fn(() => false),
-      read: vi.fn(() => new Promise<never>(() => {})),
+      next: vi.fn(() => new Promise<never>(() => {})),
+      onInterrupt: vi.fn(() => () => {}),
       restore: vi.fn(),
-      setAuthorizationWindow: vi.fn(),
     };
     const execution = createExecution({ inbox, queue, sessionState: state("") });
     vi.mocked(turnStep)
@@ -230,7 +223,9 @@ describe("SessionExecution background task checkpoints", () => {
       }));
 
     await expect(
-      execution.runTurn({ kind: "deliver", payloads: [{ message: "Start the work." }] }),
+      execution.runTurn({
+        delivery: { kind: "deliver", payloads: [{ message: "Start the work." }] },
+      }),
     ).resolves.toMatchObject({ kind: "park", settled: { output: "Done." } });
 
     expect(turnStep).toHaveBeenCalledTimes(1);
@@ -252,14 +247,9 @@ describe("SessionExecution background task checkpoints", () => {
       claimSessionHooks: vi.fn(),
       drain: vi.fn(() => []),
       hasPending: vi.fn(() => false),
-      hasReadyAuthorization: vi.fn(() => false),
-      read: vi.fn(async (consumer) => {
-        if (consumer === "interrupt") return await new Promise<never>(() => {});
-        const value = runtimePayloads.shift();
-        return value === undefined ? undefined : { consume() {}, value };
-      }),
+      next: vi.fn(async () => runtimePayloads.shift()),
+      onInterrupt: vi.fn(() => () => {}),
       restore: vi.fn(),
-      setAuthorizationWindow: vi.fn(),
     };
     const execution = createExecution({ inbox, queue, sessionState });
     vi.mocked(turnStep).mockResolvedValue({
@@ -283,7 +273,9 @@ describe("SessionExecution background task checkpoints", () => {
     });
 
     await expect(
-      execution.runTurn({ kind: "deliver", payloads: [{ message: "Start the work." }] }),
+      execution.runTurn({
+        delivery: { kind: "deliver", payloads: [{ message: "Start the work." }] },
+      }),
     ).resolves.toEqual({ cancelled: true, kind: "park" });
 
     expect(routeDeliverToChildren).toHaveBeenCalledWith(
@@ -310,19 +302,22 @@ describe("SessionExecution background task checkpoints", () => {
       };
       const backgroundContext = { ...observability, state: "before" };
       const completedContext = { ...observability, state: "completed" };
+      let interrupt: ((payload: SessionInboxPayload) => void) | undefined;
       const inbox: SessionInbox = {
         claimedTokens: [],
         claimSessionHook: vi.fn(),
         claimSessionHooks: vi.fn(),
-        drain: vi.fn(() => []),
-        hasPending: vi.fn(() => false),
-        hasReadyAuthorization: vi.fn(() => false),
-        read: vi
+        drain: vi
           .fn()
-          .mockResolvedValueOnce({ consume() {}, value: { kind: "cancel" } })
-          .mockImplementation(() => new Promise(() => {})),
+          .mockReturnValueOnce([{ kind: "cancel" }])
+          .mockReturnValue([]),
+        hasPending: vi.fn(() => false),
+        next: vi.fn(() => new Promise<never>(() => {})),
+        onInterrupt: vi.fn((handler) => {
+          interrupt = handler;
+          return () => {};
+        }),
         restore: vi.fn(),
-        setAuthorizationWindow: vi.fn(),
       };
       const execution = createExecution({
         inbox,
@@ -335,6 +330,8 @@ describe("SessionExecution background task checkpoints", () => {
         expect(execution.cursor.sessionState).toBe(backgroundState);
       });
       vi.mocked(turnStep).mockImplementationOnce(async (input) => {
+        // The pump pushes the accepted cancel while this step is still running.
+        interrupt?.({ kind: "cancel" });
         await vi.waitFor(() => expect(input.abortSignal?.aborted).toBe(true));
         return {
           action,
@@ -347,8 +344,7 @@ describe("SessionExecution background task checkpoints", () => {
       });
 
       const result = await execution.runTurn({
-        kind: "deliver",
-        payloads: [{ message: "work" }],
+        delivery: { kind: "deliver", payloads: [{ message: "work" }] },
       });
       expect(result).toEqual({
         cancelled: true,
@@ -382,7 +378,6 @@ function createExecution(input: {
   return new SessionExecution({
     cursor,
     inbox: input.inbox,
-    ledger: new SessionInputLedger(),
     mode: "conversation",
     queue: input.queue ?? new SessionInputQueue(),
     sessionId: input.sessionState.sessionId,

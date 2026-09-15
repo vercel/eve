@@ -3,7 +3,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { DeliverHookPayload, SessionAuthContext } from "#channel/types.js";
 import { nextTurnDelivery } from "#execution/parked-delivery-wait.js";
-import { SessionInputLedger } from "#execution/session-input-ledger.js";
 import { SessionInputQueue } from "#execution/session-input-queue.js";
 import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
 import type { SessionInbox, SessionInboxPayload } from "#execution/session-inbox/inbox.js";
@@ -32,63 +31,48 @@ interface ScriptedRead {
   readonly result: IteratorResult<SessionInboxPayload>;
 }
 
-interface MockInbox extends SessionInbox {
-  readonly windowTransitions: boolean[];
-}
-
-/**
- * Scripted inbox: serves reads in order and records every authorization
- * window transition so tests can assert the window spans the whole wait.
- */
-function createMockInbox(reads: readonly ScriptedRead[], authorizationReady = false): MockInbox {
+/** Scripted inbox: serves reads in order. */
+function createMockInbox(reads: readonly ScriptedRead[]): SessionInbox {
   const remaining = [...reads];
-  const windowTransitions: boolean[] = [];
 
   return {
-    windowTransitions,
     claimedTokens: [],
     async claimSessionHook() {},
     async claimSessionHooks() {},
     drain() {
       return remaining.splice(0).map((read) => read.result.value);
     },
-    hasReadyAuthorization() {
-      return authorizationReady;
-    },
     hasPending() {
       return remaining.length > 0;
     },
-    async read() {
+    async next() {
       const read = remaining.shift();
       if (read === undefined) throw new Error("Mock inbox exhausted.");
       if (read.result.done) return undefined;
-      return { consume() {}, value: read.result.value };
+      return read.result.value;
+    },
+    onInterrupt() {
+      return () => {};
     },
     restore() {},
-    setAuthorizationWindow(open: boolean) {
-      windowTransitions.push(open);
-    },
   };
 }
 
-function authorizationRead(): ScriptedRead {
-  return {
-    result: {
-      done: false,
-      value: {
-        kind: "authorization-callback",
-        payloads: [
-          {
-            authorizationCallback: {
-              attemptId: "attempt-1",
-              callback: { method: "GET", params: { code: "abc" } },
-              connectionName: "weather",
-            },
-          },
-        ],
-      } satisfies SessionInboxPayload,
+const authorizationCallbackPayload = {
+  kind: "authorization-callback",
+  payloads: [
+    {
+      authorizationCallback: {
+        attemptId: "attempt-1",
+        callback: { method: "GET", params: { code: "abc" } },
+        connectionName: "weather",
+      },
     },
-  };
+  ],
+} satisfies SessionInboxPayload;
+
+function authorizationRead(): ScriptedRead {
+  return { result: { done: false, value: authorizationCallbackPayload } };
 }
 
 function cancelRead(command: Record<string, unknown> = {}): ScriptedRead {
@@ -114,10 +98,9 @@ type WaitInput = {
 function waitInput(inbox: SessionInbox): WaitInput {
   const cursor = createCursor(inbox);
   return {
-    awaitAuthorizationCallbacks: true,
+    expectedAttemptIds: new Set(["attempt-1"]),
     inbox: inbox,
     cursor,
-    ledger: new SessionInputLedger(),
     queue: new SessionInputQueue(),
   };
 }
@@ -258,10 +241,9 @@ describe("nextTurnDelivery", () => {
 
     const next = await nextTurnDelivery(waitInput(inbox));
 
-    expect(next.kind).toBe("authorization");
-    if (next.kind !== "authorization") throw new Error("unreachable");
-    expect(next.payloads).toHaveLength(1);
-    expect(inbox.windowTransitions).toEqual([true, false]);
+    expect(next.kind).toBe("authorization-resume");
+    if (next.kind !== "authorization-resume") throw new Error("unreachable");
+    expect(next.payloads).toEqual(authorizationCallbackPayload.payloads);
   });
 
   it("cancels indexed tasks and keeps waiting for ordinary parked activity", async () => {
@@ -270,32 +252,31 @@ describe("nextTurnDelivery", () => {
 
     const next = await nextTurnDelivery(input);
 
-    expect(next.kind).toBe("authorization");
+    expect(next.kind).toBe("authorization-resume");
     expect(cancelAllIndexedSessionTasksStep).toHaveBeenCalledWith({
       serializedContext: input.cursor.serializedContext,
       sessionState: input.cursor.sessionState,
     });
   });
 
-  it("keeps the authorization window open across a consumed no-op cancel", async () => {
+  it("resumes authorization after a consumed no-op cancel", async () => {
     // A cancel with no active turn is consumed without producing a parent
-    // turn; the wait continues and the callback must still surface within
-    // the same window instead of stashing until unrelated activity.
+    // turn; the wait continues and the callback must still resume the challenge.
     const inbox = createMockInbox([cancelRead(), authorizationRead()]);
 
     const next = await nextTurnDelivery(waitInput(inbox));
 
-    expect(next.kind).toBe("authorization");
-    expect(inbox.windowTransitions).toEqual([true, false]);
+    expect(next.kind).toBe("authorization-resume");
   });
 
   it("does not let buffered deliveries bypass a ready authorization callback", async () => {
-    const inbox = createMockInbox([authorizationRead()], true);
+    const inbox = createMockInbox([]);
     const queue = queueOf({ kind: "deliver", payloads: [{ message: "later" }] });
+    queue.enqueueAuthorization(authorizationCallbackPayload.payloads);
 
     const next = await nextTurnDelivery({ ...waitInput(inbox), queue });
 
-    expect(next.kind).toBe("authorization");
+    expect(next.kind).toBe("authorization-resume");
     expect(queue.pendingCount).toBe(1);
   });
 
@@ -305,7 +286,7 @@ describe("nextTurnDelivery", () => {
 
     const next = await nextTurnDelivery({ ...waitInput(inbox), queue, deferDeliveries: true });
 
-    expect(next.kind).toBe("authorization");
+    expect(next.kind).toBe("authorization-resume");
     expect(queue.pendingCount).toBe(1);
   });
 
@@ -315,15 +296,6 @@ describe("nextTurnDelivery", () => {
     const next = await nextTurnDelivery(waitInput(inbox));
 
     expect(next).toMatchObject({ kind: "closed" });
-  });
-
-  it("never opens the window without an open challenge", async () => {
-    const inbox = createMockInbox([cancelRead(), cancelRead()]);
-
-    await expect(
-      nextTurnDelivery({ ...waitInput(inbox), awaitAuthorizationCallbacks: false }),
-    ).rejects.toThrow("Mock inbox exhausted.");
-    expect(inbox.windowTransitions).toEqual([]);
   });
 
   it("carries retired proxy state through fully routed parked deliveries", async () => {
@@ -345,7 +317,7 @@ describe("nextTurnDelivery", () => {
 
     const next = await nextTurnDelivery({
       ...waitInput(inbox),
-      awaitAuthorizationCallbacks: false,
+      expectedAttemptIds: undefined,
     });
 
     expect(vi.mocked(routeDeliverToChildren).mock.calls[1]?.[0].sessionState).toBe(retiredState);
@@ -429,21 +401,16 @@ describe("nextTurnDelivery routing", () => {
       claimSessionHook: vi.fn(),
       claimSessionHooks: vi.fn(),
       drain: vi.fn(() => commands.splice(0)),
-      hasReadyAuthorization: vi.fn(() => false),
       hasPending: vi.fn(() => commands.length > 0),
-      read: vi.fn(async () => {
-        const value = commands.shift();
-        return value === undefined ? undefined : { consume() {}, value };
-      }),
+      next: vi.fn(async () => commands.shift()),
+      onInterrupt: vi.fn(() => () => {}),
       restore: vi.fn(),
-      setAuthorizationWindow: vi.fn(),
     };
 
     const cursor = createCursor(inbox, sessionState);
     const result = await nextTurnDelivery({
       inbox,
       cursor,
-      ledger: new SessionInputLedger(),
       queue: new SessionInputQueue(),
     });
 
@@ -523,7 +490,6 @@ function batchingInput(count = 100, crossTurn = false) {
     },
   };
   input.cursor = createCursor({ claimSessionHooks: async () => {} }, taskSessionState);
-  input.ledger = new SessionInputLedger();
   vi.mocked(routeDeliverToChildren).mockImplementation(
     async ({ delivery, sessionState, serializedContext }) => ({
       kind: "continue",
@@ -807,12 +773,9 @@ describe("buffered task completion batching", () => {
   it("services ready authorization before a buffered completion batch", async () => {
     const input = batchingInput();
     const queue = queueOf(completion("task_0"), completion("task_1"));
-    const next = await nextTurnDelivery({
-      ...input,
-      queue,
-      inbox: createMockInbox([authorizationRead()], true),
-    });
-    expect(next.kind).toBe("authorization");
+    queue.enqueueAuthorization(authorizationCallbackPayload.payloads);
+    const next = await nextTurnDelivery({ ...input, queue, inbox: createMockInbox([]) });
+    expect(next.kind).toBe("authorization-resume");
     expect(queue.pendingCount).toBe(2);
     expect(routeDeliverToChildren).not.toHaveBeenCalled();
   });

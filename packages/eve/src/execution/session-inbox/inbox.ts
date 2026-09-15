@@ -19,7 +19,6 @@ export type SessionInboxPayload =
   | WorkflowToolRunMessage
   | AuthorizationCallbackPayload;
 
-type ReadMode = "session" | "interrupt" | "runtime";
 interface Source {
   readonly token: string;
   readonly hook: Hook<SessionInboxPayload>;
@@ -27,25 +26,24 @@ interface Source {
   stopping: boolean;
   closed: boolean;
 }
-interface Read {
-  readonly value: SessionInboxPayload;
-}
-interface PendingRead {
-  readonly promise: Promise<SessionInboxLease | undefined>;
-  read?: Read;
-}
-
-export interface SessionInboxLease {
-  readonly value: SessionInboxPayload;
-  consume(): void;
-}
 
 export interface SessionInboxReader {
-  read(mode?: ReadMode): Promise<SessionInboxLease | undefined>;
+  /**
+   * Waits for and removes the next accepted payload in arrival order, or
+   * `undefined` once every hook is released. Only one consumer waits at a
+   * time; the owner program is strictly sequential.
+   */
+  next(): Promise<SessionInboxPayload | undefined>;
+  /** Removes every payload accepted so far, in arrival order. */
   drain(): SessionInboxPayload[];
   hasPending(): boolean;
-  hasReadyAuthorization(): boolean;
-  setAuthorizationWindow(open: boolean): void;
+  /**
+   * Called from the pump the moment an interrupt (`cancel`, `reset`,
+   * `session-timeout`) is accepted, ahead of any consumer read. Handlers must
+   * be synchronous and idempotent. The payload stays in the queue so the
+   * consumer still processes it in order.
+   */
+  onInterrupt(handler: (payload: SessionInboxPayload) => void): () => void;
   restore(payloads: readonly SessionInboxPayload[]): void;
 }
 
@@ -63,35 +61,31 @@ export interface SessionInboxHandle extends SessionInbox {
   release(): Promise<SessionInboxPayload[]>;
 }
 
-/** One queue for the session lifetime. Reads only select entries; consumption
- * happens explicitly, so a losing Promise.race cannot steal a message. */
+export function isInterrupt(value: SessionInboxPayload): boolean {
+  return value.kind === "cancel" || value.kind === "reset" || value.kind === "session-timeout";
+}
+
+/**
+ * One FIFO queue for the session lifetime, fed by a continuous reader per
+ * claimed hook. The pump never waits on queue depth: interrupts share each
+ * hook's ordered stream, so any backpressure on ordinary payloads would also
+ * hold back the cancel behind them. Accepted payloads are already durable on
+ * the hook, so the queue is a mirror rather than the source of truth.
+ */
 export function createSessionInbox(sessionId: string): SessionInboxHandle {
   const sources: Source[] = [];
-  const queue: Read[] = [];
-  const pending = new Map<ReadMode, PendingRead>();
+  const queue: SessionInboxPayload[] = [];
   const waiters = new Set<() => void>();
-  let authorizationOpen = false;
+  const interruptHandlers = new Set<(payload: SessionInboxPayload) => void>();
   let failure: { error: unknown } | undefined;
+
   const notify = (): void => {
     for (const resolve of waiters) resolve();
     waiters.clear();
   };
   const wait = (): Promise<void> => new Promise((resolve) => waiters.add(resolve));
-  const eligible = (value: SessionInboxPayload, mode: ReadMode): boolean => {
-    if (mode === "interrupt")
-      return value.kind === "cancel" || value.kind === "reset" || value.kind === "session-timeout";
-    if (value.kind === "authorization-callback") return authorizationOpen;
-    if (isWorkflowMessage(value)) return mode === "runtime";
-    return true;
-  };
-  const invalidate = (reads: readonly Read[]): void => {
-    for (const [mode, entry] of pending)
-      if (entry.read !== undefined && reads.includes(entry.read)) pending.delete(mode);
-    notify();
-  };
-  // The pump never waits on queue depth: interrupts share each hook's ordered
-  // stream, so any backpressure on ordinary payloads would also hold back the
-  // cancel behind them. Accepted payloads are already durable on the hook.
+  const closed = (): boolean => sources.every((source) => source.closed || source.stopping);
+
   // The SDK abandons (never settles) a read that is in flight when the hook
   // is disposed, so the loop exits on `stopping` rather than on `done`.
   const pump = async (source: Source): Promise<void> => {
@@ -100,7 +94,9 @@ export function createSessionInbox(sessionId: string): SessionInboxHandle {
       while (!source.stopping) {
         const result = await iterator.next();
         if (result.done) break;
-        queue.push({ value: result.value });
+        queue.push(result.value);
+        if (isInterrupt(result.value))
+          for (const handler of interruptHandlers) handler(result.value);
         notify();
       }
     } catch (error) {
@@ -110,42 +106,13 @@ export function createSessionInbox(sessionId: string): SessionInboxHandle {
       notify();
     }
   };
-  const consume = (mode: ReadMode, read: Read): void => {
-    const entry = pending.get(mode);
-    if (entry?.read !== read) throw new Error("Session message lease is no longer current.");
-    const index = queue.indexOf(read);
-    if (index === -1) throw new Error("Session message was already consumed.");
-    queue.splice(index, 1);
-    invalidate([read]);
-  };
-  const nextRead = (mode: ReadMode = "session"): Promise<SessionInboxLease | undefined> => {
-    const existing = pending.get(mode);
-    if (existing !== undefined) return existing.promise;
-    const entry: PendingRead = {
-      promise: Promise.resolve().then(async () => {
-        while (true) {
-          if (failure !== undefined) throw failure.error;
-          const read = queue.find(({ value }) => eligible(value, mode));
-          if (read !== undefined) {
-            entry.read = read;
-            return { consume: () => consume(mode, read), value: read.value };
-          }
-          if (sources.every((source) => source.closed || source.stopping)) return undefined;
-          await wait();
-        }
-      }),
-    };
-    pending.set(mode, entry);
-    return entry.promise;
-  };
 
   const stop = async (): Promise<SessionInboxPayload[]> => {
     const released = sources.splice(0);
     for (const source of released) source.stopping = true;
     notify();
     await Promise.all(released.map(({ hook }) => disposeHook(hook)));
-    const accepted = queue.splice(0).map(({ value }) => value);
-    pending.clear();
+    const accepted = queue.splice(0);
     notify();
     return accepted;
   };
@@ -186,42 +153,32 @@ export function createSessionInbox(sessionId: string): SessionInboxHandle {
       const outcomes = await Promise.allSettled([...new Set(tokens)].map(claimSessionHook));
       for (const outcome of outcomes) if (outcome.status === "rejected") throw outcome.reason;
     },
-    read: nextRead,
+    async next() {
+      while (true) {
+        if (failure !== undefined) throw failure.error;
+        if (queue.length > 0) return queue.shift();
+        if (closed()) return undefined;
+        await wait();
+      }
+    },
     drain() {
       if (failure !== undefined) throw failure.error;
-      const reads = queue.filter(({ value }) => eligible(value, "session"));
-      for (const read of reads) queue.splice(queue.indexOf(read), 1);
-      invalidate(reads);
-      return reads.map(({ value }) => value);
+      return queue.splice(0);
     },
     hasPending() {
       if (failure !== undefined) throw failure.error;
       return queue.length > 0;
     },
-    hasReadyAuthorization() {
-      return (
-        queue.find(({ value }) => eligible(value, "session"))?.value.kind ===
-        "authorization-callback"
-      );
-    },
-    setAuthorizationWindow(open) {
-      authorizationOpen = open;
-      for (const mode of ["session", "runtime"] as const) {
-        const entry = pending.get(mode);
-        if (
-          entry?.read !== undefined &&
-          entry.read !== queue.find(({ value }) => eligible(value, mode))
-        )
-          pending.delete(mode);
-      }
-      notify();
+    onInterrupt(handler) {
+      interruptHandlers.add(handler);
+      return () => interruptHandlers.delete(handler);
     },
     restore(payloads) {
       if (sources.length === 0)
         throw new Error("Cannot restore session commands before reclaiming the session hooks.");
       // Restored payloads were accepted before anything the reclaimed pumps
       // have enqueued since, so they must precede the current queue.
-      queue.unshift(...payloads.map((value) => ({ value })));
+      queue.unshift(...payloads);
       notify();
     },
     async dispose() {

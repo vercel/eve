@@ -60,9 +60,9 @@ export async function turnWorkflow(rawInput: unknown): Promise<void> {
       capabilities: prepared.input.capabilities,
       deploymentId: prepared.deploymentId,
       initialInput:
-        prepared.input.delivery?.kind === "deliver"
-          ? { ...prepared.input.delivery, caller: undefined }
-          : prepared.input.delivery,
+        prepared.input.delivery === undefined
+          ? undefined
+          : { ...prepared.input.delivery, caller: undefined },
       mode,
       retention: prepared.input.retention,
       serializedContext: interrupted.serializedContext,

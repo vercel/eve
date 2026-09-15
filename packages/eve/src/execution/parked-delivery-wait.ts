@@ -1,6 +1,5 @@
 import type { DeliverPayload } from "#channel/types.js";
 import { routeSelectedDelivery } from "#execution/selected-delivery-router.js";
-import type { SessionInputLedger } from "#execution/session-input-ledger.js";
 import type {
   SessionControl,
   SessionInputQueue,
@@ -14,35 +13,24 @@ import { getSessionTaskCohorts } from "#tasks/session-task-cohorts.js";
 
 export type NextTurnInstruction =
   | { readonly kind: "workflow"; readonly message: WorkflowToolRunMessage }
-  | { readonly kind: "authorization"; readonly payloads: readonly DeliverPayload[] }
+  | { readonly kind: "authorization-resume"; readonly payloads: readonly DeliverPayload[] }
   | { readonly kind: SessionControl }
   | { readonly kind: "closed" }
   | { readonly kind: "cancel-turn" }
   | TurnSelection;
 
+/**
+ * Waits for the next input the parked owner must act on. While an
+ * authorization challenge is open, its callbacks collect in the queue and
+ * resume the challenge once every expected attempt has reported; ordinary
+ * deliveries keep starting turns in the meantime. Fully routed descendant
+ * deliveries leave nothing for the parent, so the wait continues.
+ */
 export async function nextTurnDelivery(input: {
-  readonly awaitAuthorizationCallbacks?: boolean;
   readonly inbox: SessionInboxReader;
   readonly cursor: SessionStateCursor;
   readonly deferDeliveries?: boolean;
-  readonly ledger: SessionInputLedger;
-  readonly queue: SessionInputQueue;
-}): Promise<NextTurnInstruction> {
-  if (input.awaitAuthorizationCallbacks !== true) return await awaitNextTurnDelivery(input);
-
-  input.inbox.setAuthorizationWindow(true);
-  try {
-    return await awaitNextTurnDelivery(input);
-  } finally {
-    input.inbox.setAuthorizationWindow(false);
-  }
-}
-
-async function awaitNextTurnDelivery(input: {
-  readonly inbox: SessionInboxReader;
-  readonly cursor: SessionStateCursor;
-  readonly deferDeliveries?: boolean;
-  readonly ledger: SessionInputLedger;
+  readonly expectedAttemptIds?: ReadonlySet<string>;
   readonly queue: SessionInputQueue;
 }): Promise<NextTurnInstruction> {
   const { inbox, cursor, queue } = input;
@@ -50,37 +38,33 @@ async function awaitNextTurnDelivery(input: {
   // pumped) is the only kind that may move the session to another deployment.
   let freshSequence: number | undefined;
   while (true) {
-    if (!inbox.hasReadyAuthorization()) {
-      const selected = queue.takeNext(
-        getSessionTaskCohorts(cursor.sessionState.snapshot.session.state),
-        {
-          deferDeliveries: input.deferDeliveries,
-          freshSequence: inbox.hasPending() ? undefined : freshSequence,
-          isTaskCancelled: (taskId) => input.ledger.isTaskCancelled(taskId),
-        },
-      );
-      if (selected?.kind === "control") return { kind: selected.control };
-      if (selected?.kind === "turn") {
-        const routed = await routeSelectedDelivery(selected, cursor);
-        if (routed.kind === "cancel-turn") return routed;
-        if (routed.kind === "consumed") continue;
-        return routed;
-      }
+    const selected = queue.takeNext(
+      getSessionTaskCohorts(cursor.sessionState.snapshot.session.state),
+      {
+        deferDeliveries: input.deferDeliveries,
+        expectedAttemptIds: input.expectedAttemptIds,
+        freshSequence: inbox.hasPending() ? undefined : freshSequence,
+      },
+    );
+    if (selected?.kind === "control") return { kind: selected.control };
+    if (selected?.kind === "authorization-resume") return selected;
+    if (selected?.kind === "turn") {
+      const routed = await routeSelectedDelivery(selected, cursor);
+      if (routed.kind === "cancel-turn") return routed;
+      if (routed.kind === "consumed") continue;
+      return routed;
     }
 
     const wasIdle = queue.pendingCount === 0 && !inbox.hasPending();
-    const lease = await inbox.read("runtime");
-    if (lease === undefined) return { kind: "closed" };
-    lease.consume();
+    const payload = await inbox.next();
+    if (payload === undefined) return { kind: "closed" };
 
-    const admitted = await admitSessionInboxPayload(lease.value, input);
+    const admitted = await admitSessionInboxPayload(payload, input);
     freshSequence =
       wasIdle && admitted.kind === "delivery" ? admitted.admission.sequence : undefined;
     switch (admitted.kind) {
       case "workflow":
         return { kind: "workflow", message: admitted.message };
-      case "authorization":
-        return { kind: "authorization", payloads: admitted.payload.payloads };
       case "cancel":
         await applySessionCancellation(admitted.command, input);
         break;

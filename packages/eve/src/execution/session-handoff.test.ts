@@ -227,10 +227,9 @@ function createInbox(input: { released?: SessionInboxPayload[] } = {}): SessionI
     dispose: vi.fn(async () => {}),
     drain: vi.fn(() => []),
     hasPending: vi.fn(() => false),
-    hasReadyAuthorization: vi.fn(() => false),
-    read: vi.fn(),
+    next: vi.fn(),
+    onInterrupt: vi.fn(() => () => {}),
     release: vi.fn(async () => input.released ?? []),
     restore: vi.fn(),
-    setAuthorizationWindow: vi.fn(),
   };
 }

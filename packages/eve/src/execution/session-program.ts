@@ -1,4 +1,4 @@
-import type { DeliverPayload, SessionCapabilities, TurnCaller } from "#channel/types.js";
+import type { DeliverHookPayload, SessionCapabilities, TurnCaller } from "#channel/types.js";
 import { createSafeOuterWorkflowError } from "#execution/workflow-entry-crash.js";
 import type { AgentWorkflowRetentionDefinition } from "#shared/agent-definition.js";
 import type { RunMode } from "#shared/run-mode.js";
@@ -11,7 +11,6 @@ import {
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import { nextTurnDelivery, type NextTurnInstruction } from "#execution/parked-delivery-wait.js";
 import { cancelDescendantTurnsStep } from "#execution/cancel-descendant-turns-step.js";
-import { SessionInputLedger } from "#execution/session-input-ledger.js";
 import { SessionInputQueue } from "#execution/session-input-queue.js";
 import { SessionExecution } from "#execution/session-execution.js";
 import { SessionStateCursor } from "#execution/session-state-cursor.js";
@@ -42,7 +41,7 @@ export interface SessionBoot {
   readonly caller: TurnCaller | undefined;
   readonly capabilities?: SessionCapabilities;
   readonly deploymentId: string;
-  readonly initialInput: TurnStepPayload | undefined;
+  readonly initialInput: DeliverHookPayload | undefined;
   readonly mode: RunMode;
   readonly retention?: AgentWorkflowRetentionDefinition;
   readonly serializedContext: Record<string, unknown>;
@@ -184,19 +183,14 @@ async function runSessionLoop(
 ): Promise<SessionLoopOutcome> {
   const { cursor, handoff, inbox, progress } = deps;
   const queue = new SessionInputQueue();
-  const ledger = new SessionInputLedger();
   const execution = new SessionExecution({
     capabilities: boot.capabilities,
     cursor,
     inbox,
-    ledger,
     mode: boot.mode,
     queue,
     sessionId: boot.sessionId,
   });
-  // One payload per exact authorization attempt accumulates across
-  // intervening turns. Replaced attempts are pruned at each park.
-  const collectedAuthPayloads = new Map<string, DeliverPayload>();
   const sessionTimeout =
     boot.sessionTimeoutDeadline === undefined
       ? undefined
@@ -205,65 +199,26 @@ async function runSessionLoop(
           sessionId: boot.sessionId,
         });
 
-  /**
-   * Waits for the next parked-session activity. While an authorization
-   * challenge is open (`expected > 0`), callback reads surface through the
-   * same single FIFO wait as ordinary session activity — one arrival order,
-   * which keeps the wait deterministic under workflow replay — and keep
-   * surfacing across wait iterations that produce no parent turn. Callbacks
-   * accumulate across intervening turns; once every expected challenge has
-   * reported, the collected payloads resume the challenge.
-   */
   const nextParkedActivity = async (
     expectedAttemptIds: ReadonlySet<string>,
-  ): Promise<
-    | { readonly kind: "authorization-resume"; readonly payloads: DeliverPayload[] }
-    | Exclude<NextTurnInstruction, { kind: "authorization" | "workflow" }>
-  > => {
-    for (const attemptId of collectedAuthPayloads.keys()) {
-      if (!expectedAttemptIds.has(attemptId)) collectedAuthPayloads.delete(attemptId);
-    }
+  ): Promise<Exclude<NextTurnInstruction, { kind: "workflow" }>> => {
     while (true) {
-      if (
-        expectedAttemptIds.size > 0 &&
-        [...expectedAttemptIds].every((attemptId) => collectedAuthPayloads.has(attemptId))
-      ) {
-        const payloads = [...expectedAttemptIds].map((id) => collectedAuthPayloads.get(id)!);
-        collectedAuthPayloads.clear();
-        return { kind: "authorization-resume", payloads };
-      }
       const next = await nextTurnDelivery({
-        awaitAuthorizationCallbacks: expectedAttemptIds.size > 0,
         cursor,
         deferDeliveries: boot.mode === "task" && expectedAttemptIds.size > 0,
+        expectedAttemptIds,
         inbox,
-        ledger,
         queue,
       });
-      if (next.kind === "workflow") {
-        await execution.handleWorkflowMessage(next.message);
-        continue;
-      }
-      if (next.kind !== "authorization") return next;
-      for (const payload of next.payloads) {
-        const callback = payload["authorizationCallback"] as
-          | { readonly attemptId?: unknown }
-          | undefined;
-        if (
-          typeof callback?.attemptId === "string" &&
-          expectedAttemptIds.has(callback.attemptId) &&
-          !collectedAuthPayloads.has(callback.attemptId)
-        ) {
-          collectedAuthPayloads.set(callback.attemptId, payload);
-        }
-      }
+      if (next.kind !== "workflow") return next;
+      await execution.handleWorkflowMessage(next.message);
     }
   };
 
   let turnIndex = 0;
-  const runTurn = async (delivery: TurnStepPayload | undefined): Promise<TurnOutcome> => {
+  const runTurn = async (payload: TurnStepPayload | undefined): Promise<TurnOutcome> => {
     const caller = progress.caller;
-    if (caller?.taskId !== undefined) ledger.rememberTask(caller.taskId);
+    if (caller?.taskId !== undefined) queue.rememberTask(caller.taskId);
     if (caller !== undefined) {
       await cursor.apply({
         serializedContext: await bindTurnCallerContextStep({
@@ -273,7 +228,7 @@ async function runSessionLoop(
       });
     }
     progress.turnId = `turn_${String(turnIndex++)}`;
-    return await execution.runTurn(delivery);
+    return await execution.runTurn(payload);
   };
   const settleCancelledTurn = async () => {
     const settled = await settleCancelledTurnStep({
@@ -288,7 +243,7 @@ async function runSessionLoop(
 
   try {
     const [actionResult, timerResult] = await Promise.allSettled([
-      runTurn(boot.initialInput),
+      runTurn(boot.initialInput === undefined ? undefined : { delivery: boot.initialInput }),
       sessionTimeout?.start(),
     ]);
     if (timerResult.status === "rejected") throw timerResult.reason;
@@ -329,7 +284,7 @@ async function runSessionLoop(
 
       switch (next.kind) {
         case "authorization-resume":
-          action = await runTurn({ kind: "deliver", payloads: next.payloads });
+          action = await runTurn({ delivery: { kind: "deliver", payloads: next.payloads } });
           continue;
         case "expired":
         case "reset":
@@ -337,7 +292,7 @@ async function runSessionLoop(
           return { kind: "terminal", outcome: { kind: "expired" } };
         case "clear":
         case "compact":
-          action = await runTurn({ kind: next.kind });
+          action = await runTurn({ control: next.kind });
           continue;
         case "cancel-turn":
           await cancelDescendantTurnsStep({
@@ -356,7 +311,7 @@ async function runSessionLoop(
           });
           if (transfer.kind === "transferred") return { kind: "transferred" };
           if (next.delivery.caller !== undefined) progress.caller = next.delivery.caller;
-          action = await runTurn(next.delivery);
+          action = await runTurn({ delivery: next.delivery });
           continue;
         }
       }

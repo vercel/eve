@@ -2,13 +2,8 @@ import { getWorkflowMetadata } from "#compiled/@workflow/core/index.js";
 
 import type { RuntimeActionResultHookPayload, SessionCommand } from "#channel/types.js";
 import { cancelAllIndexedSessionTasksStep } from "#execution/cancel-indexed-session-tasks-step.js";
-import type { SessionInputLedger } from "#execution/session-input-ledger.js";
 import type { DeliveryAdmission, SessionInputQueue } from "#execution/session-input-queue.js";
-import {
-  isWorkflowMessage,
-  type AuthorizationCallbackPayload,
-  type SessionInboxPayload,
-} from "#execution/session-inbox/inbox.js";
+import { isWorkflowMessage, type SessionInboxPayload } from "#execution/session-inbox/inbox.js";
 import {
   decodeSessionInboxPayload,
   SessionInboxPayloadError,
@@ -27,8 +22,7 @@ export type SessionAdmission =
   | { readonly command: SessionCancellation; readonly kind: "cancel" }
   | { readonly kind: "consumed" }
   | { readonly kind: "runtime-action-result"; readonly payload: RuntimeActionResultHookPayload }
-  | { readonly kind: "workflow"; readonly message: WorkflowToolRunMessage }
-  | { readonly kind: "authorization"; readonly payload: AuthorizationCallbackPayload };
+  | { readonly kind: "workflow"; readonly message: WorkflowToolRunMessage };
 
 /**
  * Decodes and admits one inbox payload. This boundary never decides whether a
@@ -39,14 +33,16 @@ export async function admitSessionInboxPayload(
   value: SessionInboxPayload,
   input: {
     readonly cursor: SessionStateCursor;
-    readonly ledger: SessionInputLedger;
     readonly queue: SessionInputQueue;
   },
 ): Promise<SessionAdmission> {
   if (value.kind === "runtime-action-result")
     return { kind: "runtime-action-result", payload: value };
   if (isWorkflowMessage(value)) return { kind: "workflow", message: value };
-  if (value.kind === "authorization-callback") return { kind: "authorization", payload: value };
+  if (value.kind === "authorization-callback") {
+    input.queue.enqueueAuthorization(value.payloads);
+    return { kind: "consumed" };
+  }
   if (value.kind === "subagent-input-request" || value.kind === "subagent-authorization-event") {
     const handle = findRunningAgentHandle(input.cursor.sessionState.snapshot.session.state, {
       callId: value.callId,
@@ -77,9 +73,10 @@ export async function admitSessionInboxPayload(
   }
 
   switch (command.kind) {
-    case "deliver":
-      if (!input.ledger.admit(command)) return { kind: "consumed" };
-      return { admission: input.queue.enqueueDelivery(command), kind: "delivery" };
+    case "deliver": {
+      const admission = input.queue.enqueueDelivery(command);
+      return admission === undefined ? { kind: "consumed" } : { admission, kind: "delivery" };
+    }
     case "clear":
     case "compact":
       input.queue.enqueueControl(command.kind);
@@ -103,7 +100,6 @@ export async function applySessionCancellation(
   command: SessionCancellation,
   input: {
     readonly cursor: SessionStateCursor;
-    readonly ledger: SessionInputLedger;
     readonly queue: SessionInputQueue;
   },
 ): Promise<void> {
@@ -113,8 +109,5 @@ export async function applySessionCancellation(
       sessionState: input.cursor.sessionState,
     });
   }
-  if (command.taskId !== undefined) {
-    input.ledger.cancelTask(command.taskId);
-    input.queue.discardTask(command.taskId);
-  }
+  if (command.taskId !== undefined) input.queue.cancelTask(command.taskId);
 }
