@@ -69,6 +69,30 @@ export default defineSandbox(async () => {
 
 Use the environment's `prepare` callback for immutable setup that every new session should inherit. Use post-open initialization for state that belongs only to one durable session.
 
+## Experimental Dockerfile image environment
+
+`ExperimentalVercelDockerfile` builds `agent/sandbox/Dockerfile` as a Linux AMD64 OCI image, publishes a digest-pinned image, and stores managed workspace and skill inputs in immutable Drive snapshots. The built-in `VercelSandbox` remains snapshot-backed; use this separate environment only when the sandbox must start directly from an authored image.
+
+```ts
+import { defineSandbox } from "eve/sandbox";
+import { ExperimentalVercelDockerfile } from "eve/sandbox/vercel";
+
+export const environment = ExperimentalVercelDockerfile.environment({
+  region: "iad1",
+});
+
+export default defineSandbox(() =>
+  environment.open({
+    networkPolicy: "deny-all",
+    resources: { vcpus: 4 },
+  }),
+);
+```
+
+The build requires Vercel project credentials and an OCI builder: Docker locally or buildah in a hosted build environment. Registry credentials never appear in command arguments or prepared artifacts.
+
+This environment does not accept `prepare`. Put immutable software setup in the Dockerfile. The build artifact records only the digest-pinned image reference and content-addressed Drive identities; it never records credentials. Runtime strictly resolves those resources and fails with rebuild or redeploy guidance when they are unavailable.
+
 ## Network policy
 
 Pass the initial policy to `open()`. It applies to the new live Vercel Sandbox, not to the environment definition:

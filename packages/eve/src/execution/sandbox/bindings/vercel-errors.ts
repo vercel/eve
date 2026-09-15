@@ -46,8 +46,16 @@ function readErrorText(value: unknown): string {
   return parts.join("\n");
 }
 
-export function isVercelSandboxMissingError(error: unknown): boolean {
+export function isVercelResourceMissingError(error: unknown): boolean {
   return errorChainContainsStatus(error, 404);
+}
+
+export function isVercelSandboxMissingError(error: unknown): boolean {
+  return isVercelResourceMissingError(error);
+}
+
+export function isVercelImageUnavailableError(error: unknown): boolean {
+  return errorChainContainsStatus(error, 404) || errorChainContainsStatus(error, 410);
 }
 
 function errorChainContainsStatus(error: unknown, expectedStatus: number): boolean {
