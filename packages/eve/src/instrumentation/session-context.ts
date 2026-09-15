@@ -5,7 +5,9 @@ import {
   ParentSessionKey,
   ParentTraceContextKey,
   AuthKey,
+  ScheduleIdKey,
   SessionCallbackKey,
+  SessionTitleKey,
   SessionTraceSeedKey,
 } from "#context/keys.js";
 import {
@@ -50,6 +52,8 @@ export function readInstrumentationSessionContext(context: AlsContext) {
     parentLineage: resolveParentLineage(parent, channel, context.get(SessionCallbackKey)),
     parentTraceContext: context.get(ParentTraceContextKey),
     principals: readInstrumentationPrincipals(context, conversation, traceSeed?.decision),
+    scheduleId: context.get(ScheduleIdKey),
+    title: context.get(SessionTitleKey),
     traceSeed,
   };
 }

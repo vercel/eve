@@ -154,6 +154,8 @@ export interface ToolGroupItem {
 export interface RenderBlockContext {
   /** Current shared square-pulse frame for live activity blocks. */
   activityPulse: string;
+  /** Whether prose responses are parsed and styled as Markdown. */
+  renderMarkdown?: boolean;
   /**
    * Kind and title of the block rendered immediately above this one. Lets a
    * sandbox block detect that it continues a run (label suppressed, lines
@@ -220,7 +222,7 @@ function renderBody(
       return renderUser(block, width, theme);
     case "assistant":
     case "subagent-step":
-      return renderProse(block, width, theme);
+      return renderProse(block, width, theme, context);
     case "reasoning":
       return renderReasoning(block, width, theme);
     case "tool":
@@ -279,7 +281,12 @@ function renderUser(block: Block, width: number, theme: Theme): string[] {
   return rows;
 }
 
-function renderProse(block: Block, width: number, theme: Theme): string[] {
+function renderProse(
+  block: Block,
+  width: number,
+  theme: Theme,
+  context: RenderBlockContext,
+): string[] {
   const rows: string[] = [];
   const isSubagent = block.kind === "subagent-step";
   // A collapsed child message is one activity row in its section — the
@@ -292,9 +299,9 @@ function renderProse(block: Block, width: number, theme: Theme): string[] {
     if (line === undefined) return [];
     return [theme.colors.dim(sliceVisible(line, Math.max(1, width)))];
   }
-  // Bold at the terminal's DEFAULT foreground: black on a light theme,
-  // white on a dark one. Explicit bright-white (SGR 97) would vanish on
-  // light backgrounds.
+  // The brand anchors every top-level response; Markdown styles the content
+  // following it, rather than replacing the response gutter.
+  const markdown = context.renderMarkdown ?? true;
   const glyph = isSubagent ? "" : `${theme.colors.bold(theme.glyph.brand)} `;
   const indent = isSubagent ? "" : "  ";
 
@@ -308,7 +315,7 @@ function renderProse(block: Block, width: number, theme: Theme): string[] {
   }
 
   if (body.length > 0) {
-    const rendered = renderMarkdown(body, width - indent.length)
+    const rendered = (markdown ? renderMarkdown(body, width - indent.length) : body)
       .split("\n")
       .flatMap((line) => wrapVisibleLine(line, width - indent.length));
     rendered.forEach((line, index) => {

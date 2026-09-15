@@ -1,13 +1,17 @@
 import { defineChannel, POST } from "eve/channels";
 import { getHookByToken, getRun, getWorld, resumeHook } from "workflow/api";
 import { z } from "zod";
-import { lifecycleNamespace, type LifecycleControlEvent } from "../lib/lifecycle-control.js";
+import {
+  AUTH_SNAPSHOT_MARKER,
+  lifecycleNamespace,
+  type LifecycleControlEvent,
+} from "../lib/lifecycle-control.js";
 
 const bodySchema = z.object({
   key: z.string().uuid(),
   index: z.number().int().min(0).max(20).optional(),
   token: z.string().min(1).max(512).optional(),
-  marker: z.enum(["A", "B"]).optional(),
+  marker: z.enum(["A", "B", AUTH_SNAPSHOT_MARKER]).optional(),
 });
 
 // Fixture-only capability routes: a per-eval random key addresses only its own

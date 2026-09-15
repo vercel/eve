@@ -79,6 +79,13 @@ export const { bot, channel, send } = chatSdkChannel({
 
 Use `routes` when a provider requires a fixed URL or when you are migrating an existing endpoint without changing the provider's settings.
 
+## Audience
+
+Workspace-visible threads are `public`. DMs and private or external threads
+are `private`; threads without a known visibility are `unknown`. The audience
+controls observability content capture, not access to the thread. See
+[Audience](./overview#audience) for the shared channel model.
+
 ## How the channel handles messages
 
 ### Dispatch

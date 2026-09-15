@@ -319,6 +319,7 @@ export function createAgentOtelInstrumentation(
                 attributes: runtimeAttributes.agentActivationAttributes({
                   agentName,
                   frameworkVersion: input.frameworkVersion,
+                  session,
                   sessionId: event.sessionId,
                   turnId: event.turnId!,
                   turn,

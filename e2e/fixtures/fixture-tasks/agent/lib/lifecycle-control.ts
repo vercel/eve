@@ -1,9 +1,13 @@
 import { createHook, getWorkflowMetadata } from "workflow";
 import { getRun } from "workflow/api";
 
+export const AUTH_SNAPSHOT_MARKER = "auth-snapshot" as const;
+
+export type LifecycleMarker = "A" | "B" | "parent" | typeof AUTH_SNAPSHOT_MARKER;
+
 export interface LifecycleControlEvent {
   readonly kind: "gate" | "owner" | "gate-cancelled";
-  readonly marker: "A" | "B" | "parent";
+  readonly marker: LifecycleMarker;
   readonly runId: string;
   readonly sessionId: string;
   readonly turnId: string;
@@ -34,7 +38,7 @@ export async function lifecycleGate(
   input: {
     parentSessionId: string;
     key: string;
-    marker: "A" | "B" | "parent";
+    marker: LifecycleMarker;
     sessionId: string;
     turnId: string;
   },

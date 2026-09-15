@@ -16,6 +16,7 @@ const machineTypeFor = (url: string): string | undefined => {
     url === "/docs/getting-started" ||
     url === "/docs/install-integrations" ||
     url.startsWith("/docs/guides/") ||
+    url.startsWith("/docs/observability/") ||
     url.startsWith("/docs/protocols/") ||
     url.startsWith("/docs/tutorial/")
   ) {

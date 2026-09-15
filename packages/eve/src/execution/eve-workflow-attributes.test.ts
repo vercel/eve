@@ -19,6 +19,7 @@ import {
   ChannelInstrumentationKey,
   ChannelRequestIdKey,
   ScheduleIdKey,
+  SessionTitleKey,
   SessionTraceSeedKey,
 } from "#context/keys.js";
 import { CHANNEL_CONTEXT_KEY_NAME } from "#context/key-names.js";
@@ -43,6 +44,7 @@ const unknownConversation = {
 const slackChannelCtx = {
   "eve.channel": { kind: "slack", state: { team: "T1" } },
   [ConversationContextKey.name]: publicConversation,
+  [SessionTitleKey.name]: "ship the thing please",
 } satisfies Record<string, unknown>;
 
 const subagentChainCtx = {
@@ -104,7 +106,7 @@ describe("isWorkflowTraceContentVisible", () => {
     };
 
     expect(isWorkflowTraceContentVisible(serializedContext)).toBe(true);
-    expect(buildSessionAttributes({ inputMessage: "research", serializedContext })).toMatchObject({
+    expect(buildSessionAttributes({ serializedContext })).toMatchObject({
       "$eve.is_trace_content_visible": true,
     });
   });
@@ -162,7 +164,7 @@ describe("isWorkflowTraceContentVisible", () => {
     };
 
     expect(isWorkflowTraceContentVisible(serializedContext)).toBe(false);
-    expect(buildSessionAttributes({ inputMessage: "research", serializedContext })).toMatchObject({
+    expect(buildSessionAttributes({ serializedContext })).toMatchObject({
       "$eve.is_trace_content_visible": false,
     });
   });
@@ -183,7 +185,7 @@ describe("isWorkflowTraceContentVisible", () => {
     };
 
     expect(isWorkflowTraceContentVisible(serializedContext)).toBe(false);
-    expect(buildSessionAttributes({ inputMessage: "research", serializedContext })).toMatchObject({
+    expect(buildSessionAttributes({ serializedContext })).toMatchObject({
       "$eve.is_trace_content_visible": false,
     });
   });
@@ -302,9 +304,8 @@ describe("deriveSessionTitle", () => {
 });
 
 describe("buildSessionAttributes", () => {
-  it("emits type=session with trigger and derived title", () => {
+  it("emits type=session with trigger and stored title", () => {
     const attrs = buildSessionAttributes({
-      inputMessage: "ship the thing please",
       serializedContext: slackChannelCtx,
     });
 
@@ -320,10 +321,13 @@ describe("buildSessionAttributes", () => {
     });
   });
 
+  it("omits the title when the root context has none", () => {
+    expect(buildSessionAttributes({ serializedContext: {} })["$eve.title"]).toBeUndefined();
+  });
+
   it("marks unknown sessions denied while retaining their stored title", () => {
     const attrs = buildSessionAttributes({
-      inputMessage: "hi",
-      serializedContext: {},
+      serializedContext: { [SessionTitleKey.name]: "hi" },
     });
 
     expect(attrs["$eve.trigger"]).toBeUndefined();
@@ -334,8 +338,10 @@ describe("buildSessionAttributes", () => {
 
   it("stamps hosted OTEL enablement without suppressing the stored title", () => {
     const attrs = buildSessionAttributes({
-      inputMessage: "private prompt",
-      serializedContext: { "eve.otelTraceEnabled": true },
+      serializedContext: {
+        "eve.otelTraceEnabled": true,
+        [SessionTitleKey.name]: "private prompt",
+      },
     });
 
     expect(attrs["$eve.is_otel_trace_enabled"]).toBe(true);
@@ -345,9 +351,9 @@ describe("buildSessionAttributes", () => {
 
   it("allows unknown session content in development", () => {
     const attrs = buildSessionAttributes({
-      inputMessage: "local prompt",
       serializedContext: {
         [ConversationContextKey.name]: { ...unknownConversation, environment: "development" },
+        [SessionTitleKey.name]: "local prompt",
       },
     });
 
@@ -357,7 +363,6 @@ describe("buildSessionAttributes", () => {
 
   it("emits the channel request id when present", () => {
     const attrs = buildSessionAttributes({
-      inputMessage: "hi",
       serializedContext: {
         ...slackChannelCtx,
         [ChannelRequestIdKey.name]: "req_session",
@@ -369,7 +374,6 @@ describe("buildSessionAttributes", () => {
 
   it("emits the schedule while retaining the target channel trigger", () => {
     const attrs = buildSessionAttributes({
-      inputMessage: "run the scheduled task",
       serializedContext: {
         ...slackChannelCtx,
         [ScheduleIdKey.name]: "dynamic-tasks",
@@ -382,7 +386,6 @@ describe("buildSessionAttributes", () => {
 
   it("emits $eve.trace_id from a sampled trace seed", () => {
     const attrs = buildSessionAttributes({
-      inputMessage: "hi",
       serializedContext: {
         ...slackChannelCtx,
         "eve.sessionTraceSeed": { spanId: "a".repeat(16), traceFlags: 1, traceId: "b".repeat(32) },
@@ -394,7 +397,6 @@ describe("buildSessionAttributes", () => {
 
   it("withholds $eve.trace_id from an unsampled trace seed", () => {
     const attrs = buildSessionAttributes({
-      inputMessage: "hi",
       serializedContext: {
         ...slackChannelCtx,
         "eve.sessionTraceSeed": { spanId: "a".repeat(16), traceFlags: 0, traceId: "b".repeat(32) },

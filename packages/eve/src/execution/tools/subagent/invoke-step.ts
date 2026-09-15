@@ -56,6 +56,13 @@ import {
   flushAgentInvocationTraces,
   settleAgentInvocationTrace,
 } from "#tracing/agent-invocation-terminal.js";
+import {
+  AuthKey,
+  InitiatorAuthKey,
+  SessionDynamicSubagentSelectionsKey,
+  TurnDynamicSubagentSelectionsKey,
+} from "#context/keys.js";
+import type { TaskAgentDispatchContext } from "#tasks/session-index.js";
 
 export type AgentInvocationDispatchResult =
   | {
@@ -86,6 +93,8 @@ export async function dispatchAgentInvocation(input: {
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
   readonly ownerId: string;
+  /** Optional creator snapshot used only to prepare this invocation. */
+  readonly invocationContext?: Record<string, unknown>;
   readonly taskId?: string | undefined;
 }): Promise<AgentInvocationDispatchResult> {
   const durableSession = await readDurableSession(input.sessionState);
@@ -94,7 +103,7 @@ export async function dispatchAgentInvocation(input: {
     invocation: input.request.input,
     invocationId: input.request.invocationId,
     knownAgentIds: agentHandles.map((handle) => handle.identity.id),
-    serializedContext: input.serializedContext,
+    serializedContext: input.invocationContext ?? input.serializedContext,
     sessionState: input.sessionState,
   });
   const entry = prepared.plan[0];
@@ -105,7 +114,7 @@ export async function dispatchAgentInvocation(input: {
     return {
       kind: "failed",
       result: entry.result,
-      serializedContext: prepared.serializedContext,
+      serializedContext: input.serializedContext,
       sessionState: input.sessionState,
     };
   }
@@ -114,7 +123,7 @@ export async function dispatchAgentInvocation(input: {
     conversation: prepared.inheritedConversation,
     invocation: invocationAction,
     ownerId: input.ownerId,
-    serializedContext: prepared.serializedContext,
+    serializedContext: input.serializedContext,
     sessionId: prepared.session.sessionId,
     sessionState: durableSession.state,
     startTimeMs: Date.now(),
@@ -334,6 +343,7 @@ export async function dispatchTaskAgentInvocationStep(
   "use step";
 
   let activityWorkIdentity: ActivityWorkIdentityV1 | undefined;
+  let taskDispatchContext: TaskAgentDispatchContext | undefined;
   if (input.taskId !== undefined) {
     const session = await readDurableSession(input.sessionState);
     const entry = findSessionTaskEntry(session.state, input.taskId);
@@ -342,15 +352,63 @@ export async function dispatchTaskAgentInvocationStep(
     if (view === undefined || isTerminalTaskStatus(view.status)) {
       return { kind: "not-admitted", sessionState: input.sessionState };
     }
+    if ("legacy" in entry.dispatchContext) {
+      return missingTaskDispatchContext(input);
+    }
+    taskDispatchContext = entry.dispatchContext;
     if (entry.metadata.kind === "subagent") {
       activityWorkIdentity = entry.activityWorkIdentity;
     }
   }
-  return await dispatchAgentInvocation({
+  const dispatched = await dispatchAgentInvocation({
     ...input,
     activityWorkIdentity,
     callbackBaseUrl: resolveWorkflowCallbackBaseUrl(getWorkflowMetadata().url),
+    invocationContext:
+      taskDispatchContext === undefined
+        ? undefined
+        : applyTaskDispatchContext(input.serializedContext, taskDispatchContext),
   });
+  return dispatched;
+}
+
+function missingTaskDispatchContext(
+  input: Parameters<typeof dispatchTaskAgentInvocationStep>[0],
+): TaskAgentInvocationDispatchResult {
+  return {
+    kind: "failed",
+    result: {
+      callId: input.request.invocationId,
+      isError: true,
+      kind: "subagent-result",
+      origin: "dispatch",
+      output: {
+        code: "AGENT_INVOCATION_AUTH_UNAVAILABLE",
+        message: "The background task predates captured authentication context.",
+      },
+      subagentName: input.request.input.target,
+    },
+    sessionState: input.sessionState,
+  };
+}
+
+function applyTaskDispatchContext(
+  parent: Record<string, unknown>,
+  task: TaskAgentDispatchContext,
+): Record<string, unknown> {
+  const context = {
+    ...parent,
+    [AuthKey.name]: task.auth.current,
+    [InitiatorAuthKey.name]: task.auth.initiator,
+  };
+  for (const [key, value] of [
+    [SessionDynamicSubagentSelectionsKey.name, task.sessionDynamicSubagentSelections],
+    [TurnDynamicSubagentSelectionsKey.name, task.turnDynamicSubagentSelections],
+  ] as const) {
+    if (value === undefined) delete context[key];
+    else context[key] = value;
+  }
+  return context;
 }
 
 /** Applies an owner-scoped child settlement to the parent session's canonical state. */

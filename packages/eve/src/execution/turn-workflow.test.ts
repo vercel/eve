@@ -784,65 +784,6 @@ describe("turnWorkflow", () => {
     );
   });
 
-  it("keeps dynamic-workflow child dispatch and immediate remote failures in the same turn", async () => {
-    const now = vi.spyOn(Date, "now").mockReturnValue(2_345);
-    const pendingState = createSessionState();
-    const completedState = createSessionState();
-    installInbox([]);
-    vi.mocked(dispatchCoordinationStep).mockResolvedValue({
-      results: [
-        {
-          callId: "call-1",
-          isError: true,
-          kind: "subagent-result",
-          origin: "dispatch",
-          output: { code: "REMOTE_AGENT_START_FAILED", message: "remote unavailable" },
-          subagentName: "research",
-        },
-      ],
-      sessionState: pendingState,
-      pendingTasks: [],
-    });
-    vi.mocked(turnStep)
-      .mockResolvedValueOnce({
-        action: "dispatch-workflow-tasks",
-        pendingTaskCallIds: ["call-1"],
-        serializedContext: { state: "pending" },
-        sessionState: pendingState,
-      })
-      .mockResolvedValueOnce({
-        action: "done",
-        output: "handled failure",
-        serializedContext: { state: "done" },
-        sessionState: completedState,
-      });
-
-    const { input, parentWritable } = createInput({
-      driverCapabilities: { turnInbox: true },
-      mode: "task",
-      sessionState: pendingState,
-    });
-    await turnWorkflow(input);
-
-    expect(dispatchCoordinationStep).toHaveBeenCalledWith({
-      action: "dispatch-workflow-tasks",
-      callbackBaseUrl: "https://eve.example.com",
-      workflowToolRunOwner: { inbox: "generated-owner-token" },
-      parentWritable,
-      serializedContext: { state: "pending" },
-      sessionState: pendingState,
-    });
-    expect(vi.mocked(turnStep).mock.calls[1]?.[0].input).toEqual({
-      acceptedAtMsByCallId: { "call-1": 2_345 },
-      kind: "runtime-action-result",
-      results: [expect.objectContaining({ callId: "call-1", isError: true })],
-    });
-    expect(
-      resumeHookMock.mock.calls.filter((call) => call[1]?.kind === "turn-result"),
-    ).toHaveLength(1);
-    now.mockRestore();
-  });
-
   it("proxies child HITL and pulls the response through the active turn", async () => {
     const runningChildren = [{ callId: "call-1", sessionId: "child-session" }];
     const pendingState = createSessionState();

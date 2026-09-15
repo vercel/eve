@@ -11,6 +11,7 @@ import {
   SessionIdKey,
   SessionKey,
   ScheduleIdKey,
+  SessionTitleKey,
 } from "#context/keys.js";
 import { setChannelContext } from "#execution/channel-context.js";
 import { buildRunContext } from "#execution/runtime-context.js";
@@ -201,6 +202,36 @@ describe("buildRunContext", () => {
 
     expect(ctx.require(AuthKey)).toEqual(testAuth);
     expect(ctx.require(ScheduleIdKey)).toBe("dynamic-tasks");
+  });
+
+  it("stores a title only for top-level sessions", () => {
+    const root = buildRunContext({
+      bundle: createMinimalBundle(),
+      run: {
+        auth: null,
+        adapter: { kind: "http" },
+        input: { message: "Investigate the incident" },
+        mode: "conversation",
+      },
+    });
+    const child = buildRunContext({
+      bundle: createMinimalBundle(),
+      run: {
+        auth: null,
+        adapter: { kind: "subagent" },
+        input: { message: "Delegated prompt" },
+        mode: "task",
+        parent: {
+          callId: "call-1",
+          rootSessionId: "root-session",
+          sessionId: "parent-session",
+          turn: { id: "turn-1", sequence: 0 },
+        },
+      },
+    });
+
+    expect(root.get(SessionTitleKey)).toBe("Investigate the incident");
+    expect(child.get(SessionTitleKey)).toBeUndefined();
   });
 
   it("does not invent a continuation for an ID-only run", () => {

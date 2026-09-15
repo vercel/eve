@@ -114,9 +114,13 @@ test("proxy approvals in both ancestors do not count as nested probe executions"
   assert.deepEqual(toolEvidence(turns, "child", "probe"), []);
 });
 
-test("only deduplicates event IDs within the owning session, including overlapping watches", () => {
+test("deduplicates event and logical-call retries within the owning session", () => {
   const turns = snapshots();
   turns.push(...snapshots());
+  turns.push({
+    sessionId: "child",
+    events: [requested("retried-request"), completed("retried-result")],
+  });
   turns.push({
     sessionId: "sibling",
     events: [
@@ -125,8 +129,17 @@ test("only deduplicates event IDs within the owning session, including overlappi
     ],
   });
   assert.deepEqual(toolEvidence(turns, "child", "probe"), expected);
-  assert.equal(eventsForSession(turns, "child").length, 3);
+  assert.equal(eventsForSession(turns, "child").length, 5);
   assert.deepEqual(toolEvidence(turns, "sibling", "probe")[0].inputs, [{ check: "second" }]);
+});
+
+test("rejects a logical-call retry that changes its result", () => {
+  const turns = snapshots();
+  turns.push({
+    sessionId: "child",
+    events: [completed("changed-result", "probe-call", "completed", { result: "pears" })],
+  });
+  assert.throws(() => toolEvidence(turns, "child", "probe"), /tool result probe-call changed/);
 });
 
 test("does not join a same-call-ID request and result from different sessions", () => {
@@ -141,8 +154,6 @@ for (const [name, extra] of [
     "a second execution with a new call ID",
     [requested("request-2", "second-call"), completed("result-2", "second-call")],
   ],
-  ["a duplicate result event for the same call ID", [completed("result-2")]],
-  ["a duplicate request event for the same call ID", [requested("request-2")]],
   ["an orphan completion", [completed("orphan", "unknown-call")]],
   ["a pending extra call", [requested("pending", "pending-call")]],
 ]) {

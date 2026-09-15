@@ -100,7 +100,7 @@ By default, the UI shows `stderr` logs. Use `/loglevel <all|stderr|sandbox|none>
 
 Every `eve dev` process writes diagnostic logs to `.eve/logs/`, regardless of the display mode. Read them with [`eve logs`](../reference/cli#eve-logs).
 
-Use `/traces` to inspect traces recorded during local development. See [Instrumentation](instrumentation#local-traces) for trace capture and retention settings.
+Use `/traces` to inspect traces recorded during local development. See [Instrumentation](../observability/instrumentation#local-traces) for trace capture and retention settings.
 
 ## Display options
 
@@ -110,7 +110,7 @@ Use `eve dev` flags to control tool calls, reasoning, subagents, connection auth
 eve dev --tools full --reasoning collapsed --logs all
 ```
 
-Use `--host` and `--port` to bind the local server, or `--no-ui` to run without the terminal UI. See the [`eve dev` CLI reference](../reference/cli#eve-dev) for the complete option list, accepted values, and defaults.
+Use `--host` and `--port` to bind the local server, or `--no-ui` to run without the terminal UI. Set `EVE_TUI_RENDER_MARKDOWN=0` to show assistant and subagent responses without Markdown parsing or styling; `1` (the default) enables Markdown rendering. See the [`eve dev` CLI reference](../reference/cli#eve-dev) for the complete option list, accepted values, and defaults.
 
 ## Connect to a deployment
 
@@ -131,6 +131,6 @@ Remote Vercel sessions reuse an existing authorized CLI session. They do not ope
 
 ## What to read next
 
-- [Instrumentation](./instrumentation): traces, OpenTelemetry, and diagnostics.
+- [Instrumentation](../observability/instrumentation): traces, OpenTelemetry, and diagnostics.
 - [CLI](../reference/cli): commands and flags.
 - [Agent Client Protocol (ACP)](../protocols/acp): drive the same agent from ACP clients such as Zed instead of the TUI.

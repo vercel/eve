@@ -301,6 +301,7 @@ const analysisTaskAnnouncement =
 function recordBackgroundTask(session: HarnessSession, taskId = "analysis"): HarnessSession {
   return recordSessionTask(session, {
     createdByTurnId: activeTurnId(getHarnessEmissionState(session.state)),
+    dispatchContext: { auth: { current: null, initiator: null } },
     executor: { data: {}, kind: "workflow-tool" },
     metadata: { kind: "report-probe", name: taskId },
     taskId,
@@ -1925,70 +1926,6 @@ describe("createToolLoopHarness", () => {
     expect(JSON.stringify(toolMessages)).toContain("delegated-done");
     expect(events.filter((event) => event.type === "subagent.completed")).toHaveLength(1);
     expect(events.at(-1)?.type).toBe("session.waiting");
-  });
-
-  it("keeps declared subagent tools when Workflow is unavailable outside the root", async () => {
-    setupMockAgent({
-      finishReason: "stop",
-      response: { messages: [{ content: "Hello!", role: "assistant" }] },
-      text: "Hello!",
-      toolCalls: [],
-      toolResults: [],
-    });
-
-    const config = createTestConfig("conversation", undefined, {
-      workflow: true,
-      tools: new Map([
-        [
-          "delegate",
-          {
-            description: "Delegate to a subagent.",
-            inputSchema: jsonSchema({ type: "object" }),
-            name: "delegate",
-            resultKind: "subagent",
-            workflowId: "workflow//./agent/subagents/researcher//execute",
-          },
-        ],
-      ]),
-    });
-    const runStep = createToolLoopHarness(config);
-
-    await runStep(createTestSession({ rootSessionId: "root-session" }), {
-      message: "Hi",
-    });
-
-    const agentCall = vi.mocked(ToolLoopAgent).mock.calls[0]?.[0];
-    expect(agentCall).toBeDefined();
-    expect(agentCall!.tools).toHaveProperty("delegate");
-    expect(agentCall!.tools).not.toHaveProperty("Workflow");
-  });
-
-  it("omits Workflow from runtime subagent sessions", async () => {
-    setupMockAgent({
-      finishReason: "stop",
-      response: { messages: [{ content: "Hello!", role: "assistant" }] },
-      text: "Hello!",
-      toolCalls: [],
-      toolResults: [],
-    });
-
-    const config = createTestConfig("conversation", undefined, {
-      workflow: true,
-      tools: createDelegationToolMap(),
-    });
-    const runStep = createToolLoopHarness(config);
-
-    await runStep(
-      createTestSession({
-        rootSessionId: "root-session",
-      }),
-      { message: "Hi" },
-    );
-
-    const agentCall = vi.mocked(ToolLoopAgent).mock.calls[0]?.[0];
-    expect(agentCall).toBeDefined();
-    expect(agentCall!.tools).toHaveProperty("delegate");
-    expect(agentCall!.tools).not.toHaveProperty("Workflow");
   });
 
   it("forwards the agent reasoning effort to the model call", async () => {

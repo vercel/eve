@@ -1,3 +1,5 @@
+import { isDeepStrictEqual } from "node:util";
+
 import type { EveEvalTurn, InputRequest } from "eve/evals";
 
 type Event = EveEvalTurn["events"][number];
@@ -102,17 +104,29 @@ export function toolEvidence(
     }
     return entry;
   }
+  function appendRetry<T>(values: T[], value: T, label: string): void {
+    const previous = values[0];
+    if (previous === undefined) {
+      values.push(value);
+    } else if (!isDeepStrictEqual(previous, value)) {
+      throw new Error(`Retried ${label} changed its value.`);
+    }
+  }
   for (const event of eventsForSession(snapshots, sessionId)) {
     if (event.type === "actions.requested") {
       for (const action of event.data.actions) {
         if (action.kind === "tool-call" && action.toolName === toolName) {
-          call(action.callId).inputs.push(action.input);
+          appendRetry(call(action.callId).inputs, action.input, `tool input ${action.callId}`);
         }
       }
     } else if (event.type === "action.result") {
       const { result, status } = event.data;
       if (result.kind === "tool-result" && result.toolName === toolName) {
-        call(result.callId).results.push({ status, output: result.output });
+        appendRetry(
+          call(result.callId).results,
+          { status, output: result.output },
+          `tool result ${result.callId}`,
+        );
       }
     }
   }

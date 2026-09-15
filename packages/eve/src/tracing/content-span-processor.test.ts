@@ -65,6 +65,27 @@ describe("contentFilteringProcessor", () => {
     });
   });
 
+  it("reports the content policy visible to each destination", () => {
+    const downstream = recordingProcessor();
+    const original = span({
+      "agent.trace.content.input": true,
+      "agent.trace.content.output": true,
+      "gen_ai.input.messages": "what the user said",
+    });
+
+    contentFilteringProcessor(downstream, redactSpanInputs()).onEnd(original as never);
+
+    expect((downstream.ended[0] as { attributes: unknown }).attributes).toEqual({
+      "agent.trace.content.input": false,
+      "agent.trace.content.output": true,
+    });
+    expect((original as { attributes: unknown }).attributes).toEqual({
+      "agent.trace.content.input": true,
+      "agent.trace.content.output": true,
+      "gen_ai.input.messages": "what the user said",
+    });
+  });
+
   it("leaves the original span's attributes in place for the other destinations", () => {
     const kept = recordingProcessor();
     const declined = recordingProcessor();

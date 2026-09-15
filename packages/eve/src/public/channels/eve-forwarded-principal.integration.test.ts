@@ -185,7 +185,7 @@ describe("eveChannel forwarded principal → runtime principal", () => {
         originAudience: "private",
       },
     });
-    expect(buildSessionAttributes({ inputMessage: "research", serializedContext })).toMatchObject({
+    expect(buildSessionAttributes({ serializedContext })).toMatchObject({
       "$eve.is_trace_content_visible": false,
     });
     expect(ctx.get(ParentTraceContextKey)).toEqual({

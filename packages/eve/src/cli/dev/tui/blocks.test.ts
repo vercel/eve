@@ -17,9 +17,46 @@ describe("renderBlockLines", () => {
     expect(render({ kind: "user", body: "hello there" })).toEqual(["│ hello there"]);
   });
 
-  it("marks the assistant with the brand triangle", () => {
+  it("marks rendered assistant Markdown with the brand triangle", () => {
     const lines = render({ kind: "assistant", body: "all done" });
-    expect(lines[0]).toBe("▲ all done");
+    expect(lines).toEqual(["▲ all done"]);
+  });
+
+  it("keeps an inline image on the preceding prose row", () => {
+    const lines = renderBlockLines(
+      {
+        kind: "assistant",
+        body: "Visit [eve](https://github.com/vercel-labs/eve) or view this image: ![eve logo](https://eve.dev/logo.png).",
+      },
+      80,
+      theme,
+      ctx,
+    );
+
+    expect(lines).toHaveLength(1);
+    expect(stripAnsi(lines[0] ?? "")).toBe(
+      "▲ Visit eve or view this image:\u00a0▧\u00a0eve\u00a0logo.",
+    );
+
+    const wrapped = renderBlockLines(
+      {
+        kind: "assistant",
+        body: "Visit [eve](https://github.com/vercel-labs/eve) or view this image: ![eve logo](https://eve.dev/logo.png).",
+      },
+      35,
+      theme,
+      ctx,
+    ).map(stripAnsi);
+    expect(wrapped).toEqual(["▲ Visit eve or view this", "  image:\u00a0▧\u00a0eve\u00a0logo."]);
+  });
+
+  it("preserves prose Markdown when Markdown rendering is disabled", () => {
+    const lines = renderBlockLines({ kind: "assistant", body: "**bold**\n\n- item" }, 60, theme, {
+      ...ctx,
+      renderMarkdown: false,
+    }).map(stripAnsi);
+
+    expect(lines).toEqual(["▲ **bold**", "  ", "  - item"]);
   });
 
   it("colors per-item status markers in a mixed command result", () => {

@@ -238,11 +238,15 @@ export function bindInstrumentationRuntime(
       session: {
         agentName: boundSession.agentName,
         channelAudience: sessionContext.conversation.audience,
+        // OTel stores the normalized conversation kind; `$eve.trigger` retains the raw adapter kind.
+        channelKind: sessionContext.conversation.channel.kind,
         channelType: sessionContext.instrumentation?.channelType,
         parentLineage: sessionContext.parentLineage,
         parentTraceContext: sessionContext.parentTraceContext,
         rootSessionId: sessionContext.parent?.rootSessionId ?? boundSession.rootSessionId,
+        scheduleId: sessionContext.scheduleId,
         sessionId: boundSession.sessionId,
+        title: sessionContext.title,
         traceSeed: sessionContext.traceSeed,
       },
     });
@@ -400,7 +404,9 @@ export function bindInstrumentationRuntime(
                 parentLineage: sessionContext.parentLineage,
                 parentTraceContext: sessionContext.parentTraceContext,
                 rootSessionId: sessionContext.parent?.rootSessionId,
+                scheduleId: sessionContext.scheduleId,
                 sessionId: boundSession.sessionId,
+                title: sessionContext.title,
               }),
             prepareAttempt: (attemptInput) => {
               const scope: InstrumentationAttemptScope = {
@@ -489,10 +495,12 @@ export function bindInstrumentationRuntime(
       const sessionContext = readSessionContext();
       return createInstrumentationHandleEvent({
         agentName: boundSession.agentName,
-        channelKind: sessionContext.instrumentation?.kind,
+        channelKind: sessionContext.conversation.channel.kind,
         handleEvent: input.handleEvent,
         hooks: bindHooks(sessionContext),
+        scheduleId: sessionContext.scheduleId,
         sessionId: boundSession.sessionId,
+        title: sessionContext.title,
         turnId: input.turnId,
       });
     },

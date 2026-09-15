@@ -65,7 +65,17 @@ describe("workflow-owned agent requests", () => {
   });
 
   it("retains existing context when replaying a dispatch result without tracing state", async () => {
-    const serializedContext = { "eve.test": "preserved" };
+    const receiver = {
+      attributes: {},
+      authenticator: "test-idp",
+      principalId: "receiver",
+      principalType: "user",
+    };
+    const serializedContext = {
+      "eve.auth": receiver,
+      "eve.initiatorAuth": receiver,
+      "eve.test": "preserved",
+    };
     const event = { type: "subagent.called" } as never;
     vi.mocked(dispatchTaskAgentInvocationStep).mockResolvedValue({
       agentId: "child",

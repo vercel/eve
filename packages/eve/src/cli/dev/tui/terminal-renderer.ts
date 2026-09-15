@@ -104,6 +104,7 @@ import {
   type ProviderPickerEvent,
 } from "./provider-picker.js";
 import { buildAgentHeader } from "./agent-header.js";
+import { detectMarkdownRendering } from "./markdown.js";
 import {
   EMPTY_LINE,
   PromptHistory,
@@ -290,6 +291,7 @@ export type TerminalRendererOptions = {
   logs?: LogDisplayMode;
   color?: boolean;
   unicode?: boolean;
+  renderMarkdown?: boolean;
   /** The process's diagnostics recorder (log, dump, stats); local sessions only. */
   diagnostics?: DevDiagnostics;
   /** Slash commands available in this local or remote session. */
@@ -369,6 +371,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
   readonly #live: LiveRegion;
   readonly #altScreen: AltScreen;
   readonly #theme: Theme;
+  readonly #renderMarkdown: boolean;
   readonly #tools: TerminalPartDisplayMode;
   readonly #reasoning: TerminalPartDisplayMode;
   readonly #subagents: TerminalPartDisplayMode;
@@ -635,6 +638,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
       color: options?.color ?? true,
       unicode: options?.unicode ?? detectUnicode(),
     });
+    this.#renderMarkdown = options?.renderMarkdown ?? detectMarkdownRendering();
     this.#tools = options?.tools ?? "auto-collapsed";
     this.#reasoning = options?.reasoning ?? "auto-collapsed";
     this.#subagents = options?.subagents ?? "auto-collapsed";
@@ -4163,6 +4167,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
 
   #renderBlock(block: DisplayBlock, width: number, previous: PreviousBlock | undefined): string[] {
     const context: Parameters<typeof renderBlockLines>[3] = {
+      renderMarkdown: this.#renderMarkdown,
       activityPulse: this.#progressPulseGlyph(
         this.#activityPulseStartedAtMs,
         this.#theme.unicode ? PROGRESS_PULSE_GLYPH : PROGRESS_PULSE_ASCII_GLYPH,

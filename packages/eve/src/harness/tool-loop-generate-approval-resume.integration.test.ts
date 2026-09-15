@@ -878,6 +878,7 @@ describe("tool loop generate approval resume (real AI SDK)", () => {
         ctx.set(TurnTaskDeliveryKey, "initiating");
         session = recordSessionTask(session, {
           createdByTurnId: "turn-1",
+          dispatchContext: { auth: { current: null, initiator: null } },
           executor: { data: {}, kind: "workflow-tool" },
           metadata: { kind: "report-probe", name: "analysis" },
           taskId: "analysis",

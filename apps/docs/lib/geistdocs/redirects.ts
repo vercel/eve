@@ -68,6 +68,13 @@ export const docsRedirects: DocsRedirect[] = [
   ...createDocsRedirects("/deployment/vercel", "/guides/deployment/vercel"),
   ...createDocsRedirects("/deployment/self-hosting", "/guides/deployment/self-hosting"),
   ...createDocsRedirects("/self-hosting", "/guides/deployment/self-hosting"),
+  ...createDocsRedirects("/guides/instrumentation", "/observability/instrumentation"),
+  ...createDocsRedirects(
+    "/guides/instrumentation-providers",
+    "/observability/instrumentation-providers",
+  ),
+  ...createDocsRedirects("/guides/instrumentation-otel", "/observability/otel"),
+  ...createDocsRedirects("/observability/instrumentation-otel", "/observability/otel"),
   ...createDocsRedirects("/evals", "/evals/overview"),
   ...createDocsRedirects("/advanced/evals", "/evals/overview"),
   ...createDocsRedirects("/getting-started/installation", "/getting-started"),
