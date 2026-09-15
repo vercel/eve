@@ -21,7 +21,7 @@ const repoRoot = resolve(appRoot, "../..");
 const packageRoot = join(repoRoot, "packages/eve");
 const packageJsonPath = join(packageRoot, "package.json");
 const artifactDirectory = join(appRoot, ".artifacts");
-const target = resolveDeploymentTarget(process.env);
+const target = await resolveDeploymentTarget(process.env);
 
 if (target === undefined) {
   await writeLandingPage();
