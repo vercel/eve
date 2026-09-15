@@ -109,7 +109,7 @@ function renderEndpoint(
   }
   if (input.endpoint.credential === "oauth") {
     const slug = input.vercel?.modelTeamSlug;
-    return clause("Vercel", slug ? ` · ${slug}` : "");
+    return c.dim(slug ? `Vercel · ${slug}` : "Vercel");
   }
   const projectName = input.vercel?.identity?.projectName;
   const scope = projectName === undefined ? "oidc" : `oidc:${projectName}`;
