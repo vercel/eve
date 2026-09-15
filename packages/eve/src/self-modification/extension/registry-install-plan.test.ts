@@ -12,44 +12,25 @@ const lazyEntry: CatalogEntry = {
 };
 
 describe("self-modification registry install planning", () => {
-  it("plans a project-scoped source transform for opted-in Connect items", () => {
+  it("plans a stable random connector transform without resolving a project", () => {
     const plan = planSelfModificationRegistryInstall({
+      createConnectorUid: (name) => `${name}-generated-id`,
       entry: lazyEntry,
-      missingProject: "requires-user-setup",
       setupHandling: "requires-user-setup",
-      projectId: "prj_abc123",
     });
 
     expect(plan.kind).toBe("install-with-transform");
     if (plan.kind !== "install-with-transform") throw new Error("Expected a source transform.");
     expect(plan.transform.target).toBe("agent/connections/linear.ts");
     expect(plan.transform.apply('  auth: connect("linear"),')).toContain(
-      'connect("linear-prj_abc123")',
+      'connect("linear-generated-id")',
     );
-  });
-
-  it("preserves terminal setup without a local project and fails deployed setup closed", () => {
-    expect(
-      planSelfModificationRegistryInstall({
-        entry: lazyEntry,
-        missingProject: "requires-user-setup",
-        setupHandling: "requires-user-setup",
-      }).kind,
-    ).toBe("requires-user-setup");
-    expect(
-      planSelfModificationRegistryInstall({
-        entry: lazyEntry,
-        missingProject: "cannot-install",
-        setupHandling: "execute",
-      }).kind,
-    ).toBe("cannot-install");
   });
 
   it("allows deployed proposal workspaces to execute ordinary setup", () => {
     expect(
       planSelfModificationRegistryInstall({
         entry: { ...lazyEntry, selfModification: undefined },
-        missingProject: "cannot-install",
         setupHandling: "execute",
       }).kind,
     ).toBe("install");
@@ -59,9 +40,7 @@ describe("self-modification registry install planning", () => {
     expect(
       planSelfModificationRegistryInstall({
         entry: { ...lazyEntry, selfModification: undefined },
-        missingProject: "requires-user-setup",
         setupHandling: "requires-user-setup",
-        projectId: "prj_abc123",
       }).kind,
     ).toBe("requires-user-setup");
   });
@@ -70,9 +49,7 @@ describe("self-modification registry install planning", () => {
     expect(
       planSelfModificationRegistryInstall({
         entry: { ...lazyEntry, authoredTarget: "agent/tools/linear.ts" },
-        missingProject: "requires-user-setup",
         setupHandling: "requires-user-setup",
-        projectId: "prj_abc123",
       }).kind,
     ).toBe("requires-user-setup");
   });

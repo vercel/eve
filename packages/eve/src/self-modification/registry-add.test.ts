@@ -222,47 +222,21 @@ describe("addLocalRegistryItem", () => {
     expect(calls).toHaveLength(0);
   });
 
-  it("returns the exact installation command for a headless Linear handoff", async () => {
-    const result = await addLocalRegistryItem("connection/linear", {
-      getCapability: () => capability(),
-      resolveProjectId: async () => undefined,
-    });
-
-    expect(result).toMatchObject({
-      address: "connection/linear",
-      nextCommand: "eve add connection/linear",
-      status: "needs-terminal",
-    });
-    expect(result.message).toContain("`eve add connection/linear`");
-  });
-
-  it("does not install lazily with an invalid linked project ID", async () => {
-    const { calls, spawn } = fakeSpawn({ code: 0, output: COMPLETED });
-    const result = await addLocalRegistryItem("connection/linear", {
-      getCapability: () => capability(),
-      resolveProjectId: async () => "project-name",
-      spawn,
-    });
-
-    expect(result.status).toBe("needs-terminal");
-    expect(calls).toHaveLength(0);
-  });
-
-  it("installs a project-scoped lazy connector only through self-modification", async () => {
+  it("installs a lazy connector without a linked project", async () => {
     const installLocal = vi
       .spyOn(localRegistryInstall, "installLocalRegistryItem")
       .mockResolvedValue({ outcome: { kind: "installed" } });
 
     const result = await addLocalRegistryItem("connection/linear", {
+      createConnectorUid: (name) => `${name}-generated-id`,
       getCapability: () => capability(),
-      resolveProjectId: async () => "prj_abc123",
     });
 
     expect(result).toMatchObject({ status: "installed" });
     const transform = installLocal.mock.calls[0]?.[0].transform;
     expect(transform?.target).toBe("agent/connections/linear.ts");
     expect(transform?.apply('  auth: connect("linear"),')).toContain(
-      'connect("linear-prj_abc123")',
+      'connect("linear-generated-id")',
     );
   });
 
@@ -272,8 +246,8 @@ describe("addLocalRegistryItem", () => {
       transformFailure: { restored: true, changed: [] },
     });
     const result = await addLocalRegistryItem("connection/linear", {
+      createConnectorUid: (name) => `${name}-generated-id`,
       getCapability: () => capability(),
-      resolveProjectId: async () => "prj_abc123",
     });
 
     expect(result).toMatchObject({

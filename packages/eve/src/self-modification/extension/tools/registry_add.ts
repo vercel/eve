@@ -1,8 +1,6 @@
 import { getLocalDevCapability, type LocalDevCapability } from "eve/local-dev";
 import { defineDynamic, defineTool, type ToolContext } from "eve/tools";
 
-import { resolveVercelProjectIdFromEnvironment } from "#shared/vercel-project.js";
-import { readProjectLink } from "#setup/project-resolution.js";
 import { once } from "eve/tools/approval";
 
 import {
@@ -16,10 +14,7 @@ import { withSelfModificationWorkspaceLock } from "../../workspace-lock.js";
 import selfModification from "../extension.js";
 import type { SpawnLike } from "../eve-add.js";
 import { installLocalRegistryItem } from "../local-registry-install.js";
-import {
-  planSelfModificationRegistryInstall,
-  selfModificationRegistryInstallNeedsProject,
-} from "../registry-install-plan.js";
+import { planSelfModificationRegistryInstall } from "../registry-install-plan.js";
 import {
   assertOfficialRegistryAddress,
   installProductionRegistryItem,
@@ -144,8 +139,8 @@ const productionOutputSchema = {
 } as const;
 
 interface RegistryAddDependencies {
+  readonly createConnectorUid?: (name: string) => string;
   readonly getCapability?: () => LocalDevCapability | undefined;
-  readonly resolveProjectId?: (appRoot: string) => Promise<string | undefined>;
   readonly spawn?: SpawnLike;
 }
 
@@ -255,15 +250,9 @@ export async function addLocalRegistryItem(
     );
   }
 
-  const resolveProjectId =
-    options.resolveProjectId ??
-    (async (appRoot: string) => (await readProjectLink(appRoot))?.projectId);
   const plan = planSelfModificationRegistryInstall({
+    createConnectorUid: options.createConnectorUid,
     entry,
-    missingProject: "requires-user-setup",
-    projectId: selfModificationRegistryInstallNeedsProject(entry)
-      ? await resolveProjectId(capability.appRoot)
-      : undefined,
     setupHandling: "requires-user-setup",
   });
   if (plan.kind === "requires-user-setup") {
@@ -281,16 +270,6 @@ export async function addLocalRegistryItem(
       ...handoff,
     };
   }
-  if (plan.kind === "cannot-install") {
-    return {
-      address,
-      status: "failed",
-      title: entry.title,
-      reason: plan.message,
-      message: plan.message,
-    };
-  }
-
   const result = await withSelfModificationWorkspaceLock(`local:${capability.appRoot}`, async () =>
     installLocalRegistryItem({
       address,
@@ -388,17 +367,7 @@ async function addProductionRegistryItem(
   const sandbox = await context.getSandbox();
   const result = await withSelfModificationWorkspaceLock(`sandbox:${sandbox.id}`, async () => {
     const workspace = await readPreparedSelfModificationWorkspace({ ...deployed, sandbox });
-    const plan = planSelfModificationRegistryInstall({
-      entry,
-      missingProject: "cannot-install",
-      projectId: selfModificationRegistryInstallNeedsProject(entry)
-        ? resolveVercelProjectIdFromEnvironment()
-        : undefined,
-      setupHandling: "execute",
-    });
-    if (plan.kind === "cannot-install") {
-      return { kind: "failed" as const, message: plan.message };
-    }
+    const plan = planSelfModificationRegistryInstall({ entry, setupHandling: "execute" });
     if (plan.kind === "requires-user-setup") {
       return { kind: "failed" as const, message: plan.reason };
     }

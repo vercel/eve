@@ -73,7 +73,7 @@ describe("production registry addresses", () => {
     expect(networkPolicyUpdates).toBe(0);
   });
 
-  it("rewrites a self-modified connection for lazy project-scoped provisioning", async () => {
+  it("rewrites a self-modified connection for lazy provisioning without project binding", async () => {
     const commands: string[] = [];
     const writes: { content: string; path: string }[] = [];
     let treeWrites = 0;
@@ -81,7 +81,7 @@ describe("production registry addresses", () => {
       address: "connection/linear",
       transform: {
         target: "agent/connections/linear.ts",
-        apply: (source) => source.replace('connect("linear")', 'connect("linear-prj_abc123")'),
+        apply: (source) => source.replace('connect("linear")', 'connect("linear-generated-id")'),
       },
       sandbox: {
         readTextFile: async () =>
@@ -131,7 +131,7 @@ describe("production registry addresses", () => {
     expect(writes).toEqual([
       {
         content:
-          'import { connect } from "@vercel/connect/eve";\nconst auth = connect("linear-prj_abc123");\n',
+          'import { connect } from "@vercel/connect/eve";\nconst auth = connect("linear-generated-id");\n',
         path: "/repository/agent/connections/linear.ts",
       },
     ]);

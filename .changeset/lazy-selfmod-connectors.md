@@ -2,4 +2,4 @@
 "eve": patch
 ---
 
-Self-modification can now install standard user-OAuth MCP connections with a project-scoped Vercel Connect connector that provisions lazily on first use.
+Self-modification can now install standard user-OAuth MCP connections without first linking a Vercel project. Each install gets a stable random connector UID that Vercel Connect provisions on first use.
