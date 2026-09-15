@@ -58,11 +58,11 @@ export class ClientSession {
     input: SendTurnInput<TOutput>,
   ): Promise<{ readonly response: MessageResponse<TOutput>; readonly session: ClientSession }> {
     const response = await postTurn(context, EVE_SESSION_ROUTE_PATH, input, true);
-    const { sessionId } = await readAcceptedMessage(response);
+    const { sessionId, deliveryId } = await readAcceptedMessage(response);
     const session = new ClientSession(context, { sessionId, streamIndex: 0 });
 
     return {
-      response: session.#messageResponse<TOutput>(response, input, 0),
+      response: session.#messageResponse<TOutput>(response, input, 0, deliveryId),
       session,
     };
   }
@@ -136,6 +136,7 @@ export class ClientSession {
       response,
       input,
       initialStreamIndex,
+      deliveryId,
       input.message === undefined ? undefined : deliveryId,
     );
   }
@@ -190,11 +191,13 @@ export class ClientSession {
     input: SendTurnPayload,
     initialStreamIndex: number,
     deliveryId?: string,
+    streamDeliveryId?: string,
   ): MessageResponse<TOutput> {
     response.body?.cancel().catch(() => {});
     return new MessageResponse<TOutput>({
       cancelTurn: async (turnId) => await this.cancel({ turnId }),
-      createStream: () => this.#createEventStream(initialStreamIndex, input, deliveryId),
+      createStream: () => this.#createEventStream(initialStreamIndex, input, streamDeliveryId),
+      deliveryId,
       sessionId: this.#state.sessionId,
     });
   }

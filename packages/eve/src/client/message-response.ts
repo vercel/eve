@@ -9,6 +9,7 @@ import type { CancelSessionResult, MessageResult } from "#client/types.js";
 interface MessageResponseInput {
   readonly cancelTurn: (turnId: string) => Promise<CancelSessionResult>;
   readonly createStream: () => AsyncGenerator<MessageStreamEvent>;
+  readonly deliveryId?: string;
   readonly sessionId: string;
 }
 
@@ -20,6 +21,9 @@ interface MessageResponseInput {
  * {@link result} or iterate it with `for await...of`.
  */
 export class MessageResponse<TOutput = unknown> implements AsyncIterable<MessageStreamEvent> {
+  /** Delivery identity assigned to the accepted message, when available. */
+  readonly deliveryId: string | undefined;
+
   /**
    * Session ID assigned by the server.
    */
@@ -35,6 +39,7 @@ export class MessageResponse<TOutput = unknown> implements AsyncIterable<Message
   /** @internal */
   constructor(input: MessageResponseInput) {
     this.#cancelTurn = input.cancelTurn;
+    this.deliveryId = input.deliveryId;
     this.sessionId = input.sessionId;
     this.#createStream = input.createStream;
   }
