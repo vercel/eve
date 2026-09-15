@@ -650,10 +650,10 @@ describe("TerminalRenderer (inline scrollback)", () => {
       // The label types itself out: one character at t=0.
       let barRow = lines.findIndex((line) => line === "▪ W 1s");
       expect(barRow).toBeGreaterThan(-1);
-      // The pending prompt row wears the same quiet `›` as the idle one
+      // The pending prompt row wears the same default-color `❯` as the idle one
       // beneath the bar; the status line follows it.
       expect(lines[barRow + 1]).toBe("");
-      expect(lines[barRow + 2]).toContain("›");
+      expect(lines[barRow + 2]).toContain("❯");
       expect(lines[barRow + 4]).toContain("gpt-5");
 
       // The duration ticks live while the pulse blinks on the shared beat.
@@ -662,7 +662,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
       // Fully revealed once the reveal window has passed.
       barRow = lines.findIndex((line) => line.includes("Working for 2s"));
       expect(barRow).toBeGreaterThan(-1);
-      expect(lines[barRow + 2]).toContain("›");
+      expect(lines[barRow + 2]).toContain("❯");
       expect(lines[barRow + 4]).toContain("gpt-5");
 
       streamController?.close();
@@ -1546,6 +1546,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
     const second = renderer.readPrompt();
     expect(countOccurrences(screen.snapshot(), "└ Done in")).toBe(1);
     input.ctrlC();
+    expect(screen.snapshot()).toContain("❯");
     input.ctrlC();
     await expect(second).rejects.toThrow();
     renderer.shutdown();
@@ -1566,10 +1567,10 @@ describe("TerminalRenderer (inline scrollback)", () => {
     );
     await Promise.resolve();
 
-    // Empty: the quiet idle mark.
-    expect(screen.snapshot()).toContain("›");
+    // Empty: the default-color prompt mark.
+    expect(screen.snapshot()).toContain("❯");
 
-    // A typed draft flips to the active mark, but dim — Enter is inert, so
+    // A typed draft dims the mark — Enter is inert, so
     // the cyan ready state would overclaim.
     input.type("next question");
     await screen.waitForText("❯ next question");
@@ -1739,13 +1740,12 @@ describe("TerminalRenderer (inline scrollback)", () => {
     const prompt = renderer.readPrompt();
     // A bare prompt before any info/turn has no status row (no ↑ 0 ↓ 0 counter).
     expect(screen.snapshot()).not.toContain("↑ 0");
-    // Empty buffer: the quiet `›` gutter with the rotation's first message.
-    expect(screen.snapshot()).toContain(`› ${PROMPT_PLACEHOLDER_MESSAGES[0]}`);
-    expect(screen.snapshot()).not.toContain("❯");
+    // Empty buffer: the default-color `❯` gutter with the rotation's first message.
+    expect(screen.snapshot()).toContain(`❯ ${PROMPT_PLACEHOLDER_MESSAGES[0]}`);
     expect(screen.rawOutput()).not.toContain("\x1b[48;5;");
 
     input.type("hello");
-    // Typing swaps in the active prompt mark and clears the invitation.
+    // Typing colors the prompt mark and clears the invitation.
     expect(screen.snapshot()).toContain("❯ hello");
     expect(screen.snapshot()).not.toContain(PROMPT_PLACEHOLDER_MESSAGES[0]);
     input.enter();
@@ -1825,6 +1825,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
     // crossing the 20K input threshold is what earns the row.
     expect(screen.snapshot()).toContain("└ Done in 1s ── ↑ 20.5K ↓ 43");
     input.ctrlC();
+    expect(screen.snapshot()).toContain("❯");
     input.ctrlC();
     await expect(second).rejects.toThrow();
     renderer.shutdown();
@@ -1853,6 +1854,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
     const second = renderer.readPrompt();
     expect(screen.snapshot()).not.toContain("\n└ ");
     input.ctrlC();
+    expect(screen.snapshot()).toContain("❯");
     input.ctrlC();
     await expect(second).rejects.toThrow();
     renderer.shutdown();
@@ -1862,21 +1864,20 @@ describe("TerminalRenderer (inline scrollback)", () => {
     const { screen, input, renderer } = makeRenderer();
 
     const first = renderer.readPrompt();
-    expect(screen.snapshot()).toContain(`› ${PROMPT_PLACEHOLDER_MESSAGES[0]}`);
+    expect(screen.snapshot()).toContain(`❯ ${PROMPT_PLACEHOLDER_MESSAGES[0]}`);
     input.type("hello");
     input.enter();
     expect(await first).toBe("hello");
 
-    // Once the user has spoken, the empty prompt keeps the quiet `›` but
-    // drops the invitation text; typing still swaps in the active `❯`.
+    // Once the user has spoken, the empty prompt keeps the default-color `❯` but
+    // drops the invitation text; typing still colors the active `❯`.
     const second = renderer.readPrompt();
-    expect(screen.snapshot()).toContain("›");
-    expect(screen.snapshot()).not.toContain("❯");
+    expect(screen.snapshot()).toContain("❯");
     expect(screen.snapshot()).not.toContain(PROMPT_PLACEHOLDER_MESSAGES[0]);
     input.type("again");
     expect(screen.snapshot()).toContain("❯ again");
     input.ctrlC();
-    expect(screen.snapshot()).not.toContain("❯");
+    expect(screen.snapshot()).toContain("❯");
     input.ctrlC();
     await expect(second).rejects.toThrow();
     renderer.shutdown();
@@ -1916,7 +1917,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
     expect(barRow).toBeGreaterThan(-1);
     expect(screen.snapshot()).not.toContain("the plan is to check the forecast");
     // The pending prompt row holds its place below, then the status line.
-    expect(lines[barRow + 2]).toContain("›");
+    expect(lines[barRow + 2]).toContain("❯");
     expect(lines[barRow + 4]).toContain("gpt-5");
 
     streamController?.enqueue({ type: "reasoning-complete", id: "r1" });
@@ -1982,9 +1983,9 @@ describe("TerminalRenderer (inline scrollback)", () => {
     );
 
     await vi.waitFor(() => {
-      // Empty draft: the pending prompt wears the same quiet `›` as idle
+      // Empty draft: the pending prompt wears the same default-color `❯` as idle
       // (readiness is signalled by the turn bar's absence, not the glyph).
-      expect(screen.snapshot()).toContain("›");
+      expect(screen.snapshot()).toContain("❯");
     });
     input.type("follow-up question");
     // Enter mid-turn queues the draft into the panel and clears the buffer.
@@ -2020,7 +2021,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
     );
 
     await vi.waitFor(() => {
-      expect(screen.snapshot()).toContain("›");
+      expect(screen.snapshot()).toContain("❯");
     });
     input.type("/cancel");
     input.enter();
@@ -2055,7 +2056,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
     );
 
     await vi.waitFor(() => {
-      expect(screen.snapshot()).toContain("›");
+      expect(screen.snapshot()).toContain("❯");
     });
     input.type("/cancel");
     input.enter();
@@ -2100,7 +2101,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
     );
 
     await vi.waitFor(() => {
-      expect(screen.snapshot()).toContain("›");
+      expect(screen.snapshot()).toContain("❯");
     });
     input.type("go north");
     input.enter();
@@ -2147,7 +2148,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
       { submittedPrompt: "long task", continueSession: true },
     );
     await vi.waitFor(() => {
-      expect(screen.snapshot()).toContain("›");
+      expect(screen.snapshot()).toContain("❯");
     });
 
     await escape();
@@ -2253,7 +2254,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
       { submittedPrompt: "long task", continueSession: true },
     );
     await vi.waitFor(() => {
-      expect(screen.snapshot()).toContain("›");
+      expect(screen.snapshot()).toContain("❯");
     });
     input.type("go north");
     input.enter();
@@ -2326,7 +2327,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
       { submittedPrompt: "long task", continueSession: true },
     );
     await vi.waitFor(() => {
-      expect(screen.snapshot()).toContain("›");
+      expect(screen.snapshot()).toContain("❯");
     });
 
     for (let index = 1; index <= 5; index += 1) {
@@ -2367,7 +2368,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
       { submittedPrompt: "long task", continueSession: true },
     );
     await vi.waitFor(() => {
-      expect(screen.snapshot()).toContain("›");
+      expect(screen.snapshot()).toContain("❯");
     });
     input.type("first");
     input.enter();
@@ -2409,9 +2410,9 @@ describe("TerminalRenderer (inline scrollback)", () => {
     );
 
     await vi.waitFor(() => {
-      // The pending prompt already shows `›` — but the live bar keeps the
+      // The pending prompt already shows `❯` — but the live bar keeps the
       // idle predicate false.
-      expect(screen.snapshot()).toContain("›");
+      expect(screen.snapshot()).toContain("❯");
     });
     await expect(screen.waitForIdlePrompt(200)).rejects.toThrow(/idle prompt/u);
 
@@ -5267,7 +5268,7 @@ describe("TerminalRenderer status line", () => {
     });
 
     const lines = screen.snapshot().split("\n");
-    const promptRow = lines.findIndex((line) => line.includes("›"));
+    const promptRow = lines.findIndex((line) => line.includes("❯"));
     expect(promptRow).toBeGreaterThan(-1);
     const statusRow = lines.slice(promptRow + 1).join("\n");
     expect(statusRow).not.toContain(":3000");

@@ -127,9 +127,9 @@ export class MockScreen extends EventEmitter implements TerminalOutput {
   }
 
   /**
-   * Resolves once the runner parks at an idle prompt: a column-0 `›` row
+   * Resolves once the runner parks at an idle prompt: a column-0 `❯` row
    * with no live turn bar on screen. A streaming turn keeps an identical
-   * `›` prompt anchored (Enter inert), so the glyph alone cannot signal
+   * `❯` prompt anchored (Enter inert), so the glyph alone cannot signal
    * readiness — the bar's absence is the discriminator.
    */
   async waitForIdlePrompt(timeoutMs = 1000) {
@@ -147,7 +147,7 @@ export class MockScreen extends EventEmitter implements TerminalOutput {
     // ASCII brand mark, and every TUI smoke script pins EVE_TUI_UNICODE=1.
     const idle = () => {
       const snapshot = this.snapshot();
-      return /^[›❯]/mu.test(snapshot) && !liveTurnBar.test(snapshot);
+      return /^[❯]/mu.test(snapshot) && !liveTurnBar.test(snapshot);
     };
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {

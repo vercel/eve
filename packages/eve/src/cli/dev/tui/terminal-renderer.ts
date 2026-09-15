@@ -4354,7 +4354,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
         ghost,
         maxRows: maxPromptRows,
       };
-      // An empty chat prompt always wears the quiet `›`; the rotating
+      // An empty chat prompt keeps the full-size prompt mark; the rotating
       // invitation text rides it only until the user's first message.
       if (this.#promptPlaceholderActive && this.#inputText.length === 0) {
         promptRows.placeholder =
@@ -4461,8 +4461,8 @@ export class TerminalRenderer implements AgentTUIRenderer {
    */
   #pushStreamingPrompt(rows: string[], width: number): void {
     if (!this.#streamDraftActive) return;
-    // An empty pending prompt wears the same quiet `›` as the idle one; a
-    // typed draft flips to a DIM `❯` (inert — Enter does nothing yet).
+    // An empty pending prompt wears the same `❯` as the idle one; a
+    // typed draft dims the `❯` (inert — Enter does nothing yet).
     // Readiness is therefore NOT detectable from the glyph — MockScreen's
     // `waitForIdlePrompt` discriminates by the live turn bar's absence.
     this.#pushDraftPrompt(rows, width, { inert: true });
@@ -4933,9 +4933,9 @@ interface PromptInputRowsInput {
   readonly ghost: string;
   readonly maxRows: number;
   /**
-   * Present on an empty chat prompt: switches the gutter to the quiet `›`.
+   * Present on an empty chat prompt: shows invitation text behind the caret.
    * Non-empty text renders dim behind the caret; the empty string keeps the
-   * quiet mark with a bare caret (the post-first-message state).
+   * prompt mark with a bare caret (the post-first-message state).
    */
   placeholder?: string;
   /** Anchored-but-inert prompt (streaming turn): typed drafts show a dim `❯`. */
@@ -4963,8 +4963,7 @@ function promptInputRows({
   const c = theme.colors;
 
   if (text.length === 0 && placeholder !== undefined) {
-    // The empty state trades the active `❯` for a quiet `›` and lets the
-    // caret rest on the placeholder's first character, like the setup
+    // The caret rests on the placeholder's first character, like the setup
     // panel's text fields.
     const body = renderInputWithBlockCursor({
       ...visibleLine(
@@ -4976,7 +4975,7 @@ function promptInputRows({
       inverse: c.inverse,
       render: (segment) => c.dim(renderInputText(segment)),
     });
-    return [clip(`${c.dim(theme.glyph.promptIdle)} ${body}`, width), ""];
+    return [clip(`${theme.glyph.prompt} ${body}`, width), ""];
   }
 
   const style = (segment: string): string => {
@@ -4990,8 +4989,7 @@ function promptInputRows({
     0,
     Math.min(layout.caretRow - visibleCount + 1, layout.rows.length - visibleCount),
   );
-  // An inert prompt's typed draft flips the mark like the active prompt,
-  // but keeps it dim: the state is legible without claiming readiness.
+  // An inert prompt's typed draft keeps the mark dim: the state is legible without claiming readiness.
   const promptGlyph = inert === true ? c.dim(theme.glyph.prompt) : c.cyan(theme.glyph.prompt);
   const ellipsis = c.dim(theme.glyph.ellipsis);
   // Reserve the gutter and the block cursor's trailing cell at end-of-line.
