@@ -4,6 +4,7 @@ import type { AudienceInput } from "#shared/conversation-context.js";
 export function defaultEveAudience(
   input: Omit<AudienceInput<undefined>, "state">,
 ): ChannelAudience {
+  if (input.environment === "development") return "public";
   const principalType = input.auth?.principalType ?? "anonymous";
   if (principalType === "anonymous") return "public";
   if (principalType === "user" || principalType === "service" || principalType === "runtime") {

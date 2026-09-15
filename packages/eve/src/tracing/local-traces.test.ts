@@ -2,7 +2,6 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createLocalTracesProcessor, resolveLocalTracesContent } from "#tracing/local-traces.js";
 import { localTracePolicy } from "#tracing/local-instrumentation-runtime.js";
-import { resolveTracePolicy } from "#tracing/sampled-trace.js";
 import { localTraces } from "#public/instrumentation/otel.js";
 
 vi.mock("#tracing/local-trace-span-processor.js", () => ({
@@ -110,14 +109,11 @@ describe("resolveLocalTracesContent", () => {
 });
 
 describe("localTracePolicy", () => {
-  it.each(["public", "private", "unknown"] as const)(
-    "treats the %s audience as public",
-    (audience) => {
-      expect(resolveTracePolicy(localTracePolicy, traceContext(audience))).toEqual({
-        action: "record",
-        recordInputs: true,
-        recordOutputs: true,
-      });
-    },
-  );
+  it.each([
+    ["public", true],
+    ["unknown", true],
+    ["private", false],
+  ] as const)("accepts the %s audience: %s", (audience, accepted) => {
+    expect(localTracePolicy(traceContext(audience))).toBe(accepted);
+  });
 });

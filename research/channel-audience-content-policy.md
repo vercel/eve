@@ -1,14 +1,14 @@
 ---
 issue: https://github.com/vercel/eve/issues/2331
 status: implemented
-last_updated: "2026-09-13"
+last_updated: "2026-09-15"
 ---
 
 # Audience-aware trace content policy
 
 ## Summary
 
-Messaging agents need different trace behavior for public and private conversations. Public messages may be traced with model and tool content; private conversations should not produce traces unless an author explicitly admits them. Zero-config local tracing additionally retains unclassified HTTP/TUI sessions for debugging.
+Messaging agents need different trace behavior for public and private conversations. Public messages may be traced with model and tool content; private conversations should not produce traces unless an author explicitly admits them. The default eve channel classifies development sessions as public, and zero-config local tracing additionally retains unclassified HTTP/TUI sessions for debugging.
 
 This design adds a fail-closed `audience(input)` classification hook to channels, persists one framework-owned conversation context, classifies built-in messaging channels from durable platform state, and separates the process-wide trace gate from each destination's ordered export pipeline.
 

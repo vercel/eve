@@ -62,7 +62,7 @@ You are responsible for ensuring any observability or eval provider is approved 
 
 The third configurable surface, [runtime context events](#runtime-context), attaches per-model-call values to these spans.
 
-Channels classify their conversation with an `audience`: `public`, `private`, or `unknown`. The eve channel classifies anonymous callers as public and authenticated `user`, `service`, or `runtime` callers as private. Slack public-channel handoffs and Chat SDK workspace-visible threads are public; direct and private conversations are private; platform surfaces without enough visibility evidence remain unknown. Inbound Slack webhooks remain `unknown`; proactive Slack `receive` / `ctx.send` handoffs also stay `unknown` unless the caller passes `audience` on the target, for example when a webhook or schedule already knows the destination channel is public.
+Channels classify their conversation with an `audience`: `public`, `private`, or `unknown`. The default eve channel classifies every development conversation as public; outside development, anonymous callers are public and authenticated `user`, `service`, or `runtime` callers are private. Slack public-channel handoffs and Chat SDK workspace-visible threads are public; direct and private conversations are private; platform surfaces without enough visibility evidence remain unknown. Inbound Slack webhooks remain `unknown`; proactive Slack `receive` / `ctx.send` handoffs also stay `unknown` unless the caller passes `audience` on the target, for example when a webhook or schedule already knows the destination channel is public.
 
 ## Channel delivery traces
 
