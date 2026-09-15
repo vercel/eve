@@ -14,6 +14,7 @@ vi.mock("node:module", () => ({ findPackageJSON }));
 vi.mock("node:fs/promises", () => ({ readFile }));
 
 import { readTerminalHeadlessEvent, runEveAdd } from "./extension/eve-add.js";
+import * as localRegistryInstall from "./extension/local-registry-install.js";
 import {
   addLocalRegistryItem,
   handoffMessage,
@@ -51,8 +52,16 @@ const INDEX = {
       name: "connection/linear",
       title: "Linear MCP",
       meta: {
-        eve: { setup: { package: "eve", bin: "eve", args: ["integration", "setup", "linear"] } },
+        eve: {
+          selfModification: { lazyConnect: true },
+          setup: {
+            package: "eve",
+            bin: "eve",
+            args: ["integration", "connect", "linear", "mcp.linear.app", "linear"],
+          },
+        },
       },
+      files: [{ target: "agent/connections/linear.ts" }],
     },
     {
       name: "@acme/widget",
@@ -126,6 +135,7 @@ afterEach(() => {
   if (originalEveDev === undefined) delete process.env.EVE_DEV;
   else process.env.EVE_DEV = originalEveDev;
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
   vi.clearAllMocks();
 });
 
@@ -212,17 +222,38 @@ describe("addLocalRegistryItem", () => {
     expect(calls).toHaveLength(0);
   });
 
-  it("returns the exact installation command for a headless Linear handoff", async () => {
+  it("installs a lazy connector without a linked project", async () => {
+    const installLocal = vi
+      .spyOn(localRegistryInstall, "installLocalRegistryItem")
+      .mockResolvedValue({ outcome: { kind: "installed" } });
+
     const result = await addLocalRegistryItem("connection/linear", {
+      createConnectorUid: (name) => `${name}-generated-id`,
+      getCapability: () => capability(),
+    });
+
+    expect(result).toMatchObject({ status: "installed" });
+    const transform = installLocal.mock.calls[0]?.[0].transform;
+    expect(transform?.target).toBe("agent/connections/linear.ts");
+    expect(transform?.apply('  auth: connect("linear"),')).toContain(
+      'connect("linear-generated-id")',
+    );
+  });
+
+  it("reports when an install transform fails and project files are restored", async () => {
+    vi.spyOn(localRegistryInstall, "installLocalRegistryItem").mockResolvedValue({
+      outcome: { kind: "installed" },
+      transformFailure: { restored: true, changed: [] },
+    });
+    const result = await addLocalRegistryItem("connection/linear", {
+      createConnectorUid: (name) => `${name}-generated-id`,
       getCapability: () => capability(),
     });
 
     expect(result).toMatchObject({
-      address: "connection/linear",
-      nextCommand: "eve add connection/linear",
-      status: "needs-terminal",
+      status: "failed",
+      message: expect.stringContaining("Project files were restored"),
     });
-    expect(result.message).toContain("`eve add connection/linear`");
   });
 
   it("leaves the automatically queued setup to an interactive client", async () => {

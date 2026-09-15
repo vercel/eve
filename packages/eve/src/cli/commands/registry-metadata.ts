@@ -22,6 +22,7 @@ const EveRegistryMetadataSchema = z.object({
   docs: z.string().min(1).optional(),
   implementation: z.enum(["native", "chat-sdk"]).optional(),
   hidden: z.literal(true).optional(),
+  selfModification: z.object({ lazyConnect: z.literal(true) }).optional(),
   install: z
     .object({
       pnpm: z.object({ buildScripts: z.array(PnpmBuildScriptPolicySchema).min(1) }).optional(),

@@ -17,8 +17,15 @@ describe("classifyCatalogEntry", () => {
   });
 
   it("hands a setup-bearing item to the terminal", () => {
-    const result = classifyCatalogEntry(entry({ address: "channel/slack", declaresSetup: true }));
+    const result = classifyCatalogEntry(
+      entry({
+        address: "channel/slack",
+        declaresSetup: true,
+      }),
+    );
     expect(result.kind).toBe("needs-terminal");
     expect(result).toHaveProperty("reason", expect.stringContaining("setup flow"));
   });
+
+
 });
