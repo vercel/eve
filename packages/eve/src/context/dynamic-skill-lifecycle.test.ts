@@ -87,7 +87,7 @@ function makeSkill(description: string, markdown = description): SkillPackageDef
 }
 
 describe("dispatchDynamicSkillEvent", () => {
-  it("clears removed dynamic skills from the durable announcement", async () => {
+  it("announces when all dynamic skills are withdrawn", async () => {
     const { ctx, sandbox } = createCtx();
     let enabled = true;
     const resolver = createResolver("tenant", () =>
@@ -115,7 +115,7 @@ describe("dispatchDynamicSkillEvent", () => {
     });
 
     expect(ctx.get(DynamicSkillManifestKey)).toEqual({});
-    expect(ctx.get(PendingSkillAnnouncementKey)).toBe("");
+    expect(ctx.get(PendingSkillAnnouncementKey)).toBe("Available skills: none");
     expect(sandbox.removedPaths).toEqual(["/home/agent/.agents/skills/tenant"]);
   });
 
