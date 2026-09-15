@@ -587,14 +587,14 @@ describe("eveChannel — stream cursor", () => {
     },
   );
 
-  it("omits the tail index by default without paying for the lookup", async () => {
+  it("resolves the tail index by default without returning it", async () => {
     const handler = createEveStreamHandler({ auth: none() });
 
     const response = await handler.fetch("https://eve.test/eve/v1/session/test-session-id/stream");
 
     expect(response.status).toBe(200);
     expect(response.headers.get("x-eve-stream-tail-index")).toBeNull();
-    expect(handler.getStreamTailIndex).not.toHaveBeenCalled();
+    expect(handler.getStreamTailIndex).toHaveBeenCalledOnce();
   });
 
   it("reports the durable tail index when the request opts in", async () => {

@@ -61,6 +61,7 @@ export async function emitTerminalSessionEvent(input: {
       const writer = input.parentWritable.getWriter();
       try {
         await writer.write(encodeMessageStreamEvent(stampMessageStreamEvent(event)));
+        await writer.close();
       } finally {
         writer.releaseLock();
       }

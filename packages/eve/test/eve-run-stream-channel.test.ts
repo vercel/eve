@@ -75,6 +75,46 @@ describe("eveChannel GET stream", () => {
     expect(attachSession).toHaveBeenCalledTimes(1);
   });
 
+  it("returns 404 for an unknown session in follow mode", async () => {
+    const getRoute = createGetHandler();
+    const attachSession = createMockAttachSession(createEvents([]), {
+      async getStreamTailIndex() {
+        const { WorkflowRunNotFoundError } = await import("#compiled/@workflow/errors/index.js");
+        throw new WorkflowRunNotFoundError("session_xyz");
+      },
+    });
+
+    const response = await (getRoute as any).handler(
+      new Request("https://example.com/eve/v1/session/session_xyz/stream", {
+        method: "GET",
+      }),
+      createArgs({ attachSession, params: { sessionId: "session_xyz" } }),
+    );
+
+    expect(response.status).toBe(404);
+    expect(await response.json()).toEqual({ error: "Session not found.", ok: false });
+    expect(attachSession).toHaveBeenCalledTimes(1);
+  });
+
+  it("returns 503 when the session lookup fails transiently", async () => {
+    const getRoute = createGetHandler();
+    const attachSession = createMockAttachSession(createEvents([]), {
+      async getStreamTailIndex() {
+        throw new Error("stream lookup failed");
+      },
+    });
+
+    const response = await (getRoute as any).handler(
+      new Request("https://example.com/eve/v1/session/session_xyz/stream", {
+        method: "GET",
+      }),
+      createArgs({ attachSession, params: { sessionId: "session_xyz" } }),
+    );
+
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({ error: "Session stream unavailable.", ok: false });
+  });
+
   it("accepts negative tail-relative startIndex values", async () => {
     const getRoute = createGetHandler();
     const attachSession = createMockAttachSession(createEvents([]));
@@ -168,7 +208,10 @@ function createEvents(events: readonly MessageStreamEvent[]): ReadableStream<Mes
   });
 }
 
-function createMockAttachSession(events: ReadableStream<MessageStreamEvent>) {
+function createMockAttachSession(
+  events: ReadableStream<MessageStreamEvent>,
+  options: { readonly getStreamTailIndex?: () => Promise<number> } = {},
+) {
   return vi.fn<AttachSessionFn>().mockReturnValue({
     id: "session_xyz",
     async send() {
@@ -193,7 +236,7 @@ function createMockAttachSession(events: ReadableStream<MessageStreamEvent>) {
       return events;
     },
     async getStreamTailIndex() {
-      return -1;
+      return (await options.getStreamTailIndex?.()) ?? -1;
     },
   } satisfies Session);
 }

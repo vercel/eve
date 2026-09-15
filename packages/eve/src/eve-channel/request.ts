@@ -1,5 +1,6 @@
 import type { FilePart, TextPart, UserContent } from "ai";
 
+import { WorkflowRunNotFoundError } from "#compiled/@workflow/errors/index.js";
 import type {
   ActivityObserverConfig,
   SessionAuthContext,
@@ -30,6 +31,7 @@ import {
 } from "#public/channels/upload-policy.js";
 import { isInputResponse, type ValidatedInputResponse } from "#shared/input.js";
 import { parseJsonObject, type JsonObject } from "#shared/json.js";
+import { walkCauseChain } from "#shared/errors.js";
 import type { RunMode } from "#shared/run-mode.js";
 
 interface ParsedCreateBody {
@@ -308,7 +310,7 @@ export async function createSessionStreamResponse(
   const includeTailIndex = parseIncludeTailIndex(request);
 
   try {
-    const tailIndex = includeTailIndex ? await session.getStreamTailIndex() : undefined;
+    const tailIndex = await session.getStreamTailIndex();
     const events = await session.getEventStream({ startIndex });
     const headers = new Headers({
       "cache-control": "no-store, no-transform",
@@ -318,15 +320,25 @@ export async function createSessionStreamResponse(
       [EVE_STREAM_FORMAT_HEADER]: EVE_MESSAGE_STREAM_FORMAT,
       [EVE_STREAM_VERSION_HEADER]: EVE_MESSAGE_STREAM_VERSION,
     });
-    if (tailIndex !== undefined) {
+    if (includeTailIndex) {
       headers.set(EVE_STREAM_TAIL_INDEX_HEADER, String(tailIndex));
     }
     return new Response(
-      serializeAsNdjson(events, request.signal, streamEventLimit(startIndex, tailIndex)),
+      serializeAsNdjson(
+        events,
+        request.signal,
+        includeTailIndex ? streamEventLimit(startIndex, tailIndex) : undefined,
+      ),
       { headers },
     );
-  } catch {
-    return Response.json({ error: "Session not found.", ok: false }, { status: 404 });
+  } catch (error) {
+    const notFound = [...walkCauseChain(error)].some((candidate) =>
+      WorkflowRunNotFoundError.is(candidate),
+    );
+    return Response.json(
+      { error: notFound ? "Session not found." : "Session stream unavailable.", ok: false },
+      { status: notFound ? 404 : 503 },
+    );
   }
 }
 
