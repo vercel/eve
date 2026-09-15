@@ -161,14 +161,13 @@ For the full auth model and helper list, see [Auth & route protection](../guides
 
 The eve channel classifies who can observe a session when that session is created:
 
-| Session environment and creator                     | Default audience |
-| --------------------------------------------------- | ---------------- |
-| Any session during development                      | `public`         |
-| Anonymous caller outside development                | `public`         |
-| `user`, `service`, or `runtime` outside development | `private`        |
-| Any other principal outside development             | `unknown`        |
+| Session creator                           | Default audience |
+| ----------------------------------------- | ---------------- |
+| Anonymous caller                          | `public`         |
+| `user`, `service`, or `runtime` principal | `private`        |
+| Any other principal type                  | `unknown`        |
 
-The default eve channel treats every development session as public so local tooling can inspect it, regardless of which development credential authenticated the request. Outside development, anonymous HTTP surfaces are public because anyone who can reach the surface can read them. Authenticated `user`, `service`, and `runtime` sessions are private because they belong to one identified party. Other authenticated principal types remain `unknown`: trace consumers record metadata but omit content by default in preview and production.
+Anonymous HTTP surfaces are public because anyone who can reach the surface can read it. Authenticated `user`, `service`, and `runtime` sessions are private because they belong to one identified party. Other authenticated principal types remain `unknown`: trace consumers record metadata but omit content by default in preview and production.
 
 Pass a constant or a function to override the default:
 

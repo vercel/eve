@@ -3,10 +3,7 @@ import { describe, expect, it } from "vitest";
 import { defaultEveAudience } from "#eve-channel/audience.js";
 import type { AudienceInput } from "#shared/conversation-context.js";
 
-function input(
-  principalType: string | null,
-  environment: AudienceInput<undefined>["environment"] = "production",
-): Omit<AudienceInput<undefined>, "state"> {
+function input(principalType: string | null): Omit<AudienceInput<undefined>, "state"> {
   return {
     auth:
       principalType === null
@@ -17,7 +14,7 @@ function input(
             principalType,
           },
     channel: { kind: "http" },
-    environment,
+    environment: "production",
     mode: "conversation",
   };
 }
@@ -33,11 +30,4 @@ describe("defaultEveAudience", () => {
   ] as const)("classifies %s as %s", (principalType, audience) => {
     expect(defaultEveAudience(input(principalType))).toBe(audience);
   });
-
-  it.each([null, "anonymous", "user", "service", "runtime", "local-dev", "app"] as const)(
-    "classifies %s as public during development",
-    (principalType) => {
-      expect(defaultEveAudience(input(principalType, "development"))).toBe("public");
-    },
-  );
 });

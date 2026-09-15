@@ -8,7 +8,7 @@ last_updated: "2026-09-15"
 
 ## Summary
 
-Messaging agents need different trace behavior for public and private conversations. Public messages may be traced with model and tool content; private conversations should not produce traces unless an author explicitly admits them. The default eve channel classifies development sessions as public, and zero-config local tracing additionally retains unclassified HTTP/TUI sessions for debugging.
+Messaging agents need different trace behavior for public and private conversations. Public messages may be traced with model and tool content; private conversations should not produce traces unless an author explicitly admits them. Zero-config local tracing additionally retains unclassified HTTP/TUI sessions for debugging.
 
 This design adds a fail-closed `audience(input)` classification hook to channels, persists one framework-owned conversation context, classifies built-in messaging channels from durable platform state, and separates the process-wide trace gate from each destination's ordered export pipeline.
 
@@ -187,14 +187,12 @@ policy remains subject to its process-wide audience ceiling.
 The default policy for local tracing for `eve dev` is equivalent to:
 
 ```ts
-({ audience }) =>
-  audience === "private"
-    ? { emit: false }
-    : { emit: true, recordInputs: true, recordOutputs: true },
+() => true,
 ```
 
-This keeps unclassified local HTTP/TUI sessions observable while still rejecting channels classified as `private`.
-Because local tracing runs in development, every emitted trace uses the development content default.
+This admits conversations classified as `private` to the local spool without changing
+the persisted conversation audience or forwarded origin audience. Because local
+tracing runs in development, every emitted trace uses the development content default.
 
 The runtime order is:
 
