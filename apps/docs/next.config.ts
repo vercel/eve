@@ -13,7 +13,9 @@ const withGeistdocs = createGeistdocs();
 const require = createRequire(import.meta.url);
 const wgslLoader = require.resolve("@vgpu/wgsl/loader-webpack");
 
-const localSiteHost = "localhost:3000";
+const localSiteHost = process.env.PORTLESS_URL
+  ? new URL(process.env.PORTLESS_URL).host
+  : "localhost:3000";
 
 const config: NextConfig = {
   cacheComponents: true,
