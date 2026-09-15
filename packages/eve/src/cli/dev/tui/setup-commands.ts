@@ -30,7 +30,7 @@ export type TuiSetupCommand = PromptCommandExtensionName;
  * move past their opening question.
  */
 export const SETUP_FLOW_CONFIG = {
-  login: { title: "Connect a model", indicator: "pulse" },
+  login: { title: "Connecting your model", indicator: "pulse" },
   model: { title: "Configure the agent model", indicator: "pulse" },
   add: { title: "Add to your agent", indicator: "pulse" },
   deploy: { title: "Deploy to Vercel", indicator: "spinner" },
