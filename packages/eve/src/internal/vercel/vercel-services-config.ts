@@ -32,6 +32,7 @@ export interface VercelServiceConfig {
   readonly entrypoint?: string;
   readonly framework?: string;
   readonly mount?: string | VercelServiceMount;
+  readonly outputDirectory?: string;
   readonly routes?: readonly VercelRouteConfig[];
   readonly routePrefix?: string;
   readonly root?: string;
@@ -41,6 +42,7 @@ export interface VercelServiceConfig {
 export interface GeneratedVercelServiceConfig extends VercelServiceConfig {
   readonly buildCommand: string;
   readonly framework: "eve";
+  readonly outputDirectory: ".vercel/output";
   readonly root: string;
   readonly routes: readonly VercelRouteConfig[];
 }

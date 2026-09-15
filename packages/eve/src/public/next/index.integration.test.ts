@@ -85,6 +85,7 @@ describe("withEve Vercel config", () => {
           buildCommand:
             "cd '../../..' && export EVE_INTERNAL_BUILD_OUTPUT_DIRECTORY='.eve/vercel-services/eve/.vercel/output' && export EVE_INTERNAL_HOST_BUILD_OUTPUT_DIRECTORY='.vercel/output' && node 'node_modules/eve/bin/eve.js' build",
           framework: "eve",
+          outputDirectory: ".vercel/output",
           routes: [
             {
               src: "^/eve/v1/(.*)$",
@@ -159,6 +160,7 @@ describe("withEve Vercel config", () => {
           buildCommand:
             "cd '../../..' && export EVE_INTERNAL_BUILD_OUTPUT_DIRECTORY='.eve/vercel-services/eve/.vercel/output' && export EVE_INTERNAL_HOST_BUILD_OUTPUT_DIRECTORY='../../.vercel/output' && node 'node_modules/eve/bin/eve.js' build",
           framework: "eve",
+          outputDirectory: ".vercel/output",
           routes: [
             {
               src: "^/eve/v1/(.*)$",
@@ -414,6 +416,7 @@ describe("withEve Vercel config", () => {
           buildCommand:
             "cd '../../../agents/billing' && export EVE_INTERNAL_BUILD_OUTPUT_DIRECTORY='../../.eve/vercel-services/eve-billing/.vercel/output' && export EVE_INTERNAL_HOST_BUILD_OUTPUT_DIRECTORY='../../.vercel/output' && export EVE_PUBLIC_ROUTE_PREFIX='/eve/agents/billing' && pnpm build:billing-agent",
           framework: "eve",
+          outputDirectory: ".vercel/output",
           routes: [
             {
               src: "^/eve/agents/billing/eve/v1/(.*)$",
@@ -433,6 +436,7 @@ describe("withEve Vercel config", () => {
           buildCommand:
             "cd '../../../agents/support' && export EVE_INTERNAL_BUILD_OUTPUT_DIRECTORY='../../.eve/vercel-services/eve-support/.vercel/output' && export EVE_INTERNAL_HOST_BUILD_OUTPUT_DIRECTORY='../../.vercel/output' && export EVE_PUBLIC_ROUTE_PREFIX='/eve/agents/support' && node 'node_modules/eve/bin/eve.js' build",
           framework: "eve",
+          outputDirectory: ".vercel/output",
           routes: [
             {
               src: "^/eve/agents/support/eve/v1/(.*)$",
@@ -532,6 +536,7 @@ describe("withEve Vercel config", () => {
           buildCommand:
             "cd '../../../agents/billing' && export EVE_INTERNAL_BUILD_OUTPUT_DIRECTORY='../../.eve/vercel-services/eve-billing/.vercel/output' && export EVE_INTERNAL_HOST_BUILD_OUTPUT_DIRECTORY='../../.vercel/output' && export EVE_PUBLIC_ROUTE_PREFIX='/eve/agents/billing' && node 'node_modules/eve/bin/eve.js' build",
           framework: "eve",
+          outputDirectory: ".vercel/output",
           routes: [
             {
               src: "^/eve/agents/billing/eve/v1/(.*)$",
