@@ -244,7 +244,7 @@ Reset terminally retires the exact session ID. A reset ID never becomes a new se
 
 The stream is durable. Every event is recorded before a step completes, so consumers can reconnect from their cursor when an HTTP connection ends. A nonnegative `startIndex` is an absolute event count: use it to pick up where you dropped off or pass `0` to rewind to the start.
 
-The TypeScript client treats each HTTP response as a renewable lease over that durable stream. It keeps quiet responses active with transport heartbeats, then reconnects from the current cursor when the server ends the lease. This bounds server-side stream readers even when a host does not report that the client disconnected. The lease renewal and heartbeats are transport details: they do not stop the run or appear as session events.
+When automatic reconnection is enabled and `startIndex` is nonnegative, the TypeScript client requests renewable leases over that durable stream. A server that supports leases sends transport heartbeats during quiet periods, then ends the response so the client reconnects from its current cursor. This bounds server-side stream readers even when a host does not report that the client disconnected. The lease renewal and heartbeats are transport details: they do not stop the run or appear as session events. Tail-relative reads and streams with reconnection disabled do not request leases.
 
 If a reconnect overlaps events you already handled, [`meta.id`](#the-event-envelope) identifies the duplicates: it is unchanged across reconnects and rewinds, so a consumer keyed on it can replay safely.
 

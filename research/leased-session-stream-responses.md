@@ -36,10 +36,12 @@ For version 1, the server:
   intentional close; and
 - cancels the response's Workflow reader when the lease ends.
 
-The client consumes the control record internally, reconnects immediately from
-its absolute event cursor, and does not charge the lease renewal against its
-empty-stream retry budget. EOF without the control record retains the existing
-bounded, backed-off reconnect behavior.
+The client requests leases only for nonnegative cursors with stream reconnection
+enabled. Tail-relative reads and streams with reconnection disabled remain
+unleased because they cannot renew. The client consumes the control record
+internally, reconnects immediately from its absolute event cursor, and does not
+charge the lease renewal against its empty-stream retry budget. EOF without the
+control record retains the existing bounded, backed-off reconnect behavior.
 
 The lease bounds cleanup even if heartbeats or the final control record are
 buffered by an intermediary. In that case the client's ordinary read timeout
@@ -47,11 +49,11 @@ reconnects, while the abandoned server invocation ends no later than its lease.
 
 ## Compatibility
 
-| Client  | Server  | Behavior                                                                       |
-| ------- | ------- | ------------------------------------------------------------------------------ |
-| Current | Current | Leased response with heartbeats and explicit renewal                           |
-| Current | Older   | Request header is ignored; existing read timeout and reconnect behavior remain |
-| Older   | Current | No capability header, so existing unleased response behavior remains           |
+| Client  | Server  | Behavior                                                                        |
+| ------- | ------- | ------------------------------------------------------------------------------- |
+| Current | Current | Leased response with heartbeats and explicit renewal                            |
+| Current | Older   | Query parameter is ignored; existing read timeout and reconnect behavior remain |
+| Older   | Current | No capability query parameter, so existing unleased response behavior remains   |
 
 The capability query parameter is forwarded through remote subagent stream
 proxies. An unknown control version is not negotiated. This avoids emitting records that an

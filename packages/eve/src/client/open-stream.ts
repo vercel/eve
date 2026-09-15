@@ -236,16 +236,22 @@ interface OpenedStream {
 export async function openStreamBody(
   input: OpenStreamInput & { readonly retryPolicy?: ResolvedStreamReconnectPolicy },
 ): Promise<OpenedStream> {
-  const retryPolicy = input.retryPolicy ?? DEFAULT_STREAM_RECONNECT_POLICY;
+  const retryPolicy =
+    input.retryPolicy ?? resolveStreamReconnectPolicy(input.streamReconnectPolicy);
   const openRetryPolicy = retryPolicy.streamOpenReconnectPolicy;
   let lastStatus: number | undefined;
   let lastBody: string | undefined;
   let lastHeaders: Headers | undefined;
   let retryDelayMs = openRetryPolicy.baseDelayMs;
 
-  const searchParams: Record<string, string> = {
-    [EVE_STREAM_CONTROL_VERSION_QUERY]: EVE_STREAM_CONTROL_VERSION,
-  };
+  const controlVersion =
+    input.startIndex >= 0 && retryPolicy.streamIdleReconnectPolicy.maxAttempts > 0
+      ? EVE_STREAM_CONTROL_VERSION
+      : undefined;
+  const searchParams: Record<string, string> = {};
+  if (controlVersion !== undefined) {
+    searchParams[EVE_STREAM_CONTROL_VERSION_QUERY] = controlVersion;
+  }
   if (input.startIndex !== 0) {
     searchParams.startIndex = String(input.startIndex);
   }
@@ -303,7 +309,7 @@ export async function openStreamBody(
           response.body?.cancel().catch(() => {});
           connectionController.abort();
         },
-        controlVersion: EVE_STREAM_CONTROL_VERSION,
+        controlVersion,
         streamVersion: readMessageStreamVersion(response.headers),
         tailIndex: parseTailIndexHeader(response.headers),
       };
