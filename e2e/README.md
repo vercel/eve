@@ -148,6 +148,12 @@ high-volume session execution and repeated session resumption respectively.
 
 ## Fixtures
 
+The [`agent-self-modification`](./fixtures/agent-self-modification/README.md)
+fixture contains source-generation and repair examples using `eve eval`. It
+checks generated tools through real calls in fresh sessions and restores source
+after retiring the parent and child sessions. Routing-only self-modification
+coverage stays in `agent-subagents`.
+
 E2E fixtures live under `e2e/fixtures/*`. Fixture discovery also accepts
 `apps/fixtures/*` apps with an `evals/` directory, but shared development apps
 should stay out of the e2e matrix unless they intentionally own evals.
@@ -176,7 +182,9 @@ matrices from the registry:
   `e2e.optionalModels` can name selected model legs that should still run and
   report failures without blocking the aggregate check.
 - `world_matrix_<world>` — one leg per fixture for that world's suite
-  workflow. A registered world's `package` reaches the job as
+  workflow. A fixture can set `e2e.worlds` to a subset of registered world
+  names, or to `[]` when its evals require local dev behavior; omitting it
+  selects every world. A registered world's `package` reaches the job as
   `EVE_E2E_WORKFLOW_WORLD` (worlds without one, like `vercel`, use the
   deploy target's default).
 
@@ -195,8 +203,13 @@ once per leg, then runs one fixture directory with the leg's real model:
 ```sh
 pnpm --filter eve run build
 cd "$FIXTURE_DIR"
+pnpm run --if-present e2e:prepare
 EVE_E2E_MODEL="$MODEL" pnpm exec eve eval --strict --junit "$JUNIT_PATH"
 ```
+
+Fixtures with generated source can define an `e2e:prepare` script. The local
+model suite runs it before starting the eval server; the self-modification
+fixture uses it to copy the checkout's standard registry scaffold.
 
 Always build with the full `build` script (not `build:js`); only the full
 build stamps the package version into `dist`.
