@@ -3,7 +3,7 @@ import { getWorkflowMetadata } from "#compiled/@workflow/core/index.js";
 import {
   cancelSessionTimeoutStep,
   startSessionTimeoutStep,
-} from "#execution/session-timeout-steps.js";
+} from "#execution/session/timeout-steps.js";
 import { sessionCommandHookToken } from "#execution/session-inbox/address.js";
 
 /** Workflow-body handle that targets a durable deadline at the stable command inbox. */

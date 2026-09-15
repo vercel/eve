@@ -52,6 +52,7 @@ const taskMetadataSchema = z.looseObject({
 }) as z.ZodType<TaskMetadata>;
 
 const taskViewBaseShape = {
+  // Terminal views never carry pending requests; the loose object must say so explicitly.
   inputRequests: z.never().optional(),
   executor: z
     .looseObject({

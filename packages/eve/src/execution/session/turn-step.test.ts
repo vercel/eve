@@ -62,8 +62,8 @@ import { readLatestTaskView, sendTaskInboundPayload } from "#execution/tasks/par
 import { recordTaskInputRequestStep } from "#execution/tasks/parent/hitl-proxy-steps.js";
 import { emitTerminalSessionFailureStep } from "#execution/terminal-session-failure-step.js";
 import { resolveEffectiveOutputSchema } from "#execution/effective-output-schema.js";
-import { turnStep as runTurnStep } from "#execution/workflow-steps.js";
-import type { TurnStepInput, TurnStepPayload } from "#execution/turn-step.js";
+import { turnStep as runTurnStep } from "#execution/session/turn-step.js";
+import type { TurnStepInput, TurnStepPayload } from "#execution/session/turn-step-types.js";
 import type { DeliverHookPayload } from "#channel/types.js";
 import type { RuntimeActionResult } from "#shared/action-types.js";
 
@@ -99,15 +99,15 @@ vi.mock("#instrumentation/runtime.js", async (importOriginal) => {
   };
 });
 
-vi.mock("./durable-session-store.js", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("./durable-session-store.js")>();
+vi.mock("../durable-session-store.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../durable-session-store.js")>();
   return {
     ...actual,
     createDurableSessionState: vi.fn(actual.createDurableSessionState),
     readDurableSession: vi.fn(),
   };
 });
-vi.mock("./tasks/parent/run-parent.js", () => ({
+vi.mock("../tasks/parent/run-parent.js", () => ({
   readLatestTaskView: vi.fn(),
   sendTaskInboundPayload: vi.fn(),
 }));
@@ -169,7 +169,7 @@ function createTestWritable(
   });
 }
 
-vi.mock("./node-step.js", () => ({
+vi.mock("../node-step.js", () => ({
   buildRuntimeIdentity: vi.fn(() => ({
     agentId: "test-agent",
     eveVersion: "0.0.0-test",
@@ -178,7 +178,7 @@ vi.mock("./node-step.js", () => ({
   createExecutionNodeStep: vi.fn(),
 }));
 
-vi.mock("../runtime/sessions/compiled-agent-cache.js", () => ({
+vi.mock("../../runtime/sessions/compiled-agent-cache.js", () => ({
   getCompiledRuntimeAgentBundle: vi.fn(),
 }));
 

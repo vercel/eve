@@ -230,48 +230,38 @@ work, not a prerequisite.
 
 ## Open questions and upstream request
 
-### Merge prerequisites from Workflow
+### The no-owner interval
 
-The branch carries no `@workflow/core` patch. One upstream change still gates
-merging; it is not worked around here, and the handoff release/claim gap is
-left as-is rather than papered over.
+The branch carries no `@workflow/core` patch. `@workflow/core` ≥ 5.0.0-beta.51
+landed with [vercel/workflow#3941](https://github.com/vercel/workflow/pull/3941),
+which drains released step stream writers before recording `step_completed`;
+the `persists model output before settlement…` integration test in
+`session/entry.integration.test.ts` covers it.
 
-1. ~~`@workflow/core` ≥ 5.0.0-beta.51~~ — landed. Includes
-   [vercel/workflow#3941](https://github.com/vercel/workflow/pull/3941), which
-   drains released step stream writers before recording `step_completed` so a
-   slow stream PUT cannot make a successful turn appear empty to clients. The
-   `persists model output before settlement when a stream append exceeds the
-SDK flush window` integration test in `workflow-entry.integration.test.ts`
-   covers it.
-2. **`createHook(token, { force: true })`** — the Workflow team's forced-claim
-   API removes the interval between `dispose()` on the old owner and the
-   successor's claim. `SessionHandoff.release()`/`recover()` and the bounded
-   `resumeSessionInboxWithHandoffRetry` in `workflow-runtime.ts` are the only
-   places that change when it lands; the successor claims with `force` and the
-   release step disappears.
+The existing [hook helpers](../packages/eve/src/execution/hook-ownership.ts)
+dispose and claim in separate durable commits, so handoff steps 2–3 leave an
+interval with no hook owner spanning candidate startup and hydration. eve
+closes the observable consequences of that interval without an upstream
+primitive:
 
-Known first-version limitation: the existing [hook helpers](../packages/eve/src/execution/hook-ownership.ts)
-dispose and claim in separate durable commits, so steps 2–3 above leave an interval with no hook
-owner that spans candidate startup and hydration. Deliveries and controls in that interval may
-need to retry. Two guarantees still hold: accepted commands are never silently dropped, and two
-owners never activate. Continuous hook resolution is not guaranteed until the upstream primitive
-exists.
+- **Handoff markers.** Before releasing, the owner claims
+  `eve:inbox:handoff:<token>` for every address in its claim set and disposes
+  the markers once the transfer has either activated or been recovered. Ingress
+  (`session-inbox/resume.ts`) treats "hook not found, marker present" as
+  "retry within a bounded window" and "hook not found, no marker" as "no
+  session". A channel therefore never starts a replacement session for an
+  alias that is mid-handoff, and alias-bearing sessions hand off like
+  ID-addressed ones.
+- **Accepted-during-release drain.** `release()` commits `hook_disposed`
+  durably before stopping the readers, and the SDK delivers every event
+  accepted before that commit to the iterators first, so the payloads the
+  hooks accepted but the owner never read are returned and either restored on
+  the retained owner or handed to the successor.
 
-Still to settle:
-
-- How the SDK exposes payloads accepted by a hook between the checkpoint position and its
-  disposal. Step 2 depends on a reliable final drain, and the earlier successor-run prototype
-  showed this is the hard race. If disposal cannot expose them, abandon-and-reclaim is
-  insufficient and handoff must wait for the primitive.
-- Continuous alias ownership during the no-owner interval. ID-addressed dispatch retries
-  missing hooks within a bounded window. Alias-only dispatch cannot distinguish this interval
-  from an unowned address and may start a competing candidate. Atomic handoff is required to
-  remove that ambiguity without a session directory or a preflight lookup.
-- `Run.getWritable()` semantics. The repo pins `@workflow/core` 5.0.0-beta.50, and
-  `workflow@5.0.0-beta.50` exposes `run.getWritable(options)` for writing to another run's stream.
-  Implementation must still verify stream lifetime, permissions, and append behavior for the
-  original-run anchor.
-- Exact deployment selection across local build generations.
+Two guarantees hold: accepted commands are never silently dropped, and two
+owners never activate. When `createHook(token, { force: true })` lands, the
+successor claims with `force`; `SessionHandoff` drops the marker and release
+stages and `resumeSessionInbox` drops its retry loop. Nothing else changes.
 
 Upstream request, made in parallel and not a prerequisite for starting: an atomic,
 replay-idempotent hook handoff. Inputs: expected owner, handoff id, successor, hook set, and inbox
@@ -285,18 +275,28 @@ gap inside the handoff boundary without touching ordinary execution.
 These are eve-owned internal contracts inside `execution/`, not public APIs. Each exists to absorb
 a deleted path, not to wrap the Workflow SDK generally.
 
-| Contract                                                               | Replaces                                                                                                           | Responsibility                                                                                                                                        |
-| ---------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `SessionExecution`: `runTurn(delivery) → TurnOutcome`                  | `turn-dispatch.ts`, `dispatch-turn-step.ts`, the inline/child split, turn-owned coordination in `turn-workflow.ts` | Own state mutation for a turn and return policy only. Run `turnStep`, service the inbox, coordinate waits, and settle locally.                        |
-| `SessionInbox`: `read() → lease` plus structural hook claims           | Turn-control hooks and `TurnControlReceiver`                                                                       | Merge claimed hooks into one transport queue. A read lease owns consumption; `{ stable, aliases }` owns hook identity. No turn policy.                |
-| `SessionInputQueue`: `enqueue(...)`, `takeNext(...) → selection`       | Public delivery/control arrays and in-memory dedupe                                                                | Keep one private ordered admitted-input queue. Selections preserve original admissions and source category; `SessionHandoff` decides eligibility.     |
-| `SessionStateCursor`: `apply(transition)`                              | Split raw state adoption and alias-aware adoption                                                                  | Be the only state-transition authority and claim every continuation alias before publishing the new context/state pair.                               |
-| `SessionHandoff`: `tryTransfer(selection, checkpoint) → typed outcome` | Public checkpoint/release/start/activate/recover staging                                                           | Execute transfer as one transaction. The triggering delivery travels beside the versioned checkpoint; all recovery stages stay private.               |
-| `createSessionEventSink(scope)`                                        | Raw stream-writer ownership in workflow steps                                                                      | Bind adapter context, dynamic connections, and event fan-out to one step's stream writer; the step closes or releases it at its exit.                 |
-| Session-owner start operations in `workflow-runtime.ts`                | Per-turn `start()` of the child turn workflow                                                                      | Start an exact-deployment owner with a separate checkpoint and handoff trigger while keeping workflow-body and step-side execution contexts distinct. |
+The owner program lives in `execution/session/`:
 
-`workflowEntry` remains the composition root and owns lifecycle and cleanup. `SessionExecution`
-applies turn transitions through the one shared `SessionStateCursor`.
+| Module                           | Responsibility                                                                                                                                                                                         |
+| -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `entry.ts`                       | `workflowEntry`: boots an initial or handoff owner into one `SessionBoot`, then runs the program.                                                                                                      |
+| `program.ts`                     | The owner loop: runs turns, waits for the next input, tries handoff, finalizes once, and reports to whichever anchor holds the stream.                                                                 |
+| `turn.ts`                        | `SessionExecution.runTurn`: runs `turnStep` until the turn settles, admitting inbox traffic at committed boundaries. `ActiveTurn` owns cancellation and steering for one turn.                         |
+| `turn-step.ts`                   | The `"use step"` body for one bounded batch of model calls.                                                                                                                                            |
+| `input-queue.ts`                 | The one ordered queue of admitted deliveries, controls, and authorization callbacks, plus task-delivery idempotency and cancellation facts. Decides what the next turn is and whether it may hand off. |
+| `admission.ts`                   | Decodes one inbox payload into a queue admission; no turn policy.                                                                                                                                      |
+| `next-input.ts`                  | Waits for the next input a parked owner must act on.                                                                                                                                                   |
+| `state-cursor.ts`                | The one mutable context/state pair; claims every hook the state names before publishing a transition.                                                                                                  |
+| `hook-tokens.ts`                 | Derives the full hook claim set from committed state. Used by boot, every transition, handoff, and legacy import.                                                                                      |
+| `handoff.ts`, `handoff-steps.ts` | `SessionHandoff.tryTransfer` as one transaction: markers, release, start, activate, recover.                                                                                                           |
+| `finalization.ts`                | The single terminal path for done, expired, and failed sessions.                                                                                                                                       |
+| `event-sink.ts`                  | Binds adapter context, dynamic connections, and event fan-out to one step's stream writer.                                                                                                             |
+| `timeout*.ts`                    | The durable deadline timer, stamped with the arming owner so a successor ignores a predecessor's wake.                                                                                                 |
+
+`session-inbox/` is transport only: `inbox.ts` merges every claimed hook into one FIFO and pushes
+interrupts to the active turn the moment they are accepted; `resume.ts` is ingress; `address.ts`
+owns token namespacing. `legacy-session/` imports a pre-cutover driver's session into this program
+and is the only module that knows the former wire shapes.
 
 ## Deletion ledger
 
@@ -323,7 +323,7 @@ versions remain separate because stored output survives deployments.
   `execution/legacy-session/`. Step types still needed move out of transport modules.
 
 Transport cutover is clean: new sessions use one stable ingress envelope with required deployment
-metadata, and legacy driver/child sessions enter the isolated one-time import in `execution/legacy-session/` on their next turn dispatch. The import preserves committed conversation data and interrupts pending execution; old drivers remain stream anchors until final completion. Ingress
+metadata, and legacy driver/child sessions enter the isolated one-time import in `execution/legacy-session/` on their next turn dispatch. The import preserves committed conversation data and interrupts pending execution; old drivers remain stream anchors until final completion. Import supports drivers from eve 0.45 onward (wire versions 1–7, turn-input versions 1–2, embedded snapshots); an older driver is reported inactive so its channel starts a fresh session. Ingress
 can still be newer than a busy owner, so the owner validates that one envelope and rejects
 unsupported commands instead of translating them. Nothing deleted here is replaced by wait
 migration, callback rebinding, or cross-version coordination.
@@ -338,11 +338,15 @@ all earlier addresses remain valid. There is no rekey API or replacement claim.
 The checkpoint names the stable session inbox explicitly and carries continuation aliases separately.
 
 Each claimed hook has one continuously running iterator reader. Readers merge
-accepted payloads into one queue while model and tool steps run and never
-pause on queue depth, so a cancel is never held behind unread input. They
-share the same payload contract, and failures wake the consumer. Authorization
-callbacks retain their separate eligibility window. Handoff releases the entire
-claim set and transfers accepted, unconsumed payloads with the exact tokens.
+accepted payloads into one FIFO while model and tool steps run and never
+pause on queue depth, so a cancel is never held behind unread input. A cancel
+or reset is pushed to the active turn the moment the reader accepts it, so the
+running step aborts immediately; its durable side effects apply when the
+queued command is admitted at the next boundary. Authorization callbacks are
+ordinary queue entries keyed by attempt; the queue resumes a challenge once
+every expected attempt has reported and drops callbacks for replaced attempts.
+Handoff releases the entire claim set and transfers accepted, unconsumed
+payloads with the exact tokens.
 
 `TurnRouting` admits input from the session's one queue only against committed state.
 `steer` preserves completed work, turn identity, and accumulated usage.

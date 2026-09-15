@@ -1,6 +1,6 @@
 import { hydrateWorkflowArguments } from "#compiled/@workflow/core/serialization.js";
 import { getWorld, resolveRunEncryptionKey } from "#internal/workflow/runtime.js";
-import { DEFAULT_SESSION_TIMEOUT_MS } from "#execution/session-timeout.js";
+import { DEFAULT_SESSION_TIMEOUT_MS } from "#execution/session/timeout.js";
 import { readLegacyTurnInput, type LegacyTurnInput } from "./input.js";
 import { readLegacySnapshot, importConversation } from "./snapshot.js";
 import { SESSION_INBOX_CONTEXT_KEY } from "#execution/session-inbox/address.js";

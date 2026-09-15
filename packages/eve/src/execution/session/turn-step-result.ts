@@ -1,6 +1,6 @@
 import { createDurableSessionState } from "#execution/durable-session-store.js";
-import { derivePendingState } from "#execution/pending-turn-state.js";
-import type { DurableStepResult } from "#execution/turn-step.js";
+import { derivePendingState } from "#execution/session/pending-turn-state.js";
+import type { DurableStepResult } from "#execution/session/turn-step-types.js";
 import { hasPendingInputBatch } from "#harness/input-requests.js";
 import { getTurnUsageState, takeSessionUsageDelta, toUsage } from "#harness/turn-tag-state.js";
 import type { StepResult } from "#harness/types.js";

@@ -4,7 +4,7 @@ import {
   SESSION_CHECKPOINT_VERSION,
   type SessionCheckpoint,
   type SessionOwnerActivation,
-} from "#execution/session-handoff.js";
+} from "#execution/session/handoff.js";
 import { resumeHook } from "#internal/workflow/runtime.js";
 import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
 import { isObject } from "#shared/guards.js";

@@ -1,4 +1,4 @@
-import { DEFAULT_SESSION_TIMEOUT_MS } from "#execution/session-timeout.js";
+import { DEFAULT_SESSION_TIMEOUT_MS } from "#execution/session/timeout.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { prepareLegacySessionStep } from "./prepare-step.js";
 const mocks = vi.hoisted(() => ({ run: vi.fn(), hydrate: vi.fn(), encryption: vi.fn() }));

@@ -1,8 +1,8 @@
 import { createTestSessionState } from "#internal/testing/session-state.js";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { SessionCheckpoint } from "#execution/session-handoff.js";
-import { validateSessionCheckpointStep } from "#execution/session-handoff-steps.js";
+import type { SessionCheckpoint } from "#execution/session/handoff.js";
+import { validateSessionCheckpointStep } from "#execution/session/handoff-steps.js";
 import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
 
 const deserializeContextMock = vi.fn();

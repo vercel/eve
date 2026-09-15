@@ -397,7 +397,7 @@
           "operations": "1 hook_created per address; one concurrent claim batch",
           "why": "One stable address, plus the requested alias. getConflict is a registration fence preventing duplicate first-turn execution, not hooks.getByToken.",
           "source": {
-            "path": "packages/eve/src/execution/workflow-entry.ts",
+            "path": "packages/eve/src/execution/session/entry.ts",
             "symbol": "const [sessionCreation"
           }
         },
@@ -421,7 +421,7 @@
           "operations": "isSessionIdleForHandoffStep lifecycle",
           "why": "Only a fresh delivery to an idle session can trigger transfer. Same-deployment and busy sessions do not run this step.",
           "source": {
-            "path": "packages/eve/src/execution/session-handoff.ts",
+            "path": "packages/eve/src/execution/session/handoff.ts",
             "symbol": "async checkpoint"
           }
         },
@@ -433,7 +433,7 @@
           "operations": "1 hook_created on original owner's first attempt",
           "why": "Keeps the original run and its public stream alive after its execution ownership transfers.",
           "source": {
-            "path": "packages/eve/src/execution/workflow-entry.ts",
+            "path": "packages/eve/src/execution/session/entry.ts",
             "symbol": "const ensureAnchor"
           }
         },
@@ -457,7 +457,7 @@
           "operations": "activation hook_created + startSessionOwnerStep lifecycle + run_created + publish",
           "why": "Activation callback is registered before starting a run that can signal it. Successor receives explicit anchorRunId, snapshot, address set, and configured timeout duration. Successful activation restarts that duration.",
           "source": {
-            "path": "packages/eve/src/execution/session-handoff.ts",
+            "path": "packages/eve/src/execution/session/handoff.ts",
             "symbol": "async start"
           }
         },
@@ -469,7 +469,7 @@
           "operations": "validation step lifecycle + 1 hook_created per address, batched",
           "why": "No model work until all claims succeed. Preserves stable identity and uses the original stream writer.",
           "source": {
-            "path": "packages/eve/src/execution/workflow-entry.ts",
+            "path": "packages/eve/src/execution/session/entry.ts",
             "symbol": "await validateSessionCheckpointStep"
           }
         },
@@ -481,7 +481,7 @@
           "operations": "signalSessionOwnerActivationStep + resume lookup/write/publish",
           "why": "Old owner can now exit or park as anchor. Later owners signal the anchor only at session end.",
           "source": {
-            "path": "packages/eve/src/execution/session-handoff-steps.ts",
+            "path": "packages/eve/src/execution/session/handoff-steps.ts",
             "symbol": "signalSessionOwnerActivationStep"
           }
         },
@@ -493,7 +493,7 @@
           "operations": "startSessionTimeoutStep + timer run_created/publish/lifecycle + durable wait scheduling",
           "why": "Default deadline infrastructure. Does not block the first model call; startup operations are joined before the session loop advances.",
           "source": {
-            "path": "packages/eve/src/execution/workflow-entry.ts",
+            "path": "packages/eve/src/execution/session/entry.ts",
             "symbol": "const initialTurn"
           }
         },
@@ -529,7 +529,7 @@
           "operations": "local work + authored hooks/connections/sandbox I/O",
           "why": "No universal count: authored integrations, dynamic model selection, memory, sandbox, and tracing can add work before the provider call.",
           "source": {
-            "path": "packages/eve/src/execution/workflow-steps.ts",
+            "path": "packages/eve/src/execution/session/turn-step.ts",
             "symbol": "async function turnStep"
           }
         },
@@ -553,7 +553,7 @@
           "operations": "stream write batches; batch count is variable",
           "why": "Lifecycle events and authored handlers can be awaited before the model call. Count actual stream batches, not individual events.",
           "source": {
-            "path": "packages/eve/src/execution/workflow-steps.ts",
+            "path": "packages/eve/src/execution/session/turn-step.ts",
             "symbol": "await emitTurnPreamble"
           }
         },
@@ -565,7 +565,7 @@
           "operations": "1 provider request for this first call",
           "why": "Provider response latency is outside time-to-model. Subsequent tool/model cycles have their own costs.",
           "source": {
-            "path": "packages/eve/src/execution/workflow-steps.ts",
+            "path": "packages/eve/src/execution/session/turn-step.ts",
             "symbol": "await runModelCallBatch"
           }
         },
@@ -577,7 +577,7 @@
           "operations": "step_completed + optional next step + settleTurnStep + stream batches",
           "why": "Steering uses the same turn after a committed boundary; queue waits for settlement. No child turn run or owner-release handshake per ordinary turn.",
           "source": {
-            "path": "packages/eve/src/execution/session-execution.ts",
+            "path": "packages/eve/src/execution/session/turn.ts",
             "symbol": "async runTurn"
           }
         },

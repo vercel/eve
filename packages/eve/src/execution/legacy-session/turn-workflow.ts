@@ -1,9 +1,9 @@
 import { isHookConflictError } from "#execution/hook-ownership.js";
-import { sessionHookTokens } from "#execution/session-hook-claims.js";
+import { sessionHookTokens } from "#execution/session/hook-tokens.js";
 import { sessionCommandHookToken } from "#execution/session-inbox/address.js";
 import { createSessionInbox } from "#execution/session-inbox/inbox.js";
-import { failSession, runPreparedSession } from "#execution/session-program.js";
-import { sessionTimeoutDeadline } from "#execution/session-timeout.js";
+import { failSession, runPreparedSession } from "#execution/session/program.js";
+import { sessionTimeoutDeadline } from "#execution/session/timeout.js";
 import { completeLegacyDriverStep } from "./completion-step.js";
 import { interruptLegacySessionStep } from "./interrupt-step.js";
 import { prepareLegacySessionStep } from "./prepare-step.js";

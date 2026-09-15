@@ -1,6 +1,6 @@
 import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
-import type { TurnSelection } from "#execution/session-input-queue.js";
-import type { SessionStateCursor } from "#execution/session-state-cursor.js";
+import type { TurnSelection } from "#execution/session/input-queue.js";
+import type { SessionStateCursor } from "#execution/session/state-cursor.js";
 
 export type RoutedTurnSelection =
   | { readonly kind: "cancel-turn" }

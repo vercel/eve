@@ -4,7 +4,7 @@ import { preserveSerializedSessionDynamicModelSelection } from "#context/seriali
 import { serializeContext } from "#context/serialize.js";
 import { preserveCancelledTurnMessage } from "#execution/cancelled-turn-message.js";
 import { createDurableSessionState } from "#execution/durable-session-store.js";
-import type { DurableStepResult } from "#execution/turn-step.js";
+import type { DurableStepResult } from "#execution/session/turn-step-types.js";
 import { readRetainedBackgroundToolResult } from "#execution/tasks/parent/tool-execution.js";
 import type { HarnessSession, StepInput, StepResult } from "#harness/types.js";
 import { preserveSerializedInstrumentationState } from "#instrumentation/state.js";

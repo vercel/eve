@@ -1,14 +1,14 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { sleep } from "#compiled/@workflow/core/index.js";
 
-import { signalSessionTimeoutStep } from "#execution/session-timeout-steps.js";
-import { sessionTimeoutWorkflow } from "#execution/session-timeout-workflow.js";
+import { signalSessionTimeoutStep } from "#execution/session/timeout-steps.js";
+import { sessionTimeoutWorkflow } from "#execution/session/timeout-workflow.js";
 
 vi.mock("#compiled/@workflow/core/index.js", () => ({
   sleep: vi.fn(),
 }));
 
-vi.mock("./session-timeout-steps.js", () => ({
+vi.mock("./timeout-steps.js", () => ({
   signalSessionTimeoutStep: vi.fn(),
 }));
 

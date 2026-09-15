@@ -1,9 +1,8 @@
-import { failSession, runPreparedSession, type SessionBoot } from "#execution/session-program.js";
+import { failSession, runPreparedSession, type SessionBoot } from "#execution/session/program.js";
 import { getWorkflowMetadata, getWritable } from "#compiled/@workflow/core/index.js";
 
 import type { DeliverHookPayload, RunInput, SessionCapabilities } from "#channel/types.js";
 import { readChannelRequestId, readRootSessionId } from "#execution/eve-workflow-attributes.js";
-import { hasDelegatedCallerContext } from "#execution/workflow-entry-crash.js";
 import type { RunMode } from "#shared/run-mode.js";
 import type { DurableCompiledArtifactsSource } from "#runtime/durable-compiled-artifacts-source.js";
 import { resolveInitialTurnCallerStep } from "#subagents/parent-notification.js";
@@ -11,8 +10,8 @@ import { normalizeSerializableError } from "#execution/workflow-errors.js";
 import { createSessionStep } from "#execution/create-session-step.js";
 import { isHookConflictError } from "#execution/hook-ownership.js";
 import { createSessionInbox, type SessionInboxHandle } from "#execution/session-inbox/inbox.js";
-import { sessionHookTokens } from "#execution/session-hook-claims.js";
-import { DEFAULT_SESSION_TIMEOUT_MS, sessionTimeoutDeadline } from "#execution/session-timeout.js";
+import { sessionHookTokens } from "#execution/session/hook-tokens.js";
+import { DEFAULT_SESSION_TIMEOUT_MS, sessionTimeoutDeadline } from "#execution/session/timeout.js";
 import type { DynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agent-config.js";
 import { attachClientContext, readClientContext } from "#internal/client-context.js";
 import { settleContinuationConflictStep } from "#execution/continuation-conflict-step.js";
@@ -23,13 +22,13 @@ import {
 import {
   signalSessionOwnerActivationStep,
   validateSessionCheckpointStep,
-} from "#execution/session-handoff-steps.js";
+} from "#execution/session/handoff-steps.js";
 import type {
   HandoffWorkflowEntryInput,
   InitialWorkflowEntryInput,
   WorkflowEntryInput,
   WorkflowEntryResult,
-} from "#execution/workflow-entry-input.js";
+} from "#execution/session/entry-input.js";
 
 // workflow-entry.ts is the durable workflow body — the bundler rejects
 // node built-ins here, so `internal/logging.ts` cannot be imported.
@@ -203,6 +202,14 @@ async function bootHandoffOwner(
       sessionWritable: input.parentWritable,
     },
   };
+}
+
+function hasDelegatedCallerContext(serializedContext: Record<string, unknown>): boolean {
+  if (serializedContext["eve.sessionCallback"] !== undefined) return true;
+  const channel = serializedContext["eve.channel"];
+  return (
+    typeof channel === "object" && channel !== null && Reflect.get(channel, "kind") === "subagent"
+  );
 }
 
 function createInitialDelivery(

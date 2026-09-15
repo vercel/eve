@@ -47,7 +47,7 @@ describe("applyWorkflowTransform", () => {
   });
 
   it.each([
-    ["workflowEntry", "src/execution/workflow-entry.ts"],
+    ["workflowEntry", "src/execution/session/entry.ts"],
     ["turnWorkflow", "src/execution/legacy-session/turn-workflow.ts"],
   ])("keeps %s stable across package versions and source moves", async (name, filename) => {
     const transformed = await applyWorkflowTransform(

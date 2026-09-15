@@ -5,7 +5,7 @@ import { handleConnectionCallbackRequest } from "#execution/connections/callback
 import { sessionCommandHookToken } from "#execution/session-inbox/address.js";
 import { executeSleepTool, SLEEP_INPUT_SCHEMA } from "#execution/tools/sleep.js";
 import { resumeSessionInbox } from "#execution/session-inbox/resume.js";
-import { workflowEntry } from "#execution/workflow-entry.js";
+import { workflowEntry } from "#execution/session/entry.js";
 import { createTestRuntime, type TestRuntime } from "#internal/testing/app-harness.js";
 import { captureTurnEvents, filterEventsByType } from "#internal/testing/events.js";
 import {

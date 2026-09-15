@@ -1,5 +1,4 @@
 import type { DeliverHookPayload, SessionCapabilities, TurnCaller } from "#channel/types.js";
-import { createSafeOuterWorkflowError } from "#execution/workflow-entry-crash.js";
 import type { AgentWorkflowRetentionDefinition } from "#shared/agent-definition.js";
 import type { RunMode } from "#shared/run-mode.js";
 import {
@@ -9,19 +8,26 @@ import {
   resolveInitialTurnCallerStep,
 } from "#subagents/parent-notification.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
-import { nextTurnDelivery, type NextTurnInstruction } from "#execution/parked-delivery-wait.js";
+import { nextTurnDelivery, type NextTurnInstruction } from "#execution/session/next-input.js";
 import { cancelDescendantTurnsStep } from "#execution/cancel-descendant-turns-step.js";
-import { SessionInputQueue } from "#execution/session-input-queue.js";
-import { SessionExecution } from "#execution/session-execution.js";
-import { SessionStateCursor } from "#execution/session-state-cursor.js";
-import type { TurnOutcome, TurnStepPayload } from "#execution/turn-step.js";
+import { SessionInputQueue } from "#execution/session/input-queue.js";
+import { SessionExecution } from "#execution/session/turn.js";
+import { SessionStateCursor } from "#execution/session/state-cursor.js";
+import type { TurnOutcome, TurnStepPayload } from "#execution/session/turn-step-types.js";
 import { settleCancelledTurnStep } from "#execution/settle-cancelled-turn-step.js";
-import { finalizeSession, type SessionTerminalOutcome } from "#execution/session-finalization.js";
+import { finalizeSession, type SessionTerminalOutcome } from "#execution/session/finalization.js";
 import { type SessionInboxHandle } from "#execution/session-inbox/inbox.js";
-import { createSessionTimeoutControl } from "#execution/session-timeout-control.js";
-import { SessionHandoff, sessionAnchorToken } from "#execution/session-handoff.js";
-import { signalSessionAnchorStep } from "#execution/session-handoff-steps.js";
-import type { WorkflowEntryResult } from "#execution/workflow-entry-input.js";
+import { createSessionTimeoutControl } from "#execution/session/timeout-control.js";
+import { SessionHandoff, sessionAnchorToken } from "#execution/session/handoff.js";
+import { signalSessionAnchorStep } from "#execution/session/handoff-steps.js";
+import type { WorkflowEntryResult } from "#execution/session/entry-input.js";
+
+/** The run's own failure never carries internals; the terminal event already logged them. */
+function createSafeOuterWorkflowError(): Error {
+  const error = new Error("Agent workflow failed. Inspect the private session trace for details.");
+  error.name = "EveWorkflowFailure";
+  return error;
+}
 
 /**
  * Who to tell when this owner exits. The original run anchors the public

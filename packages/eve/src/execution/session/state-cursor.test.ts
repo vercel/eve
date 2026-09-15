@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { ContinuationHookTokensKey } from "#context/keys.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
-import { SessionStateCursor } from "#execution/session-state-cursor.js";
+import { SessionStateCursor } from "#execution/session/state-cursor.js";
 
 const stableToken = "eve:session:session-1:inbox";
 

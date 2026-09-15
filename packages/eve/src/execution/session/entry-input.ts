@@ -1,6 +1,6 @@
 import type { TokenUsage } from "#shared/token-usage.js";
 import type { DeliverHookPayload, RunInput, SessionCommand } from "#channel/types.js";
-import type { SessionCheckpoint } from "#execution/session-handoff.js";
+import type { SessionCheckpoint } from "#execution/session/handoff.js";
 import type { AgentWorkflowRetentionDefinition } from "#shared/agent-definition.js";
 
 /**

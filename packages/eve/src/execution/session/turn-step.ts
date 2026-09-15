@@ -38,10 +38,10 @@ import { setChannelContext } from "#execution/channel-context.js";
 import { activeTurnId } from "#harness/active-turn-id.js";
 import { coalesceTurnInputs, type UserModelMessage } from "#harness/messages.js";
 import type { HarnessSession, StepInput, StepResult } from "#harness/types.js";
-import type { DurableStepResult, TurnStepInput } from "#execution/turn-step.js";
-import { resolveSessionStepResult } from "#execution/session-step-result.js";
-import { createSessionEventSink } from "#execution/session-event-sink.js";
-import { derivePendingState } from "#execution/pending-turn-state.js";
+import type { DurableStepResult, TurnStepInput } from "#execution/session/turn-step-types.js";
+import { resolveSessionStepResult } from "#execution/session/turn-step-result.js";
+import { createSessionEventSink } from "#execution/session/event-sink.js";
+import { derivePendingState } from "#execution/session/pending-turn-state.js";
 import {
   createAuthorizationCompletedEvent,
   createSessionStartedEvent,

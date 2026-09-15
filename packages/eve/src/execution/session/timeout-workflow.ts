@@ -1,6 +1,6 @@
 import { sleep } from "#compiled/@workflow/core/index.js";
 
-import { signalSessionTimeoutStep } from "#execution/session-timeout-steps.js";
+import { signalSessionTimeoutStep } from "#execution/session/timeout-steps.js";
 
 export interface SessionTimeoutWorkflowInput {
   readonly deadline: Date;

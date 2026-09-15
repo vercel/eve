@@ -23,7 +23,7 @@ replay unit.
 
 The Workflow SDK is not inherently tied to Vercel. In local development and in a self-deployed `eve start` process, eve uses the SDK's local world by default; that world persists workflow runs on disk under `.eve/.workflow-data` and dispatches through the same Nitro-hosted workflow routes. On Vercel, the same workflow code runs against Vercel Workflow instead, which adds deployment-aware routing and dashboard run metadata.
 
-When a Vercel production deployment changes, a new ID-addressed delivery to an idle session hands the session's settled state to the exact deployment that accepted the request. The session keeps its original ID and event stream, while the next model turn uses that deployment's current system-role instructions, model, and tools. Static user-role instructions stay pinned in the durable conversation history and are not seeded again. A successful handoff restarts the session's original configured [`sessionTimeoutMs`](../agent-config#runtime-limits) duration; disabled timeouts stay disabled. Failed or skipped handoffs keep the existing deadline.
+When a Vercel production deployment changes, a new delivery to an idle session hands the session's settled state to the exact deployment that accepted the request. This applies whether the delivery arrives through the session ID or through any channel continuation address the session has claimed. The session keeps its original ID and event stream, while the next model turn uses that deployment's current system-role instructions, model, and tools. Static user-role instructions stay pinned in the durable conversation history and are not seeded again. A successful handoff restarts the session's original configured [`sessionTimeoutMs`](../agent-config#runtime-limits) duration; disabled timeouts stay disabled. Failed or skipped handoffs keep the existing deadline.
 
 Before taking ownership, the target deployment validates the checkpoint's stored tasks and subagent handles and checks that no pending work remains. This includes settled tasks. If that validation fails, the previous owner recovers the session and processes the triggering delivery. Task and handle state preserve unknown metadata fields, while known fields and lifecycle rules must still be valid. Authored session state remains opaque to this validation.
 
@@ -42,6 +42,10 @@ input requests, and authorization attempts are abandoned; start that work again
 if it is still needed. Messages already buffered exclusively inside the old
 driver are not imported. The triggering message is preserved without repeating
 committed tool effects.
+
+Import supports drivers started on eve 0.45 or later. A session from an older
+release reports itself inactive on its next message, and its channel starts a
+fresh session.
 
 Keep the original deployment available until these sessions end. Their old
 drivers remain waiting to keep the original streams open; the current runtime
@@ -143,11 +147,11 @@ the returned handle. That identity lookup does not block workflow resumption.
 ID-addressed delivery already knows the session ID and needs no hook metadata
 lookup. An ambiguous delivery failure does not trigger session creation.
 
-Sessions with a channel continuation address stay on their current deployment.
-Moving those sessions safely requires an atomic handoff primitive that keeps
-every address continuously owned. ID-only sessions can hand off because their
-stable session address does not create a replacement session when temporarily
-unowned.
+While a handoff is in progress, the session's addresses are briefly unowned.
+The releasing owner leaves a short-lived marker for each address, so a
+delivery that lands in that interval retries until the successor claims the
+address instead of being reported as an inactive session. A channel therefore
+never starts a replacement session for an address that is mid-handoff.
 
 When a session is waiting, a delivery through its ID or any claimed channel address wakes it and starts the next turn. Message sends default to `turnPolicy: "steer"`: while a turn is active, the session owner buffers the message and applies it after the current workflow step commits. The model call and tool work complete safely, and steering continues the same turn with the same turn ID. Before emitting the turn's completion events, the owner checks for steering accepted at that boundary.
 

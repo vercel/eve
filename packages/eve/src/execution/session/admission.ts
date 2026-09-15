@@ -2,14 +2,14 @@ import { getWorkflowMetadata } from "#compiled/@workflow/core/index.js";
 
 import type { RuntimeActionResultHookPayload, SessionCommand } from "#channel/types.js";
 import { cancelAllIndexedSessionTasksStep } from "#execution/cancel-indexed-session-tasks-step.js";
-import type { DeliveryAdmission, SessionInputQueue } from "#execution/session-input-queue.js";
+import type { DeliveryAdmission, SessionInputQueue } from "#execution/session/input-queue.js";
 import { isWorkflowMessage, type SessionInboxPayload } from "#execution/session-inbox/inbox.js";
 import {
   decodeSessionInboxPayload,
   SessionInboxPayloadError,
 } from "#execution/session-inbox/protocol.js";
 import { reportDroppedWirePayloadStep } from "#execution/report-dropped-wire-payload-step.js";
-import type { SessionStateCursor } from "#execution/session-state-cursor.js";
+import type { SessionStateCursor } from "#execution/session/state-cursor.js";
 import type { WorkflowToolRunMessage } from "#execution/tools/workflow/messages.js";
 import { findRunningAgentHandle } from "#subagents/handles/query.js";
 import { runProxySubagentEventStep } from "#subagents/event-proxy-step.js";

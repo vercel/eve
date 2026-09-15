@@ -13,7 +13,7 @@ import { waitForHook } from "#internal/testing/workflow-test-helpers.js";
 import { ROOT_COMPILED_AGENT_NODE_ID } from "#compiler/manifest.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { sessionCommandHookToken } from "#execution/session-inbox/address.js";
-import { workflowEntry } from "#execution/workflow-entry.js";
+import { workflowEntry } from "#execution/session/entry.js";
 import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
 import { createEveSessionCancelRoutePath } from "#protocol/routes.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";

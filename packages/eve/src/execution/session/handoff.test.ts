@@ -2,15 +2,15 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { DeliverHookPayload } from "#channel/types.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
-import { SessionHandoff, type SessionOwnerActivation } from "#execution/session-handoff.js";
-import type { TurnSelection } from "#execution/session-input-queue.js";
+import { SessionHandoff, type SessionOwnerActivation } from "#execution/session/handoff.js";
+import type { TurnSelection } from "#execution/session/input-queue.js";
 import type { SessionInboxHandle, SessionInboxPayload } from "#execution/session-inbox/inbox.js";
 
 const isSessionIdleForHandoffStepMock = vi.fn(async (..._args: unknown[]) => true);
 const startSessionOwnerStepMock = vi.fn();
 const createHookMock = vi.fn();
 
-vi.mock("#execution/session-handoff-steps.js", () => ({
+vi.mock("#execution/session/handoff-steps.js", () => ({
   isSessionIdleForHandoffStep: (...args: unknown[]) => isSessionIdleForHandoffStepMock(...args),
 }));
 vi.mock("#execution/workflow-runtime.js", () => ({

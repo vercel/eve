@@ -1,16 +1,16 @@
 import { createHook, getWorkflowMetadata, type Hook } from "#compiled/@workflow/core/index.js";
 
 import type { DeliverHookPayload, SessionCapabilities } from "#channel/types.js";
-import { readAcceptedDeploymentId } from "#execution/accepted-delivery-deployment.js";
+import { readAcceptedDeploymentId } from "#execution/session/accepted-deployment.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import { claimHookOwnership, disposeHook } from "#execution/hook-ownership.js";
-import { sessionHookTokens } from "#execution/session-hook-claims.js";
+import { sessionHookTokens } from "#execution/session/hook-tokens.js";
 import type { SessionInboxHandle, SessionInboxPayload } from "#execution/session-inbox/inbox.js";
-import type { TurnSelection } from "#execution/session-input-queue.js";
-import type { WorkflowEntryResult } from "#execution/workflow-entry-input.js";
+import type { TurnSelection } from "#execution/session/input-queue.js";
+import type { WorkflowEntryResult } from "#execution/session/entry-input.js";
 import { startSessionOwnerStep } from "#execution/workflow-runtime.js";
 import { sessionHandoffMarkerToken } from "#execution/session-inbox/address.js";
-import { isSessionIdleForHandoffStep } from "#execution/session-handoff-steps.js";
+import { isSessionIdleForHandoffStep } from "#execution/session/handoff-steps.js";
 import type { AgentWorkflowRetentionDefinition } from "#shared/agent-definition.js";
 import type { RunMode } from "#shared/run-mode.js";
 

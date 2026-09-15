@@ -4,15 +4,18 @@ import type { DeliverHookPayload, SessionCapabilities } from "#channel/types.js"
 import { cancelDescendantTurnsStep } from "#execution/cancel-descendant-turns-step.js";
 import { dispatchCoordinationStep } from "#execution/coordination-dispatch-step.js";
 import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
-import { routeSelectedDelivery } from "#execution/selected-delivery-router.js";
-import type { SessionInputQueue } from "#execution/session-input-queue.js";
+import { routeSelectedDelivery } from "#execution/session/route-selected-delivery.js";
+import type { SessionInputQueue } from "#execution/session/input-queue.js";
 import {
   sessionCommandHookToken,
   sessionInboxHookToken,
 } from "#execution/session-inbox/address.js";
 import type { SessionInboxPayload, SessionInboxReader } from "#execution/session-inbox/inbox.js";
-import { admitSessionInboxPayload, applySessionCancellation } from "#execution/session-routing.js";
-import type { SessionStateCursor } from "#execution/session-state-cursor.js";
+import {
+  admitSessionInboxPayload,
+  applySessionCancellation,
+} from "#execution/session/admission.js";
+import type { SessionStateCursor } from "#execution/session/state-cursor.js";
 import { acknowledgeDelegatedTasksStep } from "#execution/tasks/parent/delegate.js";
 import { handleWorkflowToolRunMessage } from "#execution/session-workflow-tool-run.js";
 import type { WorkflowToolRunMessage } from "#execution/tools/workflow/messages.js";
@@ -21,9 +24,9 @@ import type {
   RuntimeActionResultStepInput,
   TurnOutcome,
   TurnStepPayload,
-} from "#execution/turn-step.js";
+} from "#execution/session/turn-step-types.js";
 import { resolveWorkflowCallbackBaseUrl } from "#execution/workflow-callback-url.js";
-import { turnStep } from "#execution/workflow-steps.js";
+import { turnStep } from "#execution/session/turn-step.js";
 import { activeTurnId } from "#harness/active-turn-id.js";
 import { coalesceDeliveries } from "#harness/messages.js";
 import { TurnCancelledError } from "#harness/turn-cancellation.js";

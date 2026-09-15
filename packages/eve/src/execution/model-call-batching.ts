@@ -1,4 +1,4 @@
-import { derivePendingState } from "#execution/pending-turn-state.js";
+import { derivePendingState } from "#execution/session/pending-turn-state.js";
 import type { HarnessSession, StepInput, StepResult } from "#harness/types.js";
 
 export async function runModelCallBatch(input: {

@@ -1,5 +1,5 @@
 import type { RunCreatedEventRequest } from "@workflow/world";
-import { DEFAULT_SESSION_TIMEOUT_MS } from "#execution/session-timeout.js";
+import { DEFAULT_SESSION_TIMEOUT_MS } from "#execution/session/timeout.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { getWorld, resumeHook, start } from "#internal/workflow/runtime.js";
 import {
@@ -13,7 +13,7 @@ import { captureTurnEvents, filterEventsByType } from "#internal/testing/events.
 import { createTestRuntime } from "#internal/testing/app-harness.js";
 import { waitForHook } from "#internal/testing/workflow-test-helpers.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
-import { workflowEntry } from "#execution/workflow-entry.js";
+import { workflowEntry } from "#execution/session/entry.js";
 import { sessionInboxHookToken } from "#execution/session-inbox/address.js";
 import { sessionCommandHookToken } from "#execution/session-inbox/address.js";
 import {
@@ -1397,7 +1397,7 @@ describe("workflowEntry integration", () => {
           if (pending === undefined) {
             pending = (async () => {
               const args = (await hydrateWorkflowArguments(encoded, runId, undefined)) as [
-                import("./workflow-entry-input.js").HandoffWorkflowEntryInput,
+                import("./entry-input.js").HandoffWorkflowEntryInput,
               ];
               expect(args[0].kind).toBe("handoff");
               candidateId = runId;

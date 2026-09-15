@@ -2,12 +2,12 @@ import { createTestSessionState } from "#internal/testing/session-state.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import type { SessionInbox, SessionInboxPayload } from "#execution/session-inbox/inbox.js";
-import { SessionInputQueue } from "#execution/session-input-queue.js";
-import { SessionExecution } from "#execution/session-execution.js";
-import { SessionStateCursor } from "#execution/session-state-cursor.js";
+import { SessionInputQueue } from "#execution/session/input-queue.js";
+import { SessionExecution } from "#execution/session/turn.js";
+import { SessionStateCursor } from "#execution/session/state-cursor.js";
 import { cancelDescendantTurnsStep } from "#execution/cancel-descendant-turns-step.js";
 import { acknowledgeDelegatedTasksStep } from "#execution/tasks/parent/delegate.js";
-import { turnStep } from "#execution/workflow-steps.js";
+import { turnStep } from "#execution/session/turn-step.js";
 import type { DeliverHookPayload } from "#channel/types.js";
 import { dispatchCoordinationStep } from "#execution/coordination-dispatch-step.js";
 import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
@@ -18,7 +18,7 @@ vi.mock("#compiled/@workflow/core/index.js", async (importOriginal) => ({
 }));
 vi.mock("#execution/coordination-dispatch-step.js", () => ({ dispatchCoordinationStep: vi.fn() }));
 
-vi.mock("#execution/workflow-steps.js", () => ({
+vi.mock("#execution/session/turn-step.js", () => ({
   turnStep: vi.fn(),
 }));
 vi.mock("#execution/tasks/parent/delegate.js", () => ({

@@ -58,8 +58,8 @@ import { parseNdjsonStream } from "#execution/ndjson-stream.js";
 import type {
   HandoffWorkflowEntryInput,
   InitialWorkflowEntryInput,
-} from "#execution/workflow-entry-input.js";
-import type { SessionCheckpoint } from "#execution/session-handoff.js";
+} from "#execution/session/entry-input.js";
+import type { SessionCheckpoint } from "#execution/session/handoff.js";
 import type { ActivityCollectorInput } from "#execution/activity-collector.js";
 import { createEveActivityRoutePath } from "#protocol/routes.js";
 import {

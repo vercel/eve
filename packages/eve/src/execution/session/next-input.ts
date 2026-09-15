@@ -1,13 +1,16 @@
 import type { DeliverPayload } from "#channel/types.js";
-import { routeSelectedDelivery } from "#execution/selected-delivery-router.js";
+import { routeSelectedDelivery } from "#execution/session/route-selected-delivery.js";
 import type {
   SessionControl,
   SessionInputQueue,
   TurnSelection,
-} from "#execution/session-input-queue.js";
+} from "#execution/session/input-queue.js";
 import type { SessionInboxReader } from "#execution/session-inbox/inbox.js";
-import { admitSessionInboxPayload, applySessionCancellation } from "#execution/session-routing.js";
-import type { SessionStateCursor } from "#execution/session-state-cursor.js";
+import {
+  admitSessionInboxPayload,
+  applySessionCancellation,
+} from "#execution/session/admission.js";
+import type { SessionStateCursor } from "#execution/session/state-cursor.js";
 import type { WorkflowToolRunMessage } from "#execution/tools/workflow/messages.js";
 import { getSessionTaskCohorts } from "#tasks/session-task-cohorts.js";
 

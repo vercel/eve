@@ -4,7 +4,7 @@ import { legacySessionDriverWorkflow } from "#internal/testing/legacy-session-dr
 import { waitForHook } from "#internal/testing/workflow-test-helpers.js";
 import { captureTurnEvents, filterEventsByType } from "#internal/testing/events.js";
 import { hydrateStepReturnValue } from "#compiled/@workflow/core/serialization.js";
-import type { DurableStepResult } from "#execution/turn-step.js";
+import type { DurableStepResult } from "#execution/session/turn-step-types.js";
 import { getWorld, getHookByToken, start } from "#internal/workflow/runtime.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { createWorkflowRuntime } from "#execution/workflow-runtime.js";

@@ -5,7 +5,7 @@ import type {
   WorkflowToolRunRequestMessage,
 } from "#execution/tools/workflow/messages.js";
 import { resolveWorkflowCallbackBaseUrl } from "#execution/workflow-callback-url.js";
-import type { SessionStateCursor } from "#execution/session-state-cursor.js";
+import type { SessionStateCursor } from "#execution/session/state-cursor.js";
 import { applyTaskAgentRequest } from "#execution/tools/subagent/task-agent-requests.js";
 import { cancelAgentInvocationOwnerStep } from "#execution/tools/subagent/task-cancel.js";
 import { releaseAgentInvocationOwnerStep } from "#execution/tools/subagent/invoke-step.js";

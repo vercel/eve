@@ -2,21 +2,21 @@ import { createTestSessionState } from "#internal/testing/session-state.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { DeliverHookPayload, SessionAuthContext } from "#channel/types.js";
-import { nextTurnDelivery } from "#execution/parked-delivery-wait.js";
-import { SessionInputQueue } from "#execution/session-input-queue.js";
+import { nextTurnDelivery } from "#execution/session/next-input.js";
+import { SessionInputQueue } from "#execution/session/input-queue.js";
 import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
 import type { SessionInbox, SessionInboxPayload } from "#execution/session-inbox/inbox.js";
-import { SessionStateCursor } from "#execution/session-state-cursor.js";
+import { SessionStateCursor } from "#execution/session/state-cursor.js";
 import { cacheTerminalTaskView } from "#tasks/session-index.js";
 import type { TaskView } from "#tasks/types.js";
 
 vi.mock("#compiled/@workflow/core/index.js", () => ({
   getWorkflowMetadata: () => ({ workflowRunId: "owner-1" }),
 }));
-vi.mock("./route-child-delivery.js", () => ({
+vi.mock("../route-child-delivery.js", () => ({
   routeDeliverToChildren: vi.fn(),
 }));
-vi.mock("./cancel-indexed-session-tasks-step.js", () => ({
+vi.mock("../cancel-indexed-session-tasks-step.js", () => ({
   cancelAllIndexedSessionTasksStep: vi.fn(),
 }));
 

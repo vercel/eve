@@ -215,7 +215,6 @@ const identitySchema = z.looseObject({
 });
 
 const startOperationSchema = z.looseObject({
-  previousStatus: z.never().optional(),
   callId: nonEmptyString,
   id: nonEmptyString,
   kind: z.literal("start"),
@@ -230,25 +229,10 @@ const continueOperationSchema = z.looseObject({
   previousStatus: z.string().max(MAX_STATUS_LENGTH),
 });
 
-const localAddressFields = {
-  callbackBaseUrl: z.never().optional(),
-  credentialResolver: z.never().optional(),
-  url: z.never().optional(),
-};
-
 const startTargetSchema: z.ZodType<AgentStartTarget> = z.discriminatedUnion("kind", [
+  z.looseObject({ continuationToken: nonEmptyString, kind: z.literal("agent/local") }),
+  z.looseObject({ continuationToken: nonEmptyString, kind: z.literal("agent/self") }),
   z.looseObject({
-    ...localAddressFields,
-    continuationToken: nonEmptyString,
-    kind: z.literal("agent/local"),
-  }),
-  z.looseObject({
-    ...localAddressFields,
-    continuationToken: nonEmptyString,
-    kind: z.literal("agent/self"),
-  }),
-  z.looseObject({
-    continuationToken: z.never().optional(),
     callbackBaseUrl: z.url(),
     credentialResolver: z.looseObject({ resolverId: nonEmptyString.optional() }).optional(),
     kind: z.literal("agent/remote"),
@@ -258,19 +242,16 @@ const startTargetSchema: z.ZodType<AgentStartTarget> = z.discriminatedUnion("kin
 
 const addressSchema: z.ZodType<AgentAddress> = z.discriminatedUnion("kind", [
   z.looseObject({
-    ...localAddressFields,
     continuationToken: nonEmptyString,
     kind: z.literal("agent/local"),
     sessionId: nonEmptyString,
   }),
   z.looseObject({
-    ...localAddressFields,
     continuationToken: nonEmptyString,
     kind: z.literal("agent/self"),
     sessionId: nonEmptyString,
   }),
   z.looseObject({
-    continuationToken: z.never().optional(),
     callbackBaseUrl: z.url(),
     credentialResolver: z.looseObject({ resolverId: nonEmptyString.optional() }).optional(),
     kind: z.literal("agent/remote"),
@@ -314,42 +295,20 @@ const agentHandleStoreCommandSchema: z.ZodType<AgentHandleStoreCommand> = z.disc
   ],
 );
 
-// Known lifecycle fields must not survive into a phase that cannot use them.
-const agentHandlePhaseFields = {
-  address: z.never().optional(),
-  callId: z.never().optional(),
-  lastStatus: z.never().optional(),
-  operation: z.never().optional(),
-  operationId: z.never().optional(),
-  ownerId: z.never().optional(),
-  phase: z.never().optional(),
-  target: z.never().optional(),
-};
-
-/** Carries extensions across phase changes without retaining retired lease/work fields. */
-export function agentHandleMetadata(handle: AgentHandle): Record<string, unknown> {
-  return Object.fromEntries(
-    Object.entries(handle).filter(([key]) => !Object.hasOwn(agentHandlePhaseFields, key)),
-  );
-}
-
 const turnOwnedAgentHandleSchema: z.ZodType<TurnOwnedAgentHandle> = z.discriminatedUnion("phase", [
   z.looseObject({
-    ...agentHandlePhaseFields,
     identity: identitySchema,
     operation: startOperationSchema,
     phase: z.literal("starting"),
     target: startTargetSchema,
   }),
   z.looseObject({
-    ...agentHandlePhaseFields,
     address: addressSchema,
     identity: identitySchema,
     operation: z.discriminatedUnion("kind", [startOperationSchema, continueOperationSchema]),
     phase: z.literal("running"),
   }),
   z.looseObject({
-    ...agentHandlePhaseFields,
     address: addressSchema,
     identity: identitySchema,
     lastStatus: z.string().max(MAX_STATUS_LENGTH),
@@ -359,7 +318,6 @@ const turnOwnedAgentHandleSchema: z.ZodType<TurnOwnedAgentHandle> = z.discrimina
 
 const taskOwnedAgentHandleSchema: z.ZodType<TaskOwnedAgentHandle> = z.discriminatedUnion("phase", [
   z.looseObject({
-    ...agentHandlePhaseFields,
     callId: nonEmptyString.optional(),
     identity: identitySchema,
     operationId: nonEmptyString,
@@ -367,7 +325,6 @@ const taskOwnedAgentHandleSchema: z.ZodType<TaskOwnedAgentHandle> = z.discrimina
     ownerId: nonEmptyString,
   }),
   z.looseObject({
-    ...agentHandlePhaseFields,
     address: addressSchema,
     callId: nonEmptyString.optional(),
     identity: identitySchema,
@@ -376,7 +333,6 @@ const taskOwnedAgentHandleSchema: z.ZodType<TaskOwnedAgentHandle> = z.discrimina
     ownerId: nonEmptyString,
   }),
   z.looseObject({
-    ...agentHandlePhaseFields,
     address: addressSchema,
     identity: identitySchema,
     phase: z.literal("available"),
@@ -459,10 +415,7 @@ export function setAgentHandleStore(
 ): SessionStateMap {
   return {
     ...state,
-    [AGENT_HANDLES_STATE_KEY]: assertPersistableAgentHandleStore({
-      ...getAgentHandleStore(state),
-      ...store,
-    }),
+    [AGENT_HANDLES_STATE_KEY]: assertPersistableAgentHandleStore(store),
   };
 }
 

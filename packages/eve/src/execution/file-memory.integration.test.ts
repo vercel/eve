@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { workflowEntry } from "#execution/workflow-entry.js";
+import { workflowEntry } from "#execution/session/entry.js";
 import { createTestRuntime } from "#internal/testing/app-harness.js";
 import { captureTurnEvents, filterEventsByType } from "#internal/testing/events.js";
 import { start } from "#internal/workflow/runtime.js";

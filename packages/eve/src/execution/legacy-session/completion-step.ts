@@ -1,7 +1,7 @@
 import { HookNotFoundError } from "#compiled/@workflow/errors/index.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import { resumeHook } from "#internal/workflow/runtime.js";
-import type { WorkflowEntryResult } from "#execution/workflow-entry-input.js";
+import type { WorkflowEntryResult } from "#execution/session/entry-input.js";
 
 /** The old driver owns final notifications for the dispatch that became this session. */
 export async function completeLegacyDriverStep(input: {

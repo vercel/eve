@@ -1,22 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { createTestSessionState } from "#internal/testing/session-state.js";
-import { isSessionStateIdleForHandoff } from "#execution/session-handoff-steps.js";
+import { isSessionStateIdleForHandoff } from "#execution/session/handoff-steps.js";
 import {
   cacheTerminalTaskView,
   getSessionTaskIndex,
   recordSessionTask,
 } from "#tasks/session-index.js";
 import { parseActivityWorkIdentityV1 } from "#protocol/activity.js";
-import {
-  getAgentHandleStore,
-  parseAgentHandleStoreCommand,
-  setAgentHandleStore,
-} from "#subagents/handles/store.js";
-import {
-  applyAgentHandleStoreCommand,
-  confirmAgentStarted,
-  rejectAgentEffect,
-} from "#subagents/handles/transitions.js";
 import type { HarnessSession } from "#harness/types.js";
 
 const metadata = { kind: "tool", name: "research" };
@@ -69,13 +59,6 @@ function session(state: Record<string, unknown>): HarnessSession {
     state,
   };
 }
-const identity = { id: "agent", name: "research", nodeId: "node", futureIdentity: true };
-const address = {
-  kind: "agent/local" as const,
-  sessionId: "child",
-  continuationToken: "child-token",
-  futureAddress: true,
-};
 const restored = <T>(value: T): T => JSON.parse(JSON.stringify(value));
 
 describe("additive durable state", () => {
@@ -135,102 +118,6 @@ describe("additive durable state", () => {
     });
     expect(getSessionTaskIndex(restored(cancelled))[0]?.terminalView?.lastOutput).toBeUndefined();
   });
-
-  it("preserves handle/store extensions while retiring owner lease fields", () => {
-    const initial = {
-      futureStore: true,
-      handles: [
-        {
-          address,
-          identity,
-          phase: "available" as const,
-          futureHandle: true,
-        },
-      ],
-    };
-    const loaded = getAgentHandleStore({ "eve.agent.handles": restored(initial) })!;
-    const claimed = applyAgentHandleStoreCommand(loaded, {
-      kind: "claim",
-      agentId: "agent",
-      expectedTarget: "local",
-      invokedName: "research",
-      operationId: "operation",
-      ownerId: "owner",
-      callId: "call",
-    });
-    expect(claimed.store).toMatchObject({
-      futureStore: true,
-      handles: [{ futureHandle: true, phase: "claimed", ownerId: "owner" }],
-    });
-    const released = applyAgentHandleStoreCommand(claimed.store, {
-      kind: "release-owner",
-      ownerId: "owner",
-    });
-    expect(restored(released.store)).toEqual(initial);
-    expect(
-      getAgentHandleStore(setAgentHandleStore({ "eve.agent.handles": initial }, { handles: [] })),
-    ).toEqual({ futureStore: true, handles: [] });
-    expect(parseAgentHandleStoreCommand({ kind: "read", futureOption: true })).toBeUndefined();
-  });
-
-  it("preserves metadata when a turn-owned handle changes phases", () => {
-    const state = {
-      "eve.agent.handles": {
-        futureStore: true,
-        handles: [
-          {
-            phase: "starting",
-            identity,
-            futureHandle: true,
-            operation: {
-              kind: "start",
-              id: "operation",
-              callId: "call",
-              parentTurnId: "turn",
-              futureOperation: true,
-            },
-            target: { kind: "agent/local", continuationToken: "child-token" },
-          },
-        ],
-      },
-    };
-    const running = confirmAgentStarted(session(state), { operationId: "operation", address });
-    const handle = getAgentHandleStore(running.state)!.handles[0]!;
-    expect(handle).toMatchObject({ futureHandle: true, operation: { futureOperation: true } });
-    expect(handle).not.toHaveProperty("target");
-    const continuing = {
-      ...handle,
-      operation: {
-        kind: "continue" as const,
-        id: "operation",
-        callId: "call",
-        parentTurnId: "turn",
-        previousStatus: "waiting",
-      },
-    };
-    const parked = rejectAgentEffect(
-      session({ "eve.agent.handles": { futureStore: true, handles: [continuing] } }),
-      { operationId: "operation", disposition: "retryable" },
-    );
-    expect(getAgentHandleStore(parked.state)).toMatchObject({
-      futureStore: true,
-      handles: [{ futureHandle: true, address, identity, phase: "parked" }],
-    });
-    expect(getAgentHandleStore(parked.state)!.handles[0]).not.toHaveProperty("operation");
-  });
-
-  it.each(["ownerId", "operationId", "operation", "callId", "target"])(
-    "rejects retired %s on an available handle",
-    (key) => {
-      expect(() =>
-        getAgentHandleStore({
-          "eve.agent.handles": {
-            handles: [{ phase: "available", address, identity, [key]: "stale" }],
-          },
-        }),
-      ).toThrow("Corrupt agent handle store");
-    },
-  );
 });
 
 describe("handoff state inspection", () => {

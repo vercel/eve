@@ -1,7 +1,7 @@
 import type { DurableSessionState } from "#execution/durable-session-store.js";
-import { sessionHookTokens } from "#execution/session-hook-claims.js";
+import { sessionHookTokens } from "#execution/session/hook-tokens.js";
 import type { SessionInboxOwnership } from "#execution/session-inbox/inbox.js";
-import type { TurnStepInput, TurnStepPayload } from "#execution/turn-step.js";
+import type { TurnStepInput, TurnStepPayload } from "#execution/session/turn-step-types.js";
 
 /** A durable-state transition; absent fields keep the cursor's current value. */
 export interface SessionStateTransition {

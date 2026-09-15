@@ -4,7 +4,7 @@ import {
   cancelSessionTimeoutStep,
   signalSessionTimeoutStep,
   startSessionTimeoutStep,
-} from "#execution/session-timeout-steps.js";
+} from "#execution/session/timeout-steps.js";
 import { sessionTimeoutWorkflowReference } from "#execution/workflow-runtime.js";
 
 const cancelRunMock = vi.fn();

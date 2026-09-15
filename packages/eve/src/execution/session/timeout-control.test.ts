@@ -1,12 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { createSessionTimeoutControl } from "#execution/session-timeout-control.js";
+import { createSessionTimeoutControl } from "#execution/session/timeout-control.js";
 import {
   cancelSessionTimeoutStep,
   startSessionTimeoutStep,
-} from "#execution/session-timeout-steps.js";
+} from "#execution/session/timeout-steps.js";
 
-vi.mock("./session-timeout-steps.js", () => ({
+vi.mock("./timeout-steps.js", () => ({
   cancelSessionTimeoutStep: vi.fn(),
   startSessionTimeoutStep: vi.fn(),
 }));
