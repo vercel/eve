@@ -23,6 +23,10 @@ import {
   turnIdempotencyKey,
 } from "#instrumentation/lifecycle.js";
 import { installLocalInstrumentationRuntime } from "#tracing/local-instrumentation-runtime.js";
+import {
+  localTraceConversationMarker,
+  localTraceIndexedMarker,
+} from "#tracing/local-trace-discovery-index.js";
 import { LocalTraceSpanProcessor } from "#tracing/local-trace-span-processor.js";
 
 const temporaryDirectories: string[] = [];
@@ -266,14 +270,20 @@ describe("local instrumentation runtime", () => {
       }),
     );
 
-    firstProvider.getTracer("worker-1").startSpan("worker.one", {}, parent).end();
-    secondProvider.getTracer("worker-2").startSpan("worker.two", {}, parent).end();
+    const attributes = { "gen_ai.conversation.id": "conversation-1" };
+    firstProvider.getTracer("worker-1").startSpan("worker.one", { attributes }, parent).end();
+    secondProvider.getTracer("worker-2").startSpan("worker.two", { attributes }, parent).end();
     await Promise.all([firstProcessor.forceFlush(), secondProcessor.forceFlush()]);
 
-    const segments = await readdir(
-      join(appRoot, ".eve", "traces", "v1", "a".repeat(32), "segments"),
-    );
+    const traceDirectory = join(appRoot, ".eve", "traces", "v1", "a".repeat(32));
+    const segments = await readdir(join(traceDirectory, "segments"));
     expect(segments).toHaveLength(2);
+    await expect(
+      readFile(join(traceDirectory, localTraceConversationMarker("conversation-1")), "utf8"),
+    ).resolves.toBe("");
+    await expect(readFile(join(traceDirectory, localTraceIndexedMarker()), "utf8")).resolves.toBe(
+      "",
+    );
   });
 });
 

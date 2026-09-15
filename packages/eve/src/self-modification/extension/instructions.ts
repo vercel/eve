@@ -60,8 +60,7 @@ const localGuidance = `## Local environment
 
 The selfmod__registry_add tool will complete installation for items that need no setup. In the local dev TUI, a \`needs-terminal\` result from the tool call automatically opens the existing setup panel for the user to complete setup there. In headless development, if a \`needs-terminal\` result includes \`nextCommand\`, present that exact value as the only shell command in your response. Never infer, construct, or rewrite a command: installing an item uses \`eve add <item>\`; \`eve registry add\` configures registry namespace mappings and does not install items.
 
-Local eve dev logs are available read-only at /logs.
-Local trace segments are mounted read-only at /traces when available. Inspect other traces only when the user asks about another session or broader behavior.
+Local eve dev logs are mounted read-only at /logs. Local trace segments are mounted read-only at /traces when available. For latency, failure, token, or behavior analysis, load and follow the trace-analysis skill. Trace searches are scoped to the invoking conversation and exclude the current investigation by default.
 
 The application package.json is not mounted. Do not search outside /source for application files. You cannot run host binaries such as git, node, pnpm, or tsc. Use existing imports and selfmod__registry_add for supported registry installations.`;
 
@@ -83,25 +82,6 @@ function readSubagentSourceGuidance(event: unknown): string {
 
   const sourcePath = `/source/subagents/${invocation.name}`;
   return `Your authored self-modification subagent source is mounted at ${sourcePath}. For changes to this subagent itself, inspect that directory directly instead of searching /source. Its agent.ts owns agent options such as model; config.ts owns policy shared by the self-modification agent, sandbox, and extension.`;
-}
-
-function readTrace(
-  event: unknown,
-): { readonly traceFlags: number; readonly traceId: string } | undefined {
-  return (
-    event as {
-      readonly data?: {
-        readonly trace?: { readonly traceFlags: number; readonly traceId: string };
-      };
-    }
-  ).data?.trace;
-}
-
-function localTraceGuidance(event: unknown): string {
-  const trace = readTrace(event);
-  if (trace === undefined) return "";
-
-  return `The invoking trace has ID ${trace.traceId}. ${(trace.traceFlags & 1) === 1 ? "If local segments were captured," : "This trace was not sampled, so local segments may be absent. If any are present,"} inspect them at /traces/${trace.traceId}.`;
 }
 
 function renderInstructions(sections: readonly string[]): string {
@@ -126,7 +106,6 @@ export default defineDynamic({
           registryWorkflow,
           documentationGuidance,
           mode === "local" ? localGuidance : deployedGuidance,
-          mode === "local" ? localTraceGuidance(event) : "",
           workingGuidance,
           mode === "local" ? localReportingGuidance : deployedReportingGuidance,
         ]),
