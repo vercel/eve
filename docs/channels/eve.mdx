@@ -163,11 +163,11 @@ The eve channel classifies who can observe a session when that session is create
 
 | Session creator                           | Default audience |
 | ----------------------------------------- | ---------------- |
-| Anonymous caller                          | `public`         |
+| Anonymous caller                          | `unknown`        |
 | `user`, `service`, or `runtime` principal | `private`        |
 | Any other principal type                  | `unknown`        |
 
-Anonymous HTTP surfaces are public because anyone who can reach the surface can read it. Authenticated `user`, `service`, and `runtime` sessions are private because they belong to one identified party. Other authenticated principal types remain `unknown`: trace consumers record metadata but omit content by default in preview and production.
+Anonymous HTTP surfaces are `unknown` by default because reachability does not establish that their content is safe to record. Authenticated `user`, `service`, and `runtime` sessions are private because they belong to one identified party. Other authenticated principal types also remain `unknown`: trace consumers record metadata but omit content by default in preview and production. Set an explicit `audience: "public"` only for intentionally public traffic.
 
 Pass a constant or a function to override the default:
 

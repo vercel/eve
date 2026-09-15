@@ -99,9 +99,9 @@ export interface EveChannelInput {
   /**
    * Conversation audience classification, fixed when the session is created.
    *
-   * By default, anonymous callers are `public` and `user`, `service`, or
-   * `runtime` principals are `private`. Every other principal type is
-   * `unknown`, which trace consumers treat as non-public.
+   * By default, `user`, `service`, and `runtime` principals are `private`.
+   * Anonymous callers and every other principal type are `unknown`, which
+   * trace consumers treat as non-public.
    *
    * Pass a constant audience, or a function receiving the authenticated
    * principal, channel, run mode, and deployment environment. Continuation

@@ -4,9 +4,12 @@ import type { AudienceContext } from "#shared/conversation-context.js";
 export function defaultEveAudience(
   input: Omit<AudienceContext<undefined>, "state">,
 ): ChannelAudience {
-  if (input.caller.type === "anonymous") return "public";
-  const principalType = input.caller.principal.kind;
-  if (principalType === "user" || principalType === "service" || principalType === "runtime") {
+  if (
+    input.caller.type === "principal" &&
+    (input.caller.principal.kind === "user" ||
+      input.caller.principal.kind === "service" ||
+      input.caller.principal.kind === "runtime")
+  ) {
     return "private";
   }
   return "unknown";

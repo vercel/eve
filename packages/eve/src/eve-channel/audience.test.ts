@@ -28,8 +28,8 @@ function input(principalType: string | null): Omit<AudienceContext<undefined>, "
 
 describe("defaultEveAudience", () => {
   it.each([
-    [null, "public"],
-    ["anonymous", "public"],
+    [null, "unknown"],
+    ["anonymous", "unknown"],
     ["user", "private"],
     ["service", "private"],
     ["runtime", "private"],

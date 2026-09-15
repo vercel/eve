@@ -22,7 +22,7 @@ afterEach(() => {
 });
 
 describe("eve channel production audience", () => {
-  it("classifies callers and captures content only for public sessions", async () => {
+  it("classifies anonymous callers as unknown and omits content in production", async () => {
     vi.stubEnv("EVE_DEV_WORKER_APP_ROOT", undefined);
     vi.stubEnv("VERCEL_ENV", "production");
 
@@ -99,11 +99,8 @@ describe("eve channel production audience", () => {
     }
 
     expect(events).toHaveLength(4);
-    expect(events[0]).toMatchObject({ channelAudience: "public", type: "session.started" });
-    expect(events[1]).toMatchObject({
-      input: { instructions: "private instructions" },
-      type: "model.call.started",
-    });
+    expect(events[0]).toMatchObject({ channelAudience: "unknown", type: "session.started" });
+    expect(events[1]).toMatchObject({ input: undefined, type: "model.call.started" });
     expect(events[2]).toMatchObject({ channelAudience: "private", type: "session.started" });
     expect(events[3]).toMatchObject({ input: undefined, type: "model.call.started" });
 
