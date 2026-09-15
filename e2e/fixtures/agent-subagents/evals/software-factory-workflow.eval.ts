@@ -19,9 +19,9 @@ export default defineEval({
       [
         `FACTORY_RUN_TOKEN=${token}.`,
         "Alice is processing a manufactured software-factory backlog. Use the workflow tool exactly once, and do not call any of its subagents outside that program.",
-        "Create 200 synthetic tickets with unique zero-padded T- ids. Put the value FACTORY_RUN_TOKEN:triage in `triageKey` on the first ticket and FACTORY_RUN_TOKEN:review in `reviewKey` on the last ticket, replacing FACTORY_RUN_TOKEN with the supplied token.",
-        "Use Promise.all to run ticket-triage and ticket-review concurrently, passing the complete tickets array to both calls with structured output schemas.",
-        "After both complete, call ticket-reproducer with the returned `{ triage, review }` objects and a structured output schema.",
+        "Create a minimal array of exactly 200 tickets with ids `T-000` through `T-199`. Each ticket must contain only `id`, except `T-000` also has `triageKey` set to FACTORY_RUN_TOKEN:triage and `T-199` also has `reviewKey` set to FACTORY_RUN_TOKEN:review, replacing FACTORY_RUN_TOKEN with the supplied token.",
+        "Use Promise.all to run ticket-triage and ticket-review concurrently, passing the complete tickets array to both calls. Use `outputSchema` to request exactly `{ ticketCount: integer, priorityTicket: string, derivedKey: string }` from ticket-triage and `{ ticketCount: integer, accepted: boolean, derivedKey: string }` from ticket-review.",
+        "After both complete, call ticket-reproducer with the returned `{ triage, review }` objects and use `outputSchema` to request exactly `{ combinedKey: string, sampleTicket: string, testCase: string }`. Make every listed output field required and allow no additional output fields.",
         "Return `{ reproduction, review, triage }` and reply with only that returned JSON object.",
       ].join(" "),
     );

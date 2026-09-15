@@ -126,7 +126,8 @@ describe("runJsProgram", () => {
     );
   });
 
-  it("validates the trusted call budget", async () => {
+  it("validates JavaScript and the trusted call budget before starting a program", async () => {
+    await expect(runJsProgram(42 as never, ctx, options)).rejects.toThrow('requires a "js" string');
     await expect(
       runJsProgram("return 1", ctx, {
         maxSubagents: MAX_WORKFLOW_PROGRAM_MAX_SUBAGENTS + 1,

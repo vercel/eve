@@ -8,9 +8,10 @@ export default defineEval({
       "Use the workflow tool exactly once to call the sleeper subagent with the message GENERATED-PROGRAM-CHILD-HITL. Return the child result.",
     );
     const request = t.requireInputRequest({
-      display: "text",
+      prompt: "What marker should the child return?",
       toolName: "ask_question",
     });
+    if (request.kind !== "question") throw new Error("Child input request is not a question.");
 
     const resumed = await t.respond([
       { requestId: request.requestId, text: "GENERATED-HITL-MARKER" },
@@ -18,8 +19,12 @@ export default defineEval({
     resumed.expectOk();
 
     t.succeeded();
-    t.calledTool("workflow", { count: 1 });
+    t.calledTool("workflow", {
+      count: 1,
+      output: /CHILD_HITL_RESULT=.*GENERATED-HITL-MARKER/su,
+    });
     t.calledSubagent("sleeper", { count: 1, status: "pending" });
+    t.messageIncludes("CHILD_HITL_RESULT=");
     t.messageIncludes("GENERATED-HITL-MARKER");
     t.noFailedActions();
   },

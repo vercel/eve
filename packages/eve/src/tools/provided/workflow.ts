@@ -2,7 +2,7 @@ import { z } from "#compiled/zod/index.js";
 
 import {
   DEFAULT_WORKFLOW_PROGRAM_MAX_SUBAGENTS,
-  MAX_WORKFLOW_PROGRAM_MAX_SUBAGENTS,
+  parseWorkflowProgramOptions,
 } from "#execution/dynamic-workflow/schema.js";
 import { executeWorkflowProgram } from "#execution/dynamic-workflow/tool.js";
 import type { JsonValue } from "#shared/json.js";
@@ -23,11 +23,14 @@ export interface WorkflowToolInput {
 
 export type WorkflowTool = BlockingWorkflowToolDefinition<WorkflowToolInput, JsonValue>;
 
+const workflowProgramAgentContract =
+  "Call ctx.agent(name, { message: string, agentId?: string, outputSchema?: object }). It resolves directly to the child's JSON-serializable output; when outputSchema is provided, the output matches that schema. It does not return an agent metadata wrapper. Use an agentId from the conversation's <agents> block to continue that child. The owning agent resolves the target and applies its existing availability and authorization checks.";
+
 const workflowInputSchema = z.strictObject({
   js: z
     .string()
     .describe(
-      "Async JavaScript function body. Use ctx.agent(name, input) and return one JSON-serializable value.",
+      `JavaScript statements executed inside an async function. Supply only the body, without a surrounding function declaration or arrow function. ${workflowProgramAgentContract} Return one JSON-serializable value.`,
     ),
 });
 
@@ -35,7 +38,9 @@ const workflowInputSchema = z.strictObject({
 export function workflow(options: WorkflowToolOptions = {}): WorkflowTool {
   const normalized = normalizeWorkflowToolOptions(options);
   const description = [
-    "Run an async JavaScript function body that invokes agents through ctx.agent(name, input) and returns one JSON-serializable value.",
+    "Run an async JavaScript function body that invokes agents and returns one JSON-serializable value.",
+    workflowProgramAgentContract,
+    'Supply the body directly, for example: return await ctx.agent("researcher", { message: "Describe the task" });',
     `The program may invoke at most ${String(normalized.maxSubagents)} agents.`,
   ].join(" ");
   return attachWorkflowProgramOptions(
@@ -54,15 +59,7 @@ function normalizeWorkflowToolOptions(options: WorkflowToolOptions): {
   if (typeof options !== "object" || options === null) {
     throw new TypeError("workflow options must be an object.");
   }
-  const maxSubagents = options.maxSubagents ?? DEFAULT_WORKFLOW_PROGRAM_MAX_SUBAGENTS;
-  if (
-    !Number.isSafeInteger(maxSubagents) ||
-    maxSubagents < 1 ||
-    maxSubagents > MAX_WORKFLOW_PROGRAM_MAX_SUBAGENTS
-  ) {
-    throw new TypeError(
-      `workflow maxSubagents must be an integer between 1 and ${String(MAX_WORKFLOW_PROGRAM_MAX_SUBAGENTS)}.`,
-    );
-  }
-  return { maxSubagents };
+  return parseWorkflowProgramOptions({
+    maxSubagents: options.maxSubagents ?? DEFAULT_WORKFLOW_PROGRAM_MAX_SUBAGENTS,
+  });
 }

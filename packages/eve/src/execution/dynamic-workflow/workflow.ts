@@ -1,10 +1,10 @@
 import {
   DEFAULT_WORKFLOW_PROGRAM_MAX_SUBAGENTS,
   MAX_WORKFLOW_PROGRAM_MAX_SUBAGENTS,
-  parseWorkflowProgramInput,
+  parseWorkflowProgramOptions,
   readWorkflowProgramAgentCall,
   readWorkflowProgramCallInterrupt,
-  serializeWorkflowProgramInput,
+  type WorkflowProgramInput,
 } from "#execution/dynamic-workflow/schema.js";
 import {
   runWorkflowProgramStep,
@@ -26,14 +26,15 @@ export async function runJsProgram(
   ctx: WorkflowToolContext,
   options: JsProgramOptions,
 ): Promise<JsonValue> {
-  const continuationSecurity = await createWorkflowProgramContinuationSecurityStep();
-  const program = parseWorkflowProgramInput(
-    serializeWorkflowProgramInput({
-      continuationSecurity,
-      js,
-      maxSubagents: options.maxSubagents ?? DEFAULT_WORKFLOW_PROGRAM_MAX_SUBAGENTS,
-    }),
-  );
+  if (typeof js !== "string") throw new TypeError('workflow requires a "js" string.');
+  const optionsWithDefaults = parseWorkflowProgramOptions({
+    maxSubagents: options.maxSubagents ?? DEFAULT_WORKFLOW_PROGRAM_MAX_SUBAGENTS,
+  });
+  const program: WorkflowProgramInput = {
+    ...optionsWithDefaults,
+    continuationSecurity: await createWorkflowProgramContinuationSecurityStep(),
+    js,
+  };
   const base = { callId: ctx.callId, program };
   let outcome: WorkflowProgramStepOutcome = await runWorkflowProgramStep(base);
   let calls = 0;

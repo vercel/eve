@@ -19,7 +19,7 @@ export default defineAgent({
                   id: "child-question",
                   input: {
                     allowFreeform: true,
-                    display: "text",
+                    options: [],
                     prompt: "What marker should the child return?",
                   },
                   name: "ask_question",
