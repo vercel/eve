@@ -1,4 +1,10 @@
-export type PromptCommandExtensionName = "model" | "add" | "deploy" | "vc:install" | "vc:login";
+export type PromptCommandExtensionName =
+  | "model"
+  | "add"
+  | "deploy"
+  | "link"
+  | "vc:install"
+  | "vc:login";
 
 type PromptCommandTarget = "local" | "remote";
 
@@ -109,6 +115,14 @@ const PROMPT_COMMAND_DEFINITIONS = [
     takesArgument: false,
     build: () => ({ type: "extension", name: "vc:login", argument: "" }),
     targets: ["local", "remote"],
+  },
+  {
+    name: "link",
+    aliases: [],
+    description: "Link this project to Vercel",
+    takesArgument: false,
+    build: () => ({ type: "extension", name: "link", argument: "" }),
+    targets: ["local"],
   },
   {
     name: "model",

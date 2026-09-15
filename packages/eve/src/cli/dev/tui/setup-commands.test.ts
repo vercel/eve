@@ -61,6 +61,7 @@ function fakeFlows(overrides: Partial<TuiSetupFlows> = {}): TuiSetupFlows {
     runInstallVercelCliFlow: vi.fn<TuiSetupFlows["runInstallVercelCliFlow"]>(async () => ({
       kind: "installed",
     })),
+    runLinkFlow: vi.fn<TuiSetupFlows["runLinkFlow"]>(async () => ({ kind: "done" })),
     runLoginFlow: vi.fn<TuiSetupFlows["runLoginFlow"]>(async () => ({ kind: "logged-in" })),
     runModelFlow: vi.fn<TuiSetupFlows["runModelFlow"]>(async () => ({
       kind: "done",
@@ -77,7 +78,7 @@ function fakeFlows(overrides: Partial<TuiSetupFlows> = {}): TuiSetupFlows {
 }
 
 function run(input: {
-  command: "vc:install" | "vc:login" | "model" | "add" | "deploy";
+  command: "vc:install" | "vc:login" | "link" | "model" | "add" | "deploy";
   flows: TuiSetupFlows;
   renderer?: TuiSetupCommandRenderer;
   initialModelStep?: "provider";
@@ -188,9 +189,35 @@ describe("runTuiSetupCommand", () => {
     ).toEqual({
       "vc:install": "pulse",
       "vc:login": "pulse",
+      link: "pulse",
       model: "pulse",
       add: "pulse",
       deploy: "spinner",
+    });
+  });
+
+  it("links a fresh project and refreshes its identity", async () => {
+    const flows = fakeFlows();
+
+    await expect(run({ command: "link", flows })).resolves.toEqual({
+      message: "Linked this project to Vercel.",
+      preserveFlowDiagnostics: false,
+      effect: { kind: "refresh-identity" },
+    });
+    expect(flows.runLinkFlow).toHaveBeenCalledWith(
+      expect.objectContaining({ appRoot: APP_ROOT, projectSelection: "create-or-link" }),
+    );
+  });
+
+  it("does not refresh identity when project linking is cancelled", async () => {
+    const flows = fakeFlows({
+      runLinkFlow: vi.fn<TuiSetupFlows["runLinkFlow"]>(async () => ({ kind: "cancelled" })),
+    });
+
+    await expect(run({ command: "link", flows })).resolves.toEqual({
+      message: "/link dismissed.",
+      cancelled: true,
+      preserveFlowDiagnostics: false,
     });
   });
 
