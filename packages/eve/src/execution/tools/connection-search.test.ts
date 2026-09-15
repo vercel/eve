@@ -9,6 +9,7 @@ import {
   PendingAuthorizationResultKey,
 } from "#harness/authorization.js";
 import { ConnectionAuthorizationRequiredError } from "#connections/errors.js";
+import { VercelProjectLinkRequiredError } from "#runtime/connections/project-link-required.js";
 import type { ToolContext } from "#tools/definition.js";
 import type {
   ConnectionToolExecuteOptions,
@@ -241,6 +242,31 @@ describe("connection_search", () => {
         keywords: "list incidents",
       }),
     ).rejects.toThrow('Connection "incidents" is not registered. Available connections: incident.');
+  });
+
+  it("returns a project-link prerequisite instead of failing the search", async () => {
+    const linear = connection("linear");
+    const connectionRegistry = registry({
+      connections: [linear],
+      loadTools: {
+        linear: async () => {
+          throw new VercelProjectLinkRequiredError("linear");
+        },
+      },
+    });
+
+    await expect(
+      executeConnectionSearch(connectionRegistry, {
+        connection: "linear",
+        keywords: "list issues",
+      }),
+    ).resolves.toEqual([
+      {
+        connection: "linear",
+        description: "linear connection",
+        requiresProjectLink: true,
+      },
+    ]);
   });
 
   it("fails when authorization cannot be started", async () => {

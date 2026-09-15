@@ -60,6 +60,8 @@ The UI installs planner selections in order and offers deployment once after the
 
 Type a message and press `Enter` to send it. When the agent asks a question or requests tool approval, respond in the prompt shown by the UI. Connection authorization can open a browser; keep local `eve dev` running until the browser returns to it.
 
+A supported Vercel Connect connection installed through self-modification can be added before the project is linked. When the agent first queries that connection, the UI opens the project-link flow if needed. After linking, the UI retries the original request automatically; connector provisioning and service authorization continue on first use.
+
 While a turn is running, `Enter` queues a follow-up message. Press `Esc` or `Ctrl+C` to cancel the turn; when messages are queued, this uses the oldest queued message as the next turn instead. If a direct cancellation requested with `/cancel` or `Ctrl+C` does not settle, press `Ctrl+C` to stop waiting. The UI then returns to the prompt and asks you to press `Ctrl+C` again to exit. At an idle prompt, press `Ctrl+C` twice to exit.
 
 | Key           | Action                                                                                                                  |

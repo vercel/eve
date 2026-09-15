@@ -180,6 +180,7 @@ export type AgentTUIStreamEvent =
   | { type: "tool-call"; toolCallId: string; toolName: string; input: unknown }
   | { type: "tool-approval-request"; approvalId: string; toolCallId: string }
   | { type: "tool-result"; toolCallId: string; output: unknown }
+  | { type: "tool-discard"; toolCallId: string }
   | { type: "tool-error"; toolCallId: string; errorText: string }
   | { type: "tool-rejected"; toolCallId: string; reason: string }
   | { type: "error"; errorText: string; hint?: string; detail?: string }
@@ -191,6 +192,8 @@ export type AgentTUITurnState = {
   boundaryEvent?: "session.completed" | "session.failed" | "session.waiting";
   pendingApprovals: AgentTUIToolApprovalRequest[];
   pendingQuestions: InputRequest[];
+  projectLinkRequired?: boolean;
+  projectLinkReplaySafe?: boolean;
   sawSessionFailure: boolean;
   /** Id of the streaming turn, once `turn.started` names it. Scopes cancels. */
   turnId?: string;
@@ -422,7 +425,7 @@ export interface PromptCommandOutcome {
   /** Promotes an outcome to a top-level status. */
   tone?: "success" | "error";
   /** Post-command work after setup settles. */
-  effect?: VercelStatusEffect | { kind: "model-access-changed" };
+  effect?: VercelStatusEffect | { kind: "model-access-changed" } | { kind: "project-linked" };
   cancelled?: true;
 }
 
@@ -582,9 +585,16 @@ export class EveTUIRunner {
   readonly #pendingInputRequests = new Map<string, InputRequest>();
   /** Idle wake result handed from the prompt follower into the normal HITL response loop. */
   #idleInputResult?: AgentTUIStreamResult;
-  /** Registry setups queued by tool results on root or child streams. */
-  readonly #pendingRegistrySetups: string[] = [];
-  #activeRegistrySetup?: string;
+  /** Setup commands queued by tool results on root or child streams. */
+  readonly #pendingSetupCommands: Array<{
+    readonly command: Extract<PromptCommand, { type: "extension" }>;
+    readonly key: string;
+    readonly suppressSuccessfulTranscript?: true;
+    readonly title: string;
+  }> = [];
+  #activeSetupCommandKey?: string;
+  #projectLinkRetryPrompt?: string;
+  #projectLinkReplayPending = false;
   /** True only while the idle prompt owns terminal input. */
   #readingPrompt = false;
   /**
@@ -834,22 +844,37 @@ export class EveTUIRunner {
       if (this.#lifecycle?.signal.aborted === true || this.#renderer.exitRequested?.() === true) {
         return;
       }
-      const pendingRegistrySetup = this.#pendingRegistrySetups[0];
+      const pendingSetupCommand = this.#pendingSetupCommands[0];
       if (
-        pendingRegistrySetup !== undefined &&
+        pendingSetupCommand !== undefined &&
         pendingInputResponses === undefined &&
         this.#idleInputResult === undefined
       ) {
-        this.#pendingRegistrySetups.shift();
-        this.#activeRegistrySetup = pendingRegistrySetup;
+        this.#pendingSetupCommands.shift();
+        this.#activeSetupCommandKey = pendingSetupCommand.key;
+        let outcome: PromptCommandOutcome | undefined;
         try {
-          await this.#openRegistrySetup(pendingRegistrySetup);
+          outcome = await this.#executeExtensionCommand(
+            pendingSetupCommand.command,
+            pendingSetupCommand.title,
+            {
+              trigger: "command",
+              suppressSuccessfulTranscript: pendingSetupCommand.suppressSuccessfulTranscript,
+            },
+          );
         } finally {
-          this.#activeRegistrySetup = undefined;
+          this.#activeSetupCommandKey = undefined;
         }
         followCurrentSession = false;
         streamWithoutPrompt = false;
-        prompt = undefined;
+        prompt =
+          pendingSetupCommand.key === "project-link" &&
+          outcome?.cancelled !== true &&
+          outcome?.tone !== "error"
+            ? this.#projectLinkRetryPrompt
+            : undefined;
+        this.#projectLinkReplayPending = prompt !== undefined;
+        this.#projectLinkRetryPrompt = undefined;
         continue;
       }
       if (!streamWithoutPrompt) {
@@ -875,7 +900,7 @@ export class EveTUIRunner {
             prompt = await this.#readPromptFollowingSession(promptOptions);
           } catch (error) {
             if (isInterruptedError(error)) {
-              if (this.#idleInputResult === undefined && this.#pendingRegistrySetups.length === 0) {
+              if (this.#idleInputResult === undefined && this.#pendingSetupCommands.length === 0) {
                 return;
               }
               streamWithoutPrompt = true;
@@ -887,7 +912,7 @@ export class EveTUIRunner {
             this.#readingPrompt = false;
           }
 
-          if (this.#pendingRegistrySetups.length > 0 && this.#idleInputResult === undefined) {
+          if (this.#pendingSetupCommands.length > 0 && this.#idleInputResult === undefined) {
             prompt = undefined;
             continue;
           }
@@ -1100,7 +1125,8 @@ export class EveTUIRunner {
       if (acceptedSessionId !== undefined) {
         this.#renderer.setSessionId?.(acceptedSessionId);
       }
-      let submittedPrompt = prompt;
+      let submittedPrompt = this.#projectLinkReplayPending ? undefined : prompt;
+      this.#projectLinkReplayPending = false;
       let respondedToInputRequest = false;
 
       try {
@@ -1183,7 +1209,17 @@ export class EveTUIRunner {
             continue;
           }
 
-          if (result.turnState && result.turnState.boundaryEvent === undefined) {
+          if (result.turnState?.projectLinkRequired === true) {
+            this.#projectLinkRetryPrompt =
+              result.turnState.projectLinkReplaySafe === true ? submittedPrompt : undefined;
+            this.#failedSession = this.#session;
+          }
+
+          if (
+            result.turnState &&
+            result.turnState.boundaryEvent === undefined &&
+            result.turnState.projectLinkRequired !== true
+          ) {
             if (!result.turnState.aborted) {
               const strandedSessionId = this.#session?.state.sessionId;
               this.#renderer.renderNotice?.(
@@ -1230,7 +1266,10 @@ export class EveTUIRunner {
       // failure, or a user interrupt). Replace it with a fresh one so the
       // next prompt isn't sent into a dead session, but keep the transcript
       // on screen. Server-side context is gone with the old session.
-      this.#recoverFailedSession(result.turnState?.aborted === true);
+      this.#recoverFailedSession(
+        result.turnState?.aborted === true,
+        result.turnState?.projectLinkRequired === true,
+      );
     }
   }
 
@@ -1252,13 +1291,14 @@ export class EveTUIRunner {
   }
 
   /** Clears one failure marker and replaces its source only by identity. */
-  #recoverFailedSession(aborted = false): void {
+  #recoverFailedSession(aborted = false, silent = false): void {
     const failedSession = this.#failedSession;
     if (failedSession === undefined) return;
     this.#failedSession = undefined;
     if (this.#session !== failedSession) return;
 
     this.#startNewSession();
+    if (silent) return;
     if (aborted) {
       this.#renderer.renderNotice?.(
         "Stopped following the turn and started a new session. Earlier context was cleared; the interrupted turn may still be running on the server.",
@@ -1617,6 +1657,13 @@ export class EveTUIRunner {
           this.#appRoot === undefined
             ? undefined
             : async (address) => this.#queueRegistrySetup(address),
+        onProjectLinkRequired:
+          this.#appRoot === undefined
+            ? undefined
+            : async () => {
+                this.#queueProjectLinkSetup();
+                await this.#requestTurnCancellation(turnState, sourceSession);
+              },
         onTerminalFailure: () => {
           this.#failedSession = sourceSession;
         },
@@ -1626,20 +1673,37 @@ export class EveTUIRunner {
     };
   }
 
-  #queueRegistrySetup(address: string): void {
-    if (this.#activeRegistrySetup === address || this.#pendingRegistrySetups.includes(address)) {
-      return;
-    }
-    this.#pendingRegistrySetups.push(address);
-    if (this.#readingPrompt) this.#renderer.suspendPromptForInput?.();
+  #queueProjectLinkSetup(): void {
+    this.#queueSetupCommand({
+      command: { type: "extension", name: "link", argument: "" },
+      key: "project-link",
+      suppressSuccessfulTranscript: true,
+      title: "Link to Vercel",
+    });
   }
 
-  async #openRegistrySetup(address: string): Promise<void> {
-    await this.#executeExtensionCommand(
-      { type: "extension", name: "add", argument: address },
-      "Add to your agent",
-      { trigger: "command" },
-    );
+  #queueRegistrySetup(address: string): void {
+    this.#queueSetupCommand({
+      command: { type: "extension", name: "add", argument: address },
+      key: `registry:${address}`,
+      title: "Add to your agent",
+    });
+  }
+
+  #queueSetupCommand(input: {
+    readonly command: Extract<PromptCommand, { type: "extension" }>;
+    readonly key: string;
+    readonly suppressSuccessfulTranscript?: true;
+    readonly title: string;
+  }): void {
+    if (
+      this.#activeSetupCommandKey === input.key ||
+      this.#pendingSetupCommands.some((pending) => pending.key === input.key)
+    ) {
+      return;
+    }
+    this.#pendingSetupCommands.push(input);
+    if (this.#readingPrompt) this.#renderer.suspendPromptForInput?.();
   }
 
   async #renderSetupIssues(info: AgentInfoResult | undefined): Promise<void> {
@@ -1788,6 +1852,13 @@ export class EveTUIRunner {
       this.#vercelStatus?.applyEffect({ kind: "refresh-identity" });
       this.#authHintStale = true;
       await this.#refreshModelAccess();
+      return;
+    }
+    if (effect?.kind === "project-linked") {
+      this.#authHintStale = true;
+      this.#authIssue = undefined;
+      this.#paintSetupAttention();
+      this.#vercelStatus?.applyEffect({ kind: "refresh-identity" });
       return;
     }
     if (effect === undefined) return;
@@ -2174,6 +2245,7 @@ type EveStreamTranslatorInput = {
   onConnectionAuthCompleted?: (event: AuthorizationCompletedStreamEvent) => void;
   /** Opens a setup-bearing registry item in the existing `/add` flow. */
   onRegistryHandoff?: (address: string) => Promise<void>;
+  onProjectLinkRequired?: () => Promise<void>;
   onTerminalFailure?: (event: SessionFailedStreamEvent) => void;
   /**
    * Replaces a failure's structured hint with a surface-local one (the
@@ -2184,6 +2256,20 @@ type EveStreamTranslatorInput = {
 };
 
 const SELFMOD_REGISTRY_ADD_TOOL = "selfmod__registry_add";
+const CONNECTION_SEARCH_TOOL = "connection_search";
+
+export function connectionSearchRequiresProjectLink(
+  toolName: string | undefined,
+  output: unknown,
+): boolean {
+  if (toolName !== CONNECTION_SEARCH_TOOL || !Array.isArray(output)) return false;
+  return output.some(
+    (item) =>
+      typeof item === "object" &&
+      item !== null &&
+      (item as { requiresProjectLink?: unknown }).requiresProjectLink === true,
+  );
+}
 
 /** Returns the registry address carried by a self-modification terminal handoff. */
 export function registryHandoffAddress(
@@ -2218,6 +2304,7 @@ async function* eveEventsToTUIStream(
     onConnectionAuthRequired,
     onConnectionAuthCompleted,
     onRegistryHandoff,
+    onProjectLinkRequired,
     onTerminalFailure,
     failureHintOverride,
   } = input;
@@ -2248,6 +2335,15 @@ async function* eveEventsToTUIStream(
     }
 
     if (visibleTurnCompleted && isPostTurnVisibleEvent(event)) {
+      continue;
+    }
+    if (
+      turnState.projectLinkRequired === true &&
+      event.type !== "turn.cancelled" &&
+      event.type !== "session.failed" &&
+      event.type !== "session.waiting" &&
+      event.type !== "session.completed"
+    ) {
       continue;
     }
 
@@ -2486,12 +2582,19 @@ async function* eveEventsToTUIStream(
         switch (resultEvent.data.status) {
           case "completed": {
             const output = resultEvent.data.result.output;
+            const toolName = toolNames.get(callId);
+            if (connectionSearchRequiresProjectLink(toolName, output)) {
+              turnState.projectLinkRequired = true;
+              yield { type: "tool-discard", toolCallId: callId };
+              await onProjectLinkRequired?.();
+              break;
+            }
             yield {
               type: "tool-result",
               toolCallId: callId,
               output,
             };
-            const address = registryHandoffAddress(toolNames.get(callId), output);
+            const address = registryHandoffAddress(toolName, output);
             if (address !== undefined) await onRegistryHandoff?.(address);
             break;
           }
@@ -2559,6 +2662,10 @@ async function* eveEventsToTUIStream(
       case "turn.cancelled":
         // A cooperative cancel (`/cancel`, Esc, Ctrl+C, or a steer) — not a failure.
         // `session.waiting` follows and finishes the stream normally.
+        if (turnState.projectLinkRequired === true) {
+          turnState.projectLinkReplaySafe = true;
+          break;
+        }
         onTurnCancelled?.(event.data.turnId);
         yield* closeOpenParts(textParts, "assistant-complete", stepEpoch);
         yield* closeOpenParts(reasoningParts, "reasoning-complete", stepEpoch);

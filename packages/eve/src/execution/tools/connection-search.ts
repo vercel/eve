@@ -33,6 +33,7 @@ import {
 import type { ConnectionRegistry } from "#runtime/connections/registry-types.js";
 import type { ResolvedConnectionDefinition } from "#runtime/types.js";
 import { createLogger } from "#internal/logging.js";
+import { isVercelProjectLinkRequiredError } from "#runtime/connections/project-link-required.js";
 import { toError } from "#shared/errors.js";
 
 import { ConnectionRegistryKey } from "#context/providers/connection-key.js";
@@ -59,6 +60,7 @@ const CONNECTION_SEARCH_RESULT_ITEM_SCHEMA = z.strictObject({
   error: z.string().optional(),
   inputSchema: connectionSchema.optional(),
   needsAuthorization: z.boolean().optional(),
+  requiresProjectLink: z.boolean().optional(),
   outputSchema: connectionSchema.optional(),
   qualifiedName: z.string().optional(),
   tool: z.string().optional(),
@@ -94,6 +96,7 @@ interface ConnectionSearchResultItem {
   readonly error?: string;
   readonly inputSchema?: Record<string, unknown>;
   readonly needsAuthorization?: boolean;
+  readonly requiresProjectLink?: boolean;
   readonly outputSchema?: Record<string, unknown>;
   readonly tool?: string;
   readonly qualifiedName?: string;
@@ -195,6 +198,14 @@ async function executeConnectionSearch(
       const client = registry.getClient(conn.connectionName);
       tools = await client.getToolMetadata();
     } catch (err) {
+      if (isVercelProjectLinkRequiredError(err)) {
+        failedConnections.push({
+          connection: conn.connectionName,
+          description: conn.description,
+          requiresProjectLink: true,
+        });
+        continue;
+      }
       if (isConnectionAuthorizationRequiredError(err)) {
         const scoped = await resolveInteractiveAuth(registry, conn.connectionName);
         if (scoped !== undefined) {
