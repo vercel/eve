@@ -163,21 +163,13 @@ export class SelfModificationHarness {
     return { child, parent, session: liveParent.session };
   }
 
-  async followUp(session: EveEvalSession, prompt: string): Promise<EveEvalTurn> {
-    const live = await session.start(prompt);
-    this.#turns.add(live);
-    const turn = await live.result();
-    turn.expectOk();
-    return turn;
+  followUp(session: EveEvalSession, prompt: string): Promise<EveEvalTurn> {
+    return this.#runTurn(session, prompt);
   }
 
   /** Uses a fresh conversation so the model cannot answer from the authoring exchange alone. */
-  async verify(prompt: string): Promise<EveEvalTurn> {
-    const live = await this.#t.newSession().start(prompt);
-    this.#turns.add(live);
-    const turn = await live.result();
-    turn.expectOk();
-    return turn;
+  verify(prompt: string): Promise<EveEvalTurn> {
+    return this.#runTurn(this.#t.newSession(), prompt);
   }
 
   async apply(): Promise<void> {
@@ -261,6 +253,14 @@ export class SelfModificationHarness {
     }
     await this.#post("rebuild?force=1", signal);
     await rm(this.#backupRoot, { recursive: true, force: true });
+  }
+
+  async #runTurn(session: EveEvalSession, prompt: string): Promise<EveEvalTurn> {
+    const live = await session.start(prompt);
+    this.#turns.add(live);
+    const turn = await live.result();
+    turn.expectOk();
+    return turn;
   }
 
   #resolve(sourcePath: string): string {
