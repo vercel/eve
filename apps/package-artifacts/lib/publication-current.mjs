@@ -10,10 +10,6 @@ export async function assertCurrentPublicationTarget(
   if (!SHA_PATTERN.test(sourceSha ?? "")) {
     throw new Error("Publication source SHA must be a 40-character Git commit SHA.");
   }
-  if (typeof token !== "string" || token.length === 0) {
-    throw new Error("GITHUB_TOKEN is required to revalidate package publication.");
-  }
-
   if (ref === "main") {
     const branch = await githubRequest(
       `/repos/${repository}/branches/main`,
@@ -36,13 +32,13 @@ export async function assertCurrentPublicationTarget(
 }
 
 async function githubRequest(pathname, token, fetchImplementation) {
-  const response = await fetchImplementation(`https://api.github.com${pathname}`, {
-    headers: {
-      Accept: "application/vnd.github+json",
-      Authorization: `Bearer ${token}`,
-      "X-GitHub-Api-Version": "2022-11-28",
-    },
-  });
+  const headers = {
+    Accept: "application/vnd.github+json",
+    "X-GitHub-Api-Version": "2022-11-28",
+  };
+  if (typeof token === "string" && token.length > 0) headers.Authorization = `Bearer ${token}`;
+
+  const response = await fetchImplementation(`https://api.github.com${pathname}`, { headers });
   if (!response.ok) {
     throw new Error(`GitHub returned ${response.status} while revalidating package publication.`);
   }
