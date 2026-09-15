@@ -40,6 +40,22 @@ test("uses native Gateway agents and canonical cases", () => {
   assert.equal(typeof config.setup, "function");
 });
 
+test("passes an explicit native model override to Codex", () => {
+  const config = authoringExperiment({
+    ...common,
+    benchmark: {
+      id: "gpt-6-astra-high",
+      model: "openai/gpt-6-astra",
+      agentModel: "openai/gpt-6-astra?reasoningEffort=high",
+      displayName: "GPT-6 Astra (high)",
+      harness: "Codex",
+      support: "supported",
+    },
+  });
+
+  assert.equal(config.model, "openai/gpt-6-astra?reasoningEffort=high");
+});
+
 test("strips the Gateway provider prefix for native Claude Code", () => {
   const config = authoringExperiment({
     ...common,

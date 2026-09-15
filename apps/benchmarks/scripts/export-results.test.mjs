@@ -40,7 +40,7 @@ test("exports missing cells without publishing private artifacts", () => {
     assert.equal(output.schemaVersion, 1);
     assert.equal(output.suite.caseCount, 7);
     assert.match(output.suite.caseFingerprint, /^[0-9a-f]{64}$/u);
-    assert.equal(output.experiments.length, 18);
+    assert.equal(output.experiments.length, 26);
     assert.deepEqual(
       [...new Set(output.experiments.map((experiment) => experiment.modelDisplayName))],
       [
@@ -49,13 +49,17 @@ test("exports missing cells without publishing private artifacts", () => {
         "Grok 4.6",
         "GPT-5.6 Sol",
         "GPT-5.6 Terra",
+        "GPT-6 Astra (high)",
         "Claude Sonnet 5",
         "GLM 5.3",
         "Claude Opus 5",
         "Gemini 3.1 Pro Preview",
+        "Gemini 3.8 Flash",
+        "MiniMax M3",
+        "Kimi K2.7 Code",
       ],
     );
-    assert.equal(output.results.length, 126);
+    assert.equal(output.results.length, 182);
     assert.ok(output.results.every((result) => result.status === "missing"));
     for (const privateField of ["transcript", "commands", "worldEvents", "files"]) {
       assert.equal(raw.includes(`"${privateField}"`), false);
