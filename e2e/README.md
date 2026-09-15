@@ -203,8 +203,13 @@ once per leg, then runs one fixture directory with the leg's real model:
 ```sh
 pnpm --filter eve run build
 cd "$FIXTURE_DIR"
+pnpm run --if-present e2e:prepare
 EVE_E2E_MODEL="$MODEL" pnpm exec eve eval --strict --junit "$JUNIT_PATH"
 ```
+
+Fixtures with generated source can define an `e2e:prepare` script. The local
+model suite runs it before starting the eval server; the self-modification
+fixture uses it to copy the checkout's standard registry scaffold.
 
 Always build with the full `build` script (not `build:js`); only the full
 build stamps the package version into `dist`.

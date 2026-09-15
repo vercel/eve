@@ -134,6 +134,7 @@ jobs:
         run: |
           mkdir -p "$EVE_EVAL_JUNIT_DIR"
           cd "${{ matrix.dir }}"
+          pnpm run --if-present e2e:prepare
           pnpm exec eve eval --strict --verbose \
             --junit "$EVE_EVAL_JUNIT_DIR/${{ matrix.name }}-${{ matrix.model_name }}.xml"
 

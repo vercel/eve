@@ -9,3 +9,4 @@ dist
 .DS_Store
 *.tsbuildinfo
 .env*.local
+/agent/subagents/self-modification/

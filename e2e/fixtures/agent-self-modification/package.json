@@ -4,11 +4,12 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "eve build",
-    "dev": "eve dev",
+    "e2e:prepare": "node scripts/prepare.mjs",
+    "build": "pnpm run e2e:prepare && eve build",
+    "dev": "pnpm run e2e:prepare && eve dev",
     "start": "eve start",
-    "typecheck": "eve build && tsc",
-    "test:e2e": "eve eval --strict",
+    "typecheck": "pnpm run build && tsc",
+    "test:e2e": "pnpm run e2e:prepare && eve eval --strict",
     "test:scenario": "node --test test/*.scenario.test.mjs"
   },
   "dependencies": {

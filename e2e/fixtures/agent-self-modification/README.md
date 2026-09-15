@@ -1,10 +1,18 @@
 # Self-modification e2e fixture
 
-This fixture uses `eve eval` to test a parent delegating a source change to the real self-modification child, rebuilding the agent, and using the result in a new conversation. CI runs the default root model; the child remains pinned to `anthropic/claude-sonnet-5`. Independent parent/child model selection is not part of this fixture.
+This fixture uses `eve eval` to test a parent delegating a source change to the real self-modification child, rebuilding the agent, and using the result in a new conversation. CI runs the default root model and the standard self-modification child with eve's default model. Independent parent/child model selection is not part of this fixture.
 
 The workspace root declares `@vercel/connect` as a development dependency so the bundler can resolve the self-modification extension's optional deployed credential provider through the workspace-linked `eve` package. These local cases do not use Connect credentials.
 
 Routing-only cases remain in [`agent-subagents`](../agent-subagents/evals/self-modification/), where an acceptance-only child avoids performing real integration installs.
+
+## Fixture preparation
+
+`pnpm run e2e:prepare` copies the `eve/self-modification` scaffold from this checkout using the source and target paths in `apps/docs/registry.json`. The generated `agent/subagents/self-modification/` directory is gitignored and replaced on each preparation; no registry fetch, dependency installation, or credential setup runs.
+
+The fixture's `build`, `dev`, `typecheck`, and `test:e2e` scripts prepare the scaffold before starting eve. The local e2e CI workflow also runs `e2e:prepare` before invoking `eve eval` directly. For a direct CLI invocation, prepare first. Do not prepare while an eval or dev server is running: preparation replaces the generated subtree.
+
+This exercises the current standard scaffold without duplicating it in the fixture. Registry installer behavior is outside these evals' scope. Dependencies remain declared in the fixture's `package.json`.
 
 ## Cases
 
