@@ -17,9 +17,9 @@ describe("renderBlockLines", () => {
     expect(render({ kind: "user", body: "hello there" })).toEqual(["│ hello there"]);
   });
 
-  it("starts rendered assistant Markdown at the content column", () => {
+  it("marks rendered assistant Markdown with the brand triangle", () => {
     const lines = render({ kind: "assistant", body: "all done" });
-    expect(lines[0]).toBe("all done");
+    expect(lines).toEqual(["▲ all done"]);
   });
 
   it("keeps an inline image on the preceding prose row", () => {
@@ -35,7 +35,7 @@ describe("renderBlockLines", () => {
 
     expect(lines).toHaveLength(1);
     expect(stripAnsi(lines[0] ?? "")).toBe(
-      "Visit eve or view this image:\u00a0▧\u00a0eve\u00a0logo.",
+      "▲ Visit eve or view this image:\u00a0▧\u00a0eve\u00a0logo.",
     );
 
     const wrapped = renderBlockLines(
@@ -47,7 +47,7 @@ describe("renderBlockLines", () => {
       theme,
       ctx,
     ).map(stripAnsi);
-    expect(wrapped).toEqual(["Visit eve or view this", "image:\u00a0▧\u00a0eve\u00a0logo."]);
+    expect(wrapped).toEqual(["▲ Visit eve or view this", "  image:\u00a0▧\u00a0eve\u00a0logo."]);
   });
 
   it("preserves prose Markdown when Markdown rendering is disabled", () => {
