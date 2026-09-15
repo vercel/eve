@@ -15,7 +15,7 @@ describe("Slack app manifests", () => {
           messages_tab_enabled: true,
           messages_tab_read_only_enabled: false,
         },
-        bot_user: { display_name: "support", always_online: false },
+        bot_user: { display_name: "support" },
       },
       oauth_config: { scopes: { bot: ["app_mentions:read", "chat:write"] } },
       settings: {
@@ -28,8 +28,43 @@ describe("Slack app manifests", () => {
     });
   });
 
+  it.each([true, false])("emits an explicitly configured always-online value", (alwaysOnline) => {
+    const definition = defineSlackAppManifest({ alwaysOnline });
+
+    expect(buildSlackAppManifest(definition, "support")).toMatchObject({
+      features: { bot_user: { display_name: "support", always_online: alwaysOnline } },
+    });
+  });
+
+  it("emits optional scopes that are not already required", () => {
+    const definition = defineSlackAppManifest({
+      botScopes: ["channels:history"],
+      optionalBotScopes: ["reactions:write", "channels:history", "chat:write", "reactions:write"],
+    });
+
+    expect(buildSlackAppManifest(definition, "support")).toMatchObject({
+      oauth_config: {
+        scopes: {
+          bot: ["app_mentions:read", "chat:write", "channels:history"],
+          bot_optional: ["reactions:write"],
+        },
+      },
+    });
+  });
+
+  it("omits empty optional scopes", () => {
+    const definition = defineSlackAppManifest({ optionalBotScopes: ["chat:write"] });
+
+    expect(buildSlackAppManifest(definition, "support")).toMatchObject({
+      oauth_config: { scopes: { bot: ["app_mentions:read", "chat:write"] } },
+    });
+    expect(
+      (buildSlackAppManifest(definition, "support")?.oauth_config as { scopes: object }).scopes,
+    ).not.toHaveProperty("bot_optional");
+  });
+
   it("uses a configured bot name and enforces Slack's app name limit", () => {
-    const definition = defineSlackAppManifest({ botName: "x".repeat(40) });
+    const definition = defineSlackAppManifest({ displayName: "x".repeat(40) });
 
     expect(buildSlackAppManifest(definition, "support")).toMatchObject({
       display_information: { name: "x".repeat(35) },
