@@ -1,9 +1,6 @@
 import type { FlexibleSchema, ToolSet } from "ai";
 import type * as CodeModeModule from "#compiled/@ai-sdk/code-mode/index.js";
 
-/** Model-facing tool name for eve's legacy dynamic orchestration tool. */
-export const WORKFLOW_TOOL_NAME = "Workflow";
-
 const WORKFLOW_SANDBOX_MODULE_KEY = Symbol.for("eve.workflowSandbox.module");
 const WORKFLOW_SANDBOX_MODULE_SPECIFIER = ["#compiled", "@ai-sdk", "code-mode", "index.js"].join(
   "/",
@@ -13,7 +10,6 @@ type WorkflowSandboxModule = {
   readonly CodeModeToolError: typeof CodeModeModule.CodeModeToolError;
   readonly continueCodeModeInterrupt: typeof CodeModeModule.experimental_continueCodeModeInterrupt;
   readonly createCodeModeTool: typeof CodeModeModule.experimental_createCodeModeTool;
-  readonly getCodeModeInterrupt: typeof CodeModeModule.experimental_getCodeModeInterrupt;
   readonly requestCodeModeInterrupt: typeof CodeModeModule.experimental_requestCodeModeInterrupt;
   readonly unwrapCodeModeResult: typeof CodeModeModule.experimental_unwrapCodeModeResult;
 };
@@ -42,24 +38,6 @@ export async function createWorkflowSandboxTool(input: {
     input.hostTools,
     createWorkflowSandboxOptions(input.bridgeRequestLimit, input.continuationSecurity),
   ) as ToolSet[string];
-}
-
-export async function requestWorkflowSandboxInterrupt(input: {
-  readonly kind: string;
-  readonly task: unknown;
-  readonly toolInput: unknown;
-  readonly toolName: string;
-}): Promise<unknown> {
-  const { requestCodeModeInterrupt } = await loadWorkflowSandboxModule();
-  return requestCodeModeInterrupt(input);
-}
-
-export async function getWorkflowSandboxInterrupt(
-  result: unknown,
-  continuationSecurity: WorkflowSandboxContinuationSecurity,
-): Promise<WorkflowSandboxInterrupt | undefined> {
-  const { getCodeModeInterrupt } = await loadWorkflowSandboxModule();
-  return getCodeModeInterrupt(result as never, continuationSecurity);
 }
 
 export async function continueWorkflowSandboxInterrupt(input: {
@@ -116,15 +94,11 @@ export function createParkingHostTool(input: {
   } as ToolSet[string];
 }
 
-export function readWorkflowSandboxResolution(options: unknown): unknown {
+function readWorkflowProgramResolution(options: unknown): WorkflowSandboxResolution | undefined {
   if (typeof options !== "object" || options === null) return undefined;
   const interrupt = (options as Record<string, unknown>).codeModeInterrupt;
   if (typeof interrupt !== "object" || interrupt === null) return undefined;
-  return (interrupt as Record<string, unknown>).resolution;
-}
-
-function readWorkflowProgramResolution(options: unknown): WorkflowSandboxResolution | undefined {
-  const resolution = readWorkflowSandboxResolution(options);
+  const resolution = (interrupt as Record<string, unknown>).resolution;
   if (typeof resolution !== "object" || resolution === null) return undefined;
   const status = (resolution as Record<string, unknown>).status;
   return status === "completed" || status === "failed"
@@ -186,7 +160,6 @@ async function importWorkflowSandboxModule(specifier: string): Promise<WorkflowS
     CodeModeToolError: module.CodeModeToolError,
     continueCodeModeInterrupt: module.experimental_continueCodeModeInterrupt,
     createCodeModeTool: module.experimental_createCodeModeTool,
-    getCodeModeInterrupt: module.experimental_getCodeModeInterrupt,
     requestCodeModeInterrupt: module.experimental_requestCodeModeInterrupt,
     unwrapCodeModeResult: module.experimental_unwrapCodeModeResult,
   };

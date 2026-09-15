@@ -20,7 +20,6 @@ import {
   type CompiledSandboxDefinition,
   type CompiledSubagentNode,
   type CompiledToolDefinition,
-  type CompiledWorkflowToolDefinition,
   createCompiledAgentManifest,
   createCompiledAgentNodeManifest,
   createCompiledAgentResources,
@@ -69,7 +68,6 @@ import {
   assertApplicationOverlayCanApplyToAllNodes,
   assertNonExtensionSpecialTool,
   assertRootOnlyConfig,
-  assertRootOwnedSpecialTool,
   assertUniqueBy,
   assertUniqueRegistryIds,
   compileExtensionMounts,
@@ -499,7 +497,6 @@ class AgentGraphCompiler {
     const channels: CompiledChannelDefinition[] = [];
     let sandbox: CompiledSandboxDefinition | undefined;
     let instrumentation: ModuleSourceRef | undefined;
-    let workflowTool: CompiledWorkflowToolDefinition | undefined;
     const selectedSourceIds = collectSelectedSourceIds(state.composed);
     const loadNamespace = state.evaluation.loadNamespace;
 
@@ -624,9 +621,6 @@ class AgentGraphCompiler {
           } else if (result.kind === "dynamic-tool") {
             dynamicTools.push(withExtensionNamespace(result.definition, candidate.owner));
             state.evaluation.requireRuntimeEntry(candidate.sourceId);
-          } else if (result.kind === "workflow-tool") {
-            assertRootOwnedSpecialTool(candidate as AgentModuleCandidate, "Workflow");
-            workflowTool = { ...entry.source, maxSubagents: result.maxSubagents };
           } else {
             assertNonExtensionSpecialTool(candidate as AgentModuleCandidate, "Web search");
             tools.push(result.definition);
@@ -692,7 +686,6 @@ class AgentGraphCompiler {
       skills,
       sourceComposition: state.composed.composition,
       tools,
-      workflowTool,
     });
   }
 }

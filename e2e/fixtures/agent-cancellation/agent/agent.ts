@@ -3,6 +3,7 @@ import { defineAgent } from "eve";
 import type { MockModelRequest, MockModelResponse } from "eve/evals";
 
 const RECOVERY_REQUEST = "RESUME-CANCELLED-SLEEPER";
+const HITL_REQUEST = "GENERATED-PROGRAM-CHILD-HITL";
 
 function respond(request: MockModelRequest): MockModelResponse | string {
   const message = request.lastUserMessage ?? "";
@@ -33,14 +34,23 @@ function respond(request: MockModelRequest): MockModelResponse | string {
           .join("\n");
   }
   if (message.includes("call the sleeper subagent")) {
+    const hitl = message.includes(HITL_REQUEST);
+    const hitlResult = request.toolResults.find((entry) => entry.id === "hitl-sleeper");
+    if (hitlResult !== undefined) {
+      return typeof hitlResult.output === "string"
+        ? hitlResult.output
+        : JSON.stringify(hitlResult.output);
+    }
     return {
       toolCalls: [
         {
-          id: "cancel-sleeper",
+          id: hitl ? "hitl-sleeper" : "cancel-sleeper",
           input: {
-            js: 'return await tools["sleeper"]({ message: "Call the wait-for-cancellation tool exactly once and wait until this delegated turn is cancelled." });',
+            js: hitl
+              ? `return await ctx.agent("sleeper", { message: ${JSON.stringify(HITL_REQUEST)} });`
+              : 'return await ctx.agent("sleeper", { message: "Call the wait-for-cancellation tool exactly once and wait until this delegated turn is cancelled." });',
           },
-          name: "Workflow",
+          name: "workflow",
         },
       ],
     };
@@ -63,9 +73,9 @@ function respond(request: MockModelRequest): MockModelResponse | string {
         {
           id: "resume-sleeper",
           input: {
-            js: `return await tools["sleeper"]({ agentId: ${agentId}, message: ${JSON.stringify(RECOVERY_REQUEST)} });`,
+            js: `return await ctx.agent("sleeper", { agentId: ${agentId}, message: ${JSON.stringify(RECOVERY_REQUEST)} });`,
           },
-          name: "Workflow",
+          name: "workflow",
         },
       ],
     };

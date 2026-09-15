@@ -132,17 +132,11 @@ describe("durable-session-store cross-version contract", () => {
         serializedContext: ctx,
         sessionState: baseState,
       },
-      {
-        kind: "dispatch-workflow-tasks",
-        pendingCallIds: ["call-2"],
-        serializedContext: ctx,
-        sessionState: baseState,
-      },
     ];
 
     // Lock the closed-contract kind set. Adding a new arm is breaking.
     expect(new Set(arms.map((a) => a.kind))).toEqual(
-      new Set(["done", "park", "dispatch-coordination", "dispatch-workflow-tasks"]),
+      new Set(["done", "park", "dispatch-coordination"]),
     );
   });
 

@@ -143,7 +143,42 @@ fan-out followed by fan-in, but `Promise.race` does not resume after only the fi
 A child failure is thrown at the corresponding `ctx.agent` call, so generated code can catch it.
 The program must return a JSON-serializable value.
 
-### Migrate an existing workflow tool
+### Migrate from `experimental_workflow`
+
+The experimental uppercase `Workflow` framework tool and the `eve/tools/workflow` entry point have
+been removed. Replace the sentinel in `agent/tools/workflow.ts`:
+
+```diff
+-import { experimental_workflow } from "eve/tools/workflow";
+-
+-export default experimental_workflow({ maxSubagents: 20 });
+```
+
+with an ordinary authored workflow tool:
+
+```ts
+import { defineWorkflowTool, runWorkflowProgram } from "eve/tools";
+import { z } from "zod";
+
+const agents = ["ticket-triage", "ticket-review"] as const;
+
+export default defineWorkflowTool({
+  description:
+    "Run JavaScript with ctx.agent(name, input). Available agents: ticket-triage, ticket-review.",
+  inputSchema: z.object({ js: z.string() }),
+  async execute({ js }, ctx) {
+    "use workflow";
+    return runWorkflowProgram(js, ctx, { agents, maxSubagents: 20 });
+  },
+});
+```
+
+The path still gives the authored tool the model-facing name `workflow`. Unlike the removed
+framework tool, eve does not discover or advertise an agent catalog automatically. List the agents
+in the description for the model and in the required trusted `agents` option for authorization.
+Move the old `maxSubagents` value into the `runWorkflowProgram` options.
+
+### Migrate an authored workflow tool
 
 Replace `defineTool` with `defineWorkflowTool`, keep the executor's `"use workflow"` directive,
 and replace `agent(ctx, input)` and `ask(ctx, request)` with `ctx.agent(target, input)` and

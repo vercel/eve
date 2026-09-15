@@ -80,10 +80,8 @@ function resolveProductionNitroPreset(): "vercel" | undefined {
 /** Whether any agent can execute code that needs the workflow sandbox runtime. */
 function manifestEnablesWorkflow(manifest: CompiledAgentManifest): boolean {
   const nodes = [manifest, ...manifest.subagents.map((subagent) => subagent.agent)];
-  return nodes.some(
-    (node) =>
-      node.workflowTool !== undefined ||
-      node.tools.some((tool) => tool.behavior?.handling?.kind === "workflow-tool"),
+  return nodes.some((node) =>
+    node.tools.some((tool) => tool.behavior?.handling?.kind === "workflow-tool"),
   );
 }
 

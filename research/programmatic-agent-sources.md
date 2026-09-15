@@ -598,10 +598,9 @@ through source composition:
 
 Every identity above is replaceable and disableable through ordinary slot
 composition. `glob` and `grep` are published at `eve/tools/glob` and
-`eve/tools/grep` but never registered. Workflow shares the slot pattern
-without a framework default: an authored `experimental_workflow()` sentinel
-at `tools/workflow.ts` opts in at that canonical identity. Authored
-`instrumentation.ts` likewise composes as an ordinary module slot with no
+`eve/tools/grep` but never registered. Runtime-generated programs use an ordinary path-derived tool authored with
+`defineWorkflowTool()` and `runWorkflowProgram()`; there is no framework workflow
+slot or sentinel. Authored `instrumentation.ts` likewise composes as an ordinary module slot with no
 framework default and no dedicated plan artifact. Native behavior outside
 these identities is limited to `final_output` and the closed host inventory.
 

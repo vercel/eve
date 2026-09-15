@@ -129,6 +129,27 @@ describe("extension compatibility manifest", () => {
     },
   );
 
+  it.each([
+    { capability: "tool", epoch: 36 },
+    { capability: "tool", epoch: 37 },
+    { capability: "dynamicTool", epoch: 35 },
+    { capability: "dynamicTool", epoch: 36 },
+  ] as const)(
+    "rejects removed legacy workflow surface in $capability epoch $epoch",
+    ({ capability, epoch }) => {
+      const supportedVersions = EXTENSION_CAPABILITY_SUPPORT[capability];
+      expect(supportedVersions).not.toContain(epoch);
+      expect(
+        findUnsupportedExtensionCapabilities({
+          kind: EXTENSION_COMPATIBILITY_MANIFEST_KIND,
+          formatVersion: EXTENSION_COMPATIBILITY_MANIFEST_FORMAT_VERSION,
+          builtWithEve: "0.54.5",
+          requires: { [capability]: epoch },
+        }),
+      ).toEqual([{ capability, requiredVersion: epoch, supportedVersions }]);
+    },
+  );
+
   it("publishes valid support history for every capability version it stamps", () => {
     for (const [capability, version] of Object.entries(EXTENSION_CAPABILITY_VERSIONS)) {
       const supportedVersions = EXTENSION_CAPABILITY_SUPPORT[capability as ExtensionCapability];
