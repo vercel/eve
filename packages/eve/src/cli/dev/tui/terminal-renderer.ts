@@ -3629,6 +3629,16 @@ export class TerminalRenderer implements AgentTUIRenderer {
         break;
       }
 
+      case "tool-discard": {
+        turnState.tools.delete(event.toolCallId);
+        const id =
+          this.#parentToolBlockIds.get(event.toolCallId) ?? toolSectionId(event.toolCallId);
+        this.#removeBlock(id);
+        this.#parentToolBlockIds.delete(event.toolCallId);
+        this.#paint();
+        break;
+      }
+
       case "tool-result": {
         if (displayModes.tools === "hidden") break;
         const existing = this.#resolveNativeToolState(event.toolCallId, turnState);

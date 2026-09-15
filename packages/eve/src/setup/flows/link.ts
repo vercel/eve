@@ -79,6 +79,8 @@ export async function runLinkFlow(input: {
    * branch, where a fresh agent has no project yet).
    */
   projectSelection?: "create-or-link" | "existing-only";
+  /** Suppress credential-source context when another flow already explained why linking opened. */
+  quietUnlinkedCredentialNotice?: boolean;
   teamSelectMessage?: (currentTeam: string) => string;
   deps?: Partial<LinkFlowDeps>;
 }): Promise<LinkFlowResult> {
@@ -104,7 +106,11 @@ export async function runLinkFlow(input: {
       deps.findEnvFileWithKey(appRoot, "VERCEL_OIDC_TOKEN"),
     ]);
     const credentialFile = gatewayKey ?? oidc;
-    if (credentialFile !== undefined && input.teamSelectMessage === undefined) {
+    if (
+      credentialFile !== undefined &&
+      input.quietUnlinkedCredentialNotice !== true &&
+      input.teamSelectMessage === undefined
+    ) {
       prompter.log.message(
         `This directory is not linked to a Vercel project yet — the model currently runs on credentials from ${credentialFile}.`,
       );

@@ -21,6 +21,7 @@ import { createDevelopmentCredentialGate } from "#services/dev-client/credential
 import type { VercelDeploymentResolution } from "#setup/vercel-deployment.js";
 
 import {
+  connectionSearchRequiresProjectLink,
   EveTUIRunner,
   parsePromptCommand,
   registryHandoffAddress,
@@ -49,6 +50,110 @@ const REMOTE_VERIFIED_TARGET = await resolveTestVercelTarget({
 });
 const VERCEL_SSO_URL =
   "https://vercel.com/sso-api?url=https%3A%2F%2Fvpoke.playground-vercel.tools&nonce=test";
+
+describe("connection search project-link recovery", () => {
+  it("recognizes only explicit connection_search project-link results", () => {
+    expect(
+      connectionSearchRequiresProjectLink("connection_search", [
+        { connection: "linear", requiresProjectLink: true },
+      ]),
+    ).toBe(true);
+    expect(connectionSearchRequiresProjectLink("connection_search", [])).toBe(false);
+    expect(
+      connectionSearchRequiresProjectLink("other_tool", [
+        { connection: "linear", requiresProjectLink: true },
+      ]),
+    ).toBe(false);
+  });
+
+  it("silently links, clears stale login guidance, and replays the connection query", async () => {
+    const handle = vi.fn(async () => ({
+      message: "linked",
+      effect: { kind: "project-linked" as const },
+    }));
+    const client = stubClient();
+    const replaySession = sessionYielding([{ type: "session.completed" }]);
+    mockSessionCreation(client, replaySession);
+    const renderedEvents: AgentTUIStreamEvent[] = [];
+    const renderedPrompts: Array<string | undefined> = [];
+    const setupAttention: string[] = [];
+    const renderer = fakeRenderer({
+      clearSetupWarning: vi.fn(() => setupAttention.push("clear")),
+      renderSetupWarning: vi.fn((text) => setupAttention.push(text)),
+      readPrompt: vi.fn().mockResolvedValueOnce("query linear").mockResolvedValueOnce(undefined),
+      renderStream: vi.fn(async (result, options) => {
+        renderedPrompts.push(options.submittedPrompt);
+        for await (const event of result.events as AsyncIterable<AgentTUIStreamEvent>) {
+          renderedEvents.push(event);
+        }
+      }),
+    });
+
+    const sourceSession = sessionYielding([
+      { type: "turn.started", data: { turnId: "turn-linear" } },
+      {
+        type: "actions.requested",
+        data: {
+          actions: [
+            {
+              callId: "search-linear",
+              input: { connection: "linear", keywords: "issues" },
+              kind: "tool-call",
+              toolName: "connection_search",
+            },
+          ],
+        },
+      },
+      {
+        type: "action.result",
+        data: {
+          result: {
+            callId: "search-linear",
+            kind: "tool-result",
+            output: [{ connection: "linear", requiresProjectLink: true }],
+          },
+          status: "completed",
+        },
+      },
+      { type: "turn.cancelled", data: { turnId: "turn-linear" } },
+      { type: "session.waiting" },
+    ]);
+    vi.spyOn(sourceSession, "cancel").mockResolvedValue({
+      sessionId: "session_test",
+      status: "accepted",
+    });
+
+    await new EveTUIRunner({
+      client,
+      session: sourceSession,
+      renderer,
+      name: "Weather Agent",
+      appRoot: "/tmp/weather-agent",
+      bootDetections: [],
+      detectProjectIdentity: vi.fn(async () => undefined),
+      getVercelAuthStatus: vi.fn(async (): Promise<"logged-out"> => "logged-out"),
+      promptCommandHandler: { handle },
+    }).run();
+
+    expect(handle).toHaveBeenCalledWith(
+      { type: "extension", name: "link", argument: "" },
+      expect.any(Object),
+    );
+    expect(sourceSession.cancel).toHaveBeenCalledWith({ turnId: "turn-linear" });
+    expect(replaySession.send).toHaveBeenCalledWith(
+      "query linear",
+      expect.objectContaining({ message: "query linear" }),
+    );
+    expect(renderedEvents).toContainEqual({ type: "tool-discard", toolCallId: "search-linear" });
+    expect(renderedEvents).not.toContainEqual(
+      expect.objectContaining({ type: "tool-result", output: expect.anything() }),
+    );
+    expect(renderedEvents).not.toContainEqual(expect.objectContaining({ type: "error" }));
+    expect(renderedEvents).not.toContainEqual(expect.objectContaining({ type: "turn-cancelled" }));
+    expect(renderedPrompts).toEqual(["query linear", undefined]);
+    expect(setupAttention.at(-1)).toBe("clear");
+  });
+});
 
 describe("registryHandoffAddress", () => {
   it("accepts only a terminal handoff from the self-modification registry tool", () => {

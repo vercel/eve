@@ -107,7 +107,7 @@ export interface TuiSetupCommandResult {
   /** Keep warning/error lines after the bordered panel closes. */
   preserveFlowDiagnostics: boolean;
   /** Status refresh required after the command settles. */
-  effect?: VercelStatusEffect | { kind: "model-access-changed" };
+  effect?: VercelStatusEffect | { kind: "model-access-changed" } | { kind: "project-linked" };
 }
 
 /**
@@ -273,6 +273,7 @@ async function executeSetupCommand(
           appRoot,
           prompter,
           projectSelection: "create-or-link",
+          quietUnlinkedCredentialNotice: true,
           signal,
         });
         return result.kind === "cancelled"
@@ -280,7 +281,7 @@ async function executeSetupCommand(
           : {
               message: "Linked this project to Vercel.",
               preserveFlowDiagnostics: false,
-              effect: { kind: "refresh-identity" },
+              effect: { kind: "project-linked" },
             };
       }
       case "model": {
