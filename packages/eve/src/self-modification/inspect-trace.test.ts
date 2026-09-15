@@ -1,19 +1,31 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import inspectTrace from "./extension/tools/inspect_trace.js";
-import inspectTraceSpans from "./extension/tools/inspect_trace_spans.js";
-import searchTraces from "./extension/tools/search_traces.js";
+import { resolveInspectTraceTool } from "./extension/tools/inspect_trace.js";
+import { resolveInspectTraceSpansTool } from "./extension/tools/inspect_trace_spans.js";
+import { resolveSearchTracesTool } from "./extension/tools/search_traces.js";
+import { resolveTraceAnalysisSkill } from "./extension/skills/trace_analysis.js";
 
 const traceId = "1".repeat(32);
 const otherTraceId = "2".repeat(32);
 const spanId = "a".repeat(16);
 const toolSpanId = "b".repeat(16);
+const originalEveDev = process.env.EVE_DEV;
+
+beforeEach(() => {
+  process.env.EVE_DEV = "1";
+});
+
+afterEach(() => {
+  if (originalEveDev === undefined) delete process.env.EVE_DEV;
+  else process.env.EVE_DEV = originalEveDev;
+});
 
 function segment(
   input: {
     agentName?: string;
     conversationId?: string;
     id?: string;
+    runId?: string;
     sessionId?: string;
     status?: { code: number; message?: string };
     toolName?: string;
@@ -22,7 +34,9 @@ function segment(
   const id = input.id ?? traceId;
   const attributes = [
     { key: "agent.name", value: { stringValue: input.agentName ?? "reviewer" } },
-    { key: "agent.session.id", value: { stringValue: input.sessionId ?? "session-a" } },
+    input.runId === undefined
+      ? { key: "agent.session.id", value: { stringValue: input.sessionId ?? "session-a" } }
+      : { key: "agent.run.id", value: { stringValue: input.runId } },
     { key: "gen_ai.conversation.id", value: { stringValue: input.conversationId ?? "root" } },
     { key: "gen_ai.operation.name", value: { stringValue: "chat" } },
     { key: "gen_ai.request.model", value: { stringValue: "test-model" } },
@@ -84,11 +98,11 @@ describe("selfmod trace inspection tools", () => {
             ? segment({
                 id: traceId,
                 agentName: "worker",
-                sessionId: "target",
+                runId: "target",
                 toolName: "deploy",
                 status: { code: 2, message: "failed" },
               })
-            : segment({ id: otherTraceId, agentName: "other", sessionId: "other" }),
+            : segment({ id: otherTraceId, agentName: "other", runId: "other" }),
         run: async ({ command }: { command: string }) => {
           if (command === "ls -1dt /traces/*") {
             return {
@@ -105,7 +119,7 @@ describe("selfmod trace inspection tools", () => {
       session: { id: "root" },
     } as never;
 
-    const result = await searchTraces.execute(
+    const result = await resolveSearchTracesTool({ localEnabled: true })!.execute(
       { agentName: "worker", failedOnly: true, sessionId: "target", toolName: "deploy" },
       ctx,
     );
@@ -118,7 +132,7 @@ describe("selfmod trace inspection tools", () => {
 
   it("reports incomplete coverage without exposing unindexed trace internals", async () => {
     const ids = Array.from({ length: 101 }, (_, index) => index.toString(16).padStart(32, "0"));
-    const result = await searchTraces.execute({}, {
+    const result = await resolveSearchTracesTool({ localEnabled: true })!.execute({}, {
       abortSignal: new AbortController().signal,
       getSandbox: async () => ({
         readTextFile: async () => segment({ conversationId: "other" }),
@@ -144,8 +158,72 @@ describe("selfmod trace inspection tools", () => {
     expect(JSON.stringify(result)).not.toContain("legacy");
   });
 
+  it("treats an empty trace mount as an empty result", async () => {
+    const result = await resolveSearchTracesTool({ localEnabled: true })!.execute({}, {
+      abortSignal: new AbortController().signal,
+      getSandbox: async () => ({
+        run: async ({ command }: { command: string }) =>
+          command === "ls -1dt /traces/*"
+            ? {
+                exitCode: 2,
+                stderr: "ls: cannot access '/traces/*': No such file or directory",
+                stdout: "",
+              }
+            : { exitCode: 2, stderr: "", stdout: "" },
+      }),
+      session: { id: "root" },
+    } as never);
+
+    expect(result).toMatchObject({ coverage: { complete: true, stored: 0 }, matches: [] });
+  });
+
+  it("keeps readable matches when one trace disappears during the scan", async () => {
+    const missingTraceId = "3".repeat(32);
+    const result = await resolveSearchTracesTool({ localEnabled: true })!.execute({}, {
+      abortSignal: new AbortController().signal,
+      getSandbox: async () => ({
+        readTextFile: async () => segment({ id: traceId }),
+        run: async ({ command }: { command: string }) => {
+          if (command === "ls -1dt /traces/*") {
+            return {
+              exitCode: 0,
+              stderr: "",
+              stdout: `/traces/${missingTraceId}\n/traces/${traceId}\n`,
+            };
+          }
+          if (command.includes(`/traces/${missingTraceId}/segments`)) {
+            return { exitCode: 2, stderr: "trace was pruned", stdout: "" };
+          }
+          if (command.includes("/segments")) {
+            return { exitCode: 0, stderr: "", stdout: `${spanId}.otlp.json\n` };
+          }
+          return { exitCode: 2, stderr: "", stdout: "" };
+        },
+      }),
+      session: { id: "root" },
+    } as never);
+
+    expect(result).toMatchObject({
+      coverage: {
+        complete: false,
+        matched: 1,
+        stored: 2,
+        warning: expect.stringContaining("read"),
+      },
+      matches: [{ traceId }],
+    });
+  });
+
+  it("resolves trace analysis only in local mode", () => {
+    delete process.env.EVE_DEV;
+    expect(resolveSearchTracesTool({ localEnabled: true })).toBeNull();
+    expect(resolveInspectTraceTool({ localEnabled: true })).toBeNull();
+    expect(resolveInspectTraceSpansTool({ localEnabled: true })).toBeNull();
+    expect(resolveTraceAnalysisSkill({ localEnabled: true })).toBeNull();
+  });
+
   it("returns a structural timeline with argument previews and available fields", async () => {
-    const result = await inspectTrace.execute(
+    const result = await resolveInspectTraceTool({ localEnabled: true })!.execute(
       { traceId, limit: 2 },
       traceContext({
         [traceId]: segment({ id: traceId, toolName: "bash" }),
@@ -164,10 +242,21 @@ describe("selfmod trace inspection tools", () => {
       ],
       totals: { modelCalls: 1, toolCalls: 1 },
     });
+
+    const page = await resolveInspectTraceTool({ localEnabled: true })!.execute(
+      { limit: 1, offset: 1, traceId },
+      traceContext({ [traceId]: segment({ id: traceId, toolName: "bash" }) }),
+    );
+    expect(page).toMatchObject({
+      hasMore: false,
+      offset: 1,
+      timeline: [{ category: "tool", spanId: toolSpanId }],
+      total: 2,
+    });
   });
 
   it("returns selected payloads for several spans in one call", async () => {
-    const result = await inspectTraceSpans.execute(
+    const result = await resolveInspectTraceSpansTool({ localEnabled: true })!.execute(
       { include: ["arguments", "result"], spanIds: [toolSpanId, "c".repeat(16)], traceId },
       traceContext({ [traceId]: segment({ id: traceId, toolName: "bash" }) }),
     );
@@ -189,10 +278,16 @@ describe("selfmod trace inspection tools", () => {
 
   it("validates the focused tool inputs", async () => {
     await expect(
-      inspectTrace.execute({ operation: "summary", traceId }, {} as never),
+      resolveInspectTraceTool({ localEnabled: true })!.execute(
+        { operation: "summary", traceId },
+        {} as never,
+      ),
     ).rejects.toThrow();
     await expect(
-      inspectTraceSpans.execute({ include: ["prompt"], spanIds: [spanId], traceId }, {} as never),
+      resolveInspectTraceSpansTool({ localEnabled: true })!.execute(
+        { include: ["prompt"], spanIds: [spanId], traceId },
+        {} as never,
+      ),
     ).rejects.toThrow("include must contain arguments, result, or error.");
   });
 });

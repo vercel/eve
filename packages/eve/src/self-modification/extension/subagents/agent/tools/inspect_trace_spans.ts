@@ -1,5 +1,7 @@
 import { defineTool } from "eve/tools";
 
+import type { ResolvedSelfModificationConfig } from "../../../../config.js";
+import { defineLocalOnlyDynamic, resolveLocalOnly } from "../../../local-only.js";
 import { detailFields, readTraceSources, SPAN_ID, TRACE_ID } from "../../../trace-inspection.js";
 
 const FIELDS = ["arguments", "result", "error"] as const;
@@ -29,7 +31,7 @@ const inputSchema = {
   required: ["traceId", "spanIds", "include"],
 } as const;
 
-export default defineTool({
+const inspectTraceSpansTool = defineTool({
   description:
     "Return bounded arguments, results, or errors for selected spans in one trace. First use selfmod__inspect_trace to choose spanIds and see availableFields.",
   inputSchema,
@@ -69,6 +71,12 @@ export default defineTool({
     return { traceId, spans, truncated };
   },
 });
+
+export function resolveInspectTraceSpansTool(config: ResolvedSelfModificationConfig) {
+  return resolveLocalOnly(config, inspectTraceSpansTool);
+}
+
+export default defineLocalOnlyDynamic(inspectTraceSpansTool);
 
 function parseInput(value: unknown): {
   readonly include: readonly Field[];

@@ -40,6 +40,7 @@ export interface TraceTimelineRecord {
 
 export interface TraceAnalysis {
   readonly durationMs: number;
+  readonly failedOperations: number;
   readonly groups: readonly TraceAnalysisGroup[];
   readonly modelDurationMs: number;
   readonly modelCalls: number;
@@ -132,6 +133,7 @@ export function analyzeLocalTrace(
               startTimeNs,
             ) - startTimeNs,
           ) / 1_000_000,
+    failedOperations: spans.filter(({ span }) => span.statusCode === 2).length,
     groups: groups(ordered),
     modelCalls: model.length,
     modelDurationMs: sum(model),
@@ -151,7 +153,7 @@ function deduplicate(sources: readonly LocalTraceSpanSource[]): LocalTraceSpanSo
 }
 
 function matches(span: LocalTraceSpan, selector: TraceAnalysisSelector): boolean {
-  const sessionId = stringAttribute(span, "agent.session.id");
+  const sessionId = traceSessionId(span);
   const turnId = stringAttribute(span, "agent.turn.id");
   if (selector.excludeSessionId !== undefined && sessionId === selector.excludeSessionId)
     return false;
@@ -179,7 +181,7 @@ function recordFor(source: LocalTraceSpanSource, startTimeNs: bigint): TraceTime
   };
   const callId = stringAttribute(span, "agent.action.call_id");
   const model = modelFor(span);
-  const sessionId = stringAttribute(span, "agent.session.id");
+  const sessionId = traceSessionId(span);
   const toolName = toolFor(span);
   const turnId = stringAttribute(span, "agent.turn.id");
   if (callId !== undefined) record.callId = callId;
@@ -264,6 +266,10 @@ function groups(records: readonly TraceTimelineRecord[]): TraceAnalysisGroup[] {
 
 function sum(records: readonly TraceTimelineRecord[]): number {
   return records.reduce((total, record) => total + record.durationMs, 0);
+}
+
+export function traceSessionId(span: LocalTraceSpan): string | undefined {
+  return stringAttribute(span, "agent.run.id") ?? stringAttribute(span, "agent.session.id");
 }
 
 function stringAttribute(span: LocalTraceSpan, key: string): string | undefined {

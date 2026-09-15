@@ -3,6 +3,7 @@ import { defineTool } from "eve/tools";
 import { context, trace } from "#compiled/@opentelemetry/api/index.js";
 import {
   analyzeLocalTrace,
+  traceSessionId,
   type LocalTraceSpanSource,
 } from "#self-modification/local-trace-analysis.js";
 import { resolveConversationId } from "#tracing/conversation-context.js";
@@ -11,6 +12,8 @@ import {
   localTraceIndexedMarker,
 } from "#tracing/local-trace-discovery-index.js";
 
+import type { ResolvedSelfModificationConfig } from "../../../../config.js";
+import { defineLocalOnlyDynamic, resolveLocalOnly } from "../../../local-only.js";
 import { readTraceSources, TRACE_ID } from "../../../trace-inspection.js";
 
 const MAX_ANALYZED_TRACES = 200;
@@ -57,7 +60,7 @@ interface TraceSummary {
   readonly traceId: string;
 }
 
-export default defineTool({
+const searchTracesTool = defineTool({
   description:
     "Search structural summaries for traces in the invoking conversation. Filter by session, agent, tool, or failures; then inspect a returned trace with selfmod__inspect_trace. Prompts and tool payloads are never searched.",
   inputSchema,
@@ -74,8 +77,9 @@ export default defineTool({
       sandbox.run({ command: `ls -1 /traces/*/${localTraceIndexedMarker()}` }),
       sandbox.run({ command: `ls -1 /traces/*/${localTraceConversationMarker(conversationId)}` }),
     ]);
-    if (available.exitCode !== 0)
+    if (available.exitCode !== 0 && !isEmptyTraceListing(available)) {
       throw new Error(`Could not list local traces: ${available.stderr}`);
+    }
 
     const stored = [...traceIds(available.stdout)];
     const eligible = stored.filter((traceId) => traceId !== currentTraceId);
@@ -84,11 +88,22 @@ export default defineTool({
     const unindexed = eligible.filter((traceId) => !indexedIds.has(traceId));
     const scannedUnindexed = unindexed.slice(0, MAX_UNINDEXED_TRACES);
     const digests = new Map<string, TraceSummary>();
+    let readFailures = 0;
+    const read = async (traceId: string): Promise<LocalTraceSpanSource[] | undefined> => {
+      try {
+        return await readTraceSources(traceId, ctx);
+      } catch (error) {
+        if (ctx.abortSignal.aborted) throw error;
+        readFailures += 1;
+        return undefined;
+      }
+    };
 
     for (const traceId of scannedUnindexed) {
       if (ctx.abortSignal.aborted) throw new Error("Trace search was cancelled.");
-      const sources = await readTraceSources(traceId, ctx);
-      if (!contains(sources, "gen_ai.conversation.id", conversationId)) continue;
+      const sources = await read(traceId);
+      if (sources === undefined || !contains(sources, "gen_ai.conversation.id", conversationId))
+        continue;
       matchingIds.add(traceId);
       digests.set(traceId, summarize(traceId, sources));
     }
@@ -98,10 +113,15 @@ export default defineTool({
     const summaries: TraceSummary[] = [];
     for (const traceId of considered) {
       if (ctx.abortSignal.aborted) throw new Error("Trace search was cancelled.");
-      const summary =
-        digests.get(traceId) ?? summarize(traceId, await readTraceSources(traceId, ctx));
-      if (!matches(summary, parsed)) continue;
-      summaries.push(summary);
+      const cached = digests.get(traceId);
+      if (cached !== undefined) {
+        if (matches(cached, parsed)) summaries.push(cached);
+        continue;
+      }
+      const sources = await read(traceId);
+      if (sources === undefined) continue;
+      const readSummary = summarize(traceId, sources);
+      if (matches(readSummary, parsed)) summaries.push(readSummary);
     }
     sort(summaries, parsed.sortBy);
     const results = summaries.slice(0, parsed.limit);
@@ -113,12 +133,15 @@ export default defineTool({
       stored: number;
       warning?: string;
     } = {
-      complete: omitted === 0,
+      complete: omitted === 0 && readFailures === 0,
       considered: considered.length,
       matched: matched.length,
       stored: stored.length,
     };
-    if (omitted !== 0) coverage.warning = "Some older traces could not be included.";
+    const warnings = [];
+    if (omitted !== 0) warnings.push("Some older traces could not be included.");
+    if (readFailures !== 0) warnings.push("Some traces could not be read.");
+    if (warnings.length > 0) coverage.warning = warnings.join(" ");
     return {
       conversationId,
       coverage,
@@ -200,7 +223,7 @@ function summarize(traceId: string, sources: readonly LocalTraceSpanSource[]): T
   return {
     agentNames: names("agent.name"),
     durationMs: analysis.durationMs,
-    failedOperations: analysis.records.filter((record) => record.outcome === "failed").length,
+    failedOperations: analysis.failedOperations,
     inputTokens: maximum("agent.usage.input_tokens"),
     modelCalls: analysis.modelCalls,
     models: [
@@ -209,7 +232,14 @@ function summarize(traceId: string, sources: readonly LocalTraceSpanSource[]): T
       ),
     ],
     outputTokens: maximum("agent.usage.output_tokens"),
-    sessionIds: names("agent.session.id"),
+    sessionIds: [
+      ...new Set(
+        sources.flatMap(({ span }) => {
+          const sessionId = traceSessionId(span);
+          return sessionId === undefined ? [] : [sessionId];
+        }),
+      ),
+    ],
     startedAt: new Date(Number(analysis.startTimeNs / 1_000_000n)).toISOString(),
     toolCalls: analysis.toolCalls,
     toolNames: [
@@ -221,6 +251,17 @@ function summarize(traceId: string, sources: readonly LocalTraceSpanSource[]): T
     ],
     traceId,
   };
+}
+
+function isEmptyTraceListing(result: {
+  readonly stderr: string;
+  readonly stdout: string;
+}): boolean {
+  return (
+    result.stdout.trim() === "" &&
+    result.stderr.includes("/traces/*") &&
+    /no such file or directory/iu.test(result.stderr)
+  );
 }
 
 function contains(
@@ -239,6 +280,12 @@ function matches(summary: TraceSummary, input: SearchInput): boolean {
     (input.failedOnly !== true || summary.failedOperations > 0)
   );
 }
+
+export function resolveSearchTracesTool(config: ResolvedSelfModificationConfig) {
+  return resolveLocalOnly(config, searchTracesTool);
+}
+
+export default defineLocalOnlyDynamic(searchTracesTool);
 
 function sort(summaries: TraceSummary[], sortBy: SortBy): void {
   summaries.sort((left, right) => {

@@ -1,6 +1,9 @@
 import { defineSkill } from "eve/skills";
 
-export default defineSkill({
+import type { ResolvedSelfModificationConfig } from "../../config.js";
+import { defineLocalOnlyDynamic, resolveLocalOnly } from "../local-only.js";
+
+const traceAnalysisSkill = defineSkill({
   description:
     "Analyze local eve traces for latency, token usage, failures, repeated tool calls, and discovery inefficiency with a bounded investigation.",
   markdown: `# Trace analysis
@@ -21,3 +24,9 @@ Prefer three analysis rounds or fewer. Do not read raw trace segments, search th
 For latency, distinguish tool execution time from model round-trip time. Repeated tool counts are leads, not proof that calls are independent; inspect the compact timeline before recommending batching. Report the highest-impact opportunities first.
 `,
 });
+
+export function resolveTraceAnalysisSkill(config: ResolvedSelfModificationConfig) {
+  return resolveLocalOnly(config, traceAnalysisSkill);
+}
+
+export default defineLocalOnlyDynamic(traceAnalysisSkill);

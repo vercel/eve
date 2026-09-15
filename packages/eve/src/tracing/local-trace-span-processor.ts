@@ -44,7 +44,6 @@ export function resolveLocalTraceSegmentsDirectory(appRoot: string, traceId: str
 /** Persists spans from agent-owned traces as immutable OTLP/JSON segments. */
 export class LocalTraceSpanProcessor implements SpanProcessor {
   readonly #appRoot: string;
-  readonly #indexedConversations = new Set<string>();
   #queue = Promise.resolve();
   #reportedFailure = false;
 
@@ -69,21 +68,14 @@ export class LocalTraceSpanProcessor implements SpanProcessor {
       typeof recordedConversationId === "string" && recordedConversationId.length > 0
         ? recordedConversationId
         : undefined;
-    const indexKey = conversationId === undefined ? undefined : `${traceId}\0${conversationId}`;
-
     this.#queue = this.#queue
       .then(async () => {
         const traceDirectory = resolveLocalTraceDirectory(this.#appRoot, traceId);
         const segmentsDirectory = resolveLocalTraceSegmentsDirectory(this.#appRoot, traceId);
         await mkdir(segmentsDirectory, { recursive: true });
         await atomicWriteFile(join(segmentsDirectory, `${spanId}.otlp.json`), payload);
-        if (
-          conversationId !== undefined &&
-          indexKey !== undefined &&
-          !this.#indexedConversations.has(indexKey)
-        ) {
+        if (conversationId !== undefined) {
           await indexLocalTraceConversation({ conversationId, traceDirectory });
-          this.#indexedConversations.add(indexKey);
         }
       })
       .catch((error: unknown) => {

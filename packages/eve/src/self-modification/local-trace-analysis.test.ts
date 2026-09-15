@@ -222,6 +222,34 @@ describe("analyzeLocalTrace", () => {
     expect(analysis.records[1]?.usage).toBeUndefined();
   });
 
+  it("counts failures on structural spans and uses the current run identity", () => {
+    const analysis = analyzeLocalTrace(
+      [
+        source({
+          attributes: { "agent.run.id": "run-1" },
+          endMs: 10,
+          name: "agent.step",
+          spanId: "a".repeat(16),
+          startMs: 0,
+          statusCode: 2,
+        }),
+        source({
+          attributes: { "agent.run.id": "run-1", "gen_ai.operation.name": "chat" },
+          endMs: 20,
+          name: "chat",
+          spanId: "b".repeat(16),
+          startMs: 10,
+        }),
+      ],
+      { sessionId: "run-1" },
+    );
+
+    expect(analysis.failedOperations).toBe(1);
+    expect(analysis.records).toEqual([
+      expect.objectContaining({ category: "model", sessionId: "run-1" }),
+    ]);
+  });
+
   it("filters structurally and ignores duplicate span ids", () => {
     const shared = source({
       attributes: {
