@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { WizardCancelledError } from "#setup/step.js";
 import { createFakePrompter } from "#internal/testing/fake-prompter.js";
 const mocks = vi.hoisted(() => ({
   json: vi.fn(),
@@ -34,25 +35,34 @@ beforeEach(() => {
     .mockResolvedValueOnce({ access_token: "access", refresh_token: "refresh", expires_in: 3600 });
 });
 afterEach(() => vi.restoreAllMocks());
-it("requests offline access and reuses the CLI team without a picker", async () => {
-  mocks.json.mockResolvedValueOnce({
-    teams: [
-      { id: "team_a", name: "Alice" },
-      { id: "team_b", name: "Bob" },
-    ],
-  });
-  mocks.cli.mockResolvedValue("team_b");
-  const fake = createFakePrompter();
-  await loginVercelModel(fake.prompter);
-  expect(mocks.json.mock.calls[0]![1].body.get("scope")).toBe("openid offline_access");
-  expect(fake.selectMessages).toEqual([]);
-  expect(mocks.validate).toHaveBeenCalledWith("access", "team_b", undefined);
-  expect(mocks.write.mock.calls[0]![0]).toMatchObject({
-    teamId: "team_b",
-    teamName: "Bob",
-    refreshToken: "refresh",
-  });
-});
+it.each([undefined, "team_b"])(
+  "lets an explicit login switch away from the current team (project: %s)",
+  async (projectTeam) => {
+    mocks.json.mockResolvedValueOnce({
+      teams: [
+        { id: "team_a", name: "Alice" },
+        { id: "team_b", name: "Bob" },
+      ],
+    });
+    mocks.cli.mockResolvedValue("team_b");
+    const fake = createFakePrompter({
+      single: (options) => {
+        expect(options.initialValue).toBe("team_b");
+        expect(options.search).toBe(true);
+        return "team_a";
+      },
+    });
+    await loginVercelModel(fake.prompter, undefined, projectTeam);
+    expect(mocks.json.mock.calls[0]![1].body.get("scope")).toBe("openid offline_access");
+    expect(fake.selectMessages).toEqual(["Vercel team"]);
+    expect(mocks.validate).toHaveBeenCalledWith("access", "team_a", undefined);
+    expect(mocks.write.mock.calls[0]![0]).toMatchObject({
+      teamId: "team_a",
+      teamName: "Alice",
+      refreshToken: "refresh",
+    });
+  },
+);
 it("asks for a team when the CLI selection is unavailable", async () => {
   mocks.json.mockResolvedValueOnce({
     teams: [
@@ -77,4 +87,39 @@ it("selects the only team without prompting", async () => {
   await loginVercelModel(fake.prompter);
   expect(fake.selectMessages).toEqual([]);
   expect(mocks.validate).toHaveBeenCalledWith("access", "team_only", undefined);
+});
+
+it("preserves the saved session when team selection is cancelled", async () => {
+  mocks.json.mockResolvedValueOnce({
+    teams: [
+      { id: "team_a", name: "Alice" },
+      { id: "team_b", name: "Bob" },
+    ],
+  });
+  const fake = createFakePrompter({
+    single: () => {
+      throw new WizardCancelledError();
+    },
+  });
+  await expect(loginVercelModel(fake.prompter, undefined, "team_b")).rejects.toBeInstanceOf(
+    WizardCancelledError,
+  );
+  expect(mocks.validate).not.toHaveBeenCalled();
+  expect(mocks.write).not.toHaveBeenCalled();
+});
+
+it("lets another team be selected after Gateway rejects the first choice", async () => {
+  mocks.json.mockResolvedValueOnce({
+    teams: [
+      { id: "team_a", name: "Alice" },
+      { id: "team_b", name: "Bob" },
+    ],
+  });
+  mocks.validate.mockRejectedValueOnce(new Error("Unavailable")).mockResolvedValueOnce(undefined);
+  let attempt = 0;
+  const fake = createFakePrompter({ single: () => (attempt++ === 0 ? "team_a" : "team_b") });
+  await loginVercelModel(fake.prompter);
+  expect(fake.selectMessages).toEqual(["Vercel team", "Vercel team"]);
+  expect(mocks.write).toHaveBeenCalledOnce();
+  expect(mocks.write).toHaveBeenCalledWith(expect.objectContaining({ teamId: "team_b" }));
 });

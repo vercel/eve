@@ -96,15 +96,15 @@ export async function loginVercelModel(
       "No Vercel team is available. Join a team or choose another connection in /login.",
     );
   const cliTeam = await readVercelCliTeam();
-  let team =
-    teams.find((team) => team.id === preferredTeamId) ??
-    teams.find((team) => team.id === cliTeam) ??
-    (teams.length === 1 ? teams[0] : undefined);
+  const preferred =
+    teams.find((team) => team.id === preferredTeamId) ?? teams.find((team) => team.id === cliTeam);
+  let team = teams.length === 1 ? teams[0] : undefined;
   while (true) {
     if (!team) {
       const id = await prompter.select({
         message: "Vercel team",
         search: true,
+        initialValue: preferred?.id,
         options: teams.map((team) => ({ value: team.id, label: team.name })),
       });
       team = teams.find((candidate) => candidate.id === id);
