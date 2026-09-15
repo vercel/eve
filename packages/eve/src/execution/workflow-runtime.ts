@@ -230,7 +230,6 @@ export function createWorkflowRuntime(config: {
       const sessionAttributes =
         parentLineage.sessionId === undefined
           ? buildSessionAttributes({
-              inputMessage: input.title ?? input.input.message,
               serializedContext,
             })
           : buildSubagentRootAttributes({

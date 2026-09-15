@@ -80,11 +80,7 @@ export class SessionExecution {
         turnStep(cursor.createStepInput(nextStepInput, control.signal)),
       );
       const pendingCallIds =
-        result.action === "dispatch-workflow-tasks"
-          ? result.pendingTaskCallIds
-          : result.action === "park"
-            ? result.pendingCoordinationCallIds
-            : undefined;
+        result.action === "park" ? result.pendingCoordinationCallIds : undefined;
       const hasBackgroundTasks = (result.backgroundTasks?.length ?? 0) > 0;
 
       if (hasBackgroundTasks) {
@@ -122,10 +118,7 @@ export class SessionExecution {
         };
       }
 
-      if (
-        pendingCallIds !== undefined &&
-        (result.action === "park" || result.action === "dispatch-workflow-tasks")
-      ) {
+      if (pendingCallIds !== undefined && result.action === "park") {
         if (deferredRuntimeResults !== undefined) {
           const steering = await control.takeSteering();
           if (steering === undefined) {

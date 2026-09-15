@@ -4,12 +4,21 @@ const ansiEscape = String.fromCharCode(27);
 
 const ansiPattern = new RegExp(`${ansiEscape}\\[[0-?]*[ -/]*[@-~]`, "g");
 const ansiPrefixPattern = new RegExp(`^${ansiEscape}\\[[0-?]*[ -/]*[@-~]`);
+// OSC 8 links are renderer-owned terminal controls. Their target is not
+// visible text and must not affect wrapping, table geometry, or clipping.
+const oscPattern = new RegExp(
+  `${ansiEscape}\\][^${ansiEscape}\\x07]*(?:\\x07|${ansiEscape}\\\\)`,
+  "g",
+);
+const oscPrefixPattern = new RegExp(
+  `^${ansiEscape}\\][^${ansiEscape}\\x07]*(?:\\x07|${ansiEscape}\\\\)`,
+);
 const emojiPresentationPattern = /\p{Emoji_Presentation}/u;
 const extendedPictographicPattern = /\p{Extended_Pictographic}/u;
 const keycapPattern = /^[#*0-9]\u{fe0f}?\u{20e3}$/u;
 
 export function stripAnsi(input: string): string {
-  return stripTerminalControls(input.replaceAll(ansiPattern, ""));
+  return stripTerminalControls(input.replaceAll(ansiPattern, "").replaceAll(oscPattern, ""));
 }
 
 export function stripTerminalControls(input: string): string {
@@ -151,21 +160,28 @@ function terminalTextUnits(input: string): TerminalTextUnit[] {
   let index = 0;
   while (index < input.length) {
     const remaining = input.slice(index);
-    const ansiMatch = remaining.match(ansiPrefixPattern);
-    if (ansiMatch !== null) {
-      units.push({ text: ansiMatch[0], width: 0, ansi: true });
-      index += ansiMatch[0].length;
+    const control = terminalControlPrefix(remaining);
+    if (control !== undefined) {
+      units.push({ text: control, width: 0, ansi: true });
+      index += control.length;
       continue;
     }
 
     const nextAnsi = remaining.search(ansiPattern);
-    const plain = remaining.slice(0, nextAnsi === -1 ? remaining.length : nextAnsi);
+    const nextOsc = remaining.search(oscPattern);
+    const nextControl =
+      nextAnsi === -1 ? nextOsc : nextOsc === -1 ? nextAnsi : Math.min(nextAnsi, nextOsc);
+    const plain = remaining.slice(0, nextControl === -1 ? remaining.length : nextControl);
     for (const grapheme of graphemes(plain)) {
       units.push({ text: grapheme.text, width: terminalGraphemeWidth(grapheme.text), ansi: false });
     }
     index += plain.length;
   }
   return units;
+}
+
+function terminalControlPrefix(input: string): string | undefined {
+  return input.match(ansiPrefixPattern)?.[0] ?? input.match(oscPrefixPattern)?.[0];
 }
 
 /**

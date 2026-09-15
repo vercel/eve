@@ -5,11 +5,14 @@ const config = e2eAgentConfig();
 
 export default defineAgent({
   ...config,
-  // Cache locality belongs to the serving provider, not the gateway model id.
-  modelOptions:
-    typeof config.model === "string" && config.model.startsWith("anthropic/")
-      ? { providerOptions: { gateway: { only: ["anthropic"] } } }
-      : undefined,
+  // Measure Anthropic cache reuse through its native provider.
+  ...(typeof config.model === "string" && config.model.startsWith("anthropic/")
+    ? {
+        modelOptions: {
+          providerOptions: { gateway: { only: ["anthropic"] } },
+        },
+      }
+    : {}),
   reasoning: "high",
   limits: { maxInputTokensPerSession: 300_000 },
 });

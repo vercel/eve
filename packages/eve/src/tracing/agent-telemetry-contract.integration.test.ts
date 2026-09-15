@@ -931,7 +931,7 @@ function normalizeTraceForest(
     const deliveryId = root.attributes["agent.channel.delivery.id"];
     lines.push(
       `trace ${alias} outcome=${String(root.attributes["agent.turn.outcome"] ?? "unknown")}${
-        channelKind === undefined
+        deliveryId === undefined
           ? ""
           : ` channel=${String(channelKind)}:${String(channelName)} delivery=${String(deliveryId)}`
       }`,

@@ -1,6 +1,7 @@
 {
   "name": "@eve/self-modification",
   "version": "0.0.13",
+  "private": true,
   "description": "Compatibility entrypoints for eve self-modification.",
   "keywords": [
     "agents",
@@ -61,12 +62,11 @@
     "prepack": "pnpm run build",
     "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.scaffold.json --noEmit"
   },
-  "devDependencies": {
-    "eve": "workspace:*",
-    "typescript": "catalog:"
+  "dependencies": {
+    "eve": "workspace:*"
   },
-  "peerDependencies": {
-    "eve": "workspace:>=0.54.0"
+  "devDependencies": {
+    "typescript": "catalog:"
   },
   "engines": {
     "node": ">=24"

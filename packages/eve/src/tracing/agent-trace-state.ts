@@ -21,6 +21,8 @@ export interface AgentSessionTraceState {
   readonly decision?: InstrumentationDecision;
   readonly parentLineage?: InstrumentationParentLineage;
   readonly rootSessionId: string;
+  readonly scheduleId?: string;
+  readonly title?: string;
 }
 
 export interface AgentTurnTraceState {

@@ -26,7 +26,6 @@ import { defineMemory } from "#public/memory/index.js";
 import type { ToolContext } from "#tools/definition.js";
 import type { ResolvedToolDefinition } from "#runtime/types.js";
 import { toInputSchema } from "#tools/schema.js";
-import { experimental_workflow } from "#tools/workflow.js";
 
 /**
  * Turn cancellation settles as `turn.cancelled` → `session.waiting` with
@@ -122,12 +121,6 @@ async function createWaitToolRuntime(
   );
   const runtime = await createTestRuntime({
     agent: { name: agentName },
-    modules: [
-      {
-        loadNamespace: async () => ({ default: experimental_workflow() }),
-        logicalPath: "tools/workflow.ts",
-      },
-    ],
     tools: [waitTool],
   });
   const manifestTool = runtime.manifest.tools.find((tool) => tool.name === WAIT_TOOL_NAME);
@@ -224,15 +217,6 @@ async function waitForHookByToken(token: string, timeout = 15_000): Promise<{ ru
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
   throw new Error(`Timed out waiting for hook token "${token}".`);
-}
-
-async function waitForValue(read: () => number, expected: number, timeout = 15_000): Promise<void> {
-  const deadline = Date.now() + timeout;
-  while (Date.now() < deadline) {
-    if (read() === expected) return;
-    await new Promise((resolve) => setTimeout(resolve, 50));
-  }
-  throw new Error(`Timed out waiting for value ${String(expected)}.`);
 }
 
 /**
@@ -762,169 +746,6 @@ describe("turn cancellation integration", () => {
             (event) =>
               event.type === "message.completed" &&
               event.data.message?.includes("follow up after helper cancel") === true,
-          ),
-        ).toBe(true);
-      } finally {
-        stream.dispose();
-        await run.cancel();
-      }
-    });
-  }, 60_000);
-
-  it("cascades cancellation to an in-flight subagent and does not re-dispatch it", async () => {
-    const fixture = await createWaitToolRuntime("turn-cancel-subagent");
-    const continuationToken = "http:turn-cancel-subagent";
-
-    await fixture.runtime.run(async () => {
-      const run = await start(workflowEntry, [
-        {
-          kind: "initial",
-          ownerDeploymentId: "dpl_inline",
-          input: {
-            message: `Delegate through Workflow to a subagent: use the ${WAIT_TOOL_NAME} tool.`,
-          },
-          serializedContext: buildSerializedContext({
-            channelKind: "http",
-            continuationToken,
-            mode: "conversation",
-          }),
-        },
-      ]);
-      const stream = captureTurnEvents(run);
-
-      try {
-        // The child (a fresh copy of the same agent) hangs on the wait
-        // tool, holding the parent in `waitForRuntimeActionResults`.
-        await fixture.toolStarted;
-
-        const cancelToken = sessionCommandHookToken(run.runId);
-        await waitForHookByToken(cancelToken);
-        await resumeHook(cancelToken, { kind: "cancel" });
-
-        const cancelledTurn = await stream.nextTurn();
-
-        expect(cancelledTurn.at(-1)?.type).toBe("session.waiting");
-        expect(filterEventsByType(cancelledTurn, "turn.cancelled")).toHaveLength(1);
-        expect(filterEventsByType(cancelledTurn, "subagent.called")).toHaveLength(1);
-        expectNoFailureEvents(cancelledTurn);
-
-        const childSessionId = filterEventsByType(cancelledTurn, "subagent.called")[0]?.data
-          .childSessionId;
-        expect(childSessionId).toBeDefined();
-        await waitForValue(fixture.toolAborts, 1);
-        expect(fixture.toolAborts()).toBe(1);
-
-        // The cleared pending batch must not re-dispatch on the next turn.
-        await waitForHook(
-          { runId: run.runId },
-          { token: sessionInboxHookToken(continuationToken) },
-        );
-        await resumeHook(sessionInboxHookToken(continuationToken), {
-          kind: "send",
-          payload: { message: "follow up after subagent cancel" },
-        });
-
-        const followUpTurn = await stream.nextTurn();
-
-        expect(followUpTurn.at(-1)?.type).toBe("session.waiting");
-        expect(filterEventsByType(followUpTurn, "subagent.called")).toHaveLength(0);
-        expect(filterEventsByType(followUpTurn, "turn.cancelled")).toHaveLength(0);
-        expectNoFailureEvents(followUpTurn);
-        expect(
-          followUpTurn.some(
-            (event) =>
-              event.type === "message.completed" &&
-              event.data.message?.includes("follow up after subagent cancel") === true,
-          ),
-        ).toBe(true);
-      } finally {
-        stream.dispose();
-        await run.cancel();
-      }
-    });
-  }, 60_000);
-
-  it("cancels a turn parked on a child HITL request without corrupting the stream", async () => {
-    const runtime = await createTestRuntime({
-      agent: { name: "turn-cancel-hitl" },
-      modules: [
-        {
-          loadNamespace: async () => ({ default: experimental_workflow() }),
-          logicalPath: "tools/workflow.ts",
-        },
-      ],
-    });
-    const continuationToken = "http:turn-cancel-hitl";
-
-    await runtime.run(async () => {
-      const run = await start(workflowEntry, [
-        {
-          kind: "initial",
-          ownerDeploymentId: "dpl_inline",
-          input: {
-            message:
-              "Delegate through Workflow to a subagent: Use the ask_question tool exactly once.",
-          },
-          serializedContext: {
-            ...buildSerializedContext({
-              channelKind: "http",
-              continuationToken,
-              mode: "conversation",
-            }),
-            "eve.capabilities": { requestInput: true },
-          },
-        },
-      ]);
-      const stream = captureTurnEvents(run);
-
-      try {
-        // The child asks a question; the proxy epilogue emits this turn's
-        // waiting boundary while the parent keeps waiting on the child.
-        const hitlTurn = await stream.nextTurn();
-        expect(hitlTurn.at(-1)?.type, JSON.stringify(hitlTurn.at(-1), null, 2)).toBe(
-          "session.waiting",
-        );
-        const requested = filterEventsByType(hitlTurn, "input.requested");
-        expect(requested).toHaveLength(1);
-        const requestId = requested[0]?.data.requests[0]?.requestId;
-        expect(requestId).toBeDefined();
-        const childSessionId = filterEventsByType(hitlTurn, "subagent.called")[0]?.data
-          .childSessionId;
-        expect(childSessionId).toBeDefined();
-
-        const cancelToken = sessionCommandHookToken(run.runId);
-        await waitForHookByToken(cancelToken);
-        await resumeHook(cancelToken, { kind: "cancel" });
-
-        // The boundary is already on the stream: settling must not emit a
-        // fabricated turn.cancelled or a second session.waiting.
-        const answer = {
-          kind: "send",
-          payload: {
-            inputResponses: [{ requestId: requestId ?? "", text: "blue" }],
-            message: "answer after hitl cancel",
-          },
-        };
-        await waitForHook(
-          { runId: run.runId },
-          { token: sessionInboxHookToken(continuationToken) },
-        );
-        await resumeHook(sessionInboxHookToken(continuationToken), answer);
-
-        const followUpTurn = await stream.nextTurn();
-
-        expect(followUpTurn.at(-1)?.type).toBe("session.waiting");
-        expect(filterEventsByType(followUpTurn, "turn.cancelled")).toHaveLength(0);
-        expect(filterEventsByType(followUpTurn, "turn.started")).toHaveLength(1);
-        expect(filterEventsByType(followUpTurn, "step.completed")).toHaveLength(1);
-        expect(filterEventsByType(followUpTurn, "session.waiting")).toHaveLength(1);
-        expectNoFailureEvents(followUpTurn);
-        expect(
-          followUpTurn.some(
-            (event) =>
-              event.type === "message.received" &&
-              typeof event.data.message === "string" &&
-              event.data.message.includes("answer after hitl cancel"),
           ),
         ).toBe(true);
       } finally {

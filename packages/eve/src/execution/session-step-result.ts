@@ -2,8 +2,6 @@ import { createDurableSessionState } from "#execution/durable-session-store.js";
 import { derivePendingState } from "#execution/pending-turn-state.js";
 import type { DurableStepResult } from "#execution/turn-step.js";
 import { hasPendingInputBatch } from "#harness/input-requests.js";
-import { getPendingWorkflowInterrupt } from "#harness/workflow-interrupt-state.js";
-import { getWorkflowTaskCallIds, isWorkflowTaskInterrupt } from "#harness/workflow-task-state.js";
 import { getTurnUsageState, takeSessionUsageDelta, toUsage } from "#harness/turn-tag-state.js";
 import type { StepResult } from "#harness/types.js";
 import type { RunMode } from "#shared/run-mode.js";
@@ -53,17 +51,6 @@ export function resolveSessionStepResult(
   }
 
   if (stepResult.next === null) {
-    const workflowInterrupt = getPendingWorkflowInterrupt(stepResult.session.state);
-    if (workflowInterrupt !== undefined && isWorkflowTaskInterrupt(workflowInterrupt.interrupt)) {
-      return {
-        action: "dispatch-workflow-tasks",
-        ...backgroundTransition,
-        pendingTaskCallIds: getWorkflowTaskCallIds(workflowInterrupt.interrupt),
-        serializedContext: nextSerializedContext,
-        sessionState: nextState,
-      };
-    }
-
     const pending = derivePendingState(stepResult.session);
 
     // `settledTurn` is the harness's explicit settlement verdict. Pending

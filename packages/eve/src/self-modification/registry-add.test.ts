@@ -41,10 +41,10 @@ const INDEX = {
       },
     },
     {
-      name: "linear",
-      title: "Linear",
+      name: "channel/linear",
+      title: "Linear Agent",
       meta: {
-        eve: { components: [{ item: "channel/linear-agent" }, { item: "connection/linear" }] },
+        eve: { setup: { package: "eve", bin: "eve", args: ["integration", "setup", "linear"] } },
       },
     },
     {
@@ -209,18 +209,6 @@ describe("addLocalRegistryItem", () => {
     expect(result.status).toBe("needs-terminal");
     expect(result.title).toBe("Slack");
     expect(result.nextCommand).toBe("eve add channel/slack");
-    expect(calls).toHaveLength(0);
-  });
-
-  it("hands a bundle over without installing anything", async () => {
-    const { calls, spawn } = fakeSpawn({ code: 0, output: COMPLETED });
-    const result = await addLocalRegistryItem("linear", {
-      getCapability: () => capability(),
-      spawn,
-    });
-
-    expect(result.status).toBe("needs-terminal");
-    expect(result.reason).toContain("channel/linear-agent");
     expect(calls).toHaveLength(0);
   });
 
@@ -415,7 +403,7 @@ describe("unsetEnvVars", () => {
   });
 
   it("treats a missing envVars field as declaring none", () => {
-    expect(unsetEnvVars({ address: "linear", title: "Linear" }, {})).toEqual([]);
+    expect(unsetEnvVars({ address: "channel/linear", title: "Linear Agent" }, {})).toEqual([]);
   });
 });
 

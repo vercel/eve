@@ -63,7 +63,6 @@ const outputSchema = {
           title: { type: "string" },
           description: { type: "string" },
           category: { type: "string" },
-          components: { type: "array", items: { type: "string" } },
           requires: { type: "string" },
           installed: { type: "boolean" },
         },
@@ -95,9 +94,6 @@ export interface CatalogEntry {
   readonly title: string;
   readonly description?: string;
   readonly category?: Category;
-  readonly components?: readonly string[];
-  /** Component addresses, labels, and descriptions used to search bundles. */
-  readonly componentSearchTerms?: readonly string[];
   readonly requires?: string;
   /** Authored path this item installs, used to detect an existing install. */
   readonly authoredTarget?: string;
@@ -113,7 +109,6 @@ export interface FoundIntegration {
   readonly title: string;
   readonly description?: string;
   readonly category?: Category;
-  readonly components?: readonly string[];
   readonly requires?: string;
   readonly installed?: boolean;
 }
@@ -134,8 +129,8 @@ function isCategory(value: string): value is Category {
  * Derives the category from the item address.
  *
  * eve registry addresses carry their category as the leading path segment.
- * Bundles (`linear`) and package-scoped items (`eve/self-modification`)
- * have none, so the field stays absent rather than being guessed.
+ * Package-scoped items such as `eve/self-modification` have no recognized
+ * category, so the field stays absent rather than being guessed.
  */
 function categoryOf(address: string): Category | undefined {
   const segment = address.split("/")[0];
@@ -169,29 +164,6 @@ function eveMetadata(entry: Record<string, unknown>): Record<string, unknown> {
   if (!isRecord(meta)) return {};
   const eve = meta.eve;
   return isRecord(eve) ? eve : {};
-}
-
-/** Metadata for bundle components, used both for display and free-text search. */
-function componentMetadata(
-  eve: Record<string, unknown>,
-): { readonly addresses: readonly string[]; readonly searchTerms: readonly string[] } | undefined {
-  const components = eve.components;
-  if (!Array.isArray(components)) return undefined;
-
-  const addresses: string[] = [];
-  const searchTerms: string[] = [];
-  for (const component of components) {
-    if (!isRecord(component)) continue;
-    const address = optionalString(component.item);
-    if (address === undefined) continue;
-    addresses.push(address);
-    searchTerms.push(address);
-    const label = optionalString(component.label);
-    if (label !== undefined) searchTerms.push(label);
-    const description = optionalString(component.description);
-    if (description !== undefined) searchTerms.push(description);
-  }
-  return addresses.length > 0 ? { addresses, searchTerms } : undefined;
 }
 
 /** First authored file the item installs; identifies an existing install. */
@@ -233,8 +205,6 @@ export function parseRegistryIndex(value: unknown): readonly CatalogEntry[] {
       address: string;
       authoredTarget?: string;
       category?: Category;
-      componentSearchTerms?: readonly string[];
-      components?: readonly string[];
       declaresSetup?: boolean;
       description?: string;
       envVars?: readonly string[];
@@ -246,11 +216,6 @@ export function parseRegistryIndex(value: unknown): readonly CatalogEntry[] {
     if (category !== undefined) entry.category = category;
     const description = optionalString(item.description);
     if (description !== undefined) entry.description = description;
-    const components = componentMetadata(eve);
-    if (components !== undefined) {
-      entry.components = components.addresses;
-      entry.componentSearchTerms = components.searchTerms;
-    }
     const requires = optionalString(eve.requires);
     if (requires !== undefined) entry.requires = requires;
     const authoredTarget = authoredTargetOf(item);
@@ -268,9 +233,7 @@ export function parseRegistryIndex(value: unknown): readonly CatalogEntry[] {
 /**
  * Filters and bounds catalog entries for one search.
  *
- * A bundle matches when one of its components matches the requested category,
- * so asking for channels still surfaces `linear` (which installs a channel)
- * instead of hiding it behind its uncategorized address.
+ * Category filters match the leading segment of each registry address.
  */
 export function selectIntegrations(input: {
   readonly category?: Category;
@@ -304,13 +267,7 @@ export function selectIntegrationPage(input: {
     const primaryTerms = `${entry.address} ${entry.title}`.toLowerCase();
     return {
       entry,
-      haystack: [
-        primaryTerms,
-        entry.description ?? "",
-        ...(entry.componentSearchTerms ?? entry.components ?? []),
-      ]
-        .join(" ")
-        .toLowerCase(),
+      haystack: [primaryTerms, entry.description ?? ""].join(" ").toLowerCase(),
       index,
       primaryTerms,
     };
@@ -346,13 +303,11 @@ export function selectIntegrationPage(input: {
     const row: {
       address: string;
       category?: Category;
-      components?: readonly string[];
       description?: string;
       requires?: string;
       title: string;
     } = { address: entry.address, title: entry.title };
     if (entry.category !== undefined) row.category = entry.category;
-    if (entry.components !== undefined) row.components = entry.components;
     if (entry.description !== undefined) row.description = entry.description;
     if (entry.requires !== undefined) row.requires = entry.requires;
     return row;
@@ -373,8 +328,7 @@ export function selectIntegrationPage(input: {
 }
 
 function matchesCategory(entry: CatalogEntry, category: Category): boolean {
-  if (entry.category === category) return true;
-  return entry.components?.some((component) => categoryOf(component) === category) === true;
+  return entry.category === category;
 }
 
 /**

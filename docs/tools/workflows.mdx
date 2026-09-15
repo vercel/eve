@@ -99,7 +99,62 @@ workflow and step modules reachable from the agent's runtime modules. Unrelated 
 in the host application stay outside the agent bundle. An unresolved workflow import fails
 the build with the missing import in the error.
 
-### Migrate an existing workflow tool
+### Add a runtime-generated workflow tool
+
+Create `agent/tools/workflow.ts` and export the provided `workflow` factory when the model should
+supply the JavaScript program at runtime:
+
+```ts title="agent/tools/workflow.ts"
+import { workflow } from "eve/tools/workflow";
+
+export default workflow({ maxSubagents: 20 });
+```
+
+The model supplies an async function body through the tool's `js` input. Its only host capability is
+`ctx.agent(name, { message, agentId?, outputSchema? })`. For example:
+
+```js
+const [triage, review] = await Promise.all([
+  ctx.agent("ticket-triage", { message: JSON.stringify(tickets) }),
+  ctx.agent("ticket-review", { message: JSON.stringify(tickets) }),
+]);
+return { triage, review };
+```
+
+`maxSubagents` defaults to `100` and must be an integer from `1` through `128`. The generated
+program cannot access the workflow context, session state,
+credentials, imports, or ordinary tools. Agent authorization, questions, approvals, cancellation,
+and `agentId` continuation use the same owner-managed behavior as direct `ctx.agent` calls.
+
+The sandbox resumes after every pending call in the current batch settles. `Promise.all` supports
+fan-out followed by fan-in, but `Promise.race` does not resume after only the first child settles.
+A child failure is thrown at the corresponding `ctx.agent` call, so generated code can catch it.
+The program must return a JSON-serializable value.
+
+### Migrate from `experimental_workflow`
+
+The experimental uppercase `Workflow` framework tool and its exports have been removed. Replace the
+old sentinel:
+
+```diff
+-import { experimental_workflow } from "eve/tools/workflow";
+-
+-export default experimental_workflow({ maxSubagents: 20 });
+```
+
+with the lowercase factory:
+
+```ts
+import { workflow } from "eve/tools/workflow";
+
+export default workflow({ maxSubagents: 20 });
+```
+
+The path gives the authored tool the model-facing name `workflow`. eve does not discover or inject
+an agent catalog. Calls use the same target resolution, availability, and authorization checks as
+`ctx.agent` in any other authored workflow tool.
+
+### Migrate an authored workflow tool
 
 Replace `defineTool` with `defineWorkflowTool`, keep the executor's `"use workflow"` directive,
 and replace `agent(ctx, input)` and `ask(ctx, request)` with `ctx.agent(target, input)` and

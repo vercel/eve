@@ -52,10 +52,6 @@ export type DurableStepResult = (
       readonly pendingCoordinationCallIds?: readonly string[];
       readonly settled?: SettledTurn;
     }
-  | {
-      readonly action: "dispatch-workflow-tasks";
-      readonly pendingTaskCallIds: readonly string[];
-    }
 ) &
   DurableStepResultFields;
 

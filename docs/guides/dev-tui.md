@@ -49,7 +49,7 @@ Pass an item address to `/add` to confirm and install that exact address without
 ```text
 /add channel/slack
 /add extension/agent-browser
-/add linear
+/add channel/linear
 /add @acme/analytics
 ```
 
@@ -87,7 +87,7 @@ Use `eve dev` flags to control tool calls, reasoning, subagents, connection auth
 eve dev --tools full --reasoning collapsed --logs all
 ```
 
-Use `--host` and `--port` to bind the local server, or `--no-ui` to run without the terminal UI. See the [`eve dev` CLI reference](../reference/cli#eve-dev) for the complete option list, accepted values, and defaults.
+Use `--host` and `--port` to bind the local server, or `--no-ui` to run without the terminal UI. Set `EVE_TUI_RENDER_MARKDOWN=0` to show assistant and subagent responses without Markdown parsing or styling; `1` (the default) enables Markdown rendering. See the [`eve dev` CLI reference](../reference/cli#eve-dev) for the complete option list, accepted values, and defaults.
 
 ## Connect to a deployment
 

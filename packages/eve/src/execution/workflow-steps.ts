@@ -399,7 +399,6 @@ async function runSessionStep(rawInput: TurnStepInput): Promise<DurableStepResul
           nodeId: bundle.nodeId,
         },
         node: effectiveNode,
-        workflowMaxSubagents: refreshedSession.workflowMaxSubagents,
       });
       return step(modelSession, stepInput);
     };

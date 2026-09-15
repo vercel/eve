@@ -378,7 +378,7 @@ export default githubChannel({
     install: `Add this channel from eve's registry to create a Vercel Connect client, route verified Agent Session events, and write \`agent/channels/linear.ts\`:
 
 \`\`\`bash
-eve add channel/linear-agent
+eve add channel/linear
 \`\`\``,
     quickStart: `The guided setup writes \`agent/channels/linear.ts\`:
 

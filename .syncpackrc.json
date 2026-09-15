@@ -20,16 +20,9 @@
     {
       "label": "Separately published eve packages accept compatible eve patch releases",
       "dependencies": ["eve"],
-      "packages": ["@eve/buzz-acp-adapter", "@eve/self-modification"],
+      "packages": ["@eve/buzz-acp-adapter"],
       "dependencyTypes": ["prod"],
       "pinVersion": "workspace:^"
-    },
-    {
-      "label": "Compatibility shim accepts every newer eve release",
-      "dependencies": ["eve"],
-      "packages": ["@eve/self-modification"],
-      "dependencyTypes": ["peer"],
-      "pinVersion": "workspace:>=0.54.0"
     },
     {
       "label": "Blooio is an externally published integration",

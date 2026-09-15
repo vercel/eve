@@ -37,6 +37,7 @@ import type { ResolvedToolDefinition } from "#runtime/types.js";
 import { toInputSchema } from "#tools/schema.js";
 import { defineHook } from "#public/definitions/hook.js";
 import { ConversationContextKey } from "#shared/conversation-context.js";
+import { SessionTitleKey } from "#context/keys.js";
 
 function buildSerializedContext(overrides: {
   acceptedDeploymentId?: string;
@@ -1933,12 +1934,15 @@ describe("workflowEntry integration", () => {
     const continuationToken = "http:workflow-entry-tags";
 
     await runtime.run(async () => {
-      const serializedContext = buildSerializedContext({
-        audience: "public",
-        channelKind: "http",
-        continuationToken,
-        mode: "conversation",
-      });
+      const serializedContext = {
+        ...buildSerializedContext({
+          audience: "public",
+          channelKind: "http",
+          continuationToken,
+          mode: "conversation",
+        }),
+        [SessionTitleKey.name]: "session tag round-trip",
+      };
       const run = await start(
         workflowEntry,
         [
@@ -1953,7 +1957,6 @@ describe("workflowEntry integration", () => {
           allowReservedAttributes: true,
           attributes: normalizeEveAttributes(
             buildSessionAttributes({
-              inputMessage: "session tag round-trip",
               serializedContext,
             }),
           ),
