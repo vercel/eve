@@ -4,6 +4,7 @@ import {
   runInstallVercelCliFlow,
   type InstallVercelCliResult,
 } from "#setup/flows/install-vercel-cli.js";
+import { runLinkFlow } from "#setup/flows/link.js";
 import { runLoginFlow, type LoginFlowResult } from "#setup/flows/login.js";
 import { runModelFlow } from "#setup/flows/model.js";
 import type { ProviderSelection } from "#setup/provider-settings.js";
@@ -36,6 +37,7 @@ export type TuiSetupCommand = PromptCommandExtensionName;
 export const SETUP_FLOW_CONFIG = {
   "vc:install": { title: "Install the Vercel CLI", indicator: "pulse" },
   "vc:login": { title: "Log in to Vercel", indicator: "pulse" },
+  link: { title: "Link to Vercel", indicator: "pulse" },
   model: { title: "Configure the agent model", indicator: "pulse" },
   add: { title: "Add to your agent", indicator: "pulse" },
   deploy: { title: "Deploy to Vercel", indicator: "spinner" },
@@ -87,6 +89,7 @@ export interface TuiSetupCommandInput {
 
 export interface TuiSetupFlows {
   runInstallVercelCliFlow: typeof runInstallVercelCliFlow;
+  runLinkFlow: typeof runLinkFlow;
   runLoginFlow: typeof runLoginFlow;
   runModelFlow: typeof runModelFlow;
   runRegistryFlow: typeof runRegistryFlow;
@@ -247,6 +250,7 @@ async function executeSetupCommand(
   const { command, appRoot } = input;
   const flows: TuiSetupFlows = {
     runInstallVercelCliFlow,
+    runLinkFlow,
     runLoginFlow,
     runModelFlow,
     runRegistryFlow,
@@ -263,6 +267,21 @@ async function executeSetupCommand(
       }
       case "vc:login": {
         return loginResultMessage(await flows.runLoginFlow({ appRoot, prompter, signal }));
+      }
+      case "link": {
+        const result = await flows.runLinkFlow({
+          appRoot,
+          prompter,
+          projectSelection: "create-or-link",
+          signal,
+        });
+        return result.kind === "cancelled"
+          ? { message: "/link dismissed.", cancelled: true, preserveFlowDiagnostics: false }
+          : {
+              message: "Linked this project to Vercel.",
+              preserveFlowDiagnostics: false,
+              effect: { kind: "refresh-identity" },
+            };
       }
       case "model": {
         const pickProvider: ProviderPicker = (request) => renderer.readProviderPicker(request);
