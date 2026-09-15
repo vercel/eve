@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { migrateDurableSessionSnapshot } from "#execution/durable-session-migrations/snapshot.js";
 import {
   createDurableSessionState,
-  type DurableSessionSnapshot,
+  MODEL_MESSAGE_FORMAT_VERSION,
   readDurableSession,
 } from "#execution/durable-session-store.js";
 import {
@@ -43,13 +43,17 @@ describe("pre-0.54 durable history", () => {
       turnAgent,
     });
     const state = createDurableSessionState({ session: initial });
+    const { modelMessageFormatVersion: _modelMessageFormatVersion, ...legacySnapshotEnvelope } =
+      state.snapshot!;
     const legacySnapshot = {
-      ...state.snapshot,
+      ...legacySnapshotEnvelope,
       retained: "snapshot field",
       session: { ...projectToDurableSession(initial), history },
-    } as DurableSessionSnapshot;
+    };
+    const legacyState = { ...state };
+    Reflect.set(legacyState, "snapshot", legacySnapshot);
 
-    const durable = await readDurableSession({ ...state, snapshot: legacySnapshot });
+    const durable = await readDurableSession(legacyState);
     const resumed = hydrateDurableSession({ durable, turnAgent });
 
     expect(resumed.history).toEqual([
@@ -62,10 +66,14 @@ describe("pre-0.54 durable history", () => {
     const saved = createDurableSessionState({ session: resumed });
     expect(saved.version).toBe(state.version);
     expect(saved.snapshot?.version).toBe(state.snapshot?.version);
-    expect(await readDurableSession(saved)).toEqual(durable);
+    expect(saved.snapshot?.modelMessageFormatVersion).toBe(MODEL_MESSAGE_FORMAT_VERSION);
+    const reread = await readDurableSession(saved);
+    expect(reread).toBe(saved.snapshot?.session);
+    expect(reread).toEqual(durable);
 
     const migrated = migrateDurableSessionSnapshot(legacySnapshot);
     expect(migrated).toHaveProperty("retained", "snapshot field");
+    expect(migrated.modelMessageFormatVersion).toBe(MODEL_MESSAGE_FORMAT_VERSION);
   });
 
   it("does not repair malformed explicit kinds or relax new-message validation", () => {

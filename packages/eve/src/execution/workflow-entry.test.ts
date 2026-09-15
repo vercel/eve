@@ -12,7 +12,10 @@ import {
   notifyTurnCallerStep,
   resolveInitialTurnCallerStep,
 } from "#subagents/parent-notification.js";
-import type { DurableSessionState } from "#execution/durable-session-store.js";
+import {
+  MODEL_MESSAGE_FORMAT_VERSION,
+  type DurableSessionState,
+} from "#execution/durable-session-store.js";
 import { dispatchTurnStep } from "#execution/dispatch-turn-step.js";
 import { fireSessionCallbackStep } from "#subagents/callback-step.js";
 import { emitTerminalSessionCompletionStep } from "#execution/terminal-session-completion-step.js";
@@ -1242,6 +1245,7 @@ describe("workflowEntry", () => {
   it("settles a cancelled turn in the driver and starts the next turn from the settled state", async () => {
     const sessionState = createBaseSessionState({
       snapshot: {
+        modelMessageFormatVersion: MODEL_MESSAGE_FORMAT_VERSION,
         session: {
           agent: { system: "" },
           continuationToken: "http:test",

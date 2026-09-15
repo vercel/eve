@@ -1,6 +1,5 @@
 import type { DurableSession } from "#execution/durable-session-store.js";
 import { formatAvailableSkillsSection } from "#execution/skills/instructions.js";
-import { validateHarnessModelMessages } from "#harness/messages.js";
 import type {
   HarnessSession,
   SessionAgent,
@@ -245,7 +244,9 @@ export function projectToDurableSession(session: HarnessSession): DurableSession
 /**
  * Rehydrates a {@link HarnessSession} from a {@link DurableSession}
  * plus the current `turnAgent`, rebuilding the runtime-only agent and
- * compaction fields the durable shape omits.
+ * compaction fields the durable shape omits. Callers provide history projected
+ * from a typed harness session or certified by the snapshot message-format
+ * migration, so hydration reuses it without another full scan.
  */
 export function hydrateDurableSession(input: {
   readonly durable: DurableSession;
@@ -268,7 +269,7 @@ export function hydrateDurableSession(input: {
       thresholdPercent: input.compactionOverrides?.thresholdPercent,
     }),
     continuationToken: durable.continuationToken,
-    history: validateHarnessModelMessages(durable.history),
+    history: durable.history,
     sessionId: durable.sessionId,
   };
 

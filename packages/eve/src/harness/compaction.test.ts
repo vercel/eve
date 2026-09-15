@@ -8,7 +8,7 @@ import {
   resolveCompactionModel,
   shouldCompact,
 } from "#harness/compaction.js";
-import { createFrameworkUserMessage } from "#harness/messages.js";
+import { createFrameworkUserMessage, createUserMessage } from "#harness/messages.js";
 import { estimateTokens } from "#harness/token-estimate.js";
 import type { CompactionConfig } from "#harness/types.js";
 
@@ -279,7 +279,7 @@ const ROOMY = 100_000;
 const CHECKPOINT_MARKER = "Summary of our conversation so far:";
 
 function user(text: string): ModelMessage {
-  return { content: text, role: "user" };
+  return createUserMessage("user", text);
 }
 
 function compactionMarker(text: string): ModelMessage {
@@ -799,6 +799,24 @@ describe("compactMessages: summarization fallback", () => {
       { recentWindowSize: 2, threshold: 2_048 },
     );
 
+    expect(result.at(-1)).toEqual(task);
+  });
+
+  it("does not let equal-content legacy history stand in for the human request", async () => {
+    const content = "Summarize the report.";
+    const task = user(content);
+    const legacy = {
+      content,
+      kind: "legacy.unknown",
+      role: "user",
+    } as const;
+    const [call, resultMsg] = toolExchange({ callId: "call-1", payloadChars: 100 });
+    const { result } = await compact(
+      [user("old notes ".repeat(4_000)), task, legacy, call, resultMsg],
+      { recentWindowSize: 3, threshold: 2_048 },
+    );
+
+    expect(result).toContainEqual(legacy);
     expect(result.at(-1)).toEqual(task);
   });
 

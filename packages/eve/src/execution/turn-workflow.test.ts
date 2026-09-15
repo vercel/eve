@@ -3,7 +3,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { HookPayload } from "#channel/types.js";
 import { cancelDescendantTurnsStep } from "#execution/cancel-descendant-turns-step.js";
 import { dispatchCoordinationStep } from "#execution/coordination-dispatch-step.js";
-import type { DurableSessionState } from "#execution/durable-session-store.js";
+import {
+  MODEL_MESSAGE_FORMAT_VERSION,
+  type DurableSessionState,
+} from "#execution/durable-session-store.js";
 import { acknowledgeDelegatedTasksStep } from "#execution/tasks/parent/delegate.js";
 import { applyTaskAgentRequest } from "#execution/tools/subagent/task-agent-requests.js";
 import { releaseAgentInvocationOwnerStep } from "#execution/tools/subagent/invoke-step.js";
@@ -1718,6 +1721,7 @@ function withRunningChildren(
   return {
     ...state,
     snapshot: {
+      modelMessageFormatVersion: MODEL_MESSAGE_FORMAT_VERSION,
       session: {
         agent: { system: "" },
         continuationToken: state.continuationToken,
@@ -1773,6 +1777,7 @@ function withWorkflowToolRun(
   return {
     ...state,
     snapshot: {
+      modelMessageFormatVersion: MODEL_MESSAGE_FORMAT_VERSION,
       session,
       version: 1,
     },

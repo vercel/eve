@@ -323,6 +323,22 @@ describe("createSession", () => {
     expect(hydrated.limits).toEqual({});
   });
 
+  it("hydrates versioned model-message history without copying it", () => {
+    const session = createSession({
+      continuationToken: "root-token",
+      sessionId: "sess-root",
+      turnAgent: createTestTurnAgent(),
+    });
+    const durable = projectToDurableSession(session);
+
+    const hydrated = hydrateDurableSession({
+      durable,
+      turnAgent: createTestTurnAgent(),
+    });
+
+    expect(hydrated.history).toBe(durable.history);
+  });
+
   it("persists run outputSchema through durable session projection and hydration", () => {
     const agentOutputSchema = {
       properties: { ignored: { type: "string" } },

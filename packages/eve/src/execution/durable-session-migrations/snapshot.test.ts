@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   DURABLE_SESSION_VERSION,
+  MODEL_MESSAGE_FORMAT_VERSION,
   type DurableSessionSnapshot,
 } from "#execution/durable-session-store.js";
 import { projectToDurableSession } from "#execution/session.js";
@@ -14,16 +15,27 @@ import { migrateDurableSessionSnapshot } from "./snapshot.js";
  * Generic chain behavior is covered in `chain.test.ts`.
  */
 describe("migrateDurableSessionSnapshot", () => {
-  it("returns a v1 snapshot unchanged", () => {
+  it("returns a current snapshot without inspecting its history", () => {
+    let historyReads = 0;
+    const session = projectToDurableSession(buildSession());
+    Object.defineProperty(session, "history", {
+      get() {
+        historyReads += 1;
+        return [];
+      },
+    });
     const snapshot: DurableSessionSnapshot = {
-      session: projectToDurableSession(buildSession()),
+      modelMessageFormatVersion: MODEL_MESSAGE_FORMAT_VERSION,
+      session,
       version: DURABLE_SESSION_VERSION,
     };
 
     const migrated = migrateDurableSessionSnapshot(snapshot);
 
-    expect(migrated).toEqual(snapshot);
+    expect(migrated).toBe(snapshot);
     expect(migrated.version).toBe(DURABLE_SESSION_VERSION);
+    expect(migrated.modelMessageFormatVersion).toBe(MODEL_MESSAGE_FORMAT_VERSION);
+    expect(historyReads).toBe(0);
   });
 
   it("preserves unrecognized fields on the snapshot through the migrator", () => {
@@ -31,6 +43,7 @@ describe("migrateDurableSessionSnapshot", () => {
     // without bumping the version; the migrator passes them through.
     const snapshotWithFutureField = {
       futureField: { hint: "experimental" },
+      modelMessageFormatVersion: MODEL_MESSAGE_FORMAT_VERSION,
       session: projectToDurableSession(buildSession()),
       version: DURABLE_SESSION_VERSION,
     };
@@ -40,6 +53,71 @@ describe("migrateDurableSessionSnapshot", () => {
     expect((migrated as { futureField?: unknown }).futureField).toEqual({
       hint: "experimental",
     });
+  });
+
+  it("repairs unversioned model-message history and stamps its format", () => {
+    const durable = projectToDurableSession(buildSession());
+    let assistantRoleReads = 0;
+    const assistantMessage = {
+      content: "Already answered.",
+      get role(): "assistant" {
+        assistantRoleReads += 1;
+        return "assistant";
+      },
+    };
+
+    const migrated = migrateDurableSessionSnapshot({
+      session: {
+        ...durable,
+        history: [assistantMessage, { content: "Retained before eve 0.54.", role: "user" }],
+      },
+      version: DURABLE_SESSION_VERSION,
+    });
+
+    expect(assistantRoleReads).toBe(1);
+    expect(migrated.session.history[0]).toBe(assistantMessage);
+    expect(migrated.session.history[1]).toEqual({
+      content: "Retained before eve 0.54.",
+      kind: "legacy.unknown",
+      role: "user",
+    });
+    expect(migrated.modelMessageFormatVersion).toBe(MODEL_MESSAGE_FORMAT_VERSION);
+  });
+
+  it("rejects a model-message format written by a newer deployment", () => {
+    const durable = projectToDurableSession(buildSession());
+
+    expect(() =>
+      migrateDurableSessionSnapshot({
+        modelMessageFormatVersion: 2,
+        session: durable,
+        version: DURABLE_SESSION_VERSION,
+      }),
+    ).toThrow(/model-message format: encountered version 2/);
+  });
+
+  it("rejects malformed explicit model-message format versions", () => {
+    const durable = projectToDurableSession(buildSession());
+
+    expect(() =>
+      migrateDurableSessionSnapshot({
+        modelMessageFormatVersion: "1",
+        session: durable,
+        version: DURABLE_SESSION_VERSION,
+      }),
+    ).toThrow(/no numeric "modelMessageFormatVersion" field/);
+  });
+
+  it.each([0, 1.5])("rejects invalid model-message format version %s", (version) => {
+    const durable = projectToDurableSession(buildSession());
+
+    expect(() =>
+      migrateDurableSessionSnapshot({
+        modelMessageFormatVersion: version,
+        session: durable,
+        version: DURABLE_SESSION_VERSION,
+      }),
+    ).toThrow(/model-message format: version .* is not a positive integer/);
   });
 
   it("throws clearly on a version newer than the supported one", () => {

@@ -1,7 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { AGENT_HANDLES_STATE_KEY, type AgentHandle } from "#subagents/handles/store.js";
-import type { DurableSessionState } from "#execution/durable-session-store.js";
+import {
+  MODEL_MESSAGE_FORMAT_VERSION,
+  type DurableSessionState,
+} from "#execution/durable-session-store.js";
 import { terminateChildSessionsStep } from "#execution/terminate-child-sessions-step.js";
 import { SESSION_TASKS_STATE_KEY, type SessionTaskIndexEntry } from "#tasks/session-index.js";
 
@@ -455,6 +458,7 @@ function makeSessionState(
     hasProxyInputRequests: false,
     sessionId: "parent-session",
     snapshot: {
+      modelMessageFormatVersion: MODEL_MESSAGE_FORMAT_VERSION,
       session: {
         agent: { system: "" },
         continuationToken: "parent-token",

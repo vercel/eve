@@ -79,6 +79,13 @@ export function isUserModelMessage(message: ModelMessage): message is UserModelM
   return isUserMessageKind(kind);
 }
 
+/** True when a user-role message is known to have been authored by a human. */
+export function isHumanUserMessage(
+  message: ModelMessage,
+): message is UserModelMessage & { readonly kind: "user" } {
+  return isUserModelMessage(message) && message.kind === "user";
+}
+
 /** True when a user-role message was authored by the framework. */
 export function isFrameworkUserMessage(message: ModelMessage): message is FrameworkUserMessage {
   return isUserModelMessage(message) && isFrameworkMessageKind(message.kind);

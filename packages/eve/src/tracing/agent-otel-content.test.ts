@@ -60,13 +60,18 @@ describe("GenAI message attributes", () => {
       genAiInputMessagesAttribute([
         { content: "A real user message.", kind: "user", role: "user" },
         {
+          content: "A retained message with unknown provenance.",
+          kind: "legacy.unknown",
+          role: "user",
+        },
+        {
           content: "A background task completed.",
           kind: "execution.background_task",
           role: "user",
         },
       ]),
     ).toBe(
-      '[{"kind":"user","parts":[{"content":"A real user message.","type":"text"}],"role":"user"},{"kind":"execution.background_task","parts":[{"content":"A background task completed.","type":"text"}],"role":"user"}]',
+      '[{"kind":"user","parts":[{"content":"A real user message.","type":"text"}],"role":"user"},{"kind":"legacy.unknown","parts":[{"content":"A retained message with unknown provenance.","type":"text"}],"role":"user"},{"kind":"execution.background_task","parts":[{"content":"A background task completed.","type":"text"}],"role":"user"}]',
     );
   });
 

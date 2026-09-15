@@ -7,6 +7,7 @@ import {
   createUserMessage,
   isFrameworkMessageKind,
   isFrameworkUserMessage,
+  isHumanUserMessage,
   isUserMessageKind,
   isUserModelMessage,
   markFrameworkStepInput,
@@ -313,6 +314,7 @@ describe("createFrameworkUserMessage", () => {
       role: "user",
     });
     expect(isFrameworkUserMessage(message)).toBe(true);
+    expect(isHumanUserMessage(message)).toBe(false);
     expect(isFrameworkUserMessage({ content: "A user message", role: "user" })).toBe(false);
     expect(isFrameworkMessageKind("synthetic")).toBe(false);
   });
@@ -323,6 +325,7 @@ describe("createFrameworkUserMessage", () => {
     expect(message).toEqual({ content: "A user message", kind: "user", role: "user" });
     expect(isUserMessageKind("user")).toBe(true);
     expect(isUserModelMessage(message)).toBe(true);
+    expect(isHumanUserMessage(message)).toBe(true);
     expect(isFrameworkUserMessage(message)).toBe(false);
   });
 
@@ -335,13 +338,17 @@ describe("createFrameworkUserMessage", () => {
 
     expect(isUserMessageKind(message.kind)).toBe(true);
     expect(isUserModelMessage(message)).toBe(true);
+    expect(isHumanUserMessage(message)).toBe(false);
     expect(isFrameworkUserMessage(message)).toBe(false);
   });
 
   it("rejects unclassified user messages before history retention", () => {
-    expect(() =>
-      validateHarnessModelMessages([{ content: "A user message", role: "user" }]),
-    ).toThrow("Expected every user-role model message to have a kind.");
+    const message = { content: "A user message", role: "user" } as const;
+
+    expect(isHumanUserMessage(message)).toBe(false);
+    expect(() => validateHarnessModelMessages([message])).toThrow(
+      "Expected every user-role model message to have a kind.",
+    );
   });
 });
 

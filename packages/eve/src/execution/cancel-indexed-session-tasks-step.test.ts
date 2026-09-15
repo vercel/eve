@@ -1,6 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { DurableSessionState } from "#execution/durable-session-store.js";
+import {
+  MODEL_MESSAGE_FORMAT_VERSION,
+  type DurableSessionState,
+} from "#execution/durable-session-store.js";
 import { cancelAllIndexedSessionTasksStep } from "#execution/cancel-indexed-session-tasks-step.js";
 import { SESSION_TASKS_STATE_KEY, type SessionTaskIndexEntry } from "#tasks/session-index.js";
 
@@ -79,6 +82,7 @@ function makeSessionState(tasks: readonly SessionTaskIndexEntry[]): DurableSessi
     hasProxyInputRequests: false,
     sessionId: "parent-session",
     snapshot: {
+      modelMessageFormatVersion: MODEL_MESSAGE_FORMAT_VERSION,
       session: {
         agent: { system: "" },
         continuationToken: "http:test",

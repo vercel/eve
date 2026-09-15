@@ -30,6 +30,9 @@ const EVE_SESSION_STREAM_NAMESPACE = "eve.session";
 /** Current wire version for {@link DurableSessionState} and {@link DurableSessionSnapshot}. */
 export const DURABLE_SESSION_VERSION = 1;
 
+/** Current persisted shape for model messages retained in session history. */
+export const MODEL_MESSAGE_FORMAT_VERSION = 1;
+
 const DURABLE_SESSION_READ_TIMEOUT_MS = 10_000;
 
 /**
@@ -97,6 +100,8 @@ export interface DurableSession {
 
 /** Versioned wrapper around a {@link DurableSession} on the wire. */
 export interface DurableSessionSnapshot {
+  /** Certifies that `session.history` matches the current persisted message contract. */
+  readonly modelMessageFormatVersion: typeof MODEL_MESSAGE_FORMAT_VERSION;
   readonly version: typeof DURABLE_SESSION_VERSION;
   readonly session: DurableSession;
 }
@@ -190,6 +195,7 @@ export function createDurableSessionState(input: {
   readonly session: HarnessSession;
 }): DurableSessionState {
   const snapshot: DurableSessionSnapshot = {
+    modelMessageFormatVersion: MODEL_MESSAGE_FORMAT_VERSION,
     session: projectToDurableSession(input.session),
     version: DURABLE_SESSION_VERSION,
   };
@@ -214,6 +220,7 @@ export function replaceDurableSessionSnapshot(input: {
     version: DURABLE_SESSION_VERSION,
     snapshot: {
       ...input.state.snapshot,
+      modelMessageFormatVersion: MODEL_MESSAGE_FORMAT_VERSION,
       session: input.session,
       version: DURABLE_SESSION_VERSION,
     },

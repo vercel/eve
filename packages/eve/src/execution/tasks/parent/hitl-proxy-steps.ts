@@ -1,6 +1,10 @@
 import { contextStorage } from "#context/container.js";
 import { deserializeContext, serializeContext } from "#context/serialize.js";
-import { type DurableSessionState, readDurableSession } from "#execution/durable-session-store.js";
+import {
+  type DurableSessionState,
+  readDurableSession,
+  replaceDurableSessionSnapshot,
+} from "#execution/durable-session-store.js";
 import { readLatestTaskView } from "#execution/tasks/parent/run-parent.js";
 import { createTaskInputCapabilityToken } from "#execution/task-input-capability.js";
 import { createRemoteTaskInputCallbackUrl } from "#execution/workflow-callback-url.js";
@@ -94,14 +98,10 @@ export async function recordTaskInputRequestStep(input: {
   return {
     accepted: true,
     request,
-    sessionState: {
-      ...input.sessionState,
-      hasProxyInputRequests: true,
-      snapshot: {
-        session: { ...durableSession, state },
-        version: input.sessionState.version,
-      },
-    },
+    sessionState: replaceDurableSessionSnapshot({
+      session: { ...durableSession, state },
+      state: input.sessionState,
+    }),
   };
 }
 
@@ -136,13 +136,7 @@ export async function recordTerminalTaskViewsStep(input: {
   const sessionState =
     session === durableSession
       ? input.sessionState
-      : {
-          ...input.sessionState,
-          snapshot: {
-            session,
-            version: input.sessionState.version,
-          },
-        };
+      : replaceDurableSessionSnapshot({ session, state: input.sessionState });
   return { serializedContext, sessionState };
 }
 

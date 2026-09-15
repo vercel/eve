@@ -4,6 +4,7 @@ import type { HarnessSession } from "#harness/types.js";
 import {
   createDurableSessionState,
   DURABLE_SESSION_VERSION,
+  MODEL_MESSAGE_FORMAT_VERSION,
   type DurableSessionSnapshot,
   type DurableSessionState,
   projectSessionState,
@@ -101,6 +102,7 @@ describe("durable-session-store cross-version contract", () => {
       buildSession({ sessionId: "wrun_snapshot", continuationToken: "http:test" }),
     );
     const snapshotWithFutureField = {
+      modelMessageFormatVersion: MODEL_MESSAGE_FORMAT_VERSION,
       session: { ...durable, futureField: { kind: "experimental" } },
       version: DURABLE_SESSION_VERSION,
     } as DurableSessionSnapshot;
@@ -157,6 +159,7 @@ describe("durable-session-store cross-version contract", () => {
     expect(state).toEqual({
       ...projectSessionState({ session }),
       snapshot: {
+        modelMessageFormatVersion: MODEL_MESSAGE_FORMAT_VERSION,
         session: projectToDurableSession(session),
         version: DURABLE_SESSION_VERSION,
       },
@@ -182,6 +185,7 @@ describe("durable-session-store cross-version contract", () => {
     const replaced = replaceDurableSessionSnapshot({ session, state });
 
     expect(replaced.continuationToken).toBe("http:new");
+    expect(replaced.snapshot?.modelMessageFormatVersion).toBe(MODEL_MESSAGE_FORMAT_VERSION);
     expect(replaced.snapshot?.session).toBe(session);
     expect(
       (replaced.snapshot as DurableSessionSnapshot & { futureSnapshotField?: unknown })
@@ -198,7 +202,7 @@ describe("durable-session-store cross-version contract", () => {
 
     const durableSession = await readDurableSession(state);
 
-    expect(durableSession).toEqual(projectToDurableSession(session));
+    expect(durableSession).toBe(state.snapshot?.session);
     expect(getRunMock).not.toHaveBeenCalled();
   });
 
@@ -208,8 +212,10 @@ describe("durable-session-store cross-version contract", () => {
       sessionId: "wrun_embedded_legacy",
     });
     const state = createDurableSessionState({ session });
+    const { modelMessageFormatVersion: _modelMessageFormatVersion, ...legacySnapshotEnvelope } =
+      state.snapshot!;
     const legacySnapshot = {
-      ...state.snapshot,
+      ...legacySnapshotEnvelope,
       session: {
         ...state.snapshot!.session,
         history: [{ content: "Retained before eve 0.54.", role: "user" }],

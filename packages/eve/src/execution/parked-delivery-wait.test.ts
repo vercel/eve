@@ -8,7 +8,10 @@ import type {
   SessionInboxPayload,
   SessionInboxSource,
 } from "#execution/session-command-inbox.js";
-import type { DurableSessionState } from "#execution/durable-session-store.js";
+import {
+  MODEL_MESSAGE_FORMAT_VERSION,
+  type DurableSessionState,
+} from "#execution/durable-session-store.js";
 import { SessionStateCursor } from "#execution/session-state-cursor.js";
 import { cacheTerminalTaskView } from "#tasks/session-index.js";
 import type { TaskView } from "#tasks/types.js";
@@ -456,6 +459,7 @@ function batchingInput(count = 100, crossTurn = false) {
     sessionState: {
       ...sessionState,
       snapshot: {
+        modelMessageFormatVersion: MODEL_MESSAGE_FORMAT_VERSION,
         version: 1,
         session: {
           sessionId: "session",

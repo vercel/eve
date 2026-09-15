@@ -18,7 +18,10 @@ import { getSessionTaskIndex } from "#tasks/session-index.js";
 const flushInstrumentation = vi.hoisted(() => vi.fn());
 const publishBackgroundTaskSettlements = vi.hoisted(() => vi.fn());
 
-vi.mock("#execution/durable-session-store.js", () => ({ readDurableSession: vi.fn() }));
+vi.mock("#execution/durable-session-store.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("#execution/durable-session-store.js")>()),
+  readDurableSession: vi.fn(),
+}));
 vi.mock("#execution/tasks/parent/run-parent.js", () => ({ readLatestTaskView: vi.fn() }));
 vi.mock("#instrumentation/runtime.js", () => ({
   bindSessionInstrumentation: vi.fn(),
