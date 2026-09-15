@@ -299,11 +299,11 @@ function renderProse(
     if (line === undefined) return [];
     return [theme.colors.dim(sliceVisible(line, Math.max(1, width)))];
   }
-  // Bold at the terminal's DEFAULT foreground: black on a light theme,
-  // white on a dark one. Explicit bright-white (SGR 97) would vanish on
-  // light backgrounds.
-  const glyph = isSubagent ? "" : `${theme.colors.bold(theme.glyph.brand)} `;
-  const indent = isSubagent ? "" : "  ";
+  // Markdown owns its content presentation and starts at the normal assistant
+  // content column. Keep eve's brand marker only in the raw opt-out mode.
+  const markdown = context.renderMarkdown ?? true;
+  const glyph = isSubagent || markdown ? "" : `${theme.colors.bold(theme.glyph.brand)} `;
+  const indent = isSubagent ? "" : markdown ? "" : "  ";
 
   if (block.reasoning && block.reasoning.trim().length > 0) {
     rows.push(...renderReasoningLines(block.reasoning, width, theme));
@@ -315,13 +315,12 @@ function renderProse(
   }
 
   if (body.length > 0) {
-    const markdown = context.renderMarkdown ?? true;
     const rendered = (markdown ? renderMarkdown(body, width - indent.length) : body)
       .split("\n")
       .flatMap((line) => wrapVisibleLine(line, width - indent.length));
     rendered.forEach((line, index) => {
       if (index === 0 && !isSubagent && rows.length === 0) {
-        rows.push(`${glyph}${line}`);
+        rows.push(markdown ? line : `${glyph}${line}`);
       } else {
         rows.push(`${indent}${line}`);
       }

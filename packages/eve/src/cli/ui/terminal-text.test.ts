@@ -30,7 +30,19 @@ describe("stripAnsi", () => {
   it("strips CSI sequences and unsafe terminal controls", () => {
     const input = "a\x1b[31mb\x1b[0mc\x1b]0;title\x07d";
 
-    expect(stripAnsi(input)).toBe("abc]0;titled");
+    expect(stripAnsi(input)).toBe("abcd");
+  });
+
+  it("treats renderer-owned OSC-8 links as zero-width terminal controls", () => {
+    const link = "\x1b]8;;https://example.com/a-long-path\x1b\\label\x1b]8;;\x1b\\";
+
+    expect(stripAnsi(link)).toBe("label");
+    expect(visibleLength(link)).toBe(5);
+    expect(sliceVisible(link, 5)).toBe(link);
+    expect(wrapVisibleLine(link, 3)).toEqual([
+      "\x1b]8;;https://example.com/a-long-path\x1b\\lab",
+      "el\x1b]8;;\x1b\\",
+    ]);
   });
 });
 

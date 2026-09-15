@@ -17,9 +17,37 @@ describe("renderBlockLines", () => {
     expect(render({ kind: "user", body: "hello there" })).toEqual(["│ hello there"]);
   });
 
-  it("marks the assistant with the brand triangle", () => {
+  it("starts rendered assistant Markdown at the content column", () => {
     const lines = render({ kind: "assistant", body: "all done" });
-    expect(lines[0]).toBe("▲ all done");
+    expect(lines[0]).toBe("all done");
+  });
+
+  it("keeps an inline image on the preceding prose row", () => {
+    const lines = renderBlockLines(
+      {
+        kind: "assistant",
+        body: "Visit [eve](https://github.com/vercel-labs/eve) or view this image: ![eve logo](https://eve.dev/logo.png).",
+      },
+      80,
+      theme,
+      ctx,
+    );
+
+    expect(lines).toHaveLength(1);
+    expect(stripAnsi(lines[0] ?? "")).toBe(
+      "Visit eve or view this image:\u00a0▧\u00a0eve\u00a0logo.",
+    );
+
+    const wrapped = renderBlockLines(
+      {
+        kind: "assistant",
+        body: "Visit [eve](https://github.com/vercel-labs/eve) or view this image: ![eve logo](https://eve.dev/logo.png).",
+      },
+      35,
+      theme,
+      ctx,
+    ).map(stripAnsi);
+    expect(wrapped).toEqual(["Visit eve or view this", "image:\u00a0▧\u00a0eve\u00a0logo."]);
   });
 
   it("preserves prose Markdown when Markdown rendering is disabled", () => {
