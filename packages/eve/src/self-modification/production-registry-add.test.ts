@@ -73,6 +73,132 @@ describe("production registry addresses", () => {
     expect(networkPolicyUpdates).toBe(0);
   });
 
+  it("rewrites a self-modified connection for lazy project-scoped provisioning", async () => {
+    const commands: string[] = [];
+    const writes: { content: string; path: string }[] = [];
+    let treeWrites = 0;
+    const result = await installProductionRegistryItem({
+      address: "connection/linear",
+      transform: {
+        target: "agent/connections/linear.ts",
+        apply: (source) =>
+          source.replace(
+            'connect("linear")',
+            'connect({ connector: "linear-prj_abc123", autoProvision: true })',
+          ),
+      },
+      sandbox: {
+        readTextFile: async () =>
+          'import { connect } from "@vercel/connect/eve";\nconst auth = connect("linear");\n',
+        run: async ({ command }: { readonly command: string }) => {
+          commands.push(command);
+          if (command.includes("while :")) return { exitCode: 0, stdout: "pnpm\t/repository" };
+          if (command.includes("info/exclude") || command.includes("corepack")) {
+            return { exitCode: 0 };
+          }
+          if (command.includes("for executable")) {
+            return { exitCode: 0, stdout: "/repository/node_modules/.bin/eve" };
+          }
+          if (command.includes(" add -A")) return { exitCode: 0 };
+          if (command.includes("write-tree")) {
+            treeWrites += 1;
+            return { exitCode: 0, stdout: treeWrites === 1 ? SHA : "b".repeat(40) };
+          }
+          if (command.includes("diff-tree")) {
+            return { exitCode: 0, stdout: "agent/connections/linear.ts\0" };
+          }
+          if (command.includes(" add ")) {
+            return {
+              exitCode: 0,
+              stdout: JSON.stringify({
+                version: 1,
+                type: "completed",
+                item: "connection/linear",
+                completedItems: ["connection/linear"],
+              }),
+            };
+          }
+          throw new Error(`Unexpected command: ${command}`);
+        },
+        writeTextFile: async (input: { content: string; path: string }) => {
+          writes.push(input);
+        },
+      } as never,
+      workspace,
+    });
+
+    expect(result).toMatchObject({
+      kind: "completed",
+      changedPaths: ["agent/connections/linear.ts"],
+    });
+    expect(commands.join("\n")).toContain("--skip-setup");
+    expect(writes).toEqual([
+      {
+        content:
+          'import { connect } from "@vercel/connect/eve";\nconst auth = connect({ connector: "linear-prj_abc123", autoProvision: true });\n',
+        path: "/repository/agent/connections/linear.ts",
+      },
+    ]);
+  });
+
+  it("restores a production install when its lazy connector cannot be rewritten", async () => {
+    const commands: string[] = [];
+    let treeWrites = 0;
+    const result = await installProductionRegistryItem({
+      address: "connection/linear",
+      transform: {
+        target: "agent/connections/linear.ts",
+        apply: () => undefined,
+      },
+      sandbox: {
+        readTextFile: async () => 'const auth = connect("not-linear");\n',
+        run: async ({ command }: { readonly command: string }) => {
+          commands.push(command);
+          if (command.includes("while :")) return { exitCode: 0, stdout: "pnpm\t/repository" };
+          if (command.includes("info/exclude") || command.includes("corepack")) {
+            return { exitCode: 0 };
+          }
+          if (command.includes("for executable")) {
+            return { exitCode: 0, stdout: "/repository/node_modules/.bin/eve" };
+          }
+          if (
+            command.includes(" add -A") ||
+            command.includes("read-tree") ||
+            command.includes(" clean -fd -- .")
+          ) {
+            return { exitCode: 0 };
+          }
+          if (command.includes("write-tree")) {
+            treeWrites += 1;
+            return { exitCode: 0, stdout: treeWrites === 1 ? SHA : "b".repeat(40) };
+          }
+          if (command.includes(" add ")) {
+            return {
+              exitCode: 0,
+              stdout: JSON.stringify({
+                version: 1,
+                type: "completed",
+                item: "connection/linear",
+              }),
+            };
+          }
+          throw new Error(`Unexpected command: ${command}`);
+        },
+        writeTextFile: async () => {
+          throw new Error("Must not write mismatched source.");
+        },
+      } as never,
+      workspace,
+    });
+
+    expect(result).toMatchObject({
+      kind: "failed",
+      message: expect.stringContaining("Project files were restored"),
+    });
+    expect(commands.some((command) => command.includes("read-tree --reset -u"))).toBe(true);
+    expect(commands.some((command) => command.includes("clean -fd -- ."))).toBe(true);
+  });
+
   it("removes files created by a failed install while restoring the starting tree", async () => {
     const commands: string[] = [];
     const result = await installProductionRegistryItem({

@@ -1,5 +1,8 @@
 import { getLocalDevCapability, type LocalDevCapability } from "eve/local-dev";
 import { defineDynamic, defineTool, type ToolContext } from "eve/tools";
+
+import { resolveVercelProjectIdFromEnvironment } from "#shared/vercel-project.js";
+import { readProjectLink } from "#setup/project-resolution.js";
 import { once } from "eve/tools/approval";
 
 import {
@@ -11,12 +14,17 @@ import { readPreparedSelfModificationWorkspace } from "../../git-workspace.js";
 import { resolveSelfModificationMode } from "../../mode.js";
 import { withSelfModificationWorkspaceLock } from "../../workspace-lock.js";
 import selfModification from "../extension.js";
-import { classifyCatalogEntry } from "../classify-registry-item.js";
-import { runEveAdd, type SpawnLike } from "../eve-add.js";
+import type { SpawnLike } from "../eve-add.js";
+import { installLocalRegistryItem } from "../local-registry-install.js";
+import {
+  planSelfModificationRegistryInstall,
+  selfModificationRegistryInstallNeedsProject,
+} from "../registry-install-plan.js";
 import {
   assertOfficialRegistryAddress,
   installProductionRegistryItem,
 } from "../production-registry-add.js";
+
 import {
   loadRegistryIndex,
   officialRegistryIndexUrl,
@@ -137,6 +145,7 @@ const productionOutputSchema = {
 
 interface RegistryAddDependencies {
   readonly getCapability?: () => LocalDevCapability | undefined;
+  readonly resolveProjectId?: (appRoot: string) => Promise<string | undefined>;
   readonly spawn?: SpawnLike;
 }
 
@@ -246,33 +255,53 @@ export async function addLocalRegistryItem(
     );
   }
 
-  const classification = classifyCatalogEntry(entry);
-  if (classification.kind === "needs-terminal") {
+  const resolveProjectId =
+    options.resolveProjectId ??
+    (async (appRoot: string) => (await readProjectLink(appRoot))?.projectId);
+  const plan = planSelfModificationRegistryInstall({
+    entry,
+    missingProject: "requires-user-setup",
+    projectId: selfModificationRegistryInstallNeedsProject(entry)
+      ? await resolveProjectId(capability.appRoot)
+      : undefined,
+    setupHandling: "requires-user-setup",
+  });
+  if (plan.kind === "requires-user-setup") {
     const handoff = handoffMessage({
       address,
       interactiveClient: capability.interactiveClient,
-      reason: classification.reason,
+      reason: plan.reason,
       title: entry.title,
     });
     return {
       address,
-      reason: classification.reason,
+      reason: plan.reason,
       status: "needs-terminal",
       title: entry.title,
       ...handoff,
     };
   }
+  if (plan.kind === "cannot-install") {
+    return {
+      address,
+      status: "failed",
+      title: entry.title,
+      reason: plan.message,
+      message: plan.message,
+    };
+  }
 
-  const outcome = await withSelfModificationWorkspaceLock(`local:${capability.appRoot}`, async () =>
-    capability.withSuspendedSource(() =>
-      runEveAdd({
-        address,
-        appRoot: capability.appRoot,
-        signal: options.signal,
-        spawn: options.spawn,
-      }),
-    ),
+  const result = await withSelfModificationWorkspaceLock(`local:${capability.appRoot}`, async () =>
+    installLocalRegistryItem({
+      address,
+      appRoot: capability.appRoot,
+      signal: options.signal,
+      spawn: options.spawn,
+      transform: plan.kind === "install-with-transform" ? plan.transform : undefined,
+      withSuspendedSource: capability.withSuspendedSource,
+    }),
   );
+  const outcome = result.outcome;
 
   if (outcome.kind === "blocked") {
     const handoff = handoffMessage({
@@ -306,6 +335,21 @@ export async function addLocalRegistryItem(
       reason: outcome.message,
       message: outcome.message,
       changed: outcome.changed,
+    };
+  }
+
+  if (result.transformFailure !== undefined) {
+    const message = result.transformFailure.restored
+      ? `Could not finish configuring ${entry.title}. Project files were restored.`
+      : `Could not finish configuring ${entry.title}. The install partially changed: ${result.transformFailure.changed.join(", ")}.`;
+    return {
+      address,
+      status: "failed",
+      title: entry.title,
+      reason: message,
+      message,
+      changed:
+        result.transformFailure.changed.length === 0 ? undefined : result.transformFailure.changed,
     };
   }
 
@@ -344,12 +388,27 @@ async function addProductionRegistryItem(
   const sandbox = await context.getSandbox();
   const result = await withSelfModificationWorkspaceLock(`sandbox:${sandbox.id}`, async () => {
     const workspace = await readPreparedSelfModificationWorkspace({ ...deployed, sandbox });
+    const plan = planSelfModificationRegistryInstall({
+      entry,
+      missingProject: "cannot-install",
+      projectId: selfModificationRegistryInstallNeedsProject(entry)
+        ? resolveVercelProjectIdFromEnvironment()
+        : undefined,
+      setupHandling: "execute",
+    });
+    if (plan.kind === "cannot-install") {
+      return { kind: "failed" as const, message: plan.message };
+    }
+    if (plan.kind === "requires-user-setup") {
+      return { kind: "failed" as const, message: plan.reason };
+    }
     return await installProductionRegistryItem({
       address,
       answers: continuation.answers,
       installed: continuation.installed,
       sandbox,
       signal: context.abortSignal,
+      transform: plan.kind === "install-with-transform" ? plan.transform : undefined,
       workspace,
     });
   });

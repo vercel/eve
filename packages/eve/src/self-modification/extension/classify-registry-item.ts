@@ -15,7 +15,7 @@ import type { CatalogEntry } from "./tools/search_registry.js";
 export function classifyCatalogEntry(
   entry: CatalogEntry,
 ): { readonly kind: "installable" } | { readonly kind: "needs-terminal"; readonly reason: string } {
-  if (entry.declaresSetup === true) {
+  if (entry.setup !== undefined) {
     return {
       kind: "needs-terminal",
       reason: `${entry.address} declares a setup flow, which can ask for credentials or open a browser authorization. Neither can be answered from a chat turn.`,
