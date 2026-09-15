@@ -33,6 +33,34 @@ describe("validateSessionCheckpointStep", () => {
     expect(readDurableSessionMock).toHaveBeenCalledWith(checkpoint.sessionState);
   });
 
+  it("rejects an incompatible settled task with the current checkpoint version", async () => {
+    deserializeContextMock.mockResolvedValue({ require: vi.fn() });
+    readDurableSessionMock.mockReturnValue({
+      state: {
+        "eve.tasks": {
+          version: 2,
+          tasks: [
+            {
+              taskId: "task",
+              taskRunId: "run",
+              taskInboxToken: 42,
+              createdByTurnId: "turn",
+              metadata: { kind: "tool", name: "research" },
+              terminalView: {
+                taskId: "task",
+                metadata: { kind: "tool", name: "research" },
+                status: "cancelled",
+              },
+            },
+          ],
+        },
+      },
+    });
+    await expect(validateSessionCheckpointStep({ checkpoint: createCheckpoint() })).rejects.toThrow(
+      "Corrupt task index",
+    );
+  });
+
   it("rejects a checkpoint written by a different contract version", async () => {
     const checkpoint: SessionCheckpoint = { ...createCheckpoint(), version: 2 as never };
 

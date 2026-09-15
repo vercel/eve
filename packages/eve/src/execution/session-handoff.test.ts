@@ -132,7 +132,10 @@ describe("SessionHandoff", () => {
 
   it("keeps ownership and restores accepted payloads when activation fails", async () => {
     const inbox = createInbox();
-    const payloads: SessionInboxPayload[] = [{ kind: "clear" }];
+    const payloads: SessionInboxPayload[] = [
+      { kind: "send", payload: { message: "Alice sends the first input." } },
+      { kind: "send", payload: { message: "Bob sends the second input." } },
+    ];
     installActivation({ error: new Error("bundle mismatch"), kind: "failed", payloads });
     startSessionOwnerStepMock.mockResolvedValue(undefined);
 

@@ -208,20 +208,21 @@ export type AgentHandleStoreCommandResult =
 
 const nonEmptyString = z.string().min(1);
 
-const identitySchema = z.strictObject({
+const identitySchema = z.looseObject({
   id: nonEmptyString,
   name: nonEmptyString,
   nodeId: nonEmptyString,
 });
 
-const startOperationSchema = z.strictObject({
+const startOperationSchema = z.looseObject({
+  previousStatus: z.never().optional(),
   callId: nonEmptyString,
   id: nonEmptyString,
   kind: z.literal("start"),
   parentTurnId: nonEmptyString,
 });
 
-const continueOperationSchema = z.strictObject({
+const continueOperationSchema = z.looseObject({
   callId: nonEmptyString,
   id: nonEmptyString,
   kind: z.literal("continue"),
@@ -229,31 +230,49 @@ const continueOperationSchema = z.strictObject({
   previousStatus: z.string().max(MAX_STATUS_LENGTH),
 });
 
+const localAddressFields = {
+  callbackBaseUrl: z.never().optional(),
+  credentialResolver: z.never().optional(),
+  url: z.never().optional(),
+};
+
 const startTargetSchema: z.ZodType<AgentStartTarget> = z.discriminatedUnion("kind", [
-  z.strictObject({ continuationToken: nonEmptyString, kind: z.literal("agent/local") }),
-  z.strictObject({ continuationToken: nonEmptyString, kind: z.literal("agent/self") }),
-  z.strictObject({
+  z.looseObject({
+    ...localAddressFields,
+    continuationToken: nonEmptyString,
+    kind: z.literal("agent/local"),
+  }),
+  z.looseObject({
+    ...localAddressFields,
+    continuationToken: nonEmptyString,
+    kind: z.literal("agent/self"),
+  }),
+  z.looseObject({
+    continuationToken: z.never().optional(),
     callbackBaseUrl: z.url(),
-    credentialResolver: z.strictObject({ resolverId: nonEmptyString.optional() }).optional(),
+    credentialResolver: z.looseObject({ resolverId: nonEmptyString.optional() }).optional(),
     kind: z.literal("agent/remote"),
     url: z.url(),
   }),
 ]);
 
 const addressSchema: z.ZodType<AgentAddress> = z.discriminatedUnion("kind", [
-  z.strictObject({
+  z.looseObject({
+    ...localAddressFields,
     continuationToken: nonEmptyString,
     kind: z.literal("agent/local"),
     sessionId: nonEmptyString,
   }),
-  z.strictObject({
+  z.looseObject({
+    ...localAddressFields,
     continuationToken: nonEmptyString,
     kind: z.literal("agent/self"),
     sessionId: nonEmptyString,
   }),
-  z.strictObject({
+  z.looseObject({
+    continuationToken: z.never().optional(),
     callbackBaseUrl: z.url(),
-    credentialResolver: z.strictObject({ resolverId: nonEmptyString.optional() }).optional(),
+    credentialResolver: z.looseObject({ resolverId: nonEmptyString.optional() }).optional(),
     kind: z.literal("agent/remote"),
     sessionId: nonEmptyString,
     url: z.url(),
@@ -295,20 +314,42 @@ const agentHandleStoreCommandSchema: z.ZodType<AgentHandleStoreCommand> = z.disc
   ],
 );
 
+// Known lifecycle fields must not survive into a phase that cannot use them.
+const agentHandlePhaseFields = {
+  address: z.never().optional(),
+  callId: z.never().optional(),
+  lastStatus: z.never().optional(),
+  operation: z.never().optional(),
+  operationId: z.never().optional(),
+  ownerId: z.never().optional(),
+  phase: z.never().optional(),
+  target: z.never().optional(),
+};
+
+/** Carries extensions across phase changes without retaining retired lease/work fields. */
+export function agentHandleMetadata(handle: AgentHandle): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(handle).filter(([key]) => !Object.hasOwn(agentHandlePhaseFields, key)),
+  );
+}
+
 const turnOwnedAgentHandleSchema: z.ZodType<TurnOwnedAgentHandle> = z.discriminatedUnion("phase", [
-  z.strictObject({
+  z.looseObject({
+    ...agentHandlePhaseFields,
     identity: identitySchema,
     operation: startOperationSchema,
     phase: z.literal("starting"),
     target: startTargetSchema,
   }),
-  z.strictObject({
+  z.looseObject({
+    ...agentHandlePhaseFields,
     address: addressSchema,
     identity: identitySchema,
     operation: z.discriminatedUnion("kind", [startOperationSchema, continueOperationSchema]),
     phase: z.literal("running"),
   }),
-  z.strictObject({
+  z.looseObject({
+    ...agentHandlePhaseFields,
     address: addressSchema,
     identity: identitySchema,
     lastStatus: z.string().max(MAX_STATUS_LENGTH),
@@ -317,14 +358,16 @@ const turnOwnedAgentHandleSchema: z.ZodType<TurnOwnedAgentHandle> = z.discrimina
 ]);
 
 const taskOwnedAgentHandleSchema: z.ZodType<TaskOwnedAgentHandle> = z.discriminatedUnion("phase", [
-  z.strictObject({
+  z.looseObject({
+    ...agentHandlePhaseFields,
     callId: nonEmptyString.optional(),
     identity: identitySchema,
     operationId: nonEmptyString,
     phase: z.literal("reserved"),
     ownerId: nonEmptyString,
   }),
-  z.strictObject({
+  z.looseObject({
+    ...agentHandlePhaseFields,
     address: addressSchema,
     callId: nonEmptyString.optional(),
     identity: identitySchema,
@@ -332,7 +375,8 @@ const taskOwnedAgentHandleSchema: z.ZodType<TaskOwnedAgentHandle> = z.discrimina
     phase: z.literal("claimed"),
     ownerId: nonEmptyString,
   }),
-  z.strictObject({
+  z.looseObject({
+    ...agentHandlePhaseFields,
     address: addressSchema,
     identity: identitySchema,
     phase: z.literal("available"),
@@ -345,7 +389,7 @@ const agentHandleSchema: z.ZodType<AgentHandle> = z.union([
 ]);
 
 const agentHandleStoreSchema: z.ZodType<AgentHandleStore> = z
-  .strictObject({
+  .looseObject({
     handles: z.array(agentHandleSchema),
   })
   .refine(
@@ -415,7 +459,10 @@ export function setAgentHandleStore(
 ): SessionStateMap {
   return {
     ...state,
-    [AGENT_HANDLES_STATE_KEY]: assertPersistableAgentHandleStore(store),
+    [AGENT_HANDLES_STATE_KEY]: assertPersistableAgentHandleStore({
+      ...getAgentHandleStore(state),
+      ...store,
+    }),
   };
 }
 

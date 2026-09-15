@@ -172,7 +172,11 @@ command backlog, live waits, callback ownership, or task/subagent/tool handles; 
 guarantees none exist.
 
 The successor rebuilds instructions, models, tools, skills, and compiled configuration from its own
-bundle. It rejects a checkpoint it cannot read. There is no migration chain and no author-facing
+bundle. Before claiming hooks, it shares the source's idle-state inspection: parse all retained
+tasks (including settled entries) and handle state, and require pending-work registries to be absent
+or canonically empty. Task and handle readers preserve additive metadata on updates but still
+validate known fields and lifecycle rules. An unreadable checkpoint is refused before activation,
+so the previous owner can recover and process the triggering delivery. Authored state stays opaque. There is no migration chain and no author-facing
 state migration API, so raw `defineState` values must remain readable by the target code. The
 public event stream is not a checkpoint (it omits private history and framework state), and the
 design needs no per-turn snapshot store: the upgrade copies one settled snapshot when it is needed.

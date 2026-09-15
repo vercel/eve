@@ -25,6 +25,8 @@ The Workflow SDK is not inherently tied to Vercel. In local development and in a
 
 When a Vercel production deployment changes, a new ID-addressed delivery to an idle session hands the session's settled state to the exact deployment that accepted the request. The session keeps its original ID and event stream, while the next model turn uses that deployment's current system-role instructions, model, and tools. Static user-role instructions stay pinned in the durable conversation history and are not seeded again. A successful handoff restarts the session's original configured [`sessionTimeoutMs`](../agent-config#runtime-limits) duration; disabled timeouts stay disabled. Failed or skipped handoffs keep the existing deadline.
 
+Before taking ownership, the target deployment validates the checkpoint's stored tasks and subagent handles and checks that no pending work remains. This includes settled tasks. If that validation fails, the previous owner recovers the session and processes the triggering delivery. Task and handle state preserve unknown metadata fields, while known fields and lifecycle rules must still be valid. Authored session state remains opaque to this validation.
+
 eve does not move live work between deployments. A session with a running turn, pending human input or authorization, queued messages, or active tasks and subagents stays on its current deployment. After that work settles, a later delivery can move the idle session; the earlier deployment signal is not remembered.
 
 ### Upgrading sessions from the former execution model

@@ -1,5 +1,5 @@
 import { deserializeContext } from "#context/serialize.js";
-import { readDurableSession } from "#execution/durable-session-store.js";
+import { isSessionStateIdleForHandoff } from "#execution/session-handoff-state.js";
 import { SESSION_CHECKPOINT_VERSION, type SessionCheckpoint } from "#execution/session-handoff.js";
 import { flattenSessionHookClaims } from "#execution/session-hook-claims.js";
 import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
@@ -38,5 +38,7 @@ export async function validateSessionCheckpointStep(input: {
   }
   const context = await deserializeContext(checkpoint.serializedContext);
   context.require(BundleKey);
-  readDurableSession(checkpoint.sessionState);
+  if (!isSessionStateIdleForHandoff(checkpoint.sessionState)) {
+    throw new Error("Session checkpoint contains pending work and cannot be handed off.");
+  }
 }

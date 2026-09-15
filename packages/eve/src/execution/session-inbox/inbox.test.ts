@@ -223,9 +223,13 @@ describe("createSessionInbox", () => {
 
     await inbox.claimSessionHook("stable");
     await expect(readResult(inbox)).resolves.toEqual(resolved(send("after reclaim")));
-    inbox.restore(released);
+    inbox.restore([...released, send("second released")]);
 
-    expect(inbox.drain()).toEqual([send("released"), send("after reclaim")]);
+    expect(inbox.drain()).toEqual([
+      send("released"),
+      send("second released"),
+      send("after reclaim"),
+    ]);
     await inbox.dispose();
   });
 
