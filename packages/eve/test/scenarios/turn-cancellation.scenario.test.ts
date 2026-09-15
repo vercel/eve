@@ -101,22 +101,9 @@ export default defineAgent({
 });
 `,
       "agent/instructions.md": "Delegate cancellation waits as requested.\n",
-      "agent/tools/workflow.ts": `import { defineWorkflowTool, runWorkflowProgram } from "eve/tools";
+      "agent/tools/workflow.ts": `import { workflow } from "eve/tools/workflow";
 
-const agents = ["local-sleeper", "remote-sleeper"];
-
-export default defineWorkflowTool({
-  description: "Run JavaScript with ctx.agent. Available agents: local-sleeper, remote-sleeper.",
-  inputSchema: {
-    properties: { js: { type: "string" } },
-    required: ["js"],
-    type: "object",
-  },
-  async execute({ js }, ctx) {
-    "use workflow";
-    return runWorkflowProgram(js, ctx, { agents });
-  },
-});
+export default workflow({ agents: ["local-sleeper", "remote-sleeper"] });
 `,
       "agent/subagents/local-sleeper/agent.ts": `import { defineAgent } from "eve";
 import { mockModel } from "eve/evals";

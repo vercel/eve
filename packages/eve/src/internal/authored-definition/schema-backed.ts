@@ -11,6 +11,10 @@ import {
 import type { InternalToolDefinition, ToolExecuteFn } from "#tools/definition.js";
 import { readToolBehavior, type CompiledToolBehavior } from "#tools/behavior.js";
 import {
+  readWorkflowProgramOptions,
+  type WorkflowProgramOptions,
+} from "#tools/workflow-program-input.js";
+import {
   serializeInputSchema,
   serializeOutputSchema,
   type ToolSchemaSource,
@@ -36,6 +40,7 @@ type NormalizedAuthoredTool = Readonly<
     readonly hasApproval: boolean;
     readonly hasExecute: boolean;
     readonly hasModelOutputProjection: boolean;
+    readonly workflowProgram?: WorkflowProgramOptions;
   }
 >;
 type MutableNormalizedAuthoredTool = {
@@ -123,6 +128,7 @@ export function normalizeToolDefinition(value: unknown, message: string): Normal
       : serializeInputSchema(record.inputSchema as ToolSchemaSource);
   const outputSchema = serializeOutputSchema(record.outputSchema as ToolSchemaSource | undefined);
   const behavior = readToolBehavior(value);
+  const workflowProgram = readWorkflowProgramOptions(value);
   const hasExecute = record.execute !== undefined;
   if (
     !hasExecute &&
@@ -140,6 +146,9 @@ export function normalizeToolDefinition(value: unknown, message: string): Normal
   };
   if (behavior !== undefined) {
     definition.behavior = behavior;
+  }
+  if (workflowProgram !== undefined) {
+    definition.workflowProgram = workflowProgram;
   }
   if (hasExecute) {
     definition.execute = expectFunction(record.execute, message) as ToolExecuteFn;

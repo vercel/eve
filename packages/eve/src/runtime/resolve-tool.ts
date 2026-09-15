@@ -11,6 +11,7 @@ import { toErrorMessage } from "#shared/errors.js";
 import { loadResolvedModuleExport, ResolveAgentError } from "#runtime/resolve-helpers.js";
 import type { ResolvedToolDefinition } from "#runtime/types.js";
 import type { AgentSourceOwner } from "#compiler/source-graph.js";
+import { createWorkflowProgramExecuteInput } from "#tools/workflow-program-input.js";
 
 /**
  * Resolves one compiled authored tool into a runtime-owned definition
@@ -74,11 +75,17 @@ export async function resolveToolDefinition(
     const outputSchema = isToolSchema(resolvedRecord.outputSchema)
       ? resolvedRecord.outputSchema
       : toOutputSchema(definition.outputSchema);
+    const workflowProgram = definition.workflowProgram;
+    const executeInput =
+      workflowProgram === undefined
+        ? undefined
+        : (input: unknown) => createWorkflowProgramExecuteInput(workflowProgram, input);
 
     return {
       behavior: definition.behavior,
       description: definition.description,
       execute,
+      executeInput,
       execution: definition.execution,
       exportName: definition.exportName,
       inputSchema,

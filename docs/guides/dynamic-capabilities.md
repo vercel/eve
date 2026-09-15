@@ -137,8 +137,8 @@ returns `null`. If a resolver throws or returns an invalid definition, eve logs 
 failure and omits the subagent.
 
 The resolved set applies to local and remote direct delegation. An authored workflow tool can
-also call a selected subagent through `ctx.agent`. A generated program can call it through
-`runWorkflowProgram` only when the tool author includes its name in the trusted `agents` allowlist.
+also call a selected subagent through `ctx.agent`. A generated program can call it through the
+provided `workflow` tool only when the tool author includes its name in the trusted `agents` allowlist.
 eve also checks availability again before starting the child, so a stale or
 manually constructed call fails with `SUBAGENT_UNAVAILABLE`. Treat conditional
 availability as capability composition, not as the only authorization

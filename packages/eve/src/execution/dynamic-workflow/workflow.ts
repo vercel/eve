@@ -15,7 +15,7 @@ import { toErrorMessage } from "#shared/errors.js";
 import type { JsonValue } from "#shared/json.js";
 import type { WorkflowToolContext } from "#tools/workflow-definition.js";
 
-export interface WorkflowProgramOptions {
+export interface JsProgramOptions {
   /** Agent names generated code may pass to `ctx.agent`. */
   readonly agents: readonly string[];
   /** Maximum child-agent calls, from 1 to 128. Defaults to 100. */
@@ -23,10 +23,10 @@ export interface WorkflowProgramOptions {
 }
 
 /** Runs a model-generated JavaScript function body inside an isolated workflow sandbox. */
-export async function runWorkflowProgram(
+export async function runJsProgram(
   js: string,
   ctx: WorkflowToolContext,
-  options: WorkflowProgramOptions,
+  options: JsProgramOptions,
 ): Promise<JsonValue> {
   const continuationSecurity = await createWorkflowProgramContinuationSecurityStep();
   const program = parseWorkflowProgramInput(
@@ -50,14 +50,14 @@ export async function runWorkflowProgram(
         if (!allowedAgents.has(call.target)) {
           return {
             status: "failed" as const,
-            error: `WORKFLOW_PROGRAM_AGENT_NOT_ALLOWED: Agent "${call.target}" is not in the runWorkflowProgram allowlist.`,
+            error: `WORKFLOW_PROGRAM_AGENT_NOT_ALLOWED: Agent "${call.target}" is not in the workflow allowlist.`,
           };
         }
         const invocationIndex = calls++;
         if (invocationIndex >= program.maxSubagents) {
           return {
             status: "failed" as const,
-            error: `WORKFLOW_PROGRAM_SUBAGENT_LIMIT_REACHED: runWorkflowProgram may invoke at most ${String(program.maxSubagents)} agents; "${call.target}" was not called.`,
+            error: `WORKFLOW_PROGRAM_SUBAGENT_LIMIT_REACHED: workflow may invoke at most ${String(program.maxSubagents)} agents; "${call.target}" was not called.`,
           };
         }
         try {

@@ -42,5 +42,4 @@ export {
   type WorkflowToolDefinition,
   type AgentInput,
 } from "#tools/workflow-definition.js";
-export { runWorkflowProgram, type WorkflowProgramOptions } from "#tools/workflow-program.js";
 export type { ToolInputRequest, ToolInputResponse } from "#tools/definition.js";

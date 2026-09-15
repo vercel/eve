@@ -3,7 +3,6 @@ export {
   defineWorkflowTool,
   disableTool,
   isDisabledToolSentinel,
-  runWorkflowProgram,
   toolOutput,
   toolOutputPart,
   toolResultFrom,
@@ -13,3 +12,9 @@ export {
   isWebSearchToolDefinition,
   webSearch,
 } from "../../src/public/tools/web-search.ts";
+export {
+  workflow,
+  type WorkflowTool,
+  type WorkflowToolInput,
+  type WorkflowToolOptions,
+} from "../../src/public/tools/workflow.ts";

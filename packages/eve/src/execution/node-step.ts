@@ -215,6 +215,7 @@ function resolveHarnessToolDefinition(input: {
       return createPreparedWorkflowToolHarnessDefinition(input.tool);
     }
     return createWorkflowToolHarnessDefinition({
+      executeInput: registeredTool.definition.executeInput,
       definition: createRegisteredHarnessToolDefinition({
         behavior: input.tool.behavior,
         definition: registeredTool.definition,
@@ -280,6 +281,7 @@ function createRegisteredHarnessToolDefinition(input: {
     behavior: input.behavior,
     description: def.description,
     execution: def.execution,
+    executeInput: def.executeInput,
     execute: isFrameworkRequestInput
       ? undefined
       : resolveAuthoredExecute({

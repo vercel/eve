@@ -2,4 +2,4 @@
 "eve": minor
 ---
 
-Add `runWorkflowProgram` for executing a runtime-supplied JavaScript function body inside an authored workflow tool through allowlisted `ctx.agent` calls. Remove the experimental `Workflow` framework tool and `experimental_workflow`; migrate its tool file to `defineWorkflowTool` with `runWorkflowProgram`.
+Add the `workflow` factory from `eve/tools/workflow` for running model-supplied JavaScript through allowlisted durable `ctx.agent` calls. Remove the experimental uppercase `Workflow` tool and `experimental_workflow`; migrate its tool file to the new lowercase factory.

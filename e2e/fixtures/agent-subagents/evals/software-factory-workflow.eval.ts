@@ -18,7 +18,7 @@ export default defineEval({
     const turn = await t.send(
       [
         `FACTORY_RUN_TOKEN=${token}.`,
-        "Alice is processing a manufactured software-factory backlog. Use the run-program tool exactly once, and do not call any of its subagents outside that program.",
+        "Alice is processing a manufactured software-factory backlog. Use the workflow tool exactly once, and do not call any of its subagents outside that program.",
         "Create 200 synthetic tickets with unique zero-padded T- ids. Put the value FACTORY_RUN_TOKEN:triage in `triageKey` on the first ticket and FACTORY_RUN_TOKEN:review in `reviewKey` on the last ticket, replacing FACTORY_RUN_TOKEN with the supplied token.",
         "Use Promise.all to run ticket-triage and ticket-review concurrently, passing the complete tickets array to both calls with structured output schemas.",
         "After both complete, call ticket-reproducer with the returned `{ triage, review }` objects and a structured output schema.",
@@ -28,7 +28,7 @@ export default defineEval({
 
     turn.expectOk();
     t.succeeded();
-    t.calledTool("run-program", { count: 1, output: exactOutput(expected) });
+    t.calledTool("workflow", { count: 1, output: exactOutput(expected) });
     t.calledSubagent(TRIAGE, { count: 1, status: "pending" });
     t.calledSubagent(REVIEW, { count: 1, status: "pending" });
     t.calledSubagent(REPRODUCE, { count: 1, status: "pending" });

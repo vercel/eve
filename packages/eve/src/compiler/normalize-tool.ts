@@ -127,6 +127,7 @@ export async function compileToolEntry(
       requiresApproval: entry.definition.hasApproval,
       sourceId: source.sourceId,
       sourceKind: "module",
+      workflowProgram: entry.definition.workflowProgram,
     },
   };
 }

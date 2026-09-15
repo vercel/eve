@@ -22,8 +22,8 @@ interface ExtensionCapabilityContract {
 const EXTENSION_CAPABILITY_CONTRACTS = {
   extension: { current: 1, supported: [1], dropped: {} },
   tool: {
-    current: 40,
-    supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 28, 29, 30, 31, 32, 34, 35, 40],
+    current: 41,
+    supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 28, 29, 30, 31, 32, 34, 35, 41],
     dropped: {
       14: "TaskExec.delegated was removed; migrate to workflow-backed background tools",
       15: "TaskExec replaces stageEffect with send",
@@ -40,10 +40,11 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
       26: "Background tools now use task yield descriptors",
       27: "TaskExec.delegated was removed; migrate to workflow-backed background tools",
       33: "ctx.agent now accepts the subagent name as its first argument, derives invocation identity internally, and infers structured output types",
-      36: "experimental_workflow and eve/tools/workflow were removed; migrate to defineWorkflowTool with runWorkflowProgram",
-      37: "experimental_workflow and eve/tools/workflow were removed; migrate to defineWorkflowTool with runWorkflowProgram",
-      38: "experimental_workflow and eve/tools/workflow were removed; migrate to defineWorkflowTool with runWorkflowProgram",
-      39: "experimental_workflow and eve/tools/workflow were removed; migrate to defineWorkflowTool with runWorkflowProgram",
+      36: "experimental_workflow and eve/tools/workflow were removed; migrate to the workflow factory from eve/tools/workflow",
+      37: "experimental_workflow and eve/tools/workflow were removed; migrate to the workflow factory from eve/tools/workflow",
+      38: "experimental_workflow and eve/tools/workflow were removed; migrate to the workflow factory from eve/tools/workflow",
+      39: "experimental_workflow and eve/tools/workflow were removed; migrate to the workflow factory from eve/tools/workflow",
+      40: "runWorkflowProgram was made internal; use the workflow factory from eve/tools/workflow",
     },
   },
   dynamicTool: {
@@ -59,10 +60,10 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
       25: "TaskExec.delegated was removed; migrate to workflow-backed background tools",
       26: "Background tools now use task yield descriptors",
       27: "TaskExec.delegated was removed; migrate to workflow-backed background tools",
-      35: "workflowMaxSubagents was removed with experimental_workflow; configure generated-program limits in runWorkflowProgram",
-      36: "workflowMaxSubagents was removed with experimental_workflow; configure generated-program limits in runWorkflowProgram",
-      37: "workflowMaxSubagents was removed with experimental_workflow; configure generated-program limits in runWorkflowProgram",
-      38: "workflowMaxSubagents was removed with experimental_workflow; configure generated-program limits in runWorkflowProgram",
+      35: "workflowMaxSubagents was removed with experimental_workflow; configure generated-program limits with the workflow factory",
+      36: "workflowMaxSubagents was removed with experimental_workflow; configure generated-program limits with the workflow factory",
+      37: "workflowMaxSubagents was removed with experimental_workflow; configure generated-program limits with the workflow factory",
+      38: "workflowMaxSubagents was removed with experimental_workflow; configure generated-program limits with the workflow factory",
     },
   },
   channel: {

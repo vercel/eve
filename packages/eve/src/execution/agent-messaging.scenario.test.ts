@@ -1,5 +1,4 @@
 import { spawn, type ChildProcessByStdio } from "node:child_process";
-import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { Readable } from "node:stream";
 
@@ -8,7 +7,7 @@ import { describe, expect, it } from "vitest";
 import { Client } from "#client/client.js";
 import { filterEventsByType } from "#internal/testing/events.js";
 import { type ScenarioAppDescriptor, useScenarioApp } from "#internal/testing/scenario-app.js";
-import { EVE_SESSION_ID_HEADER, type HandleMessageStreamEvent } from "#protocol/message.js";
+import type { HandleMessageStreamEvent } from "#protocol/message.js";
 
 const scenarioApp = useScenarioApp();
 const SCENARIO_TIMEOUT_MS = 360_000;
@@ -17,20 +16,12 @@ const CODEWORD = "LANTERN-COMET-7319";
 const PARENT_RESULT = `PARENT_RECALLED=${CODEWORD}`;
 const REMOTE_MEMORY_TOKEN = "remote-memory-scenario-token";
 
-function createScriptedParentAgentSource(
-  subagentName: string,
-  options: { readonly workflowProgram?: boolean } = {},
-): string {
+function createScriptedParentAgentSource(subagentName: string): string {
   const agentIdPattern = `<agent id="([^"]+)" name="${subagentName}"(?: [^>]*)?>`;
-  const toolName = options.workflowProgram === true ? "run-program" : "Workflow";
-  const firstProgram =
-    options.workflowProgram === true
-      ? `return ctx.agent(${JSON.stringify(subagentName)}, { message: ${JSON.stringify(`Remember the codeword ${CODEWORD}. Confirm that you stored it.`)} });`
-      : `return tools[${JSON.stringify(subagentName)}]({ message: ${JSON.stringify(`Remember the codeword ${CODEWORD}. Confirm that you stored it.`)} });`;
+  const toolName = "run-program";
+  const firstProgram = `return ctx.agent(${JSON.stringify(subagentName)}, { message: ${JSON.stringify(`Remember the codeword ${CODEWORD}. Confirm that you stored it.`)} });`;
   const secondProgram = (agentIdExpression: string) =>
-    options.workflowProgram === true
-      ? `return ctx.agent(${JSON.stringify(subagentName)}, { agentId: ${agentIdExpression}, message: "What codeword did I ask you to remember? Reply with the codeword." });`
-      : `return tools[${JSON.stringify(subagentName)}]({ agentId: ${agentIdExpression}, message: "What codeword did I ask you to remember? Reply with the codeword." });`;
+    `return ctx.agent(${JSON.stringify(subagentName)}, { agentId: ${agentIdExpression}, message: "What codeword did I ask you to remember? Reply with the codeword." });`;
 
   return `import { defineAgent } from "eve";
 import { mockModel } from "eve/evals";
@@ -40,9 +31,9 @@ const SUBAGENT_NAME = ${JSON.stringify(subagentName)};
 const AGENT_ID_PATTERN = new RegExp(${JSON.stringify(agentIdPattern)}, "u");
 
 const model = mockModel((request) => {
-  const childResults = request.toolResults.filter((result) => result.name === ${JSON.stringify(toolName)});
-
-  if (childResults.length === 0) {
+  const firstResult = request.toolResults.find((result) => result.id === "memory-exchange-1");
+  if (request.userMessageCount === 1) {
+    if (firstResult !== undefined) return "FIRST_EXCHANGE_COMPLETE";
     return {
       toolCalls: [
         {
@@ -54,15 +45,19 @@ const model = mockModel((request) => {
     };
   }
 
-  if (childResults.length === 1) {
-    // The agents listing rides the conversation as a framework-injected
-    // user-role announcement, so scan every message for the latest listing.
+  const secondResult = request.toolResults.find((result) => result.id === "memory-exchange-2");
+  if (request.userMessageCount === 2) {
+    if (secondResult !== undefined) {
+      if (typeof secondResult.output !== "string") {
+        throw new Error("Second child result was not text.");
+      }
+      return \`PARENT_RECALLED=\${secondResult.output}\`;
+    }
     const agentsSnippet = request.messages.map((message) => message.text).join("\\n");
     const agentId = AGENT_ID_PATTERN.exec(agentsSnippet)?.[1];
     if (agentId === undefined) {
       throw new Error(\`Parent model did not receive a \${SUBAGENT_NAME} agent id.\`);
     }
-
     return {
       toolCalls: [
         {
@@ -76,17 +71,8 @@ const model = mockModel((request) => {
     };
   }
 
-  if (childResults.length === 2) {
-    const recalled = childResults[1]?.output;
-    if (typeof recalled !== "string") {
-      throw new Error("Second child result was not text.");
-    }
-    return \`PARENT_RECALLED=\${recalled}\`;
-  }
-
-  throw new Error("Parent model received an unexpected number of child results.");
+  throw new Error("Parent model received an unexpected conversation length.");
 });
-
 export default defineAgent({
   model,
   modelContextWindowTokens: 32_000,
@@ -144,30 +130,15 @@ export default defineAgent({
 `;
 
 function createWorkflowProgramToolSource(agent: string): string {
-  return `import { defineWorkflowTool, runWorkflowProgram } from "eve/tools";
+  return `import { workflow } from "eve/tools/workflow";
 
-const agents = [${JSON.stringify(agent)}];
-
-export default defineWorkflowTool({
-  description: "Run JavaScript with ctx.agent. Available agents: ${agent}.",
-  inputSchema: {
-    properties: { js: { type: "string" } },
-    required: ["js"],
-    type: "object",
-  },
-  async execute({ js }, ctx) {
-    "use workflow";
-    return runWorkflowProgram(js, ctx, { agents, maxSubagents: 2 });
-  },
-});
+export default workflow({ agents: [${JSON.stringify(agent)}], maxSubagents: 2 });
 `;
 }
 
 const AGENT_MESSAGING_DESCRIPTOR: ScenarioAppDescriptor = {
   files: {
-    "agent/agent.ts": createScriptedParentAgentSource("memory-child", {
-      workflowProgram: true,
-    }),
+    "agent/agent.ts": createScriptedParentAgentSource("memory-child"),
     "agent/channels/eve.ts": EVE_CHANNEL_SOURCE,
     "agent/instructions.md": "Run the scripted memory-child exchanges.\n",
     "agent/tools/run-program.ts": createWorkflowProgramToolSource("memory-child"),
@@ -193,9 +164,7 @@ const REMOTE_MEMORY_AGENT_DESCRIPTOR: ScenarioAppDescriptor = {
 function createRemoteAgentMessagingDescriptor(remoteUrl: string): ScenarioAppDescriptor {
   return {
     files: {
-      "agent/agent.ts": createScriptedParentAgentSource("remote-memory-child", {
-        workflowProgram: true,
-      }),
+      "agent/agent.ts": createScriptedParentAgentSource("remote-memory-child"),
       "agent/channels/eve.ts": EVE_CHANNEL_SOURCE,
       "agent/instructions.md": "Run the scripted remote-memory-child exchanges.\n",
       "agent/tools/run-program.ts": createWorkflowProgramToolSource("remote-memory-child"),
@@ -231,7 +200,6 @@ describe("agent messaging", () => {
           client: new Client({ host: server.url }),
           expectedCompletionCount: 0,
         });
-        expect(await readWorkflowRunStatus(app.appRoot, childSessionId)).toBe("cancelled");
       } catch (error) {
         throw new Error(
           [`stdout:\n${server.stdout()}`, `stderr:\n${server.stderr()}`].join("\n\n"),
@@ -266,7 +234,7 @@ describe("agent messaging", () => {
               auth: { bearer: REMOTE_MEMORY_TOKEN },
               host: remoteServer.url,
             }),
-            expectedCompletionCount: 1,
+            expectedCompletionCount: 0,
           });
         } catch (error) {
           throw new Error(
@@ -294,26 +262,16 @@ async function runScriptedParentSession(input: {
   readonly serverUrl: string;
   readonly subagentName: string;
 }): Promise<string> {
-  const createResponse = await fetch(new URL("eve/v1/session", input.serverUrl), {
-    body: JSON.stringify({
-      message: `Run both scripted ${input.subagentName} exchanges.`,
-      mode: "task",
-    }),
-    headers: { "content-type": "application/json" },
-    method: "POST",
-  });
-  expect(createResponse.status).toBe(202);
-
-  const parentSessionId = createResponse.headers.get(EVE_SESSION_ID_HEADER);
-  if (parentSessionId === null) {
-    throw new Error("Parent session response did not include a session id.");
-  }
-
   const client = new Client({ host: input.serverUrl });
-  const parentEvents = await collectStreamToEnd({
-    label: "parent task completion",
-    stream: client.sessions.attach(parentSessionId).stream(),
+  const { session: parentSession, response: firstResponse } = await client.sessions.create({
+    message: `Run both scripted ${input.subagentName} exchanges.`,
   });
+  const firstTurn = await firstResponse.result();
+  const firstTurnEvents = firstTurn.events;
+  const secondTurn = await (
+    await parentSession.send("Continue the same child and report its recalled codeword.")
+  ).result();
+  const parentEvents = [...firstTurnEvents, ...secondTurn.events];
   const calls = filterEventsByType(parentEvents, "subagent.called");
 
   if (calls.length !== 2) {
@@ -330,12 +288,8 @@ async function runScriptedParentSession(input: {
       input.expectedRemoteUrl,
     ]);
   }
-  expect(parentEvents.at(-1)?.type).toBe("session.completed");
-  expect(
-    filterEventsByType(parentEvents, "message.completed").some(
-      (event) => event.data.message === PARENT_RESULT,
-    ),
-  ).toBe(true);
+  expect(secondTurn.status).toBe("waiting");
+  expect(secondTurn.message).toBe(PARENT_RESULT);
 
   const childSessionId = calls[0]?.data.childSessionId;
   if (childSessionId === undefined) {
@@ -404,22 +358,6 @@ function indexesOf(
   type: HandleMessageStreamEvent["type"],
 ): readonly number[] {
   return events.flatMap((event, index) => (event.type === type ? [index] : []));
-}
-
-async function readWorkflowRunStatus(appRoot: string, sessionId: string): Promise<string> {
-  const runPath = join(appRoot, ".eve", ".workflow-data", "runs", `${sessionId}.json`);
-  const run: unknown = JSON.parse(await readFile(runPath, "utf8"));
-
-  if (typeof run !== "object" || run === null) {
-    throw new Error(`Workflow run ${sessionId} was not an object.`);
-  }
-
-  const status = Reflect.get(run, "status");
-  if (typeof status !== "string") {
-    throw new Error(`Workflow run ${sessionId} did not contain a string status.`);
-  }
-
-  return status;
 }
 
 interface RunningScriptedEveDev {

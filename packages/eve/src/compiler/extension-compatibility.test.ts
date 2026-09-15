@@ -134,12 +134,13 @@ describe("extension compatibility manifest", () => {
     { capability: "tool", epoch: 37 },
     { capability: "tool", epoch: 38 },
     { capability: "tool", epoch: 39 },
+    { capability: "tool", epoch: 40 },
     { capability: "dynamicTool", epoch: 35 },
     { capability: "dynamicTool", epoch: 36 },
     { capability: "dynamicTool", epoch: 37 },
     { capability: "dynamicTool", epoch: 38 },
   ] as const)(
-    "rejects removed legacy workflow surface in $capability epoch $epoch",
+    "rejects removed workflow surfaces in $capability epoch $epoch",
     ({ capability, epoch }) => {
       const supportedVersions = EXTENSION_CAPABILITY_SUPPORT[capability];
       expect(supportedVersions).not.toContain(epoch);

@@ -2,6 +2,7 @@ import { parseJsonObject, parseJsonValue, type JsonObject, type JsonValue } from
 
 export const DEFAULT_WORKFLOW_PROGRAM_MAX_SUBAGENTS = 100;
 export const MAX_WORKFLOW_PROGRAM_MAX_SUBAGENTS = 128;
+export const MAX_WORKFLOW_PROGRAM_AGENTS = 128;
 export const WORKFLOW_PROGRAM_BRIDGE_REQUEST_LIMIT = 256;
 export const WORKFLOW_PROGRAM_CALL_INTERRUPT_KIND = "eve.workflow-program-agent-call";
 
@@ -37,27 +38,32 @@ export interface WorkflowProgramAgentCall {
 export function parseWorkflowProgramInput(value: unknown): WorkflowProgramInput {
   const input = parseJsonObject(value);
   if (typeof input.js !== "string") {
-    throw new TypeError('runWorkflowProgram requires a "js" string.');
+    throw new TypeError('workflow requires a "js" string.');
   }
   if (
     !isPositiveInteger(input.maxSubagents) ||
     input.maxSubagents > MAX_WORKFLOW_PROGRAM_MAX_SUBAGENTS
   ) {
     throw new TypeError(
-      `runWorkflowProgram maxSubagents must be an integer between 1 and ${String(MAX_WORKFLOW_PROGRAM_MAX_SUBAGENTS)}.`,
+      `workflow maxSubagents must be an integer between 1 and ${String(MAX_WORKFLOW_PROGRAM_MAX_SUBAGENTS)}.`,
     );
   }
   if (!Array.isArray(input.agents)) {
-    throw new TypeError('runWorkflowProgram requires an "agents" allowlist.');
+    throw new TypeError('workflow requires an "agents" allowlist.');
+  }
+  if (input.agents.length === 0 || input.agents.length > MAX_WORKFLOW_PROGRAM_AGENTS) {
+    throw new TypeError(
+      `workflow requires between 1 and ${String(MAX_WORKFLOW_PROGRAM_AGENTS)} allowed agents.`,
+    );
   }
   const agents = input.agents.map((agent) => {
     if (typeof agent !== "string" || agent.trim() === "") {
-      throw new TypeError("runWorkflowProgram agent names must be non-empty strings.");
+      throw new TypeError("workflow agent names must be non-empty strings.");
     }
     return agent;
   });
   if (new Set(agents).size !== agents.length) {
-    throw new TypeError("runWorkflowProgram agent names must be unique.");
+    throw new TypeError("workflow agent names must be unique.");
   }
   const continuationSecurity = parseJsonObject(input.continuationSecurity);
   if (typeof continuationSecurity.signingKey !== "string") {

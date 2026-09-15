@@ -6,7 +6,7 @@ import {
   readWorkflowProgramCallInterrupt,
   type WorkflowProgramInput,
 } from "#execution/dynamic-workflow/schema.js";
-import { runWorkflowProgram } from "#execution/dynamic-workflow/workflow.js";
+import { runJsProgram } from "#execution/dynamic-workflow/workflow.js";
 
 const continuationSecurity = {
   maxAgeMs: 60_000,
@@ -119,14 +119,14 @@ try {
     } as never;
 
     await expect(
-      runWorkflowProgram('return ctx.agent("agent", { message: "not allowed" });', ctx, {
+      runJsProgram('return ctx.agent("agent", { message: "not allowed" });', ctx, {
         agents: ["researcher"],
       }),
     ).rejects.toThrow("WORKFLOW_PROGRAM_AGENT_NOT_ALLOWED");
     expect(agent).not.toHaveBeenCalled();
 
     await expect(
-      runWorkflowProgram(
+      runJsProgram(
         `
 try {
   await ctx.agent("researcher", { message: "one" });

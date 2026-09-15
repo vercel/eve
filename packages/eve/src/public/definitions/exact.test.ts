@@ -238,7 +238,7 @@ function typeOnlyFixtures(): void {
 
   defineAgent({
     limits: {
-      // @ts-expect-error Generated-program fan-out is configured by runWorkflowProgram.
+      // @ts-expect-error Generated-program fan-out is configured by the workflow factory.
       maxSubagents: 6,
     },
     model: "anthropic/claude-sonnet-5",

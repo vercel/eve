@@ -99,29 +99,22 @@ workflow and step modules reachable from the agent's runtime modules. Unrelated 
 in the host application stay outside the agent bundle. An unresolved workflow import fails
 the build with the missing import in the error.
 
-### Run a program supplied at runtime
+### Add a runtime-generated workflow tool
 
-Call `runWorkflowProgram` inside a workflow tool when the tool's input contains a JavaScript
-function body produced at runtime:
+Create `agent/tools/workflow.ts` and export the provided `workflow` factory when the model should
+supply the JavaScript program at runtime:
 
-```ts title="agent/tools/run-program.ts"
-import { defineWorkflowTool, runWorkflowProgram } from "eve/tools";
-import { z } from "zod";
+```ts title="agent/tools/workflow.ts"
+import { workflow } from "eve/tools/workflow";
 
-const agents = ["ticket-triage", "ticket-review"] as const;
-
-export default defineWorkflowTool({
-  description:
-    "Run JavaScript with ctx.agent(name, input). Available agents: ticket-triage, ticket-review.",
-  inputSchema: z.object({ js: z.string() }),
-  async execute({ js }, ctx) {
-    "use workflow";
-    return runWorkflowProgram(js, ctx, { agents, maxSubagents: 20 });
-  },
+export default workflow({
+  agents: ["ticket-triage", "ticket-review"],
+  maxSubagents: 20,
 });
 ```
 
-The supplied source is an async function body. Its only host capability is
+The tool description lists the allowed agents automatically. The model supplies an async function
+body through the tool's `js` input. Its only host capability is
 `ctx.agent(name, { message, agentId?, outputSchema? })`. For example:
 
 ```js
@@ -132,11 +125,10 @@ const [triage, review] = await Promise.all([
 return { triage, review };
 ```
 
-`agents` is a required trusted allowlist. Describing an agent in the tool description does not
-authorize it. `maxSubagents` defaults to `100` and must be an integer from `1` through `128`.
-The generated program cannot access the workflow context, session state, credentials, imports,
-or ordinary tools. Agent authorization, questions, approvals, cancellation, and `agentId`
-continuation use the same owner-managed behavior as direct `ctx.agent` calls.
+`agents` is a required trusted allowlist of `1` through `128` unique names. `maxSubagents` defaults
+to `100` and must be an integer from `1` through `128`. The generated program cannot access the workflow context, session state,
+credentials, imports, or ordinary tools. Agent authorization, questions, approvals, cancellation,
+and `agentId` continuation use the same owner-managed behavior as direct `ctx.agent` calls.
 
 The sandbox resumes after every pending call in the current batch settles. `Promise.all` supports
 fan-out followed by fan-in, but `Promise.race` does not resume after only the first child settles.
@@ -145,8 +137,8 @@ The program must return a JSON-serializable value.
 
 ### Migrate from `experimental_workflow`
 
-The experimental uppercase `Workflow` framework tool and the `eve/tools/workflow` entry point have
-been removed. Replace the sentinel in `agent/tools/workflow.ts`:
+The experimental uppercase `Workflow` framework tool and its exports have been removed. Replace the
+old sentinel:
 
 ```diff
 -import { experimental_workflow } from "eve/tools/workflow";
@@ -154,29 +146,20 @@ been removed. Replace the sentinel in `agent/tools/workflow.ts`:
 -export default experimental_workflow({ maxSubagents: 20 });
 ```
 
-with an ordinary authored workflow tool:
+with the lowercase factory:
 
 ```ts
-import { defineWorkflowTool, runWorkflowProgram } from "eve/tools";
-import { z } from "zod";
+import { workflow } from "eve/tools/workflow";
 
-const agents = ["ticket-triage", "ticket-review"] as const;
-
-export default defineWorkflowTool({
-  description:
-    "Run JavaScript with ctx.agent(name, input). Available agents: ticket-triage, ticket-review.",
-  inputSchema: z.object({ js: z.string() }),
-  async execute({ js }, ctx) {
-    "use workflow";
-    return runWorkflowProgram(js, ctx, { agents, maxSubagents: 20 });
-  },
+export default workflow({
+  agents: ["ticket-triage", "ticket-review"],
+  maxSubagents: 20,
 });
 ```
 
-The path still gives the authored tool the model-facing name `workflow`. Unlike the removed
-framework tool, eve does not discover or advertise an agent catalog automatically. List the agents
-in the description for the model and in the required trusted `agents` option for authorization.
-Move the old `maxSubagents` value into the `runWorkflowProgram` options.
+The path gives the authored tool the model-facing name `workflow`. eve does not discover or inject
+an agent catalog. Configure every callable agent in the required trusted `agents` option; the tool
+description is generated from that same allowlist.
 
 ### Migrate an authored workflow tool
 

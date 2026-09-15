@@ -24,17 +24,17 @@ export default defineEval({
 
     const second = await (firstTurn?.session ?? t).send(
       [
-        "Use the workflow tool exactly once. In its JavaScript, call the same echo-marker child twice sequentially with ctx.agent",
-        "using the agentId shown in the latest <agents> block, with messages 'blocking second' and 'blocking third'.",
-        "Then attempt a third call with that agentId and message 'blocking over limit'.",
-        "Return all three inline results and reply with them verbatim as JSON. Do not call echo-marker outside workflow.",
+        "Use the workflow tool exactly once. In its JavaScript, call the same echo-marker child three times sequentially with ctx.agent",
+        "using the agentId shown in the latest <agents> block, with messages 'blocking second', 'blocking third', and 'blocking fourth'.",
+        "Then attempt a fourth call with that agentId and message 'blocking over limit'.",
+        "Catch the fourth call's error, return all three inline results followed by its message, and reply with that four-element array verbatim as JSON. Do not call echo-marker outside workflow.",
       ].join(" "),
     );
     second.expectOk();
 
     t.succeeded();
     t.calledTool("workflow", { count: 2 });
-    t.calledSubagent("echo-marker", { count: 3 });
+    t.calledSubagent("echo-marker", { count: 4 });
     t.eventsSatisfy("all workflow-program calls continue one child session", (events) => {
       const childSessionIds = events.flatMap((event) =>
         event.type === "subagent.called" && event.data.name === "echo-marker"

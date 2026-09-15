@@ -10,7 +10,7 @@ vi.mock("#execution/dynamic-workflow/program-step.js", async (importOriginal) =>
 
 import {
   MAX_WORKFLOW_PROGRAM_MAX_SUBAGENTS,
-  runWorkflowProgram,
+  runJsProgram,
 } from "#execution/dynamic-workflow/workflow.js";
 
 const pending = {
@@ -28,7 +28,7 @@ const ctx = {
 } as never;
 const options = { agents: ["researcher"], maxSubagents: 2 } as const;
 
-describe("runWorkflowProgram", () => {
+describe("runJsProgram", () => {
   beforeEach(() => vi.resetAllMocks());
 
   it("delegates allowlisted interrupts and resumes the sandbox", async () => {
@@ -37,7 +37,7 @@ describe("runWorkflowProgram", () => {
       .mockResolvedValueOnce({ output: { result: "done" }, status: "completed" });
     agent.mockResolvedValue({ result: "child" });
 
-    await expect(runWorkflowProgram("return 1", ctx, options)).resolves.toEqual({ result: "done" });
+    await expect(runJsProgram("return 1", ctx, options)).resolves.toEqual({ result: "done" });
     expect(agent).toHaveBeenCalledWith("researcher", { message: "one" });
     expect(mocks.runWorkflowProgramStep).toHaveBeenLastCalledWith(
       expect.objectContaining({
@@ -70,7 +70,7 @@ describe("runWorkflowProgram", () => {
       call.message === "one" ? first.promise : second.promise,
     );
 
-    const result = runWorkflowProgram("return 1", ctx, options);
+    const result = runJsProgram("return 1", ctx, options);
     await vi.waitFor(() => expect(agent).toHaveBeenCalledTimes(2));
     first.resolve("one");
     await Promise.resolve();
@@ -87,7 +87,7 @@ describe("runWorkflowProgram", () => {
       .mockResolvedValueOnce({ output: "caught", status: "completed" });
     agent.mockRejectedValue(new Error("child failed"));
 
-    await expect(runWorkflowProgram("return 1", ctx, options)).resolves.toBe("caught");
+    await expect(runJsProgram("return 1", ctx, options)).resolves.toBe("caught");
     expect(mocks.runWorkflowProgramStep).toHaveBeenLastCalledWith(
       expect.objectContaining({
         resume: {
@@ -114,7 +114,7 @@ describe("runWorkflowProgram", () => {
       })
       .mockResolvedValueOnce({ output: "blocked", status: "completed" });
 
-    await expect(runWorkflowProgram("return 1", ctx, options)).resolves.toBe("blocked");
+    await expect(runJsProgram("return 1", ctx, options)).resolves.toBe("blocked");
     expect(agent).not.toHaveBeenCalled();
     expect(mocks.runWorkflowProgramStep).toHaveBeenLastCalledWith(
       expect.objectContaining({
@@ -142,7 +142,7 @@ describe("runWorkflowProgram", () => {
       .mockResolvedValueOnce({ output: "limited", status: "completed" });
     agent.mockResolvedValueOnce("one").mockResolvedValueOnce("two");
 
-    await expect(runWorkflowProgram("return 1", ctx, options)).resolves.toBe("limited");
+    await expect(runJsProgram("return 1", ctx, options)).resolves.toBe("limited");
     expect(agent).toHaveBeenCalledTimes(2);
     expect(mocks.runWorkflowProgramStep).toHaveBeenLastCalledWith(
       expect.objectContaining({
@@ -161,12 +161,12 @@ describe("runWorkflowProgram", () => {
 
   it("validates trusted helper options", async () => {
     await expect(
-      runWorkflowProgram("return 1", ctx, {
+      runJsProgram("return 1", ctx, {
         agents: ["researcher", "researcher"],
       }),
     ).rejects.toThrow("must be unique");
     await expect(
-      runWorkflowProgram("return 1", ctx, {
+      runJsProgram("return 1", ctx, {
         agents: [],
         maxSubagents: MAX_WORKFLOW_PROGRAM_MAX_SUBAGENTS + 1,
       }),
@@ -191,7 +191,7 @@ describe("runWorkflowProgram", () => {
       throw new Error("child stopped");
     });
 
-    await expect(runWorkflowProgram("return 1", cancelledCtx, options)).rejects.toThrow(
+    await expect(runJsProgram("return 1", cancelledCtx, options)).rejects.toThrow(
       "owner cancelled",
     );
     expect(mocks.runWorkflowProgramStep).toHaveBeenCalledTimes(1);
