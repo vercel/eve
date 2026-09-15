@@ -8,10 +8,10 @@ const registry = {
   worlds: [{ name: "vercel" }, { name: "postgres", package: "world-postgres" }],
 };
 
-function discover(packageJson) {
+function discover(packageJson, additionalFixtures = []) {
   return discoverE2eFixtures({
     registry,
-    fixtures: [{ name: "fixture", dir: "fixtures/fixture", packageJson }],
+    fixtures: [{ name: "fixture", dir: "fixtures/fixture", packageJson }, ...additionalFixtures],
   });
 }
 
@@ -28,17 +28,25 @@ test("omitted e2e.worlds selects every registered world", () => {
   ]);
 });
 
-test("an empty e2e.worlds array selects no worlds", () => {
-  const result = discover({ e2e: { worlds: [] } });
-
-  assert.deepEqual(worldMatrix(result, "vercel"), []);
-  assert.deepEqual(worldMatrix(result, "postgres"), []);
+test("a registered world must retain at least one fixture", () => {
+  assert.throws(
+    () => discover({ e2e: { worlds: [] } }),
+    /No e2e fixtures select the registered world "vercel"/u,
+  );
 });
 
 test("a valid e2e.worlds subset selects only that world", () => {
-  const result = discover({ e2e: { worlds: ["postgres"] } });
+  const result = discover({ e2e: { worlds: ["postgres"] } }, [
+    {
+      name: "vercel-fixture",
+      dir: "fixtures/vercel-fixture",
+      packageJson: { e2e: { worlds: ["vercel"] } },
+    },
+  ]);
 
-  assert.deepEqual(worldMatrix(result, "vercel"), []);
+  assert.deepEqual(worldMatrix(result, "vercel"), [
+    { name: "vercel-fixture", dir: "fixtures/vercel-fixture" },
+  ]);
   assert.deepEqual(worldMatrix(result, "postgres"), [
     { name: "fixture", dir: "fixtures/fixture", world_package: "world-postgres" },
   ]);

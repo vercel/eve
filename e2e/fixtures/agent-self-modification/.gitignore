@@ -10,3 +10,4 @@ dist
 *.tsbuildinfo
 .env*.local
 /agent/subagents/self-modification/
+/.eve-self-modification-eval.lock/

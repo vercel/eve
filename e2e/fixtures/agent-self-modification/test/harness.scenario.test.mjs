@@ -330,7 +330,30 @@ test("separate eval bundles serialize cleanup before the next source snapshot", 
   }
 });
 
-test("a failed eval restores source and preserves the original failure", async () => {
+test("checkout lock rejects another eval process before source mutation", async () => {
+  const root = await mkdtemp(join(tmpdir(), "eve-selfmod-locked-"));
+  const cwd = process.cwd();
+  await mkdir(join(root, "agent"));
+  await mkdir(join(root, ".eve-self-modification-eval.lock"));
+  await writeFile(join(root, "agent", "instructions.md"), "baseline");
+  process.chdir(root);
+  try {
+    let started = false;
+    await assert.rejects(
+      withSelfModification(context(targetFor()), async () => {
+        started = true;
+      }),
+      /Another self-modification eval owns this checkout/,
+    );
+    assert.equal(started, false);
+    assert.equal(await readFile(join(root, "agent", "instructions.md"), "utf8"), "baseline");
+  } finally {
+    process.chdir(cwd);
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("a failed eval restores source, releases its checkout lock, and preserves the failure", async () => {
   const root = await mkdtemp(join(tmpdir(), "eve-selfmod-failed-"));
   const cwd = process.cwd();
   await mkdir(join(root, "agent"));
@@ -348,6 +371,7 @@ test("a failed eval restores source and preserves the original failure", async (
     );
     assert.equal(await readFile(join(root, "agent", "instructions.md"), "utf8"), "baseline");
     await assert.rejects(readFile(join(root, "agent", "tools", "unexpected.ts")));
+    await assert.rejects(readFile(join(root, ".eve-self-modification-eval.lock", "owner.json")));
   } finally {
     process.chdir(cwd);
     await rm(root, { recursive: true, force: true });
@@ -407,4 +431,36 @@ test("request falls back to a parent-boundary watch when the initial event is mi
   await harness.request("make a change");
   await harness.close();
   await rm(root, { recursive: true, force: true });
+});
+
+test("cleanup failure retains a lock that identifies the source backup", async () => {
+  const root = await mkdtemp(join(tmpdir(), "eve-selfmod-cleanup-failed-"));
+  const cwd = process.cwd();
+  await mkdir(join(root, "agent"));
+  await writeFile(join(root, "agent", "instructions.md"), "baseline");
+  const target = targetFor();
+  target.fetch = async (path) =>
+    path.includes("/suspend?")
+      ? new Response("no", { status: 500 })
+      : response({ revision: "revision" });
+  process.chdir(root);
+  let backupRoot;
+  try {
+    await assert.rejects(
+      withSelfModification(context(target), async (harness) => {
+        await harness.writeSource("instructions.md", "changed");
+      }),
+      /suspend.*failed: 500/,
+    );
+    const owner = JSON.parse(
+      await readFile(join(root, ".eve-self-modification-eval.lock", "owner.json"), "utf8"),
+    );
+    backupRoot = owner.backupRoot;
+    assert.equal(typeof backupRoot, "string");
+    assert.equal(await readFile(join(backupRoot, "agent", "instructions.md"), "utf8"), "baseline");
+  } finally {
+    process.chdir(cwd);
+    await rm(root, { recursive: true, force: true });
+    if (backupRoot) await rm(backupRoot, { recursive: true, force: true });
+  }
 });

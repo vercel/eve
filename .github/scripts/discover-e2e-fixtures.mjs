@@ -60,6 +60,9 @@ export function discoverE2eFixtures({ registry, fixtures }) {
       .map(({ name, dir }) =>
         world.package === undefined ? { name, dir } : { name, dir, world_package: world.package },
       );
+    if (legs.length === 0) {
+      throw new Error(`No e2e fixtures select the registered world "${world.name}".`);
+    }
     outputs.push(`world_matrix_${world.name}=${JSON.stringify(legs)}`);
   }
   return { lines: `${outputs.join("\n")}\n`, modelMatrix, worlds, fixtures: normalizedFixtures };

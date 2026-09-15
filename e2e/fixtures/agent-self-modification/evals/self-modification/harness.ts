@@ -17,6 +17,7 @@ import type { EveEvalContext, EveEvalLiveTurn, EveEvalTurn } from "eve/evals";
 
 const SELF_MODIFICATION_AGENT = "self-modification";
 const CLEANUP_TIMEOUT_MS = 30_000;
+const LOCK_DIRECTORY = ".eve-self-modification-eval.lock";
 // Each eval entry bundles its relative imports separately. Share the lock across those copies.
 const shared = globalThis as typeof globalThis & {
   __eveSelfModificationEvalIsolation?: { previousCleanup: Promise<void>; failure?: unknown };
@@ -45,6 +46,8 @@ export async function withSelfModification(
     release = resolve;
   });
   await preceding;
+  let checkoutLock: Awaited<ReturnType<typeof acquireCheckoutLock>> | undefined;
+  let retainCheckoutLock = false;
   try {
     t.signal.throwIfAborted();
     if (isolation.failure !== undefined) {
@@ -52,7 +55,10 @@ export async function withSelfModification(
         cause: isolation.failure,
       });
     }
-    const harness = await SelfModificationHarness.create(t);
+    checkoutLock = await acquireCheckoutLock(process.cwd());
+    const harness = await SelfModificationHarness.create(t, {
+      onBackupCreated: checkoutLock.recordBackup,
+    });
     let failure: { error: unknown } | undefined;
     try {
       await test(harness);
@@ -63,6 +69,7 @@ export async function withSelfModification(
       await harness.close();
     } catch (error) {
       isolation.failure = error;
+      retainCheckoutLock = true;
       if (failure !== undefined) {
         throw new AggregateError(
           [failure.error, error],
@@ -73,7 +80,11 @@ export async function withSelfModification(
     }
     if (failure !== undefined) throw failure.error;
   } finally {
-    release();
+    try {
+      if (!retainCheckoutLock) await checkoutLock?.release();
+    } finally {
+      release();
+    }
   }
 }
 
@@ -91,10 +102,21 @@ export class SelfModificationHarness {
 
   static async create(
     t: EveEvalContext,
-    sourceRoot = join(process.cwd(), "agent"),
+    sourceRootOrOptions:
+      | string
+      | {
+          sourceRoot?: string;
+          onBackupCreated?: (backupRoot: string) => Promise<void>;
+        } = {},
   ): Promise<SelfModificationHarness> {
+    const options =
+      typeof sourceRootOrOptions === "string"
+        ? { sourceRoot: sourceRootOrOptions }
+        : sourceRootOrOptions;
+    const sourceRoot = options.sourceRoot ?? join(process.cwd(), "agent");
     const backupRoot = await mkdtemp(join(tmpdir(), "eve-selfmod-eval-"));
     try {
+      await options.onBackupCreated?.(backupRoot);
       await cp(sourceRoot, join(backupRoot, "agent"), { recursive: true, verbatimSymlinks: true });
       return new SelfModificationHarness(t, sourceRoot, backupRoot);
     } catch (error) {
@@ -244,6 +266,39 @@ export class SelfModificationHarness {
     if (!response.ok) throw new Error(`Self-modification ${operation} failed: ${response.status}`);
     return response;
   }
+}
+
+async function acquireCheckoutLock(root: string): Promise<{
+  recordBackup: (backupRoot: string) => Promise<void>;
+  release: () => Promise<void>;
+}> {
+  const lockDirectory = join(root, LOCK_DIRECTORY);
+  const owner = { pid: process.pid, startedAt: new Date().toISOString() };
+  try {
+    await mkdir(lockDirectory);
+  } catch (error) {
+    if (error instanceof Error && "code" in error && error.code === "EEXIST") {
+      throw new Error(
+        `Another self-modification eval owns this checkout. Remove ${lockDirectory} only after confirming no eval or development server is mutating it.`,
+      );
+    }
+    throw error;
+  }
+  const writeOwner = (backupRoot?: string) =>
+    writeFile(
+      join(lockDirectory, "owner.json"),
+      `${JSON.stringify({ ...owner, backupRoot }, null, 2)}\n`,
+    );
+  try {
+    await writeOwner();
+  } catch (error) {
+    await rm(lockDirectory, { recursive: true, force: true });
+    throw error;
+  }
+  return {
+    recordBackup: writeOwner,
+    release: () => rm(lockDirectory, { recursive: true, force: true }),
+  };
 }
 
 async function sourceFiles(root: string): Promise<Map<string, Buffer>> {
