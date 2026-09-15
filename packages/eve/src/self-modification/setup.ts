@@ -6,6 +6,12 @@ import { promisify } from "node:util";
 
 import { discoverAgent } from "#discover/discover-agent.js";
 import { stripLogicalPathExtension } from "#discover/filesystem.js";
+import {
+  captureVercel,
+  runVercelCaptureStdout,
+  type VercelCaptureResult,
+} from "#setup/primitives/run-vercel.js";
+import type { VercelProjectReference } from "#setup/project-resolution.js";
 
 import { SELF_MODIFICATION_CONFIG_PATH } from "./git-workspace.js";
 
@@ -30,13 +36,23 @@ export interface DetectedGitRepository {
   readonly remoteKind: "github" | "missing" | "other";
 }
 export interface SelfModificationSetupOperations {
-  attachConnector(connector: string): Promise<void>;
+  attachConnector(connector: string, project: VercelProjectReference): Promise<void>;
   detectChannelNames(): Promise<readonly string[]>;
   detectGitRepository(): Promise<DetectedGitRepository>;
-  findOrCreateConnector(name: string): Promise<string>;
+  findOrCreateConnector(name: string, project: VercelProjectReference): Promise<string>;
   readConfig(): Promise<string | undefined>;
   writeConfig(source: string): Promise<void>;
 }
+
+export interface SelfModificationSetupDependencies {
+  captureVercel: typeof captureVercel;
+  runVercelCaptureStdout: typeof runVercelCaptureStdout;
+}
+
+const defaultDependencies: SelfModificationSetupDependencies = {
+  captureVercel,
+  runVercelCaptureStdout,
+};
 
 export function connectorName(owner: string, repo: string): string {
   return `selfmod-${owner}-${repo}`.toLowerCase().replaceAll(/[^a-z0-9-]/gu, "-");
@@ -124,6 +140,7 @@ export function parseGitHubRemote(remote: string): { owner: string; repo: string
 
 export function defaultSelfModificationSetupOperations(
   appRoot: string,
+  deps: SelfModificationSetupDependencies = defaultDependencies,
 ): SelfModificationSetupOperations {
   const configPath = join(appRoot, SELF_MODIFICATION_CONFIG_PATH);
   return {
@@ -163,13 +180,8 @@ export function defaultSelfModificationSetupOperations(
       }
     },
     writeConfig: (source) => writeFile(configPath, source, "utf8"),
-    async findOrCreateConnector(name) {
-      const listed = await vercel(appRoot, ["connect", "list", "-F", "json"]);
-      if (!listed.ok)
-        throw new Error(
-          "Vercel Connect requires an authenticated Vercel CLI linked to this project.",
-        );
-      const connectors = parseConnectors(listed.stdout);
+    async findOrCreateConnector(name, project) {
+      const connectors = await listGitHubConnectors(appRoot, project, deps.captureVercel);
       const expected = `github/${name}`;
       const existing = connectors.find((connector) => connector.uid === expected);
       if (existing !== undefined) {
@@ -177,39 +189,34 @@ export function defaultSelfModificationSetupOperations(
           throw new Error(`The existing connector ${expected} is not a GitHub connector.`);
         return existing.uid;
       }
-      const created = await vercel(appRoot, [
-        "connect",
-        "create",
-        "github",
-        "--name",
-        name,
-        "-F",
-        "json",
-      ]);
+      const created = await deps.runVercelCaptureStdout(
+        ["connect", "create", "github", "--name", name, "-F", "json", "--scope", project.orgId],
+        { cwd: appRoot },
+      );
       const connector = created.ok ? parseCreatedConnector(created.stdout) : undefined;
       if (connector === undefined || !connector.startsWith("github/"))
         throw new Error("Could not create a GitHub Vercel Connect connector.");
       return connector;
     },
-    async attachConnector(connector) {
-      const link = await readLinkedProject(appRoot);
-      if (link === undefined)
-        throw new Error(
-          "Vercel Connect requires this directory to be linked to a Vercel project. Run `vercel link` and retry.",
-        );
-      const result = await vercel(appRoot, [
-        "connect",
-        "attach",
-        connector,
-        "--project",
-        link.projectId,
-        "--environment",
-        "production",
-        "--yes",
-      ]);
+    async attachConnector(connector, project) {
+      const result = await deps.runVercelCaptureStdout(
+        [
+          "connect",
+          "attach",
+          connector,
+          "--project",
+          project.projectId,
+          "--environment",
+          "production",
+          "--yes",
+          "--scope",
+          project.orgId,
+        ],
+        { cwd: appRoot },
+      );
       if (!result.ok)
         throw new Error(
-          `Could not attach ${connector} to the linked Vercel project for Production.`,
+          `Could not attach ${connector} to the selected Vercel project for Production.`,
         );
     },
   };
@@ -224,11 +231,13 @@ function parseCreatedConnector(stdout: string): string | undefined {
   }
 }
 
-function parseConnectors(stdout: string): { type: string; uid: string }[] {
+function parseConnectorListPage(
+  stdout: string,
+): { connectors: { type: string; uid: string }[]; cursor?: string } | undefined {
   try {
-    const parsed = JSON.parse(stdout) as { connectors?: unknown; uid?: unknown; type?: unknown };
-    const values = Array.isArray(parsed.connectors) ? parsed.connectors : [parsed];
-    return values.flatMap((value) =>
+    const parsed = JSON.parse(stdout) as { connectors?: unknown; cursor?: unknown };
+    if (!Array.isArray(parsed.connectors)) return undefined;
+    const connectors = parsed.connectors.flatMap((value) =>
       typeof value === "object" &&
       value !== null &&
       typeof (value as { uid?: unknown }).uid === "string" &&
@@ -236,27 +245,50 @@ function parseConnectors(stdout: string): { type: string; uid: string }[] {
         ? [{ uid: (value as { uid: string }).uid, type: (value as { type: string }).type }]
         : [],
     );
-  } catch {
-    return [];
-  }
-}
-async function vercel(cwd: string, args: string[]) {
-  try {
-    const result = await runFile("vercel", args, { cwd });
-    return { ok: true, stdout: result.stdout };
-  } catch {
-    return { ok: false, stdout: "" };
-  }
-}
-async function readLinkedProject(appRoot: string): Promise<{ projectId: string } | undefined> {
-  try {
-    const value = JSON.parse(await readFile(join(appRoot, ".vercel", "project.json"), "utf8")) as {
-      projectId?: unknown;
-    };
-    return typeof value.projectId === "string" ? { projectId: value.projectId } : undefined;
+    return typeof parsed.cursor === "string"
+      ? { connectors, cursor: parsed.cursor }
+      : { connectors };
   } catch {
     return undefined;
   }
+}
+
+async function listGitHubConnectors(
+  appRoot: string,
+  project: VercelProjectReference,
+  capture: typeof captureVercel,
+): Promise<{ type: string; uid: string }[]> {
+  const connectors: { type: string; uid: string }[] = [];
+  const seenCursors = new Set<string>();
+  let cursor: string | undefined;
+  do {
+    const args = [
+      "connect",
+      "list",
+      "--all-projects",
+      "--service",
+      "github",
+      "-F",
+      "json",
+      "--scope",
+      project.orgId,
+    ];
+    if (cursor !== undefined) args.push("--next", cursor);
+    const result: VercelCaptureResult = await capture(args, { cwd: appRoot });
+    if (!result.ok)
+      throw new Error(
+        `Could not list GitHub connectors for the selected Vercel project. ${result.failure.message}`,
+      );
+    const page = parseConnectorListPage(result.stdout);
+    if (page === undefined)
+      throw new Error("Vercel returned an invalid GitHub connector list for the selected project.");
+    connectors.push(...page.connectors);
+    if (page.cursor !== undefined && seenCursors.has(page.cursor))
+      throw new Error(`The GitHub connector list repeated cursor ${page.cursor}.`);
+    if (page.cursor !== undefined) seenCursors.add(page.cursor);
+    cursor = page.cursor;
+  } while (cursor !== undefined);
+  return connectors;
 }
 export function repositoryRelativeDirectory(
   repositoryRoot: string,
