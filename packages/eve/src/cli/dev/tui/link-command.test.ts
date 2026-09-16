@@ -41,7 +41,7 @@ describe("runTuiLinkCommand", () => {
     const deps = dependencies({ runLinkFlow });
 
     await expect(runTuiLinkCommand(INPUT, deps)).resolves.toMatchObject({
-      effect: { kind: "model-access-changed" },
+      effect: { kind: "project-linked" },
     });
     expect(deps.runLoginFlow).toHaveBeenCalledOnce();
     expect(runLinkFlow).toHaveBeenCalledTimes(2);

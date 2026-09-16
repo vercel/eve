@@ -31,6 +31,7 @@ export async function runTuiLinkCommand(
         authAlreadyConfirmed: loginConfirmed,
         prompter: input.prompter,
         projectSelection: "create-or-link",
+        quietUnlinkedCredentialNotice: true,
         signal: input.signal,
       });
       break;
@@ -59,6 +60,6 @@ export async function runTuiLinkCommand(
     : {
         message: "Linked this project to Vercel.",
         preserveFlowDiagnostics: false,
-        effect: { kind: "model-access-changed" as const },
+        effect: { kind: "project-linked" as const },
       };
 }

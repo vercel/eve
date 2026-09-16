@@ -36,6 +36,7 @@ import {
   type DevelopmentRuntimeArtifactRefresher,
 } from "#services/dev-client.js";
 import { inspectApplication } from "#services/inspect-application.js";
+import { readVercelProjectLink } from "#internal/vercel/project-link.js";
 import { toErrorMessage } from "#shared/errors.js";
 import { SubagentPump, type SubagentPumpOptions, type SubagentView } from "./subagent-pump.js";
 export type {
@@ -182,6 +183,7 @@ export type AgentTUIStreamEvent =
   | { type: "tool-call"; toolCallId: string; toolName: string; input: unknown }
   | { type: "tool-approval-request"; approvalId: string; toolCallId: string }
   | { type: "tool-result"; toolCallId: string; output: unknown }
+  | { type: "tool-discard"; toolCallId: string }
   | { type: "tool-error"; toolCallId: string; errorText: string }
   | { type: "tool-rejected"; toolCallId: string; reason: string }
   | { type: "error"; errorText: string; hint?: string; detail?: string }
@@ -193,6 +195,8 @@ export type AgentTUITurnState = {
   boundaryEvent?: "session.completed" | "session.failed" | "session.waiting";
   pendingApprovals: AgentTUIToolApprovalRequest[];
   pendingQuestions: InputRequest[];
+  localVercelAuthContinuation?: SetupCommandContinuation;
+  localVercelAuthReplaySafe?: boolean;
   sawSessionFailure: boolean;
   /** Id of the streaming turn, once `turn.started` names it. Scopes cancels. */
   turnId?: string;
@@ -424,8 +428,45 @@ export interface PromptCommandOutcome {
   /** Promotes an outcome to a top-level status. */
   tone?: "success" | "error";
   /** Post-command work after setup settles. */
-  effect?: VercelStatusEffect | { kind: "model-access-changed" };
+  effect?: VercelStatusEffect | { kind: "model-access-changed" } | { kind: "project-linked" };
   cancelled?: true;
+}
+
+interface SetupCommandContinuation {
+  prompt?: string;
+  readonly resumeAfterEffect: "project-linked" | "refresh-identity";
+}
+
+interface QueuedSetupCommand {
+  readonly command: Extract<PromptCommand, { type: "extension" }>;
+  readonly continuation?: SetupCommandContinuation;
+  readonly key: string;
+  readonly suppressSuccessfulTranscript?: true;
+  readonly title: string;
+}
+
+export function setupContinuationPrompt(
+  continuation: SetupCommandContinuation | undefined,
+  outcome: PromptCommandOutcome | undefined,
+): string | undefined {
+  return continuation !== undefined && outcome?.effect?.kind === continuation.resumeAfterEffect
+    ? continuation.prompt
+    : undefined;
+}
+
+export function localVercelAuthRecoveryCommand(linked: boolean): {
+  readonly command: Extract<PromptCommand, { type: "extension" }>;
+  readonly resumeAfterEffect: SetupCommandContinuation["resumeAfterEffect"];
+} {
+  return linked
+    ? {
+        command: { type: "extension", name: "vc:login", argument: "" },
+        resumeAfterEffect: "refresh-identity",
+      }
+    : {
+        command: { type: "extension", name: "link", argument: "" },
+        resumeAfterEffect: "project-linked",
+      };
 }
 
 export interface PromptCommandHandler {
@@ -496,6 +537,8 @@ export type EveTUIRunnerOptions = TuiDisplayOptions & {
   bootDetections?: readonly BootDetection[];
   /** Test seam for the status line's Vercel link probe; defaults to the real one. */
   detectProjectIdentity?: typeof detectProjectIdentity;
+  /** Test seam for first-use Connect recovery routing. */
+  readVercelProjectLink?: typeof readVercelProjectLink;
   /** Test seam for `/info`; defaults to the filesystem application inspector. */
   inspectApplication?: typeof inspectApplication;
   /** Test seam for the off-critical-path boot login probe; defaults to the real one. */
@@ -546,6 +589,7 @@ export class EveTUIRunner {
   readonly #remoteConnection?: RemoteConnectionController;
   readonly #bootDetections: readonly BootDetection[];
   readonly #getVercelAuthStatus: typeof getVercelAuthStatus;
+  readonly #readVercelProjectLink: typeof readVercelProjectLink;
   readonly #inspectApplication: typeof inspectApplication;
   #onBootProgress?: DevBootProgressReporter;
   /** Set when the run loop unwinds, so a late boot login probe cannot paint into a torn-down terminal. */
@@ -584,9 +628,10 @@ export class EveTUIRunner {
   readonly #pendingInputRequests = new Map<string, InputRequest>();
   /** Idle wake result handed from the prompt follower into the normal HITL response loop. */
   #idleInputResult?: AgentTUIStreamResult;
-  /** Registry setups queued by tool results on root or child streams. */
-  readonly #pendingRegistrySetups: string[] = [];
-  #activeRegistrySetup?: string;
+  /** Setup commands queued by tool results on root or child streams. */
+  readonly #pendingSetupCommands: QueuedSetupCommand[] = [];
+  #activeSetupCommandKey?: string;
+  #setupReplayPending = false;
   /** True only while the idle prompt owns terminal input. */
   #readingPrompt = false;
   /**
@@ -692,6 +737,7 @@ export class EveTUIRunner {
     }
     this.#bootDetections = options.bootDetections ?? BOOT_DETECTIONS;
     this.#getVercelAuthStatus = options.getVercelAuthStatus ?? getVercelAuthStatus;
+    this.#readVercelProjectLink = options.readVercelProjectLink ?? readVercelProjectLink;
     this.#inspectApplication = options.inspectApplication ?? inspectApplication;
     if (options.onBootProgress !== undefined) this.#onBootProgress = options.onBootProgress;
     if (options.serverUrl !== undefined) this.#serverUrl = options.serverUrl;
@@ -836,22 +882,31 @@ export class EveTUIRunner {
       if (this.#lifecycle?.signal.aborted === true || this.#renderer.exitRequested?.() === true) {
         return;
       }
-      const pendingRegistrySetup = this.#pendingRegistrySetups[0];
+      const pendingSetupCommand = this.#pendingSetupCommands[0];
       if (
-        pendingRegistrySetup !== undefined &&
+        pendingSetupCommand !== undefined &&
         pendingInputResponses === undefined &&
         this.#idleInputResult === undefined
       ) {
-        this.#pendingRegistrySetups.shift();
-        this.#activeRegistrySetup = pendingRegistrySetup;
+        this.#pendingSetupCommands.shift();
+        this.#activeSetupCommandKey = pendingSetupCommand.key;
+        let outcome: PromptCommandOutcome | undefined;
         try {
-          await this.#openRegistrySetup(pendingRegistrySetup);
+          outcome = await this.#executeExtensionCommand(
+            pendingSetupCommand.command,
+            pendingSetupCommand.title,
+            {
+              trigger: "command",
+              suppressSuccessfulTranscript: pendingSetupCommand.suppressSuccessfulTranscript,
+            },
+          );
         } finally {
-          this.#activeRegistrySetup = undefined;
+          this.#activeSetupCommandKey = undefined;
         }
         followCurrentSession = false;
         streamWithoutPrompt = false;
-        prompt = undefined;
+        prompt = setupContinuationPrompt(pendingSetupCommand.continuation, outcome);
+        this.#setupReplayPending = prompt !== undefined;
         continue;
       }
       if (!streamWithoutPrompt) {
@@ -877,7 +932,7 @@ export class EveTUIRunner {
             prompt = await this.#readPromptFollowingSession(promptOptions);
           } catch (error) {
             if (isInterruptedError(error)) {
-              if (this.#idleInputResult === undefined && this.#pendingRegistrySetups.length === 0) {
+              if (this.#idleInputResult === undefined && this.#pendingSetupCommands.length === 0) {
                 return;
               }
               streamWithoutPrompt = true;
@@ -889,7 +944,7 @@ export class EveTUIRunner {
             this.#readingPrompt = false;
           }
 
-          if (this.#pendingRegistrySetups.length > 0 && this.#idleInputResult === undefined) {
+          if (this.#pendingSetupCommands.length > 0 && this.#idleInputResult === undefined) {
             prompt = undefined;
             continue;
           }
@@ -1102,7 +1157,8 @@ export class EveTUIRunner {
       if (acceptedSessionId !== undefined) {
         this.#renderer.setSessionId?.(acceptedSessionId);
       }
-      let submittedPrompt = prompt;
+      let submittedPrompt = this.#setupReplayPending ? undefined : prompt;
+      this.#setupReplayPending = false;
       let respondedToInputRequest = false;
 
       try {
@@ -1185,7 +1241,18 @@ export class EveTUIRunner {
             continue;
           }
 
-          if (result.turnState && result.turnState.boundaryEvent === undefined) {
+          if (result.turnState?.localVercelAuthContinuation !== undefined) {
+            if (result.turnState.localVercelAuthReplaySafe === true) {
+              result.turnState.localVercelAuthContinuation.prompt = submittedPrompt;
+            }
+            this.#failedSession = this.#session;
+          }
+
+          if (
+            result.turnState &&
+            result.turnState.boundaryEvent === undefined &&
+            result.turnState.localVercelAuthContinuation === undefined
+          ) {
             if (!result.turnState.aborted) {
               const strandedSessionId = this.#session?.state.sessionId;
               this.#renderer.renderNotice?.(
@@ -1232,7 +1299,10 @@ export class EveTUIRunner {
       // failure, or a user interrupt). Replace it with a fresh one so the
       // next prompt isn't sent into a dead session, but keep the transcript
       // on screen. Server-side context is gone with the old session.
-      this.#recoverFailedSession(result.turnState?.aborted === true);
+      this.#recoverFailedSession(
+        result.turnState?.aborted === true,
+        result.turnState?.localVercelAuthContinuation !== undefined,
+      );
     }
   }
 
@@ -1254,13 +1324,14 @@ export class EveTUIRunner {
   }
 
   /** Clears one failure marker and replaces its source only by identity. */
-  #recoverFailedSession(aborted = false): void {
+  #recoverFailedSession(aborted = false, silent = false): void {
     const failedSession = this.#failedSession;
     if (failedSession === undefined) return;
     this.#failedSession = undefined;
     if (this.#session !== failedSession) return;
 
     this.#startNewSession();
+    if (silent) return;
     if (aborted) {
       this.#renderer.renderNotice?.(
         "Stopped following the turn and started a new session. Earlier context was cleared; the interrupted turn may still be running on the server.",
@@ -1622,6 +1693,14 @@ export class EveTUIRunner {
           this.#appRoot === undefined
             ? undefined
             : async (address) => this.#queueRegistrySetup(address),
+        onLocalVercelAuthRequired:
+          this.#appRoot === undefined
+            ? undefined
+            : async () => {
+                const continuation = await this.#queueLocalVercelAuthRecovery();
+                await this.#requestTurnCancellation(turnState, sourceSession);
+                return continuation;
+              },
         onTerminalFailure: () => {
           this.#failedSession = sourceSession;
         },
@@ -1631,20 +1710,48 @@ export class EveTUIRunner {
     };
   }
 
-  #queueRegistrySetup(address: string): void {
-    if (this.#activeRegistrySetup === address || this.#pendingRegistrySetups.includes(address)) {
-      return;
+  async #queueLocalVercelAuthRecovery(): Promise<SetupCommandContinuation> {
+    const linked = (await this.#readVercelProjectLink(this.#appRoot!)) !== undefined;
+    const recovery = localVercelAuthRecoveryCommand(linked);
+    const continuation: SetupCommandContinuation = {
+      resumeAfterEffect: recovery.resumeAfterEffect,
+    };
+    if (linked) {
+      this.#queueSetupCommand({
+        command: recovery.command,
+        continuation,
+        key: "vercel-login",
+        title: "Log in to Vercel",
+      });
+    } else {
+      this.#queueSetupCommand({
+        command: recovery.command,
+        continuation,
+        key: "project-link",
+        suppressSuccessfulTranscript: true,
+        title: "Link to Vercel",
+      });
     }
-    this.#pendingRegistrySetups.push(address);
-    if (this.#readingPrompt) this.#renderer.suspendPromptForInput?.();
+    return continuation;
   }
 
-  async #openRegistrySetup(address: string): Promise<void> {
-    await this.#executeExtensionCommand(
-      { type: "extension", name: "add", argument: address },
-      "Add to your agent",
-      { trigger: "command" },
-    );
+  #queueRegistrySetup(address: string): void {
+    this.#queueSetupCommand({
+      command: { type: "extension", name: "add", argument: address },
+      key: `registry:${address}`,
+      title: "Add to your agent",
+    });
+  }
+
+  #queueSetupCommand(input: QueuedSetupCommand): void {
+    if (
+      this.#activeSetupCommandKey === input.key ||
+      this.#pendingSetupCommands.some((pending) => pending.key === input.key)
+    ) {
+      return;
+    }
+    this.#pendingSetupCommands.push(input);
+    if (this.#readingPrompt) this.#renderer.suspendPromptForInput?.();
   }
 
   async #renderSetupIssues(info: AgentInfoResult | undefined): Promise<void> {
@@ -1694,7 +1801,10 @@ export class EveTUIRunner {
    * once `/vc:login` succeeds) instead of lingering stale. Authoritative: unlike
    * the boot probe it re-reads detections and auth and is not stale-guarded.
    */
-  async #refreshSetupAttention(info: AgentInfoResult | undefined): Promise<void> {
+  async #refreshSetupAttention(
+    info: AgentInfoResult | undefined,
+    options: { readonly refreshAuth?: boolean } = {},
+  ): Promise<void> {
     const appRoot = this.#appRoot;
     if (appRoot === undefined) return;
     if (this.#renderer.renderSetupWarning === undefined) return;
@@ -1702,10 +1812,12 @@ export class EveTUIRunner {
     if (info !== undefined) context.info = info;
     try {
       this.#bootIssues = await detectSetupIssues(context, this.#bootDetections);
-      const status = await this.#getVercelAuthStatus(appRoot, {
-        signal: this.#authProbeAbort.signal,
-      });
-      this.#authIssue = authIssueForStatus(status);
+      if (options.refreshAuth !== false) {
+        const status = await this.#getVercelAuthStatus(appRoot, {
+          signal: this.#authProbeAbort.signal,
+        });
+        this.#authIssue = authIssueForStatus(status);
+      }
     } catch {
       return;
     }
@@ -1793,6 +1905,14 @@ export class EveTUIRunner {
       this.#vercelStatus?.applyEffect({ kind: "refresh-identity" });
       this.#authHintStale = true;
       await this.#refreshModelAccess();
+      return;
+    }
+    if (effect?.kind === "project-linked") {
+      this.#authHintStale = true;
+      this.#authIssue = undefined;
+      this.#paintSetupAttention();
+      this.#vercelStatus?.applyEffect({ kind: "refresh-identity" });
+      await this.#refreshModelAccess(false);
       return;
     }
     if (effect === undefined) return;
@@ -2031,14 +2151,14 @@ export class EveTUIRunner {
    * shared by the status bar and setup detector. The Vercel auth probe stays
    * off the prompt path.
    */
-  async #refreshModelAccess(): Promise<void> {
+  async #refreshModelAccess(refreshAuth = true): Promise<void> {
     const appRoot = this.#appRoot;
     if (appRoot === undefined) return;
 
     await loadDevelopmentEnvironmentFiles(appRoot);
     await this.#runtimeArtifacts?.refreshAfterSourceChange({});
     const refreshedInfo = this.#replaceAgentInfo(await this.#readAgentInfo());
-    void this.#refreshSetupAttention(refreshedInfo);
+    void this.#refreshSetupAttention(refreshedInfo, { refreshAuth });
   }
 
   async #readAgentInfo(): Promise<AgentInfoResult | undefined> {
@@ -2179,6 +2299,7 @@ type EveStreamTranslatorInput = {
   onConnectionAuthCompleted?: (event: AuthorizationCompletedStreamEvent) => void;
   /** Opens a setup-bearing registry item in the existing `/add` flow. */
   onRegistryHandoff?: (address: string) => Promise<void>;
+  onLocalVercelAuthRequired?: () => Promise<SetupCommandContinuation>;
   onTerminalFailure?: (event: SessionFailedStreamEvent) => void;
   /**
    * Replaces a failure's structured hint with a surface-local one (the
@@ -2189,6 +2310,31 @@ type EveStreamTranslatorInput = {
 };
 
 const SELFMOD_REGISTRY_ADD_TOOL = "selfmod__registry_add";
+const CONNECTION_SEARCH_TOOL = "connection_search";
+
+export function connectionSearchRequiresLocalVercelAuth(
+  toolName: string | undefined,
+  input: unknown,
+  output: unknown,
+): boolean {
+  if (
+    toolName !== CONNECTION_SEARCH_TOOL ||
+    typeof input !== "object" ||
+    input === null ||
+    typeof (input as { connection?: unknown }).connection !== "string" ||
+    (input as { connection: string }).connection.length === 0 ||
+    !Array.isArray(output) ||
+    output.length === 0
+  ) {
+    return false;
+  }
+  return output.every(
+    (item) =>
+      typeof item === "object" &&
+      item !== null &&
+      (item as { requiresLocalVercelAuth?: unknown }).requiresLocalVercelAuth === true,
+  );
+}
 
 /** Returns the registry address carried by a self-modification terminal handoff. */
 export function registryHandoffAddress(
@@ -2223,12 +2369,14 @@ async function* eveEventsToTUIStream(
     onConnectionAuthRequired,
     onConnectionAuthCompleted,
     onRegistryHandoff,
+    onLocalVercelAuthRequired,
     onTerminalFailure,
     failureHintOverride,
   } = input;
   const textParts = new Map<string, StreamPartState>();
   const reasoningParts = new Map<string, StreamPartState>();
   const toolNames = new Map<string, string>();
+  const toolInputs = new Map<string, unknown>();
   // Dropping re-delivered events here means every case below is a new emission.
   const seenEvents = createEventDeduper();
   // Counts `step.started` events. The harness reuses `stepIndex` across the
@@ -2253,6 +2401,15 @@ async function* eveEventsToTUIStream(
     }
 
     if (visibleTurnCompleted && isPostTurnVisibleEvent(event)) {
+      continue;
+    }
+    if (
+      turnState.localVercelAuthContinuation !== undefined &&
+      event.type !== "turn.cancelled" &&
+      event.type !== "session.failed" &&
+      event.type !== "session.waiting" &&
+      event.type !== "session.completed"
+    ) {
       continue;
     }
 
@@ -2423,6 +2580,7 @@ async function* eveEventsToTUIStream(
 
         for (const action of actions) {
           toolNames.set(action.callId, action.toolName);
+          toolInputs.set(action.callId, action.input);
           if (knownToolCalls.has(action.callId)) continue;
           knownToolCalls.add(action.callId);
           yield {
@@ -2443,6 +2601,7 @@ async function* eveEventsToTUIStream(
         for (const request of requests) {
           const toolCallId = request.action.callId;
           toolNames.set(toolCallId, request.action.toolName);
+          toolInputs.set(toolCallId, request.action.input);
 
           // The session-limit continuation is harness-authored — no model
           // tool call exists behind it, so fabricating a transcript entry
@@ -2492,12 +2651,18 @@ async function* eveEventsToTUIStream(
         switch (resultEvent.data.status) {
           case "completed": {
             const output = resultEvent.data.result.output;
+            const toolName = toolNames.get(callId);
+            if (connectionSearchRequiresLocalVercelAuth(toolName, toolInputs.get(callId), output)) {
+              yield { type: "tool-discard", toolCallId: callId };
+              turnState.localVercelAuthContinuation = await onLocalVercelAuthRequired?.();
+              break;
+            }
             yield {
               type: "tool-result",
               toolCallId: callId,
               output,
             };
-            const address = registryHandoffAddress(toolNames.get(callId), output);
+            const address = registryHandoffAddress(toolName, output);
             if (address !== undefined) await onRegistryHandoff?.(address);
             break;
           }
@@ -2565,6 +2730,10 @@ async function* eveEventsToTUIStream(
       case "turn.cancelled":
         // Explicit cooperative cancellation preserves the session.
         // `session.waiting` follows and finishes the stream normally.
+        if (turnState.localVercelAuthContinuation !== undefined) {
+          turnState.localVercelAuthReplaySafe = true;
+          break;
+        }
         onTurnCancelled?.(event.data.turnId);
         yield* closeOpenParts(textParts, "assistant-complete", stepEpoch);
         yield* closeOpenParts(reasoningParts, "reasoning-complete", stepEpoch);

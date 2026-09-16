@@ -16,6 +16,8 @@ import { ConnectionAuthorizationFailedError } from "#connections/errors.js";
 import type { AuthorizationDefinition, ConnectionPrincipal } from "#shared/connection-types.js";
 import { isVercelOidcIssuer } from "#shared/vercel-project.js";
 
+import { LocalVercelAuthRequiredError } from "./local-vercel-auth-required.js";
+
 /**
  * Stable string key identifying one principal within a connection's
  * per-principal token cache.
@@ -96,8 +98,11 @@ export function resolveConnectionPrincipalFromAuth(
   }
 
   if (current === null || current === undefined || current.principalType !== "user") {
+    if (authorization.vercelConnect !== undefined && current?.authenticator === "local-dev") {
+      throw new LocalVercelAuthRequiredError(connectionName);
+    }
     throw new ConnectionAuthorizationFailedError(connectionName, {
-      message: buildUserPrincipalRequiredMessage(connectionName, authorization, ctx, current),
+      message: buildUserPrincipalRequiredMessage(connectionName, ctx, current),
       reason: "principal_required",
       retryable: false,
     });
@@ -130,7 +135,6 @@ function isVercelDevelopmentUser(current: SessionAuthContext): boolean {
 
 function buildUserPrincipalRequiredMessage(
   connectionName: string,
-  authorization: AuthorizationDefinition,
   ctx: AlsContext | undefined,
   current: SessionAuthContext | null | undefined,
 ): string {
@@ -139,10 +143,6 @@ function buildUserPrincipalRequiredMessage(
     detail = "it was invoked outside an eve context, so no authenticated user can be resolved.";
   } else if (current === undefined || current === null) {
     detail = "the active session has no authenticated user.";
-  } else if (authorization.vercelConnect !== undefined && current.authenticator === "local-dev") {
-    detail =
-      "the local request fell back to local development access instead of authenticating a Vercel user. " +
-      "Ensure this directory is linked and the Vercel CLI can mint a Vercel OIDC token, then retry.";
   } else {
     detail = `the active session is scoped to "${current.principalType}", not an authenticated user.`;
   }

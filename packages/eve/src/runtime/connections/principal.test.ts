@@ -7,6 +7,7 @@ import {
   isConnectionAuthorizationFailedError,
 } from "#connections/errors.js";
 import { principalKey, resolveConnectionPrincipal } from "#runtime/connections/principal.js";
+import { isLocalVercelAuthRequiredError } from "#runtime/connections/local-vercel-auth-required.js";
 import type { AuthorizationDefinition } from "#shared/connection-types.js";
 
 function ctxWithAuth(current: SessionAuthContext | null): ContextContainer {
@@ -199,7 +200,7 @@ describe("resolveConnectionPrincipal", () => {
     ).toThrow(/active session is scoped to "service"/);
   });
 
-  it("explains when a local Connect request has no Vercel user", () => {
+  it("requires project linking when a local Connect request has no Vercel user", () => {
     const ctx = ctxWithAuth({
       attributes: {},
       authenticator: "local-dev",
@@ -207,9 +208,13 @@ describe("resolveConnectionPrincipal", () => {
       principalType: "local-dev",
     });
 
-    expect(() =>
-      contextStorage.run(ctx, () => resolveConnectionPrincipal("notion", connectUserAuthDef)),
-    ).toThrow(/fell back to local development access/);
+    expect.assertions(2);
+    try {
+      contextStorage.run(ctx, () => resolveConnectionPrincipal("notion", connectUserAuthDef));
+    } catch (error) {
+      expect(isLocalVercelAuthRequiredError(error)).toBe(true);
+      expect((error as Error).message).toContain("requires local Vercel authentication");
+    }
   });
 
   it("accepts an explicit ctx argument and bypasses AsyncLocalStorage", () => {

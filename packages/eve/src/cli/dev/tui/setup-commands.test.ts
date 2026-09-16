@@ -202,10 +202,14 @@ describe("runTuiSetupCommand", () => {
     await expect(run({ command: "link", flows })).resolves.toEqual({
       message: "Linked this project to Vercel.",
       preserveFlowDiagnostics: false,
-      effect: { kind: "model-access-changed" },
+      effect: { kind: "project-linked" },
     });
     expect(flows.runLinkFlow).toHaveBeenCalledWith(
-      expect.objectContaining({ appRoot: APP_ROOT, projectSelection: "create-or-link" }),
+      expect.objectContaining({
+        appRoot: APP_ROOT,
+        projectSelection: "create-or-link",
+        quietUnlinkedCredentialNotice: true,
+      }),
     );
   });
 
