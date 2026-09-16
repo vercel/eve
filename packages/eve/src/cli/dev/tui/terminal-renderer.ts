@@ -580,7 +580,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
   /**
    * Provenance of the next runner-submitted prompt, remembered between
    * {@link takeQueuedPrompt} and the echo in {@link #addSubmittedPrompt} so
-   * the user block can carry its steer/queue gutter arrow.
+   * the user block can use the steering gutter color.
    */
   #nextSubmittedPromptOrigin?: "steer" | "queue";
   /** True once this stream's prompt requested cancellation. */
@@ -952,7 +952,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
    * Consumes the next prompt produced by mid-turn input — the staged Esc
    * steer message, or the whole queue coalesced into one. The runner calls
    * this at a clean turn boundary and submits the result directly; the
-   * remembered origin marks the echoed user block with its gutter arrow.
+   * remembered origin determines the echoed user block's gutter color.
    */
   takeQueuedPrompt(): string | undefined {
     const steering = this.#messageQueue.view().steering;

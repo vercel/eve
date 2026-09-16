@@ -71,12 +71,7 @@ export interface Block {
   subtitle?: string;
   /** Main multi-line content (markdown for prose, plain for logs). */
   body?: string;
-  /**
-   * User blocks only: how a mid-turn message reached the transcript. A
-   * steered message (Esc pop, displacing the running turn) marks itself
-   * with the accent arrow above its bar; a queued one (drained at the turn
-   * boundary) carries the arrow below. Absent for ordinary typed prompts.
-   */
+  /** User blocks only: steered messages use a yellow gutter. */
   promptOrigin?: "steer" | "queue";
   /** Reasoning trace shown above `body` (subagent steps). */
   reasoning?: string;
@@ -269,16 +264,12 @@ function renderBody(
 }
 
 function renderUser(block: Block, width: number, theme: Theme): string[] {
-  const bar = theme.colors.cyan(theme.glyph.user);
+  const bar =
+    block.promptOrigin === "steer"
+      ? theme.colors.yellow(theme.glyph.user)
+      : theme.colors.cyan(theme.glyph.user);
   const lines = wrap(block.body ?? "", width - 2);
-  const rows = lines.map((line) => `${bar} ${line}`);
-  // Mid-turn provenance rides the gutter in the bar's own accent: a steered
-  // message pushed itself ahead of the running turn (arrow above), a queued
-  // one waited for the boundary (arrow below).
-  const arrow = theme.colors.cyan(theme.glyph.arrowUp);
-  if (block.promptOrigin === "steer") return [arrow, ...rows];
-  if (block.promptOrigin === "queue") return [...rows, arrow];
-  return rows;
+  return lines.map((line) => `${bar} ${line}`);
 }
 
 function renderProse(

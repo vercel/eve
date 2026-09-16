@@ -2216,7 +2216,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
     renderer.shutdown();
   });
 
-  it("marks steered and queued prompts with their provenance arrow", async () => {
+  it("renders steered and queued prompts without provenance arrow rows", async () => {
     const { screen, input, renderer } = makeRenderer();
     const closedStream = () =>
       new ReadableStream<AgentTUIStreamEvent>({
@@ -2253,7 +2253,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
     expect(renderer.takeQueuedPrompt()).toBeUndefined();
     let lines = screen.snapshot().split("\n");
     const steerIndex = lines.findIndex((line) => line.includes("│ go north"));
-    expect(lines[steerIndex - 1]?.trim()).toBe("↑");
+    expect(lines[steerIndex - 1]?.trim()).not.toBe("↑");
 
     // Queue: a message that waited for the natural boundary.
     let secondController: ReadableStreamDefaultController<AgentTUIStreamEvent> | undefined;
@@ -2286,7 +2286,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
     );
     lines = screen.snapshot().split("\n");
     const queueIndex = lines.findIndex((line) => line.includes("│ go south"));
-    expect(lines[queueIndex + 1]?.trim()).toBe("↑");
+    expect(lines[queueIndex + 1]?.trim()).not.toBe("↑");
 
     // The ordinary typed prompts carry no arrow.
     const typedIndex = lines.findIndex((line) => line.includes("│ long task"));
