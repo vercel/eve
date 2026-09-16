@@ -277,6 +277,11 @@ describe("toolResultFrom", () => {
         'Conflicting definitions: connection "first" from "connections/first.ts" and connection "second" from "connections/second.ts".',
       ),
     );
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining(
+        "Multiple authored definitions share that fallback identity, so only lookups that fall back to it will not match.",
+      ),
+    );
     expect(toolResultFrom(toolResult("first__search", []), first)).toEqual({
       callId: "call_1",
       connectionToolName: "search",

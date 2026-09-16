@@ -28,8 +28,8 @@ export function registerDefinitionSource(key: string, entry: DefinitionSourceEnt
         [
           `eve could not assign a unique toolResultFrom identity for ${JSON.stringify(key)}.`,
           `Conflicting definitions: ${formatDefinitionSourceForWarning(existing)} and ${formatDefinitionSourceForWarning(entry)}.`,
-          "Multiple authored definitions share that fallback identity, so toolResultFrom will not match through it.",
-          "Use the original definition object loaded by eve so source-derived identity can be used instead.",
+          "Multiple authored definitions share that fallback identity, so only lookups that fall back to it will not match.",
+          "Definitions loaded by eve resolve through their source identity, so use the original definition object loaded by eve.",
         ].join(" "),
       );
     }
