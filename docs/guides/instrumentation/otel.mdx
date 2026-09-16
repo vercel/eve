@@ -74,8 +74,11 @@ invoke_agent <agent>
 ```
 
 Each turn starts a new trace. The first subagent trace links to its caller with
-`eve.link.type=agent.dispatch`. Use `gen_ai.conversation.id` to find the traces
-for one conversation in your destination's span-search surface.
+`eve.link.type=agent.dispatch`; the link is not an authorization grant. For a
+remote agent, `trustedForwarders` lets the receiver accept the sender's session
+lineage and trace-content policy. See [Remote agents](../guides/remote-agents#preserving-trace-content).
+Use `gen_ai.conversation.id` to find the traces for one conversation in your
+destination's span-search surface.
 
 ## Manage built-in destinations
 
