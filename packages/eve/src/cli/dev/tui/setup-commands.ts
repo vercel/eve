@@ -1,3 +1,4 @@
+import type { ModelAccessChange } from "#shared/model-connection.js";
 import { runModelLogin } from "#setup/flows/model-login.js";
 import { HumanActionRequiredError } from "#setup/human-action.js";
 import { runDeployFlow } from "#setup/flows/deploy.js";
@@ -72,7 +73,7 @@ export interface TuiSetupCommandInput {
   onOnboardingScreen?: (input: OnboardingScreenEvent) => void;
   /** Live ChatGPT identity shown only inside model configuration UI. */
   chatGptAccountLabel?: string;
-  /** Suspends development runtime artifacts while registry installation and setup mutate them. */
+  /** Groups setup writes under one runtime update. */
   withExclusiveTerminal?<T>(task: () => Promise<T>): Promise<T>;
   createPrompter?: (renderer: TuiPrompterRenderer) => Prompter;
   /** Test seam; defaults to the real setup flows. */
@@ -98,7 +99,7 @@ export interface TuiSetupCommandResult {
   /** Keep warning/error lines after the bordered panel closes. */
   preserveFlowDiagnostics: boolean;
   /** Status refresh required after the command settles. */
-  effect?: VercelStatusEffect | { kind: "model-access-changed" };
+  effect?: VercelStatusEffect | ModelAccessChange;
 }
 
 /**
@@ -259,6 +260,7 @@ async function executeSetupCommand(
           prompter,
           signal,
           automatic: input.initialModelStep === "provider",
+          withConnectionUpdate: input.withExclusiveTerminal,
         });
         return result.kind === "cancelled"
           ? {
@@ -268,7 +270,7 @@ async function executeSetupCommand(
             }
           : {
               message: "Connected. Start chatting · /add to extend your agent",
-              effect: { kind: "model-access-changed" },
+              effect: { kind: "model-access-changed", reload: result.reload },
               preserveFlowDiagnostics: false,
             };
       }
@@ -308,7 +310,7 @@ async function executeSetupCommand(
         // A model edit can also move routing between AI Gateway and ChatGPT.
         // The runner rebuilds authored artifacts before refreshing model access.
         if (result.accessChanged) {
-          outcome.effect = { kind: "model-access-changed" };
+          outcome.effect = { kind: "model-access-changed", reload: true };
         }
         return outcome;
       }

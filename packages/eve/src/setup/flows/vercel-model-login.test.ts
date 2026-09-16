@@ -55,7 +55,7 @@ it.each([undefined, "team_b"])(
     });
     await loginVercelModel(fake.prompter, undefined, projectTeam);
     expect(mocks.json.mock.calls[0]![1].body.get("scope")).toBe("openid offline_access");
-    expect(fake.selectMessages).toEqual(["Vercel team"]);
+    expect(fake.selectMessages).toEqual(["Choose a Vercel team"]);
     expect(mocks.validate).toHaveBeenCalledWith("access", "team_a", undefined);
     expect(mocks.write.mock.calls[0]![0]).toMatchObject({
       teamId: "team_a",
@@ -74,7 +74,7 @@ it("asks for a team when the CLI selection is unavailable", async () => {
   });
   const fake = createFakePrompter({ single: () => "team_a" });
   await loginVercelModel(fake.prompter);
-  expect(fake.selectMessages).toEqual(["Vercel team"]);
+  expect(fake.selectMessages).toEqual(["Choose a Vercel team"]);
 });
 it("does not save a team rejected by Gateway", async () => {
   mocks.json.mockResolvedValueOnce({ teams: [{ id: "team_a", name: "Alice" }] });
@@ -121,10 +121,30 @@ it("lets another team be selected after Gateway rejects the first choice", async
   let attempt = 0;
   const fake = createFakePrompter({ single: () => (attempt++ === 0 ? "team_a" : "team_b") });
   await loginVercelModel(fake.prompter);
-  expect(fake.selectMessages).toEqual(["Vercel team", "Vercel team"]);
+  expect(fake.selectMessages).toEqual(["Choose a Vercel team", "Choose a Vercel team"]);
   expect(mocks.write).toHaveBeenCalledOnce();
   expect(mocks.write).toHaveBeenCalledWith(
     expect.objectContaining({ teamId: "team_b" }),
     "cl_HYyOPBNtFMfHhaUn9L4QPfTZz6TP47bp",
   );
+});
+
+it("returns the validated team and retains its slug for the footer", async () => {
+  mocks.json.mockResolvedValueOnce({
+    teams: [{ id: "team_cached", name: "Alice Inc", slug: "alice" }],
+  });
+  expect(await loginVercelModel(createFakePrompter().prompter)).toEqual({
+    teamId: "team_cached",
+    teamName: "Alice Inc",
+  });
+  expect(mocks.validate).toHaveBeenCalledOnce();
+  const { resolveModelTeamSlug } = await import("#internal/model-auth/vercel-team.js");
+  vi.stubEnv("EVE_MODEL_CONNECTION", "vercel");
+  vi.stubEnv("EVE_MODEL_TEAM", "team_cached");
+  try {
+    expect(await resolveModelTeamSlug()).toBe("alice");
+    expect(mocks.json).toHaveBeenCalledTimes(3);
+  } finally {
+    vi.unstubAllEnvs();
+  }
 });

@@ -21,8 +21,11 @@ const mocks = vi.hoisted(() => ({
   oauth: vi.fn(),
   models: vi.fn(),
   gateway: vi.fn(),
+  settingsMatch: vi.fn(),
+  catalog: vi.fn(),
 }));
 vi.mock("#setup/provider-settings.js", () => ({
+  providerSettingsMatch: mocks.settingsMatch,
   readProviderSelection: mocks.readSelection,
   readProviderTeamSync: mocks.team,
   readProviderKeySourceSync: vi.fn(),
@@ -39,7 +42,7 @@ vi.mock("#internal/model-auth/store.js", async (original) => ({
 }));
 vi.mock("#services/inspect-application.js", () => ({ inspectApplication: mocks.inspect }));
 vi.mock("./model-source-change.js", () => ({
-  changeAgentModel: mocks.change,
+  changeValidatedAgentModel: mocks.change,
   readAuthoredModelSelection: mocks.authored,
 }));
 vi.mock("#internal/model-auth/vercel-cli.js", () => ({ readVercelCliConnection: mocks.cli }));
@@ -58,7 +61,7 @@ vi.mock("#public/models/openai/chatgpt/token-broker.js", () => ({
   }),
 }));
 vi.mock("../boxes/select-model.js", () => ({
-  fetchGatewayCatalog: async () => [{ id: "openai/gpt-5.6-luna-fast", type: "language" }],
+  fetchGatewayCatalog: mocks.catalog,
 }));
 vi.mock("#setup/validate-gateway-key.js", () => ({ validateGatewayApiKey: mocks.gateway }));
 import { environmentConnection, runModelLogin } from "./model-login.js";
@@ -87,6 +90,9 @@ beforeEach(() => {
   vi.stubEnv("EVE_MODEL_CONNECTION", undefined);
   mocks.session.mockResolvedValue({ accessToken: "access", teamId: "team_123", teamName: "Alice" });
   mocks.readSession.mockResolvedValue({ refreshToken: "refresh" });
+  mocks.authored.mockResolvedValue("openai/gpt-5.6-luna-fast");
+  mocks.oauth.mockResolvedValue({ teamId: "team_123", teamName: "Alice" });
+  mocks.catalog.mockResolvedValue([{ id: "openai/gpt-5.6-luna-fast", type: "language" }]);
   mocks.change.mockResolvedValue({ kind: "changed" });
   mocks.readSecret.mockResolvedValue("stored-key");
   mocks.models.mockResolvedValue({
@@ -94,7 +100,7 @@ beforeEach(() => {
     models: [{ slug: "gpt-5.6-luna-fast" }],
   });
   mocks.gateway.mockResolvedValue({ kind: "valid" });
-  mocks.chatgptState.mockResolvedValue({ kind: "ready" });
+  mocks.chatgptState.mockResolvedValue({ kind: "ready", reload: true });
 });
 
 describe("model login", () => {
@@ -104,8 +110,9 @@ describe("model login", () => {
       const fake = createFakePrompter({ single: () => selected, password: () => "new-key" });
       expect(await runModelLogin({ appRoot: "/agent", prompter: fake.prompter })).toEqual({
         kind: "ready",
+        reload: true,
       });
-      expect(fake.selectMessages).toEqual(["Connect a model"]);
+      expect(fake.selectMessages).toEqual(["Choose a connection"]);
       expect(mocks.writeSelection.mock.calls[0]?.slice(0, 2)).toEqual(["/agent", selected]);
       expect(mocks.writeDefault).toHaveBeenCalledWith(selected);
       if (["openai", "anthropic", "ai-gateway-key"].includes(selected))
@@ -122,9 +129,9 @@ describe("model login", () => {
     const fake = createFakePrompter();
     expect(
       await runModelLogin({ appRoot: "/agent", prompter: fake.prompter, automatic: true }),
-    ).toEqual({ kind: "ready" });
+    ).toEqual({ kind: "ready", reload: true });
     expect(fake.selectMessages).toEqual([]);
-    expect(mocks.validate).toHaveBeenCalledWith("cli-token", "team_123", undefined);
+    expect(mocks.validate).toHaveBeenCalledWith("cli-token", "team_123", expect.any(AbortSignal));
     expect(mocks.writeSecret).not.toHaveBeenCalled();
   });
   it("keeps project selection ahead of environment and machine preferences", async () => {
@@ -197,7 +204,7 @@ describe("model login", () => {
     const fake = createFakePrompter();
     expect(
       await runModelLogin({ appRoot: "/agent", prompter: fake.prompter, automatic: true }),
-    ).toEqual({ kind: "ready" });
+    ).toEqual({ kind: "ready", reload: true });
     expect(fake.selectMessages).toEqual([]);
     expect(mocks.cli).not.toHaveBeenCalled();
   });
@@ -209,12 +216,21 @@ describe("model login", () => {
     const fake = createFakePrompter();
     expect(
       await runModelLogin({ appRoot: "/agent", prompter: fake.prompter, automatic: true }),
-    ).toEqual({ kind: "ready" });
-    expect(mocks.validate).toHaveBeenCalledWith("cli-token", "team_project", undefined);
-    expect(mocks.writeSelection).toHaveBeenCalledWith("/agent", "vercel-cli", {
-      teamId: "team_project",
-      teamName: "Project team",
-    });
+    ).toEqual({ kind: "ready", reload: true });
+    expect(mocks.validate).toHaveBeenCalledWith(
+      "cli-token",
+      "team_project",
+      expect.any(AbortSignal),
+    );
+    expect(mocks.writeSelection).toHaveBeenCalledWith(
+      "/agent",
+      "vercel-cli",
+      {
+        teamId: "team_project",
+        teamName: "Project team",
+      },
+      undefined,
+    );
   });
   it("returns to chat when key entry is cancelled", async () => {
     const fake = createFakePrompter({
@@ -258,6 +274,7 @@ afterEach(() => vi.unstubAllEnvs());
 it.each(["openai", "anthropic"] as const)(
   "does not mistake a foreign %s model for an eve helper",
   async (provider) => {
+    mocks.authored.mockResolvedValue(undefined);
     mocks.inspect.mockResolvedValue({
       compiledState: {
         manifest: {
@@ -305,6 +322,120 @@ it("preserves an explicitly authored eve helper's compatible custom model", asyn
   const fake = createFakePrompter({ single: () => "openai", password: () => "new-key" });
   await expect(runModelLogin({ appRoot: "/agent", prompter: fake.prompter })).resolves.toEqual({
     kind: "ready",
+    reload: true,
   });
   expect(mocks.change).not.toHaveBeenCalled();
+});
+
+it("reuses CLI validation and source inspection exactly once", async () => {
+  mocks.cli.mockResolvedValue({ token: "cli-token", teamId: "team_123" });
+  await runModelLogin({
+    appRoot: "/agent",
+    automatic: true,
+    prompter: createFakePrompter().prompter,
+  });
+  expect(mocks.validate).toHaveBeenCalledOnce();
+  expect(mocks.cli).toHaveBeenCalledOnce();
+  expect(mocks.authored).toHaveBeenCalledOnce();
+  expect(mocks.inspect).not.toHaveBeenCalled();
+  expect(mocks.catalog).toHaveBeenCalledOnce();
+});
+
+it.each(["openai", "anthropic"] as const)(
+  "retains %s models from automatic credential validation",
+  async (selected) => {
+    mocks.readSelection.mockResolvedValue(selected);
+    await runModelLogin({
+      appRoot: "/agent",
+      automatic: true,
+      prompter: createFakePrompter().prompter,
+    });
+    expect(mocks.models).toHaveBeenCalledOnce();
+    expect(mocks.inspect).not.toHaveBeenCalled();
+  },
+);
+
+it("overlaps Gateway catalog loading with OAuth and does not validate the returned team again", async () => {
+  const oauth = Promise.withResolvers<{ teamId: string; teamName: string }>();
+  const catalogStarted = Promise.withResolvers<void>();
+  mocks.oauth.mockReturnValue(oauth.promise);
+  mocks.catalog.mockImplementation(async () => {
+    catalogStarted.resolve();
+    return [{ id: "openai/gpt-5.6-luna-fast", type: "language" }];
+  });
+  const result = runModelLogin({
+    appRoot: "/agent",
+    prompter: createFakePrompter({ single: () => "vercel" }).prompter,
+  });
+  await catalogStarted.promise;
+  expect(mocks.oauth).toHaveBeenCalledOnce();
+  expect(mocks.writeSelection).not.toHaveBeenCalled();
+  oauth.resolve({ teamId: "team_selected", teamName: "Selected" });
+  await result;
+  expect(mocks.writeSelection).toHaveBeenCalledWith(
+    "/agent",
+    "vercel",
+    { teamId: "team_selected", teamName: "Selected" },
+    undefined,
+  );
+  expect(mocks.session).not.toHaveBeenCalled();
+  expect(mocks.validate).not.toHaveBeenCalled();
+});
+
+it("leaves an unchanged connection alone", async () => {
+  mocks.readSelection.mockResolvedValue("vercel-cli");
+  mocks.settingsMatch.mockResolvedValue(true);
+  mocks.cli.mockResolvedValue({ token: "cli-token", teamId: "team_123" });
+  const withConnectionUpdate = vi.fn();
+  await expect(
+    runModelLogin({
+      appRoot: "/agent",
+      automatic: true,
+      prompter: createFakePrompter().prompter,
+      withConnectionUpdate,
+    }),
+  ).resolves.toEqual({ kind: "ready", reload: false });
+  expect(mocks.change).not.toHaveBeenCalled();
+  expect(mocks.writeSelection).not.toHaveBeenCalled();
+  expect(withConnectionUpdate).not.toHaveBeenCalled();
+});
+
+it("waits for a single runtime activation before reporting a changed connection ready", async () => {
+  const activation = Promise.withResolvers<void>();
+  const written = Promise.withResolvers<void>();
+  const withConnectionUpdate = vi.fn(async (task: () => Promise<void>): Promise<void> => {
+    await task();
+    written.resolve();
+    await activation.promise;
+  });
+  let ready = false;
+  const result = runModelLogin({
+    appRoot: "/agent",
+    prompter: createFakePrompter({ single: () => "openai", password: () => "key" }).prompter,
+    withConnectionUpdate,
+  }).then((value) => {
+    ready = true;
+    return value;
+  });
+  await written.promise;
+  expect(ready).toBe(false);
+  expect(mocks.change).toHaveBeenCalledOnce();
+  expect(mocks.writeSelection).toHaveBeenCalledOnce();
+  activation.resolve();
+  expect(await result).toEqual({ kind: "ready", reload: false });
+  expect(withConnectionUpdate).toHaveBeenCalledOnce();
+});
+
+it("does not save a connection when an overlapping catalog request fails", async () => {
+  mocks.catalog.mockRejectedValue(new Error("Gateway is unavailable."));
+  let picks = 0;
+  const prompter = createFakePrompter({
+    single: () => {
+      if (picks++) throw new WizardCancelledError();
+      return "vercel";
+    },
+  }).prompter;
+  expect(await runModelLogin({ appRoot: "/agent", prompter })).toEqual({ kind: "cancelled" });
+  expect(mocks.writeSelection).not.toHaveBeenCalled();
+  expect(mocks.writeDefault).not.toHaveBeenCalled();
 });

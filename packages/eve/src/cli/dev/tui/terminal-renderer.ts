@@ -410,7 +410,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
   readonly #fileContents = new FileContentCache();
   readonly #subagentHeaders = new Set<string>();
   #agentHeader?: AgentHeaderOptions;
-  #startupPhase?: "starting" | "connecting" | "preparing";
+  #startupPhase?: "starting" | "connecting" | "updating";
   #startupEditor?: LineState;
   #startupConsumer?: (key: TerminalKey) => void;
   #startupStartedAt = 0;
@@ -651,7 +651,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
     this.#availablePromptCommands = options?.availablePromptCommands ?? PROMPT_COMMANDS;
   }
 
-  setStartupPhase(phase: "starting" | "connecting" | "preparing" | undefined): void {
+  setStartupPhase(phase: "starting" | "connecting" | "updating" | undefined): void {
     this.#startupPhase = phase;
     if (phase === undefined) this.#stopTicker();
     else this.#startTicker();
@@ -4510,9 +4510,9 @@ export class TerminalRenderer implements AgentTUIRenderer {
   #pushStatusLine(rows: string[], width: number): void {
     if (this.#startupPhase !== undefined) {
       const labels = {
-        starting: "Starting your agent…",
+        starting: "Starting agent…",
         connecting: "Checking saved connection…",
-        preparing: "Preparing your chat…",
+        updating: "Updating agent connection…",
       };
       const label = this.#setupFlow?.status?.text ?? labels[this.#startupPhase];
       const pulse = this.#progressPulseGlyph(

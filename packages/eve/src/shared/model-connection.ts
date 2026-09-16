@@ -4,3 +4,9 @@ export type ModelConnectionSelection = ModelConnection | "ai-gateway-project" | 
 export function isModelConnection(value: unknown): value is ModelConnection {
   return CONNECTIONS.some((connection) => connection === value);
 }
+
+/** Whether a completed connection or model edit still needs runtime activation. */
+export interface ModelAccessChange {
+  kind: "model-access-changed";
+  reload: boolean;
+}

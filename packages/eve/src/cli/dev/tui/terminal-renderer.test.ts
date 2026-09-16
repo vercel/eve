@@ -2484,7 +2484,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
     expect(screen.snapshot()).toContain("Use the /help command");
     expect(screen.snapshot()).not.toContain("model");
     expect(screen.snapshot()).not.toContain("loading");
-    expect(screen.snapshot()).toContain("Starting your agent");
+    expect(screen.snapshot()).toContain("Starting agent");
     expect(screen.snapshot()).toContain("weather");
 
     input.type(" tomorrow");
@@ -2575,10 +2575,10 @@ describe("TerminalRenderer (inline scrollback)", () => {
       input.type("!");
       expect(screen.snapshot()).toContain("Hello 世界!");
       input.enter();
-      renderer.setStartupPhase("preparing");
-      renderer.setupFlow.setStatus("Preparing your chat…");
+      renderer.setStartupPhase("updating");
+      renderer.setupFlow.setStatus("Updating agent connection…");
       input.type("Next message");
-      expect(screen.snapshot()).toContain("Preparing your chat");
+      expect(screen.snapshot()).toContain("Updating agent connection");
       expect(screen.snapshot()).not.toContain("Working");
       interrupt.dispose();
       renderer.setupFlow.end({ preserveDiagnostics: false });

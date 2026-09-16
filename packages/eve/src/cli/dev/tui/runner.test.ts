@@ -3612,66 +3612,69 @@ describe("EveTUIRunner Vercel status line", () => {
     expect(detectIdentity).toHaveBeenCalledTimes(2);
   });
 
-  it("refreshes agent info only after a model-access change", async () => {
-    const runtimeRequests: Array<{ method: string; url: URL }> = [];
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
-        runtimeRequests.push({
-          method: init?.method ?? "GET",
-          url: new URL(
-            typeof input === "string" ? input : input instanceof URL ? input : input.url,
-          ),
-        });
-        return Response.json({ revision: "snapshot-a" });
-      }),
-    );
-    const client = stubClient();
-    const info = vi.spyOn(client, "info").mockResolvedValue(AGENT_INFO);
-    const prompts: Array<string | undefined> = ["/deploy", "/model", undefined];
-    const infoCallsAtPrompt: number[] = [];
-    const renderer = fakeRenderer({
-      readPrompt: vi.fn(async () => {
-        infoCallsAtPrompt.push(info.mock.calls.length);
-        return prompts.shift();
-      }),
-    });
-    const deployOutcome: PromptCommandOutcome = {
-      message: "Deployed.",
-      effect: { kind: "deployed" },
-    };
-    const modelOutcome: PromptCommandOutcome = {
-      message: "Connected to AI Gateway.",
-      effect: { kind: "model-access-changed" },
-    };
+  it.each([true, false])(
+    "refreshes agent info and only rebuilds when requested (reload: %s)",
+    async (reload) => {
+      const runtimeRequests: Array<{ method: string; url: URL }> = [];
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+          runtimeRequests.push({
+            method: init?.method ?? "GET",
+            url: new URL(
+              typeof input === "string" ? input : input instanceof URL ? input : input.url,
+            ),
+          });
+          return Response.json({ revision: "snapshot-a" });
+        }),
+      );
+      const client = stubClient();
+      const info = vi.spyOn(client, "info").mockResolvedValue(AGENT_INFO);
+      const prompts: Array<string | undefined> = ["/deploy", "/model", undefined];
+      const infoCallsAtPrompt: number[] = [];
+      const renderer = fakeRenderer({
+        readPrompt: vi.fn(async () => {
+          infoCallsAtPrompt.push(info.mock.calls.length);
+          return prompts.shift();
+        }),
+      });
+      const deployOutcome: PromptCommandOutcome = {
+        message: "Deployed.",
+        effect: { kind: "deployed" },
+      };
+      const modelOutcome: PromptCommandOutcome = {
+        message: "Connected to AI Gateway.",
+        effect: { kind: "model-access-changed", reload },
+      };
 
-    const runner = new EveTUIRunner({
-      session: stubSession(),
-      client,
-      renderer,
-      serverUrl: "http://localhost:3000",
-      name: "Weather Agent",
-      appRoot: "/tmp/weather-agent",
-      bootDetections: [],
-      detectProjectIdentity: vi.fn(async () => undefined),
-      promptCommandHandler: {
-        handle: async (command) => (command.name === "model" ? modelOutcome : deployOutcome),
-      },
-    });
+      const runner = new EveTUIRunner({
+        session: stubSession(),
+        client,
+        renderer,
+        serverUrl: "http://localhost:3000",
+        name: "Weather Agent",
+        appRoot: "/tmp/weather-agent",
+        bootDetections: [],
+        detectProjectIdentity: vi.fn(async () => undefined),
+        promptCommandHandler: {
+          handle: async (command) => (command.name === "model" ? modelOutcome : deployOutcome),
+        },
+      });
 
-    await runner.run();
+      await runner.run();
 
-    expect(infoCallsAtPrompt).toEqual([1, 1, 2]);
-    expect(info).toHaveBeenCalledTimes(2);
-    expect(
-      runtimeRequests.some(
-        (request) =>
-          request.method === "POST" &&
-          request.url.pathname === "/eve/v1/dev/runtime-artifacts/rebuild" &&
-          request.url.searchParams.get("force") === "1",
-      ),
-    ).toBe(true);
-  });
+      expect(infoCallsAtPrompt).toEqual([1, 1, 2]);
+      expect(info).toHaveBeenCalledTimes(2);
+      expect(
+        runtimeRequests.some(
+          (request) =>
+            request.method === "POST" &&
+            request.url.pathname === "/eve/v1/dev/runtime-artifacts/rebuild" &&
+            request.url.searchParams.get("force") === "1",
+        ),
+      ).toBe(reload);
+    },
+  );
 
   it("never pushes Vercel status for a remote --url session", async () => {
     const setVercelStatus = vi.fn();
@@ -3827,7 +3830,7 @@ describe("EveTUIRunner boot setup detection", () => {
           command.name === "login"
             ? {
                 message: "AI Gateway via API key selected.",
-                effect: { kind: "model-access-changed" },
+                effect: { kind: "model-access-changed", reload: true },
               }
             : { message: "/add dismissed." },
       },
@@ -3916,7 +3919,7 @@ describe("EveTUIRunner boot setup detection", () => {
     expect(renderCommandResult).not.toHaveBeenCalled();
     expect(renderSetupWarning).not.toHaveBeenCalled();
     expect(readPrompt).not.toHaveBeenCalled();
-    expect(setStartupPhase).toHaveBeenLastCalledWith("preparing");
+    await vi.waitFor(() => expect(setStartupPhase).toHaveBeenLastCalledWith("updating"));
     refreshed.resolve(AGENT_INFO);
     await run;
     expect(renderAgentHeader).toHaveBeenCalledOnce();
@@ -3926,6 +3929,25 @@ describe("EveTUIRunner boot setup detection", () => {
     expect(renderAgentHeader.mock.invocationCallOrder[0]).toBeLessThan(
       renderCommandResult.mock.invocationCallOrder[0]!,
     );
+  });
+
+  it("releases the composer without waiting on unrelated setup diagnostics", async () => {
+    const diagnostics = createDeferred<Awaited<ReturnType<BootDetection["detect"]>>>();
+    const detect = vi.fn(() => diagnostics.promise);
+    const readPrompt = vi.fn(async () => undefined);
+    const { runner } = providerSetupRefreshRunner({
+      refreshInfo: async () => AGENT_INFO,
+      bootDetections: [{ id: "slow", detect }],
+      renderer: { readPrompt },
+    });
+    const run = runner.run();
+    try {
+      await vi.waitFor(() => expect(readPrompt).toHaveBeenCalledOnce());
+      expect(detect).toHaveBeenCalledOnce();
+    } finally {
+      diagnostics.resolve([]);
+      await run;
+    }
   });
 
   it("normalizes a committed local key after automatic provider setup", async () => {

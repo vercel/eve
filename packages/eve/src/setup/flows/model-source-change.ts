@@ -109,6 +109,15 @@ export async function changeAgentModel(input: {
   const rejection = await validateModelSlug(appRoot, slug);
   if (rejection !== null) return { kind: "rejected", message: rejection };
 
+  return changeValidatedAgentModel(input);
+}
+
+/** Applies a selection already confirmed by the provider catalog, retaining source-edit guards. */
+export async function changeValidatedAgentModel(input: {
+  readonly appRoot: string;
+  readonly slug: string;
+}): Promise<ApplyModelOutcome> {
+  const { appRoot, slug } = input;
   const project = await resolveDiscoveryProject(appRoot);
   const { manifest } = await discoverAgent(project);
   const result = await createStaticSourceChange(manifest).updateModelName(slug);

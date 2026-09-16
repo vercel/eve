@@ -143,7 +143,7 @@ describe("createPromptCommandHandler", () => {
     const runTuiSetupCommand = vi.fn(async () => ({
       message: "AI Gateway via API key selected.",
       preserveFlowDiagnostics: false,
-      effect: { kind: "model-access-changed" } as const,
+      effect: { kind: "model-access-changed", reload: true } as const,
     }));
     vi.doMock("./setup-commands.js", () => ({
       SETUP_FLOW_CONFIG: {
@@ -163,7 +163,7 @@ describe("createPromptCommandHandler", () => {
         ),
       ).resolves.toEqual({
         message: "AI Gateway via API key selected.",
-        effect: { kind: "model-access-changed" },
+        effect: { kind: "model-access-changed", reload: true },
       });
       expect(runTuiSetupCommand).toHaveBeenCalledWith(
         expect.objectContaining({ initialModelStep: "provider" }),
@@ -218,7 +218,7 @@ describe("createPromptCommandHandler", () => {
       SETUP_FLOW_CONFIG: { login: { title: "Connect a model", indicator: "pulse" } },
       runTuiSetupCommand: async () => ({
         message: "Connected.",
-        effect: { kind: "model-access-changed" },
+        effect: { kind: "model-access-changed", reload: true },
         preserveFlowDiagnostics: false,
       }),
     }));

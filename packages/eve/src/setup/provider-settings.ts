@@ -66,6 +66,31 @@ export function readProviderSelectionSync(appRoot: string): ProviderSelection | 
   }
 }
 
+export interface ProviderSettings {
+  selected: ProviderSelection;
+  teamId?: string;
+  teamName?: string;
+  keySource?: "environment" | "secret";
+}
+
+export async function providerSettingsMatch(
+  appRoot: string,
+  settings: ProviderSettings,
+): Promise<boolean> {
+  try {
+    const current = JSON.parse(await readFile(providerSettingsPath(appRoot), "utf8"));
+    return (
+      isObject(current) &&
+      current.selected === settings.selected &&
+      current.teamId === settings.teamId &&
+      current.teamName === settings.teamName &&
+      current.keySource === settings.keySource
+    );
+  } catch {
+    return false;
+  }
+}
+
 export async function writeProviderSelection(
   appRoot: string,
   selected: ProviderSelection,

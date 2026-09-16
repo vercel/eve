@@ -27,7 +27,10 @@ vi.mock("#services/inspect-application.js", () => ({
     },
   }),
 }));
-vi.mock("./model-source-change.js", () => ({ changeAgentModel: state.model }));
+vi.mock("./model-source-change.js", () => ({
+  readAuthoredModelSelection: async () => "openai/gpt-5.6-luna-fast",
+  changeValidatedAgentModel: state.model,
+}));
 import { runModelLogin } from "./model-login.js";
 import { openai } from "#public/models/openai/index.js";
 afterEach(() => {
@@ -75,6 +78,7 @@ it("logs in and streams the first response without exposing the entered key", as
   const fake = createFakePrompter({ single: () => "openai", password: () => "fixture-key" });
   expect(await runModelLogin({ appRoot: "/fixture", prompter: fake.prompter })).toEqual({
     kind: "ready",
+    reload: true,
   });
   expect(state.model).toHaveBeenCalledWith({
     appRoot: "/fixture",

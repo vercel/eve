@@ -22,7 +22,8 @@ vi.mock("#services/inspect-application.js", () => ({
   }),
 }));
 vi.mock("./model-source-change.js", () => ({
-  changeAgentModel: async () => ({ kind: "changed" }),
+  readAuthoredModelSelection: async () => "openai/gpt-5.6-luna-fast",
+  changeValidatedAgentModel: async () => ({ kind: "changed" }),
 }));
 vi.mock("#internal/model-auth/available-models.js", () => ({
   availableDirectModels: async () => ["gpt-5.6-luna-fast", "claude-sonnet-5"],
@@ -36,7 +37,9 @@ vi.mock("#internal/model-auth/vercel.js", () => ({
   }),
   validateVercelAccess: async () => {},
 }));
-vi.mock("./vercel-model-login.js", () => ({ loginVercelModel: async () => {} }));
+vi.mock("./vercel-model-login.js", () => ({
+  loginVercelModel: async () => ({ teamId: "team_alice", teamName: "Alice" }),
+}));
 vi.mock("./chatgpt-auth.js", () => ({ ensureChatGptAuth: async () => {} }));
 vi.mock("../boxes/select-model.js", () => ({
   fetchGatewayCatalog: async () => [{ id: "openai/gpt-5.6-luna-fast", type: "language" }],
@@ -64,6 +67,7 @@ it("switches all five connections while keeping keys out of project files", asyn
     const fake = createFakePrompter({ single: () => selected, password: () => "entered-secret" });
     expect(await runModelLogin({ appRoot: root, prompter: fake.prompter })).toEqual({
       kind: "ready",
+      reload: true,
     });
     expect(await readProviderSelection(root)).toBe(selected);
     expect(mocks.defaults).toHaveBeenLastCalledWith(selected);

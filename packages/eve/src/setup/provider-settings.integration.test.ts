@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import {
   providerSettingsPath,
+  providerSettingsMatch,
   readProviderSelection,
   readProviderSelectionSync,
   resolveAvailableProviders,
@@ -58,4 +59,24 @@ describe("provider settings", () => {
     await expect(readProviderSelection(root)).resolves.toBeUndefined();
     expect(readProviderSelectionSync(root)).toBeUndefined();
   });
+});
+
+it("compares connection, team, and key source before deciding whether activation is needed", async () => {
+  const root = await mkdtemp(join(tmpdir(), "eve-provider-settings-"));
+  roots.push(root);
+  const team = { teamId: "team_a", teamName: "Alice" };
+  expect(await providerSettingsMatch(root, { selected: "vercel", ...team })).toBe(false);
+  await writeProviderSelection(root, "vercel", team);
+  expect(await providerSettingsMatch(root, { selected: "vercel", ...team })).toBe(true);
+  expect(await providerSettingsMatch(root, { selected: "vercel", ...team, teamId: "team_b" })).toBe(
+    false,
+  );
+  expect(await providerSettingsMatch(root, { selected: "vercel-cli", ...team })).toBe(false);
+  await writeProviderSelection(root, "openai", undefined, "environment");
+  expect(await providerSettingsMatch(root, { selected: "openai", keySource: "environment" })).toBe(
+    true,
+  );
+  expect(await providerSettingsMatch(root, { selected: "openai", keySource: "secret" })).toBe(
+    false,
+  );
 });

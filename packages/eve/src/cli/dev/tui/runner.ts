@@ -1,3 +1,4 @@
+import type { ModelAccessChange } from "#shared/model-connection.js";
 import { SteeringStream } from "#cli/dev/tui/steering-stream.js";
 import {
   type ActionResultStreamEvent,
@@ -260,7 +261,7 @@ export type AgentTUIRenderer = {
    */
   renderAgentHeader?(header: AgentTUIAgentHeader): void;
   /** Keeps preliminary connection diagnostics out of the startup presentation. */
-  setStartupPhase?(phase: "starting" | "connecting" | "preparing" | undefined): void;
+  setStartupPhase?(phase: "starting" | "connecting" | "updating" | undefined): void;
   /**
    * Commits a single informational line to the transcript. Used for session
    * recovery and slash-command results. Optional.
@@ -412,7 +413,7 @@ export interface PromptCommandOutcome {
   /** Promotes an outcome to a top-level status. */
   tone?: "success" | "error";
   /** Post-command work after setup settles. */
-  effect?: VercelStatusEffect | { kind: "model-access-changed" };
+  effect?: VercelStatusEffect | ModelAccessChange;
   cancelled?: true;
 }
 
@@ -547,6 +548,7 @@ export class EveTUIRunner {
    * "not logged in" hint over a session the user has since logged into.
    */
   #authHintStale = false;
+  #setupAttentionRevision = 0;
   /** Cheap-and-local boot detection issues, cached so the auth probe can re-combine. */
   #bootIssues: SetupIssue[] = [];
   /** The current Vercel auth issue (login / CLI-missing), or undefined when fine. */
@@ -1700,22 +1702,23 @@ export class EveTUIRunner {
     const appRoot = this.#appRoot;
     if (appRoot === undefined) return;
     if (this.#renderer.renderSetupWarning === undefined) return;
+    const revision = ++this.#setupAttentionRevision;
     const context: BootDetectionContext = { appRoot, env: process.env };
     if (info !== undefined) context.info = info;
     try {
-      this.#bootIssues = await detectSetupIssues(context, this.#bootDetections);
-      this.#authIssue = undefined;
-      if (process.env.EVE_MODEL_CONNECTION === "ai-gateway-project") {
-        const status = await this.#getVercelAuthStatus(appRoot, {
-          signal: this.#authProbeAbort.signal,
-        });
-        this.#authIssue = authIssueForStatus(status);
-      }
+      const [issues, auth] = await Promise.all([
+        detectSetupIssues(context, this.#bootDetections),
+        process.env.EVE_MODEL_CONNECTION === "ai-gateway-project"
+          ? this.#getVercelAuthStatus(appRoot, { signal: this.#authProbeAbort.signal })
+          : undefined,
+      ]);
+      if (this.#disposed || revision !== this.#setupAttentionRevision) return;
+      this.#bootIssues = issues;
+      this.#authIssue = auth === undefined ? undefined : authIssueForStatus(auth);
+      this.#paintSetupAttention();
     } catch {
       return;
     }
-    if (this.#disposed) return;
-    this.#paintSetupAttention();
   }
 
   #subscribeDevelopmentSandboxLogs(): void {
@@ -1787,7 +1790,7 @@ export class EveTUIRunner {
     if (effect?.kind === "model-access-changed") {
       this.#vercelStatus?.applyEffect({ kind: "refresh-identity" });
       this.#authHintStale = true;
-      await this.#refreshModelAccess();
+      await this.#refreshModelAccess(effect.reload);
       return;
     }
     if (effect === undefined) return;
@@ -1799,11 +1802,18 @@ export class EveTUIRunner {
 
   async #settleCommandOutcome(outcome: PromptCommandOutcome): Promise<PromptCommandOutcome> {
     if (outcome.effect === undefined) return outcome;
+    const refreshTimer =
+      outcome.effect.kind === "model-access-changed"
+        ? setTimeout(() => {
+            if (this.#startupActive) this.#renderer.setStartupPhase?.("updating");
+            this.#renderer.setupFlow?.setStatus(
+              outcome.effect?.kind === "model-access-changed" && outcome.effect.reload
+                ? "Updating agent connection…"
+                : "Checking agent connection…",
+            );
+          }, 150)
+        : undefined;
     try {
-      if (outcome.effect.kind === "model-access-changed") {
-        if (this.#startupActive) this.#renderer.setStartupPhase?.("preparing");
-        this.#renderer.setupFlow?.setStatus("Preparing your chat…");
-      }
       await this.#applyCommandEffect(outcome.effect);
       const { effect: _effect, ...settled } = outcome;
       return settled;
@@ -1813,6 +1823,8 @@ export class EveTUIRunner {
         message:
           "Settings were saved, but the agent could not reload. Retry the command or restart eve dev.",
       };
+    } finally {
+      clearTimeout(refreshTimer);
     }
   }
 
@@ -1941,18 +1953,18 @@ export class EveTUIRunner {
   }
 
   /**
-   * Setup commands can write authored source and env files. Force the local
-   * runtime snapshot to catch up, then cache the credential-normalized `/info`
+   * Setup commands report whether their writes still need runtime activation.
+   * Cache the credential-normalized `/info`
    * shared by the status bar and setup detector before releasing the panel.
    */
-  async #refreshModelAccess(): Promise<void> {
+  async #refreshModelAccess(reload: boolean): Promise<void> {
     const appRoot = this.#appRoot;
     if (appRoot === undefined) return;
 
     await loadDevelopmentEnvironmentFiles(appRoot);
-    await this.#runtimeArtifacts?.refreshAfterSourceChange({});
+    if (reload) await this.#runtimeArtifacts?.refreshAfterSourceChange({});
     const refreshedInfo = this.#replaceAgentInfo(await this.#readAgentInfo());
-    await this.#refreshSetupAttention(refreshedInfo);
+    void this.#refreshSetupAttention(refreshedInfo);
     if (this.#client !== undefined && refreshedInfo === undefined) {
       throw new Error("Agent information is unavailable after reload.");
     }

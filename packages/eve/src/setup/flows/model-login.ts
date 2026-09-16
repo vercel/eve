@@ -1,30 +1,14 @@
-import {
-  availableDirectModels as directModels,
-  availableHelperModels,
-} from "#internal/model-auth/available-models.js";
+import { measureLoginStage, withLoginProgress } from "./model-login-progress.js";
+import { availableHelperModels } from "#internal/model-auth/available-models.js";
 import { fetchGatewayCatalog } from "../boxes/select-model.js";
-import { getVercelOidcToken } from "#compiled/@vercel/oidc/index.js";
 import { inspectApplication } from "#services/inspect-application.js";
 import {
   isModelConnection,
-  modelKeySecretName,
   readDefaultConnection,
-  readVercelSession,
   writeDefaultConnection,
-  writeModelSecret,
   type ModelConnectionSelection,
 } from "#internal/model-auth/store.js";
-import { MODEL_CONNECTION_ENV, resolveModelApiKey } from "#internal/model-auth/transport.js";
-import {
-  readVercelCliConnection,
-  refreshVercelCliConnection,
-} from "#internal/model-auth/vercel-cli.js";
-import {
-  resolveVercelSession,
-  validateVercelAccess,
-  VERCEL_MODEL_CLIENT_ID,
-} from "#internal/model-auth/vercel.js";
-import { getDefaultCodexTokenBroker } from "#public/models/openai/chatgpt/token-broker.js";
+import { MODEL_CONNECTION_ENV } from "#internal/model-auth/transport.js";
 import { parseModelHelper, MODEL_HELPERS } from "#shared/model-helper.js";
 import {
   readProviderSelection,
@@ -32,39 +16,18 @@ import {
   readProviderKeySourceSync,
   resolveAvailableProviders,
   writeProviderSelection,
+  providerSettingsMatch,
+  type ProviderSettings,
 } from "#setup/provider-settings.js";
 import type { Prompter } from "#setup/prompter.js";
 import { WizardCancelledError } from "#setup/step.js";
-import { withSpinner } from "#setup/with-spinner.js";
-import { validateGatewayApiKey } from "#setup/validate-gateway-key.js";
-import { ensureChatGptAuth } from "./chatgpt-auth.js";
-import { loginVercelModel } from "./vercel-model-login.js";
-import { changeAgentModel, readAuthoredModelSelection } from "./model-source-change.js";
-
-const CONNECTION_OPTIONS = [
-  { value: "vercel", label: "Vercel Account" },
-  { value: "ai-gateway-key", label: "Vercel AI Gateway API Key" },
-  { value: "chatgpt", label: "ChatGPT Subscription" },
-  { value: "openai", label: "OpenAI API Key" },
-  { value: "anthropic", label: "Anthropic API Key" },
-] as const;
-
-function connectionProgress(selected: ModelConnectionSelection): string {
-  switch (selected) {
-    case "vercel":
-    case "vercel-cli":
-      return "Connecting with Vercel…";
-    case "chatgpt":
-      return "Connecting with ChatGPT…";
-    case "openai":
-      return "Connecting with OpenAI…";
-    case "anthropic":
-      return "Connecting with Anthropic…";
-    case "ai-gateway-key":
-    case "ai-gateway-project":
-      return "Connecting with AI Gateway…";
-  }
-}
+import { changeValidatedAgentModel, readAuthoredModelSelection } from "./model-source-change.js";
+import {
+  authenticateModelConnection,
+  CONNECTION_OPTIONS,
+  reuseModelConnection,
+  type ValidatedModelConnection,
+} from "./model-login-connection.js";
 
 export function environmentConnection(
   env: Record<string, string | undefined>,
@@ -76,192 +39,219 @@ export function environmentConnection(
   return undefined;
 }
 
-async function connectionReady(
-  selected: ModelConnectionSelection,
-  signal?: AbortSignal,
-): Promise<boolean> {
-  switch (selected) {
-    case "chatgpt":
-      return (await getDefaultCodexTokenBroker().refreshState()).kind === "ready";
-    case "vercel": {
-      if (!(await readVercelSession(VERCEL_MODEL_CLIENT_ID))) return false;
-      const session = await resolveVercelSession();
-      await validateVercelAccess(
-        session.accessToken,
-        process.env.EVE_MODEL_TEAM ?? session.teamId,
-        signal,
-      );
-      return true;
-    }
-    case "vercel-cli": {
-      let cli = await readVercelCliConnection();
-      if (!cli) return false;
-      const teamId = process.env.EVE_MODEL_TEAM ?? cli.teamId;
-      try {
-        await validateVercelAccess(cli.token, teamId, signal);
-      } catch {
-        signal?.throwIfAborted();
-        await refreshVercelCliConnection();
-        cli = await readVercelCliConnection();
-        if (!cli) return false;
-        await validateVercelAccess(cli.token, teamId, signal);
-      }
-      return true;
-    }
-    case "ai-gateway-project":
-      return Boolean(await getVercelOidcToken().catch(() => undefined));
-    case "ai-gateway-key": {
-      const key = await resolveModelApiKey("ai-gateway-key");
-      if (!key) return false;
-      return (await validateGatewayApiKey(key, signal)).kind === "valid";
-    }
-    case "openai":
-    case "anthropic": {
-      const key = await resolveModelApiKey(selected);
-      if (!key) return false;
-      await directModels(selected, key, signal);
-      return true;
-    }
-  }
+interface LoginModel {
+  selection?: string;
+  external: boolean;
 }
 
-async function applyConnection(input: {
-  appRoot: string;
-  agentRoot: string;
-  selected: ModelConnectionSelection;
-  prompter: Prompter;
-  signal?: AbortSignal;
-  automatic?: boolean;
-  availableModels?: string[];
-}): Promise<void> {
-  const { appRoot, agentRoot, selected, prompter, signal } = input;
-  const inspection = await inspectApplication(agentRoot).catch(() => undefined);
-  const model = inspection?.compiledState?.manifest.config.model;
-  const routing = model?.routing;
+async function readLoginModel(agentRoot: string): Promise<LoginModel> {
+  const selection = await readAuthoredModelSelection(agentRoot);
+  if (selection !== undefined)
+    return { selection, external: parseModelHelper(selection) !== undefined };
+  // Dynamic models still need routing inspection, but ordinary source literals
+  // and eve helpers do not need to compile the agent just to sign in.
+  const inspection = await inspectApplication(agentRoot);
+  const model = inspection.compiledState?.manifest.config.model;
+  return {
+    selection:
+      model?.routing.kind === "gateway" && model.source === undefined ? model.id : undefined,
+    external: model?.routing.kind === "external",
+  };
+}
+
+function modelSelection(selected: ModelConnectionSelection, model: LoginModel) {
   const helper =
     selected === "chatgpt" || selected === "openai" || selected === "anthropic"
       ? selected
       : undefined;
-  const authored =
-    routing?.kind === "external" ? await readAuthoredModelSelection(agentRoot) : undefined;
+  const authored = model.selection === undefined ? undefined : parseModelHelper(model.selection);
   const compatible = helper
-    ? authored !== undefined && parseModelHelper(authored)?.helper === helper
-    : routing?.kind === "gateway" && model?.source === undefined;
+    ? authored?.helper === helper
+    : model.selection !== undefined && !model.external;
   const defaultId = helper ? MODEL_HELPERS[helper].defaultModel : "openai/gpt-5.6-luna-fast";
-  if (!compatible || model?.id === defaultId) {
-    let id: string = defaultId;
-    const models =
-      input.availableModels ??
+  const currentId = authored?.id ?? model.selection;
+  return { helper, compatible, defaultId, needsModels: !compatible || currentId === defaultId };
+}
+
+type LoginInput = {
+  appRoot: string;
+  agentRoot?: string;
+  prompter: Prompter;
+  automatic?: boolean;
+  signal?: AbortSignal;
+  /** Applies writes under one watcher lease and waits for runtime activation. */
+  withConnectionUpdate?(task: () => Promise<void>): Promise<void>;
+};
+
+export type ModelLoginResult = { kind: "ready"; reload: boolean } | { kind: "cancelled" };
+
+async function applyConnection(
+  input: LoginInput,
+  connection: ValidatedModelConnection,
+  model: LoginModel,
+  models: string[] | undefined,
+): Promise<ModelLoginResult> {
+  const { appRoot, prompter, signal } = input;
+  const { selected, team } = connection;
+  const { helper, compatible, defaultId, needsModels } = modelSelection(selected, model);
+  let slug: string | undefined;
+  if (needsModels) {
+    const available =
+      connection.availableModels ??
+      models ??
       (helper
-        ? await availableHelperModels(helper, signal)
-        : (await fetchGatewayCatalog(signal))
-            .filter((model) => model.type === "language")
-            .map((model) => model.id));
-    if (!models.includes(id)) {
-      if (models.length === 0)
+        ? await withLoginProgress(prompter, "Loading available models…", () =>
+            availableHelperModels(helper, signal),
+          )
+        : []);
+    let id = defaultId;
+    if (!available.includes(id)) {
+      if (available.length === 0)
         throw new Error(
           "No models are available for this connection. Choose another connection with /login.",
         );
       id = await prompter.select({
         message: "Choose an available model",
         search: true,
-        options: models.map((id) => ({ value: id, label: id })),
+        options: available.map((id) => ({ value: id, label: id })),
       });
     }
-    if (!compatible || id !== model?.id) {
-      const outcome = await changeAgentModel({
-        appRoot: agentRoot,
-        slug: helper ? MODEL_HELPERS[helper].prefix + id : id,
+    const next = helper ? MODEL_HELPERS[helper].prefix + id : id;
+    if (!compatible || next !== model.selection) slug = next;
+  }
+  const keyConnection =
+    selected === "openai" || selected === "anthropic" || selected === "ai-gateway-key";
+  const keySource = !keyConnection
+    ? undefined
+    : input.automatic
+      ? (readProviderKeySourceSync(appRoot) ??
+        (environmentConnection(process.env) === selected ? "environment" : "secret"))
+      : "secret";
+  const settings: ProviderSettings = { selected, ...team, keySource };
+  const settingsChanged = !(await providerSettingsMatch(appRoot, settings));
+  const changed = slug !== undefined || settingsChanged;
+  const save = async () => {
+    signal?.throwIfAborted();
+    if (slug !== undefined) {
+      const outcome = await changeValidatedAgentModel({
+        appRoot: input.agentRoot ?? appRoot,
+        slug,
       });
       if (outcome.kind === "rejected") throw new Error(outcome.message);
     }
-  }
-  signal?.throwIfAborted();
-  if (selected === "vercel" || selected === "vercel-cli") {
-    const credential =
-      selected === "vercel" ? await resolveVercelSession() : await readVercelCliConnection();
-    if (!credential) throw new Error("Vercel credentials are unavailable. Retry /login.");
-    const team = (input.automatic ? readProviderTeamSync(appRoot) : undefined) ?? {
-      teamId: credential.teamId,
-      teamName: "teamName" in credential ? credential.teamName : credential.teamId,
-    };
-    await validateVercelAccess(
-      "accessToken" in credential ? credential.accessToken : credential.token,
-      team.teamId,
-      signal,
-    );
-    await writeProviderSelection(appRoot, selected, team);
-    delete process.env.EVE_MODEL_KEY_SOURCE;
-    process.env.EVE_MODEL_TEAM = team.teamId;
-    process.env.EVE_MODEL_TEAM_NAME = team.teamName;
-  } else {
-    const keyConnection =
-      selected === "openai" || selected === "anthropic" || selected === "ai-gateway-key";
-    const keySource = !keyConnection
-      ? undefined
-      : input.automatic
-        ? (readProviderKeySourceSync(appRoot) ??
-          (environmentConnection(process.env) === selected ? "environment" : "secret"))
-        : "secret";
-    await writeProviderSelection(appRoot, selected, undefined, keySource);
+    if (settingsChanged) await writeProviderSelection(appRoot, selected, team, keySource);
+    process.env[MODEL_CONNECTION_ENV] = selected;
     if (keySource) process.env.EVE_MODEL_KEY_SOURCE = keySource;
     else delete process.env.EVE_MODEL_KEY_SOURCE;
-    delete process.env.EVE_MODEL_TEAM;
-    delete process.env.EVE_MODEL_TEAM_NAME;
-  }
+    if (team) {
+      process.env.EVE_MODEL_TEAM = team.teamId;
+      process.env.EVE_MODEL_TEAM_NAME = team.teamName;
+    } else {
+      delete process.env.EVE_MODEL_TEAM;
+      delete process.env.EVE_MODEL_TEAM_NAME;
+    }
+  };
+  if (changed) {
+    await withLoginProgress(prompter, "Updating agent connection…", () =>
+      measureLoginStage("activation", () =>
+        input.withConnectionUpdate ? input.withConnectionUpdate(save) : save(),
+      ),
+    );
+  } else await save();
   if (!input.automatic) await writeDefaultConnection(selected);
-  process.env[MODEL_CONNECTION_ENV] = selected;
+  return { kind: "ready", reload: changed && input.withConnectionUpdate === undefined };
 }
 
-export async function runModelLogin(input: {
-  appRoot: string;
-  agentRoot?: string;
-  prompter: Prompter;
-  automatic?: boolean;
-  signal?: AbortSignal;
-}): Promise<{ kind: "ready" | "cancelled" }> {
+export async function runModelLogin(input: LoginInput): Promise<ModelLoginResult> {
   const { appRoot, prompter, signal } = input;
-  const agentRoot = input.agentRoot ?? appRoot;
+  let modelPromise: Promise<LoginModel> | undefined;
+  const getModel = () =>
+    (modelPromise ??= measureLoginStage("source_inspection", () =>
+      readLoginModel(input.agentRoot ?? appRoot),
+    ));
+
+  const connect = async (
+    selected: ModelConnectionSelection,
+    automatic: boolean,
+  ): Promise<ModelLoginResult | undefined> => {
+    const controller = new AbortController();
+    const attemptSignal = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal;
+    // Public catalog work can overlap browser sign-in. Capture its failure so
+    // it cannot abandon an active prompt or become an unhandled rejection.
+    const preparation = getModel()
+      .then(async (model) => {
+        const selection = modelSelection(selected, model);
+        const models =
+          !selection.helper && selection.needsModels
+            ? (await measureLoginStage("gateway_catalog", () => fetchGatewayCatalog(attemptSignal)))
+                .filter((model) => model.type === "language")
+                .map((model) => model.id)
+            : undefined;
+        return { model, models };
+      })
+      .then(
+        (value) => ({ value }),
+        (error) => ({ error }),
+      );
+    try {
+      const team = readProviderTeamSync(appRoot);
+      const connection = await measureLoginStage("authentication", async () =>
+        automatic
+          ? await withLoginProgress(prompter, "Checking saved connection…", () =>
+              reuseModelConnection(selected, team, attemptSignal),
+            )
+          : await authenticateModelConnection({ selected, team, prompter, signal: attemptSignal }),
+      );
+      if (!connection) return undefined;
+      const prepared = await withLoginProgress(
+        prompter,
+        "Loading available models…",
+        () => preparation,
+      );
+      if ("error" in prepared) throw prepared.error;
+      return await applyConnection(
+        { ...input, automatic, signal: attemptSignal },
+        connection,
+        prepared.value.model,
+        prepared.value.models,
+      );
+    } finally {
+      controller.abort();
+    }
+  };
+
   try {
     if (input.automatic) {
-      const inspection = await inspectApplication(agentRoot).catch(() => undefined);
-      const model = inspection?.compiledState?.manifest.config.model;
-      const authored =
-        model?.routing.kind === "external"
-          ? await readAuthoredModelSelection(agentRoot)
-          : undefined;
-      const authoredHelper =
-        authored === undefined ? undefined : parseModelHelper(authored)?.helper;
-      if (model?.routing.kind === "external" && authoredHelper === undefined)
-        return { kind: "ready" };
-      const existing = (await readProviderSelection(appRoot)) ?? authoredHelper;
-      const available = await resolveAvailableProviders(appRoot);
-      const selected =
-        existing ??
-        environmentConnection(process.env) ??
-        (available.includes("ai-gateway-project") ? "ai-gateway-project" : undefined) ??
-        (await readDefaultConnection()) ??
-        "vercel-cli";
+      const { model, selected } = await withLoginProgress(
+        prompter,
+        "Checking saved connection…",
+        async () => {
+          const [model, existing, available, machineDefault] = await Promise.all([
+            getModel(),
+            readProviderSelection(appRoot),
+            resolveAvailableProviders(appRoot),
+            readDefaultConnection(),
+          ]);
+          const authoredHelper =
+            model.selection === undefined ? undefined : parseModelHelper(model.selection)?.helper;
+          return {
+            model,
+            selected:
+              existing ??
+              authoredHelper ??
+              environmentConnection(process.env) ??
+              (available.includes("ai-gateway-project") ? "ai-gateway-project" : undefined) ??
+              machineDefault ??
+              ("vercel-cli" as const),
+          };
+        },
+      );
+      if (model.external && model.selection === undefined) return { kind: "ready", reload: false };
       try {
-        if (
-          await withSpinner(prompter, connectionProgress(selected), () =>
-            connectionReady(selected, signal),
-          )
-        ) {
-          prompter.replaceContent?.();
-          await withSpinner(prompter, "Preparing your chat…", () =>
-            applyConnection({
-              appRoot,
-              agentRoot,
-              selected,
-              prompter,
-              signal,
-              automatic: true,
-            }),
-          );
-          return { kind: "ready" };
-        }
+        const result = await connect(selected, true);
+        if (result) return result;
       } catch (error) {
+        modelPromise = undefined;
         signal?.throwIfAborted();
         prompter.log.warning(
           error instanceof Error ? error.message : "Could not connect automatically. Retry /login.",
@@ -270,42 +260,16 @@ export async function runModelLogin(input: {
     }
     while (true) {
       const selected = await prompter.select({
-        message: "Connect a model",
+        message: "Choose a connection",
         search: true,
         options: [...CONNECTION_OPTIONS],
       });
       if (!isModelConnection(selected)) throw new Error("Choose a model connection.");
-      let availableModels: string[] | undefined;
       try {
-        if (selected === "chatgpt") {
-          await ensureChatGptAuth({ signal, log: (message) => prompter.log.info(message) });
-        } else if (selected === "vercel") {
-          await loginVercelModel(prompter, signal, readProviderTeamSync(appRoot)?.teamId);
-        } else {
-          const key = (
-            await prompter.password({
-              message: CONNECTION_OPTIONS.find((option) => option.value === selected)!.label,
-              validate: (value) => (value.trim() ? undefined : "Enter an API key."),
-            })
-          ).trim();
-          await withSpinner(prompter, "Checking connection…", async () => {
-            if (selected === "ai-gateway-key") {
-              const result = await validateGatewayApiKey(key, signal);
-              if (result.kind !== "valid")
-                throw new Error(
-                  "Could not validate the Gateway key. Check the key and your connection, then retry.",
-                );
-            } else availableModels = await directModels(selected, key, signal);
-          });
-          signal?.throwIfAborted();
-          await writeModelSecret(modelKeySecretName(selected), key);
-        }
-        prompter.replaceContent?.();
-        await withSpinner(prompter, "Preparing your chat…", () =>
-          applyConnection({ appRoot, agentRoot, selected, prompter, signal, availableModels }),
-        );
-        return { kind: "ready" };
+        const result = await connect(selected, false);
+        if (result) return result;
       } catch (error) {
+        modelPromise = undefined;
         if (error instanceof WizardCancelledError) return { kind: "cancelled" };
         signal?.throwIfAborted();
         prompter.log.warning(

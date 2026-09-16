@@ -197,7 +197,7 @@ describe("runTuiSetupCommand", () => {
     await expect(run({ command: "model", flows })).resolves.toEqual({
       message: "Model changed to openai/gpt-5.5. Live on your next prompt.",
       preserveFlowDiagnostics: false,
-      effect: { kind: "model-access-changed" },
+      effect: { kind: "model-access-changed", reload: true },
     });
     expect(flows.runModelFlow).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -282,7 +282,7 @@ describe("runTuiSetupCommand", () => {
         "Model changed to openai/gpt-5.5. Live on your next prompt.\n" +
         "AI Gateway via Project selected.",
       preserveFlowDiagnostics: false,
-      effect: { kind: "model-access-changed" },
+      effect: { kind: "model-access-changed", reload: true },
     });
   });
 
@@ -297,7 +297,7 @@ describe("runTuiSetupCommand", () => {
     await expect(run({ command: "model", flows })).resolves.toEqual({
       message: "AI Gateway via Project selected.",
       preserveFlowDiagnostics: false,
-      effect: { kind: "model-access-changed" },
+      effect: { kind: "model-access-changed", reload: true },
     });
   });
 
@@ -312,7 +312,7 @@ describe("runTuiSetupCommand", () => {
     await expect(run({ command: "model", flows })).resolves.toEqual({
       message: "AI Gateway via API key selected.",
       preserveFlowDiagnostics: false,
-      effect: { kind: "model-access-changed" },
+      effect: { kind: "model-access-changed", reload: true },
     });
   });
 
@@ -327,7 +327,7 @@ describe("runTuiSetupCommand", () => {
     await expect(run({ command: "model", flows })).resolves.toEqual({
       message: "ChatGPT subscription selected.",
       preserveFlowDiagnostics: false,
-      effect: { kind: "model-access-changed" },
+      effect: { kind: "model-access-changed", reload: true },
     });
   });
 
@@ -637,7 +637,7 @@ describe("runTuiSetupCommand", () => {
       cancelled: true,
       tone: undefined,
       preserveFlowDiagnostics: false,
-      effect: { kind: "model-access-changed" },
+      effect: { kind: "model-access-changed", reload: true },
     });
   });
 
