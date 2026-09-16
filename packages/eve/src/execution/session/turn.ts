@@ -116,6 +116,14 @@ export class SessionExecution {
         return await this.finishCancelledTurn();
       }
 
+      if (result.action === "complete") {
+        const steering = await turn.takeSteering();
+        if (turn.signal.aborted) return await this.finishCancelledTurn();
+        // Keep the candidate if the channel ignores the selected delivery.
+        nextStepInput = { completion: result.completion, delivery: steering };
+        continue;
+      }
+
       if (result.action === "done") {
         return {
           isError: result.isError,

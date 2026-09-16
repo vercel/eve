@@ -1,6 +1,6 @@
 import type { DeliverHookPayload } from "#channel/types.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
-import type { SettledTurn, StepResult } from "#harness/types.js";
+import type { SettledTurn, StepResult, TurnCompletion } from "#harness/types.js";
 import type { RuntimeActionResult } from "#shared/action-types.js";
 import type { TokenUsage } from "#shared/token-usage.js";
 
@@ -16,6 +16,7 @@ export interface RuntimeActionResultStepInput {
  * was in flight is appended ahead of that action's result in the same step.
  */
 export interface TurnStepPayload {
+  readonly completion?: TurnCompletion;
   readonly control?: "clear" | "compact";
   readonly delivery?: DeliverHookPayload;
   readonly runtimeResults?: RuntimeActionResultStepInput;
@@ -41,6 +42,7 @@ interface DurableStepResultFields {
 
 /** Result returned by a session-mutating turn step. */
 export type DurableStepResult = (
+  | { readonly action: "complete"; readonly completion: TurnCompletion }
   | {
       readonly action: "continue" | "done";
       readonly output?: unknown;

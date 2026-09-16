@@ -564,6 +564,32 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       });
     };
 
+    if (config.completeTurn !== undefined) {
+      throwIfTurnAborted(config.abortSignal);
+      session = { ...clearTurnClientContextState(session), outputSchema: undefined };
+      try {
+        if (emit) {
+          emissionState =
+            config.completeTurn.result === undefined
+              ? await emitTurnEpilogue(emit, emissionState, config.mode)
+              : await emitStructuredResult(
+                  emit,
+                  // The pending candidate reserved the next model index; this
+                  // result still belongs to the call that produced the answer.
+                  { ...emissionState, stepIndex: emissionState.stepIndex - 1 },
+                  config.completeTurn.result,
+                  config.mode,
+                );
+          session = setHarnessEmissionState(session, emissionState);
+        }
+      } catch (error) {
+        return failBoundaryEvent(error, emissionState);
+      }
+      return config.mode === "task"
+        ? { next: { done: true, output: config.completeTurn.output }, session }
+        : { next: null, session, settledTurn: { output: config.completeTurn.output } };
+    }
+
     if (config.clearOnly === true) {
       session = {
         ...session,
@@ -2721,6 +2747,26 @@ async function handleStepResult(input: {
       session: nextSession,
       stepOutput,
     });
+  }
+
+  if (config.deferTurnCompletion === true) {
+    const structured = extractFinalOutput(result);
+    if (nextSession.outputSchema === undefined || structured !== undefined) {
+      if (structured !== undefined) {
+        nextSession = {
+          ...persistStructuredAssistantTurn(nextSession, promptMessages, structured),
+          outputSchema: nextSession.outputSchema,
+        };
+      }
+      return {
+        next: null,
+        pendingCompletion: {
+          output: structured !== undefined ? structured : (stepOutput ?? ""),
+          result: structured,
+        },
+        session: setHarnessEmissionState(nextSession, advanceStep(emissionState)),
+      };
+    }
   }
 
   if (config.mode === "task") {

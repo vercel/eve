@@ -1656,6 +1656,36 @@ describe("turnStep", () => {
     expect(workflowWritesByNamespace.get(DEFAULT_WORKFLOW_STREAM_NAMESPACE) ?? []).toEqual([]);
   });
 
+  it("completes the saved answer when the channel ignores pending steering", async () => {
+    const adapter: ChannelAdapter = { kind: "ignored-steering", deliver: () => undefined };
+    vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue({
+      ...createStubBundle(),
+      adapterRegistry: { adaptersByKind: new Map([[adapter.kind, adapter]]) },
+    } as never);
+    installSessionStoreMocks([createStubSession()]);
+    const completion = { output: "Alice's report is ready." };
+    vi.mocked(createExecutionNodeStep).mockImplementation((config) => {
+      expect(config.completeTurn).toEqual(completion);
+      return async (session) => ({ next: null, session, settledTurn: completion });
+    });
+    const ctx = new ContextContainer();
+    ctx.set(AuthKey, null);
+    ctx.set(BundleKey, createStubBundle());
+    ctx.set(ChannelKey, adapter);
+    ctx.set(ModeKey, "conversation");
+    ctx.set(SessionIdKey, "session-1");
+    const result = await runTurnStep({
+      input: {
+        completion,
+        delivery: { kind: "deliver", payloads: [{ message: "Ignored update." }] },
+      },
+      sessionWritable: createTestWritable(),
+      serializedContext: serializeContext(ctx),
+      sessionState: createStubSessionState(),
+    });
+    expect(result).toMatchObject({ action: "park", settled: completion });
+  });
+
   it("releases the parent stream writer when the deliver hook throws", async () => {
     const adapter: ChannelAdapter = {
       kind: "deliver-failure",

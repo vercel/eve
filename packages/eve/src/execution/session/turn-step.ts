@@ -91,7 +91,7 @@ function channelDeliveryErrorCode(error: unknown): string {
 
 export type { TurnStepInput };
 
-/** Runs a bounded batch of harness model steps inside one durable `"use step"` boundary. */
+/** Runs a model batch or commits its completion after the owner's steering check. */
 export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResult> {
   "use step";
   return runSessionStep(rawInput);
@@ -292,7 +292,7 @@ async function runSessionStep(input: TurnStepInput): Promise<DurableStepResult> 
       setChannelContext(ctx, updatedAdapter);
     }
 
-    if (delivery !== undefined && resolved === undefined) {
+    if (delivery !== undefined && resolved === undefined && input.input?.completion === undefined) {
       await contextStorage.run(ctx, () =>
         instrumentation?.instrumentChannelDelivery({
           ctx,
@@ -386,6 +386,8 @@ async function runSessionStep(input: TurnStepInput): Promise<DurableStepResult> 
         capabilities,
         clearOnly: input.input?.control === "clear",
         compactOnly: input.input?.control === "compact",
+        deferTurnCompletion: true,
+        completeTurn: resolved === undefined ? input.input?.completion : undefined,
         createRuntime: createWorkflowRuntime,
         handleEvent,
         historyProjector: history.projector,

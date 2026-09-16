@@ -12,7 +12,7 @@ import type { RuntimeActionResult } from "#shared/action-types.js";
 import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
 import type { InputResponse } from "#shared/input.js";
 import type { SandboxState } from "#sandbox/state.js";
-import type { JsonObject } from "#shared/json.js";
+import type { JsonObject, JsonValue } from "#shared/json.js";
 import type { TokenUsage } from "#shared/token-usage.js";
 import type { InternalToolDefinition } from "#tools/definition.js";
 import type { AgentReasoningDefinition } from "#shared/agent-definition.js";
@@ -208,10 +208,17 @@ export interface SettledTurn {
   readonly usage?: TokenUsage;
 }
 
+/** A successful answer awaiting the owner's final steering check. */
+export interface TurnCompletion {
+  readonly output: unknown;
+  readonly result?: JsonValue;
+}
+
 /**
  * Result returned by one harness step invocation.
  */
 export interface StepResult {
+  readonly pendingCompletion?: TurnCompletion;
   /** Background-tool effects projected onto the session that entered this step. */
   readonly backgroundTaskSession?: HarnessSession;
   /** Durable tasks started by background tools and awaiting the parent commit barrier. */
@@ -273,6 +280,10 @@ export type HandleEventFn = (
  * Dependencies injected into the tool-loop harness at construction time.
  */
 export interface ToolLoopHarnessConfig {
+  /** Lets the owner admit steering before committing a successful turn's epilogue. */
+  readonly deferTurnCompletion?: boolean;
+  /** Commits a previously produced answer without another model call. */
+  readonly completeTurn?: TurnCompletion;
   /** Cancellation signal for the active turn. */
   readonly abortSignal?: AbortSignal;
   /**

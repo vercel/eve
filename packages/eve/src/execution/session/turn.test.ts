@@ -240,6 +240,67 @@ describe("SessionExecution background task checkpoints", () => {
     expect(dispatchCoordinationStep).toHaveBeenCalledTimes(1);
   });
 
+  it.each(["steer", "queue"] as const)(
+    "checks %s input accepted before the final model step completes",
+    async (turnPolicy) => {
+      const pending: SessionInboxPayload[] = [];
+      const queue = new SessionInputQueue();
+      const correction: DeliverHookPayload = {
+        kind: "deliver",
+        payloads: [{ message: "Actually, use Alice's 2025 report." }],
+        turnPolicy,
+      };
+      const inbox: SessionInbox = {
+        claimedTokens: [],
+        claimSessionHook: vi.fn(),
+        claimSessionHooks: vi.fn(),
+        drain: vi.fn(() => pending.splice(0)),
+        hasPending: vi.fn(() => pending.length > 0),
+        next: vi.fn(() => new Promise<never>(() => {})),
+        onInterrupt: vi.fn(() => () => {}),
+        restore: vi.fn(),
+      };
+      const started = Promise.withResolvers<void>();
+      const finish = Promise.withResolvers<void>();
+      const completion = { output: "Alice's 2026 report." };
+      vi.mocked(turnStep)
+        .mockReset()
+        .mockImplementationOnce(async (input) => {
+          started.resolve();
+          await finish.promise;
+          return {
+            action: "complete",
+            completion,
+            serializedContext: input.serializedContext,
+            sessionState: input.sessionState,
+          };
+        })
+        .mockImplementation(async (input) => ({
+          action: "park",
+          hasPendingAuthorization: false,
+          hasPendingInputBatch: false,
+          settled: { output: "Done." },
+          serializedContext: input.serializedContext,
+          sessionState: input.sessionState,
+        }));
+      const execution = createExecution({ inbox, queue, sessionState: state("") });
+      const result = execution.runTurn({
+        delivery: { kind: "deliver", payloads: [{ message: "Read Alice's 2026 report." }] },
+      });
+      await started.promise;
+      pending.push(correction);
+      finish.resolve();
+      await result;
+
+      expect(turnStep).toHaveBeenCalledTimes(2);
+      expect(vi.mocked(turnStep).mock.calls[1]?.[0].input).toEqual({
+        completion,
+        delivery: turnPolicy === "steer" ? correction : undefined,
+      });
+      expect(queue.pendingCount).toBe(turnPolicy === "steer" ? 0 : 1);
+    },
+  );
+
   it("treats input that arrives after a settled turn as the next turn", async () => {
     const followUp: DeliverHookPayload = {
       kind: "deliver",

@@ -218,6 +218,82 @@ function expectSingleTurn(events: readonly MessageStreamEvent[], turnId: string)
 }
 
 describe("workflowEntry integration", () => {
+  it.each(["conversation", "task"] as const)(
+    "applies steering accepted during a final %s model call before completing the turn",
+    async (mode) => {
+      let completions = 0;
+      const runtime = await createTestRuntime({
+        agent: { name: "workflow-final-step-steering" },
+        modules: [
+          {
+            logicalPath: "hooks/steer.ts",
+            loadNamespace: async () => ({
+              default: defineHook({
+                events: {
+                  async "step.started"(event, ctx) {
+                    if (event.data.sequence !== 0 || event.data.stepIndex !== 0) return;
+                    const result = await createWorkflowRuntime({
+                      compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
+                    }).dispatchSession({
+                      sessionId: ctx.session.id,
+                      command: {
+                        kind: "send",
+                        auth: null,
+                        delivery: {
+                          acceptedDeploymentId: "dpl_inline",
+                          channelKind: "http",
+                          channelName: "test",
+                          deliveryId: "correction",
+                        },
+                        payload: { message: "Actually, use Alice's 2025 report." },
+                        turnPolicy: "steer",
+                      },
+                    });
+                    expect(result.status).toBe("accepted");
+                  },
+                  "turn.completed"() {
+                    completions++;
+                  },
+                },
+              }),
+            }),
+          },
+        ],
+      });
+      await runtime.run(async () => {
+        const run = await start(workflowEntry, [
+          {
+            kind: "initial",
+            ownerDeploymentId: "dpl_inline",
+            input: { message: "Read Alice's 2026 report." },
+            serializedContext: buildSerializedContext({ channelKind: "http", mode }),
+          },
+        ]);
+        const stream = captureTurnEvents(run);
+        try {
+          const events = await stream.nextTurn();
+          expectSingleTurn(events, "turn_0");
+          expect(filterEventsByType(events, "message.received")).toHaveLength(2);
+          expect(
+            filterEventsByType(events, "step.started").map((event) => event.data.stepIndex),
+          ).toEqual([0, 1]);
+          expect(filterEventsByType(events, "message.completed").at(-1)?.data.message).toContain(
+            "2025",
+          );
+          expect(filterEventsByType(events, "turn.completed")).toHaveLength(1);
+          expect(completions).toBe(1);
+          if (mode === "task")
+            await expect(run.returnValue).resolves.toMatchObject({
+              output: expect.stringContaining("2025"),
+            });
+        } finally {
+          stream.dispose();
+          if (mode === "conversation") await run.cancel();
+        }
+      });
+    },
+  );
+
   it("persists model output before settlement when a stream append exceeds the SDK flush window", async () => {
     const runtime = await createTestRuntime({ agent: { name: "workflow-stream-order" } });
     const world = await getWorld();
@@ -1212,6 +1288,7 @@ describe("workflowEntry integration", () => {
       },
       kind: "send" as const,
       payload: { message },
+      turnPolicy: "queue" as const,
     });
 
     it.each([undefined, 60_000, false] as const)(
@@ -1481,15 +1558,19 @@ describe("workflowEntry integration", () => {
           expect(candidateHooks.data).toEqual([]);
           const steps = await world.steps.list({ runId: anchor.runId, resolveData: "all" });
           const turns = steps.data.filter((step) => step.stepName.endsWith("//turnStep"));
-          expect(turns).toHaveLength(2);
-          const histories = await Promise.all(
+          const results = await Promise.all(
             turns.map(async (step) => {
-              const output = await hydrateStepReturnValue(step.output, anchor.runId, undefined);
-              return output.sessionState.snapshot.session.history as Array<{
+              return await hydrateStepReturnValue(step.output, anchor.runId, undefined);
+            }),
+          );
+          const modelSteps = results.filter((result) => result.action === "complete");
+          expect(modelSteps).toHaveLength(2);
+          const histories = modelSteps.map(
+            (result) =>
+              result.sessionState.snapshot.session.history as Array<{
                 role: string;
                 content: unknown;
-              }>;
-            }),
+              }>,
           );
           const deliveries = histories.map((history) =>
             history.filter(
@@ -1548,6 +1629,7 @@ describe("workflowEntry integration", () => {
               await resumeHook(sessionInboxHookToken(sessionCommandHookToken(anchor.runId)), {
                 kind: "send",
                 payload: { message: `Alice sends input ${index} during release.` },
+                turnPolicy: "queue",
               });
             }
           }
