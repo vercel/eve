@@ -4,7 +4,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 
-import type { SandboxDockerfileInput } from "#shared/sandbox-provider.js";
+import type { SandboxDockerfile as SandboxDockerfileInput } from "#execution/sandbox/dockerfile.js";
 
 const OCI_PLATFORM = "linux/amd64";
 const SHA256_DIGEST = /sha256:[a-f0-9]{64}/u;

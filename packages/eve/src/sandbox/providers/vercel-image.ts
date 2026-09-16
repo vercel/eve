@@ -1,5 +1,7 @@
 import {
   createVercelImageSandboxProvider,
+  type VercelImagePreparedArtifact,
+  type VercelImageSessionState,
   VERCEL_IMAGE_PROVIDER_NAME,
 } from "#execution/sandbox/bindings/vercel-image.js";
 import type {
@@ -11,10 +13,11 @@ import { defineSandboxProvider } from "#shared/sandbox-provider.js";
 
 const provider = defineSandboxProvider<
   ExperimentalVercelImageEnvironmentOptions,
-  ExperimentalVercelImageRuntimeOptions
+  ExperimentalVercelImageRuntimeOptions,
+  VercelImagePreparedArtifact,
+  VercelImageSessionState
 >({
   name: VERCEL_IMAGE_PROVIDER_NAME,
-  kind: () => "dockerfile",
   environment: (options) => createVercelImageSandboxProvider(options),
 });
 
