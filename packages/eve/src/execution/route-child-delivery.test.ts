@@ -1,3 +1,4 @@
+import { createTestSessionState } from "#internal/testing/session-state.js";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
@@ -36,13 +37,14 @@ vi.mock("#execution/tools/workflow/resume-hook-step.js", () => ({
   resumeHookStep: vi.fn(),
 }));
 
-const state = (hasProxyInputRequests: boolean): DurableSessionState => ({
-  continuationToken: "parent-token",
-  emissionState: { sequence: 0, sessionStarted: true, stepIndex: 0, turnId: "" },
-  hasProxyInputRequests,
-  sessionId: "parent-session",
-  version: 1,
-});
+const state = (hasProxyInputRequests: boolean): DurableSessionState =>
+  createTestSessionState({
+    continuationToken: "parent-token",
+    emissionState: { sequence: 0, sessionStarted: true, stepIndex: 0, turnId: "" },
+    hasProxyInputRequests,
+    sessionId: "parent-session",
+    version: 1,
+  });
 
 const taskRequest = {
   replyTo: "eve:workflow-tool-run-answer:run-1:0",
@@ -83,7 +85,7 @@ describe("task HITL delivery routing", () => {
         kind: "deliver",
         payloads: [{ task: { inputRequests: [taskRequest] } }],
       },
-      parentWritable: new WritableStream<Uint8Array>(),
+      sessionWritable: new WritableStream<Uint8Array>(),
       serializedContext: {},
       sessionState: state(false),
     });
@@ -120,7 +122,7 @@ describe("task HITL delivery routing", () => {
         kind: "deliver",
         payloads: [{ task: { views: [view] } }],
       },
-      parentWritable: new WritableStream<Uint8Array>(),
+      sessionWritable: new WritableStream<Uint8Array>(),
       serializedContext: { trace: "open" },
       sessionState: state(false),
     });
@@ -149,7 +151,7 @@ describe("task HITL delivery routing", () => {
         kind: "deliver",
         payloads: [{ task: { inputRequests: [{ ...taskRequest, taskId: "foreign-task" }] } }],
       },
-      parentWritable: new WritableStream<Uint8Array>(),
+      sessionWritable: new WritableStream<Uint8Array>(),
       serializedContext: {},
       sessionState: state(false),
     });
@@ -194,7 +196,7 @@ describe("task HITL delivery routing", () => {
           },
         ],
       },
-      parentWritable: new WritableStream<Uint8Array>(),
+      sessionWritable: new WritableStream<Uint8Array>(),
       serializedContext: {},
       sessionState: state(false),
     });
@@ -251,7 +253,7 @@ describe("task HITL delivery routing", () => {
           },
         ],
       },
-      parentWritable: new WritableStream<Uint8Array>(),
+      sessionWritable: new WritableStream<Uint8Array>(),
       serializedContext: { source: "parent" },
       sessionState: state(false),
     });
@@ -303,7 +305,7 @@ describe("task HITL delivery routing", () => {
         taskDeliveryId: "task-delivery-1",
         turnPolicy: "queue",
       },
-      parentWritable: new WritableStream<Uint8Array>(),
+      sessionWritable: new WritableStream<Uint8Array>(),
       serializedContext: {},
       sessionState: routedState,
     });

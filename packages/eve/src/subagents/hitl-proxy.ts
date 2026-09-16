@@ -1,4 +1,4 @@
-import type { SessionInboxAddress } from "#execution/wire/session-inbox-contract.js";
+import type { SessionInboxAddress } from "#execution/session-inbox/address.js";
 import type { DeliverPayload, SubagentInputRequestHookPayload } from "#channel/types.js";
 import {
   emitTurnEpilogue,

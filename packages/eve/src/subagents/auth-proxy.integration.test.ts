@@ -30,7 +30,7 @@ const authorizationAdapter: ChannelAdapter<AuthorizationAdapterContext> = {
   kind: "authorization-proxy-test",
   "authorization.required"(data, ctx) {
     ctx.state.pendingName = data.name;
-    ctx.session.continuation?.rekey("auth-thread");
+    ctx.session.continuation?.alias("auth-thread");
   },
   "authorization.completed"(data, ctx) {
     delete ctx.state.pendingName;
@@ -143,7 +143,7 @@ describe("subagent authorization proxy", () => {
     const session = createSession(parentSessionId);
     const { ctx } = buildContext({ adapter: authorizationAdapter, sessionId: parentSessionId });
     const chunks: Uint8Array[] = [];
-    const parentWritable = createCapturingWritable(chunks);
+    const sessionWritable = createCapturingWritable(chunks);
     const candidateEvent: SubagentAuthorizationEvent = {
       data: {
         candidateId: "candidate-1",
@@ -172,13 +172,13 @@ describe("subagent authorization proxy", () => {
       ctx,
       durableSession: projectToDurableSession(session),
       hookPayload: authorizationPayload(candidateEvent),
-      parentWritable,
+      sessionWritable,
     });
     await emitProxiedSubagentEvent({
       ctx,
       durableSession: projectToDurableSession(session),
       hookPayload: authorizationPayload(settledEvent),
-      parentWritable,
+      sessionWritable,
     });
 
     expect(decodeEvent(chunks[0]!)).toMatchObject(candidateEvent);
@@ -192,7 +192,7 @@ describe("subagent authorization proxy", () => {
       sessionId: parentSessionId,
     });
     const chunks: Uint8Array[] = [];
-    const parentWritable = createCapturingWritable(chunks);
+    const sessionWritable = createCapturingWritable(chunks);
     const requiredEvent: SubagentAuthorizationEvent = {
       data: {
         authorization: {
@@ -214,7 +214,7 @@ describe("subagent authorization proxy", () => {
       ctx,
       durableSession: projectToDurableSession(session),
       hookPayload: authorizationPayload(requiredEvent),
-      parentWritable,
+      sessionWritable,
     });
 
     expect(required.sessionState.continuationToken).toBe("http:auth-thread");
@@ -237,9 +237,9 @@ describe("subagent authorization proxy", () => {
     };
     const completed = await emitProxiedSubagentEvent({
       ctx: rehydrateContext({ bundle, serializedContext: required.serializedContext }),
-      durableSession: required.sessionState.snapshot!.session,
+      durableSession: required.sessionState.snapshot.session,
       hookPayload: authorizationPayload(completedEvent),
-      parentWritable,
+      sessionWritable,
     });
 
     expect(completed.serializedContext[ChannelKey.name]).toEqual({

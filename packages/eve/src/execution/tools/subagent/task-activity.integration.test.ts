@@ -279,8 +279,7 @@ describe("task-owned subagent activity", () => {
         ownerId: "task-b",
         phase: "claimed",
       },
-      parentToken: "task-b-reply",
-      taskId: "task-b",
+      reply: { kind: "reply", parentToken: "task-b-reply", taskId: "task-b" },
     });
     expect(result.kind).toBe("called");
     let caller: TurnCaller | undefined;
@@ -289,11 +288,15 @@ describe("task-owned subagent activity", () => {
       const request = continueRemote.mock.calls[0]![0];
       const parsed = parseActivityObserverField(request.activityObserver);
       if (parsed === undefined || parsed instanceof Response) throw new Error("Invalid observer");
-      expect(validateActivityObserverBinding(parsed, request.callback)).toBeUndefined();
+      const callback = request.callback;
+      if (callback === undefined) throw new Error("Expected callback");
+      expect(validateActivityObserverBinding(parsed, callback)).toBeUndefined();
       caller = {
-        ...request.callback,
+        callId: callback.callId,
         activityObserver: parsed,
-        replyTo: { kind: "callback", token: request.callback.token, url: request.callback.url },
+        subagentName: callback.subagentName,
+        taskId: callback.taskId,
+        replyTo: { kind: "callback", token: callback.token, url: callback.url },
       };
     }
     const context = await bindTurnCallerContextStep({

@@ -166,7 +166,7 @@ type EventData<T extends UnstampedMessageStreamEvent["type"]> =
 export interface ChannelContinuationOps {
   readonly continuation?: {
     readonly token: string;
-    rekey(token: string): void;
+    alias(token: string): void;
   };
 }
 
@@ -361,7 +361,7 @@ function buildAdapter<TState, TCtx, TReceiveTarget, TMetadata extends Record<str
               ? undefined
               : {
                   token: session.continuation.token,
-                  rekey: (token: string) => session.continuation?.rekey(token),
+                  alias: (token: string) => session.continuation?.alias(token),
                 },
         };
         if (eventType === "session.failed") {

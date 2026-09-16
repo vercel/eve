@@ -1,4 +1,5 @@
 {
   "title": "Observability",
+  "defaultOpen": false,
   "pages": ["overview", "providers", "otel"]
 }

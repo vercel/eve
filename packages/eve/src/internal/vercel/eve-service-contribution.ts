@@ -155,6 +155,7 @@ export function compileEveVercelService(input: {
     service: {
       buildCommand: build.buildCommand,
       framework: "eve",
+      outputDirectory: ".vercel/output",
       root: build.root,
       routes: [
         ...(homeRoute === undefined ? [] : [homeRoute]),

@@ -32,6 +32,7 @@ describe("parseVercelServicesConfig", () => {
     [{ services: [{}] }, /must have a non-empty name/],
     [{ services: { eve: { framework: 42 } } }, /framework must be a string/],
     [{ services: { eve: { mount: false } } }, /mount must be a string or JSON object/],
+    [{ services: { eve: { outputDirectory: 42 } } }, /outputDirectory must be a string/],
     [{ services: { eve: { routes: {} } } }, /routes must be an array/],
     [{ routes: {} }, /routes must be an array/],
     [{ routes: [{ destination: 42 }] }, /destination must be a string or JSON object/],

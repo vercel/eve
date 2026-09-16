@@ -5,17 +5,16 @@ import type {
   SubagentAuthorizationEventHookPayload,
   SubagentInputRequestHookPayload,
 } from "#channel/types.js";
-import {
-  readWorkflowToolRunAdmission,
-  readWorkflowToolRunOwner,
-  readWorkflowToolRunRef,
-} from "#execution/tools/workflow/ask.js";
+import { readWorkflowToolRunOwner, readWorkflowToolRunRef } from "#execution/tools/workflow/ask.js";
 import { resumeHookStep } from "#execution/tools/workflow/resume-hook-step.js";
 import type { RuntimeSubagentChildResult, RuntimeSubagentResult } from "#shared/action-types.js";
 import type { JsonValue } from "#shared/json.js";
 import type { JsonObject } from "#shared/json.js";
 import { disposeHook } from "#execution/hook-ownership.js";
-import { sessionCommandHookToken } from "#execution/session-command-token.js";
+import {
+  sessionCommandHookToken,
+  sessionInboxHookToken,
+} from "#execution/session-inbox/address.js";
 import type { AgentInput } from "#tools/workflow-definition.js";
 import type { ToolContext } from "#tools/definition.js";
 
@@ -28,7 +27,7 @@ export type InternalAgentInput = {
 
 /**
  * Asks the owning session to spawn an agent for a workflow tool run. Spawning
- * needs owner-held material (auth, capabilities, admission, the agent handle
+ * needs owner-held material (auth, capabilities, the agent handle
  * store) that a workflow tool body never has.
  */
 export interface AgentInvocationRequest {
@@ -87,11 +86,6 @@ export async function invokeAgent(
   validateAgentInput(input);
   const run = readWorkflowToolRunRef(ctx);
   const owner = readWorkflowToolRunOwner(ctx);
-  const admission = readWorkflowToolRunAdmission(ctx);
-  if (admission !== undefined) {
-    const admitted = await admission;
-    if (admitted.status === "rejected") throw new Error(admitted.reason);
-  }
   const replies = createHook<AgentInvocationReply>();
   const invocationId = options.invocationId ?? `${ctx.callId}:${replies.token}`;
   try {
@@ -131,9 +125,11 @@ export async function invokeAgent(
         await resumeHookStep(owner.inbox, {
           kind: "request",
           from: run,
+          // Current session inboxes use their physical token. A remote child's
+          // create-once operation hook is already a narrowed reply capability.
           replyTo:
             reply.childSessionInbox?.sessionId === reply.childSessionId
-              ? sessionCommandHookToken(reply.childSessionInbox.sessionId)
+              ? sessionInboxHookToken(sessionCommandHookToken(reply.childSessionInbox.sessionId))
               : reply.childContinuationToken,
           request: {
             kind: "input-batch",

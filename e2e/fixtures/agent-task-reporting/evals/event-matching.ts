@@ -6,6 +6,45 @@ type Event = EveEvalTurn["events"][number];
 export type SessionEvents = Pick<EveEvalTurn, "sessionId" | "events">;
 export const CHECKS = ["first", "second", "third"] as const;
 export type Check = (typeof CHECKS)[number];
+const COMPLETION = /Background task (task_[a-z0-9]+) \([^)]+\) is completed\./giu;
+
+/** Counts logical model steps while tolerating durable step retries with new event IDs. */
+export function modelStepCount(snapshots: readonly SessionEvents[]): number {
+  const steps = new Set<string>();
+  for (const snapshot of snapshots) {
+    for (const event of snapshot.events) {
+      if (event.type !== "step.started") continue;
+      steps.add(
+        JSON.stringify([
+          snapshot.sessionId,
+          event.data.turnId,
+          event.data.sequence,
+          event.data.stepIndex,
+          event.data.modelId,
+        ]),
+      );
+    }
+  }
+  return steps.size;
+}
+
+/** Extracts each logical notification once without hiding duplicates inside one message. */
+export function completedTaskIds(snapshot: SessionEvents): string[] {
+  const messages = new Set<string>();
+  const taskIds: string[] = [];
+  for (const event of snapshot.events) {
+    if (event.type !== "message.received") continue;
+    const logicalMessage = JSON.stringify([
+      event.data.turnId,
+      event.data.sequence,
+      event.data.message,
+    ]);
+    if (messages.has(logicalMessage)) continue;
+    messages.add(logicalMessage);
+    taskIds.push(...[...event.data.message.matchAll(COMPLETION)].map((match) => match[1]));
+  }
+  return taskIds;
+}
 
 export function requireOriginalTasksHealthy(
   snapshots: readonly SessionEvents[],

@@ -29,6 +29,7 @@ export interface EveVercelServiceConfig {
   readonly entrypoint?: string;
   readonly framework?: string;
   readonly mount?: string | { readonly path?: string; readonly subdomain?: string };
+  readonly outputDirectory?: string;
   readonly routes?: readonly EveVercelRouteConfig[];
   readonly root?: string;
   readonly type?: string;
@@ -48,7 +49,7 @@ export interface EveVercelConfig {
 
 /** Options for composing an eve workspace into a programmatic Vercel configuration. */
 export interface WithEveOptions {
-  /** Eve workspace root. Defaults to the directory evaluating `vercel.ts`. */
+  /** Eve workspace root. Defaults to the workspace containing the directory evaluating `vercel.ts`. */
   readonly root?: string;
 }
 
@@ -97,13 +98,17 @@ export async function withEve<TConfig extends EveVercelConfig>(
     readonly services: Readonly<Record<string, EveVercelServiceConfig>>;
   }
 > {
-  const root = resolve(options.root ?? process.cwd());
-  const context = await resolveEveProjectContext(root);
-  if (context.kind !== "workspace" || context.workspace.root !== root) {
-    throw new Error(`withEve must run at an eve workspace root; received ${root}.`);
+  const requestedRoot = resolve(options.root ?? process.cwd());
+  const context = await resolveEveProjectContext(requestedRoot);
+  if (
+    context.kind !== "workspace" ||
+    (options.root !== undefined && context.workspace.root !== requestedRoot)
+  ) {
+    throw new Error(`withEve must run at an eve workspace root; received ${requestedRoot}.`);
   }
 
   const { workspace } = context;
+  const root = workspace.root;
   if (workspace.members.length === 0) {
     throw new Error(
       `withEve found no workspace agents under ${join(root, "agents")}. Add an agent or remove withEve from vercel.ts.`,

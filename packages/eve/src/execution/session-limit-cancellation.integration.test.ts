@@ -1,3 +1,4 @@
+import { sessionInboxHookToken } from "#execution/session-inbox/address.js";
 import { describe, expect, it } from "vitest";
 import { resumeHook, start } from "#internal/workflow/runtime.js";
 
@@ -8,7 +9,7 @@ import {
   filterEventsByType,
 } from "#internal/testing/events.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
-import { workflowEntry } from "#execution/workflow-entry.js";
+import { workflowEntry } from "#execution/session/entry.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 
 /**
@@ -56,7 +57,11 @@ async function deliver(
   const deadline = Date.now() + timeout;
   while (true) {
     try {
-      await resumeHook(continuationToken, { auth: null, kind: "send", payload });
+      await resumeHook(sessionInboxHookToken(continuationToken), {
+        auth: null,
+        kind: "send",
+        payload,
+      });
       return;
     } catch (error) {
       if (Date.now() > deadline) throw error;
@@ -85,6 +90,8 @@ describe("session-limit continuation decline integration", () => {
     await runtime.run(async () => {
       const run = await start(workflowEntry, [
         {
+          kind: "initial",
+          ownerDeploymentId: "dpl_inline",
           input: { message: "Hello there" },
           serializedContext: buildSerializedContext({
             channelKind: "http",

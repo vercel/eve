@@ -380,16 +380,22 @@ const workflowWorld = await workflowWorldModule.createWorld({
   }
 
   if (packageName === "@workflow/world-vercel") {
+    const defaultsImportSpecifier = stringifyEsmImportSpecifier(
+      resolvePackageSourceFilePath("src/internal/workflow/vercel-world-defaults.ts"),
+    );
     const moduleImportSpecifier = resolvePackageCompiledFilePath(
       `src/compiled/${packageName}/index.js`,
     );
     const createWorldSource = `
 const workflowWorld = await workflowWorldModule.createWorld({
   headers: { "User-Agent": ${JSON.stringify(buildPackageUserAgent())} },
-});`.trimStart();
+});
+applyVercelWorkflowWorldDefaults(workflowWorld);`.trimStart();
     return {
       moduleImportSpecifier,
-      extraImportLines: [],
+      extraImportLines: [
+        `import { applyVercelWorkflowWorldDefaults } from ${defaultsImportSpecifier};`,
+      ],
       runtimeImports: "getWorld, setWorld",
       createWorldSource,
     };

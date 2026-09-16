@@ -13,10 +13,9 @@ import { theme } from "./lib/theme.ts";
  *
  *   1. Start a long turn, then submit two messages while it streams —
  *      both must land in the pinned `↑ Queue n/5` panel, not the turn.
- *   2. Ctrl+C pops the oldest queued message: the panel flips to Steering,
- *      the running turn settles as `turn.cancelled` → `session.waiting`
- *      (cooperative — the session keeps its context), and the popped
- *      message runs as the replacement turn.
+ *   2. Ctrl+C pops the oldest queued message and submits it for steering;
+ *      the popped message joins the running turn at its next committed
+ *      boundary without cancelling the model or tool work already in flight.
  *   3. The remaining queued message auto-drains as the following turn.
  *   4. The steered echo carries the `↑` provenance arrow above its bar,
  *      the queued one below, and the runner returns to an idle prompt.
@@ -65,10 +64,9 @@ run({ app: "agent-tui-client", kind: "local-build" }, async (target) => {
   await screen.waitForText("Queue 2/5", 10_000);
   console.log(theme.muted("[tui-queue-steer] two messages queued behind the running turn"));
 
-  // Ctrl+C pops the oldest message and cooperatively cancels the running turn.
+  // Admission can clear the transient Steering label before the next render.
+  // The echoed message, answer, and provenance arrow prove accepted steering.
   input.ctrlC();
-  await screen.waitForText("Steering", 10_000);
-  console.log(theme.muted("[tui-queue-steer] steering engaged, cancelling the turn"));
 
   await waitForTwice(screen, STEER_TOKEN, 120_000, "steered turn echo + reply");
   console.log(theme.muted("[tui-queue-steer] steered message answered"));

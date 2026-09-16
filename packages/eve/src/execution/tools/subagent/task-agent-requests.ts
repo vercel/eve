@@ -16,7 +16,7 @@ export interface AgentRequestDelivery {
 }
 
 export interface TaskAgentRequestContext {
-  readonly parentWritable: WritableStream<Uint8Array>;
+  readonly sessionWritable: WritableStream<Uint8Array>;
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
 }
@@ -64,7 +64,7 @@ export async function applyTaskAgentRequest(
         case "dispatched": {
           const emitted = await emitTaskSubagentCalledStep({
             event: dispatched.event,
-            parentWritable: ctx.parentWritable,
+            sessionWritable: ctx.sessionWritable,
             serializedContext: dispatched.serializedContext ?? ctx.serializedContext,
           });
           return {

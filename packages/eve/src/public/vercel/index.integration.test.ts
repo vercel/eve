@@ -58,6 +58,7 @@ describe("withEve", () => {
       buildCommand:
         "cd '../../../agents/support' && export EVE_INTERNAL_BUILD_OUTPUT_DIRECTORY='../../.eve/vercel-services/eve-support/.vercel/output' && export EVE_INTERNAL_HOST_BUILD_OUTPUT_DIRECTORY='../../.vercel/output' && export EVE_PUBLIC_ROUTE_PREFIX='/support' && export EVE_INTERNAL_AGENT_WORKSPACE_MEMBER=1 && node 'node_modules/eve/bin/eve.js' build",
       framework: "eve",
+      outputDirectory: ".vercel/output",
       root: ".eve/vercel-services/eve-support",
       routes: [
         {
@@ -73,6 +74,20 @@ describe("withEve", () => {
     await expect(
       access(join(root, ".eve", "vercel-services", "eve-support")),
     ).resolves.toBeUndefined();
+  });
+
+  it("discovers the workspace when Vercel evaluates config from .vercel", async () => {
+    const root = await createWorkspace();
+    const configDirectory = join(root, ".vercel");
+    await mkdir(configDirectory);
+    const originalCwd = process.cwd();
+    process.chdir(configDirectory);
+    try {
+      const config = await withEve({});
+      expect(config.services["eve-support"]).toBeDefined();
+    } finally {
+      process.chdir(originalCwd);
+    }
   });
 
   it("does not modify the root Build Output", async () => {

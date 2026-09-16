@@ -78,7 +78,6 @@ async function executeAuthorizedStep(
           ctx,
           execute,
           receiver,
-          run,
         });
       } catch (error) {
         if (!ctx.abortSignal.aborted) {
@@ -121,11 +120,9 @@ async function invokeAuthorizedStep(input: {
   readonly ctx: ToolContext;
   readonly execute: (invocation: WorkflowStepInvocation) => Promise<unknown>;
   readonly receiver: unknown;
-  readonly run: WorkflowToolRunContext;
 }): Promise<WorkflowStepResult> {
-  const { args, authorizationResults, callbackToken, ctx, execute, receiver, run } = input;
+  const { args, authorizationResults, callbackToken, ctx, execute, receiver } = input;
   const context: WorkflowStepContext = {
-    authorizationSupported: run.authorizationSupported === true,
     callId: ctx.callId,
     toolName: ctx.toolName,
     session: ctx.session,

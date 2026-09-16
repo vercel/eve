@@ -72,7 +72,10 @@ async function formatDynamicSkillAnnouncement(input: {
 }): Promise<string> {
   const sandbox = await input.ctx.require(SandboxKey).get();
   const skillRoot = sandbox === null ? undefined : await resolveSandboxSkillRoot({ sandbox });
-  return formatAvailableSkillsSection(Object.values(input.manifest).flat(), { skillRoot }) ?? "";
+  return (
+    formatAvailableSkillsSection(Object.values(input.manifest).flat(), { skillRoot }) ??
+    "Available skills: none"
+  );
 }
 
 // ---------------------------------------------------------------------------

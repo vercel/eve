@@ -219,7 +219,7 @@ export async function continueRemoteAgentSession(input: {
   readonly activityObserver?: ActivityObserverConfig;
   /** The dispatching turn's session principal, forwarded when `remote.forwardPrincipal` is set. */
   readonly auth: SessionAuthContext | null;
-  readonly callback: {
+  readonly callback?: {
     readonly callId: string;
     readonly subagentName: string;
     readonly taskId?: string;

@@ -3,7 +3,7 @@ import { createSessionCompletedEvent } from "#protocol/message.js";
 
 /** Emits a terminal `session.completed` outside a turn. */
 export async function emitTerminalSessionCompletionStep(input: {
-  readonly parentWritable: WritableStream<Uint8Array>;
+  readonly sessionWritable: WritableStream<Uint8Array>;
   readonly serializedContext: Record<string, unknown>;
 }): Promise<void> {
   "use step";

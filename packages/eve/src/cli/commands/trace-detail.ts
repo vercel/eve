@@ -72,6 +72,7 @@ export function summarizeLocalTrace(spans: readonly LocalTraceSpan[]): LocalTrac
       0;
     cacheWriteTokens +=
       numberAttribute(span, AGENT_USAGE_ATTRIBUTES.cacheWriteTokens) ??
+      numberAttribute(span, "gen_ai.usage.cache_write.input_tokens") ??
       numberAttribute(span, "gen_ai.usage.cache_creation.input_tokens") ??
       0;
     const cost = spanCostUsd(span);

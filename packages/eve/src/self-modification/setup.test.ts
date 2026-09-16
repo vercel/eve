@@ -1,16 +1,20 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { win32 } from "node:path";
 import { runInNewContext } from "node:vm";
 
 import { defineSelfModificationConfig } from "./config.js";
 
+import { captureVercel, runVercelCaptureStdout } from "#setup/primitives/run-vercel.js";
+
 import {
   classifySelfModificationConfig,
   connectorName,
+  defaultSelfModificationSetupOperations,
   parseGitHubRemote,
   renderSelfModificationConfig,
   repositoryRelativeDirectory,
+  type SelfModificationSetupDependencies,
 } from "./setup.js";
 
 describe("self-modification setup", () => {
@@ -128,6 +132,68 @@ describe("self-modification setup", () => {
         `${renderSelfModificationConfig({ branch: "main", channelNames: [], connector: "github/selfmod-acme-agents", directory: ".", repository: "github.com/acme/agents", vercelBackend: false })}\n// edited`,
       ),
     ).toBe("authored");
+  });
+
+  it("finds a connector on a later Vercel list page", async () => {
+    const capture = vi.fn<typeof captureVercel>();
+    capture.mockResolvedValueOnce({
+      ok: true,
+      stdout: JSON.stringify({
+        connectors: [{ type: "github", uid: "github/other" }],
+        cursor: "next-page",
+      }),
+    });
+    capture.mockResolvedValueOnce({
+      ok: true,
+      stdout: JSON.stringify({
+        connectors: [{ type: "github", uid: "github/selfmod-acme-agents" }],
+      }),
+    });
+    const deps: SelfModificationSetupDependencies = {
+      captureVercel: capture,
+      runVercelCaptureStdout: vi.fn<typeof runVercelCaptureStdout>(),
+    };
+    const operations = defaultSelfModificationSetupOperations("/project", deps);
+
+    await expect(
+      operations.findOrCreateConnector("selfmod-acme-agents", {
+        orgId: "team_acme",
+        projectId: "prj_agent",
+      }),
+    ).resolves.toBe("github/selfmod-acme-agents");
+    expect(capture).toHaveBeenNthCalledWith(
+      1,
+      [
+        "connect",
+        "list",
+        "--all-projects",
+        "--service",
+        "github",
+        "-F",
+        "json",
+        "--scope",
+        "team_acme",
+      ],
+      { cwd: "/project" },
+    );
+    expect(capture).toHaveBeenNthCalledWith(
+      2,
+      [
+        "connect",
+        "list",
+        "--all-projects",
+        "--service",
+        "github",
+        "-F",
+        "json",
+        "--scope",
+        "team_acme",
+        "--next",
+        "next-page",
+      ],
+      { cwd: "/project" },
+    );
+    expect(deps.runVercelCaptureStdout).not.toHaveBeenCalled();
   });
 
   it("uses a stable repository-specific connector name", () => {

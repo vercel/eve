@@ -135,14 +135,14 @@ describe("settleCancelledTurnStep handle store", () => {
 
     await runtime.run(async () => {
       const result = await settleCancelledTurnStep({
-        parentWritable: new WritableStream<Uint8Array>({ write() {} }),
+        sessionWritable: new WritableStream<Uint8Array>({ write() {} }),
         serializedContext: buildSerializedContext(),
         sessionState: createDurableSessionState({
           session: createCancelledTurnSession([RUNNING_HANDLE, PARKED_HANDLE]),
         }),
       });
 
-      expect(getAgentHandleStore(result.sessionState.snapshot?.session.state)).toEqual({
+      expect(getAgentHandleStore(result.sessionState.snapshot.session.state)).toEqual({
         handles: [
           {
             address: RUNNING_HANDLE.address,
@@ -153,7 +153,7 @@ describe("settleCancelledTurnStep handle store", () => {
           PARKED_HANDLE,
         ],
       });
-      expect(result.sessionState.snapshot?.session.outputSchema).toBeUndefined();
+      expect(result.sessionState.snapshot.session.outputSchema).toBeUndefined();
       expect(bindSessionInstrumentationSpy).toHaveBeenCalledWith(
         expect.objectContaining({ agentName: "settle-cancel-handles" }),
       );
@@ -172,12 +172,12 @@ describe("settleCancelledTurnStep handle store", () => {
         toolName: "Workflow",
       });
       const result = await settleCancelledTurnStep({
-        parentWritable: new WritableStream<Uint8Array>({ write() {} }),
+        sessionWritable: new WritableStream<Uint8Array>({ write() {} }),
         serializedContext: buildSerializedContext(),
         sessionState: createDurableSessionState({ session }),
       });
 
-      expect(getAgentHandleStore(result.sessionState.snapshot?.session.state)).toEqual({
+      expect(getAgentHandleStore(result.sessionState.snapshot.session.state)).toEqual({
         handles: [
           {
             address: CLAIMED_HANDLE.address,

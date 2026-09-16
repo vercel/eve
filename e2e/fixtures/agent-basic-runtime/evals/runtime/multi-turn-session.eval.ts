@@ -1,5 +1,5 @@
 import { defineEval } from "eve/evals";
-import { equals, includes } from "eve/evals/expect";
+import { equals, includes, satisfies } from "eve/evals/expect";
 
 /**
  * Core session-route runtime behavior: multi-turn session continuity.
@@ -16,6 +16,26 @@ export default defineEval({
     const second = await t.send("What is my favorite word? Reply with just the word.");
 
     await t.require(second.sessionId, equals(first.sessionId));
+    second.messageIncludes(/marigold/i);
+
+    const cancel = await t.cancel();
+    await t.require(
+      cancel,
+      satisfies(
+        (value: typeof cancel) =>
+          value.status === "accepted" && value.sessionId === first.sessionId,
+        "the parked session accepts cancellation through its stable address",
+      ),
+    );
+
+    const third = await t.send(
+      "Alice is checking the saved conversation. What favorite word did I ask you to remember? Reply with just that word.",
+    );
+    await t.require(third.sessionId, equals(first.sessionId));
+    third.notEvent("session.started");
+    third.notEvent("turn.cancelled");
+    third.notEvent("session.failed");
+    third.messageIncludes(/marigold/i);
 
     t.succeeded();
     t.messageIncludes(/marigold/i);

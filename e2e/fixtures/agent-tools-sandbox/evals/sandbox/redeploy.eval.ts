@@ -13,9 +13,9 @@ import type { EveEvalContext } from "eve/evals";
 // each redeploy repoints the alias, so the runner's client — and the durable
 // session it drives — lands on the new deployment without any URL swap.
 //
-// Each inbound request stamps the exact deployment that accepted it. The
-// parked driver dispatches that request's turn to the stamped deployment, so
-// repointing the alias adopts new code without resolving a "latest" sentinel.
+// Each inbound request stamps the exact deployment that accepted it. An idle
+// parked session hands ownership to that deployment before executing the turn,
+// so repointing the alias adopts new code without a "latest" lookup.
 //
 // Timeline under test:
 //   t0  session A writes a file into its sandbox workspace

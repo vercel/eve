@@ -2,10 +2,7 @@ import { expect, it, vi } from "vitest";
 import type { ToolContext } from "#tools/definition.js";
 import type { WorkflowToolContext } from "#tools/workflow-definition.js";
 import { executeWorkflowBody, type WorkflowBodyInput } from "#execution/tools/workflow/body.js";
-import {
-  findWorkflowToolRunContext,
-  readWorkflowToolRunRef,
-} from "#execution/tools/workflow/ask.js";
+import { readWorkflowToolRunRef } from "#execution/tools/workflow/ask.js";
 
 const mocks = vi.hoisted(() => ({ execute: vi.fn(), agent: vi.fn(), ask: vi.fn() }));
 vi.mock("#execution/workflow-registry.js", () => ({ readRegisteredWorkflow: () => mocks.execute }));
@@ -47,40 +44,3 @@ it("binds workflow-only methods to the run context", async () => {
     reportCount: 0,
   });
 });
-
-it.each([
-  { execution: "background", authorizationSupported: undefined, expected: false },
-  { execution: "background", authorizationSupported: false, expected: false },
-  { execution: "background", authorizationSupported: true, expected: true },
-  { execution: "blocking", authorizationSupported: undefined, expected: true },
-] as const)(
-  "binds auth support to the actual owner ($execution, $authorizationSupported)",
-  async ({ execution, authorizationSupported, expected }) => {
-    mocks.execute.mockImplementation(async (_input, ctx) => {
-      expect(findWorkflowToolRunContext(ctx)?.authorizationSupported).toBe(expected);
-      return "done";
-    });
-    await expect(
-      executeWorkflowBody(
-        {
-          authorizationSupported,
-          callId: "call",
-          input: {},
-          session: {
-            id: "session",
-            auth: { current: null, initiator: null },
-            turn: { id: "turn", sequence: 1 },
-          },
-          stepIndex: 0,
-          taskId: "task",
-          toolName: "deploy",
-          workflowId: "workflow//test//execute",
-          owner: { inbox: "inbox" },
-          execution,
-          runId: "run",
-        },
-        new AbortController().signal,
-      ),
-    ).resolves.toMatchObject({ outcome: { status: "completed", output: "done" } });
-  },
-);

@@ -71,6 +71,7 @@ import { attemptIdempotencyKey } from "#instrumentation/lifecycle.js";
 import {
   AGENT_SPAN_NAMES,
   agentInvocationSpanName,
+  modelSpanName,
   type AgentSamplingOperation,
 } from "#tracing/agent-span-contract.js";
 import { withErrorContent } from "#tracing/error-content-context.js";
@@ -417,6 +418,9 @@ export function createAgentOtelInstrumentation(
       if (event.responseId !== undefined) {
         state.span.setAttribute("gen_ai.response.id", event.responseId);
       }
+      if (event.responseModelId !== undefined) {
+        state.span.setAttribute("gen_ai.response.model", event.responseModelId);
+      }
       state.span.setAttribute("gen_ai.response.finish_reasons", [event.finishReason]);
       const attempt = steps.get(event.scope);
       if (attempt !== undefined) setAgentUsage(attempt.span, event.usage);
@@ -689,10 +693,6 @@ function takeSpanState<T>(
 
 function contextFromSpanContext(spanContext: SpanContext): Context {
   return trace.setSpan(ROOT_CONTEXT, trace.wrapSpanContext(spanContext));
-}
-
-function modelSpanName(modelId: string): string {
-  return `chat ${modelId}`;
 }
 
 function errorText(error: unknown): unknown {

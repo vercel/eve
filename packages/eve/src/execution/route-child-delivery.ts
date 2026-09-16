@@ -23,12 +23,12 @@ import { applyTaskAgentRequest } from "#execution/tools/subagent/task-agent-requ
  *
  * Short-circuits via `hasProxyInputRequests` so the common no-active-descendant
  * path skips a durable step boundary. Lives in its own non-step module so both
- * the driver and the active turn can share it (a `"use step"` module cannot
+ * the owner and the active turn can share it (a `"use step"` module cannot
  * re-export plain helpers into a workflow body).
  */
 export async function routeDeliverToChildren(input: {
   readonly delivery: DeliverHookPayload;
-  readonly parentWritable: WritableStream<Uint8Array>;
+  readonly sessionWritable: WritableStream<Uint8Array>;
   readonly sessionState: DurableSessionState;
   readonly serializedContext: Record<string, unknown>;
 }): Promise<RoutedDeliverResult> {
@@ -44,7 +44,7 @@ export async function routeDeliverToChildren(input: {
     sessionState = recorded.sessionState;
     if (!recorded.accepted) continue;
     const emitted = await emitRecordedTaskInputRequestStep({
-      parentWritable: input.parentWritable,
+      sessionWritable: input.sessionWritable,
       request: recorded.request,
       serializedContext,
       sessionState,
@@ -57,7 +57,7 @@ export async function routeDeliverToChildren(input: {
     const applied = await applyTaskAgentRequest(
       { ...request, ownerId: request.taskId },
       {
-        parentWritable: input.parentWritable,
+        sessionWritable: input.sessionWritable,
         serializedContext,
         sessionState,
       },
@@ -73,7 +73,7 @@ export async function routeDeliverToChildren(input: {
     if (!accepted) continue;
     const emitted = await runProxySubagentEventStep({
       hookPayload: delivery.hookPayload,
-      parentWritable: input.parentWritable,
+      sessionWritable: input.sessionWritable,
       serializedContext,
       sessionState,
     });
@@ -130,7 +130,7 @@ export async function routeDeliverToChildren(input: {
 
   return await routeProxiedDeliverStep({
     delivery,
-    parentWritable: input.parentWritable,
+    sessionWritable: input.sessionWritable,
     serializedContext,
     sessionState,
   });

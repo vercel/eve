@@ -4,7 +4,9 @@ import { test } from "node:test";
 import {
   childActivations,
   checkForTask,
+  completedTaskIds,
   eventsForSession,
+  modelStepCount,
   requireOriginalTasksHealthy,
   toolEvidence,
 } from "./event-matching.ts";
@@ -140,6 +142,48 @@ test("rejects a logical-call retry that changes its result", () => {
     events: [completed("changed-result", "probe-call", "completed", { result: "pears" })],
   });
   assert.throws(() => toolEvidence(turns, "child", "probe"), /tool result probe-call changed/);
+});
+
+test("counts retried model preambles once by logical coordinates", () => {
+  const started = (id, stepIndex = 0) =>
+    event(id, "step.started", {
+      modelId: "openai/test",
+      sequence: 4,
+      stepIndex,
+      turnId: "turn_4",
+    });
+  const turns = [
+    { sessionId: "parent", events: [started("step-1"), started("step-retry")] },
+    { sessionId: "parent", events: [started("step-2", 1)] },
+    { sessionId: "child", events: [started("child-step")] },
+  ];
+
+  assert.equal(modelStepCount(turns), 3);
+});
+
+test("deduplicates retried completion notifications but not duplicate text in one message", () => {
+  const message =
+    "Background task task_first (agent) is completed.\nBackground task task_second (agent) is completed.";
+  const notification = (id, value = message) =>
+    event(id, "message.received", { message: value, sequence: 4, turnId: "turn_4" });
+  const snapshot = {
+    sessionId: "parent",
+    events: [notification("message-1"), notification("message-retry")],
+  };
+
+  assert.deepEqual(completedTaskIds(snapshot), ["task_first", "task_second"]);
+  assert.deepEqual(
+    completedTaskIds({
+      ...snapshot,
+      events: [
+        notification(
+          "duplicated-in-message",
+          "Background task task_first (agent) is completed.\nBackground task task_first (agent) is completed.",
+        ),
+      ],
+    }),
+    ["task_first", "task_first"],
+  );
 });
 
 test("does not join a same-call-ID request and result from different sessions", () => {

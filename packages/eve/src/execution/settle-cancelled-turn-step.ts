@@ -52,17 +52,17 @@ export interface CancelledTurnSettleResult {
 /**
  * Settles one cancelled turn: emits `turn.cancelled` → `session.waiting`,
  * drops pending coordination state, and persists the between-turns
- * session. Runs in the *driver* run, whose wake sources exclude the
+ * session. Runs in the owner, whose wake sources exclude the
  * cancel hook, so a queued cancel wake cannot re-dispatch it.
  */
 export async function settleCancelledTurnStep(input: {
-  readonly parentWritable: WritableStream<Uint8Array>;
+  readonly sessionWritable: WritableStream<Uint8Array>;
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
 }): Promise<CancelledTurnSettleResult> {
   "use step";
 
-  const durableSession = await readDurableSession(input.sessionState);
+  const durableSession = readDurableSession(input.sessionState);
   const ctx = await deserializeContext(input.serializedContext);
   const adapter = ctx.require(ChannelKey);
   const adapterCtx = buildAdapterContext(adapter, ctx);
@@ -97,7 +97,7 @@ export async function settleCancelledTurnStep(input: {
     !stoppedAtDescendantLimit;
 
   if (!alreadyEpilogued) {
-    const writer = input.parentWritable.getWriter();
+    const writer = input.sessionWritable.getWriter();
     try {
       const scoped = await withContextScope(ctx, session, async (enrichedSession) => {
         const baseEmit = async (event: UnstampedMessageStreamEvent): Promise<void> => {

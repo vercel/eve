@@ -440,6 +440,7 @@ export interface InstrumentationModelCallCompletedEvent {
   readonly content?: readonly InstrumentationContentPart[];
   readonly finishReason: string;
   readonly idempotencyKey: string;
+  readonly responseModelId?: string;
   readonly responseId?: string;
   readonly scope: InstrumentationAttemptScope;
   readonly usage: InstrumentationUsage;

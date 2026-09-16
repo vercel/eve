@@ -1,6 +1,6 @@
 /**
  * Pure helpers that project a delegated subagent's terminal output
- * into the runtime-action result shape its parent driver expects.
+ * into the runtime-action result shape its parent owner expects.
  * Lives in its own (non-directive) file to escape the workflow
  * step-proxy transform.
  */

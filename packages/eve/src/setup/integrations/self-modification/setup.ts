@@ -11,6 +11,7 @@ import {
   type SelfModificationSetupValues,
 } from "#self-modification/setup.js";
 import { SELF_MODIFICATION_CONFIG_PATH } from "#self-modification/git-workspace.js";
+import type { VercelProjectReference } from "#setup/project-resolution.js";
 
 import { describeIntegrationSetupEnvironment } from "../shared/environment.js";
 import {
@@ -25,6 +26,7 @@ type SelfModificationSetupPlan =
   | {
       readonly kind: "deployed";
       readonly connectorName: string;
+      readonly project: VercelProjectReference;
       readonly values: SelfModificationSetupValues;
     };
 
@@ -72,7 +74,8 @@ export async function prepareSelfModificationSetup(
   );
   if (mode === "local") return { kind: "local" };
 
-  const [detected, channelNames] = await Promise.all([
+  const [project, detected, channelNames] = await Promise.all([
+    context.resolveVercelProject("self-modification"),
     operations.detectGitRepository(),
     operations.detectChannelNames(),
   ]);
@@ -119,9 +122,7 @@ export async function prepareSelfModificationSetup(
     connector: `github/${name}`,
     directory,
     repository: `github.com/${owner}/${repo}`,
-    vercelBackend:
-      context.environment.vercel.kind === "available" &&
-      context.environment.vercel.project.kind !== "unresolved",
+    vercelBackend: true,
   };
   context.presenter.note(
     renderSelfModificationConfig(values),
@@ -139,7 +140,7 @@ export async function prepareSelfModificationSetup(
       required: true,
     }),
   );
-  return confirmed ? { kind: "deployed", connectorName: name, values } : { kind: "local" };
+  return confirmed ? { kind: "deployed", connectorName: name, project, values } : { kind: "local" };
 }
 
 export async function applySelfModificationSetup(
@@ -158,8 +159,8 @@ export async function applySelfModificationSetup(
     return { facts: [] };
   }
 
-  const connector = await operations.findOrCreateConnector(plan.connectorName);
-  await operations.attachConnector(connector);
+  const connector = await operations.findOrCreateConnector(plan.connectorName, plan.project);
+  await operations.attachConnector(connector, plan.project);
   await operations.writeConfig(renderSelfModificationConfig({ ...plan.values, connector }));
   context.presenter.log.success(`Updated ${SELF_MODIFICATION_CONFIG_PATH}.`);
   context.presenter.nextSteps([

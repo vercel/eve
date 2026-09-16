@@ -661,7 +661,7 @@ describe("WorkflowBundleBuilder", () => {
 
   it.each([
     ["sleep tool", "src/execution/tools/sleep-workflow.ts", "executeSleepTool"],
-    ["session driver", "src/execution/workflow-entry.ts", "nextTurnDelivery"],
+    ["session owner", "src/execution/session/entry.ts", "nextTurnDelivery"],
   ])("keeps the %s schemas out of the workflow driver", async (_name, sourcePath, marker) => {
     const tempRoot = await mkdtemp(join(tmpdir(), "eve-workflow-bundle-no-schemas-"));
     const outDir = join(tempRoot, "workflow-build");

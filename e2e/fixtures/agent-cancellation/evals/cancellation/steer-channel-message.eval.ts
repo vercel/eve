@@ -2,7 +2,7 @@ import type { TurnPolicy } from "eve/channels";
 import { defineEval, type EveEvalTargetHandle } from "eve/evals";
 import { satisfies } from "eve/evals/expect";
 
-const TOOL_NAME = "wait-for-cancellation";
+const TOOL_NAME = "complete-work";
 
 interface MessageResponse {
   readonly ok: boolean;
@@ -28,14 +28,14 @@ async function postMessage(
   return JSON.parse(text) as MessageResponse;
 }
 
-/** Replaces an active turn through the custom channel's default steering policy. */
+/** Applies an accepted message at a safe boundary within the active turn. */
 export default defineEval({
-  description: "An accepted channel message replaces the active turn by default.",
+  description: "An accepted channel message steers the active turn without cancelling its work.",
   timeoutMs: 240_000,
 
   async test(t) {
     const threadId = crypto.randomUUID();
-    const started = await postMessage(t.target, threadId, "Please wait for cancellation.");
+    const started = await postMessage(t.target, threadId, "Please complete work before answering.");
     await t.require(
       started,
       satisfies(
@@ -67,15 +67,9 @@ export default defineEval({
       ),
     );
 
-    const cancelled = await activeTurn.result();
-    cancelled.event("turn.cancelled", { count: 1 });
-    cancelled.eventOrder([{ type: "turn.cancelled" }, { type: "session.waiting" }]);
-    cancelled.notEvent("turn.failed");
-    cancelled.notEvent("session.failed");
-
-    const replacementTurn = await t.target
-      .watchTurn(sessionId, { startIndex: cancelled.events.length })
-      .result();
+    const replacementTurn = await activeTurn.result();
+    replacementTurn.event("turn.started", { count: 1 });
+    replacementTurn.event("message.received", { count: 2 });
     replacementTurn.notEvent("turn.cancelled");
     replacementTurn.notEvent("turn.failed");
     replacementTurn.notEvent("session.failed");

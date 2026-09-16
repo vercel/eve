@@ -13,7 +13,7 @@ import {
   startTaskRun,
   waitForTaskCommandOwner,
 } from "#execution/tasks/parent/run-parent.js";
-import { sessionCommandHookToken } from "#execution/session-command-token.js";
+import { sessionCommandHookToken } from "#execution/session-inbox/address.js";
 import type { JsonValue } from "#shared/json.js";
 import type { TaskExecutorBinding } from "#tools/task.js";
 import { deriveTaskInboxToken, deriveTaskId } from "#tasks/task-id.js";

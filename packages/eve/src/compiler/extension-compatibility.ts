@@ -22,8 +22,8 @@ interface ExtensionCapabilityContract {
 const EXTENSION_CAPABILITY_CONTRACTS = {
   extension: { current: 1, supported: [1], dropped: {} },
   tool: {
-    current: 43,
-    supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 28, 29, 30, 31, 32, 34, 35, 42, 43],
+    current: 44,
+    supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 28, 29, 30, 31, 32, 34, 35, 44],
     dropped: {
       14: "TaskExec.delegated was removed; migrate to workflow-backed background tools",
       15: "TaskExec replaces stageEffect with send",
@@ -46,13 +46,15 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
       39: "experimental_workflow and eve/tools/workflow were removed; migrate to the workflow factory from eve/tools/workflow",
       40: "runWorkflowProgram was made internal; use the workflow factory from eve/tools/workflow",
       41: "workflow no longer accepts agents and its options argument is optional; use workflow() or workflow({ maxSubagents })",
+      42: "Legacy session history migration was removed; user-role messages require current provenance kinds.",
+      43: "Legacy session history migration was removed; user-role messages require current provenance kinds.",
     },
   },
   dynamicTool: {
-    current: 40,
+    current: 41,
     supported: [
       1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 22, 28, 29, 30, 31, 32,
-      33, 34, 39, 40,
+      33, 41,
     ],
     dropped: {
       21: "Message and reasoning append events now expose deltas instead of cumulative snapshots.",
@@ -61,17 +63,24 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
       25: "TaskExec.delegated was removed; migrate to workflow-backed background tools",
       26: "Background tools now use task yield descriptors",
       27: "TaskExec.delegated was removed; migrate to workflow-backed background tools",
+      34: "Legacy session history migration was removed; user-role messages require current provenance kinds.",
       35: "workflowMaxSubagents was removed with experimental_workflow; configure generated-program limits with the workflow factory",
       36: "workflowMaxSubagents was removed with experimental_workflow; configure generated-program limits with the workflow factory",
       37: "workflowMaxSubagents was removed with experimental_workflow; configure generated-program limits with the workflow factory",
       38: "workflowMaxSubagents was removed with experimental_workflow; configure generated-program limits with the workflow factory",
+      39: "Legacy session history migration was removed; user-role messages require current provenance kinds.",
+      40: "Legacy session history migration was removed; user-role messages require current provenance kinds.",
     },
   },
   channel: {
-    current: 22,
-    supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22],
+    current: 23,
+    supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 14, 15, 16, 17, 18, 23],
     dropped: {
       12: "Message and reasoning append events now expose deltas instead of cumulative snapshots.",
+      19: "Continuation rekey was removed; channel extensions must use additive continuation.alias instead.",
+      20: "Continuation rekey was removed; channel extensions must use additive continuation.alias instead.",
+      21: "Continuation rekey was removed; channel extensions must use additive continuation.alias instead.",
+      22: "Continuation rekey was removed; channel extensions must use additive continuation.alias instead.",
     },
   },
   schedule: {

@@ -131,6 +131,40 @@ describe("createRuntimeToolRegistry", () => {
     });
   });
 
+  it("uses the shared stable workflow for a restored application-owned agent tool", async () => {
+    const registry = await createRuntimeToolRegistry(
+      {
+        tools: [
+          createResolvedToolDefinition({
+            behavior: {
+              availability: ["root-session"],
+              handling: { action: "self-agent", kind: "dispatch" },
+            },
+            logicalPath: "tools/agent.ts",
+            name: "agent",
+            sourceId: "tools/agent.ts",
+          }),
+        ],
+      },
+      { nodeId: "__root__" },
+    );
+
+    const prepared = registry.preparedTools[0];
+    expect(prepared?.task).toEqual({
+      nodeId: "__root__",
+      resultKind: "subagent",
+      workflowId: subagentToolExecuteWorkflowReference.workflowId,
+    });
+    expect(prepared?.behavior?.handling).toEqual({
+      kind: "dispatch",
+      target: {
+        kind: "self-agent-call",
+        nodeId: "__root__",
+        subagentName: "agent",
+      },
+    });
+  });
+
   it("rejects duplicate authored tool names", async () => {
     await expect(
       createRuntimeToolRegistry({

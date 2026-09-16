@@ -475,6 +475,7 @@ describe("createAiSdkHookBridge", () => {
           { type: "some-future-kind" },
         ],
         finishReason: "tool-calls",
+        modelId: "response-model",
         performance: { responseTimeMs: 1 },
         responseId: "response-1",
         usage: {
@@ -520,6 +521,7 @@ describe("createAiSdkHookBridge", () => {
         ],
         finishReason: "tool-calls",
         idempotencyKey: modelCallIdempotencyKey(scope, 0),
+        responseModelId: "response-model",
         responseId: "response-1",
         scope,
         type: "model.call.completed",

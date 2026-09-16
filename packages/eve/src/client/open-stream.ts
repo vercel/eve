@@ -1,5 +1,9 @@
 import type { MessageStreamEvent } from "#protocol/message.js";
-import { EVE_STREAM_TAIL_INDEX_HEADER } from "#protocol/message.js";
+import {
+  EVE_STREAM_CONTROL_VERSION,
+  EVE_STREAM_CONTROL_VERSION_QUERY,
+  EVE_STREAM_TAIL_INDEX_HEADER,
+} from "#protocol/message.js";
 import type { MessageStreamVersion } from "#protocol/message-version.js";
 import { createEveSessionStreamRoutePath } from "#protocol/routes.js";
 import { ClientError } from "#client/client-error.js";
@@ -162,9 +166,14 @@ export async function* followStreamIterable(
     }
 
     let deliveredEvent = false;
+    let leaseEnded = false;
     try {
       for await (const event of readNdjsonStream(connection.body, {
+        controlVersion: connection.controlVersion,
         idleTimeoutMs: input.streamReadIdleTimeoutMs ?? DEFAULT_STREAM_READ_IDLE_TIMEOUT_MS,
+        onLeaseEnded: () => {
+          leaseEnded = true;
+        },
         streamVersion: connection.streamVersion,
       })) {
         startIndex += 1;
@@ -185,6 +194,10 @@ export async function* followStreamIterable(
 
     if (input.signal?.aborted || input.startIndex < 0 || idleRetryPolicy.maxAttempts === 0) {
       return;
+    }
+
+    if (leaseEnded) {
+      continue;
     }
 
     if (
@@ -209,6 +222,7 @@ export async function* followStreamIterable(
 interface OpenedStream {
   readonly body: ReadableStream<Uint8Array>;
   close(): void;
+  readonly controlVersion: "1" | undefined;
   readonly streamVersion: MessageStreamVersion;
   readonly tailIndex: number | undefined;
 }
@@ -222,14 +236,22 @@ interface OpenedStream {
 export async function openStreamBody(
   input: OpenStreamInput & { readonly retryPolicy?: ResolvedStreamReconnectPolicy },
 ): Promise<OpenedStream> {
-  const retryPolicy = input.retryPolicy ?? DEFAULT_STREAM_RECONNECT_POLICY;
+  const retryPolicy =
+    input.retryPolicy ?? resolveStreamReconnectPolicy(input.streamReconnectPolicy);
   const openRetryPolicy = retryPolicy.streamOpenReconnectPolicy;
   let lastStatus: number | undefined;
   let lastBody: string | undefined;
   let lastHeaders: Headers | undefined;
   let retryDelayMs = openRetryPolicy.baseDelayMs;
 
+  const controlVersion =
+    input.startIndex >= 0 && retryPolicy.streamIdleReconnectPolicy.maxAttempts > 0
+      ? EVE_STREAM_CONTROL_VERSION
+      : undefined;
   const searchParams: Record<string, string> = {};
+  if (controlVersion !== undefined) {
+    searchParams[EVE_STREAM_CONTROL_VERSION_QUERY] = controlVersion;
+  }
   if (input.startIndex !== 0) {
     searchParams.startIndex = String(input.startIndex);
   }
@@ -287,6 +309,7 @@ export async function openStreamBody(
           response.body?.cancel().catch(() => {});
           connectionController.abort();
         },
+        controlVersion,
         streamVersion: readMessageStreamVersion(response.headers),
         tailIndex: parseTailIndexHeader(response.headers),
       };
