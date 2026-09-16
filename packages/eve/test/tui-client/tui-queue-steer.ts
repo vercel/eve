@@ -65,8 +65,7 @@ run({ app: "agent-tui-client", kind: "local-build" }, async (target) => {
   console.log(theme.muted("[tui-queue-steer] two messages queued behind the running turn"));
 
   // Admission can clear the transient Steering label before the next render.
-  // The echoed message, answer, and provenance arrow prove the replacement or
-  // boundary steering was accepted.
+  // The echoed message, answer, and provenance arrow prove steering was accepted.
   input.ctrlC();
 
   await waitForTwice(screen, STEER_TOKEN, 120_000, "steered turn echo + reply");

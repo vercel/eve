@@ -39,6 +39,23 @@ vi.mock("#compiled/@workflow/core/index.js", () => ({
 }));
 
 describe("createSessionInbox", () => {
+  it("notifies delivery observers promptly and replays unread deliveries on subscription", async () => {
+    const delivery = createDeferred<IteratorResult<SessionInboxPayload>>();
+    installHooks(createMockHook({ token: "stable", reads: [delivery.promise] }));
+    const inbox = createSessionInbox("session-1");
+    const observed = vi.fn();
+    const unsubscribe = inbox.onDelivery(observed);
+    await inbox.claimSessionHook("stable");
+    delivery.resolve(resolved(send("correction")));
+    await delivery.promise;
+    expect(observed).toHaveBeenCalledWith(send("correction"));
+    unsubscribe();
+    const lateObserver = vi.fn();
+    inbox.onDelivery(lateObserver);
+    expect(lateObserver).toHaveBeenCalledWith(send("correction"));
+    expect(inbox.drain()).toEqual([send("correction")]);
+    await inbox.dispose();
+  });
   beforeEach(() => {
     createHookMock.mockReset();
   });

@@ -14,6 +14,12 @@ export function resolveSessionStepResult(
   beforeStepContext: Record<string, unknown>,
 ): DurableStepResult {
   const nextState = createDurableSessionState({ session: stepResult.session });
+  if (stepResult.steered)
+    return {
+      action: "steered",
+      serializedContext: nextSerializedContext,
+      sessionState: nextState,
+    };
   const backgroundTransition =
     stepResult.backgroundTasks === undefined || stepResult.backgroundTaskSession === undefined
       ? {}

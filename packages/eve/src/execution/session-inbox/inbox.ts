@@ -44,6 +44,8 @@ export interface SessionInboxReader {
    * consumer still processes it in order.
    */
   onInterrupt(handler: (payload: SessionInboxPayload) => void): () => void;
+  /** Observes deliveries without consuming them; replays unread deliveries on subscription. */
+  onDelivery(handler: (payload: SessionInboxPayload) => void): () => void;
   restore(payloads: readonly SessionInboxPayload[]): void;
 }
 
@@ -77,6 +79,7 @@ export function createSessionInbox(sessionId: string): SessionInboxHandle {
   const queue: SessionInboxPayload[] = [];
   const waiters = new Set<() => void>();
   const interruptHandlers = new Set<(payload: SessionInboxPayload) => void>();
+  const deliveryHandlers = new Set<(payload: SessionInboxPayload) => void>();
   let failure: { error: unknown } | undefined;
 
   const notify = (): void => {
@@ -95,6 +98,8 @@ export function createSessionInbox(sessionId: string): SessionInboxHandle {
         const result = await iterator.next();
         if (result.done) break;
         queue.push(result.value);
+        if (result.value.kind === "send" || result.value.kind === "deliver")
+          for (const handler of deliveryHandlers) handler(result.value);
         if (isInterrupt(result.value))
           for (const handler of interruptHandlers) handler(result.value);
         notify();
@@ -172,6 +177,12 @@ export function createSessionInbox(sessionId: string): SessionInboxHandle {
     onInterrupt(handler) {
       interruptHandlers.add(handler);
       return () => interruptHandlers.delete(handler);
+    },
+    onDelivery(handler) {
+      deliveryHandlers.add(handler);
+      for (const payload of queue)
+        if (payload.kind === "send" || payload.kind === "deliver") handler(payload);
+      return () => deliveryHandlers.delete(handler);
     },
     restore(payloads) {
       if (sources.length === 0)

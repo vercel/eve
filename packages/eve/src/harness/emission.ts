@@ -105,12 +105,15 @@ export async function emitTurnPreamble(
     );
   }
 
-  return {
+  const nextState: HarnessEmissionState = {
     sessionStarted: true,
     sequence: state.sequence,
     stepIndex: steering ? state.stepIndex : 0,
     turnId,
   };
+  return steering && state.assistantOutputStarted
+    ? { ...nextState, assistantOutputStarted: true }
+    : nextState;
 }
 
 /**

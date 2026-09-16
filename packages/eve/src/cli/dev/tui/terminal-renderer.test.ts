@@ -2226,39 +2226,6 @@ describe("TerminalRenderer (inline scrollback)", () => {
     renderer.shutdown();
   });
 
-  it("does not restore the superseded message after a steering restart", async () => {
-    const { screen, input, renderer } = makeRenderer();
-    let streamController: ReadableStreamDefaultController<AgentTUIStreamEvent> | undefined;
-    const rendering = renderer.renderStream(
-      {
-        events: new ReadableStream<AgentTUIStreamEvent>({
-          start(controller) {
-            streamController = controller;
-          },
-        }),
-      },
-      { submittedPrompt: "go north", continueSession: true },
-    );
-    await vi.waitFor(() => {
-      expect(screen.snapshot()).toContain("│ go north");
-    });
-
-    streamController?.enqueue({ type: "turn-cancelled", source: "steering-restart" });
-    streamController?.close();
-    await rendering;
-
-    expect(screen.snapshot()).not.toContain("cancelled from outside this prompt");
-    expect(screen.snapshot()).not.toContain("Cancelled");
-    const prompt = renderer.readPrompt();
-    await vi.waitFor(() => {
-      expect(screen.snapshot()).not.toContain("❯ go north");
-    });
-    input.type("next");
-    input.enter();
-    expect(await prompt).toBe("next");
-    renderer.shutdown();
-  });
-
   it("marks steered and queued prompts with their provenance arrow", async () => {
     const { screen, input, renderer } = makeRenderer();
     const escape = async () => {

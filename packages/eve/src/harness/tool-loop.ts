@@ -1,4 +1,6 @@
 import { BoundaryHookError } from "#shared/boundary-hook-error.js";
+import { GenerationSteering, GenerationSteeredError } from "#harness/generation-steering.js";
+import { interruptStreamOnFailure } from "#harness/interruptible-stream.js";
 import {
   isStepCount,
   type LanguageModelCallEndEvent,
@@ -441,8 +443,19 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     initialSession: Readonly<Parameters<StepFn>[0]>,
     input?: StepInput,
   ): Promise<StepResult> {
-    const executeStep = (scope: InstrumentationStepScope<HarnessSession>) =>
-      executeStepBody(scope.session, input, scope);
+    const executeStep = async (scope?: InstrumentationStepScope<HarnessSession>) => {
+      const current = scope?.session ?? initialSession;
+      const generation = new GenerationSteering({
+        abortSignal: config.abortSignal,
+        steeringSignal: config.steeringSignal,
+        outputStarted: getHarnessEmissionState(current.state).assistantOutputStarted,
+      });
+      try {
+        return await executeStepBody(current, generation, input, scope);
+      } finally {
+        generation.dispose();
+      }
+    };
     return (
       config.instrumentation?.runStep(
         {
@@ -452,12 +465,13 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
           session: initialSession,
         },
         executeStep,
-      ) ?? executeStepBody(initialSession, input)
+      ) ?? executeStep()
     );
   }
 
   async function executeStepBody(
     initialSession: Readonly<Parameters<StepFn>[0]>,
+    generation: GenerationSteering,
     input?: StepInput,
     stepInstrumentation?: InstrumentationStepScope<HarnessSession>,
   ): Promise<StepResult> {
@@ -484,12 +498,19 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     const callback = store?.get(SessionCallbackKey);
     const hasDelegatedCaller = parent !== undefined || callback !== undefined;
     let activeAttemptScope: InstrumentationAttempt | undefined;
-    const emit =
+    const instrumentedEmit =
       stepInstrumentation?.createHandleEvent({
         getAttemptScope: () => activeAttemptScope,
         handleEvent: baseEmit,
         turnId: activeTurnId(emissionState),
       }) ?? baseEmit;
+    const emit: typeof instrumentedEmit =
+      instrumentedEmit === undefined
+        ? undefined
+        : async (event, messages) => {
+            generation.beforeEvent(event);
+            await instrumentedEmit(event, messages);
+          };
     const failModelSelection = async (
       error: unknown,
       failureState: ReturnType<typeof getHarnessEmissionState>,
@@ -1256,6 +1277,29 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       });
     }
     const promptMessages = currentMessages.history;
+    let interruptedUsage: TokenUsageDelta | undefined;
+    const finishSteeredStep = (): StepResult => {
+      throwIfTurnAborted(config.abortSignal);
+      ctx?.set(HistoryStateKey, currentMessages.historyState);
+      if (interruptedUsage !== undefined) {
+        session = setTurnUsageState(
+          session,
+          accumulateTurnUsage({
+            previous: getTurnUsageState(session.state),
+            turnId: emissionState.turnId,
+            usage: interruptedUsage,
+          }),
+        );
+      }
+      return {
+        steered: true,
+        next: runStep,
+        session: setHarnessEmissionState(
+          { ...session, history: [...promptMessages] },
+          advanceStep(emissionState),
+        ),
+      };
+    };
 
     // Hydrate `eve-sandbox:` ref FileParts into inline bytes for the model call
     // only. Session history remains ref-only across future step boundaries.
@@ -1319,6 +1363,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     const runSingleModelCall = async (
       opts: ModelCallOptions & { readonly attemptIndex: number },
     ): Promise<HarnessStepResult> => {
+      generation.begin();
       const { instructions, telemetryRuntimeContext = {} } =
         opts.preparedInput ?? prepareModelCallInput(opts.extraSystemNote);
       // Label the reissued call's telemetry; without this a retry is only
@@ -1387,6 +1432,20 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       const modelTools = advertisedModelTools.modelTools;
 
       const effectiveTools = marker ? applyLastToolCacheBreakpoint(modelTools, marker) : modelTools;
+      for (const tool of Object.values(effectiveTools)) {
+        const execute = tool.execute;
+        if (execute !== undefined)
+          tool.execute = (...args) => {
+            generation.protectToolExecution();
+            return execute(...args);
+          };
+        const onInputAvailable = tool.onInputAvailable;
+        if (onInputAvailable !== undefined)
+          tool.onInputAvailable = (...args: Parameters<typeof onInputAvailable>) => {
+            generation.protectToolExecution();
+            return onInputAvailable(...args);
+          };
+      }
 
       const instrumentationTurnId = activeTurnId(emissionState);
       const attempt = stepInstrumentation?.prepareAttempt({
@@ -1413,6 +1472,11 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         instructions,
         model,
         onLanguageModelCallEnd(event: LanguageModelCallEndEvent) {
+          if (generation.interrupted) return;
+          interruptedUsage = extractTokenUsageDelta({
+            usage: event.usage,
+            costUsd: extractGatewayCostUsd(event.providerMetadata),
+          });
           for (const part of event.content) {
             if (
               part.type !== "tool-call" ||
@@ -1432,6 +1496,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         // Replaces the AI SDK's default `console.error`; the harness still
         // emits stream events, this just keeps the raw error from being silent.
         onError(event: { error: unknown }) {
+          if (generation.interrupted) return;
           // Recognized configuration failures (gateway auth, missing API key)
           // skip the raw inspector dump — its stack points at the harness, not
           // the fix, and the terminal-failure path logs the one-line summary
@@ -1466,7 +1531,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
             ...hiddenRuntimeActionToolNames,
           ]);
           const streamResult = await agent.stream({
-            abortSignal: config.abortSignal,
+            abortSignal: generation.signal,
             messages: callMessages,
           });
           const {
@@ -1475,11 +1540,17 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
             invalidInputToolCallIds,
             inlineAuthorizationResults,
             trailingInlineToolResultParts,
-          } = await emitStreamContent(emit, emissionState, streamResult.fullStream, {
-            excludedActionToolNames,
-            tools: advertisedHarnessTools,
-          });
+          } = await emitStreamContent(
+            emit,
+            emissionState,
+            interruptStreamOnFailure(streamResult.fullStream, generation.signal),
+            {
+              excludedActionToolNames,
+              tools: advertisedHarnessTools,
+            },
+          );
           throwIfTurnAborted(config.abortSignal);
+          generation.check();
           const [stepResult, accumulatedResponseMessages] = await Promise.all([
             hooks.stepResult,
             streamResult.responseMessages,
@@ -1522,10 +1593,11 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
           });
         }
         const generateResult = await agent.generate({
-          abortSignal: config.abortSignal,
+          abortSignal: generation.signal,
           messages: callMessages,
         });
         throwIfTurnAborted(config.abortSignal);
+        generation.check();
         const stepResult = await hooks.stepResult;
         if (stepResult.finishReason === "content-filter") {
           throw new ContentFilteredModelResponseError(
@@ -1549,7 +1621,9 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         await attempt?.complete();
         return result;
       } catch (error) {
-        await attempt?.fail(error);
+        if (generation.interrupted) await attempt?.complete();
+        else await attempt?.fail(error);
+        generation.check();
         return rethrowNoOutputAsEmptyResponse(error);
       }
     };
@@ -1595,6 +1669,10 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     } catch (error) {
       throwIfTurnAborted(config.abortSignal);
 
+      if (generation.interrupted) {
+        return finishSteeredStep();
+      }
+
       // Stage order: drop a gateway-rejected provider tool first, then
       // reissue an empty response; see runModelCallRecoveryPipeline for
       // the skip/act semantics.
@@ -1620,6 +1698,8 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         ],
       });
       throwIfTurnAborted(config.abortSignal);
+
+      if (generation.interrupted) return finishSteeredStep();
 
       if (recoveryResult.outcome === "recovered") {
         result = recoveryResult.result;
@@ -1812,6 +1892,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       }),
     });
     session = setTurnUsageState(session, nextTurnUsage);
+    interruptedUsage = undefined;
     // `formatLanguageModelGatewayId` requires `model.provider` to be a string;
     // mock models in tests omit it, so guard the lookup so a missing field
     // becomes `undefined` and is dropped by `setEveAttributes` instead of
@@ -1834,20 +1915,30 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
 
     // --- Handle result ------------------------------------------------------
 
-    const stepResult = await handleStepResult({
-      config,
-      emit,
-      emissionState,
-      durableModelPromptMessageCount:
-        turnClientContext === undefined || turnClientContext.messages.length === 0
-          ? modelMessages.length
-          : undefined,
-      promptMessages,
-      result,
-      runStep,
-      session,
-      coordinationTools: modelCallCoordinationTools,
-    });
+    let stepResult: StepResult;
+    try {
+      generation.check();
+      stepResult = await handleStepResult({
+        config,
+        emit,
+        emissionState: generation.outputStarted
+          ? { ...emissionState, assistantOutputStarted: true }
+          : emissionState,
+        durableModelPromptMessageCount:
+          turnClientContext === undefined || turnClientContext.messages.length === 0
+            ? modelMessages.length
+            : undefined,
+        promptMessages,
+        result,
+        runStep,
+        session,
+        coordinationTools: modelCallCoordinationTools,
+      });
+    } catch (error) {
+      throwIfTurnAborted(config.abortSignal);
+      if (generation.interrupted) return finishSteeredStep();
+      throw error;
+    }
     // The returned session now owns these messages; persist their baseline with it.
     ctx?.set(HistoryStateKey, currentMessages.historyState);
     return stepResult;
@@ -3141,6 +3232,7 @@ async function runModelCallWithRetries<T>(
       return await fn(attempt);
     } catch (error) {
       throwIfTurnAborted(abortSignal);
+      if (error instanceof GenerationSteeredError) throw error;
       if (attempt === MODEL_CALL_MAX_ATTEMPTS || classifyModelCallError(error) !== "retry") {
         throw error;
       }

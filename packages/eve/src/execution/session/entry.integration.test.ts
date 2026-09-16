@@ -1203,6 +1203,7 @@ describe("workflowEntry integration", () => {
 
   describe("deployment handoff", () => {
     const followUp = (acceptedDeploymentId: string, message: string, deliveryId: string) => ({
+      turnPolicy: "queue" as const,
       auth: null,
       delivery: {
         acceptedDeploymentId,
@@ -1548,6 +1549,7 @@ describe("workflowEntry integration", () => {
               await resumeHook(sessionInboxHookToken(sessionCommandHookToken(anchor.runId)), {
                 kind: "send",
                 payload: { message: `Alice sends input ${index} during release.` },
+                turnPolicy: "queue",
               });
             }
           }
@@ -2231,8 +2233,8 @@ async function expectHookClaims(runId: string, tokens: string[]): Promise<void> 
   const claims = events.data.flatMap((event) =>
     event.eventType === "hook_created" ? [event.eventData.token] : [],
   );
-  const cancellation = claims.filter((token) => token.startsWith("abrt_"));
-  expect(cancellation).toHaveLength(1);
+  const signals = claims.filter((token) => token.startsWith("abrt_"));
+  expect(signals).toHaveLength(2);
   expect(claims.filter((token) => !token.startsWith("abrt_")).sort()).toEqual(
     tokens.map(sessionInboxHookToken).sort(),
   );

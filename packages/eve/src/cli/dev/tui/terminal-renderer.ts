@@ -3696,7 +3696,6 @@ export class TerminalRenderer implements AgentTUIRenderer {
         // empty-queue cancel); its in-flight tool calls get no further updates.
         // The current pass's top-level-tool sweep settles them at stream end.
         turnState.cancelled = true;
-        if (event.source === "steering-restart") break;
         if (!turnState.restoreCancelledPrompt) break;
         this.#turnCancelled = true;
         // A cancellation nobody asked for through THIS prompt — a stale

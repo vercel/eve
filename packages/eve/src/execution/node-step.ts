@@ -53,6 +53,7 @@ export type CreateRuntime = (config: {
  * Input for building a harness step for one resolved runtime node.
  */
 export interface CreateExecutionNodeStepInput {
+  readonly steeringSignal?: AbortSignal;
   /** Cancellation signal forwarded to the tool-loop harness. */
   readonly abortSignal?: AbortSignal;
   /**
@@ -97,6 +98,7 @@ export function createExecutionNodeStep(input: CreateExecutionNodeStepInput): St
   const instrumentation = input.instrumentation;
   const sessionInstrumentation = instrumentation?.prepareExecution();
   const step = createToolLoopHarness({
+    steeringSignal: input.steeringSignal,
     abortSignal: input.abortSignal,
     capabilities: input.capabilities,
     clearOnly: input.clearOnly,

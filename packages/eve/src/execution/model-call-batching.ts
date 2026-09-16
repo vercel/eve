@@ -2,6 +2,7 @@ import { derivePendingState } from "#execution/session/pending-turn-state.js";
 import type { HarnessSession, StepInput, StepResult } from "#harness/types.js";
 
 export async function runModelCallBatch(input: {
+  readonly steeringSignal?: AbortSignal;
   readonly initialInput: StepInput | undefined;
   readonly initialSession: HarnessSession;
   readonly modelCallsPerStep: number;
@@ -23,6 +24,8 @@ export async function runModelCallBatch(input: {
     });
     completedModelCalls++;
     if (
+      input.steeringSignal?.aborted === true ||
+      result.steered === true ||
       !shouldRunAnotherModelCall({
         completedModelCalls,
         modelCallsPerStep: input.modelCallsPerStep,

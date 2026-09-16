@@ -228,6 +228,7 @@ function createInbox(input: { released?: SessionInboxPayload[] } = {}): SessionI
     drain: vi.fn(() => []),
     hasPending: vi.fn(() => false),
     next: vi.fn(),
+    onDelivery: vi.fn(() => () => {}),
     onInterrupt: vi.fn(() => () => {}),
     release: vi.fn(async () => input.released ?? []),
     restore: vi.fn(),

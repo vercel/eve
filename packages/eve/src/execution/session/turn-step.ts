@@ -382,6 +382,7 @@ async function runSessionStep(input: TurnStepInput): Promise<DurableStepResult> 
       const modelSession = refreshedSession;
 
       const step = createExecutionNodeStep({
+        steeringSignal: input.steeringSignal,
         abortSignal: input.abortSignal,
         capabilities,
         clearOnly: input.input?.control === "clear",
@@ -409,6 +410,7 @@ async function runSessionStep(input: TurnStepInput): Promise<DurableStepResult> 
       // or the pending batch would re-park and later re-dispatch.
       throwIfTurnAborted(input.abortSignal);
       stepResult = await runModelCallBatch({
+        steeringSignal: input.steeringSignal,
         initialInput: resolved,
         initialSession,
         modelCallsPerStep,

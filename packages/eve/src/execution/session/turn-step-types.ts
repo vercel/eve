@@ -24,6 +24,7 @@ export interface TurnStepPayload {
 /** Input for one atomic, session-owner-executed turn step. */
 export interface TurnStepInput {
   readonly abortSignal?: AbortSignal;
+  readonly steeringSignal?: AbortSignal;
   readonly input: TurnStepPayload | undefined;
   readonly sessionWritable: WritableStream<Uint8Array>;
   readonly serializedContext: Record<string, unknown>;
@@ -48,7 +49,7 @@ export type DurableStepResult = (
       readonly usage?: TokenUsage;
       readonly usageDelta?: TokenUsage;
     }
-  | { readonly action: "cancelled" }
+  | { readonly action: "cancelled" | "steered" }
   | {
       readonly action: "park";
       readonly authorizationAttemptIds?: readonly string[];

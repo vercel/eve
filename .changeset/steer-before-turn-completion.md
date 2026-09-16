@@ -2,4 +2,4 @@
 "eve": patch
 ---
 
-Restart a terminal UI turn when steering arrives before assistant output begins, so the correction replaces the pending answer instead of rendering two answers. Steering keeps its existing boundary behavior after output starts.
+Apply steering in the core runtime before a pending model request produces an answer, continuing the same turn with the correction across clients and channels. Preserve executing tools and their results, and keep boundary steering after assistant output begins.

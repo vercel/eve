@@ -212,6 +212,7 @@ export interface SettledTurn {
  * Result returned by one harness step invocation.
  */
 export interface StepResult {
+  readonly steered?: true;
   /** Background-tool effects projected onto the session that entered this step. */
   readonly backgroundTaskSession?: HarnessSession;
   /** Durable tasks started by background tools and awaiting the parent commit barrier. */
@@ -273,6 +274,7 @@ export type HandleEventFn = (
  * Dependencies injected into the tool-loop harness at construction time.
  */
 export interface ToolLoopHarnessConfig {
+  readonly steeringSignal?: AbortSignal;
   /** Cancellation signal for the active turn. */
   readonly abortSignal?: AbortSignal;
   /**

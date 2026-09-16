@@ -185,7 +185,7 @@ export type AgentTUIStreamEvent =
   | { type: "tool-error"; toolCallId: string; errorText: string }
   | { type: "tool-rejected"; toolCallId: string; reason: string }
   | { type: "error"; errorText: string; hint?: string; detail?: string }
-  | { type: "turn-cancelled"; source?: "steering-restart" }
+  | { type: "turn-cancelled" }
   | { type: "finish"; usage?: AgentTUIStreamUsage };
 
 export type AgentTUITurnState = {
@@ -1611,8 +1611,6 @@ export class EveTUIRunner {
         events: steering ?? events,
         pendingInputRequests: this.#pendingInputRequests,
         turnState,
-        isSteeringRestart:
-          steering === undefined ? undefined : (turnId) => steering.isRestartCancellation(turnId),
         onSubagentCalled: (called) => this.#subagentPump.begin(called),
         onSubagentBackgrounded: (callId) => this.#subagentPump.background(callId),
         onSubagentCompleted: (callId) => this.#subagentPump.settle(callId),
@@ -2177,7 +2175,6 @@ type EveStreamTranslatorInput = {
   onSubagentBackgrounded?: (callId: string) => void;
   onSubagentCompleted?: (callId: string) => void;
   onTurnCancelled?: (turnId: string) => void;
-  isSteeringRestart?: (turnId: string) => boolean;
   onConnectionAuthRequired?: (event: AuthorizationRequiredStreamEvent) => void;
   onConnectionAuthCompleted?: (event: AuthorizationCompletedStreamEvent) => void;
   /** Opens a setup-bearing registry item in the existing `/add` flow. */
@@ -2223,7 +2220,6 @@ async function* eveEventsToTUIStream(
     onSubagentBackgrounded,
     onSubagentCompleted,
     onTurnCancelled,
-    isSteeringRestart,
     onConnectionAuthRequired,
     onConnectionAuthCompleted,
     onRegistryHandoff,
@@ -2572,12 +2568,7 @@ async function* eveEventsToTUIStream(
         onTurnCancelled?.(event.data.turnId);
         yield* closeOpenParts(textParts, "assistant-complete", stepEpoch);
         yield* closeOpenParts(reasoningParts, "reasoning-complete", stepEpoch);
-        yield {
-          type: "turn-cancelled",
-          ...(isSteeringRestart?.(event.data.turnId) === true
-            ? { source: "steering-restart" as const }
-            : {}),
-        };
+        yield { type: "turn-cancelled" };
         break;
 
       case "subagent.called": {
