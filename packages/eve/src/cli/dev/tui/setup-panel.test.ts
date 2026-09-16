@@ -67,6 +67,33 @@ describe("renderFlowPanel", () => {
     expect(text).toContain("   › Create a new project");
   });
 
+  it("renders multiline titles as separate terminal rows", () => {
+    const title =
+      "You need to link to a project to use linear through Vercel Connect.\n\nSelect your team";
+    const rows = renderFlowPanel(
+      {
+        title: "Add to your agent",
+        lines: [],
+        content: {
+          kind: "question",
+          title,
+          rows: ["  › Vercel"],
+        },
+      },
+      theme,
+      80,
+    );
+
+    expect(rows.slice(0, 5)).toEqual([
+      "   You need to link to a project to use linear through Vercel Connect.",
+      "",
+      "   Select your team",
+      "",
+      "   › Vercel",
+    ]);
+    expect(rows.every((row) => !row.includes("\n"))).toBe(true);
+  });
+
   it("renders multiline diagnostics as separate terminal rows", () => {
     const rows = renderFlowPanel(
       {

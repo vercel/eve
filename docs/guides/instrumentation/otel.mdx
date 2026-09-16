@@ -40,6 +40,8 @@ export default otel({
 The OpenTelemetry `tracePolicy` is a capture ceiling shared by every OTel
 destination. A destination cannot restore content excluded by this policy. It
 does not affect lifecycle-event providers created with `defineInstrumentation()`.
+See [Audience](../channels/overview#audience) for how channels classify the
+conversation passed to this policy.
 
 ## Add an OpenTelemetry destination
 

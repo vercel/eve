@@ -4458,6 +4458,30 @@ describe("TerminalRenderer setup panel", () => {
 });
 
 describe("TerminalRenderer setup flow session", () => {
+  it("repaints multiline setup titles without leaking copies into the transcript", async () => {
+    const { screen, input, renderer } = makeRenderer();
+    const message =
+      "You need to link to a project to use linear through Vercel Connect.\n\nSelect your team";
+
+    renderer.setupFlow.begin("Add to your agent", "pulse");
+    const answer = renderer.setupFlow.readSelect({
+      kind: "single",
+      message,
+      options: [
+        { value: "vercel", label: "Vercel" },
+        { value: "labs", label: "Vercel Labs" },
+      ],
+    });
+    input.down();
+    input.up();
+
+    expect(screen.snapshot().split(message.split("\n")[0]!)).toHaveLength(2);
+    input.send("\x1b");
+    await expect(answer).resolves.toBeUndefined();
+    renderer.setupFlow.end({ preserveDiagnostics: false });
+    renderer.shutdown();
+  });
+
   it("discards inherited subprocess output when restoring the transcript", async () => {
     const { screen, input, renderer } = makeRenderer();
 

@@ -109,9 +109,8 @@ requests for user input, provider metadata, and error details. Omitted content
 fields are unavailable to the handler.
 
 The channel assigns the audience once when it creates the session. It controls
-content capture, not access. Configure it in the [default eve HTTP
-channel](../channels/eve#audience) or a [custom
-channel](../channels/custom#conversation-audience).
+content capture, not access. See [Audience](../channels/overview#audience) for
+how the channel derives `public`, `private`, and `unknown`.
 
 ## Redact fields in a custom provider
 
