@@ -70,6 +70,8 @@ interface VercelApiProject {
 /** Cancellation options shared by Vercel project read/operation helpers. */
 export interface VercelProjectOperationOptions {
   readonly signal?: AbortSignal;
+  /** Use only the Vercel CLI resolved from the caller's PATH. */
+  readonly trustedCli?: boolean;
 }
 
 function pickShortestAlias(aliases: unknown): string | undefined {
