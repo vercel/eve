@@ -140,10 +140,10 @@ export function createVercelImageSandboxProvider(
         reused: false,
       };
     },
-    async getOrCreate(context, source) {
+    async open(context, source) {
       if (source.kind === "base") {
         throw new Error(
-          `Sandbox session "${context.session.name}" requires a prepared Vercel image artifact.`,
+          `Sandbox session "${context.instance.name}" requires a prepared Vercel image artifact.`,
         );
       }
       const artifact = requirePreparedArtifact(source);
@@ -152,7 +152,7 @@ export function createVercelImageSandboxProvider(
       let sandbox = await getNamedVercelSandbox({
         createOptions,
         sandboxModule: module,
-        sandboxName: context.session.name,
+        sandboxName: context.instance.name,
       });
       if (sandbox === null) {
         try {
@@ -177,7 +177,7 @@ export function createVercelImageSandboxProvider(
                 fetch: getVercelSandboxFetch(createOptions),
                 image: artifact.image,
                 mounts,
-                name: context.session.name,
+                name: context.instance.name,
                 persistent: true,
                 tags,
               }),
@@ -197,7 +197,7 @@ export function createVercelImageSandboxProvider(
           throw error;
         }
         const session = buildSandboxSession(
-          createVercelInternalSandboxSession(sandbox, context.session.name),
+          createVercelInternalSandboxSession(sandbox, context.instance.name),
           createVercelNetworkPolicySetter(sandbox),
         );
         try {
@@ -209,7 +209,7 @@ export function createVercelImageSandboxProvider(
           } catch (cleanupError) {
             throw new AggregateError(
               [error, cleanupError],
-              `Failed to hydrate and discard sandbox session "${context.session.name}".`,
+              `Failed to hydrate and discard sandbox session "${context.instance.name}".`,
               { cause: error },
             );
           }
@@ -217,19 +217,13 @@ export function createVercelImageSandboxProvider(
         }
       } else {
         await ensureBaseRuntime(sandbox);
-        const expectedConfig = tags?.sandboxConfig;
-        if (expectedConfig !== undefined && sandbox.tags?.sandboxConfig !== expectedConfig) {
-          throw new Error(
-            `Named sandbox "${context.session.name}" was requested with conflicting configuration.`,
-          );
-        }
         await ensureVercelSandboxTags(sandbox, tags);
       }
       return createVercelSandboxHandle({
         createOptions,
         loadDeleteSandboxModule: loadDeleteModule,
         sandbox,
-        sessionKey: context.session.name,
+        sessionKey: context.instance.name,
       });
     },
   };

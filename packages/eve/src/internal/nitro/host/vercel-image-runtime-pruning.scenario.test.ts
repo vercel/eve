@@ -22,7 +22,7 @@ describe("experimental Vercel image runtime bundling", () => {
           'import { defineSandbox } from "eve/sandbox";',
           'import { ExperimentalVercelDockerfile } from "eve/sandbox/vercel";',
           "export const environment = ExperimentalVercelDockerfile.environment();",
-          "export default defineSandbox(() => environment.create());",
+          "export default defineSandbox(() => environment.open());",
         ].join("\n"),
       },
       installDependencies: true,

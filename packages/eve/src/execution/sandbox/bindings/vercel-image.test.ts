@@ -140,7 +140,7 @@ describe("createVercelImageSandboxProvider", () => {
     expect(JSON.stringify(result.artifact)).not.toContain(token);
   });
 
-  it("creates a named persistent sandbox from the exact prepared artifact", async () => {
+  it("opens a persistent session sandbox from the exact prepared artifact", async () => {
     const { create, provider, resolveMounts } = createProvider();
     const artifact: VercelImagePreparedArtifact = {
       image: `vcr.vercel.com/account/project/image@sha256:${"a".repeat(64)}`,
@@ -155,12 +155,12 @@ describe("createVercelImageSandboxProvider", () => {
       version: 1,
     };
 
-    const handle = await provider.getOrCreate(
+    const handle = await provider.open(
       {
         appRoot: "/app",
         options: { networkPolicy: "deny-all" },
         resources: { source: { kind: "reference", key: "resources" } },
-        session: { kind: "create", name: "session-name" },
+        instance: { kind: "create", name: "session-name" },
       },
       { artifact, kind: "prepared", templateName: "template-key" },
     );
@@ -188,12 +188,12 @@ describe("createVercelImageSandboxProvider", () => {
   it("rejects artifacts with unpinned images or provider-controlled mount paths", async () => {
     const { provider } = createProvider();
     await expect(
-      provider.getOrCreate(
+      provider.open(
         {
           appRoot: "/app",
           options: {},
           resources: { source: { kind: "reference", key: "resources" } },
-          session: { kind: "create", name: "session-name" },
+          instance: { kind: "create", name: "session-name" },
         },
         {
           artifact: {
@@ -232,12 +232,12 @@ describe("createVercelImageSandboxProvider", () => {
     };
 
     await expect(
-      provider.getOrCreate(
+      provider.open(
         {
           appRoot: "/app",
           options: {},
           resources: { source: { kind: "none" } },
-          session: { kind: "create", name: "session-name" },
+          instance: { kind: "create", name: "session-name" },
         },
         { artifact, kind: "prepared", templateName: "template-key" },
       ),
@@ -265,12 +265,12 @@ describe("createVercelImageSandboxProvider", () => {
     };
 
     await expect(
-      provider.getOrCreate(
+      provider.open(
         {
           appRoot: "/app",
           options: {},
           resources: { source: { kind: "reference", key: "resources" } },
-          session: { kind: "create", name: "session-name" },
+          instance: { kind: "create", name: "session-name" },
         },
         { artifact, kind: "prepared", templateName: "template-key" },
       ),
@@ -291,12 +291,12 @@ describe("createVercelImageSandboxProvider", () => {
     };
 
     await expect(
-      provider.getOrCreate(
+      provider.open(
         {
           appRoot: "/app",
           options: {},
           resources: { source: { kind: "reference", key: "resources" } },
-          session: { kind: "create", name: "session-name" },
+          instance: { kind: "create", name: "session-name" },
         },
         { artifact, kind: "prepared", templateName: "template-key" },
       ),
@@ -307,12 +307,12 @@ describe("createVercelImageSandboxProvider", () => {
   it("rejects the base source branch", async () => {
     const { provider } = createProvider();
     await expect(
-      provider.getOrCreate(
+      provider.open(
         {
           appRoot: "/app",
           options: {},
           resources: { source: { kind: "none" } },
-          session: { kind: "create", name: "session-name" },
+          instance: { kind: "create", name: "session-name" },
         },
         { kind: "base" },
       ),

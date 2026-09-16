@@ -12,8 +12,7 @@ describe("VercelSandbox", () => {
     const environment = ExperimentalVercelDockerfile.environment({ region: "iad1" });
     expect(environment.provider).toBe("vercel-image");
     expect(environment.kind).toBe("dockerfile");
-    expectTypeOf(environment.create).toBeFunction();
-    expectTypeOf(environment.getOrCreate).toBeFunction();
+    expectTypeOf(environment.open).toBeFunction();
     // @ts-expect-error Immutable setup belongs in the Dockerfile for this environment.
     ExperimentalVercelDockerfile.environment({ prepare: async () => {} });
   });
