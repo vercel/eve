@@ -51,6 +51,7 @@ const CONNECT_SERVICES: Readonly<Record<string, string>> = {
   datadog: "mcp.datadoghq.com",
   honeycomb: "mcp.honeycomb.io",
   context: "mcp.context.dev",
+  replynodes: "mcp.replynodes.com",
   natural: "mcp.natural.com",
 };
 const CONNECT_CREATION_TYPES: Readonly<Record<string, string>> = {
