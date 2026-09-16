@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   team: vi.fn(),
   readDefault: vi.fn(),
   readSecret: vi.fn(),
+  readSession: vi.fn(),
   writeSecret: vi.fn(),
   writeSelection: vi.fn(),
   writeDefault: vi.fn(),
@@ -32,6 +33,7 @@ vi.mock("#internal/model-auth/store.js", async (original) => ({
   ...(await original<typeof import("#internal/model-auth/store.js")>()),
   readDefaultConnection: mocks.readDefault,
   readModelSecret: mocks.readSecret,
+  readVercelSession: mocks.readSession,
   writeModelSecret: mocks.writeSecret,
   writeDefaultConnection: mocks.writeDefault,
 }));
@@ -45,6 +47,7 @@ vi.mock("#internal/model-auth/vercel.js", () => ({
   authJson: mocks.models,
   resolveVercelSession: mocks.session,
   validateVercelAccess: mocks.validate,
+  VERCEL_MODEL_CLIENT_ID: "client-id",
 }));
 vi.mock("./chatgpt-auth.js", () => ({ ensureChatGptAuth: mocks.chatgpt }));
 vi.mock("./vercel-model-login.js", () => ({ loginVercelModel: mocks.oauth }));
@@ -83,6 +86,7 @@ beforeEach(() => {
   vi.stubEnv("EVE_MODEL_KEY_SOURCE", undefined);
   vi.stubEnv("EVE_MODEL_CONNECTION", undefined);
   mocks.session.mockResolvedValue({ accessToken: "access", teamId: "team_123", teamName: "Alice" });
+  mocks.readSession.mockResolvedValue({ refreshToken: "refresh" });
   mocks.change.mockResolvedValue({ kind: "changed" });
   mocks.readSecret.mockResolvedValue("stored-key");
   mocks.models.mockResolvedValue({
@@ -148,6 +152,20 @@ describe("model login", () => {
     ).toEqual({ kind: "cancelled" });
     expect(mocks.cli).not.toHaveBeenCalled();
     expect(mocks.writeSelection).not.toHaveBeenCalled();
+  });
+  it("opens login without warning when a saved Vercel session belongs to another client", async () => {
+    mocks.readSelection.mockResolvedValue("vercel");
+    mocks.readSession.mockResolvedValue(undefined);
+    const fake = createFakePrompter({
+      single: () => {
+        throw new WizardCancelledError();
+      },
+    });
+    expect(
+      await runModelLogin({ appRoot: "/agent", prompter: fake.prompter, automatic: true }),
+    ).toEqual({ kind: "cancelled" });
+    expect(fake.prompter.log.warning).not.toHaveBeenCalled();
+    expect(mocks.session).not.toHaveBeenCalled();
   });
   it("does not save a rejected key", async () => {
     mocks.gateway.mockResolvedValue({ kind: "invalid" });

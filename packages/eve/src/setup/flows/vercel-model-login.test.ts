@@ -16,6 +16,7 @@ vi.mock("#internal/model-auth/vercel.js", async (original) => ({
     device: "https://api.vercel.com/login/oauth/device-authorization",
     token: "https://api.vercel.com/login/oauth/token",
   }),
+  vercelApiJson: mocks.json,
   validateVercelAccess: mocks.validate,
 }));
 vi.mock("#internal/model-auth/store.js", () => ({ writeVercelSession: mocks.write }));
@@ -61,6 +62,7 @@ it.each([undefined, "team_b"])(
       teamName: "Alice",
       refreshToken: "refresh",
     });
+    expect(mocks.write.mock.calls[0]![1]).toBe("cl_HYyOPBNtFMfHhaUn9L4QPfTZz6TP47bp");
   },
 );
 it("asks for a team when the CLI selection is unavailable", async () => {
@@ -121,5 +123,8 @@ it("lets another team be selected after Gateway rejects the first choice", async
   await loginVercelModel(fake.prompter);
   expect(fake.selectMessages).toEqual(["Vercel team", "Vercel team"]);
   expect(mocks.write).toHaveBeenCalledOnce();
-  expect(mocks.write).toHaveBeenCalledWith(expect.objectContaining({ teamId: "team_b" }));
+  expect(mocks.write).toHaveBeenCalledWith(
+    expect.objectContaining({ teamId: "team_b" }),
+    "cl_HYyOPBNtFMfHhaUn9L4QPfTZz6TP47bp",
+  );
 });

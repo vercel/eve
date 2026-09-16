@@ -9,6 +9,7 @@ import {
   isModelConnection,
   modelKeySecretName,
   readDefaultConnection,
+  readVercelSession,
   writeDefaultConnection,
   writeModelSecret,
   type ModelConnectionSelection,
@@ -18,7 +19,11 @@ import {
   readVercelCliConnection,
   refreshVercelCliConnection,
 } from "#internal/model-auth/vercel-cli.js";
-import { resolveVercelSession, validateVercelAccess } from "#internal/model-auth/vercel.js";
+import {
+  resolveVercelSession,
+  validateVercelAccess,
+  VERCEL_MODEL_CLIENT_ID,
+} from "#internal/model-auth/vercel.js";
 import { getDefaultCodexTokenBroker } from "#public/models/openai/chatgpt/token-broker.js";
 import { parseModelHelper, MODEL_HELPERS } from "#shared/model-helper.js";
 import {
@@ -79,6 +84,7 @@ async function connectionReady(
     case "chatgpt":
       return (await getDefaultCodexTokenBroker().refreshState()).kind === "ready";
     case "vercel": {
+      if (!(await readVercelSession(VERCEL_MODEL_CLIENT_ID))) return false;
       const session = await resolveVercelSession();
       await validateVercelAccess(
         session.accessToken,

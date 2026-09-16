@@ -35,14 +35,16 @@ export async function writeModelSecret(name: string, value: string): Promise<voi
 }
 
 let cachedVercelSession: VercelSession | undefined;
+let cachedVercelSessionClientId: string | undefined;
 
-export async function writeVercelSession(session: VercelSession): Promise<void> {
+export async function writeVercelSession(session: VercelSession, clientId: string): Promise<void> {
   const { accessToken: _accessToken, expiresAt: _expiresAt, ...stored } = session;
-  await writeModelSecret("vercel", JSON.stringify(stored));
+  await writeModelSecret("vercel", JSON.stringify({ clientId, ...stored }));
   cachedVercelSession = session;
+  cachedVercelSessionClientId = clientId;
 }
 
-export async function readVercelSession(): Promise<VercelSession | undefined> {
+export async function readVercelSession(clientId: string): Promise<VercelSession | undefined> {
   const raw = await readModelSecret("vercel");
   if (raw === undefined) return undefined;
   let value: unknown;
@@ -51,8 +53,8 @@ export async function readVercelSession(): Promise<VercelSession | undefined> {
   } catch {
     throw new Error("Saved Vercel login is invalid. Run /login to sign in again.");
   }
+  if (!isObject(value) || value.clientId !== clientId) return undefined;
   if (
-    !isObject(value) ||
     typeof value.refreshToken !== "string" ||
     typeof value.teamId !== "string" ||
     typeof value.teamName !== "string"
@@ -61,12 +63,16 @@ export async function readVercelSession(): Promise<VercelSession | undefined> {
   }
   return {
     accessToken:
+      cachedVercelSessionClientId === clientId &&
       cachedVercelSession?.refreshToken === value.refreshToken
         ? cachedVercelSession.accessToken
         : "",
     refreshToken: value.refreshToken,
     expiresAt:
-      cachedVercelSession?.refreshToken === value.refreshToken ? cachedVercelSession.expiresAt : 0,
+      cachedVercelSessionClientId === clientId &&
+      cachedVercelSession?.refreshToken === value.refreshToken
+        ? cachedVercelSession.expiresAt
+        : 0,
     teamId: value.teamId,
     teamName: value.teamName,
   };

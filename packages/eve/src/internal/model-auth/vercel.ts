@@ -8,6 +8,7 @@ import { readVercelSession, writeVercelSession, type VercelSession } from "./sto
 export const VERCEL_MODEL_CLIENT_ID = "cl_HYyOPBNtFMfHhaUn9L4QPfTZz6TP47bp";
 export const VERCEL_OAUTH_ISSUER = "https://vercel.com";
 export const VERCEL_TEAM_HEADER = "x-vercel-ai-gateway-team";
+const VERCEL_API_MAX_BYTES = 8 * 1024 * 1024;
 
 export async function authJson(
   url: string,
@@ -52,6 +53,13 @@ export async function authJson(
   return value;
 }
 
+export function vercelApiJson(
+  url: string,
+  init: RequestInit = {},
+): Promise<Record<string, unknown>> {
+  return authJson(url, init, VERCEL_API_MAX_BYTES);
+}
+
 export async function vercelOAuthEndpoints(signal?: AbortSignal): Promise<{
   device: string;
   token: string;
@@ -80,6 +88,7 @@ export function sessionFromToken(
   value: Record<string, unknown>,
   previous?: VercelSession,
 ): VercelSession {
+  if (typeof value.error === "string") throw new Error("Vercel login expired. Retry /login.");
   if (
     typeof value.access_token !== "string" ||
     typeof value.expires_in !== "number" ||
@@ -100,7 +109,7 @@ export function sessionFromToken(
 }
 
 export async function resolveVercelSession(rejectedToken?: string): Promise<VercelSession> {
-  let session = await readVercelSession();
+  let session = await readVercelSession(VERCEL_MODEL_CLIENT_ID);
   if (!session) throw new Error("Sign in to Vercel with /login.");
   if (session.expiresAt > Date.now() + 60_000 && session.accessToken !== rejectedToken)
     return session;
@@ -125,7 +134,7 @@ export async function resolveVercelSession(rejectedToken?: string): Promise<Verc
     }
   }
   try {
-    session = await readVercelSession();
+    session = await readVercelSession(VERCEL_MODEL_CLIENT_ID);
     if (!session) throw new Error("Sign in to Vercel with /login.");
     if (session.expiresAt > Date.now() + 60_000 && session.accessToken !== rejectedToken)
       return session;
@@ -139,7 +148,7 @@ export async function resolveVercelSession(rejectedToken?: string): Promise<Verc
       }),
     });
     session = sessionFromToken(token, session);
-    await writeVercelSession(session);
+    await writeVercelSession(session, VERCEL_MODEL_CLIENT_ID);
     return session;
   } finally {
     await rm(lock, { recursive: true, force: true });

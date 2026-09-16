@@ -8,7 +8,13 @@ const mocks = vi.hoisted(() => ({
 }));
 vi.mock("./store.js", () => ({ readVercelSession: mocks.read, writeVercelSession: mocks.write }));
 vi.mock("node:fs/promises", () => ({ mkdir: mocks.mkdir, rm: mocks.rm, stat: vi.fn() }));
-import { authJson, vercelOAuthEndpoints, resolveVercelSession } from "./vercel.js";
+import {
+  authJson,
+  vercelApiJson,
+  vercelOAuthEndpoints,
+  resolveVercelSession,
+  VERCEL_MODEL_CLIENT_ID,
+} from "./vercel.js";
 beforeEach(() => {
   vi.resetAllMocks();
   vi.stubGlobal("fetch", mocks.fetch);
@@ -39,6 +45,7 @@ it("refreshes expired OAuth access and saves rotation before releasing the lock"
   expect(url).toBe("https://api.vercel.com/login/oauth/token");
   expect(init.body.get("refresh_token")).toBe("refresh");
   expect(mocks.write).toHaveBeenCalledOnce();
+  expect(mocks.write).toHaveBeenCalledWith(expect.anything(), VERCEL_MODEL_CLIENT_ID);
   expect(mocks.rm.mock.invocationCallOrder[0]).toBeGreaterThan(
     mocks.write.mock.invocationCallOrder[0]!,
   );
@@ -80,4 +87,5 @@ it("allows bounded model catalogs larger than OAuth responses", async () => {
     catalog,
   );
   await expect(authJson("https://vercel.com/token")).rejects.toThrow("too large");
+  await expect(vercelApiJson("https://api.vercel.com/v2/teams")).resolves.toEqual(catalog);
 });

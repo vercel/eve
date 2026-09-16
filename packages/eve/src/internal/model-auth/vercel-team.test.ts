@@ -3,7 +3,10 @@ import { resolveModelTeamSlug } from "./vercel-team.js";
 
 const mocks = vi.hoisted(() => ({ cli: vi.fn(), session: vi.fn(), json: vi.fn() }));
 vi.mock("./vercel-cli.js", () => ({ readVercelCliConnection: mocks.cli }));
-vi.mock("./vercel.js", () => ({ resolveVercelSession: mocks.session, authJson: mocks.json }));
+vi.mock("./vercel.js", () => ({
+  resolveVercelSession: mocks.session,
+  vercelApiJson: mocks.json,
+}));
 
 beforeEach(() => {
   vi.resetAllMocks();

@@ -2,6 +2,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { isObject } from "#shared/guards.js";
 import {
   authJson,
+  vercelApiJson,
   vercelOAuthEndpoints,
   sessionFromToken,
   validateVercelAccess,
@@ -76,7 +77,7 @@ export async function loginVercelModel(
   const teams: { id: string; name: string }[] = [];
   let until: number | undefined;
   for (let page = 0; page < 20; page++) {
-    const data = await authJson(
+    const data = await vercelApiJson(
       `https://api.vercel.com/v2/teams?limit=100${until === undefined ? "" : `&until=${until}`}`,
       { headers: { authorization: `Bearer ${session.accessToken}` }, signal },
     );
@@ -125,5 +126,5 @@ export async function loginVercelModel(
   session.teamId = team.id;
   session.teamName = team.name;
   signal?.throwIfAborted();
-  await writeVercelSession(session);
+  await writeVercelSession(session, VERCEL_MODEL_CLIENT_ID);
 }
