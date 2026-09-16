@@ -26,7 +26,7 @@ export async function assertCurrentPublicationTarget(
   }
 
   const pull = await githubRequest(`/repos/${repository}/pulls/${ref}`, token, fetchImplementation);
-  if (pull.state !== "open" || pull.head?.sha !== sourceSha) {
+  if (pull.state !== "open" || pull.base?.ref !== "main" || pull.head?.sha !== sourceSha) {
     throw new Error(`Refusing to update PR #${ref} package pointer from stale build ${sourceSha}.`);
   }
 }

@@ -36,10 +36,10 @@ describe("current package publication target", () => {
     ).rejects.toThrow("stale build");
   });
 
-  test("accepts the current open stacked pull request build without a GitHub token", async () => {
+  test("accepts the current open pull request build without a GitHub token", async () => {
     const fetchImplementation = vi
       .fn()
-      .mockResolvedValue(response({ state: "open", base: { ref: "stack-base" }, head: { sha } }));
+      .mockResolvedValue(response({ state: "open", base: { ref: "main" }, head: { sha } }));
     await expect(
       assertCurrentPublicationTarget({ ...input, token: undefined }, fetchImplementation),
     ).resolves.toBeUndefined();
@@ -51,10 +51,11 @@ describe("current package publication target", () => {
     );
   });
 
-  test("rejects stale and closed pull requests", async () => {
+  test("rejects stale, closed, and retargeted pull requests", async () => {
     const invalidPulls = [
       { state: "open", base: { ref: "main" }, head: { sha: "b".repeat(40) } },
       { state: "closed", base: { ref: "main" }, head: { sha } },
+      { state: "open", base: { ref: "release" }, head: { sha } },
     ];
     for (const pull of invalidPulls) {
       const fetchImplementation = vi.fn().mockResolvedValue(response(pull));

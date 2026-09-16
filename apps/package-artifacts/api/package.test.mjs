@@ -39,7 +39,7 @@ describe("package route", () => {
     await handler({ query: { ref: "main" } }, res);
 
     expect(get).toHaveBeenCalledWith("packages/refs/main.json", { access: "private" });
-    expect(res.setHeader).toHaveBeenCalledWith("Cache-Control", "no-store");
+    expect(res.setHeader).toHaveBeenCalledWith("Cache-Control", "public, max-age=60");
     expect(res.redirect).toHaveBeenCalledWith(302, manifest.tarball);
   });
 

@@ -57,6 +57,7 @@ async function resolvePullRequest(env, sourceSha, fetchImplementation) {
   const branch = env.VERCEL_GIT_COMMIT_REF;
   if (typeof branch !== "string" || branch.length === 0) return undefined;
   const query = new URLSearchParams({
+    base: "main",
     head: `${REPOSITORY_OWNER}:${branch}`,
     state: "open",
   });
@@ -68,6 +69,7 @@ async function resolvePullRequest(env, sourceSha, fetchImplementation) {
 function isCurrentPullRequest(pull, sourceSha, branch) {
   return (
     pull.state === "open" &&
+    pull.base?.ref === "main" &&
     pull.head?.ref === branch &&
     pull.head?.repo?.full_name === REPOSITORY &&
     pull.head?.sha === sourceSha
