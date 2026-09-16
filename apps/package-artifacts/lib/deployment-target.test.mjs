@@ -15,7 +15,7 @@ const baseEnv = {
 const currentPull = {
   number: 123,
   state: "open",
-  base: { ref: "main" },
+  base: { ref: "stack-base" },
   head: { ref: "feature/package", repo: { full_name: "vercel/eve" }, sha },
 };
 
@@ -39,7 +39,7 @@ describe("Vercel package deployment target", () => {
     ).resolves.toEqual({ sourceSha: sha, ref: "main", origin: "https://pkg.eve.dev" });
   });
 
-  test("publishes same-repository pull requests from the system PR ID", async () => {
+  test("publishes same-repository stacked pull requests from the system PR ID", async () => {
     const fetchImplementation = vi.fn().mockResolvedValue(githubResponse(currentPull));
     await expect(resolveDeploymentTarget(baseEnv, fetchImplementation)).resolves.toEqual({
       sourceSha: sha,
@@ -61,7 +61,7 @@ describe("Vercel package deployment target", () => {
     expect(url).toContain("head=vercel%3Afeature%2Fpackage");
   });
 
-  test("rejects local, fork, direct branch, stale, and non-main PR deployments", async () => {
+  test("rejects local, fork, direct branch, stale, and closed PR deployments", async () => {
     await expect(resolveDeploymentTarget({})).resolves.toBeUndefined();
     await expect(
       resolveDeploymentTarget({ ...baseEnv, VERCEL_GIT_REPO_OWNER: "alice" }),
@@ -75,7 +75,6 @@ describe("Vercel package deployment target", () => {
 
     for (const pull of [
       { ...currentPull, state: "closed" },
-      { ...currentPull, base: { ref: "release" } },
       { ...currentPull, head: { ...currentPull.head, sha: "b".repeat(40) } },
     ]) {
       await expect(
