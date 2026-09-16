@@ -102,9 +102,15 @@ function modelProviderAccess(
   // ranking delegates to the one precedence authority; the server-reported
   // endpoint snapshot slots between a freshly loaded key (which outranks a
   // stale snapshot) and a local OIDC token (which the snapshot outranks).
+  const selected = context.env.EVE_MODEL_CONNECTION;
   const local = resolveGatewayCredential({
-    apiKeyInEnv: hasEnvValue(context.env["AI_GATEWAY_API_KEY"]),
-    oidcAvailable: hasEnvValue(context.env["VERCEL_OIDC_TOKEN"]),
+    apiKeyInEnv:
+      (selected === undefined ||
+        (selected === "ai-gateway-key" && context.env.EVE_MODEL_KEY_SOURCE !== "secret")) &&
+      hasEnvValue(context.env.AI_GATEWAY_API_KEY),
+    oidcAvailable:
+      (selected === undefined || selected === "ai-gateway-project") &&
+      hasEnvValue(context.env.VERCEL_OIDC_TOKEN),
   });
   if (local?.credential === "api-key") {
     return { kind: "gateway", runtime: { status: "connected", credential: "api-key" } };

@@ -4511,8 +4511,8 @@ export class TerminalRenderer implements AgentTUIRenderer {
     if (this.#startupPhase !== undefined) {
       const labels = {
         starting: "Starting agent…",
-        connecting: "Checking saved connection…",
-        updating: "Updating agent connection…",
+        connecting: "Reading saved connection…",
+        updating: "Loading selected model…",
       };
       const label = this.#setupFlow?.status?.text ?? labels[this.#startupPhase];
       const pulse = this.#progressPulseGlyph(

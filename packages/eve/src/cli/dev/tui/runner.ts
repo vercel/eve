@@ -549,6 +549,7 @@ export class EveTUIRunner {
    */
   #authHintStale = false;
   #setupAttentionRevision = 0;
+  #agentInfoRevision = 0;
   /** Cheap-and-local boot detection issues, cached so the auth probe can re-combine. */
   #bootIssues: SetupIssue[] = [];
   /** The current Vercel auth issue (login / CLI-missing), or undefined when fine. */
@@ -1322,8 +1323,7 @@ export class EveTUIRunner {
         const now = Date.now();
         if (shouldRefreshChatGptAuth && now - lastChatGptAuthRefresh >= idleChatGptAuthPollMs) {
           lastChatGptAuthRefresh = now;
-          const refreshedInfo = await this.#readAgentInfo();
-          if (refreshedInfo !== undefined) this.#replaceAgentInfo(refreshedInfo);
+          void this.#refreshAgentInfo();
         }
       } finally {
         refreshing = false;
@@ -1790,7 +1790,7 @@ export class EveTUIRunner {
     if (effect?.kind === "model-access-changed") {
       this.#vercelStatus?.applyEffect({ kind: "refresh-identity" });
       this.#authHintStale = true;
-      await this.#refreshModelAccess(effect.reload);
+      await this.#refreshModelAccess(effect);
       return;
     }
     if (effect === undefined) return;
@@ -1803,14 +1803,10 @@ export class EveTUIRunner {
   async #settleCommandOutcome(outcome: PromptCommandOutcome): Promise<PromptCommandOutcome> {
     if (outcome.effect === undefined) return outcome;
     const refreshTimer =
-      outcome.effect.kind === "model-access-changed"
+      outcome.effect.kind === "model-access-changed" && outcome.effect.reload
         ? setTimeout(() => {
             if (this.#startupActive) this.#renderer.setStartupPhase?.("updating");
-            this.#renderer.setupFlow?.setStatus(
-              outcome.effect?.kind === "model-access-changed" && outcome.effect.reload
-                ? "Updating agent connection…"
-                : "Checking agent connection…",
-            );
+            this.#renderer.setupFlow?.setStatus("Loading selected model…");
           }, 150)
         : undefined;
     try {
@@ -1952,22 +1948,38 @@ export class EveTUIRunner {
     }
   }
 
-  /**
-   * Setup commands report whether their writes still need runtime activation.
-   * Cache the credential-normalized `/info`
-   * shared by the status bar and setup detector before releasing the panel.
-   */
-  async #refreshModelAccess(reload: boolean): Promise<void> {
+  async #refreshModelAccess(effect: ModelAccessChange): Promise<void> {
     const appRoot = this.#appRoot;
     if (appRoot === undefined) return;
-
+    // Invalidate inspections started before this selection, including watcher notifications.
+    ++this.#agentInfoRevision;
+    ++this.#setupAttentionRevision;
     await loadDevelopmentEnvironmentFiles(appRoot);
-    if (reload) await this.#runtimeArtifacts?.refreshAfterSourceChange({});
-    const refreshedInfo = this.#replaceAgentInfo(await this.#readAgentInfo());
-    void this.#refreshSetupAttention(refreshedInfo);
-    if (this.#client !== undefined && refreshedInfo === undefined) {
-      throw new Error("Agent information is unavailable after reload.");
-    }
+    if (effect.reload) await this.#runtimeArtifacts?.refreshAfterSourceChange({});
+    if (effect.model && this.#agentInfo) {
+      this.#replaceAgentInfo({
+        ...this.#agentInfo,
+        agent: {
+          ...this.#agentInfo.agent,
+          model: { ...this.#agentInfo.agent.model, ...effect.model },
+        },
+      });
+    } else this.#replaceAgentInfo(this.#agentInfo);
+    this.#bootIssues = [];
+    this.#authIssue = undefined;
+    this.#paintSetupAttention();
+    void this.#refreshAgentInfo();
+  }
+
+  async #refreshAgentInfo(notify = false): Promise<void> {
+    const previousInfo = this.#agentInfo;
+    const revision = ++this.#agentInfoRevision;
+    const nextInfo = await this.#readAgentInfo();
+    if (this.#disposed || revision !== this.#agentInfoRevision || nextInfo === undefined) return;
+    this.#replaceAgentInfo(nextInfo);
+    if (notify && !this.#renderer.renderAgentHeader)
+      this.#renderer.renderNotice?.(formatAgentUpdateNotice(previousInfo, nextInfo));
+    void this.#refreshSetupAttention(this.#agentInfo);
   }
 
   async #readAgentInfo(): Promise<AgentInfoResult | undefined> {
@@ -1978,14 +1990,8 @@ export class EveTUIRunner {
     return probe.kind === "ready" ? probe.info : undefined;
   }
 
-  async #handleRuntimeArtifactsChanged(): Promise<void> {
-    const previousInfo = this.#agentInfo;
-    const nextInfo = await this.#readAgentInfo();
-    if (nextInfo !== undefined) this.#replaceAgentInfo(nextInfo);
-
-    if (!this.#renderer.renderAgentHeader || nextInfo === undefined) {
-      this.#renderer.renderNotice?.(formatAgentUpdateNotice(previousInfo, nextInfo));
-    }
+  #handleRuntimeArtifactsChanged(): void {
+    void this.#refreshAgentInfo(true);
   }
 
   #handleConnectionAuthRequired(event: AuthorizationRequiredStreamEvent): void {

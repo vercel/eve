@@ -65,9 +65,9 @@ it("switches all five connections while keeping keys out of project files", asyn
   await writeFile(join(root, ".env.local"), "USER_SETTING=preserved\n");
   for (const selected of ["chatgpt", "vercel", "ai-gateway-key", "openai", "anthropic"]) {
     const fake = createFakePrompter({ single: () => selected, password: () => "entered-secret" });
-    expect(await runModelLogin({ appRoot: root, prompter: fake.prompter })).toEqual({
+    expect(await runModelLogin({ appRoot: root, prompter: fake.prompter })).toMatchObject({
       kind: "ready",
-      reload: true,
+      reload: ["chatgpt", "openai", "anthropic"].includes(selected),
     });
     expect(await readProviderSelection(root)).toBe(selected);
     expect(mocks.defaults).toHaveBeenLastCalledWith(selected);

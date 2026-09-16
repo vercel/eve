@@ -108,9 +108,9 @@ describe("model login", () => {
     "connects %s and returns directly to chat",
     async (selected) => {
       const fake = createFakePrompter({ single: () => selected, password: () => "new-key" });
-      expect(await runModelLogin({ appRoot: "/agent", prompter: fake.prompter })).toEqual({
+      expect(await runModelLogin({ appRoot: "/agent", prompter: fake.prompter })).toMatchObject({
         kind: "ready",
-        reload: true,
+        reload: ["openai", "anthropic", "chatgpt"].includes(selected),
       });
       expect(fake.selectMessages).toEqual(["Choose a connection"]);
       expect(mocks.writeSelection.mock.calls[0]?.slice(0, 2)).toEqual(["/agent", selected]);
@@ -129,7 +129,7 @@ describe("model login", () => {
     const fake = createFakePrompter();
     expect(
       await runModelLogin({ appRoot: "/agent", prompter: fake.prompter, automatic: true }),
-    ).toEqual({ kind: "ready", reload: true });
+    ).toMatchObject({ kind: "ready", reload: false });
     expect(fake.selectMessages).toEqual([]);
     expect(mocks.validate).toHaveBeenCalledWith("cli-token", "team_123", expect.any(AbortSignal));
     expect(mocks.writeSecret).not.toHaveBeenCalled();
@@ -204,7 +204,7 @@ describe("model login", () => {
     const fake = createFakePrompter();
     expect(
       await runModelLogin({ appRoot: "/agent", prompter: fake.prompter, automatic: true }),
-    ).toEqual({ kind: "ready", reload: true });
+    ).toMatchObject({ kind: "ready", reload: true });
     expect(fake.selectMessages).toEqual([]);
     expect(mocks.cli).not.toHaveBeenCalled();
   });
@@ -216,7 +216,7 @@ describe("model login", () => {
     const fake = createFakePrompter();
     expect(
       await runModelLogin({ appRoot: "/agent", prompter: fake.prompter, automatic: true }),
-    ).toEqual({ kind: "ready", reload: true });
+    ).toMatchObject({ kind: "ready", reload: false });
     expect(mocks.validate).toHaveBeenCalledWith(
       "cli-token",
       "team_project",
@@ -320,9 +320,11 @@ it("preserves an explicitly authored eve helper's compatible custom model", asyn
   });
   mocks.authored.mockResolvedValue("openai-api/custom-model");
   const fake = createFakePrompter({ single: () => "openai", password: () => "new-key" });
-  await expect(runModelLogin({ appRoot: "/agent", prompter: fake.prompter })).resolves.toEqual({
+  await expect(
+    runModelLogin({ appRoot: "/agent", prompter: fake.prompter }),
+  ).resolves.toMatchObject({
     kind: "ready",
-    reload: true,
+    reload: false,
   });
   expect(mocks.change).not.toHaveBeenCalled();
 });
@@ -394,7 +396,7 @@ it("leaves an unchanged connection alone", async () => {
       prompter: createFakePrompter().prompter,
       withConnectionUpdate,
     }),
-  ).resolves.toEqual({ kind: "ready", reload: false });
+  ).resolves.toMatchObject({ kind: "ready", reload: false });
   expect(mocks.change).not.toHaveBeenCalled();
   expect(mocks.writeSelection).not.toHaveBeenCalled();
   expect(withConnectionUpdate).not.toHaveBeenCalled();
@@ -422,7 +424,7 @@ it("waits for a single runtime activation before reporting a changed connection 
   expect(mocks.change).toHaveBeenCalledOnce();
   expect(mocks.writeSelection).toHaveBeenCalledOnce();
   activation.resolve();
-  expect(await result).toEqual({ kind: "ready", reload: false });
+  expect(await result).toMatchObject({ kind: "ready", reload: false });
   expect(withConnectionUpdate).toHaveBeenCalledOnce();
 });
 
@@ -438,4 +440,25 @@ it("does not save a connection when an overlapping catalog request fails", async
   expect(await runModelLogin({ appRoot: "/agent", prompter })).toEqual({ kind: "cancelled" });
   expect(mocks.writeSelection).not.toHaveBeenCalled();
   expect(mocks.writeDefault).not.toHaveBeenCalled();
+});
+
+it("changes teams without recompiling an unchanged Gateway model", async () => {
+  const withConnectionUpdate = vi.fn();
+  mocks.settingsMatch.mockResolvedValue(false);
+  const result = await runModelLogin({
+    appRoot: "/agent",
+    withConnectionUpdate,
+    prompter: createFakePrompter({ single: () => "vercel" }).prompter,
+  });
+  expect(result).toMatchObject({
+    kind: "ready",
+    reload: false,
+    model: {
+      id: "openai/gpt-5.6-luna-fast",
+      endpoint: { kind: "gateway", connected: true, credential: "oauth", team: "Alice" },
+    },
+  });
+  expect(mocks.writeSelection).toHaveBeenCalledOnce();
+  expect(mocks.change).not.toHaveBeenCalled();
+  expect(withConnectionUpdate).not.toHaveBeenCalled();
 });

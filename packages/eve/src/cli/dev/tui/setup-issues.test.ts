@@ -185,3 +185,21 @@ describe("orderedSetupIssues", () => {
     expect(orderedSetupIssues(boot, undefined)).toEqual(boot);
   });
 });
+
+it("preserves a validated Vercel connection and team when a shell Gateway key also exists", () => {
+  const info = infoWithRouting(
+    { kind: "gateway", target: "openai" },
+    {
+      kind: "gateway",
+      connected: true,
+      credential: "oauth",
+      team: "alice",
+    },
+  );
+  expect(
+    normalizeLocalModelEndpoint(info, {
+      EVE_MODEL_CONNECTION: "vercel",
+      AI_GATEWAY_API_KEY: "other-key",
+    }),
+  ).toBe(info);
+});

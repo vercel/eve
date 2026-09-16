@@ -76,7 +76,7 @@ it("logs in and streams the first response without exposing the entered key", as
   });
   vi.stubGlobal("fetch", fetch);
   const fake = createFakePrompter({ single: () => "openai", password: () => "fixture-key" });
-  expect(await runModelLogin({ appRoot: "/fixture", prompter: fake.prompter })).toEqual({
+  expect(await runModelLogin({ appRoot: "/fixture", prompter: fake.prompter })).toMatchObject({
     kind: "ready",
     reload: true,
   });

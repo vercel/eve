@@ -14,8 +14,9 @@ export async function authJson(
   url: string,
   init: RequestInit = {},
   maxBytes = 256_000,
+  timeoutMs = 15_000,
 ): Promise<Record<string, unknown>> {
-  const timeout = AbortSignal.timeout(15_000);
+  const timeout = AbortSignal.timeout(timeoutMs);
   const response = await fetch(url, {
     ...init,
     redirect: "error",

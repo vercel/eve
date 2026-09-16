@@ -1,3 +1,6 @@
+import { resolveModelEndpointStatus } from "#internal/resolve-model-endpoint-status.js";
+import { classifyModelRouting } from "#internal/classify-model-routing.js";
+import type { ConnectedModel } from "#shared/model-connection.js";
 import { measureLoginStage, withLoginProgress } from "./model-login-progress.js";
 import { availableHelperModels } from "#internal/model-auth/available-models.js";
 import { fetchGatewayCatalog } from "../boxes/select-model.js";
@@ -83,7 +86,9 @@ type LoginInput = {
   withConnectionUpdate?(task: () => Promise<void>): Promise<void>;
 };
 
-export type ModelLoginResult = { kind: "ready"; reload: boolean } | { kind: "cancelled" };
+export type ModelLoginResult =
+  | { kind: "ready"; reload: boolean; model?: ConnectedModel }
+  | { kind: "cancelled" };
 
 async function applyConnection(
   input: LoginInput,
@@ -129,7 +134,6 @@ async function applyConnection(
       : "secret";
   const settings: ProviderSettings = { selected, ...team, keySource };
   const settingsChanged = !(await providerSettingsMatch(appRoot, settings));
-  const changed = slug !== undefined || settingsChanged;
   const save = async () => {
     signal?.throwIfAborted();
     if (slug !== undefined) {
@@ -151,15 +155,41 @@ async function applyConnection(
       delete process.env.EVE_MODEL_TEAM_NAME;
     }
   };
-  if (changed) {
-    await withLoginProgress(prompter, "Updating agent connection…", () =>
+  if (slug !== undefined) {
+    await withLoginProgress(prompter, "Loading selected model…", () =>
       measureLoginStage("activation", () =>
         input.withConnectionUpdate ? input.withConnectionUpdate(save) : save(),
       ),
     );
   } else await save();
   if (!input.automatic) await writeDefaultConnection(selected);
-  return { kind: "ready", reload: changed && input.withConnectionUpdate === undefined };
+  const selection = slug ?? model.selection;
+  const id = helper && selection ? parseModelHelper(selection)?.id : selection;
+  let connectedModel: ConnectedModel | undefined;
+  if (id) {
+    const routing = helper
+      ? { kind: "external" as const, provider: MODEL_HELPERS[helper].provider }
+      : classifyModelRouting(id);
+    connectedModel = {
+      id,
+      routing,
+      endpoint: resolveModelEndpointStatus(
+        routing,
+        {
+          apiKey: selected === "ai-gateway-key",
+          oidc: selected === "ai-gateway-project",
+          account: selected === "vercel" || selected === "vercel-cli",
+          team: team?.teamName,
+        },
+        { state: "ready" },
+      ),
+    };
+  }
+  return {
+    kind: "ready",
+    reload: slug !== undefined && input.withConnectionUpdate === undefined,
+    ...(connectedModel && { model: connectedModel }),
+  };
 }
 
 export async function runModelLogin(input: LoginInput): Promise<ModelLoginResult> {
@@ -197,7 +227,7 @@ export async function runModelLogin(input: LoginInput): Promise<ModelLoginResult
       const team = readProviderTeamSync(appRoot);
       const connection = await measureLoginStage("authentication", async () =>
         automatic
-          ? await withLoginProgress(prompter, "Checking saved connection…", () =>
+          ? await withLoginProgress(prompter, "Checking model access…", () =>
               reuseModelConnection(selected, team, attemptSignal),
             )
           : await authenticateModelConnection({ selected, team, prompter, signal: attemptSignal }),
@@ -224,7 +254,7 @@ export async function runModelLogin(input: LoginInput): Promise<ModelLoginResult
     if (input.automatic) {
       const { model, selected } = await withLoginProgress(
         prompter,
-        "Checking saved connection…",
+        "Reading saved connection…",
         async () => {
           const [model, existing, available, machineDefault] = await Promise.all([
             getModel(),

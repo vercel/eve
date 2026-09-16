@@ -1,39 +1,22 @@
 import { createGateway, type LanguageModel } from "ai";
 import { isEveDevEnvironment } from "#internal/application/dev-environment.js";
-import { readModelSecret, modelKeySecretName } from "./store.js";
-import { readVercelCliConnection, refreshVercelCliConnection } from "./vercel-cli.js";
-import { resolveVercelSession, VERCEL_TEAM_HEADER } from "./vercel.js";
-
+import { resolveModelApiKey } from "./api-key.js";
+import {
+  developmentModelBrokerAvailable,
+  readDevelopmentModelCredential,
+} from "./development-broker-client.js";
+import { resolveGatewayModelCredential } from "./gateway-credential.js";
+import { VERCEL_TEAM_HEADER } from "./vercel.js";
 import { MODEL_CONNECTION_ENV } from "#shared/model-helper.js";
-export { MODEL_CONNECTION_ENV } from "#shared/model-helper.js";
-const KEY_ENV = {
-  openai: "OPENAI_API_KEY",
-  anthropic: "ANTHROPIC_API_KEY",
-  "ai-gateway-key": "AI_GATEWAY_API_KEY",
-} as const;
 
-export async function resolveModelApiKey(provider: keyof typeof KEY_ENV): Promise<string> {
-  const value = process.env[KEY_ENV[provider]];
-  const source =
-    isEveDevEnvironment() && process.env[MODEL_CONNECTION_ENV] === provider
-      ? process.env.EVE_MODEL_KEY_SOURCE
-      : undefined;
-  if (value?.trim() && source !== "secret") return value;
-  if (isEveDevEnvironment() && source !== "environment") {
-    const stored = await readModelSecret(modelKeySecretName(provider));
-    if (stored) return stored;
-  }
-  if (source === "secret")
-    throw new Error("The selected saved API key is unavailable. Run /login to reconnect.");
-  throw new Error(
-    `Set ${KEY_ENV[provider]}${isEveDevEnvironment() ? " or connect with /login" : " in the server environment"}.`,
-  );
-}
+export { MODEL_CONNECTION_ENV } from "#shared/model-helper.js";
+export { resolveModelApiKey } from "./api-key.js";
 
 export function createDirectModelFetch(provider: "openai" | "anthropic"): typeof fetch {
   return async (url, init) => {
     const headers = new Headers(init?.headers);
-    const key = await resolveModelApiKey(provider);
+    const credential = await readDevelopmentModelCredential(provider, undefined, init?.signal);
+    const key = credential?.token ?? (await resolveModelApiKey(provider));
     headers.set(
       provider === "openai" ? "authorization" : "x-api-key",
       provider === "openai" ? `Bearer ${key}` : key,
@@ -42,45 +25,41 @@ export function createDirectModelFetch(provider: "openai" | "anthropic"): typeof
   };
 }
 
-/** Construct providers at request time so credential rotation never enters compiled state. */
+/** Resolve the connection for every request, including models constructed before /login. */
 export function localGatewayModel(id: string): LanguageModel | undefined {
   if (!isEveDevEnvironment()) return undefined;
   const selected = process.env[MODEL_CONNECTION_ENV];
-  if (selected !== "vercel" && selected !== "vercel-cli" && selected !== "ai-gateway-key")
+  if (
+    !developmentModelBrokerAvailable() &&
+    selected !== "vercel" &&
+    selected !== "vercel-cli" &&
+    selected !== "ai-gateway-key" &&
+    selected !== "ai-gateway-project"
+  )
     return undefined;
+  const resolve = async (rejectedToken?: string, signal?: AbortSignal | null) =>
+    (await readDevelopmentModelCredential("gateway", rejectedToken, signal)) ??
+    (await resolveGatewayModelCredential(rejectedToken));
   return createGateway({
     apiKey: "eve-local-credential",
     fetch: async (url, init) => {
       const headers = new Headers(init?.headers);
-      if (selected === "ai-gateway-key") {
-        headers.set("authorization", `Bearer ${await resolveModelApiKey("ai-gateway-key")}`);
-      } else {
-        const credential =
-          selected === "vercel" ? await resolveVercelSession() : await readVercelCliConnection();
-        if (!credential) throw new Error("Vercel CLI credentials are unavailable. Run /login.");
-        headers.set(
-          "authorization",
-          `Bearer ${"accessToken" in credential ? credential.accessToken : credential.token}`,
-        );
-        headers.set(VERCEL_TEAM_HEADER, process.env.EVE_MODEL_TEAM ?? credential.teamId);
-      }
+      const authenticate = (credential: Awaited<ReturnType<typeof resolve>>) => {
+        headers.set("authorization", `Bearer ${credential.token}`);
+        headers.delete(VERCEL_TEAM_HEADER);
+        if (credential.teamId) headers.set(VERCEL_TEAM_HEADER, credential.teamId);
+      };
+      const credential = await resolve(undefined, init?.signal);
+      authenticate(credential);
       const response = await fetch(url, { ...init, headers });
       if (
         response.status !== 401 ||
-        selected === "ai-gateway-key" ||
+        credential.kind !== "oauth" ||
         (init?.body !== undefined && init.body !== null && typeof init.body !== "string")
       )
         return response;
       await response.body?.cancel();
-      if (selected === "vercel") {
-        const session = await resolveVercelSession(headers.get("authorization")?.slice(7));
-        headers.set("authorization", `Bearer ${session.accessToken}`);
-      } else {
-        await refreshVercelCliConnection();
-        const cli = await readVercelCliConnection();
-        if (!cli) throw new Error("Vercel CLI credentials are unavailable. Run /login.");
-        headers.set("authorization", `Bearer ${cli.token}`);
-      }
+      authenticate(await resolve(credential.token, init?.signal));
       return fetch(url, { ...init, headers });
     },
   })(id);

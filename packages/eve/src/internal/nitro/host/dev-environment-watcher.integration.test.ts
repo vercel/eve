@@ -43,33 +43,33 @@ describe("development environment reload transactions", () => {
     expect(process.env.EVE_WATCH_ENV_SHELL).toBe("from-parent");
   });
 
-  it("honors the persisted Gateway credential selection over available keys", async () => {
+  it("loads connection settings separately from explicit environment keys", async () => {
     const appRoot = await createEnvironmentApp();
     await writeFile(join(appRoot, ".env.local"), "AI_GATEWAY_API_KEY=from-file\n");
     await mkdir(join(appRoot, ".eve"));
     await writeFile(join(appRoot, ".eve", "provider.json"), '{"selected":"ai-gateway-project"}\n');
 
     await loadDevelopmentEnvironmentFiles(appRoot);
-    expect(process.env.AI_GATEWAY_API_KEY).toBeUndefined();
+    expect(process.env.AI_GATEWAY_API_KEY).toBe("from-file");
 
     await writeFile(join(appRoot, ".eve", "provider.json"), '{"selected":"ai-gateway-key"}\n');
     await loadDevelopmentEnvironmentFiles(appRoot);
     expect(process.env.AI_GATEWAY_API_KEY).toBe("from-file");
   });
 
-  it("fingerprints suppression of a shell Gateway key for Project OIDC", async () => {
+  it("does not change the host fingerprint when selecting Project OIDC", async () => {
     const appRoot = await createEnvironmentApp();
     process.env.AI_GATEWAY_API_KEY = "from-parent";
 
     await loadDevelopmentEnvironmentFiles(appRoot);
-    expect(readDevelopmentEnvironmentHostValues(appRoot).AI_GATEWAY_API_KEY).toBe("from-parent");
+    const previous = readDevelopmentEnvironmentHostValues(appRoot);
 
     await mkdir(join(appRoot, ".eve"));
     await writeFile(join(appRoot, ".eve", "provider.json"), '{"selected":"ai-gateway-project"}\n');
     await loadDevelopmentEnvironmentFiles(appRoot);
 
-    expect(process.env.AI_GATEWAY_API_KEY).toBeUndefined();
-    expect(readDevelopmentEnvironmentHostValues(appRoot).AI_GATEWAY_API_KEY).toBeNull();
+    expect(process.env.AI_GATEWAY_API_KEY).toBe("from-parent");
+    expect(readDevelopmentEnvironmentHostValues(appRoot)).toEqual(previous);
   });
 
   it("loads, watches, fingerprints, and reloads workspace-root env", async () => {

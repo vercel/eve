@@ -3830,7 +3830,15 @@ describe("EveTUIRunner boot setup detection", () => {
           command.name === "login"
             ? {
                 message: "AI Gateway via API key selected.",
-                effect: { kind: "model-access-changed", reload: true },
+                effect: {
+                  kind: "model-access-changed",
+                  reload: false,
+                  model: {
+                    id: "gpt-5",
+                    routing: { kind: "gateway", target: "openai" },
+                    endpoint: { kind: "gateway", connected: true, credential: "api-key" },
+                  },
+                },
               }
             : { message: "/add dismissed." },
       },
@@ -3895,7 +3903,7 @@ describe("EveTUIRunner boot setup detection", () => {
     expect(handle).not.toHaveBeenCalled();
   });
 
-  it("publishes startup success and diagnostics only after the refreshed info settles", async () => {
+  it("releases the composer while /info is still pending and ignores its result after exit", async () => {
     const refreshed = createDeferred<AgentInfoResult>();
     const renderAgentHeader = vi.fn();
     const renderCommandResult = vi.fn();
@@ -3914,21 +3922,65 @@ describe("EveTUIRunner boot setup detection", () => {
       },
     });
     const run = runner.run();
-    await vi.waitFor(() => expect(client.info).toHaveBeenCalledTimes(2));
-    expect(renderAgentHeader).not.toHaveBeenCalled();
-    expect(renderCommandResult).not.toHaveBeenCalled();
-    expect(renderSetupWarning).not.toHaveBeenCalled();
-    expect(readPrompt).not.toHaveBeenCalled();
-    await vi.waitFor(() => expect(setStartupPhase).toHaveBeenLastCalledWith("updating"));
-    refreshed.resolve(AGENT_INFO);
-    await run;
-    expect(renderAgentHeader).toHaveBeenCalledOnce();
+    await vi.waitFor(() => expect(readPrompt).toHaveBeenCalledOnce());
+    expect(client.info).toHaveBeenCalledTimes(2);
     expect(renderCommandResult).toHaveBeenCalledOnce();
-    expect(readPrompt).toHaveBeenCalledOnce();
+    expect(renderSetupWarning).not.toHaveBeenCalled();
     expect(setStartupPhase).toHaveBeenLastCalledWith(undefined);
-    expect(renderAgentHeader.mock.invocationCallOrder[0]).toBeLessThan(
-      renderCommandResult.mock.invocationCallOrder[0]!,
+    await run;
+    const paints = renderAgentHeader.mock.calls.length;
+    refreshed.resolve(AGENT_INFO);
+    await Promise.resolve();
+    expect(renderAgentHeader).toHaveBeenCalledTimes(paints);
+  });
+
+  it("sends the first message while post-login info is pending", async () => {
+    const refreshed = createDeferred<AgentInfoResult>();
+    const client = stubClient();
+    vi.spyOn(client, "info")
+      .mockResolvedValueOnce(disconnectedGatewayInfo)
+      .mockImplementation(() => refreshed.promise);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => Response.json({ revision: "snapshot-a" })),
     );
+    const session = sessionYielding([]);
+    const prompts = ["Hello", undefined];
+    const runner = new EveTUIRunner({
+      client,
+      session,
+      name: "Weather Agent",
+      serverUrl: "http://localhost:3000",
+      appRoot: "/tmp/weather-agent",
+      onboard: true,
+      bootDetections: [],
+      detectProjectIdentity: vi.fn(async () => undefined),
+      renderer: fakeRenderer({
+        readPrompt: vi.fn(async () => prompts.shift()),
+        setupFlow: createFakeSetupFlowRenderer(),
+      }),
+      promptCommandHandler: {
+        handle: async () => ({
+          message: "Connected.",
+          effect: {
+            kind: "model-access-changed",
+            reload: false,
+            model: {
+              id: "gpt-5",
+              routing: { kind: "gateway", target: "openai" },
+              endpoint: { kind: "gateway", connected: true, credential: "oauth", team: "alice" },
+            },
+          },
+        }),
+      },
+    });
+    const run = runner.run();
+    try {
+      await vi.waitFor(() => expect(session.send).toHaveBeenCalled());
+    } finally {
+      refreshed.resolve(AGENT_INFO);
+      await run;
+    }
   });
 
   it("releases the composer without waiting on unrelated setup diagnostics", async () => {
@@ -4020,13 +4072,13 @@ describe("EveTUIRunner boot setup detection", () => {
     await runner.run();
     await vi.waitFor(() => expect(clearSetupWarning).toHaveBeenCalled());
 
-    expect(renderCommandResult).toHaveBeenCalledWith(
-      expect.stringContaining("could not reload"),
-      "error",
-    );
+    expect(renderCommandResult).toHaveBeenCalledWith("AI Gateway via API key selected.", undefined);
     expect(client.info).toHaveBeenCalledTimes(2);
-    expect(detect.mock.calls.at(-1)?.[0].info).toBeUndefined();
-    expect(headers.at(-1)?.info).toBeUndefined();
+    expect(detect).not.toHaveBeenCalled();
+    expect(headers.at(-1)?.info?.agent.model.endpoint).toMatchObject({
+      kind: "gateway",
+      connected: true,
+    });
   });
 
   it("stays quiet without a local setup context, even with issues", async () => {

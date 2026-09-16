@@ -270,7 +270,11 @@ async function executeSetupCommand(
             }
           : {
               message: "Connected. Start chatting · /add to extend your agent",
-              effect: { kind: "model-access-changed", reload: result.reload },
+              effect: {
+                kind: "model-access-changed",
+                reload: result.reload,
+                ...(result.model && { model: result.model }),
+              },
               preserveFlowDiagnostics: false,
             };
       }

@@ -7,7 +7,7 @@ import {
   providerSettingsPath,
   providerSettingsMatch,
   readProviderSelection,
-  readProviderSelectionSync,
+  readProviderSettingsSync,
   resolveAvailableProviders,
   writeProviderSelection,
 } from "./provider-settings.js";
@@ -48,7 +48,7 @@ describe("provider settings", () => {
     await writeProviderSelection(root, "ai-gateway-project");
 
     await expect(readProviderSelection(root)).resolves.toBe("ai-gateway-project");
-    expect(readProviderSelectionSync(root)).toBe("ai-gateway-project");
+    expect(readProviderSettingsSync(root)?.selected).toBe("ai-gateway-project");
     expect(providerSettingsPath(root)).toBe(join(root, ".eve", "provider.json"));
   });
 
@@ -57,7 +57,7 @@ describe("provider settings", () => {
     roots.push(root);
 
     await expect(readProviderSelection(root)).resolves.toBeUndefined();
-    expect(readProviderSelectionSync(root)).toBeUndefined();
+    expect(readProviderSettingsSync(root)?.selected).toBeUndefined();
   });
 });
 

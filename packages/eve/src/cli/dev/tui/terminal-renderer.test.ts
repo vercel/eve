@@ -2522,7 +2522,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
       renderer.renderSetupWarning("Model disconnected · /login");
       expect(screen.snapshot()).not.toContain("Model disconnected");
       renderer.setStartupPhase("connecting");
-      expect(screen.snapshot()).toContain("Checking saved connection");
+      expect(screen.snapshot()).toContain("Reading saved connection");
       expect(screen.snapshot()).not.toContain("Model disconnected");
       expect(renderer.finishStartupDraft()).toEqual({
         draft: "Hello Alice",
@@ -2576,9 +2576,9 @@ describe("TerminalRenderer (inline scrollback)", () => {
       expect(screen.snapshot()).toContain("Hello 世界!");
       input.enter();
       renderer.setStartupPhase("updating");
-      renderer.setupFlow.setStatus("Updating agent connection…");
+      renderer.setupFlow.setStatus("Loading selected model…");
       input.type("Next message");
-      expect(screen.snapshot()).toContain("Updating agent connection");
+      expect(screen.snapshot()).toContain("Loading selected model");
       expect(screen.snapshot()).not.toContain("Working");
       interrupt.dispose();
       renderer.setupFlow.end({ preserveDiagnostics: false });

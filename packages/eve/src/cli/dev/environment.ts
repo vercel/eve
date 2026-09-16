@@ -5,11 +5,7 @@ import { parseEnv } from "node:util";
 
 import { findEveProjectRoot } from "#internal/eve-project-root.js";
 import { isObject } from "#shared/guards.js";
-import {
-  readProviderSelectionSync,
-  readProviderTeamSync,
-  readProviderKeySourceSync,
-} from "#setup/provider-settings.js";
+import { readProviderSettingsSync } from "#setup/provider-settings.js";
 
 /**
  * Development environment files loaded by local CLI commands such as
@@ -76,13 +72,6 @@ export function readDevelopmentEnvironmentHostValues(
     getDevelopmentEnvironmentLoader(appRoot).environmentRoot,
   );
   const hostKeys = new Set(fileValues.keys());
-  // Project selection can suppress a shell-only key. Keep that transition in
-  // the host fingerprint so the worker that inherited the key is replaced.
-  hostKeys.add("AI_GATEWAY_API_KEY");
-  hostKeys.add(MODEL_CONNECTION_ENV);
-  hostKeys.add("EVE_MODEL_TEAM");
-  hostKeys.add("EVE_MODEL_TEAM_NAME");
-  hostKeys.add("EVE_MODEL_KEY_SOURCE");
 
   for (const key of [...hostKeys].sort((left, right) => left.localeCompare(right))) {
     values[key] = process.env[key] ?? null;
@@ -111,15 +100,13 @@ function createDevelopmentEnvironmentLoader(
   appRoot: string,
   environmentRoot: string,
 ): DevelopmentEnvironmentLoader {
-  const protectedValues = new Map(Object.entries(process.env));
-  const protectedKeys = new Set(protectedValues.keys());
+  const protectedKeys = new Set(Object.keys(process.env));
   const managedValues = new Map<string, string>();
 
   const stageReload = (): DevelopmentEnvironmentReload => {
     const previousManagedValues = new Map(managedValues);
     const nextValues = readDevelopmentEnvironmentValues(environmentRoot);
-    const selected = readProviderSelectionSync(appRoot);
-    const preferProjectOidc = applyProviderSelection(appRoot, nextValues);
+    const settings = readProviderSettingsSync(appRoot);
     const affectedKeys = new Set([
       ...managedValues.keys(),
       ...nextValues.keys(),
@@ -128,32 +115,23 @@ function createDevelopmentEnvironmentLoader(
       "EVE_MODEL_TEAM_NAME",
       "EVE_MODEL_KEY_SOURCE",
     ]);
-    if (preferProjectOidc) {
-      affectedKeys.add("AI_GATEWAY_API_KEY");
-      protectedKeys.delete("AI_GATEWAY_API_KEY");
-    } else if (protectedValues.has("AI_GATEWAY_API_KEY")) {
-      protectedKeys.add("AI_GATEWAY_API_KEY");
-      process.env.AI_GATEWAY_API_KEY = protectedValues.get("AI_GATEWAY_API_KEY");
-    }
     const previousEnvironment = new Map(
       [...affectedKeys].map((key) => [key, process.env[key]] as const),
     );
     let settled = false;
-    if (selected) process.env[MODEL_CONNECTION_ENV] = selected;
+    if (settings) process.env[MODEL_CONNECTION_ENV] = settings.selected;
     else delete process.env[MODEL_CONNECTION_ENV];
-    const keySource = readProviderKeySourceSync(appRoot);
+    const keySource = settings?.keySource;
     if (keySource) process.env.EVE_MODEL_KEY_SOURCE = keySource;
     else delete process.env.EVE_MODEL_KEY_SOURCE;
-    const team = readProviderTeamSync(appRoot);
-    if (team) {
-      process.env.EVE_MODEL_TEAM = team.teamId;
-      process.env.EVE_MODEL_TEAM_NAME = team.teamName;
+    if (settings?.teamId && settings.teamName) {
+      process.env.EVE_MODEL_TEAM = settings.teamId;
+      process.env.EVE_MODEL_TEAM_NAME = settings.teamName;
     } else {
       delete process.env.EVE_MODEL_TEAM;
       delete process.env.EVE_MODEL_TEAM_NAME;
     }
 
-    if (preferProjectOidc) delete process.env.AI_GATEWAY_API_KEY;
     applyDevelopmentEnvironmentValues({
       managedValues,
       nextValues,
@@ -191,12 +169,6 @@ function createDevelopmentEnvironmentLoader(
     },
     stageReload,
   };
-}
-
-function applyProviderSelection(appRoot: string, values: Map<string, string>): boolean {
-  if (readProviderSelectionSync(appRoot) !== "ai-gateway-project") return false;
-  values.delete("AI_GATEWAY_API_KEY");
-  return true;
 }
 
 function applyDevelopmentEnvironmentValues(input: {
