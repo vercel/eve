@@ -91,7 +91,10 @@ export function createPromptCommandHandler(
       try {
         const commandInput: TuiSetupCommandInput = {
           command: command.name,
-          appRoot: target.workspaceRoot,
+          appRoot:
+            command.name === "add"
+              ? (target.agentRoot ?? target.workspaceRoot)
+              : target.workspaceRoot,
           renderer: flow,
           withExclusiveTerminal: context.withExclusiveTerminal,
           chatGptAccountLabel: context.chatGptAccountLabel,
