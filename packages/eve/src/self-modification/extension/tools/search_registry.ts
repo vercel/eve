@@ -99,6 +99,8 @@ export interface CatalogEntry {
   readonly authoredTarget?: string;
   /** Whether `meta.eve.setup` declares one or more setup commands. */
   readonly declaresSetup?: boolean;
+  /** Self-modification behavior declared by `meta.eve.selfModification`. */
+  readonly selfModification?: { readonly lazyConnect: true };
   /** Names of environment variables the item declares. */
   readonly envVars?: readonly string[];
 }
@@ -155,7 +157,7 @@ function titleFromAddress(address: string): string {
  * Reads the eve-owned metadata block from one index entry.
  *
  * `meta.eve` is eve's own registry contract, described by the schemas in the
- * CLI's `registry-metadata.ts`. This reads the two fields the subagent needs
+ * CLI's `registry-metadata.ts`. This reads the fields self-modification needs
  * and ignores the rest, so an added field degrades to an absent value here
  * instead of a parse failure.
  */
@@ -209,6 +211,7 @@ export function parseRegistryIndex(value: unknown): readonly CatalogEntry[] {
       description?: string;
       envVars?: readonly string[];
       requires?: string;
+      selfModification?: { readonly lazyConnect: true };
       title: string;
     } = { address, title: optionalString(item.title) ?? titleFromAddress(address) };
 
@@ -221,6 +224,9 @@ export function parseRegistryIndex(value: unknown): readonly CatalogEntry[] {
     const authoredTarget = authoredTargetOf(item);
     if (authoredTarget !== undefined) entry.authoredTarget = authoredTarget;
     if (eve.setup !== undefined && eve.setup !== null) entry.declaresSetup = true;
+    if (isRecord(eve.selfModification) && eve.selfModification.lazyConnect === true) {
+      entry.selfModification = { lazyConnect: true };
+    }
     const envVars = declaredEnvVars(item);
     if (envVars.length > 0) entry.envVars = envVars;
 
