@@ -69,6 +69,9 @@ import {
   type RemoteConnectionControllerOptions,
   type RemoteConnectionSnapshot,
 } from "./remote-connection.js";
+import type { RemoteAuthFlow } from "./remote-auth.js";
+import { describeRemoteAuthCompletedMutations } from "./remote-auth-result.js";
+import { prepareRemoteTuiAccess } from "./remote-startup.js";
 import type { DevelopmentCredentialGate } from "#services/dev-client/credential-gate.js";
 import {
   BOOT_DETECTIONS,
@@ -401,7 +404,6 @@ export interface PromptCommandHandlerContext {
   readonly chatGptAccountLabel?: string;
   /** Settles runtime changes before the setup panel releases the screen. */
   readonly settleOutcome?: (outcome: PromptCommandOutcome) => Promise<PromptCommandOutcome>;
-  readonly remoteConnection?: RemoteConnectionController;
   readonly withExclusiveTerminal?: <T>(task: () => Promise<T>) => Promise<T>;
   readonly disabledConnectionReasons?: Readonly<Record<string, string>>;
 }
@@ -480,6 +482,8 @@ export type EveTUIRunnerOptions = TuiDisplayOptions & {
     readonly credentials: DevelopmentCredentialGate;
     readonly resolveOidcToken: NonNullable<RemoteConnectionControllerOptions["resolveOidcToken"]>;
     readonly resolveDeployment: NonNullable<RemoteConnectionControllerOptions["resolveDeployment"]>;
+    /** Test seam for consented deployment access repair. */
+    readonly runAuthFlow?: RemoteAuthFlow;
   };
   /** Boot-time installation-state checks; defaults to the built-ins. */
   bootDetections?: readonly BootDetection[];
@@ -534,6 +538,7 @@ export class EveTUIRunner {
   readonly #availablePromptCommands: readonly PromptCommandSpec[];
   readonly #withExclusiveTerminal?: <T>(task: () => Promise<T>) => Promise<T>;
   readonly #remoteConnection?: RemoteConnectionController;
+  readonly #remoteAuthFlow?: RemoteAuthFlow;
   readonly #bootDetections: readonly BootDetection[];
   readonly #getVercelAuthStatus: typeof getVercelAuthStatus;
   readonly #inspectApplication: typeof inspectApplication;
@@ -670,6 +675,7 @@ export class EveTUIRunner {
     }
     this.#availablePromptCommands = options.availablePromptCommands ?? PROMPT_COMMANDS;
     if (options.remote !== undefined) {
+      this.#remoteAuthFlow = options.remote.runAuthFlow;
       if (this.#client === undefined) {
         throw new Error("A remote TUI requires a configured development client.");
       }
@@ -806,6 +812,28 @@ export class EveTUIRunner {
       this.#promptCommandHandler !== undefined &&
       this.#renderer.setupFlow !== undefined;
     let startupOutcome: PromptCommandOutcome | undefined;
+    if (this.#remoteConnection !== undefined && this.#renderer.setupFlow !== undefined) {
+      const access = await prepareRemoteTuiAccess({
+        connection: this.#remoteConnection,
+        renderer: this.#renderer.setupFlow,
+        signal: this.#lifecycle?.signal,
+        runAuthFlow: this.#remoteAuthFlow,
+      });
+      if (access?.kind === "authenticated") {
+        const connection = this.#remoteConnection.current().connection;
+        if (connection.state === "ready") this.#replaceAgentInfo(connection.info);
+      } else if (access?.kind === "failed" || access?.kind === "unavailable") {
+        startupOutcome = {
+          tone: "error",
+          message: access.kind === "failed" ? access.message : access.failure.message,
+        };
+      } else if (access?.kind === "cancelled") {
+        startupOutcome = { cancelled: true };
+        if (access.completedMutations.length > 0) {
+          startupOutcome.message = `Completed before cancellation: ${describeRemoteAuthCompletedMutations(access.completedMutations).join(", ")}.`;
+        }
+      }
+    }
     if (initialAgentOnboarding) {
       this.#renderer.setStartupPhase?.("connecting");
       startupOutcome = await this.#runInitialAgentOnboarding(title);
@@ -827,8 +855,8 @@ export class EveTUIRunner {
         "startup",
         startupOutcome?.tone,
       );
-      this.#renderCommandOutcome(startupOutcome?.message, startupOutcome?.tone);
     }
+    this.#renderCommandOutcome(startupOutcome?.message, startupOutcome?.tone);
 
     while (true) {
       if (this.#lifecycle?.signal.aborted === true || this.#renderer.exitRequested?.() === true) {
@@ -1761,7 +1789,6 @@ export class EveTUIRunner {
         endpoint?.kind === "chatgpt" && endpoint.state === "ready"
           ? endpoint.accountLabel
           : undefined,
-      remoteConnection: this.#remoteConnection,
       withExclusiveTerminal: this.#withExclusiveTerminal,
     };
     const disabledConnectionReasons = this.#mcpConnectionStatus?.current();

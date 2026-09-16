@@ -3129,6 +3129,7 @@ describe("EveTUIRunner remote authentication", () => {
     client: Client;
     flow: RemoteAuthFlow;
     renderer?: Partial<AgentTUIRenderer>;
+    initialInput?: string;
     resolveDeployment?: NonNullable<RemoteConnectionControllerOptions["resolveDeployment"]>;
   }): Promise<void> {
     await new EveTUIRunner({
@@ -3140,7 +3141,8 @@ describe("EveTUIRunner remote authentication", () => {
       promptCommandHandler: createPromptCommandHandler({
         target,
       }),
-      remote: remoteOptions(input.resolveDeployment),
+      remote: { ...remoteOptions(input.resolveDeployment), runAuthFlow: input.flow },
+      initialInput: input.initialInput,
     }).run();
   }
 
@@ -3177,24 +3179,180 @@ describe("EveTUIRunner remote authentication", () => {
     expect(commandInvocations).toEqual([]);
   });
 
-  it("does not open login for a remote SSO challenge", async () => {
+  it.each([
+    new ClientError(302, "Redirecting...", { location: VERCEL_SSO_URL }),
+    new ClientError(403, "TRUSTED_SOURCES_ENVIRONMENT_MISMATCH"),
+  ])(
+    "repairs Deployment Protection at startup without echoing a login command (%s)",
+    async (challenge) => {
+      const client = stubClient();
+      vi.spyOn(client, "info").mockRejectedValueOnce(challenge).mockResolvedValueOnce(AGENT_INFO);
+      const commandInvocations: Array<{ text: string; status: "failed" | undefined }> = [];
+      const flow = successfulAuth();
+      const statuses: string[] = [];
+      const renderAgentHeader = vi.fn();
+
+      await runRemoteAuth({
+        client,
+        flow,
+        renderer: {
+          renderCommandInvocation: (text, status) => commandInvocations.push({ text, status }),
+          setRemoteConnectionStatus: (snapshot) => statuses.push(snapshot.connection.state),
+          renderAgentHeader,
+        },
+      });
+
+      expect(flow).toHaveBeenCalledWith(
+        expect.objectContaining({
+          configureTrustedSources: true,
+          workspaceRoot: target.workspaceRoot,
+          serverUrl: target.serverUrl,
+        }),
+      );
+      expect(client.info).toHaveBeenCalledTimes(2);
+      expect(statuses).toContain("authenticating");
+      expect(statuses.at(-1)).toBe("ready");
+      expect(renderAgentHeader).toHaveBeenLastCalledWith(
+        expect.objectContaining({ info: AGENT_INFO }),
+      );
+      expect(commandInvocations).toEqual([]);
+    },
+  );
+
+  it("does not open setup when existing remote credentials already work", async () => {
     const client = stubClient();
+    vi.spyOn(client, "info").mockResolvedValue(AGENT_INFO);
+    const flow = successfulAuth();
+    const setupFlow = idleSetupFlow();
+    await runRemoteAuth({ client, flow, renderer: { setupFlow } });
+    expect(flow).not.toHaveBeenCalled();
+    expect(setupFlow.begin).not.toHaveBeenCalled();
+  });
+
+  it("sends the first message after the repaired connection is verified", async () => {
+    const client = stubClient();
+    const order: string[] = [];
     vi.spyOn(client, "info")
       .mockRejectedValueOnce(new ClientError(302, "Redirecting...", { location: VERCEL_SSO_URL }))
-      .mockResolvedValueOnce(AGENT_INFO);
-    const commandInvocations: Array<{ text: string; status: "failed" | undefined }> = [];
-    const flow = successfulAuth();
+      .mockImplementationOnce(async () => {
+        order.push("verified");
+        return AGENT_INFO;
+      });
+    const session = sessionYielding([{ type: "session.waiting" }]);
+    const renderer = fakeRenderer({
+      setupFlow: idleSetupFlow(),
+      readPrompt: vi
+        .fn()
+        .mockImplementationOnce(async () => {
+          order.push("prompt");
+          return "Hello Alice";
+        })
+        .mockResolvedValueOnce(undefined),
+    });
+    await new EveTUIRunner({
+      session,
+      client,
+      renderer,
+      serverUrl: target.serverUrl,
+      remote: { ...remoteOptions(), runAuthFlow: successfulAuth() },
+    }).run();
+    expect(order).toEqual(["verified", "prompt"]);
+    expect(session.send).toHaveBeenCalledWith("Hello Alice", expect.any(Object));
+    expect(renderer.renderStream).toHaveBeenCalledOnce();
+  });
 
+  it.each(["cancelled", "failed"] as const)(
+    "preserves the draft and closes %s remote setup without retrying",
+    async (kind) => {
+      const client = stubClient();
+      vi.spyOn(client, "info").mockRejectedValue(
+        new ClientError(302, "Redirecting...", { location: VERCEL_SSO_URL }),
+      );
+      const flow = vi.fn<RemoteAuthFlow>(async () =>
+        kind === "cancelled"
+          ? { kind: "cancelled", completedMutations: [] }
+          : {
+              kind: "failed",
+              message:
+                "Could not update Trusted Sources. Check project permissions, then reconnect.",
+              completedMutations: [],
+            },
+      );
+      const setupFlow = idleSetupFlow();
+      const readPrompt = vi.fn(async () => undefined);
+      const renderCommandResult = vi.fn();
+      await runRemoteAuth({
+        client,
+        flow,
+        initialInput: "Hello Alice",
+        renderer: { setupFlow, readPrompt, renderCommandResult },
+      });
+      expect(flow).toHaveBeenCalledOnce();
+      expect(client.info).toHaveBeenCalledOnce();
+      expect(setupFlow.end).toHaveBeenCalledWith({ preserveDiagnostics: false });
+      expect(readPrompt).toHaveBeenCalledWith(
+        expect.objectContaining({ initialDraft: "Hello Alice" }),
+      );
+      if (kind === "cancelled") expect(renderCommandResult).not.toHaveBeenCalled();
+      else
+        expect(renderCommandResult).toHaveBeenCalledWith(
+          expect.stringContaining("Check project permissions"),
+          "error",
+        );
+    },
+  );
+
+  it("reports a failed access check after applying Trusted Sources instead of declaring success", async () => {
+    const client = stubClient();
+    vi.spyOn(client, "info").mockRejectedValue(
+      new ClientError(302, "Redirecting...", { location: VERCEL_SSO_URL }),
+    );
+    const flow = successfulAuth([
+      { kind: "trusted-sources-updated", targetProjectName: "inbound" },
+    ]);
+    const renderCommandResult = vi.fn();
+    const statuses: string[] = [];
     await runRemoteAuth({
       client,
       flow,
       renderer: {
-        renderCommandInvocation: (text, status) => commandInvocations.push({ text, status }),
+        renderCommandResult,
+        setRemoteConnectionStatus: (snapshot) => statuses.push(snapshot.connection.state),
       },
     });
+    expect(flow).toHaveBeenCalledOnce();
+    expect(client.info).toHaveBeenCalledTimes(2);
+    expect(statuses.at(-1)).toBe("auth-failed");
+    expect(renderCommandResult).toHaveBeenCalledWith(
+      expect.stringContaining("updated Trusted Sources for inbound"),
+      "error",
+    );
+  });
 
-    expect(flow).not.toHaveBeenCalled();
-    expect(commandInvocations).toEqual([]);
+  it("aborts remote setup during an idle wait and waits for cleanup before releasing input", async () => {
+    const client = stubClient();
+    vi.spyOn(client, "info").mockRejectedValue(
+      new ClientError(302, "Redirecting...", { location: VERCEL_SSO_URL }),
+    );
+    const interrupt = Promise.withResolvers<"escape" | "ctrl-c">();
+    let cleanedUp = false;
+    const flow = vi.fn<RemoteAuthFlow>(async ({ signal }) => {
+      interrupt.resolve("escape");
+      await new Promise<void>((resolve) =>
+        signal!.addEventListener("abort", () => resolve(), { once: true }),
+      );
+      cleanedUp = true;
+      return { kind: "cancelled", completedMutations: [] };
+    });
+    const dispose = vi.fn();
+    const setupFlow = createFakeSetupFlowRenderer({
+      waitForInterrupt: () => ({ promise: interrupt.promise, dispose }),
+      end: () => expect(cleanedUp).toBe(true),
+    });
+    await runRemoteAuth({ client, flow, renderer: { setupFlow } });
+    expect(cleanedUp).toBe(true);
+    expect(dispose).toHaveBeenCalledOnce();
+    expect(client.info).toHaveBeenCalledOnce();
   });
 
   it("does not start authentication for an ordinary remote HTTP failure", async () => {
