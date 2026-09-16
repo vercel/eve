@@ -6,6 +6,7 @@ import {
   backspace,
   deleteForward,
   deleteWord,
+  deleteWordBackward,
   insert,
   killToEnd,
   killToStart,
@@ -119,7 +120,31 @@ describe("line editing", () => {
     expect(killToStart({ text: "one\ntwo", cursor: 4 })).toEqual({ text: "one\ntwo", cursor: 4 });
   });
 
-  it("deletes the previous word", () => {
+  it("deletes the previous readline-style word", () => {
+    const text = "one,  two_three 世界";
+    expect(deleteWordBackward({ text, cursor: text.length })).toEqual({
+      text: "one,  two_three ",
+      cursor: 16,
+    });
+    expect(deleteWordBackward({ text, cursor: 16 })).toEqual({ text: "one,  世界", cursor: 6 });
+    expect(deleteWordBackward({ text: "e\u0301lan vital", cursor: 5 })).toEqual({
+      text: " vital",
+      cursor: 0,
+    });
+  });
+
+  it("deletes the same span that Alt+Left traverses across lines", () => {
+    expect(deleteWordBackward({ text: "one\ntwo", cursor: 7 })).toEqual({
+      text: "one\n",
+      cursor: 4,
+    });
+    expect(deleteWordBackward({ text: "one\ntwo", cursor: 4 })).toEqual({
+      text: "two",
+      cursor: 0,
+    });
+  });
+
+  it("deletes the previous whitespace-delimited word", () => {
     expect(deleteWord({ text: "one two three", cursor: 13 })).toEqual({
       text: "one two ",
       cursor: 8,
@@ -160,6 +185,10 @@ describe("line editing", () => {
     expect(applyLineEditorKey({ text: "one two", cursor: 0 }, { type: "alt-f" })).toEqual({
       text: "one two",
       cursor: 3,
+    });
+    expect(applyLineEditorKey(lineOf("one two"), { type: "alt-backspace" })).toEqual({
+      text: "one ",
+      cursor: 4,
     });
     expect(applyLineEditorKey(line, { type: "enter" })).toBeUndefined();
     expect(applyLineEditorKey(line, { type: "escape" })).toBeUndefined();

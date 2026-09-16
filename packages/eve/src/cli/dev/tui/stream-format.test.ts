@@ -112,9 +112,11 @@ describe("nextKey", () => {
     expect(nextKey("\x1bO")).toEqual({ consumed: 0, incomplete: true });
   });
 
-  it("decodes Alt+B/F as complete readline word-movement chords", () => {
+  it("decodes Alt+B/F and Alt+Backspace as complete readline chords", () => {
     expect(nextKey("\x1bb")).toEqual({ key: { type: "alt-b" }, consumed: 2 });
     expect(nextKey("\x1bF")).toEqual({ key: { type: "alt-f" }, consumed: 2 });
+    expect(nextKey("\x1b\x7f")).toEqual({ key: { type: "alt-backspace" }, consumed: 2 });
+    expect(nextKey("\x1b\b")).toEqual({ key: { type: "alt-backspace" }, consumed: 2 });
   });
 
   it("takes a printable run as a single character token", () => {
@@ -221,6 +223,13 @@ describe("parseKey", () => {
     expect(parseKey(Buffer.from("\x1b[1;3D"))).toEqual({ type: "alt-b" });
     expect(parseKey(Buffer.from("\x1b[1;5C"))).toEqual({ type: "alt-f" });
     expect(parseKey(Buffer.from("\x1b[5D"))).toEqual({ type: "alt-b" });
+  });
+
+  it("decodes kitty and xterm Alt+Backspace sequences", () => {
+    expect(parseKey(Buffer.from("\x1b[127;3u"))).toEqual({ type: "alt-backspace" });
+    expect(parseKey(Buffer.from("\x1b[8;3u"))).toEqual({ type: "alt-backspace" });
+    expect(parseKey(Buffer.from("\x1b[27;3;127~"))).toEqual({ type: "alt-backspace" });
+    expect(parseKey(Buffer.from("\x1b[27;3;8~"))).toEqual({ type: "alt-backspace" });
   });
 
   it("decodes SGR mouse press and release with cell coordinates", () => {

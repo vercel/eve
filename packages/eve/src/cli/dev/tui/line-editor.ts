@@ -146,6 +146,14 @@ export function killToStart(state: LineState): LineState {
   };
 }
 
+/** Deletes to the previous readline-style word boundary (Alt+Backspace). */
+export function deleteWordBackward(state: LineState): LineState {
+  const start = moveWordBackward(state).cursor;
+  if (start === state.cursor) return state;
+  const text = state.text.slice(0, start) + state.text.slice(state.cursor);
+  return { text, cursor: graphemeBoundaryAtOrAfter(text, start) };
+}
+
 /** Deletes the whitespace-delimited word before the caret (Ctrl+W). */
 export function deleteWord(state: LineState): LineState {
   if (state.cursor === 0) return state;
@@ -213,6 +221,8 @@ export function applyLineEditorKey(
       return moveWordBackward(state);
     case "alt-f":
       return moveWordForward(state);
+    case "alt-backspace":
+      return deleteWordBackward(state);
     case "home":
     case "ctrl-a":
       return moveHome(state);
