@@ -123,6 +123,7 @@ export function createVercelImageSandboxProvider(
     context: import("#shared/sandbox-provider.js").SandboxProviderSessionContext,
     options: Readonly<ExperimentalVercelImageRuntimeOptions> | undefined,
     artifactValue: SandboxPreparedArtifact,
+    nativeTags: Readonly<Record<string, string>>,
     sandboxName: string,
   ) {
     const artifact = requirePreparedArtifact(artifactValue);
@@ -160,10 +161,7 @@ export function createVercelImageSandboxProvider(
               mounts,
               name: sandboxName,
               persistent: true,
-              tags: resolveVercelSandboxTags(
-                createOptions.tags,
-                resolveNativeSession(context).tags,
-              ),
+              tags: resolveVercelSandboxTags(createOptions.tags, nativeTags),
             }),
           wait: waitForImage,
         });
@@ -206,7 +204,7 @@ export function createVercelImageSandboxProvider(
       await ensureBaseRuntime(sandbox);
       await ensureVercelSandboxTags(
         sandbox,
-        resolveVercelSandboxTags(createOptions.tags, resolveNativeSession(context).tags),
+        resolveVercelSandboxTags(createOptions.tags, nativeTags),
       );
     }
     return {
@@ -258,27 +256,20 @@ export function createVercelImageSandboxProvider(
     },
     async resume(context, options, artifact, stateValue) {
       const state = requireSessionState(stateValue);
-      const expectedName = sessionName(
-        identityPrefix,
-        resolveNativeSession(context).identity,
-        options,
-        artifact,
-      );
+      const nativeSession = resolveNativeSession(context);
+      const expectedName = sessionName(identityPrefix, nativeSession.identity, options, artifact);
       if (state.sandboxName !== expectedName) {
         throw new Error(
           "Vercel image sandbox session state is incompatible with this environment.",
         );
       }
-      return (await openSession(context, options, artifact, state.sandboxName)).handle;
+      return (await openSession(context, options, artifact, nativeSession.tags, state.sandboxName))
+        .handle;
     },
     async start(context, options, artifact) {
-      const sandboxName = sessionName(
-        identityPrefix,
-        resolveNativeSession(context).identity,
-        options,
-        artifact,
-      );
-      const result = await openSession(context, options, artifact, sandboxName);
+      const nativeSession = resolveNativeSession(context);
+      const sandboxName = sessionName(identityPrefix, nativeSession.identity, options, artifact);
+      const result = await openSession(context, options, artifact, nativeSession.tags, sandboxName);
       return { handle: result.handle, state: { sandboxName, version: 1 } };
     },
   };
