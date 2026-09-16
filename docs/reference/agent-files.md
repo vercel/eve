@@ -3,7 +3,7 @@ title: "Agent Files"
 description: "Look up agent directory slots, path-derived names, subagent files, and filesystem discovery rules."
 ---
 
-eve builds an agent from files under its agent directory. Each supported path determines how eve loads the file. For recommended project layouts and when to split agents, read [Project Structure](/docs/getting-started/project-structure).
+eve builds an agent from files under its agent directory. Each supported path determines how eve loads the file. For recommended project layouts and when to split agents, read [Project Structure](/docs/concepts/project-structure).
 
 ## Agent directory layout
 
@@ -95,10 +95,10 @@ my-agent/
 └── skills/
 ```
 
-Workspace members can also use flat agent files directly under `agents/<name>/`. Prefer the nested layouts in [Project Structure](/docs/getting-started/project-structure) to keep application files separate from agent definitions.
+Workspace members can also use flat agent files directly under `agents/<name>/`. Prefer the nested layouts in [Project Structure](/docs/concepts/project-structure) to keep application files separate from agent definitions.
 
 ## Debug file discovery
 
 Run `eve info` from the agent's app directory, or `eve info --agent <name>` from an eve workspace root. It lists the discovered files and diagnostics. eve also writes inspectable artifacts under `.eve/`; see the [CLI reference](/docs/reference/cli#eve-info).
 
-Workspace discovery includes only direct `agents/<name>/` children with agent files and no `package.json` of their own. A root `agent/` directory takes precedence over `agents/` and makes the project single-agent. See [Add a second root agent](/docs/getting-started/project-structure#add-a-second-root-agent) to convert that layout.
+Workspace discovery includes only direct `agents/<name>/` children with agent files and no `package.json` of their own. A root `agent/` directory takes precedence over `agents/` and makes the project single-agent. See [Add a second root agent](/docs/concepts/project-structure#add-a-second-root-agent) to convert that layout.

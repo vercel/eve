@@ -63,7 +63,7 @@ A proxy restricted to `/eve/` lets a session start, but the run stalls when its 
 
 ## Run workspace members
 
-An [agent workspace](../../getting-started/project-structure#several-root-agents) does not require Vercel or a frontend at runtime. Build each member from its own directory: root `eve build` produces a Vercel workspace deployment, not a group of self-hosted Node servers.
+An [agent workspace](../../concepts/project-structure#several-root-agents) does not require Vercel or a frontend at runtime. Build each member from its own directory: root `eve build` produces a Vercel workspace deployment, not a group of self-hosted Node servers.
 
 For a workspace containing `support` and `research`, run these from the workspace root, outside a Vercel build environment:
 

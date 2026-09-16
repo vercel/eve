@@ -13,7 +13,7 @@ Documentation links below point directly to Markdown. Remove the \`.md\` suffix 
 ## Introduction
 
 - [Getting Started](${EVE_ORIGIN}/docs/getting-started.md): Create a project, configure model credentials, and run your first agent.
-- [Project Structure](${EVE_ORIGIN}/docs/getting-started/project-structure.md): Choose a layout for agents and application code, add specialist subagents, and grow into an agent workspace.
+- [Project Structure](${EVE_ORIGIN}/docs/concepts/project-structure.md): Choose a layout for agents and application code, add specialist subagents, and grow into an agent workspace.
 
 ## Core Concepts
 

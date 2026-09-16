@@ -109,11 +109,11 @@ describe("docsRedirects", () => {
     ["/docs/introduction.md", "/docs/getting-started.md"],
     ["/docs/installation", "/docs/getting-started"],
     ["/docs/installation.md", "/docs/getting-started.md"],
-    ["/docs/project-structure", "/docs/getting-started/project-structure"],
-    ["/docs/project-structure.md", "/docs/getting-started/project-structure.md"],
-    ["/docs/getting-started/multiple-root-agents", "/docs/getting-started/project-structure"],
-    ["/docs/multi-agent-projects", "/docs/getting-started/project-structure"],
-    ["/docs/multi-agent-projects.mdx", "/docs/getting-started/project-structure.mdx"],
+    ["/docs/project-structure", "/docs/concepts/project-structure"],
+    ["/docs/project-structure.md", "/docs/concepts/project-structure.md"],
+    ["/docs/getting-started/multiple-root-agents", "/docs/concepts/project-structure"],
+    ["/docs/multi-agent-projects", "/docs/concepts/project-structure"],
+    ["/docs/multi-agent-projects.mdx", "/docs/concepts/project-structure.mdx"],
     ["/docs/reference/http-api", "/docs/channels/eve"],
     ["/docs/project-layout", "/docs/getting-started"],
     ["/docs/reference/project-layout", "/docs/getting-started"],
@@ -136,11 +136,23 @@ describe("docsRedirects", () => {
   });
 });
 
+describe("project structure redirects", () => {
+  it.each(["", ".md", ".mdx"])("preserves the %s representation at both old paths", (extension) => {
+    for (const prefix of ["/docs", "/en/docs"]) {
+      expect(docsRedirects).toContainEqual({
+        source: `${prefix}/getting-started/project-structure${extension}`,
+        destination: `/docs/concepts/project-structure${extension}`,
+        permanent: true,
+      });
+    }
+  });
+});
+
 describe("rootMarkdownRedirects", () => {
   it.each([
     ["/getting-started.mdx", "/docs/getting-started.mdx"],
     ["/installation.md", "/docs/getting-started.md"],
-    ["/project-structure.mdx", "/docs/getting-started/project-structure.mdx"],
+    ["/project-structure.mdx", "/docs/concepts/project-structure.mdx"],
     ["/tools/overview.md", "/docs/tools.md"],
     ["/channels/eve.mdx", "/docs/channels/eve.mdx"],
   ])("redirects observed root Markdown alias %s to %s", (source, destination) => {

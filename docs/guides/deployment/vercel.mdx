@@ -51,7 +51,7 @@ See [Sandbox](../../sandbox) for resource limits, network policy, and lifecycle 
 
 ## Deploy the agent
 
-For a single-agent project without a frontend, use `eve build`. For an agent-only workspace, run it from the workspace root: eve generates a separately built service and a `/<name>/eve/v1/*` transport route for each member. All members deploy together in one Vercel project. See [Project Structure](../../getting-started/project-structure) for workspace membership and layout rules.
+For a single-agent project without a frontend, use `eve build`. For an agent-only workspace, run it from the workspace root: eve generates a separately built service and a `/<name>/eve/v1/*` transport route for each member. All members deploy together in one Vercel project. See [Project Structure](../../concepts/project-structure) for workspace membership and layout rules.
 
 A Next.js-centered project uses [`withEve` in `next.config.ts`](../frontend/nextjs) and its Next.js build command. If you author the project's broader service graph in `vercel.ts`, use the configuration below instead.
 
