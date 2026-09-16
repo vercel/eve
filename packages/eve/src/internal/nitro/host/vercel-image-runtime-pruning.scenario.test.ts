@@ -19,7 +19,7 @@ describe("experimental Vercel image runtime bundling", () => {
     },
     {
       constructor: "ExperimentalVercelReusedDockerfile",
-      environment: 'ExperimentalVercelReusedDockerfile.environment({ key: "trusted-team" })',
+      environment: "ExperimentalVercelReusedDockerfile.environment()",
       name: "vercel-reused-runtime-pruning",
     },
   ])("keeps OCI publication code out of $constructor hosted runtime output", async (fixture) => {

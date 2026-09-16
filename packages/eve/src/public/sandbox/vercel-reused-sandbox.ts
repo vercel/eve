@@ -5,6 +5,4 @@ import type {
 
 export type ExperimentalVercelReusedImageEnvironmentOptions =
   ExperimentalVercelImageEnvironmentOptions &
-    ExperimentalVercelImageRuntimeOptions & {
-      readonly key: string;
-    };
+    Omit<ExperimentalVercelImageRuntimeOptions, "onSession">;

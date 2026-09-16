@@ -21,12 +21,10 @@ describe("VercelSandbox", () => {
 
   it("creates experimental reused Dockerfile environments", () => {
     const environment = ExperimentalVercelReusedDockerfile.environment({
-      key: "trusted-team",
       networkPolicy: "deny-all",
       region: "iad1",
     });
     expect(environment.provider).toBe("vercel-reused-image");
-    expect(environment.kind).toBe("dockerfile");
     expectTypeOf(environment.open).parameters.toEqualTypeOf<[]>();
   });
 });

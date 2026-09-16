@@ -102,7 +102,6 @@ import { defineSandbox } from "eve/sandbox";
 import { ExperimentalVercelReusedDockerfile } from "eve/sandbox/vercel";
 
 export const environment = ExperimentalVercelReusedDockerfile.environment({
-  key: "trusted-team-workspace",
   networkPolicy: "deny-all",
   region: "iad1",
   resources: { vcpus: 4 },
@@ -111,9 +110,9 @@ export const environment = ExperimentalVercelReusedDockerfile.environment({
 export default defineSandbox(() => environment.open());
 ```
 
-The `key` is an application-defined reuse identity. eve combines it with the prepared image and managed-resource generation, so changing the Dockerfile or managed resources opens different native compute. Environment options are fixed for every attached session; `open()` accepts no options.
+The provider derives reuse identity from the prepared image, managed resources, immutable environment options, and its contract version. Sessions using the same environment generation converge on the same native compute; changing those inputs rotates it. `open()` accepts no options.
 
-Each eve session receives its own logical sandbox identity, but commands and files operate on the reused native Sandbox. Session `stop()` and `delete()` calls do not stop or delete the native Sandbox. Calling `setNetworkPolicy()` changes the shared native network boundary for every attached session.
+Each eve session receives its own logical view, but commands and files operate on the reused native Sandbox. Session `stop()` and `delete()` calls detach logically and do not stop or delete native compute. The session omits `setNetworkPolicy()` because policy is shared and fixed in environment configuration.
 
 ## Network policy
 

@@ -97,7 +97,7 @@ void DockerSandbox.image("ghcr.io/acme/agent:latest");
 void JustBashSandbox.environment();
 void MicrosandboxSandbox.dockerfile();
 void MicrosandboxSandbox.image("ghcr.io/acme/agent:latest");
-void ExperimentalVercelReusedDockerfile.environment({ key: "trusted-team" }).open();
+void ExperimentalVercelReusedDockerfile.environment().open();
 
 export default defineSandbox(() => environment.open());
 `,
