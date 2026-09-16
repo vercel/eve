@@ -281,6 +281,7 @@ describe("startRemoteAgentSession", () => {
     const childSessionId = await startRemoteAgentSession({
       action: createAction(),
       callbackBaseUrl: "https://caller.example.com",
+      capabilities: { requestInput: true },
       remote: {
         ...createRemoteAgent(),
         headers: { Traceparent: "00-authored", "x-static": "yes" },
@@ -344,7 +345,7 @@ describe("startRemoteAgentSession", () => {
         "Caller message:",
         "find the marker",
       ].join("\n"),
-      capabilities: {},
+      capabilities: { requestInput: true },
       mode: "conversation",
     });
     expect(

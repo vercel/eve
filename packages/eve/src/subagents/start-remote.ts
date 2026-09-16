@@ -19,6 +19,7 @@ export async function startRemoteSubagent(input: {
   readonly auth: Parameters<typeof startRemoteAgentSession>[0]["auth"];
   readonly bundle: CompiledBundle;
   readonly callbackBaseUrl: string | undefined;
+  readonly capabilities: Parameters<typeof startRemoteAgentSession>[0]["capabilities"];
   readonly currentSession: RuntimeSession;
   readonly dynamicRemoteAgent?: NonNullable<
     Parameters<typeof resolveRemoteAgentForAction>[0]["dynamicRemoteAgent"]
@@ -89,6 +90,7 @@ export async function startRemoteSubagent(input: {
       action,
       auth: input.auth,
       callbackBaseUrl,
+      capabilities: input.capabilities,
       originAudience: input.parent.originAudience,
       initiatorAuth: input.initiatorAuth,
       operationId: operation.id,
