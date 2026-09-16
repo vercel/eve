@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -15,7 +15,7 @@ import { theme } from "./lib/theme.ts";
  * dependency still resolves and the bug ships. This test packs the built
  * package (`pnpm pack`), installs the tarball into an empty project with npm
  * (which installs only declared dependencies, exactly like a user install),
- * and drives the installed TUI through the prefilled onboarding provider setup.
+ * and drives the installed TUI through first-run connection setup with a minimal agent.
  *
  * Regression: eve 0.6.x–0.7.0 imported `oxc-parser` from the `/model` flow
  * while declaring it only as a devDependency. In a scaffolded project the
@@ -98,6 +98,18 @@ void (async () => {
     );
     console.log(theme.muted("[tui-packed-install] consumer npm install completed"));
 
+    // Login reads the authored model before deciding which connection to reuse.
+    // Match the scaffold's layout while keeping eve's install free of devDependencies.
+    const agentRoot = join(consumerRoot, "agent");
+    await mkdir(agentRoot);
+    await Promise.all([
+      writeFile(
+        join(agentRoot, "agent.ts"),
+        'import { defineAgent } from "eve";\n\nexport default defineAgent({\n  model: "openai/gpt-5.6-luna-fast",\n});\n',
+      ),
+      writeFile(join(agentRoot, "instructions.md"), "Help Alice with her questions.\n"),
+    ]);
+
     // Imported by file URL: the harness is not on the package's `exports`
     // map, and the point is to load the *installed* module graph — every
     // bare specifier in it resolves against the consumer's node_modules.
@@ -110,7 +122,7 @@ void (async () => {
     const screen = new MockScreen({ columns: 100, rows: 40 });
     const input = new MockUserInput();
     const runner = new EveTUIRunner({
-      // `/model` runs before the first chat turn, so no client session exists yet.
+      // `/login` runs before the first chat turn, so no client session exists yet.
       screen,
       userInput: input,
       name: "Packed install model command",
@@ -144,12 +156,12 @@ void (async () => {
       // the first prompt only when its module graph loads — the exact surface
       // the oxc-parser regression crashed.
 
-      await screen.waitForText("Connect a model", 15_000);
+      await screen.waitForText("Choose a connection", 15_000);
+      await screen.waitForText("Anthropic API Key", 5_000);
       console.log(theme.muted("[tui-packed-install] /login opened connection setup"));
 
       input.send("\x1b");
-      // Initial onboarding suppresses the standalone command transcript; cancelling
-      // the required model phase returns directly to chat.
+      // Cancelling first-run connection setup returns directly to chat.
       await screen.waitForIdlePrompt(5_000);
 
       input.type("/exit");
@@ -159,11 +171,7 @@ void (async () => {
     } catch (error) {
       console.error(`[tui-packed-install] screen at failure:\n${screen.snapshot()}`);
       input.ctrlC();
-      // ctrl-C is a no-op while the `/model` menu is parked waiting for a
-      // selection, so an unbounded `await runPromise` hangs here — the `throw`
-      // never runs, the outer catch never sets `process.exitCode`, and the idle
-      // event loop drains to a false exit-0. Bound the unwind so the failure
-      // always lands.
+      // Bound cleanup so a stalled runner cannot prevent the failure from being reported.
       await withTimeout(runPromise, 2_000, "runner did not unwind after ctrl-C").catch(() => {});
       throw error;
     }
