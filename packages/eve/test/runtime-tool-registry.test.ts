@@ -158,8 +158,9 @@ describe("createRuntimeToolRegistry", () => {
     expect(prepared?.behavior?.handling).toEqual({
       kind: "dispatch",
       target: {
-        kind: "workflow-tool-call",
-        workflowId: subagentToolExecuteWorkflowReference.workflowId,
+        kind: "self-agent-call",
+        nodeId: "__root__",
+        subagentName: "agent",
       },
     });
   });

@@ -83,8 +83,7 @@ async function createPreparedRuntimeTool(
   definition: ResolvedToolDefinition,
   nodeId: string | undefined,
 ): Promise<PreparedRuntimeAuthoredTool> {
-  const isFrameworkAgent =
-    definition.owner.kind === "framework" && definition.name === AGENT_TOOL_NAME;
+  const isFrameworkAgent = definition.name === AGENT_TOOL_NAME;
   const workflowId = isFrameworkAgent
     ? subagentToolExecuteWorkflowReference.workflowId
     : definition.behavior?.handling?.kind === "workflow-tool"
