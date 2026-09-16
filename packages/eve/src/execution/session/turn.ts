@@ -119,6 +119,7 @@ export class SessionExecution {
       if (result.action === "complete") {
         const steering = await turn.takeSteering();
         if (turn.signal.aborted) return await this.finishCancelledTurn();
+        if (steering === undefined) turn.beginCompletionCommit();
         // Keep the candidate if the channel ignores the selected delivery.
         nextStepInput = { completion: result.completion, delivery: steering };
         continue;
@@ -278,6 +279,7 @@ class ActiveTurn {
   private readonly routedToChildren = new Set<number>();
   private readonly runtimeResults: RuntimeEvent[] = [];
   private readonly controller = new AbortController();
+  private committingCompletion = false;
   private readonly expectedTurnId: string;
   private readonly input: SessionExecutionInput;
   private readonly callerCallId: string | undefined;
@@ -288,7 +290,7 @@ class ActiveTurn {
     this.callerCallId = callerCallId;
     this.expectedTurnId = activeTurnId(input.cursor.sessionState.emissionState);
     this.unsubscribe = input.inbox.onInterrupt((payload) => {
-      if (this.cancelsThisTurn(payload)) this.abort();
+      if (!this.committingCompletion && this.cancelsThisTurn(payload)) this.abort();
     });
   }
 
@@ -298,6 +300,11 @@ class ActiveTurn {
 
   dispose(): void {
     this.unsubscribe();
+  }
+
+  /** The answer is final; commands accepted during its commit belong after this turn. */
+  beginCompletionCommit(): void {
+    this.committingCompletion = true;
   }
 
   /** Admits everything the pump accepted while the last step ran. */
@@ -362,7 +369,7 @@ class ActiveTurn {
       case "cancel":
         if (!this.cancelsThisTurn(value)) return;
         await applySessionCancellation(admitted.command, this.input);
-        this.abort();
+        if (!this.committingCompletion) this.abort();
         return;
       case "consumed":
         return;

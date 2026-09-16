@@ -301,6 +301,63 @@ describe("SessionExecution background task checkpoints", () => {
     },
   );
 
+  it("queues a reset accepted while the saved answer is committing", async () => {
+    vi.mocked(cancelDescendantTurnsStep).mockClear();
+    const pending: SessionInboxPayload[] = [];
+    const queue = new SessionInputQueue();
+    let interrupt: ((payload: SessionInboxPayload) => void) | undefined;
+    const inbox: SessionInbox = {
+      claimedTokens: [],
+      claimSessionHook: vi.fn(),
+      claimSessionHooks: vi.fn(),
+      drain: vi.fn(() => pending.splice(0)),
+      hasPending: vi.fn(() => pending.length > 0),
+      next: vi.fn(() => new Promise<never>(() => {})),
+      onInterrupt: vi.fn((handler) => {
+        interrupt = handler;
+        return () => {};
+      }),
+      restore: vi.fn(),
+    };
+    const completionStarted = Promise.withResolvers<void>();
+    const finishCompletion = Promise.withResolvers<void>();
+    const completion = { output: "Alice's report is ready." };
+    vi.mocked(turnStep)
+      .mockReset()
+      .mockImplementationOnce(async (input) => ({
+        action: "complete",
+        completion,
+        serializedContext: input.serializedContext,
+        sessionState: input.sessionState,
+      }))
+      .mockImplementationOnce(async (input) => {
+        completionStarted.resolve();
+        await finishCompletion.promise;
+        expect(input.abortSignal?.aborted).toBe(false);
+        return {
+          action: "park",
+          hasPendingAuthorization: false,
+          hasPendingInputBatch: false,
+          serializedContext: input.serializedContext,
+          sessionState: input.sessionState,
+          settled: completion,
+        };
+      });
+    const execution = createExecution({ inbox, queue, sessionState: state("") });
+    const outcome = execution.runTurn({
+      delivery: { kind: "deliver", payloads: [{ message: "Read Alice's report." }] },
+    });
+    await completionStarted.promise;
+    const reset = { kind: "reset" as const };
+    pending.push(reset);
+    interrupt?.(reset);
+    finishCompletion.resolve();
+
+    await expect(outcome).resolves.toMatchObject({ kind: "park", settled: completion });
+    expect(queue.takeNext(new Map())).toEqual({ control: "reset", kind: "control" });
+    expect(cancelDescendantTurnsStep).not.toHaveBeenCalled();
+  });
+
   it("treats input that arrives after a settled turn as the next turn", async () => {
     const followUp: DeliverHookPayload = {
       kind: "deliver",
