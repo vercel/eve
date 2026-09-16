@@ -32,6 +32,16 @@ describe("defineWorkspaceAgent", () => {
     });
   });
 
+  it("uses the local workspace router without deployment credentials", async () => {
+    vi.stubEnv("EVE_INTERNAL_WORKSPACE_ORIGIN", "http://localhost:3000");
+    vi.stubEnv("VERCEL", undefined);
+    const subagent = defineWorkspaceAgent({ name: "research" });
+
+    expect((subagent.url as () => string)()).toBe("http://localhost:3000/research");
+    await expect(subagent.auth?.()).resolves.toEqual({ headers: {} });
+    expect(getVercelOidcToken).not.toHaveBeenCalled();
+  });
+
   it("uses the local Vercel router without deployment credentials in development", async () => {
     vi.stubEnv("VERCEL", "1");
     vi.stubEnv("VERCEL_ENV", "development");

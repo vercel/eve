@@ -9,6 +9,7 @@ import { runInteractiveDevelopmentUi } from "#cli/dev/run-interactive-ui.js";
 import type { DevUiMode } from "#cli/dev/ui-options.js";
 import { ensureWorkspaceVercelCli } from "#cli/dev/workspace-vercel-cli.js";
 import { FORCED_EXIT_BACKSTOP_MS, installShutdownSignal } from "#cli/shutdown.js";
+import { EVE_INTERNAL_WORKSPACE_ORIGIN_ENV } from "#internal/application/workspace-environment.js";
 import type { AgentWorkspace } from "#internal/project-context.js";
 import { assembleEveVercelServices } from "#internal/vercel/assemble-eve-services.js";
 import { quoteVercelShellArgument, toVercelRelativePath } from "#internal/vercel/build-command.js";
@@ -24,7 +25,10 @@ async function hasAuthoredVercelConfig(root: string): Promise<boolean> {
   }
 }
 
-async function writeGeneratedWorkspaceConfig(workspace: AgentWorkspace): Promise<string> {
+async function writeGeneratedWorkspaceConfig(
+  workspace: AgentWorkspace,
+  workspaceOrigin: string,
+): Promise<string> {
   const projectRoot = workspace.root;
   const assembled = assembleEveVercelServices({
     agents: workspace.members.map((member) => {
@@ -35,7 +39,7 @@ async function writeGeneratedWorkspaceConfig(workspace: AgentWorkspace): Promise
         agent: {
           appRoot: member.appRoot,
           buildCommand: `node ${binary} build`,
-          devCommand: `node ${binary} dev --no-ui`,
+          devCommand: `export ${EVE_INTERNAL_WORKSPACE_ORIGIN_ENV}=${quoteVercelShellArgument(workspaceOrigin)} && node ${binary} dev --no-ui`,
           name: member.name,
           publicRoutePrefix: `/${member.name}`,
           workspaceMember: true,
@@ -136,16 +140,19 @@ export async function runWorkspaceDevelopment(input: {
       ? await selectWorkspaceAgent(input.workspace, input.options.agent)
       : undefined;
   const selected = input.workspace.members.find((member) => member.appRoot === selectedRoot);
-  const generatedConfig = (await hasAuthoredVercelConfig(input.workspace.root))
-    ? undefined
-    : await writeGeneratedWorkspaceConfig(input.workspace);
   const host = input.options.host ?? "localhost";
   const port = input.options.port ?? 3000;
+  const requestHost = host === "0.0.0.0" || host === "::" ? "localhost" : host;
+  const workspaceOrigin = `http://${requestHost}:${port}`;
+  const generatedConfig = (await hasAuthoredVercelConfig(input.workspace.root))
+    ? undefined
+    : await writeGeneratedWorkspaceConfig(input.workspace, workspaceOrigin);
   const args = ["dev", "--local", "--listen", `${host}:${port}`];
   if (generatedConfig !== undefined) args.push("--local-config", generatedConfig);
   const invocation = resolveVercelInvocation(input.workspace.root, args);
   const child = spawn(invocation.command, invocation.commandArgs, {
     cwd: input.workspace.root,
+    env: { ...process.env, [EVE_INTERNAL_WORKSPACE_ORIGIN_ENV]: workspaceOrigin },
     shell: invocation.shell,
     stdio: "inherit",
   });
@@ -159,8 +166,7 @@ export async function runWorkspaceDevelopment(input: {
       return;
     }
 
-    const requestHost = host === "0.0.0.0" || host === "::" ? "localhost" : host;
-    const serverUrl = `http://${requestHost}:${port}/${selected.name}/`;
+    const serverUrl = `${workspaceOrigin}/${selected.name}/`;
     await waitForWorkspaceAgent({ child, serverUrl, signal: lifecycle.signal });
     if (!lifecycle.signal.aborted) {
       await runInteractiveDevelopmentUi({
