@@ -8,7 +8,6 @@ import {
   type RemoteAgentUrl,
 } from "#public/definitions/remote-agent.js";
 import type { JsonObject } from "#shared/json.js";
-import { normalizePublicRoutePrefix } from "#shared/public-route-prefix.js";
 
 const WORKSPACE_AGENT_NAME = Symbol.for("eve.workspace-agent.name");
 

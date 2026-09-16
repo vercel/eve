@@ -43,32 +43,38 @@ describe("withEve", () => {
       { destination: { service: "web", type: "service" }, src: "^/api/(.*)$" },
       {
         destination: { service: "eve-research", type: "service" },
-        src: "^/research/eve/v1/(.*)$",
+        src: "^/eve/agents/research/eve/v1/(.*)$",
       },
-      { destination: { service: "eve-research", type: "service" }, src: "^/research/?$" },
+      {
+        destination: { service: "eve-research", type: "service" },
+        src: "^/eve/agents/research/?$",
+      },
       {
         destination: { service: "eve-support", type: "service" },
-        src: "^/support/eve/v1/(.*)$",
+        src: "^/eve/agents/support/eve/v1/(.*)$",
       },
-      { destination: { service: "eve-support", type: "service" }, src: "^/support/?$" },
+      {
+        destination: { service: "eve-support", type: "service" },
+        src: "^/eve/agents/support/?$",
+      },
       { handle: "filesystem" },
     ]);
     expect(config.services.web).toEqual({ framework: "nextjs", root: "apps/web" });
     expect(config.services["eve-support"]).toEqual({
       buildCommand:
-        "cd '../../../agents/support' && export EVE_INTERNAL_BUILD_OUTPUT_DIRECTORY='../../.eve/vercel-services/eve-support/.vercel/output' && export EVE_INTERNAL_HOST_BUILD_OUTPUT_DIRECTORY='../../.vercel/output' && export EVE_PUBLIC_ROUTE_PREFIX='/support' && export EVE_INTERNAL_AGENT_WORKSPACE_MEMBER=1 && node 'node_modules/eve/bin/eve.js' build",
+        "cd '../../../agents/support' && export EVE_INTERNAL_BUILD_OUTPUT_DIRECTORY='../../.eve/vercel-services/eve-support/.vercel/output' && export EVE_INTERNAL_HOST_BUILD_OUTPUT_DIRECTORY='../../.vercel/output' && export EVE_PUBLIC_ROUTE_PREFIX='/eve/agents/support' && export EVE_INTERNAL_AGENT_WORKSPACE_MEMBER=1 && node 'node_modules/eve/bin/eve.js' build",
       devCommand:
-        "cd '../../../agents/support' && export EVE_PUBLIC_ROUTE_PREFIX='/support' && export EVE_INTERNAL_AGENT_WORKSPACE_MEMBER=1 && node 'node_modules/eve/bin/eve.js' dev --no-ui",
+        "cd '../../../agents/support' && export EVE_PUBLIC_ROUTE_PREFIX='/eve/agents/support' && export EVE_INTERNAL_AGENT_WORKSPACE_MEMBER=1 && node 'node_modules/eve/bin/eve.js' dev --no-ui",
       framework: "eve",
       outputDirectory: ".vercel/output",
       root: ".eve/vercel-services/eve-support",
       routes: [
         {
-          src: "^/support/?$",
+          src: "^/eve/agents/support/?$",
           transforms: [{ args: "/", op: "set", type: "request.path" }],
         },
         {
-          src: "^/support/eve/v1/(.*)$",
+          src: "^/eve/agents/support/eve/v1/(.*)$",
           transforms: [{ args: "/eve/v1/$1", op: "set", type: "request.path" }],
         },
       ],
@@ -109,7 +115,17 @@ describe("withEve", () => {
     await expect(
       withEve({ services: { "eve-support": { framework: "nextjs" } } }, { root }),
     ).rejects.toThrow(
-      'Vercel service key "eve-support" conflicts with the service generated for eve workspace agent "support". Remove or rename the authored service; withEve owns this key.',
+      'Vercel service key "eve-support" conflicts with the service generated for eve agent "support". Remove or rename the authored service; withEve owns this key.',
+    );
+  });
+
+  it("rejects authored eve services when composing a standalone agent", async () => {
+    const root = await mkdtemp(join(tmpdir(), "eve-vercel-config-standalone-conflict-"));
+    await writeFile(join(root, "package.json"), JSON.stringify({ dependencies: { eve: "*" } }));
+    await mkdir(join(root, "agent"), { recursive: true });
+
+    await expect(withEve({ services: { legacy: { framework: "eve" } } }, { root })).rejects.toThrow(
+      'Vercel service key "eve" conflicts with the service generated for eve agent "the default agent". Remove or rename the authored service; withEve owns this key.',
     );
   });
 
@@ -117,9 +133,19 @@ describe("withEve", () => {
     const root = await createWorkspace();
 
     await expect(
-      withEve({ routes: [{ src: "^/support/eve/v1/(.*)$" }] }, { root }),
+      withEve({ routes: [{ src: "^/eve/agents/support/eve/v1/(.*)$" }] }, { root }),
     ).rejects.toThrow(
-      'Vercel route "^/support/eve/v1/(.*)$" conflicts with the transport route generated for eve workspace agent "support". Remove the authored route; withEve adds it automatically.',
+      'Vercel route "^/eve/agents/support/eve/v1/(.*)$" conflicts with the route generated for eve agent "support". Remove the authored route; withEve adds it automatically.',
+    );
+  });
+
+  it("rejects authored routes owned by generated agent home pages", async () => {
+    const root = await createWorkspace();
+
+    await expect(
+      withEve({ routes: [{ src: "^/eve/agents/support/?$" }] }, { root }),
+    ).rejects.toThrow(
+      'Vercel route "^/eve/agents/support/?$" conflicts with the route generated for eve agent "support". Remove the authored route; withEve adds it automatically.',
     );
   });
 
@@ -157,11 +183,27 @@ describe("withEve", () => {
     );
   });
 
-  it("requires an eve workspace root", async () => {
+  it("composes a standalone agent at the unprefixed protocol route", async () => {
     const root = await mkdtemp(join(tmpdir(), "eve-vercel-config-standalone-"));
     await writeFile(join(root, "package.json"), JSON.stringify({ dependencies: { eve: "*" } }));
     await mkdir(join(root, "agent"), { recursive: true });
 
-    await expect(withEve({}, { root })).rejects.toThrow(/workspace root/);
+    const config = await withEve({}, { root });
+
+    expect(config.routes).toEqual([
+      { destination: { service: "eve", type: "service" }, src: "^/eve/v1/(.*)$" },
+    ]);
+    expect(config.services.eve).toEqual({
+      buildCommand:
+        "cd '../../..' && export EVE_INTERNAL_BUILD_OUTPUT_DIRECTORY='.eve/vercel-services/eve/.vercel/output' && export EVE_INTERNAL_HOST_BUILD_OUTPUT_DIRECTORY='.vercel/output' && node 'node_modules/eve/bin/eve.js' build",
+      framework: "eve",
+      root: ".eve/vercel-services/eve",
+      routes: [
+        {
+          src: "^/eve/v1/(.*)$",
+          transforms: [{ args: "/eve/v1/$1", op: "set", type: "request.path" }],
+        },
+      ],
+    });
   });
 });

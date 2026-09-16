@@ -48,11 +48,11 @@ describe("hostless agent workspace", () => {
       expect.arrayContaining([
         expect.objectContaining({
           destination: { service: "eve-support", type: "service" },
-          src: "^/support/eve/v1/(.*)$",
+          src: "^/eve/agents/support/eve/v1/(.*)$",
         }),
         expect.objectContaining({
           destination: { service: "eve-research", type: "service" },
-          src: "^/research/eve/v1/(.*)$",
+          src: "^/eve/agents/research/eve/v1/(.*)$",
         }),
       ]),
     );

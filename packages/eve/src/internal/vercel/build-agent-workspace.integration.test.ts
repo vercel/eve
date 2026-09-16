@@ -50,12 +50,12 @@ describe("buildAgentWorkspace", () => {
       agents: [
         {
           name: "research",
-          routePrefix: "/research",
+          routePrefix: "/eve/agents/research",
           summaryPath: "agents/research/.eve/agent-summary.json",
         },
         {
           name: "support",
-          routePrefix: "/support",
+          routePrefix: "/eve/agents/support",
           summaryPath: "agents/support/.eve/agent-summary.json",
         },
       ],
@@ -66,19 +66,19 @@ describe("buildAgentWorkspace", () => {
     expect(config.routes).toEqual([
       {
         destination: { service: "eve-research", type: "service" },
-        src: "^/research/eve/v1/(.*)$",
+        src: "^/eve/agents/research/eve/v1/(.*)$",
       },
       {
         destination: { service: "eve-research", type: "service" },
-        src: "^/research/?$",
+        src: "^/eve/agents/research/?$",
       },
       {
         destination: { service: "eve-support", type: "service" },
-        src: "^/support/eve/v1/(.*)$",
+        src: "^/eve/agents/support/eve/v1/(.*)$",
       },
       {
         destination: { service: "eve-support", type: "service" },
-        src: "^/support/?$",
+        src: "^/eve/agents/support/?$",
       },
       { handle: "filesystem" },
     ]);
@@ -91,20 +91,20 @@ describe("buildAgentWorkspace", () => {
 
     expect(config.services["eve-support"]).toEqual({
       buildCommand:
-        "cd '../../../agents/support' && export EVE_INTERNAL_BUILD_OUTPUT_DIRECTORY='../../.eve/vercel-services/eve-support/.vercel/output' && export EVE_INTERNAL_HOST_BUILD_OUTPUT_DIRECTORY='../../.vercel/output' && export EVE_PUBLIC_ROUTE_PREFIX='/support' && export EVE_INTERNAL_AGENT_WORKSPACE_MEMBER=1 && node 'node_modules/eve/bin/eve.js' build",
+        "cd '../../../agents/support' && export EVE_INTERNAL_BUILD_OUTPUT_DIRECTORY='../../.eve/vercel-services/eve-support/.vercel/output' && export EVE_INTERNAL_HOST_BUILD_OUTPUT_DIRECTORY='../../.vercel/output' && export EVE_PUBLIC_ROUTE_PREFIX='/eve/agents/support' && export EVE_INTERNAL_AGENT_WORKSPACE_MEMBER=1 && node 'node_modules/eve/bin/eve.js' build",
       devCommand:
-        "cd '../../../agents/support' && export EVE_PUBLIC_ROUTE_PREFIX='/support' && export EVE_INTERNAL_AGENT_WORKSPACE_MEMBER=1 && node 'node_modules/eve/bin/eve.js' dev --no-ui",
+        "cd '../../../agents/support' && export EVE_PUBLIC_ROUTE_PREFIX='/eve/agents/support' && export EVE_INTERNAL_AGENT_WORKSPACE_MEMBER=1 && node 'node_modules/eve/bin/eve.js' dev --no-ui",
       framework: "eve",
       outputDirectory: ".vercel/output",
       root: ".eve/vercel-services/eve-support",
-      routePrefix: "/support",
+      routePrefix: "/eve/agents/support",
       routes: [
         {
-          src: "^/support/?$",
+          src: "^/eve/agents/support/?$",
           transforms: [{ args: "/", op: "set", type: "request.path" }],
         },
         {
-          src: "^/support/eve/v1/(.*)$",
+          src: "^/eve/agents/support/eve/v1/(.*)$",
           transforms: [{ args: "/eve/v1/$1", op: "set", type: "request.path" }],
         },
       ],
@@ -124,7 +124,7 @@ describe("buildAgentWorkspace", () => {
     expect(supportServiceName).toMatch(/^eve-support-[a-z]+$/);
     expect(config.routes).toContainEqual({
       destination: { service: supportServiceName, type: "service" },
-      src: "^/support2/eve/v1/(.*)$",
+      src: "^/eve/agents/support2/eve/v1/(.*)$",
     });
   });
 

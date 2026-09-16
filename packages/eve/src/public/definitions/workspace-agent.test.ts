@@ -14,7 +14,7 @@ afterEach(() => {
 });
 
 describe("defineWorkspaceAgent", () => {
-  it("selects Vercel transport in a Vercel environment", async () => {
+  it("selects the named workspace route in a Vercel environment", async () => {
     vi.stubEnv("VERCEL", "1");
     vi.stubEnv("VERCEL_ENV", "preview");
     vi.stubEnv("VERCEL_URL", "preview.example.com");
@@ -22,7 +22,7 @@ describe("defineWorkspaceAgent", () => {
 
     expect(subagent).toMatchObject({ description: "", kind: "remote", path: "/eve/v1/session" });
     expect(await (subagent.url as () => Promise<string>)()).toBe(
-      "https://preview.example.com/research",
+      "https://preview.example.com/eve/agents/research",
     );
     await expect(subagent.auth?.()).resolves.toEqual({
       headers: {

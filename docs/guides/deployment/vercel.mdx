@@ -82,13 +82,11 @@ export default await withEve({
 });
 ```
 
-Vercel evaluates `vercel.ts` before resolving the service graph. `withEve` discovers direct workspace members, adds their services and transport routes, and returns a plain Vercel configuration. Vercel then builds `web` and each eve agent separately. The frontend does not need a build script that builds the agents.
+Vercel evaluates `vercel.ts` before resolving the service graph. `withEve` adds the root agent, or every direct workspace member, as an independently built service and returns a plain Vercel configuration. Named workspace agents mount at `/eve/<name>/v1/*`; a root agent mounts at `/eve/v1/*`. Vercel then builds the frontend and each eve agent separately. The frontend does not need a build script that builds the agents.
 
 The Web Chat installer does not support agent workspaces. Create the frontend using the [React chat example](../frontend/overview#basic-chat-react), and configure authentication for every exposed agent. To self-host the same source layout, replace Vercel composition with your own [process and proxy configuration](./self-hosting#run-workspace-members).
 
-Workspace agents use `/<name>/eve/v1/*` routes. A same-origin React client calls support with `useEveAgent({ host: "/support" })`; the hook's `agent: "support"` shorthand targets the different `/eve/agents/support` mount used by frontend framework integrations.
-
-Run Vercel CLI 59.16.0 or newer with `vercel dev --local` to start the complete service graph locally. Each hostless agent is available at `http://localhost:3000/<agent>/`, and default `defineWorkspaceAgent` transports can call peers without deployment credentials. Run `eve dev` instead when you only need one agent and the eve terminal UI.
+Run Vercel CLI 59.16.0 or newer with `vercel dev --local` to start the complete service graph locally. Named agents use the same `/eve/<name>/v1/*` routes in development, and default `defineWorkspaceAgent` transports can call peers without deployment credentials. Run `eve dev` instead when you only need one agent and the eve terminal UI.
 
 Generated transport routes are inserted before a filesystem handler or, when no filesystem handler exists, before authored routes. `withEve` throws instead of overwriting an authored service key or exact transport route that belongs to a generated agent. Remove the authored route, and remove or rename the authored service; `withEve` adds both automatically. Names in the array form of `services` must also be unique. Other service names, routes, bindings, and Cron Jobs remain authored in `vercel.ts`.
 
@@ -116,7 +114,7 @@ export default await withEve({
 
 A Vercel project can use only one configuration source, so remove `vercel.json` when adopting `vercel.ts`. Keep `eve` in the root package dependencies so Vercel can import `eve/vercel` while evaluating the configuration. `withEve` discovers the workspace containing its evaluation directory, including Vercel's temporary `.vercel` configuration directory. Pass `{ root: "/absolute/workspace/path" }` as the second argument only when you need to select a specific workspace root.
 
-An authored eve service routed at `/eve/v1` already uses the protocol path; callbacks remain at `/eve/v1/callback/*`. A named mount such as `/support` adds that mount before the protocol path, giving `/support/eve/v1/callback/*`.
+An authored eve service routed at `/eve/v1` already uses the protocol path; callbacks remain at `/eve/v1/callback/*`. A named mount such as `/eve/agents/support` adds that mount before the protocol path, giving `/eve/agents/support/eve/v1/callback/*`.
 
 ### Deploy the project
 
@@ -153,8 +151,8 @@ eve dev https://your_agent.vercel.app
 For a workspace agent, include its public mount: `/support` with `eve/vercel` or an agent-only workspace, or `/eve/agents/support` with `eve/next`. For example:
 
 ```bash
-curl https://your_agent.vercel.app/support/eve/v1/health
-eve dev https://your_agent.vercel.app/support
+curl https://your_agent.vercel.app/eve/agents/support/eve/v1/health
+eve dev https://your_agent.vercel.app/eve/agents/support
 ```
 
 Set `VERCEL_AUTOMATION_BYPASS_SECRET` locally before connecting if the deployment uses Deployment Protection.
