@@ -11,8 +11,7 @@ export default defineEval({
     }
     const live = await t.start("Alice is preparing the 2026 report.");
     await live.waitForEvent("step.started");
-    const session = await t.target.attachSession(live.sessionId);
-    const correction = await session.start("Alice corrected the report year to 2025.", {
+    const correction = await live.session.start("Alice corrected the report year to 2025.", {
       turnPolicy: "steer",
     });
     const result = await live.result();
