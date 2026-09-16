@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import { setTimeout as sleep } from "node:timers/promises";
 
 import { hydrateSandboxFromImmutableResources } from "#execution/sandbox/bindings/immutable-resources.js";
@@ -36,6 +35,8 @@ import type {
   VercelModule,
 } from "#execution/sandbox/bindings/vercel-sdk-types.js";
 import { buildSandboxSession } from "#execution/sandbox/session.js";
+import { materializeSandboxDockerfile } from "#execution/sandbox/dockerfile.js";
+import { createSandboxProviderIdentity } from "#execution/sandbox/provider-identity.js";
 import type {
   ExperimentalVercelImageEnvironmentOptions,
   ExperimentalVercelImageRuntimeOptions,
@@ -44,7 +45,6 @@ import { SandboxTemplateNotProvisionedError } from "#shared/sandbox-template-err
 import { decodeVercelOidcTokenClaims } from "#shared/vercel-project.js";
 import {
   isSandboxPreparedArtifactRecord,
-  type NoSandboxProviderMetadata,
   type SandboxPreparedArtifact,
   type SandboxProviderImplementation,
 } from "#shared/sandbox-provider.js";
@@ -76,13 +76,18 @@ export interface CreateVercelImageProviderInput {
   readonly waitForImage?: () => Promise<void>;
 }
 
+export type VercelImageSessionState = {
+  readonly sandboxName: string;
+  readonly version: 1;
+};
+
 export function createVercelImageSandboxProvider(
-  environmentOptions: ExperimentalVercelImageEnvironmentOptions,
+  environmentOptions: ExperimentalVercelImageEnvironmentOptions | undefined,
   input: CreateVercelImageProviderInput = {},
 ): SandboxProviderImplementation<
   ExperimentalVercelImageRuntimeOptions,
-  NoSandboxProviderMetadata,
-  VercelImagePreparedArtifact
+  VercelImagePreparedArtifact,
+  VercelImageSessionState
 > {
   const createImagePublisher = input.createImagePublisher ?? createLazyOciImagePublisher;
   const ensureBaseRuntime = input.ensureBaseRuntime ?? ensureVercelSandboxBaseRuntime;
@@ -99,27 +104,129 @@ export function createVercelImageSandboxProvider(
     ...environmentOptions,
   };
 
+  async function openSession(
+    context: import("#shared/sandbox-provider.js").SandboxProviderSessionContext,
+    options: Readonly<ExperimentalVercelImageRuntimeOptions> | undefined,
+    artifactValue: SandboxPreparedArtifact,
+    sandboxName: string,
+  ) {
+    const artifact = requirePreparedArtifact(artifactValue);
+    const module = await loadModule();
+    let sandbox = await getNamedVercelSandbox({
+      createOptions,
+      sandboxModule: module,
+      sandboxName,
+    });
+    let created = false;
+    if (sandbox === null) {
+      created = true;
+      try {
+        const credentials = await getVercelSandboxCredentials(createOptions);
+        const mounts = await resourcePublisher.resolveMounts({
+          createOptions,
+          mounts: artifact.mounts,
+          signal: createOptions.signal,
+        });
+        const {
+          image: _image,
+          runtime: _runtime,
+          source: _source,
+          ...imageCreateOptions
+        } = createOptions;
+        const { onSession: _onSession, ...runtimeOptions } = options ?? {};
+        sandbox = await createImageSandboxWithRetry({
+          create: async () =>
+            await module.Sandbox.create({
+              ...imageCreateOptions,
+              ...runtimeOptions,
+              ...credentials,
+              fetch: getVercelSandboxFetch(createOptions),
+              image: artifact.image,
+              mounts,
+              name: sandboxName,
+              persistent: true,
+              tags: resolveVercelSandboxTags(createOptions.tags, {
+                sessionId: context.session.id,
+              }),
+            }),
+          wait: waitForImage,
+        });
+      } catch (error) {
+        if (
+          error instanceof VercelImageResourceUnavailableError ||
+          isVercelImageUnavailableError(error) ||
+          isVercelResourcePendingError(error)
+        ) {
+          throw new SandboxTemplateNotProvisionedError({
+            providerName: VERCEL_IMAGE_PROVIDER_NAME,
+            templateKey: artifact.image,
+          });
+        }
+        throw error;
+      }
+      const session = buildSandboxSession(
+        createVercelInternalSandboxSession(sandbox),
+        createVercelNetworkPolicySetter(sandbox),
+      );
+      try {
+        await ensureBaseRuntime(sandbox);
+        await hydrateResources(session);
+        await options?.onSession?.({ sandbox: session, session: context.session });
+      } catch (error) {
+        try {
+          await sandbox.delete({ signal: createOptions.signal });
+        } catch (cleanupError) {
+          throw new AggregateError(
+            [error, cleanupError],
+            "Failed to hydrate and discard sandbox.",
+            {
+              cause: error,
+            },
+          );
+        }
+        throw error;
+      }
+    } else {
+      await ensureBaseRuntime(sandbox);
+      await ensureVercelSandboxTags(
+        sandbox,
+        resolveVercelSandboxTags(createOptions.tags, { sessionId: context.session.id }),
+      );
+    }
+    return {
+      created,
+      handle: createVercelSandboxHandle({
+        createOptions,
+        loadDeleteSandboxModule: loadDeleteModule,
+        sandbox,
+      }),
+    };
+  }
+
   return {
     async prepare(context) {
-      if (context.dockerfile === undefined) {
+      const dockerfile = await materializeSandboxDockerfile({
+        files: context.files,
+        storagePath: context.storagePath,
+      });
+      if (dockerfile === undefined) {
         throw new Error("The Vercel image environment requires agent/sandbox/Dockerfile.");
       }
-      if (context.hasPreparation) {
-        throw new Error(
-          "The Vercel image environment does not support prepare. Put immutable setup in agent/sandbox/Dockerfile.",
-        );
-      }
       const credentials = await getVercelSandboxCredentials(createOptions);
-      const imageReference = resolveImageReference(credentials, context.templateName);
+      const imageReference = resolveImageReference(
+        credentials,
+        createSandboxProviderIdentity({
+          dockerfile: dockerfile.contentHash,
+          environment: environmentOptions,
+          resources: context.resources.source,
+          version: 1,
+        }),
+      );
       const image = await createImagePublisher({
         authToken: credentials.token,
         registry: OCI_REGISTRY,
         username: credentials.teamId,
-      }).publish({
-        dockerfile: context.dockerfile,
-        imageReference,
-        signal: createOptions.signal,
-      });
+      }).publish({ dockerfile, imageReference, signal: createOptions.signal });
       const preparedMounts = await Promise.all(
         [context.resources.workspace, context.resources.skills]
           .filter((resource) => resource !== undefined)
@@ -131,102 +238,48 @@ export function createVercelImageSandboxProvider(
             }),
           ),
       );
-      return {
-        artifact: {
-          image,
-          mounts: preparedMounts.map((mount) => mount.artifact),
-          version: 1,
-        },
-        reused: false,
-      };
+      return { image, mounts: preparedMounts.map((mount) => mount.artifact), version: 1 };
     },
-    async open(context, source) {
-      if (source.kind === "base") {
+    async resume(context, options, artifact, stateValue) {
+      const state = requireSessionState(stateValue);
+      const expectedName = sessionName(context.session.id, options, artifact);
+      if (state.sandboxName !== expectedName) {
         throw new Error(
-          `Sandbox session "${context.instance.name}" requires a prepared Vercel image artifact.`,
+          "Vercel image sandbox session state is incompatible with this environment.",
         );
       }
-      const artifact = requirePreparedArtifact(source);
-      const module = await loadModule();
-      const tags = resolveVercelSandboxTags(createOptions.tags, context.tags);
-      let sandbox = await getNamedVercelSandbox({
-        createOptions,
-        sandboxModule: module,
-        sandboxName: context.instance.name,
-      });
-      if (sandbox === null) {
-        try {
-          const credentials = await getVercelSandboxCredentials(createOptions);
-          const mounts = await resourcePublisher.resolveMounts({
-            createOptions,
-            mounts: artifact.mounts,
-            signal: createOptions.signal,
-          });
-          const {
-            image: _image,
-            runtime: _runtime,
-            source: _source,
-            ...imageCreateOptions
-          } = createOptions;
-          sandbox = await createImageSandboxWithRetry({
-            create: async () =>
-              await module.Sandbox.create({
-                ...imageCreateOptions,
-                ...context.options,
-                ...credentials,
-                fetch: getVercelSandboxFetch(createOptions),
-                image: artifact.image,
-                mounts,
-                name: context.instance.name,
-                persistent: true,
-                tags,
-              }),
-            wait: waitForImage,
-          });
-        } catch (error) {
-          if (
-            error instanceof VercelImageResourceUnavailableError ||
-            isVercelImageUnavailableError(error) ||
-            isVercelResourcePendingError(error)
-          ) {
-            throw new SandboxTemplateNotProvisionedError({
-              providerName: VERCEL_IMAGE_PROVIDER_NAME,
-              templateKey: source.templateName,
-            });
-          }
-          throw error;
-        }
-        const session = buildSandboxSession(
-          createVercelInternalSandboxSession(sandbox, context.instance.name),
-          createVercelNetworkPolicySetter(sandbox),
-        );
-        try {
-          await ensureBaseRuntime(sandbox);
-          await hydrateResources(session);
-        } catch (error) {
-          try {
-            await sandbox.delete({ signal: createOptions.signal });
-          } catch (cleanupError) {
-            throw new AggregateError(
-              [error, cleanupError],
-              `Failed to hydrate and discard sandbox session "${context.instance.name}".`,
-              { cause: error },
-            );
-          }
-          throw error;
-        }
-      } else {
-        await ensureBaseRuntime(sandbox);
-        await ensureVercelSandboxTags(sandbox, tags);
-      }
-      return createVercelSandboxHandle({
-        createOptions,
-        loadDeleteSandboxModule: loadDeleteModule,
-        sandbox,
-        sessionKey: context.instance.name,
-      });
+      return (await openSession(context, options, artifact, state.sandboxName)).handle;
+    },
+    async start(context, options, artifact) {
+      const sandboxName = sessionName(context.session.id, options, artifact);
+      const result = await openSession(context, options, artifact, sandboxName);
+      return { handle: result.handle, state: { sandboxName, version: 1 } };
     },
   };
+}
+
+function sessionName(
+  sessionId: string,
+  options: Readonly<ExperimentalVercelImageRuntimeOptions> | undefined,
+  artifact: SandboxPreparedArtifact,
+): string {
+  return `eve-sbx-vercel-image-${createSandboxProviderIdentity({
+    artifact: requirePreparedArtifact(artifact),
+    options: { networkPolicy: options?.networkPolicy, resources: options?.resources },
+    sessionId,
+    version: 1,
+  }).slice(0, 32)}`;
+}
+
+function requireSessionState(state: unknown): VercelImageSessionState {
+  if (
+    !isSandboxPreparedArtifactRecord(state) ||
+    state.version !== 1 ||
+    typeof state.sandboxName !== "string"
+  ) {
+    throw new Error("Invalid Vercel image sandbox session state.");
+  }
+  return { sandboxName: state.sandboxName, version: 1 };
 }
 
 async function createImageSandboxWithRetry<T>(input: {
@@ -258,12 +311,7 @@ function createLazyOciImagePublisher(input: {
   };
 }
 
-function requirePreparedArtifact(source: {
-  readonly artifact: VercelImagePreparedArtifact;
-  readonly kind: "prepared";
-  readonly templateName: string;
-}): VercelImagePreparedArtifact {
-  const artifact: SandboxPreparedArtifact = source.artifact;
+function requirePreparedArtifact(artifact: SandboxPreparedArtifact): VercelImagePreparedArtifact {
   if (
     !isSandboxPreparedArtifactRecord(artifact) ||
     artifact.version !== 1 ||
@@ -273,9 +321,7 @@ function requirePreparedArtifact(source: {
     !artifact.mounts.every(isMountArtifact) ||
     new Set(artifact.mounts.map((mount) => mount.mountPath)).size !== artifact.mounts.length
   ) {
-    throw new Error(
-      `Invalid prepared Vercel image artifact for template "${source.templateName}".`,
-    );
+    throw new Error("Invalid prepared Vercel image artifact.");
   }
   return {
     image: artifact.image,
@@ -305,14 +351,14 @@ function isMountArtifact(value: SandboxPreparedArtifact): value is VercelImageMo
 
 function resolveImageReference(
   credentials: Awaited<ReturnType<typeof getVercelSandboxCredentials>>,
-  templateName: string,
+  artifactIdentity: string,
 ): string {
   const claims = decodeVercelOidcTokenClaims(credentials.token);
   if (claims.ownerId !== credentials.teamId || claims.projectId !== credentials.projectId) {
     throw new Error("The Vercel credentials do not match the active image scope.");
   }
   const scope = readImageScope(credentials.token);
-  const tag = createHash("sha256").update(templateName).digest("hex").slice(0, 24);
+  const tag = createSandboxProviderIdentity(artifactIdentity).slice(0, 24);
   return `${OCI_REGISTRY}/${scope.owner}/${scope.project}/eve-sandbox:${tag}`;
 }
 

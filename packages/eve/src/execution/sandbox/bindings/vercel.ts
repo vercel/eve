@@ -196,7 +196,7 @@ export function createVercelSandbox(
         { cause: error },
       );
     }
-    const handle = createHandle({
+    const handle = createVercelSandboxHandle({
       createOptions: sessionCreateOptions,
       loadDeleteSandboxModule,
       sandbox: session.sandbox,
@@ -563,7 +563,7 @@ function createSessionCreateParams(
   };
 }
 
-function createHandle(input: {
+export function createVercelSandboxHandle(input: {
   readonly createOptions: VercelCreateOptions;
   readonly loadDeleteSandboxModule: () => Promise<VercelModule>;
   readonly sandbox: VercelSandbox;
@@ -595,7 +595,7 @@ function createHandle(input: {
   };
 }
 
-function createVercelInternalSandboxSession(sandbox: VercelSandbox): InternalSandboxSession {
+export function createVercelInternalSandboxSession(sandbox: VercelSandbox): InternalSandboxSession {
   return {
     resolvePath: resolveVercelSandboxPath,
     async spawn(options: SandboxSpawnOptions): Promise<SandboxProcess> {
