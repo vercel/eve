@@ -2521,6 +2521,10 @@ export class TerminalRenderer implements AgentTUIRenderer {
         dispatch({ type: "backspace" });
         return;
       }
+      if (key.type === "alt-backspace") {
+        dispatch({ type: "delete-word-backward" });
+        return;
+      }
       if (key.type === "text") {
         for (const char of key.value.replaceAll("\n", " ")) {
           if (char >= " " && char !== "\u007f") dispatch({ type: "char", char });

@@ -41,6 +41,7 @@ export type TerminalKey =
   | { type: "ctrl-d" }
   | { type: "alt-b" }
   | { type: "alt-f" }
+  | { type: "alt-backspace" }
   | { type: "ctrl-k" }
   | { type: "ctrl-n" }
   | { type: "ctrl-p" }
@@ -194,6 +195,9 @@ export function nextKey(buffer: string): KeyToken {
     if (second === "f" || second === "F") {
       return { key: { type: "alt-f" }, consumed: 2 };
     }
+    if (second === "\x7f" || second === "\b") {
+      return { key: { type: "alt-backspace" }, consumed: 2 };
+    }
     // Other `ESC` + byte chords surface Escape and then re-tokenize the byte.
     return { key: { type: "escape" }, consumed: 1 };
   }
@@ -301,6 +305,13 @@ export function parseKey(chunk: Buffer): TerminalKey {
       return { type: "end" };
     case "\x1B[3~":
       return { type: "delete" };
+    // Alt+Backspace commonly arrives as Meta+Backspace, kitty CSI-u, or
+    // xterm's modifyOtherKeys form.
+    case "\x1B[127;3u":
+    case "\x1B[8;3u":
+    case "\x1B[27;3;127~":
+    case "\x1B[27;3;8~":
+      return { type: "alt-backspace" };
     case "\t":
       return { type: "tab" };
     case "\x1B":
