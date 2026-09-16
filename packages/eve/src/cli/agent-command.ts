@@ -62,7 +62,6 @@ export function agentCommand(
         if (requestedName !== undefined) {
           await selectWorkspaceAgent(initialSelection.workspace, requestedName);
         }
-        await applicationContext.resolve();
         return;
       }
       applicationContext.root = await selectWorkspaceAgent(

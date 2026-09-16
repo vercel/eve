@@ -36,7 +36,7 @@ async function servePointer(ref, request, response) {
   const manifest = parseManifest(await new Response(result.stream).text());
   if (manifest === undefined) return packageNotFound(response);
 
-  response.setHeader("Cache-Control", "public, max-age=60");
+  response.setHeader("Cache-Control", "no-store");
   if (request.query.manifest === "1") return response.status(200).json(manifest);
   return response.redirect(302, manifest.tarball);
 }

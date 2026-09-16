@@ -66,6 +66,7 @@ describe("agentCommand", () => {
     await program.parseAsync(["dev", "--agent", "support"], { from: "user" });
 
     expect(action).toHaveBeenCalledOnce();
+    expect(context.resolve).not.toHaveBeenCalled();
   });
 
   it("automatically selects the only workspace agent", async () => {
