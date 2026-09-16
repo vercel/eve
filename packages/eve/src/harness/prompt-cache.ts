@@ -1,4 +1,5 @@
 import type { LanguageModel, ModelMessage, SystemModelMessage, ToolSet } from "ai";
+import { isGatewayModel } from "#internal/gateway.js";
 
 /**
  * The caching strategy to apply for one harness step.
@@ -51,7 +52,7 @@ const ANTHROPIC_CACHE_MARKER: AnthropicCacheMarker = Object.freeze({
  * Runs once per harness step right after `resolveModel()`.
  */
 export function detectPromptCachePath(model: LanguageModel): PromptCachePath {
-  if (typeof model === "string") {
+  if (typeof model === "string" || isGatewayModel(model)) {
     return { kind: "gateway-auto" };
   }
 
