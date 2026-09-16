@@ -79,7 +79,7 @@ export function registerDevelopmentCommand(input: {
         undefined
       );
     },
-    { workspace: "preserve" },
+    { preserveWorkspace: true },
   )
     .description("Start the eve development server or connect to an existing URL.")
     .argument("[url]", "Connect to an existing server URL", parseDevelopmentServerUrl)
@@ -136,32 +136,6 @@ export function registerDevelopmentCommand(input: {
     )
     .action(async (positionalUrl: string | undefined, options: DevelopmentCliOptions) => {
       const remoteTarget = resolveDevelopmentUrlTarget(options, positionalUrl);
-      const projectContext =
-        remoteTarget === undefined ? await applicationContext.resolveAgent() : undefined;
-      if (projectContext?.kind === "workspace") {
-        if (
-          options.assistantResponseStats !== undefined ||
-          options.connectionAuth !== undefined ||
-          options.contextSize !== undefined ||
-          options.input !== undefined ||
-          options.logs !== undefined ||
-          options.name !== undefined ||
-          options.onboard === true ||
-          options.reasoning !== undefined ||
-          options.subagents !== undefined ||
-          options.tools !== undefined ||
-          options.ui === false
-        ) {
-          throw new InvalidArgumentError(
-            "This option requires an individual agent. Run `eve dev --agent <name>` instead.",
-          );
-        }
-        const { runWorkspaceDevelopment } = await import("#cli/dev/workspace-dev.js");
-        await runWorkspaceDevelopment({ options, workspace: projectContext.workspace });
-        return;
-      }
-
-      const remoteServerUrl = remoteTarget?.serverUrl;
       const interactive = hasInteractiveTerminal();
       const mode = resolveDevUiMode({ options, interactive });
       telemetry.trackDevContext({ target: remoteTarget ? "remote" : "local", ui: mode });
@@ -169,6 +143,16 @@ export function registerDevelopmentCommand(input: {
       if (options.input !== undefined && mode === "headless") {
         throw new InvalidArgumentError("--input requires the interactive UI.");
       }
+
+      const projectContext =
+        remoteTarget === undefined ? await applicationContext.resolveAgent() : undefined;
+      if (projectContext?.kind === "workspace") {
+        const { runWorkspaceDevelopment } = await import("#cli/dev/workspace-dev.js");
+        await runWorkspaceDevelopment({ mode, options, workspace: projectContext.workspace });
+        return;
+      }
+
+      const remoteServerUrl = remoteTarget?.serverUrl;
       let existingLocalDevelopmentServer = false;
       if (remoteServerUrl !== undefined) {
         const isActive =

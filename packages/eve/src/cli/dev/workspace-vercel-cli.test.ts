@@ -11,9 +11,7 @@ const WORKSPACE_ROOT = "/repo";
 
 function detectVersions(...versions: string[]) {
   let index = 0;
-  return vi.fn(async () => ({
-    version: versions[Math.min(index++, versions.length - 1)],
-  }));
+  return vi.fn(async () => versions[Math.min(index++, versions.length - 1)]);
 }
 
 describe("ensureWorkspaceVercelCli", () => {

@@ -59,7 +59,7 @@ describe("agentCommand", () => {
     const context = workspaceContext();
     const action = vi.fn(() => expect(context.root).toBe("/repo"));
     const program = new Command().exitOverride();
-    agentCommand(program.command("dev"), context, () => true, { workspace: "preserve" }).action(
+    agentCommand(program.command("dev"), context, () => true, { preserveWorkspace: true }).action(
       action,
     );
 

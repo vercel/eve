@@ -168,7 +168,7 @@ async function detectVercelCli(
   // deadline; the invocation is re-resolved only to report which binary
   // answered (a workspace-local install beats the PATH lookup).
   const invocation = resolveVercelInvocation(appRoot);
-  const [{ version }, path] = await Promise.all([
+  const [version, path] = await Promise.all([
     detectVercelCliVersion({ projectRoot: appRoot, timeoutMs: VERCEL_VERSION_TIMEOUT_MS }),
     invocation.command === "vercel" ? findOnPath("vercel") : Promise.resolve(invocation.command),
   ]);

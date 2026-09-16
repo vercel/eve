@@ -6,8 +6,9 @@ import { dirname, join } from "node:path";
 import { selectWorkspaceAgent } from "#cli/agent-command.js";
 import type { DevelopmentCliOptions } from "#cli/dev/command-options.js";
 import { runInteractiveDevelopmentUi } from "#cli/dev/run-interactive-ui.js";
+import type { DevUiMode } from "#cli/dev/ui-options.js";
 import { ensureWorkspaceVercelCli } from "#cli/dev/workspace-vercel-cli.js";
-import { installShutdownSignal } from "#cli/shutdown.js";
+import { FORCED_EXIT_BACKSTOP_MS, installShutdownSignal } from "#cli/shutdown.js";
 import type { AgentWorkspace } from "#internal/project-context.js";
 import { assembleEveVercelServices } from "#internal/vercel/assemble-eve-services.js";
 import { quoteVercelShellArgument, toVercelRelativePath } from "#internal/vercel/build-command.js";
@@ -107,23 +108,39 @@ function waitForWorkspaceAgent(input: {
   });
 }
 
+function waitForWorkspaceExit(child: ChildProcess, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const onError = (error: Error) => {
+      child.off("exit", onExit);
+      reject(error);
+    };
+    const onExit = (code: number | null) => {
+      child.off("error", onError);
+      if (signal.aborted || code === 0) resolve();
+      else reject(new Error(`vc dev exited unexpectedly (code ${String(code)}).`));
+    };
+    child.once("error", onError);
+    child.once("exit", onExit);
+  });
+}
+
 /** Run a hostless agent workspace through Vercel's local service router. */
 export async function runWorkspaceDevelopment(input: {
+  readonly mode: DevUiMode;
   readonly options: DevelopmentCliOptions;
   readonly workspace: AgentWorkspace;
 }): Promise<void> {
   await ensureWorkspaceVercelCli({ workspaceRoot: input.workspace.root });
-  const selectedRoot = await selectWorkspaceAgent(input.workspace, input.options.agent, {
-    required: true,
-  });
-  const selected = input.workspace.members.find((member) => member.appRoot === selectedRoot)!;
+  const selectedRoot =
+    input.mode === "tui"
+      ? await selectWorkspaceAgent(input.workspace, input.options.agent)
+      : undefined;
+  const selected = input.workspace.members.find((member) => member.appRoot === selectedRoot);
   const generatedConfig = (await hasAuthoredVercelConfig(input.workspace.root))
     ? undefined
     : await writeGeneratedWorkspaceConfig(input.workspace);
   const host = input.options.host ?? "localhost";
   const port = input.options.port ?? 3000;
-  const requestHost = host === "0.0.0.0" || host === "::" ? "localhost" : host;
-  const serverUrl = `http://${requestHost}:${port}/${selected.name}/`;
   const args = ["dev", "--local", "--listen", `${host}:${port}`];
   if (generatedConfig !== undefined) args.push("--local-config", generatedConfig);
   const invocation = resolveVercelInvocation(input.workspace.root, args);
@@ -132,8 +149,18 @@ export async function runWorkspaceDevelopment(input: {
     shell: invocation.shell,
     stdio: "inherit",
   });
-  const lifecycle = installShutdownSignal({ onStop: () => child.kill("SIGTERM") });
+  const lifecycle = installShutdownSignal({
+    exitAfterMs: FORCED_EXIT_BACKSTOP_MS,
+    onStop: () => child.kill("SIGTERM"),
+  });
   try {
+    if (selected === undefined || selectedRoot === undefined) {
+      await waitForWorkspaceExit(child, lifecycle.signal);
+      return;
+    }
+
+    const requestHost = host === "0.0.0.0" || host === "::" ? "localhost" : host;
+    const serverUrl = `http://${requestHost}:${port}/${selected.name}/`;
     await waitForWorkspaceAgent({ child, serverUrl, signal: lifecycle.signal });
     if (!lifecycle.signal.aborted) {
       await runInteractiveDevelopmentUi({
@@ -145,7 +172,7 @@ export async function runWorkspaceDevelopment(input: {
       });
     }
   } finally {
-    if (child.pid !== undefined && child.exitCode === null) {
+    if (child.pid !== undefined && child.exitCode === null && child.signalCode === null) {
       const exited = new Promise<void>((resolve) => child.once("exit", () => resolve()));
       child.kill("SIGTERM");
       await exited;

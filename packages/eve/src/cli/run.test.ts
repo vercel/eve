@@ -481,12 +481,13 @@ describe("eve dev in an agent workspace", () => {
     await program.parseAsync(["dev", "--agent", "support", "--port", "4123"], { from: "user" });
 
     expect(runWorkspaceDevelopment).toHaveBeenCalledWith({
+      mode: "headless",
       options: expect.objectContaining({ agent: "support", port: 4123 }),
       workspace,
     });
   });
 
-  it("rejects agent-specific TUI options", async () => {
+  it("forwards TUI options for the selected workspace agent", async () => {
     const workspace = {
       members: [{ appRoot: "/workspace/agents/support", name: "support" }],
       root: "/workspace",
@@ -501,10 +502,17 @@ describe("eve dev in an agent workspace", () => {
       },
       { trackDevContext: () => {}, trackSetupStep: () => {}, trackSetupTerminal: () => {} },
     );
+    runWorkspaceDevelopment.mockClear();
 
-    await expect(
+    await withInteractiveTerminal(() =>
       program.parseAsync(["dev", "--name", "Support"], { from: "user" }),
-    ).rejects.toThrow("This option requires an individual agent.");
+    );
+
+    expect(runWorkspaceDevelopment).toHaveBeenCalledWith({
+      mode: "tui",
+      options: expect.objectContaining({ name: "Support" }),
+      workspace,
+    });
   });
 });
 

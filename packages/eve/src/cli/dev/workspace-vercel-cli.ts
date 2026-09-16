@@ -32,11 +32,27 @@ function unsupportedVersionMessage(version: string, detail?: string): string {
   return `Vercel CLI ${version} is too old. Workspace development requires ${MINIMUM_WORKSPACE_DEV_VERCEL_VERSION} or newer.${failure} Run \`vercel upgrade\`, then retry \`eve dev\`.`;
 }
 
+function upgradeFailureDetail(result: OfferVercelCliUpgradeResult): string | undefined {
+  switch (result.kind) {
+    case "cancelled":
+      return "The upgrade was cancelled.";
+    case "declined":
+      return undefined;
+    case "failed":
+      return result.reason === undefined
+        ? "The upgrade failed."
+        : `The upgrade failed: ${result.reason}.`;
+    case "already":
+    case "installed":
+      return undefined;
+  }
+}
+
 async function readVercelCliVersion(
   workspaceRoot: string,
   deps: WorkspaceVercelCliDeps,
 ): Promise<string> {
-  const { version } = await deps.detectVercelCliVersion({ projectRoot: workspaceRoot });
+  const version = await deps.detectVercelCliVersion({ projectRoot: workspaceRoot });
   if (version === undefined) {
     throw new Error(
       `Vercel CLI ${MINIMUM_WORKSPACE_DEV_VERCEL_VERSION} or newer is required. Install it with \`npm i -g vercel@latest\`, then retry \`eve dev\`.`,
@@ -63,15 +79,7 @@ export async function ensureWorkspaceVercelCli(input: {
     upgradeLabel: "Upgrade Vercel CLI and continue",
   });
   if (result.kind !== "installed" && result.kind !== "already") {
-    const detail =
-      result.kind === "failed" && result.reason !== undefined
-        ? `The upgrade failed: ${result.reason}.`
-        : result.kind === "cancelled"
-          ? "The upgrade was cancelled."
-          : result.kind === "declined"
-            ? undefined
-            : "The upgrade failed.";
-    throw new Error(unsupportedVersionMessage(installedVersion, detail));
+    throw new Error(unsupportedVersionMessage(installedVersion, upgradeFailureDetail(result)));
   }
 
   const upgradedVersion = await readVercelCliVersion(input.workspaceRoot, deps);
