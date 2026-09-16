@@ -21,7 +21,6 @@ import {
   type TaskAgentRequestDelivery,
   type TaskAuthorizationEventDelivery,
   type TaskInboundAnswerInput,
-  type TaskInboundMessage,
   type TaskInboundUpdate,
   type TaskInputRequestDelivery,
   type TaskProgress,
@@ -153,27 +152,6 @@ export async function wakeTaskUpdateParentStep(input: {
       message: `Background task ${input.view.taskId} (${input.view.metadata.name}) update: ${input.update.message}`,
     },
     taskDeliveryId: `${input.view.taskId}:update:${input.update.updateEpoch}:${input.update.updateIndex}:${input.update.callId}`,
-  };
-  try {
-    await resumeSessionInbox(input.token, command);
-  } catch (error) {
-    if (isTaskWorkflowTargetGone(error)) return;
-    throw error;
-  }
-}
-
-/** Delivers one task-authored message to the parent as a new turn. */
-export async function wakeTaskMessageParentStep(input: {
-  readonly message: TaskInboundMessage;
-  readonly taskId: string;
-  readonly token: string;
-}): Promise<void> {
-  "use step";
-
-  const command: SessionCommand = {
-    kind: "send",
-    payload: { message: input.message.message },
-    taskDeliveryId: `${input.taskId}:message:${input.message.messageEpoch}:${input.message.messageIndex}:${input.message.callId}`,
   };
   try {
     await resumeSessionInbox(input.token, command);

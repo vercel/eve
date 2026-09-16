@@ -2,7 +2,6 @@ import type { FlexibleSchema } from "ai";
 
 import type { Approval } from "#approval/definition.js";
 import type { InternalToolLabelDefinition, ToolExecuteOptions } from "#tools/definition.js";
-import type { TaskExec } from "#tools/task.js";
 import type { JsonValue } from "#shared/json.js";
 import type { PreparedToolBehavior } from "#tools/behavior.js";
 
@@ -23,7 +22,7 @@ export interface HarnessToolDefinition {
   readonly approvalKey?: (toolInput: Readonly<Record<string, unknown>>) => string;
   readonly behavior?: PreparedToolBehavior;
   readonly description: string;
-  readonly execute?: (input: any, options: ToolExecuteOptions, task?: TaskExec) => any;
+  readonly execute?: (input: any, options: ToolExecuteOptions) => any;
   /** Optional JSON input substituted when this tool starts its workflow body. */
   readonly executeInput?: (input: unknown) => JsonValue;
   readonly execution?: "background";

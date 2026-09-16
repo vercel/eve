@@ -93,7 +93,7 @@ describe("workflow-tool task input", () => {
 });
 
 describe("workflow-tool task reports", () => {
-  it("maps postMessage to a distinct parent delivery", () => {
+  it("keeps message-shaped yields as progress", () => {
     expect(
       workflowToolRunReportToTaskPayload(
         { from, update: { kind: "eve:task-message", message: "Review this output." } },
@@ -102,10 +102,10 @@ describe("workflow-tool task reports", () => {
       ),
     ).toEqual({
       callId: "call-1",
-      kind: "task-message",
-      message: "Review this output.",
-      messageEpoch: "task-1",
-      messageIndex: 2,
+      kind: "task-update",
+      message: '{"kind":"eve:task-message","message":"Review this output."}',
+      updateEpoch: "task-1",
+      updateIndex: 2,
     });
   });
 

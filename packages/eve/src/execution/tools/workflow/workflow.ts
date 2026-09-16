@@ -1,10 +1,9 @@
 import { sleep as workflowSleep } from "#compiled/@workflow/core/index.js";
 
-import type {
-  WorkflowToolRunOutcome,
-  WorkflowToolRunOutcomeMessage,
-} from "#execution/tools/workflow/messages.js";
-import { createWorkflowBodyRef, executeWorkflowBody } from "#execution/tools/workflow/body.js";
+import { createWorkflowBodyRef } from "#execution/tools/workflow/body.js";
+import type { WorkflowToolRunMessage } from "#execution/tools/workflow/messages.js";
+import { createWorkflowToolInvocationReader } from "#execution/tools/workflow/invocation.js";
+import { raceChannelReads } from "#execution/tools/workflow/owner-channels.js";
 import { openWorkflowToolRunControlInbox } from "#execution/tools/workflow/run-control.js";
 import type { WorkflowToolRunInput } from "#execution/tools/workflow/types.js";
 import { resumeHookStep } from "#execution/tools/workflow/resume-hook-step.js";
@@ -17,32 +16,49 @@ export async function workflowToolRunWorkflow(input: WorkflowToolRunInput): Prom
   "use workflow";
 
   const control = openWorkflowToolRunControlInbox(input.hookToken);
-  const bodyInput = { ...input, execution: input.execution ?? "blocking" } as const;
-  const from = createWorkflowBodyRef(bodyInput);
-  const body = executeWorkflowBody(bodyInput, control.signal).then(({ outcome }) => {
-    if (outcome.status === "completed") return outcome.output;
-    if (outcome.status === "failed") throw outcome.error;
-    throw control.signal.reason ?? new Error(outcome.reason ?? "Workflow tool run cancelled.");
-  });
-  const settled = body.catch(() => {});
-  let outcome: WorkflowToolRunOutcome;
+  const invocationInput = { ...input, execution: input.execution ?? "blocking" } as const;
+  const reader = createWorkflowToolInvocationReader(invocationInput, control.signal);
   try {
-    outcome = { output: await Promise.race([body, control.cancelled]), status: "completed" };
+    while (true) {
+      const read = await raceChannelReads([reader], control.cancelled);
+      if (read === "cancel" || read.next.done) return;
+      await deliver(read.next.value);
+      if (read.next.value.kind === "outcome") return;
+    }
   } catch (error) {
     if (!control.signal.aborted) {
-      outcome = { error: normalizeSerializableError(error), status: "failed" };
-    } else {
-      await Promise.race([settled, workflowSleep(CANCEL_GRACE)]);
-      outcome = { reason: control.reason(), status: "cancelled" };
+      await deliver({
+        from: createWorkflowBodyRef(invocationInput),
+        kind: "outcome",
+        result: { error: normalizeSerializableError(error), status: "failed" },
+      });
+      return;
+    }
+    const drained = await Promise.race([
+      drainInvocation().then(() => true),
+      workflowSleep(CANCEL_GRACE).then(() => false),
+    ]);
+    if (!drained) {
+      await deliver({
+        from: createWorkflowBodyRef(invocationInput),
+        kind: "outcome",
+        result: { reason: control.reason(), status: "cancelled" },
+      });
     }
   }
 
-  const message: WorkflowToolRunOutcomeMessage = { from, result: outcome };
-  await resumeHookStep(
-    input.owner.inbox,
-    { kind: "outcome", ...message },
-    {
-      ifPresent: outcome.status === "cancelled",
-    },
-  );
+  async function drainInvocation(): Promise<void> {
+    while (true) {
+      const read = await raceChannelReads([reader]);
+      if (read.next.done) return;
+      await deliver(read.next.value);
+      if (read.next.value.kind === "outcome") return;
+    }
+  }
+
+  async function deliver(message: WorkflowToolRunMessage): Promise<void> {
+    await resumeHookStep(input.owner.inbox, message, {
+      ifPresent: message.kind === "outcome" && message.result.status === "cancelled",
+    });
+  }
 }

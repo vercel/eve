@@ -3,17 +3,13 @@
  * Task-run transport (start/command/view) lives in `run-parent.ts`, which
  * Callers compose these primitives around their own executor policy.
  */
-import type { ActivityObserverConfig } from "#channel/types.js";
 import type { HarnessSession } from "#harness/types.js";
 import type { ActivityWorkIdentityV1 } from "#protocol/activity.js";
 import {
   readLatestTaskView,
   sendTaskCommand,
   sendTaskCommandToOwner,
-  startTaskRun,
-  waitForTaskCommandOwner,
 } from "#execution/tasks/parent/run-parent.js";
-import { sessionCommandHookToken } from "#execution/session-inbox/address.js";
 import type { JsonValue } from "#shared/json.js";
 import type { TaskExecutorBinding } from "#tools/task.js";
 import { deriveTaskInboxToken, deriveTaskId } from "#tasks/task-id.js";
@@ -78,28 +74,6 @@ export function prepareBackgroundTask(input: {
     metadata: input.metadata,
     taskId,
   };
-}
-
-/** Starts a lifecycle-only task run for a non-workflow external executor. */
-export async function beginBackgroundTask(input: {
-  readonly activityObserver?: ActivityObserverConfig;
-  readonly callId: string;
-  readonly dispatchContext: TaskAgentDispatchContext;
-  readonly metadata: TaskMetadata;
-  readonly parentSessionId: string;
-  readonly parentStepIndex?: number;
-  readonly parentTurnId: string;
-  readonly session: HarnessSession;
-}): Promise<BackgroundTask> {
-  const task = prepareBackgroundTask(input);
-  await startTaskRun({
-    activityObserver: input.activityObserver,
-    taskInboxToken: task.taskInboxToken,
-    initialView: { metadata: task.metadata, status: "working", taskId: task.taskId },
-    parentContinuationToken: sessionCommandHookToken(input.session.sessionId),
-  });
-  const owner = await waitForTaskCommandOwner({ taskInboxToken: task.taskInboxToken });
-  return { ...task, taskRunId: owner.runId };
 }
 
 /** Releases task events only after the parent session index committed. */

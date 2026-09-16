@@ -203,22 +203,22 @@ export class SessionInputQueue {
     const deliveries = this.entries.filter(
       (entry): entry is QueuedDelivery => entry.kind === "delivery",
     );
-    const completed = new Set(
+    const terminal = new Set(
       deliveries.flatMap(({ delivery }) => {
-        const taskId = completionTaskId(delivery);
+        const taskId = terminalTaskId(delivery);
         return taskId === undefined ? [] : [taskId];
       }),
     );
     const pendingCohorts = new Set<string>();
     for (const [taskId, cohort] of cohorts) {
-      if (!cohort.settled && !completed.has(taskId) && !this.cancelledTaskIds.has(taskId)) {
+      if (!cohort.settled && !terminal.has(taskId) && !this.cancelledTaskIds.has(taskId)) {
         pendingCohorts.add(cohort.cohortId);
       }
     }
     return this.entries.findIndex((entry) => {
       if (entry.kind === "control") return true;
       if (entry.kind === "authorization" || deferDeliveries) return false;
-      const cohort = completionCohort(entry.delivery, cohorts);
+      const cohort = terminalCohort(entry.delivery, cohorts);
       return cohort === undefined || !pendingCohorts.has(cohort);
     });
   }
@@ -234,17 +234,17 @@ export class SessionInputQueue {
       if (selected.kind === "control") return { control: selected.control, kind: "control" };
       return { kind: "authorization-resume", payloads: [selected.payload] };
     }
-    const readyCohort = completionCohort(selected.delivery, cohorts);
+    const readyCohort = terminalCohort(selected.delivery, cohorts);
     if (readyCohort !== undefined) {
       const lastSibling = this.entries.findLastIndex(
         (entry) =>
-          entry.kind === "delivery" && completionCohort(entry.delivery, cohorts) === readyCohort,
+          entry.kind === "delivery" && terminalCohort(entry.delivery, cohorts) === readyCohort,
       );
       const boundary = this.entries.findIndex(
         (entry, position) =>
           position > index &&
           position < lastSibling &&
-          (entry.kind !== "delivery" || completionCohort(entry.delivery, cohorts) === undefined),
+          (entry.kind !== "delivery" || terminalCohort(entry.delivery, cohorts) === undefined),
       );
       if (boundary >= 0) return this.takeSelectionAt(boundary, cohorts, freshSequence);
     }
@@ -252,16 +252,15 @@ export class SessionInputQueue {
     const first = this.entries.splice(index, 1)[0]!;
     if (first.kind !== "delivery") throw new Error("Selected a non-delivery entry as a turn.");
     const turnEntries = [first];
-    const cohort = completionCohort(first.delivery, cohorts);
+    const cohort = terminalCohort(first.delivery, cohorts);
     if (cohort !== undefined) {
       const siblings = this.entries.filter(
         (entry): entry is QueuedDelivery =>
-          entry.kind === "delivery" && completionCohort(entry.delivery, cohorts) === cohort,
+          entry.kind === "delivery" && terminalCohort(entry.delivery, cohorts) === cohort,
       );
       turnEntries.push(...siblings);
       this.retain(
-        (entry) =>
-          entry.kind !== "delivery" || completionCohort(entry.delivery, cohorts) !== cohort,
+        (entry) => entry.kind !== "delivery" || terminalCohort(entry.delivery, cohorts) !== cohort,
       );
     } else {
       const authenticated =
@@ -346,13 +345,20 @@ function isTaskDelivery(
   return deliveryId !== undefined && predicate(deliveryId);
 }
 
-function completionCohort(delivery: DeliverHookPayload, cohorts: TaskCohorts): string | undefined {
-  const taskId = completionTaskId(delivery);
+function terminalCohort(delivery: DeliverHookPayload, cohorts: TaskCohorts): string | undefined {
+  const taskId = terminalTaskId(delivery);
   return taskId === undefined ? undefined : cohorts.get(taskId)?.cohortId;
 }
 
-function completionTaskId(delivery: DeliverHookPayload): string | undefined {
-  const suffix = ":ready:completed";
-  if (delivery.caller !== undefined || !delivery.taskDeliveryId?.endsWith(suffix)) return undefined;
-  return delivery.taskDeliveryId.slice(0, -suffix.length);
+function terminalTaskId(delivery: DeliverHookPayload): string | undefined {
+  if (delivery.caller !== undefined) return undefined;
+  const views = delivery.payloads.flatMap((payload) => payload.task?.views ?? []);
+  if (views.length !== 1) return undefined;
+  const view = views[0]!;
+  if (view.status !== "completed" && view.status !== "failed" && view.status !== "cancelled") {
+    return undefined;
+  }
+  return delivery.taskDeliveryId === `${view.taskId}:ready:${view.status}`
+    ? view.taskId
+    : undefined;
 }

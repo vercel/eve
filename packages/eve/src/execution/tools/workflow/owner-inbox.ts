@@ -12,8 +12,7 @@ import type { RuntimeSubagentResult } from "#shared/action-types.js";
 import type { InputRequest } from "#shared/input.js";
 import type { ToolInputRequest } from "#tools/definition.js";
 import type { WorkflowToolRunTaskInputRequest } from "#execution/tasks/child/workflow.js";
-import type { TaskCommand, TaskInboundMessage, TaskInboundUpdate } from "#tasks/types.js";
-import { isTaskMessage } from "#tools/task.js";
+import type { TaskCommand, TaskInboundUpdate } from "#tasks/types.js";
 import { SUBAGENT_EXECUTION_FAILED } from "#subagents/agent-handle-errors.js";
 import { parseJsonValue, type JsonValue } from "#shared/json.js";
 
@@ -103,16 +102,7 @@ export function workflowToolRunReportToTaskPayload(
   report: WorkflowToolRunReport,
   taskId: string,
   updateIndex: number,
-): TaskInboundMessage | TaskInboundUpdate {
-  if (isTaskMessage(report.update)) {
-    return {
-      callId: report.from.callId,
-      kind: "task-message",
-      message: report.update.message,
-      messageEpoch: taskId,
-      messageIndex: updateIndex,
-    };
-  }
+): TaskInboundUpdate {
   return {
     callId: report.from.callId,
     kind: "task-update",

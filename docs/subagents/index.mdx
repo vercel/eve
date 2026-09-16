@@ -9,15 +9,16 @@ eve supports two ways to delegate work: the root-only built-in `agent` tool, whi
 
 Overlapping background work owned by a session forms a cohort. Tasks launched in
 later user turns join the open cohort while earlier work is still pending or its
-successful results await delivery. eve holds successful completion notifications
-until every task in that cohort has completed, failed, or been cancelled, then
-delivers the successful results together in one parent turn. Partial completions
-do not invoke the parent model. Work started after the cohort settles forms a new
-cohort. No configuration or debounce timer is required.
+terminal results await delivery. eve holds completion, failure, and cancellation
+notifications until every task in that cohort is terminal, then delivers all outcomes
+together in one parent turn. This includes cohorts where every task failed or was
+cancelled. Partial settlements do not invoke the parent model. Work started after the
+cohort settles forms a new cohort. No configuration or debounce timer is required.
 
-User messages, input requests, authorization events, failures, and cancellation
-are handled without waiting for the cohort. Child lifecycle events are processed
-before completion delivery so usage accounting and handle cleanup stay ordered.
+User messages, input requests, and authorization events are handled without waiting
+for the cohort. Failure and cancellation update task lifecycle state immediately;
+their automatic conversational report waits for the cohort. Child lifecycle events
+are processed before terminal delivery so usage accounting and handle cleanup stay ordered.
 To follow work in progress, subscribe to the child session streams.
 
 ## The built-in `agent` tool

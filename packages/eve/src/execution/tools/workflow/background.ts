@@ -2,7 +2,6 @@ import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import type { PreparedRuntimeTool } from "#runtime/sessions/turn.js";
 import { parseJsonObject, type JsonValue } from "#shared/json.js";
 import type { ToolExecuteOptions } from "#tools/definition.js";
-import type { TaskExec } from "#tools/task.js";
 import { UNSPECIFIED_INPUT_SCHEMA, toInputSchema, toOutputSchema } from "#tools/schema.js";
 
 export interface WorkflowToolHarnessDefinitionInput {
@@ -68,7 +67,7 @@ export function createWorkflowToolBackgroundExecute(input: {
   readonly toolName: string;
   readonly workflowId: string;
 }): NonNullable<HarnessToolDefinition["execute"]> {
-  return (_toolInput: unknown, _options: ToolExecuteOptions, _task?: TaskExec): never => {
+  return (_toolInput: unknown, _options: ToolExecuteOptions): never => {
     throw new Error(
       `Background workflow tool "${input.toolName}" must be started by the task runtime (${input.workflowId}).`,
     );

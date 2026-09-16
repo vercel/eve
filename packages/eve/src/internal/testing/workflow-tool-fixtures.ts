@@ -13,7 +13,6 @@ import {
 } from "#compiled/@workflow/core/index.js";
 
 import type { WorkflowToolContext } from "#tools/workflow-definition.js";
-import type { TaskExec, TaskMessage } from "#tools/task.js";
 import {
   ConnectionAuthorizationFailedError,
   ConnectionAuthorizationRequiredError,
@@ -183,13 +182,12 @@ export async function* reportingDeployWorkflow(
 export async function* backgroundDeployWorkflow(
   input: DeployInput,
   _ctx: WorkflowToolContext,
-  task: TaskExec,
-): AsyncGenerator<string | TaskMessage, { readonly plan: string }> {
+): AsyncGenerator<string, { readonly plan: string }> {
   "use workflow";
 
   const plan = await planDeployStep(input.service);
   yield `planned ${input.service}`;
-  yield task.postMessage(`Review ${plan}`);
+  yield `review ${plan}`;
   return { plan };
 }
 

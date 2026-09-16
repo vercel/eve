@@ -69,17 +69,15 @@ describe("defineWorkflowTool", () => {
     expectTypeOf(useStepContext).parameter(0).toEqualTypeOf<WorkflowStepToolContext>();
   });
 
-  it("provides task messages and receipt projections for background workflows", () => {
+  it("provides progress yields and receipt projections for background workflows", () => {
     const definition = defineWorkflowTool({
       description: "Report a deployment",
       execution: "background",
       inputSchema: z.object({ service: z.string() }),
-      async *execute(input, ctx, task) {
+      async *execute(input, ctx) {
         expectTypeOf(input).toEqualTypeOf<{ service: string }>();
         expectTypeOf(ctx).toEqualTypeOf<WorkflowToolContext>();
-        expectTypeOf(task.taskId).toEqualTypeOf<string>();
         yield { status: "planning" };
-        yield task.postMessage(input.service);
         return { deployed: input.service };
       },
       toModelOutput(receipt) {

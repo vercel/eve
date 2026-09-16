@@ -7,7 +7,6 @@ import { SessionInputQueue } from "#execution/session/input-queue.js";
 import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
 import type { SessionInbox, SessionInboxPayload } from "#execution/session-inbox/inbox.js";
 import { SessionStateCursor } from "#execution/session/state-cursor.js";
-import { cacheTerminalTaskView } from "#tasks/session-index.js";
 import type { TaskView } from "#tasks/types.js";
 
 vi.mock("#compiled/@workflow/core/index.js", () => ({
@@ -465,6 +464,21 @@ function completion(taskId: string): DeliverHookPayload {
   };
 }
 
+function terminalDelivery(taskId: string, status: "failed" | "cancelled"): DeliverHookPayload {
+  const view: TaskView = {
+    taskId,
+    metadata: { kind: "subagent", name: "worker" },
+    ...(status === "failed"
+      ? { status, lastOutput: { type: "error", data: "failed" } }
+      : { status }),
+  };
+  return {
+    kind: "deliver",
+    taskDeliveryId: `${taskId}:ready:${status}`,
+    payloads: [{ message: status, task: { views: [view] } }],
+  };
+}
+
 function batchingInput(count = 100, crossTurn = false) {
   const input = waitInput(createMockInbox([]));
   const taskSessionState = {
@@ -540,8 +554,6 @@ describe("buffered task completion batching", () => {
   });
 
   it.each([
-    ["failed", { ...completion("task_2"), taskDeliveryId: "task_2:ready:failed" }],
-    ["cancelled", { ...completion("task_2"), taskDeliveryId: "task_2:ready:cancelled" }],
     ["input request", { ...completion("task_2"), taskDeliveryId: "task_2:input:request-1" }],
     ["update", { ...completion("task_2"), taskDeliveryId: "task_2:update:1" }],
     ["other cohort", completion("other-cohort")],
@@ -734,52 +746,32 @@ describe("buffered task completion batching", () => {
   });
 
   it.each(["failed", "cancelled"] as const)(
-    "delivers %s immediately, then releases successful siblings from the settled cohort",
+    "batches %s with successful siblings from the same cohort",
     async (status) => {
       const input = batchingInput(2);
       const first = completion("task_0");
-      const view: TaskView = {
-        taskId: "task_1",
-        metadata: { kind: "subagent", name: "worker" },
-        ...(status === "failed"
-          ? { status, lastOutput: { type: "error", data: "failed" } }
-          : { status }),
-      };
-      const terminal: DeliverHookPayload = {
-        kind: "deliver",
-        taskDeliveryId: `task_1:ready:${status}`,
-        payloads: [{ message: status, task: { views: [view] } }],
-      };
+      const terminal = terminalDelivery("task_1", status);
       for (const delivery of [first, terminal]) input.queue.enqueueDelivery(delivery);
-      vi.mocked(routeDeliverToChildren).mockImplementation(
-        async ({ delivery, sessionState, serializedContext }) => {
-          const snapshot = sessionState.snapshot!;
-          return {
-            kind: "continue",
-            remainder: delivery,
-            serializedContext,
-            sessionState: {
-              ...sessionState,
-              snapshot: {
-                ...snapshot,
-                session: {
-                  ...snapshot.session,
-                  state: cacheTerminalTaskView(snapshot.session.state, view),
-                },
-              },
-            },
-          };
-        },
-      );
       await expect(nextTurnDelivery(input)).resolves.toMatchObject({
         kind: "turn",
-        delivery: terminal,
+        delivery: { payloads: [...first.payloads, ...terminal.payloads] },
       });
-      expect(input.queue.pendingCount).toBe(1);
+      expect(input.queue.pendingCount).toBe(0);
+    },
+  );
+
+  it.each(["failed", "cancelled"] as const)(
+    "batches an all-%s cohort into one report",
+    async (status) => {
+      const input = batchingInput(2);
+      const first = terminalDelivery("task_0", status);
+      const last = terminalDelivery("task_1", status);
+      for (const delivery of [first, last]) input.queue.enqueueDelivery(delivery);
       await expect(nextTurnDelivery(input)).resolves.toMatchObject({
         kind: "turn",
-        delivery: first,
+        delivery: { payloads: [...first.payloads, ...last.payloads] },
       });
+      expect(input.queue.pendingCount).toBe(0);
     },
   );
 

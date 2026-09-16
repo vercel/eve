@@ -8,24 +8,18 @@ import {
   deliverTaskInputResponsesStep,
   wakeTaskAgentRequestParentStep,
   wakeTaskAuthorizationParentStep,
-  wakeTaskMessageParentStep,
   wakeTaskParentStep,
   wakeTaskUpdateParentStep,
   wakeWorkflowTaskInputRequestParentStep,
 } from "#execution/tasks/child/steps.js";
-import {
-  createWorkflowBodyRef,
-  executeWorkflowBody,
-  type WorkflowBodyDefinition,
-  type WorkflowBodyResult,
-} from "#execution/tools/workflow/body.js";
+import type { WorkflowBodyDefinition } from "#execution/tools/workflow/body.js";
+import { createWorkflowToolInvocationReader } from "#execution/tools/workflow/invocation.js";
 import { resumeHookStep } from "#execution/tools/workflow/resume-hook-step.js";
 import type {
   WorkflowToolAuthorizationRequest,
   WorkflowToolRunRequestMessage,
 } from "#execution/tools/workflow/messages.js";
 import { createChannelReader, raceChannelReads } from "#execution/tools/workflow/owner-channels.js";
-import { openWorkflowToolRunOwnerInbox } from "#execution/tools/workflow/owner.js";
 import {
   workflowToolRunOutcomeToTaskCommand,
   workflowToolRunReportToTaskPayload,
@@ -39,7 +33,6 @@ import {
   readTaskInputRequestId,
   type TaskCommand,
   type TaskInboundAnswerInput,
-  type TaskInboundMessage,
   type TaskInputRequest,
   type TaskInboundUpdate,
   type TaskRunInboundPayload,
@@ -51,7 +44,7 @@ export interface TaskRunWorkflowInput {
   readonly initialView: TaskView;
   readonly parentContinuationToken: string;
   readonly taskInboxToken: string;
-  readonly workflow?: WorkflowBodyDefinition;
+  readonly workflow: WorkflowBodyDefinition;
 }
 
 /** A workflow-body question routed through the task that owns the workflow tool run. */
@@ -69,35 +62,22 @@ export type WorkflowToolRunTaskInputRequest = WorkflowToolRunTaskInputRequestBas
     | { readonly request?: never; readonly requests: readonly TaskInputRequest[] }
   );
 
-interface PendingWorkflowToolTraffic {
-  readonly messages: TaskInboundMessage[];
-  readonly ownerRequests: WorkflowToolRunRequestMessage[];
-}
-
 /** Owns lifecycle for one background task and consumes its executor traffic. */
 export async function taskRunWorkflow(input: TaskRunWorkflowInput): Promise<void> {
   "use workflow";
 
   const commands = createHook<TaskRunInboundPayload>({ token: input.taskInboxToken });
-  const workflowToolRunInbox = openWorkflowToolRunOwnerInbox();
-  const readers = [workflowToolRunInbox.reader, createChannelReader("commands", commands)] as const;
+  const commandReader = createChannelReader("commands", commands);
   let view = input.initialView;
   let dispatchAcknowledged = false;
   let dispatchRejected = false;
   let pendingInputRequest: WorkflowToolRunTaskInputRequest | undefined;
   let pendingUpdates: TaskInboundUpdate[] = [];
   let updateIndex = 0;
-  const pendingTraffic: PendingWorkflowToolTraffic = { messages: [], ownerRequests: [] };
   const answerHooks = new Map<string, AnswerHookRoute>();
   const bodyController = new AbortController();
-  let bodyReader:
-    | import("#execution/tools/workflow/owner-channels.js").ChannelReader<
-        "body",
-        WorkflowBodyResult
-      >
-    | undefined;
-  let executorSettled = input.workflow === undefined;
-  let pendingBodyResult: WorkflowBodyResult | undefined;
+  let invocationReader: ReturnType<typeof createWorkflowToolInvocationReader> | undefined;
+  let executorSettled = false;
 
   try {
     await claimHookOwnership(commands);
@@ -108,31 +88,10 @@ export async function taskRunWorkflow(input: TaskRunWorkflowInput): Promise<void
 
   await appendTaskViewStep({ activityObserver: input.activityObserver, view });
   while (true) {
-    // Hook persistence does not mean the owner has consumed every report yet.
-    if (pendingBodyResult !== undefined && updateIndex >= pendingBodyResult.reportCount) {
-      executorSettled = true;
-      await applyPayload({
-        command: workflowToolRunOutcomeToTaskCommand({
-          from: createWorkflowBodyRef({ ...input.workflow!, execution: "background" }),
-          result: pendingBodyResult.outcome,
-        }),
-        kind: "task-command",
-      });
-      pendingBodyResult = undefined;
-      if (view.status === "cancelled" && dispatchAcknowledged && !dispatchRejected) {
-        await wakeTaskParentStep({ token: input.parentContinuationToken, view });
-      }
-    }
     if (isFinished()) break;
     const read = await raceChannelReads(
-      bodyReader === undefined ? readers : [...readers, bodyReader],
+      invocationReader === undefined ? [commandReader] : [commandReader, invocationReader],
     );
-    if (read.channel === "body") {
-      bodyReader = undefined;
-      if (read.next.done) continue;
-      pendingBodyResult = read.next.value;
-      continue;
-    }
     if (read.next.done) return;
 
     if (read.channel === "workflow") {
@@ -142,10 +101,14 @@ export async function taskRunWorkflow(input: TaskRunWorkflowInput): Promise<void
         continue;
       }
       if (message.kind === "outcome") {
+        executorSettled = true;
         await applyPayload({
           command: workflowToolRunOutcomeToTaskCommand(message),
           kind: "task-command",
         });
+        if (view.status === "cancelled" && dispatchAcknowledged && !dispatchRejected) {
+          await wakeTaskParentStep({ token: input.parentContinuationToken, view });
+        }
         continue;
       }
       const request = message;
@@ -189,19 +152,6 @@ export async function taskRunWorkflow(input: TaskRunWorkflowInput): Promise<void
     });
   }
 
-  async function handleMessage(message: TaskInboundMessage): Promise<void> {
-    if (dispatchRejected || isTerminalTaskStatus(view.status)) return;
-    if (!dispatchAcknowledged) {
-      pendingTraffic.messages.push(message);
-      return;
-    }
-    await wakeTaskMessageParentStep({
-      message,
-      taskId: view.taskId,
-      token: input.parentContinuationToken,
-    });
-  }
-
   async function applyPayload(
     payload: TaskRunInboundPayload | WorkflowToolRunTaskInputRequest,
   ): Promise<void> {
@@ -213,34 +163,15 @@ export async function taskRunWorkflow(input: TaskRunWorkflowInput): Promise<void
     if (isReady || isRejected) {
       if (isRejected || isTerminalTaskStatus(view.status)) {
         executorSettled = true;
-      } else if (
-        input.workflow !== undefined &&
-        bodyReader === undefined &&
-        pendingBodyResult === undefined &&
-        !executorSettled
-      ) {
-        bodyReader = createChannelReader(
-          "body",
-          awaitBodyResult(
-            executeWorkflowBody(
-              {
-                ...input.workflow,
-                execution: "background",
-                owner: workflowToolRunInbox.owner,
-              },
-              bodyController.signal,
-            ),
-          ),
+      } else if (invocationReader === undefined && !executorSettled) {
+        invocationReader = createWorkflowToolInvocationReader(
+          { ...input.workflow, execution: "background" },
+          bodyController.signal,
         );
       }
-      await flushPendingTraffic();
     }
 
     if (payload.kind === "task-input-request") pendingInputRequest = payload;
-    if (payload.kind === "task-message") {
-      await handleMessage(payload);
-      return;
-    }
     if (payload.kind === "task-update") {
       await handleUpdate(payload);
       return;
@@ -278,7 +209,7 @@ export async function taskRunWorkflow(input: TaskRunWorkflowInput): Promise<void
     if (!accepted) return;
     if (command.kind === "cancel") {
       bodyController.abort(new Error(`Task ${view.taskId} was cancelled.`));
-      if (bodyReader === undefined) executorSettled = true;
+      if (invocationReader === undefined) executorSettled = true;
     }
     if (!isTerminalTaskStatus(view.status)) await flushUpdates();
     if (
@@ -324,10 +255,6 @@ export async function taskRunWorkflow(input: TaskRunWorkflowInput): Promise<void
 
   // Owner traffic must wait until the parent has acknowledged task dispatch.
   async function handleOwnerRequest(message: WorkflowToolRunRequestMessage): Promise<void> {
-    if (!dispatchAcknowledged) {
-      pendingTraffic.ownerRequests.push(message);
-      return;
-    }
     const { request, replyTo } = message;
     if (
       request.kind === "authorization-request" &&
@@ -388,29 +315,6 @@ export async function taskRunWorkflow(input: TaskRunWorkflowInput): Promise<void
     // Discarded events are acknowledged too; persistence and delivery failures are not.
     await resumeHookStep(replyTo, null, { ifPresent: true });
   }
-
-  async function flushPendingTraffic(): Promise<void> {
-    if (!dispatchRejected) {
-      for (const message of pendingTraffic.messages) {
-        await wakeTaskMessageParentStep({
-          message,
-          taskId: view.taskId,
-          token: input.parentContinuationToken,
-        });
-      }
-    }
-    for (const request of pendingTraffic.ownerRequests) {
-      await handleOwnerRequest(request);
-    }
-    pendingTraffic.messages.length = 0;
-    pendingTraffic.ownerRequests.length = 0;
-  }
-}
-
-async function* awaitBodyResult(
-  result: Promise<WorkflowBodyResult>,
-): AsyncGenerator<WorkflowBodyResult> {
-  yield await result;
 }
 
 async function resolveAnsweredCommand(

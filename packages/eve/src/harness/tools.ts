@@ -77,12 +77,11 @@ export function buildToolSet(input: {
       definition.name,
       definition.execution === "background" && definition.execute !== undefined
         ? {
-            execute: definition.execute,
             executeInput: definition.executeInput,
             name: definition.name,
             nodeId: definition.nodeId,
             resultKind: definition.resultKind,
-            workflowId: definition.workflowId,
+            workflowId: requireBackgroundWorkflowId(definition),
           }
         : undefined,
     );
@@ -169,6 +168,15 @@ export function buildToolSet(input: {
   }
 
   return tools as ToolSet;
+}
+
+function requireBackgroundWorkflowId(definition: HarnessToolDefinition): string {
+  if (definition.workflowId === undefined) {
+    throw new Error(
+      `Background tool "${definition.name}" must be defined with defineWorkflowTool().`,
+    );
+  }
+  return definition.workflowId;
 }
 
 /**

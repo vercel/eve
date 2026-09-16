@@ -789,7 +789,7 @@ describe("workflow tools", () => {
           notifications.push(eventsText(filterEventsByType(woken, "message.received")));
         }
         const text = notifications.join("\n");
-        expect(text).toContain("Review plan:api");
+        expect(text).not.toContain("Review plan:api");
         expect(text).not.toContain("update: planned api");
         expect(text).toContain("is completed");
         expect(text).toContain("plan:api");

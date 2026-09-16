@@ -3,12 +3,10 @@
  */
 
 export {
-  type BackgroundToolDefinition,
   type DisabledToolSentinel,
   defineTool,
   disableTool,
   isDisabledToolSentinel,
-  type TaskExec,
   type TaskReceipt,
   type ToolLabelDefinition,
   type ToolAuthOptions,

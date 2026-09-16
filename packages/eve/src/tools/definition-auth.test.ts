@@ -35,17 +35,14 @@ describe("defineTool approvalKey", () => {
     expect(definition.approvalKey?.({ scope: "repo" })).toBe("write:repo");
   });
 
-  it("infers readonly input for background tools with input schemas", () => {
-    const definition = defineTool({
-      description: "Scoped background write",
-      execution: "background",
-      inputSchema: z.object({ scope: z.string() }),
-      approvalKey(input) {
-        expectTypeOf(input).toEqualTypeOf<Readonly<{ scope: string }>>();
-        return `write:${input.scope}`;
-      },
-      execute: async (input) => input.scope,
-    });
-    expect(definition.approvalKey?.({ scope: "repo" })).toBe("write:repo");
+  it("rejects background execution", () => {
+    expect(() =>
+      defineTool({
+        description: "Scoped background write",
+        execution: "background",
+        inputSchema: z.object({ scope: z.string() }),
+        execute: async () => null,
+      } as never),
+    ).toThrow("Use defineWorkflowTool for background work");
   });
 });

@@ -334,7 +334,6 @@ function createMetadata(input: {
       name: input.name,
     }),
     description: input.entry.description,
-    execution: input.entry.execution === "background" ? "background" : undefined,
     entryKey: input.entryKey,
     inputSchema: serializeInputSchema(input.entry.inputSchema),
     name: input.name,
