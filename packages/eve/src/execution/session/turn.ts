@@ -326,6 +326,7 @@ class ActiveTurn {
   }
 
   resetSteering(): void {
+    if (!this.steeringController.signal.aborted) return;
     this.unsubscribeDelivery();
     this.steeringController = new AbortController();
     // Admission can yield while new deliveries are pumped. Replaying the

@@ -732,6 +732,8 @@ describe("workflowEntry integration", () => {
           (event) => event.type === "session.waiting",
         );
 
+        await waitForParkedTurnStep(run.runId);
+
         // A cancel with no active turn is consumed by the parked wait
         // without producing a parent turn. The callback must still surface
         // in the continued wait instead of stalling until unrelated
@@ -1557,6 +1559,7 @@ describe("workflowEntry integration", () => {
         });
         try {
           expect((await stream.nextTurn()).at(-1)?.type).toBe("session.waiting");
+          await waitForParkedTurnStep(anchor.runId);
 
           await expect(
             workflowRuntime.dispatchSession({
@@ -2120,6 +2123,23 @@ const CALLER_STEP_NAMES = new Set([
 
 async function listCallerStepNames(runId: string): Promise<string[]> {
   return (await listStepNames(runId)).filter((name) => CALLER_STEP_NAMES.has(name)).sort();
+}
+
+async function waitForParkedTurnStep(runId: string): Promise<void> {
+  // Stream publication precedes the durable commit. Tests that require an
+  // idle owner must wait for the committed park before delivering input.
+  await vi.waitFor(
+    async () => {
+      const steps = await (await getWorld()).steps.list({ runId, resolveData: "all" });
+      for (const step of steps.data) {
+        if (!step.stepName.endsWith("//turnStep") || step.output === undefined) continue;
+        const result = await hydrateStepReturnValue(step.output, runId, undefined);
+        if (result.action === "park") return;
+      }
+      expect.fail("The turn has not committed its park yet.");
+    },
+    { timeout: 10_000 },
+  );
 }
 
 async function listStepNames(runId: string): Promise<string[]> {

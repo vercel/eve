@@ -44,6 +44,40 @@ beforeEach(() => {
 afterEach(() => vi.restoreAllMocks());
 
 describe("SessionExecution background task checkpoints", () => {
+  it("retains the durable steering signal across steps until a correction uses it", async () => {
+    const inbox: SessionInbox = {
+      claimedTokens: [],
+      claimSessionHook: vi.fn(),
+      claimSessionHooks: vi.fn(),
+      drain: () => [],
+      hasPending: () => false,
+      next: vi.fn(),
+      restore: vi.fn(),
+      onDelivery: () => () => {},
+      onInterrupt: () => () => {},
+    };
+    let signal: AbortSignal | undefined;
+    vi.mocked(turnStep)
+      .mockReset()
+      .mockImplementationOnce(async (input) => {
+        signal = input.steeringSignal;
+        return {
+          action: "continue",
+          serializedContext: input.serializedContext,
+          sessionState: input.sessionState,
+        };
+      })
+      .mockImplementationOnce(async (input) => {
+        expect(input.steeringSignal).toBe(signal);
+        return {
+          action: "done",
+          serializedContext: input.serializedContext,
+          sessionState: input.sessionState,
+        };
+      });
+    await createExecution({ inbox, sessionState: state("") }).runTurn(undefined);
+    expect(turnStep).toHaveBeenCalledTimes(2);
+  });
   it.each(["cancel", "reset"] as const)(
     "gives %s precedence over generation steering",
     async (kind) => {

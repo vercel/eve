@@ -61,12 +61,9 @@ async function waitForReviews(t: EveEvalContext, started: EveEvalTurn, taskIds: 
     assert(cursor !== undefined, "parent stream cursor is present");
     const live = t.target.watchTurn(started.sessionId, { startIndex: cursor });
     const turn = await live.result();
-    cursor = live.session.state?.streamIndex;
-    // A result can settle at turn.completed before session.waiting reaches
-    // the stream; that trailing boundary is not a background model turn.
-    if (turn.events.length === 1 && turn.events[0]?.type === "session.waiting") continue;
     expectHealthyTurn(turn);
     turns.push(turn);
+    cursor = live.session.state?.streamIndex;
   }
   assert(allCompleted(turns, taskIds), "all five completion notifications reach the parent");
   assert(turns.length > 1, "background completion wakes the parent");
