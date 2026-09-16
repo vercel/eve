@@ -55,8 +55,11 @@ describe("agentCommand", () => {
     );
   });
 
-  it("leaves a workspace root intact when requested", async () => {
+  it("leaves a workspace root intact without single-agent discovery", async () => {
     const context = workspaceContext();
+    context.resolve = vi.fn(async () => {
+      throw new Error("single-agent discovery must not run for a workspace root");
+    });
     const action = vi.fn(() => expect(context.root).toBe("/repo"));
     const program = new Command().exitOverride();
     agentCommand(program.command("dev"), context, () => true, { preserveWorkspace: true }).action(
