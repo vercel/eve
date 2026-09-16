@@ -89,6 +89,20 @@ describe("summarizeLocalTrace", () => {
     expect(summary.errorCount).toBe(0);
   });
 
+  it("reads legacy GenAI cache details from persisted step spans", () => {
+    const summary = summarizeLocalTrace([
+      span({
+        attributes: {
+          "gen_ai.usage.cache_creation.input_tokens": 20,
+          "gen_ai.usage.cache_read.input_tokens": 40,
+        },
+      }),
+    ]);
+
+    expect(summary.cacheReadTokens).toBe(40);
+    expect(summary.cacheWriteTokens).toBe(20);
+  });
+
   it("reports errors and leaves cost undefined when unreported", () => {
     const summary = summarizeLocalTrace([span({ statusCode: 2 }), span()]);
     expect(summary.errorCount).toBe(1);

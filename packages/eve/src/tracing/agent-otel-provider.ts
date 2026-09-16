@@ -417,6 +417,9 @@ export function createAgentOtelInstrumentation(
       if (event.responseId !== undefined) {
         state.span.setAttribute("gen_ai.response.id", event.responseId);
       }
+      if (event.responseModelId !== undefined) {
+        state.span.setAttribute("gen_ai.response.model", event.responseModelId);
+      }
       state.span.setAttribute("gen_ai.response.finish_reasons", [event.finishReason]);
       const attempt = steps.get(event.scope);
       if (attempt !== undefined) setAgentUsage(attempt.span, event.usage);

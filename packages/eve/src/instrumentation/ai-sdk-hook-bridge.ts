@@ -197,6 +197,7 @@ function toModelCallCompleted(
     content: state.capturesOutputs ? toContentParts(source.content) : undefined,
     finishReason: source.finishReason,
     idempotencyKey,
+    responseModelId: source.modelId,
     responseId: source.responseId,
     scope: state.scope,
     type: "model.call.completed",

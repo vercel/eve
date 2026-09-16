@@ -231,6 +231,7 @@ async function emitAttempt(input: {
           },
         ],
         finishReason: "tool-calls",
+        modelId: "claude-response",
         performance: { responseTimeMs: 10 },
         responseId: "response-1",
         usage: {
@@ -1312,7 +1313,8 @@ describe("createAgentOtelInstrumentation", () => {
     });
     expect(model.attributes).toMatchObject({
       "gen_ai.response.id": "response-1",
-      "gen_ai.usage.cache_creation.input_tokens": 2,
+      "gen_ai.response.model": "claude-response",
+      "gen_ai.usage.cache_write.input_tokens": 2,
       "gen_ai.usage.cache_read.input_tokens": 4,
       "gen_ai.usage.input_tokens": 10,
       "gen_ai.usage.output_tokens": 5,
@@ -1324,12 +1326,12 @@ describe("createAgentOtelInstrumentation", () => {
     });
     expect(tool.kind).toBe(SpanKind.INTERNAL);
     expect(tool.attributes).toMatchObject({
+      "gen_ai.agent.name": "weather",
       "gen_ai.operation.name": "execute_tool",
       "gen_ai.tool.call.id": "tool-1",
       "gen_ai.tool.name": "weather",
       "gen_ai.tool.type": "function",
     });
-    expect(tool.attributes).not.toHaveProperty("gen_ai.agent.name");
   });
 
   it("projects production workflow actions and classifies only GenAI composition", async () => {
