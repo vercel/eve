@@ -75,16 +75,20 @@ export default defineEval({
       await selfMod.assertOnlyChanged([TOOL_PATH]);
       await selfMod.apply();
 
-      for (const [input, reorderUnits] of [
-        [{ onHand: 20, incoming: 30, target: 100 }, 50],
-        [{ onHand: 100, incoming: 25, target: 100 }, 0],
-        [{ onHand: 0, incoming: 0, target: 75 }, 75],
-      ] as const) {
-        const turn = await selfMod.verify(
-          `Call ${TOOL_NAME} once with ${JSON.stringify(input)} and report the recommendation without placing an order.`,
-        );
-        turn.requireToolCall(TOOL_NAME, { input, output: { reorderUnits } });
-      }
+      await Promise.all(
+        (
+          [
+            [{ onHand: 20, incoming: 30, target: 100 }, 50],
+            [{ onHand: 100, incoming: 25, target: 100 }, 0],
+            [{ onHand: 0, incoming: 0, target: 75 }, 75],
+          ] as const
+        ).map(async ([input, reorderUnits]) => {
+          const turn = await selfMod.verify(
+            `Call ${TOOL_NAME} once with ${JSON.stringify(input)} and report the recommendation without placing an order.`,
+          );
+          turn.requireToolCall(TOOL_NAME, { input, output: { reorderUnits } });
+        }),
+      );
       t.succeeded();
     });
   },
