@@ -71,9 +71,11 @@ export interface CreateVercelImageProviderInput {
   }) => OciImagePublisher;
   readonly ensureBaseRuntime?: typeof ensureVercelSandboxBaseRuntime;
   readonly hydrateResources?: typeof hydrateSandboxFromImmutableResources;
+  readonly identityPrefix?: string;
   readonly loadDeleteModule?: () => Promise<VercelDeleteModule>;
   readonly loadModule?: () => Promise<VercelModule>;
   readonly resourcePublisher?: VercelImageResourcePublisher;
+  readonly sessionScope?: "dedicated" | "shared";
   readonly waitForImage?: () => Promise<void>;
 }
 
@@ -93,12 +95,14 @@ export function createVercelImageSandboxProvider(
   const createImagePublisher = input.createImagePublisher ?? createLazyOciImagePublisher;
   const ensureBaseRuntime = input.ensureBaseRuntime ?? ensureVercelSandboxBaseRuntime;
   const hydrateResources = input.hydrateResources ?? hydrateSandboxFromImmutableResources;
+  const identityPrefix = input.identityPrefix ?? VERCEL_IMAGE_PROVIDER_NAME;
   const loadModule =
     input.loadModule ?? (async () => await import("#compiled/@vercel/sandbox-drives/index.js"));
   const loadDeleteModule =
     input.loadDeleteModule ?? (async () => await import("#compiled/@vercel/sandbox/index.js"));
   const resourcePublisher =
     input.resourcePublisher ?? createVercelImageResourcePublisher({ loadModule });
+  const sessionScope = input.sessionScope ?? "dedicated";
   const waitForImage = input.waitForImage ?? (async () => await sleep(2_000));
   const createOptions: VercelCreateOptions = {
     timeout: DEFAULT_SANDBOX_TIMEOUT_MS,
@@ -146,9 +150,7 @@ export function createVercelImageSandboxProvider(
               mounts,
               name: sandboxName,
               persistent: true,
-              tags: resolveVercelSandboxTags(createOptions.tags, {
-                sessionId: context.session.id,
-              }),
+              tags: resolveVercelSandboxTags(createOptions.tags, nativeSessionTags(context)),
             }),
           wait: waitForImage,
         });
@@ -191,7 +193,7 @@ export function createVercelImageSandboxProvider(
       await ensureBaseRuntime(sandbox);
       await ensureVercelSandboxTags(
         sandbox,
-        resolveVercelSandboxTags(createOptions.tags, { sessionId: context.session.id }),
+        resolveVercelSandboxTags(createOptions.tags, nativeSessionTags(context)),
       );
     }
     return {
@@ -243,7 +245,7 @@ export function createVercelImageSandboxProvider(
     },
     async resume(context, options, artifact, stateValue) {
       const state = requireSessionState(stateValue);
-      const expectedName = sessionName(context.session.id, options, artifact);
+      const expectedName = sessionName(identityPrefix, nativeSessionId(context), options, artifact);
       if (state.sandboxName !== expectedName) {
         throw new Error(
           "Vercel image sandbox session state is incompatible with this environment.",
@@ -252,22 +254,36 @@ export function createVercelImageSandboxProvider(
       return (await openSession(context, options, artifact, state.sandboxName)).handle;
     },
     async start(context, options, artifact) {
-      const sandboxName = sessionName(context.session.id, options, artifact);
+      const sandboxName = sessionName(identityPrefix, nativeSessionId(context), options, artifact);
       const result = await openSession(context, options, artifact, sandboxName);
       return { handle: result.handle, state: { sandboxName, version: 1 } };
     },
   };
+
+  function nativeSessionId(
+    context: import("#shared/sandbox-provider.js").SandboxProviderSessionContext,
+  ): string | undefined {
+    return sessionScope === "dedicated" ? context.session.id : undefined;
+  }
+
+  function nativeSessionTags(
+    context: import("#shared/sandbox-provider.js").SandboxProviderSessionContext,
+  ): { readonly sessionId?: string } {
+    const sessionId = nativeSessionId(context);
+    return sessionId === undefined ? {} : { sessionId };
+  }
 }
 
 function sessionName(
-  sessionId: string,
+  identityPrefix: string,
+  sessionId: string | undefined,
   options: Readonly<ExperimentalVercelImageRuntimeOptions> | undefined,
   artifact: SandboxPreparedArtifact,
 ): string {
-  return `eve-sbx-vercel-image-${createSandboxProviderIdentity({
+  return `eve-sbx-${identityPrefix}-${createSandboxProviderIdentity({
     artifact: requirePreparedArtifact(artifact),
     options: { networkPolicy: options?.networkPolicy, resources: options?.resources },
-    sessionId,
+    ...(sessionId === undefined ? {} : { sessionId }),
     version: 1,
   }).slice(0, 32)}`;
 }
