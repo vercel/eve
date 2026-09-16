@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { WorkflowToolRunMessage } from "#execution/tools/workflow/messages.js";
-import { taskRunWorkflow } from "#execution/tasks/child/workflow.js";
+import { runBackgroundWorkflowTool } from "#execution/tools/workflow/background-owner.js";
 import type { TaskView } from "#tasks/types.js";
 import {
   createAuthorizationRequiredEvent,
@@ -145,7 +145,7 @@ const workflowInput = {
   },
 };
 
-describe("taskRunWorkflow", () => {
+describe("runBackgroundWorkflowTool", () => {
   beforeEach(() => {
     vi.resetAllMocks();
     mocks.createHook.mockReturnValue({ token: "task-token" });
@@ -160,7 +160,7 @@ describe("taskRunWorkflow", () => {
     queueOwnerRequest(authorizationRequest("b", true));
     mocks.raceChannelReads.mockResolvedValueOnce({ channel: "commands", next: { done: true } });
 
-    await taskRunWorkflow(workflowInput);
+    await runBackgroundWorkflowTool(workflowInput);
 
     const views = mocks.appendTaskViewStep.mock.calls.slice(-4).map(([input]) => input.view);
     expect(views.map((view) => view.status)).toEqual([
@@ -196,7 +196,7 @@ describe("taskRunWorkflow", () => {
     queueOwnerRequest(message);
     mocks.raceChannelReads.mockResolvedValueOnce({ channel: "commands", next: { done: true } });
 
-    await taskRunWorkflow(workflowInput);
+    await runBackgroundWorkflowTool(workflowInput);
 
     expect(mocks.wakeTaskAuthorizationParentStep).toHaveBeenCalledExactlyOnceWith({
       request: message.request,
@@ -222,7 +222,7 @@ describe("taskRunWorkflow", () => {
         mocks.wakeTaskAuthorizationParentStep.mockRejectedValue(new Error("failed forwarding"));
       }
 
-      await expect(taskRunWorkflow(workflowInput)).rejects.toThrow(`failed ${failure}`);
+      await expect(runBackgroundWorkflowTool(workflowInput)).rejects.toThrow(`failed ${failure}`);
       expect(mocks.resumeHookStep).not.toHaveBeenCalled();
     },
   );
@@ -239,7 +239,7 @@ describe("taskRunWorkflow", () => {
       })
       .mockResolvedValueOnce({ channel: "commands", next: { done: true, value: undefined } });
 
-    await taskRunWorkflow(workflowInput);
+    await runBackgroundWorkflowTool(workflowInput);
 
     expect(mocks.wakeTaskAgentRequestParentStep).toHaveBeenCalledWith({
       request: workflowAgentRequest,
@@ -254,7 +254,7 @@ describe("taskRunWorkflow", () => {
       next: { done: true, value: undefined },
     });
 
-    await taskRunWorkflow({
+    await runBackgroundWorkflowTool({
       initialView,
       parentContinuationToken: "parent-token",
       taskInboxToken: "task-token",
@@ -283,7 +283,7 @@ describe("taskRunWorkflow", () => {
       })
       .mockResolvedValueOnce({ channel: "commands", next: { done: true, value: undefined } });
 
-    await taskRunWorkflow({
+    await runBackgroundWorkflowTool({
       initialView,
       parentContinuationToken: "parent-token",
       taskInboxToken: "task-token",
@@ -311,31 +311,32 @@ describe("taskRunWorkflow", () => {
   it.each(["tool", "subagent"])(
     "routes %s progress without changing subagent delivery",
     async (kind) => {
-      const update = {
-        callId: "call-1",
-        kind: "task-update" as const,
-        message: "progress",
-        updateEpoch: "task-1",
-        updateIndex: 0,
+      const report = {
+        from: { ...bufferedAgentRequest.from, callId: "call-1" },
+        update: "progress",
       };
       mocks.raceChannelReads
-        .mockResolvedValueOnce({ channel: "commands", next: { done: false, value: update } })
-        .mockResolvedValueOnce({
-          channel: "commands",
-          next: {
-            done: false,
-            value: {
-              command: { data: "done", kind: "complete" },
-              kind: "task-command",
-            },
-          },
-        })
         .mockResolvedValueOnce({
           channel: "commands",
           next: { done: false, value: { command: { kind: "ready" }, kind: "task-command" } },
+        })
+        .mockResolvedValueOnce({
+          channel: "workflow",
+          next: { done: false, value: { ...report, kind: "report" } },
+        })
+        .mockResolvedValueOnce({
+          channel: "workflow",
+          next: {
+            done: false,
+            value: {
+              from: report.from,
+              kind: "outcome",
+              result: { status: "completed", output: "done" },
+            },
+          },
         });
 
-      await taskRunWorkflow({
+      await runBackgroundWorkflowTool({
         ...workflowInput,
         initialView: { ...initialView, metadata: { ...initialView.metadata, kind } },
       });
@@ -344,8 +345,9 @@ describe("taskRunWorkflow", () => {
         expect(mocks.appendTaskProgressStep).not.toHaveBeenCalled();
         expect(mocks.wakeTaskUpdateParentStep).toHaveBeenCalledWith({
           token: "parent-token",
-          update,
-          view: expect.objectContaining({ status: "completed" }),
+          report: expect.objectContaining(report),
+          updateIndex: 0,
+          view: expect.objectContaining({ status: "working" }),
         });
         expect(mocks.wakeTaskUpdateParentStep.mock.invocationCallOrder[0]).toBeLessThan(
           mocks.wakeTaskParentStep.mock.invocationCallOrder[0]!,
@@ -387,7 +389,7 @@ describe("taskRunWorkflow", () => {
         },
       });
 
-    await taskRunWorkflow({
+    await runBackgroundWorkflowTool({
       initialView,
       parentContinuationToken: "parent-token",
       taskInboxToken: "task-token",
@@ -433,7 +435,7 @@ describe("taskRunWorkflow", () => {
         },
       });
 
-    await taskRunWorkflow({
+    await runBackgroundWorkflowTool({
       initialView,
       parentContinuationToken: "parent-token",
       taskInboxToken: "task-token",
@@ -490,7 +492,7 @@ describe("taskRunWorkflow", () => {
           },
         },
       });
-    await taskRunWorkflow({
+    await runBackgroundWorkflowTool({
       initialView,
       parentContinuationToken: "parent-token",
       taskInboxToken: "task-token",

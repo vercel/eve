@@ -13,17 +13,14 @@ export interface WorkflowToolRunControlInbox {
   readonly signal: AbortSignal;
   /** Rejects with {@link WorkflowToolRunCancelledError} when a cancel message arrives; never resolves. */
   readonly cancelled: Promise<never>;
-  reason(): string | undefined;
 }
 
 export function openWorkflowToolRunControlInbox(hookToken: string): WorkflowToolRunControlInbox {
   const hook = createHook<WorkflowToolRunControlMessage>({ token: hookToken });
   const iterator = hook[Symbol.asyncIterator]();
   const controller = new AbortController();
-  let cancelReason: string | undefined;
 
   const cancelled = consumeCancel(iterator, (reason) => {
-    cancelReason = reason;
     controller.abort(new WorkflowToolRunCancelledError(reason));
   });
   // Racing drives the read; a lone reference must not surface as unhandled.
@@ -31,7 +28,6 @@ export function openWorkflowToolRunControlInbox(hookToken: string): WorkflowTool
 
   return {
     cancelled,
-    reason: () => cancelReason,
     signal: controller.signal,
   };
 }

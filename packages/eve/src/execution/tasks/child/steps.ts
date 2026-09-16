@@ -3,8 +3,9 @@ import type { ActivityObserverConfig, SessionAuthContext, SessionCommand } from 
 import type {
   WorkflowToolAuthorizationRequest,
   WorkflowToolRunRequestMessage,
+  WorkflowToolRunReport,
 } from "#execution/tools/workflow/messages.js";
-import type { WorkflowToolRunTaskInputRequest } from "./workflow.js";
+import { workflowToolRunInputRequests } from "#execution/tools/workflow/owner-inbox.js";
 import { submitActivity } from "#execution/submit-activity.js";
 import { isTaskWorkflowTargetGone } from "#execution/tasks/workflow-target.js";
 import { resumeSessionInbox } from "#execution/session-inbox/resume.js";
@@ -21,7 +22,6 @@ import {
   type TaskAgentRequestDelivery,
   type TaskAuthorizationEventDelivery,
   type TaskInboundAnswerInput,
-  type TaskInboundUpdate,
   type TaskInputRequestDelivery,
   type TaskProgress,
   type TaskView,
@@ -141,7 +141,8 @@ export async function wakeTaskParentStep(input: {
 /** Forwards a running child's intermediate update to its parent session. */
 export async function wakeTaskUpdateParentStep(input: {
   readonly token: string;
-  readonly update: TaskInboundUpdate;
+  readonly report: WorkflowToolRunReport;
+  readonly updateIndex: number;
   readonly view: TaskView;
 }): Promise<void> {
   "use step";
@@ -149,9 +150,9 @@ export async function wakeTaskUpdateParentStep(input: {
   const command: SessionCommand = {
     kind: "send",
     payload: {
-      message: `Background task ${input.view.taskId} (${input.view.metadata.name}) update: ${input.update.message}`,
+      message: `Background task ${input.view.taskId} (${input.view.metadata.name}) update: ${formatTaskOutput(input.report.update)}`,
     },
-    taskDeliveryId: `${input.view.taskId}:update:${input.update.updateEpoch}:${input.update.updateIndex}:${input.update.callId}`,
+    taskDeliveryId: `${input.view.taskId}:update:${input.view.taskId}:${input.updateIndex}:${input.report.from.callId}`,
   };
   try {
     await resumeSessionInbox(input.token, command);
@@ -223,30 +224,22 @@ export async function wakeTaskAuthorizationParentStep(input: {
 
 /** Sends a workflow-body question to the owning parent's pre-model router. */
 export async function wakeWorkflowTaskInputRequestParentStep(input: {
-  readonly request: WorkflowToolRunTaskInputRequest;
+  readonly request: WorkflowToolRunRequestMessage;
   readonly taskId: string;
   readonly token: string;
 }): Promise<void> {
   "use step";
 
-  const delivery: TaskInputRequestDelivery =
-    input.request.requests === undefined
-      ? {
-          replyTo: input.request.replyTo,
-          request: input.request.request,
-          sequence: input.request.sequence,
-          stepIndex: input.request.stepIndex,
-          taskId: input.taskId,
-          turnId: input.request.turnId,
-        }
-      : {
-          replyTo: input.request.replyTo,
-          requests: input.request.requests,
-          sequence: input.request.sequence,
-          stepIndex: input.request.stepIndex,
-          taskId: input.taskId,
-          turnId: input.request.turnId,
-        };
+  const coordinates = input.request.requestCoordinates ?? input.request.from;
+  const requests = workflowToolRunInputRequests(input.request);
+  const delivery: TaskInputRequestDelivery = {
+    replyTo: input.request.replyTo,
+    requests,
+    sequence: coordinates.sequence,
+    stepIndex: coordinates.stepIndex,
+    taskId: input.taskId,
+    turnId: coordinates.turnId,
+  };
   const command: SessionCommand = {
     kind: "send",
     payload: {
@@ -254,7 +247,7 @@ export async function wakeWorkflowTaskInputRequestParentStep(input: {
         inputRequests: [delivery],
       },
     },
-    taskDeliveryId: `${input.taskId}:input:${input.request.turnId}:${input.request.stepIndex}:${input.request.sequence}`,
+    taskDeliveryId: `${input.taskId}:input:${coordinates.turnId}:${coordinates.stepIndex}:${coordinates.sequence}`,
   };
   try {
     await resumeSessionInbox(input.token, command);

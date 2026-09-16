@@ -26,7 +26,6 @@ const task = {
   metadata,
   activityWorkIdentity: activity,
   futureTask: { revision: 2 },
-  executor: { kind: "workflow", data: {}, futureExecutor: true },
   terminalView: {
     taskId: "task",
     metadata,
@@ -38,10 +37,6 @@ const task = {
       cacheReadTokens: 0,
       cacheWriteTokens: 0,
       futureUsage: true,
-    },
-    executor: {
-      futureExecutor: true,
-      binding: { kind: "workflow", data: {}, futureBinding: true },
     },
     futureView: true,
   },
@@ -115,7 +110,6 @@ describe("additive durable state", () => {
       dispatchContext: { auth: { current: null, initiator: null } },
       metadata,
       activityWorkIdentity: { id: "work", kind: "task", rootSessionId: "root", rootTurnId: "turn" },
-      executor: { kind: "workflow", data: {} },
     });
     const saved = cacheTerminalTaskView(updated.state, {
       taskId: "task",
@@ -123,7 +117,6 @@ describe("additive durable state", () => {
       status: "completed",
       lastOutput: { type: "result", data: "updated" },
       usage: { inputTokens: 3, outputTokens: 4, cacheReadTokens: 0, cacheWriteTokens: 0 },
-      executor: { binding: { kind: "workflow", data: {} } },
     });
     expect(restored(saved)).toMatchObject({
       authored: { opaque: true },
@@ -134,12 +127,10 @@ describe("additive durable state", () => {
             futureTask: { revision: 2 },
             taskRunId: "new-run",
             activityWorkIdentity: activity,
-            executor: { futureExecutor: true },
             terminalView: {
               futureView: true,
               lastOutput: { data: "updated", futureOutput: true },
               usage: { inputTokens: 3, futureUsage: true },
-              executor: { futureExecutor: true, binding: { futureBinding: true } },
             },
           },
         ],

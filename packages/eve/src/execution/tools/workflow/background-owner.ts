@@ -1,6 +1,5 @@
 import { createHook } from "#compiled/@workflow/core/index.js";
 
-import type { ActivityObserverConfig } from "#channel/types.js";
 import { claimHookOwnership, isHookConflictError } from "#execution/hook-ownership.js";
 import {
   appendTaskProgressStep,
@@ -12,72 +11,42 @@ import {
   wakeTaskUpdateParentStep,
   wakeWorkflowTaskInputRequestParentStep,
 } from "#execution/tasks/child/steps.js";
-import type { WorkflowBodyDefinition } from "#execution/tools/workflow/body.js";
+import type { BackgroundWorkflowToolRunInput } from "#execution/tools/workflow/types.js";
 import { createWorkflowToolInvocationReader } from "#execution/tools/workflow/invocation.js";
 import { resumeHookStep } from "#execution/tools/workflow/resume-hook-step.js";
 import type {
   WorkflowToolAuthorizationRequest,
   WorkflowToolRunRequestMessage,
+  WorkflowToolRunReport,
+  WorkflowToolRunMessage,
 } from "#execution/tools/workflow/messages.js";
 import { createChannelReader, raceChannelReads } from "#execution/tools/workflow/owner-channels.js";
-import {
-  workflowToolRunOutcomeToTaskCommand,
-  workflowToolRunReportToTaskPayload,
-  workflowToolRunRequestToTaskInputRequest,
-} from "#execution/tools/workflow/owner-inbox.js";
+import { workflowToolRunInputRequests } from "#execution/tools/workflow/owner-inbox.js";
 import type { AnswerHookRoute } from "#harness/proxy-input-requests.js";
 import { applyTaskTransition } from "#tasks/transitions.js";
 import {
-  isReadyTaskStatus,
   isTerminalTaskStatus,
   readTaskInputRequestId,
   type TaskCommand,
   type TaskInboundAnswerInput,
-  type TaskInputRequest,
-  type TaskInboundUpdate,
   type TaskRunInboundPayload,
   type TaskView,
 } from "#tasks/types.js";
 
-export interface TaskRunWorkflowInput {
-  readonly activityObserver?: ActivityObserverConfig;
-  readonly initialView: TaskView;
-  readonly parentContinuationToken: string;
-  readonly taskInboxToken: string;
-  readonly workflow: WorkflowBodyDefinition;
-}
-
-/** A workflow-body question routed through the task that owns the workflow tool run. */
-interface WorkflowToolRunTaskInputRequestBase {
-  readonly kind: "task-input-request";
-  readonly replyTo: string;
-  readonly sequence: number;
-  readonly stepIndex: number;
-  readonly turnId: string;
-}
-
-export type WorkflowToolRunTaskInputRequest = WorkflowToolRunTaskInputRequestBase &
-  (
-    | { readonly request: TaskInputRequest; readonly requests?: never }
-    | { readonly request?: never; readonly requests: readonly TaskInputRequest[] }
-  );
-
-/** Owns lifecycle for one background task and consumes its executor traffic. */
-export async function taskRunWorkflow(input: TaskRunWorkflowInput): Promise<void> {
-  "use workflow";
-
+/** Admits a session-owned invocation and projects its messages into session state and delivery. */
+export async function runBackgroundWorkflowTool(
+  input: BackgroundWorkflowToolRunInput,
+): Promise<void> {
   const commands = createHook<TaskRunInboundPayload>({ token: input.taskInboxToken });
   const commandReader = createChannelReader("commands", commands);
   let view = input.initialView;
   let dispatchAcknowledged = false;
   let dispatchRejected = false;
-  let pendingInputRequest: WorkflowToolRunTaskInputRequest | undefined;
-  let pendingUpdates: TaskInboundUpdate[] = [];
   let updateIndex = 0;
   const answerHooks = new Map<string, AnswerHookRoute>();
   const bodyController = new AbortController();
   let invocationReader: ReturnType<typeof createWorkflowToolInvocationReader> | undefined;
-  let executorSettled = false;
+  let invocationSettled = false;
 
   try {
     await claimHookOwnership(commands);
@@ -97,16 +66,17 @@ export async function taskRunWorkflow(input: TaskRunWorkflowInput): Promise<void
     if (read.channel === "workflow") {
       const message = read.next.value;
       if (message.kind === "report") {
-        await applyPayload(workflowToolRunReportToTaskPayload(message, view.taskId, updateIndex++));
+        await handleReport(message);
         continue;
       }
       if (message.kind === "outcome") {
-        executorSettled = true;
-        await applyPayload({
-          command: workflowToolRunOutcomeToTaskCommand(message),
-          kind: "task-command",
-        });
-        if (view.status === "cancelled" && dispatchAcknowledged && !dispatchRejected) {
+        invocationSettled = true;
+        const transitioned = await transitionTask(message);
+        if (
+          (transitioned || view.status === "cancelled") &&
+          dispatchAcknowledged &&
+          !dispatchRejected
+        ) {
           await wakeTaskParentStep({ token: input.parentContinuationToken, view });
         }
         continue;
@@ -120,7 +90,18 @@ export async function taskRunWorkflow(input: TaskRunWorkflowInput): Promise<void
       if (request.requestCoordinates === undefined) {
         answerHooks.set(request.replyTo, { runId: request.from.runId });
       }
-      await applyPayload(workflowToolRunRequestToTaskInputRequest(request));
+      if (
+        await transitionTask({
+          kind: "require-input",
+          inputRequests: workflowToolRunInputRequests(request),
+        })
+      ) {
+        await wakeWorkflowTaskInputRequestParentStep({
+          request,
+          taskId: view.taskId,
+          token: input.parentContinuationToken,
+        });
+      }
       continue;
     }
 
@@ -128,33 +109,33 @@ export async function taskRunWorkflow(input: TaskRunWorkflowInput): Promise<void
   }
 
   function isFinished(): boolean {
-    return isTerminalTaskStatus(view.status) && dispatchAcknowledged && executorSettled;
+    return isTerminalTaskStatus(view.status) && dispatchAcknowledged && invocationSettled;
   }
 
-  async function handleUpdate(update: TaskInboundUpdate): Promise<void> {
+  async function handleReport(report: WorkflowToolRunReport): Promise<void> {
+    const index = updateIndex++;
+    if (dispatchRejected || isTerminalTaskStatus(view.status)) return;
     if (view.metadata.kind === "subagent") {
-      if (dispatchRejected) return;
-      if (dispatchAcknowledged && !isTerminalTaskStatus(view.status)) {
-        await wakeTaskUpdateParentStep({ token: input.parentContinuationToken, update, view });
-      } else {
-        pendingUpdates.push(update);
-      }
+      await wakeTaskUpdateParentStep({
+        token: input.parentContinuationToken,
+        report,
+        updateIndex: index,
+        view,
+      });
       return;
     }
     await appendTaskProgressStep({
       progress: {
-        callId: update.callId,
+        callId: report.from.callId,
         kind: "task-progress",
         taskId: view.taskId,
-        update: update.message,
-        updateIndex: update.updateIndex,
+        update: typeof report.update === "string" ? report.update : JSON.stringify(report.update),
+        updateIndex: index,
       },
     });
   }
 
-  async function applyPayload(
-    payload: TaskRunInboundPayload | WorkflowToolRunTaskInputRequest,
-  ): Promise<void> {
+  async function applyPayload(payload: TaskRunInboundPayload): Promise<void> {
     const isReady = payload.kind === "task-command" && payload.command.kind === "ready";
     const isRejected =
       payload.kind === "task-command" && payload.command.kind === "reject-dispatch";
@@ -162,19 +143,13 @@ export async function taskRunWorkflow(input: TaskRunWorkflowInput): Promise<void
     if (isRejected) dispatchRejected = true;
     if (isReady || isRejected) {
       if (isRejected || isTerminalTaskStatus(view.status)) {
-        executorSettled = true;
-      } else if (invocationReader === undefined && !executorSettled) {
+        invocationSettled = true;
+      } else if (invocationReader === undefined && !invocationSettled) {
         invocationReader = createWorkflowToolInvocationReader(
           { ...input.workflow, execution: "background" },
           bodyController.signal,
         );
       }
-    }
-
-    if (payload.kind === "task-input-request") pendingInputRequest = payload;
-    if (payload.kind === "task-update") {
-      await handleUpdate(payload);
-      return;
     }
 
     let command: TaskCommand | undefined;
@@ -187,11 +162,6 @@ export async function taskRunWorkflow(input: TaskRunWorkflowInput): Promise<void
               answerHooks.get(payload.childContinuationToken),
             )
           : undefined;
-    } else if (payload.kind === "task-input-request") {
-      command = {
-        inputRequests: payload.requests ?? [payload.request],
-        kind: "require-input",
-      };
     } else if (payload.kind === "task-command") {
       command = payload.command;
     } else {
@@ -199,7 +169,6 @@ export async function taskRunWorkflow(input: TaskRunWorkflowInput): Promise<void
     }
     if (command === undefined) return;
     if (isReady && isTerminalTaskStatus(view.status)) {
-      await flushUpdates(true);
       await wakeTaskParentStep({ token: input.parentContinuationToken, view });
       return;
     }
@@ -209,43 +178,22 @@ export async function taskRunWorkflow(input: TaskRunWorkflowInput): Promise<void
     if (!accepted) return;
     if (command.kind === "cancel") {
       bodyController.abort(new Error(`Task ${view.taskId} was cancelled.`));
-      if (invocationReader === undefined) executorSettled = true;
+      if (invocationReader === undefined) invocationSettled = true;
     }
-    if (!isTerminalTaskStatus(view.status)) await flushUpdates();
     if (
-      pendingInputRequest !== undefined &&
-      dispatchAcknowledged &&
-      view.status === "input_required"
-    ) {
-      await wakeWorkflowTaskInputRequestParentStep({
-        request: pendingInputRequest,
-        taskId: view.taskId,
-        token: input.parentContinuationToken,
-      });
-      pendingInputRequest = undefined;
-    } else if (
       !dispatchRejected &&
       dispatchAcknowledged &&
-      (command.kind !== "cancel" || executorSettled) &&
-      ((!isTerminalTaskStatus(previous.status) && isTerminalTaskStatus(view.status)) ||
-        (!isReadyTaskStatus(previous.status) &&
-          isReadyTaskStatus(view.status) &&
-          pendingInputRequest === undefined))
+      (command.kind !== "cancel" || invocationSettled) &&
+      !isTerminalTaskStatus(previous.status) &&
+      isTerminalTaskStatus(view.status)
     ) {
       await wakeTaskParentStep({ token: input.parentContinuationToken, view });
     }
-    if (view.status !== "input_required") pendingInputRequest = undefined;
   }
 
-  async function flushUpdates(includeTerminal = false): Promise<void> {
-    if (!dispatchAcknowledged || (isTerminalTaskStatus(view.status) && !includeTerminal)) return;
-    for (const update of pendingUpdates) {
-      await wakeTaskUpdateParentStep({ token: input.parentContinuationToken, update, view });
-    }
-    pendingUpdates = [];
-  }
-
-  async function transitionTask(command: TaskCommand): Promise<boolean> {
+  async function transitionTask(
+    command: TaskCommand | Extract<WorkflowToolRunMessage, { kind: "outcome" }>,
+  ): Promise<boolean> {
     const result = applyTaskTransition(view, command);
     if (result.action !== "accepted") return false;
     view = result.view;

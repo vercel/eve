@@ -3,7 +3,6 @@ import { z } from "#compiled/zod/index.js";
 import type { HarnessSession, SessionStateMap } from "#harness/types.js";
 import { parseActivityWorkIdentityV1, type ActivityWorkIdentityV1 } from "#protocol/activity.js";
 import type { JsonValue } from "#shared/json.js";
-import type { TaskExecutorBinding } from "#tools/task.js";
 import { sameTaskMetadata, type TaskMetadata, type TaskView } from "#tasks/types.js";
 import { type DurableDynamicSubagentSelection, type SessionAuth } from "#context/keys.js";
 import {
@@ -44,7 +43,6 @@ export interface SessionTaskIndexEntry {
   readonly createdByTurnId: string;
   /** Immutable join target; absent on the task that starts a cohort. */
   readonly cohortId?: string;
-  readonly executor?: TaskExecutorBinding;
   readonly metadata: TaskMetadata;
 }
 
@@ -97,16 +95,6 @@ const sessionTaskDispatchContextSchema = z.union([
 const taskViewBaseShape = {
   // Terminal views never carry pending requests; the loose object must say so explicitly.
   inputRequests: z.never().optional(),
-  executor: z
-    .looseObject({
-      binding: z
-        .looseObject({
-          data: z.record(z.string(), z.custom<JsonValue>()),
-          kind: z.string().min(1),
-        })
-        .optional(),
-    })
-    .optional(),
   metadata: taskMetadataSchema,
   taskId: z.string().min(1),
   usage: z
@@ -157,12 +145,6 @@ const storedSessionTaskIndexEntrySchema: z.ZodType<StoredSessionTaskIndexEntry> 
   createdByTurnId: z.string().min(1),
   cohortId: z.string().min(1).optional(),
   dispatchContext: sessionTaskDispatchContextSchema.optional(),
-  executor: z
-    .looseObject({
-      data: z.record(z.string(), z.custom<JsonValue>()),
-      kind: z.string().min(1),
-    })
-    .optional(),
   metadata: taskMetadataSchema,
   taskId: z.string().min(1),
   taskRunId: z.string().min(1),
@@ -266,20 +248,6 @@ export function cacheTerminalTaskView(
               ...view.lastOutput,
             },
       usage: view.usage === undefined ? undefined : { ...previous?.usage, ...view.usage },
-      executor:
-        view.executor === undefined
-          ? undefined
-          : {
-              ...previous?.executor,
-              ...view.executor,
-              binding:
-                view.executor.binding === undefined
-                  ? undefined
-                  : {
-                      ...previous?.executor?.binding,
-                      ...view.executor.binding,
-                    },
-            },
     }),
   };
   return {
@@ -336,10 +304,6 @@ export function recordSessionTask(
               ...previous.activityWorkIdentity,
               ...entry.activityWorkIdentity,
             },
-      executor:
-        entry.executor === undefined
-          ? previous.executor
-          : { ...previous.executor, ...entry.executor },
       cohortId: previous.cohortId,
       createdByStepIndex: previous.createdByStepIndex,
       createdByTurnId: previous.createdByTurnId,

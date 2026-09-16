@@ -2,7 +2,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { cancelOwnedTask, isTaskControlAction } from "#execution/tasks/parent/dispatch.js";
 import { readLatestTaskView, sendTaskCommand } from "#execution/tasks/parent/run-parent.js";
-import { cancelWorkflowToolRun } from "#execution/tools/workflow/cancel.js";
 import { resumeSessionInbox } from "#execution/session-inbox/resume.js";
 
 const { cancelRun, getRun } = vi.hoisted(() => ({
@@ -14,7 +13,6 @@ vi.mock("#execution/tasks/parent/run-parent.js", () => ({
   readLatestTaskView: vi.fn(),
   sendTaskCommand: vi.fn(),
 }));
-vi.mock("#execution/tools/workflow/cancel.js", () => ({ cancelWorkflowToolRun: vi.fn() }));
 vi.mock("#execution/session-inbox/resume.js", () => ({ resumeSessionInbox: vi.fn() }));
 vi.mock("#internal/workflow/runtime.js", () => ({
   cancelRun,
@@ -25,7 +23,6 @@ vi.mock("#internal/workflow/runtime.js", () => ({
 const entry = {
   createdByTurnId: "turn-1",
   dispatchContext: { auth: { current: null, initiator: null } },
-  executor: { data: { hookToken: "run-hook", runId: "run-1" }, kind: "workflow-tool" },
   metadata: { kind: "tool", name: "export" },
   taskId: "task-1",
   taskInboxToken: "task-token",
@@ -46,7 +43,6 @@ describe("task cancellation", () => {
 
   it("cancels task-owned work after cancellation commits", async () => {
     vi.mocked(readLatestTaskView).mockResolvedValue({
-      executor: { binding: entry.executor },
       metadata: entry.metadata,
       status: "cancelled",
       taskId: entry.taskId,
@@ -58,26 +54,8 @@ describe("task cancellation", () => {
       command: { kind: "cancel" },
       taskInboxToken: "task-token",
     });
-    expect(cancelWorkflowToolRun).toHaveBeenCalledWith(
-      { hookToken: "run-hook", runId: "run-1" },
-      "Task task-1 was cancelled.",
-    );
     expect(cancelRun).not.toHaveBeenCalled();
     expect(resumeSessionInbox).not.toHaveBeenCalled();
-  });
-
-  it("does not reinterpret an unknown executor binding", async () => {
-    const external = { data: { id: "external" }, kind: "external" };
-    vi.mocked(readLatestTaskView).mockResolvedValue({
-      executor: { binding: external },
-      metadata: entry.metadata,
-      status: "cancelled",
-      taskId: entry.taskId,
-    });
-    const cancelled = cancelOwnedTask({ entry: { ...entry, executor: external } });
-    await vi.runAllTimersAsync();
-    await cancelled;
-    expect(cancelWorkflowToolRun).not.toHaveBeenCalled();
   });
 
   it("retries child cancellation after the cancelled task's inbox has closed", async () => {
@@ -119,7 +97,6 @@ describe("task cancellation", () => {
     const cancelOwnedWork = vi.fn();
     await cancelOwnedTask({ cancelOwnedWork, entry });
     expect(cancelOwnedWork).not.toHaveBeenCalled();
-    expect(cancelWorkflowToolRun).not.toHaveBeenCalled();
   });
 
   it("hard-cancels a task run that does not unwind cooperatively", async () => {
@@ -185,7 +162,6 @@ describe("task cancellation", () => {
     getRun.mockReturnValue({ status: Promise.resolve("cancelled") });
     await expect(cancelOwnedTask({ entry, session })).resolves.toEqual(view);
     expect(cancelRun).toHaveBeenCalledTimes(1);
-    expect(cancelWorkflowToolRun).toHaveBeenCalledTimes(2);
     expect(resumeSessionInbox).toHaveBeenCalledTimes(2);
     expect(vi.mocked(resumeSessionInbox).mock.calls[1]).toEqual(
       vi.mocked(resumeSessionInbox).mock.calls[0],

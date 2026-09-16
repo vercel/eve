@@ -1,11 +1,10 @@
-import { jsonValuesEqual } from "#shared/json.js";
+import type { WorkflowToolRunOutcomeMessage } from "#execution/tools/workflow/messages.js";
+import { workflowToolRunFailureOutput } from "#execution/tools/workflow/owner-inbox.js";
 import {
   isTerminalTaskStatus,
   readTaskInputRequestId,
   type TaskCommand,
   type TaskInputRequest,
-  type TaskOutput,
-  type TaskUsage,
   type TaskView,
 } from "#tasks/types.js";
 
@@ -14,55 +13,11 @@ export type TaskTransitionResult =
   | { readonly action: "noop"; readonly view: TaskView }
   | { readonly action: "rejected"; readonly view: TaskView; readonly reason: string };
 
-function terminalView(
+/** Pure transition function for the background invocation view. */
+export function applyTaskTransition(
   view: TaskView,
-  command: Extract<TaskCommand, { kind: "complete" | "fail" | "reject-dispatch" | "cancel" }>,
-  settled:
-    | { readonly lastOutput: Extract<TaskOutput, { type: "result" }>; readonly status: "completed" }
-    | { readonly lastOutput: Extract<TaskOutput, { type: "error" }>; readonly status: "failed" }
-    | { readonly status: "cancelled" },
-): TaskView {
-  const usage = "usage" in command ? command.usage : undefined;
-  const base: Pick<TaskView, "executor" | "metadata" | "taskId"> & { usage?: TaskUsage } = {
-    executor: view.executor,
-    metadata: view.metadata,
-    taskId: view.taskId,
-  };
-  if (usage !== undefined) base.usage = usage;
-  switch (settled.status) {
-    case "completed":
-      return { ...base, lastOutput: settled.lastOutput, status: "completed" };
-    case "failed":
-      return { ...base, lastOutput: settled.lastOutput, status: "failed" };
-    case "cancelled":
-      return { ...base, status: "cancelled" };
-  }
-}
-
-/** Pure, executor-neutral transition function for one durable task. */
-export function applyTaskTransition(view: TaskView, command: TaskCommand): TaskTransitionResult {
-  if (command.kind === "bind") {
-    const binding = view.executor?.binding;
-    if (
-      binding !== undefined &&
-      binding.kind === command.executor.kind &&
-      jsonValuesEqual(binding.data, command.executor.data)
-    ) {
-      return { action: "noop", view };
-    }
-    if (binding !== undefined) {
-      return {
-        action: "rejected",
-        reason: `Task "${view.taskId}" already has an executor binding.`,
-        view,
-      };
-    }
-    return {
-      action: "accepted",
-      view: { ...view, executor: { ...view.executor, binding: command.executor } },
-    };
-  }
-
+  command: TaskCommand | ({ readonly kind: "outcome" } & WorkflowToolRunOutcomeMessage),
+): TaskTransitionResult {
   if (isTerminalTaskStatus(view.status)) {
     if (command.kind === "cancel" && view.status === "cancelled") {
       return { action: "noop", view };
@@ -74,26 +29,38 @@ export function applyTaskTransition(view: TaskView, command: TaskCommand): TaskT
     };
   }
 
+  const base = { metadata: view.metadata, taskId: view.taskId };
+  if (command.kind === "outcome") {
+    const result = command.result;
+    return {
+      action: "accepted",
+      view:
+        result.status === "completed"
+          ? { ...base, status: "completed", lastOutput: { type: "result", data: result.output } }
+          : result.status === "failed"
+            ? {
+                ...base,
+                status: "failed",
+                lastOutput: { type: "error", data: workflowToolRunFailureOutput(command) },
+              }
+            : { ...base, status: "cancelled" },
+    };
+  }
+
   switch (command.kind) {
-    case "complete":
-      return {
-        action: "accepted",
-        view: terminalView(view, command, {
-          lastOutput: { data: command.data, type: "result" },
-          status: "completed",
-        }),
-      };
-    case "fail":
     case "reject-dispatch":
       return {
         action: "accepted",
-        view: terminalView(view, command, {
-          lastOutput: { data: command.data, type: "error" },
-          status: "failed",
-        }),
+        view: { ...base, lastOutput: { data: command.data, type: "error" }, status: "failed" },
       };
     case "cancel":
-      return { action: "accepted", view: terminalView(view, command, { status: "cancelled" }) };
+      return {
+        action: "accepted",
+        view:
+          command.usage === undefined
+            ? { ...base, status: "cancelled" }
+            : { ...base, status: "cancelled", usage: command.usage },
+      };
     case "require-input":
       if (!isValidInputRequestBatch(command.inputRequests)) {
         return {
@@ -106,7 +73,6 @@ export function applyTaskTransition(view: TaskView, command: TaskCommand): TaskT
         action: "accepted",
         view: {
           inputRequests: command.inputRequests,
-          executor: view.executor,
           metadata: view.metadata,
           status: "input_required",
           taskId: view.taskId,
@@ -131,7 +97,6 @@ export function applyTaskTransition(view: TaskView, command: TaskCommand): TaskT
       return {
         action: "accepted",
         view: {
-          executor: view.executor,
           metadata: view.metadata,
           status: "working",
           taskId: view.taskId,

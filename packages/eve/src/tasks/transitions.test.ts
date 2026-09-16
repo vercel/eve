@@ -13,34 +13,6 @@ function view(status: TaskStatus, overrides: Partial<TaskView> = {}): TaskView {
 }
 
 describe("applyTaskTransition", () => {
-  it("binds one opaque executor idempotently", () => {
-    const command = {
-      executor: { data: { runId: "run-1" }, kind: "workflow-tool" },
-      kind: "bind",
-    } as const;
-    const bound = applyTaskTransition(view("working"), command);
-    expect(bound).toMatchObject({
-      action: "accepted",
-      view: { executor: { binding: command.executor } },
-    });
-    expect(applyTaskTransition(bound.view, command).action).toBe("noop");
-    expect(
-      applyTaskTransition(bound.view, {
-        executor: { data: { runId: "run-2" }, kind: "workflow-tool" },
-        kind: "bind",
-      }).action,
-    ).toBe("rejected");
-  });
-
-  it("retains a late binding after fast completion", () => {
-    const completed = applyTaskTransition(view("working"), { data: "done", kind: "complete" });
-    const bound = applyTaskTransition(completed.view, {
-      executor: { data: { runId: "run-1" }, kind: "workflow-tool" },
-      kind: "bind",
-    });
-    expect(bound).toMatchObject({ action: "accepted", view: { status: "completed" } });
-  });
-
   it("moves through input, answer, and completion", () => {
     const blocked = applyTaskTransition(view("working"), {
       inputRequests: [{ prompt: "Continue?", requestId: "req-1" }],
@@ -49,7 +21,7 @@ describe("applyTaskTransition", () => {
     expect(blocked).toMatchObject({ action: "accepted", view: { status: "input_required" } });
     const resumed = applyTaskTransition(blocked.view, { kind: "answered", requestIds: ["req-1"] });
     expect(resumed).toMatchObject({ action: "accepted", view: { status: "working" } });
-    const completed = applyTaskTransition(resumed.view, { data: { answer: 42 }, kind: "complete" });
+    const completed = applyTaskTransition(resumed.view, outcome({ answer: 42 }));
     expect(completed).toMatchObject({
       action: "accepted",
       view: { lastOutput: { data: { answer: 42 }, type: "result" }, status: "completed" },
@@ -72,8 +44,23 @@ describe("applyTaskTransition", () => {
     const cancelled = applyTaskTransition(view("working"), { kind: "cancel" });
     expect(cancelled).toMatchObject({ action: "accepted", view: { status: "cancelled" } });
     expect(applyTaskTransition(cancelled.view, { kind: "cancel" }).action).toBe("noop");
-    expect(applyTaskTransition(cancelled.view, { data: "late", kind: "complete" }).action).toBe(
-      "rejected",
-    );
+    expect(applyTaskTransition(cancelled.view, outcome("late")).action).toBe("rejected");
   });
 });
+
+function outcome(output: import("#shared/json.js").JsonValue) {
+  return {
+    kind: "outcome" as const,
+    result: { status: "completed" as const, output },
+    from: {
+      callId: "call",
+      execution: "background" as const,
+      input: {},
+      runId: "run",
+      sequence: 0,
+      stepIndex: 0,
+      toolName: "export",
+      turnId: "turn",
+    },
+  };
+}

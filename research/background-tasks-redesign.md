@@ -6,12 +6,11 @@ last_updated: "2026-09-16"
 
 # Background tasks: one workflow invocation runtime
 
-**Prototype result: viable, with a retained task lifecycle.** One durable workflow invocation
-runtime now executes both waiting and background workflow tools. Requiring workflow-backed
-background work and removing authored parent messages deletes enough alternate execution code to
-make the consolidation smaller than the baseline. The session-owned task lifecycle remains
-necessary for admission, cancellation finality, human input, reusable child ownership, accounting,
-and cohort delivery.
+**Prototype result: background work is a session-owned workflow invocation.** Waiting and
+background tools now enter through one durable workflow kind and share body execution, report
+drainage, and cancellation finality. The background owner retains admission, human-input state,
+child ownership, accounting, and session delivery; it no longer translates workflow traffic into a
+second executor protocol.
 
 This prototype is based on `32aca9b1485ce8fce0eb9c636d741456c1779f25`. The linked, closed issue
 is provenance only. The branch is an investigation, not a production-ready migration.
@@ -37,24 +36,25 @@ The prototype implements three approved scope decisions:
 the existing `WorkflowToolRunMessage` outcome only after those reports are consumed.
 [Shared invocation][prototype-invocation]
 
-The foreground adapter consumes that stream and keeps its existing turn-bound cancellation policy.
-The background task owner creates the same stream only after `ready`; its admitted work therefore
-remains session-bound and survives the initiating turn. [Foreground adapter][prototype-blocking],
+`workflowToolRunWorkflow` is the only durable entry for both modes. The shared reader handles
+cancellation cleanup and prevents a late success from replacing cancellation. The foreground
+adapter delivers messages to its waiting turn. The background owner creates the stream only after
+`ready`; its admitted work remains session-bound and survives the initiating turn. [Foreground adapter][prototype-blocking],
 [background adapter][prototype-background]
 
 | Concern                             | Before                                                        | Prototype                                           |
 | ----------------------------------- | ------------------------------------------------------------- | --------------------------------------------------- |
 | Workflow-body execution owners      | 2 direct callers of `executeWorkflowBody`                     | 1 shared invocation reader                          |
 | Background executor implementations | Workflow body or inline `defineTool` body                     | Workflow body only                                  |
-| Durable workflow kinds              | Foreground workflow-tool run and background task run          | Unchanged; no extra run                             |
+| Durable workflow kinds              | Foreground workflow-tool run and background task run          | One workflow-tool run entry                         |
 | Mutable lifecycle writers           | Foreground run record and background `TaskView` writer        | Unchanged; each lifetime keeps one writer           |
 | Persistent records                  | Harness workflow-tool-run record and session task-index entry | Unchanged; no result ledger added                   |
 | Authored background protocols       | Return/yield plus `TaskExec`/`TaskMessage`                    | Return/yield plus workflow context                  |
 | Terminal report classifier          | Successful `:ready:completed` delivery ID suffix              | Stable terminal delivery ID, retained after routing |
 
-This does not remove background tasks as a lifecycle concept. It removes background execution as a
-second way to run authored code. A task still represents admitted session-owned work; the workflow
-invocation reader is the common executor inside that owner.
+A task is the public handle for an admitted session-owned invocation. The session index still
+checks ownership and groups results. Turn-owned records remain separate because turn completion
+must clear them without discarding background work.
 
 ## What was eliminated
 
@@ -63,15 +63,21 @@ The prototype deletes these responsibilities rather than renaming them:
 - Parent-step execution of ordinary background tool bodies, async-iterable drainage, authorization
   return handling, and final task-command delivery.
 - Lifecycle-only task runs with no workflow body and the optional no-body branch in
-  `TaskRunWorkflowInput`.
+  the background workflow input.
 - Two `TaskExec` constructors, `TaskMessage` detection, message buffering, and the dedicated
   task-message parent wake step.
 - Background dynamic-tool persistence and replay.
 - Success-only cohort classification; all three terminal delivery suffixes now share the barrier.
+- `TaskExecutorBinding`, the `bind` command, fixed executor tags, and the separate executor-run
+  cancellation lookup.
+- The `taskRunWorkflow` durable entry and its stable workflow registration.
+- Workflow-to-task outcome, progress, and question wrappers. The background owner consumes
+  workflow messages directly; only session delivery and public view projection adapt their shape.
+- Pre-admission progress buffering: the workflow body cannot emit before `ready` starts it.
 
 These responsibilities were retained or relocated:
 
-- Body start, report drainage, and outcome construction moved into the shared invocation reader.
+- Body start, report drainage, cancellation cleanup, and final outcome construction live in the shared invocation reader.
 - Admission, compensation, child reservation/claiming, steering, task cancellation, and session
   indexing remain in the task owner.
 - Foreground workflow-tool-run records and background task records remain separate projections
@@ -81,8 +87,8 @@ These responsibilities were retained or relocated:
 ## Size comparison
 
 The reduction comes from deleting ordinary background executors, the authored task-message
-protocol, and their associated tests. The shared invocation reader adds one execution owner;
-its ordering and cancellation tests exercise the real channel reader.
+protocol, executor bindings, duplicate message conversions, and their associated tests. Shared
+ordering and cancellation tests exercise the real invocation and channel readers for both modes.
 
 Measure the current patch with `git diff --numstat 32aca9b1485ce8fce0eb9c636d741456c1779f25`.
 For production source, include `packages/eve/src/**` and exclude `*.test.ts` and
@@ -124,7 +130,7 @@ superseded task deliveries for suppression.
 ## Compatibility and migration
 
 This is a breaking authoring change, so the prototype includes a minor changeset and updated public
-docs. Extension capability generation records `tool` epoch 45 and `dynamicTool` epoch 42. It also
+docs. Extension capability generation records `tool` epoch 45 and `dynamicTool` epoch 42. Channel epoch 24 removes executor bindings from task views and drops epoch 23. The authoring change also
 drops retained epochs that explicitly exercised the removed surfaces: tool epoch 28, dynamic-tool
 epochs 28–30, and the previous current epochs 44 and 41.
 
@@ -142,7 +148,7 @@ A dependency on an intermediate result belongs inside the owning workflow throug
 | Background receipt before later completion                    | Workflow integration suite exercises both root and child owners       |
 | Commit before body start                                      | Task-owner unit test creates the invocation reader only after `ready` |
 | Report before outcome                                         | Shared invocation unit test and task-owner report/outcome test        |
-| Explicit cancellation wins over late completion               | Task-owner and foreground cancellation unit tests                     |
+| Explicit cancellation wins over late completion               | Background-owner tests and shared-reader tests for both modes         |
 | Workflow human input and authorization routing                | Workflow integration suite and task-owner authorization tests         |
 | Mixed success/failure and success/cancellation report         | Session next-input unit tests                                         |
 | All-failed and all-cancelled report                           | Session next-input unit tests                                         |
@@ -154,9 +160,8 @@ A dependency on an intermediate result belongs inside the owning workflow throug
 
 Exact checks run in this worktree:
 
-- Full unit tier: **798 files passed; 8,676 tests passed; 1 skipped**.
-- Workflow/task integration slice: **2 files, 41 tests passed**.
-- Forced-stop cancellation integration: **1 file, 1 test passed**.
+- Full unit tier: **798 files passed; 8,678 tests passed; 1 skipped**.
+- Workflow/task integration slice: **3 files, 42 tests passed**, including forced-stop cancellation.
 - TypeScript `--noEmit`, fresh production TypeScript/Rolldown build, focused lint, formatting,
   `git diff --check`, extension-contract generation, and `guard:invariants`: passed.
 - Documentation frontmatter/navigation, import snippets, and MDX compilation: passed for all 89
@@ -180,9 +185,9 @@ The prototype does not yet demonstrate these full boundaries:
 - Reusable-child steering with a late superseded success through the complete combined path.
 - Replay at the exact parent commit/`ready` boundary and a crash during final cohort release.
 
-Removing the optional workflow body also changes replay compatibility for an already-running
-lifecycle-only task created by an older deployment. A production rollout needs deployment pinning
-or a drain/migration plan for those in-flight runs; the prototype does not provide a legacy fallback.
+Removing the old `taskRunWorkflow` registration changes replay compatibility for in-flight runs
+created by older deployments, including workflow-backed tasks. A production rollout needs deployment
+pinning or a drain/migration plan; the prototype does not provide a legacy workflow fallback.
 
 Delaying automatic failure output behind a slow sibling is an intentional behavior change. Task
 state and activity still show failure promptly, but the model does not receive the failure as
@@ -204,4 +209,4 @@ especially initiating-turn cancellation and active-parent report release.
 
 [prototype-invocation]: ../packages/eve/src/execution/tools/workflow/invocation.ts
 [prototype-blocking]: ../packages/eve/src/execution/tools/workflow/workflow.ts
-[prototype-background]: ../packages/eve/src/execution/tasks/child/workflow.ts
+[prototype-background]: ../packages/eve/src/execution/tools/workflow/background-owner.ts

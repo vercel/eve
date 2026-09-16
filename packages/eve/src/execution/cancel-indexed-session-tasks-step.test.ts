@@ -65,7 +65,6 @@ function indexedTask(taskId: string): SessionTaskIndexEntry {
   return {
     createdByTurnId: "turn_0",
     dispatchContext: { auth: { current: null, initiator: null } },
-    executor: { data: {}, kind: "workflow" },
     metadata: { kind: "tool", name: "research" },
     taskId,
     taskInboxToken: `${taskId}-inbox`,

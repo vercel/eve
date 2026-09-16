@@ -1,9 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  workflowToolRunOutcomeToTaskCommand,
-  workflowToolRunReportToTaskPayload,
-  workflowToolRunRequestToTaskInputRequest,
+  workflowToolRunFailureOutput,
+  workflowToolRunRequestToInputRequestPayload,
 } from "#execution/tools/workflow/owner-inbox.js";
 
 const from = {
@@ -32,18 +31,19 @@ describe("workflow-tool task input", () => {
     };
 
     expect(
-      workflowToolRunRequestToTaskInputRequest({
+      workflowToolRunRequestToInputRequestPayload({
         from,
         replyTo: "subagent:parent:call-1",
         request,
       }),
-    ).toEqual({
-      kind: "task-input-request",
-      replyTo: "subagent:parent:call-1",
-      request,
-      sequence: 0,
-      stepIndex: 0,
-      turnId: "turn-1",
+    ).toMatchObject({
+      childContinuationToken: "subagent:parent:call-1",
+      event: {
+        requests: [request],
+        sequence: 0,
+        stepIndex: 0,
+        turnId: "turn-1",
+      },
     });
   });
 
@@ -61,25 +61,26 @@ describe("workflow-tool task input", () => {
     };
 
     expect(
-      workflowToolRunRequestToTaskInputRequest({
+      workflowToolRunRequestToInputRequestPayload({
         from,
         replyTo: "subagent:parent:call-1",
         request,
         requestCoordinates: { sequence: 4, stepIndex: 2, turnId: "turn-child" },
       }),
-    ).toEqual({
-      kind: "task-input-request",
-      replyTo: "subagent:parent:call-1",
-      request,
-      sequence: 4,
-      stepIndex: 2,
-      turnId: "turn-child",
+    ).toMatchObject({
+      childContinuationToken: "subagent:parent:call-1",
+      event: {
+        requests: [request],
+        sequence: 4,
+        stepIndex: 2,
+        turnId: "turn-child",
+      },
     });
   });
 
   it("does not normalize workflow agent requests as human input", () => {
     expect(() =>
-      workflowToolRunRequestToTaskInputRequest({
+      workflowToolRunRequestToInputRequestPayload({
         from,
         replyTo: "subagent:parent:call-1",
         request: {
@@ -92,40 +93,10 @@ describe("workflow-tool task input", () => {
   });
 });
 
-describe("workflow-tool task reports", () => {
-  it("keeps message-shaped yields as progress", () => {
-    expect(
-      workflowToolRunReportToTaskPayload(
-        { from, update: { kind: "eve:task-message", message: "Review this output." } },
-        "task-1",
-        2,
-      ),
-    ).toEqual({
-      callId: "call-1",
-      kind: "task-update",
-      message: '{"kind":"eve:task-message","message":"Review this output."}',
-      updateEpoch: "task-1",
-      updateIndex: 2,
-    });
-  });
-
-  it("keeps untagged yields as progress", () => {
-    expect(
-      workflowToolRunReportToTaskPayload({ from, update: { progress: 0.5 } }, "task-1", 1),
-    ).toEqual({
-      callId: "call-1",
-      kind: "task-update",
-      message: '{"progress":0.5}',
-      updateEpoch: "task-1",
-      updateIndex: 1,
-    });
-  });
-});
-
 describe("workflow-tool task outcomes", () => {
   it("keeps a subagent failure object as task failure data", () => {
     expect(
-      workflowToolRunOutcomeToTaskCommand({
+      workflowToolRunFailureOutput({
         from: { ...from, resultKind: "subagent" },
         result: {
           error: {
@@ -136,17 +107,14 @@ describe("workflow-tool task outcomes", () => {
         },
       }),
     ).toEqual({
-      data: {
-        code: "SUBAGENT_EXECUTION_FAILED",
-        message: "child crashed",
-      },
-      kind: "fail",
+      code: "SUBAGENT_EXECUTION_FAILED",
+      message: "child crashed",
     });
   });
 
   it("keeps ordinary workflow-tool task failures as message strings", () => {
     expect(
-      workflowToolRunOutcomeToTaskCommand({
+      workflowToolRunFailureOutput({
         from,
         result: {
           error: {
@@ -155,9 +123,6 @@ describe("workflow-tool task outcomes", () => {
           status: "failed",
         },
       }),
-    ).toEqual({
-      data: "export failed",
-      kind: "fail",
-    });
+    ).toEqual("export failed");
   });
 });

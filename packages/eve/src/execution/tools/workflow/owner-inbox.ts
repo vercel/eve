@@ -1,7 +1,6 @@
 import type { SubagentInputRequestHookPayload } from "#channel/types.js";
 import type {
   WorkflowToolRunOutcomeMessage,
-  WorkflowToolRunReport,
   WorkflowToolRunRef,
   WorkflowToolInputRequestBatch,
   WorkflowToolRequest,
@@ -11,8 +10,6 @@ import type { RuntimeToolResultActionResult } from "#shared/action-types.js";
 import type { RuntimeSubagentResult } from "#shared/action-types.js";
 import type { InputRequest } from "#shared/input.js";
 import type { ToolInputRequest } from "#tools/definition.js";
-import type { WorkflowToolRunTaskInputRequest } from "#execution/tasks/child/workflow.js";
-import type { TaskCommand, TaskInboundUpdate } from "#tasks/types.js";
 import { SUBAGENT_EXECUTION_FAILED } from "#subagents/agent-handle-errors.js";
 import { parseJsonValue, type JsonValue } from "#shared/json.js";
 
@@ -63,22 +60,12 @@ export function workflowToolRunOutcomeToSubagentResult(
   };
 }
 
-export function workflowToolRunOutcomeToTaskCommand(
-  message: WorkflowToolRunOutcomeMessage,
-): TaskCommand {
-  if (message.result.status === "completed") {
-    return { data: message.result.output, kind: "complete" };
-  }
-  if (message.result.status === "failed") {
-    return {
-      data:
-        message.from.resultKind === "subagent"
-          ? subagentFailureOutput(message.result.error)
-          : errorMessage(message.result.error),
-      kind: "fail",
-    };
-  }
-  return { kind: "cancel" };
+export function workflowToolRunFailureOutput(message: WorkflowToolRunOutcomeMessage): JsonValue {
+  if (message.result.status !== "failed")
+    throw new TypeError("Expected a failed workflow outcome.");
+  return message.from.resultKind === "subagent"
+    ? subagentFailureOutput(message.result.error)
+    : errorMessage(message.result.error);
 }
 
 function subagentFailureOutput(error: unknown): JsonValue {
@@ -95,20 +82,6 @@ function subagentFailureOutput(error: unknown): JsonValue {
   return {
     code: SUBAGENT_EXECUTION_FAILED,
     message: errorMessage(error),
-  };
-}
-
-export function workflowToolRunReportToTaskPayload(
-  report: WorkflowToolRunReport,
-  taskId: string,
-  updateIndex: number,
-): TaskInboundUpdate {
-  return {
-    callId: report.from.callId,
-    kind: "task-update",
-    message: typeof report.update === "string" ? report.update : JSON.stringify(report.update),
-    updateEpoch: taskId,
-    updateIndex,
   };
 }
 
@@ -140,16 +113,13 @@ function parseJsonValueOrUndefined(value: unknown): JsonValue | undefined {
 export function workflowToolRunRequestToInputRequestPayload(
   message: WorkflowToolRunRequestMessage,
 ): SubagentInputRequestHookPayload {
-  const { from, replyTo, request, requestCoordinates } = message;
+  const { from, replyTo, requestCoordinates } = message;
   return {
     callId: from.callId,
     childContinuationToken: replyTo,
     childSessionId: from.runId,
     event: {
-      requests:
-        request.kind === "input-batch"
-          ? request.requests
-          : [normalizeInputRequest(request, from, replyTo)],
+      requests: workflowToolRunInputRequests(message),
       sequence: requestCoordinates?.sequence ?? from.sequence,
       stepIndex: requestCoordinates?.stepIndex ?? from.stepIndex,
       turnId: requestCoordinates?.turnId ?? from.turnId,
@@ -159,20 +129,12 @@ export function workflowToolRunRequestToInputRequestPayload(
   };
 }
 
-export function workflowToolRunRequestToTaskInputRequest(
+export function workflowToolRunInputRequests(
   message: WorkflowToolRunRequestMessage,
-): WorkflowToolRunTaskInputRequest {
-  const { from, replyTo, request, requestCoordinates } = message;
-  const base = {
-    kind: "task-input-request" as const,
-    replyTo,
-    sequence: requestCoordinates?.sequence ?? from.sequence,
-    stepIndex: requestCoordinates?.stepIndex ?? from.stepIndex,
-    turnId: requestCoordinates?.turnId ?? from.turnId,
-  };
-  return request.kind === "input-batch"
-    ? { ...base, requests: request.requests }
-    : { ...base, request: normalizeInputRequest(request, from, replyTo) };
+): readonly InputRequest[] {
+  return message.request.kind === "input-batch"
+    ? message.request.requests
+    : [normalizeInputRequest(message.request, message.from, message.replyTo)];
 }
 
 function normalizeInputRequest(

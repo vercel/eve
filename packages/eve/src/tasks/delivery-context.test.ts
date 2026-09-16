@@ -75,9 +75,9 @@ describe("resolveInitiatingTaskContext", () => {
     expect(
       resolveInitiatingTaskContext({
         state: taskState([
-          taskEntry("task_1", "turn_1", undefined, { data: {}, kind: "workflow-tool" }),
+          taskEntry("task_1", "turn_1"),
           {
-            ...taskEntry("task_2", "turn_2", undefined, { data: {}, kind: "workflow-tool" }),
+            ...taskEntry("task_2", "turn_2"),
             cohortId: "task_1",
           },
         ]),
@@ -90,13 +90,13 @@ describe("resolveInitiatingTaskContext", () => {
     });
   });
 
-  it("ignores task records that were not accepted by an executor", () => {
+  it("recognizes an indexed invocation without an executor binding", () => {
     expect(
       resolveInitiatingTaskContext({
         state: taskState([taskEntry("task_1", "turn_1")]),
         turnId: "turn_1",
       }),
-    ).toBeUndefined();
+    ).toMatchObject({ phase: "initiating" });
   });
 });
 
@@ -204,12 +204,10 @@ function taskEntry(
   taskId: string,
   createdByTurnId: string,
   terminalView?: TaskView,
-  executor?: { readonly data: Record<string, never>; readonly kind: string },
 ): SessionTaskIndexEntry {
   return {
     createdByTurnId,
     dispatchContext: { auth: { current: null, initiator: null } },
-    executor,
     metadata,
     taskId,
     taskInboxToken: `inbox-${taskId}`,

@@ -305,7 +305,6 @@ function recordBackgroundTask(session: HarnessSession, taskId = "analysis"): Har
   return recordSessionTask(session, {
     createdByTurnId: activeTurnId(getHarnessEmissionState(session.state)),
     dispatchContext: { auth: { current: null, initiator: null } },
-    executor: { data: {}, kind: "workflow-tool" },
     metadata: { kind: "report-probe", name: taskId },
     taskId,
     taskInboxToken: `token-${taskId}`,

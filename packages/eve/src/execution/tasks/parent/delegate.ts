@@ -1,7 +1,6 @@
 /**
- * Generic task creation, readiness acknowledgement, and dispatch rejection.
- * Task-run transport (start/command/view) lives in `run-parent.ts`, which
- * Callers compose these primitives around their own executor policy.
+ * Session-owned invocation identity, admission acknowledgement, and dispatch rejection.
+ * The parent commits its session index before releasing the workflow body.
  */
 import type { HarnessSession } from "#harness/types.js";
 import type { ActivityWorkIdentityV1 } from "#protocol/activity.js";
@@ -11,7 +10,6 @@ import {
   sendTaskCommandToOwner,
 } from "#execution/tasks/parent/run-parent.js";
 import type { JsonValue } from "#shared/json.js";
-import type { TaskExecutorBinding } from "#tools/task.js";
 import { deriveTaskInboxToken, deriveTaskId } from "#tasks/task-id.js";
 import { isTerminalTaskStatus, type TaskMetadata } from "#tasks/types.js";
 import type { TaskAgentDispatchContext } from "#tasks/session-index.js";
@@ -29,7 +27,6 @@ export interface BackgroundTask {
   readonly taskInboxToken: string;
   readonly createdByStepIndex?: number;
   readonly createdByTurnId: string;
-  readonly executor?: TaskExecutorBinding;
   readonly metadata: TaskMetadata;
   readonly taskId: string;
   readonly taskRunId: string;

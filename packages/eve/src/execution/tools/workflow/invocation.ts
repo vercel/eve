@@ -1,3 +1,5 @@
+import { sleep } from "#compiled/@workflow/core/index.js";
+import { normalizeSerializableError } from "#execution/workflow-errors.js";
 import {
   createWorkflowBodyRef,
   executeWorkflowBody,
@@ -23,8 +25,69 @@ export interface WorkflowToolInvocationInput extends WorkflowBodyDefinition {
 export function createWorkflowToolInvocationReader(
   input: WorkflowToolInvocationInput,
   signal: AbortSignal,
+  cancelled?: Promise<never>,
 ): ChannelReader<"workflow", WorkflowToolRunMessage> {
-  return createChannelReader("workflow", executeWorkflowToolInvocation(input, signal));
+  return createChannelReader("workflow", runInvocation(input, signal, cancelled));
+}
+
+async function* runInvocation(
+  input: WorkflowToolInvocationInput,
+  signal: AbortSignal,
+  cancelled?: Promise<never>,
+): AsyncGenerator<WorkflowToolRunMessage> {
+  const reader = createChannelReader("body", executeWorkflowToolInvocation(input, signal));
+  let onAbort: (() => void) | undefined;
+  const cancellation =
+    cancelled ??
+    new Promise<never>((_, reject) => {
+      onAbort = () => reject(signal.reason);
+      if (signal.aborted) onAbort();
+      else signal.addEventListener("abort", onAbort, { once: true });
+    });
+  cancellation.catch(() => {});
+  let started = false;
+  try {
+    while (true) {
+      if (signal.aborted) throw signal.reason;
+      started = true;
+      const read = await raceChannelReads([reader], cancellation);
+      if (read === "cancel" || read.next.done) return;
+      if (signal.aborted && read.next.value.kind === "outcome") throw signal.reason;
+      if (read.next.value.kind === "outcome" && onAbort !== undefined)
+        signal.removeEventListener("abort", onAbort);
+      yield read.next.value;
+      if (read.next.value.kind === "outcome") return;
+    }
+  } catch (error) {
+    if (!signal.aborted) {
+      yield {
+        from: createWorkflowBodyRef(input),
+        kind: "outcome",
+        result: { status: "failed", error: normalizeSerializableError(error) },
+      };
+      return;
+    }
+    // Cleanup can close prompts and release child agents, but cannot undo cancellation.
+    const deadline = started ? sleep("30s").then(() => "cancel" as const) : undefined;
+    try {
+      while (started) {
+        const read = await raceChannelReads([reader], deadline);
+        if (read === "cancel" || read.next.done || read.next.value.kind === "outcome") break;
+        yield read.next.value;
+      }
+    } catch {}
+    yield {
+      from: createWorkflowBodyRef(input),
+      kind: "outcome",
+      result: {
+        status: "cancelled",
+        reason:
+          signal.reason instanceof Error ? signal.reason.message : String(signal.reason ?? ""),
+      },
+    };
+  } finally {
+    if (onAbort !== undefined) signal.removeEventListener("abort", onAbort);
+  }
 }
 
 async function* executeWorkflowToolInvocation(

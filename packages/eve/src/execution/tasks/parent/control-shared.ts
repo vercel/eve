@@ -60,11 +60,7 @@ function createPendingTaskView(entry: SessionTaskIndexEntry): TaskView {
     taskId: entry.taskId,
   };
 
-  if (entry.executor === undefined) {
-    return view;
-  }
-
-  return { ...view, executor: { binding: entry.executor } };
+  return view;
 }
 
 /** One successful task-control result carrying full task views. */

@@ -42,8 +42,6 @@ import {
 import { applyTaskAgentHandleCommand } from "#subagents/handles/transitions.js";
 import { steerBackgroundAgent } from "#execution/tools/subagent/steer.js";
 
-const IN_PROCESS_WORKFLOW_EXECUTOR = { data: {}, kind: "workflow-task" } as const;
-
 interface BackgroundToolExecutionRecord {
   readonly callId: string;
   claim?: {
@@ -466,7 +464,6 @@ class BackgroundToolExecutionScope implements BackgroundToolExecutor {
     const owner = await waitForTaskCommandOwner({ taskInboxToken: task.taskInboxToken });
     const backgroundTask = {
       ...task,
-      executor: IN_PROCESS_WORKFLOW_EXECUTOR,
       taskRunId: owner.runId,
     };
     input.record.task = backgroundTask;

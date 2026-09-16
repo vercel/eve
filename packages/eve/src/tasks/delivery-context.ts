@@ -61,7 +61,7 @@ export function resolveInitiatingTaskContext(input: {
   const cohort = getSessionTaskIndex(input.state).filter(
     (entry) => entry.createdByTurnId === input.turnId,
   );
-  if (!cohort.some((entry) => entry.executor !== undefined && entry.terminalView === undefined)) {
+  if (!cohort.some((entry) => entry.terminalView === undefined)) {
     return undefined;
   }
   return { ...projectTaskCohort(cohort), phase: "initiating" };

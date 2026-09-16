@@ -1,8 +1,8 @@
-import type { TaskRunWorkflowInput } from "#execution/tasks/child/workflow.js";
+import type { BackgroundWorkflowToolRunInput } from "#execution/tools/workflow/types.js";
 import { isTaskWorkflowTargetGone } from "#execution/tasks/workflow-target.js";
 import {
   startWorkflowOnCurrentDeployment,
-  taskRunWorkflowReference,
+  workflowToolRunWorkflowReference,
   waitForCommandHookOwner,
 } from "#execution/workflow-runtime.js";
 import { getRun, resumeHook } from "#internal/workflow/runtime.js";
@@ -17,19 +17,16 @@ import {
 const TASK_VIEW_READ_TIMEOUT_MS = 10_000;
 
 /**
- * Node-side controls for durable task runs — the generic transport layer.
- * This module only speaks `TaskCommand`/`TaskView`; it knows nothing about
- * executor implementations, receipts, or the session index. Caller-specific
- * policy composes these primitives.
+ * Node-side admission, cancellation, and view reads for session-owned workflow invocations.
  *
  * Every export must be called from inside a `"use step"` body; none of
  * these are steps themselves so dispatch and tool steps can compose them
  * inside one durable boundary.
  */
 
-/** Starts the durable run owning one task's lifecycle. */
-export async function startTaskRun(input: TaskRunWorkflowInput): Promise<void> {
-  await startWorkflowOnCurrentDeployment(taskRunWorkflowReference, [input]);
+/** Starts a session-owned invocation through the common workflow entry. */
+export async function startTaskRun(input: BackgroundWorkflowToolRunInput): Promise<void> {
+  await startWorkflowOnCurrentDeployment(workflowToolRunWorkflowReference, [input]);
 }
 
 /** Resolves the task run that won ownership of one replay-stable command token. */

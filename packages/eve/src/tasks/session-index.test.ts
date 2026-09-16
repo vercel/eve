@@ -196,13 +196,10 @@ describe("session task index", () => {
       : { metadata, status, taskId, lastOutput: { type: "error", data: "failed" } };
   }
 
-  it("durably joins overlapping work across turns and executor kinds", () => {
+  it("durably joins overlapping work across turns", () => {
     const first = task("task_a", "turn-1");
     const initial = recordSessionTask(createSession(), first);
-    const second = {
-      ...task("task_b", "turn-2"),
-      executor: { kind: "workflow-tool", data: {} },
-    };
+    const second = task("task_b", "turn-2");
     const session = recordSessionTask(initial, second);
     const entries = getSessionTaskIndex(session.state);
     expect(entries.map(getTaskCohortId)).toEqual(["task_a", "task_a"]);

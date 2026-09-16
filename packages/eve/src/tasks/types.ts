@@ -5,7 +5,6 @@ import type {
 import type { WorkflowToolAgentRequest } from "#execution/tools/workflow/messages.js";
 import type { SessionInboxAddress } from "#execution/session-inbox/address.js";
 import { jsonValuesEqual, type JsonValue } from "#shared/json.js";
-import type { TaskExecutorBinding } from "#tools/task.js";
 
 /** Durable lifecycle status for one unit of background work. */
 export type TaskStatus = "working" | "input_required" | "completed" | "failed" | "cancelled";
@@ -79,7 +78,6 @@ interface TaskViewBase {
   readonly taskId: string;
   readonly metadata: TaskMetadata;
   /** Private executor state, excluded from model-visible JSON. */
-  readonly executor?: { readonly binding?: TaskExecutorBinding };
   /** Retained for accounting, excluded from model-visible JSON. */
   readonly usage?: TaskUsage;
 }
@@ -113,19 +111,8 @@ export type TaskView = TaskViewBase &
       }
   );
 
-/** Executor-neutral commands accepted by the durable task run. */
+/** Admission, cancellation, and input state changes for a background invocation. */
 export type TaskCommand =
-  | { readonly executor: TaskExecutorBinding; readonly kind: "bind" }
-  | {
-      readonly kind: "complete";
-      readonly data: JsonValue;
-      readonly usage?: TaskUsage;
-    }
-  | {
-      readonly kind: "fail";
-      readonly data: JsonValue;
-      readonly usage?: TaskUsage;
-    }
   | { readonly kind: "reject-dispatch"; readonly data: JsonValue }
   | {
       readonly kind: "cancel";
@@ -138,25 +125,6 @@ export type TaskCommand =
 export interface TaskCommandHookPayload {
   readonly kind: "task-command";
   readonly command: TaskCommand;
-}
-
-/** Intermediate progress reported by an executor. */
-export interface TaskInboundUpdate {
-  readonly callId: string;
-  readonly updateIndex: number;
-  readonly updateEpoch: string;
-  readonly kind: "task-update";
-  readonly message: string;
-}
-
-/** One workflow-executor request bound to its private answer hook. */
-export interface TaskInboundInputRequest {
-  readonly kind: "task-input-request";
-  readonly replyTo: string;
-  readonly requests: readonly TaskInputRequest[];
-  readonly sequence: number;
-  readonly stepIndex: number;
-  readonly turnId: string;
 }
 
 /** One human answer routed through the task that owns the blocked executor. */
@@ -174,10 +142,7 @@ export interface TaskInboundAnswerInput {
   readonly taskId: string;
 }
 
-export type TaskRunInboundPayload =
-  | TaskCommandHookPayload
-  | TaskInboundAnswerInput
-  | TaskInboundUpdate;
+export type TaskRunInboundPayload = TaskCommandHookPayload | TaskInboundAnswerInput;
 
 /** Generic task-owned request sent through the parent session payload. */
 interface TaskInputRequestDeliveryBase {

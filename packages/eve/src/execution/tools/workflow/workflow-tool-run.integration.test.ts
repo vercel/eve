@@ -745,7 +745,7 @@ describe("workflow tools", () => {
     });
   }, 60_000);
 
-  it("runs a background workflow tool as its task's executor", async () => {
+  it("runs a session-owned background workflow invocation", async () => {
     vi.stubEnv("VERCEL_DEPLOYMENT_ID", "dpl_inline");
     const runtime = await createWorkflowToolRuntime({
       agentName: "workflow-tool-background",
