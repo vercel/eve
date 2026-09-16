@@ -71,6 +71,7 @@ export async function runRegistryFlow(input: {
           value: item.address,
           label: item.name,
           hint: item.address,
+          keywords: [item.title ?? "", item.description ?? ""],
         })),
         notices: catalogResult.errors.map((error) => ({
           tone: "warning" as const,

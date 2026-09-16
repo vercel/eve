@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { createFakePrompter } from "#internal/testing/fake-prompter.js";
+import { createSelectOptionCodec } from "#setup/cli/select-option-codec.js";
+import { filterOptions } from "#setup/cli/select-state.js";
 import { WizardCancelledError } from "#setup/step.js";
 import { runRegistryFlow, type RegistryFlowDeps } from "./registry.js";
 function deps(): RegistryFlowDeps {
@@ -15,6 +17,56 @@ function deps(): RegistryFlowDeps {
   };
 }
 describe("runRegistryFlow", () => {
+  it("finds providers by capability or title and installs the filtered selection", async () => {
+    const flow = deps();
+    flow.browseRegistryCatalog = vi.fn(async () => ({
+      items: [
+        {
+          address: "channel/blooio",
+          name: "channel/blooio",
+          title: "Blooio",
+          description: "Send and receive iMessage, RCS, and SMS through Blooio.",
+          source: "Vercel",
+        },
+        {
+          address: "channel/linq",
+          name: "channel/linq",
+          title: "Linq",
+          description: "Connect an eve agent to iMessage and SMS through Linq.",
+          source: "Vercel",
+        },
+        {
+          address: "channel/teams",
+          name: "channel/teams",
+          title: "Microsoft Teams",
+          source: "Vercel",
+        },
+      ],
+      total: 3,
+      errors: [],
+    }));
+    const fake = createFakePrompter({
+      single: (options) => {
+        const codec = createSelectOptionCodec(options.options);
+        const matches = filterOptions(codec.options, " iMESSAGE ");
+        expect(matches.map((option) => codec.decode(option.value))).toEqual([
+          "channel/blooio",
+          "channel/linq",
+        ]);
+        expect(filterOptions(codec.options, "microsoft").map((option) => option.label)).toEqual([
+          "channel/teams",
+        ]);
+        expect(filterOptions(codec.options, "unrelated")).toEqual([]);
+        return codec.decode(matches[0]!.value);
+      },
+    });
+    await runRegistryFlow({ appRoot: "/agent", prompter: fake.prompter, deps: flow });
+    expect(flow.installRegistryItem).toHaveBeenCalledWith(
+      "/agent",
+      "channel/blooio",
+      expect.any(Object),
+    );
+  });
   it("searches one catalog and installs the chosen item without a review", async () => {
     const flow = deps();
     const fake = createFakePrompter({

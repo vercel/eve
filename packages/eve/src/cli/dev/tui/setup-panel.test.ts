@@ -179,6 +179,29 @@ describe("renderFlowPanel", () => {
 });
 
 describe("renderSelectQuestion", () => {
+  it.each([32, 100])(
+    "filters by capability without displaying search metadata at width %i",
+    (width) => {
+      const options = [
+        { value: "blooio", label: "Blooio", keywords: ["Send and receive iMessage and SMS."] },
+        { value: "slack", label: "Slack" },
+      ];
+      const text = renderSelectQuestion(
+        {
+          kind: "search",
+          message: "Add to your agent",
+          options,
+          select: { ...initialSelectState({ options }), filter: "imessage" },
+        },
+        theme,
+        width,
+      ).join("\n");
+      expect(text).toContain("› Blooio");
+      expect(text).not.toContain("Slack");
+      expect(text).not.toContain("Send and receive");
+    },
+  );
+
   it("renders question context beneath the heading and above compact actions", () => {
     const rows = renderSelectQuestion(
       {
