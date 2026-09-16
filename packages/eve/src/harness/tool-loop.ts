@@ -1,5 +1,6 @@
+import { setTimeout as delay } from "node:timers/promises";
 import { BoundaryHookError } from "#shared/boundary-hook-error.js";
-import { GenerationSteering, GenerationSteeredError } from "#harness/generation-steering.js";
+import { GenerationSteering } from "#harness/generation-steering.js";
 import { interruptStreamOnFailure } from "#harness/interruptible-stream.js";
 import {
   isStepCount,
@@ -1642,7 +1643,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
           sessionId: session.sessionId,
           turnId: emissionState.turnId,
         },
-        config.abortSignal,
+        generation.signal,
       );
 
     // Resolve first-attempt instrumentation after step.started dynamic
@@ -3224,15 +3225,14 @@ function resolveApprovalKeyFromTools(
 async function runModelCallWithRetries<T>(
   fn: (attempt: number) => Promise<T>,
   diag: { readonly sessionId: string; readonly turnId: string },
-  abortSignal?: AbortSignal,
+  signal: AbortSignal,
 ): Promise<T> {
   for (let attempt = 1; ; attempt++) {
-    throwIfTurnAborted(abortSignal);
+    signal.throwIfAborted();
     try {
       return await fn(attempt);
     } catch (error) {
-      throwIfTurnAborted(abortSignal);
-      if (error instanceof GenerationSteeredError) throw error;
+      signal.throwIfAborted();
       if (attempt === MODEL_CALL_MAX_ATTEMPTS || classifyModelCallError(error) !== "retry") {
         throw error;
       }
@@ -3245,7 +3245,7 @@ async function runModelCallWithRetries<T>(
         turnId: diag.turnId,
         error,
       });
-      await new Promise((resolve) => setTimeout(resolve, delayMs));
+      await delay(delayMs, undefined, { signal });
     }
   }
 }

@@ -3,6 +3,7 @@ import { MockLanguageModelV3 } from "ai/test";
 import { describe, expect, it, vi } from "vitest";
 import { createToolLoopHarness } from "#harness/tool-loop.js";
 import { getHarnessEmissionState } from "#harness/emission-state.js";
+import { TurnCancelledError } from "#harness/turn-cancellation.js";
 import type { HarnessSession } from "#harness/types.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 
@@ -32,6 +33,106 @@ function finish(controller: ReadableStreamDefaultController<Part>, text: string)
 }
 
 describe("generation steering with the real AI SDK", () => {
+  it.each(["steer", "cancel"] as const)("wakes retry backoff immediately on %s", async (kind) => {
+    vi.useFakeTimers();
+    const retrying = Promise.withResolvers<void>();
+    const warning = vi.spyOn(console, "warn").mockImplementation((message) => {
+      if (String(message).includes("retrying")) retrying.resolve();
+    });
+    const steering = new AbortController();
+    const cancellation = new AbortController();
+    const doStream = vi.fn<MockLanguageModelV3["doStream"]>(async () => ({
+      stream: new ReadableStream<Part>({
+        start(controller) {
+          controller.enqueue({
+            type: "error",
+            error: Object.assign(new Error("Connection interrupted"), { isRetryable: true }),
+          });
+          controller.close();
+        },
+      }),
+    }));
+    try {
+      const running = createToolLoopHarness({
+        mode: "conversation",
+        abortSignal: cancellation.signal,
+        steeringSignal: steering.signal,
+        tools: new Map(),
+        resolveModel: async () => new MockLanguageModelV3({ doStream }),
+        handleEvent: async () => {},
+      })(session(), { message: "Prepare Alice's report" });
+      await retrying.promise;
+      if (kind === "cancel") cancellation.abort(new TurnCancelledError());
+      steering.abort();
+      if (kind === "cancel") await expect(running).rejects.toBeInstanceOf(TurnCancelledError);
+      else expect((await running).steered).toBe(true);
+      expect(doStream).toHaveBeenCalledOnce();
+    } finally {
+      warning.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
+  it.each(["input.requested", "turn.completed", "step.failed"] as const)(
+    "finishes committing %s when a correction arrives during publication",
+    async (boundary) => {
+      const steering = new AbortController();
+      const events: UnstampedMessageStreamEvent[] = [];
+      const model = new MockLanguageModelV3({
+        doStream: async () => {
+          if (boundary === "step.failed") throw new Error("Model unavailable");
+          return {
+            stream: new ReadableStream<Part>({
+              start(controller) {
+                controller.enqueue({
+                  type: "tool-call",
+                  toolCallId: "question-1",
+                  toolName: "ask_question",
+                  input: JSON.stringify({ prompt: "Which year should Alice use?" }),
+                });
+                controller.enqueue({
+                  type: "finish",
+                  finishReason: { unified: "tool-calls", raw: undefined },
+                  usage,
+                });
+                controller.close();
+              },
+            }),
+          };
+        },
+      });
+      const result = await createToolLoopHarness({
+        mode: "conversation",
+        capabilities: { requestInput: true },
+        steeringSignal: steering.signal,
+        tools: new Map([
+          [
+            "ask_question",
+            {
+              name: "ask_question",
+              description: "Ask the user a question",
+              inputSchema: jsonSchema({ type: "object" }),
+              behavior: {
+                availability: ["requires-request-input"],
+                handling: { kind: "request-input", request: "question" },
+              },
+            },
+          ],
+        ]),
+        resolveModel: async () => model,
+        handleEvent: async (event) => {
+          events.push(event);
+          if (event.type === boundary) steering.abort();
+        },
+      })(session(), { message: "Report only if there is a new update" });
+      expect(result.steered).toBeUndefined();
+      expect(result.next).toBeNull();
+      expect(events.filter((event) => event.type === boundary)).toHaveLength(1);
+      expect(events.filter((event) => event.type === "session.waiting")).toHaveLength(1);
+      expect(events.filter((event) => event.type === "message.appended")).toHaveLength(0);
+    },
+  );
+
   it("commits the original input and turn preamble when steering precedes model startup", async () => {
     const steering = new AbortController();
     steering.abort();

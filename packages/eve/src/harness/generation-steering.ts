@@ -1,6 +1,6 @@
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 
-export class GenerationSteeredError extends Error {
+class GenerationSteeredError extends Error {
   constructor() {
     super("Model generation superseded by steering.");
     this.name = "GenerationSteeredError";
@@ -11,7 +11,7 @@ export class GenerationSteeredError extends Error {
 export class GenerationSteering {
   private readonly controller = new AbortController();
   private active = false;
-  private protected = false;
+  private effectsStarted = false;
   private readonly steeringSignal: AbortSignal | undefined;
   readonly signal: AbortSignal;
   outputStarted: boolean;
@@ -44,12 +44,20 @@ export class GenerationSteering {
 
   protectToolExecution(): void {
     this.check();
-    this.protected = true;
+    this.effectsStarted = true;
   }
 
   beforeEvent(event: UnstampedMessageStreamEvent): void {
     if (!this.active) return;
     this.check();
+    // Published requests and terminal events must finish committing, even
+    // when the model produced no assistant text.
+    if (
+      event.type === "input.requested" ||
+      event.type === "step.failed" ||
+      event.type === "turn.completed"
+    )
+      this.effectsStarted = true;
     if (
       (event.type === "message.appended" && event.data.messageDelta.length > 0) ||
       (event.type === "message.completed" && (event.data.message?.length ?? 0) > 0) ||
@@ -67,7 +75,12 @@ export class GenerationSteering {
   }
 
   private readonly onSteering = (): void => {
-    if (this.active && !this.protected && !this.outputStarted && this.steeringSignal?.aborted) {
+    if (
+      this.active &&
+      !this.effectsStarted &&
+      !this.outputStarted &&
+      this.steeringSignal?.aborted
+    ) {
       this.controller.abort(new GenerationSteeredError());
     }
   };

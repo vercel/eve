@@ -151,9 +151,7 @@ export class SessionInputQueue {
       (entry): entry is QueuedDelivery =>
         entry.kind === "delivery" &&
         admitted.has(entry.sequence) &&
-        entry.delivery.taskDeliveryId === undefined &&
-        (entry.delivery.turnPolicy ?? "steer") === "steer" &&
-        (entry.delivery.caller === undefined || entry.delivery.caller.callId === callerCallId),
+        isSteeringDelivery(entry.delivery, callerCallId),
     );
     if (steering.length === 0) return undefined;
     this.retain((entry) => entry.kind !== "delivery" || !steering.includes(entry));
@@ -312,6 +310,17 @@ export class SessionInputQueue {
     const kept = this.entries.filter(predicate);
     this.entries.splice(0, this.entries.length, ...kept);
   }
+}
+
+export function isSteeringDelivery(
+  delivery: DeliverHookPayload,
+  callerCallId: string | undefined,
+): boolean {
+  return (
+    delivery.taskDeliveryId === undefined &&
+    (delivery.turnPolicy ?? "steer") === "steer" &&
+    (delivery.caller === undefined || delivery.caller.callId === callerCallId)
+  );
 }
 
 function combine(entries: readonly DeliveryAdmission[]): DeliverHookPayload {

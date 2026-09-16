@@ -4,6 +4,9 @@ import {
   createMessageAppendedEvent,
   createMessageCompletedEvent,
   createReasoningAppendedEvent,
+  createInputRequestedEvent,
+  createStepFailedEvent,
+  createTurnCompletedEvent,
 } from "#protocol/message.js";
 
 describe("GenerationSteering", () => {
@@ -51,7 +54,7 @@ describe("GenerationSteering", () => {
     generation.dispose();
   });
 
-  it.each(["text", "prior text", "tool"])(
+  it.each(["text", "prior text", "tool", "request", "completion", "failure"])(
     "preserves work after %s but still permits explicit cancellation",
     (phase) => {
       const steering = new AbortController();
@@ -72,6 +75,14 @@ describe("GenerationSteering", () => {
           }),
         );
       if (phase === "tool") generation.protectToolExecution();
+      const coordinates = { sequence: 0, stepIndex: 0, turnId: "turn_0" };
+      if (phase === "request")
+        generation.beforeEvent(createInputRequestedEvent({ ...coordinates, requests: [] }));
+      if (phase === "completion") generation.beforeEvent(createTurnCompletedEvent(coordinates));
+      if (phase === "failure")
+        generation.beforeEvent(
+          createStepFailedEvent({ ...coordinates, code: "MODEL_CALL_FAILED", message: "Failed" }),
+        );
       steering.abort();
       expect(generation.signal.aborted).toBe(false);
       cancellation.abort();

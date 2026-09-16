@@ -5,7 +5,7 @@ import { cancelDescendantTurnsStep } from "#execution/cancel-descendant-turns-st
 import { dispatchCoordinationStep } from "#execution/coordination-dispatch-step.js";
 import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
 import { routeSelectedDelivery } from "#execution/session/route-selected-delivery.js";
-import type { SessionInputQueue } from "#execution/session/input-queue.js";
+import { isSteeringDelivery, type SessionInputQueue } from "#execution/session/input-queue.js";
 import {
   sessionCommandHookToken,
   sessionInboxHookToken,
@@ -86,7 +86,10 @@ export class SessionExecution {
       const { cursor } = this.input;
       const beforeStepContext = cursor.serializedContext;
       const result: DurableStepResult = await turnStep(
-        cursor.createStepInput(nextStepInput, turn.signal, turn.steeringSignal),
+        cursor.createStepInput(nextStepInput, {
+          abortSignal: turn.signal,
+          steeringSignal: turn.steeringSignal,
+        }),
       );
       const pendingCallIds =
         result.action === "park" ? result.pendingCoordinationCallIds : undefined;
@@ -298,9 +301,7 @@ class ActiveTurn {
     }
     if (
       delivery.kind === "deliver" &&
-      delivery.taskDeliveryId === undefined &&
-      (delivery.turnPolicy ?? "steer") === "steer" &&
-      (delivery.caller === undefined || delivery.caller.callId === this.callerCallId) &&
+      isSteeringDelivery(delivery, this.callerCallId) &&
       !this.input.cursor.sessionState.hasProxyInputRequests &&
       delivery.payloads.some(
         (value) =>
