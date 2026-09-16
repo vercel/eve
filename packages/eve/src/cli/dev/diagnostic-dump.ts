@@ -4,8 +4,7 @@ import { delimiter, join, relative, sep } from "node:path";
 
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import { LOCAL_WORKFLOW_WORLD_DATA_DIRECTORY_RELATIVE_PATH } from "#internal/workflow/local-world-data-directory.js";
-import { resolveVercelInvocation } from "#setup/primitives/run-vercel.js";
-import { detectVercelCliVersion } from "#setup/vercel-cli.js";
+import { captureVercel, resolveVercelInvocation } from "#setup/primitives/run-vercel.js";
 
 const VERCEL_VERSION_TIMEOUT_MS = 5_000;
 
@@ -168,10 +167,16 @@ async function detectVercelCli(
   // deadline; the invocation is re-resolved only to report which binary
   // answered (a workspace-local install beats the PATH lookup).
   const invocation = resolveVercelInvocation(appRoot);
-  const [version, path] = await Promise.all([
-    detectVercelCliVersion({ projectRoot: appRoot, timeoutMs: VERCEL_VERSION_TIMEOUT_MS }),
+  const [result, path] = await Promise.all([
+    captureVercel(["--version"], {
+      cwd: appRoot,
+      nonInteractive: true,
+      timeoutMs: VERCEL_VERSION_TIMEOUT_MS,
+    }),
     invocation.command === "vercel" ? findOnPath("vercel") : Promise.resolve(invocation.command),
   ]);
+  const output = result.ok ? result.stdout : `${result.failure.stdout}\n${result.failure.stderr}`;
+  const version = /(\d+\.\d+\.\d+\S*)/.exec(output)?.[1];
   const detected: { vercelCliVersion?: string; vercelCliPath?: string } = {};
   if (version !== undefined) detected.vercelCliVersion = version;
   if (path !== undefined) detected.vercelCliPath = path;

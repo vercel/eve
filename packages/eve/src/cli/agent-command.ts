@@ -5,12 +5,7 @@ import type { CliApplicationContext } from "./application-command.js";
 
 export type AgentCommandRequirement = (command: Command) => boolean;
 
-export interface AgentCommandOptions {
-  /** Leave a workspace root intact so the command can operate on every agent. */
-  readonly preserveWorkspace?: boolean;
-}
-
-export async function selectWorkspaceAgent(
+async function selectWorkspaceAgent(
   workspace: AgentWorkspace,
   requestedName: string | undefined,
 ): Promise<string> {
@@ -44,7 +39,6 @@ export function agentCommand(
   command: Command,
   applicationContext: CliApplicationContext,
   requirement: AgentCommandRequirement = () => true,
-  options: AgentCommandOptions = {},
 ): Command {
   command.option("--agent <name>", "Select an agent from an agents/ workspace");
   return command.hook("preAction", async (_command, actionCommand) => {
@@ -58,12 +52,6 @@ export function agentCommand(
 
     const initialSelection = await applicationContext.resolveAgent();
     if (initialSelection.kind === "workspace") {
-      if (options.preserveWorkspace === true) {
-        if (requestedName !== undefined) {
-          await selectWorkspaceAgent(initialSelection.workspace, requestedName);
-        }
-        return;
-      }
       applicationContext.root = await selectWorkspaceAgent(
         initialSelection.workspace,
         requestedName,

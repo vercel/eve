@@ -128,6 +128,9 @@ export async function withEve<TConfig extends EveVercelConfig>(
         buildCommand: `node ${quoteVercelShellArgument(
           toVercelRelativePath(member.appRoot, resolveEveBinaryPath(member.appRoot)),
         )} build`,
+        devCommand: `node ${quoteVercelShellArgument(
+          toVercelRelativePath(member.appRoot, resolveEveBinaryPath(member.appRoot)),
+        )} dev --no-ui`,
         name: member.name,
         publicRoutePrefix: `/${member.name}`,
         workspaceMember: true,

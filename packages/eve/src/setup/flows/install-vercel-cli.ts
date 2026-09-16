@@ -24,51 +24,12 @@ export interface InstallVercelCliDeps {
   spawnPackageManager: typeof spawnPackageManager;
 }
 
-export type OfferVercelCliUpgradeResult = InstallVercelCliResult | { kind: "declined" };
-
 const defaultDeps: InstallVercelCliDeps = {
   getVercelAuthStatus,
   detectPackageManager,
   runVercel,
   spawnPackageManager,
 };
-
-/** Offer an interactive Vercel CLI upgrade and run the shared install flow when accepted. */
-export async function offerVercelCliUpgrade(input: {
-  readonly appRoot: string;
-  readonly message: string;
-  readonly prompter: Prompter;
-  readonly signal?: AbortSignal;
-  readonly upgradeLabel?: string;
-  readonly deps?: Partial<InstallVercelCliDeps>;
-  readonly runInstallVercelCliFlow?: typeof runInstallVercelCliFlow;
-}): Promise<OfferVercelCliUpgradeResult> {
-  let choice: "upgrade" | "later";
-  try {
-    choice = await input.prompter.select({
-      message: input.message,
-      options: [
-        {
-          value: "upgrade",
-          label: input.upgradeLabel ?? "Upgrade Vercel CLI",
-          description: "Run the Vercel CLI's native upgrader",
-        },
-        { value: "later", label: "Not now" },
-      ],
-      initialValue: "upgrade",
-    });
-  } catch {
-    choice = "later";
-  }
-  if (choice === "later") return { kind: "declined" };
-  return (input.runInstallVercelCliFlow ?? runInstallVercelCliFlow)({
-    appRoot: input.appRoot,
-    prompter: input.prompter,
-    signal: input.signal,
-    upgrade: true,
-    deps: input.deps,
-  });
-}
 
 /** The global-install argv per package manager (`vercel@latest`, account-wide). */
 function globalInstallArguments(kind: PackageManagerKind): string[] {

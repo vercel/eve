@@ -6,7 +6,6 @@ import type {
 } from "#cli/dev/tui/types.js";
 
 export interface DevelopmentCliOptions {
-  agent?: string;
   assistantResponseStats?: AssistantResponseStatsMode;
   connectionAuth?: TerminalPartDisplayMode;
   contextSize?: number;

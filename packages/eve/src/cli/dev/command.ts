@@ -69,18 +69,13 @@ export function registerDevelopmentCommand(input: {
   const { applicationContext, logger, program, runtime, telemetry } = input;
   const theme = createCliTheme();
 
-  agentCommand(
-    program.command("dev"),
-    applicationContext,
-    (command) => {
-      const options = command.opts<DevelopmentCliOptions>();
-      return (
-        resolveDevelopmentUrlTarget(options, command.processedArgs[0] as string | undefined) ===
-        undefined
-      );
-    },
-    { preserveWorkspace: true },
-  )
+  agentCommand(program.command("dev"), applicationContext, (command) => {
+    const options = command.opts<DevelopmentCliOptions>();
+    return (
+      resolveDevelopmentUrlTarget(options, command.processedArgs[0] as string | undefined) ===
+      undefined
+    );
+  })
     .description("Start the eve development server or connect to an existing URL.")
     .argument("[url]", "Connect to an existing server URL", parseDevelopmentServerUrl)
     .option("--host <host>", "Host interface to bind")
@@ -136,6 +131,7 @@ export function registerDevelopmentCommand(input: {
     )
     .action(async (positionalUrl: string | undefined, options: DevelopmentCliOptions) => {
       const remoteTarget = resolveDevelopmentUrlTarget(options, positionalUrl);
+      const remoteServerUrl = remoteTarget?.serverUrl;
       const interactive = hasInteractiveTerminal();
       const mode = resolveDevUiMode({ options, interactive });
       telemetry.trackDevContext({ target: remoteTarget ? "remote" : "local", ui: mode });
@@ -143,16 +139,6 @@ export function registerDevelopmentCommand(input: {
       if (options.input !== undefined && mode === "headless") {
         throw new InvalidArgumentError("--input requires the interactive UI.");
       }
-
-      const projectContext =
-        remoteTarget === undefined ? await applicationContext.resolveAgent() : undefined;
-      if (projectContext?.kind === "workspace") {
-        const { runWorkspaceDevelopment } = await import("#cli/dev/workspace-dev.js");
-        await runWorkspaceDevelopment({ mode, options, workspace: projectContext.workspace });
-        return;
-      }
-
-      const remoteServerUrl = remoteTarget?.serverUrl;
       let existingLocalDevelopmentServer = false;
       if (remoteServerUrl !== undefined) {
         const isActive =

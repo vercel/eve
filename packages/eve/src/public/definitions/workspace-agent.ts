@@ -1,7 +1,6 @@
 import type { StandardJSONSchemaV1 } from "#compiled/@standard-schema/spec/index.js";
 
 import type { HeadersValue } from "#client/types.js";
-import { EVE_INTERNAL_WORKSPACE_ORIGIN_ENV } from "#internal/application/workspace-environment.js";
 import { type OutboundAuthFn, vercelOidc } from "#public/agents/auth.js";
 import {
   defineRemoteAgent,
@@ -65,23 +64,14 @@ function workspaceAgentRoutePrefix(name: string): string {
   return `${namespace}/${name}`;
 }
 
-function localWorkspaceOrigin(): string | undefined {
-  const origin = process.env[EVE_INTERNAL_WORKSPACE_ORIGIN_ENV]?.trim().replace(/\/+$/u, "");
-  return origin?.length === 0 ? undefined : origin;
-}
-
 function defaultWorkspaceAgentTransport(name: string): WorkspaceAgentTransport {
   const auth = vercelOidc();
   return {
     auth: async () => {
-      if (localWorkspaceOrigin() !== undefined) return { headers: {} };
       requireVercelWorkspaceEnvironment();
       return process.env.VERCEL_ENV === "development" ? { headers: {} } : auth();
     },
     url: () => {
-      const localOrigin = localWorkspaceOrigin();
-      if (localOrigin !== undefined) return `${localOrigin}${workspaceAgentRoutePrefix(name)}`;
-
       requireVercelWorkspaceEnvironment();
       const development = process.env.VERCEL_ENV === "development";
       const host =
