@@ -1,83 +1,111 @@
 ---
 title: "Project Structure"
-description: "Choose a single root agent, an agent workspace, or declared subagents before you create a project."
+description: "Start with one agent, keep application code beside it, and split into a workspace only when you need separately addressable agents."
 ---
 
-Most projects have one root agent: the agent that receives requests through its own HTTP endpoint. Choose an agent workspace when several root agents need their own endpoints, channels, schedules, or ownership boundaries. Choose declared subagents when one root agent needs to delegate specialized work.
+Start with one root agent in `agent/`. A root agent accepts requests through its own HTTP API or channels; it can have many tools, skills, and subagents. Keep browser application files outside `agent/`.
 
-## Choose the agent boundary
+| When you need…                                                         | Structure                                        |
+| ---------------------------------------------------------------------- | ------------------------------------------------ |
+| One agent, with or without a browser app                               | `agent/` beside your application code            |
+| A specialist that an agent delegates to                                | `agent/subagents/<name>/` inside that agent      |
+| Several separately addressable agents sharing a package and deployment | `agents/<name>/agent/` in an eve agent workspace |
+| Separate dependencies, versions, or release schedules                  | Separate agent packages or projects              |
 
-| Need                                                                                            | Use                                                       |
-| ----------------------------------------------------------------------------------------------- | --------------------------------------------------------- |
-| One public agent with several tools, skills, channels, or subagents                             | One root agent                                            |
-| A specialist with a different prompt, tool surface, or sandbox that the root agent delegates to | A declared subagent under `agent/subagents/`              |
-| Agents independently addressed through their own endpoints, channels, or schedules              | Multiple root agents in an agent workspace                |
-| An agent owned or released independently                                                        | A separate root agent, in this project or another project |
+Every root agent can have [declared subagents](/docs/subagents#declared-subagents) with their own prompts, tools, and sandboxes. These specialists have no separate channel endpoint and do not inherit the parent's authored capabilities. Use a [skill](/docs/skills) instead when you only need an optional procedure.
 
-Each root agent has its own HTTP surface and lifecycle. A declared subagent is a tool of its parent agent, so users and channels cannot address it directly. See [Subagents](../subagents) for delegation, or [Remote Agents](../guides/remote-agents) when a subagent runs in another deployment.
+## One agent
 
-## Choose a root-agent layout
-
-A project with one root agent has an `agent/` directory at its root:
+Use this layout for a standalone agent or an agent inside a web application:
 
 ```text
-my-agent/
+project/
 ├── package.json
 ├── agent/
 │   ├── instructions.md
 │   ├── tools/
-│   ├── skills/
 │   └── subagents/
-└── evals/
+├── evals/
+├── app/                    # optional Next.js browser application
+└── next.config.ts          # optional Next.js integration
 ```
 
-An agent workspace keeps each independently addressed root agent under `agents/<name>/`:
+Create the agent with [Getting Started](/docs/getting-started). The [Agent Files reference](/docs/reference/agent-files) lists supported paths. Keep agent-only helpers in `agent/lib/`; share reusable capabilities through [extensions](/docs/extensions).
+
+For a generated Next.js chat UI, run `eve add channel/web` from the project root. For an existing browser app, follow your [framework integration guide](/docs/guides/frontend/overview#per-framework-integration).
+
+## Several root agents
+
+Use an eve agent workspace when, for example, clients need to address support and research separately:
 
 ```text
-operations/
+project/
 ├── package.json
-├── tsconfig.json
-└── agents/
-    ├── support/
-    │   └── agent/
-    │       ├── instructions.md
-    │       ├── tools/
-    │       └── channels/
-    └── research/
-        └── agent/
-            ├── instructions.md
-            ├── tools/
-            └── channels/
+├── agents/
+│   ├── support/
+│   │   ├── agent/
+│   │   └── evals/
+│   └── research/
+│       ├── agent/
+│       └── evals/
+└── apps/                   # optional peer applications, not eve workspace members
+    └── web/
 ```
 
-Each workspace member uses the same [agent directory layout](./#agent-directory-layout) as a standalone root agent. They share the root package, dependencies, and build scripts. If `agents/<name>/` has its own `package.json`, it is a separate package rather than a workspace member.
+Members share the root package, dependencies, scripts, and Vercel deployment. Their directory names identify them in the CLI and public routes. Members have no `package.json` of their own: adding one excludes that directory from eve workspace discovery. Unlike a package-manager workspace, this layout does not give members separate dependency or version boundaries.
 
-## Create an agent workspace
-
-Pass comma-separated agent names to `eve init`:
+Create a workspace, then select an agent to run:
 
 ```bash
-eve init operations --agents support,research
-```
-
-To add another root agent later, run `eve init <name>` from the workspace root:
-
-```bash
+npx eve@latest init operations --agents support,research
 cd operations
-eve init billing
+npx eve dev --agent support
 ```
 
-This adds `agents/billing/agent/`. Run agent-scoped commands from that member directory, or select the agent from the workspace root with `--agent`:
+Run agent commands such as `dev`, `info`, and `eval` from `agents/<name>/`, or pass `--agent <name>` from the workspace root. `eve dev --agent support` runs the selected agent, not peer applications. Start other agents separately when needed; local [workspace-peer calls](/docs/subagents#vercel-workspace-peers) require an explicit transport.
+
+On Vercel, run `eve link` and `eve deploy` from the root; deployment includes all members. No frontend is required. For self-hosting, [build and run each member separately](/docs/guides/deployment/self-hosting#run-workspace-members).
+
+## Independent releases
+
+Use separate packages or projects when agents need independent dependencies or releases, even within the same monorepo. These are not eve agent-workspace members. Share capabilities through [workspace extensions](/docs/extensions#use-an-extension-in-a-workspace); delegate across deployments with [remote agents](/docs/guides/remote-agents).
+
+## Configure a web deployment
+
+Choose how the frontend and agents run together independently of how many agents you have:
+
+- **Add agents to a Next.js application:** use [`eve/next`](/docs/guides/frontend/nextjs) in `next.config.ts`. Next.js owns the application lifecycle; the integration starts agent processes and proxies requests locally, and contributes separate agent services on Vercel. A root Next.js app can sit beside either `agent/` or `agents/`; workspace members are discovered automatically.
+- **Add a frontend to an agent workspace:** keep the frontend as a peer application, for example under `apps/web/`. On Vercel, use [`eve/vercel` in root `vercel.ts`](/docs/guides/deployment/vercel#compose-agents-with-other-vercel-services) to contribute the agents alongside the frontend service. For [self-hosting](/docs/guides/deployment/self-hosting#run-workspace-members), run the services with your process manager and configure a reverse proxy. The frontend does not need `eve/next`.
+
+`apps/web/` is an organizational convention, not an eve filesystem slot. Deployment configuration owns peer services; eve discovers only the agents. Both Vercel integrations deploy the services together, not as independent releases.
+
+The generated Web Chat installer does not support agent workspaces. Create the frontend and its agent-selection UI yourself, using the [React chat example](/docs/guides/frontend/overview#basic-chat-react). Develop a peer Next.js frontend with `next dev` separately from the agents. For an authored Vercel service graph, use `vercel dev --local` to run the composition without linking a Vercel project.
+
+For a single `agent/` project, `eve add channel/web` currently generates a root Next.js app using `eve/next`. `eve/vercel` currently requires an `agents/` workspace; it cannot compose a standalone root `agent/`.
+
+## Add a second root agent
+
+To convert a single-agent project into a workspace, move the original agent from the project root:
 
 ```bash
-eve info --agent billing
+mkdir -p agents/support
+mv agent agents/support/agent
 ```
 
-When you run an interactive agent-scoped command without naming an agent, eve offers a picker.
+Move its `evals/` directory, if present, to `agents/support/evals/`. Keep `package.json`, dependencies, environment files, and any browser application at the project root. Do not leave a root `agent/` directory: eve treats a project with `agent/` as single-agent even when `agents/` also exists.
 
-## Continue configuring the project
+Before adding the next agent:
 
-- [Getting Started](./): create and run a single-root project, then learn the files inside each root agent.
-- [Deploy to Vercel](../guides/deployment/vercel): deploy workspace agents as Vercel services and configure their public routes.
-- [Next.js](../guides/frontend/nextjs): put one or more root agents behind a browser application.
-- [Subagents](../subagents#vercel-workspace-peers): let one Vercel workspace agent delegate work to another.
+- Update `tsconfig.json` to include `agents/**/*.ts`, preserving any application includes. Update moved-file imports and path aliases, including scaffolded `package.json#imports` entries that point at `./agent/*` or `./evals/*`.
+- Update scripts that assume one agent. Use `--agent support` for agent-scoped commands; build an agent-only Vercel workspace with root `eve build`. For a Next.js app, keep the framework scripts and follow its [build instructions](/docs/guides/frontend/nextjs#dev-vs-deploy-topology).
+- Update HTTP clients and webhook registrations for the named agent's public routes. In a root Next.js app, remove a single-agent `eveRoot` override to enable workspace discovery, and select `support` in the client hook. Store the agent name alongside durable-session links.
+
+Then add the second agent and check discovery:
+
+```bash
+npx eve init research
+npx eve info --agent support
+npx eve info --agent research
+```
+
+Run the moved agent's evals with `npx eve eval --agent support`. Add later agents with `npx eve init <name>` from the workspace root.

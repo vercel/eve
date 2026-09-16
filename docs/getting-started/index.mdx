@@ -1,6 +1,6 @@
 ---
 title: "Getting Started"
-description: "Create and run a single-root eve project, then understand the files inside its agent directory."
+description: "Create an eve project, configure model credentials, and run your first agent."
 contentType: "How-to"
 ---
 
@@ -18,7 +18,7 @@ Choose a model, provider, and channel that meet your data-processing and complia
 
 ## Create a project
 
-This guide creates one root agent. If you need several root agents that users, channels, or schedules can address independently, start with [Project Structure](/docs/getting-started/project-structure) and create an agent workspace instead.
+Start with one agent. You can [add a browser app or split into an agent workspace](/docs/getting-started/project-structure) as the project grows.
 
 Run `eve init` with a project name:
 
@@ -50,119 +50,29 @@ npx eve@latest init my-agent --model openai/gpt-5.6-terra --reasoning high
 
 ## Run the agent
 
-The terminal UI opens after interactive initialization. To return later, run this from the project root:
+The terminal UI opens after interactive initialization. To return later, enter the project and run:
 
 ```bash
+cd my-agent
 npm run dev
 ```
 
-This starts an interactive session where you can send messages to your agent.
+This starts an interactive session where you can send messages to your agent. Edit `agent/instructions.md` to change its behavior and `agent/agent.ts` to configure its model. eve reloads your changes as you work.
 
-## Agent directory layout
+<span id="project-layout" />
+<span id="agent-directory-layout" />
+<span id="naming-from-paths" />
+<span id="recommended-layout" />
+<span id="nested-layout" />
+<span id="agent-files-and-directories" />
+<span id="files-available-in-the-sandbox" />
+<span id="local-subagents" />
+<span id="flat-layout" />
+<span id="debug-file-discovery" />
 
-eve builds your agent from the files under `agent/`. Each directory is an authored slot: where you put a file determines how eve loads it.
+## Organize your project
 
-### Naming from paths
-
-eve derives names from file paths, so you do not configure them separately.
-
-| Path                                  | Resolves to           |
-| ------------------------------------- | --------------------- |
-| `agent/tools/get_weather.ts`          | tool `get_weather`    |
-| `agent/connections/linear.ts`         | connection `linear`   |
-| `agent/skills/summarize.md`           | skill `summarize`     |
-| `agent/subagents/researcher/agent.ts` | subagent `researcher` |
-
-A root agent uses the `name` in its `package.json`, or its app directory name when no name is set. A subagent uses its directory name.
-
-### Nested layout
-
-For a standalone agent, use the nested layout below. A minimal agent needs `instructions.md`; add `agent.ts` only when you need to change the default configuration. Framework defaults use the same slots, so a file at the same path replaces the default when eve compiles the agent. Add the other slots as needed:
-
-```text
-my-agent/
-├── README.md
-├── package.json
-├── tsconfig.json
-├── agent/
-│   ├── agent.ts
-│   ├── instructions.md
-│   ├── instrumentation.ts
-│   ├── channels/
-│   ├── connections/
-│   ├── hooks/
-│   ├── skills/
-│   ├── lib/
-│   ├── sandbox/
-│   ├── tools/
-│   ├── schedules/
-│   └── subagents/
-└── evals/
-```
-
-Evals live beside `agent/`, not inside it.
-
-### Agent files and directories
-
-Each path under `agent/` has a specific purpose. Root agents can use every path below. Subagents have their own files, but can use only the paths marked **Yes**.
-
-| Path                                                    | Use                                       | Available to subagents | Notes                                                                                                                                                                             |
-| ------------------------------------------------------- | ----------------------------------------- | ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `agent.ts`                                              | Runtime config                            | Yes                    | Model, model options, compaction, build, and experimental settings. See [Agents](/docs/agent-config).                                                                             |
-| `instructions.md` / `instructions.ts` / `instructions/` | Base system prompt                        | Optional               | A flat file or directory of `.md` and `.ts` files. Static sources compose at build time. Dynamic sources resolve at runtime. Required on the root, optional on subagents.         |
-| `instrumentation.ts`                                    | Telemetry config                          | No                     | OTel exporter and AI SDK span settings, auto-discovered and run before agent code. Root-only.                                                                                     |
-| `channels/`                                             | HTTP and messaging entry points           | No                     | Root-only.                                                                                                                                                                        |
-| `connections/`                                          | External MCP and OpenAPI services         | Yes                    | Static files define one path-named connection. Dynamic files can resolve a caller-specific connection set at runtime.                                                             |
-| `hooks/`                                                | Lifecycle and stream-event subscribers    | Yes                    | Module-backed only. Recursive directories are supported.                                                                                                                          |
-| `skills/`                                               | On-demand procedures and capability packs | Yes                    | Flat markdown, module-backed skills, or packaged skills. Runtime files are seeded under `$HOME/.agents/skills/`, with `/workspace/skills/` as a fallback.                         |
-| `lib/`                                                  | Shared authored helper code               | Yes                    | Import-only; not mounted into the workspace.                                                                                                                                      |
-| `sandbox.ts` or `sandbox/sandbox.ts`                    | The agent's single sandbox                | Yes                    | Use `sandbox.ts` for a definition-only override; use `sandbox/sandbox.ts` with `sandbox/workspace/**` to also seed files. The framework default applies when neither is authored. |
-| `sandbox/workspace/**`                                  | Files seeded into the sandbox             | Yes                    | Mirrored into `/workspace/` when a session starts.                                                                                                                                |
-| `tools/`                                                | Typed executable integrations             | Yes                    | Module-backed only.                                                                                                                                                               |
-| `schedules/`                                            | Recurring jobs                            | No                     | Each schedule is a default-exported `defineSchedule` module or a markdown prompt with `cron` frontmatter. Recursive nesting is supported. Root-only.                              |
-| `subagents/`                                            | Specialist child agents                   | Yes                    | Each child is a local package under `subagents/<id>/`. Nested subagents are supported.                                                                                            |
-
-### Files available in the sandbox
-
-Files under `agent/` define your agent; only files in `agent/sandbox/workspace/` are copied to `/workspace/` when a session starts.
-
-### Local subagents
-
-A local subagent uses the same `agent.ts` shape as the root:
-
-```text
-agent/subagents/researcher/
-├── agent.ts
-├── instructions.md
-├── connections/
-├── hooks/
-├── skills/
-├── lib/
-├── sandbox/
-├── tools/
-└── subagents/
-```
-
-A subagent's `agent.ts` is required and must include a description; its instructions are optional. Subagents support connections, hooks, skills, shared code, sandboxes, tools, and nested subagents. Channels and schedules are root-only. See [Subagents](/docs/subagents) for inheritance and isolation behavior.
-
-### Flat layout
-
-When the app root is also the agent root, eve supports this layout:
-
-```text
-my-agent/
-├── package.json
-├── agent.ts
-├── instructions.md
-├── tools/
-└── skills/
-```
-
-Prefer the nested layout to keep application files separate from the files that define your agent.
-
-### Debug file discovery
-
-If eve does not discover a file, run `eve info`. It lists the discovered surface and diagnostics, so you can check the file's slot and whether it belongs to a root agent or subagent. eve also writes inspectable artifacts under `.eve/`; see [Instrumentation](./observability/instrumentation) and the [CLI](./reference/cli) reference.
+Keep agent definitions under `agent/` and application code beside it. Read [Project Structure](/docs/getting-started/project-structure) for recommended layouts, browser-app placement, and adding a second agent. The [Agent Files reference](/docs/reference/agent-files) lists supported files, naming rules, subagent slots, and discovery diagnostics.
 
 ## Install manually
 
@@ -185,8 +95,7 @@ After the tutorial, continue with the task you need:
 | Give the model some code it can run                                | [Tools](/docs/tools)                                                                                          |
 | Connect the agent to an external MCP or OpenAPI service            | [Connections](/docs/connections)                                                                              |
 | Communicate with users through Slack, Discord, or another platform | [Channels](/docs/channels/overview)                                                                           |
-| Build a browser interface                                          | [Next.js](/docs/guides/frontend/nextjs), then [Frontend Frameworks](/docs/guides/frontend/overview)           |
-| Organize several independently addressed root agents               | [Project Structure](/docs/getting-started/project-structure)                                                  |
+| Build a browser interface                                          | [Frontend Frameworks](/docs/guides/frontend/overview)                                                         |
 | Test agent behavior                                                | [Evals](/docs/evals/overview)                                                                                 |
 | Secure and deploy the agent                                        | [Authentication](/docs/guides/auth-and-route-protection), then [Deployment](/docs/guides/deployment/overview) |
 

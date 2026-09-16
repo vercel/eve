@@ -7,7 +7,7 @@ Deploy eve to Vercel when you want the framework’s managed build and runtime i
 
 ## Prepare the Vercel project
 
-Link the agent directory to a Vercel project:
+Run this from the project root to link it to a Vercel project. For an eve agent workspace, use the workspace root, not a member directory:
 
 ```bash
 eve link
@@ -51,15 +51,17 @@ See [Sandbox](../../sandbox) for resource limits, network policy, and lifecycle 
 
 ## Deploy the agent
 
-An agent workspace contains several root agents that users, channels, or schedules can address independently. To create and manage this layout, see [Project Structure](../../getting-started/project-structure).
+For a single-agent project without a frontend, use `eve build`. For an agent-only workspace, run it from the workspace root: eve generates a separately built service and a `/<name>/eve/v1/*` transport route for each member. All members deploy together in one Vercel project. See [Project Structure](../../getting-started/project-structure) for workspace membership and layout rules.
 
-For an agent-only workspace, run `eve build` from the workspace root. eve finds direct `agents/<name>/` children without their own `package.json`, then generates an independently built service and a `/<name>/eve/v1/*` transport route for each one. A child with its own `package.json` is a separate package rather than a workspace member.
+A Next.js-centered project uses [`withEve` in `next.config.ts`](../frontend/nextjs) and its Next.js build command. If you author the project's broader service graph in `vercel.ts`, use the configuration below instead.
 
 ### Compose agents with other Vercel services
 
-Use Vercel's programmatic configuration when agents, a frontend, private API, worker, or another application are peer services that Vercel builds and deploys independently. In this arrangement, Vercel's service graph handles routing instead of a Next.js app. Replace `vercel.json` with a root `vercel.ts`, then compose the service graph with `withEve`:
+Use `withEve` from `eve/vercel` when the agents and other applications are peer services. The helper contributes workspace agents to a Vercel service graph; it does not manage or require a particular frontend framework. Unlike `eve/next`, this keeps the project lifecycle separate from Next.js. Both integrations deploy the agent services together in one Vercel project.
 
-If a single Next.js app should serve same-origin browser routes for one or more agents, use [`withEve()` in `next.config.ts`](../frontend/nextjs) instead.
+`eve/vercel` currently requires an `agents/` workspace, even if it has only one member. It does not support a standalone root `agent/`.
+
+For a workspace with a peer Next.js frontend under `apps/web/`, replace `vercel.json` with a root `vercel.ts`. The frontend uses an ordinary Next.js config without `eve/next`:
 
 ```typescript title="vercel.ts"
 import { withEve } from "eve/vercel";
@@ -80,7 +82,11 @@ export default await withEve({
 });
 ```
 
-Vercel evaluates `vercel.ts` before resolving the service graph. `withEve` discovers direct workspace members, adds their services and transport routes, and returns a plain Vercel configuration. Vercel can then build `web` and every eve agent independently. The frontend does not need `withEve` in its framework configuration or a build script that builds the agents.
+Vercel evaluates `vercel.ts` before resolving the service graph. `withEve` discovers direct workspace members, adds their services and transport routes, and returns a plain Vercel configuration. Vercel then builds `web` and each eve agent separately. The frontend does not need a build script that builds the agents.
+
+The Web Chat installer does not support agent workspaces. Create the frontend using the [React chat example](../frontend/overview#basic-chat-react), and configure authentication for every exposed agent. To self-host the same source layout, replace Vercel composition with your own [process and proxy configuration](./self-hosting#run-workspace-members).
+
+Workspace agents use `/<name>/eve/v1/*` routes. A same-origin React client calls support with `useEveAgent({ host: "/support" })`; the hook's `agent: "support"` shorthand targets the different `/eve/agents/support` mount used by frontend framework integrations.
 
 Generated transport routes are inserted before a filesystem handler or, when no filesystem handler exists, before authored routes. `withEve` throws instead of overwriting an authored service key or exact transport route that belongs to a generated agent. Remove the authored route, and remove or rename the authored service; `withEve` adds both automatically. Names in the array form of `services` must also be unique. Other service names, routes, bindings, and Cron Jobs remain authored in `vercel.ts`.
 
@@ -110,7 +116,9 @@ A Vercel project can use only one configuration source, so remove `vercel.json` 
 
 An authored eve service routed at `/eve/v1` already uses the protocol path; callbacks remain at `/eve/v1/callback/*`. A named mount such as `/support` adds that mount before the protocol path, giving `/support/eve/v1/callback/*`.
 
-Deploy the linked project to production:
+### Deploy the project
+
+Deploy the linked project to production from its root:
 
 ```bash
 eve deploy
@@ -133,7 +141,14 @@ Vercel uses the generated output to configure these services:
 
 ## Verify the deployment
 
-Check the health route and connect the development TUI:
+For a single unnamed agent, check the health route and connect the development TUI:
+
+```bash
+curl https://your_agent.vercel.app/eve/v1/health
+eve dev https://your_agent.vercel.app
+```
+
+For a workspace agent, include its public mount: `/support` with `eve/vercel` or an agent-only workspace, or `/eve/agents/support` with `eve/next`. For example:
 
 ```bash
 curl https://your_agent.vercel.app/support/eve/v1/health

@@ -399,10 +399,10 @@ Lists the user-authored channels in the current project.
 4. `eve build` before shipping.
 5. `eve start` to smoke-test the built output locally.
 
-Related: [Project layout](../getting-started#project-layout) · [Instrumentation](../observability/instrumentation).
+Related: [Agent Files](/docs/reference/agent-files) · [Instrumentation](../observability/instrumentation).
 
 ## What to read next
 
-- [Project layout](../getting-started#project-layout): what `eve info` discovers
+- [Agent Files](/docs/reference/agent-files): what `eve info` discovers
 - [Instrumentation](../observability/instrumentation): tracing and the error catalog
 - [Deployment](../guides/deployment/overview): `eve build` and `eve start` in production
