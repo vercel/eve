@@ -74,7 +74,7 @@ describe("runRegistrySetupCommand", () => {
         "/project",
         { package: "@acme/slack", bin: "acme-slack", args: ["setup"] },
         "channel/slack",
-        options(),
+        { ...options(), projectRoot: "/workspace" },
       ),
     ).resolves.toEqual({ kind: "completed", facts: [] });
 
@@ -86,6 +86,7 @@ describe("runRegistrySetupCommand", () => {
         env: expect.objectContaining({
           EVE_SETUP: "1",
           EVE_SETUP_ITEM: "channel/slack",
+          EVE_SETUP_PROJECT_ROOT: "/workspace",
           EVE_SETUP_PROTOCOL: "2",
         }),
         stdio: ["ignore", "pipe", "pipe", "ipc"],

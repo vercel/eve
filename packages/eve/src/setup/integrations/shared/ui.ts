@@ -33,6 +33,7 @@ export function createSetupPresenter(
 
 export function createSetupContexts(input: {
   appRoot: string;
+  projectRoot?: string;
   asker: Asker;
   environment: SetupPrepareContext["environment"];
   prompter: Prompter;
@@ -46,7 +47,11 @@ export function createSetupContexts(input: {
   }) => SetupExternalAction;
 }): { prepare: SetupPrepareContext; apply: SetupApplyContext } {
   const presenter = createSetupPresenter(input.prompter, input.beginExternalAction);
-  const apply: SetupApplyContext = { appRoot: input.appRoot, presenter };
+  const apply: SetupApplyContext = {
+    appRoot: input.appRoot,
+    projectRoot: input.projectRoot ?? input.appRoot,
+    presenter,
+  };
   if (input.signal !== undefined) apply.signal = input.signal;
   if (input.force !== undefined) apply.force = input.force;
   return {

@@ -36,6 +36,7 @@ function logger(): RegistryCommandLogger & { errors: string[] } {
 
 afterEach(() => {
   process.exitCode = undefined;
+  vi.unstubAllEnvs();
   vi.clearAllMocks();
 });
 
@@ -76,6 +77,26 @@ describe("runIntegrationSetupCommand", () => {
       signal: undefined,
     });
     expect(output.errors).toEqual([]);
+  });
+
+  it("passes the shared project root from a registry setup process", async () => {
+    vi.stubEnv("EVE_SETUP", "1");
+    vi.stubEnv("EVE_SETUP_PROJECT_ROOT", "/workspace");
+    vi.mocked(runIntegrationSetup).mockResolvedValue({
+      kind: "done",
+      completion: { facts: [] },
+    });
+
+    await runIntegrationSetupCommand(logger(), "/workspace/agents/support", "slack");
+
+    expect(runIntegrationSetup).toHaveBeenCalledWith(
+      "slack",
+      expect.objectContaining({
+        appRoot: "/workspace/agents/support",
+        projectRoot: "/workspace",
+      }),
+      undefined,
+    );
   });
 
   it("passes force to the integration runner", async () => {

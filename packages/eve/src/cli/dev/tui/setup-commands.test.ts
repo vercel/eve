@@ -456,7 +456,25 @@ describe("runTuiSetupCommand", () => {
     if (result.kind === "done" && result.result.deployed === "production") {
       expect(outcome.effect).toEqual({ kind: "deployed" });
     }
-    expect(runRegistryFlow).toHaveBeenCalledWith(expect.objectContaining({ appRoot: APP_ROOT }));
+    expect(runRegistryFlow).toHaveBeenCalledWith(
+      expect.objectContaining({ appRoot: APP_ROOT, installRoot: undefined }),
+    );
+  });
+
+  it("keeps shared setup at the workspace root while installing into its agent", async () => {
+    const runRegistryFlow = vi.fn<TuiSetupFlows["runRegistryFlow"]>(async () => registryResult());
+    await run({
+      command: "add",
+      agentRoot: "/tmp/project/agents/support",
+      flows: fakeFlows({ runRegistryFlow }),
+    });
+
+    expect(runRegistryFlow).toHaveBeenCalledWith(
+      expect.objectContaining({
+        appRoot: APP_ROOT,
+        installRoot: "/tmp/project/agents/support",
+      }),
+    );
   });
 
   it("reports completed items and skipped failures together", async () => {

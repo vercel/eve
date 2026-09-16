@@ -30,6 +30,8 @@ export type RegistrySetupCommandResult =
 
 export interface RegistrySetupCommandOptions {
   prompter: Prompter;
+  /** Project root for setup effects shared by workspace agents. */
+  projectRoot?: string;
   signal?: AbortSignal;
 }
 
@@ -218,6 +220,7 @@ export async function runRegistrySetupCommand(
         ...process.env,
         EVE_SETUP: "1",
         EVE_SETUP_ITEM: item,
+        EVE_SETUP_PROJECT_ROOT: options.projectRoot ?? appRoot,
         EVE_SETUP_PROTOCOL: String(REGISTRY_SETUP_PROTOCOL_VERSION),
       },
       stdio: ["ignore", "pipe", "pipe", "ipc"],

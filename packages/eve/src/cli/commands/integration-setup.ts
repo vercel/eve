@@ -61,6 +61,8 @@ export async function runIntegrationSetupCommand(
       kind,
       {
         appRoot,
+        projectRoot:
+          process.env.EVE_SETUP === "1" ? (process.env.EVE_SETUP_PROJECT_ROOT ?? appRoot) : appRoot,
         prompter,
         asker,
         force: options.force,

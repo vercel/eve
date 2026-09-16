@@ -18,7 +18,10 @@ import type { IntegrationSetupResult, SetupExternalAction } from "./types.js";
 
 /** Inputs shared by every registry-owned integration setup flow. */
 export interface RunIntegrationSetupOptions {
+  /** Selected agent project where authored files are changed. */
   appRoot: string;
+  /** Project root for shared dependencies, Vercel links, and environment files. */
+  projectRoot?: string;
   prompter: Prompter;
   /** Defaults to the interactive adapter; agent drivers inject an answer-backed asker. */
   asker?: Asker;
@@ -52,11 +55,12 @@ export async function runIntegrationSetup(
   deps: IntegrationSetupRunnerDeps = defaultDeps,
 ): Promise<IntegrationSetupResult> {
   const integration = setupIntegration(kind);
+  const projectRoot = options.projectRoot ?? options.appRoot;
   options.prompter.intro(`Set up ${integration.label}`, integration.hint);
   options.prompter.log.message("Checking Vercel setup...");
   const [deployment, authStatus] = await Promise.all([
-    deps.detectDeployment(options.appRoot, { signal: options.signal }),
-    deps.getVercelAuthStatus(options.appRoot, { signal: options.signal }),
+    deps.detectDeployment(projectRoot, { signal: options.signal }),
+    deps.getVercelAuthStatus(projectRoot, { signal: options.signal }),
   ]);
   const project = projectResolutionFromDeployment(deployment);
   const environment = integrationSetupEnvironment(authStatus, project);
@@ -67,6 +71,7 @@ export async function runIntegrationSetup(
   return integration.run(
     createSetupContexts({
       appRoot: options.appRoot,
+      projectRoot,
       asker: options.asker ?? interactiveAsker(options.prompter),
       environment,
       prompter: options.prompter,
@@ -74,7 +79,7 @@ export async function runIntegrationSetup(
         options.resolveVercelProject ??
         ((integration) =>
           resolveIntegrationVercelProject({
-            appRoot: options.appRoot,
+            appRoot: projectRoot,
             integration,
             signal: options.signal,
           })),

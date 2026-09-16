@@ -21,6 +21,8 @@ export interface DeclaredSetupOptions {
 export async function runDeclaredSetups(input: {
   logger: RegistryCommandLogger;
   appRoot: string;
+  /** Project root for setup effects shared by workspace agents. */
+  projectRoot?: string;
   item: string;
   setups: readonly RegistrySetupCommand[] | undefined;
   options: DeclaredSetupOptions;
@@ -58,7 +60,7 @@ export async function runDeclaredSetups(input: {
           ],
         },
         input.item,
-        { prompter, signal: input.options.signal },
+        { prompter, projectRoot: input.projectRoot, signal: input.options.signal },
       );
       if (result.kind === "cancelled") {
         input.logger.log(input.cancelledReminder);

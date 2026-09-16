@@ -7,6 +7,7 @@ import {
 } from "#compiled/shadcn-registry/index.js";
 import semver from "#compiled/semver/index.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
+import { resolveEveProjectContext } from "#internal/project-context.js";
 import { createPrompter, type Prompter } from "#setup/prompter.js";
 import type { RegistrySetupCompletion } from "#setup/registry-setup-protocol.js";
 import { WizardCancelledError } from "#setup/step.js";
@@ -468,6 +469,7 @@ export async function runAddCommand(
   dependencies: AddCommandDependencies = defaultAddCommandDependencies,
 ): Promise<RegistrySetupCompletion | false | undefined> {
   return runRegistryAction(logger, appRoot, async () => {
+    const projectRoot = (await resolveEveProjectContext(appRoot)).environmentRoot;
     const address = itemAddress(item);
     if (address === itemAddress("channel/web")) await assertCanInstallWebChat(appRoot);
     const config = await readEveRegistryConfig(appRoot);
@@ -503,6 +505,7 @@ export async function runAddCommand(
       const completion = await runDeclaredSetups({
         logger,
         appRoot,
+        projectRoot,
         item,
         setups: eveMetadata.setup,
         options,
@@ -597,6 +600,7 @@ export async function runAddCommand(
     const completion = await runDeclaredSetups({
       logger,
       appRoot,
+      projectRoot,
       item,
       setups: eveMetadata.setup,
       options: { ...options, force: options.overwrite },

@@ -141,6 +141,7 @@ export function parseGitHubRemote(remote: string): { owner: string; repo: string
 export function defaultSelfModificationSetupOperations(
   appRoot: string,
   deps: SelfModificationSetupDependencies = defaultDependencies,
+  projectRoot: string = appRoot,
 ): SelfModificationSetupOperations {
   const configPath = join(appRoot, SELF_MODIFICATION_CONFIG_PATH);
   return {
@@ -181,7 +182,7 @@ export function defaultSelfModificationSetupOperations(
     },
     writeConfig: (source) => writeFile(configPath, source, "utf8"),
     async findOrCreateConnector(name, project) {
-      const connectors = await listGitHubConnectors(appRoot, project, deps.captureVercel);
+      const connectors = await listGitHubConnectors(projectRoot, project, deps.captureVercel);
       const expected = `github/${name}`;
       const existing = connectors.find((connector) => connector.uid === expected);
       if (existing !== undefined) {
@@ -191,7 +192,7 @@ export function defaultSelfModificationSetupOperations(
       }
       const created = await deps.runVercelCaptureStdout(
         ["connect", "create", "github", "--name", name, "-F", "json", "--scope", project.orgId],
-        { cwd: appRoot },
+        { cwd: projectRoot },
       );
       const connector = created.ok ? parseCreatedConnector(created.stdout) : undefined;
       if (connector === undefined || !connector.startsWith("github/"))
@@ -212,7 +213,7 @@ export function defaultSelfModificationSetupOperations(
           "--scope",
           project.orgId,
         ],
-        { cwd: appRoot },
+        { cwd: projectRoot },
       );
       if (!result.ok)
         throw new Error(

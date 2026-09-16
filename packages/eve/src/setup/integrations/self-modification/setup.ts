@@ -38,6 +38,8 @@ export async function prepareSelfModificationSetup(
   context: SetupPrepareContext,
   operations: SelfModificationSetupOperations = defaultSelfModificationSetupOperations(
     context.appRoot,
+    undefined,
+    context.projectRoot,
   ),
 ): Promise<SelfModificationSetupPlan> {
   const existing = await operations.readConfig();
@@ -148,6 +150,8 @@ export async function applySelfModificationSetup(
   context: SetupApplyContext,
   operations: SelfModificationSetupOperations = defaultSelfModificationSetupOperations(
     context.appRoot,
+    undefined,
+    context.projectRoot,
   ),
 ) {
   if (plan.kind === "authored") {
@@ -184,6 +188,8 @@ export async function prepareLocalSelfModificationSetup(
   context: SetupPrepareContext,
   operations: SelfModificationSetupOperations = defaultSelfModificationSetupOperations(
     context.appRoot,
+    undefined,
+    context.projectRoot,
   ),
 ): Promise<SelfModificationSetupPlan> {
   const existing = await operations.readConfig();

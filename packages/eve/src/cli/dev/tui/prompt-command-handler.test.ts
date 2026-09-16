@@ -240,7 +240,7 @@ describe("createPromptCommandHandler", () => {
       expect(runTuiSetupCommand).toHaveBeenCalledWith(
         expect.objectContaining({
           agentRoot: WORKSPACE_AGENT_ROOT,
-          appRoot: WORKSPACE_AGENT_ROOT,
+          appRoot: WORKSPACE_TARGET.workspaceRoot,
           command: "add",
         }),
       );
