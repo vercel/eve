@@ -37,6 +37,55 @@ const work = {
 };
 
 describe("activityCollectorWorkflow", () => {
+  it("flushes the final buffered snapshot when the activity stream closes", async () => {
+    mocks.sleep.mockImplementation(() => new Promise<void>(() => {}));
+    mocks.createHook.mockReturnValue({
+      token: "activity",
+      getConflict: async () => null,
+      async *[Symbol.asyncIterator]() {
+        yield {
+          events: [{ eventId: "start", kind: "work.started", startedAt: "1", work }],
+          version: 1,
+        } satisfies ActivityBatchV1;
+        yield {
+          events: [
+            {
+              eventId: "settled",
+              kind: "work.settled",
+              outcome: "completed",
+              settledAt: "2",
+              workId: work.id,
+            },
+          ],
+          version: 1,
+        } satisfies ActivityBatchV1;
+      },
+    });
+    mocks.renderSessionActivityStep.mockResolvedValue({ rendererStates: { slack: "rendered" } });
+
+    await expect(
+      activityCollectorWorkflow({
+        expiresAt: "2026-09-04T00:00:00Z",
+        serializedContext: {},
+        token: "activity",
+      }),
+    ).resolves.toBeUndefined();
+
+    expect(mocks.renderSessionActivityStep).toHaveBeenCalledExactlyOnceWith({
+      rendererStates: {},
+      serializedContext: {},
+      snapshot: expect.objectContaining({
+        work: expect.objectContaining({
+          [work.id]: expect.objectContaining({ phase: "completed", settledAt: "2" }),
+        }),
+      }),
+    });
+    expect(mocks.disposeSessionActivityStep).toHaveBeenCalledExactlyOnceWith({
+      rendererStates: { slack: "rendered" },
+      serializedContext: {},
+    });
+  });
+
   it.each([false, true])(
     "expires with a pending hook read (debouncing: %s)",
     async (debouncing) => {
