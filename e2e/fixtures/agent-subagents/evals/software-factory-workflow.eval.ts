@@ -17,11 +17,11 @@ export default defineEval({
     const expected = expectedFactoryOutput(token);
     const turn = await t.send(
       [
-        `FACTORY_RUN_TOKEN=${token}.`,
-        "Alice is processing a manufactured software-factory backlog. Use the workflow tool exactly once, and do not call any of its subagents outside that program.",
-        "Create a minimal array of exactly 200 tickets with ids `T-000` through `T-199`. Each ticket must contain only `id`, except `T-000` also has `triageKey` set to FACTORY_RUN_TOKEN:triage and `T-199` also has `reviewKey` set to FACTORY_RUN_TOKEN:review, replacing FACTORY_RUN_TOKEN with the supplied token.",
-        "Use Promise.all to run ticket-triage and ticket-review concurrently, passing the complete tickets array to both calls. Use `outputSchema` to request exactly `{ ticketCount: integer, priorityTicket: string, derivedKey: string }` from ticket-triage and `{ ticketCount: integer, accepted: boolean, derivedKey: string }` from ticket-review.",
-        "After both complete, call ticket-reproducer with the returned `{ triage, review }` objects and use `outputSchema` to request exactly `{ combinedKey: string, sampleTicket: string, testCase: string }`. Make every listed output field required and allow no additional output fields.",
+        `Alice's QA batch id is ${token}.`,
+        "Alice is preparing a QA summary for a sample software backlog. Use the workflow tool exactly once, and call its subagents only from that program.",
+        `Create a minimal array of exactly 200 tickets with ids \`T-000\` through \`T-199\`. Each ticket must contain only \`id\`, except \`T-000\` also has \`triageLabel\` set to \`TRIAGE-${token}\` and \`T-199\` also has \`reviewLabel\` set to \`REVIEW-${token}\`.`,
+        "Use Promise.all to run ticket-triage and ticket-review concurrently, passing the complete tickets array to both calls. Use `outputSchema` to request exactly `{ ticketCount: integer, priorityTicket: string, summaryLabel: string }` from ticket-triage and `{ ticketCount: integer, accepted: boolean, summaryLabel: string }` from ticket-review.",
+        "After both complete, call ticket-reproducer with the returned `{ triage, review }` objects and use `outputSchema` to request exactly `{ combinedLabel: string, sampleTicket: string, verificationNote: string }`. Make every listed output field required and allow no additional output fields.",
         "Return `{ reproduction, review, triage }` and reply with only that returned JSON object.",
       ].join(" "),
     );
@@ -57,20 +57,20 @@ export default defineEval({
 
 function expectedFactoryOutput(token: string) {
   const triage = {
-    derivedKey: `${token}:triage`,
     priorityTicket: "T-000",
+    summaryLabel: `TRIAGE-${token}`,
     ticketCount: 200,
   };
   const review = {
     accepted: true,
-    derivedKey: `${token}:review`,
+    summaryLabel: `REVIEW-${token}`,
     ticketCount: 200,
   };
   return {
     reproduction: {
-      combinedKey: `${triage.derivedKey}|${review.derivedKey}`,
+      combinedLabel: `${triage.summaryLabel}|${review.summaryLabel}`,
       sampleTicket: triage.priorityTicket,
-      testCase: `test("${token}", () => expect(runSyntheticRegression()).not.toThrow());`,
+      verificationNote: `Check QA batch ${token} using ticket T-000.`,
     },
     review,
     triage,
