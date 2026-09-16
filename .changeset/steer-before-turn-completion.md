@@ -2,4 +2,4 @@
 "eve": patch
 ---
 
-Apply pending steering before completing a turn, including when the active model call produces a final answer. Follow-ups accepted at that boundary now continue the same turn instead of starting a separate one; already streamed text remains visible.
+Restart a terminal UI turn when steering arrives before assistant output begins, so the correction replaces the pending answer instead of rendering two answers. Steering keeps its existing boundary behavior after output starts.

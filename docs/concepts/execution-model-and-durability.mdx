@@ -155,12 +155,6 @@ never starts a replacement session for an address that is mid-handoff.
 
 When a session is waiting, a delivery through its ID or any claimed channel address wakes it and starts the next turn. Message sends default to `turnPolicy: "steer"`: while a turn is active, the session owner buffers the message and applies it after the current workflow step commits. The model call and tool work complete safely, and steering continues the same turn with the same turn ID. Before emitting the turn's completion events, the owner checks for steering accepted at that boundary.
 
-This check also runs when the model produces a final answer. Pending steering
-continues the open turn; otherwise, a separate durable step completes it without
-another model call. Input accepted after this final check starts the next turn.
-Text already streamed remains visible, and provider-managed tools within a
-single model response do not create additional steering boundaries.
-
 `turnPolicy: "queue"` preserves the message until the active turn settles. If several deliveries are ready when the owner checks, eve may fold adjacent messages into the next turn while preserving their arrival order. Pure `inputResponses` deliveries do not steer; they remain available to the pending request they address.
 
 Every built-in and custom channel accepts a default `turnPolicy`, and imperative message sends can override it. The policy is part of the same durable delivery command as the message, so concurrent senders cannot separate replacement ownership from cancellation intent. Separate sessions still run independently.

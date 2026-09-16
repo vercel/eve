@@ -12,7 +12,7 @@ import type { RuntimeActionResult } from "#shared/action-types.js";
 import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
 import type { InputResponse } from "#shared/input.js";
 import type { SandboxState } from "#sandbox/state.js";
-import type { JsonObject, JsonValue } from "#shared/json.js";
+import type { JsonObject } from "#shared/json.js";
 import type { TokenUsage } from "#shared/token-usage.js";
 import type { InternalToolDefinition } from "#tools/definition.js";
 import type { AgentReasoningDefinition } from "#shared/agent-definition.js";
@@ -208,13 +208,10 @@ export interface SettledTurn {
   readonly usage?: TokenUsage;
 }
 
-/** A successful answer awaiting the owner's final steering check. */
-export interface TurnCompletion {
-  readonly output: unknown;
-  readonly result?: JsonValue;
-}
-
-interface StepResultFields {
+/**
+ * Result returned by one harness step invocation.
+ */
+export interface StepResult {
   /** Background-tool effects projected onto the session that entered this step. */
   readonly backgroundTaskSession?: HarnessSession;
   /** Durable tasks started by background tools and awaiting the parent commit barrier. */
@@ -224,29 +221,14 @@ interface StepResultFields {
     readonly taskId: string;
     readonly taskRunId: string;
   }[];
+  readonly next: StepNext;
   readonly session: HarnessSession;
+  /**
+   * Present when a conversation turn settled with a user-facing answer; carried
+   * across the park boundary so a delegated parent can be notified.
+   */
+  readonly settledTurn?: SettledTurn;
 }
-
-/**
- * Result returned by one harness step invocation.
- */
-export type StepResult = StepResultFields &
-  (
-    | {
-        readonly next: null;
-        readonly pendingCompletion: TurnCompletion;
-        readonly settledTurn?: never;
-      }
-    | {
-        readonly next: StepNext;
-        readonly pendingCompletion?: never;
-        /**
-         * Present when a conversation turn settled with a user-facing answer; carried
-         * across the park boundary so a delegated parent can be notified.
-         */
-        readonly settledTurn?: SettledTurn;
-      }
-  );
 
 /**
  * A single step of AI work. Takes the current session and optional user input,
@@ -291,10 +273,6 @@ export type HandleEventFn = (
  * Dependencies injected into the tool-loop harness at construction time.
  */
 export interface ToolLoopHarnessConfig {
-  /** Lets the owner admit steering before committing a successful turn's epilogue. */
-  readonly deferTurnCompletion?: boolean;
-  /** Commits a previously produced answer without another model call. */
-  readonly completeTurn?: TurnCompletion;
   /** Cancellation signal for the active turn. */
   readonly abortSignal?: AbortSignal;
   /**

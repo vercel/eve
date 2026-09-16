@@ -978,57 +978,6 @@ describe("createToolLoopHarness", () => {
     ]);
   });
 
-  it.each(["conversation", "task"] as const)(
-    "defers successful %s completion until the owner has checked steering",
-    async (mode) => {
-      setupMockAgentSequence(
-        ["The 2026 report.", "The 2025 report."].map((text) => ({
-          finishReason: "stop",
-          response: { messages: [{ content: text, role: "assistant" }] },
-          text,
-          toolCalls: [],
-          toolResults: [],
-        })),
-      );
-      const { emit, events } = createEventCollector();
-      const config = createTestConfig(mode, emit, { deferTurnCompletion: true });
-      const step = createToolLoopHarness(config);
-      const first = await step(createTestSession(), { message: "Read the 2026 report." });
-      expect(first.pendingCompletion).toMatchObject({ output: "The 2026 report." });
-      expect(first.settledTurn).toBeUndefined();
-      expect(getHarnessEmissionState(first.session.state)).toMatchObject({
-        sequence: 0,
-        turnId: "turn_0",
-        stepIndex: 1,
-      });
-      expect(events.filter((event) => event.type === "turn.completed")).toHaveLength(0);
-
-      const second = await step(first.session, { message: "Actually, use 2025." });
-      expect(second.pendingCompletion).toMatchObject({ output: "The 2025 report." });
-      expect(second.session.history.at(-2)).toMatchObject({
-        content: "Actually, use 2025.",
-        role: "user",
-      });
-      expect(events.filter((event) => event.type === "turn.started")).toHaveLength(1);
-      expect(events.filter((event) => event.type === "message.received")).toHaveLength(2);
-      expect(events.filter((event) => event.type === "turn.completed")).toHaveLength(0);
-
-      const complete = createToolLoopHarness({ ...config, completeTurn: second.pendingCompletion });
-      const final = await complete(second.session);
-      expect(final.pendingCompletion).toBeUndefined();
-      expect(events.filter((event) => event.type === "step.started")).toHaveLength(2);
-      expect(events.filter((event) => event.type === "turn.completed")).toHaveLength(1);
-      expect(events.at(-1)?.type).toBe(mode === "task" ? "session.completed" : "session.waiting");
-      expect(getHarnessEmissionState(final.session.state)).toMatchObject({
-        sequence: 1,
-        turnId: "",
-        stepIndex: 0,
-      });
-      if (mode === "task") expect(final.next).toEqual({ done: true, output: "The 2025 report." });
-      else expect(final.settledTurn).toEqual({ output: "The 2025 report." });
-    },
-  );
-
   it("steers an open turn with a new message without repeating the turn preamble", async () => {
     const toolCall = {
       input: { query: "weather in ny" },
@@ -2718,38 +2667,6 @@ describe("createToolLoopHarness", () => {
       tools: expect.objectContaining({ final_output: expect.anything() }),
     });
   });
-
-  it.each([{ summary: "Done" }, null])(
-    "defers structured result %j until completion",
-    async (output) => {
-      const schema = { type: ["object", "null"] } as const;
-      setupMockAgent(finalOutputResult("Done.", output));
-      const { emit, events } = createEventCollector();
-      const config = createTestConfig("task", emit, { deferTurnCompletion: true });
-      const step = createToolLoopHarness(config);
-      const pending = await step(createTestSession({ outputSchema: schema }), {
-        message: "Summarize Alice's report.",
-      });
-      expect(pending.pendingCompletion).toEqual({ output, result: output });
-      expect(pending.session.outputSchema).toEqual(schema);
-      expect(pending.session.history.at(-1)).toEqual({
-        content: JSON.stringify(output),
-        role: "assistant",
-      });
-      expect(events.some((event) => event.type === "result.completed")).toBe(false);
-      const complete = createToolLoopHarness({
-        ...config,
-        completeTurn: pending.pendingCompletion,
-      });
-      const result = await complete(pending.session);
-      expect(result.next).toEqual({ done: true, output });
-      expect(result.session.outputSchema).toBeUndefined();
-      expect(events.filter((event) => event.type === "result.completed")).toMatchObject([
-        { data: { result: output, stepIndex: 0, turnId: "turn_0" } },
-      ]);
-      expect(events.filter((event) => event.type === "step.started")).toHaveLength(1);
-    },
-  );
 
   it("produces structured task output when a schema is in effect", async () => {
     const schema = {

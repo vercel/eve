@@ -354,15 +354,15 @@ payloads with the exact tokens.
 waits for its own turn. Runtime results and addressed responses retain their
 existing routing. Explicit cancellation uses the abort signal; steering does not.
 
-Successful model answers return a completion candidate with the turn still
-open. The owner checks steering before a separate, model-free `turnStep`
-emits the completion events. Accepted steering continues the same turn with
-its committed history; input accepted after the final check starts the next
-turn. Streamed text remains visible. Model-call batching defines the
-checkpoint interval and therefore the steering latency.
+Steering applies only while the turn is still open: `turnStep` returned
+`continue` and the model wants another step. The harness emits `turn.completed`
+and `session.waiting` itself inside the settling step, so a message that arrives
+after the model produced its answer starts the next turn. This matches what
+other harnesses do and costs no extra durable step per turn. Model-call batching
+defines the checkpoint interval and therefore the steering latency.
 
-This follows the holder attempt's continuous-reader boundary and deferred
-settlement without adopting its separate holder and turn topology. Upstream
+This follows the holder attempt's continuous-reader boundary without adopting
+its separate holder and turn topology or its deferred settlement. Upstream
 `step-delivery-ordering.test.ts`, `step-delivery-hop-count.test.ts`, and
 `delivery-barrier-coverage.test.ts` cover iterator delivery order against cached
 step results and other hooks, including layered async consumers. eve additionally

@@ -116,15 +116,6 @@ export class SessionExecution {
         return await this.finishCancelledTurn();
       }
 
-      if (result.action === "complete") {
-        const steering = await turn.takeSteering();
-        if (turn.signal.aborted) return await this.finishCancelledTurn();
-        if (steering === undefined) turn.beginCompletionCommit();
-        // Keep the candidate if the channel ignores the selected delivery.
-        nextStepInput = { completion: result.completion, delivery: steering };
-        continue;
-      }
-
       if (result.action === "done") {
         return {
           isError: result.isError,
@@ -279,7 +270,6 @@ class ActiveTurn {
   private readonly routedToChildren = new Set<number>();
   private readonly runtimeResults: RuntimeEvent[] = [];
   private readonly controller = new AbortController();
-  private committingCompletion = false;
   private readonly expectedTurnId: string;
   private readonly input: SessionExecutionInput;
   private readonly callerCallId: string | undefined;
@@ -290,7 +280,7 @@ class ActiveTurn {
     this.callerCallId = callerCallId;
     this.expectedTurnId = activeTurnId(input.cursor.sessionState.emissionState);
     this.unsubscribe = input.inbox.onInterrupt((payload) => {
-      if (!this.committingCompletion && this.cancelsThisTurn(payload)) this.abort();
+      if (this.cancelsThisTurn(payload)) this.abort();
     });
   }
 
@@ -302,14 +292,8 @@ class ActiveTurn {
     this.unsubscribe();
   }
 
-  /** The answer is final; commands accepted during its commit belong after this turn. */
-  beginCompletionCommit(): void {
-    this.committingCompletion = true;
-  }
-
-  /** Admits traffic for this turn; completion-time arrivals belong to the parked session. */
+  /** Admits everything the pump accepted while the last step ran. */
   async admitBoundary(): Promise<void> {
-    if (this.committingCompletion) return;
     const pending = this.input.inbox.drain();
     for (const payload of pending) await this.admit(payload);
   }
@@ -370,7 +354,7 @@ class ActiveTurn {
       case "cancel":
         if (!this.cancelsThisTurn(value)) return;
         await applySessionCancellation(admitted.command, this.input);
-        if (!this.committingCompletion) this.abort();
+        this.abort();
         return;
       case "consumed":
         return;

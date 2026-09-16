@@ -91,7 +91,7 @@ function channelDeliveryErrorCode(error: unknown): string {
 
 export type { TurnStepInput };
 
-/** Runs a model batch or commits its completion after the owner's steering check. */
+/** Runs a bounded batch of harness model steps inside one durable `"use step"` boundary. */
 export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResult> {
   "use step";
   return runSessionStep(rawInput);
@@ -292,7 +292,7 @@ async function runSessionStep(input: TurnStepInput): Promise<DurableStepResult> 
       setChannelContext(ctx, updatedAdapter);
     }
 
-    if (delivery !== undefined && resolved === undefined && input.input?.completion === undefined) {
+    if (delivery !== undefined && resolved === undefined) {
       await contextStorage.run(ctx, () =>
         instrumentation?.instrumentChannelDelivery({
           ctx,
@@ -386,8 +386,6 @@ async function runSessionStep(input: TurnStepInput): Promise<DurableStepResult> 
         capabilities,
         clearOnly: input.input?.control === "clear",
         compactOnly: input.input?.control === "compact",
-        deferTurnCompletion: true,
-        completeTurn: resolved === undefined ? input.input?.completion : undefined,
         createRuntime: createWorkflowRuntime,
         handleEvent,
         historyProjector: history.projector,
@@ -426,9 +424,6 @@ async function runSessionStep(input: TurnStepInput): Promise<DurableStepResult> 
                   session: enrichedSession,
                 })
               : enrichedSession;
-            if (input.input?.completion !== undefined && resolved === undefined) {
-              return runHarnessStep(schemaSession, stepInput);
-            }
             await dynamicConnections.rehydrate(
               getHarnessEmissionState(schemaSession.state),
               runtimeIdentity,

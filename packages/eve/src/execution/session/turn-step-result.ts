@@ -29,16 +29,6 @@ export function resolveSessionStepResult(
           backgroundTasks: stepResult.backgroundTasks,
         };
 
-  if (stepResult.pendingCompletion !== undefined) {
-    return {
-      action: "complete",
-      completion: stepResult.pendingCompletion,
-      ...backgroundTransition,
-      serializedContext: nextSerializedContext,
-      sessionState: nextState,
-    };
-  }
-
   if (
     stepResult.next !== null &&
     typeof stepResult.next === "object" &&

@@ -28,7 +28,7 @@ import type { HarnessModelMessage } from "#harness/messages.js";
 import { getPendingInputBatches } from "#harness/pending-input-batches.js";
 import { createToolLoopHarness } from "#harness/tool-loop.js";
 import { setTurnUsageState } from "#harness/turn-tag-state.js";
-import type { HarnessSession, StepFn, StepResult, ToolLoopHarnessConfig } from "#harness/types.js";
+import type { HarnessSession, ToolLoopHarnessConfig } from "#harness/types.js";
 import { recordSessionTask } from "#tasks/session-index.js";
 import { once } from "#tools/approval/policies.js";
 import { defineTool } from "#tools/definition.js";
@@ -704,11 +704,10 @@ describe("tool loop generate approval resume (real AI SDK)", () => {
     if (typeof first.next !== "function") {
       throw new TypeError("Expected the deferred approval response to schedule another step.");
     }
-    let result: StepResult = first;
+    let result = first;
     while (typeof result.next === "function") {
-      const next: StepFn = result.next;
-      const { session } = result;
-      result = await contextStorage.run(ctx, (): Promise<StepResult> => next(session));
+      const { next, session } = result;
+      result = await contextStorage.run(ctx, () => next(session));
     }
 
     expect(requested).toEqual([]);
