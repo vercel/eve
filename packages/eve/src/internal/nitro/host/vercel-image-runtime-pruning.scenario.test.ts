@@ -11,7 +11,18 @@ const scenarioApp = useScenarioApp();
 describe("experimental Vercel image runtime bundling", () => {
   afterEach(() => vi.unstubAllEnvs());
 
-  it("keeps OCI publication code out of hosted runtime output", async () => {
+  it.each([
+    {
+      constructor: "ExperimentalVercelDockerfile",
+      environment: "ExperimentalVercelDockerfile.environment()",
+      name: "vercel-image-runtime-pruning",
+    },
+    {
+      constructor: "ExperimentalVercelReusedDockerfile",
+      environment: 'ExperimentalVercelReusedDockerfile.environment({ key: "trusted-team" })',
+      name: "vercel-reused-runtime-pruning",
+    },
+  ])("keeps OCI publication code out of $constructor hosted runtime output", async (fixture) => {
     vi.stubEnv("VERCEL", "1");
     const app = await scenarioApp({
       files: {
@@ -20,13 +31,13 @@ describe("experimental Vercel image runtime bundling", () => {
         "agent/sandbox/Dockerfile": "FROM alpine:3.22\n",
         "agent/sandbox/sandbox.ts": [
           'import { defineSandbox } from "eve/sandbox";',
-          'import { ExperimentalVercelDockerfile } from "eve/sandbox/vercel";',
-          "export const environment = ExperimentalVercelDockerfile.environment();",
+          `import { ${fixture.constructor} } from "eve/sandbox/vercel";`,
+          `export const environment = ${fixture.environment};`,
           "export default defineSandbox(() => environment.open());",
         ].join("\n"),
       },
       installDependencies: true,
-      name: "vercel-image-runtime-pruning",
+      name: fixture.name,
     });
 
     const output = await buildApplication(app.appRoot, { skipVercelSandboxPrewarm: true });

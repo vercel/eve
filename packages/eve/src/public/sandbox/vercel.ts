@@ -1,4 +1,5 @@
 export { ExperimentalVercelDockerfile } from "#sandbox/providers/vercel-image.js";
+export { ExperimentalVercelReusedDockerfile } from "#sandbox/providers/vercel-reused.js";
 export {
   VercelSandbox,
   type VercelSandboxEnvironmentOptions,
@@ -9,6 +10,7 @@ export type {
   ExperimentalVercelImageEnvironmentOptions,
   ExperimentalVercelImageRuntimeOptions,
 } from "#public/sandbox/vercel-image-sandbox.js";
+export type { ExperimentalVercelReusedImageEnvironmentOptions } from "#public/sandbox/vercel-reused-sandbox.js";
 export type {
   VercelSandboxMount,
   VercelSandboxMountMode,

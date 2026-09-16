@@ -93,6 +93,28 @@ The build requires Vercel project credentials and an OCI builder: Docker locally
 
 This environment does not accept `prepare`. Add a Dockerfile when the eve base image is not sufficient, and put immutable software setup there. The build artifact records only the digest-pinned image reference and content-addressed Drive identities; it never records credentials. Runtime resolves each serialized Drive name with `Drive.getOrCreate()` and mounts its snapshot.
 
+## Experimental reused Dockerfile environment
+
+`ExperimentalVercelReusedDockerfile` reuses one persistent native Vercel Sandbox across eve sessions. Use it only when every attached session belongs to the same trust boundary and concurrent access to one filesystem and network policy is safe.
+
+```ts
+import { defineSandbox } from "eve/sandbox";
+import { ExperimentalVercelReusedDockerfile } from "eve/sandbox/vercel";
+
+export const environment = ExperimentalVercelReusedDockerfile.environment({
+  key: "trusted-team-workspace",
+  networkPolicy: "deny-all",
+  region: "iad1",
+  resources: { vcpus: 4 },
+});
+
+export default defineSandbox(() => environment.open());
+```
+
+The `key` is an application-defined reuse identity. eve combines it with the prepared image and managed-resource generation, so changing the Dockerfile or managed resources opens different native compute. Environment options are fixed for every attached session; `open()` accepts no options.
+
+Each eve session receives its own logical sandbox identity, but commands and files operate on the reused native Sandbox. Session `stop()` and `delete()` calls do not stop or delete the native Sandbox. Calling `setNetworkPolicy()` changes the shared native network boundary for every attached session.
+
 ## Network policy
 
 Pass the initial policy to `open()`. It applies to the new live Vercel Sandbox, not to the environment definition:

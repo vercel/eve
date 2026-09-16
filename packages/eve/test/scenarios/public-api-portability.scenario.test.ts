@@ -70,7 +70,7 @@ import { defineSandboxProvider } from "eve/sandbox/provider";
 import { DockerSandbox } from "eve/sandbox/docker";
 import { JustBashSandbox } from "eve/sandbox/just-bash";
 import { MicrosandboxSandbox } from "eve/sandbox/microsandbox";
-import { Drive, VercelSandbox } from "eve/sandbox/vercel";
+import { Drive, ExperimentalVercelReusedDockerfile, VercelSandbox } from "eve/sandbox/vercel";
 
 const custom = defineSandboxProvider({
   name: "custom",
@@ -97,6 +97,7 @@ void DockerSandbox.image("ghcr.io/acme/agent:latest");
 void JustBashSandbox.environment();
 void MicrosandboxSandbox.dockerfile();
 void MicrosandboxSandbox.image("ghcr.io/acme/agent:latest");
+void ExperimentalVercelReusedDockerfile.environment({ key: "trusted-team" }).open();
 
 export default defineSandbox(() => environment.open());
 `,
