@@ -1245,6 +1245,7 @@ describe("workflowEntry integration", () => {
           let completed = false;
           try {
             expect((await stream.nextTurn()).at(-1)?.type).toBe("session.waiting");
+            await waitForParkedTurnStep(anchor.runId);
 
             const originalTimer =
               sessionTimeoutMs === false ? undefined : await readSessionTimer(anchor.runId);
@@ -1324,6 +1325,7 @@ describe("workflowEntry integration", () => {
             if (successorTimer !== undefined) {
               expect(await readSessionTimer(successor.runId)).toEqual(successorTimer);
             }
+            await waitForParkedTurnStep(successor.runId, 2);
             await workflowRuntime.dispatchSession({
               command: followUp("dpl_c", "fourth message", "delivery-d"),
               sessionId: anchor.runId,

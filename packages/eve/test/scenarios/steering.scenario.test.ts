@@ -7,26 +7,28 @@ import { startEveDev } from "./dev-server-harness.js";
 const scenarioApp = useScenarioApp();
 
 describe("durable generation steering", () => {
-  it("does not repeat a model step when background children wake the owner", async () => {
-    const app = await scenarioApp({
-      name: "steering-background-wakes",
-      installDependencies: true,
-      files: {
-        "agent/instructions.md": "Delegate the five work items.\n",
-        "agent/agent.ts": `import { defineAgent } from "eve";
+  it.each([undefined, "1"])(
+    "does not repeat a model step when background children wake the owner (lease %s)",
+    async (leaseSeconds) => {
+      const app = await scenarioApp({
+        name: "steering-background-wakes",
+        installDependencies: true,
+        files: {
+          "agent/instructions.md": "Delegate the five work items.\n",
+          "agent/agent.ts": `import { defineAgent } from "eve";
 import { mockModel } from "eve/evals";
 export default defineAgent({
   model: mockModel(async ({ toolResults }) => {
     if (toolResults.length === 0) return { toolCalls: Array.from({ length: 5 }, (_, i) => ({
       id: "work-" + i, name: "worker", input: { message: "Work item " + i },
     })) };
-    await new Promise(resolve => setTimeout(resolve, 1000));
+    await new Promise(resolve => setTimeout(resolve, 3000));
     return "Work delegated";
   }),
   modelContextWindowTokens: 32000,
 });`,
-        "agent/subagents/worker/instructions.md": "Complete the work item.\n",
-        "agent/subagents/worker/agent.ts": `import { defineAgent } from "eve";
+          "agent/subagents/worker/instructions.md": "Complete the work item.\n",
+          "agent/subagents/worker/agent.ts": `import { defineAgent } from "eve";
 import { mockModel } from "eve/evals";
 export default defineAgent({
   description: "Complete a work item in the background.",
@@ -36,26 +38,32 @@ export default defineAgent({
   }),
   modelContextWindowTokens: 32000,
 });`,
-      },
-    });
-    const server = await startEveDev(app.appRoot, {
-      env: { EVE_MOCK_AUTHORED_MODELS: "", NODE_ENV: "production" },
-    });
-    try {
-      const client = new Client({ host: server.url });
-      const { response } = await client.sessions.create({ message: "Start five work items." });
-      const result = await response.result();
-      const events = result.events;
-      const steps = events
-        .filter((event) => event.type === "step.started")
-        .map((event) => `${event.data.turnId}:${event.data.stepIndex}`);
-      expect(steps).toHaveLength(2);
-      expect(new Set(steps).size).toBe(steps.length);
-      expect(events.filter((event) => event.type === "turn.completed")).toHaveLength(1);
-    } finally {
-      await server.stop();
-    }
-  }, 360_000);
+        },
+      });
+      const server = await startEveDev(app.appRoot, {
+        env: {
+          EVE_MOCK_AUTHORED_MODELS: "",
+          NODE_ENV: "production",
+          WORKFLOW_INLINE_OWNERSHIP_LEASE_SECONDS: leaseSeconds,
+        },
+      });
+      try {
+        const client = new Client({ host: server.url });
+        const { response } = await client.sessions.create({ message: "Start five work items." });
+        const result = await response.result();
+        const events = result.events;
+        const steps = events
+          .filter((event) => event.type === "step.started")
+          .map((event) => `${event.data.turnId}:${event.data.stepIndex}`);
+        expect(steps).toHaveLength(2);
+        expect(new Set(steps).size).toBe(steps.length);
+        expect(events.filter((event) => event.type === "turn.completed")).toHaveLength(1);
+      } finally {
+        await server.stop();
+      }
+    },
+    360_000,
+  );
   it("interrupts a pending request through the public session API and keeps one turn", async () => {
     const app = await scenarioApp({
       name: "generation-steering",
