@@ -7,6 +7,7 @@ import {
   EVE_INTERNAL_HOST_BUILD_OUTPUT_DIRECTORY_ENV,
 } from "#internal/application/build-output-environment.js";
 import { EVE_ROUTE_PREFIX } from "#protocol/routes.js";
+import { joinEveRoutePath } from "#shared/eve-route-path.js";
 import {
   EVE_PUBLIC_ROUTE_PREFIX_ENV,
   normalizePublicRoutePrefix,
@@ -74,7 +75,7 @@ function escapeVercelRouteLiteral(value: string): string {
 export function createEveServiceRouteSrc(publicRoutePrefix: string): string {
   if (publicRoutePrefix.length === 0) return `^${EVE_ROUTE_PREFIX}/(.*)$`;
   const prefix = publicRoutePrefix.startsWith("/") ? publicRoutePrefix : `/${publicRoutePrefix}`;
-  return `^${escapeVercelRouteLiteral(prefix)}${EVE_ROUTE_PREFIX}/(.*)$`;
+  return `^${escapeVercelRouteLiteral(joinEveRoutePath(prefix, EVE_ROUTE_PREFIX))}/(.*)$`;
 }
 
 export function createEveRequestPathRoute(routeSrc: string): VercelRouteConfig {

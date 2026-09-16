@@ -22,7 +22,7 @@ describe("defineWorkspaceAgent", () => {
 
     expect(subagent).toMatchObject({ description: "", kind: "remote", path: "/eve/v1/session" });
     expect(await (subagent.url as () => Promise<string>)()).toBe(
-      "https://preview.example.com/eve/agents/research",
+      "https://preview.example.com/eve/research",
     );
     await expect(subagent.auth?.()).resolves.toEqual({
       headers: {
@@ -45,8 +45,8 @@ describe("defineWorkspaceAgent", () => {
 
   it.each([
     {
-      callerRoutePrefix: "/eve/agents/support",
-      expected: "http://localhost:3000/eve/agents/research",
+      callerRoutePrefix: "/eve/support",
+      expected: "http://localhost:3000/eve/research",
       environment: "development",
       host: "localhost:3000",
     },

@@ -43,38 +43,38 @@ describe("withEve", () => {
       { destination: { service: "web", type: "service" }, src: "^/api/(.*)$" },
       {
         destination: { service: "eve-research", type: "service" },
-        src: "^/eve/agents/research/eve/v1/(.*)$",
+        src: "^/eve/research/v1/(.*)$",
       },
       {
         destination: { service: "eve-research", type: "service" },
-        src: "^/eve/agents/research/?$",
+        src: "^/eve/research/?$",
       },
       {
         destination: { service: "eve-support", type: "service" },
-        src: "^/eve/agents/support/eve/v1/(.*)$",
+        src: "^/eve/support/v1/(.*)$",
       },
       {
         destination: { service: "eve-support", type: "service" },
-        src: "^/eve/agents/support/?$",
+        src: "^/eve/support/?$",
       },
       { handle: "filesystem" },
     ]);
     expect(config.services.web).toEqual({ framework: "nextjs", root: "apps/web" });
     expect(config.services["eve-support"]).toEqual({
       buildCommand:
-        "cd '../../../agents/support' && export EVE_INTERNAL_BUILD_OUTPUT_DIRECTORY='../../.eve/vercel-services/eve-support/.vercel/output' && export EVE_INTERNAL_HOST_BUILD_OUTPUT_DIRECTORY='../../.vercel/output' && export EVE_PUBLIC_ROUTE_PREFIX='/eve/agents/support' && export EVE_INTERNAL_AGENT_WORKSPACE_MEMBER=1 && node 'node_modules/eve/bin/eve.js' build",
+        "cd '../../../agents/support' && export EVE_INTERNAL_BUILD_OUTPUT_DIRECTORY='../../.eve/vercel-services/eve-support/.vercel/output' && export EVE_INTERNAL_HOST_BUILD_OUTPUT_DIRECTORY='../../.vercel/output' && export EVE_PUBLIC_ROUTE_PREFIX='/eve/support' && export EVE_INTERNAL_AGENT_WORKSPACE_MEMBER=1 && node 'node_modules/eve/bin/eve.js' build",
       devCommand:
-        "cd '../../../agents/support' && export EVE_PUBLIC_ROUTE_PREFIX='/eve/agents/support' && export EVE_INTERNAL_AGENT_WORKSPACE_MEMBER=1 && node 'node_modules/eve/bin/eve.js' dev --no-ui",
+        "cd '../../../agents/support' && export EVE_PUBLIC_ROUTE_PREFIX='/eve/support' && export EVE_INTERNAL_AGENT_WORKSPACE_MEMBER=1 && node 'node_modules/eve/bin/eve.js' dev --no-ui",
       framework: "eve",
       outputDirectory: ".vercel/output",
       root: ".eve/vercel-services/eve-support",
       routes: [
         {
-          src: "^/eve/agents/support/?$",
+          src: "^/eve/support/?$",
           transforms: [{ args: "/", op: "set", type: "request.path" }],
         },
         {
-          src: "^/eve/agents/support/eve/v1/(.*)$",
+          src: "^/eve/support/v1/(.*)$",
           transforms: [{ args: "/eve/v1/$1", op: "set", type: "request.path" }],
         },
       ],
@@ -133,19 +133,17 @@ describe("withEve", () => {
     const root = await createWorkspace();
 
     await expect(
-      withEve({ routes: [{ src: "^/eve/agents/support/eve/v1/(.*)$" }] }, { root }),
+      withEve({ routes: [{ src: "^/eve/support/v1/(.*)$" }] }, { root }),
     ).rejects.toThrow(
-      'Vercel route "^/eve/agents/support/eve/v1/(.*)$" conflicts with the route generated for eve agent "support". Remove the authored route; withEve adds it automatically.',
+      'Vercel route "^/eve/support/v1/(.*)$" conflicts with the route generated for eve agent "support". Remove the authored route; withEve adds it automatically.',
     );
   });
 
   it("rejects authored routes owned by generated agent home pages", async () => {
     const root = await createWorkspace();
 
-    await expect(
-      withEve({ routes: [{ src: "^/eve/agents/support/?$" }] }, { root }),
-    ).rejects.toThrow(
-      'Vercel route "^/eve/agents/support/?$" conflicts with the route generated for eve agent "support". Remove the authored route; withEve adds it automatically.',
+    await expect(withEve({ routes: [{ src: "^/eve/support/?$" }] }, { root })).rejects.toThrow(
+      'Vercel route "^/eve/support/?$" conflicts with the route generated for eve agent "support". Remove the authored route; withEve adds it automatically.',
     );
   });
 
@@ -196,7 +194,9 @@ describe("withEve", () => {
     expect(config.services.eve).toEqual({
       buildCommand:
         "cd '../../..' && export EVE_INTERNAL_BUILD_OUTPUT_DIRECTORY='.eve/vercel-services/eve/.vercel/output' && export EVE_INTERNAL_HOST_BUILD_OUTPUT_DIRECTORY='.vercel/output' && node 'node_modules/eve/bin/eve.js' build",
+      devCommand: "cd '../../..' && node 'node_modules/eve/bin/eve.js' dev --no-ui",
       framework: "eve",
+      outputDirectory: ".vercel/output",
       root: ".eve/vercel-services/eve",
       routes: [
         {

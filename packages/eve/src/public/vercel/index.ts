@@ -82,7 +82,7 @@ function assertComposableConfig(
       );
     }
 
-    const publicRoutePrefix = name === undefined ? "" : `/eve/agents/${name}`;
+    const publicRoutePrefix = name === undefined ? "" : `/eve/${name}`;
     const routeSources = [
       createEveServiceRouteSrc(publicRoutePrefix),
       createEveHomeRouteSrc(publicRoutePrefix),
@@ -112,11 +112,15 @@ export async function withEve<TConfig extends EveVercelConfig>(
     readonly services: Readonly<Record<string, EveVercelServiceConfig>>;
   }
 > {
-  const root = resolve(options.root ?? process.cwd());
-  const context = await resolveEveProjectContext(root);
-  if (context.kind === "workspace-member" || context.environmentRoot !== root) {
-    throw new Error(`withEve must run at an eve project root; received ${root}.`);
+  const requestedRoot = resolve(options.root ?? process.cwd());
+  const context = await resolveEveProjectContext(requestedRoot);
+  if (
+    context.kind === "workspace-member" ||
+    (options.root !== undefined && context.environmentRoot !== requestedRoot)
+  ) {
+    throw new Error(`withEve must run at an eve project root; received ${requestedRoot}.`);
   }
+  const root = context.environmentRoot;
 
   const agents =
     context.kind === "standalone"
