@@ -1018,7 +1018,24 @@ describe("dispatchCoordinationStep", () => {
 
 describe("turnStep", () => {
   it("resumes an interrupted turn when the channel ignores the correction", async () => {
-    const adapter: ChannelAdapter = { kind: "ignore-correction", deliver: () => undefined };
+    const originalAuth: SessionAuthContext = {
+      attributes: {},
+      authenticator: "test",
+      issuer: "test",
+      principalId: "alice",
+      principalType: "user",
+      subject: "alice",
+    };
+    const correctionAuth = { ...originalAuth, principalId: "bob", subject: "bob" };
+    const adapter: ChannelAdapter = {
+      kind: "ignore-correction",
+      state: { reply: { recipient: "alice" } },
+      deliver: (_payload, adapterCtx) => {
+        expect(adapterCtx.ctx.get(AuthKey)).toEqual(correctionAuth);
+        (adapterCtx.state.reply as { recipient: string }).recipient = "bob";
+        return undefined;
+      },
+    };
     const bundle = Object.assign({}, createTurnStepTestBundle() as object, {
       adapterRegistry: { adaptersByKind: new Map([[adapter.kind, adapter]]) },
     }) as never;
@@ -1029,13 +1046,16 @@ describe("turnStep", () => {
       emissionState,
     );
     installSessionStoreMocks([session]);
-    const execute = vi.fn(async (current: HarnessSession): Promise<StepResult> => ({
-      next: { done: true, output: "Original answer" },
-      session: current,
-    }));
+    const execute = vi.fn(async (current: HarnessSession): Promise<StepResult> => {
+      expect(loadContext().get(AuthKey)).toEqual(originalAuth);
+      expect(loadContext().get(TurnDeliveryIdsKey)).toEqual(["original-delivery"]);
+      expect(loadContext().get(ChannelKey)?.state).toEqual({ reply: { recipient: "alice" } });
+      return { next: { done: true, output: "Original answer" }, session: current };
+    });
     vi.mocked(createExecutionNodeStep).mockImplementation(() => execute);
     const ctx = new ContextContainer();
-    ctx.set(AuthKey, null);
+    ctx.set(AuthKey, originalAuth);
+    ctx.set(TurnDeliveryIdsKey, ["original-delivery"]);
     ctx.set(BundleKey, bundle);
     ctx.set(ChannelKey, adapter);
     ctx.set(ContinuationTokenKey, "ignore-correction");
@@ -1043,7 +1063,19 @@ describe("turnStep", () => {
     ctx.set(SessionIdKey, "sess-test");
 
     const result = await turnStep({
-      input: { kind: "deliver", payloads: [{ message: "Ignored correction" }] },
+      input: {
+        auth: correctionAuth,
+        kind: "deliver",
+        payloads: [{ message: "Ignored correction" }],
+        deliveryMetadata: [
+          {
+            channelKind: adapter.kind,
+            channelName: adapter.kind,
+            deliveryId: "ignored-delivery",
+            payloadIndex: 0,
+          },
+        ],
+      },
       sessionWritable: createTestWritable(),
       serializedContext: serializeContext(ctx),
       sessionState: createStubSessionState({ emissionState }),
@@ -1052,6 +1084,8 @@ describe("turnStep", () => {
     expect(execute).toHaveBeenCalledOnce();
     expect(execute.mock.calls[0]?.[0].history).toEqual(session.history);
     expect(result.sessionState.emissionState.turnId).toBe("turn_0");
+    expect(result.serializedContext[AuthKey.name]).toEqual(originalAuth);
+    expect(result.serializedContext[TurnDeliveryIdsKey.name]).toEqual(["original-delivery"]);
   });
   it("keeps one task stream open while hiding a scheduled fallback from delivery hooks", async () => {
     const appended: string[] = [];

@@ -78,7 +78,9 @@ curl -X POST https://<deployment>/eve/v1/session/wrun_A \
   -d '{"inputResponses":[{"requestId":"req_A","optionId":"approve"}]}'
 ```
 
-Follow-up messages use `turnPolicy: "steer"` by default. If a turn is active, eve buffers the message and applies it at the next committed workflow boundary, preserving the turn ID. Set `turnPolicy: "queue"` on `eveChannel(...)` when follow-ups should wait for active turns to finish. `inputResponses` answer their addressed requests.
+Follow-up messages use `turnPolicy: "steer"` by default. Before assistant answer output or local tool execution begins, steering interrupts pending model generation and applies the correction in the same turn. Executing tools finish and checkpoint their results first. After answer output starts, steering waits for the next committed workflow boundary. Reasoning and search progress do not count as answer output; interrupted provider-managed search may run again. The turn ID stays the same.
+
+Set `turnPolicy: "queue"` on `eveChannel(...)` when follow-ups should wait for active turns to finish. `inputResponses` answer their addressed requests.
 
 Sending a message to an unknown, terminal, or not-yet-active session ID returns `409` with
 `{"code":"session_not_active","error":"The session is no longer active.","ok":false}`.

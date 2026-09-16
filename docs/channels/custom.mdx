@@ -127,7 +127,11 @@ const inputResponses = parseInputResponses(decodedResponses);
 await source.respond(inputResponses, { auth });
 ```
 
-Message sends use the channel's `turnPolicy`, which defaults to `"steer"`. An accepted message arriving during an active turn is buffered and applied at the next committed workflow boundary. The active model call and tools finish safely; the message joins the same turn and keeps its turn ID. Configure `turnPolicy: "queue"` on `defineChannel(...)` when messages should wait for the active turn to finish, or override one send:
+Message sends use the channel's `turnPolicy`, which defaults to `"steer"`. Before assistant answer output or local tool execution begins, steering interrupts pending model generation and applies the correction in the same turn. Executing tools finish and checkpoint their results first. After answer output starts, steering waits for the next committed workflow boundary. Reasoning and search progress do not count as answer output, and interrupted provider-managed search may run again. The turn ID stays the same.
+
+A sent delivery can interrupt generation before your `deliver` hook runs. If the hook ignores the correction, eve resumes the original request with its original auth, delivery provenance, and channel state. Filter events before `send(...)` when they should never interrupt generation.
+
+Configure `turnPolicy: "queue"` on `defineChannel(...)` when messages should wait for the active turn to finish, or override one send:
 
 ```ts
 export default defineChannel({

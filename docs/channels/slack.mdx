@@ -294,7 +294,9 @@ export default slackChannel({
 
 #### Control overlapping turns
 
-Accepted Slack messages steer by default: eve buffers the new message and applies it to the same turn at the next committed workflow boundary. Ignored mentions and messages rejected by your hooks never enter the turn. Set `turnPolicy: "queue"` when every active turn should finish:
+Accepted Slack messages steer by default. Before assistant answer output or local tool execution begins, steering interrupts pending model generation and continues the same turn with the correction. Executing tools finish and checkpoint their results first; after answer output starts, steering waits for the next committed workflow boundary. Reasoning and search progress do not count as answer output, and interrupted provider-managed search may run again.
+
+Mentions and messages filtered before sending never reach the active turn. See [Overlapping messages](./overview#overlapping-messages) for deliveries ignored later by a channel's `deliver` hook. Set `turnPolicy: "queue"` when every active turn should finish:
 
 ```ts title="agent/channels/slack.ts"
 export default slackChannel({

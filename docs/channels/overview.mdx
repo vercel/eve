@@ -28,7 +28,9 @@ own.
 
 ## Overlapping messages
 
-Channels default to `turnPolicy: "steer"`. When an accepted message arrives while a turn is active, eve buffers it and applies it at the next committed workflow boundary. The current model call and tools complete safely; the message continues the same turn with the same turn ID.
+Channels default to `turnPolicy: "steer"`. Before assistant answer output or local tool execution begins, a message can interrupt pending model generation and continue the same turn with the correction. Executing tools finish and checkpoint their results before steering reaches the next model call. After answer output starts, steering waits for the next committed workflow boundary. The turn ID stays the same.
+
+Reasoning and search progress do not count as answer output. Interrupted provider-managed search may run again; completed local tools are preserved.
 
 Set `turnPolicy: "queue"` on any built-in or custom channel when each turn must finish before the next message starts:
 
@@ -45,7 +47,7 @@ Adjacent queued messages can combine into one turn only when their full auth con
 
 `from(address).send(...)`, fixed `Session.send(...)`, cross-channel sends, and Chat SDK bridge sends also accept a per-send `turnPolicy` override. Pure `inputResponses` deliveries answer their pending request without steering. Explicit `cancel()` remains the stop-without-replacement operation.
 
-Channel admission still runs first. Ignored mentions, rejected signatures, duplicates, and any other dropped platform events never affect the active turn.
+Events rejected before `send(...)`, such as invalid signatures or filtered mentions, never reach the active turn. A delivery already sent to the session can interrupt pending generation before the channel's `deliver` hook processes it. If that hook ignores the correction, eve resumes the original request with its original auth, delivery provenance, and channel state.
 
 Each channel has its own provider terms, data flow, auth model, and user-consent expectations. Before sending non-public, sensitive, regulated, or production data through a channel, confirm that the channel provider and your configured scopes, signature checks, route auth, and delivery behavior are appropriate for your use case.
 
