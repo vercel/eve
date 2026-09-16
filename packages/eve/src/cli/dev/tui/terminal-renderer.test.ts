@@ -2079,12 +2079,8 @@ describe("TerminalRenderer (inline scrollback)", () => {
     renderer.shutdown();
   });
 
-  it("sends the oldest queued message on Esc without cancelling the turn", async () => {
+  it("steers each Enter message without cancelling the turn", async () => {
     const { screen, input, renderer } = makeRenderer();
-    const escape = async () => {
-      input.send("\x1b");
-      await new Promise((resolve) => setTimeout(resolve, 50));
-    };
     let streamController: ReadableStreamDefaultController<AgentTUIStreamEvent> | undefined;
     const cancel = vi.fn();
     const steer = vi.fn(async () => {});
@@ -2108,22 +2104,16 @@ describe("TerminalRenderer (inline scrollback)", () => {
     input.enter();
     input.type("go south");
     input.enter();
-    await vi.waitFor(() => {
-      expect(screen.snapshot()).toContain("Queue 2/5");
-    });
-
-    await escape();
     expect(cancel).not.toHaveBeenCalled();
-    expect(steer).toHaveBeenCalledWith("go north");
-    expect(screen.snapshot()).toContain("Queue 1/5");
+    expect(steer).toHaveBeenNthCalledWith(1, "go north");
+    expect(steer).toHaveBeenNthCalledWith(2, "go south");
+    expect(screen.snapshot()).not.toContain("Queue");
 
-    // The server settles the cancelled turn and the stream reaches its boundary.
     streamController?.enqueue({ type: "finish" });
     streamController?.close();
     await rendering;
 
-    // The popped message steers; the remaining one stays queued behind it.
-    expect(renderer.takeQueuedPrompt()).toBe("go south");
+    expect(renderer.takeQueuedPrompt()).toBeUndefined();
     renderer.shutdown();
   });
 
@@ -2228,10 +2218,6 @@ describe("TerminalRenderer (inline scrollback)", () => {
 
   it("marks steered and queued prompts with their provenance arrow", async () => {
     const { screen, input, renderer } = makeRenderer();
-    const escape = async () => {
-      input.send("\x1b");
-      await new Promise((resolve) => setTimeout(resolve, 50));
-    };
     const closedStream = () =>
       new ReadableStream<AgentTUIStreamEvent>({
         start(controller) {
@@ -2239,11 +2225,12 @@ describe("TerminalRenderer (inline scrollback)", () => {
         },
       });
 
-    // Steer: queue a message mid-turn and pop it with Esc.
+    // Enter steers immediately without a cancellation key.
+    const steer = vi.fn(async () => {});
     let streamController: ReadableStreamDefaultController<AgentTUIStreamEvent> | undefined;
     const first = renderer.renderStream(
       {
-        steer: vi.fn(async () => {}),
+        steer,
         events: new ReadableStream<AgentTUIStreamEvent>({
           start(controller) {
             streamController = controller;
@@ -2257,7 +2244,8 @@ describe("TerminalRenderer (inline scrollback)", () => {
     });
     input.type("go north");
     input.enter();
-    await escape();
+    expect(steer).toHaveBeenCalledWith("go north");
+    expect(screen.snapshot()).not.toContain("Queue 1/5");
     streamController?.enqueue({ type: "finish" });
     streamController?.close();
     await first;
@@ -2304,6 +2292,61 @@ describe("TerminalRenderer (inline scrollback)", () => {
     const typedIndex = lines.findIndex((line) => line.includes("│ long task"));
     expect(lines[typedIndex - 1]?.trim()).not.toBe("↑");
     expect(lines[typedIndex + 1]?.trim()).not.toBe("↑");
+    renderer.shutdown();
+  });
+
+  it("preserves a rejected Enter steering message for recovery", async () => {
+    const { screen, input, renderer } = makeRenderer();
+    const steer = vi.fn(async () => {
+      throw new Error("Session unavailable");
+    });
+    let controller: ReadableStreamDefaultController<AgentTUIStreamEvent> | undefined;
+    const rendering = renderer.renderStream(
+      {
+        steer,
+        events: new ReadableStream<AgentTUIStreamEvent>({
+          start(value) {
+            controller = value;
+          },
+        }),
+      },
+      { submittedPrompt: "long task", continueSession: true },
+    );
+    await screen.waitForText("❯");
+    input.type("change direction");
+    input.enter();
+    await screen.waitForText("Steering failed");
+    expect(steer).toHaveBeenCalledWith("change direction");
+    controller?.enqueue({ type: "finish" });
+    controller?.close();
+    await rendering;
+    expect(renderer.takeQueuedPrompt()).toBe("change direction");
+    renderer.shutdown();
+  });
+
+  it("keeps slash commands out of the steering message", async () => {
+    const { screen, input, renderer } = makeRenderer();
+    const steer = vi.fn(async () => {});
+    let controller: ReadableStreamDefaultController<AgentTUIStreamEvent> | undefined;
+    const rendering = renderer.renderStream(
+      {
+        steer,
+        events: new ReadableStream<AgentTUIStreamEvent>({
+          start(value) {
+            controller = value;
+          },
+        }),
+      },
+      { submittedPrompt: "long task", continueSession: true },
+    );
+    await screen.waitForText("❯");
+    input.type("/model");
+    input.enter();
+    expect(steer).not.toHaveBeenCalled();
+    controller?.enqueue({ type: "finish" });
+    controller?.close();
+    await rendering;
+    expect(renderer.takeQueuedPrompt()).toBe("/model");
     renderer.shutdown();
   });
 

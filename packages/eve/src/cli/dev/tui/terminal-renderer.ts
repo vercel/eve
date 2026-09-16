@@ -564,7 +564,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
   #todoCommittedSignature?: string;
   /**
    * Messages submitted while a turn streams, pinned in a panel directly
-   * above the input. Enter queues, `/cancel` cancels directly, and Esc or
+   * above the input when steering is unavailable. `/cancel` cancels directly, and Esc or
    * Ctrl+C pops-to-steer or cancels immediately when empty; the runner drains
    * via {@link takeQueuedPrompt} at a clean turn boundary and
    * {@link readPrompt} restores any leftovers as a draft.
@@ -3263,10 +3263,11 @@ export class TerminalRenderer implements AgentTUIRenderer {
           this.#paint();
           break;
         }
-        // Mid-turn Enter queues the draft as a message for the next turn
-        // (or for a steer-key pop). A full queue keeps the draft in place —
-        // the panel header says why — rather than silently dropping input.
-        if (this.#messageQueue.enqueue(message)) {
+        const send = this.#sendSteering;
+        if (send !== undefined && parsePromptCommand(message) === null) {
+          this.#streamDraft = EMPTY_LINE;
+          this.#submitSteering(message, send);
+        } else if (this.#messageQueue.enqueue(message)) {
           this.#streamDraft = EMPTY_LINE;
         }
         this.#paint();
@@ -3295,13 +3296,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
           const send = this.#sendSteering;
           if (send !== undefined) {
             const message = this.#messageQueue.takeSteering()!;
-            this.#nextSubmittedPromptOrigin = "steer";
-            this.#addSubmittedPrompt(message);
-            void send(message).catch((error) => {
-              this.#messageQueue.restoreSteering(message);
-              this.#addErrorBlock("Steering failed", toErrorMessage(error));
-              this.#paint();
-            });
+            this.#submitSteering(message, send);
           }
         } else {
           this.#cancelRequestedByUser = true;
@@ -3319,6 +3314,16 @@ export class TerminalRenderer implements AgentTUIRenderer {
         break;
       }
     }
+  }
+
+  #submitSteering(message: string, send: (message: string) => Promise<void>): void {
+    this.#nextSubmittedPromptOrigin = "steer";
+    this.#addSubmittedPrompt(message);
+    void send(message).catch((error) => {
+      this.#messageQueue.restoreSteering(message);
+      this.#addErrorBlock("Steering failed", toErrorMessage(error));
+      this.#paint();
+    });
   }
 
   #startCaretBlink() {
