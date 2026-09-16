@@ -5,8 +5,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { isObject, isErrnoCode } from "#shared/guards.js";
 import { readVercelSession, writeVercelSession, type VercelSession } from "./store.js";
 
-// Shared with fx until eve's OAuth application is registered.
-export const VERCEL_MODEL_CLIENT_ID = "cl_zzh5hiOZbwJ9bfqEcYqPIJv3TaPaEYL0";
+export const VERCEL_MODEL_CLIENT_ID = "cl_HYyOPBNtFMfHhaUn9L4QPfTZz6TP47bp";
 export const VERCEL_OAUTH_ISSUER = "https://vercel.com";
 export const VERCEL_TEAM_HEADER = "x-vercel-ai-gateway-team";
 
