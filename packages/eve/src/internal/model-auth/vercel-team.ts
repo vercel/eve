@@ -1,5 +1,6 @@
 import { authJson, resolveVercelSession } from "./vercel.js";
 import { readVercelCliConnection } from "./vercel-cli.js";
+import { readVercelResourceSlug } from "#internal/vercel/api-resource.js";
 
 /** Resolves display metadata without changing credentials or linking a project. */
 export async function resolveModelTeamSlug(signal?: AbortSignal): Promise<string | undefined> {
@@ -14,7 +15,5 @@ export async function resolveModelTeamSlug(signal?: AbortSignal): Promise<string
     headers: { authorization: `Bearer ${token}` },
     signal,
   });
-  return typeof team.slug === "string" && /^[a-z0-9]+(?:-[a-z0-9]+)*$/u.test(team.slug)
-    ? team.slug
-    : undefined;
+  return readVercelResourceSlug(team);
 }

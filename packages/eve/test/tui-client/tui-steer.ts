@@ -8,18 +8,13 @@ import { run } from "./lib/run.ts";
 import { theme } from "./lib/theme.ts";
 
 /**
- * End-to-end proof of the mid-turn message queue, Ctrl+C steering, single-Esc
- * cooperative cancellation, and double-Ctrl+C exit against a live server:
+ * End-to-end proof of steer-on-Enter, single-Esc cooperative cancellation,
+ * and double-Ctrl+C exit against a live server:
  *
- *   1. Start a long turn, then submit two messages while it streams —
- *      both must land in the pinned `↑ Queue n/5` panel, not the turn.
- *   2. Ctrl+C pops the oldest queued message and submits it for steering;
- *      the popped message joins the running turn at its next committed
- *      boundary without cancelling the model or tool work already in flight.
- *   3. The remaining queued message auto-drains as the following turn.
- *   4. The steered echo carries the `↑` provenance arrow above its bar,
- *      the queued one below, and the runner returns to an idle prompt.
- *   5. With no message queued, one Esc cancels another long turn, then a
+ *   1. Start a long turn, then press Enter on a follow-up while it streams.
+ *      The message steers immediately without entering the queue panel.
+ *   2. The steered message is answered and the runner returns to an idle prompt.
+ *   3. With no message queued, one Esc cancels another long turn, then a
  *      follow-up succeeds on the preserved session.
  *
  * The tokens prove delivery order end-to-end: each must appear twice
@@ -27,7 +22,6 @@ import { theme } from "./lib/theme.ts";
  */
 
 const STEER_TOKEN = "STEER-MARKER-B7Q";
-const QUEUE_TOKEN = "QUEUE-MARKER-K4Z";
 const CANCEL_FOLLOW_UP_TOKEN = "CANCEL-FOLLOW-UP-MARKER-P8N";
 process.env.EVE_TUI_UNICODE = "1";
 
@@ -39,7 +33,7 @@ run({ app: "agent-tui-client", kind: "local-build" }, async (target) => {
     client,
     screen,
     userInput: input,
-    name: "TUI queue/steer smoke",
+    name: "TUI steer smoke",
   });
 
   const runPromise = runner.run().catch((error: unknown) => {
@@ -57,48 +51,16 @@ run({ app: "agent-tui-client", kind: "local-build" }, async (target) => {
   await screen.waitForText("Working for", 30_000);
 
   input.type(`Reply with one short sentence containing the token ${STEER_TOKEN}.`);
+  const steeringOutputStart = screen.rawOutput().length;
   input.enter();
-  await screen.waitForText("Queue 1/5", 10_000);
-  input.type(`Reply with one short sentence containing the token ${QUEUE_TOKEN}.`);
-  input.enter();
-  await screen.waitForText("Queue 2/5", 10_000);
-  console.log(theme.muted("[tui-queue-steer] two messages queued behind the running turn"));
-
-  // Admission can clear the transient Steering label before the next render.
-  // The echoed message, answer, and provenance arrow prove accepted steering.
-  input.ctrlC();
 
   await waitForTwice(screen, STEER_TOKEN, 120_000, "steered turn echo + reply");
-  console.log(theme.muted("[tui-queue-steer] steered message answered"));
-
-  await waitForTwice(screen, QUEUE_TOKEN, 120_000, "auto-drained turn echo + reply");
-  console.log(theme.muted("[tui-queue-steer] remaining queue auto-drained"));
+  if (screen.rawOutput().slice(steeringOutputStart).includes("Queue 1/5")) {
+    throw new Error(`Enter queued the follow-up instead of steering:\n${screen.snapshot()}`);
+  }
+  console.log(theme.muted("[tui-steer] steered message answered"));
 
   await screen.waitForIdlePrompt(60_000);
-
-  // Provenance arrows: steered above its bar, queued below.
-  const lines = screen.snapshot().split("\n");
-  const steerEcho = lines.findIndex((line) =>
-    line.includes(`│ Reply with one short sentence containing the token ${STEER_TOKEN}`),
-  );
-  if (steerEcho <= 0 || lines[steerEcho - 1]?.trim() !== "↑") {
-    throw new Error(
-      `Steered echo is missing its ↑ marker above the bar:\n${lines
-        .slice(Math.max(0, steerEcho - 2), steerEcho + 1)
-        .join("\n")}`,
-    );
-  }
-  const queueEcho = lines.findIndex((line) =>
-    line.includes(`│ Reply with one short sentence containing the token ${QUEUE_TOKEN}`),
-  );
-  if (queueEcho < 0 || lines[queueEcho + 1]?.trim() !== "↑") {
-    throw new Error(
-      `Queued echo is missing its ↑ marker below the bar:\n${lines
-        .slice(queueEcho, queueEcho + 3)
-        .join("\n")}`,
-    );
-  }
-  console.log(theme.muted("[tui-queue-steer] provenance arrows rendered"));
 
   const cancellationOutputStart = screen.rawOutput().length;
   input.type("Write a story of about 500 words about lighthouses. Do not use any tools.");
@@ -116,13 +78,13 @@ run({ app: "agent-tui-client", kind: "local-build" }, async (target) => {
     "single-Esc cancellation",
   );
   await screen.waitForIdlePrompt(30_000);
-  console.log(theme.muted("[tui-queue-steer] one empty-queue Esc cancelled the turn"));
+  console.log(theme.muted("[tui-steer] one empty-queue Esc cancelled the turn"));
 
   input.type(`Reply with one short sentence containing the token ${CANCEL_FOLLOW_UP_TOKEN}.`);
   input.enter();
   await waitForTwice(screen, CANCEL_FOLLOW_UP_TOKEN, 120_000, "post-cancellation follow-up");
   await screen.waitForIdlePrompt(60_000);
-  console.log(theme.muted("[tui-queue-steer] preserved session answered after cancellation"));
+  console.log(theme.muted("[tui-steer] preserved session answered after cancellation"));
 
   input.ctrlC();
   await screen.waitForText("Press Ctrl+C again to exit", 5_000);
