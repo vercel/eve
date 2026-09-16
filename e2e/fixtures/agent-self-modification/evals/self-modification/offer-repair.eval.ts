@@ -52,8 +52,7 @@ export default defineEval({
       await selfMod.writeSource(TOOL_PATH, DEFECTIVE_SOURCE);
       await selfMod.apply();
 
-      const incorrect = await selfMod.followUp(
-        authored.session,
+      const incorrect = await selfMod.verify(
         `Call ${TOOL_NAME} once with ${JSON.stringify({ onHand: 20, incoming: 30, target: 100 })} and report the recommendation.`,
       );
       incorrect.requireToolCall(TOOL_NAME, {
