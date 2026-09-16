@@ -213,6 +213,36 @@ describe("parent development Workflow World", () => {
     }
   });
 
+  it("routes a pre-start health check to the active generation before its run exists", async () => {
+    const appRoot = await createScratchDirectory("eve-parent-workflow-health-check-");
+    await seedGeneration(appRoot, "generation-b");
+    const world = createWorld({ activeGenerationId: () => "generation-b", appRoot });
+    connectWorkerToWorld(world, appRoot);
+
+    try {
+      await world.start();
+      const payload = { __healthCheck: true, correlationId: "probe", runId: RUN_ID };
+      const handled = vi.fn(async () => {
+        expect(getDevelopmentWorkflowGeneration()?.generationId).toBe("generation-b");
+      });
+      const handler = createDevelopmentWorkflowWorld().createQueueHandler(QUEUE_PREFIX, handled);
+      const response = await handler(
+        new Request("http://localhost/.well-known/workflow/v1/flow", {
+          body: JSON.stringify(payload),
+          headers: {
+            ...deliveryHeaders({}),
+            "x-vqs-queue-name": `${QUEUE_PREFIX}health_check`,
+          },
+          method: "POST",
+        }),
+      );
+      expect(response.status, await response.text()).toBe(200);
+      expect(handled).toHaveBeenCalledWith(payload, expect.any(Object));
+    } finally {
+      await world.close();
+    }
+  });
+
   it("acknowledges and drops a delivery whose generation is permanently missing", async () => {
     const appRoot = await createScratchDirectory("eve-parent-workflow-dropped-delivery-");
     await seedGeneration(appRoot, "generation-a");

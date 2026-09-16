@@ -235,7 +235,8 @@ function createQueueHandler(
  * an untrusted caller controls participates.
  */
 async function resolveDeliveryGenerationId(message: unknown): Promise<string> {
-  if (!isRecord(message)) {
+  // Capability probes may name a run before start() persists its record.
+  if (!isRecord(message) || message.__healthCheck === true) {
     return await call<string>("resolveLatestDeploymentId");
   }
   const runInput = isRecord(message.runInput) ? message.runInput : undefined;
