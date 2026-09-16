@@ -108,6 +108,14 @@ describe("createVercelImageSandboxProvider", () => {
     expect(second.create).not.toHaveBeenCalled();
   });
 
+  it("derives distinct native identity for each eve session", async () => {
+    const first = createProvider();
+    const startedA = await first.provider.start(context("session-a"), {}, artifact);
+    const second = createProvider();
+    const startedB = await second.provider.start(context("session-b"), {}, artifact);
+    expect(startedB.state).not.toEqual(startedA.state);
+  });
+
   it("rejects incompatible serialized session state", async () => {
     const { provider } = createProvider();
     await expect(
