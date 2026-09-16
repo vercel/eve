@@ -15,7 +15,7 @@ Important naming note:
 | To do this                                               | Read this                                                                                                                    |
 | -------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
 | Organize agents, subagents, and browser application code | [Project Structure](./concepts/project-structure.mdx)                                                                        |
-| Create a project and run your first agent                | [Getting Started](./getting-started/index.mdx)                                                                               |
+| Create a project and run your first agent                | [Getting Started](./getting-started.mdx)                                                                                     |
 | Look up agent files and discovery rules                  | [Agent Files](./reference/agent-files.md)                                                                                    |
 | Set the model, reasoning, or other agent-wide config     | [Agents](./agent-config.md)                                                                                                  |
 | Change what the agent does and how it behaves            | [Instructions](./instructions.mdx)                                                                                           |
@@ -56,7 +56,7 @@ Unless you configure stricter controls, eve agents may operate with permissive s
 
 For a full picture rather than a single task, read in this order:
 
-1. [Getting Started](./getting-started/index.mdx)
+1. [Getting Started](./getting-started.mdx)
 2. [Project Structure](./concepts/project-structure.mdx)
 3. [Tutorial](./tutorial/first-agent.mdx)
 4. [Agents](./agent-config.md)
