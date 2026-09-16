@@ -281,7 +281,12 @@ export function renderFlowPanel(state: FlowPanelState, theme: Theme, width: numb
   const rows: string[] = [];
   const title =
     state.content.kind === "question" ? (state.content.title ?? state.title) : state.title;
-  if (title.length > 0) rows.push(`  ${c.bold(title)}`, "");
+  if (title.length > 0) {
+    for (const line of title.split("\n")) {
+      rows.push(line.length === 0 ? "" : `  ${c.bold(line)}`);
+    }
+    rows.push("");
+  }
   if (state.navigation?.kind === "planner") {
     rows.push(...plannerStepRows(state.navigation, undefined, theme));
   }
