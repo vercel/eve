@@ -307,8 +307,9 @@ class ActiveTurn {
     this.committingCompletion = true;
   }
 
-  /** Admits everything the pump accepted while the last step ran. */
+  /** Admits traffic for this turn; completion-time arrivals belong to the parked session. */
   async admitBoundary(): Promise<void> {
+    if (this.committingCompletion) return;
     const pending = this.input.inbox.drain();
     for (const payload of pending) await this.admit(payload);
   }

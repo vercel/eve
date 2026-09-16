@@ -301,7 +301,7 @@ describe("SessionExecution background task checkpoints", () => {
     },
   );
 
-  it("queues a reset accepted while the saved answer is committing", async () => {
+  it("leaves a reset accepted during completion for the parked session", async () => {
     vi.mocked(cancelDescendantTurnsStep).mockClear();
     const pending: SessionInboxPayload[] = [];
     const queue = new SessionInputQueue();
@@ -354,7 +354,9 @@ describe("SessionExecution background task checkpoints", () => {
     finishCompletion.resolve();
 
     await expect(outcome).resolves.toMatchObject({ kind: "park", settled: completion });
-    expect(queue.takeNext(new Map())).toEqual({ control: "reset", kind: "control" });
+    expect(inbox.drain).toHaveBeenCalledTimes(1);
+    expect(pending).toEqual([reset]);
+    expect(queue.takeNext(new Map())).toBeUndefined();
     expect(cancelDescendantTurnsStep).not.toHaveBeenCalled();
   });
 
