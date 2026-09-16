@@ -61,9 +61,8 @@ function isBrandedWorkspaceSubagent(value: unknown): value is BrandedWorkspaceSu
 
 function workspaceAgentRoutePrefix(name: string): string {
   const callerRoutePrefix = normalizePublicRoutePrefix(process.env.EVE_PUBLIC_ROUTE_PREFIX);
-  return callerRoutePrefix?.startsWith("/eve/agents/") === true
-    ? `/eve/agents/${name}`
-    : `/${name}`;
+  const namespace = callerRoutePrefix?.slice(0, callerRoutePrefix.lastIndexOf("/")) ?? "";
+  return `${namespace}/${name}`;
 }
 
 function localWorkspaceOrigin(): string | undefined {

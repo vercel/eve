@@ -55,19 +55,21 @@ describe("defineWorkspaceAgent", () => {
 
   it.each([
     {
+      callerRoutePrefix: "/eve/agents/support",
       expected: "http://localhost:3000/eve/agents/research",
       environment: "development",
       host: "localhost:3000",
     },
     {
-      expected: "https://preview.example.com/eve/agents/research",
+      callerRoutePrefix: "/internal/agents/support",
+      expected: "https://preview.example.com/internal/agents/research",
       environment: "preview",
       host: "preview.example.com",
     },
   ])(
-    "uses the Next.js named-agent route in $environment",
-    async ({ environment, expected, host }) => {
-      vi.stubEnv("EVE_PUBLIC_ROUTE_PREFIX", "/eve/agents/support");
+    "preserves the caller's route namespace in $environment",
+    async ({ callerRoutePrefix, environment, expected, host }) => {
+      vi.stubEnv("EVE_PUBLIC_ROUTE_PREFIX", callerRoutePrefix);
       vi.stubEnv("VERCEL", "1");
       vi.stubEnv("VERCEL_ENV", environment);
       vi.stubEnv("VERCEL_URL", host);
