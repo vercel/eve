@@ -20,6 +20,7 @@ import { snapshotSetupState, type SetupState } from "../state.js";
 import { withSpinner } from "../with-spinner.js";
 
 import { inProjectSetupState, prompterSink } from "./in-project.js";
+import { runInstallVercelCliFlow } from "./install-vercel-cli.js";
 import { runLoginFlow } from "./login.js";
 
 /** Injected for tests; defaults to the real detection and box effects. */
@@ -27,6 +28,7 @@ export interface DeployFlowDeps {
   detectDeployment: typeof detectDeployment;
   inspectApplication: typeof inspectApplication;
   runLoginFlow: typeof runLoginFlow;
+  runInstallVercelCliFlow: typeof runInstallVercelCliFlow;
   resolveProvisioning?: ResolveProvisioningDeps;
   linkProject?: LinkProjectDeps;
   deployProject?: DeployProjectDeps;
@@ -44,15 +46,8 @@ function productionUrlOf(project: ProjectResolution): string | undefined {
 }
 
 /**
- * THE DEPLOY FLOW, shared by `eve deploy` and the dev TUI's `/deploy`. Link
- * state is the safety-critical input for a deploy, so it is re-detected at
- * decision time, never trusted from an earlier render. An already-linked
- * project goes straight to the deploy box; an unlinked one walks the same
- * login and team/project flow as onboarding (resolve-provisioning with the
- * deploy gate pre-answered — invoking deploy IS the deploy decision), then
- * links non-interactively so the deploy box never hits its bare-`vercel link`
- * fallback. A non-interactive run with no link refuses with `needs-link`
- * before any side effect.
+ * Interactive deployment prepares CLI access before linking or deploying.
+ * Noninteractive deployment never installs tools or starts browser login.
  */
 export async function runDeployFlow(input: {
   appRoot: string;
@@ -67,6 +62,7 @@ export async function runDeployFlow(input: {
     detectDeployment,
     inspectApplication,
     runLoginFlow,
+    runInstallVercelCliFlow,
     ...input.deps,
   };
 
@@ -90,9 +86,24 @@ export async function runDeployFlow(input: {
   if (!linked && !interactive) {
     return { kind: "needs-link" };
   }
-  if (!linked) {
-    const login = await deps.runLoginFlow({ appRoot, prompter, signal });
+  if (interactive) {
+    let login = await deps.runLoginFlow({ appRoot, prompter, signal });
+    if (login.kind === "cli-missing") {
+      const install = await deps.runInstallVercelCliFlow({ appRoot, prompter, signal });
+      if (install.kind === "cancelled") return { kind: "cancelled" };
+      if (install.kind === "failed")
+        throw new Error(
+          "Could not install the Vercel CLI. Install it with `npm i -g vercel@latest`, then retry deployment.",
+        );
+      login = await deps.runLoginFlow({ appRoot, prompter, signal });
+    }
     if (login.kind === "cancelled") return { kind: "cancelled" };
+    if (login.kind !== "already" && login.kind !== "logged-in")
+      throw new Error(
+        login.kind === "unavailable"
+          ? "Could not reach Vercel. Check your connection and retry deployment."
+          : "Vercel login did not complete. Retry deployment to sign in.",
+      );
   }
 
   const state = inProjectSetupState(appRoot, project, { deploymentPending: true });

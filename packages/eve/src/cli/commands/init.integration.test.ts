@@ -20,10 +20,8 @@ import {
   type ScaffoldBaseProjectOptions,
 } from "#setup/scaffold/index.js";
 import { pathExists } from "#setup/path-exists.js";
-import { WizardCancelledError } from "#setup/step.js";
 
 import type { GitInitResult } from "./init-git.js";
-import { initAgentReplPrompt } from "./agent-instructions.js";
 import {
   EVE_INIT_PACKAGE_SPEC_ENV,
   runInitCommand,
@@ -71,14 +69,6 @@ function dependencies(
   runPackageManagerInstall: ReturnType<
     typeof vi.fn<InitCommandDependencies["runPackageManagerInstall"]>
   >;
-  installSelfModification: ReturnType<
-    typeof vi.fn<InitCommandDependencies["installSelfModification"]>
-  >;
-  selectInitHandoff: ReturnType<typeof vi.fn<InitCommandDependencies["selectInitHandoff"]>>;
-  selectInitSelfModification: ReturnType<
-    typeof vi.fn<InitCommandDependencies["selectInitSelfModification"]>
-  >;
-  spawnCodingAgentRepl: ReturnType<typeof vi.fn<InitCommandDependencies["spawnCodingAgentRepl"]>>;
   spawnPackageManager: ReturnType<typeof vi.fn<InitCommandDependencies["spawnPackageManager"]>>;
   tryInitializeGit: ReturnType<typeof vi.fn<InitCommandDependencies["tryInitializeGit"]>>;
   validateModelSlug: ReturnType<typeof vi.fn<InitCommandDependencies["validateModelSlug"]>>;
@@ -112,10 +102,7 @@ function dependencies(
         webPackageVersions: { ...WEB_VERSIONS, ...options.webPackageVersions },
       }),
     runPackageManagerInstall: vi.fn(async () => packageInstallResult()),
-    installSelfModification: vi.fn(async () => {}),
-    selectInitHandoff: vi.fn(async () => "eve-dev"),
-    selectInitSelfModification: vi.fn(async () => false),
-    spawnCodingAgentRepl: vi.fn(async () => true),
+    hasInteractiveTerminal: () => true,
     spawnPackageManager: vi.fn(async () => packageProcessResult()),
     tryInitializeGit: vi.fn(async () => gitResult),
     validateModelSlug: vi.fn(async () => null),
@@ -144,6 +131,14 @@ afterEach(() => {
 });
 
 describe("runInitCommand", () => {
+  it("returns after scaffolding without opening the TUI in a noninteractive terminal", async () => {
+    const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-headless-"));
+    const deps = { ...dependencies(), hasInteractiveTerminal: () => false };
+    await runInitCommand(logger(), parentDirectory, "agent", {}, deps);
+    expect(deps.spawnPackageManager).not.toHaveBeenCalled();
+    expect(deps.runPackageManagerInstall).toHaveBeenCalled();
+  });
+
   it("creates an agent workspace from comma-separated names", async () => {
     const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-agents-"));
     const output = logger();
@@ -170,7 +165,6 @@ describe("runInitCommand", () => {
     await expect(readFile(join(projectRoot, "tsconfig.json"), "utf8")).resolves.toContain(
       '"agents/**/*.ts"',
     );
-    expect(deps.selectInitHandoff).toHaveBeenCalledWith({ agentName: "operations" });
     expect(deps.spawnPackageManager).toHaveBeenCalledWith("pnpm", projectRoot, [
       "exec",
       "eve",
@@ -365,30 +359,6 @@ describe("runInitCommand", () => {
     expect(deps.runPackageManagerInstall).not.toHaveBeenCalled();
   });
 
-  it("installs self-modification before Git initialization and skips the coding-agent handoff", async () => {
-    const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-self-modification-"));
-    const output = logger();
-    const deps = dependencies();
-    deps.selectInitSelfModification.mockResolvedValue(true);
-
-    await runInitCommand(output, parentDirectory, "my-agent", {}, deps);
-
-    const projectPath = join(parentDirectory, "my-agent");
-    expect(deps.installSelfModification).toHaveBeenCalledWith(projectPath);
-    expect(deps.installSelfModification.mock.invocationCallOrder[0]).toBeLessThan(
-      deps.tryInitializeGit.mock.invocationCallOrder[0]!,
-    );
-    expect(deps.selectInitHandoff).not.toHaveBeenCalled();
-    expect(deps.spawnCodingAgentRepl).not.toHaveBeenCalled();
-    expect(deps.spawnPackageManager).toHaveBeenCalledWith("pnpm", projectPath, [
-      "exec",
-      "eve",
-      "dev",
-      "--onboard",
-    ]);
-    expect(stripAnsi(output.messages.join("\n"))).toContain("✓ Enabled self-modification");
-  });
-
   it("does not offer self-modification when init was launched by a coding agent", async () => {
     const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-agent-launched-selfmod-"));
     const output = logger();
@@ -396,71 +366,6 @@ describe("runInitCommand", () => {
     deps.isCodingAgentLaunch.mockResolvedValue(true);
 
     await runInitCommand(output, parentDirectory, "my-agent", {}, deps);
-
-    expect(deps.selectInitSelfModification).not.toHaveBeenCalled();
-    expect(deps.installSelfModification).not.toHaveBeenCalled();
-  });
-
-  it("opens the selected coding-agent REPL instead of starting eve dev", async () => {
-    const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-repl-handoff-"));
-    const output = logger();
-    const deps = dependencies();
-    deps.selectInitHandoff.mockResolvedValue("codex");
-
-    await runInitCommand(output, parentDirectory, "my-agent", {}, deps);
-
-    const projectPath = join(parentDirectory, "my-agent");
-    expect(deps.spawnCodingAgentRepl).toHaveBeenCalledWith(
-      expect.objectContaining({
-        command: "codex",
-        cwd: projectPath,
-        prompt: expect.stringContaining("pnpm exec eve dev --no-ui"),
-      }),
-    );
-    const prompt = deps.spawnCodingAgentRepl.mock.calls[0]?.[0].prompt;
-    expect(prompt).toBe(
-      initAgentReplPrompt({
-        devCommand: "pnpm exec eve dev",
-      }),
-    );
-    expect(prompt).toContain("What should the agent do?");
-    expect(prompt).toContain("HMR development server");
-    expect(prompt).not.toContain(projectPath);
-    expect(prompt).not.toContain("{{");
-    expect(deps.spawnPackageManager).not.toHaveBeenCalled();
-    expect(output.messages.at(-1)).toContain("$ codex");
-  });
-
-  it("keeps a completed init successful when its optional handoff is cancelled", async () => {
-    const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-repl-cancelled-"));
-    const output = logger();
-    const deps = dependencies();
-    deps.selectInitHandoff.mockRejectedValue(new WizardCancelledError());
-
-    await expect(
-      runInitCommand(output, parentDirectory, "my-agent", {}, deps),
-    ).resolves.toBeUndefined();
-
-    const projectPath = join(parentDirectory, "my-agent");
-    await expect(pathExists(join(projectPath, "agent/agent.ts"))).resolves.toBe(true);
-    expect(deps.spawnCodingAgentRepl).not.toHaveBeenCalled();
-    expect(deps.spawnPackageManager).not.toHaveBeenCalled();
-    expect(output.errors).toEqual([]);
-  });
-
-  it("exits after init without starting a handoff when selected", async () => {
-    const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-exit-handoff-"));
-    const output = logger();
-    const deps = dependencies();
-    deps.selectInitHandoff.mockResolvedValue("exit");
-
-    await runInitCommand(output, parentDirectory, "my-agent", {}, deps);
-
-    const projectPath = join(parentDirectory, "my-agent");
-    await expect(pathExists(join(projectPath, "agent/agent.ts"))).resolves.toBe(true);
-    expect(deps.spawnCodingAgentRepl).not.toHaveBeenCalled();
-    expect(deps.spawnPackageManager).not.toHaveBeenCalled();
-    expect(output.errors).toEqual([]);
   });
 
   it("uses an explicit init package spec for fresh project scaffolds", async () => {
@@ -1305,8 +1210,6 @@ describe("runInitCommand", () => {
       expect.anything(),
     );
     expect(deps.tryInitializeGit).toHaveBeenCalledWith(parentDirectory);
-    expect(deps.selectInitHandoff).not.toHaveBeenCalled();
-    expect(deps.spawnCodingAgentRepl).not.toHaveBeenCalled();
     expect(deps.spawnPackageManager).not.toHaveBeenCalled();
     expect(output.messages.join("\n")).toContain("Created an eve agent in");
   });
@@ -1331,8 +1234,6 @@ describe("runInitCommand", () => {
     expect(deps.tryInitializeGit).toHaveBeenCalledWith(projectPath);
     // The dev server is handed off as text, never spawned — the dev TUI would
     // wedge the launching agent. The handoff's content is the unit test's job.
-    expect(deps.selectInitHandoff).not.toHaveBeenCalled();
-    expect(deps.spawnCodingAgentRepl).not.toHaveBeenCalled();
     expect(deps.spawnPackageManager).not.toHaveBeenCalled();
     const messages = stripAnsi(output.messages.join("\n"));
     expect(messages).toContain(`✓ Model ${DEFAULT_AGENT_MODEL_ID} (eve default)`);

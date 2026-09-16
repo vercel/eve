@@ -1,4 +1,8 @@
+import { parseModelHelper } from "#shared/model-helper.js";
 import { join } from "node:path";
+import { readFile } from "node:fs/promises";
+import { resolveDiscoveryProject } from "#discover/project.js";
+import { readModelSelectionFromSource } from "#source-change/apply-model-selection.js";
 
 import { createCompiledRuntimeModelCatalogLoader } from "#compiler/model-catalog.js";
 import { discoverAgent } from "#discover/discover-agent.js";
@@ -8,10 +12,7 @@ import type {
   AgentModelSetting,
   AgentModelSettingsPatch,
 } from "#source-change/apply-agent-model-settings.js";
-import {
-  CHATGPT_MODEL_SELECTION_PREFIX,
-  parseChatGptModelSelection,
-} from "#shared/chatgpt-model.js";
+import { CHATGPT_MODEL_SELECTION_PREFIX } from "#shared/chatgpt-model.js";
 import { createStaticSourceChange } from "#source-change/static-source-change.js";
 
 import pc from "#compiled/picocolors/index.js";
@@ -74,8 +75,8 @@ export async function changeAgentModelSettings(input: {
     if (rejection !== null) return { kind: "rejected", message: rejection };
   }
 
-  const agentRoot = join(appRoot, "agent");
-  const { manifest } = await discoverAgent({ agentRoot, appRoot });
+  const project = await resolveDiscoveryProject(appRoot);
+  const { manifest } = await discoverAgent(project);
   const result = await createStaticSourceChange(manifest).updateModelSettings(patch);
   if (result.kind === "bail") {
     return {
@@ -108,8 +109,17 @@ export async function changeAgentModel(input: {
   const rejection = await validateModelSlug(appRoot, slug);
   if (rejection !== null) return { kind: "rejected", message: rejection };
 
-  const agentRoot = join(appRoot, "agent");
-  const { manifest } = await discoverAgent({ agentRoot, appRoot });
+  return changeValidatedAgentModel(input);
+}
+
+/** Applies a selection already confirmed by the provider catalog, retaining source-edit guards. */
+export async function changeValidatedAgentModel(input: {
+  readonly appRoot: string;
+  readonly slug: string;
+}): Promise<ApplyModelOutcome> {
+  const { appRoot, slug } = input;
+  const project = await resolveDiscoveryProject(appRoot);
+  const { manifest } = await discoverAgent(project);
   const result = await createStaticSourceChange(manifest).updateModelName(slug);
   if (result.kind === "bail") {
     return {
@@ -123,7 +133,7 @@ export async function changeAgentModel(input: {
 }
 
 export async function validateModelSlug(appRoot: string, slug: string): Promise<string | null> {
-  if (parseChatGptModelSelection(slug) !== undefined) return null;
+  if (parseModelHelper(slug) !== undefined) return null;
   if (slug.startsWith(CHATGPT_MODEL_SELECTION_PREFIX)) {
     return "Choose a bare OpenAI model id after `chatgpt/`.";
   }
@@ -141,4 +151,13 @@ export async function validateModelSlug(appRoot: string, slug: string): Promise<
     return null;
   }
   return null;
+}
+
+/** Uses the same source grammar as model edits, never the provider endpoint. */
+export async function readAuthoredModelSelection(startPath: string): Promise<string | undefined> {
+  const project = await resolveDiscoveryProject(startPath);
+  const { manifest } = await discoverAgent(project);
+  if (!manifest.configModule) return undefined;
+  const source = await readFile(join(project.agentRoot, manifest.configModule.logicalPath), "utf8");
+  return readModelSelectionFromSource(source);
 }

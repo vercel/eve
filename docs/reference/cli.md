@@ -57,7 +57,7 @@ Creates a new agent app or adds an agent to an existing app. Always installs dep
 
 Existing packages do not need a target-selection prompt: run `eve init` from the project directory or `eve init path/to/app`. New projects in non-interactive environments need a new directory name, such as `eve init my-agent`.
 
-After scaffolding, a human terminal usually continues into `eve dev`. Enable the self-modification subagent to edit your agent from the dev session. Otherwise, if a coding-agent REPL is on `PATH`, you can launch it to make changes instead of opening the TUI. Fresh projects use the parent workspace's package manager when there is one; otherwise they use the manager that launched `eve init`.
+After scaffolding in an interactive human terminal, eve opens the TUI directly. Noninteractive and coding-agent invocations return without starting an interactive session. Fresh projects use the parent workspace's package manager when there is one; otherwise they use the manager that launched `eve init`.
 
 | Flag                   | Type   | Default                    | Description                                                                                                              |
 | ---------------------- | ------ | -------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
@@ -234,7 +234,7 @@ Pass a bare URL and the UI connects to that server instead of booting a local on
 
 `eve acp` reserves stdin and stdout for newline-delimited JSON-RPC and sends diagnostics to stderr. Without a URL, it supervises an isolated local development server. With a URL, it bridges ACP to that server's existing eve HTTP API and accepts the same URL credentials and request headers as `eve dev <url>`. Pass `--scope <team>` when the active Vercel scope does not own the deployment; `EVE_VERCEL_SCOPE` provides the same value for managed harnesses. See [Agent Client Protocol (ACP)](../protocols/acp) for client configuration and capability limits.
 
-A fresh `eve init` starts onboarding before the first prompt: the TUI installs the Vercel CLI if needed, asks you to log in if needed, guides you through model configuration, then lets you choose channels and integrations. Other `--input` text stays editable in the prompt.
+A fresh `eve init` opens the TUI and reuses an available model connection or opens `/login`. No Vercel project, channels, integrations, or review step is required before chat. Use `/model` to change models and settings, and `/add` to install an addition. Other `--input` text stays editable in the prompt. See [Terminal UI](../guides/dev-tui) for credential precedence and login options.
 
 For a URL target protected by HTTP Basic auth, put the credentials in the URL. eve sends them as a Basic `Authorization` header and strips them from the server URL before connecting:
 

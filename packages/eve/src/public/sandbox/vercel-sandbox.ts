@@ -30,7 +30,7 @@ type VercelSandboxAuthorCreateOptions<T> = T extends unknown
  * author-supplied values.
  *
  * `runtime` is excluded: eve defaults to its published
- * `vcr.vercel.com/vercel/eve/base` image tagged with the installed eve version
+ * `vcr.vercel.com/vercel/eve/base` image tagged with the installed eve version without build metadata
  * or `EVE_SANDBOX_IMAGE_TAG` when `image` is not supplied. Both are mutually
  * exclusive with a stock runtime.
  *

@@ -17,7 +17,7 @@ describe("formatRegistrySessionResult", () => {
         failures: [
           {
             title: "Slack",
-            message: "Vercel CLI is not authenticated.\nRun /vc:login, then try again.",
+            message: "Vercel CLI is not authenticated.\nRun /deploy, then try again.",
           },
         ],
       }),
@@ -30,7 +30,7 @@ describe("formatRegistrySessionResult", () => {
         "    Configured MCP connection.\n\n" +
         "  ⨯ Slack\n" +
         "    Vercel CLI is not authenticated.\n" +
-        "    Run /vc:login, then try again.",
+        "    Run /deploy, then try again.",
     );
   });
 

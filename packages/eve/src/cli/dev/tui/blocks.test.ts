@@ -276,22 +276,22 @@ describe("renderBlockLines", () => {
     expect(lines).toEqual(["  ※ subagent(self:4)"]);
   });
 
-  it("marks steered and queued user messages with a gutter arrow", () => {
+  it("renders steered and queued messages without extra arrow rows", () => {
     const steered = render({
       kind: "user",
       body: "need to be\n\nsuper accurate",
       promptOrigin: "steer",
     });
-    expect(steered).toEqual(["↑", "│ need to be", "│ ", "│ super accurate"]);
+    expect(steered).toEqual(["│ need to be", "│ ", "│ super accurate"]);
 
     const queued = render({ kind: "user", body: "later then", promptOrigin: "queue" });
-    expect(queued).toEqual(["│ later then", "↑"]);
+    expect(queued).toEqual(["│ later then"]);
 
     // An ordinary typed prompt keeps its bare bar.
     expect(render({ kind: "user", body: "hello" })).toEqual(["│ hello"]);
   });
 
-  it("colors the provenance arrow with the user bar's accent", () => {
+  it("colors the steered message gutter yellow", () => {
     const colorTheme = createTheme({ color: true, unicode: true });
     const rows = renderBlockLines(
       { kind: "user", body: "go", promptOrigin: "steer" },
@@ -299,9 +299,7 @@ describe("renderBlockLines", () => {
       colorTheme,
       { activityPulse: "▪" },
     );
-    // Same cyan as the `│` gutter bar.
-    expect(rows[0]).toBe("\x1b[36m↑\x1b[39m");
-    expect(rows[1]).toContain("\x1b[36m│\x1b[39m");
+    expect(rows).toEqual(["\x1b[33m│\x1b[39m go"]);
   });
 
   it("pulses the in-progress subagent mark by intensity, with a quiet label", () => {
@@ -510,7 +508,7 @@ describe("error block coloring", () => {
       {
         kind: "error",
         title: "Error",
-        body: "HookConflictError: token in use\n╰▶ docs: https://workflow-sdk.dev/err/hook-conflict",
+        body: "HookConflictError: token in use\n╰› docs: https://workflow-sdk.dev/err/hook-conflict",
       },
       80,
       colorTheme,

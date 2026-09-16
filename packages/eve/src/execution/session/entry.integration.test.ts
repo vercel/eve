@@ -12,6 +12,7 @@ import { createChannelAddress } from "#channel/channel-address.js";
 import { captureTurnEvents, filterEventsByType } from "#internal/testing/events.js";
 import { createTestRuntime } from "#internal/testing/app-harness.js";
 import { waitForHook } from "#internal/testing/workflow-test-helpers.js";
+import { waitForParkedTurnStep } from "#internal/testing/session-test-helpers.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { workflowEntry } from "#execution/session/entry.js";
 import { sessionInboxHookToken } from "#execution/session-inbox/address.js";
@@ -2123,23 +2124,6 @@ const CALLER_STEP_NAMES = new Set([
 
 async function listCallerStepNames(runId: string): Promise<string[]> {
   return (await listStepNames(runId)).filter((name) => CALLER_STEP_NAMES.has(name)).sort();
-}
-
-async function waitForParkedTurnStep(runId: string): Promise<void> {
-  // Stream publication precedes the durable commit. Tests that require an
-  // idle owner must wait for the committed park before delivering input.
-  await vi.waitFor(
-    async () => {
-      const steps = await (await getWorld()).steps.list({ runId, resolveData: "all" });
-      for (const step of steps.data) {
-        if (!step.stepName.endsWith("//turnStep") || step.output === undefined) continue;
-        const result = await hydrateStepReturnValue(step.output, runId, undefined);
-        if (result.action === "park") return;
-      }
-      expect.fail("The turn has not committed its park yet.");
-    },
-    { timeout: 10_000 },
-  );
 }
 
 async function listStepNames(runId: string): Promise<string[]> {

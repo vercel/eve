@@ -103,7 +103,7 @@ async function runVercelLoginWithControls(
 }
 
 /**
- * THE LOGIN FLOW for the dev TUI's `/vc:login`. Short-circuits when already
+ * THE LOGIN FLOW for the dev TUI's `/deploy`. Short-circuits when already
  * authenticated; otherwise runs `vercel login` as a browser flow the TUI waits
  * on (see {@link runVercelLoginWithControls}) and re-probes after, so a
  * half-finished or abandoned login reports `failed`, never a false success.
@@ -113,6 +113,8 @@ export async function runLoginFlow(input: {
   prompter: Prompter;
   /** Run the browser login even when the account-level Vercel session is valid. */
   force?: boolean;
+  /** False for remote access: reuse the existing session without opening a browser. */
+  allowLogin?: boolean;
   signal?: AbortSignal;
   deps?: Partial<LoginFlowDeps>;
 }): Promise<LoginFlowResult> {
@@ -148,6 +150,8 @@ export async function runLoginFlow(input: {
       return exhaustive;
     }
   }
+
+  if (input.allowLogin === false) return { kind: "failed" };
 
   const outcome = await runVercelLoginWithControls(deps, appRoot, onOutput, prompter, signal);
   if (outcome === "cancelled") return { kind: "cancelled" };

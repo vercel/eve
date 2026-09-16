@@ -34,6 +34,7 @@ export async function ensureVercelProject(input: {
     appRoot: input.appRoot,
     prompter: input.prompter,
     signal: input.signal,
+    allowLogin: false,
   });
   if (login.kind === "cancelled") throw new WizardCancelledError();
   if (login.kind !== "already" && login.kind !== "logged-in") {

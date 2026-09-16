@@ -259,10 +259,6 @@ describe("eve init smoke", () => {
         args: ["--dir", canonicalProjectDir, "install", "--no-frozen-lockfile"],
         cwd: canonicalProjectDir,
       },
-      {
-        args: ["--dir", canonicalProjectDir, "exec", "eve", "dev", "--onboard"],
-        cwd: canonicalProjectDir,
-      },
     ]);
     expect(result.stdout).toContain("Created an eve agent in ");
     expect(result.stdout).toContain("Preparing project...");
@@ -297,9 +293,9 @@ describe("eve init smoke", () => {
     expect(await readFile(join(projectDir, "next.config.ts"), "utf8")).toContain(
       "export default withEve(nextConfig);",
     );
-    const [installCall, devCall] = await fakePnpm.readCalls();
+    const [installCall, ...remainingCalls] = await fakePnpm.readCalls();
     expect(installCall?.args.slice(-2)).toEqual(["install", "--no-frozen-lockfile"]);
-    expect(devCall?.args.slice(-4)).toEqual(["exec", "eve", "dev", "--onboard"]);
+    expect(remainingCalls).toEqual([]);
   });
 
   it("adds Web Chat through npm without writing pnpm configuration", async () => {
@@ -321,10 +317,6 @@ describe("eve init smoke", () => {
     expect(await fakeNpm.readCalls()).toEqual([
       {
         args: ["install"],
-        cwd: canonicalProjectDir,
-      },
-      {
-        args: ["exec", "--", "eve", "dev", "--onboard"],
         cwd: canonicalProjectDir,
       },
     ]);
@@ -364,7 +356,7 @@ describe("eve init smoke", () => {
     );
     const calls = await fakePnpm.readCalls();
     expect(calls[0]?.args.slice(-2)).toEqual(["install", "--no-frozen-lockfile"]);
-    expect(calls[1]?.args.slice(-3)).toEqual(["exec", "eve", "dev"]);
+    expect(calls).toHaveLength(1);
   });
 
   it("scaffolds the current directory for a coding agent that omits the target", async () => {
@@ -422,10 +414,6 @@ describe("eve init smoke", () => {
     expect(await fakePnpm.readCalls()).toEqual([
       {
         args: ["--dir", canonicalProjectDir, "install", "--no-frozen-lockfile"],
-        cwd: canonicalProjectDir,
-      },
-      {
-        args: ["--dir", canonicalProjectDir, "exec", "eve", "dev", "--onboard"],
         cwd: canonicalProjectDir,
       },
     ]);

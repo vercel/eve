@@ -1,12 +1,14 @@
+import { createOpenAI } from "#compiled/@ai-sdk/openai/index.js";
+import { createDirectModelFetch } from "#internal/model-auth/transport.js";
 import type { LanguageModel } from "ai";
 import { DEFAULT_CHATGPT_MODEL_ID, normalizeChatGptModelId } from "#shared/chatgpt-model.js";
 import { createCodexSubscriptionModel } from "./chatgpt/model.js";
 
 /**
  * Creates a language model billed to the local ChatGPT subscription instead
- * of an API key. Sign in through `/model` in `eve dev`.
+ * of an API key. Sign in through `/login` in `eve dev`.
  *
- * Defaults to `gpt-5.6-sol`. Pass a bare OpenAI model slug or an
+ * Defaults to `gpt-5.6-luna-fast`. Pass a bare OpenAI model slug or an
  * `openai/`-prefixed id to override it; the Codex backend serves OpenAI models
  * only, so any other provider-qualified id is rejected. Model availability is
  * enforced by the Codex backend per account at call time, not at compile time.
@@ -42,3 +44,13 @@ export function chatgpt(model = DEFAULT_CHATGPT_MODEL_ID): LanguageModel {
 
 /** @deprecated Use {@link chatgpt}. */
 export const experimental_chatgpt = chatgpt;
+
+/** Creates a direct OpenAI model. Uses OPENAI_API_KEY, or /login credentials in local development. */
+export function openai(model = "gpt-5.6-luna-fast"): LanguageModel {
+  const id = model.trim().replace(/^openai\//u, "");
+  if (!id || id.includes("/")) throw new Error("Expected an OpenAI model ID.");
+  return createOpenAI({
+    apiKey: "eve-local-credential",
+    fetch: createDirectModelFetch("openai"),
+  }).responses(id);
+}

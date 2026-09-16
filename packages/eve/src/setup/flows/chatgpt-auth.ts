@@ -109,7 +109,6 @@ async function signInWithOwnedCredentials(
       broker,
       "ChatGPT sign-in could not be verified. Retry from /model.",
     );
-    log("ChatGPT subscription connected.");
   } catch (error) {
     signal.throwIfAborted();
     throw error;

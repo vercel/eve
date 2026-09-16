@@ -48,6 +48,14 @@ describe("filterOptions", () => {
     expect(filterOptions(options, "installed")).toEqual(options);
   });
 
+  it("matches hidden keywords without filtering out trailing actions", () => {
+    const option = { value: "blooio", label: "Blooio", keywords: ["iMessage", "SMS"] };
+    const done = { value: "done", label: "Done", trailingAction: true, keywords: ["iMessage"] };
+    expect(filterOptions([option, done], " IMESSAGE ")).toEqual([option, done]);
+    expect(filterOptions([option, done], "sms")).toEqual([option, done]);
+    expect(filterOptions([option, done], "email")).toEqual([done]);
+  });
+
   it("returns nothing when no option matches", () => {
     const done = { value: "done", label: "Done", trailingAction: true };
     expect(filterOptions([...OPTIONS, done], "zzz")).toEqual([done]);

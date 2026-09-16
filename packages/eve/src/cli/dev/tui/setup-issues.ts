@@ -40,7 +40,7 @@ type ModelProviderAccess =
   | {
       kind: "gateway";
       runtime:
-        | { status: "connected"; credential: "api-key" | "oidc" }
+        | { status: "connected"; credential: "api-key" | "oidc" | "oauth" }
         | { status: "disconnected" }
         | { status: "unknown" };
     };
@@ -102,9 +102,15 @@ function modelProviderAccess(
   // ranking delegates to the one precedence authority; the server-reported
   // endpoint snapshot slots between a freshly loaded key (which outranks a
   // stale snapshot) and a local OIDC token (which the snapshot outranks).
+  const selected = context.env.EVE_MODEL_CONNECTION;
   const local = resolveGatewayCredential({
-    apiKeyInEnv: hasEnvValue(context.env["AI_GATEWAY_API_KEY"]),
-    oidcAvailable: hasEnvValue(context.env["VERCEL_OIDC_TOKEN"]),
+    apiKeyInEnv:
+      (selected === undefined ||
+        (selected === "ai-gateway-key" && context.env.EVE_MODEL_KEY_SOURCE !== "secret")) &&
+      hasEnvValue(context.env.AI_GATEWAY_API_KEY),
+    oidcAvailable:
+      (selected === undefined || selected === "ai-gateway-project") &&
+      hasEnvValue(context.env.VERCEL_OIDC_TOKEN),
   });
   if (local?.credential === "api-key") {
     return { kind: "gateway", runtime: { status: "connected", credential: "api-key" } };
@@ -146,8 +152,8 @@ const modelProvider: BootDetection = {
         return [
           {
             kind: "attention",
-            label: linked ? "AI Gateway credentials missing" : "model provider not linked",
-            command: "/model",
+            label: linked ? "AI Gateway credentials missing" : "connect a model",
+            command: "/login",
           },
         ];
       }
@@ -155,9 +161,9 @@ const modelProvider: BootDetection = {
 
     const linked = await pathExists(join(appRoot, ".vercel", "project.json"));
     if (linked) {
-      return [{ kind: "attention", label: "AI Gateway credentials missing", command: "/model" }];
+      return [{ kind: "attention", label: "AI Gateway credentials missing", command: "/login" }];
     }
-    return [{ kind: "attention", label: "model provider not linked", command: "/model" }];
+    return [{ kind: "attention", label: "connect a model", command: "/login" }];
   },
 };
 
@@ -174,19 +180,19 @@ export const BOOT_DETECTIONS: readonly BootDetection[] = [modelProvider];
 export const LOGIN_SETUP_ISSUE: SetupIssue = {
   kind: "attention",
   label: "not logged in",
-  command: "/vc:login",
+  command: "/deploy",
 };
 
 /**
  * The CLI-missing hint, surfaced by the same off-critical-path probe as
  * {@link LOGIN_SETUP_ISSUE}. When the `vercel` binary is absent the probe
  * reports this instead of the login hint, so the diagnostic points at its fix
- * command (`/vc:install`) rather than a logged-out state the probe can't determine.
+ * command (`/deploy`) rather than a logged-out state the probe can't determine.
  */
 export const CLI_MISSING_SETUP_ISSUE: SetupIssue = {
   kind: "attention",
   label: "Vercel CLI not found",
-  command: "/vc:install",
+  command: "/deploy",
 };
 
 /**

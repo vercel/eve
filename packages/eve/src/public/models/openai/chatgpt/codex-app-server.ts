@@ -90,7 +90,7 @@ export class CodexAppServerClient implements CodexAppServer {
       throw input.forceRefresh
         ? new ChatGptSignInRequiredError()
         : new ChatGptSignedOutError(
-            "ChatGPT subscription is not signed in to Codex. Run `codex login` or sign in from /model.",
+            "ChatGPT subscription is not signed in to Codex. Run `codex login` or sign in from /login.",
           );
     }
     let token = tokenFromCodex(status.authToken);

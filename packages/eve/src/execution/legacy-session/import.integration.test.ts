@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { createTestRuntime } from "#internal/testing/app-harness.js";
 import { legacySessionDriverWorkflow } from "#internal/testing/legacy-session-driver-workflow.js";
 import { waitForHook } from "#internal/testing/workflow-test-helpers.js";
+import { waitForParkedTurnStep } from "#internal/testing/session-test-helpers.js";
 import { captureTurnEvents, filterEventsByType } from "#internal/testing/events.js";
 import { hydrateStepReturnValue } from "#compiled/@workflow/core/serialization.js";
 import type { DurableStepResult } from "#execution/session/turn-step-types.js";
@@ -184,6 +185,7 @@ describe("imported session lifetime", () => {
         const importedOwner = await getHookByToken(
           sessionInboxHookToken(sessionCommandHookToken(driver.runId)),
         );
+        await waitForParkedTurnStep(importedOwner.runId);
         await resumeSessionInbox(
           { sessionId: driver.runId },
           {
@@ -202,6 +204,7 @@ describe("imported session lifetime", () => {
           sessionInboxHookToken(sessionCommandHookToken(driver.runId)),
         );
         expect(successor.runId).not.toBe(importedOwner.runId);
+        await waitForParkedTurnStep(successor.runId);
         expect(await driver.status).toBe("running");
         await resumeSessionInbox({ sessionId: driver.runId }, { kind: "cancel" });
         await resumeSessionInbox(

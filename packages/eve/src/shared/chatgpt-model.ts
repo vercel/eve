@@ -1,6 +1,6 @@
 import type { ModelRouting } from "./agent-definition.js";
 
-export const DEFAULT_CHATGPT_MODEL_ID = "gpt-5.6-sol";
+export const DEFAULT_CHATGPT_MODEL_ID = "gpt-5.6-luna-fast";
 export const CHATGPT_MODEL_SELECTION_PREFIX = "chatgpt/";
 export const DEFAULT_CHATGPT_MODEL_SELECTION = `${CHATGPT_MODEL_SELECTION_PREFIX}${DEFAULT_CHATGPT_MODEL_ID}`;
 

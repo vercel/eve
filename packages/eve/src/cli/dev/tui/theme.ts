@@ -99,8 +99,6 @@ export interface ThemeGlyphs {
   option: string;
   /** `❯` — the input prompt mark. */
   prompt: string;
-  /** `›` — the prompt mark's quiet form while the buffer is empty. */
-  promptIdle: string;
   /** `⎿` — hangs a command's result under its invocation. */
   elbow: string;
   /** `▔` — strong full-width rule opening the bottom question panel. */
@@ -150,11 +148,10 @@ const UNICODE_GLYPHS: ThemeGlyphs = {
   question: "?",
   connection: "●",
   arrow: "→",
-  pointer: "▷",
-  selectedPointer: "▶",
-  option: "◦",
+  pointer: "›",
+  selectedPointer: "›",
+  option: " ",
   prompt: "❯",
-  promptIdle: "›",
   elbow: "⎿",
   hrule: "▔",
   dash: "─",
@@ -193,7 +190,6 @@ const ASCII_GLYPHS: ThemeGlyphs = {
   selectedPointer: ">",
   option: ".",
   prompt: ">",
-  promptIdle: ">",
   elbow: "`-",
   hrule: "=",
   dash: "-",

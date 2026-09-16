@@ -935,6 +935,7 @@ describe("registry commands", () => {
           registry: "https://eve.dev/r/registry.json",
           name: "channel/photon-imessage",
           title: "Photon iMessage",
+          description: "iMessage through Photon, with guided project and phone setup.",
           addCommandArgument: "https://eve.dev/r/channel/photon-imessage.json",
         },
         {
@@ -949,7 +950,11 @@ describe("registry commands", () => {
 
     await expect(browseRegistryCatalog("/project", { query: "sdk" })).resolves.toMatchObject({
       items: [
-        { name: "channel/photon-imessage", title: "Photon iMessage" },
+        {
+          name: "channel/photon-imessage",
+          title: "Photon iMessage",
+          description: "iMessage through Photon, with guided project and phone setup.",
+        },
         { name: "extension/ai-sdk-tools", title: "AI SDK Tools" },
       ],
     });

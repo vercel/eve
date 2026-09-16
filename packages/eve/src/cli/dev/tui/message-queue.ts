@@ -2,7 +2,8 @@
  * The pinned message-queue panel: client-side state and pure rendering for
  * messages submitted while a turn is still streaming.
  *
- * Enter queues the draft (up to {@link MESSAGE_QUEUE_LIMIT}); each queued
+ * When steering is unavailable, Enter queues the draft (up to
+ * {@link MESSAGE_QUEUE_LIMIT}); each queued
  * message waits for the turn to end, where the whole queue coalesces into
  * the next turn's message. Esc or Ctrl+C pops the oldest message to steer the
  * conversation instead of waiting: the renderer sends the popped message to
