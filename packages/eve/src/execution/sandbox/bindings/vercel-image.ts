@@ -45,6 +45,7 @@ import { SandboxTemplateNotProvisionedError } from "#shared/sandbox-template-err
 import { decodeVercelOidcTokenClaims } from "#shared/vercel-project.js";
 import {
   isSandboxPreparedArtifactRecord,
+  sandboxProviderResourceIdentity,
   type SandboxPreparedArtifact,
   type SandboxProviderImplementation,
 } from "#shared/sandbox-provider.js";
@@ -218,7 +219,7 @@ export function createVercelImageSandboxProvider(
         createSandboxProviderIdentity({
           dockerfile: dockerfile.contentHash,
           environment: environmentOptions,
-          resources: context.resources.source,
+          resources: sandboxProviderResourceIdentity(context.resources),
           version: 1,
         }),
       );
