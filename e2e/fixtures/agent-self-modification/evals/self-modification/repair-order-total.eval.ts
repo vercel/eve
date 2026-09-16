@@ -37,38 +37,42 @@ export default defineEval({
       await selfMod.assertOnlyChanged([`tools/${TOOL_NAME}.ts`]);
       await selfMod.apply();
 
-      for (const [input, subtotalCents, discountCents] of [
-        [ORDER, 4600, 575],
-        [
-          {
-            items: [{ sku: "monitor", unitPriceCents: 333, quantity: 3 }],
-            discountBps: 3333,
-          },
-          999,
-          332,
-        ],
-        [
-          {
-            items: [{ sku: "cable", unitPriceCents: 250, quantity: 1 }],
-            discountBps: 0,
-          },
-          250,
-          0,
-        ],
-        [{ items: [], discountBps: 5000 }, 0, 0],
-      ] as const) {
-        const turn = await selfMod.verify(
-          `Call ${TOOL_NAME} once with ${JSON.stringify(input)} and report its result.`,
-        );
-        turn.requireToolCall(TOOL_NAME, {
-          input,
-          output: {
-            subtotalCents,
-            discountCents,
-            totalCents: subtotalCents - discountCents,
-          },
-        });
-      }
+      await Promise.all(
+        (
+          [
+            [ORDER, 4600, 575],
+            [
+              {
+                items: [{ sku: "monitor", unitPriceCents: 333, quantity: 3 }],
+                discountBps: 3333,
+              },
+              999,
+              332,
+            ],
+            [
+              {
+                items: [{ sku: "cable", unitPriceCents: 250, quantity: 1 }],
+                discountBps: 0,
+              },
+              250,
+              0,
+            ],
+            [{ items: [], discountBps: 5000 }, 0, 0],
+          ] as const
+        ).map(async ([input, subtotalCents, discountCents]) => {
+          const turn = await selfMod.verify(
+            `Call ${TOOL_NAME} once with ${JSON.stringify(input)} and report its result.`,
+          );
+          turn.requireToolCall(TOOL_NAME, {
+            input,
+            output: {
+              subtotalCents,
+              discountCents,
+              totalCents: subtotalCents - discountCents,
+            },
+          });
+        }),
+      );
       t.succeeded();
     });
   },

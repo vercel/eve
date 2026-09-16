@@ -26,57 +26,61 @@ export default defineEval({
       await selfMod.assertOnlyChanged([`tools/${TOOL_NAME}.ts`]);
       await selfMod.apply();
 
-      for (const [input, standardShippingCents, expeditedSurchargeCents] of [
-        [
-          { subtotalCents: 4999, weightGrams: 1000, destination: "domestic", expedited: false },
-          600,
-          0,
-        ],
-        [
-          { subtotalCents: 5000, weightGrams: 1001, destination: "domestic", expedited: false },
-          0,
-          0,
-        ],
-        [
-          { subtotalCents: 5000, weightGrams: 1001, destination: "domestic", expedited: true },
-          0,
-          1200,
-        ],
-        [
-          {
-            subtotalCents: 10000,
-            weightGrams: 2001,
-            destination: "international",
-            expedited: false,
-          },
-          2400,
-          0,
-        ],
-        [
-          {
-            subtotalCents: 2500,
-            weightGrams: 1,
-            destination: "international",
-            expedited: true,
-          },
-          1800,
-          1200,
-        ],
-      ] as const) {
-        const shippingCents = standardShippingCents + expeditedSurchargeCents;
-        const turn = await selfMod.verify(
-          `Please use ${TOOL_NAME} once to quote this order: ${JSON.stringify(input)}. Report the quote without placing an order.`,
-        );
-        turn.requireToolCall(TOOL_NAME, {
-          input,
-          output: {
-            standardShippingCents,
-            expeditedSurchargeCents,
-            shippingCents,
-            totalCents: input.subtotalCents + shippingCents,
-          },
-        });
-      }
+      await Promise.all(
+        (
+          [
+            [
+              { subtotalCents: 4999, weightGrams: 1000, destination: "domestic", expedited: false },
+              600,
+              0,
+            ],
+            [
+              { subtotalCents: 5000, weightGrams: 1001, destination: "domestic", expedited: false },
+              0,
+              0,
+            ],
+            [
+              { subtotalCents: 5000, weightGrams: 1001, destination: "domestic", expedited: true },
+              0,
+              1200,
+            ],
+            [
+              {
+                subtotalCents: 10000,
+                weightGrams: 2001,
+                destination: "international",
+                expedited: false,
+              },
+              2400,
+              0,
+            ],
+            [
+              {
+                subtotalCents: 2500,
+                weightGrams: 1,
+                destination: "international",
+                expedited: true,
+              },
+              1800,
+              1200,
+            ],
+          ] as const
+        ).map(async ([input, standardShippingCents, expeditedSurchargeCents]) => {
+          const shippingCents = standardShippingCents + expeditedSurchargeCents;
+          const turn = await selfMod.verify(
+            `Please use ${TOOL_NAME} once to quote this order: ${JSON.stringify(input)}. Report the quote without placing an order.`,
+          );
+          turn.requireToolCall(TOOL_NAME, {
+            input,
+            output: {
+              standardShippingCents,
+              expeditedSurchargeCents,
+              shippingCents,
+              totalCents: input.subtotalCents + shippingCents,
+            },
+          });
+        }),
+      );
       t.succeeded();
     });
   },
