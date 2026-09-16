@@ -352,13 +352,11 @@ function terminalCohort(delivery: DeliverHookPayload, cohorts: TaskCohorts): str
 
 function terminalTaskId(delivery: DeliverHookPayload): string | undefined {
   if (delivery.caller !== undefined) return undefined;
-  const views = delivery.payloads.flatMap((payload) => payload.task?.views ?? []);
-  if (views.length !== 1) return undefined;
-  const view = views[0]!;
-  if (view.status !== "completed" && view.status !== "failed" && view.status !== "cancelled") {
-    return undefined;
+  for (const status of ["completed", "failed", "cancelled"]) {
+    const suffix = `:ready:${status}`;
+    if (delivery.taskDeliveryId?.endsWith(suffix)) {
+      return delivery.taskDeliveryId.slice(0, -suffix.length);
+    }
   }
-  return delivery.taskDeliveryId === `${view.taskId}:ready:${view.status}`
-    ? view.taskId
-    : undefined;
+  return undefined;
 }

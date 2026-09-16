@@ -2,7 +2,6 @@ import { e2eAgentConfig } from "@eve-e2e/config";
 import { defineAgent } from "eve";
 import { mockModel, type MockModelRequest, type MockModelResponse } from "eve/evals";
 
-const PROGRESS = "EXPORT-PROGRESS";
 const RESULT = "EXPORT-COMPLETE";
 const SCHEDULED = "BACKGROUND-EXPORT-SCHEDULED";
 const EMPTY_DELIVERY_SENTINEL = "<eve-empty-delivery/>";
@@ -45,10 +44,6 @@ function respond(request: MockModelRequest): MockModelResponse | string {
       };
     }
     return "BACKGROUND-EXPORT-STARTED";
-  }
-
-  if (message.includes(PROGRESS)) {
-    return "BACKGROUND-EXPORT-UPDATE-RECEIVED";
   }
 
   if (

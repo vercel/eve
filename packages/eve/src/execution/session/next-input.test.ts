@@ -532,6 +532,34 @@ describe("buffered task completion batching", () => {
   beforeEach(() => vi.mocked(routeDeliverToChildren).mockReset());
   afterEach(() => vi.mocked(routeDeliverToChildren).mockReset());
 
+  it.each(["completed", "failed", "cancelled"] as const)(
+    "keeps routed %s remainders behind the cohort barrier",
+    async (status) => {
+      const input = batchingInput(2);
+      const original =
+        status === "completed" ? completion("task_0") : terminalDelivery("task_0", status);
+      const admission = input.queue.enqueueDelivery(original)!;
+      const routed = {
+        ...original,
+        payloads: original.payloads.map(({ task: _task, ...payload }) => payload),
+      };
+      input.queue.replaceDelivery(admission.sequence, routed);
+      const last = completion("task_1");
+      input.inbox = createMockInbox([
+        messageRead("still working"),
+        { result: { done: false, value: last } },
+      ]);
+      await expect(nextTurnDelivery(input)).resolves.toMatchObject({
+        delivery: { payloads: [{ message: "still working" }] },
+      });
+      expect(input.queue.pendingCount).toBe(1);
+      await expect(nextTurnDelivery(input)).resolves.toMatchObject({
+        delivery: { payloads: [...routed.payloads, ...last.payloads] },
+      });
+      expect(input.queue.pendingCount).toBe(0);
+    },
+  );
+
   it("delivers 100 buffered sibling results and their metadata in one parent turn", async () => {
     const input = batchingInput();
     const deliveries = Array.from({ length: 100 }, (_, index) => completion(`task_${index}`));

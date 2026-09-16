@@ -2,9 +2,11 @@ import { defineEval } from "eve/evals";
 import { satisfies } from "eve/evals/expect";
 import { defaultMessageReducer } from "eve/client";
 
+const RESULT = "EXPORT-COMPLETE";
+
 export default defineEval({
   description:
-    "An authored background defineTool yields state and progress, explicitly posts a message, then completes; the parent sees both.",
+    "A background workflow streams progress and delivers one terminal report to the parent.",
   async test(t) {
     const started = await t.send("BACKGROUND-EXPORT-START");
     const conversation = started.session;
@@ -18,19 +20,8 @@ export default defineEval({
     const sessionId = conversation.sessionId;
     if (sessionId === undefined) throw new Error("Eval has no parent session id.");
 
-    const updateLive = t.target.watchTurn(sessionId, {
-      startIndex: requireStreamIndex(started.session, "update wait"),
-    });
-    const updateTurn = await updateLive.result();
-    updateTurn.expectOk();
-    updateTurn.messageIncludes("BACKGROUND-EXPORT-UPDATE-RECEIVED");
-    updateTurn.event("message.received", {
-      data: (data) => data.kind === "execution.background_task",
-      count: 1,
-    });
-
     const doneLive = t.target.watchTurn(sessionId, {
-      startIndex: requireStreamIndex(updateLive.session, "completion wait"),
+      startIndex: requireStreamIndex(started.session, "completion wait"),
     });
     const doneTurn = await doneLive.result();
     doneTurn.expectOk();
@@ -41,7 +32,7 @@ export default defineEval({
     });
 
     const reducer = defaultMessageReducer();
-    const projection = [...started.events, ...updateTurn.events, ...doneTurn.events].reduce(
+    const projection = [...started.events, ...doneTurn.events].reduce(
       (data, event) => reducer.reduce(data, event),
       reducer.initial(),
     );
@@ -60,6 +51,10 @@ export default defineEval({
         "frontend projection keeps the background result without rendering runtime task input",
       ),
     );
+    doneTurn.event("turn.started", { count: 1 });
+    doneTurn.notEvent("message.received", {
+      data: (data) => messageText(data.message).includes("PROGRESS"),
+    });
     t.noFailedActions();
   },
 });

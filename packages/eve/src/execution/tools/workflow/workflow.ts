@@ -34,25 +34,20 @@ export async function workflowToolRunWorkflow(input: WorkflowToolRunInput): Prom
       });
       return;
     }
-    const drained = await Promise.race([
-      drainInvocation().then(() => true),
-      workflowSleep(CANCEL_GRACE).then(() => false),
-    ]);
-    if (!drained) {
-      await deliver({
-        from: createWorkflowBodyRef(invocationInput),
-        kind: "outcome",
-        result: { reason: control.reason(), status: "cancelled" },
-      });
-    }
+    await Promise.race([drainInvocation().catch(() => {}), workflowSleep(CANCEL_GRACE)]);
+    await deliver({
+      from: createWorkflowBodyRef(invocationInput),
+      kind: "outcome",
+      result: { reason: control.reason(), status: "cancelled" },
+    });
   }
 
   async function drainInvocation(): Promise<void> {
     while (true) {
       const read = await raceChannelReads([reader]);
       if (read.next.done) return;
-      await deliver(read.next.value);
       if (read.next.value.kind === "outcome") return;
+      await deliver(read.next.value);
     }
   }
 

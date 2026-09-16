@@ -50,9 +50,12 @@ async function* executeWorkflowToolInvocation(
       return;
     }
 
-    const read = await raceChannelReads([inbox.reader, bodyReader]);
+    const read = await raceChannelReads(
+      bodyResult === undefined ? [inbox.reader, bodyReader] : [inbox.reader],
+    );
     if (read.channel === "body") {
-      if (!read.next.done) bodyResult = read.next.value;
+      if (read.next.done) throw new Error("Workflow body ended without an outcome.");
+      bodyResult = read.next.value;
       continue;
     }
     if (read.next.done) return;

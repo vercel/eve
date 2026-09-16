@@ -125,11 +125,11 @@ Background execution controls how a workflow tool delivers its result to the par
 Set `execution: "background"` on `defineWorkflowTool`; ordinary `defineTool` calls always finish
 inside the initiating step.
 
-| Definition                                       | Durable waits inside `execute`                           | Result delivered to the model                                          |
-| ------------------------------------------------ | -------------------------------------------------------- | ---------------------------------------------------------------------- |
-| `defineTool`                                     | No; the executor runs inside the initiating step.        | Executor output after it finishes.                                     |
-| `defineWorkflowTool`                             | Yes; the tool call waits while the workflow can suspend. | Workflow output after it finishes.                                     |
-| `defineWorkflowTool` + `execution: "background"` | Yes; the workflow body can outlive the initiating step.  | Task receipt before the body finishes, followed by task notifications. |
+| Definition                                       | Durable waits inside `execute`                           | Result delivered to the model                                                                          |
+| ------------------------------------------------ | -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| `defineTool`                                     | No; the executor runs inside the initiating step.        | Executor output after it finishes.                                                                     |
+| `defineWorkflowTool`                             | Yes; the tool call waits while the workflow can suspend. | Workflow output after it finishes.                                                                     |
+| `defineWorkflowTool` + `execution: "background"` | Yes; the workflow body can outlive the initiating step.  | Task receipt before the body finishes; one combined report after all tasks in its cohort are terminal. |
 
 A background workflow tool's result is the receipt `{ status: "working", taskId }`; its eventual
 output belongs to the task. Use this mode when the conversation should continue while the body

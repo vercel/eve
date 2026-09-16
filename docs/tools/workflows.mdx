@@ -603,7 +603,9 @@ it.
 
 One call, one result. A waiting tool's call resolves once, with the return value, the error, or a
 cancellation. A background tool's call resolves once, with the receipt. Its terminal outcome arrives
-in the cohort's automatic session input after every sibling is terminal.
+in one automatic report after every task in its cohort is terminal. A cohort includes overlapping
+background work in the same session, including tasks launched in later user turns while earlier
+work remains open.
 
 While a waiting tool runs, the turn is parked. A `queue` message waits for it. A `steer` message
 cancels the turn, which cancels the run, which withdraws its requests. Input responses never steer.

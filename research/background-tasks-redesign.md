@@ -1,7 +1,7 @@
 ---
 issue: https://github.com/vercel/eve/issues/1084
 status: draft
-last_updated: "2026-09-15"
+last_updated: "2026-09-16"
 ---
 
 # Background tasks: one workflow invocation runtime
@@ -42,15 +42,15 @@ The background task owner creates the same stream only after `ready`; its admitt
 remains session-bound and survives the initiating turn. [Foreground adapter][prototype-blocking],
 [background adapter][prototype-background]
 
-| Concern                             | Before                                                        | Prototype                                 |
-| ----------------------------------- | ------------------------------------------------------------- | ----------------------------------------- |
-| Workflow-body execution owners      | 2 direct callers of `executeWorkflowBody`                     | 1 shared invocation reader                |
-| Background executor implementations | Workflow body or inline `defineTool` body                     | Workflow body only                        |
-| Durable workflow kinds              | Foreground workflow-tool run and background task run          | Unchanged; no extra run                   |
-| Mutable lifecycle writers           | Foreground run record and background `TaskView` writer        | Unchanged; each lifetime keeps one writer |
-| Persistent records                  | Harness workflow-tool-run record and session task-index entry | Unchanged; no result ledger added         |
-| Authored background protocols       | Return/yield plus `TaskExec`/`TaskMessage`                    | Return/yield plus workflow context        |
-| Terminal report classifier          | Successful `:ready:completed` delivery ID suffix              | Owned terminal `TaskView` payload         |
+| Concern                             | Before                                                        | Prototype                                           |
+| ----------------------------------- | ------------------------------------------------------------- | --------------------------------------------------- |
+| Workflow-body execution owners      | 2 direct callers of `executeWorkflowBody`                     | 1 shared invocation reader                          |
+| Background executor implementations | Workflow body or inline `defineTool` body                     | Workflow body only                                  |
+| Durable workflow kinds              | Foreground workflow-tool run and background task run          | Unchanged; no extra run                             |
+| Mutable lifecycle writers           | Foreground run record and background `TaskView` writer        | Unchanged; each lifetime keeps one writer           |
+| Persistent records                  | Harness workflow-tool-run record and session task-index entry | Unchanged; no result ledger added                   |
+| Authored background protocols       | Return/yield plus `TaskExec`/`TaskMessage`                    | Return/yield plus workflow context                  |
+| Terminal report classifier          | Successful `:ready:completed` delivery ID suffix              | Stable terminal delivery ID, retained after routing |
 
 This does not remove background tasks as a lifecycle concept. It removes background execution as a
 second way to run authored code. A task still represents admitted session-owned work; the workflow
@@ -67,7 +67,7 @@ The prototype deletes these responsibilities rather than renaming them:
 - Two `TaskExec` constructors, `TaskMessage` detection, message buffering, and the dedicated
   task-message parent wake step.
 - Background dynamic-tool persistence and replay.
-- Success-only cohort classification based on a delivery ID suffix.
+- Success-only cohort classification; all three terminal delivery suffixes now share the barrier.
 
 These responsibilities were retained or relocated:
 
@@ -80,19 +80,14 @@ These responsibilities were retained or relocated:
 
 ## Size comparison
 
-Against the current base, the prototype changes 26 production files under `packages/eve/src` with
-265 additions and 581 deletions: **316 fewer production lines**. This includes the new 69-line
-invocation owner. No file is a verbatim move; the shared owner recomposes ordering logic formerly
-split across the foreground workflow run and background task owner.
+The reduction comes from deleting ordinary background executors, the authored task-message
+protocol, and their associated tests. The shared invocation reader adds one execution owner;
+its ordering and cancellation tests exercise the real channel reader.
 
-Fifteen test and test-support files change by 274 additions and 413 deletions: **139 fewer test
-lines**. Two obsolete unit files for the removed inline background and `TaskMessage` APIs are
-deleted. Fixture edits add 6 and delete 6 lines.
-
-The reduction is material because the public surface and runtime branches shrink together. In the
-initial experiment, sharing the executor while retaining both authoring paths increased the bounded
-runtime scope by 42 lines. Applying the approved deletions made the implementation smaller than its
-base. The common invocation owner is worth retaining only with those scope reductions.
+Measure the current patch with `git diff --numstat 32aca9b1485ce8fce0eb9c636d741456c1779f25`.
+For production source, include `packages/eve/src/**` and exclude `*.test.ts` and
+`src/internal/testing/**`. Report documentation, generated extension reports, test support,
+and E2E fixtures separately. The PR description records the current diff totals.
 
 ## Observable semantics
 
@@ -147,19 +142,19 @@ A dependency on an intermediate result belongs inside the owning workflow throug
 | Background receipt before later completion                    | Workflow integration suite exercises both root and child owners       |
 | Commit before body start                                      | Task-owner unit test creates the invocation reader only after `ready` |
 | Report before outcome                                         | Shared invocation unit test and task-owner report/outcome test        |
-| Explicit cancellation wins over late completion               | Task-owner unit test                                                  |
+| Explicit cancellation wins over late completion               | Task-owner and foreground cancellation unit tests                     |
 | Workflow human input and authorization routing                | Workflow integration suite and task-owner authorization tests         |
-| Mixed success/failure and success/cancellation report         | Parked delivery unit tests                                            |
-| All-failed and all-cancelled report                           | Parked delivery unit tests                                            |
-| Active parent does not steer on terminal failure/cancellation | Turn-control receiver unit test                                       |
-| Duplicate terminal delivery                                   | Existing parked-delivery deduplication unit test                      |
-| Cross-turn cohort membership                                  | Existing parked-delivery cross-turn unit test                         |
+| Mixed success/failure and success/cancellation report         | Session next-input unit tests                                         |
+| All-failed and all-cancelled report                           | Session next-input unit tests                                         |
+| Active parent does not steer on terminal failure/cancellation | Session input queue and active-turn unit tests                        |
+| Duplicate terminal delivery                                   | Existing session next-input deduplication unit test                   |
+| Cross-turn cohort membership                                  | Existing session next-input cross-turn unit test                      |
 | Forced-stop cancellation notification                         | Cancellation integration test                                         |
 | Extension migration boundary                                  | Generated capability reports and invariant guard                      |
 
 Exact checks run in this worktree:
 
-- Full unit tier: **797 files passed; 8,667 tests passed; 1 skipped**.
+- Full unit tier: **798 files passed; 8,676 tests passed; 1 skipped**.
 - Workflow/task integration slice: **2 files, 41 tests passed**.
 - Forced-stop cancellation integration: **1 file, 1 test passed**.
 - TypeScript `--noEmit`, fresh production TypeScript/Rolldown build, focused lint, formatting,

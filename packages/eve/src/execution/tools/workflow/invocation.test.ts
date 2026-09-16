@@ -4,7 +4,7 @@ import { createWorkflowToolInvocationReader } from "#execution/tools/workflow/in
 
 const mocks = vi.hoisted(() => ({
   executeWorkflowBody: vi.fn(),
-  raceChannelReads: vi.fn(),
+  openWorkflowToolRunOwnerInbox: vi.fn(),
 }));
 
 vi.mock("#execution/tools/workflow/body.js", () => ({
@@ -28,19 +28,10 @@ vi.mock("#execution/tools/workflow/body.js", () => ({
   executeWorkflowBody: mocks.executeWorkflowBody,
 }));
 vi.mock("#execution/tools/workflow/owner.js", () => ({
-  openWorkflowToolRunOwnerInbox: () => ({
-    owner: { inbox: "invocation-owner" },
-    reader: { channel: "workflow" },
-  }),
+  openWorkflowToolRunOwnerInbox: mocks.openWorkflowToolRunOwnerInbox,
 }));
-vi.mock("#execution/tools/workflow/owner-channels.js", () => ({
-  createChannelReader: (channel: string, iterable: AsyncIterable<unknown>) => ({
-    channel,
-    iterator: iterable[Symbol.asyncIterator](),
-    landed: [],
-  }),
-  raceChannelReads: mocks.raceChannelReads,
-}));
+
+import { createChannelReader } from "#execution/tools/workflow/owner-channels.js";
 
 const input = {
   callId: "call-1",
@@ -85,15 +76,17 @@ it("emits every persisted report before the terminal outcome", async () => {
     kind: "report" as const,
     update: "halfway",
   };
-  mocks.raceChannelReads
-    .mockResolvedValueOnce({
-      channel: "body",
-      next: {
-        done: false,
-        value: { outcome: { output: "done", status: "completed" }, reportCount: 1 },
-      },
-    })
-    .mockResolvedValueOnce({ channel: "workflow", next: { done: false, value: report } });
+  mocks.openWorkflowToolRunOwnerInbox.mockReturnValue({
+    owner: { inbox: "invocation-owner" },
+    reader: createChannelReader(
+      "workflow",
+      (async function* () {
+        // The body settles before the persisted report reaches its owner.
+        await new Promise<void>((resolve) => setTimeout(resolve, 0));
+        yield report;
+      })(),
+    ),
+  });
 
   const reader = createWorkflowToolInvocationReader(input, new AbortController().signal);
   await expect(reader.iterator.next()).resolves.toEqual({ done: false, value: report });
