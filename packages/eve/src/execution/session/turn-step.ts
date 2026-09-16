@@ -292,7 +292,7 @@ async function runSessionStep(input: TurnStepInput): Promise<DurableStepResult> 
       setChannelContext(ctx, updatedAdapter);
     }
 
-    if (delivery !== undefined && resolved === undefined) {
+    if (delivery !== undefined && resolved === undefined && isHarnessBetweenTurns(initialSession)) {
       await contextStorage.run(ctx, () =>
         instrumentation?.instrumentChannelDelivery({
           ctx,
