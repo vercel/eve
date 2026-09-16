@@ -214,11 +214,7 @@ export interface TurnCompletion {
   readonly result?: JsonValue;
 }
 
-/**
- * Result returned by one harness step invocation.
- */
-export interface StepResult {
-  readonly pendingCompletion?: TurnCompletion;
+interface StepResultFields {
   /** Background-tool effects projected onto the session that entered this step. */
   readonly backgroundTaskSession?: HarnessSession;
   /** Durable tasks started by background tools and awaiting the parent commit barrier. */
@@ -228,14 +224,29 @@ export interface StepResult {
     readonly taskId: string;
     readonly taskRunId: string;
   }[];
-  readonly next: StepNext;
   readonly session: HarnessSession;
-  /**
-   * Present when a conversation turn settled with a user-facing answer; carried
-   * across the park boundary so a delegated parent can be notified.
-   */
-  readonly settledTurn?: SettledTurn;
 }
+
+/**
+ * Result returned by one harness step invocation.
+ */
+export type StepResult = StepResultFields &
+  (
+    | {
+        readonly next: null;
+        readonly pendingCompletion: TurnCompletion;
+        readonly settledTurn?: never;
+      }
+    | {
+        readonly next: StepNext;
+        readonly pendingCompletion?: never;
+        /**
+         * Present when a conversation turn settled with a user-facing answer; carried
+         * across the park boundary so a delegated parent can be notified.
+         */
+        readonly settledTurn?: SettledTurn;
+      }
+  );
 
 /**
  * A single step of AI work. Takes the current session and optional user input,

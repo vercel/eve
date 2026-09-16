@@ -1686,6 +1686,89 @@ describe("turnStep", () => {
     expect(result).toMatchObject({ action: "park", settled: completion });
   });
 
+  it("does not rehydrate turn connections while committing a saved answer", async () => {
+    const resolveTurnConnections = vi
+      .fn()
+      .mockReturnValueOnce(null)
+      .mockImplementationOnce(() => {
+        throw new Error("turn connections resolved twice");
+      });
+    const dynamicConnectionResolvers = [
+      {
+        eventNames: ["turn.started"],
+        events: { "turn.started": resolveTurnConnections },
+        logicalPath: "agent/connections/account.ts",
+        slug: "account",
+        sourceId: "test:account",
+        sourceKind: "module",
+      },
+    ];
+    const baseBundle = createStubBundle();
+    const compiledBundle = {
+      ...baseBundle,
+      graph: {
+        ...baseBundle.graph,
+        root: {
+          ...baseBundle.graph.root,
+          agent: { connections: [], dynamicConnectionResolvers },
+        },
+      },
+      resolvedAgent: {
+        config: {},
+        dynamicConnectionResolvers,
+      },
+    } as never;
+    vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue(compiledBundle);
+    const session = createStubSession({
+      state: {
+        "eve.harness.emission": {
+          sequence: 0,
+          sessionStarted: true,
+          stepIndex: 0,
+          turnId: "turn_0",
+        },
+      },
+    });
+    installSessionStoreMocks([session, session]);
+    const completion = { output: "Alice's report is ready." };
+    vi.mocked(createExecutionNodeStep).mockImplementation(
+      (config) => async (stepSession) =>
+        config.completeTurn === undefined
+          ? { next: null, pendingCompletion: completion, session: stepSession }
+          : { next: null, session: stepSession, settledTurn: completion },
+    );
+    const ctx = new ContextContainer();
+    ctx.set(AuthKey, null);
+    ctx.set(BundleKey, compiledBundle);
+    ctx.set(ChannelKey, threadContextAdapter);
+    ctx.set(ModeKey, "conversation");
+    ctx.set(SessionIdKey, "session-1");
+    const first = await runTurnStep({
+      input: { delivery: { kind: "deliver", payloads: [{ message: "Read the report." }] } },
+      sessionWritable: createTestWritable("answer"),
+      serializedContext: serializeContext(ctx),
+      sessionState: createStubSessionState({
+        emissionState: {
+          sequence: 0,
+          sessionStarted: true,
+          stepIndex: 0,
+          turnId: "turn_0",
+        },
+      }),
+    });
+    expect(first).toMatchObject({ action: "complete", completion });
+
+    const committed = await runTurnStep({
+      input: { completion },
+      sessionWritable: createTestWritable("completion"),
+      serializedContext: first.serializedContext,
+      sessionState: first.sessionState,
+    });
+
+    expect(committed).toMatchObject({ action: "park", settled: completion });
+    expect(resolveTurnConnections).toHaveBeenCalledOnce();
+  });
+
   it("releases the parent stream writer when the deliver hook throws", async () => {
     const adapter: ChannelAdapter = {
       kind: "deliver-failure",

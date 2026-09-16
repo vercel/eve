@@ -77,7 +77,7 @@ export async function instrumentChannelDelivery(
 
   if (input.hooks === undefined || input.delivery.deliveryMetadata === undefined) return;
 
-  const active: ActiveChannelDelivery[] = [];
+  const active: ActiveChannelDelivery[] = [...(input.ctx.get(ActiveChannelDeliveriesKey) ?? [])];
   const conversation = input.ctx.get(ConversationContextKey) ?? UNKNOWN_CONVERSATION_CONTEXT;
   const channelAudience = conversation.audience;
   const hooks =
@@ -108,6 +108,15 @@ export async function instrumentChannelDelivery(
       sessionId: input.sessionId,
       turnId: input.turnId,
     };
+    if (
+      active.some(
+        (candidate) =>
+          candidate.sessionId === item.sessionId &&
+          candidate.delivery.deliveryId === item.delivery.deliveryId,
+      )
+    ) {
+      continue;
+    }
     active.push(item);
     await hooks?.publish({
       agentName: item.agentName,

@@ -426,6 +426,9 @@ async function runSessionStep(input: TurnStepInput): Promise<DurableStepResult> 
                   session: enrichedSession,
                 })
               : enrichedSession;
+            if (input.input?.completion !== undefined && resolved === undefined) {
+              return runHarnessStep(schemaSession, stepInput);
+            }
             await dynamicConnections.rehydrate(
               getHarnessEmissionState(schemaSession.state),
               runtimeIdentity,
