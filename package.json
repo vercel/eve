@@ -36,6 +36,7 @@
     "@microsoft/api-extractor": "7.59.0",
     "@types/node": "catalog:",
     "@vercel/connect": "catalog:",
+    "eve": "workspace:*",
     "gray-matter": "4.0.3",
     "oxfmt": "0.66.0",
     "oxlint": "1.81.0",
