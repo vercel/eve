@@ -73,7 +73,7 @@ function prepareContext(hasDockerfile = true): SandboxProviderPrepareContext {
   const error = Object.assign(new Error("missing"), { code: "ENOENT" });
   return {
     files: {
-      glob: async () => (hasDockerfile ? ["Dockerfile"] : []),
+      list: async () => (hasDockerfile ? ["Dockerfile"] : []),
       read: async () => {
         if (!hasDockerfile) throw error;
         return Buffer.from("FROM alpine:3.22\n");
