@@ -53,6 +53,8 @@ export interface ResolveProvisioningDeps {
 export interface ResolveProvisioningOptions {
   /** Resolves the provisioning-tree questions; the composed stack decides how. */
   asker: Asker;
+  /** Skip the auth preflight when an immediately preceding login flow already confirmed it. */
+  authAlreadyConfirmed?: boolean;
   /**
    * Still drives the Vercel reads that validate a decision (team/project
    * pickers, auth, name availability) and carries the spinner/progress log. The
@@ -287,7 +289,9 @@ export function resolveProvisioning(
     }
 
     if (deployVercel) {
-      await deps.requireAuth(parent(), prompter, { signal });
+      if (options.authAlreadyConfirmed !== true) {
+        await deps.requireAuth(parent(), prompter, { signal });
+      }
       const teamOptions = { signal, selectMessage: options.teamSelectMessage };
       const team = await deps.pickTeam(prompter, parent(), undefined, teamOptions);
       const projectOptions = [

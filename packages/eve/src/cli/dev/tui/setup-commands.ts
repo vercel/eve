@@ -4,6 +4,7 @@ import {
   runInstallVercelCliFlow,
   type InstallVercelCliResult,
 } from "#setup/flows/install-vercel-cli.js";
+import { runLinkFlow } from "#setup/flows/link.js";
 import { runLoginFlow, type LoginFlowResult } from "#setup/flows/login.js";
 import { runModelFlow } from "#setup/flows/model.js";
 import type { ProviderSelection } from "#setup/provider-settings.js";
@@ -23,23 +24,14 @@ import {
 } from "./registry-result-message.js";
 import { createTuiPrompter, type TuiPrompterRenderer } from "./tui-prompter.js";
 import type { PromptCommandExtensionName } from "./prompt-commands.js";
-import type { SetupFlowIndicator, SetupFlowRenderer } from "./setup-flow.js";
+import type { SetupFlowRenderer } from "./setup-flow.js";
+import { runTuiLinkCommand } from "./link-command.js";
+import { recoverVercelHumanAction } from "./vercel-human-action-recovery.js";
 import type { VercelStatusEffect } from "./vercel-status.js";
 
 export type TuiSetupCommand = PromptCommandExtensionName;
 
-/**
- * Panel title and loading indicator per command. The bordered panel never
- * repeats the echoed command verbatim, but it keeps a constant title as flows
- * move past their opening question.
- */
-export const SETUP_FLOW_CONFIG = {
-  "vc:install": { title: "Install the Vercel CLI", indicator: "pulse" },
-  "vc:login": { title: "Log in to Vercel", indicator: "pulse" },
-  model: { title: "Configure the agent model", indicator: "pulse" },
-  add: { title: "Add to your agent", indicator: "pulse" },
-  deploy: { title: "Deploy to Vercel", indicator: "spinner" },
-} satisfies Record<TuiSetupCommand, { title: string; indicator: SetupFlowIndicator }>;
+export { SETUP_FLOW_CONFIG } from "./setup-command-config.js";
 
 export type TuiSetupCommandRenderer = TuiPrompterRenderer &
   Pick<
@@ -87,6 +79,7 @@ export interface TuiSetupCommandInput {
 
 export interface TuiSetupFlows {
   runInstallVercelCliFlow: typeof runInstallVercelCliFlow;
+  runLinkFlow: typeof runLinkFlow;
   runLoginFlow: typeof runLoginFlow;
   runModelFlow: typeof runModelFlow;
   runRegistryFlow: typeof runRegistryFlow;
@@ -247,6 +240,7 @@ async function executeSetupCommand(
   const { command, appRoot } = input;
   const flows: TuiSetupFlows = {
     runInstallVercelCliFlow,
+    runLinkFlow,
     runLoginFlow,
     runModelFlow,
     runRegistryFlow,
@@ -264,6 +258,15 @@ async function executeSetupCommand(
       case "vc:login": {
         return loginResultMessage(await flows.runLoginFlow({ appRoot, prompter, signal }));
       }
+      case "link":
+        return await runTuiLinkCommand(
+          { appRoot, prompter, signal },
+          {
+            runInstallVercelCliFlow: flows.runInstallVercelCliFlow,
+            runLinkFlow: flows.runLinkFlow,
+            runLoginFlow: flows.runLoginFlow,
+          },
+        );
       case "model": {
         const pickProvider: ProviderPicker = (request) => renderer.readProviderPicker(request);
         const modelInput: Parameters<TuiSetupFlows["runModelFlow"]>[0] = {
@@ -414,81 +417,6 @@ async function executeSetupCommand(
       preserveFlowDiagnostics: true,
     };
   }
-}
-
-async function recoverVercelHumanAction(
-  error: HumanActionRequiredError,
-  flows: TuiSetupFlows,
-  input: { appRoot: string; prompter: Prompter; signal: AbortSignal },
-): Promise<"retry" | "cancel"> {
-  const action = error.action.kind;
-  if (
-    action !== "vercel-cli-missing" &&
-    action !== "vercel-cli-upgrade" &&
-    action !== "vercel-login" &&
-    action !== "vercel-forbidden"
-  ) {
-    throw error;
-  }
-
-  const repair =
-    action === "vercel-cli-missing"
-      ? { label: "Install Vercel CLI", message: "The Vercel CLI is required. Install it now?" }
-      : action === "vercel-cli-upgrade"
-        ? {
-            label: "Upgrade Vercel CLI",
-            message: "Your Vercel CLI needs an update. Upgrade it now?",
-          }
-        : {
-            label:
-              action === "vercel-forbidden" ? "Re-authenticate with Vercel" : "Log in to Vercel",
-            message:
-              action === "vercel-forbidden"
-                ? "Vercel denied access to that team. Re-authenticate and continue?"
-                : "You need to log in to Vercel to continue.",
-          };
-
-  let choice: "repair" | "cancel";
-  try {
-    choice = await input.prompter.select({
-      message: repair.message,
-      options: [
-        { value: "repair", label: `${repair.label} and continue` },
-        { value: "cancel", label: "Choose another option" },
-      ],
-      initialValue: "repair",
-    });
-  } catch {
-    return "cancel";
-  }
-  if (choice === "cancel") return "cancel";
-
-  if (action === "vercel-cli-missing" || action === "vercel-cli-upgrade") {
-    const result = await flows.runInstallVercelCliFlow({
-      appRoot: input.appRoot,
-      prompter: input.prompter,
-      signal: input.signal,
-      upgrade: action === "vercel-cli-upgrade",
-    });
-    if (result.kind === "installed" || result.kind === "already") return "retry";
-    input.prompter.log.warning(
-      result.kind === "failed" && result.reason !== undefined
-        ? `Couldn't ${action === "vercel-cli-upgrade" ? "upgrade" : "install"} the Vercel CLI: ${result.reason}`
-        : `Couldn't ${action === "vercel-cli-upgrade" ? "upgrade" : "install"} the Vercel CLI.`,
-    );
-    return "cancel";
-  }
-
-  const login = await flows.runLoginFlow({
-    appRoot: input.appRoot,
-    prompter: input.prompter,
-    signal: input.signal,
-    force: action === "vercel-forbidden",
-  });
-  // Device-login output belongs only to the login attempt. Clear it before
-  // either linking or the provider picker resumes.
-  input.prompter.replaceContent?.();
-  return login.kind === "logged-in" || login.kind === "already" ? "retry" : "cancel";
 }
 
 function withRegistryResults(

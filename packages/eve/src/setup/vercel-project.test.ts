@@ -114,6 +114,7 @@ describe("getVercelAuthStatus", () => {
 
   it.each([
     "Error: Not authenticated",
+    "Vercel CLI 59.1.4\nLogged out.\nRun `vercel login` to log in.",
     "Error: The specified token is not valid. Use `vercel login` to generate a new token.",
     "Error: You do not have access to the specified account\nLearn More: https://err.sh/vercel/scope-not-accessible",
   ])("reports logged-out for an authentication-recovery diagnostic: %s", async (stderr) => {
@@ -149,12 +150,15 @@ describe("requireAuth", () => {
     });
   });
 
-  it("throws a login action when whoami reports no credentials", async () => {
-    mockedCaptureVercel.mockResolvedValueOnce(failedCapture("", "Error: Not authenticated"));
-    await expect(requireAuth("/tmp/eve-agent")).rejects.toMatchObject({
-      action: { kind: "vercel-login" },
-    });
-  });
+  it.each(["Error: Not authenticated", "Vercel CLI 59.1.4\nLogged out."])(
+    "throws a login action when whoami reports no credentials: %s",
+    async (stderr) => {
+      mockedCaptureVercel.mockResolvedValueOnce(failedCapture("", stderr));
+      await expect(requireAuth("/tmp/eve-agent")).rejects.toMatchObject({
+        action: { kind: "vercel-login" },
+      });
+    },
+  );
 
   it("throws a plain error (not a login action) on a transient fault", async () => {
     mockedCaptureVercel.mockResolvedValueOnce(

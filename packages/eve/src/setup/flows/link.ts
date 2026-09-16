@@ -79,6 +79,8 @@ export async function runLinkFlow(input: {
    * branch, where a fresh agent has no project yet).
    */
   projectSelection?: "create-or-link" | "existing-only";
+  /** Skip a redundant auth preflight after this flow just completed Vercel login. */
+  authAlreadyConfirmed?: boolean;
   teamSelectMessage?: (currentTeam: string) => string;
   deps?: Partial<LinkFlowDeps>;
 }): Promise<LinkFlowResult> {
@@ -140,6 +142,7 @@ export async function runLinkFlow(input: {
   const boxes: AnySetupBox<SetupState>[] = [
     resolveProvisioning({
       asker: withAnswers({ deploy: "vercel" })(interactiveAsker(prompter)),
+      authAlreadyConfirmed: input.authAlreadyConfirmed,
       prompter,
       targetDirectory: appRoot,
       mode: { headless: false },
