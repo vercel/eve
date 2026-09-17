@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import type { EveProjectContext } from "#internal/project-context.js";
 import { createFakePrompter } from "#internal/testing/fake-prompter.js";
 import { InteractionRequired, select } from "#setup/ask.js";
 import { ensureVercelProject } from "#setup/flows/ensure-vercel-project.js";
@@ -8,7 +9,14 @@ import { runIntegrationSetup } from "#setup/integrations/runner.js";
 import { runIntegrationSetupCommand } from "./integration-setup.js";
 import type { RegistryCommandLogger } from "./registry.js";
 
-const { isEveProject } = vi.hoisted(() => ({ isEveProject: vi.fn(async () => true) }));
+const { isEveProject, resolveEveProjectContext } = vi.hoisted(() => ({
+  isEveProject: vi.fn(async () => true),
+  resolveEveProjectContext: vi.fn(async (appRoot: string): Promise<EveProjectContext> => ({
+    appRoot,
+    environmentRoot: appRoot,
+    kind: "standalone",
+  })),
+}));
 
 class SetupProcess {
   connected = true;
@@ -27,6 +35,7 @@ vi.mock("#setup/scaffold/index.js", async (importOriginal) => ({
   isEveProject,
 }));
 vi.mock("#setup/integrations/runner.js", () => ({ runIntegrationSetup: vi.fn() }));
+vi.mock("#internal/project-context.js", () => ({ resolveEveProjectContext }));
 vi.mock("#setup/flows/ensure-vercel-project.js", () => ({ ensureVercelProject: vi.fn() }));
 
 function logger(): RegistryCommandLogger & { errors: string[] } {
@@ -79,9 +88,16 @@ describe("runIntegrationSetupCommand", () => {
     expect(output.errors).toEqual([]);
   });
 
-  it("passes the shared project root from a registry setup process", async () => {
-    vi.stubEnv("EVE_SETUP", "1");
-    vi.stubEnv("EVE_SETUP_PROJECT_ROOT", "/workspace");
+  it("rediscovers the shared project root from a workspace agent", async () => {
+    resolveEveProjectContext.mockResolvedValueOnce({
+      environmentRoot: "/workspace",
+      kind: "workspace-member",
+      member: { appRoot: "/workspace/agents/support", name: "support" },
+      workspace: {
+        root: "/workspace",
+        members: [{ appRoot: "/workspace/agents/support", name: "support" }],
+      },
+    });
     vi.mocked(runIntegrationSetup).mockResolvedValue({
       kind: "done",
       completion: { facts: [] },

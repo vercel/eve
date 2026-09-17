@@ -190,7 +190,7 @@ describe("registry commands", () => {
       appRoot,
       expect.any(Object),
       "channel/teams",
-      expect.objectContaining({ projectRoot: "/project" }),
+      expect.objectContaining({ prompter: expect.any(Object) }),
     );
   });
 
