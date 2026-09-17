@@ -15,7 +15,7 @@ export default defineEvalConfig({});
 
 ## Single-turn evals
 
-The common case sends one turn and asserts on the reply. `t.send(input)` resolves once the turn settles, and `t.reply` is the last assistant message:
+The common case sends one turn and asserts on the reply. `t.send(input)` resolves once the turn settles, and the returned turn’s `.message` is the assistant reply:
 
 ```ts title="evals/weather/brooklyn-forecast.eval.ts"
 import { defineEval } from "eve/evals";
@@ -23,9 +23,9 @@ import { includes } from "eve/evals/expect";
 
 export default defineEval({
   async test(t) {
-    await t.send("What is the weather in Brooklyn?");
+    const turn = await t.send("What is the weather in Brooklyn?");
     t.succeeded();
-    t.check(t.reply, includes("Sunny"));
+    t.check(turn.message, includes("Sunny"));
   },
 });
 ```
@@ -60,7 +60,7 @@ evals/
 
 ## Multi-turn evals
 
-Drive several turns in sequence for branching, HITL approvals, structured output, attachments, or multiple sessions. Because assertions live in the function, an intermediate value is a local variable. Judge a draft before the next turn overwrites it, then keep going.
+Drive several turns in sequence for branching, HITL approvals, structured output, attachments, or multiple sessions. Because assertions live in the function, an intermediate value is a local variable. Keep each turn in a local variable and continue through its `.session`.
 
 ```ts title="evals/draft-then-send.eval.ts"
 import { defineEval } from "eve/evals";
@@ -72,7 +72,7 @@ export default defineEval({
     t.check(draft.message, includes("Best regards"));
     t.judge.autoevals.closedQA("professional tone", { on: draft.message }).atLeast(0.6);
 
-    await t.send("Now send it.");
+    await draft.session.send("Now send it.");
     t.calledTool("send_email");
   },
 });
@@ -88,7 +88,7 @@ export default defineEval({
   async test(t) {
     const first = await t.send("My favorite word is marigold.");
 
-    const second = await t.send("What is my favorite word?");
+    const second = await first.session.send("What is my favorite word?");
     await t.require(second.sessionId, equals(first.sessionId));
 
     t.succeeded();
@@ -96,7 +96,7 @@ export default defineEval({
 
     t.judge.autoevals
       .closedQA("The assistant remembers the user's favorite word across turns", {
-        on: t.transcript,
+        on: first.session.transcript,
       })
       .atLeast(0.8);
   },
@@ -105,21 +105,56 @@ export default defineEval({
 
 ## The drive API
 
-`t` drives the primary session; `t.newSession()` returns an independent `EveEvalSession` against the same target, whose events feed the same run-level assertions.
+Every `t.session()` or `t.send()` creates a new independent conversation. Continue an existing conversation through its session handle. Events from all sessions feed the same run-level assertions.
 
-- `t.send(message, options?)` sends a turn and waits for it to settle. It matches `ClientSession.send()` and resolves to a turn carrying `.message` and `.expectOk()`.
-- `t.start(message)` starts a text turn but returns as soon as the server accepts it. The returned live turn exposes `.sessionId`, `.waitForEvent(...)`, `.cancel()`, and `.result()` for coordinating with work that is still running.
-- `t.cancel()` requests cooperative cancellation of the primary session's active turn. Both `accepted` and `no_active_turn` are successful outcomes.
-- `t.sendFile(text, path, mediaType?)` attaches a local file as a data URL.
-- `t.requireInputRequest(filter?)` records a gate, requires exactly one pending request, and returns it. Filters match tool name, action input, prompt, display, and option ids.
-- `t.respond(responses, options?)` answers specific pending input requests and sends them as the next turn.
-- `t.respondAll(optionId)` answers every pending input request with the same option and sends the responses as the next turn.
-- `t.reply` is the last assistant message (or `null`); `t.sessionId` is the current session id; `t.events` is the full typed event stream captured so far.
-- `t.transcript` formats the primary session's observed user and assistant messages in turn order. Pass it as a judge's `on` value to grade the complete conversation. An independent session returned by `t.newSession()` exposes its own `session.transcript`.
+- `t.session(options?)` creates a session without starting a turn or consuming its stream. It resolves on `202 Accepted` with an `EveEvalSession` whose `.sessionId` and `.state` are available. Options accept per-request `headers` and `signal`; creation uses the eval timeout signal by default.
+- `t.send(message, options?)` creates a new session with its first message in one request and waits for the turn to settle. The returned turn carries `.session`, `.message`, and `.expectOk()`.
+- `session.send(message, options?)` sends a follow-up on that session and waits for it to settle.
+- `session.start(message, options?)` starts a text turn and returns as soon as the server accepts it. The live turn exposes `.session`, `.sessionId`, `.waitForEvent(...)`, `.cancel()`, and `.result()`.
+- `session.cancel()` requests cooperative cancellation of that session's active turn. Both `accepted` and `no_active_turn` are successful outcomes.
+- `session.sendFile(text, path, mediaType?)` attaches a local file as a data URL.
+- `session.requireInputRequest(filter?)` records a gate, requires exactly one pending request, and returns it. Filters match tool name, action input, prompt, display, and option ids.
+- `session.respond(responses, options?)` answers specific pending input requests and sends them as the next turn. `session.startRespond(...)` returns a live turn for the same operation.
+- `session.respondAll(optionId)` answers every pending input request with the same option and sends the responses as the next turn.
+- `session.events` contains the events captured for that session. `session.transcript` formats its observed user and assistant messages in turn order.
 
-The transcript uses `User:` and `Assistant:` labels separated by blank lines. It excludes reasoning, tool calls, tool results, and messages from other sessions. It updates after each turn settles, so read it after `await t.send(...)`, `await t.respond(...)`, or `await live.result()`.
+The transcript uses `User:` and `Assistant:` labels separated by blank lines. It excludes reasoning, tool calls, tool results, and messages from other sessions. It updates after each turn settles, so read it after `await session.send(...)`, `await session.respond(...)`, or `await live.result()`.
 
-Each `send` (and `respond`/`respondAll`) resolves to an immutable turn with `.message`, `.data`, `.events`, `.inputRequests`, `.toolCalls`, `.sessionId`, `.status`, and `.expectOk()`. Use `.sessionId` to relate turns or attach follow-up work to the session that produced a specific turn. `expectOk()` throws only when the turn ended failed; a session left open for a next message is the normal end state of a successful turn.
+Each `send` (and `respond`/`respondAll`) resolves to a turn with `.message`, `.data`, `.events`, `.inputRequests`, `.toolCalls`, `.session`, `.sessionId`, `.status`, and `.expectOk()`. Turn results retain their captured output and events; `.session` references the live conversation handle. `expectOk()` throws only when the turn ended failed; a session left open for a next message is the normal end state of a successful turn.
+
+## Prewarming a session
+
+Use `t.session()` to create a session before its first message:
+
+```ts title="evals/prewarm.eval.ts"
+import { defineEval } from "eve/evals";
+import { equals } from "eve/evals/expect";
+
+export default defineEval({
+  async test(t) {
+    const session = await t.session();
+    const turn = await session.send("Greet Alice briefly.");
+    await t.require(turn.sessionId, equals(session.sessionId));
+    turn.event("session.started", { count: 1 });
+    turn.event("turn.started", { count: 1, data: { turnId: "turn_0" } });
+    t.succeeded();
+  },
+});
+```
+
+Acceptance is not an initialization barrier. The first message runs session initialization;
+the TypeScript client handles bounded retries if the workflow inbox is still starting.
+Creation failures reject `t.session()` without returning a handle. Each call creates an
+independent session, including concurrent calls. Accepted sessions appear in eval results
+and participate in timeout cleanup even when no message was sent.
+
+## Migrating existing evals
+
+Replace `t.newSession()` and `t.prewarm()` with `const session = await t.session()`.
+Replace consecutive `t.send()` calls with `session.send()` calls, or continue the first
+returned turn through `turn.session.send()`. Read identity, cursor, events, and transcript
+from `session`; read replies from `turn.message`. Session operations such as `respond()`,
+`requireInputRequest()`, and `cancel()` also move from `t` to `session`.
 
 ## In-flight turns
 
@@ -130,7 +165,8 @@ import { defineEval } from "eve/evals";
 
 export default defineEval({
   async test(t) {
-    const live = await t.start("Run the long operation.");
+    const session = await t.session();
+    const live = await session.start("Run the long operation.");
 
     await live.waitForEvent("actions.requested", {
       data: {
@@ -152,7 +188,7 @@ export default defineEval({
 
 Use `expectOk()` only when the next operation depends on that intermediate turn succeeding. A final `t.succeeded()` already records a complete-run gate.
 
-To intentionally omit an eval for the current target, call `t.skip(reason)` before sending messages or recording assertions. Skipped evals are reported separately and do not affect the exit code.
+To intentionally omit an eval for the current target, call `t.skip(reason)` before creating sessions, sending messages, or recording assertions. Skipped evals are reported separately and do not affect the exit code.
 
 Events from every session are captured in the result and artifacts. `t.log(message)` records debug lines into the eval artifact; `--verbose` also streams them to stdout as evals run. `t.signal` is an `AbortSignal` that fires on timeout.
 
@@ -174,9 +210,9 @@ export default rows.map((row) =>
   defineEval({
     description: row.task,
     async test(t) {
-      await t.send(row.prompt);
+      const turn = await t.send(row.prompt);
       t.succeeded();
-      t.check(t.reply, equals(row.sql));
+      t.check(turn.message, equals(row.sql));
     },
   }),
 );

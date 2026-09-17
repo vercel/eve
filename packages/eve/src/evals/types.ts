@@ -9,6 +9,7 @@ import type {
 import type {
   CancelSessionResult,
   ClientSessionState,
+  CreateSessionOptions,
   SendTurnInput,
   SendTurnOptions,
 } from "#client/types.js";
@@ -287,7 +288,7 @@ export interface EveEvalLiveTurn {
   ): Promise<EveEvalStreamEvent<TType>>;
 }
 
-/** Operations and state shared by the primary eval context and independent sessions. */
+/** Operations and state belonging to one accepted session. */
 export interface EveEvalSessionDriver {
   /** All events observed on this session so far. */
   readonly events: readonly MessageStreamEvent[];
@@ -299,9 +300,9 @@ export interface EveEvalSessionDriver {
   /** Input requests left pending by the last parked turn. */
   readonly pendingInputRequests: readonly InputRequest[];
   /** Serializable cursor for resuming this session. */
-  readonly state: ClientSessionState | undefined;
-  /** eve session id after the first successful send. */
-  readonly sessionId: string | undefined;
+  readonly state: ClientSessionState;
+  /** Durable session id, available when the session is returned. */
+  readonly sessionId: string;
   /** Request cooperative cancellation of this session's active turn. */
   cancel(): Promise<CancelSessionResult>;
   /** Require exactly one pending input request matching `filter`, or abort dependent control flow. */
@@ -323,7 +324,7 @@ export interface EveEvalSessionDriver {
   sendFile(text: string, filePath: string, mediaType?: string): Promise<EveEvalTurn>;
 }
 
-/** Driver for one independent session, exposed by `t.newSession()` and target attachment helpers. */
+/** One accepted session, exposed by `t.session()`, turns, and target attachment helpers. */
 export interface EveEvalSession
   extends EveEvalSessionDriver, EveEvalAssertions, EveEvalOutputAssertions {}
 
@@ -335,6 +336,8 @@ export interface EveEvalTurn extends EveEvalAssertions, EveEvalOutputAssertions 
   readonly events: readonly MessageStreamEvent[];
   readonly inputRequests: readonly InputRequest[];
   readonly message: string | undefined;
+  /** Session that owns this turn; use it for follow-up messages. */
+  readonly session: EveEvalSession;
   readonly sessionId: string;
   readonly status: "completed" | "failed" | "waiting";
   readonly toolCalls: readonly EveEvalToolCall[];
@@ -365,7 +368,7 @@ export interface EveEvalJudgeConfig {
  * Per-call options for `t.judge.autoevals.*` assertions.
  */
 export interface JudgeOpts {
-  /** Value to grade. Defaults to the final assistant message (`t.reply`). */
+  /** Value to grade. Defaults to the most recently settled turn’s assistant message. */
   readonly on?: unknown;
   /** Judge model for this call only; overrides the eval/config judge model. */
   readonly model?: LanguageModel;
@@ -394,26 +397,28 @@ export interface JudgeContext {
 }
 
 /**
- * The single context passed to an eval's `test(t)` function. It drives the
- * primary session, carries the run-level
- * and value-level assertion vocabulary, and exposes `judge` for LLM-as-judge.
+ * The context passed to `test(t)`. Creates independent sessions and carries
+ * run-level assertions, value-level assertions, and model-backed judges.
  *
  * Scoped assertions (`succeeded`, `calledTool`, …) record an entry evaluated
  * after the test body; `check`, `require`, and `judge` evaluate explicit values.
  */
-export interface EveEvalContext extends EveEvalSessionDriver, EveEvalAssertions {
+export interface EveEvalContext extends EveEvalAssertions {
   /** Eval timeout signal. */
   readonly signal: AbortSignal;
   /** Current target under test. */
   readonly target: EveEvalTargetHandle;
-  /** The primary session's last assistant message, or null. */
-  readonly reply: string | null;
   /** Structured eval log hook. */
   log(message: string): void;
   /** Pause the eval task, defaulting to 1 second, while respecting the eval timeout signal. */
   sleep(ms?: number): Promise<void>;
-  /** Create an additional independent session against the same target. */
-  newSession(): EveEvalSession;
+  /**
+   * Create a new session without starting a turn or reading events. Resolves on
+   * acceptance with a definite session id and cursor. Every call creates a session.
+   */
+  session(options?: CreateSessionOptions): Promise<EveEvalSession>;
+  /** Create a new session with its first message and wait for the turn to settle. */
+  send(message: SendTurnInput["message"], options?: SendTurnOptions): Promise<EveEvalTurn>;
 
   /** Apply a value-level assertion (from `eve/evals/expect`) to a value. */
   check(value: unknown, assertion: Assertion): AssertionHandle;

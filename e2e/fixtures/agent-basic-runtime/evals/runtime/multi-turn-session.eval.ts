@@ -12,13 +12,19 @@ export default defineEval({
 
   async test(t) {
     const first = await t.send("My favorite word is marigold. Remember it.");
+    const session = first.session;
+    const independent = await t.send("Bob opened a separate chat. Greet him briefly.");
+    await t.require(independent.sessionId === first.sessionId, equals(false));
+    independent.event("session.started", { count: 1 });
+    independent.event("turn.started", { count: 1, data: { turnId: "turn_0" } });
 
-    const second = await t.send("What is my favorite word? Reply with just the word.");
+    const second = await session.send("What is my favorite word? Reply with just the word.");
 
     await t.require(second.sessionId, equals(first.sessionId));
+    await t.require(second.session === session, equals(true));
     second.messageIncludes(/marigold/i);
 
-    const cancel = await t.cancel();
+    const cancel = await session.cancel();
     await t.require(
       cancel,
       satisfies(
@@ -28,7 +34,7 @@ export default defineEval({
       ),
     );
 
-    const third = await t.send(
+    const third = await session.send(
       "Alice is checking the saved conversation. What favorite word did I ask you to remember? Reply with just that word.",
     );
     await t.require(third.sessionId, equals(first.sessionId));
@@ -39,7 +45,7 @@ export default defineEval({
 
     t.succeeded();
     t.messageIncludes(/marigold/i);
-    t.check(t.transcript, includes("User:\nMy favorite word is marigold. Remember it."));
-    t.check(t.transcript, includes("Assistant:\n"));
+    t.check(session.transcript, includes("User:\nMy favorite word is marigold. Remember it."));
+    t.check(session.transcript, includes("Assistant:\n"));
   },
 });

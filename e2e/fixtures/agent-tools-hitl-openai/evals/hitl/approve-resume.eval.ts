@@ -19,16 +19,17 @@ export default defineEval({
   description: "HITL regression (#236): text approval executes and replays on OpenAI Responses.",
   async test(t) {
     const parked = await t.send('Call the guarded-echo tool with note "openai-approve".');
+    const session = parked.session;
     parked.calledTool("guarded-echo", { status: "pending", count: 1 });
     parked.notEvent("compaction.completed");
-    t.requireInputRequest({
+    session.requireInputRequest({
       display: "confirmation",
       toolName: "guarded-echo",
     });
 
     // No compaction and no structured `respond()`: this is the payload shape
     // produced when a Telegram reply falls back to an ordinary text message.
-    const approved = await t.send("approve");
+    const approved = await session.send("approve");
     approved.expectOk();
     approved.notEvent("compaction.completed");
     approved.event("action.result", {
@@ -43,7 +44,7 @@ export default defineEval({
       count: 1,
     });
 
-    const followup = await t.send("Reply with exactly OPENAI-REPLAY-OK.");
+    const followup = await session.send("Reply with exactly OPENAI-REPLAY-OK.");
     followup.expectOk();
     followup.notEvent("compaction.completed");
     followup.messageIncludes(/OPENAI-REPLAY-OK/i);

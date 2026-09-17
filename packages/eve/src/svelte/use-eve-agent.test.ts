@@ -50,7 +50,15 @@ function createBoundedStreamResponse(
   return response;
 }
 
+const cleanupMounts: Array<() => void> = [];
+vi.mock("svelte", () => ({
+  onMount: (callback: () => () => void) => {
+    cleanupMounts.push(callback());
+  },
+}));
+
 afterEach(() => {
+  for (const cleanup of cleanupMounts.splice(0)) cleanup();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
@@ -118,7 +126,7 @@ describe("useEveAgent (Svelte rune binding)", () => {
     });
 
     await vi.waitFor(() => expect(seenEvents).toEqual(stampTestEvents(events)));
-    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it("sends messages and notifies lifecycle callbacks from the shared store", async () => {
@@ -133,6 +141,7 @@ describe("useEveAgent (Svelte rune binding)", () => {
     const seenEvents: UnstampedMessageStreamEvent[] = [];
 
     const agent = useEveAgent({
+      prewarm: false,
       onEvent(event) {
         seenEvents.push(event);
       },

@@ -2,6 +2,7 @@ import { shallowRef, computed, onScopeDispose, type ComputedRef } from "vue";
 import type { UserContent } from "ai";
 
 import {
+  attachEveAgentStore,
   detachEveAgentStore,
   EveAgentStore,
   type EveAgentStoreCallbacks,
@@ -55,6 +56,8 @@ export interface UseEveAgentReturn<TData> {
   readonly events: ComputedRef<readonly MessageStreamEvent[]>;
   /** Replay the attached durable session and follow its in-flight turn, if any. */
   readonly resume: () => Promise<void>;
+  /** Create the session without starting its first turn. */
+  readonly prewarm: () => Promise<void>;
   /** Clear all state and start a new session. */
   readonly reset: () => void;
   /** Send a message with optional turn settings. */
@@ -125,6 +128,8 @@ export interface UseEveAgentOptions<TData> extends EveAgentStoreCallbacks<TData>
    * @default true
    */
   readonly optimistic?: boolean;
+  /** Prewarm an owned session on mount and after reset. @default false */
+  readonly prewarm?: boolean;
   /**
    * Projects stream events into `TData`.
    *
@@ -156,7 +161,7 @@ export function useEveAgent<TData>(
  * Without a `reducer`, events project into `EveMessageData` via
  * `defaultMessageReducer()`; pass `reducer` to project into a custom `TData`.
  * Returns reactive refs (`data`, `error`, `events`, `session`, `status`) plus
- * `send`, `respond`, `resume`, `cancel`, and `reset`. Configuration is read once on store creation;
+ * `prewarm`, `send`, `respond`, `resume`, `cancel`, and `reset`. Configuration is read once on store creation;
  * remount to change it. On scope dispose, the in-flight request is detached and
  * the store unsubscribed.
  */
@@ -175,6 +180,7 @@ export function useEveAgent<TData>(
     initialEvents: options.initialEvents,
     initialSession: options.initialSession,
     optimistic: options.optimistic,
+    prewarm: options.prewarm,
     reducer,
     session: options.session,
   });
@@ -193,6 +199,7 @@ export function useEveAgent<TData>(
     const unsubscribe = store.subscribe(() => {
       snapshot.value = store.snapshot;
     });
+    attachEveAgentStore(store);
     if (options.resume) void store.resume();
 
     onScopeDispose(() => {
@@ -206,6 +213,7 @@ export function useEveAgent<TData>(
     data: computed(() => snapshot.value.data),
     error: computed(() => snapshot.value.error),
     events: computed(() => snapshot.value.events),
+    prewarm: () => store.prewarm(),
     reset: () => store.reset(),
     respond: <TOutput = unknown>(
       inputResponses: Parameters<ClientSession["respond"]>[0],

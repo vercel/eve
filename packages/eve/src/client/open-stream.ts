@@ -58,6 +58,7 @@ function resolveRetryPolicy(
 
 function resolveStreamReconnectPolicy(
   policy: StreamReconnectPolicy | undefined,
+  keepAlive = false,
 ): ResolvedStreamReconnectPolicy {
   if (policy && "reconnect" in policy && policy.reconnect === false) {
     return NO_STREAM_RECONNECT_POLICY;
@@ -68,10 +69,12 @@ function resolveStreamReconnectPolicy(
     retryableErrorStatuses: configured?.retryableErrorStatuses
       ? new Set(configured.retryableErrorStatuses)
       : DEFAULT_STREAM_RECONNECT_POLICY.retryableErrorStatuses,
-    streamIdleReconnectPolicy: resolveRetryPolicy(
-      configured?.streamIdleReconnectPolicy,
-      DEFAULT_STREAM_RECONNECT_POLICY.streamIdleReconnectPolicy,
-    ),
+    streamIdleReconnectPolicy: resolveRetryPolicy(configured?.streamIdleReconnectPolicy, {
+      ...DEFAULT_STREAM_RECONNECT_POLICY.streamIdleReconnectPolicy,
+      maxAttempts: keepAlive
+        ? Infinity
+        : DEFAULT_STREAM_RECONNECT_POLICY.streamIdleReconnectPolicy.maxAttempts,
+    }),
     streamOpenReconnectPolicy: resolveRetryPolicy(
       configured?.streamOpenReconnectPolicy,
       DEFAULT_STREAM_RECONNECT_POLICY.streamOpenReconnectPolicy,
@@ -83,9 +86,12 @@ function resolveStreamReconnectPolicy(
  * Internal configuration for following a durable event stream.
  */
 interface FollowStreamInput {
+  /** Called once after consuming the durable tail captured when the connection opens. */
+  readonly onCaughtUp?: () => void;
   readonly host: string;
-  /** Keep reconnecting after empty streams until the consumer aborts or stops iteration. */
+  /** Keep following empty streams unless the caller configures an idle retry limit. */
   readonly keepAlive?: boolean;
+  readonly resolveReconnectPolicy?: () => StreamReconnectPolicy | undefined;
   readonly streamReconnectPolicy?: StreamReconnectPolicy;
   /** @internal Test override for reconnecting an open stream that stops producing bytes. */
   readonly streamReadIdleTimeoutMs?: number;
@@ -125,22 +131,33 @@ export async function* followStreamIterable(
     );
   }
 
-  const retryPolicy = resolveStreamReconnectPolicy(input.streamReconnectPolicy);
-  const idleRetryPolicy = retryPolicy.streamIdleReconnectPolicy;
+  const resolvePolicy = () =>
+    resolveStreamReconnectPolicy(
+      input.resolveReconnectPolicy === undefined
+        ? input.streamReconnectPolicy
+        : input.resolveReconnectPolicy(),
+      input.keepAlive,
+    );
+  let retryPolicy = resolvePolicy();
+  let idleRetryPolicy = retryPolicy.streamIdleReconnectPolicy;
   let startIndex = input.startIndex;
   let reconnectDelayMs = idleRetryPolicy.baseDelayMs;
   let idleReconnects = 0;
   let initialConnection = true;
   let tailIndex: number | undefined;
+  let caughtUp = false;
 
   while (true) {
+    retryPolicy = resolvePolicy();
+    idleRetryPolicy = retryPolicy.streamIdleReconnectPolicy;
     let connection: OpenedStream;
     try {
       connection = await openStreamBody({
         ...input,
         retryPolicy,
         startIndex,
-        requestTailIndex: input.follow === false && tailIndex === undefined,
+        requestTailIndex:
+          (input.follow === false || input.onCaughtUp !== undefined) && tailIndex === undefined,
       });
     } catch (error) {
       if (input.signal?.aborted) {
@@ -149,7 +166,7 @@ export async function* followStreamIterable(
       throw error;
     }
 
-    if (input.follow === false && tailIndex === undefined) {
+    if ((input.follow === false || input.onCaughtUp !== undefined) && tailIndex === undefined) {
       tailIndex = connection.tailIndex;
       if (tailIndex === undefined) {
         connection.close();
@@ -160,7 +177,11 @@ export async function* followStreamIterable(
       }
     }
 
-    if (tailIndex !== undefined && startIndex > tailIndex) {
+    if (!caughtUp && tailIndex !== undefined && startIndex > tailIndex) {
+      caughtUp = true;
+      input.onCaughtUp?.();
+    }
+    if (input.follow === false && tailIndex !== undefined && startIndex > tailIndex) {
       connection.close();
       return;
     }
@@ -169,6 +190,7 @@ export async function* followStreamIterable(
     let leaseEnded = false;
     try {
       for await (const event of readNdjsonStream(connection.body, {
+        signal: input.signal,
         controlVersion: connection.controlVersion,
         idleTimeoutMs: input.streamReadIdleTimeoutMs ?? DEFAULT_STREAM_READ_IDLE_TIMEOUT_MS,
         onLeaseEnded: () => {
@@ -182,7 +204,11 @@ export async function* followStreamIterable(
         idleReconnects = 0;
         yield event;
 
-        if (tailIndex !== undefined && startIndex > tailIndex) {
+        if (!caughtUp && tailIndex !== undefined && startIndex > tailIndex) {
+          caughtUp = true;
+          input.onCaughtUp?.();
+        }
+        if (input.follow === false && tailIndex !== undefined && startIndex > tailIndex) {
           return;
         }
       }
@@ -192,6 +218,7 @@ export async function* followStreamIterable(
       connection.close();
     }
 
+    idleRetryPolicy = resolvePolicy().streamIdleReconnectPolicy;
     if (input.signal?.aborted || input.startIndex < 0 || idleRetryPolicy.maxAttempts === 0) {
       return;
     }
@@ -201,7 +228,6 @@ export async function* followStreamIterable(
     }
 
     if (
-      input.keepAlive !== true &&
       !deliveredEvent &&
       !initialConnection &&
       (idleReconnects += 1) >= idleRetryPolicy.maxAttempts
@@ -237,7 +263,7 @@ export async function openStreamBody(
   input: OpenStreamInput & { readonly retryPolicy?: ResolvedStreamReconnectPolicy },
 ): Promise<OpenedStream> {
   const retryPolicy =
-    input.retryPolicy ?? resolveStreamReconnectPolicy(input.streamReconnectPolicy);
+    input.retryPolicy ?? resolveStreamReconnectPolicy(input.streamReconnectPolicy, input.keepAlive);
   const openRetryPolicy = retryPolicy.streamOpenReconnectPolicy;
   let lastStatus: number | undefined;
   let lastBody: string | undefined;
@@ -260,6 +286,7 @@ export async function openStreamBody(
   }
 
   for (let attempt = 0; attempt < openRetryPolicy.maxAttempts; attempt += 1) {
+    input.signal?.throwIfAborted();
     const url = createClientUrl(
       input.host,
       createEveSessionStreamRoutePath(input.sessionId),
@@ -267,6 +294,7 @@ export async function openStreamBody(
     );
 
     const headers = await input.resolveHeaders();
+    input.signal?.throwIfAborted();
     const connectionController = new AbortController();
     const signal = input.signal
       ? AbortSignal.any([input.signal, connectionController.signal])

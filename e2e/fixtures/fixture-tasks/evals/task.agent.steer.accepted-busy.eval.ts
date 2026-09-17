@@ -31,7 +31,7 @@ export default defineTaskEval({
     const initialTaskId = requireBackgroundTaskId(setup);
     const initial = await waitForCompletedTask(
       t,
-      t,
+      setup.session,
       "CHILD-TASK-EXCLUSIVITY-VERIFY",
       initialTaskId,
     );
@@ -40,7 +40,7 @@ export default defineTaskEval({
       initialTaskId,
     );
 
-    const race = await sendAndFollowQueuedTurn(t, "CHILD-TASK-EXCLUSIVITY-RACE", t, {
+    const race = await sendAndFollowQueuedTurn(t, "CHILD-TASK-EXCLUSIVITY-RACE", initial.session, {
       allowFailedActions: true,
     });
     const raced = race.turn;

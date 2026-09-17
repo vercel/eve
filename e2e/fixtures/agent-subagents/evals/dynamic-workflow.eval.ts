@@ -21,7 +21,8 @@ export default defineEval({
   description:
     "Generated workflow-program smoke: model-authored JavaScript fans out two local subagent calls and combines their results.",
   async test(t) {
-    const parent = await t.start(
+    const session = await t.session();
+    const parent = await session.start(
       "Use the workflow tool exactly once to fan out two independent echo-marker subagent calls. In its JavaScript, create the messages 'workflow alpha' and 'workflow beta', map them through ctx.agent calls to echo-marker inside Promise.all, and return the resulting two-element array. Do not call echo-marker outside workflow. Then reply with the returned array verbatim as JSON.",
     );
     const firstCalled = await parent.waitForEvent("subagent.called", {

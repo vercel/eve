@@ -1331,6 +1331,117 @@ describe("TerminalRenderer (inline scrollback)", () => {
     renderer.shutdown();
   });
 
+  it("keeps the activity ticker running while a background subagent remains live", async () => {
+    vi.useFakeTimers();
+    try {
+      const { screen, renderer } = makeRenderer();
+      renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
+      renderer.beginSubagent({ callId: "background", name: "researcher" });
+      renderer.backgroundSubagent({ callId: "background" });
+      renderer.upsertSubagentTool({
+        callId: "background",
+        subagentName: "researcher",
+        childCallId: "child-hold",
+        toolName: "hold",
+        input: { durationMs: 45_000 },
+        status: "executing",
+      });
+
+      await renderer.renderStream(streamOf([{ type: "finish" }]), {
+        continueSession: true,
+        submittedPrompt: "start background work",
+      });
+      const outputBeforeTick = screen.rawOutput().length;
+      await vi.advanceTimersByTimeAsync(90);
+      expect(screen.rawOutput().length).toBeGreaterThan(outputBeforeTick);
+
+      renderer.completeSubagent({ authoritative: true, callId: "background" });
+      const outputAfterCompletion = screen.rawOutput().length;
+      await vi.advanceTimersByTimeAsync(180);
+      expect(screen.rawOutput()).toHaveLength(outputAfterCompletion);
+      renderer.shutdown();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps the ticker running when one of two background subagents completes", async () => {
+    vi.useFakeTimers();
+    try {
+      const { screen, renderer } = makeRenderer();
+      renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
+      const startBackground = (callId: string) => {
+        renderer.beginSubagent({ callId, name: "hang-worker" });
+        renderer.backgroundSubagent({ callId });
+        renderer.upsertSubagentTool({
+          callId,
+          subagentName: "hang-worker",
+          childCallId: `${callId}-hold`,
+          toolName: "hold",
+          input: { durationMs: 45_000 },
+          status: "executing",
+        });
+      };
+
+      startBackground("first");
+      await renderer.renderStream(streamOf([{ type: "finish" }]), {
+        continueSession: true,
+        submittedPrompt: "start first background worker",
+      });
+      await renderer.renderStream(
+        streamOf([
+          { type: "assistant-complete", id: "a", text: "Mock reply: a" },
+          { type: "finish" },
+        ]),
+        { continueSession: true, submittedPrompt: "a" },
+      );
+      startBackground("second");
+      await renderer.renderStream(streamOf([{ type: "finish" }]), {
+        continueSession: true,
+        submittedPrompt: "start second background worker",
+      });
+
+      renderer.completeSubagent({ authoritative: true, callId: "first" });
+      const outputBeforeTick = screen.rawOutput().length;
+      await vi.advanceTimersByTimeAsync(90);
+      expect(screen.rawOutput().length).toBeGreaterThan(outputBeforeTick);
+
+      renderer.completeSubagent({ authoritative: true, callId: "second" });
+      const outputAfterCompletion = screen.rawOutput().length;
+      await vi.advanceTimersByTimeAsync(180);
+      expect(screen.rawOutput()).toHaveLength(outputAfterCompletion);
+      renderer.shutdown();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("stops background activity ticking when a session boundary abandons its child", async () => {
+    vi.useFakeTimers();
+    try {
+      const { screen, renderer } = makeRenderer();
+      renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
+      renderer.beginSubagent({ callId: "background", name: "researcher" });
+      renderer.backgroundSubagent({ callId: "background" });
+      renderer.upsertSubagentTool({
+        callId: "background",
+        subagentName: "researcher",
+        childCallId: "child-hold",
+        toolName: "hold",
+        input: { durationMs: 45_000 },
+        status: "executing",
+      });
+
+      renderer.renderSessionBoundary();
+      const outputAfterBoundary = screen.rawOutput().length;
+      await vi.advanceTimersByTimeAsync(180);
+      expect(screen.rawOutput()).toHaveLength(outputAfterBoundary);
+      renderer.shutdown();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("commits completed foreground turns ahead of a live background subagent", async () => {
     const { screen, renderer } = makeRenderer(48, 8);
     renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
@@ -4503,6 +4614,30 @@ describe("TerminalRenderer setup flow session", () => {
     await expect(answer).resolves.toBeUndefined();
     renderer.setupFlow.end({ preserveDiagnostics: false });
     renderer.shutdown();
+  });
+
+  it("does not repaint while inherited stdio owns the terminal", async () => {
+    vi.useFakeTimers();
+    try {
+      const { screen, renderer } = makeRenderer();
+      renderer.setupFlow.begin("Add integration", "pulse");
+      renderer.beginSubagent({ callId: "background", name: "researcher" });
+      renderer.backgroundSubagent({ callId: "background" });
+      let release!: () => void;
+      const inherited = renderer.setupFlow.withInheritedStdio(
+        () => new Promise<void>((resolve) => (release = resolve)),
+      );
+      const outputDuringHandoff = screen.rawOutput().length;
+      await vi.advanceTimersByTimeAsync(180);
+      expect(screen.rawOutput()).toHaveLength(outputDuringHandoff);
+
+      release();
+      await inherited;
+      renderer.setupFlow.end();
+      renderer.shutdown();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("discards inherited subprocess output when restoring the transcript", async () => {

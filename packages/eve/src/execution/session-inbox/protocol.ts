@@ -31,6 +31,7 @@ export function decodeSessionInboxPayload(value: unknown): DecodedSessionInbox {
       const command = value as Extract<SessionCommand, { readonly kind: "send" }>;
       return {
         auth: command.auth,
+        title: command.title,
         caller: command.caller,
         deliveryMetadata:
           command.delivery === undefined ? undefined : [{ ...command.delivery, payloadIndex: 0 }],

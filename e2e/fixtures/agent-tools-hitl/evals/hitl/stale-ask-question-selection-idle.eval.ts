@@ -11,7 +11,7 @@ export default defineEval({
   description:
     "HITL smoke: a stale ask-question selection becomes a new user turn when nothing is pending.",
   async test(t) {
-    await t.send(
+    const { session } = await t.send(
       [
         "Use the `ask_question` tool exactly once to ask me which context to use.",
         "Set prompt to: 'Which context should I use?'",
@@ -23,19 +23,19 @@ export default defineEval({
       ].join("\n"),
     );
 
-    const request = t.requireInputRequest({
+    const request = session.requireInputRequest({
       optionIds: ["current", "candidate"],
       toolName: "ask_question",
     });
 
-    const intervening = await t.send(
+    const intervening = await session.send(
       "Use current context instead and reply with exactly INTERVENING-HITL-OK.",
     );
     intervening.expectOk();
     intervening.notEvent("input.requested");
     intervening.messageIncludes(/INTERVENING-HITL-OK/i);
 
-    const staleSelection = await t.respond([
+    const staleSelection = await session.respond([
       {
         requestId: request.requestId,
         optionId: "candidate",

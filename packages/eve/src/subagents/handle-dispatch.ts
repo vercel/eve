@@ -236,11 +236,11 @@ async function deliverToAgentAddress(input: {
       },
       sessionId: address.sessionId,
     });
-    if (result.status === "session_not_active") {
+    if (result.status !== "accepted") {
       return err({
-        cause: new Error(`Agent session "${address.sessionId}" is no longer active.`),
+        cause: new Error(`Agent session "${address.sessionId}" is not available.`),
         deliveryAmbiguous: false,
-        permanent: true,
+        permanent: result.retryable !== true,
       });
     }
   } catch (error) {

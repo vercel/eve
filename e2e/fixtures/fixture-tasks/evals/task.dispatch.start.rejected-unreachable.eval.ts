@@ -45,7 +45,13 @@ export default defineTaskEval({
       );
     });
 
-    const failed = await waitForTaskStatus(t, t, "TASK-A3-UNKNOWN-VERIFY", taskId, "failed");
+    const failed = await waitForTaskStatus(
+      t,
+      started.session,
+      "TASK-A3-UNKNOWN-VERIFY",
+      taskId,
+      "failed",
+    );
     failed.expectOk();
     failed.messageIncludes("TASK-A3-UNKNOWN");
     const view = requireTaskView(failed.requireToolCall("task_cancel").output, taskId);

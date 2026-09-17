@@ -36,7 +36,12 @@ export default defineTaskEval({
     });
     const taskId = requireBackgroundTaskId(started);
 
-    const required = await waitForAuthorizationEvent(t, t, started, "authorization.required");
+    const required = await waitForAuthorizationEvent(
+      t,
+      started.session,
+      started,
+      "authorization.required",
+    );
     required.turn.event("authorization.required", {
       count: 1,
       data: { authorization: { userCode: AUTHORIZATION_CODE }, name: AUTHORIZATION_NAME },

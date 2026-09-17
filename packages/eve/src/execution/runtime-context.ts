@@ -68,7 +68,9 @@ export function buildRunContext(input: {
   }
   ctx.set(ModeKey, run.mode);
   ctx.set(AuthKey, auth);
-  ctx.set(InitiatorAuthKey, run.initiatorAuth ?? auth);
+  if (run.initiatorAuth !== undefined || run.input.message !== undefined) {
+    ctx.set(InitiatorAuthKey, run.initiatorAuth ?? auth);
+  }
 
   if (input.dynamicSubagentAgentConfig !== undefined) {
     ctx.set(DynamicSubagentAgentConfigKey, input.dynamicSubagentAgentConfig);

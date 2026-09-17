@@ -21,14 +21,14 @@ export default defineEval({
     "A descendant session-limit prompt reaches the root; continue resumes the child and stop leaves the root session reusable.",
   timeoutMs: 90_000,
   async test(t) {
-    await t.send(DELEGATE_PROMPT);
-    const continueSession = await waitForInput(t, t);
+    const { session } = await t.send(DELEGATE_PROMPT);
+    const continueSession = await waitForInput(t, session);
     const continueRequest = continueSession.requireInputRequest({
       display: "confirmation",
       optionIds: ["continue", "stop"],
       toolName: "session_limit_continuation",
     });
-    const rootSessionId = t.sessionId;
+    const rootSessionId = session.sessionId;
     if (rootSessionId === undefined) {
       throw new Error("The root session did not expose its session id.");
     }
@@ -54,7 +54,7 @@ export default defineEval({
     completed.messageIncludes(CHILD_TOKEN);
     t.noFailedActions();
 
-    const stopSession = t.newSession();
+    const stopSession = await t.session();
     await stopSession.send(DELEGATE_PROMPT);
     const blockedStopSession = await waitForInput(t, stopSession);
     const stopRequest = blockedStopSession.requireInputRequest({

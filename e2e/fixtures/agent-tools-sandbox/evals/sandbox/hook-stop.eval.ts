@@ -11,9 +11,10 @@ export default defineEval({
   description: "Sandbox: an authored hook can stop compute and the next turn reopens it.",
   async test(t) {
     const first = await t.send(`Reply with this exact token: ${STOP_SANDBOX_TOKEN}`);
+    const session = first.session;
     first.expectOk();
 
-    const second = await t.send(
+    const second = await session.send(
       `Run the bash command \`cat ${STOP_SANDBOX_MARKER_PATH}\` and reply with the file contents verbatim.`,
     );
 

@@ -397,6 +397,19 @@ async function dispatchWorkflowCommand<TCommand extends SessionCommand>(
     hook = { runId: resumed.ownerRunId, sessionId: await resumed.sessionId };
   } catch (error) {
     if (isInactiveCommandTarget(error)) {
+      if (command.kind === "send" && typeof token !== "string") {
+        try {
+          const status = await getRun(token.sessionId).status;
+          if (status === "pending" || status === "running") {
+            return {
+              status: "session_not_active",
+              retryable: true,
+            } as SessionCommandResult<TCommand>;
+          }
+        } catch (statusError) {
+          if (!isInactiveCommandTarget(statusError)) throw statusError;
+        }
+      }
       return inactiveCommandResult(command);
     }
     logError(log, "failed to dispatch session command", error, {

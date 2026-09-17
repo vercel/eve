@@ -23,11 +23,12 @@ export default cases.map(({ parentActive, steering, description }) =>
     tags: ["real-model", "background-steering"],
     timeoutMs: 240_000,
     async test(t) {
+      const conversation = await t.session();
       const memo = crypto.randomUUID();
       const original = `WORKER-RESULT:ORIGINAL:${memo}`;
       const steered = `WORKER-RESULT:STEERED:${memo}`;
       const expected = steering ? steered : original;
-      let parent = await t.start(
+      let parent = await conversation.start(
         [
           "Call steering-worker exactly once in the background with this exact message:",
           `ASSIGNMENT ${memo}`,

@@ -62,21 +62,21 @@ export default defineTaskEval({
 
     const firstCompleted = await waitForCompletedTask(
       t,
-      t,
+      started.session,
       "TASK-D6-PARTIAL-FANOUT-VERIFY",
       firstTaskId,
     );
     assertCompletedBusyWorker(firstCompleted, firstTaskId, "TASK-D6-FIRST-SUCCESS");
     const thirdCompleted = await waitForCompletedTask(
       t,
-      t,
+      started.session,
       "TASK-D6-PARTIAL-FANOUT-VERIFY",
       thirdTaskId,
     );
     assertCompletedBusyWorker(thirdCompleted, thirdTaskId, "TASK-D6-THIRD-SUCCESS");
     const failed = await waitForTaskStatus(
       t,
-      t,
+      started.session,
       "TASK-D6-PARTIAL-FANOUT-UNKNOWN",
       failedTaskId,
       "failed",

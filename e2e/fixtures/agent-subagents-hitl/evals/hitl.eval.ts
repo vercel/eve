@@ -34,7 +34,7 @@ export default defineEval({
 
     // Background delegation returns its receipt first. The child's approval
     // then wakes the parent in a separate server-initiated turn.
-    const blocked = await waitForInput(t, t, "get_stock_price");
+    const blocked = await waitForInput(t, started.session, "get_stock_price");
     const resumed = await blocked.respondAll("approve");
     t.check(resumed.inputRequests, equals([]));
     resumed.noFailedActions();

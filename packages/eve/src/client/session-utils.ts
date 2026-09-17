@@ -1,6 +1,7 @@
 import type {
   AuthorizationRequiredStreamEvent,
   MessageCompletedStreamEvent,
+  MessageStreamEvent,
   TurnFailureStreamEvent,
   UnstampedMessageStreamEvent,
 } from "#protocol/message.js";
@@ -79,4 +80,12 @@ function isFinalMessageCompleted(
   event: UnstampedMessageStreamEvent,
 ): event is MessageCompletedStreamEvent {
   return event.type === "message.completed" && event.data.finishReason !== "tool-calls";
+}
+
+export function updatePendingAuthorizations(pending: Set<string>, event: MessageStreamEvent): void {
+  if (event.type === "authorization.required" && event.data.webhookUrl !== undefined) {
+    pending.add(event.data.name);
+  } else if (event.type === "authorization.completed") {
+    pending.delete(event.data.name);
+  }
 }

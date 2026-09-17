@@ -12,7 +12,8 @@ import type {
   EveEvalTurn,
 } from "#evals/types.js";
 import { createEmptyDerivedFacts } from "#evals/runner/derive-run-facts.js";
-import { EvalSessionManager, type EvalSessionStartedEvent } from "#evals/session.js";
+import { EvalSessionManager } from "#evals/session-manager.js";
+import type { EvalSessionStartedEvent } from "#evals/session.js";
 import { createEvalContext } from "#evals/context.js";
 import { scopeEvalTargetHandle } from "#evals/target.js";
 import { AssertionCollector } from "#evals/assertions/collector.js";

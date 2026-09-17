@@ -76,7 +76,11 @@ interface SessionDeliveryOptions {
 }
 
 /** Options for sending a message through a fixed session handle. */
-export type SessionSendOptions = SessionDeliveryOptions & { readonly turnPolicy?: TurnPolicy };
+export type SessionSendOptions = SessionDeliveryOptions & {
+  /** Initial workflow title for a prewarmed session. */
+  readonly title?: string;
+  readonly turnPolicy?: TurnPolicy;
+};
 
 /** Options for answering pending input requests through a fixed session handle. */
 export type SessionRespondOptions = SessionDeliveryOptions;
@@ -122,6 +126,7 @@ export function createSession(
         payload,
         requestId: metadata.requestId,
         turnPolicy: options.turnPolicy ?? metadata.turnPolicy ?? DEFAULT_TURN_POLICY,
+        title: options.title,
       };
       return await runtime.dispatchSession({
         command: caller === undefined ? commandWithoutCaller : { ...commandWithoutCaller, caller },

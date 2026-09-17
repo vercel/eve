@@ -69,6 +69,7 @@ import {
   parseCreateBody,
   parseIncludeTailIndex,
   parseJsonRequest,
+  parseOptionalJsonRequest,
   parseResetBody,
   parseSessionControlBody,
   parseSessionMessageBody,
@@ -150,7 +151,7 @@ export function eveChannel(input: EveChannelInput): EveChannel {
         const authResult = await routeAuth(req, input.auth);
         if (authResult instanceof Response) return authResult;
 
-        const payload = await parseJsonRequest(req);
+        const payload = await parseOptionalJsonRequest(req);
         if (payload instanceof Response) return payload;
         const tokenRejection = rejectSessionContinuationToken(payload);
         if (tokenRejection !== null) return tokenRejection;
@@ -286,12 +287,15 @@ export function eveChannel(input: EveChannelInput): EveChannel {
           }
         }
 
-        const messageResult = await resolveOnMessage({
-          auth: forwarded.auth,
-          config: input,
-          message: body.message,
-          request: req,
-        });
+        const messageResult =
+          body.message === undefined
+            ? { auth: forwarded.auth }
+            : await resolveOnMessage({
+                auth: forwarded.auth,
+                config: input,
+                message: body.message,
+                request: req,
+              });
         if (messageResult instanceof Response) return messageResult;
         const createSession = readRouteSessionCreator(args);
         if (createSession === undefined) {
@@ -370,6 +374,7 @@ export function eveChannel(input: EveChannelInput): EveChannel {
         if (policyRejection !== null) return policyRejection;
 
         let context: readonly string[] | undefined;
+        let title: string | undefined;
         let dispatchAuth: SessionAuthContext | null = forwarded.auth;
         if (body.message !== undefined) {
           const messageResult = await resolveOnMessage({
@@ -381,6 +386,7 @@ export function eveChannel(input: EveChannelInput): EveChannel {
           });
           if (messageResult instanceof Response) return messageResult;
           context = messageResult.context;
+          title = messageResult.title;
           dispatchAuth = messageResult.auth;
         }
 
@@ -395,6 +401,7 @@ export function eveChannel(input: EveChannelInput): EveChannel {
               context,
               outputSchema: body.outputSchema,
               turnPolicy: body.turnPolicy,
+              title,
             },
             body.context,
           );
@@ -409,11 +416,14 @@ export function eveChannel(input: EveChannelInput): EveChannel {
             { status: 500 },
           );
         }
-        if (result.status === "session_not_active") {
+        if (result.status !== "accepted") {
           return Response.json(
             {
-              code: "session_not_active",
-              error: "The session is no longer active.",
+              code: result.retryable ? "session_not_ready" : "session_not_active",
+              error:
+                result.retryable === true
+                  ? "The session is not ready to accept messages yet."
+                  : "The session is no longer active.",
               ok: false,
             },
             { headers: { "cache-control": "no-store" }, status: 409 },

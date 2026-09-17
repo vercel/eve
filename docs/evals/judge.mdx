@@ -19,7 +19,7 @@ export default defineEval({
 
 ## The graders
 
-The judges live under `t.judge.autoevals`. The namespace names the [Braintrust autoevals](https://github.com/braintrustdata/autoevals) grader family, so the factuality and closedQA semantics are autoevals', not eve-invented. Each grader scores `t.reply` by default and is soft by default (tracked, no gate):
+The judges live under `t.judge.autoevals`. The namespace names the [Braintrust autoevals](https://github.com/braintrustdata/autoevals) grader family, so the factuality and closedQA semantics are autoevals', not eve-invented. Each grader scores the most recently settled turn’s assistant message by default and is soft by default (tracked, no gate):
 
 | Grader                                   | Grades                                                                                 |
 | ---------------------------------------- | -------------------------------------------------------------------------------------- |
@@ -27,6 +27,8 @@ The judges live under `t.judge.autoevals`. The namespace names the [Braintrust a
 | `t.judge.autoevals.summarizes(expected)` | How well the reply summarizes the expected text                                        |
 | `t.judge.autoevals.closedQA(criteria)`   | Whether the reply satisfies a free-form yes/no criterion (no expected answer to match) |
 | `t.judge.autoevals.sql(expected)`        | Semantic equivalence of two SQL statements                                             |
+
+Judges receive the latest message text from the session whose turn most recently settled as the input prompt. Approval responses and stream reads preserve that prompt. For multipart messages, including `session.sendFile()`, the prompt contains the text parts.
 
 A failed `closedQA` assertion prints the input and judge explanation:
 
@@ -40,7 +42,7 @@ A failed `closedQA` assertion prints the input and judge explanation:
 
 The reference or criteria is the positional argument. An options object follows:
 
-- `on` is the value to grade, defaulting to `t.reply`. Pass an intermediate draft or parsed value to grade it instead.
+- `on` is the value to grade, defaulting to the most recently settled turn’s assistant message. Pass an intermediate draft or parsed value to grade it instead.
 - `model` and `modelOptions` are a per-call judge override (see below).
 
 ```ts
@@ -48,20 +50,20 @@ const draft = await t.send("Draft the welcome email.");
 t.judge.autoevals.closedQA("professional tone", { on: draft.message }).atLeast(0.6);
 ```
 
-For a multi-turn eval, pass `t.transcript` to grade the primary session's complete observed conversation instead of only its final reply:
+For a multi-turn eval, pass `session.transcript` to grade a session's complete observed conversation instead of only its final reply:
 
 ```ts
-await t.send("My favorite word is marigold. Remember it.");
-await t.send("What is my favorite word?");
+const { session } = await t.send("My favorite word is marigold. Remember it.");
+await session.send("What is my favorite word?");
 
 t.judge.autoevals
   .closedQA("The assistant remembers the user's favorite word across turns", {
-    on: t.transcript,
+    on: session.transcript,
   })
   .atLeast(0.8);
 ```
 
-`t.transcript` contains the session's user and assistant messages in turn order. It excludes reasoning, tool calls, and tool results. See [Multi-turn evals](./cases#multi-turn-evals) for the transcript format and independent sessions.
+`session.transcript` contains the session's user and assistant messages in turn order. It excludes reasoning, tool calls, and tool results. See [Multi-turn evals](./cases#multi-turn-evals) for the transcript format and independent sessions.
 
 ## Soft scoring and thresholds
 

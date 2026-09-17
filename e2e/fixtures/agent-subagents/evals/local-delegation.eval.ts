@@ -16,7 +16,7 @@ export default defineEval({
     );
     started.expectOk();
     const completed = await t.target
-      .watchTurn(started.sessionId, { startIndex: requireStreamIndex(t) })
+      .watchTurn(started.sessionId, { startIndex: requireStreamIndex(started.session) })
       .result();
     completed.expectOk();
     completed.messageIncludes(SUBAGENT_TOKEN);

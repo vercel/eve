@@ -28,7 +28,13 @@ export default defineTaskEval({
     });
     const taskId = requireBackgroundTaskId(started);
 
-    const failed = await waitForTaskStatus(t, t, "TASK-A2-CHILD-FAILURE-VERIFY", taskId, "failed");
+    const failed = await waitForTaskStatus(
+      t,
+      started.session,
+      "TASK-A2-CHILD-FAILURE-VERIFY",
+      taskId,
+      "failed",
+    );
     failed.expectOk();
     failed.messageIncludes("TASK-A2-FAILED");
     const inspected = failed.requireToolCall("task_cancel", { input: { taskIds: [taskId] } });

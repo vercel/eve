@@ -31,7 +31,7 @@ export default defineTaskEval({
     });
     const taskId = requireBackgroundTaskId(started);
 
-    const blocked = await waitForTaskInput(t, t, "release");
+    const blocked = await waitForTaskInput(t, started.session, "release");
     const cancelled = await sendAndFollowQueuedTurn(t, "TASK-CANCEL-NOW", blocked.session);
     cancelled.turn.expectOk();
     cancelled.turn.calledTool("task_cancel", { input: { taskIds: [taskId] } });

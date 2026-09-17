@@ -34,20 +34,10 @@ import {
 import { isInputResponse, type ValidatedInputResponse } from "#shared/input.js";
 import { parseJsonObject, type JsonObject } from "#shared/json.js";
 import type { RunMode } from "#shared/run-mode.js";
+import { type ParsedCreateBody, validateMessageFreeCreate } from "#eve-channel/create-request.js";
 
 const SESSION_STREAM_HEARTBEAT_MS = 10_000;
 const SESSION_STREAM_LEASE_MS = 60_000;
-
-interface ParsedCreateBody {
-  activityObserver?: ActivityObserverConfig;
-  callback?: SessionCallback;
-  capabilities?: SessionCapabilities;
-  message: string | UserContent;
-  mode?: RunMode;
-  context?: readonly string[];
-  operationId?: string;
-  outputSchema?: JsonObject;
-}
 
 /** Replay-stable identity for one authenticated create operation. */
 export async function deriveOperationContinuationToken(input: {
@@ -101,12 +91,16 @@ export function parseCreateBody(payload: Record<string, unknown>): ParsedCreateB
   const outputSchema = parseOutputSchemaField(payload.outputSchema);
   if (outputSchema instanceof Response) return outputSchema;
 
-  if (message === undefined) {
-    return Response.json(
-      { error: "Missing or empty 'message' field.", ok: false },
-      { status: 400 },
-    );
-  }
+  const messageFreeRejection = validateMessageFreeCreate({
+    activityObserver,
+    callback,
+    hasClientContext: payload.clientContext !== undefined,
+    hasMessageField: "message" in payload,
+    message,
+    mode,
+    outputSchema,
+  });
+  if (messageFreeRejection !== undefined) return messageFreeRejection;
 
   const rawOperationId = payload.operationId;
   if (rawOperationId !== undefined && (typeof rawOperationId !== "string" || !rawOperationId)) {
@@ -120,11 +114,11 @@ export function parseCreateBody(payload: Record<string, unknown>): ParsedCreateB
     activityObserver,
     callback,
     capabilities,
-    message,
     mode,
     context,
     outputSchema,
   };
+  if (message !== undefined) result.message = message;
   if (typeof rawOperationId === "string") result.operationId = rawOperationId;
   return result;
 }
@@ -270,7 +264,9 @@ export async function parseSessionControlBody(
   return rejectSessionContinuationToken(payload) ?? payload;
 }
 
-async function parseOptionalJsonRequest(req: Request): Promise<Record<string, unknown> | Response> {
+export async function parseOptionalJsonRequest(
+  req: Request,
+): Promise<Record<string, unknown> | Response> {
   let text: string;
   try {
     text = await req.text();

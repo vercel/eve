@@ -1,4 +1,4 @@
-import { defineEval } from "eve/evals";
+import { defineEval, type EveEvalSession } from "eve/evals";
 import { equals } from "eve/evals/expect";
 
 const TURN_COUNT = 100;
@@ -9,13 +9,13 @@ export default defineEval({
   tags: ["stress", "workflow", "sequential"],
 
   async test(t) {
-    let sessionId: string | undefined;
+    let session: EveEvalSession | undefined;
     const samples: Array<{ durationMs: number; turnNumber: number }> = [];
 
     for (let turnNumber = 1; turnNumber <= TURN_COUNT; turnNumber += 1) {
       const marker = `sequential-turn-${String(turnNumber).padStart(3, "0")}`;
       const startedAt = performance.now();
-      const result = await t.send(marker);
+      const result = await (session === undefined ? t.send(marker) : session.send(marker));
       const durationMs = performance.now() - startedAt;
       const elapsedSeconds = durationMs / 1_000;
 
@@ -25,11 +25,11 @@ export default defineEval({
         `turn ${String(turnNumber).padStart(3, "0")}/${TURN_COUNT} completed in ${elapsedSeconds.toFixed(3)}s`,
       );
 
-      sessionId ??= result.sessionId;
+      session ??= result.session;
 
       const turn = result.expectOk();
 
-      await t.require(turn.sessionId, equals(sessionId));
+      await t.require(turn.sessionId, equals(session.sessionId));
       await t.require(turn.message, equals(`stress-ack:${turnNumber}:${marker}`));
     }
 
@@ -38,7 +38,7 @@ export default defineEval({
         fixture: "agent-workflow-stress",
         scenario: "sequential",
         schemaVersion: 1,
-        sessionId,
+        sessionId: session?.sessionId,
         samples,
         unit: "milliseconds",
       })}`,

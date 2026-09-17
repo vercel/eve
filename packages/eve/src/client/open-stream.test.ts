@@ -76,6 +76,29 @@ describe("openStreamBody", () => {
 });
 
 describe("followStreamIterable", () => {
+  it("honors explicit idle retry limits even while following continuously", async () => {
+    const fetchMock = vi.fn(
+      async () =>
+        new Response("\n", {
+          headers: { [EVE_STREAM_VERSION_HEADER]: EVE_MESSAGE_STREAM_VERSION },
+        }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    for await (const event of followStreamIterable({
+      host: "https://agent.example",
+      resolveHeaders: () => Promise.resolve(new Headers()),
+      keepAlive: true,
+      resolveReconnectPolicy: () => ({
+        streamIdleReconnectPolicy: { maxAttempts: 1, baseDelayMs: 0 },
+      }),
+      sessionId: "session_1",
+      startIndex: 0,
+    })) {
+      expect.unreachable(`Unexpected event: ${event.type}`);
+    }
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
   it.each([
     { startIndex: -1, streamReconnectPolicy: undefined },
     { startIndex: 0, streamReconnectPolicy: { reconnect: false } },

@@ -44,6 +44,7 @@ export async function* readNdjsonStream(
     readonly controlVersion?: "1";
     readonly idleTimeoutMs?: number;
     readonly onLeaseEnded?: () => void;
+    readonly signal?: AbortSignal;
     readonly streamVersion: MessageStreamVersion;
   },
 ): AsyncGenerator<MessageStreamEvent> {
@@ -51,10 +52,16 @@ export async function* readNdjsonStream(
   const decoder = new TextDecoder();
   let buffer = "";
   let reachedEof = false;
+  const abort = () => {
+    void reader.cancel().catch(() => {});
+  };
+  options.signal?.addEventListener("abort", abort, { once: true });
 
   try {
     while (true) {
+      options.signal?.throwIfAborted();
       const result = await readWithIdleTimeout(reader, options?.idleTimeoutMs);
+      options.signal?.throwIfAborted();
 
       if (result.done) {
         reachedEof = true;
@@ -97,6 +104,7 @@ export async function* readNdjsonStream(
       }
     }
   } finally {
+    options.signal?.removeEventListener("abort", abort);
     if (!reachedEof) {
       // A cloned response waits for both branches to cancel. Let the caller
       // abort the fetch instead of blocking cleanup on a tracing reader.

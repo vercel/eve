@@ -2,7 +2,7 @@ import type { EveEvalDefinition, EveEvalInput } from "#evals/types.js";
 
 /**
  * Defines one eve eval. Each eval file is exactly one case: an imperative
- * `test(t)` function that drives the agent (`t.send`, `t.respond`, …) and
+ * `test(t)` function that drives the agent (`t.session`, `t.send`, …) and
  * asserts on what it produced (`t.succeeded()`, `t.check(...)`,
  * `t.judge.autoevals.*`). Organize related evals with directory nesting under
  * `evals/`, or default-export an array of evals to fan one file out over a
@@ -59,7 +59,7 @@ function validateEvalInput(input: EveEvalInput): void {
   rejectLegacyKey(
     input,
     "expected",
-    "Pass the reference value to the assertion (e.g. `t.check(t.reply, includes(value))`).",
+    "Pass the reference value to the assertion (e.g. `t.check(turn.message, includes(value))`).",
   );
   rejectLegacyKey(input, "thresholds", "Put the threshold on the assertion: `.atLeast(n)`.");
   rejectLegacyKey(

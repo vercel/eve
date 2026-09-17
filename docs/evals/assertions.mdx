@@ -50,15 +50,15 @@ attached.messageIncludes("Sunny");
 
 ## Value assertions with `t.check`
 
-`t.check(value, assertion)` grades an explicit value against a builder from `eve/evals/expect`. The value can be `t.reply`, a turn's `.message`, parsed JSON, or any local you computed:
+`t.check(value, assertion)` grades an explicit value against a builder from `eve/evals/expect`. The value can be a turn’s `.message`, parsed JSON, or any local you computed:
 
 ```ts
 import { includes, equals, matches, satisfies, similarity } from "eve/evals/expect";
 
-t.check(t.reply, includes(/sunny/i)); // substring or RegExp (gate)
+t.check(turn.message, includes(/sunny/i)); // substring or RegExp (gate)
 t.check(parsed, equals({ city: "Brooklyn" })); // deep structural equality (gate)
 t.check(parsed, matches(WeatherSchema)); // Standard Schema, e.g. Zod (gate)
-t.check(t.reply, similarity("Sunny, 72F")); // fuzzy 0–1 Levenshtein (soft)
+t.check(turn.message, similarity("Sunny, 72F")); // fuzzy 0–1 Levenshtein (soft)
 t.check(
   latencyMs,
   satisfies((value) => value < 1_000, "latency under one second"),
@@ -114,7 +114,7 @@ const request = session.requireInputRequest({
 
 ## Run state and derived facts
 
-Beyond the raw `t.events` stream, the runner derives typed facts the assertions read: tool calls (name, input, output, lifecycle status), subagent calls, and HITL input requests. A turn that leaves the session open for a next message is the normal end state of a successful turn; parking on unanswered HITL input is tracked separately.
+Beyond the raw `session.events` stream, the runner derives typed facts the assertions read: tool calls (name, input, output, lifecycle status), subagent calls, and HITL input requests. A turn that leaves the session open for a next message is the normal end state of a successful turn; parking on unanswered HITL input is tracked separately.
 
 Typed event matching covers presence, absence, numeric or predicate counts, partial event data, and ordering:
 
@@ -166,8 +166,8 @@ The defaults are chosen so you rarely set severity. Run-level methods and `inclu
 
 ```ts
 t.calledTool("get_weather").soft(); // record the tool call as a metric, don't gate
-t.check(t.reply, similarity("Sunny")).label("forecast wording").atLeast(0.8);
-t.check(t.reply, includes("error")).soft(); // track without failing the build
+t.check(turn.message, similarity("Sunny")).label("forecast wording").atLeast(0.8);
+t.check(turn.message, includes("error")).soft(); // track without failing the build
 ```
 
 ## What to read next

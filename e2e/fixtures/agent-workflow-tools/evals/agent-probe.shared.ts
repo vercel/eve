@@ -15,12 +15,12 @@ export async function runProbe(t: EveEvalContext, probe: ProbeCase): Promise<voi
   started.expectOk();
 
   if (probe.kind === "hitl") {
-    const blocked = await waitForInput(t, t, "approval-gate");
+    const blocked = await waitForInput(t, started.session, "approval-gate");
     const approved = await blocked.respondAll("approve");
     approved.expectOk();
     await waitForMarker(t, blocked, approved, "WORKFLOW-HITL:approved");
   } else {
-    const required = await waitForEvent(t, t, started, "authorization.required");
+    const required = await waitForEvent(t, started.session, started, "authorization.required");
     const url = required.event.data.authorization?.url;
     if (url === undefined) {
       throw new Error("Authorization probe produced no callback URL.");
@@ -131,7 +131,7 @@ export async function runStepAuth(
   scenario: "EXPLICIT" | "IMPLICIT",
 ): Promise<void> {
   const started = await t.send(`WORKFLOW-STEP-AUTH-${scenario}`);
-  const required = await waitForEvent(t, t, started, "authorization.required");
+  const required = await waitForEvent(t, started.session, started, "authorization.required");
 
   const url = fixtureAuthorizationCallback(t.target.url, required.event.data.authorization?.url);
   const response = await fetch(url);
@@ -146,7 +146,7 @@ export async function runStepAuth(
 
 export async function runRejectedStepAuth(t: EveEvalContext): Promise<void> {
   const started = await t.send("WORKFLOW-STEP-AUTH-REJECTED");
-  const required = await waitForEvent(t, t, started, "authorization.required");
+  const required = await waitForEvent(t, started.session, started, "authorization.required");
 
   const url = fixtureAuthorizationCallback(t.target.url, required.event.data.authorization?.url);
   const response = await fetch(url);

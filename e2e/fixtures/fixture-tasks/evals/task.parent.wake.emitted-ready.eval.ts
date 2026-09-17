@@ -36,7 +36,7 @@ export default defineTaskEval({
       ),
     );
 
-    const blocked = await waitForReleaseRequests(t, t, started);
+    const blocked = await waitForReleaseRequests(t, started.session, started);
     const released = await blocked.session.respond(
       blocked.requests.map((request) => ({
         optionId: "approve",

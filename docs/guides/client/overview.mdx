@@ -113,7 +113,21 @@ Per-request headers override client-level values with the same name. For example
 
 ## Sessions
 
-For an ID-addressed session, create it explicitly with the first message:
+Create and park an ID-addressed conversation before its first turn when you can start session work
+while the user is still composing:
+
+```ts
+const { session } = await client.sessions.create();
+
+const response = await session.send("Summarize account A.");
+await response.result();
+```
+
+The create promise resolves when the server accepts the durable workflow. It does not open the
+event stream or wait for initialization; an early `session.send()` uses the
+same bounded startup retries as other follow-ups.
+
+To create the session and start its first turn in one request, include the message:
 
 ```ts
 const { session, response } = await client.sessions.create({ message: "Summarize account A." });

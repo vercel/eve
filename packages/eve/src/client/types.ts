@@ -108,6 +108,14 @@ export interface SendTurnInput<TOutput = unknown> extends SendTurnOptions<TOutpu
   readonly message: string | UserContent;
 }
 
+/** Request options for creating a conversation session before its first turn. */
+export interface CreateSessionOptions {
+  /** Abort signal for cancelling the creation request. */
+  readonly signal?: AbortSignal;
+  /** Additional headers for this request only. */
+  readonly headers?: Readonly<Record<string, string>>;
+}
+
 /** Options shared by message sends and HITL responses on a client session. */
 export interface SendTurnOptions<TOutput = unknown> {
   /** Policy for a message sent while the fixed session has an active turn. */

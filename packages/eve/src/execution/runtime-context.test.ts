@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { ContextContainer, contextStorage, loadContext } from "#context/container.js";
 import {
   AuthKey,
+  InitiatorAuthKey,
   ChannelInstrumentationKey,
   ContinuationHookTokensKey,
   ContinuationTokenKey,
@@ -154,6 +155,25 @@ function createMinimalBundle(): Parameters<typeof buildRunContext>[0]["bundle"] 
 }
 
 describe("buildRunContext", () => {
+  it.each([undefined, testAuth])(
+    "defers prewarm initiator identity unless explicitly forwarded (%s)",
+    (initiatorAuth) => {
+      const ctx = buildRunContext({
+        bundle: createMinimalBundle(),
+        run: {
+          auth: testAuth,
+          initiatorAuth,
+          adapter: { kind: "http" },
+          input: {},
+          mode: "conversation",
+        },
+      });
+      expect(ctx.get(AuthKey)).toEqual(testAuth);
+      expect(ctx.has(InitiatorAuthKey)).toBe(initiatorAuth !== undefined);
+      expect(ctx.get(InitiatorAuthKey)).toEqual(initiatorAuth);
+    },
+  );
+
   it("seeds auth from the run input", () => {
     const ctx = buildRunContext({
       bundle: createMinimalBundle(),

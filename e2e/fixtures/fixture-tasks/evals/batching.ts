@@ -9,8 +9,8 @@ import {
 
 /** Release children independently of parent wakes, retaining the entire parent stream suffix. */
 export async function startBlockedFanout(t: EveEvalContext, count: number) {
-  let session: TaskEvalSessionDriver = t;
   const started = await t.send("TASK-BATCHING-BENCHMARK");
+  let session: TaskEvalSessionDriver = started.session;
   started.expectOk();
   started.noFailedActions();
   started.messageIncludes("TASK-FANOUT-STARTED");

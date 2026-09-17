@@ -18,7 +18,7 @@ export default defineEval({
     });
     saved.messageIncludes("FILE_MEMORY_SAVED");
 
-    const nextSession = t.newSession();
+    const nextSession = await t.session();
     const recalled = await nextSession.send(
       "What is the verification phrase in file memory? Reply with the phrase only. Do not call tools.",
     );

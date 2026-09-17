@@ -5,6 +5,23 @@ import { SessionTraceSeedKey } from "#context/keys.js";
 import { prepareTurnTraceContext } from "#instrumentation/prepare-trace-context.js";
 
 describe("prepareTurnTraceContext", () => {
+  it("prepares only the session trace when turn zero does not exist yet", async () => {
+    const seed = { spanId: "2".repeat(16), traceFlags: 1, traceId: "1".repeat(32) };
+    const prepareSessionTrace = vi.fn(async (_event: unknown) => seed);
+    const prepareTurnTrace = vi.fn(async (_event: unknown) => seed);
+
+    const trace = await prepareTurnTraceContext({
+      instrumentation: { prepareSessionTrace, prepareTurnTrace },
+      session: { rootSessionId: "session-1", sessionId: "session-1" },
+      sequence: 0,
+      sessionStarted: false,
+    });
+
+    expect(trace).toEqual(seed);
+    expect(prepareSessionTrace).toHaveBeenCalledOnce();
+    expect(prepareTurnTrace).not.toHaveBeenCalled();
+  });
+
   it("reuses session parent metadata without copying the seed onto a turn event", async () => {
     const seed = { spanId: "2".repeat(16), traceFlags: 1, traceId: "1".repeat(32) };
     const parentLineage = {

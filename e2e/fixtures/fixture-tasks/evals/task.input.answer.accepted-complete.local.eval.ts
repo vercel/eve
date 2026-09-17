@@ -21,7 +21,7 @@ export default defineTaskEval({
     });
     const taskId = requireBackgroundTaskId(started);
 
-    const first = await waitForTaskInput(t, t, "first_gate");
+    const first = await waitForTaskInput(t, started.session, "first_gate");
     const answered = await first.session.respond([
       {
         optionId: "approve",

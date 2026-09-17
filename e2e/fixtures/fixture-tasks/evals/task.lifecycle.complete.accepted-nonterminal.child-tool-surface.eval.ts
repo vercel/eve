@@ -27,7 +27,9 @@ export default defineTaskEval({
     });
     const taskId = requireBackgroundTaskId(started);
 
-    const completed = await waitForTaskNotification(t, t, taskId, "completed", [started]);
+    const completed = await waitForTaskNotification(t, started.session, taskId, "completed", [
+      started,
+    ]);
     completed.turn.expectOk();
     const report = completed.turn.message;
     if (report === undefined) throw new Error("Parent did not return the child's tool report.");

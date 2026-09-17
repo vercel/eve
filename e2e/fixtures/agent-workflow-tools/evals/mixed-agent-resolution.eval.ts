@@ -16,7 +16,7 @@ export default defineEval({
 
     const sessionId = initial.sessionId;
     if (sessionId === undefined) throw new Error("Mixed workflow turn has no session id.");
-    let session: Pick<EveEvalSession, "state"> = t;
+    let session: Pick<EveEvalSession, "state"> = initial.session;
     let completed: EveEvalTurn | undefined;
     for (let attempt = 0; attempt < 5; attempt += 1) {
       const live = t.target.watchTurn(sessionId, { startIndex: requireStreamIndex(session) });

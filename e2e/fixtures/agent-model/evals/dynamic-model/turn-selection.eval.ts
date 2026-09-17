@@ -10,10 +10,11 @@ export default defineEval({
     const selected = await t.send(
       '[model: mini] Reply with exactly the text "mini ping" and nothing else.',
     );
+    const session = selected.session;
     selected.expectOk();
     selected.messageIncludes("mini ping");
 
-    const selectedAgain = await t.send(
+    const selectedAgain = await session.send(
       'Reply with exactly the text "selected again" and nothing else.',
     );
     selectedAgain.expectOk();

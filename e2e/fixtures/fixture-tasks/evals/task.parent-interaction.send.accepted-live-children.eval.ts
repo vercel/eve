@@ -33,7 +33,7 @@ export default defineTaskEval({
       ),
     );
 
-    const blockedSession = await waitForReleaseRequests(t, t, started);
+    const blockedSession = await waitForReleaseRequests(t, started.session, started);
     const interactive = await sendAndFollowQueuedTurn(
       t,
       "TASK-FANOUT-INTERACTIVE-CHECK",

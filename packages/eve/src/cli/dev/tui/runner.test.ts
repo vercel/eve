@@ -6,7 +6,9 @@ import {
   MessageResponse,
   type AgentInfoResult,
   type ClientSession,
+  type CreateSessionOptions,
   type MessageStreamEvent,
+  type SendTurnInput,
 } from "#client/index.js";
 import { getApplicationInfo } from "#internal/application/paths.js";
 import { stampTestEvent } from "#internal/testing/events.js";
@@ -431,10 +433,12 @@ function stubSession(): ClientSession {
 }
 
 function mockSessionCreation(client: Client, session: ClientSession) {
-  return vi.spyOn(client.sessions, "create").mockImplementation(async (input) => ({
-    response: await session.send(input.message, input),
-    session,
-  }));
+  return vi
+    .spyOn(client.sessions, "create")
+    .mockImplementation(async (input: CreateSessionOptions | SendTurnInput = {}) => {
+      if (!("message" in input)) return { session };
+      return { response: await session.send(input.message, input), session };
+    });
 }
 
 /**
@@ -2388,10 +2392,7 @@ describe("EveTUIRunner failure rendering", () => {
       { type: "session.failed", data: { ...failureData, sessionId: "s0" } },
     ]);
     const client = stubClient();
-    vi.spyOn(client.sessions, "create").mockImplementation(async (input) => {
-      const session = sessionYielding([]);
-      return { response: await session.send(input.message, input), session };
-    });
+    mockSessionCreation(client, sessionYielding([]));
 
     const renderer: AgentTUIRenderer = {
       readPrompt: vi.fn(async () => prompts.shift()),

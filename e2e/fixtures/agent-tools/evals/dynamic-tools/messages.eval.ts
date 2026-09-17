@@ -12,10 +12,11 @@ export default defineEval({
         "Use the check_messages tool with label 'turn1' to record the initial count " +
         "from the application's conversation log, then summarize the returned counts.",
     );
+    const session = first.session;
     first.expectOk();
     const firstOutput = first.requireToolCall("check_messages").output;
 
-    const second = await t.send(
+    const second = await session.send(
       "Bob has added this follow-up to the support conversation. Use the check_messages " +
         "tool with label 'turn2' to record the updated count from the application's " +
         "conversation log, then summarize the returned counts so Alice can compare them.",

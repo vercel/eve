@@ -24,7 +24,7 @@ The default eve channel inspects the agent, creates sessions, accepts callbacks 
 
 - `GET /eve/v1/health` (check whether the application is reachable)
 - `GET /eve/v1/info` (inspect the agent)
-- `POST /eve/v1/session` (start a session and send its first message)
+- `POST /eve/v1/session` (create a session, optionally sending its first message)
 - `POST /eve/v1/session/:sessionId` (send a follow-up)
 - `POST /eve/v1/session/:sessionId/cancel` (cancel the in-flight turn)
 - `POST /eve/v1/session/:sessionId/clear` (clear the session's model history)
@@ -38,7 +38,21 @@ The session routes use only durable session IDs. Create a session explicitly, th
 
 ### Start and continue a session
 
-Start a session with an initial message, then use the returned `sessionId` for every follow-up and control operation:
+Create a conversation session before its first message with a bodyless request:
+
+```bash
+curl -X POST https://<deployment>/eve/v1/session
+# {"ok":true,"sessionId":"wrun_A","status":"accepted"}
+```
+
+See [Start a session](../concepts/sessions-runs-and-streaming#start-a-session) for the
+initialization boundary, first-turn identity, readiness response, and retry behavior.
+
+The create request still requires route auth. Session audience and the timeout are selected
+at creation; they do not change when the first message arrives. Task mode and turn-scoped
+fields such as `clientContext` and `outputSchema` require a message on the create request.
+
+Include an initial message to create the session and start its first turn in one request:
 
 ```bash
 curl -X POST https://<deployment>/eve/v1/session \
@@ -46,11 +60,6 @@ curl -X POST https://<deployment>/eve/v1/session \
   -d '{"message":"What is the weather in Paris?"}'
 # {"ok":true,"sessionId":"wrun_A","status":"accepted"}
 ```
-
-The `202` response means Workflow accepted the durable run. The route does not wait for command
-inbox or continuation-token ownership. The inbox may still be starting, so an immediate follow-up
-or control request can report that the session is not active. The event-stream client retries the
-brief window before the new run becomes readable.
 
 Authenticated callers that may retry a create request can pass their own `operationId` for
 create-once semantics. Once the operation owner is active, the same operation under the same
@@ -69,7 +78,7 @@ curl -X POST https://<deployment>/eve/v1/session \
 # {"ok":true,"sessionId":"wrun_A","status":"accepted"}
 ```
 
-The first request requires `message`. A follow-up request accepts exactly one of
+When the create request includes a message, a follow-up request accepts exactly one of
 `message` or `inputResponses`; use the latter to answer a pending HITL request:
 
 ```bash
@@ -82,8 +91,9 @@ Follow-up messages use `turnPolicy: "steer"` by default. Before assistant answer
 
 Set `turnPolicy: "queue"` on `eveChannel(...)` when follow-ups should wait for active turns to finish. `inputResponses` answer their addressed requests.
 
-Sending a message to an unknown, terminal, or not-yet-active session ID returns `409` with
+Sending a message to an unknown or terminal session ID returns `409` with
 `{"code":"session_not_active","error":"The session is no longer active.","ok":false}`.
+An existing workflow whose inbox is not yet available returns `409 session_not_ready` instead.
 TypeScript clients expose the stable code as `ClientError.code`. The route never
 creates or follows a replacement session.
 
@@ -225,7 +235,7 @@ export default eveChannel({
 });
 ```
 
-`onMessage` must return an auth result. Return `title` alongside `auth` to set the title when the dispatch starts a run. A successful canonical eve HTTP message always dispatches and therefore always produces or continues a session.
+`onMessage` must return an auth result. Return `title` alongside `auth` to set the title when the dispatch creates a session or sends the first message to a prewarmed session. A successful canonical eve HTTP message always dispatches and therefore always produces or continues a session.
 
 ## Clients
 

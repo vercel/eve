@@ -4,16 +4,16 @@ export default defineEval({
   description: "A generated workflow program proxies a child question through the existing owner.",
   timeoutMs: 120_000,
   async test(t) {
-    await t.send(
+    const { session } = await t.send(
       "Use the workflow tool exactly once to call the sleeper subagent with the message GENERATED-PROGRAM-CHILD-HITL. Return the child result.",
     );
-    const request = t.requireInputRequest({
+    const request = session.requireInputRequest({
       prompt: "What marker should the child return?",
       toolName: "ask_question",
     });
     if (request.kind !== "question") throw new Error("Child input request is not a question.");
 
-    const resumed = await t.respond([
+    const resumed = await session.respond([
       { requestId: request.requestId, text: "GENERATED-HITL-MARKER" },
     ]);
     resumed.expectOk();

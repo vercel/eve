@@ -36,7 +36,7 @@ export interface ReportingRun {
   readonly probeSessions: Map<Check, string>;
   readonly parentTurns: EveEvalTurn[];
   readonly modelId: string;
-  session: EveEvalSession | EveEvalContext;
+  session: EveEvalSession;
 }
 
 export async function startWarehouseLookups(t: EveEvalContext): Promise<ReportingRun> {
@@ -84,7 +84,7 @@ Once all three assignments are accepted, let Alice know the checks are underway.
   const taskIds = receipts.map((receipt) => receipt.taskId);
   const requests = new Map<Check, InputRequest>();
   const run: ReportingRun = {
-    session: t,
+    session: started.session,
     sessionId: started.sessionId,
     taskIds,
     children,
@@ -307,7 +307,7 @@ export function completedAt(turn: EveEvalTurn): number {
   return Date.parse(event.meta.at);
 }
 
-export function requireStreamIndex(session: EveEvalSession | EveEvalContext): number {
+export function requireStreamIndex(session: EveEvalSession): number {
   if (session.state === undefined) throw new Error("Task reporting session has no stream index.");
   return session.state.streamIndex;
 }

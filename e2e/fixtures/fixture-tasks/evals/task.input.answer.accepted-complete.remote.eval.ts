@@ -44,7 +44,7 @@ export default defineTaskEval({
       data: { requests: [{ action: { toolName: "remote_gate" } }] },
     }).label("remote input callback reaches the parent");
     t.log("Waiting for the remote input callback to reach the parent.");
-    const gate = await waitForTaskInput(t, t, "remote_gate");
+    const gate = await waitForTaskInput(t, started.session, "remote_gate");
     const answered = await gate.session.respond([
       {
         optionId: "approve",

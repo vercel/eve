@@ -10,7 +10,7 @@ export default defineEval({
       count: 1,
       data: { backgroundTask: { status: "working" }, subagentName: "conditional-marker" },
     });
-    const completed = await waitForMessage(t, t, "DYNAMIC_SUBAGENT_ENABLED");
+    const completed = await waitForMessage(t, selected.session, "DYNAMIC_SUBAGENT_ENABLED");
 
     const omitted = await completed.send("Call omitted-marker exactly once.");
 

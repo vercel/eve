@@ -10,10 +10,11 @@ export default defineEval({
       'Call the `always-throws` tool exactly once with reason "smoke". ' +
         "After it fails, reply with a one-line acknowledgement that the tool failed.",
     );
+    const session = first.session;
     first.expectOk();
     first.calledTool("always-throws", { status: "failed", count: 1 });
 
-    const second = await t.send(
+    const second = await session.send(
       "Are you still responsive? Reply with exactly the single word: yes.",
     );
     second.messageIncludes(/\byes\b/iu);

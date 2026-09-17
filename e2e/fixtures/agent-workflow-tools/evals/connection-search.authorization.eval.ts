@@ -14,6 +14,7 @@ export default defineEval({
     const started = await t.send(
       "Alice wants to see which tools are available in private-catalog. Search for its items tools, then report the available tool names.",
     );
+    const session = started.session;
     started.expectOk();
     started.event("authorization.required", { count: 1 });
     started.notEvent("authorization.completed");
@@ -24,11 +25,13 @@ export default defineEval({
       throw new Error("Connection search did not produce an authorization challenge.");
     }
     const callback = fixtureAuthorizationCallback(t.target.url, required.data.authorization?.url);
-    if (t.sessionId === undefined || t.state === undefined) {
+    if (session.sessionId === undefined || session.state === undefined) {
       throw new Error("Connection search did not create a session.");
     }
 
-    const resumed = t.target.watchTurn(t.sessionId, { startIndex: t.state.streamIndex });
+    const resumed = t.target.watchTurn(session.sessionId, {
+      startIndex: session.state.streamIndex,
+    });
     const response = await fetch(callback);
     if (!response.ok) {
       throw new Error(`Authorization callback failed (${response.status}).`);

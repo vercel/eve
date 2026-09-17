@@ -27,6 +27,7 @@ export default defineTaskEval({
     const firstTurn = await t.send("TASK-AUTH-SNAPSHOT-ROOT", {
       headers: { authorization: SESSION_INITIATOR_AUTHORIZATION },
     });
+    const session = firstTurn.session;
     firstTurn.expectOk();
     firstTurn.messageIncludes("TASK-AUTH-SNAPSHOT-ROOT-ACK");
     firstTurn.calledTool("snapshot_whoami", { count: 1, status: "completed" });
@@ -38,7 +39,7 @@ export default defineTaskEval({
 
     // A route-authenticated, schedule-shaped turn has no current session principal.
     const key = crypto.randomUUID();
-    const started = await t.send(`TASK-AUTH-SNAPSHOT ${key}`, {
+    const started = await session.send(`TASK-AUTH-SNAPSHOT ${key}`, {
       headers: { [ANONYMOUS_TASK_CREATOR_HEADER]: "1" },
     });
     started.expectOk();
@@ -55,7 +56,7 @@ export default defineTaskEval({
     const gateToken = await waitForGate(t, sessionId, key);
 
     // Another authenticated caller takes the last parent turn before nested dispatch.
-    const lastParentTurn = await t.send("TASK-AUTH-SNAPSHOT-LATER", {
+    const lastParentTurn = await session.send("TASK-AUTH-SNAPSHOT-LATER", {
       headers: { authorization: LATER_PARENT_CALLER_AUTHORIZATION },
     });
     lastParentTurn.expectOk();
@@ -68,7 +69,7 @@ export default defineTaskEval({
     );
 
     await releaseGate(t, sessionId, key, gateToken);
-    const childSessionId = await waitForSubagent(t, t);
+    const childSessionId = await waitForSubagent(t, lastParentTurn.session);
     const child = await t.target.watchTurn(childSessionId).result();
     child.expectOk();
     child.noFailedActions();

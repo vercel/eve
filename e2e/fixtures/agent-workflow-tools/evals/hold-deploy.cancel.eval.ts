@@ -10,7 +10,8 @@ export default defineEval({
   timeoutMs: 60_000,
   description: "Cancelling a turn cancels the workflow tool run it is parked on.",
   async test(t) {
-    const live = await t.start("WORKFLOW-HOLD-START");
+    const session = await t.session();
+    const live = await session.start("WORKFLOW-HOLD-START");
     await live.waitForEvent("actions.requested", {
       data: {
         actions: (actions) =>
@@ -33,7 +34,7 @@ export default defineEval({
     turn.notEvent("turn.failed");
     turn.notEvent("session.failed");
 
-    const next = await t.send("WORKFLOW-IDLE-PING");
+    const next = await session.send("WORKFLOW-IDLE-PING");
     next.expectOk();
     next.messageIncludes("WORKFLOW-IDLE");
   },

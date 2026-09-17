@@ -7,7 +7,7 @@ export default defineEval({
       "Alice and Bob need parallel investigations assigned to the worker.",
     );
     first.expectOk();
-    let session: Pick<EveEvalSession, "sessionId" | "state"> = t;
+    let session: Pick<EveEvalSession, "sessionId" | "state"> = first.session;
     let combined = first.message ?? "";
     for (let attempt = 0; attempt < 6; attempt++) {
       if (

@@ -138,7 +138,7 @@ export function requireTaskView(output: unknown, taskId: string): Record<string,
 export async function sendAndFollowQueuedTurn(
   t: EveEvalContext,
   message: string,
-  initialSession: TaskEvalSessionDriver = t,
+  initialSession: TaskEvalSessionDriver,
   options: FollowQueuedTurnOptions = {},
 ): Promise<FollowedQueuedTurn> {
   let session = initialSession;

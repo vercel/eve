@@ -765,7 +765,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
 
   async readPrompt(options?: AgentTUISessionOptions): Promise<string> {
     this.#start(options);
-    this.#stopTicker();
+    this.#syncBackgroundActivityTicker();
     this.#commitTurnStats();
     this.#inputActive = true;
     this.#promptPlaceholderActive = true;
@@ -1050,11 +1050,11 @@ export class TerminalRenderer implements AgentTUIRenderer {
       this.#requestTurnCancel = undefined;
       this.#sendSteering = undefined;
       this.#detachInput();
-      this.#stopTicker();
       this.#streamDraftActive = false;
       if (this.#turnIndicator.kind === "waiting") {
         this.#turnIndicator = { kind: "idle" };
       }
+      this.#syncBackgroundActivityTicker();
       this.#status = completedTurnStatus({
         interrupted: this.#interrupted,
         cancelled: this.#turnCancelled,
@@ -1068,6 +1068,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
       // prefix wedged and freeze scrollback for the rest of the session.
       if (this.#interrupted || turnState.cancelled) this.#settleCurrentTurnToolBlocks(turnState);
       this.#finalizeAllBlocks();
+      this.#syncBackgroundActivityTicker();
       this.#diagnostics?.reportStats();
       this.#paint();
 
@@ -1117,6 +1118,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
       this.#sweepPreparingToolBlocks(turnState);
       if (turnState.cancelled) this.#settleCurrentTurnToolBlocks(turnState);
       this.#finalizeAllBlocks();
+      this.#syncBackgroundActivityTicker();
       this.#diagnostics?.reportStats();
       this.#paint();
     }
@@ -1624,6 +1626,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
     const wasBackground = this.#backgroundSubagentCallIds.has(update.callId);
     this.#backgroundSubagentCallIds.add(update.callId);
     if (!wasBackground) this.#moveSubagentCohortToBackgroundTail(update.callId);
+    this.#syncBackgroundActivityTicker();
     this.#paint();
   }
 
@@ -1648,6 +1651,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
         if (block.subagentCallId === update.callId) block.live = true;
       }
     }
+    this.#syncBackgroundActivityTicker();
     this.#paint();
   }
 
@@ -1785,6 +1789,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
     this.#nextSubmittedPromptOrigin = undefined;
     this.#fileContents.clear();
     this.#turnClock.reset();
+    this.#syncBackgroundActivityTicker();
   }
 
   /**
@@ -2900,7 +2905,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
     this.#flowInterrupt = undefined;
     this.#disarmFlowIdleTrap();
     this.#detachInput();
-    this.#stopTicker();
+    this.#clearTicker();
     this.#live.clear();
     this.#removeLogCapture();
     this.#altScreen.enter({ cursor: "visible", mouse: false });
@@ -2921,6 +2926,8 @@ export class TerminalRenderer implements AgentTUIRenderer {
       if (this.#setupFlow !== undefined) {
         this.#startTicker();
         this.#armFlowIdleTrap();
+      } else {
+        this.#syncBackgroundActivityTicker();
       }
       this.#live.reset();
       this.#paint();
@@ -3087,7 +3094,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
     rejectReader?.(interruptedError());
     this.#detachInput();
     this.#stopCaretBlink();
-    this.#stopTicker();
+    this.#clearTicker();
     if (this.#logLevelHintTimer !== undefined) {
       clearTimeout(this.#logLevelHintTimer);
       this.#logLevelHintTimer = undefined;
@@ -3359,7 +3366,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
   }
 
   #startTicker() {
-    this.#stopTicker();
+    this.#clearTicker();
     this.#tickTimer = setInterval(() => {
       this.#spinnerIndex += 1;
       this.#paint();
@@ -3375,9 +3382,33 @@ export class TerminalRenderer implements AgentTUIRenderer {
   }
 
   #stopTicker() {
+    if (this.#hasLiveBackgroundActivity()) return;
+    this.#clearTicker();
+  }
+
+  #clearTicker() {
     if (this.#tickTimer) {
       clearInterval(this.#tickTimer);
       this.#tickTimer = undefined;
+    }
+  }
+
+  #hasLiveBackgroundActivity(): boolean {
+    return this.#blocks.some(
+      (block) =>
+        block.live &&
+        block.subagentCallId !== undefined &&
+        (this.#backgroundSubagentCallIds.has(block.subagentCallId) ||
+          this.#provisionalSubagentCallIds.has(block.subagentCallId)),
+    );
+  }
+
+  /** Keeps mutable subagent sections visibly active after their parent turn settles. */
+  #syncBackgroundActivityTicker(): void {
+    if (this.#hasLiveBackgroundActivity()) {
+      this.#startTicker();
+    } else if (!this.#streamDraftActive && this.#turnIndicator.kind === "idle") {
+      this.#clearTicker();
     }
   }
 

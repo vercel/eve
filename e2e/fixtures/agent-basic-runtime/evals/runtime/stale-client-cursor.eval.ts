@@ -3,7 +3,7 @@ import { defineEval } from "eve/evals";
 export default defineEval({
   description: "A resumed client skips old turns when collecting a newly accepted message.",
   async test(t) {
-    const original = t.newSession();
+    const original = await t.session();
     (await original.send("Reply with first-report-ready.")).expectOk();
     (await original.send("Reply with second-report-ready.")).expectOk();
     const sessionId = original.state?.sessionId;

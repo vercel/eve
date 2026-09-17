@@ -42,6 +42,147 @@ function createTestEval(test: (t: EveEvalContext) => unknown, id = "test-eval"):
 }
 
 describe("executeTask", () => {
+  it("creates accepted sessions without consuming events and reuses them for sends", async () => {
+    const server = createScriptedServer([
+      { sessionId: "session_1", events: [turnStarted("turn_0", TRACE_A), sessionWaiting()] },
+    ]);
+    let evalSignal: AbortSignal;
+    const fetch = vi.spyOn(globalThis, "fetch").mockImplementation(async (request, init) => {
+      if (new URL(String(request)).pathname === "/eve/v1/session") {
+        expect(init?.body).toBeUndefined();
+        expect(init?.signal).toBe(evalSignal);
+        expect(new Headers(init?.headers).get("authorization")).toBe("Bearer eval-token");
+        expect(new Headers(init?.headers).get("x-create")).toBe("yes");
+        return Response.json({ sessionId: "session_1" }, { status: 202 });
+      }
+      return await server.fetch(request, init);
+    });
+    const onSessionStart = vi.fn();
+    const outcome = await executeTask({
+      client: new Client({ host: target.url, auth: { bearer: "eval-token" } }),
+      target,
+      onSessionStart,
+      evaluation: createTestEval(async (t) => {
+        evalSignal = t.signal;
+        const session = await t.session({ headers: { "x-create": "yes" } });
+        expect(session.sessionId).toBe("session_1");
+        expect(session.state).toEqual({ sessionId: "session_1", streamIndex: 0 });
+        expect(session.events).toEqual([]);
+        expect(fetch).toHaveBeenCalledOnce();
+        expect(onSessionStart).not.toHaveBeenCalled();
+        const turn = await session.send("Hello Alice");
+        expect(turn.session).toBe(session);
+        expect(turn.sessionId).toBe(session.sessionId);
+      }),
+    });
+    expect(outcome.error).toBeUndefined();
+    expect(server.posts.map((post) => new URL(post.url).pathname)).toEqual([
+      "/eve/v1/session/session_1",
+    ]);
+    expect(outcome.result.sessions).toHaveLength(1);
+    expect(onSessionStart).toHaveBeenCalledOnce();
+  });
+
+  it("creates a fresh session for each send in one request and continues through the returned session", async () => {
+    const server = createScriptedServer([
+      {
+        sessionId: "alice",
+        events: [turnStarted("turn_0"), messageCompleted("Alice", "turn_0"), sessionWaiting()],
+      },
+      {
+        sessionId: "bob",
+        events: [turnStarted("turn_0"), messageCompleted("Bob", "turn_0"), sessionWaiting()],
+      },
+      {
+        sessionId: "alice",
+        events: [
+          turnStarted("turn_1"),
+          messageCompleted("Welcome back Alice", "turn_1"),
+          sessionWaiting(),
+        ],
+      },
+    ]);
+    vi.spyOn(globalThis, "fetch").mockImplementation(server.fetch);
+    const outcome = await executeTask({
+      client: new Client({ host: target.url }),
+      target,
+      evaluation: createTestEval(async (t) => {
+        const alice = await t.send("I am Alice");
+        const bob = await t.send("I am Bob");
+        expect(alice.session).not.toBe(bob.session);
+        const followup = await alice.session.send("Hello again");
+        expect(followup.session).toBe(alice.session);
+        expect(alice.message).toBe("Alice");
+        expect(bob.session.events).not.toContainEqual(
+          expect.objectContaining({
+            type: "turn.started",
+            data: expect.objectContaining({ turnId: "turn_1" }),
+          }),
+        );
+      }),
+    });
+    expect(outcome.error).toBeUndefined();
+    expect(server.posts.map((post) => new URL(post.url).pathname)).toEqual([
+      "/eve/v1/session",
+      "/eve/v1/session",
+      "/eve/v1/session/alice",
+    ]);
+    expect(server.posts.map((post) => post.body)).toEqual([
+      { message: "I am Alice" },
+      { message: "I am Bob" },
+      { message: "Hello again", turnPolicy: "queue" },
+    ]);
+    expect(outcome.result.sessions).toHaveLength(2);
+    expect(outcome.result.finalMessage).toBe("Welcome back Alice");
+  });
+
+  it("creates independent sessions concurrently and does not expose failed creations", async () => {
+    const failed = new Error("Create failed");
+    let count = 0;
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () => {
+      if (++count === 1) throw failed;
+      return Response.json({ sessionId: `session_${count}` }, { status: 202 });
+    });
+    const outcome = await executeTask({
+      client: new Client({ host: target.url }),
+      target,
+      evaluation: createTestEval(async (t) => {
+        await expect(t.session()).rejects.toBe(failed);
+        const [first, second] = await Promise.all([t.session(), t.session()]);
+        expect(first.sessionId).not.toBe(second.sessionId);
+        expect(first.events).toEqual([]);
+        expect(second.events).toEqual([]);
+      }),
+    });
+    expect(outcome.error).toBeUndefined();
+    expect(outcome.result.sessions?.map((session) => session.sessionId)).toEqual([
+      "session_2",
+      "session_3",
+    ]);
+  });
+
+  it("cleans up a prewarmed session when the eval times out before sending", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      Response.json({ sessionId: "idle-session" }, { status: 202 }),
+    );
+    const reset = vi.spyOn(ClientSession.prototype, "reset").mockResolvedValue({
+      previousSessionId: "idle-session",
+      status: "reset",
+    });
+    const outcome = await executeTask({
+      client: new Client({ host: target.url }),
+      target,
+      evaluation: createTestEval(async (t) => {
+        await t.session();
+        await new Promise<void>(() => {});
+      }),
+      timeoutMs: 50,
+    });
+    expect(outcome.error).toMatch(/timed out|timeout/i);
+    expect(reset).toHaveBeenCalledOnce();
+    expect((reset.mock.contexts[0] as ClientSession).state.sessionId).toBe("idle-session");
+  });
+
   it("settles when an eval ignores its timeout signal", async () => {
     const outcome = await executeTask({
       client: new Client({ host: target.url }),
@@ -180,8 +321,9 @@ describe("executeTask", () => {
       target,
       evaluation: createTestEval(async (t) => {
         const parked = await t.send("run pwd");
+        const session = parked.session;
         parked.calledTool("bash", { status: "pending", count: 1 });
-        const request = t.requireInputRequest({
+        const request = session.requireInputRequest({
           display: "confirmation",
           input: { command: "pwd" },
           optionIds: ["approve", "cancel"],
@@ -189,7 +331,7 @@ describe("executeTask", () => {
           toolName: "bash",
         });
         expect(request.requestId).toBe("approval_1");
-        const approved = await t.respondAll("approve");
+        const approved = await session.respondAll("approve");
         approved.calledTool("bash", { status: "completed", count: 1 });
         t.calledTool("bash", { status: "completed", count: 1 });
       }, "approve"),
@@ -232,8 +374,8 @@ describe("executeTask", () => {
       client: new Client({ host: target.url }),
       target,
       evaluation: createTestEval(async (t) => {
-        await t.send("first");
-        await t.send("second");
+        const { session } = await t.send("first");
+        await session.send("second");
       }, "trace-contexts"),
       onSessionStart,
     });
@@ -251,7 +393,7 @@ describe("executeTask", () => {
     ]);
   });
 
-  it("exposes the primary session transcript after each turn", async () => {
+  it("exposes the session transcript after each turn", async () => {
     const server = createScriptedServer([
       {
         sessionId: "session_1",
@@ -280,13 +422,13 @@ describe("executeTask", () => {
       client: new Client({ host: target.url }),
       target,
       evaluation: createTestEval(async (t) => {
-        await t.send("Remember marigold.");
-        expect(t.transcript).toBe(
+        const { session } = await t.send("Remember marigold.");
+        expect(session.transcript).toBe(
           "User:\nRemember marigold.\n\nAssistant:\nI will remember marigold.",
         );
 
-        await t.send("What word did I ask you to remember?");
-        expect(t.transcript).toBe(
+        await session.send("What word did I ask you to remember?");
+        expect(session.transcript).toBe(
           [
             "User:\nRemember marigold.",
             "Assistant:\nI will remember marigold.",
@@ -324,7 +466,7 @@ describe("executeTask", () => {
     expect(server.posts[0]?.body).toEqual({ message: "case prompt" });
   });
 
-  it("captures independent sessions created by newSession", async () => {
+  it("captures independent sessions created by send", async () => {
     const server = createScriptedServer([
       {
         sessionId: "primary",
@@ -355,8 +497,7 @@ describe("executeTask", () => {
       target,
       evaluation: createTestEval(async (t) => {
         await t.send("primary");
-        const secondary = t.newSession();
-        await secondary.send("secondary");
+        const { session: secondary } = await t.send("secondary");
         secondaryTranscript = secondary.transcript;
       }, "multi-session"),
     });
@@ -396,7 +537,8 @@ describe("executeTask", () => {
       target,
       evaluation: createTestEval(async (t) => {
         const first = await t.send("first");
-        const second = await t.send("second");
+        const session = first.session;
+        const second = await session.send("second");
         expect(first.requireToolCall("alpha", { status: "pending" }).name).toBe("alpha");
         first.calledTool("alpha", { status: "pending", count: 1 });
         second.notCalledTool("alpha");
@@ -435,8 +577,7 @@ describe("executeTask", () => {
       client: new Client({ host: target.url }),
       target,
       evaluation: createTestEval(async (t) => {
-        const session = t.newSession();
-        await session.send("first");
+        const { session } = await t.send("first");
         session.calledTool("alpha", { status: "pending", count: 1 });
         session.event("turn.started", { count: 1 });
         await session.send("second");
@@ -566,7 +707,8 @@ describe("executeTask", () => {
       client: new Client({ host: target.url }),
       target,
       evaluation: createTestEval(async (t) => {
-        const parent = await t.start("delegate");
+        const conversation = await t.session();
+        const parent = await conversation.start("delegate");
         expect(parent.sessionId).toBe("parent-session");
 
         const called = await parent.waitForEvent("subagent.called", {
@@ -637,7 +779,8 @@ describe("executeTask", () => {
       client: new Client({ host: target.url }),
       target,
       evaluation: createTestEval(async (t) => {
-        const live = await t.start("fail");
+        const session = await t.session();
+        const live = await session.start("fail");
         await expect(live.waitForEvent("actions.requested")).rejects.toThrow(/session\.failed/);
         await expect(live.result()).resolves.toMatchObject({ status: "failed" });
       }, "live-turn-failure"),
@@ -836,6 +979,9 @@ function createScriptedServer(
         );
       }
 
+      if (method === "POST" && pathname === "/eve/v1/session" && init?.body === undefined) {
+        return Response.json({ sessionId: pendingTurns[0]?.sessionId }, { status: 202 });
+      }
       if (method === "POST") {
         const next = pendingTurns.shift();
         if (next === undefined) {

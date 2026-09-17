@@ -42,7 +42,7 @@ export default defineTaskEval({
         `${FAN_IN_SIZE} distinct background task receipts`,
       ),
     );
-    const blocked = await waitForReleaseRequests(t, t, started);
+    const blocked = await waitForReleaseRequests(t, started.session, started);
 
     const released = await blocked.session.respond(
       FAN_IN_CALLS.map(({ marker }) => ({

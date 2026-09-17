@@ -48,6 +48,8 @@ export interface SessionBoot {
   readonly capabilities?: SessionCapabilities;
   readonly deploymentId: string;
   readonly initialInput: DeliverHookPayload | undefined;
+  /** Parks on the inbox before any session-scoped lifecycle work. */
+  readonly awaitFirstMessage: boolean;
   readonly mode: RunMode;
   readonly retention?: AgentWorkflowRetentionDefinition;
   readonly serializedContext: Record<string, unknown>;
@@ -61,6 +63,10 @@ export interface SessionBoot {
 type SessionLoopOutcome =
   | { readonly kind: "terminal"; readonly outcome: SessionTerminalOutcome }
   | { readonly kind: "transferred" };
+
+type SessionActionResult =
+  | { readonly action: TurnOutcome; readonly kind: "action" }
+  | SessionLoopOutcome;
 
 /** Mutable facts the crash path needs that do not live in the state cursor. */
 interface SessionProgress {
@@ -236,6 +242,17 @@ async function runSessionLoop(
     progress.turnId = `turn_${String(turnIndex++)}`;
     return await execution.runTurn(payload);
   };
+  const runDeliveredTurn = async (
+    next: Extract<NextTurnInstruction, { kind: "turn" }>,
+  ): Promise<SessionActionResult> => {
+    const transfer = await handoff.tryTransfer(next, {
+      serializedContext: cursor.serializedContext,
+      sessionState: cursor.sessionState,
+    });
+    if (transfer.kind === "transferred") return transfer;
+    if (next.delivery.caller !== undefined) progress.caller = next.delivery.caller;
+    return { action: await runTurn({ delivery: next.delivery }), kind: "action" };
+  };
   const settleCancelledTurn = async () => {
     const settled = await settleCancelledTurnStep({
       sessionWritable: boot.sessionWritable,
@@ -246,15 +263,43 @@ async function runSessionLoop(
     progress.caller = undefined;
     return settled;
   };
+  const awaitPrewarmedAction = async (): Promise<SessionActionResult> => {
+    while (true) {
+      const next = await nextParkedActivity(new Set());
+      switch (next.kind) {
+        case "expired":
+        case "reset":
+        case "closed":
+          return { kind: "terminal", outcome: { kind: "expired" } };
+        case "clear":
+        case "compact":
+          continue;
+        case "turn":
+          return await runDeliveredTurn(next);
+        case "cancel-turn":
+        case "authorization-resume":
+          continue;
+      }
+    }
+  };
+  const runInitialAction = async (): Promise<SessionActionResult> => {
+    if (boot.awaitFirstMessage) return await awaitPrewarmedAction();
+    const action = await runTurn(
+      boot.initialInput === undefined ? undefined : { delivery: boot.initialInput },
+    );
+    return { action, kind: "action" };
+  };
 
   try {
     const [actionResult, timerResult] = await Promise.allSettled([
-      runTurn(boot.initialInput === undefined ? undefined : { delivery: boot.initialInput }),
+      runInitialAction(),
       sessionTimeout?.start(),
     ]);
     if (timerResult.status === "rejected") throw timerResult.reason;
     if (actionResult.status === "rejected") throw actionResult.reason;
-    let action: TurnOutcome = actionResult.value;
+    const initial = actionResult.value;
+    if (initial.kind !== "action") return initial;
+    let action = initial.action;
 
     while (true) {
       if (action.kind === "done") {
@@ -311,13 +356,9 @@ async function runSessionLoop(
           action = { ...action, settled: undefined };
           continue;
         case "turn": {
-          const transfer = await handoff.tryTransfer(next, {
-            serializedContext: cursor.serializedContext,
-            sessionState: cursor.sessionState,
-          });
-          if (transfer.kind === "transferred") return { kind: "transferred" };
-          if (next.delivery.caller !== undefined) progress.caller = next.delivery.caller;
-          action = await runTurn({ delivery: next.delivery });
+          const result = await runDeliveredTurn(next);
+          if (result.kind !== "action") return result;
+          action = result.action;
           continue;
         }
       }

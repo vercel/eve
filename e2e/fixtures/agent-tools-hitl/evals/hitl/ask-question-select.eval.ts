@@ -9,7 +9,7 @@ export default defineEval({
   tags: ["real-model"],
   description: "HITL smoke: ask-question select parks and resumes with the chosen option.",
   async test(t) {
-    await t.send(
+    const { session } = await t.send(
       [
         "Use the `ask_question` tool exactly once to ask me which color I prefer.",
         "Set prompt to: 'Pick a color.'",
@@ -19,13 +19,13 @@ export default defineEval({
       ].join("\n"),
     );
 
-    t.requireInputRequest({
+    session.requireInputRequest({
       display: (value) => value === undefined || value === "select",
       optionIds: ["red", "blue"],
       toolName: "ask_question",
     });
 
-    await t.respondAll("blue");
+    await session.respondAll("blue");
 
     t.succeeded();
     t.messageIncludes(/\bblue\b/i);

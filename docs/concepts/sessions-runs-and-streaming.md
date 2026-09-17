@@ -33,16 +33,31 @@ React, Vue, and Svelte apps reach for [`useEveAgent()`](../guides/frontend/overv
 
 ## Start a session
 
+Create and park a conversation session before its first turn by omitting `message`:
+
+```bash
+curl -X POST http://127.0.0.1:2000/eve/v1/session
+```
+
+eve starts the durable workflow, establishes its inbox, and waits for the first message before
+running session-scoped initialization or emitting `session.started`. The first message sent to the returned
+`sessionId` remains `turn_0`. Message-free creation supports conversation mode only and does not
+accept turn-scoped `clientContext`, `outputSchema`, callbacks, or activity observers.
+
+To create the session and start its first turn in one request, include the message:
+
 ```bash
 curl -X POST http://127.0.0.1:2000/eve/v1/session \
   -H 'content-type: application/json' \
   -d '{"message":"Summarize the latest forecast."}'
 ```
 
-eve responds with `202` and the durable `sessionId` in the JSON body and
+In both forms, eve responds with `202` and the durable `sessionId` in the JSON body and
 `x-eve-session-id` header as soon as Workflow accepts the run. The command inbox can still be
-starting at that point. An immediate follow-up can return `409 session_not_active`; wait for
-`session.waiting` before sending the next message.
+starting at that point. An immediate follow-up can return `409 session_not_ready`; retry that
+code with bounded backoff. The TypeScript client retries sends for up to 20 seconds and respects
+the caller's abort signal. Do not wait
+for `session.waiting` on a prewarmed session: initialization and its first events require a message.
 
 ## Stream a session
 

@@ -20,7 +20,7 @@ export default defineTaskEval({
     const started = await t.send("TASK-CANCEL-SETUP");
     started.expectOk();
     const taskId = requireBackgroundTaskId(started);
-    const blocked = await waitForTaskInput(t, t, "release");
+    const blocked = await waitForTaskInput(t, started.session, "release");
     const sessionId = blocked.session.sessionId;
     if (sessionId === undefined) throw new Error("Task parent has no session id.");
 

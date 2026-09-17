@@ -19,9 +19,10 @@ export default defineEval({
     const first = await t.send('Acknowledge this context with exactly "READY".', {
       clientContext: [`The client context token is ${FIRST_CLIENT_CONTEXT_TOKEN}.`],
     });
+    const session = first.session;
     first.messageIncludes("READY");
 
-    const second = await t.send(
+    const second = await session.send(
       "Reply with every token beginning with clientctx- that is visible anywhere in your model input, one per line, and nothing else.",
       {
         clientContext: [`The client context token is ${SECOND_CLIENT_CONTEXT_TOKEN}.`],

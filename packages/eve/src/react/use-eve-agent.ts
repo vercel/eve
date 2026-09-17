@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 
 import {
+  attachEveAgentStore,
   detachEveAgentStore,
   EveAgentStore,
   type EveAgentStoreCallbacks,
@@ -51,6 +52,8 @@ export interface UseEveAgentHelpers<TData> extends UseEveAgentSnapshot<TData> {
   readonly cancel: () => Promise<CancelSessionResult>;
   /** Replays the attached durable session and follows its in-flight turn, if any. */
   readonly resume: () => Promise<void>;
+  /** Creates the session without starting its first turn. */
+  readonly prewarm: () => Promise<void>;
   /** Resets the session: detaches any local stream, recreates the owned session, and clears events and projected data. */
   readonly reset: () => void;
   /** Sends a message. While a turn is active, pass `turnPolicy: "steer"` to replace it. */
@@ -108,6 +111,8 @@ export interface UseEveAgentOptions<TData> extends EveAgentStoreCallbacks<TData>
    * @default true
    */
   readonly optimistic?: boolean;
+  /** Prewarm an owned session on mount and after reset. @default false */
+  readonly prewarm?: boolean;
   readonly reducer?: EveAgentReducer<TData>;
   /**
    * Replay the attached durable session after mount and follow its in-flight
@@ -131,13 +136,13 @@ export function useEveAgent<TData>(
  * React hook that drives an eve session and projects its event stream into UI data.
  *
  * Returns the current snapshot (`data`, `events`, `session`, `status`, `error`)
- * plus the commands `send`, `respond`, `resume`, `cancel`, and `reset`. With no reducer, `data` is the
+ * plus the commands `prewarm`, `send`, `respond`, `resume`, `cancel`, and `reset`. With no reducer, `data` is the
  * built-in `UIMessage` projection from {@link defaultMessageReducer} (`TData`
  * is {@link EveMessageData}); pass a reducer to project into your own shape and
  * infer `TData`.
  *
  * Session-shaping options (`host`, `reducer`, `session`, `initialEvents`,
- * `initialSession`, `auth`, `headers`, `optimistic`, `resume`) are
+ * `initialSession`, `auth`, `headers`, `optimistic`, `prewarm`, `resume`) are
  * read once when the store is created; remount to change them. Lifecycle
  * callbacks (`onError`, `onEvent`, `onFinish`, `onSessionChange`, `prepareSend`)
  * refresh on every render.
@@ -165,6 +170,7 @@ export function useEveAgent<TData>(
       initialEvents: options.initialEvents,
       initialSession: options.initialSession,
       optimistic: options.optimistic,
+      prewarm: options.prewarm,
       reducer,
       session: options.session,
     });
@@ -189,7 +195,13 @@ export function useEveAgent<TData>(
     () => store.snapshot,
   );
 
-  useEffect(() => () => detachEveAgentStore(store), [store]);
+  useEffect(() => {
+    const timeout = setTimeout(() => attachEveAgentStore(store), 0);
+    return () => {
+      clearTimeout(timeout);
+      detachEveAgentStore(store);
+    };
+  }, [store]);
   useEffect(() => {
     if (!resumeOnMountRef.current) return;
     let active = true;
@@ -205,6 +217,7 @@ export function useEveAgent<TData>(
 
   const cancel = useCallback(() => store.cancel(), [store]);
   const reset = useCallback(() => store.reset(), [store]);
+  const prewarm = useCallback(() => store.prewarm(), [store]);
   const resume = useCallback(() => store.resume(), [store]);
   const send = useCallback(
     <TOutput = unknown>(message: string | UserContent, options?: SendTurnOptions<TOutput>) => {
@@ -228,11 +241,12 @@ export function useEveAgent<TData>(
     () => ({
       ...visibleSnapshot,
       cancel,
+      prewarm,
       reset,
       respond,
       resume,
       send,
     }),
-    [cancel, reset, respond, resume, send, visibleSnapshot],
+    [cancel, prewarm, reset, respond, resume, send, visibleSnapshot],
   );
 }

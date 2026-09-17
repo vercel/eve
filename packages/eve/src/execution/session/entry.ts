@@ -90,6 +90,9 @@ async function bootInitialOwner(
     nodeId?: string;
   };
   try {
+    if (input.input.message === undefined && mode !== "conversation") {
+      throw new Error("A message-free session must use conversation mode.");
+    }
     const [sessionCreation, stableClaim, aliasClaim] = await Promise.allSettled([
       createSessionStep({
         compiledArtifactsSource: serializedBundle.source,
@@ -134,6 +137,7 @@ async function bootInitialOwner(
         capabilities: serializedContext["eve.capabilities"] as SessionCapabilities | undefined,
         deploymentId: input.ownerDeploymentId,
         initialInput: createInitialDelivery(input, serializedContext),
+        awaitFirstMessage: input.input.message === undefined,
         mode,
         retention: input.retention,
         serializedContext,
@@ -192,6 +196,7 @@ async function bootHandoffOwner(
       capabilities: checkpoint.capabilities,
       deploymentId: input.ownerDeploymentId,
       initialInput: input.delivery,
+      awaitFirstMessage: false,
       mode: checkpoint.mode,
       retention: checkpoint.retention,
       serializedContext,
@@ -215,7 +220,8 @@ function hasDelegatedCallerContext(serializedContext: Record<string, unknown>): 
 function createInitialDelivery(
   input: InitialWorkflowEntryInput,
   serializedContext: Record<string, unknown>,
-): DeliverHookPayload {
+): DeliverHookPayload | undefined {
+  if (input.input.message === undefined) return undefined;
   return {
     deliveryMetadata:
       serializedContext["eve.channelDelivery"] === undefined

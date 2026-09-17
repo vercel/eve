@@ -10,14 +10,15 @@ export default defineEval({
     "A workflow tool races ask against a deadline; the answer wins and settles the call.",
   async test(t) {
     const parked = await t.send("WORKFLOW-ESCALATE-START");
-    t.requireInputRequest({
+    const session = parked.session;
+    session.requireInputRequest({
       display: "confirmation",
       optionIds: ["approve", "cancel"],
       toolName: "escalate_deploy",
     });
     parked.calledTool("escalate_deploy", { status: "pending", count: 1 });
 
-    const answered = await t.respondAll("approve");
+    const answered = await session.respondAll("approve");
     answered.expectOk();
     answered.calledTool("escalate_deploy", { output: /"decided":"approved"/u });
     answered.messageIncludes("WORKFLOW-ESCALATE-RESULT");

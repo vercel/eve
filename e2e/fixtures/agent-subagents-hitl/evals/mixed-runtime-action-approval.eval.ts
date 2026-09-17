@@ -20,6 +20,7 @@ export default defineEval({
         `After both results arrive, reply with exactly ${COLLISION_MARKER}.`,
       ].join("\n"),
     );
+    const session = parked.session;
 
     parked.calledTool("collision-gate", { count: 1, status: "pending" });
     parked.calledSubagent("collision-child", { count: 1, status: "completed" });
@@ -29,13 +30,13 @@ export default defineEval({
       { type: "input.requested" },
       { type: "session.waiting" },
     ]);
-    t.requireInputRequest({ display: "confirmation", toolName: "collision-gate" });
+    session.requireInputRequest({ display: "confirmation", toolName: "collision-gate" });
 
-    const resumed = await t.respondAll("approve");
+    const resumed = await session.respondAll("approve");
     resumed.expectOk();
     const completed = resumed.message?.includes(COLLISION_MARKER)
       ? resumed
-      : await waitForMessage(t, t, COLLISION_MARKER);
+      : await waitForMessage(t, parked.session, COLLISION_MARKER);
     completed.messageIncludes(COLLISION_MARKER);
 
     t.succeeded();

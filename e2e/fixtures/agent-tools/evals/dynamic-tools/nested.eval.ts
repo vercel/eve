@@ -10,9 +10,10 @@ export default defineEval({
     const first = await t.send(
       "Call the `nested_query` tool and tell me exactly what it returned.",
     );
+    const session = first.session;
     first.expectOk();
 
-    await t.send("Now call the `nested_status` tool and tell me exactly what it returned.");
+    await session.send("Now call the `nested_status` tool and tell me exactly what it returned.");
 
     t.succeeded();
     t.calledTool("nested_query", {

@@ -30,7 +30,7 @@ export default defineTaskEval({
     const started = (await t.send("TASK-FAN-IN")).expectOk();
     started.messageIncludes("TASK-FAN-IN-STARTED");
     started.calledSubagent("fanout-worker", { count: MARKERS.length });
-    let session: TaskEvalSessionDriver = t;
+    let session: TaskEvalSessionDriver = started.session;
     const requests = new Map<string, InputRequest>();
     const setupEvents: EveEvalTurn["events"][number][] = [];
     collectRequests(started);

@@ -206,6 +206,8 @@ export type SessionCommand =
   | {
       readonly auth?: SessionAuthContext | null;
       readonly caller?: TurnCaller;
+      /** Initial workflow title when delivering to a prewarmed session. */
+      readonly title?: string;
       readonly kind: "send";
       readonly payload: DeliverPayload;
       readonly delivery?: ChannelDeliveryMetadata;
@@ -230,7 +232,11 @@ export type SessionCommand =
 
 export type SessionSendCommandResult =
   | { readonly status: "accepted"; readonly sessionId: string; readonly deliveryId?: string }
-  | { readonly status: "session_not_active" };
+  | {
+      readonly status: "session_not_active";
+      /** The workflow exists but its inbox is not yet available; no delivery was accepted. */
+      readonly retryable?: boolean;
+    };
 
 /** Result of terminally resetting a session. */
 export type ResetSessionResult =
@@ -269,6 +275,8 @@ export interface DispatchSessionInput<TCommand extends SessionCommand = SessionC
  * metadata so both cross the durable hook boundary outside adapter-owned data.
  */
 export interface DeliverHookPayload {
+  /** Initial workflow title; ignored once session initialization has run. */
+  readonly title?: string;
   readonly auth?: SessionAuthContext | null;
   /** Delegated caller waiting for this turn's settled result. */
   readonly caller?: TurnCaller;
@@ -529,7 +537,8 @@ export interface RunInput {
    */
   readonly initiatorAuth?: SessionAuthContext | null;
   readonly input: {
-    readonly message: string | UserContent;
+    /** Omitted only when creating a conversation session before its first turn. */
+    readonly message?: string | UserContent;
     readonly context?: readonly string[];
     readonly outputSchema?: JsonObject;
   };

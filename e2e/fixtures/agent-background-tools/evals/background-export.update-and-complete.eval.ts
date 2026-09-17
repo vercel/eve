@@ -9,6 +9,7 @@ export default defineEval({
     "An authored background defineTool yields state and progress, explicitly posts a message, then completes; the parent sees both.",
   async test(t) {
     const started = await t.send("BACKGROUND-EXPORT-START");
+    const conversation = started.session;
     started.expectOk();
     started.calledTool("export");
 
@@ -16,11 +17,11 @@ export default defineEval({
     const taskId = readTaskId(receipt.output);
     if (taskId === undefined) throw new Error("export receipt is missing taskId.");
 
-    const sessionId = t.sessionId;
+    const sessionId = conversation.sessionId;
     if (sessionId === undefined) throw new Error("Eval has no parent session id.");
 
     const updateLive = t.target.watchTurn(sessionId, {
-      startIndex: requireStreamIndex(t, "update wait"),
+      startIndex: requireStreamIndex(started.session, "update wait"),
     });
     const updateTurn = await updateLive.result();
     updateTurn.expectOk();

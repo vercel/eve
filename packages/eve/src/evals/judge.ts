@@ -10,7 +10,7 @@ import type { AssertionHandle, EveEvalJudgeConfig, JudgeContext, JudgeOpts } fro
 
 /**
  * Dependencies the judge namespace closes over: where to record assertions,
- * how to resolve the default graded value (`t.reply`) and the original prompt
+ * how to resolve the default graded value (the most recently settled turn) and the original prompt
  * (the autoevals `input`), and the eval/config judge model.
  */
 export interface JudgeDeps {

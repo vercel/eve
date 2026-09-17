@@ -16,9 +16,10 @@ export default defineEval({
       `Run the bash command \`printf %s ${PERSIST_TOKEN} > ${PERSIST_PATH}\`. ` +
         "Reply with the single word: done.",
     );
+    const session = first.session;
     first.expectOk();
 
-    const second = await t.send(
+    const second = await session.send(
       `Run the bash command \`cat ${PERSIST_PATH}\` and reply with the file contents verbatim.`,
     );
 

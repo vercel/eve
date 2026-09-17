@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
 
 import { defineEval } from "eve/evals";
 import { equals } from "eve/evals/expect";
@@ -21,14 +22,17 @@ export default defineEval({
         "Alice is preparing a QA summary for a sample software backlog. Use the workflow tool exactly once, and call its subagents only from that program.",
         `Create a minimal array of exactly 200 tickets with ids \`T-000\` through \`T-199\`. Each ticket must contain only \`id\`, except \`T-000\` also has \`triageLabel\` set to \`TRIAGE-${token}\` and \`T-199\` also has \`reviewLabel\` set to \`REVIEW-${token}\`.`,
         "Use Promise.all to run ticket-triage and ticket-review concurrently, passing the complete tickets array to both calls. Use `outputSchema` to request exactly `{ ticketCount: integer, priorityTicket: string, summaryLabel: string }` from ticket-triage and `{ ticketCount: integer, accepted: boolean, summaryLabel: string }` from ticket-review.",
-        "After both complete, call ticket-reproducer with the returned `{ triage, review }` objects and use `outputSchema` to request exactly `{ combinedLabel: string, sampleTicket: string, verificationNote: string }`. Make every listed output field required and allow no additional output fields.",
+        "After both complete, call ticket-reproducer with the returned `{ triage, review }` objects as JSON. The reproducer already has its output rules; pass the objects without adding formatting instructions. Use `outputSchema` to request exactly `{ combinedLabel: string, sampleTicket: string, verificationNote: string }`. Make every listed output field required and allow no additional output fields.",
         "Return `{ reproduction, review, triage }` and reply with only that returned JSON object.",
       ].join(" "),
     );
 
     turn.expectOk();
     t.succeeded();
-    t.calledTool("workflow", { count: 1, output: exactOutput(expected) });
+    t.calledTool("workflow", {
+      count: 1,
+      output: (observed) => isDeepStrictEqual(observed, expected),
+    });
     t.calledSubagent(TRIAGE, { count: 1, status: "pending" });
     t.calledSubagent(REVIEW, { count: 1, status: "pending" });
     t.calledSubagent(REPRODUCE, { count: 1, status: "pending" });
@@ -75,34 +79,6 @@ function expectedFactoryOutput(token: string) {
     review,
     triage,
   };
-}
-
-function exactOutput(expected: ReturnType<typeof expectedFactoryOutput>) {
-  return (observed: unknown) => structurallyEqual(observed, expected);
-}
-
-function structurallyEqual(left: unknown, right: unknown): boolean {
-  if (left === right) return true;
-  if (Array.isArray(left) || Array.isArray(right)) {
-    return (
-      Array.isArray(left) &&
-      Array.isArray(right) &&
-      left.length === right.length &&
-      left.every((value, index) => structurallyEqual(value, right[index]))
-    );
-  }
-  if (left === null || right === null || typeof left !== "object" || typeof right !== "object") {
-    return false;
-  }
-  const leftEntries = Object.entries(left);
-  const rightRecord = right as Record<string, unknown>;
-  return (
-    leftEntries.length === Object.keys(rightRecord).length &&
-    leftEntries.every(
-      ([key, value]) =>
-        Object.hasOwn(rightRecord, key) && structurallyEqual(value, rightRecord[key]),
-    )
-  );
 }
 
 function parseJsonMessage(message: string | undefined): unknown {

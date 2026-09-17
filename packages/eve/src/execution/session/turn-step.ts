@@ -1,3 +1,5 @@
+import { deriveSessionTitle } from "#execution/eve-workflow-attributes.js";
+import { setEveAttributes } from "#runtime/attributes/emit.js";
 import { defaultDeliverResult } from "#channel/adapter.js";
 import { contextStorage } from "#context/container.js";
 import {
@@ -12,6 +14,9 @@ import {
 } from "#context/dynamic-tool-lifecycle.js";
 import {
   AuthKey,
+  InitiatorAuthKey,
+  SessionTitleKey,
+  ParentSessionKey,
   CapabilitiesKey,
   ChannelDeliveryKey,
   HandleEventKey,
@@ -159,6 +164,7 @@ async function runSessionStep(input: TurnStepInput): Promise<DurableStepResult> 
   // input has no auth; it was seeded by buildRunContext).
   if (delivery?.auth !== undefined) {
     ctx.set(AuthKey, delivery.auth ?? null);
+    if (!ctx.has(InitiatorAuthKey)) ctx.set(InitiatorAuthKey, delivery.auth ?? null);
   }
   const backgroundTaskDelivery = getBackgroundTaskDelivery(delivery);
   const initialSession = hydrateDurableSession({
@@ -176,6 +182,18 @@ async function runSessionStep(input: TurnStepInput): Promise<DurableStepResult> 
     sessionId: initialSession.sessionId,
   });
   const initialEmissionState = getHarnessEmissionState(initialSession.state);
+  if (
+    !initialEmissionState.sessionStarted &&
+    !ctx.has(SessionTitleKey) &&
+    !ctx.has(ParentSessionKey)
+  ) {
+    const message = rawDelivery?.payloads.find((payload) => payload.message !== undefined)?.message;
+    const title = deriveSessionTitle(rawDelivery?.title ?? message);
+    if (title !== undefined) {
+      ctx.set(SessionTitleKey, title);
+      await setEveAttributes({ "$eve.title": title });
+    }
+  }
 
   if (rawDelivery !== undefined) {
     await contextStorage.run(ctx, () =>
@@ -520,7 +538,9 @@ async function runSessionStep(input: TurnStepInput): Promise<DurableStepResult> 
 
             return runHarnessStep(schemaSession, stepInput);
           });
-          throwIfTurnAborted(input.abortSignal);
+          // The waiting boundary may reach the client before this step returns.
+          // Its settled result wins over a cancellation of that completed turn.
+          if (result.settledTurn === undefined) throwIfTurnAborted(input.abortSignal);
           completedModelCall = { result, serializedContext: serializeContext(ctx) };
           return result;
         },

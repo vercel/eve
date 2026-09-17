@@ -63,6 +63,7 @@ export async function turnWorkflow(rawInput: unknown): Promise<void> {
         prepared.input.delivery === undefined
           ? undefined
           : { ...prepared.input.delivery, caller: undefined },
+      awaitFirstMessage: false,
       mode,
       retention: prepared.input.retention,
       serializedContext: interrupted.serializedContext,
