@@ -69,6 +69,7 @@ import {
   parseCreateBody,
   parseIncludeTailIndex,
   parseJsonRequest,
+  parseOptionalJsonRequest,
   parseResetBody,
   parseSessionControlBody,
   parseSessionMessageBody,
@@ -150,7 +151,7 @@ export function eveChannel(input: EveChannelInput): EveChannel {
         const authResult = await routeAuth(req, input.auth);
         if (authResult instanceof Response) return authResult;
 
-        const payload = await parseJsonRequest(req);
+        const payload = await parseOptionalJsonRequest(req);
         if (payload instanceof Response) return payload;
         const tokenRejection = rejectSessionContinuationToken(payload);
         if (tokenRejection !== null) return tokenRejection;

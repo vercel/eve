@@ -47,7 +47,10 @@ function createArgs(session = createFixedSession()): RouteHandlerArgs {
 }
 
 describe("eve ID-addressed session routes", () => {
-  it("creates and parks a conversation without invoking the first-message hook", async () => {
+  it.each([
+    ["without a request body", undefined],
+    ["with an empty JSON object", "{}"],
+  ])("creates and parks a conversation %s", async (_description, body) => {
     const createSession = vi.fn().mockResolvedValue({
       events: new ReadableStream(),
       sessionId: "wrun_A",
@@ -60,8 +63,8 @@ describe("eve ID-addressed session routes", () => {
       onMessage,
     })(
       new Request("https://eve.test/eve/v1/session", {
-        body: "{}",
-        headers: { "content-type": "application/json" },
+        body,
+        headers: body === undefined ? undefined : { "content-type": "application/json" },
         method: "POST",
       }),
       args,
@@ -85,6 +88,26 @@ describe("eve ID-addressed session routes", () => {
         mode: "conversation",
       }),
     );
+  });
+
+  it.each([
+    ["malformed JSON", "{"],
+    ["a non-object JSON value", "[]"],
+  ])("rejects %s when creating a session", async (_description, body) => {
+    const createSession = vi.fn();
+    const args = attachRouteSessionCreator(createArgs(), createSession);
+
+    const response = await route("POST", "/eve/v1/session")(
+      new Request("https://eve.test/eve/v1/session", {
+        body,
+        headers: { "content-type": "application/json" },
+        method: "POST",
+      }),
+      args,
+    );
+
+    expect(response.status).toBe(400);
+    expect(createSession).not.toHaveBeenCalled();
   });
 
   it("creates a session without a continuation token", async () => {

@@ -366,9 +366,7 @@ async function postCreateSession(
   options: CreateSessionOptions,
 ): Promise<Response> {
   const headers = await context.resolveHeaders(options.headers);
-  headers.set("content-type", "application/json");
   const response = await fetch(createClientUrl(context.host, EVE_SESSION_ROUTE_PATH), {
-    body: "{}",
     headers,
     method: "POST",
     redirect: context.redirect,

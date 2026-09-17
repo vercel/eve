@@ -264,7 +264,9 @@ export async function parseSessionControlBody(
   return rejectSessionContinuationToken(payload) ?? payload;
 }
 
-async function parseOptionalJsonRequest(req: Request): Promise<Record<string, unknown> | Response> {
+export async function parseOptionalJsonRequest(
+  req: Request,
+): Promise<Record<string, unknown> | Response> {
   let text: string;
   try {
     text = await req.text();

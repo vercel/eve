@@ -38,12 +38,10 @@ The session routes use only durable session IDs. Create a session explicitly, th
 
 ### Start and continue a session
 
-Create a conversation session before its first message by sending an empty object:
+Create a conversation session before its first message with a bodyless request:
 
 ```bash
-curl -X POST https://<deployment>/eve/v1/session \
-  -H "Content-Type: application/json" \
-  -d '{}'
+curl -X POST https://<deployment>/eve/v1/session
 # {"ok":true,"sessionId":"wrun_A","status":"accepted"}
 ```
 

@@ -27,7 +27,7 @@ describe("Client.sessions", () => {
 
     expect(requests).toHaveLength(1);
     expect(new URL(requests[0]!.url).pathname).toBe("/eve/v1/session");
-    expect(JSON.parse(requests[0]!.body!)).toEqual({});
+    expect(requests[0]!.body).toBeUndefined();
     expect(session.state).toEqual({ sessionId: "wrun_prewarmer", streamIndex: 0 });
   });
 
