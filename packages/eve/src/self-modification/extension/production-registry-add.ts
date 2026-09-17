@@ -6,6 +6,7 @@ import type { PreparedSelfModificationWorkspace } from "../git-workspace.js";
 import { gitOutput, runGitCommand } from "../git.js";
 import { assertFullSha } from "../identifiers.js";
 import { readTerminalHeadlessEvent } from "./eve-add.js";
+import type { RegistrySourceTransform } from "./registry-install-plan.js";
 
 const OFFICIAL_ADDRESS =
   /^(?:(?:channel|connection|extension|instrumentation)\/)?[a-z0-9][a-z0-9._-]*$/u;
@@ -40,7 +41,8 @@ export async function installProductionRegistryItem(input: {
   readonly address: string;
   readonly answers?: Readonly<Record<string, unknown>>;
   readonly installed?: boolean;
-  readonly sandbox: Pick<SandboxSession, "run">;
+  readonly transform?: RegistrySourceTransform;
+  readonly sandbox: Pick<SandboxSession, "readTextFile" | "run" | "writeTextFile">;
   readonly signal?: AbortSignal;
   readonly workspace: PreparedSelfModificationWorkspace;
 }): Promise<ProductionRegistryInstallResult> {
@@ -132,7 +134,7 @@ export async function installProductionRegistryItem(input: {
     `${key}=${JSON.stringify(value)}`,
   ]);
   try {
-    const command = `${quote(executable)} add ${quote(input.address)} --non-interactive ${input.installed === true ? "--skip-install " : ""}${answerArgs.map(quote).join(" ")}`;
+    const command = `${quote(executable)} add ${quote(input.address)} --non-interactive ${input.installed === true ? "--skip-install " : ""}${input.transform === undefined ? "" : "--skip-setup "}${answerArgs.map(quote).join(" ")}`;
     const result = await input.sandbox.run({
       abortSignal: input.signal,
       command: isolatedCommand(applicationRoot, command),
@@ -141,6 +143,21 @@ export async function installProductionRegistryItem(input: {
       `${String(result.stdout ?? "")}\n${String(result.stderr ?? "")}`,
     );
     if (event?.type === "completed" && event.item === input.address && result.exitCode === 0) {
+      if (input.transform !== undefined) {
+        try {
+          const path = `${applicationRoot}/${input.transform.target}`;
+          const source = await input.sandbox.readTextFile({ path });
+          const next = source === null ? undefined : input.transform.apply(source);
+          if (next === undefined) throw new Error("Registry source transform did not apply.");
+          await input.sandbox.writeTextFile({ content: next, path });
+        } catch {
+          await restoreTree(input.sandbox, input.workspace.repositoryPath, startingTree);
+          return {
+            kind: "failed",
+            message: `Installed ${input.address}, but could not finish configuring it. Project files were restored.`,
+          };
+        }
+      }
       const resultingTree = await captureTree(input.sandbox, input.workspace.repositoryPath);
       return {
         kind: "completed",
