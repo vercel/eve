@@ -1,6 +1,6 @@
 import { beforeEach, expect, it, vi } from "vitest";
 
-import { createWorkflowToolInvocationReader } from "#execution/tools/workflow/invocation.js";
+import { runWorkflowToolInvocation } from "#execution/tools/workflow/invocation.js";
 
 const mocks = vi.hoisted(() => ({
   sleep: vi.fn(),
@@ -59,7 +59,7 @@ beforeEach(() => {
 });
 
 it("does not start the body until the invocation owner reads", async () => {
-  createWorkflowToolInvocationReader(input, new AbortController().signal);
+  runWorkflowToolInvocation(input, new AbortController().signal);
 
   expect(mocks.executeWorkflowBody).not.toHaveBeenCalled();
 });
@@ -91,9 +91,9 @@ it("emits every persisted report before the terminal outcome", async () => {
     ),
   });
 
-  const reader = createWorkflowToolInvocationReader(input, new AbortController().signal);
-  await expect(reader.iterator.next()).resolves.toEqual({ done: false, value: report });
-  await expect(reader.iterator.next()).resolves.toEqual({
+  const reader = runWorkflowToolInvocation(input, new AbortController().signal);
+  await expect(reader.next()).resolves.toEqual({ done: false, value: report });
+  await expect(reader.next()).resolves.toEqual({
     done: false,
     value: {
       from: expect.objectContaining({ callId: "call-1", execution: "background" }),
@@ -140,8 +140,8 @@ for (const execution of ["blocking", "background"] as const) {
                 : { status: "completed", output: "late success" },
         };
       });
-      const reader = createWorkflowToolInvocationReader({ ...input, execution }, controller.signal);
-      const next = reader.iterator.next();
+      const reader = runWorkflowToolInvocation({ ...input, execution }, controller.signal);
+      const next = reader.next();
       await started.promise;
       controller.abort(new Error("stop"));
       if (status !== "blocked") release.resolve();
@@ -152,7 +152,7 @@ for (const execution of ["blocking", "background"] as const) {
           result: { status: "cancelled", reason: "stop" },
         },
       });
-      await expect(reader.iterator.next()).resolves.toMatchObject({ done: true });
+      await expect(reader.next()).resolves.toMatchObject({ done: true });
     },
   );
 }
@@ -160,8 +160,8 @@ for (const execution of ["blocking", "background"] as const) {
 it("does not start a body cancelled before its first read", async () => {
   const controller = new AbortController();
   controller.abort(new Error("never admitted"));
-  const reader = createWorkflowToolInvocationReader(input, controller.signal);
-  await expect(reader.iterator.next()).resolves.toMatchObject({
+  const reader = runWorkflowToolInvocation(input, controller.signal);
+  await expect(reader.next()).resolves.toMatchObject({
     value: { result: { status: "cancelled" } },
   });
   expect(mocks.executeWorkflowBody).not.toHaveBeenCalled();

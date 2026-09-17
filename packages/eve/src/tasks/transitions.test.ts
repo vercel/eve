@@ -1,3 +1,4 @@
+import type { JsonValue } from "#shared/json.js";
 import { describe, expect, it } from "vitest";
 
 import { applyTaskTransition } from "#tasks/transitions.js";
@@ -48,7 +49,7 @@ describe("applyTaskTransition", () => {
   });
 });
 
-function outcome(output: import("#shared/json.js").JsonValue) {
+function outcome(output: JsonValue) {
   return {
     kind: "outcome" as const,
     result: { status: "completed" as const, output },

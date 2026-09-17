@@ -252,7 +252,7 @@ describe("owner agent invocation dispatch", () => {
         rootSessionId: "root-session",
         rootTurnId: "root-turn",
       };
-      const indexedSession = registerWorkflowInvocation(session as never, {
+      const indexedSession = registerWorkflowInvocation(session, {
         callId: "task-1",
         toolName: { kind: taskKind, name: "research" }.name,
         resultKind: "tool" as const,
@@ -346,7 +346,7 @@ describe("owner agent invocation dispatch", () => {
       [AuthKey.name]: null,
       [InitiatorAuthKey.name]: sessionInitiatorAuth,
     };
-    const indexedSession = registerWorkflowInvocation(session as never, {
+    const indexedSession = registerWorkflowInvocation(session, {
       callId: "task-1",
       toolName: "research",
       resultKind: "tool" as const,

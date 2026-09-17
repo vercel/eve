@@ -1,6 +1,7 @@
+import type { HandoffWorkflowEntryInput } from "./entry-input.js";
 import type { RunCreatedEventRequest } from "@workflow/world";
 import { DEFAULT_SESSION_TIMEOUT_MS } from "#execution/session/timeout.js";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { assert, afterEach, describe, expect, it, vi } from "vitest";
 import { getWorld, resumeHook, start } from "#internal/workflow/runtime.js";
 import {
   dehydrateWorkflowArguments,
@@ -1505,7 +1506,7 @@ describe("workflowEntry integration", () => {
             if (pending === undefined) {
               pending = (async () => {
                 const args = (await hydrateWorkflowArguments(encoded, runId, undefined)) as [
-                  import("./entry-input.js").HandoffWorkflowEntryInput,
+                  HandoffWorkflowEntryInput,
                 ];
                 expect(args[0].kind).toBe("handoff");
                 candidateId = runId;
@@ -1585,7 +1586,7 @@ describe("workflowEntry integration", () => {
               sessionId: anchor.runId,
             });
             expect((await stream.nextTurn()).at(-1)?.type).toBe("session.waiting");
-            expect(candidateId).toBeDefined();
+            assert(candidateId !== undefined);
             expect(
               (
                 await waitForCommandHookOwner(
@@ -1598,7 +1599,7 @@ describe("workflowEntry integration", () => {
                 ([runId, event]) => runId === candidateId && event.eventType === "hook_created",
               ),
             ).toBe(false);
-            const candidateHooks = await world.hooks.list({ runId: candidateId! });
+            const candidateHooks = await world.hooks.list({ runId: candidateId });
             expect(candidateHooks.data).toEqual([]);
             const turns = await vi.waitFor(
               async () => {

@@ -50,16 +50,15 @@ async function cancelAgentInvocationOwner(input: {
       candidate.phase === "claimed" && candidate.ownerId === input.ownerId,
   );
   if (handles.length === 0) return;
-  const remoteContext = handles.some((handle) => handle.address.kind === "agent/remote")
-    ? deserializeContext(input.serializedContext)
-    : undefined;
+  let remoteContext: ReturnType<typeof deserializeContext> | undefined;
   const results = await Promise.allSettled(
     handles.map(async (handle) => {
       if (handle.address.kind !== "agent/remote") {
         await requestWorkflowTurnCancellation({ sessionId: handle.address.sessionId });
         return;
       }
-      const ctx = (await remoteContext)!;
+      remoteContext ??= deserializeContext(input.serializedContext);
+      const ctx = await remoteContext;
       const bundle = ctx.require(BundleKey);
       const selection = getDynamicSubagentSelection(ctx, handle.identity.nodeId);
       const remote = resolveRemoteAgentForAction({

@@ -2,14 +2,13 @@ import { ContextContainer } from "#context/container.js";
 import { beforeEach, expect, it, vi } from "vitest";
 import { cancelBackgroundAgentTask, cancelAgentInvocationOwnerStep } from "./task-cancel.js";
 import { requestWorkflowTurnCancellation } from "#execution/workflow-runtime.js";
-import { readDurableSession } from "#execution/durable-session-store.js";
+import { createTestSessionState } from "#internal/testing/session-state.js";
 import { deserializeContext } from "#context/serialize.js";
 import { cancelRemoteAgentTurn, resolveRemoteAgentForAction } from "#subagents/remote-dispatch.js";
 import { setAgentHandleStore, type AgentHandle } from "#subagents/handles/store.js";
 import type { TaskWorkflowInvocation } from "#harness/workflow-invocations.js";
 
 vi.mock("#execution/workflow-runtime.js", () => ({ requestWorkflowTurnCancellation: vi.fn() }));
-vi.mock("#execution/durable-session-store.js", () => ({ readDurableSession: vi.fn() }));
 vi.mock("#context/serialize.js", () => ({ deserializeContext: vi.fn() }));
 vi.mock("#context/dynamic-subagent-lifecycle.js", () => ({ getDynamicSubagentSelection: vi.fn() }));
 vi.mock("#subagents/remote-dispatch.js", () => ({
@@ -61,13 +60,14 @@ it.each(["background", "waiting"])(
     if (mode === "background") {
       await cancelBackgroundAgentTask({ entry, session, serializedContext: {} });
     } else {
-      vi.mocked(readDurableSession).mockReturnValue(
-        session as ReturnType<typeof readDurableSession>,
-      );
+      const sessionState = createTestSessionState();
       await cancelAgentInvocationOwnerStep({
         ownerId: "owner",
         serializedContext: {},
-        sessionState: {} as Parameters<typeof cancelAgentInvocationOwnerStep>[0]["sessionState"],
+        sessionState: {
+          ...sessionState,
+          snapshot: { session: { ...sessionState.snapshot.session, ...session } },
+        },
       });
     }
     expect(requestWorkflowTurnCancellation).toHaveBeenCalledTimes(2);
@@ -86,13 +86,11 @@ it("propagates child cancellation failure so background cancellation can retry",
 });
 
 it("waits for sibling cancellation requests before returning a failure", async () => {
-  let release!: () => void;
+  const release = Promise.withResolvers<void>();
   vi.mocked(requestWorkflowTurnCancellation)
     .mockRejectedValueOnce(new Error("first child failed"))
     .mockImplementationOnce(async () => {
-      await new Promise<void>((resolve) => {
-        release = resolve;
-      });
+      await release.promise;
       return { status: "accepted", sessionId: "child-b" };
     });
   const cancellation = cancelBackgroundAgentTask({ entry, session, serializedContext: {} });
@@ -101,7 +99,7 @@ it("waits for sibling cancellation requests before returning a failure", async (
   await Promise.resolve();
   await Promise.resolve();
   expect(rejected).not.toHaveBeenCalled();
-  release();
+  release.resolve();
   await expect(cancellation).rejects.toThrow("Failed to cancel owned agent turns");
 });
 
@@ -128,11 +126,19 @@ it("cancels remote children at their recorded address", async () => {
   vi.spyOn(ctx, "require").mockReturnValue({ subagentRegistry: { subagentsByNodeId: new Map() } });
   vi.mocked(deserializeContext).mockResolvedValue(ctx);
   vi.mocked(resolveRemoteAgentForAction).mockReturnValue({
+    kind: "remote",
+    name: "research",
+    description: "Research",
+    nodeId: "subagents/research",
+    path: "/research",
+    logicalPath: "subagents/research",
+    sourceId: "research",
+    sourceKind: "module",
     url: "https://new.example",
-  } as ReturnType<typeof resolveRemoteAgentForAction>);
+  });
   await cancelBackgroundAgentTask({ entry, session: remoteSession, serializedContext: {} });
   expect(cancelRemoteAgentTurn).toHaveBeenCalledWith({
-    remote: { url: "https://original.example" },
+    remote: expect.objectContaining({ url: "https://original.example" }),
     sessionId: "remote",
   });
 });

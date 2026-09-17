@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { assert, describe, expect, it } from "vitest";
 import type { HarnessSession } from "#harness/types.js";
 import {
   readWorkflowTaskView,
@@ -364,7 +364,8 @@ describe("session task index", () => {
         },
       });
       expect(entry?.address).toEqual(base.address);
-      expect(() => readWorkflowTaskView(entry!.task)).toThrow("Corrupt workflow task result");
+      assert(entry !== undefined);
+      expect(() => readWorkflowTaskView(entry.task)).toThrow("Corrupt workflow task result");
       expect(() =>
         registerWorkflowInvocation(createSession(), {
           ...base,

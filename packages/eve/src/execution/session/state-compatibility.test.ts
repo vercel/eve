@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { assert, describe, expect, it } from "vitest";
 import { createTestSessionState } from "#internal/testing/session-state.js";
 import { isSessionStateIdleForHandoff } from "#execution/session/handoff-steps.js";
 import {
@@ -157,7 +157,8 @@ describe("additive durable state", () => {
         ],
       },
     });
-    expect(isSessionStateIdleForHandoff(checkpoint(restored(saved!)))).toBe(true);
+    assert(saved !== undefined);
+    expect(isSessionStateIdleForHandoff(checkpoint(restored(saved)))).toBe(true);
     const cancelled = cacheWorkflowTaskView(saved, {
       taskId: "task",
       metadata,
@@ -167,9 +168,9 @@ describe("additive durable state", () => {
       futureView: true,
       status: "cancelled",
     });
-    expect(
-      readWorkflowTaskView(getTaskInvocations(restored(cancelled))[0]!.task)?.lastOutput,
-    ).toBeUndefined();
+    const [retained] = getTaskInvocations(restored(cancelled));
+    assert(retained !== undefined);
+    expect(readWorkflowTaskView(retained.task)?.lastOutput).toBeUndefined();
   });
 });
 

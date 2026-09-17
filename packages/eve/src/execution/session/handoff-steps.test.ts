@@ -68,7 +68,9 @@ describe("validateSessionCheckpointStep", () => {
   });
 
   it.each([4, 6])("rejects checkpoint version %s before reading nested state", async (version) => {
-    const checkpoint: SessionCheckpoint = { ...createCheckpoint(), version: version as never };
+    const checkpoint = createCheckpoint();
+    // Simulate an incompatible checkpoint received over the wire.
+    Object.assign(checkpoint, { version });
 
     await expect(validateSessionCheckpointStep({ checkpoint })).rejects.toThrow(
       `Unsupported session checkpoint version ${version}`,

@@ -17,7 +17,7 @@ describe("defineTool auth field", () => {
       execute: () => null,
     };
 
-    expect(() => defineTool(definition as never)).toThrow(/"auth" field is no longer supported/);
+    expect(() => defineTool(definition)).toThrow(/"auth" field is no longer supported/);
   });
 });
 
@@ -36,13 +36,12 @@ describe("defineTool approvalKey", () => {
   });
 
   it("rejects background execution", () => {
-    expect(() =>
-      defineTool({
-        description: "Scoped background write",
-        execution: "background",
-        inputSchema: z.object({ scope: z.string() }),
-        execute: async () => null,
-      } as never),
-    ).toThrow("Use defineWorkflowTool for background work");
+    const definition = {
+      description: "Scoped background write",
+      execution: "background",
+      inputSchema: z.object({ scope: z.string() }),
+      execute: async () => null,
+    };
+    expect(() => defineTool(definition)).toThrow("Use defineWorkflowTool for background work");
   });
 });

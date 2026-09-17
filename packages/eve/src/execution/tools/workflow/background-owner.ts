@@ -12,7 +12,7 @@ import {
   wakeWorkflowTaskInputRequestParentStep,
 } from "#execution/tasks/child/steps.js";
 import type { BackgroundWorkflowToolRunInput } from "#execution/tools/workflow/types.js";
-import { createWorkflowToolInvocationReader } from "#execution/tools/workflow/invocation.js";
+import { runWorkflowToolInvocation } from "#execution/tools/workflow/invocation.js";
 import { resumeHookStep } from "#execution/tools/workflow/resume-hook-step.js";
 import type {
   WorkflowToolAuthorizationRequest,
@@ -20,7 +20,11 @@ import type {
   WorkflowToolRunReport,
   WorkflowToolRunMessage,
 } from "#execution/tools/workflow/messages.js";
-import { createChannelReader, raceChannelReads } from "#execution/tools/workflow/owner-channels.js";
+import {
+  createChannelReader,
+  raceChannelReads,
+  type ChannelReader,
+} from "#execution/tools/workflow/owner-channels.js";
 import { workflowToolRunInputRequests } from "#execution/tools/workflow/owner-inbox.js";
 import type { AnswerHookRoute } from "#harness/proxy-input-requests.js";
 import { applyTaskTransition } from "#tasks/transitions.js";
@@ -44,7 +48,7 @@ export async function runBackgroundWorkflowTool(
   let updateIndex = 0;
   const answerHooks = new Map<string, AnswerHookRoute>();
   const bodyController = new AbortController();
-  let invocationReader: ReturnType<typeof createWorkflowToolInvocationReader> | undefined;
+  let invocationReader: ChannelReader<"workflow", WorkflowToolRunMessage> | undefined;
   let invocationSettled = false;
 
   try {
@@ -107,9 +111,12 @@ export async function runBackgroundWorkflowTool(
           invocationSettled = true;
           await wakeTaskParentStep({ token: input.parentContinuationToken, view });
         } else {
-          invocationReader = createWorkflowToolInvocationReader(
-            { ...input.workflow, execution: "background" },
-            bodyController.signal,
+          invocationReader = createChannelReader(
+            "workflow",
+            runWorkflowToolInvocation(
+              { ...input.workflow, execution: "background" },
+              bodyController.signal,
+            ),
           );
         }
         continue;

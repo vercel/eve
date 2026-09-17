@@ -8,11 +8,7 @@ import {
   type WorkflowBodyResult,
 } from "#execution/tools/workflow/body.js";
 import type { WorkflowToolRunMessage } from "#execution/tools/workflow/messages.js";
-import {
-  createChannelReader,
-  raceChannelReads,
-  type ChannelReader,
-} from "#execution/tools/workflow/owner-channels.js";
+import { createChannelReader, raceChannelReads } from "#execution/tools/workflow/owner-channels.js";
 import { openWorkflowToolRunOwnerInbox } from "#execution/tools/workflow/owner.js";
 
 export interface WorkflowToolInvocationInput extends WorkflowBodyDefinition {
@@ -21,17 +17,9 @@ export interface WorkflowToolInvocationInput extends WorkflowBodyDefinition {
 
 /**
  * Starts one workflow body and exposes its requests, reports, and outcome as a
- * single ordered stream. Creating the reader is inert until its owner reads it.
+ * single ordered stream. The body starts when its owner reads the stream.
  */
-export function createWorkflowToolInvocationReader(
-  input: WorkflowToolInvocationInput,
-  signal: AbortSignal,
-  cancelled?: Promise<never>,
-): ChannelReader<"workflow", WorkflowToolRunMessage> {
-  return createChannelReader("workflow", runInvocation(input, signal, cancelled));
-}
-
-async function* runInvocation(
+export async function* runWorkflowToolInvocation(
   input: WorkflowToolInvocationInput,
   signal: AbortSignal,
   cancelled?: Promise<never>,

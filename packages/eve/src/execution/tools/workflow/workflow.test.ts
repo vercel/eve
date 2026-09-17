@@ -1,5 +1,4 @@
 import { afterEach, expect, it, vi } from "vitest";
-import { createChannelReader } from "#execution/tools/workflow/owner-channels.js";
 import { workflowToolRunWorkflow } from "#execution/tools/workflow/workflow.js";
 
 const mocks = vi.hoisted(() => ({
@@ -13,7 +12,7 @@ vi.mock("#execution/tools/workflow/run-control.js", () => ({
   openWorkflowToolRunControlInbox: mocks.control,
 }));
 vi.mock("#execution/tools/workflow/invocation.js", () => ({
-  createWorkflowToolInvocationReader: mocks.invocation,
+  runWorkflowToolInvocation: mocks.invocation,
 }));
 vi.mock("#execution/tools/workflow/resume-hook-step.js", () => ({
   resumeHookStep: mocks.deliver,
@@ -65,12 +64,9 @@ it("delivers a terminal invocation outcome to the turn owner", async () => {
     result: { status: "completed" as const, output: "done" },
   };
   mocks.invocation.mockReturnValue(
-    createChannelReader(
-      "workflow",
-      (async function* () {
-        yield message;
-      })(),
-    ),
+    (async function* () {
+      yield message;
+    })(),
   );
   await workflowToolRunWorkflow(input);
   expect(mocks.deliver).toHaveBeenCalledExactlyOnceWith("owner", message, { ifPresent: false });

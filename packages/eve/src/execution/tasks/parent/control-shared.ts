@@ -49,8 +49,9 @@ export async function readTaskView(entry: TaskWorkflowInvocation): Promise<TaskV
       (await readLatestTaskView({ taskRunId: entry.address.runId })) ?? createPendingTaskView(entry)
     );
   } catch (error) {
-    if (isTaskWorkflowTargetGone(error) && entry.task.terminalView !== undefined) {
-      return readWorkflowTaskView(entry.task)!;
+    if (isTaskWorkflowTargetGone(error)) {
+      const retained = readWorkflowTaskView(entry.task);
+      if (retained !== undefined) return retained;
     }
     throw error;
   }

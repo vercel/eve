@@ -126,14 +126,13 @@ describe("definition helper exact inputs", () => {
   });
 
   it("rejects background execution on ordinary tools", () => {
-    expect(() =>
-      defineTool({
-        description: "Start a durable export.",
-        execution: "background",
-        inputSchema: z.object({ jobId: z.string() }),
-        execute: async () => null,
-      } as never),
-    ).toThrow("Use defineWorkflowTool for background work");
+    const definition = {
+      description: "Start a durable export.",
+      execution: "background",
+      inputSchema: z.object({ jobId: z.string() }),
+      execute: async () => null,
+    };
+    expect(() => defineTool(definition)).toThrow("Use defineWorkflowTool for background work");
   });
 
   it("infers tool input from Zod 3 schemas", () => {

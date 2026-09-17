@@ -328,7 +328,7 @@ export function defineTool<TInput = unknown, TOutput = unknown>(
 export function defineTool<TInput = unknown, TOutput = unknown>(
   definition: ToolDefinition<TInput, TOutput>,
 ): ToolDefinition<TInput, TOutput> {
-  if ((definition as { readonly execution?: unknown }).execution !== undefined) {
+  if ("execution" in definition && definition.execution !== undefined) {
     throw new Error(
       'defineTool: "execution" is not supported. Use defineWorkflowTool for background work.',
     );

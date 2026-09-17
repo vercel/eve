@@ -118,12 +118,8 @@ describe("cancelDescendantTurnsStep", () => {
   });
 
   it("signals owned children while their workflow is still unwinding", async () => {
-    let settle!: () => void;
-    vi.mocked(cancelWorkflowToolRun).mockReturnValueOnce(
-      new Promise<void>((resolve) => {
-        settle = resolve;
-      }),
-    );
+    const settlement = Promise.withResolvers<void>();
+    vi.mocked(cancelWorkflowToolRun).mockReturnValueOnce(settlement.promise);
     vi.mocked(requestWorkflowTurnCancellation).mockResolvedValue({
       status: "accepted",
       sessionId: "local-child",
@@ -168,7 +164,7 @@ describe("cancelDescendantTurnsStep", () => {
     await Promise.resolve();
     expect(cancelWorkflowToolRun).toHaveBeenCalled();
     expect(requestWorkflowTurnCancellation).toHaveBeenCalledWith({ sessionId: "local-child" });
-    settle();
+    settlement.resolve();
     await cancellation;
   });
 

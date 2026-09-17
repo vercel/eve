@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { assert, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { WorkflowToolRunMessage } from "#execution/tools/workflow/messages.js";
 import { runBackgroundWorkflowTool } from "#execution/tools/workflow/background-owner.js";
@@ -22,7 +22,7 @@ const mocks = vi.hoisted(() => ({
   wakeTaskParentStep: vi.fn(),
   wakeTaskUpdateParentStep: vi.fn(),
   wakeWorkflowTaskInputRequestParentStep: vi.fn(),
-  createWorkflowToolInvocationReader: vi.fn(() => ({ channel: "workflow" })),
+  runWorkflowToolInvocation: vi.fn(async function* () {}),
 }));
 
 vi.mock("#compiled/@workflow/core/index.js", async (importOriginal) => ({
@@ -51,7 +51,7 @@ vi.mock("#execution/tools/workflow/resume-hook-step.js", () => ({
   resumeHookStep: mocks.resumeHookStep,
 }));
 vi.mock("#execution/tools/workflow/invocation.js", () => ({
-  createWorkflowToolInvocationReader: mocks.createWorkflowToolInvocationReader,
+  runWorkflowToolInvocation: mocks.runWorkflowToolInvocation,
 }));
 
 const initialView = {
@@ -145,7 +145,6 @@ describe("runBackgroundWorkflowTool", () => {
   beforeEach(() => {
     vi.resetAllMocks();
     mocks.createHook.mockReturnValue({ token: "task-token" });
-    mocks.createWorkflowToolInvocationReader.mockReturnValue({ channel: "workflow" });
   });
 
   it("persists auth requests and answers before forwarding and acknowledging each event", async () => {
@@ -176,12 +175,12 @@ describe("runBackgroundWorkflowTool", () => {
     expect(mocks.resumeHookStep).toHaveBeenCalledTimes(4);
     expect(mocks.wakeTaskParentStep).not.toHaveBeenCalled();
     for (let i = 0; i < 4; i++) {
-      expect(mocks.appendTaskViewStep.mock.invocationCallOrder[i + 1]).toBeLessThan(
-        mocks.wakeTaskAuthorizationParentStep.mock.invocationCallOrder[i]!,
-      );
-      expect(mocks.wakeTaskAuthorizationParentStep.mock.invocationCallOrder[i]).toBeLessThan(
-        mocks.resumeHookStep.mock.invocationCallOrder[i]!,
-      );
+      const committed = mocks.appendTaskViewStep.mock.invocationCallOrder[i + 1];
+      const notified = mocks.wakeTaskAuthorizationParentStep.mock.invocationCallOrder[i];
+      const acknowledged = mocks.resumeHookStep.mock.invocationCallOrder[i];
+      assert(committed !== undefined && notified !== undefined && acknowledged !== undefined);
+      expect(committed).toBeLessThan(notified);
+      expect(notified).toBeLessThan(acknowledged);
     }
   });
 
@@ -252,7 +251,7 @@ describe("runBackgroundWorkflowTool", () => {
 
     await runBackgroundWorkflowTool(workflowInput);
 
-    expect(mocks.createWorkflowToolInvocationReader).not.toHaveBeenCalled();
+    expect(mocks.runWorkflowToolInvocation).not.toHaveBeenCalled();
   });
 
   it.each(["ready", "reject-dispatch"] as const)(
@@ -263,7 +262,7 @@ describe("runBackgroundWorkflowTool", () => {
 
       await runBackgroundWorkflowTool(workflowInput);
 
-      expect(mocks.createWorkflowToolInvocationReader).not.toHaveBeenCalled();
+      expect(mocks.runWorkflowToolInvocation).not.toHaveBeenCalled();
       expect(mocks.wakeTaskParentStep).toHaveBeenCalledTimes(kind === "ready" ? 1 : 0);
       expect(mocks.appendTaskViewStep).toHaveBeenLastCalledWith({
         activityObserver: undefined,
@@ -282,8 +281,8 @@ describe("runBackgroundWorkflowTool", () => {
 
     await runBackgroundWorkflowTool(workflowInput);
 
-    expect(mocks.createWorkflowToolInvocationReader).toHaveBeenCalledOnce();
-    expect(mocks.createWorkflowToolInvocationReader).toHaveBeenCalledWith(
+    expect(mocks.runWorkflowToolInvocation).toHaveBeenCalledOnce();
+    expect(mocks.runWorkflowToolInvocation).toHaveBeenCalledWith(
       expect.objectContaining({ execution: "background" }),
       expect.any(AbortSignal),
     );
@@ -330,9 +329,7 @@ describe("runBackgroundWorkflowTool", () => {
           updateIndex: 0,
           view: expect.objectContaining({ status: "working" }),
         });
-        expect(mocks.wakeTaskUpdateParentStep.mock.invocationCallOrder[0]).toBeLessThan(
-          mocks.wakeTaskParentStep.mock.invocationCallOrder[0]!,
-        );
+        expect(mocks.wakeTaskUpdateParentStep).toHaveBeenCalledBefore(mocks.wakeTaskParentStep);
         return;
       }
       expect(mocks.appendTaskProgressStep).toHaveBeenCalledWith({
@@ -393,14 +390,12 @@ describe("runBackgroundWorkflowTool", () => {
     await runBackgroundWorkflowTool(workflowInput);
 
     expect(mocks.raceChannelReads).toHaveBeenCalledTimes(6);
-    expect(mocks.createWorkflowToolInvocationReader).toHaveBeenCalledOnce();
+    expect(mocks.runWorkflowToolInvocation).toHaveBeenCalledOnce();
     expect(mocks.resumeHookStep).toHaveBeenCalledExactlyOnceWith("ack-cleanup", null, {
       ifPresent: true,
     });
     expect(mocks.wakeTaskParentStep).toHaveBeenCalledOnce();
-    expect(mocks.resumeHookStep.mock.invocationCallOrder[0]).toBeLessThan(
-      mocks.wakeTaskParentStep.mock.invocationCallOrder[0]!,
-    );
+    expect(mocks.resumeHookStep).toHaveBeenCalledBefore(mocks.wakeTaskParentStep);
   });
 
   it("keeps explicit cancellation final when the invocation completes late", async () => {
@@ -469,8 +464,6 @@ describe("runBackgroundWorkflowTool", () => {
     expect(mocks.appendTaskProgressStep).toHaveBeenCalledWith({
       progress: expect.objectContaining({ update: "Review the export" }),
     });
-    expect(mocks.appendTaskProgressStep.mock.invocationCallOrder[0]).toBeLessThan(
-      mocks.wakeTaskParentStep.mock.invocationCallOrder[0]!,
-    );
+    expect(mocks.appendTaskProgressStep).toHaveBeenCalledBefore(mocks.wakeTaskParentStep);
   });
 });

@@ -31,7 +31,7 @@ The prototype implements three approved scope decisions:
 
 ## Resulting execution model
 
-`createWorkflowToolInvocationReader` is the sole workflow-body execution owner. It starts
+`runWorkflowToolInvocation` is the sole workflow-body execution owner. It starts
 `executeWorkflowBody`, owns the internal workflow inbox, drains every persisted report, and emits
 the existing `WorkflowToolRunMessage` outcome only after those reports are consumed.
 [Shared invocation][prototype-invocation]

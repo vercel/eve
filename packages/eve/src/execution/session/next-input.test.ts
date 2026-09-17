@@ -1,5 +1,5 @@
 import { createTestSessionState } from "#internal/testing/session-state.js";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { assert, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { DeliverHookPayload, SessionAuthContext } from "#channel/types.js";
 import { nextTurnDelivery } from "#execution/session/next-input.js";
@@ -548,7 +548,8 @@ describe("buffered task completion batching", () => {
       const input = batchingInput(2);
       const original =
         status === "completed" ? completion("task_0") : terminalDelivery("task_0", status);
-      const admission = input.queue.enqueueDelivery(original)!;
+      const admission = input.queue.enqueueDelivery(original);
+      assert(admission !== undefined);
       const routed = {
         ...original,
         payloads: original.payloads.map(({ task: _task, ...payload }) => payload),
