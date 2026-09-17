@@ -63,7 +63,7 @@ export async function applyTeamsSetup(
   const connector = await deps.provisionConnector({
     ...plan,
     log: context.presenter.log,
-    projectRoot: context.appRoot,
+    projectRoot: context.projectRoot,
     signal: context.signal,
     deps,
   });

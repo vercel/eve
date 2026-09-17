@@ -99,6 +99,7 @@ export function createSessionEventSink(input: SessionEventSinkInput): SessionEve
     }
     if (emitted.event.type !== "step.started") {
       await dispatchDynamicModelEvent({
+        abortSignal: input.abortSignal,
         ctx,
         dynamicModel: effectiveAgent.turnAgent.dynamicModel,
         event: emitted.event,

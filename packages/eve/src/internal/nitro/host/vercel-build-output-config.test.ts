@@ -62,12 +62,12 @@ describe("createEveVercelOptions", () => {
     const options = createEveVercelOptions({
       agentName: "test-agent",
       enabled: true,
-      publicRoutePrefix: "eve/agents/support/",
+      publicRoutePrefix: "eve/support/",
     });
 
     expect(options?.functionRules[EVE_WORKFLOW_FLOW_ROUTE_PATH].environment).toEqual({
       WORKFLOW_PRECONDITION_GUARD: "1",
-      EVE_PUBLIC_ROUTE_PREFIX: "/eve/agents/support",
+      EVE_PUBLIC_ROUTE_PREFIX: "/eve/support",
     });
   });
 

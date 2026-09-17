@@ -82,6 +82,11 @@ describe("registry commands", () => {
       vi.fn(async () => new Response(JSON.stringify({ items: [] }))),
     );
     isEveProject.mockResolvedValue(true);
+    resolveEveProjectContext.mockImplementation(async (appRoot: string) => ({
+      appRoot,
+      environmentRoot: appRoot,
+      kind: "standalone",
+    }));
     getRegistryItems.mockResolvedValue([]);
     readFile.mockResolvedValue(
       JSON.stringify({
@@ -144,7 +149,7 @@ describe("registry commands", () => {
   it("reads registry configuration from a workspace package while targeting its agent", async () => {
     const logger = createLogger();
     const appRoot = "/project/agents/support";
-    resolveEveProjectContext.mockResolvedValueOnce({
+    resolveEveProjectContext.mockResolvedValue({
       environmentRoot: "/project",
       kind: "workspace-member",
       member: { appRoot, name: "support" },
@@ -153,9 +158,26 @@ describe("registry commands", () => {
         members: [{ appRoot, name: "support" }],
       },
     });
-    getRegistryItems.mockResolvedValue([{ name: "channel/teams", type: "registry:item" }]);
+    const runSetupCommand = vi.fn(async () => ({ kind: "completed" as const, facts: [] }));
+    getRegistryItems.mockResolvedValue([
+      {
+        name: "channel/teams",
+        type: "registry:item",
+        meta: {
+          eve: {
+            setup: [{ package: "eve", bin: "eve", args: ["integration", "setup", "teams"] }],
+          },
+        },
+      },
+    ]);
 
-    await runAddCommand(logger, appRoot, "channel/teams", {});
+    await runAddCommand(
+      logger,
+      appRoot,
+      "channel/teams",
+      { yes: true },
+      { loadSetupCommandRunner: async () => runSetupCommand },
+    );
 
     expect(readFile).toHaveBeenCalledWith("/project/package.json", "utf8");
     expect(addRegistryItems).toHaveBeenCalledWith(["https://eve.dev/r/channel/teams.json"], {
@@ -164,6 +186,12 @@ describe("registry commands", () => {
       overwrite: undefined,
       silent: undefined,
     });
+    expect(runSetupCommand).toHaveBeenCalledWith(
+      appRoot,
+      expect.any(Object),
+      "channel/teams",
+      expect.objectContaining({ prompter: expect.any(Object) }),
+    );
   });
 
   it("prepares declared pnpm build policy before installing", async () => {
@@ -413,7 +441,7 @@ describe("registry commands", () => {
   it("rejects Web Chat before it can write into an agent workspace member", async () => {
     const logger = createLogger();
     const appRoot = "/project/agents/support";
-    resolveEveProjectContext.mockResolvedValueOnce({
+    resolveEveProjectContext.mockResolvedValue({
       environmentRoot: "/project",
       kind: "workspace-member",
       member: { appRoot, name: "support" },

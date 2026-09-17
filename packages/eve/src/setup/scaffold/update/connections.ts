@@ -11,12 +11,11 @@ import {
   type OpenApiEndpoint,
 } from "../connections/catalog.js";
 import { pathExists, writeTextFile } from "../files.js";
-import { resolveVersionToken } from "../version-tokens.js";
+import { DEFAULT_CONNECT_PACKAGE_VERSION, resolveVersionToken } from "../version-tokens.js";
 import { getSupportedModuleBaseName, matchesSupportedModuleBaseName } from "./module-files.js";
 import { patchPackageJson } from "./package-json.js";
 import type { PackageJsonMutation } from "./channels.js";
 
-const DEFAULT_CONNECT_PACKAGE_VERSION = "__VERCEL_CONNECT_VERSION__";
 const CONNECT_PACKAGE_NAME = "@vercel/connect";
 const USER_AUTHORED_CONNECTION_DIR = "agent/connections";
 const ENV_LOCAL_FILE = ".env.local";

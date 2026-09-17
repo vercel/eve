@@ -7,9 +7,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { SelfModificationConfig } from "./config.js";
 import { defineSelfModificationSandbox, selectDeployedSelfModificationBackend } from "./sandbox.js";
 
-const connectConfig: SelfModificationConfig = {
+const providerConfig: SelfModificationConfig = {
   deployed: {
-    credentials: { vercelConnect: { connector: "github/selfmod-acme-agent" } },
+    credentials: { resolve: async () => "github-token" },
     source: { git: { directory: ".", repository: "github.com/acme/agent" } },
     target: { branch: "main" },
     authorize: () => true,
@@ -78,7 +78,7 @@ describe("self-modification sandbox", () => {
 
   it("does not update the just-bash network policy in local mode", async () => {
     vi.stubEnv("EVE_DEV", "1");
-    const definition = defineSelfModificationSandbox({ config: connectConfig });
+    const definition = defineSelfModificationSandbox({ config: providerConfig });
     if (definition.onSession === undefined) throw new Error("Expected an onSession hook.");
     const use = vi.fn();
 
@@ -92,8 +92,7 @@ describe("self-modification sandbox", () => {
 
   it("establishes its allow-all baseline before resolving deployed credentials", async () => {
     vi.stubEnv("EVE_DEV", "0");
-    vi.stubEnv("VERCEL_ENV", "production");
-    const definition = defineSelfModificationSandbox({ config: connectConfig });
+    const definition = defineSelfModificationSandbox({ config: providerConfig });
     if (definition.onSession === undefined) throw new Error("Expected an onSession hook.");
     const failure = new Error("baseline applied");
     const setNetworkPolicy = vi.fn().mockRejectedValue(failure);

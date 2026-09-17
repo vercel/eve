@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { createEveServiceName } from "#internal/vercel/eve-service-contribution.js";
+import {
+  compileEveVercelService,
+  createEveServiceName,
+} from "#internal/vercel/eve-service-contribution.js";
 import { resolveEveServicePrefixByRoot } from "#internal/vercel/vercel-service-config-operations.js";
 import { isValidVercelServiceName } from "#internal/vercel/vercel-service-name.js";
 
@@ -44,6 +47,26 @@ describe("resolveEveServicePrefixByRoot", () => {
         configRoot: "/project",
       }),
     ).toBe("/agent");
+  });
+});
+
+describe("compileEveVercelService", () => {
+  it("runs generated workspace agents headlessly under their public routes", () => {
+    expect(
+      compileEveVercelService({
+        agent: {
+          appRoot: "/project/agents/support",
+          buildCommand: "eve build",
+          devCommand: "eve dev --no-ui",
+          name: "support",
+          publicRoutePrefix: "/support",
+          workspaceMember: true,
+        },
+        target: { hostOutputDirectory: "/project/.vercel/output", projectRoot: "/project" },
+      }).service.devCommand,
+    ).toBe(
+      "cd '../../../agents/support' && export EVE_PUBLIC_ROUTE_PREFIX='/support' && export EVE_INTERNAL_AGENT_WORKSPACE_MEMBER=1 && eve dev --no-ui",
+    );
   });
 });
 

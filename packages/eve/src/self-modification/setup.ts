@@ -85,7 +85,9 @@ export function renderSelfModificationConfig(values?: SelfModificationSetupValue
 `
     : "";
   const switchCases = `${httpCase}${channelCases}`;
-  const body = `import { defineSelfModificationConfig } from "eve/self-modification/config";
+  const credentialErrorMessage = `Self-modification could not obtain a GitHub credential from Vercel Connect for ${values.connector}. Install and attach the configured GitHub connector to this Vercel project, install the managed GitHub App for the configured repository, then retry.`;
+  const body = `import { getToken } from "@vercel/connect";
+import { defineSelfModificationConfig } from "eve/self-modification/config";
 
 export default defineSelfModificationConfig({
   deployed: {
@@ -97,7 +99,25 @@ export default defineSelfModificationConfig({
     },
     target: { branch: ${JSON.stringify(values.branch)} },
     credentials: {
-      vercelConnect: { connector: ${JSON.stringify(values.connector)} },
+      async resolve({ capability, repository }) {
+        try {
+          return await getToken(${JSON.stringify(values.connector)}, {
+            authorizationDetails: [
+              {
+                type: "github_app_installation",
+                repositories: [repository.owner + "/" + repository.repo],
+              },
+            ],
+            scopes:
+              capability === "checkout"
+                ? ["contents:read", "metadata:read"]
+                : ["contents:write", "pull_requests:write", "metadata:read"],
+            subject: { type: "app" },
+          });
+        } catch (error) {
+          throw new Error(${JSON.stringify(credentialErrorMessage)}, { cause: error });
+        }
+      },
     },
     authorize: ({ channel, principal }) => {
       switch (channel.kind) {
@@ -141,6 +161,7 @@ export function parseGitHubRemote(remote: string): { owner: string; repo: string
 export function defaultSelfModificationSetupOperations(
   appRoot: string,
   deps: SelfModificationSetupDependencies = defaultDependencies,
+  projectRoot: string = appRoot,
 ): SelfModificationSetupOperations {
   const configPath = join(appRoot, SELF_MODIFICATION_CONFIG_PATH);
   return {
@@ -181,7 +202,7 @@ export function defaultSelfModificationSetupOperations(
     },
     writeConfig: (source) => writeFile(configPath, source, "utf8"),
     async findOrCreateConnector(name, project) {
-      const connectors = await listGitHubConnectors(appRoot, project, deps.captureVercel);
+      const connectors = await listGitHubConnectors(projectRoot, project, deps.captureVercel);
       const expected = `github/${name}`;
       const existing = connectors.find((connector) => connector.uid === expected);
       if (existing !== undefined) {
@@ -191,7 +212,7 @@ export function defaultSelfModificationSetupOperations(
       }
       const created = await deps.runVercelCaptureStdout(
         ["connect", "create", "github", "--name", name, "-F", "json", "--scope", project.orgId],
-        { cwd: appRoot },
+        { cwd: projectRoot },
       );
       const connector = created.ok ? parseCreatedConnector(created.stdout) : undefined;
       if (connector === undefined || !connector.startsWith("github/"))
@@ -212,7 +233,7 @@ export function defaultSelfModificationSetupOperations(
           "--scope",
           project.orgId,
         ],
-        { cwd: appRoot },
+        { cwd: projectRoot },
       );
       if (!result.ok)
         throw new Error(

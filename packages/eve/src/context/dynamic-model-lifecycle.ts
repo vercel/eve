@@ -68,6 +68,7 @@ function durableKeyForEvent(
 }
 
 export async function dispatchDynamicModelEvent(input: {
+  readonly abortSignal?: AbortSignal;
   readonly ctx: AlsContext;
   readonly dynamicModel: RuntimeDynamicModelReference | undefined;
   readonly event: UnstampedMessageStreamEvent;
@@ -92,7 +93,12 @@ export async function dispatchDynamicModelEvent(input: {
       );
     }
 
-    const rawResult = await handler(input.event, buildResolveContext(input.ctx, input.messages));
+    input.abortSignal?.throwIfAborted();
+    const rawResult = await handler(input.event, {
+      ...buildResolveContext(input.ctx, input.messages),
+      abortSignal: input.abortSignal,
+    });
+    input.abortSignal?.throwIfAborted();
     const selection = await resolveRuntimeModelSelection({
       durability: input.event.type === "step.started" ? "live" : "durable",
       selection: rawResult as never,

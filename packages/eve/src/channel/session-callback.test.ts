@@ -21,7 +21,7 @@ describe("parseSessionCallback callback-URL token extraction", () => {
   it("accepts a callback URL mounted behind a public route prefix", () => {
     expect(
       parseSessionCallback(
-        createCallback("https://agent.example.com/eve/agents/support/eve/v1/callback/tok123"),
+        createCallback("https://agent.example.com/eve/support/v1/callback/tok123"),
       ),
     ).toMatchObject({ ok: true });
   });
@@ -38,7 +38,7 @@ describe("parseSessionCallback callback-URL token extraction", () => {
     expect(
       parseSessionCallback(
         createCallback(
-          "https://agent.example.com/eve/agents/support/eve/v1/callback/eve%3Aparent-token",
+          "https://agent.example.com/eve/support/v1/callback/eve%3Aparent-token",
           "eve:parent-token",
         ),
       ),
@@ -47,9 +47,7 @@ describe("parseSessionCallback callback-URL token extraction", () => {
 
   it("rejects a URL without the callback route", () => {
     expect(
-      parseSessionCallback(
-        createCallback("https://agent.example.com/eve/agents/support/eve/v1/session"),
-      ),
+      parseSessionCallback(createCallback("https://agent.example.com/eve/support/v1/session")),
     ).toMatchObject({
       message: expect.stringContaining("Callback url token must match callback token"),
       ok: false,
@@ -59,7 +57,7 @@ describe("parseSessionCallback callback-URL token extraction", () => {
   it("rejects a URL whose token segment does not match the token field", () => {
     expect(
       parseSessionCallback(
-        createCallback("https://agent.example.com/eve/agents/support/eve/v1/callback/other-token"),
+        createCallback("https://agent.example.com/eve/support/v1/callback/other-token"),
       ),
     ).toMatchObject({ ok: false });
   });

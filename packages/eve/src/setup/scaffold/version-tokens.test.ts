@@ -3,13 +3,12 @@ import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
-import { resolveVersionToken } from "./version-tokens.js";
+import { DEFAULT_CONNECT_PACKAGE_VERSION, resolveVersionToken } from "./version-tokens.js";
 
 // These tests always execute from the dev tree (vitest runs over src), so the
 // fallback's sources — eve's package.json and the workspace catalog — are the
 // live files the assertions read independently.
 const EVE_PACKAGE_JSON_URL = new URL("../../../package.json", import.meta.url);
-const WORKSPACE_MANIFEST_URL = new URL("../../../../../pnpm-workspace.yaml", import.meta.url);
 
 describe("resolveVersionToken", () => {
   it("returns stamped values untouched", () => {
@@ -17,12 +16,9 @@ describe("resolveVersionToken", () => {
     expect(resolveVersionToken("evePackage.version", "1.0.0-beta.3")).toBe("1.0.0-beta.3");
   });
 
-  it("resolves a catalog token from the dev tree's workspace manifest", () => {
-    const resolved = resolveVersionToken("connectPackageVersion", "__VERCEL_CONNECT_VERSION__");
-
-    const manifest = readFileSync(fileURLToPath(WORKSPACE_MANIFEST_URL), "utf8");
-    expect(resolved).not.toMatch(/^__/);
-    expect(manifest).toContain(`"@vercel/connect": "${resolved}"`);
+  it("uses a concrete default Connect version", () => {
+    expect(DEFAULT_CONNECT_PACKAGE_VERSION).toBe("2.2.0");
+    expect(DEFAULT_CONNECT_PACKAGE_VERSION).not.toMatch(/^__/);
   });
 
   it("resolves eve runtime and dependency version tokens from eve's own package.json", () => {

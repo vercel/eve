@@ -6,7 +6,10 @@ import { composeRuntimeBasePrompt } from "#runtime/prompt/compose.js";
 import type { PreparedRuntimeTool } from "#runtime/sessions/turn.js";
 import type { ResolvedAgent, ResolvedAgentDefinition } from "#runtime/types.js";
 import type { WorkspaceRuntimeSpec } from "#runtime/workspace/types.js";
-import type { InternalAgentModelDefinition } from "#shared/agent-definition.js";
+import type {
+  AgentReasoningDefinition,
+  InternalAgentModelDefinition,
+} from "#shared/agent-definition.js";
 import type { ModuleSourceRef } from "#shared/source-ref.js";
 import type { AvailableSkillDescription } from "#execution/skills/instructions.js";
 
@@ -19,7 +22,9 @@ export const BOOTSTRAP_RUNTIME_MODEL_ID = "eve-bootstrap-model";
 /**
  * Runtime-owned model identifier prepared for one harness turn.
  */
-export type RuntimeModelReference = Readonly<InternalAgentModelDefinition>;
+export type RuntimeModelReference = Readonly<
+  InternalAgentModelDefinition & { reasoning?: AgentReasoningDefinition }
+>;
 
 /**
  * Runtime-owned reference to a dynamic model resolver authored in `agent.ts`.

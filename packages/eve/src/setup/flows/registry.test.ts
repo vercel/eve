@@ -67,6 +67,25 @@ describe("runRegistryFlow", () => {
       expect.any(Object),
     );
   });
+  it("installs into a workspace agent while keeping project effects at the workspace root", async () => {
+    const flow = deps();
+    const fake = createFakePrompter();
+    await runRegistryFlow({
+      appRoot: "/workspace",
+      installRoot: "/workspace/agents/support",
+      initialAddress: "connection/linear",
+      prompter: fake.prompter,
+      deps: flow,
+    });
+
+    expect(flow.installRegistryItem).toHaveBeenCalledWith(
+      "/workspace/agents/support",
+      "connection/linear",
+      expect.any(Object),
+    );
+    expect(flow.detectDeployment).not.toHaveBeenCalled();
+  });
+
   it("searches one catalog and installs the chosen item without a review", async () => {
     const flow = deps();
     const fake = createFakePrompter({

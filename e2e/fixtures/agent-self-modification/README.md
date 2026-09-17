@@ -2,7 +2,7 @@
 
 This fixture uses `eve eval` to test a parent delegating a source change to the real self-modification child, rebuilding the agent, and using the result in a new conversation. CI runs the default root model and the standard self-modification child with eve's default model. Independent parent/child model selection is not part of this fixture.
 
-The workspace root declares `@vercel/connect` through the dependency catalog and links the local `eve` package as development dependencies. This lets the bundler resolve the self-modification extension's optional deployed credential provider without installing a second registry copy of eve. These local cases do not use Connect credentials.
+The fixture installs Vercel Connect because the generated deployed configuration supplies a Connect-backed credential provider to eve. These local cases do not request Connect credentials.
 
 Routing-only cases remain in [`agent-subagents`](../agent-subagents/evals/self-modification/), where an acceptance-only child avoids performing real integration installs.
 

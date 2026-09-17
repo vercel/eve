@@ -8,7 +8,7 @@ import { parseChatGptModelSelection } from "../../../shared/chatgpt-model.js";
 import { SUPPORTED_AUTHORED_MODULE_FILE_EXTENSIONS } from "../update/module-files.js";
 import { pathExists, writeTextFile } from "../files.js";
 import { blockingCreateInPlaceEntries } from "../create-in-place.js";
-import { resolveVersionToken } from "../version-tokens.js";
+import { DEFAULT_CONNECT_PACKAGE_VERSION, resolveVersionToken } from "../version-tokens.js";
 import {
   applyPackageManagerWorkspaceConfiguration,
   isPackageManagerWorkspaceMember,
@@ -20,7 +20,7 @@ import { WEB_APP_TEMPLATE_FILES } from "./web-template.js";
 export const CURRENT_DIRECTORY_PROJECT_NAME = ".";
 
 export const DEFAULT_AI_PACKAGE_VERSION = "__AI_SDK_VERSION__";
-export const DEFAULT_CONNECT_PACKAGE_VERSION = "__VERCEL_CONNECT_VERSION__";
+export { DEFAULT_CONNECT_PACKAGE_VERSION } from "../version-tokens.js";
 export const DEFAULT_ZOD_PACKAGE_VERSION = "__ZOD_VERSION__";
 const DEFAULT_TYPESCRIPT_PACKAGE_VERSION = "__TYPESCRIPT_VERSION__";
 

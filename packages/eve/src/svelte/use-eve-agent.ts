@@ -96,7 +96,7 @@ export interface UseEveAgentOptions<TData> extends EveAgentStoreCallbacks<TData>
    * Named agent mounted by a framework integration such as `withEve({ agents })`.
    *
    * `agent: "support"` targets same-origin routes under
-   * `/eve/agents/support/eve/v1/...`. Do not combine with `host`.
+   * `/eve/support/v1/...`. Do not combine with `host`.
    */
   readonly agent?: string;
   /**

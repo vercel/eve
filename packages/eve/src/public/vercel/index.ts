@@ -5,6 +5,7 @@ import { resolveEveProjectContext } from "#internal/project-context.js";
 import { assembleEveVercelServices } from "#internal/vercel/assemble-eve-services.js";
 import { quoteVercelShellArgument, toVercelRelativePath } from "#internal/vercel/build-command.js";
 import {
+  createEveHomeRouteSrc,
   createEveServiceName,
   createEveServiceRouteSrc,
 } from "#internal/vercel/eve-service-contribution.js";
@@ -57,7 +58,10 @@ function toInternalConfig(config: EveVercelConfig): VercelServicesConfig {
   return config as VercelServicesConfig;
 }
 
-function assertComposableConfig(config: EveVercelConfig, agentNames: readonly string[]): void {
+function assertComposableConfig(
+  config: EveVercelConfig,
+  agentNames: readonly (string | undefined)[],
+): void {
   if (config.experimentalServices !== undefined || config.experimentalServicesV2 !== undefined) {
     throw new Error(
       "withEve cannot compose experimentalServices or experimentalServicesV2. Remove the obsolete field and define authored services under services.",
@@ -67,24 +71,34 @@ function assertComposableConfig(config: EveVercelConfig, agentNames: readonly st
   const internalConfig = toInternalConfig(config);
   const services = createServiceConfigRecord(internalConfig.services);
   for (const name of agentNames) {
+    const agentLabel = JSON.stringify(name ?? "the default agent");
     const serviceName = createEveServiceName(name);
-    if (Object.hasOwn(services, serviceName)) {
+    if (
+      Object.hasOwn(services, serviceName) ||
+      (name === undefined && Object.values(services).some((service) => service.framework === "eve"))
+    ) {
       throw new Error(
-        `Vercel service key ${JSON.stringify(serviceName)} conflicts with the service generated for eve workspace agent ${JSON.stringify(name)}. Remove or rename the authored service; withEve owns this key.`,
+        `Vercel service key ${JSON.stringify(serviceName)} conflicts with the service generated for eve agent ${agentLabel}. Remove or rename the authored service; withEve owns this key.`,
       );
     }
 
-    const routeSrc = createEveServiceRouteSrc(`/${name}`);
-    if (config.routes?.some((route) => route.src === routeSrc)) {
-      throw new Error(
-        `Vercel route ${JSON.stringify(routeSrc)} conflicts with the transport route generated for eve workspace agent ${JSON.stringify(name)}. Remove the authored route; withEve adds it automatically.`,
-      );
+    const publicRoutePrefix = name === undefined ? "" : `/eve/${name}`;
+    const routeSources = [
+      createEveServiceRouteSrc(publicRoutePrefix),
+      createEveHomeRouteSrc(publicRoutePrefix),
+    ].filter((routeSrc): routeSrc is string => routeSrc !== undefined);
+    for (const routeSrc of routeSources) {
+      if (config.routes?.some((route) => route.src === routeSrc)) {
+        throw new Error(
+          `Vercel route ${JSON.stringify(routeSrc)} conflicts with the route generated for eve agent ${agentLabel}. Remove the authored route; withEve adds it automatically.`,
+        );
+      }
     }
   }
 }
 
 /**
- * Add a hostless eve workspace's generated agent services and transport routes to `vercel.ts`.
+ * Add an eve project's generated agent services and transport routes to `vercel.ts`.
  *
  * The returned object is a plain Vercel configuration. Vercel resolves it before independently
  * building the authored services and each generated eve agent service.
@@ -101,36 +115,54 @@ export async function withEve<TConfig extends EveVercelConfig>(
   const requestedRoot = resolve(options.root ?? process.cwd());
   const context = await resolveEveProjectContext(requestedRoot);
   if (
-    context.kind !== "workspace" ||
-    (options.root !== undefined && context.workspace.root !== requestedRoot)
+    context.kind === "workspace-member" ||
+    (options.root !== undefined && context.environmentRoot !== requestedRoot)
   ) {
-    throw new Error(`withEve must run at an eve workspace root; received ${requestedRoot}.`);
+    throw new Error(`withEve must run at an eve project root; received ${requestedRoot}.`);
   }
+  const root = context.environmentRoot;
 
-  const { workspace } = context;
-  const root = workspace.root;
-  if (workspace.members.length === 0) {
+  const agents =
+    context.kind === "standalone"
+      ? [
+          {
+            appRoot: context.appRoot,
+            name: undefined,
+            publicRoutePrefix: "",
+            workspaceMember: false,
+          },
+        ]
+      : context.workspace.members.map((member) => ({
+          appRoot: member.appRoot,
+          name: member.name,
+          publicRoutePrefix: `/eve/${member.name}`,
+          workspaceMember: true,
+        }));
+  if (agents.length === 0) {
     throw new Error(
       `withEve found no workspace agents under ${join(root, "agents")}. Add an agent or remove withEve from vercel.ts.`,
     );
   }
 
-  const agentNames = workspace.members.map((member) => member.name);
+  const agentNames = agents.map((agent) => agent.name);
   const generatedServiceNames = new Set(agentNames.map(createEveServiceName));
   assertComposableConfig(config, agentNames);
 
   const outputDirectory = join(root, ".vercel", "output");
   const internalConfig = toInternalConfig(config);
   const assembled = assembleEveVercelServices({
-    agents: workspace.members.map((member) => ({
+    agents: agents.map((agent) => ({
       agent: {
-        appRoot: member.appRoot,
+        appRoot: agent.appRoot,
         buildCommand: `node ${quoteVercelShellArgument(
-          toVercelRelativePath(member.appRoot, resolveEveBinaryPath(member.appRoot)),
+          toVercelRelativePath(agent.appRoot, resolveEveBinaryPath(agent.appRoot)),
         )} build`,
-        name: member.name,
-        publicRoutePrefix: `/${member.name}`,
-        workspaceMember: true,
+        devCommand: `node ${quoteVercelShellArgument(
+          toVercelRelativePath(agent.appRoot, resolveEveBinaryPath(agent.appRoot)),
+        )} dev --no-ui`,
+        name: agent.name,
+        publicRoutePrefix: agent.publicRoutePrefix,
+        workspaceMember: agent.workspaceMember,
       },
       target: {
         hostOutputDirectory: outputDirectory,

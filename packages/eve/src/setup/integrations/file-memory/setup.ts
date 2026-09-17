@@ -26,7 +26,7 @@ export async function prepareFileMemorySetup(
 ): Promise<FileMemoryBlobPlan> {
   const project = await context.resolveVercelProject("file memory");
   return await deps.prepareBlob({
-    appRoot: context.appRoot,
+    appRoot: context.projectRoot,
     project,
     signal: context.signal,
   });
@@ -50,7 +50,7 @@ export async function applyFileMemorySetup(
   if (plan.regionWarning !== undefined) context.presenter.log.warning(plan.regionWarning);
 
   const result = await deps.applyBlob({
-    appRoot: context.appRoot,
+    appRoot: context.projectRoot,
     log: context.presenter.log,
     plan,
     signal: context.signal,

@@ -189,11 +189,11 @@ describe("framework-next build", () => {
       expect.arrayContaining([
         { path: "/api/user-cleanup", schedule: "0 0 * * *" },
         {
-          path: expect.stringMatching(/^\/eve\/agents\/billing\/eve\/v1\/cron\/[A-Za-z0-9_-]+$/),
+          path: expect.stringMatching(/^\/eve\/billing\/v1\/cron\/[A-Za-z0-9_-]+$/),
           schedule: "*/10 * * * *",
         },
         {
-          path: expect.stringMatching(/^\/eve\/agents\/support\/eve\/v1\/cron\/[A-Za-z0-9_-]+$/),
+          path: expect.stringMatching(/^\/eve\/support\/v1\/cron\/[A-Za-z0-9_-]+$/),
           schedule: "*/5 * * * *",
         },
       ]),

@@ -21,7 +21,7 @@ function createMultiAgentSummary(workspace: AgentWorkspace): VercelEveMultiAgent
   return {
     agents: workspace.members.map((member) => ({
       name: member.name,
-      routePrefix: `/${member.name}`,
+      routePrefix: `/eve/${member.name}`,
       summaryPath: relative(
         workspace.root,
         join(member.appRoot, VERCEL_EVE_AGENT_SUMMARY_OUTPUT_PATH),
@@ -52,8 +52,11 @@ export async function buildAgentWorkspace(workspace: AgentWorkspace): Promise<st
       buildCommand: `node ${quoteVercelShellArgument(
         toVercelRelativePath(member.appRoot, resolveEveBinaryPath(member.appRoot)),
       )} build`,
+      devCommand: `node ${quoteVercelShellArgument(
+        toVercelRelativePath(member.appRoot, resolveEveBinaryPath(member.appRoot)),
+      )} dev --no-ui`,
       name: member.name,
-      publicRoutePrefix: `/${member.name}`,
+      publicRoutePrefix: `/eve/${member.name}`,
       workspaceMember: true,
     },
     target: {

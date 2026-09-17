@@ -64,7 +64,7 @@ export async function applyShopifySetup(
   deps: ShopifySetupDeps = defaultDeps,
 ) {
   context.presenter.log.message("Scaffolding Shopify UCP channel and storefront environment...");
-  await deps.appendEnv(join(context.appRoot, ".env.local"), {
+  await deps.appendEnv(join(context.projectRoot, ".env.local"), {
     SHOPIFY_STORE_DOMAIN: plan.storeDomain,
   });
   await deps.writeTextFile(

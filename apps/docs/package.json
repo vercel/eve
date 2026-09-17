@@ -86,7 +86,7 @@
     "@upstash/redis": "^1.38.4",
     "@vectorize-io/hindsight-eve": "^0.2.1",
     "@veltdev/chat-sdk-adapter": "0.2.4",
-    "@vercel/connect": "catalog:",
+    "@vercel/connect": "2.2.0",
     "@vercel/otel": "catalog:",
     "@vgpu/adapter-node": "0.0.7",
     "@webgpu/types": "^0.1.69",

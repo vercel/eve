@@ -1117,7 +1117,7 @@ describe("eveChannel — create session (text)", () => {
           callId: "call-1",
           subagentName: "research",
           token: "tok123",
-          url: "https://caller.example.com/eve/agents/support/eve/v1/callback/tok123",
+          url: "https://caller.example.com/eve/support/v1/callback/tok123",
         },
         message: "hi",
         mode: "task",

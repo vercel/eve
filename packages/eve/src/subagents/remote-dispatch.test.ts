@@ -468,7 +468,7 @@ describe("startRemoteAgentSession", () => {
       callbackBaseUrl: "https://caller.example.com",
       remote: {
         ...createRemoteAgent(),
-        url: "https://remote.example.com/eve/agents/researcher",
+        url: "https://remote.example.com/eve/researcher",
       },
       session: {
         agent: { modelReference: { id: "mock/test" }, system: "", tools: [] },
@@ -480,7 +480,7 @@ describe("startRemoteAgentSession", () => {
     });
 
     expect(fetchMock).toHaveBeenCalledWith(
-      "https://remote.example.com/eve/agents/researcher/eve/v1/session",
+      "https://remote.example.com/eve/researcher/v1/session",
       expect.objectContaining({ method: "POST" }),
     );
   });
@@ -1189,14 +1189,14 @@ describe("cancelRemoteAgentTurn", () => {
       cancelRemoteAgentTurn({
         remote: {
           ...createRemoteAgent(),
-          url: "https://remote.example.com/eve/agents/researcher/",
+          url: "https://remote.example.com/eve/researcher/",
         },
         sessionId: "remote/session id",
       }),
     ).resolves.toEqual({ sessionId: "remote/session id", status: "accepted" });
 
     expect(fetchMock).toHaveBeenCalledWith(
-      "https://remote.example.com/eve/agents/researcher/eve/v1/session/remote%2Fsession%20id/cancel",
+      "https://remote.example.com/eve/researcher/v1/session/remote%2Fsession%20id/cancel",
       expect.objectContaining({ method: "POST" }),
     );
   });
@@ -1265,7 +1265,7 @@ describe("resetRemoteAgentSession", () => {
       resetRemoteAgentSession({
         remote: {
           ...createRemoteAgent(),
-          url: "https://remote.example.com/eve/agents/researcher/",
+          url: "https://remote.example.com/eve/researcher/",
         },
         sessionId: "remote/session id",
       }),
@@ -1275,7 +1275,7 @@ describe("resetRemoteAgentSession", () => {
       status: "reset",
     });
     expect(fetchMock).toHaveBeenCalledWith(
-      "https://remote.example.com/eve/agents/researcher/eve/v1/session/remote%2Fsession%20id/reset",
+      "https://remote.example.com/eve/researcher/v1/session/remote%2Fsession%20id/reset",
       {
         body: JSON.stringify({ reason: "Parent session ended" }),
         headers: {
