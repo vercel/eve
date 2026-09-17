@@ -157,9 +157,9 @@ export class SelfModificationHarness {
         startIndex: liveParent.session.state.streamIndex,
       });
       this.#turns.add(continuation);
-      called = await continuation.waitForEvent("subagent.called", {
-        data: { name: SELF_MODIFICATION_AGENT, ...(agentId === undefined ? {} : { agentId }) },
-      });
+      const data: { name: string; agentId?: string } = { name: SELF_MODIFICATION_AGENT };
+      if (agentId !== undefined) data.agentId = agentId;
+      called = await continuation.waitForEvent("subagent.called", { data });
     }
     const [child] = await Promise.all([
       this.#readChild(
