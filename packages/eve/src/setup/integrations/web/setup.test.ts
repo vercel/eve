@@ -4,7 +4,7 @@ import { createFakePrompter } from "#internal/testing/fake-prompter.js";
 import { headlessAsker } from "#setup/ask.js";
 import { integrationSetupEnvironment } from "../shared/environment.js";
 import { createSetupContexts } from "../shared/ui.js";
-import { applyWebSetup, prepareWebSetup, type WebSetupDeps } from "./setup.js";
+import { applyWebSetup, type WebSetupDeps } from "./setup.js";
 
 function deps(): WebSetupDeps {
   return {
@@ -41,9 +41,7 @@ describe("Web setup", () => {
       prompter: createFakePrompter().prompter,
       resolveVercelProject: async () => ({ orgId: "team", projectId: "project" }),
     });
-    const plan = await prepareWebSetup(ctx.prepare, effects);
-
-    await applyWebSetup(plan, ctx.apply, effects);
+    await applyWebSetup({ hosting: "vercel-services", packageManager: "pnpm" }, ctx.apply, effects);
 
     expect(effects.writeTextFile).toHaveBeenNthCalledWith(
       1,
@@ -57,9 +55,14 @@ describe("Web setup", () => {
       expect.stringContaining('WEB_CHAT_AGENT: string | undefined = "support"'),
       { force: true },
     );
+    expect(effects.writeTextFile).toHaveBeenCalledWith(
+      "/project/vercel.ts",
+      expect.stringContaining('root: "apps/web"'),
+      { force: true },
+    );
   });
 
-  it("prepares and applies without semantic questions", async () => {
+  it("configures peer services for a standalone agent", async () => {
     const effects = deps();
     const ctx = createSetupContexts({
       appRoot: "/project",
@@ -68,8 +71,7 @@ describe("Web setup", () => {
       prompter: createFakePrompter().prompter,
       resolveVercelProject: async () => ({ orgId: "team", projectId: "project" }),
     });
-    const plan = await prepareWebSetup(ctx.prepare, effects);
-    await applyWebSetup(plan, ctx.apply, effects);
+    await applyWebSetup({ hosting: "vercel-services", packageManager: "pnpm" }, ctx.apply, effects);
     expect(effects.writeTextFile).toHaveBeenCalledWith(
       "/project/agent/channels/eve.ts",
       expect.any(String),
@@ -84,7 +86,7 @@ describe("Web setup", () => {
     expect(effects.writeTextFile).toHaveBeenNthCalledWith(
       3,
       "/project/apps/web/next.config.ts",
-      expect.stringContaining('eveRoot: "../.."'),
+      expect.stringContaining("export default nextConfig"),
       { force: true },
     );
   });
