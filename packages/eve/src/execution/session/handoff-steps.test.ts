@@ -67,13 +67,14 @@ describe("validateSessionCheckpointStep", () => {
     );
   });
 
-  it("rejects a checkpoint written by a different contract version", async () => {
-    const checkpoint: SessionCheckpoint = { ...createCheckpoint(), version: 2 as never };
+  it.each([4, 6])("rejects checkpoint version %s before reading nested state", async (version) => {
+    const checkpoint: SessionCheckpoint = { ...createCheckpoint(), version: version as never };
 
     await expect(validateSessionCheckpointStep({ checkpoint })).rejects.toThrow(
-      /Unsupported session checkpoint version 2.*Start a new session/,
+      `Unsupported session checkpoint version ${version}`,
     );
     expect(deserializeContextMock).not.toHaveBeenCalled();
+    expect(readDurableSessionMock).not.toHaveBeenCalled();
   });
 
   it.each([undefined, -1, NaN, Infinity, "30000", true])(
@@ -90,7 +91,7 @@ describe("validateSessionCheckpointStep", () => {
 
 function createCheckpoint(): SessionCheckpoint {
   return {
-    version: 4,
+    version: 5,
     sessionTimeoutMs: false,
     mode: "conversation",
     serializedContext: {},

@@ -44,7 +44,7 @@ describe("SessionHandoff", () => {
       checkpoint: expect.objectContaining({
         mode: "conversation",
         sessionTimeoutMs: 60_000,
-        version: 4,
+        version: 5,
       }),
       delivery: trigger.delivery,
       targetDeploymentId: "deployment-b",

@@ -200,6 +200,21 @@ Existing sessions containing either old registry key are rejected by the new run
 import can stop discoverable old runs and retain conversation history, but does not migrate pending
 work. Completed task payloads also require the new format before deployment handoff.
 
+The cross-deployment checkpoint version is now **5**. Version 4 readers also enforce exact
+version equality, so both old-to-new and new-to-old handoffs reject the incompatible checkpoint
+before hydrating nested state or claiming session hooks. The original owner recovers its hooks
+and processes the triggering message. This version boundary is necessary even for idle sessions:
+an older reader could otherwise overlook the new registry key and lose retained task outputs.
+
+Within version 5, unknown fields on the registry, invocation, origin, address, task payload, and
+terminal output survive parsing, replayed registration, and terminal-cache updates. Authentication
+and dispatch-context schemas remain strict; incompatible changes there require another checkpoint
+version bump. Session turns execute on their owning deployment. Legacy import returns its prepared
+conversation snapshot to the parked old driver, rather than exporting the new owner's registry.
+
+These checks protect the handoff boundary; they do not migrate in-flight workflows. A rollout must
+keep the original deployments available for retained sessions and old task runs, or drain them first.
+
 ## Demonstrated behavior
 
 | Requirement                                                   | Evidence                                                              |
@@ -220,7 +235,7 @@ work. Completed task payloads also require the new format before deployment hand
 | Completion after authorization ends the visible turn          | Workflow authorization integration tests                              |
 | Extension migration boundary                                  | Generated capability reports and invariant guard                      |
 
-Exact checks run in this worktree:
+Checks run before the checkpoint-version follow-up:
 
 - Full unit tier: **799 files passed; 8,676 tests passed; 1 skipped**.
 - Workflow/session integration slices: **7 files, 107 tests passed**, including authorization, handoff,
@@ -230,6 +245,12 @@ Exact checks run in this worktree:
 - Documentation frontmatter/navigation, import snippets, and MDX compilation: passed for all 89
   published pages.
 
+The checkpoint-version follow-up passed 101 focused unit tests and all 35 session-entry and
+legacy-import integration tests, plus typechecking and a fresh production build. The integration
+suite initially failed a compatible legacy handoff while a build ran concurrently; the complete
+rerun and an isolated repeat of that handoff passed. Build interference is unconfirmed. The tests verify version rejection before nested
+state reads, recovery without duplicate input, and preservation of additive invocation fields.
+
 The normal package-manager wrapper remains unavailable in this checkout because the private
 registry requires `SOCKET_PASSWORD_B64`. Dependencies were installed from the local store with a
 frozen lockfile, and the underlying checks were invoked directly. No credential value was read or
@@ -238,6 +259,9 @@ printed. Local E2E was not run because the repository marks it CI-only.
 ## Remaining proof gaps and migration risks
 
 The prototype does not yet demonstrate these full boundaries:
+
+- A live upgrade and rollback between actual released deployments. Version rejection and owner
+  recovery are tested locally; the old reader's version check was inspected in the base revision.
 
 - An explicit initiating-turn cancellation racing after task admission while the background body
   remains blocked. Ownership is unchanged and existing retention code covers this path, but the

@@ -23,8 +23,9 @@ const task = {
   toolName: metadata.name,
   resultKind: "tool" as const,
   lifetime: "session" as const,
-  origin: { turnId: "turn", stepIndex: 0 },
-  address: { runId: "run", hookToken: "inbox" },
+  origin: { turnId: "turn", stepIndex: 0, futureOrigin: true },
+  address: { runId: "run", hookToken: "inbox", futureAddress: true },
+  futureInvocation: true,
   task: {
     taskId: "task",
     metadata,
@@ -139,7 +140,9 @@ describe("additive durable state", () => {
         futureIndex: true,
         invocations: [
           {
-            address: { runId: "new-run" },
+            address: { runId: "new-run", futureAddress: true },
+            origin: { futureOrigin: true },
+            futureInvocation: true,
             task: {
               futureTask: { revision: 2 },
               activityWorkIdentity: activity,
