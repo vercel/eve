@@ -11,7 +11,7 @@ import {
 import { resumeHookStep } from "#execution/tools/workflow/resume-hook-step.js";
 import type { WorkflowToolRunInput } from "#execution/tools/workflow/types.js";
 
-export interface WaitingWorkflowOwner {
+export interface BlockingWorkflowOwner {
   readonly kind: "turn";
   readonly commands: ChannelReader<"control", WorkflowToolRunControlMessage>;
   readonly signal: AbortSignal;
@@ -20,7 +20,7 @@ export interface WaitingWorkflowOwner {
 }
 
 /** Routes invocation messages to the waiting turn and accepts cancellation. */
-export function createWaitingWorkflowOwner(input: WorkflowToolRunInput): WaitingWorkflowOwner {
+export function createBlockingWorkflow(input: WorkflowToolRunInput): BlockingWorkflowOwner {
   const controller = new AbortController();
   const hook = createHook<WorkflowToolRunControlMessage>({ token: input.hookToken });
   return {

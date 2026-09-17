@@ -17,7 +17,7 @@ import {
   type WorkflowToolRunOwnerInbox,
 } from "#execution/tools/workflow/owner.js";
 import { createBackgroundWorkflowOwner } from "#execution/tools/workflow/background-owner.js";
-import { createWaitingWorkflowOwner } from "#execution/tools/workflow/waiting-owner.js";
+import { createBlockingWorkflow } from "#execution/tools/workflow/blocking-owner.js";
 import type {
   BackgroundWorkflowToolRunInput,
   WorkflowToolRunInput,
@@ -30,7 +30,7 @@ export async function runWorkflowToolInvocation(
   const owner =
     "workflow" in input
       ? await createBackgroundWorkflowOwner(input)
-      : createWaitingWorkflowOwner(input);
+      : createBlockingWorkflow(input);
   if (owner === undefined) return;
   const definition =
     "workflow" in input

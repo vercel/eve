@@ -38,7 +38,7 @@ the existing `WorkflowToolRunMessage` outcome only after those reports are consu
 
 `workflowToolRunWorkflow` is the only durable entry for both modes. One invocation loop reads
 commands, workflow requests and reports, and body completion. It starts background work only after
-`ready`, drains reports before settlement, and bounds cancellation cleanup. Waiting-owner handlers
+`ready`, drains reports before settlement, and bounds cancellation cleanup. Blocking-owner handlers
 deliver messages to the waiting turn; background-owner handlers persist task state and route session
 delivery. Admitted background work remains session-bound and survives the initiating turn. [Foreground adapter][prototype-blocking],
 [background adapter][prototype-background]
@@ -344,6 +344,6 @@ membership. Before production merge, add CI E2E coverage for the combined-path g
 especially initiating-turn cancellation and active-parent report release.
 
 [prototype-invocation]: ../packages/eve/src/execution/tools/workflow/invocation.ts
-[prototype-blocking]: ../packages/eve/src/execution/tools/workflow/waiting-owner.ts
+[prototype-blocking]: ../packages/eve/src/execution/tools/workflow/blocking-owner.ts
 [prototype-background]: ../packages/eve/src/execution/tools/workflow/background-owner.ts
 [prototype-registry]: ../packages/eve/src/harness/workflow-invocations.ts

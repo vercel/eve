@@ -19,8 +19,8 @@ vi.mock("#execution/tools/workflow/background-owner.js", () => ({
 
 vi.mock("#compiled/@workflow/core/index.js", () => ({ sleep: mocks.sleep }));
 
-vi.mock("#execution/tools/workflow/waiting-owner.js", () => ({
-  createWaitingWorkflowOwner: mocks.control,
+vi.mock("#execution/tools/workflow/blocking-owner.js", () => ({
+  createBlockingWorkflow: mocks.control,
 }));
 vi.mock("#execution/tools/workflow/resume-hook-step.js", () => ({ resumeHookStep: mocks.deliver }));
 
