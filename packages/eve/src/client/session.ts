@@ -239,7 +239,7 @@ export class ClientSession {
       for await (const event of source ??
         this.#readStream({
           headers: input.headers,
-          keepAlive: shouldKeepActiveTurnAlive(input.streamReconnectPolicy),
+          keepAlive: true,
           signal: input.signal,
           startIndex: initialStreamIndex,
           streamReconnectPolicy: input.streamReconnectPolicy,
@@ -382,14 +382,6 @@ async function postCreateSession(
 
 function isSessionNotReady(error: unknown): error is ClientError {
   return error instanceof ClientError && error.status === 409 && error.code === "session_not_ready";
-}
-
-function shouldKeepActiveTurnAlive(policy: StreamOptions["streamReconnectPolicy"]): boolean {
-  if (policy && "reconnect" in policy) {
-    return false;
-  }
-
-  return policy?.streamIdleReconnectPolicy?.maxAttempts === undefined;
 }
 
 async function postTurn(

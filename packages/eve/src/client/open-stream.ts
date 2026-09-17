@@ -58,6 +58,7 @@ function resolveRetryPolicy(
 
 function resolveStreamReconnectPolicy(
   policy: StreamReconnectPolicy | undefined,
+  keepAlive = false,
 ): ResolvedStreamReconnectPolicy {
   if (policy && "reconnect" in policy && policy.reconnect === false) {
     return NO_STREAM_RECONNECT_POLICY;
@@ -68,10 +69,10 @@ function resolveStreamReconnectPolicy(
     retryableErrorStatuses: configured?.retryableErrorStatuses
       ? new Set(configured.retryableErrorStatuses)
       : DEFAULT_STREAM_RECONNECT_POLICY.retryableErrorStatuses,
-    streamIdleReconnectPolicy: resolveRetryPolicy(
-      configured?.streamIdleReconnectPolicy,
-      DEFAULT_STREAM_RECONNECT_POLICY.streamIdleReconnectPolicy,
-    ),
+    streamIdleReconnectPolicy: resolveRetryPolicy(configured?.streamIdleReconnectPolicy, {
+      ...DEFAULT_STREAM_RECONNECT_POLICY.streamIdleReconnectPolicy,
+      ...(keepAlive ? { maxAttempts: Infinity } : {}),
+    }),
     streamOpenReconnectPolicy: resolveRetryPolicy(
       configured?.streamOpenReconnectPolicy,
       DEFAULT_STREAM_RECONNECT_POLICY.streamOpenReconnectPolicy,
@@ -86,7 +87,7 @@ interface FollowStreamInput {
   /** Called once after consuming the durable tail captured when the connection opens. */
   readonly onCaughtUp?: () => void;
   readonly host: string;
-  /** Keep reconnecting after empty streams until the consumer aborts or stops iteration. */
+  /** Keep following empty streams unless the caller configures an idle retry limit. */
   readonly keepAlive?: boolean;
   readonly resolveReconnectPolicy?: () => StreamReconnectPolicy | undefined;
   readonly streamReconnectPolicy?: StreamReconnectPolicy;
@@ -133,6 +134,7 @@ export async function* followStreamIterable(
       input.resolveReconnectPolicy === undefined
         ? input.streamReconnectPolicy
         : input.resolveReconnectPolicy(),
+      input.keepAlive,
     );
   let retryPolicy = resolvePolicy();
   let idleRetryPolicy = retryPolicy.streamIdleReconnectPolicy;
@@ -224,7 +226,6 @@ export async function* followStreamIterable(
     }
 
     if (
-      input.keepAlive !== true &&
       !deliveredEvent &&
       !initialConnection &&
       (idleReconnects += 1) >= idleRetryPolicy.maxAttempts
@@ -260,7 +261,7 @@ export async function openStreamBody(
   input: OpenStreamInput & { readonly retryPolicy?: ResolvedStreamReconnectPolicy },
 ): Promise<OpenedStream> {
   const retryPolicy =
-    input.retryPolicy ?? resolveStreamReconnectPolicy(input.streamReconnectPolicy);
+    input.retryPolicy ?? resolveStreamReconnectPolicy(input.streamReconnectPolicy, input.keepAlive);
   const openRetryPolicy = retryPolicy.streamOpenReconnectPolicy;
   let lastStatus: number | undefined;
   let lastBody: string | undefined;
