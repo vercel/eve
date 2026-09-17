@@ -38,7 +38,7 @@ import {
 import type { runRegistrySetupCommand } from "./registry-setup-command.js";
 import { serializeHeadlessSetupEvent } from "./setup-headless.js";
 import {
-  assertCanInstallWebChat,
+  prepareWebChatProjectRoot,
   prepareWebRegistryProject,
   readRegistryConfig,
 } from "./registry-project.js";
@@ -469,7 +469,8 @@ export async function runAddCommand(
 ): Promise<RegistrySetupCompletion | false | undefined> {
   return runRegistryAction(logger, appRoot, async () => {
     const address = itemAddress(item);
-    if (address === itemAddress("channel/web")) await assertCanInstallWebChat(appRoot);
+    const projectRoot =
+      address === itemAddress("channel/web") ? await prepareWebChatProjectRoot(appRoot) : appRoot;
     const config = await readEveRegistryConfig(appRoot);
     if (options.skipInstall === true) {
       if (options.overwrite === true) {
@@ -515,7 +516,7 @@ export async function runAddCommand(
 
     const installReady = await prepareDeclaredPnpmBuildPolicy({
       logger,
-      appRoot,
+      appRoot: projectRoot,
       item,
       policies: eveMetadata?.install?.pnpm?.buildScripts,
       options,
@@ -523,10 +524,10 @@ export async function runAddCommand(
     if (!installReady) return false;
 
     if (address === itemAddress("channel/web")) {
-      await (dependencies.prepareWebRegistryProject ?? prepareWebRegistryProject)(appRoot);
+      await (dependencies.prepareWebRegistryProject ?? prepareWebRegistryProject)(projectRoot);
     }
     await installRegistryItemTransaction({
-      appRoot,
+      appRoot: projectRoot,
       item,
       registryItem,
       nonInteractive: options.nonInteractive,
@@ -534,7 +535,7 @@ export async function runAddCommand(
       install: async () => {
         await addRegistryItems([address], {
           config,
-          cwd: appRoot,
+          cwd: projectRoot,
           overwrite: options.overwrite,
           silent: options.silent,
         });

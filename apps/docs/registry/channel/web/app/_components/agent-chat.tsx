@@ -23,6 +23,7 @@ import { Shimmer } from "@/components/ai-elements/shimmer";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { AgentMessage } from "./agent-message";
+import { WEB_CHAT_AGENT } from "@/app/eve-agent";
 
 const AGENT_NAME = "eve-agent";
 
@@ -36,6 +37,7 @@ export function AgentChat({
   const [cancellationError, setCancellationError] = useState<string>();
   const [hasInputText, setHasInputText] = useState(false);
   const agent = useEveAgent({
+    ...(WEB_CHAT_AGENT === undefined ? {} : { agent: WEB_CHAT_AGENT }),
     initialSession:
       sessionId === undefined
         ? undefined

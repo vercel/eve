@@ -1,31 +1,28 @@
-import { detectPackageManager } from "#setup/package-manager.js";
-import { formatNodeEngineOverrideWarning } from "#setup/node-engine.js";
-import { ensureChannel, type EnsureChannelOptions } from "#setup/scaffold/index.js";
+import { join } from "node:path";
 
-import { reportOverwrittenFiles } from "../shared/scaffold.js";
+import { resolveEveProjectContext } from "#internal/project-context.js";
+import { detectPackageManager } from "#setup/package-manager.js";
+import { pathExists, writeTextFile } from "#setup/scaffold/files.js";
+import { WEB_CHANNEL_TEMPLATE } from "#setup/scaffold/create/web-template.js";
 import {
   defineSetupIntegration,
   type SetupApplyContext,
   type SetupPrepareContext,
 } from "../types.js";
 
-function reportCompetingNextConfigFiles(
-  log: Parameters<typeof reportOverwrittenFiles>[0],
-  files: readonly string[] | undefined,
-): void {
-  for (const filePath of files ?? []) {
-    log.warning(
-      `Found competing Next.js config at ${filePath}; merge any needed settings into next.config.ts and remove it before starting the preview, or Next.js may ignore the generated eve rewrite.`,
-    );
-  }
-}
-
 export interface WebSetupDeps {
   detectPackageManager: typeof detectPackageManager;
-  ensureChannel: typeof ensureChannel;
+  pathExists: typeof pathExists;
+  resolveEveProjectContext: typeof resolveEveProjectContext;
+  writeTextFile: typeof writeTextFile;
 }
 
-const defaultDeps: WebSetupDeps = { detectPackageManager, ensureChannel };
+const defaultDeps: WebSetupDeps = {
+  detectPackageManager,
+  pathExists,
+  resolveEveProjectContext,
+  writeTextFile,
+};
 
 export interface WebSetupPlan {
   configureVercelServices: boolean;
@@ -43,39 +40,31 @@ export async function prepareWebSetup(
 }
 
 export async function applyWebSetup(
-  plan: WebSetupPlan,
+  _plan: WebSetupPlan,
   context: SetupApplyContext,
   deps: WebSetupDeps = defaultDeps,
 ) {
-  context.presenter.log.message("Scaffolding Web Chat channel files...");
-  const options: EnsureChannelOptions = {
-    projectRoot: context.appRoot,
-    kind: "web",
-    packageManager: plan.packageManager,
-    configureVercelServices: plan.configureVercelServices,
-    force: context.force,
-    skipDependencyMutation: true,
-  };
-  const result = await deps.ensureChannel(options);
-  reportOverwrittenFiles(context.presenter.log, result.filesOverwritten);
-  if (
-    result.kind === "web" &&
-    result.action !== "skipped" &&
-    result.nodeEngineOverride !== undefined
-  ) {
-    context.presenter.log.warning(formatNodeEngineOverrideWarning(result.nodeEngineOverride));
+  const channelPath = join(context.appRoot, "agent", "channels", "eve.ts");
+  if (context.force || !(await deps.pathExists(channelPath))) {
+    await deps.writeTextFile(channelPath, WEB_CHANNEL_TEMPLATE, { force: context.force });
   }
-  reportCompetingNextConfigFiles(
-    context.presenter.log,
-    "competingNextConfigFiles" in result ? result.competingNextConfigFiles : undefined,
+  const project = await deps.resolveEveProjectContext(context.appRoot);
+  if (project.kind === "workspace") {
+    throw new Error("Web Chat setup requires a selected workspace agent.");
+  }
+  const agentName = project.kind === "workspace-member" ? project.member.name : undefined;
+  const webRoot = join(project.environmentRoot, "apps", "web");
+  await deps.writeTextFile(
+    join(webRoot, "app", "eve-agent.ts"),
+    `/** Named workspace agent selected by the Web Chat installer. */\nexport const WEB_CHAT_AGENT: string | undefined = ${agentName === undefined ? "undefined" : JSON.stringify(agentName)};\n`,
+    { force: true },
   );
-  if (result.action === "skipped") {
-    context.presenter.log.info("Next.js project detected. Skipping Web Chat scaffolding.");
-    return { facts: [] };
-  }
-  context.presenter.log.success("Scaffolded channel: web");
-  // The registry item owns dependency installation; this setup only applies
-  // native scripts and host configuration through `skipDependencyMutation`.
+  await deps.writeTextFile(
+    join(webRoot, "next.config.ts"),
+    'import type { NextConfig } from "next";\nimport { withEve } from "eve/next";\n\nconst nextConfig: NextConfig = {};\n\nexport default withEve(nextConfig, { eveRoot: "../.." });\n',
+    { force: true },
+  );
+  context.presenter.log.success("Configured channel: web");
   return { facts: [], deploymentRequired: true as const };
 }
 

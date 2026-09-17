@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import type { EveProjectContext } from "#internal/project-context.js";
 import { createFakePrompter } from "#internal/testing/fake-prompter.js";
 import { headlessAsker } from "#setup/ask.js";
 import { integrationSetupEnvironment } from "../shared/environment.js";
@@ -11,22 +12,53 @@ function deps(): WebSetupDeps {
       kind: "pnpm" as const,
       source: "lockfile" as const,
     })),
-    ensureChannel: vi.fn(async () => ({
-      kind: "web" as const,
-      action: "created" as const,
-      filesWritten: [],
-      filesOverwritten: [],
-      filesSkipped: [],
-      packageJsonUpdated: [
-        { path: "/project/package.json", dependencies: ["eve"], devDependencies: [], scripts: [] },
-      ],
-      nodeEngineOverride: undefined,
-      competingNextConfigFiles: [],
+    pathExists: vi.fn(async () => false),
+    resolveEveProjectContext: vi.fn(async (appRoot: string): Promise<EveProjectContext> => ({
+      appRoot,
+      environmentRoot: appRoot,
+      kind: "standalone",
     })),
+    writeTextFile: vi.fn(async () => {}),
   };
 }
 
 describe("Web setup", () => {
+  it("writes the selected member channel and configures the workspace Web Chat target", async () => {
+    const effects = deps();
+    vi.mocked(effects.resolveEveProjectContext).mockResolvedValue({
+      environmentRoot: "/project",
+      kind: "workspace-member",
+      member: { appRoot: "/project/agents/support", name: "support" },
+      workspace: {
+        root: "/project",
+        members: [{ appRoot: "/project/agents/support", name: "support" }],
+      },
+    });
+    const ctx = createSetupContexts({
+      appRoot: "/project/agents/support",
+      asker: headlessAsker(),
+      environment: integrationSetupEnvironment("cli-missing", { kind: "unresolved" }),
+      prompter: createFakePrompter().prompter,
+      resolveVercelProject: async () => ({ orgId: "team", projectId: "project" }),
+    });
+    const plan = await prepareWebSetup(ctx.prepare, effects);
+
+    await applyWebSetup(plan, ctx.apply, effects);
+
+    expect(effects.writeTextFile).toHaveBeenNthCalledWith(
+      1,
+      "/project/agents/support/agent/channels/eve.ts",
+      expect.any(String),
+      { force: undefined },
+    );
+    expect(effects.writeTextFile).toHaveBeenNthCalledWith(
+      2,
+      "/project/apps/web/app/eve-agent.ts",
+      expect.stringContaining('WEB_CHAT_AGENT: string | undefined = "support"'),
+      { force: true },
+    );
+  });
+
   it("prepares and applies without semantic questions", async () => {
     const effects = deps();
     const ctx = createSetupContexts({
@@ -38,8 +70,22 @@ describe("Web setup", () => {
     });
     const plan = await prepareWebSetup(ctx.prepare, effects);
     await applyWebSetup(plan, ctx.apply, effects);
-    expect(effects.ensureChannel).toHaveBeenCalledWith(
-      expect.objectContaining({ configureVercelServices: false, skipDependencyMutation: true }),
+    expect(effects.writeTextFile).toHaveBeenCalledWith(
+      "/project/agent/channels/eve.ts",
+      expect.any(String),
+      { force: undefined },
+    );
+    expect(effects.writeTextFile).toHaveBeenNthCalledWith(
+      2,
+      "/project/apps/web/app/eve-agent.ts",
+      expect.stringContaining("WEB_CHAT_AGENT: string | undefined = undefined"),
+      { force: true },
+    );
+    expect(effects.writeTextFile).toHaveBeenNthCalledWith(
+      3,
+      "/project/apps/web/next.config.ts",
+      expect.stringContaining('eveRoot: "../.."'),
+      { force: true },
     );
   });
 });

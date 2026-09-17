@@ -111,18 +111,19 @@ export interface WithEveOptions {
    */
   readonly devServerTimeoutMs?: number;
   /**
-   * Path to the eve application root, relative to `process.cwd()` unless
-   * absolute. Defaults to the Next.js app root when it is not an eve workspace.
+   * Path to an eve project root, relative to the Next.js app root unless
+   * absolute. The root may contain one `agent/` or an `agents/` workspace.
+   * Defaults to the Next.js app root.
    */
   readonly eveRoot?: string;
   /**
    * Named eve agents to mount under `/eve/<name>/v1/*`.
    *
    * Use this when one Next.js app needs to talk to multiple eve agents outside
-   * a project-level `agents/` workspace. When unset, withEve discovers that
-   * workspace's members automatically. Do not combine with {@link eveRoot};
-   * the single-agent form remains the shorthand for one unnamed agent mounted
-   * at `/eve/v1/*`.
+   * a project-level `agents/` workspace. When unset, withEve discovers a
+   * workspace at the Next.js app root automatically. Do not combine with
+   * {@link eveRoot}; the single-agent form remains the shorthand for one
+   * unnamed agent mounted at `/eve/v1/*`.
    */
   readonly agents?: WithEveAgentsConfig;
   /**
@@ -319,10 +320,10 @@ function assertValidAgentName(name: string): void {
 }
 
 function assertValidWithEveOptions(options: WithEveOptions): void {
-  if (options.agents === undefined) return;
-  if (options.eveRoot !== undefined) {
+  if (options.eveRoot !== undefined && options.agents !== undefined) {
     throw new Error("withEve cannot combine eveRoot with agents. Use one configuration form.");
   }
+  if (options.agents === undefined) return;
   const agentNames = Object.keys(options.agents);
   if (agentNames.length === 0) {
     throw new Error("withEve agents must contain at least one named eve agent.");
@@ -340,33 +341,31 @@ function createDefaultBuildCommand(input: { readonly agentRoot: string }): strin
 
 async function normalizeAgentsConfig(
   options: WithEveOptions,
-  nextRoot: string,
 ): Promise<readonly ResolvedEveNextAgent[]> {
   const servicePrefixBase = normalizeRoutePrefix(options.servicePrefix ?? EVE_NEXT_SERVICE_PREFIX);
   const resolveBuildCommand = (agentRoot: string, buildCommand: string | undefined) =>
     buildCommand ?? options.eveBuildCommand ?? createDefaultBuildCommand({ agentRoot });
 
   if (options.agents === undefined) {
-    if (options.eveRoot === undefined) {
-      const context = await findEveProjectContext(nextRoot);
-      if (
-        context?.kind === "workspace" &&
-        context.workspace.root === nextRoot &&
-        context.workspace.members.length > 0
-      ) {
-        return context.workspace.members.map((member, index) => ({
-          appRoot: member.appRoot,
-          buildCommand: resolveBuildCommand(member.appRoot, undefined),
-          localProductionPortOffset: index,
-          name: member.name,
-          publicRoutePrefix: createNamedAgentRoutePrefix(member.name),
-          servicePrefix: createNamedAgentServicePrefix(servicePrefixBase, member.name),
-          workspaceMember: true,
-        }));
-      }
+    const eveRoot = resolveApplicationRoot(options.eveRoot);
+    const context = await findEveProjectContext(eveRoot);
+    if (
+      context?.kind === "workspace" &&
+      context.workspace.root === eveRoot &&
+      context.workspace.members.length > 0
+    ) {
+      return context.workspace.members.map((member, index) => ({
+        appRoot: member.appRoot,
+        buildCommand: resolveBuildCommand(member.appRoot, undefined),
+        localProductionPortOffset: index,
+        name: member.name,
+        publicRoutePrefix: createNamedAgentRoutePrefix(member.name),
+        servicePrefix: createNamedAgentServicePrefix(servicePrefixBase, member.name),
+        workspaceMember: true,
+      }));
     }
 
-    const appRoot = resolveApplicationRoot(options.eveRoot);
+    const appRoot = eveRoot;
     return [
       {
         appRoot,
@@ -423,7 +422,7 @@ export function withEve<TConfig extends EveNextConfig>(
   assertValidWithEveOptions(options);
   return async function eveNextConfig(phase, context) {
     const [agents, nextConfig] = await Promise.all([
-      normalizeAgentsConfig(options, nextRoot),
+      normalizeAgentsConfig(options),
       resolveNextConfig(configOrFunction, phase, context),
     ]);
     const existingRewrites = nextConfig.rewrites;

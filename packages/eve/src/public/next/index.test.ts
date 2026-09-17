@@ -416,9 +416,7 @@ describe("withEve", () => {
       withEve<TestConfig>(
         {},
         {
-          agents: {
-            support: "./agents/support",
-          },
+          agents: { support: "./agents/support" },
           eveRoot: "./agent",
         },
       ),

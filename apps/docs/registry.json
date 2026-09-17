@@ -1819,11 +1819,6 @@
       ],
       "files": [
         {
-          "path": "registry/channel/web/agent/channels/eve.ts",
-          "type": "registry:file",
-          "target": "agent/channels/eve.ts"
-        },
-        {
           "path": "registry/channel/web/app/_components/agent-chat.tsx",
           "type": "registry:file",
           "target": "app/_components/agent-chat.tsx"

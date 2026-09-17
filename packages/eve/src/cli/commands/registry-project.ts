@@ -1,4 +1,4 @@
-import { readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import {
@@ -85,11 +85,22 @@ function parseRegistryMapping(argument: string): { namespace: string; url: strin
   return { namespace, url };
 }
 
-export async function assertCanInstallWebChat(appRoot: string): Promise<void> {
-  if ((await resolveEveProjectContext(appRoot)).kind === "standalone") return;
-  throw new Error(
-    "Web Chat installs a project-level Next.js application and cannot currently be added to a top-level agents/ workspace. Configure a root Next.js app with withEve({ agents }) instead.",
-  );
+/** Resolves the one package directory the Web Chat registry item installs into. */
+export async function prepareWebChatProjectRoot(appRoot: string): Promise<string> {
+  const context = await resolveEveProjectContext(appRoot);
+  const webRoot = join(context.environmentRoot, "apps", "web");
+  const packageJsonPath = join(webRoot, "package.json");
+  try {
+    await readFile(packageJsonPath, "utf8");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    await mkdir(webRoot, { recursive: true });
+    await writeFile(
+      packageJsonPath,
+      `${JSON.stringify({ name: "web", private: true }, null, 2)}\n`,
+    );
+  }
+  return webRoot;
 }
 
 /** Reads registry namespace mappings from package.json. */
@@ -180,6 +191,7 @@ export async function prepareWebRegistryProject(appRoot: string): Promise<void> 
   try {
     source = await readFile(path, "utf8");
   } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
     throw new Error(
       `Could not add Web Chat because ${path} could not be read: ${errorMessage(error)}`,
     );

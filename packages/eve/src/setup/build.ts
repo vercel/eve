@@ -70,11 +70,7 @@ function shouldCopySourcePath(relativePath: string): boolean {
   ) {
     return false;
   }
-  return (
-    !relativePath.startsWith("agent/") ||
-    relativePath === WEB_CHANNEL_SOURCE_PATH ||
-    WEB_CHANNEL_SOURCE_PATH.startsWith(`${relativePath}/`)
-  );
+  return !relativePath.startsWith("agent/");
 }
 
 async function discoverSourceFiles(sourceRoot: string, relativeDirectory = ""): Promise<string[]> {
@@ -176,6 +172,7 @@ async function renderGeneratedModule(): Promise<string> {
     }),
   );
   const packageTemplate = parsePackageTemplate(await readFile(REGISTRY_PATH, "utf8"));
+  const webChannelTemplate = await readFile(join(SOURCE_ROOT, WEB_CHANNEL_SOURCE_PATH), "utf8");
 
   return [
     "// Generated from apps/docs/registry/channel/web by eve's setup build (src/setup/build.ts).",
@@ -184,6 +181,8 @@ async function renderGeneratedModule(): Promise<string> {
     "export const WEB_APP_TEMPLATE_FILES = {",
     ...entries,
     "} as const;",
+    "",
+    `export const WEB_CHANNEL_TEMPLATE = ${quoteSourceFile(webChannelTemplate)};`,
     "",
     "export const WEB_APP_SIGN_IN_WITH_VERCEL_TEMPLATE_FILES = {",
     ...signInWithVercelEntries,
