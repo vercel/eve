@@ -19,10 +19,21 @@ function respond(request: MockModelRequest): MockModelResponse | string {
   const continuation = request.userMessages.some((message) =>
     message.includes("continuation approval gates"),
   );
+  const delayed = request.userMessages.some((message) =>
+    message.toLowerCase().includes("wait twenty seconds before the approval gates"),
+  );
   const threeGates =
     continuation ||
     request.userMessages.some((message) => message.includes("three approval gates"));
   const id = (gate: string) => (continuation ? `continuation-${gate}` : `approval-${gate}`);
+  if (
+    delayed &&
+    request.toolResults.find((result) => result.id === "approval-wait") === undefined
+  ) {
+    return {
+      toolCalls: [{ id: "approval-wait", input: { delay: "20s" }, name: "wait_before_approval" }],
+    };
+  }
   const first = request.toolResults.find((result) => result.id === id("first"));
   if (first === undefined) {
     return {
