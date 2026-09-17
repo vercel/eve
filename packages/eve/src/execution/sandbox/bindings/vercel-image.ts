@@ -42,6 +42,7 @@ import type {
   ExperimentalVercelImageRuntimeOptions,
 } from "#public/sandbox/vercel-image-sandbox.js";
 import { SandboxTemplateNotProvisionedError } from "#shared/sandbox-template-error.js";
+import type { MutableNetworkSandboxSession } from "#shared/sandbox-session.js";
 import { decodeVercelOidcTokenClaims } from "#shared/vercel-project.js";
 import {
   isSandboxPreparedArtifactRecord,
@@ -85,8 +86,9 @@ export interface CreateVercelImageProviderInput {
 }
 
 export type VercelImageSessionState = {
+  readonly generation: string;
   readonly sandboxName: string;
-  readonly version: 1;
+  readonly version: 2;
 };
 
 export function createVercelImageSandboxProvider(
@@ -95,7 +97,8 @@ export function createVercelImageSandboxProvider(
 ): SandboxProviderImplementation<
   ExperimentalVercelImageRuntimeOptions,
   VercelImagePreparedArtifact,
-  VercelImageSessionState
+  VercelImageSessionState,
+  MutableNetworkSandboxSession
 > {
   const createImagePublisher = input.createImagePublisher ?? createLazyOciImagePublisher;
   const ensureBaseRuntime = input.ensureBaseRuntime ?? ensureVercelSandboxBaseRuntime;
@@ -254,25 +257,55 @@ export function createVercelImageSandboxProvider(
       );
       return { image, mounts: preparedMounts.map((mount) => mount.artifact), version: 1 };
     },
-    async resume(context, options, artifact, stateValue) {
+    async resume(_context, artifact, stateValue) {
       const state = requireSessionState(stateValue);
-      const nativeSession = resolveNativeSession(context);
-      const expectedName = sessionName(identityPrefix, nativeSession.identity, options, artifact);
-      if (state.sandboxName !== expectedName) {
+      if (state.generation !== imageGeneration(artifact, createOptions)) {
         throw new Error(
           "Vercel image sandbox session state is incompatible with this environment.",
         );
       }
-      return (await openSession(context, options, artifact, nativeSession.tags, state.sandboxName))
-        .handle;
+      const module = await loadModule();
+      const sandbox = await getNamedVercelSandbox({
+        createOptions,
+        sandboxModule: module,
+        sandboxName: state.sandboxName,
+      });
+      if (sandbox === null) {
+        throw new Error(`Vercel image sandbox session "${state.sandboxName}" no longer exists.`);
+      }
+      await ensureBaseRuntime(sandbox);
+      return createVercelSandboxHandle({
+        createOptions,
+        loadDeleteSandboxModule: loadDeleteModule,
+        sandbox,
+      });
     },
     async start(context, options, artifact) {
       const nativeSession = resolveNativeSession(context);
       const sandboxName = sessionName(identityPrefix, nativeSession.identity, options, artifact);
       const result = await openSession(context, options, artifact, nativeSession.tags, sandboxName);
-      return { handle: result.handle, state: { sandboxName, version: 1 } };
+      return {
+        handle: result.handle,
+        state: { generation: imageGeneration(artifact, createOptions), sandboxName, version: 2 },
+      };
     },
   };
+}
+
+function vercelImageIdentityOptions(options: object): object {
+  const excluded = new Set(["fetch", "projectId", "signal", "teamId", "token"]);
+  return Object.fromEntries(Object.entries(options).filter(([key]) => !excluded.has(key)));
+}
+
+function imageGeneration(
+  artifact: SandboxPreparedArtifact,
+  createOptions: VercelCreateOptions,
+): string {
+  return createSandboxProviderIdentity({
+    artifact: requirePreparedArtifact(artifact),
+    environment: vercelImageIdentityOptions(createOptions),
+    version: 1,
+  });
 }
 
 function sessionName(
@@ -292,12 +325,13 @@ function sessionName(
 function requireSessionState(state: unknown): VercelImageSessionState {
   if (
     !isSandboxPreparedArtifactRecord(state) ||
-    state.version !== 1 ||
+    state.version !== 2 ||
+    typeof state.generation !== "string" ||
     typeof state.sandboxName !== "string"
   ) {
     throw new Error("Invalid Vercel image sandbox session state.");
   }
-  return { sandboxName: state.sandboxName, version: 1 };
+  return { generation: state.generation, sandboxName: state.sandboxName, version: 2 };
 }
 
 async function createImageSandboxWithRetry<T>(input: {

@@ -239,7 +239,7 @@ export function createVercelSandbox(
         throw new Error(`Vercel sandbox session "${state.sandboxName}" no longer exists.`);
       }
       await ensureVercelSandboxBaseRuntime(sandbox);
-      return createHandle({ createOptions, loadDeleteSandboxModule, sandbox });
+      return createVercelSandboxHandle({ createOptions, loadDeleteSandboxModule, sandbox });
     },
     async start(context, options, artifact) {
       const sandboxName = vercelSessionName(context.session.id, options, artifact, createOptions);

@@ -99,11 +99,11 @@ describe("createVercelImageSandboxProvider", () => {
     const started = await first.provider.start(context("session-a"), {}, artifact);
     expect(started.state).toMatchObject({
       sandboxName: expect.stringMatching(/^eve-sbx-vercel-image-/u),
-      version: 1,
+      version: 2,
     });
     const second = createProvider({ existing: true });
     await expect(
-      second.provider.resume(context("session-a"), {}, artifact, started.state),
+      second.provider.resume(context("session-a"), artifact, started.state),
     ).resolves.toBeTruthy();
     expect(second.create).not.toHaveBeenCalled();
   });
@@ -119,9 +119,10 @@ describe("createVercelImageSandboxProvider", () => {
   it("rejects incompatible serialized session state", async () => {
     const { provider } = createProvider();
     await expect(
-      provider.resume(context("session-a"), {}, artifact, {
+      provider.resume(context("session-a"), artifact, {
+        generation: "wrong",
         sandboxName: "wrong",
-        version: 1,
+        version: 2,
       }),
     ).rejects.toThrow("incompatible");
   });
