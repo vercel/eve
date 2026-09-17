@@ -55,7 +55,8 @@ curl -X POST http://127.0.0.1:2000/eve/v1/session \
 In both forms, eve responds with `202` and the durable `sessionId` in the JSON body and
 `x-eve-session-id` header as soon as Workflow accepts the run. The command inbox can still be
 starting at that point. An immediate follow-up can return `409 session_not_ready`; retry that
-code with bounded backoff. The TypeScript client retries sends up to three times. Do not wait
+code with bounded backoff. The TypeScript client retries sends for up to 20 seconds and respects
+the caller's abort signal. Do not wait
 for `session.waiting` on a prewarmed session: initialization and its first events require a message.
 
 ## Stream a session

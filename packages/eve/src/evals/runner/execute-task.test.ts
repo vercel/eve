@@ -49,7 +49,7 @@ describe("executeTask", () => {
     let evalSignal: AbortSignal;
     const fetch = vi.spyOn(globalThis, "fetch").mockImplementation(async (request, init) => {
       if (new URL(String(request)).pathname === "/eve/v1/session") {
-        expect(JSON.parse(String(init?.body))).toEqual({});
+        expect(init?.body).toBeUndefined();
         expect(init?.signal).toBe(evalSignal);
         expect(new Headers(init?.headers).get("authorization")).toBe("Bearer eval-token");
         expect(new Headers(init?.headers).get("x-create")).toBe("yes");
@@ -979,7 +979,7 @@ function createScriptedServer(
         );
       }
 
-      if (method === "POST" && pathname === "/eve/v1/session" && init?.body === "{}") {
+      if (method === "POST" && pathname === "/eve/v1/session" && init?.body === undefined) {
         return Response.json({ sessionId: pendingTurns[0]?.sessionId }, { status: 202 });
       }
       if (method === "POST") {

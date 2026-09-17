@@ -110,8 +110,9 @@ The explicit `prewarm()` method resolves on `202 Accepted`, as does `client.sess
 It does not wait for an initialization event; concurrent calls share the same create request.
 The composer stays `"ready"`, meaning it can accept input, and prewarming does not run
 `prepareSend`. A concurrent `send()` waits only for acceptance, then posts the message.
-If the inbox is still starting, the client retries `409 session_not_ready` up to three times
-with delays of 250 ms, 500 ms, and 1 second. Stream events are not a prerequisite for sending.
+If the inbox is still starting, the client retries `409 session_not_ready` with bounded
+exponential backoff for up to 20 seconds. The caller's abort signal cancels the wait. Stream
+events are not a prerequisite for sending.
 
 A failed create sets `error` and calls `onError` when no send is waiting. A waiting send can
 fall back to creating a session with its message. After creation succeeds, initialization

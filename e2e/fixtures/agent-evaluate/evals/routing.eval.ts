@@ -9,7 +9,9 @@ export default defineEval({
     first.messageIncludes('"reasoning":"low"');
     first.messageIncludes('"requests":1');
     first.usedNoTools();
-    const second = await t.send("Bob now needs a difficult investigation of that incident.");
+    const second = await first.session.send(
+      "Bob now needs a difficult investigation of that incident.",
+    );
     second.expectOk();
     second.usedNoTools();
     second.messageIncludes('"model":"openai/large"');

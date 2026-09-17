@@ -54,7 +54,7 @@ flowchart LR
 UI `ready` means the composer accepts input, not that the inbox is already registered. A send
 waits for an in-flight create response, then posts immediately without a stream-event barrier.
 An unclaimed inbox on a pending or running workflow returns `409 session_not_ready`. The client
-retries sends three times with 250 ms, 500 ms, and 1 second delays, respecting cancellation.
+retries sends with bounded exponential backoff for up to 20 seconds, respecting cancellation.
 Unknown and terminal sessions return `session_not_active` without retries or replacement.
 
 The store consumes one session stream across turns. Resume uses its initial durable tail index

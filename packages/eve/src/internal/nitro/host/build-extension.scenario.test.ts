@@ -279,7 +279,7 @@ describe("extension build output", () => {
       join(outDir, "extension", "tools", "crm_search.d.ts"),
       "utf8",
     );
-    expect(dynamicToolDeclaration).toContain('import("eve/tools").DynamicSentinel');
+    expect(dynamicToolDeclaration).toContain('import("eve").DynamicSentinel');
     expect(dynamicToolDeclaration).not.toContain("node_modules");
     expect(
       await readFile(

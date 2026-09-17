@@ -29,8 +29,9 @@ import type {
   StreamOptions,
 } from "#client/types.js";
 
-const SESSION_SEND_RETRY_COUNT = 3;
 const SESSION_SEND_RETRY_BASE_DELAY_MS = 250;
+const SESSION_SEND_RETRY_MAX_DELAY_MS = 2_000;
+const SESSION_SEND_READY_TIMEOUT_MS = 20_000;
 const followSession = Symbol("followClientSession");
 
 interface FollowSessionOptions extends StreamOptions {
@@ -350,17 +351,20 @@ async function postSessionSend(
   path: string,
   input: SendTurnPayload,
 ): Promise<Response> {
+  const readyDeadline = Date.now() + SESSION_SEND_READY_TIMEOUT_MS;
   let retryDelayMs = SESSION_SEND_RETRY_BASE_DELAY_MS;
-  for (let retry = 0; ; retry += 1) {
+  for (;;) {
     try {
       return await postTurn(context, path, input, false);
     } catch (error) {
-      if (!isSessionNotReady(error) || retry >= SESSION_SEND_RETRY_COUNT) throw error;
+      if (!isSessionNotReady(error)) throw error;
+      const remainingMs = readyDeadline - Date.now();
+      if (remainingMs <= 0) throw error;
+      await sleep(Math.min(retryDelayMs, remainingMs), input.signal);
     }
 
-    await sleep(retryDelayMs, input.signal);
     input.signal?.throwIfAborted();
-    retryDelayMs *= 2;
+    retryDelayMs = Math.min(retryDelayMs * 2, SESSION_SEND_RETRY_MAX_DELAY_MS);
   }
 }
 

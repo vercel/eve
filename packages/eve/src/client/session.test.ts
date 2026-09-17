@@ -296,12 +296,14 @@ describe("ClientSession", () => {
     await expect(session.cancel()).rejects.toThrow("Cancel route returned an invalid response");
   });
 
-  it("retries session_not_ready with exponential backoff", async () => {
+  it("retries session_not_ready beyond three seconds with current headers", async () => {
     let headerResolution = 0;
     const observedHeaders: string[] = [];
-    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (_request, init) => {
+    const observedPaths: string[] = [];
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (request, init) => {
+      observedPaths.push(new URL(String(request)).pathname);
       observedHeaders.push(new Headers(init?.headers).get("x-attempt") ?? "");
-      return fetchMock.mock.calls.length <= 3
+      return fetchMock.mock.calls.length <= 4
         ? createSessionNotReadyResponse()
         : createAcceptedResponse();
     });
@@ -331,16 +333,22 @@ describe("ClientSession", () => {
       await vi.advanceTimersByTimeAsync(999);
       expect(fetchMock).toHaveBeenCalledTimes(3);
       await vi.advanceTimersByTimeAsync(1);
+      expect(fetchMock).toHaveBeenCalledTimes(4);
+
+      await vi.advanceTimersByTimeAsync(1_999);
+      expect(fetchMock).toHaveBeenCalledTimes(4);
+      await vi.advanceTimersByTimeAsync(1);
       await expect(sent).resolves.toMatchObject({ sessionId: "session_1" });
     } finally {
       vi.useRealTimers();
     }
 
-    expect(fetchMock).toHaveBeenCalledTimes(4);
-    expect(observedHeaders).toEqual(["1", "2", "3", "4"]);
+    expect(fetchMock).toHaveBeenCalledTimes(5);
+    expect(observedHeaders).toEqual(["1", "2", "3", "4", "5"]);
+    expect(new Set(observedPaths)).toEqual(new Set(["/eve/v1/session/session_1"]));
   });
 
-  it("exposes the typed session_not_ready conflict after three retries", async () => {
+  it("exposes the typed session_not_ready conflict after the readiness deadline", async () => {
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
       .mockImplementation(async () => createSessionNotReadyResponse());
@@ -362,7 +370,7 @@ describe("ClientSession", () => {
       message: "The session is not ready to accept messages yet.",
       status: 409,
     });
-    expect(fetchMock).toHaveBeenCalledTimes(4);
+    expect(fetchMock).toHaveBeenCalledTimes(14);
   });
 
   it.each(["session_not_active", "another_conflict"])(
