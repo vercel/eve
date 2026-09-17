@@ -75,12 +75,8 @@ Tests live under `test/`, outside the extension distribution. Unit and integrati
 
 The `typescript-compiler` development alias supplies the JavaScript compiler API used by the diagnostics worker test. The workspace's TypeScript 7 CLI remains the package typechecker. `prepack` builds the extension; installation does not run the extension CLI before the local framework has been built.
 
-## PR benchmark
+## Benchmarks
 
-Add the `eve-code-benchmark` label to a same-repository PR to run the [full comparison workflow](../../.github/workflows/eve-code-benchmark.yml), or dispatch it manually. It runs all 89 pinned Terminal-Bench 2.0 tasks once for each of six arms: the original eve-code baseline (`ca27ee898`), the PR's eve-code, Codex, Claude Code, OpenCode, and Hermes. PR updates rerun the comparison while the label remains attached; remove the label to stop automatic full runs.
+Use [eve-bench](https://github.com/vercel-labs/eve-bench#readme) directly. Its native `eve-code` harness accepts an installed source app through `--agent`; `apps/fixtures/eve-code-bench` supplies this workspace's eve and eve-code dependencies after the build above.
 
-Both eve-code arms use the same current framework and fixture. Only the baseline's extension source is restored from the original revision. The runner, dataset, baseline, and competitor versions are pinned in `scripts/eve-code-benchmark-config.json`; executed source hashes and harness versions are checked before accepting results. Eight shards per arm run one task at a time, with at most eight CI workers in parallel. This is 534 task attempts and can take hours.
-
-The CI summary and one updated PR comment contain the same comparison table: passed tasks, score, percentage-point difference from baseline, errors, average time, and cost. Missing or invalid results are not scored, and unreported cost is not treated as zero. Per-shard results and task diagnostics are uploaded even on failure. An older run cannot replace the current PR head's comment.
-
-Configure `AI_GATEWAY_API_KEY` and `EVE_BENCH_SSH_KEY` as repository secrets. The latter holds a read-only deploy key for the private `vercel-labs/eve-bench` runner and is used only for checkout, without persisting credentials. All arms use the same root model, defaulting to `openai/gpt-5.6-terra`; override it with `EVE_CODE_BENCH_MODEL`. The eve-code worker retains its configured model. Fork PRs are skipped. This terminal suite does not test Connect authentication, desktop provisioning, or consumer-owned PR-watch workflows.
+Dataset selection, execution, comparisons, and report generation belong to eve-bench. This package does not maintain a separate benchmark runner or reporting layer.
