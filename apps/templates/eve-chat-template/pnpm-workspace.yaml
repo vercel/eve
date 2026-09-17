@@ -2,8 +2,10 @@ packages:
   - "."
 
 minimumReleaseAgeExclude:
-  - eve
+  - "@ai-sdk/*"
   - "@vercel/connect"
+  - ai
+  - eve
 
 allowBuilds:
   esbuild: true

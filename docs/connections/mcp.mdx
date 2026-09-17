@@ -100,11 +100,11 @@ Prefer `allow` for the smallest safe surface, especially when the server exposes
 
 ## Approval gates
 
-Use the shared `approval` option to gate every tool served by an MCP connection. The [connections overview](../connections#per-connection-approval) defines the `never()`, `once()`, and `always()` helpers; [Human-in-the-loop](../human-in-the-loop#approvals) defines the pause-and-resume contract.
+Use the shared `approval` option to gate every tool served by an MCP connection. The [connections overview](../connections#per-connection-approval) defines the `never()`, `once()`, `always()`, and `auto()` helpers; [Human-in-the-loop](../human-in-the-loop#approvals) defines the pause-and-resume contract.
 
 ### Gate specific tools by name or input
 
-A remote MCP server usually mixes read tools with destructive or publishing ones, so a blanket `always()` would prompt on every harmless call. Pass a custom policy instead — the same [`Approval`](/docs/human-in-the-loop#approvals) shape authored tools use — to gate only the calls that matter. The policy receives `{ session, toolName, toolInput, approvedTools }` and returns an approval status, synchronously or as a promise.
+A remote MCP server usually mixes read tools with destructive or publishing ones, so a blanket `always()` would prompt on every harmless call. Pass a custom policy instead — the same [`Approval`](/docs/human-in-the-loop#approvals) shape authored tools use — to gate only the calls that matter. The policy receives `{ session, toolName, toolInput, approvedTools, callId, abortSignal }` and returns an approval status, synchronously or as a promise.
 
 This connection always gates deletes, gates a publish only when the call actually schedules a post, and lets everything else through:
 

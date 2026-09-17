@@ -2,7 +2,7 @@
   "kind": "eve-extension-capability-contract",
   "capability": "tool",
   "epoch": 49,
-  "sha256": "279ef6a6d9fd422f186b68dd84b5a93dc1189e16f73f50097c972db4e7232854",
+  "sha256": "ce1aba64de58c372c4a23d631123e2ce231fcb2315e99e39d0aeb9c4acf2993b",
   "exports": [
     "WorkflowTool",
     "WorkflowToolInput",

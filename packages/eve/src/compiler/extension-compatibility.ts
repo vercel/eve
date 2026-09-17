@@ -55,10 +55,10 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
     },
   },
   dynamicTool: {
-    current: 47,
+    current: 48,
     supported: [
       1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 22, 28, 29, 30, 31, 32,
-      33, 41, 47,
+      33, 41, 48,
     ],
     dropped: {
       21: "Message and reasoning append events now expose deltas instead of cumulative snapshots.",
@@ -79,6 +79,7 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
       44: "autoModel and eve/experimental/evaluate were removed; import auto from eve/models",
       45: "autoModel and eve/experimental/evaluate were removed; import auto from eve/models",
       46: "autoModel and eve/experimental/evaluate were removed; import auto from eve/models",
+      47: "autoModel and eve/experimental/evaluate were removed; import auto from eve/models",
     },
   },
   channel: {
@@ -109,8 +110,8 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
     },
   },
   connection: {
-    current: 21,
-    supported: [1, 2, 3, 4, 5, 6, 7, 8, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21],
+    current: 22,
+    supported: [1, 2, 3, 4, 5, 6, 7, 8, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22],
     dropped: {
       9: "Dynamic connection resolvers no longer receive conversation or channel continuation data",
       10: "Message and reasoning append events now expose deltas instead of cumulative snapshots.",

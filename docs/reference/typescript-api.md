@@ -115,7 +115,7 @@ import template from "../../prompts/template.txt?raw";
 | `eve`                                                                       | `defineAgent`, `defineRemoteAgent`, `defineDynamic`, agent config types                                                        |
 | `eve/tools`                                                                 | `defineTool`, `defineWorkflowTool`, `defineDurableCallback`, `defineDurableSchema`, `defineDynamic`, `disableTool`, tool types |
 | `eve/tools/{bash,read_file,write_file,todo,web_fetch,load_skill,glob,grep}` | Individual reusable tool definitions                                                                                           |
-| `eve/tools/approval`                                                        | Approval types and `always`, `once`, `never`                                                                                   |
+| `eve/tools/approval`                                                        | Approval types and `auto`, `always`, `once`, `never`                                                                           |
 | `eve/tools/web_search`                                                      | Provider-managed `webSearch` configuration                                                                                     |
 | `eve/tools/workflow`                                                        | Runtime-generated `workflow` tool factory                                                                                      |
 | `eve/tools/sleep`                                                           | Opt-in durable `sleep` tool                                                                                                    |

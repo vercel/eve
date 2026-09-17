@@ -6,24 +6,24 @@ url: /human-in-the-loop
 
 Human-in-the-loop (HITL) is any point where the agent durably pauses and waits for a person. Two things trigger it, and both ride the same pause-and-resume protocol:
 
-- **Approvals** — a tool requires a person to sign off before (or instead of) running. The agent decides to call the tool; a human decides whether it does.
+- **Approvals** — a tool policy allows, denies, or pauses a call for a person to review. The agent decides to call the tool; the policy decides whether it runs automatically or needs a human decision.
 - **Questions** — the agent itself asks the user a clarifying question or a choice mid-turn, and parks until they answer.
 
 Either way the run parks at `session.waiting`, durably, for as long as it takes — seconds or days — and picks back up exactly where it left off once the answer arrives. Channels render the request for you.
 
 ## Approvals
 
-Approval is a property of a [tool](/docs/tools) that pauses for a person before it runs. Gate a tool with `approval` and the helpers from `eve/tools/approval`:
+Approval is a property of a [tool](/docs/tools) that gates it before it runs. The policy can decide automatically or pause for a person. Set `approval` with the helpers from `eve/tools/approval`:
 
 ```ts title="agent/tools/refund_charge.ts"
 import { defineTool } from "eve/tools";
-import { always } from "eve/tools/approval";
+import { auto } from "eve/tools/approval";
 import { z } from "zod";
 
 export default defineTool({
   description: "Refund a charge.",
   inputSchema: z.object({ tenantId: z.string(), chargeId: z.string(), amount: z.number() }),
-  approval: always(), // or once() / never() / a policy
+  approval: auto(), // or always() / once() / never() / a policy
   async execute(input) {
     return refund(input);
   },
@@ -35,12 +35,34 @@ export default defineTool({
 | `never()`  | Never require approval (the default when omitted).                                 |
 | `once()`   | Require approval only the first time the tool runs in a session; auto-allow after. |
 | `always()` | Require approval before every call.                                                |
+| `auto()`   | Ask an evaluation model whether to run the exact call or require user approval.    |
 
 By default, omitted `approval` behaves like `never()`, so tool calls may execute without human approval. Require human approval or other safeguards for sensitive, irreversible, regulated, financial, healthcare, employment, housing, legal, safety-impacting, user-impacting, or external side-effecting actions.
 
+`auto()` uses an [AI SDK evaluation model](/docs/guides/evaluate) to classify each call as `clear` or `caution`. It defaults to `typesafe-ai/jev`. Like `evaluate`, a model string uses Vercel AI Gateway unless the application configures a global AI SDK default provider:
+
+```ts
+approval: auto({ model: "typesafe-ai/jev" });
+```
+
+The evaluation model reviews the tool name and input for dangerous effects. A caution, failed review, or incomplete input requires user approval. The tool input is sent to the evaluation model's provider.
+
+Override the classifier text for application-specific policy:
+
+```ts
+approval: auto({
+  model: "typesafe-ai/jev",
+  instructions: "Review whether this refund needs finance approval.",
+  criteria: {
+    clear: "The refund can proceed automatically.",
+    caution: "A person must review the refund.",
+  },
+});
+```
+
 A reusable approval grant applies only after every matching request that is already pending has been resolved. If several calls to a `once()`-gated tool have each produced an approval prompt, approving one does not authorize the others; each visible prompt remains an independent decision. After those pending requests are resolved, later calls in the session are allowed automatically.
 
-When the decision depends on the input, pass your own policy instead of a helper. It receives the same session context as tool execution, plus `{ toolName, toolInput, approvedTools, callId }`, and returns an AI SDK 7 approval status synchronously or as a promise. Use `ctx.session.auth.current` to guard by the caller of the current turn and `ctx.session.auth.initiator` to guard by the caller that created the session. Return `"user-approval"` to pause for a person or `"not-applicable"` to continue without a prompt. `toolInput` can be undefined, so guard the access. This policy denies cross-tenant calls, then requires approval only when an amount crosses a threshold:
+When the decision depends on the input, pass your own policy instead of a helper. It receives the same session context as tool execution, plus `{ toolName, toolInput, approvedTools, callId, abortSignal }`, and returns an AI SDK 7 approval status synchronously or as a promise. Use `abortSignal` for asynchronous policy work so cancellation stops it with the turn. Use `ctx.session.auth.current` to guard by the caller of the current turn and `ctx.session.auth.initiator` to guard by the caller that created the session. Return `"user-approval"` to pause for a person or `"not-applicable"` to continue without a prompt. `toolInput` can be undefined, so guard the access. This policy denies cross-tenant calls, then requires approval only when an amount crosses a threshold:
 
 ```ts
 approval: ({ session, toolInput }) => {
