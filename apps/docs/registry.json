@@ -8,63 +8,10 @@
       "type": "registry:item",
       "title": "Self-modification",
       "description": "Add a source editing subagent with local edits and official registry installation.",
-      "dependencies": ["just-bash", "@vercel/connect"],
+      "dependencies": ["just-bash"],
       "meta": {
         "eve": {
-          "requires": ">=0.54.4",
-          "install": {
-            "pnpm": {
-              "buildScripts": [
-                {
-                  "packages": ["node-liblzma", "@mongodb-js/zstd"],
-                  "optional": true,
-                  "recommendedAction": "ignore-optional",
-                  "reason": "These optional just-bash compression accelerators are not required by the self-modification agent."
-                }
-              ]
-            }
-          },
-          "setup": [
-            {
-              "package": "eve",
-              "bin": "eve",
-              "args": ["integration", "setup", "self-modification-production"]
-            }
-          ]
-        }
-      },
-      "files": [
-        {
-          "path": "registry/eve/self-modification/config.ts",
-          "type": "registry:file",
-          "target": "agent/subagents/self-modification/config.ts"
-        },
-        {
-          "path": "registry/eve/self-modification/agent.ts",
-          "type": "registry:file",
-          "target": "agent/subagents/self-modification/agent.ts"
-        },
-        {
-          "path": "registry/eve/self-modification/sandbox.ts",
-          "type": "registry:file",
-          "target": "agent/subagents/self-modification/sandbox.ts"
-        },
-        {
-          "path": "registry/eve/self-modification/extension.ts",
-          "type": "registry:file",
-          "target": "agent/subagents/self-modification/extensions/selfmod.ts"
-        }
-      ]
-    },
-    {
-      "name": "experimental/self-modification",
-      "type": "registry:item",
-      "title": "Self-modification (Experimental)",
-      "description": "Add an experimental source editing subagent with local edits and official registry installation.",
-      "dependencies": ["just-bash", "@vercel/connect"],
-      "meta": {
-        "eve": {
-          "hidden": true,
+          "requires": ">=0.59.0",
           "install": {
             "pnpm": {
               "buildScripts": [
@@ -88,24 +35,48 @@
       },
       "files": [
         {
-          "path": "registry/eve/self-modification/config.ts",
+          "path": "registry/eve/self-modification/extension.ts",
           "type": "registry:file",
-          "target": "agent/subagents/self-modification/config.ts"
-        },
-        {
-          "path": "registry/eve/self-modification/agent.ts",
-          "type": "registry:file",
-          "target": "agent/subagents/self-modification/agent.ts"
-        },
-        {
-          "path": "registry/eve/self-modification/sandbox.ts",
-          "type": "registry:file",
-          "target": "agent/subagents/self-modification/sandbox.ts"
-        },
+          "target": "agent/extensions/self-modification/extension.ts"
+        }
+      ]
+    },
+    {
+      "name": "experimental/self-modification",
+      "type": "registry:item",
+      "title": "Self-modification (Experimental)",
+      "description": "Add an experimental source editing subagent with local edits and official registry installation.",
+      "dependencies": ["just-bash"],
+      "meta": {
+        "eve": {
+          "hidden": true,
+          "requires": ">=0.59.0",
+          "install": {
+            "pnpm": {
+              "buildScripts": [
+                {
+                  "packages": ["node-liblzma", "@mongodb-js/zstd"],
+                  "optional": true,
+                  "recommendedAction": "ignore-optional",
+                  "reason": "These optional just-bash compression accelerators are not required by the self-modification agent."
+                }
+              ]
+            }
+          },
+          "setup": [
+            {
+              "package": "eve",
+              "bin": "eve",
+              "args": ["integration", "setup", "self-modification"]
+            }
+          ]
+        }
+      },
+      "files": [
         {
           "path": "registry/eve/self-modification/extension.ts",
           "type": "registry:file",
-          "target": "agent/subagents/self-modification/extensions/selfmod.ts"
+          "target": "agent/extensions/self-modification/extension.ts"
         }
       ]
     },

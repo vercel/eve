@@ -31,12 +31,21 @@ describe("self-modification proposal capture", () => {
       ".turbo/cache/state.json",
       "node_modules/eve/index.js",
       "agent/subagents/self-modification/agent.ts",
+      "agent/extensions/self-modification/extension.ts",
+      "agent/extensions/self-modification.ts",
       "agent/extensions/selfmod.ts",
     ]) {
       expect(() => assertAllowedChange({ mode: "100644", objectId: blob, path }, ".")).toThrow(
         "protected path",
       );
     }
+    expect(() =>
+      assertAllowedChange(
+        { mode: "100644", objectId: blob, path: "agent/extensions/editor/policy.ts" },
+        ".",
+        ["agent/extensions/editor"],
+      ),
+    ).toThrow("protected path");
   });
 
   it("derives a stable namespaced branch from trusted base and operation identifiers", () => {
@@ -95,6 +104,7 @@ function publish(fetch: typeof globalThis.fetch) {
         if (command.includes("^{tree}")) return result(baseTree);
         if (command.includes("diff-tree"))
           return result(`:100644 100644 ${base} ${blob} M\0agent/instructions.md\0`);
+        if (command.includes(" grep -l ")) return { exitCode: 1, stderr: "", stdout: "" };
         if (command.includes("cat-file -s")) return result("1");
         if (command.includes("cat-file blob")) return result("eA==");
         throw new Error(`Unexpected Git command: ${command}`);

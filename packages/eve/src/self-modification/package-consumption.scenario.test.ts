@@ -81,6 +81,9 @@ describe("packed package consumption", () => {
     await access(join(packageRoot, "dist/src/self-modification/config.js"));
     await access(join(packageRoot, "dist/src/self-modification/sandbox.js"));
     await access(join(packageRoot, "dist/src/self-modification/setup.js"));
+    await access(
+      join(packageRoot, "dist/src/self-modification/extension/subagents/agent/tools/edit_file.js"),
+    );
 
     const root = await mkdtemp(join(tmpdir(), "eve-self-modification-package-"));
     temporaryRoots.push(root);
@@ -103,6 +106,7 @@ describe("packed package consumption", () => {
             "@vercel/connect": "2.2.0",
             eve: `file:${eveTarball}`,
             "just-bash": "3.1.0",
+            microsandbox: "0.5.5",
           },
         },
         null,
@@ -122,7 +126,7 @@ describe("packed package consumption", () => {
     await writeAppFile(appRoot, "agent/instructions.md", "You are a test agent.\n");
     await writeAppFile(
       appRoot,
-      "agent/subagents/self-modification/config.ts",
+      "agent/extensions/self-modification/extension.ts",
       renderSelfModificationConfig({
         branch: "main",
         channelNames: [],
@@ -131,21 +135,6 @@ describe("packed package consumption", () => {
         repository: "github.com/acme/agent",
         vercelBackend: true,
       }),
-    );
-    await writeAppFile(
-      appRoot,
-      "agent/subagents/self-modification/agent.ts",
-      'import { defineSelfModificationAgent } from "eve/self-modification/agent";\nimport config from "./config";\n\nexport default defineSelfModificationAgent({ config });\n',
-    );
-    await writeAppFile(
-      appRoot,
-      "agent/subagents/self-modification/sandbox.ts",
-      'import { defineSelfModificationSandbox } from "eve/self-modification/sandbox";\nimport config from "./config";\n\nexport default defineSelfModificationSandbox({ config });\n',
-    );
-    await writeAppFile(
-      appRoot,
-      "agent/subagents/self-modification/extensions/selfmod.ts",
-      'import selfModification from "eve/self-modification";\nimport config from "../config";\n\nexport default selfModification(config);\n',
     );
 
     await run(

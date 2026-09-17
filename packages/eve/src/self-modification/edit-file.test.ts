@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import editFile, { applyExactEdits } from "./extension/tools/edit_file.js";
+import editFile, { applyExactEdits } from "./extension/subagents/agent/tools/edit_file.js";
 
 describe("applyExactEdits", () => {
   it("describes exact matching and JSON-safe encoding", () => {

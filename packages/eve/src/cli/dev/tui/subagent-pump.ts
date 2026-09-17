@@ -126,14 +126,16 @@ export interface SubagentPumpOptions {
   view?: SubagentView;
   formatActionResultError: (event: ActionResultStreamEvent) => string;
   /** Runs TUI-owned handling after a child tool result becomes visible. */
-  onToolCompleted?: (toolName: string, output: unknown) => Promise<void>;
+  onToolCompleted?: (subagentName: string, toolName: string, output: unknown) => Promise<void>;
 }
 
 export class SubagentPump {
   readonly #client: Client | undefined;
   readonly #view: SubagentView | undefined;
   readonly #formatActionResultError: (event: ActionResultStreamEvent) => string;
-  readonly #onToolCompleted: ((toolName: string, output: unknown) => Promise<void>) | undefined;
+  readonly #onToolCompleted:
+    | ((subagentName: string, toolName: string, output: unknown) => Promise<void>)
+    | undefined;
   readonly #runs = new Map<string, SubagentRun>();
   readonly #pumps = new Map<string, AbortController>();
   /** Durable child cursor shared by repeated calls into one conversation subagent. */
@@ -584,7 +586,7 @@ export class SubagentPump {
         if (tool.errorText !== undefined) update.errorText = tool.errorText;
         view?.upsertTool(update);
         if (event.data.status === "completed") {
-          return this.#onToolCompleted?.(tool.toolName, result.output);
+          return this.#onToolCompleted?.(run.name, tool.toolName, result.output);
         }
         break;
       }

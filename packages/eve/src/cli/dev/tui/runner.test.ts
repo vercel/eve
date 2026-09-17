@@ -55,19 +55,25 @@ const VERCEL_SSO_URL =
 describe("registryHandoffAddress", () => {
   it("accepts only a terminal handoff from the self-modification registry tool", () => {
     expect(
-      registryHandoffAddress("selfmod__registry_add", {
+      registryHandoffAddress("self-modification__agent", "registry_add", {
         status: "needs-terminal",
         address: "channel/slack",
       }),
     ).toBe("channel/slack");
     expect(
-      registryHandoffAddress("selfmod__registry_add", {
+      registryHandoffAddress("other__agent", "registry_add", {
+        status: "needs-terminal",
+        address: "channel/slack",
+      }),
+    ).toBeUndefined();
+    expect(
+      registryHandoffAddress("self-modification__agent", "registry_add", {
         status: "installed",
         address: "extension/browserbase",
       }),
     ).toBeUndefined();
     expect(
-      registryHandoffAddress("other_tool", {
+      registryHandoffAddress("self-modification__agent", "other_tool", {
         status: "needs-terminal",
         address: "channel/slack",
       }),
@@ -261,7 +267,7 @@ describe("registryHandoffAddress", () => {
                     callId: "registry-add",
                     input: { address: "channel/slack" },
                     kind: "tool-call",
-                    toolName: "selfmod__registry_add",
+                    toolName: "registry_add",
                   },
                 ],
                 sequence: 1,
@@ -281,7 +287,7 @@ describe("registryHandoffAddress", () => {
                       callId: "registry-add",
                       input: { address: "channel/slack" },
                       kind: "tool-call",
-                      toolName: "selfmod__registry_add",
+                      toolName: "registry_add",
                     },
                     display: "confirmation",
                     kind: "tool-approval",
@@ -289,7 +295,7 @@ describe("registryHandoffAddress", () => {
                       { id: "approve", label: "Approve" },
                       { id: "cancel", label: "Cancel" },
                     ],
-                    prompt: "Approve tool call: selfmod__registry_add",
+                    prompt: "Approve tool call: registry_add",
                     requestId: "approval-1",
                   },
                 ],
@@ -321,7 +327,7 @@ describe("registryHandoffAddress", () => {
                     callId: "registry-add",
                     input: { address: "channel/slack" },
                     kind: "tool-call",
-                    toolName: "selfmod__registry_add",
+                    toolName: "registry_add",
                   },
                 ],
                 sequence: 3,
@@ -339,7 +345,7 @@ describe("registryHandoffAddress", () => {
                   callId: "registry-add",
                   kind: "tool-result",
                   output: { status: "needs-terminal", address: "channel/slack" },
-                  toolName: "selfmod__registry_add",
+                  toolName: "registry_add",
                 },
                 sequence: 4,
                 status: "completed",
@@ -387,7 +393,7 @@ describe("registryHandoffAddress", () => {
             callId: "selfmod-call",
             childSessionId: "child-session",
             childStreamPath: "/eve/v1/session/child-session/stream",
-            name: "self-modification",
+            name: "self-modification__agent",
             sequence: 0,
             turnId: "parent-turn",
           },

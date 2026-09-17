@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { classifyCatalogEntry } from "./extension/classify-registry-item.js";
-import type { CatalogEntry } from "./extension/tools/search_registry.js";
+import type { CatalogEntry } from "./extension/subagents/agent/tools/search_registry.js";
 
 function entry(overrides: Partial<CatalogEntry> = {}): CatalogEntry {
   return {

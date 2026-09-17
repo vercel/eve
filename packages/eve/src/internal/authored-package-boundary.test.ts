@@ -89,7 +89,10 @@ describe("createRuntimeLoaderPackageBoundaryPlugin", () => {
       resolveId.call(
         context,
         "eve/tools",
-        join(PACKAGE_ROOT, "dist/src/self-modification/extension/tools/edit_file.js"),
+        join(
+          PACKAGE_ROOT,
+          "dist/src/self-modification/extension/subagents/agent/tools/edit_file.js",
+        ),
         { kind: "import-statement" },
       ),
     ).resolves.toEqual({

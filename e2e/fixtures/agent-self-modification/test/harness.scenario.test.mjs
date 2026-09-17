@@ -113,7 +113,7 @@ test("close retires every session before restoring the complete source tree", as
   const verification = liveTurn("verification");
   const parentEvent = {
     type: "subagent.called",
-    data: { name: "self-modification", childSessionId: child.sessionId },
+    data: { name: "self-modification__agent", childSessionId: child.sessionId },
   };
   const parent = liveTurn("parent", [parentEvent]);
 
@@ -194,7 +194,7 @@ test("one reset failure still retires other sessions and leaves unsafe source un
   };
   const parentEvent = {
     type: "subagent.called",
-    data: { name: "self-modification", childSessionId: "bad" },
+    data: { name: "self-modification__agent", childSessionId: "bad" },
   };
   // The public request path is used to populate both tracked sessions.
   const liveParent = {
@@ -358,10 +358,7 @@ test("request falls back to a parent-boundary watch when the initial event is mi
     sessionId: "parent",
     events: [],
     async waitForEvent() {
-      return {
-        type: "subagent.called",
-        data: { name: "self-modification", childSessionId: "child" },
-      };
+      return { data: { name: "self-modification__agent", childSessionId: "child" } };
     },
     async result() {
       return completedTurn("parent");
@@ -398,7 +395,7 @@ for (const emitsCalled of [false, true]) {
   test(`request follows a reused agent past stale turns (new called event: ${emitsCalled})`, async () => {
     const called = {
       type: "subagent.called",
-      data: { name: "self-modification", agentId: "agent-1", childSessionId: "child" },
+      data: { name: "self-modification__agent", agentId: "agent-1", childSessionId: "child" },
     };
     const initialParent = liveTurn("parent", [called]);
     initialParent.waitForEvent = async () => called;

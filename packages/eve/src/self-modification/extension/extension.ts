@@ -1,9 +1,17 @@
-import { defineExtension } from "eve/extension";
+import { defineExtension } from "#public/extension/index.js";
 import { z } from "zod";
 
+import { isAgentReasoningDefinition, isRuntimeLanguageModel } from "#internal/runtime-model.js";
+import type { AgentReasoningDefinition, AgentStaticModelDefinition } from "#public/index.js";
 import type { GitHubCredentialProvider, SelfModificationAuthorization } from "../config.js";
 
 export const selfModificationConfigSchema = z.object({
+  model: z
+    .custom<AgentStaticModelDefinition>(
+      (value) => typeof value === "string" || isRuntimeLanguageModel(value),
+    )
+    .optional(),
+  reasoning: z.custom<AgentReasoningDefinition>(isAgentReasoningDefinition).optional(),
   local: z.object({ enabled: z.boolean().optional() }).optional(),
   deployed: z
     .object({

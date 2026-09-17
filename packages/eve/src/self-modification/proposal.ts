@@ -57,12 +57,22 @@ export async function captureSelfModificationProposal(input: {
     );
   }
 
+  const protectedMounts = await selfModificationMountPaths({
+    directory: input.workspace.directory,
+    repositoryPath: input.workspace.repositoryPath,
+    sandbox: input.sandbox,
+    tree: proposedTreeSha,
+  });
   const changes: ProposalChange[] = [];
   let changedBytes = 0;
   for (const record of records) {
     const mode = record.status === "D" ? null : proposalMode(record.newMode, record.path);
     const objectId = record.status === "D" ? null : record.newObjectId;
-    assertAllowedChange({ mode, objectId, path: record.path }, input.workspace.directory);
+    assertAllowedChange(
+      { mode, objectId, path: record.path },
+      input.workspace.directory,
+      protectedMounts,
+    );
     const bytes =
       objectId === null
         ? 0
@@ -143,6 +153,7 @@ export function parseRawDiff(raw: string): readonly RawChange[] {
 export function assertAllowedChange(
   change: Pick<ProposalChange, "mode" | "objectId" | "path">,
   directory: string,
+  protectedMounts: readonly string[] = [],
 ): void {
   const path = change.path;
   const appRoot = directory === "." ? "" : `${directory}/`;
@@ -170,6 +181,9 @@ export function assertAllowedChange(
     ) ||
     path.startsWith(".github/workflows/") ||
     path.startsWith(`${agentRoot}subagents/self-modification/`) ||
+    path.startsWith(`${agentRoot}extensions/self-modification/`) ||
+    path === `${appRoot}agent/extensions/self-modification.ts` ||
+    protectedMounts.some((mount) => path === mount || path.startsWith(`${mount}/`)) ||
     path === `${appRoot}agent/extensions/selfmod.ts` ||
     path === `${appRoot}agent/self-modification.config.ts`
   ) {
@@ -177,6 +191,41 @@ export function assertAllowedChange(
       `Self-modification proposal changes a protected path: ${JSON.stringify(path)}.`,
     );
   }
+}
+
+async function selfModificationMountPaths(input: {
+  readonly directory: string;
+  readonly repositoryPath: string;
+  readonly sandbox: ProposalSandbox;
+  readonly tree: string;
+}): Promise<readonly string[]> {
+  const appRoot = input.directory === "." ? "" : `${input.directory}/`;
+  const extensionsRoot = `${appRoot}agent/extensions`;
+  const matches = await gitOutput(
+    input.sandbox,
+    `git -C ${quote(input.repositoryPath)} grep -l -z -F -- "eve/self-modification" ${quote(input.tree)} -- ${quote(extensionsRoot)}`,
+    false,
+  ).catch((error: unknown) => {
+    if (error instanceof Error && error.message.includes("failed with exit 1")) return "";
+    throw error;
+  });
+  return [
+    ...new Set(
+      matches
+        .split("\0")
+        .filter(Boolean)
+        .flatMap((match) => {
+          const path = match.slice(match.indexOf(":") + 1);
+          if (!path.startsWith(`${extensionsRoot}/`)) return [];
+          const relativePath = path.slice(extensionsRoot.length + 1);
+          if (relativePath.endsWith("/extension.ts")) {
+            return [`${extensionsRoot}/${relativePath.slice(0, -"/extension.ts".length)}`];
+          }
+          if (!relativePath.includes("/")) return [path];
+          return [`${extensionsRoot}/${relativePath.split("/")[0]}`];
+        }),
+    ),
+  ];
 }
 
 function isSafePath(path: string): boolean {

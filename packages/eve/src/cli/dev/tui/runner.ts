@@ -633,8 +633,8 @@ export class EveTUIRunner {
     if (this.#client !== undefined) pumpOptions.client = this.#client;
     if (this.#renderer.subagents !== undefined) pumpOptions.view = this.#renderer.subagents;
     if (options.appRoot !== undefined) {
-      pumpOptions.onToolCompleted = async (toolName, output) => {
-        const address = registryHandoffAddress(toolName, output);
+      pumpOptions.onToolCompleted = async (subagentName, toolName, output) => {
+        const address = registryHandoffAddress(subagentName, toolName, output);
         if (address !== undefined) this.#queueRegistrySetup(address);
       };
     }
@@ -2152,14 +2152,16 @@ type EveStreamTranslatorInput = {
   failureHintOverride?: (event: FailureStreamEvent) => string | undefined;
 };
 
-const SELFMOD_REGISTRY_ADD_TOOL = "selfmod__registry_add";
-
-/** Returns the registry address carried by a self-modification terminal handoff. */
+/** Returns the registry address carried by a packaged self-modification terminal handoff. */
 export function registryHandoffAddress(
+  subagentName: string | undefined,
   toolName: string | undefined,
   output: unknown,
 ): string | undefined {
-  if (toolName !== SELFMOD_REGISTRY_ADD_TOOL || typeof output !== "object" || output === null) {
+  const isPackagedChild =
+    subagentName === "self-modification__agent" && toolName === "registry_add";
+  const isLegacyRoot = subagentName === undefined && toolName === "selfmod__registry_add";
+  if ((!isPackagedChild && !isLegacyRoot) || typeof output !== "object" || output === null) {
     return undefined;
   }
   const result = output as { address?: unknown; status?: unknown };
@@ -2464,7 +2466,7 @@ async function* eveEventsToTUIStream(
               toolCallId: callId,
               output,
             };
-            const address = registryHandoffAddress(toolNames.get(callId), output);
+            const address = registryHandoffAddress(undefined, toolNames.get(callId), output);
             if (address !== undefined) await onRegistryHandoff?.(address);
             break;
           }
