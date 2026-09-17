@@ -407,6 +407,8 @@ export async function resolveConnectionSearchDynamicTools() {
     outputSchema: CONNECTION_SEARCH_OUTPUT_SCHEMA,
   });
   stampDurableDynamicToolCallbacks(connectionSearchTool, {
+    inputSchema: { callback: () => CONNECTION_SEARCH_INPUT_SCHEMA, closure: {} },
+    outputSchema: { callback: () => CONNECTION_SEARCH_OUTPUT_SCHEMA, closure: {} },
     execute: {
       callback: (_closure, input) => executeConnectionSearch(input as ConnectionSearchInput),
       closure: {},
