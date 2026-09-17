@@ -5,6 +5,7 @@ import { isJsonObjectValue, type JsonObject, type JsonValue } from "#shared/json
 
 export interface SubagentParentContext {
   readonly conversationId?: string;
+  readonly evaluation?: true;
   readonly lineage: SessionParent;
   readonly continuationToken?: string;
   readonly traceContext?: SessionTraceContext;

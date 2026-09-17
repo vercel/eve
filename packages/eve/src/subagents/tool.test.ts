@@ -95,6 +95,19 @@ describe("buildSubagentRunInput", () => {
     expect(runInput.capabilities).toBeUndefined();
   });
 
+  it("forwards eval provenance to the child run input", () => {
+    const session = makeSession();
+    const { runInput } = buildRuntimeSubagentRunInput({
+      action: makeAction(),
+      auth: null,
+      initiatorAuth: null,
+      session,
+      parent: makeParent(session, { id: "turn-0", sequence: 0 }, { evaluation: true }),
+    });
+
+    expect(runInput.evaluation).toBe(true);
+  });
+
   it("sets the subagent adapter state with parent lineage metadata", () => {
     const { childContinuationToken, runInput } = buildRuntimeSubagentRunInput({
       action: makeAction(),

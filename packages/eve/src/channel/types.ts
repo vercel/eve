@@ -457,6 +457,8 @@ export interface SessionCapabilities {
  */
 export interface RunInput {
   readonly adapter: ChannelAdapter<any>;
+  /** Analytics-only provenance for a session created by `eve eval`. */
+  readonly evaluation?: true;
   /** Framework task that owns this run, when the run is a task executor. */
   readonly taskId?: string;
   /**

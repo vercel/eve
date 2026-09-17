@@ -18,6 +18,7 @@ import { BundleKey, type CompiledBundle } from "#runtime/sessions/runtime-contex
 import { ROOT_RUNTIME_AGENT_NODE_ID } from "#runtime/graph.js";
 import { AGENT_TOOL_DESCRIPTION, AGENT_TOOL_NAME } from "#tools/framework/agent-contract.js";
 import {
+  EvaluationKey,
   SessionDynamicSubagentSelectionsKey,
   TurnDynamicSubagentSelectionsKey,
   type DurableDynamicSubagentSelection,
@@ -52,6 +53,13 @@ export type OwnerAgentDispatchPlanEntry =
   | { readonly kind: "reject"; readonly result: RuntimeSubagentDispatchFailure }
   | { readonly kind: "start"; readonly target: SubagentStartTarget };
 
+type PreparedOwnerAgentInvocation = Omit<
+  PreparedCoordinationDispatch<OwnerAgentDispatchPlanEntry>,
+  "sessionState"
+> & {
+  readonly evaluation?: true;
+};
+
 /** Prepares one workflow-owner agent invocation from durable inputs. */
 export async function prepareOwnerAgentInvocation(input: {
   readonly invocation: AgentInvocationRequest["input"];
@@ -60,7 +68,7 @@ export async function prepareOwnerAgentInvocation(input: {
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
   readonly taskId?: string;
-}): Promise<Omit<PreparedCoordinationDispatch<OwnerAgentDispatchPlanEntry>, "sessionState">> {
+}): Promise<PreparedOwnerAgentInvocation> {
   const durableSession = readDurableSession(input.sessionState);
   const ctx = await deserializeContext(input.serializedContext);
   const event = getHarnessEmissionState(durableSession.state);
@@ -73,7 +81,7 @@ export async function prepareOwnerAgentInvocation(input: {
     input: input.invocation,
     invocationId: input.invocationId,
   });
-  return await prepareActionDispatch({
+  const prepared = await prepareActionDispatch({
     batch: {
       requests: [action],
       event: {
@@ -97,6 +105,7 @@ export async function prepareOwnerAgentInvocation(input: {
     planSharesSandbox: ({ bundle, plan }) => ownerPlanSharesSandbox({ bundle, plan }),
     serializedContext: input.serializedContext,
   });
+  return ctx.get(EvaluationKey) === true ? { ...prepared, evaluation: true } : prepared;
 }
 
 export function planAgentDispatch(input: {

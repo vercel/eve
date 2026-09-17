@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { SessionAuthContext } from "#channel/types.js";
+import { EVE_EVAL_HEADER, EVE_EVAL_HEADER_VALUE } from "#internal/evaluation.js";
 import { readForwardedParentSessionBaggage } from "#protocol/baggage.js";
 import {
   cancelRemoteAgentTurn,
@@ -200,6 +201,45 @@ describe("startRemoteAgentSession", () => {
     expect(JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string)).toMatchObject({
       operationId: "operation-1",
     });
+  });
+
+  it("forwards eval provenance to the remote child", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(
+        Response.json(
+          { ok: true, sessionId: "remote-session", status: "accepted" },
+          { status: 202 },
+        ),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await startRemoteAgentSession({
+      action: createAction(),
+      callbackBaseUrl: "https://caller.example.com",
+      parent: {
+        evaluation: true,
+        lineage: {
+          callId: "call-1",
+          rootSessionId: "root-session",
+          sessionId: "parent-session",
+          turn: { id: "turn-1", sequence: 0 },
+        },
+      },
+      remote: { ...createRemoteAgent(), headers: { [EVE_EVAL_HEADER]: "0" } },
+      session: {
+        agent: { modelReference: { id: "mock/test" }, system: "", tools: [] },
+        compaction: { recentWindowSize: 10, threshold: 100000 },
+        continuationToken: "eve:parent-token",
+        history: [],
+        sessionId: "parent-session",
+        state: {},
+      },
+    });
+
+    expect(new Headers(fetchMock.mock.calls[0]?.[1]?.headers).get(EVE_EVAL_HEADER)).toBe(
+      EVE_EVAL_HEADER_VALUE,
+    );
   });
 
   it.each([true, false])(

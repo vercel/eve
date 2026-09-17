@@ -11,6 +11,7 @@ import {
   ContinuationTokenKey,
   ConversationIdKey,
   DynamicSubagentAgentConfigKey,
+  EvaluationKey,
   InitiatorAuthKey,
   ModeKey,
   ParentSessionKey,
@@ -69,6 +70,9 @@ export function buildRunContext(input: {
   ctx.set(ModeKey, run.mode);
   ctx.set(AuthKey, auth);
   ctx.set(InitiatorAuthKey, run.initiatorAuth ?? auth);
+  if (run.evaluation === true) {
+    ctx.set(EvaluationKey, true);
+  }
 
   if (input.dynamicSubagentAgentConfig !== undefined) {
     ctx.set(DynamicSubagentAgentConfigKey, input.dynamicSubagentAgentConfig);

@@ -4,6 +4,7 @@ import type { Runtime, SessionCapabilities } from "#channel/types.js";
 import { dispatchDynamicModelEvent } from "#context/dynamic-model-lifecycle.js";
 import { preparePersistedStepDynamicToolMetadata } from "#context/dynamic-tool-lifecycle.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
+import type { GatewayRequestAttribution } from "#internal/gateway.js";
 import type { ExecutionInstrumentation } from "#instrumentation/runtime.js";
 import { LOAD_SKILL_TOOL_NAME } from "#runtime/skills/fragment-context.js";
 import { createToolLoopHarness } from "#harness/tool-loop.js";
@@ -72,6 +73,8 @@ export interface CreateExecutionNodeStepInput {
    * delegated child runs on the same workflow runtime as the parent.
    */
   readonly createRuntime: CreateRuntime;
+  /** Analytics-only provenance inherited from an eval-created session. */
+  readonly evaluation?: true;
   readonly handleEvent?: HandleEventFn;
   readonly historyProjector?: HistoryViewProjector;
   readonly historyView?: PreparedHistoryView;
@@ -98,6 +101,11 @@ export function createExecutionNodeStep(input: CreateExecutionNodeStepInput): St
   const tools = createNodeHarnessTools({ node: input.node });
   const instrumentation = input.instrumentation;
   const sessionInstrumentation = instrumentation?.prepareExecution();
+  const runtimeIdentity = buildRuntimeIdentity(input.node);
+  const gatewayAttribution = createGatewayRequestAttribution({
+    evaluation: input.evaluation,
+    runtimeIdentity,
+  });
   const step = createToolLoopHarness({
     steeringSignal: input.steeringSignal,
     abortSignal: input.abortSignal,
@@ -105,6 +113,7 @@ export function createExecutionNodeStep(input: CreateExecutionNodeStepInput): St
     clearOnly: input.clearOnly,
     compactOnly: input.compactOnly,
     handleEvent: input.handleEvent,
+    gatewayAttribution,
     historyProjector: input.historyProjector,
     historyView: input.historyView,
     instrumentation: sessionInstrumentation,
@@ -117,7 +126,7 @@ export function createExecutionNodeStep(input: CreateExecutionNodeStepInput): St
       }),
     dispatchDynamicModelEvent: dispatchModelEvent,
     resolveModel,
-    runtimeIdentity: buildRuntimeIdentity(input.node),
+    runtimeIdentity,
     tools,
   });
   if (instrumentation === undefined) return step;
@@ -127,6 +136,20 @@ export function createExecutionNodeStep(input: CreateExecutionNodeStepInput): St
     } finally {
       await instrumentation.flush();
     }
+  };
+}
+
+function createGatewayRequestAttribution(input: {
+  readonly evaluation?: true;
+  readonly runtimeIdentity: RuntimeIdentity;
+}): GatewayRequestAttribution {
+  const title = input.runtimeIdentity.agentName ?? input.runtimeIdentity.agentId;
+  const deploymentHost = process.env.VERCEL_PROJECT_PRODUCTION_URL || process.env.VERCEL_URL;
+
+  return {
+    ...(input.evaluation === true ? { evaluation: true as const } : {}),
+    ...(title ? { title } : {}),
+    ...(deploymentHost ? { referer: `https://${deploymentHost}` } : {}),
   };
 }
 

@@ -451,6 +451,7 @@ describe("owner agent invocation dispatch", () => {
     } as never);
     vi.mocked(prepareOwnerAgentInvocation).mockResolvedValue({
       ...prepared,
+      evaluation: true,
       session: {
         ...session,
         state: setAgentHandleStore(undefined, { handles: [reserved] }),
@@ -463,6 +464,7 @@ describe("owner agent invocation dispatch", () => {
 
     expect(startSubagent).toHaveBeenCalledWith(
       expect.objectContaining({
+        evaluation: true,
         parentContinuationToken: "agent-reply",
         taskId: "task-1",
       }),

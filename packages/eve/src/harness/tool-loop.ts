@@ -19,7 +19,7 @@ import {
 import type { SessionAuthContext } from "#channel/types.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import { readClientContext } from "#internal/client-context.js";
-import { resolveProviderHeaders } from "#internal/gateway.js";
+import { resolveGatewayRequestHeaders } from "#internal/gateway.js";
 import { createErrorId, createLogger, formatError, logError } from "#internal/logging.js";
 import { formatLanguageModelGatewayId } from "#internal/runtime-model.js";
 import { contextStorage } from "#context/container.js";
@@ -322,29 +322,6 @@ function mergeSystemInstructions(
   return merged;
 }
 
-/**
- * Builds AI Gateway app attribution headers when the model is gateway-routed.
- *
- * Bare model ids and `gateway.*` model instances route through AI Gateway.
- * Direct-provider model instances receive no Gateway-specific headers.
- */
-function buildGatewayAttributionHeaders(
-  model: LanguageModel,
-  runtimeIdentity: ToolLoopHarnessConfig["runtimeIdentity"],
-): Record<string, string> | undefined {
-  const providerHeaders = resolveProviderHeaders(model);
-  if (providerHeaders === undefined) return undefined;
-
-  const title = runtimeIdentity?.agentName ?? runtimeIdentity?.agentId;
-  const deploymentHost = process.env.VERCEL_PROJECT_PRODUCTION_URL || process.env.VERCEL_URL;
-  const referer = deploymentHost ? `https://${deploymentHost}` : undefined;
-
-  const headers: Record<string, string> = { ...providerHeaders };
-  if (title) headers["x-title"] = title;
-  if (referer) headers["http-referer"] = referer;
-  return headers;
-}
-
 async function resolveEffectiveRuntimeModel(input: {
   readonly config: ToolLoopHarnessConfig;
   readonly ctx: ReturnType<typeof contextStorage.getStore>;
@@ -625,7 +602,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
             model: resolvedModel.model,
             onCompaction: config.onCompaction,
             resolveModel: config.resolveModel,
-            runtimeIdentity: config.runtimeIdentity,
+            gatewayAttribution: config.gatewayAttribution,
             session,
             telemetry: stepInstrumentation?.telemetry(),
           });
@@ -1200,7 +1177,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     //
     // Runs before `agent.stream()` so the compacted messages flow through
     // `messages` (which the harness uses to rebuild session history).
-    const attributionHeaders = buildGatewayAttributionHeaders(model, config.runtimeIdentity);
+    const attributionHeaders = resolveGatewayRequestHeaders(model, config.gatewayAttribution);
 
     const clientContextTailLength =
       turnClientContext === undefined
@@ -1217,7 +1194,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       onCompaction: config.onCompaction,
       promptMessages: createModelMessages(messages),
       resolveModel: config.resolveModel,
-      runtimeIdentity: config.runtimeIdentity,
+      gatewayAttribution: config.gatewayAttribution,
       session,
       telemetry: stepInstrumentation?.telemetry(),
     });
@@ -3116,7 +3093,7 @@ async function maybeCompact(input: {
   /** Model-visible prompt used only to decide whether durable history needs compaction. */
   readonly promptMessages?: readonly HarnessModelMessage[];
   readonly resolveModel: ToolLoopHarnessConfig["resolveModel"];
-  readonly runtimeIdentity?: ToolLoopHarnessConfig["runtimeIdentity"];
+  readonly gatewayAttribution?: ToolLoopHarnessConfig["gatewayAttribution"];
   readonly session: HarnessSession;
   readonly telemetry?: TelemetryOptions;
 }): Promise<{
@@ -3182,7 +3159,7 @@ async function maybeCompact(input: {
         session.compaction,
         providerOptions,
         input.telemetry,
-        buildGatewayAttributionHeaders(compaction.model, input.runtimeIdentity),
+        resolveGatewayRequestHeaders(compaction.model, input.gatewayAttribution),
         input.abortSignal,
         input.force === true,
       )

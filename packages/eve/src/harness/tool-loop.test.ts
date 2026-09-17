@@ -38,6 +38,7 @@ import {
 } from "#context/keys.js";
 import { SCHEDULE_APP_AUTH } from "#channel/schedule-auth.js";
 import { invocationOwnerKey } from "#internal/invocation/metadata.js";
+import { EVE_EVAL_HEADER, EVE_EVAL_HEADER_VALUE } from "#internal/evaluation.js";
 import { decodeSandboxRef, isSandboxRefUrl } from "#internal/attachments/sandbox-refs.js";
 import { attachClientContext } from "#internal/client-context.js";
 import { mockSandbox } from "#internal/testing/mocks/mock-sandbox.js";
@@ -11210,6 +11211,10 @@ describe("createToolLoopHarness", () => {
       process.env.VERCEL_PROJECT_PRODUCTION_URL = "my-agent.vercel.app";
       try {
         const config: ToolLoopHarnessConfig = {
+          gatewayAttribution: {
+            referer: "https://my-agent.vercel.app",
+            title: "Weather Agent",
+          },
           mode: "conversation",
           resolveModel: vi.fn().mockResolvedValue("anthropic/claude-sonnet-4-5"),
           runtimeIdentity: {
@@ -11245,6 +11250,7 @@ describe("createToolLoopHarness", () => {
       delete process.env.VERCEL_URL;
       try {
         const config: ToolLoopHarnessConfig = {
+          gatewayAttribution: { title: "weather-agent" },
           mode: "conversation",
           resolveModel: vi.fn().mockResolvedValue("anthropic/claude-sonnet-4-5"),
           runtimeIdentity: {
@@ -11279,6 +11285,10 @@ describe("createToolLoopHarness", () => {
       process.env.VERCEL_URL = "preview-123.vercel.app";
       try {
         const config: ToolLoopHarnessConfig = {
+          gatewayAttribution: {
+            referer: "https://preview-123.vercel.app",
+            title: "My Agent",
+          },
           mode: "conversation",
           resolveModel: vi.fn().mockResolvedValue("anthropic/claude-sonnet-4-5"),
           runtimeIdentity: {
@@ -11312,6 +11322,11 @@ describe("createToolLoopHarness", () => {
     it("does not set attribution headers for non-gateway model objects", async () => {
       setupStopResultForAttribution();
       const config: ToolLoopHarnessConfig = {
+        gatewayAttribution: {
+          evaluation: true,
+          referer: "https://my-agent.vercel.app",
+          title: "My Agent",
+        },
         mode: "conversation",
         resolveModel: vi.fn().mockResolvedValue({
           provider: "anthropic.messages",
@@ -11350,6 +11365,25 @@ describe("createToolLoopHarness", () => {
       const agentCall = vi.mocked(ToolLoopAgent).mock.calls[0]?.[0];
       expect(agentCall?.headers).toEqual({
         "user-agent": expect.stringMatching(/^eve\/.+/),
+      });
+    });
+
+    it("marks Gateway calls made by eval sessions", async () => {
+      setupStopResultForAttribution();
+      const config: ToolLoopHarnessConfig = {
+        gatewayAttribution: { evaluation: true },
+        mode: "conversation",
+        resolveModel: vi.fn().mockResolvedValue("anthropic/claude-sonnet-4-5"),
+        tools: new Map(),
+      };
+      const runStep = createToolLoopHarness(config);
+
+      await runStep(createTestSession(), { message: "hi" });
+
+      const agentCall = vi.mocked(ToolLoopAgent).mock.calls[0]?.[0];
+      expect(agentCall?.headers).toEqual({
+        "user-agent": expect.stringMatching(/^eve\/.+/),
+        [EVE_EVAL_HEADER]: EVE_EVAL_HEADER_VALUE,
       });
     });
 
@@ -11395,6 +11429,10 @@ describe("createToolLoopHarness", () => {
       try {
         const { emit } = createEventCollector();
         const config: ToolLoopHarnessConfig = {
+          gatewayAttribution: {
+            referer: "https://my-agent.vercel.app",
+            title: "Weather Agent",
+          },
           handleEvent: emit,
           mode: "conversation",
           resolveModel: vi.fn().mockImplementation(async (reference) =>
@@ -11440,6 +11478,50 @@ describe("createToolLoopHarness", () => {
           process.env.VERCEL_PROJECT_PRODUCTION_URL = originalProductionUrl;
         }
       }
+    });
+
+    it("marks Gateway compaction calls made by eval sessions", async () => {
+      vi.mocked(shouldCompact).mockReturnValueOnce(true);
+      vi.mocked(compactMessages).mockResolvedValueOnce([
+        createFrameworkUserMessage("context.compaction", "Summary of our conversation so far:"),
+        { content: "summary", role: "assistant" },
+      ]);
+      setupStopResultForAttribution();
+
+      const config: ToolLoopHarnessConfig = {
+        gatewayAttribution: { evaluation: true },
+        mode: "conversation",
+        resolveModel: vi.fn().mockImplementation(async (reference) =>
+          reference.id === "compaction-model"
+            ? "anthropic/claude-sonnet-4-5"
+            : new MockLanguageModelV3({
+                provider: "anthropic.messages",
+                modelId: "claude-sonnet-4-5-20250514",
+              }),
+        ),
+        tools: new Map(),
+      };
+      const runStep = createToolLoopHarness(config);
+
+      await runStep(
+        createTestSession({
+          agent: {
+            compactionModelReference: { id: "compaction-model" },
+            modelReference: { id: "main-model" },
+            system: "You are a test assistant.",
+            tools: [],
+          },
+        }),
+        { message: "hi" },
+      );
+
+      const agentCall = vi.mocked(ToolLoopAgent).mock.calls[0]?.[0];
+      expect(agentCall?.headers).toBeUndefined();
+      const compactCall = vi.mocked(compactMessages).mock.calls[0];
+      expect(compactCall?.[5]).toEqual({
+        "user-agent": expect.stringMatching(/^eve\/.+/),
+        [EVE_EVAL_HEADER]: EVE_EVAL_HEADER_VALUE,
+      });
     });
   });
 

@@ -4,9 +4,10 @@ import { describe, expect, it, vi } from "vitest";
 import {
   AI_GATEWAY_MODELS_CATALOG_URL,
   AI_GATEWAY_MODELS_URL,
+  resolveGatewayRequestHeaders,
   vercelGatewayFetch,
-  resolveProviderHeaders,
 } from "#internal/gateway.js";
+import { EVE_EVAL_HEADER, EVE_EVAL_HEADER_VALUE } from "#internal/evaluation.js";
 
 describe("Gateway endpoints", () => {
   it("point at the Gateway origin", () => {
@@ -30,9 +31,9 @@ describe("vercelGatewayFetch", () => {
   });
 });
 
-describe("resolveProviderHeaders", () => {
+describe("resolveGatewayRequestHeaders", () => {
   it("returns the eve user-agent for bare model ids", () => {
-    expect(resolveProviderHeaders("anthropic/claude-sonnet-4-5")).toEqual({
+    expect(resolveGatewayRequestHeaders("anthropic/claude-sonnet-4-5")).toEqual({
       "user-agent": expect.stringMatching(/^eve\/.+/),
     });
   });
@@ -42,8 +43,23 @@ describe("resolveProviderHeaders", () => {
       provider: "gateway.language-model",
       modelId: "anthropic/claude-sonnet-4-5",
     });
-    expect(resolveProviderHeaders(model)).toEqual({
+    expect(resolveGatewayRequestHeaders(model)).toEqual({
       "user-agent": expect.stringMatching(/^eve\/.+/),
+    });
+  });
+
+  it("adds the supplied application and eval attribution", () => {
+    expect(
+      resolveGatewayRequestHeaders("anthropic/claude-sonnet-4-5", {
+        evaluation: true,
+        referer: "https://weather.example.com",
+        title: "Weather Agent",
+      }),
+    ).toEqual({
+      "http-referer": "https://weather.example.com",
+      "user-agent": expect.stringMatching(/^eve\/.+/),
+      "x-title": "Weather Agent",
+      [EVE_EVAL_HEADER]: EVE_EVAL_HEADER_VALUE,
     });
   });
 
@@ -52,6 +68,6 @@ describe("resolveProviderHeaders", () => {
       provider: "anthropic.messages",
       modelId: "claude-sonnet-4-5",
     });
-    expect(resolveProviderHeaders(model)).toBeUndefined();
+    expect(resolveGatewayRequestHeaders(model)).toBeUndefined();
   });
 });

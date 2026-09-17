@@ -261,6 +261,7 @@ export async function dispatchAgentInvocation(input: {
       channelMetadata: prepared.channelMetadata,
       inheritedConversation: prepared.inheritedConversation,
       currentSession: session,
+      evaluation: prepared.evaluation,
       fanoutSize: prepared.fanoutSize,
       initiatorAuth: prepared.initiatorAuth,
       localDevRequest: prepared.localDevRequest,

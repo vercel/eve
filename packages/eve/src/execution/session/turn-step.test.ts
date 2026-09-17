@@ -17,6 +17,7 @@ import {
   ContinuationHookTokensKey,
   ContinuationTokenKey,
   DynamicSubagentAgentConfigKey,
+  EvaluationKey,
   ModeKey,
   ScheduleIdKey,
   SessionCallbackKey,
@@ -2180,6 +2181,7 @@ describe("turnStep", () => {
       description: "Perform deep research.",
       model: { id: "anthropic/claude-opus-4.6" },
     });
+    ctx.set(EvaluationKey, true);
     ctx.set(ModeKey, "task");
     ctx.set(SessionIdKey, "session-1");
 
@@ -2200,7 +2202,7 @@ describe("turnStep", () => {
     });
     expect(buildRuntimeIdentity).toHaveBeenCalledWith(effectiveNode);
     expect(createExecutionNodeStep).toHaveBeenCalledWith(
-      expect.objectContaining({ node: effectiveNode }),
+      expect.objectContaining({ evaluation: true, node: effectiveNode }),
     );
     expect(bindSessionInstrumentationSpy).toHaveBeenCalledWith(
       expect.objectContaining({ agentName: TestTurnAgent.id }),
