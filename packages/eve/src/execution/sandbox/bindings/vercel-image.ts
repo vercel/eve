@@ -31,7 +31,6 @@ import {
 } from "#execution/sandbox/bindings/vercel-image-resources.js";
 import type {
   VercelCreateOptions,
-  VercelDeleteModule,
   VercelModule,
 } from "#execution/sandbox/bindings/vercel-sdk-types.js";
 import { buildSandboxSession } from "#execution/sandbox/session.js";
@@ -73,7 +72,7 @@ export interface CreateVercelImageProviderInput {
   readonly ensureBaseRuntime?: typeof ensureVercelSandboxBaseRuntime;
   readonly hydrateResources?: typeof hydrateSandboxFromImmutableResources;
   readonly identityPrefix?: string;
-  readonly loadDeleteModule?: () => Promise<VercelDeleteModule>;
+  readonly loadDeleteModule?: () => Promise<VercelModule>;
   readonly loadModule?: () => Promise<VercelModule>;
   readonly resolveNativeSession?: (
     context: import("#shared/sandbox-provider.js").SandboxProviderSessionContext,
@@ -105,7 +104,7 @@ export function createVercelImageSandboxProvider(
   const hydrateResources = input.hydrateResources ?? hydrateSandboxFromImmutableResources;
   const identityPrefix = input.identityPrefix ?? VERCEL_IMAGE_PROVIDER_NAME;
   const loadModule =
-    input.loadModule ?? (async () => await import("#compiled/@vercel/sandbox-drives/index.js"));
+    input.loadModule ?? (async () => await import("#compiled/@vercel/sandbox/index.js"));
   const loadDeleteModule =
     input.loadDeleteModule ?? (async () => await import("#compiled/@vercel/sandbox/index.js"));
   const resolveNativeSession =
