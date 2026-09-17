@@ -35,6 +35,40 @@ afterEach(() => {
 });
 
 describe("dynamic model lifecycle", () => {
+  it("passes cancellation to the resolver and never commits a cancelled selection", async () => {
+    const ctx = createCtx();
+    const controller = new AbortController();
+    const moduleMap = createModuleMap({
+      default: {
+        model: defineDynamic({
+          events: {
+            "step.started": (_event, context) => {
+              expect(context.abortSignal).toBe(controller.signal);
+              controller.abort(new Error("cancelled selection"));
+              return { model: "openai/gpt-5.5", modelContextWindowTokens: 128_000 };
+            },
+          },
+        }),
+      },
+    });
+    await expect(
+      dispatchDynamicModelEvent({
+        abortSignal: controller.signal,
+        ctx,
+        dynamicModel: DYNAMIC_MODEL_SOURCE,
+        event: createStepStartedEvent({
+          modelId: "dynamic",
+          sequence: 1,
+          stepIndex: 0,
+          turnId: "turn_1",
+        }),
+        messages: [],
+        scope: { moduleMap, nodeId: undefined },
+      }),
+    ).rejects.toThrow("cancelled selection");
+    expect(ctx.get(LiveStepDynamicModelSelectionKey)).toBeNull();
+  });
+
   it("persists session-scoped model references", async () => {
     const ctx = createCtx();
     const moduleMap = createModuleMap({

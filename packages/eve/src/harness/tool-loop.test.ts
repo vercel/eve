@@ -1507,75 +1507,82 @@ describe("createToolLoopHarness", () => {
     });
   });
 
-  it("uses dynamic model selection for the model call", async () => {
-    setupMockAgent({
-      finishReason: "stop",
-      response: { messages: [{ content: "Hello!", role: "assistant" }] },
-      text: "Hello!",
-      toolCalls: [],
-      toolResults: [],
-    });
-
-    const selectedModel = new MockLanguageModelV3({
-      modelId: "gpt-5",
-      provider: "openai.chat",
-    });
-    const resolveModel = vi.fn().mockResolvedValue("fallback-model" as LanguageModel);
-    const dispatchDynamicModelEvent: NonNullable<
-      ToolLoopHarnessConfig["dispatchDynamicModelEvent"]
-    > = vi.fn(async ({ ctx, event, messages }) => {
-      expect(event.type).toBe("step.started");
-      expect(messages.at(-1)).toEqual({ content: "Hi", kind: "user" as const, role: "user" });
-
-      ctx.setVirtualContext(LiveStepDynamicModelSelectionKey, {
-        model: selectedModel,
-        reference: {
-          contextWindowTokens: 200_000,
-          id: "openai/gpt-5",
-          providerOptions: { openai: { parallelToolCalls: false } },
-        },
+  it.each([undefined, "low", "provider-default"] as const)(
+    "uses dynamic model selection and reasoning (%s) for the model call",
+    async (reasoning) => {
+      setupMockAgent({
+        finishReason: "stop",
+        response: { messages: [{ content: "Hello!", role: "assistant" }] },
+        text: "Hello!",
+        toolCalls: [],
+        toolResults: [],
       });
-    });
-    const config = createTestConfig("conversation", undefined, {
-      dispatchDynamicModelEvent,
-      resolveModel,
-    });
-    const runStep = createToolLoopHarness(config);
-    const ctx = new ContextContainer();
-    const session = createTestSession({
-      agent: {
-        dynamicModel: true,
-        system: "You are a test assistant.",
-        tools: [{ description: "Adds numbers", name: "add", inputSchema: { type: "object" } }],
-      },
-      compaction: { recentWindowSize: 10, threshold: 90_000 },
-    });
 
-    const result = await contextStorage.run(ctx, () => runStep(session, { message: "Hi" }));
+      const selectedModel = new MockLanguageModelV3({
+        modelId: "gpt-5",
+        provider: "openai.chat",
+      });
+      const resolveModel = vi.fn().mockResolvedValue("fallback-model" as LanguageModel);
+      const dispatchDynamicModelEvent: NonNullable<
+        ToolLoopHarnessConfig["dispatchDynamicModelEvent"]
+      > = vi.fn(async ({ ctx, event, messages }) => {
+        expect(event.type).toBe("step.started");
+        expect(messages.at(-1)).toEqual({ content: "Hi", kind: "user" as const, role: "user" });
 
-    const agentCall = vi.mocked(ToolLoopAgent).mock.calls[0]?.[0];
-    expect(agentCall).toBeDefined();
-    expect(agentCall!.model).toBe(selectedModel);
-    const prepareStep = getPrepareStep<unknown[], { providerOptions?: unknown }>(
-      agentCall!.prepareStep,
-    );
-    const prepared = await prepareStep({
-      context: undefined,
-      messages: [],
-      model: null,
-      stepNumber: 0,
-      steps: [],
-    });
-    expect(prepared.providerOptions).toEqual({ openai: { parallelToolCalls: false } });
-    expect(dispatchDynamicModelEvent).toHaveBeenCalledTimes(1);
-    expect(resolveModel).not.toHaveBeenCalled();
-    expect(result.session.agent.modelReference).toEqual({
-      contextWindowTokens: 200_000,
-      id: "openai/gpt-5",
-      providerOptions: { openai: { parallelToolCalls: false } },
-    });
-    expect(result.session.compaction.threshold).toBe(180_000);
-  });
+        ctx.setVirtualContext(LiveStepDynamicModelSelectionKey, {
+          model: selectedModel,
+          reference: {
+            contextWindowTokens: 200_000,
+            id: "openai/gpt-5",
+            reasoning,
+            providerOptions: { openai: { parallelToolCalls: false } },
+          },
+        });
+      });
+      const config = createTestConfig("conversation", undefined, {
+        dispatchDynamicModelEvent,
+        resolveModel,
+      });
+      const runStep = createToolLoopHarness(config);
+      const ctx = new ContextContainer();
+      const session = createTestSession({
+        agent: {
+          dynamicModel: true,
+          reasoning: "high",
+          system: "You are a test assistant.",
+          tools: [{ description: "Adds numbers", name: "add", inputSchema: { type: "object" } }],
+        },
+        compaction: { recentWindowSize: 10, threshold: 90_000 },
+      });
+
+      const result = await contextStorage.run(ctx, () => runStep(session, { message: "Hi" }));
+
+      const agentCall = vi.mocked(ToolLoopAgent).mock.calls[0]?.[0];
+      expect(agentCall).toBeDefined();
+      expect(agentCall!.model).toBe(selectedModel);
+      expect(agentCall!.reasoning).toBe(reasoning ?? "high");
+      const prepareStep = getPrepareStep<unknown[], { providerOptions?: unknown }>(
+        agentCall!.prepareStep,
+      );
+      const prepared = await prepareStep({
+        context: undefined,
+        messages: [],
+        model: null,
+        stepNumber: 0,
+        steps: [],
+      });
+      expect(prepared.providerOptions).toEqual({ openai: { parallelToolCalls: false } });
+      expect(dispatchDynamicModelEvent).toHaveBeenCalledTimes(1);
+      expect(resolveModel).not.toHaveBeenCalled();
+      expect(result.session.agent.modelReference).toEqual({
+        contextWindowTokens: 200_000,
+        id: "openai/gpt-5",
+        reasoning,
+        providerOptions: { openai: { parallelToolCalls: false } },
+      });
+      expect(result.session.compaction.threshold).toBe(180_000);
+    },
+  );
 
   it("uses session-scoped dynamic model selection for the model call", async () => {
     setupMockAgent({

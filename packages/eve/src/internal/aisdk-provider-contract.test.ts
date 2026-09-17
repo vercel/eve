@@ -25,6 +25,7 @@ describe("ai-sdk provider identity contract (canary)", () => {
       (globalThis as { AI_SDK_DEFAULT_PROVIDER?: unknown }).AI_SDK_DEFAULT_PROVIDER,
     ).toBeUndefined();
     expect(gateway.languageModel("anthropic/claude-sonnet-5").provider).toBe("gateway");
+    expect(gateway.evaluationModel("typesafe-ai/jev-latest").provider).toBe("gateway");
   });
 
   it("direct provider instances do not report 'gateway'", () => {

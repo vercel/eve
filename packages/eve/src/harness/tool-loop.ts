@@ -1531,7 +1531,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         onStepEnd: hooks.onStepEnd,
         onStepStart: hooks.onStepStart,
         prepareStep: hooks.prepareStep,
-        reasoning: session.agent.reasoning,
+        reasoning: session.agent.modelReference?.reasoning ?? session.agent.reasoning,
         runtimeContext: telemetryRuntimeContext,
         stopWhen: isStepCount(1),
         telemetry: attempt?.telemetry,

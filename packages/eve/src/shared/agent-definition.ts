@@ -62,6 +62,8 @@ export type AgentModelResolveContext = DynamicResolveContext;
 
 export interface PublicAgentModelSelectionDefinition {
   readonly model: PublicAgentStaticModelDefinition;
+  /** Override the agent reasoning effort for this selection; omitted values inherit it. */
+  readonly reasoning?: AgentReasoningDefinition;
   /** Context window of the selected model, in tokens. */
   readonly modelContextWindowTokens?: number;
   /** Provider options for the selected model. */

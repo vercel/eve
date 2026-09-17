@@ -46,6 +46,8 @@ export const ALLOWED_DYNAMIC_CONNECTION_EVENTS: ReadonlySet<string> = new Set<Dy
  * the session context inside tool `execute` functions.
  */
 export interface DynamicResolveContext {
+  /** Active cancellation signal when resolving a dynamic model. */
+  readonly abortSignal?: AbortSignal;
   /** Effective model for this resolver, or `null` before dynamic model selection. */
   readonly model: { readonly id: string } | null;
   readonly session: {
