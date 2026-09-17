@@ -1,4 +1,8 @@
-import { createGateway, type LanguageModel } from "ai";
+import {
+  createGateway,
+  type Experimental_EvaluationModel as EvaluationModel,
+  type LanguageModel,
+} from "ai";
 import { isEveDevEnvironment } from "#internal/application/dev-environment.js";
 import { resolveModelApiKey } from "./api-key.js";
 import {
@@ -25,8 +29,7 @@ export function createDirectModelFetch(provider: "openai" | "anthropic"): typeof
   };
 }
 
-/** Resolve the connection for every request, including models constructed before /login. */
-export function localGatewayModel(id: string): LanguageModel | undefined {
+function createLocalGateway(): ReturnType<typeof createGateway> | undefined {
   if (!isEveDevEnvironment()) return undefined;
   const selected = process.env[MODEL_CONNECTION_ENV];
   if (
@@ -62,5 +65,17 @@ export function localGatewayModel(id: string): LanguageModel | undefined {
       authenticate(await resolve(credential.token, init?.signal));
       return fetch(url, { ...init, headers });
     },
-  })(id);
+  });
+}
+
+/** Resolve the connection for every request, including models constructed before /login. */
+export function localGatewayModel(id: string): LanguageModel | undefined {
+  return createLocalGateway()?.languageModel(id);
+}
+
+/** Resolve an evaluation model through the same local Gateway connection used by language models. */
+export function localGatewayEvaluationModel(
+  id: string,
+): Exclude<EvaluationModel, string> | undefined {
+  return createLocalGateway()?.evaluationModel(id);
 }

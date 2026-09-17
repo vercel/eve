@@ -13,6 +13,7 @@ import {
   type DynamicSentinel,
 } from "#dynamic/definition.js";
 import { isAgentReasoningDefinition, isRuntimeLanguageModel } from "#internal/runtime-model.js";
+import { localGatewayEvaluationModel } from "#internal/model-auth/transport.js";
 import type {
   AgentReasoningDefinition,
   PublicAgentDynamicModelResult,
@@ -168,7 +169,10 @@ export function autoModel<const T extends Readonly<Record<string, AutoModelOptio
         if (previous?.turnId === currentTurnId) return models.get(previous.model)!;
 
         const result = await evaluate({
-          model: evaluationModel,
+          model:
+            typeof evaluationModel === "string"
+              ? (localGatewayEvaluationModel(evaluationModel) ?? evaluationModel)
+              : evaluationModel,
           state: routingState(ctx),
           questions: {
             route: {

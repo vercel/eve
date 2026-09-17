@@ -23,7 +23,11 @@ vi.mock("#public/models/openai/chatgpt/token-broker.js", () => ({
 }));
 import { handleDevelopmentModelCredentialRequest } from "./development-broker-server.js";
 import { readDevelopmentModelCredential } from "./development-broker-client.js";
-import { createDirectModelFetch, localGatewayModel } from "./transport.js";
+import {
+  createDirectModelFetch,
+  localGatewayEvaluationModel,
+  localGatewayModel,
+} from "./transport.js";
 import { createCodexFetch } from "#public/models/openai/chatgpt/transport.js";
 
 const origin = "http://localhost:4567";
@@ -218,6 +222,39 @@ it("streams through the same Gateway model after switching teams and then to a k
     expect(init.headers.has(DEVELOPMENT_WORKFLOW_TRANSPORT_HEADER)).toBe(false);
     expect(init.body).not.toContain(connection.token);
   }
+});
+
+it("evaluates through the Gateway connection selected by /login", async () => {
+  const model = localGatewayEvaluationModel("typesafe-ai/jev-latest");
+  if (!model) throw new Error("Expected a Gateway evaluation model");
+  expect(JSON.stringify(model)).not.toContain("account-token");
+  expect(mocks.gateway).not.toHaveBeenCalled();
+  upstream.mockResolvedValue(
+    Response.json({
+      answers: { route: { type: "choice", choice: "fast" } },
+      usage: { inputTokens: 4, outputTokens: 1 },
+    }),
+  );
+
+  const result = await model.doEvaluate({
+    state: "Alice requests a routine summary.",
+    questions: {
+      route: {
+        type: "choice",
+        instructions: "Choose a model.",
+        criteria: { fast: "Routine work", thorough: "Difficult work" },
+      },
+    },
+  });
+
+  expect(result.answers.route).toEqual({ type: "choice", choice: "fast" });
+  const [url, init] = upstream.mock.calls[0]!;
+  expect(String(url)).toBe("https://ai-gateway.vercel.sh/v4/ai/evaluation-model");
+  expect(init.headers.get("authorization")).toBe("Bearer account-token");
+  expect(init.headers.get("x-vercel-ai-gateway-team")).toBe("team_a");
+  expect(init.headers.get("ai-model-id")).toBe("typesafe-ai/jev-latest");
+  expect(init.headers.has(DEVELOPMENT_WORKFLOW_TRANSPORT_HEADER)).toBe(false);
+  expect(init.body).not.toContain("account-token");
 });
 
 it("cancels credential lookup with the model request", async () => {
