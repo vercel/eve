@@ -38,6 +38,31 @@ test("full comparison has all six arms and eight shards, without automatic runs 
   );
 });
 
+test("ignored events cannot cancel the full comparison", () => {
+  const group = workflow.match(/group: >-\n([\s\S]*?)\n  cancel-in-progress:/)[1];
+  const expressions = [...group.matchAll(/\$\{\{([\s\S]*?)\}\}/g)];
+  assert.equal(expressions.length, 2);
+  const context = (action, labelled, label = "eve-code-benchmark") => ({
+    event_name: "pull_request",
+    event: {
+      action,
+      label: { name: label },
+      pull_request: { labels: labelled ? [{ name: "eve-code-benchmark" }] : [] },
+    },
+  });
+  // GitHub's object-filter syntax becomes a JavaScript map for these event fixtures.
+  const expression = expressions[1][1].replace(
+    "github.event.pull_request.labels.*.name",
+    "github.event.pull_request.labels.map(label => label.name)",
+  );
+  const evaluate = new Function("github", "contains", `return (${expression});`);
+  const contains = (values, value) => values.includes(value);
+  assert.equal(evaluate(context("synchronize", true), contains), true);
+  assert.equal(evaluate(context("labeled", true), contains), true);
+  assert.equal(evaluate(context("synchronize", false), contains), false);
+  assert.equal(evaluate(context("labeled", true, "unrelated"), contains), false);
+});
+
 test("pins the runner and original extension baseline while sharing the current framework", () => {
   assert.match(workflow, new RegExp(`BENCHMARK_REVISION: ${config.runnerRevision}`));
   assert.equal(config.baselineRevision, "ca27ee898e28dc90df5f0bb4ef713a4aad2fa5f3");

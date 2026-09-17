@@ -17,7 +17,11 @@ on:
 permissions: {}
 
 concurrency:
-  group: eve-code-benchmark-${{ github.event.pull_request.number || github.ref }}
+  group: >-
+    eve-code-benchmark-${{ github.event.pull_request.number || github.ref }}-${{
+      github.event_name != 'pull_request' ||
+      (contains(github.event.pull_request.labels.*.name, 'eve-code-benchmark') &&
+       (github.event.action != 'labeled' || github.event.label.name == 'eve-code-benchmark')) }}
   cancel-in-progress: true
 
 env:
