@@ -36,15 +36,16 @@ The prototype implements three approved scope decisions:
 the existing `WorkflowToolRunMessage` outcome only after those reports are consumed.
 [Shared invocation][prototype-invocation]
 
-`workflowToolRunWorkflow` is the only durable entry for both modes. The shared reader handles
-cancellation cleanup and prevents a late success from replacing cancellation. The foreground
-adapter delivers messages to its waiting turn. The background owner creates the stream only after
-`ready`; its admitted work remains session-bound and survives the initiating turn. [Foreground adapter][prototype-blocking],
+`workflowToolRunWorkflow` is the only durable entry for both modes. One invocation loop reads
+commands, workflow requests and reports, and body completion. It starts background work only after
+`ready`, drains reports before settlement, and bounds cancellation cleanup. Waiting-owner handlers
+deliver messages to the waiting turn; background-owner handlers persist task state and route session
+delivery. Admitted background work remains session-bound and survives the initiating turn. [Foreground adapter][prototype-blocking],
 [background adapter][prototype-background]
 
 | Concern                             | Before                                               | Prototype                                           |
 | ----------------------------------- | ---------------------------------------------------- | --------------------------------------------------- |
-| Workflow-body execution owners      | 2 direct callers of `executeWorkflowBody`            | 1 shared invocation reader                          |
+| Workflow-body execution owners      | 2 direct callers of `executeWorkflowBody`            | 1 shared invocation loop                            |
 | Background executor implementations | Workflow body or inline `defineTool` body            | Workflow body only                                  |
 | Durable workflow kinds              | Foreground workflow-tool run and background task run | One workflow-tool run entry                         |
 | Persistent records                  | Separate workflow-tool-run and task registries       | One invocation registry, with task payloads         |
@@ -133,7 +134,7 @@ The prototype deletes these responsibilities rather than renaming them:
 
 These responsibilities were retained or relocated:
 
-- Body start, report drainage, cancellation cleanup, and final outcome construction live in the shared invocation reader.
+- Body start, report drainage, cancellation cleanup, and final outcome construction live in the shared invocation loop.
 - Admission, compensation, child reservation/claiming, steering, task cancellation, and session
   indexing remain in the task owner.
 - Waiting-run and task lookup remain filtered projections of the shared invocation registry.
@@ -217,23 +218,23 @@ keep the original deployments available for retained sessions and old task runs,
 
 ## Demonstrated behavior
 
-| Requirement                                                   | Evidence                                                              |
-| ------------------------------------------------------------- | --------------------------------------------------------------------- |
-| Waiting workflow completion, failure, and progress            | Workflow integration suite                                            |
-| Background receipt before later completion                    | Workflow integration suite exercises both root and child owners       |
-| Commit before body start                                      | Task-owner unit test creates the invocation reader only after `ready` |
-| Report before outcome                                         | Shared invocation unit test and task-owner report/outcome test        |
-| Explicit cancellation wins over late completion               | Background-owner tests and shared-reader tests for both modes         |
-| Workflow human input and authorization routing                | Workflow integration suite and task-owner authorization tests         |
-| Mixed success/failure and success/cancellation report         | Session next-input unit tests                                         |
-| All-failed and all-cancelled report                           | Session next-input unit tests                                         |
-| Active parent does not steer on terminal failure/cancellation | Session input queue and active-turn unit tests                        |
-| Duplicate terminal delivery                                   | Existing session next-input deduplication unit test                   |
-| Cross-turn cohort membership                                  | Existing session next-input cross-turn unit test                      |
-| Forced-stop cancellation notification                         | Cancellation integration test                                         |
-| Mixed invocation lifetimes and retained terminal payloads     | Shared registry unit test and turn-cancellation integration tests     |
-| Completion after authorization ends the visible turn          | Workflow authorization integration tests                              |
-| Extension migration boundary                                  | Generated capability reports and invariant guard                      |
+| Requirement                                                   | Evidence                                                          |
+| ------------------------------------------------------------- | ----------------------------------------------------------------- |
+| Waiting workflow completion, failure, and progress            | Workflow integration suite                                        |
+| Background receipt before later completion                    | Workflow integration suite exercises both root and child owners   |
+| Commit before body start                                      | Task-owner unit test starts the workflow body only after `ready`  |
+| Report before outcome                                         | Shared invocation unit test and task-owner report/outcome test    |
+| Explicit cancellation wins over late completion               | Background-owner tests and invocation-loop tests for both modes   |
+| Workflow human input and authorization routing                | Workflow integration suite and task-owner authorization tests     |
+| Mixed success/failure and success/cancellation report         | Session next-input unit tests                                     |
+| All-failed and all-cancelled report                           | Session next-input unit tests                                     |
+| Active parent does not steer on terminal failure/cancellation | Session input queue and active-turn unit tests                    |
+| Duplicate terminal delivery                                   | Existing session next-input deduplication unit test               |
+| Cross-turn cohort membership                                  | Existing session next-input cross-turn unit test                  |
+| Forced-stop cancellation notification                         | Cancellation integration test                                     |
+| Mixed invocation lifetimes and retained terminal payloads     | Shared registry unit test and turn-cancellation integration tests |
+| Completion after authorization ends the visible turn          | Workflow authorization integration tests                          |
+| Extension migration boundary                                  | Generated capability reports and invariant guard                  |
 
 Checks run before the checkpoint-version follow-up:
 
@@ -343,6 +344,6 @@ membership. Before production merge, add CI E2E coverage for the combined-path g
 especially initiating-turn cancellation and active-parent report release.
 
 [prototype-invocation]: ../packages/eve/src/execution/tools/workflow/invocation.ts
-[prototype-blocking]: ../packages/eve/src/execution/tools/workflow/workflow.ts
+[prototype-blocking]: ../packages/eve/src/execution/tools/workflow/waiting-owner.ts
 [prototype-background]: ../packages/eve/src/execution/tools/workflow/background-owner.ts
 [prototype-registry]: ../packages/eve/src/harness/workflow-invocations.ts

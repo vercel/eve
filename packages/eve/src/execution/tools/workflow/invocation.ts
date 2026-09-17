@@ -4,104 +4,148 @@ import { normalizeSerializableError } from "#execution/workflow-errors.js";
 import {
   createWorkflowBodyRef,
   executeWorkflowBody,
-  type WorkflowBodyDefinition,
   type WorkflowBodyResult,
 } from "#execution/tools/workflow/body.js";
-import type { WorkflowToolRunMessage } from "#execution/tools/workflow/messages.js";
-import { createChannelReader, raceChannelReads } from "#execution/tools/workflow/owner-channels.js";
-import { openWorkflowToolRunOwnerInbox } from "#execution/tools/workflow/owner.js";
+import type { WorkflowToolRunOutcome } from "#execution/tools/workflow/messages.js";
+import {
+  createChannelReader,
+  raceChannelReads,
+  type ChannelReader,
+} from "#execution/tools/workflow/owner-channels.js";
+import {
+  openWorkflowToolRunOwnerInbox,
+  type WorkflowToolRunOwnerInbox,
+} from "#execution/tools/workflow/owner.js";
+import { createBackgroundWorkflowOwner } from "#execution/tools/workflow/background-owner.js";
+import { createWaitingWorkflowOwner } from "#execution/tools/workflow/waiting-owner.js";
+import type {
+  BackgroundWorkflowToolRunInput,
+  WorkflowToolRunInput,
+} from "#execution/tools/workflow/types.js";
 
-export interface WorkflowToolInvocationInput extends WorkflowBodyDefinition {
-  readonly execution: "background" | "blocking";
-}
-
-/**
- * Starts one workflow body and exposes its requests, reports, and outcome as a
- * single ordered stream. The body starts when its owner reads the stream.
- */
-export async function* runWorkflowToolInvocation(
-  input: WorkflowToolInvocationInput,
-  signal: AbortSignal,
-  cancelled?: Promise<never>,
-): AsyncGenerator<WorkflowToolRunMessage> {
-  let onAbort: (() => void) | undefined;
-  const cancellation =
-    cancelled ??
-    new Promise<never>((_, reject) => {
-      onAbort = () => reject(signal.reason);
-      if (signal.aborted) onAbort();
-      else signal.addEventListener("abort", onAbort, { once: true });
-    });
-  cancellation.catch(() => {});
-  try {
-    if (signal.aborted) throw signal.reason;
-    const inbox = openWorkflowToolRunOwnerInbox();
-    const bodyReader = createChannelReader(
-      "body",
-      awaitBodyResult(executeWorkflowBody({ ...input, owner: inbox.owner }, signal)),
-    );
-    let consumedReports = 0;
-    let bodyResult: WorkflowBodyResult | undefined;
-    let cleanupDeadline: Promise<"cancel"> | undefined;
-
-    while (true) {
-      if (signal.aborted && cleanupDeadline === undefined) {
-        cleanupDeadline = sleep(WORKFLOW_CANCELLATION_CLEANUP_MS).then(() => "cancel");
+/** Owns admission, command intake, body execution, and settlement for either lifetime. */
+export async function runWorkflowToolInvocation(
+  input: WorkflowToolRunInput | BackgroundWorkflowToolRunInput,
+): Promise<void> {
+  const owner =
+    "workflow" in input
+      ? await createBackgroundWorkflowOwner(input)
+      : createWaitingWorkflowOwner(input);
+  if (owner === undefined) return;
+  const definition =
+    "workflow" in input
+      ? { ...input.workflow, execution: "background" as const }
+      : { ...input, execution: input.execution ?? "blocking" };
+  const { signal } = owner;
+  let admitted = owner.kind === "turn";
+  let commandsOpen = true;
+  let body:
+    | {
+        readonly inbox: WorkflowToolRunOwnerInbox;
+        readonly reader: ChannelReader<"body", WorkflowBodyResult>;
       }
-      // Hook persistence does not mean the owner has consumed every report yet.
-      if (bodyResult !== undefined && consumedReports >= bodyResult.reportCount) {
-        if (signal.aborted) break;
-        if (onAbort !== undefined) signal.removeEventListener("abort", onAbort);
-        yield { from: createWorkflowBodyRef(input), kind: "outcome", result: bodyResult.outcome };
-        return;
-      }
+    | undefined;
+  let consumedReports = 0;
+  let bodyResult: WorkflowBodyResult | undefined;
+  let cleanupDeadline: Promise<"cancel"> | undefined;
+  let outcome: WorkflowToolRunOutcome | undefined;
 
-      let read;
-      try {
-        read = await raceChannelReads(
-          bodyResult === undefined ? [inbox.reader, bodyReader] : [inbox.reader],
-          cleanupDeadline ?? cancellation,
-        );
-      } catch (error) {
-        // Keep the same pending reads while switching from execution to bounded cleanup.
-        if (signal.aborted && cleanupDeadline === undefined) continue;
-        throw error;
+  while (true) {
+    if (admitted && signal.aborted) {
+      if (body === undefined) break;
+      cleanupDeadline ??= sleep(WORKFLOW_CANCELLATION_CLEANUP_MS).then(() => "cancel");
+    }
+    // Hook persistence does not mean the owner has consumed every report yet.
+    if (
+      bodyResult !== undefined &&
+      consumedReports >= bodyResult.reportCount &&
+      owner.commands.landed.length === 0 &&
+      owner.commands.failure === undefined
+    ) {
+      outcome = bodyResult.outcome;
+      break;
+    }
+    let read;
+    try {
+      if (admitted && body === undefined) {
+        const inbox = openWorkflowToolRunOwnerInbox();
+        body = {
+          inbox,
+          reader: createChannelReader(
+            "body",
+            awaitBodyResult(executeWorkflowBody({ ...definition, owner: inbox.owner }, signal)),
+          ),
+        };
       }
-      if (read === "cancel") break;
-      if (read.channel === "body") {
-        if (read.next.done) throw new Error("Workflow body ended without an outcome.");
-        bodyResult = read.next.value;
+      read = await raceChannelReads(
+        [
+          ...(commandsOpen ? [owner.commands] : []),
+          ...(body === undefined ? [] : [body.inbox.reader]),
+          ...(body === undefined || bodyResult !== undefined ? [] : [body.reader]),
+        ],
+        cleanupDeadline,
+      );
+    } catch (error) {
+      if (owner.commands.failure !== undefined) throw error;
+      outcome = { status: "failed", error: normalizeSerializableError(error) };
+      break;
+    }
+    if (read === "cancel") break;
+    if (read.next.done) {
+      if (read.channel === "control") {
+        commandsOpen = false;
         continue;
       }
-      if (read.next.done) {
-        if (signal.aborted) break;
-        return;
+      if (read.channel === "body") {
+        outcome = { status: "failed", error: "Workflow body ended without an outcome." };
+        break;
       }
-      if (read.next.value.kind === "outcome") continue;
-      if (read.next.value.kind === "report") consumedReports += 1;
-      yield read.next.value;
-    }
-  } catch (error) {
-    if (!signal.aborted) {
-      yield {
-        from: createWorkflowBodyRef(input),
-        kind: "outcome",
-        result: { status: "failed", error: normalizeSerializableError(error) },
-      };
+      if (admitted && signal.aborted) break;
       return;
     }
-  } finally {
-    if (onAbort !== undefined) signal.removeEventListener("abort", onAbort);
+    if (read.channel === "control") {
+      if (owner.kind !== "turn")
+        throw new Error("Session-owned invocation received a turn command.");
+      owner.handleCommand(read.next.value);
+      continue;
+    }
+    if (read.channel === "commands") {
+      if (owner.kind !== "session")
+        throw new Error("Turn-owned invocation received a task command.");
+      const payload = read.next.value;
+      if (
+        admitted &&
+        payload.kind === "task-command" &&
+        (payload.command.kind === "ready" || payload.command.kind === "reject-dispatch")
+      )
+        continue;
+      const action = await owner.handleCommand(payload);
+      if (action === "stop") return;
+      if (action === "start") admitted = true;
+      continue;
+    }
+    if (read.channel === "body") {
+      bodyResult = read.next.value;
+      continue;
+    }
+    if (read.next.value.kind === "outcome") continue;
+    if (read.next.value.kind === "report") consumedReports += 1;
+    await owner.handleMessage(read.next.value);
   }
   // Cleanup cannot undo cancellation, even when the body returns success.
-  yield {
-    from: createWorkflowBodyRef(input),
-    kind: "outcome",
-    result: {
+  if (signal.aborted) {
+    outcome = {
       status: "cancelled",
       reason: signal.reason instanceof Error ? signal.reason.message : String(signal.reason ?? ""),
-    },
-  };
+    };
+  }
+  if (outcome !== undefined) {
+    await owner.handleMessage({
+      from: createWorkflowBodyRef(definition),
+      kind: "outcome",
+      result: outcome,
+    });
+  }
 }
 
 async function* awaitBodyResult(

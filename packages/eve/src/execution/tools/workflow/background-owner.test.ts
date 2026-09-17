@@ -1,7 +1,7 @@
 import { assert, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { WorkflowToolRunMessage } from "#execution/tools/workflow/messages.js";
-import { runBackgroundWorkflowTool } from "#execution/tools/workflow/background-owner.js";
+import { runWorkflowToolInvocation } from "#execution/tools/workflow/invocation.js";
 import type { TaskCommand, TaskView } from "#tasks/types.js";
 import {
   createAuthorizationRequiredEvent,
@@ -12,7 +12,11 @@ const mocks = vi.hoisted(() => ({
   appendTaskProgressStep: vi.fn(),
   appendTaskViewStep: vi.fn(),
   claimHookOwnership: vi.fn(),
-  createChannelReader: vi.fn((channel: string) => ({ channel, iterator: [][Symbol.iterator]() })),
+  createChannelReader: vi.fn((channel: string) => ({
+    channel,
+    landed: [],
+    iterator: [][Symbol.iterator](),
+  })),
   createHook: vi.fn(() => ({ token: "task-token" })),
   deliverTaskInputResponsesStep: vi.fn(),
   raceChannelReads: vi.fn(),
@@ -22,12 +26,14 @@ const mocks = vi.hoisted(() => ({
   wakeTaskParentStep: vi.fn(),
   wakeTaskUpdateParentStep: vi.fn(),
   wakeWorkflowTaskInputRequestParentStep: vi.fn(),
-  runWorkflowToolInvocation: vi.fn(async function* () {}),
+  executeWorkflowBody: vi.fn(),
+  sleep: vi.fn(),
 }));
 
 vi.mock("#compiled/@workflow/core/index.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("#compiled/@workflow/core/index.js")>()),
   createHook: mocks.createHook,
+  sleep: mocks.sleep,
 }));
 vi.mock("#execution/hook-ownership.js", () => ({
   claimHookOwnership: mocks.claimHookOwnership,
@@ -50,8 +56,15 @@ vi.mock("#execution/tools/workflow/owner-channels.js", () => ({
 vi.mock("#execution/tools/workflow/resume-hook-step.js", () => ({
   resumeHookStep: mocks.resumeHookStep,
 }));
-vi.mock("#execution/tools/workflow/invocation.js", () => ({
-  runWorkflowToolInvocation: mocks.runWorkflowToolInvocation,
+vi.mock("#execution/tools/workflow/body.js", () => ({
+  executeWorkflowBody: mocks.executeWorkflowBody,
+  createWorkflowBodyRef: () => bufferedAgentRequest.from,
+}));
+vi.mock("#execution/tools/workflow/owner.js", () => ({
+  openWorkflowToolRunOwnerInbox: () => ({
+    owner: { inbox: "owner" },
+    reader: { channel: "workflow" },
+  }),
 }));
 
 const initialView = {
@@ -110,10 +123,17 @@ function authorizationRequest(attemptId: string, completed = false) {
 }
 
 function queueOwnerRequest(value: WorkflowToolRunMessage) {
-  mocks.raceChannelReads.mockResolvedValueOnce({
-    channel: "workflow",
-    next: { done: false, value },
-  });
+  mocks.raceChannelReads.mockResolvedValueOnce(
+    value.kind === "outcome"
+      ? {
+          channel: "body",
+          next: { done: false, value: { outcome: value.result, reportCount: 0 } },
+        }
+      : {
+          channel: "workflow",
+          next: { done: false, value },
+        },
+  );
 }
 
 function queueCommand(command: TaskCommand) {
@@ -141,10 +161,12 @@ const workflowInput = {
   },
 };
 
-describe("runBackgroundWorkflowTool", () => {
+describe("runWorkflowToolInvocation", () => {
   beforeEach(() => {
     vi.resetAllMocks();
     mocks.createHook.mockReturnValue({ token: "task-token" });
+    mocks.executeWorkflowBody.mockReturnValue(new Promise(() => {}));
+    mocks.sleep.mockReturnValue(new Promise(() => {}));
   });
 
   it("persists auth requests and answers before forwarding and acknowledging each event", async () => {
@@ -155,7 +177,7 @@ describe("runBackgroundWorkflowTool", () => {
     queueOwnerRequest(authorizationRequest("b", true));
     mocks.raceChannelReads.mockResolvedValueOnce({ channel: "commands", next: { done: true } });
 
-    await runBackgroundWorkflowTool(workflowInput);
+    await runWorkflowToolInvocation(workflowInput);
 
     const views = mocks.appendTaskViewStep.mock.calls.slice(-4).map(([input]) => input.view);
     expect(views.map((view) => view.status)).toEqual([
@@ -191,7 +213,7 @@ describe("runBackgroundWorkflowTool", () => {
     queueOwnerRequest(message);
     mocks.raceChannelReads.mockResolvedValueOnce({ channel: "commands", next: { done: true } });
 
-    await runBackgroundWorkflowTool(workflowInput);
+    await runWorkflowToolInvocation(workflowInput);
 
     expect(mocks.wakeTaskAuthorizationParentStep).toHaveBeenCalledExactlyOnceWith({
       request: message.request,
@@ -217,7 +239,7 @@ describe("runBackgroundWorkflowTool", () => {
         mocks.wakeTaskAuthorizationParentStep.mockRejectedValue(new Error("failed forwarding"));
       }
 
-      await expect(runBackgroundWorkflowTool(workflowInput)).rejects.toThrow(`failed ${failure}`);
+      await expect(runWorkflowToolInvocation(workflowInput)).rejects.toThrow(`failed ${failure}`);
       expect(mocks.resumeHookStep).not.toHaveBeenCalled();
     },
   );
@@ -234,7 +256,7 @@ describe("runBackgroundWorkflowTool", () => {
       })
       .mockResolvedValueOnce({ channel: "commands", next: { done: true, value: undefined } });
 
-    await runBackgroundWorkflowTool(workflowInput);
+    await runWorkflowToolInvocation(workflowInput);
 
     expect(mocks.wakeTaskAgentRequestParentStep).toHaveBeenCalledWith({
       request: workflowAgentRequest,
@@ -249,9 +271,9 @@ describe("runBackgroundWorkflowTool", () => {
       next: { done: true, value: undefined },
     });
 
-    await runBackgroundWorkflowTool(workflowInput);
+    await runWorkflowToolInvocation(workflowInput);
 
-    expect(mocks.runWorkflowToolInvocation).not.toHaveBeenCalled();
+    expect(mocks.executeWorkflowBody).not.toHaveBeenCalled();
   });
 
   it.each(["ready", "reject-dispatch"] as const)(
@@ -260,9 +282,9 @@ describe("runBackgroundWorkflowTool", () => {
       queueCommand({ kind: "cancel" });
       queueCommand(kind === "ready" ? { kind } : { kind, data: "step failed" });
 
-      await runBackgroundWorkflowTool(workflowInput);
+      await runWorkflowToolInvocation(workflowInput);
 
-      expect(mocks.runWorkflowToolInvocation).not.toHaveBeenCalled();
+      expect(mocks.executeWorkflowBody).not.toHaveBeenCalled();
       expect(mocks.wakeTaskParentStep).toHaveBeenCalledTimes(kind === "ready" ? 1 : 0);
       expect(mocks.appendTaskViewStep).toHaveBeenLastCalledWith({
         activityObserver: undefined,
@@ -279,10 +301,10 @@ describe("runBackgroundWorkflowTool", () => {
       })
       .mockResolvedValueOnce({ channel: "commands", next: { done: true, value: undefined } });
 
-    await runBackgroundWorkflowTool(workflowInput);
+    await runWorkflowToolInvocation(workflowInput);
 
-    expect(mocks.runWorkflowToolInvocation).toHaveBeenCalledOnce();
-    expect(mocks.runWorkflowToolInvocation).toHaveBeenCalledWith(
+    expect(mocks.executeWorkflowBody).toHaveBeenCalledOnce();
+    expect(mocks.executeWorkflowBody).toHaveBeenCalledWith(
       expect.objectContaining({ execution: "background" }),
       expect.any(AbortSignal),
     );
@@ -305,18 +327,17 @@ describe("runBackgroundWorkflowTool", () => {
           next: { done: false, value: { ...report, kind: "report" } },
         })
         .mockResolvedValueOnce({
-          channel: "workflow",
+          channel: "body",
           next: {
             done: false,
             value: {
-              from: report.from,
-              kind: "outcome",
-              result: { status: "completed", output: "done" },
+              reportCount: 0,
+              outcome: { status: "completed", output: "done" },
             },
           },
         });
 
-      await runBackgroundWorkflowTool({
+      await runWorkflowToolInvocation({
         ...workflowInput,
         initialView: { ...initialView, metadata: { ...initialView.metadata, kind } },
       });
@@ -356,18 +377,17 @@ describe("runBackgroundWorkflowTool", () => {
         next: { done: false, value: { command: { kind: "cancel" }, kind: "task-command" } },
       })
       .mockResolvedValueOnce({
-        channel: "workflow",
+        channel: "body",
         next: {
           done: false,
           value: {
-            from: bufferedAgentRequest.from,
-            kind: "outcome",
-            result: { reason: "cancelled", status: "cancelled" },
+            reportCount: 0,
+            outcome: { reason: "cancelled", status: "cancelled" },
           },
         },
       });
 
-    await runBackgroundWorkflowTool(workflowInput);
+    await runWorkflowToolInvocation(workflowInput);
 
     expect(mocks.wakeTaskParentStep).toHaveBeenCalledWith({
       token: "parent-token",
@@ -387,10 +407,10 @@ describe("runBackgroundWorkflowTool", () => {
       result: { status: "cancelled", reason: "stop" },
     });
 
-    await runBackgroundWorkflowTool(workflowInput);
+    await runWorkflowToolInvocation(workflowInput);
 
     expect(mocks.raceChannelReads).toHaveBeenCalledTimes(6);
-    expect(mocks.runWorkflowToolInvocation).toHaveBeenCalledOnce();
+    expect(mocks.executeWorkflowBody).toHaveBeenCalledOnce();
     expect(mocks.resumeHookStep).toHaveBeenCalledExactlyOnceWith("ack-cleanup", null, {
       ifPresent: true,
     });
@@ -409,18 +429,17 @@ describe("runBackgroundWorkflowTool", () => {
         next: { done: false, value: { command: { kind: "cancel" }, kind: "task-command" } },
       })
       .mockResolvedValueOnce({
-        channel: "workflow",
+        channel: "body",
         next: {
           done: false,
           value: {
-            from: bufferedAgentRequest.from,
-            kind: "outcome",
-            result: { output: "late success", status: "completed" },
+            reportCount: 0,
+            outcome: { output: "late success", status: "completed" },
           },
         },
       });
 
-    await runBackgroundWorkflowTool(workflowInput);
+    await runWorkflowToolInvocation(workflowInput);
 
     expect(mocks.appendTaskViewStep.mock.calls.map(([input]) => input.view.status)).toEqual([
       "working",
@@ -450,17 +469,16 @@ describe("runBackgroundWorkflowTool", () => {
         },
       })
       .mockResolvedValueOnce({
-        channel: "workflow",
+        channel: "body",
         next: {
           done: false,
           value: {
-            from: bufferedAgentRequest.from,
-            kind: "outcome",
-            result: { output: "done", status: "completed" },
+            reportCount: 0,
+            outcome: { output: "done", status: "completed" },
           },
         },
       });
-    await runBackgroundWorkflowTool(workflowInput);
+    await runWorkflowToolInvocation(workflowInput);
     expect(mocks.appendTaskProgressStep).toHaveBeenCalledWith({
       progress: expect.objectContaining({ update: "Review the export" }),
     });

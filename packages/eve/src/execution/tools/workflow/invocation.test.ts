@@ -1,15 +1,28 @@
 import { beforeEach, expect, it, vi } from "vitest";
 
+import type { TaskRunInboundPayload } from "#tasks/types.js";
+import { createBackgroundWorkflowOwner } from "#execution/tools/workflow/background-owner.js";
 import type { WorkflowToolRunMessage } from "#execution/tools/workflow/messages.js";
 import { runWorkflowToolInvocation } from "#execution/tools/workflow/invocation.js";
 
 const mocks = vi.hoisted(() => ({
   sleep: vi.fn(),
+  control: vi.fn(),
+  deliver: vi.fn(),
   executeWorkflowBody: vi.fn(),
   openWorkflowToolRunOwnerInbox: vi.fn(),
 }));
 
+vi.mock("#execution/tools/workflow/background-owner.js", () => ({
+  createBackgroundWorkflowOwner: vi.fn(),
+}));
+
 vi.mock("#compiled/@workflow/core/index.js", () => ({ sleep: mocks.sleep }));
+
+vi.mock("#execution/tools/workflow/waiting-owner.js", () => ({
+  createWaitingWorkflowOwner: mocks.control,
+}));
+vi.mock("#execution/tools/workflow/resume-hook-step.js", () => ({ resumeHookStep: mocks.deliver }));
 
 vi.mock("#execution/tools/workflow/body.js", () => ({
   createWorkflowBodyRef: (input: {
@@ -38,6 +51,8 @@ vi.mock("#execution/tools/workflow/owner.js", () => ({
 import { createChannelReader } from "#execution/tools/workflow/owner-channels.js";
 
 const input = {
+  hookToken: "control",
+  owner: { inbox: "parent" },
   callId: "call-1",
   execution: "background" as const,
   input: {},
@@ -53,16 +68,11 @@ const input = {
 
 beforeEach(() => {
   vi.resetAllMocks();
+  setControl(new AbortController());
   mocks.executeWorkflowBody.mockResolvedValue({
     outcome: { output: "done", status: "completed" },
     reportCount: 1,
   });
-});
-
-it("does not start the body until the invocation owner reads", async () => {
-  runWorkflowToolInvocation(input, new AbortController().signal);
-
-  expect(mocks.executeWorkflowBody).not.toHaveBeenCalled();
 });
 
 it("emits every persisted report before the terminal outcome", async () => {
@@ -92,16 +102,18 @@ it("emits every persisted report before the terminal outcome", async () => {
     ),
   });
 
-  const reader = runWorkflowToolInvocation(input, new AbortController().signal);
-  await expect(reader.next()).resolves.toEqual({ done: false, value: report });
-  await expect(reader.next()).resolves.toEqual({
-    done: false,
-    value: {
+  await runWorkflowToolInvocation(input);
+  expect(mocks.deliver).toHaveBeenNthCalledWith(1, "parent", report, { ifPresent: false });
+  expect(mocks.deliver).toHaveBeenNthCalledWith(
+    2,
+    "parent",
+    {
       from: expect.objectContaining({ callId: "call-1", execution: "background" }),
       kind: "outcome",
       result: { output: "done", status: "completed" },
     },
-  });
+    { ifPresent: false },
+  );
   expect(mocks.executeWorkflowBody).toHaveBeenCalledWith(
     expect.objectContaining({ owner: { inbox: "invocation-owner" } }),
     expect.any(AbortSignal),
@@ -141,19 +153,20 @@ for (const execution of ["blocking", "background"] as const) {
                 : { status: "completed", output: "late success" },
         };
       });
-      const reader = runWorkflowToolInvocation({ ...input, execution }, controller.signal);
-      const next = reader.next();
+      setControl(controller);
+      const completion = runWorkflowToolInvocation({ ...input, execution });
       await started.promise;
       controller.abort(new Error("stop"));
       if (status !== "blocked") release.resolve();
-      await expect(next).resolves.toMatchObject({
-        done: false,
-        value: {
+      await completion;
+      expect(mocks.deliver).toHaveBeenCalledExactlyOnceWith(
+        "parent",
+        expect.objectContaining({
           kind: "outcome",
           result: { status: "cancelled", reason: "stop" },
-        },
-      });
-      await expect(reader.next()).resolves.toMatchObject({ done: true });
+        }),
+        { ifPresent: true },
+      );
     },
   );
 }
@@ -161,10 +174,15 @@ for (const execution of ["blocking", "background"] as const) {
 it("does not start a body cancelled before its first read", async () => {
   const controller = new AbortController();
   controller.abort(new Error("never admitted"));
-  const reader = runWorkflowToolInvocation(input, controller.signal);
-  await expect(reader.next()).resolves.toMatchObject({
-    value: { result: { status: "cancelled" } },
-  });
+  setControl(controller);
+  await runWorkflowToolInvocation(input);
+  expect(mocks.deliver).toHaveBeenCalledWith(
+    "parent",
+    expect.objectContaining({
+      result: expect.objectContaining({ status: "cancelled" }),
+    }),
+    { ifPresent: true },
+  );
   expect(mocks.executeWorkflowBody).not.toHaveBeenCalled();
   expect(mocks.openWorkflowToolRunOwnerInbox).not.toHaveBeenCalled();
   expect(mocks.sleep).not.toHaveBeenCalled();
@@ -193,16 +211,165 @@ it("preserves the pending inbox read across cancellation and drains the report b
     owner: { inbox: "owner" },
     reader: createChannelReader("workflow", { [Symbol.asyncIterator]: () => ({ next }) }),
   });
-  const invocation = runWorkflowToolInvocation(input, controller.signal);
-  const first = invocation.next();
+  setControl(controller);
+  const completion = runWorkflowToolInvocation(input);
   await vi.waitFor(() => expect(next).toHaveBeenCalledOnce());
   controller.abort(new Error("stop"));
   await vi.waitFor(() => expect(mocks.sleep).toHaveBeenCalledOnce());
   pending.resolve({ done: false, value: report });
-  await expect(first).resolves.toEqual({ done: false, value: report });
+  await completion;
+  expect(mocks.deliver).toHaveBeenNthCalledWith(1, "parent", report, { ifPresent: false });
   expect(next).toHaveBeenCalledOnce();
-  await expect(invocation.next()).resolves.toMatchObject({
-    value: { kind: "outcome", result: { status: "cancelled", reason: "stop" } },
+  expect(mocks.deliver).toHaveBeenNthCalledWith(
+    2,
+    "parent",
+    expect.objectContaining({
+      kind: "outcome",
+      result: { status: "cancelled", reason: "stop" },
+    }),
+    { ifPresent: true },
+  );
+});
+
+function setControl(controller: AbortController) {
+  const { signal } = controller;
+  mocks.control.mockReturnValue({
+    kind: "turn",
+    signal,
+    commands: createChannelReader(
+      "control",
+      (async function* () {
+        if (!signal.aborted)
+          await new Promise<void>((resolve) =>
+            signal.addEventListener("abort", () => resolve(), { once: true }),
+          );
+        yield { kind: "cancel", reason: "stop" };
+        await new Promise<void>(() => {});
+      })(),
+    ),
+    handleCommand: vi.fn(),
+    handleMessage: (message: WorkflowToolRunMessage) =>
+      mocks.deliver("parent", message, {
+        ifPresent: message.kind === "outcome" && message.result.status === "cancelled",
+      }),
   });
-  await expect(invocation.next()).resolves.toMatchObject({ done: true });
+}
+
+it("applies cancellation buffered during the last report delivery before publishing completion", async () => {
+  const controller = new AbortController();
+  const cancel = Promise.withResolvers<void>();
+  const commands = createChannelReader(
+    "commands",
+    (async function* (): AsyncGenerator<TaskRunInboundPayload> {
+      yield { kind: "task-command", command: { kind: "ready" } };
+      await cancel.promise;
+      yield { kind: "task-command", command: { kind: "cancel" } };
+      await new Promise<void>(() => {});
+    })(),
+  );
+  const report: WorkflowToolRunMessage = {
+    from: {
+      callId: input.callId,
+      execution: input.execution,
+      input: {},
+      runId: "run-1",
+      sequence: 0,
+      stepIndex: 0,
+      toolName: input.toolName,
+      turnId: "turn-1",
+    },
+    kind: "report",
+    update: "finished",
+  };
+  const deliver = vi.fn(async (message: WorkflowToolRunMessage) => {
+    if (message.kind === "report") {
+      cancel.resolve();
+      await vi.waitFor(() => expect(commands.landed).toHaveLength(1));
+    }
+  });
+  vi.mocked(createBackgroundWorkflowOwner).mockResolvedValue({
+    kind: "session",
+    commands,
+    signal: controller.signal,
+    handleMessage: deliver,
+    async handleCommand(payload) {
+      if (payload.kind !== "task-command") return;
+      if (payload.command.kind === "ready") return "start";
+      if (payload.command.kind === "cancel") controller.abort(new Error("stop"));
+    },
+  });
+  mocks.sleep.mockReturnValue(new Promise<void>(() => {}));
+  mocks.openWorkflowToolRunOwnerInbox.mockReturnValue({
+    owner: { inbox: "owner" },
+    reader: createChannelReader(
+      "workflow",
+      (async function* () {
+        await new Promise<void>((resolve) => setTimeout(resolve, 0));
+        yield report;
+        await new Promise<void>(() => {});
+      })(),
+    ),
+  });
+  await runWorkflowToolInvocation({
+    workflow: input,
+    initialView: { status: "working", taskId: "task", metadata: { kind: "tool", name: "worker" } },
+    taskInboxToken: "commands",
+    parentContinuationToken: "parent",
+  });
+  expect(deliver).toHaveBeenNthCalledWith(1, report);
+  expect(deliver).toHaveBeenNthCalledWith(
+    2,
+    expect.objectContaining({
+      kind: "outcome",
+      result: { status: "cancelled", reason: "stop" },
+    }),
+  );
+  expect(deliver).toHaveBeenCalledTimes(2);
+});
+
+it("keeps waiting for the body after the control hook closes", async () => {
+  mocks.control.mockReturnValue({
+    kind: "turn",
+    signal: new AbortController().signal,
+    commands: createChannelReader("control", (async function* () {})()),
+    handleCommand: vi.fn(),
+    handleMessage: mocks.deliver,
+  });
+  mocks.executeWorkflowBody.mockResolvedValue({
+    reportCount: 0,
+    outcome: { status: "completed", output: "done" },
+  });
+  mocks.openWorkflowToolRunOwnerInbox.mockReturnValue({
+    owner: { inbox: "owner" },
+    reader: createChannelReader("workflow", {
+      [Symbol.asyncIterator]: () => ({
+        next: () => new Promise<IteratorResult<WorkflowToolRunMessage>>(() => {}),
+      }),
+    }),
+  });
+  await runWorkflowToolInvocation(input);
+  expect(mocks.deliver).toHaveBeenCalledExactlyOnceWith(
+    expect.objectContaining({
+      kind: "outcome",
+      result: { status: "completed", output: "done" },
+    }),
+  );
+});
+
+it("propagates terminal delivery failure instead of replacing the invocation outcome", async () => {
+  mocks.executeWorkflowBody.mockResolvedValue({
+    reportCount: 0,
+    outcome: { status: "completed", output: "done" },
+  });
+  mocks.openWorkflowToolRunOwnerInbox.mockReturnValue({
+    owner: { inbox: "owner" },
+    reader: createChannelReader("workflow", {
+      [Symbol.asyncIterator]: () => ({
+        next: () => new Promise<IteratorResult<WorkflowToolRunMessage>>(() => {}),
+      }),
+    }),
+  });
+  mocks.deliver.mockRejectedValue(new Error("delivery failed"));
+  await expect(runWorkflowToolInvocation(input)).rejects.toThrow("delivery failed");
+  expect(mocks.deliver).toHaveBeenCalledOnce();
 });
