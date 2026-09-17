@@ -91,12 +91,27 @@ function turnStep(input: Omit<TurnStepInput, "input"> & { readonly input?: Legac
 import { routeProxiedDeliverStep } from "#execution/proxied-deliver-step.js";
 
 const bindSessionInstrumentationSpy = vi.hoisted(() => vi.fn());
+/** When set, `bindSessionInstrumentation` binds this runtime instead of the global one. */
+const instrumentationRuntimeOverride = vi.hoisted(() => ({
+  current: undefined as import("#instrumentation/runtime.js").InstrumentationRuntime | undefined,
+}));
 vi.mock("#instrumentation/runtime.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("#instrumentation/runtime.js")>();
   return {
     ...actual,
     bindSessionInstrumentation(input: Parameters<typeof actual.bindSessionInstrumentation>[0]) {
       bindSessionInstrumentationSpy(input);
+      if (instrumentationRuntimeOverride.current !== undefined) {
+        return actual.bindInstrumentationRuntime(
+          instrumentationRuntimeOverride.current,
+          input.ctx,
+          {
+            agentName: input.agentName,
+            rootSessionId: input.rootSessionId,
+            sessionId: input.sessionId,
+          },
+        );
+      }
       return actual.bindSessionInstrumentation(input);
     },
   };
@@ -2138,6 +2153,88 @@ describe("turnStep", () => {
         sessionState: createStubSessionState(),
       }),
     ).rejects.toThrow("Task mode cannot complete while input requests remain pending.");
+  });
+
+  it("prepares the session trace boundary before instrumenting a first-turn delivery", async () => {
+    const published: string[] = [];
+    const prepareSessionTrace = vi.fn(async () => {
+      published.push("prepareSessionTrace");
+      return { spanId: "1".repeat(16), traceFlags: 1, traceId: "1".repeat(32) };
+    });
+    const prepareTurnTrace = vi.fn(async () => {
+      published.push("prepareTurnTrace");
+      return { spanId: "2".repeat(16), traceFlags: 1, traceId: "1".repeat(32) };
+    });
+    instrumentationRuntimeOverride.current = {
+      forceFlush: async () => undefined,
+      hooks: {
+        capturesContent: false,
+        publish: async (event) => {
+          published.push(event.type);
+        },
+      },
+      otelSettings: undefined,
+      prepareSessionTrace,
+      prepareTurnTrace,
+      runInContext: (_operation, execute) => execute(),
+      shutdown: async () => undefined,
+    };
+    try {
+      const session = createStubSession();
+      installSessionStoreMocks([session]);
+      vi.mocked(createExecutionNodeStep).mockImplementation(() => {
+        return async (stepSession): Promise<StepResult> => ({
+          next: { done: true, output: "ok" },
+          session: stepSession,
+        });
+      });
+      const compiledBundle = {
+        adapterRegistry: {
+          adaptersByKind: new Map([[threadContextAdapter.kind, threadContextAdapter]]),
+        },
+        compiledArtifactsSource: {} as never,
+        graph: {
+          nodesByNodeId: new Map(),
+          root: { sandboxRegistry: { sandbox: null }, turnAgent: TestTurnAgent },
+        },
+        moduleMap: { nodes: {} },
+        hookRegistry: createEmptyHookRegistry(),
+        resolvedAgent: { config: {} },
+        subagentRegistry: {},
+        toolRegistry: {},
+        turnAgent: TestTurnAgent,
+      } as never;
+      vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue(compiledBundle);
+      const ctx = new ContextContainer();
+      ctx.set(AuthKey, null);
+      ctx.set(BundleKey, compiledBundle);
+      ctx.set(ChannelKey, threadContextAdapter);
+      ctx.set(ContinuationTokenKey, "first-turn-delivery");
+      ctx.set(ModeKey, "task");
+      ctx.set(SessionIdKey, "session-1");
+
+      await turnStep({
+        input: {
+          kind: "deliver",
+          payloads: [{ message: "hello" }],
+          deliveryMetadata: [
+            { channelKind: "http", channelName: "web", deliveryId: "delivery-1", payloadIndex: 0 },
+          ],
+        },
+        sessionWritable: createTestWritable(),
+        serializedContext: serializeContext(ctx),
+        sessionState: createStubSessionState(),
+      });
+
+      // The session boundary is prepared before the delivery is instrumented,
+      // and turn trace state is left to the tool loop.
+      const deliveryIndex = published.indexOf("channel.delivery.started");
+      expect(deliveryIndex).toBeGreaterThan(-1);
+      expect(published.slice(0, deliveryIndex)).toContain("prepareSessionTrace");
+      expect(published.slice(0, deliveryIndex)).not.toContain("prepareTurnTrace");
+    } finally {
+      instrumentationRuntimeOverride.current = undefined;
+    }
   });
 
   it("uses the selected dynamic subagent model for execution identity", async () => {

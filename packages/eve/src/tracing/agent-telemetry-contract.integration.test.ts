@@ -285,6 +285,7 @@ describe("exported agent telemetry contract", () => {
       })!;
       let dispatch: ReturnType<typeof prepareAgentInvocationTrace>;
       await contextStorage.run(parent, async () => {
+        await binding.preparePreamble({ sequence: 0, sessionStarted: false });
         await binding.instrumentChannelDelivery({
           ctx: parent,
           agentName: "parent",
@@ -310,6 +311,7 @@ describe("exported agent telemetry contract", () => {
             ],
           },
         });
+        // The tool loop prepares turn trace state after the delivery is instrumented.
         await binding.preparePreamble({ sequence: 0, sessionStarted: false, turnId: "turn_0" });
         await hooks.publish({
           idempotencyKey: attemptIdempotencyKey(scope),

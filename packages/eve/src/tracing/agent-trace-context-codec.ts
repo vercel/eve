@@ -99,6 +99,7 @@ function deserializeSession(value: unknown): AgentSessionTraceState | undefined 
     agentName: typeof value.agentName === "string" ? value.agentName : undefined,
     channelAudience: normalizeChannelAudience(value.channelAudience),
     channelKind: typeof value.channelKind === "string" ? value.channelKind : undefined,
+    channelType: typeof value.channelType === "string" ? value.channelType : undefined,
     context: value.context,
     decision: readInstrumentationDecision(value.decision),
     parentLineage: deserializeParentLineage(value.parentLineage),
