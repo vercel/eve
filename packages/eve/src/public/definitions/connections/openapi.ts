@@ -90,6 +90,7 @@ export interface OpenAPIConnectionDefinition {
    * - `never()`: allow all tool calls without approval
    * - `once()`: require approval only the first time per session
    * - `always()`: require approval for every tool call
+   * - `auto()`: use an evaluation model to ask about dangerous or unclear effects
    */
   approval?: Approval;
   /**

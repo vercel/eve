@@ -10966,7 +10966,7 @@ describe("createToolLoopHarness", () => {
       });
     });
 
-    it("anthropic-direct path: adds prepareStep and marks the last tool", async () => {
+    it("anthropic-direct path: marks the last tool without dropping approval", async () => {
       setupStopResult();
       const config: ToolLoopHarnessConfig = {
         mode: "conversation",
@@ -10979,6 +10979,7 @@ describe("createToolLoopHarness", () => {
           [
             "add",
             {
+              approval: () => "user-approval" as const,
               description: "Adds numbers",
               execute: vi.fn(),
               inputSchema: jsonSchema({ type: "object" }),
@@ -11003,6 +11004,31 @@ describe("createToolLoopHarness", () => {
         anthropic: { cacheControl: { type: "ephemeral" } },
         bedrock: { cachePoint: { type: "default" } },
       });
+
+      const approval = agentCall?.toolApproval;
+      if (typeof approval !== "function") throw new TypeError("Expected tool approval function.");
+      const context = new ContextContainer();
+      context.set(SessionKey, {
+        auth: { current: null, initiator: null },
+        sessionId: "session-1",
+        turn: { id: "turn-1", sequence: 0 },
+      });
+      await expect(
+        contextStorage.run(context, () =>
+          approval({
+            messages: [],
+            runtimeContext: {},
+            toolCall: {
+              input: {},
+              toolCallId: "call-1",
+              toolName: "add",
+              type: "tool-call",
+            },
+            tools: agentCall!.tools,
+            toolsContext: {},
+          }),
+        ),
+      ).resolves.toBe("user-approval");
     });
 
     it("anthropic-direct path: prepareStep marks last user and last assistant messages", async () => {

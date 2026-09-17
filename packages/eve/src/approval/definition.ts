@@ -13,6 +13,8 @@ type ApprovalToolInput<TInput> = TInput extends object ? Readonly<TInput> : TInp
  * the active session, current caller, and turn.
  */
 export interface ApprovalContext<TInput = Record<string, unknown>> extends SessionContext {
+  /** Cancels policy work when the active model generation is cancelled. */
+  readonly abortSignal: AbortSignal;
   readonly approvedTools: ReadonlySet<string>;
   readonly callId: string;
   readonly toolInput?: ApprovalToolInput<TInput>;

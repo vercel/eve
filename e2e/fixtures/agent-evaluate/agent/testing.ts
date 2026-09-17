@@ -10,6 +10,21 @@ export const routing = defineState("evaluate-fixture.routing", () => ({
   reasoning: "unselected",
 }));
 
+export const permissionEvaluationModel: Exclude<Experimental_EvaluationModel, string> = {
+  specificationVersion: "v4",
+  provider: "fixture",
+  modelId: "fixture-permission-evaluator",
+  supportedQuestionTypes: ["choice"],
+  async doEvaluate({ state }) {
+    const choice = JSON.stringify(state).includes('"effect":"malicious"') ? "caution" : "clear";
+    return {
+      answers: { permission: { type: "choice", choice } },
+      usage: { inputTokens: 20, outputTokens: 1 },
+      warnings: [],
+    };
+  },
+};
+
 export const evaluationModel: Exclude<Experimental_EvaluationModel, string> = {
   specificationVersion: "v4",
   provider: "fixture",

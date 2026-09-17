@@ -1443,13 +1443,13 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
           };
       }
 
-      return { effectiveTools, backgroundBatch, advertisedHarnessTools };
+      return { effectiveTools, backgroundBatch, advertisedHarnessTools, modelTools };
     };
 
     const runSingleModelCall = async (
       opts: ModelCallOptions & { readonly attemptIndex: number },
     ): Promise<HarnessStepResult> => {
-      let { effectiveTools, backgroundBatch, advertisedHarnessTools } =
+      let { effectiveTools, backgroundBatch, advertisedHarnessTools, modelTools } =
         await prepareModelTools(opts);
       currentMessages = createRequestMessages();
       requestEnvelopeTokens = await estimateRequestEnvelope({
@@ -1507,7 +1507,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
           normalizeModelMessages(projectHistory(createModelMessages(messages), session.state)),
         );
         currentMessages = createRequestMessages();
-        ({ effectiveTools, backgroundBatch, advertisedHarnessTools } =
+        ({ effectiveTools, backgroundBatch, advertisedHarnessTools, modelTools } =
           await prepareModelTools(opts));
         requestEnvelopeTokens = await estimateRequestEnvelope({
           history: projectedMessages,
@@ -1604,7 +1604,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         runtimeContext: telemetryRuntimeContext,
         stopWhen: isStepCount(1),
         telemetry: attempt?.telemetry,
-        toolApproval: buildToolApproval(effectiveTools),
+        toolApproval: buildToolApproval(modelTools, generation.signal),
         tools: effectiveTools,
       };
       const agent = new ToolLoopAgent(agentSettings);

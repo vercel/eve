@@ -152,6 +152,31 @@ You can also call `evaluate` outside a tool; it does not require an active eve
 session. Each call performs its own evaluation. `autoModel` uses this function
 and adds the per-turn routing behavior described below.
 
+## Evaluate tool approvals
+
+Use `auto({ model? })` when an evaluation model should decide whether a
+tool call can run automatically or needs human approval. It accepts the same
+AI SDK evaluation model strings and provider instances described above and
+defaults to `typesafe-ai/jev`:
+
+```ts title="agent/tools/deploy.ts"
+import { defineTool } from "eve/tools";
+import { auto } from "eve/tools/approval";
+import { z } from "zod";
+
+export default defineTool({
+  description: "Deploy an application.",
+  inputSchema: z.object({ environment: z.string() }),
+  approval: auto({ model: "typesafe-ai/jev" }), // Uses AI SDK string-model resolution
+  execute: ({ environment }) => deploy(environment),
+});
+```
+
+The evaluation model reviews the tool name and input for dangerous effects. A
+caution, failed review, or incomplete input requires human approval. See
+[Human-in-the-loop approvals](/docs/human-in-the-loop#approvals) for classifier
+options and data handling.
+
 ## Runtime behavior
 
 `autoModel` evaluates at the first `step.started` event, after the incoming prompt

@@ -10,7 +10,10 @@ const { findPackageJSON, readFile } = vi.hoisted(() => ({
   readFile: vi.fn(),
 }));
 
-vi.mock("node:module", () => ({ findPackageJSON }));
+vi.mock("node:module", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("node:module")>()),
+  findPackageJSON,
+}));
 vi.mock("node:fs/promises", () => ({ readFile }));
 
 import { readTerminalHeadlessEvent, runEveAdd } from "./extension/eve-add.js";

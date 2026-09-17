@@ -414,6 +414,7 @@ function createApprovalContext(input: {
   readonly toolName: string;
 }): ApprovalContext {
   return {
+    abortSignal: new AbortController().signal,
     approvedTools: new Set(),
     callId: "call_1",
     getSandbox: vi.fn(),
