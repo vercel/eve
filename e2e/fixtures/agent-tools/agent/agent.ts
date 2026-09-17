@@ -24,6 +24,10 @@ const base = e2eAgentConfig({
           ],
         };
       }
+      const result = request.toolResults.at(-1);
+      if (result?.name === "schema_validate" && result.isError) {
+        return "Blank value rejected.";
+      }
       return "Schema validation checked.";
     }
     return `Mock reply: ${request.lastUserMessage ?? ""}`;
