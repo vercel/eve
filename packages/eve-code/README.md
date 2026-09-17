@@ -80,3 +80,12 @@ The `typescript-compiler` development alias supplies the JavaScript compiler API
 Use [eve-bench](https://github.com/vercel-labs/eve-bench#readme) directly. Its native `eve-code` harness accepts an installed source app through `--agent`; `apps/fixtures/eve-code-bench` supplies this workspace's eve and eve-code dependencies after the build above.
 
 Dataset selection, execution, comparisons, and report generation belong to eve-bench. This package does not maintain a separate benchmark runner or reporting layer.
+
+### Latest SWE-lean comparison
+
+CI runs the full eight-task SWE-lean suite against the original eve-code baseline (`ca27ee898`), this PR's eve-code, Codex, and OpenCode. The latter two support the suite's MCP tasks. The native eve-bench action publishes the same table to the CI summary, PR comment, and the block below. Only a completed comparison updates this block; its source revision identifies the code tested. The rest of this README is left unchanged.
+
+<!-- eve-code-benchmark:start -->
+
+No completed SWE-lean comparison has been published by CI yet.
+<!-- eve-code-benchmark:end -->
