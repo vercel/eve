@@ -1,4 +1,3 @@
-import type { DynamicToolSchemaReference } from "#context/dynamic-tool-schemas.js";
 import type { JsonObject } from "#shared/json.js";
 import type { DurableDynamicToolCallbacks } from "#tools/durable-callbacks.js";
 
@@ -15,7 +14,6 @@ interface DynamicToolMetadataBase {
 /** Callback identity is supplied by the surrounding session, scope, and resolver metadata. */
 export interface CurrentDynamicToolMetadata extends DynamicToolMetadataBase {
   readonly callbacks: DurableDynamicToolCallbacks;
-  readonly runtimeSchemas?: DynamicToolSchemaReference;
 }
 
 /** Old schema written before callback descriptors existed. */

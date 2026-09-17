@@ -88,6 +88,14 @@ function createProviderToolCallbacks(input: {
       closure,
     },
   };
+  for (const phase of ["inputSchema", "outputSchema"] as const) {
+    if (input.tool[phase] !== undefined) {
+      callbacks[phase] = {
+        callback: async (rawClosure) => (await loadTool(rawClosure))[phase],
+        closure,
+      };
+    }
+  }
   if (input.tool.approval !== undefined) {
     callbacks.approvalRequest = {
       callback: async (rawClosure, context) =>

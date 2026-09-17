@@ -10,5 +10,10 @@ export default defineEval({
       result.expectOk();
       result.calledTool("schema_validate", { output: { value: "normalized" } });
     }
+    const invalid = await t.send(
+      'Alice is checking a blank form submission. Call `schema_validate` with value " " (one space), then explain the validation result without retrying.',
+    );
+    invalid.expectOk();
+    invalid.calledTool("schema_validate", { status: "failed" });
   },
 });

@@ -1,3 +1,4 @@
+import type { StandardSchemaV1 } from "#compiled/@standard-schema/spec/index.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import type { HarnessToolMap } from "#harness/types.js";
 import type { ContextReader } from "#context/key.js";
@@ -27,9 +28,13 @@ import {
   type DurableDynamicCallbackReference,
   type DynamicToolCallbackOwner,
 } from "#tools/durable-callbacks.js";
-import { toInputSchema, toOutputSchema } from "#tools/schema.js";
-
-import { getDynamicToolSchemas } from "#context/dynamic-tool-schemas.js";
+import { hasSchemaValidator } from "#tools/durable-schema.js";
+import {
+  toInputSchema,
+  toOutputSchema,
+  type ToolSchema,
+  type ToolSchemaSource,
+} from "#tools/schema.js";
 
 const log = createLogger("dynamic-tools");
 
@@ -100,7 +105,6 @@ export function replayDynamicTools(
   }
   return metadata.map((entry) => {
     const owner = { ...entry, ...scope };
-    const schemas = getDynamicToolSchemas(entry);
     const approvalKeyReference = entry.callbacks.approvalKey;
     const approvalKey =
       approvalKeyReference === undefined
@@ -169,7 +173,7 @@ export function replayDynamicTools(
                 );
               },
             }),
-      inputSchema: schemas.input ?? toInputSchema(entry.inputSchema),
+      inputSchema: replayDynamicToolSchema(entry, owner, "inputSchema")!,
       name: entry.name,
       execution: entry.execution,
       approval: buildReplayedApproval(entry, owner),
@@ -193,7 +197,7 @@ export function replayDynamicTools(
               return key;
             },
           }),
-      outputSchema: schemas.output ?? toOutputSchema(entry.outputSchema),
+      outputSchema: replayDynamicToolSchema(entry, owner, "outputSchema"),
     };
     if (labelComplete !== undefined || labelDelta !== undefined || labelStart !== undefined) {
       replayed.label = {
@@ -205,6 +209,48 @@ export function replayDynamicTools(
     if (toModelOutput !== undefined) replayed.toModelOutput = toModelOutput;
     return replayed;
   });
+}
+
+function replayDynamicToolSchema(
+  entry: CurrentDynamicToolMetadata,
+  owner: DynamicToolCallbackOwner,
+  phase: "inputSchema" | "outputSchema",
+): ToolSchema | undefined {
+  const jsonSchema = entry[phase];
+  if (jsonSchema === undefined) return undefined;
+  const reference = entry.callbacks[phase];
+  if (reference === undefined) {
+    return phase === "inputSchema" ? toInputSchema(jsonSchema) : toOutputSchema(jsonSchema);
+  }
+  const factory = lookupDurableDynamicCallback(owner, phase);
+  let validator: Promise<StandardSchemaV1> | undefined;
+  return {
+    "~standard": {
+      version: 1,
+      vendor: "eve",
+      jsonSchema: {
+        input: () => structuredClone(jsonSchema),
+        output: () => structuredClone(jsonSchema),
+      },
+      validate: async (value) => {
+        if (factory === undefined) throw missingCallbackError(entry, phase);
+        validator ??= Promise.resolve(callDurableDynamicCallback(factory, reference.closure)).then(
+          (source) => {
+            if (hasSchemaValidator(source)) return source;
+            if (typeof source !== "object" || source === null) {
+              throw new Error(
+                `Dynamic tool "${entry.name}" ${phase} factory did not return a schema.`,
+              );
+            }
+            return phase === "inputSchema"
+              ? toInputSchema(source as ToolSchemaSource)
+              : toOutputSchema(source as ToolSchemaSource);
+          },
+        );
+        return (await validator)["~standard"].validate(value);
+      },
+    },
+  };
 }
 
 function bindDynamicCallback(

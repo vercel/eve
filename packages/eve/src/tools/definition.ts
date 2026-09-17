@@ -390,6 +390,8 @@ export function defineTool<TInput = unknown, TOutput = unknown>(
 export function stampToolDefinition<
   T extends {
     readonly description: string;
+    readonly inputSchema?: unknown;
+    readonly outputSchema?: unknown;
     readonly execute: (...args: never[]) => unknown;
     readonly label?: ToolLabelDefinition;
     readonly approval?: Approval<never>;
@@ -407,6 +409,8 @@ export function stampToolDefinition<
   stampDurableDynamicToolCallbacks(
     definition,
     collectDurableDynamicToolCallbacks({
+      inputSchema: definition.inputSchema,
+      outputSchema: definition.outputSchema,
       label: definition.label,
       approval: definition.approval,
       approvalKey: definition.approvalKey,

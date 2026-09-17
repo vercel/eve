@@ -1,3 +1,6 @@
+import { z } from "#compiled/zod/index.js";
+import { defineDurableSchema } from "#tools/durable-schema.js";
+import { isToolSchema } from "#tools/schema.js";
 import { describe, expect, it, beforeEach } from "vitest";
 
 import { transformDynamicToolExecute } from "./dynamic-tool-transform.js";
@@ -52,6 +55,8 @@ async function transformAndEval(
     stampDurableDynamicToolCallbacks(
       entry,
       collectDurableDynamicToolCallbacks({
+        inputSchema: entry.inputSchema,
+        outputSchema: entry.outputSchema,
         label: entry.label as { complete?: never; delta?: never; start?: never } | undefined,
         approval: entry.approval as never,
         approvalKey: entry.approvalKey as never,
@@ -64,8 +69,14 @@ async function transformAndEval(
 
   // Evaluate in a function scope to provide our stubs. The transform
   // prepends its own __eveStepRegistry setup, so we don't need to add it.
-  const evalFn = new Function("defineDynamic", "defineTool", `${code}\nreturn __exported;`);
-  evalFn(defineDynamic, defineTool);
+  const evalFn = new Function(
+    "defineDynamic",
+    "defineTool",
+    "__eveDefineDurableSchema",
+    "z",
+    `${code}\nreturn __exported;`,
+  );
+  evalFn(defineDynamic, defineTool, defineDurableSchema, z);
 
   return {
     code,
@@ -2483,5 +2494,53 @@ describe("approvalKey callbacks", () => {
         branch: "main",
       }),
     ).toBe("repo:main");
+  });
+});
+
+describe("durable schema expression transform", () => {
+  it("captures inline refinement values separately from the current resolver invocation", async () => {
+    const { callHandler } = await transformAndEval(
+      "schema.ts",
+      `
+      import { defineTool, defineDynamic } from "eve/tools";
+      import { z } from "zod";
+      const output = z.object({ value: z.string().trim() });
+      export default defineDynamic({ events: { "session.started": (_event, ctx) => {
+        const limit = ctx.limit;
+        return { checked: defineTool({
+          description: "Checked",
+          inputSchema: z.object({ amount: z.number().refine(value => value <= limit) }),
+          outputSchema: output,
+          execute: () => limit,
+        }) };
+      } } });
+    `,
+      { ctx: { limit: 10 } },
+    );
+    const entry = (await callHandler()).checked;
+    const callbacks = durableCallbacks(entry);
+    expect(callbacks.inputSchema!.closure).toEqual({ limit: 10 });
+    expect(callbacks.outputSchema!.closure).toEqual({});
+    const schema = callbacks.inputSchema!.callback({ limit: 5 });
+    if (!isToolSchema(schema)) throw new Error("Expected schema");
+    expect(await schema["~standard"].validate({ amount: 6 })).toHaveProperty("issues");
+    expect(await schema["~standard"].validate({ amount: 4 })).toEqual({ value: { amount: 4 } });
+    const output = callbacks.outputSchema!.callback({});
+    if (!isToolSchema(output)) throw new Error("Expected output schema");
+    expect(await output["~standard"].validate({ value: " a " })).toEqual({ value: { value: "a" } });
+  });
+
+  it("does not wrap explicit durable schema factories again", async () => {
+    const result = await transformDynamicToolExecute(
+      "schema.ts",
+      `
+      import { defineTool, defineDurableSchema as durable } from "eve/tools";
+      import { z } from "zod";
+      export function tool(limit) {
+        return defineTool({ inputSchema: durable({ closure: { limit }, schema: ({ limit }) => z.number().max(limit) }), execute: () => null });
+      }
+    `,
+    );
+    expect(result!.code).not.toContain("__eveDefineDurableSchema");
   });
 });

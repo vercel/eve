@@ -13,7 +13,16 @@ const base = e2eAgentConfig({
     if (request.lastUserMessage?.includes("`schema_validate`")) {
       const roles = request.messages.map((message) => message.role);
       if (roles.lastIndexOf("tool") <= roles.lastIndexOf("user")) {
-        return { toolCalls: [{ name: "schema_validate", input: { value: "  normalized  " } }] };
+        return {
+          toolCalls: [
+            {
+              name: "schema_validate",
+              input: {
+                value: request.lastUserMessage?.includes("blank form") ? " " : "  normalized  ",
+              },
+            },
+          ],
+        };
       }
       return "Schema validation checked.";
     }
