@@ -1,4 +1,4 @@
-import { evaluate } from "eve/experimental/evaluate";
+import { evaluate } from "eve/ai";
 import { defineTool } from "eve/tools";
 
 import { evaluationModel } from "../testing";

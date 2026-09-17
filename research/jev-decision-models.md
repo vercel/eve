@@ -8,30 +8,31 @@ last_updated: "2026-09-17"
 
 ## Recommendation
 
-Expose `autoModel` and standalone `evaluate` at `eve/experimental/evaluate`.
-Build both on AI SDK's `experimental_evaluate` API. `evaluate` accepts the SDK's
-state, typed questions, and request options, with an optional model defaulting to
-`typesafe-ai/jev`. It returns the SDK's typed answers and response metadata.
+Expose automatic model selection as `auto` from `eve/models` and standalone
+`evaluate` from `eve/ai`. Build both on AI SDK's `experimental_evaluate` API.
+`evaluate` accepts the SDK's state, typed questions, and request options, with an
+optional model defaulting to `typesafe-ai/jev`. It returns the SDK's typed answers
+and response metadata.
 
-`autoModel` calls the shared `evaluate` wrapper. Model strings use the configured
-AI SDK default provider; without an override, the wrapper resolves eve's local
+`auto` calls the shared `evaluate` wrapper. Model strings use the configured AI
+SDK default provider; without an override, the wrapper resolves eve's local
 Gateway connection when available and otherwise leaves Gateway resolution to the
 SDK. Explicit provider instances retain their own authentication.
 
 Tool authors can call `evaluate` with structured state and pass `ctx.abortSignal`.
 Application code can use it without an active eve session. Standalone calls are
-not cached; durable per-turn selection remains specific to `autoModel`.
+not cached; durable per-turn selection remains specific to `auto`.
 
-The API is experimental because AI SDK's evaluation model specification is also
-experimental and can change in patch releases. The implemented authoring API is
-documented in [Automatic Model Selection](../docs/guides/evaluate.md).
+AI SDK's evaluation model specification remains experimental and can change in
+patch releases. The implemented authoring API is documented in [Automatic Model
+Selection](../docs/guides/evaluate.md).
 
 ```ts
 import { defineAgent } from "eve";
-import { autoModel } from "eve/experimental/evaluate";
+import { auto } from "eve/models";
 
 export default defineAgent({
-  model: autoModel({
+  model: auto({
     options: {
       "openai/gpt-5.6-sol": "Difficult reasoning and engineering tasks",
       "openai/gpt-5.6-luna": "Routine tasks where fast completion matters",
@@ -67,7 +68,7 @@ provider metadata parsing from eve.
 
 ```mermaid
 flowchart LR
-  P[Incoming prompt] --> A[autoModel]
+  P[Incoming prompt] --> A[auto]
   A --> E[AI SDK evaluate]
   E -->|string ID| G[Default provider / Gateway]
   E -->|model instance| D[Installed provider]
@@ -146,7 +147,7 @@ cannot contain a live provider model instance. The tool loop resolves the step
 model after projecting the turn input and before language-model inference, so it
 has the same prompt and can return either a model string or a live instance.
 
-`autoModel` stores only the selected option key and turn ID in a durable
+`auto` stores only the selected option key and turn ID in a durable
 `ContextKey`. A selection is reused for later tool-loop steps in that turn.
 Provider model objects stay in authored configuration and are resolved again from
 the key after resume. New turns and child sessions make independent choices.

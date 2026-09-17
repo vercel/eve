@@ -84,76 +84,79 @@ describe("extension build output", () => {
   });
 
   it.each([
-    ["static re-export", 'export { evaluate as assess } from "eve/experimental/evaluate";'],
+    ["static re-export", 'export { evaluate as assess } from "eve/ai";'],
     [
       "namespace import",
-      'import * as evaluation from "eve/experimental/evaluate"; export const assess = evaluation.evaluate;',
+      'import * as evaluation from "eve/ai"; export const assess = evaluation.evaluate;',
     ],
     [
       "dynamic import",
-      'export async function assess(options: Parameters<typeof import("eve/experimental/evaluate").evaluate>[0]): Promise<void> { await (await import("eve/experimental/evaluate")).evaluate(options); }',
+      'export async function assess(options: Parameters<typeof import("eve/ai").evaluate>[0]): Promise<void> { await (await import("eve/ai")).evaluate(options); }',
     ],
-  ])(
-    "stamps evaluation capabilities for a hook-only extension using a %s",
-    async (_name, helper) => {
-      const root = await createExtensionPackage();
-      await rm(join(root, "extension", "tools"), { recursive: true });
-      await mkdir(join(root, "extension", "hooks"));
-      await mkdir(join(root, "extension", "lib"));
-      await writeFile(join(root, "extension", "lib", "evaluation.ts"), helper);
-      await writeFile(
-        join(root, "extension", "hooks", "evaluate.ts"),
-        `import { defineHook } from "eve/hooks";
+  ])("stamps the tool capability for a hook-only extension using a %s", async (_name, helper) => {
+    const root = await createExtensionPackage();
+    await rm(join(root, "extension", "tools"), { recursive: true });
+    await mkdir(join(root, "extension", "hooks"));
+    await mkdir(join(root, "extension", "lib"));
+    await writeFile(join(root, "extension", "lib", "evaluation.ts"), helper);
+    await writeFile(
+      join(root, "extension", "hooks", "evaluate.ts"),
+      `import { defineHook } from "eve/hooks";
 import { assess } from "../lib/evaluation";
 export default defineHook({ events: { "turn.started": async () => {
   await assess({ state: { request: "Alice needs a summary." }, questions: {
     routine: { type: "boolean", instructions: "Is this routine work?" }
   } });
 } } });`,
-      );
-      const config = await tryReadExtensionBuildConfig(root);
-      const outDir = await buildExtensionPackage(root, config!);
-      const manifestPath = join(outDir, "extension", "_manifest.json");
-      const manifest = parseExtensionCompatibilityManifest(
-        await readFile(manifestPath, "utf8"),
-        manifestPath,
-      );
+    );
+    const config = await tryReadExtensionBuildConfig(root);
+    const outDir = await buildExtensionPackage(root, config!);
+    const manifestPath = join(outDir, "extension", "_manifest.json");
+    const manifest = parseExtensionCompatibilityManifest(
+      await readFile(manifestPath, "utf8"),
+      manifestPath,
+    );
 
-      expect(manifest.requires).toEqual({
-        extension: EXTENSION_CAPABILITY_VERSIONS.extension,
-        hook: EXTENSION_CAPABILITY_VERSIONS.hook,
-        tool: EXTENSION_CAPABILITY_VERSIONS.tool,
-        dynamicTool: EXTENSION_CAPABILITY_VERSIONS.dynamicTool,
-      });
-      expect(findUnsupportedExtensionCapabilities(manifest)).toEqual([]);
-      expect(
-        findUnsupportedExtensionCapabilities(manifest, {
-          ...EXTENSION_CAPABILITY_SUPPORT,
-          tool: EXTENSION_CAPABILITY_SUPPORT.tool.filter((version) => version < 47),
-        }),
-      ).toEqual([
-        expect.objectContaining({
-          capability: "tool",
-          requiredVersion: EXTENSION_CAPABILITY_VERSIONS.tool,
-        }),
-      ]);
-    },
-  );
+    expect(manifest.requires).toEqual({
+      extension: EXTENSION_CAPABILITY_VERSIONS.extension,
+      hook: EXTENSION_CAPABILITY_VERSIONS.hook,
+      tool: EXTENSION_CAPABILITY_VERSIONS.tool,
+    });
+    expect(findUnsupportedExtensionCapabilities(manifest)).toEqual([]);
+    expect(
+      findUnsupportedExtensionCapabilities(manifest, {
+        ...EXTENSION_CAPABILITY_SUPPORT,
+        tool: EXTENSION_CAPABILITY_SUPPORT.tool.filter(
+          (version) => version !== EXTENSION_CAPABILITY_VERSIONS.tool,
+        ),
+      }),
+    ).toEqual([
+      expect.objectContaining({
+        capability: "tool",
+        requiredVersion: EXTENSION_CAPABILITY_VERSIONS.tool,
+      }),
+    ]);
+  });
 
   it.each([
     [
-      "autoModel",
-      'import { autoModel } from "eve/experimental/evaluate"; export const route: ReturnType<typeof autoModel> = autoModel({ options: { "openai/small": "Routine work" } });',
-      true,
+      "automatic model selection",
+      'import { auto } from "eve/models"; export const route: ReturnType<typeof auto> = auto({ options: { "openai/small": "Routine work" } });',
+      "dynamicTool",
     ],
     [
-      "type-only import",
-      'import type { evaluate } from "eve/experimental/evaluate"; export type Evaluate = typeof evaluate;',
-      false,
+      "type-only AI import",
+      'import type { evaluate } from "eve/ai"; export type Evaluate = typeof evaluate;',
+      undefined,
     ],
-  ])(
-    "tracks runtime evaluation imports in a tool-free helper: %s",
-    async (_name, helper, runtime) => {
+    [
+      "type-only model import",
+      'import type { auto } from "eve/models"; export type Auto = typeof auto;',
+      undefined,
+    ],
+  ] as const)(
+    "tracks runtime AI and model imports in a tool-free helper: %s",
+    async (_name, helper, capability) => {
       const root = await createExtensionPackage();
       await rm(join(root, "extension", "tools"), { recursive: true });
       await mkdir(join(root, "extension", "lib"));
@@ -168,12 +171,9 @@ export default defineHook({ events: { "turn.started": async () => {
 
       expect(manifest.requires).toEqual({
         extension: EXTENSION_CAPABILITY_VERSIONS.extension,
-        ...(runtime
-          ? {
-              tool: EXTENSION_CAPABILITY_VERSIONS.tool,
-              dynamicTool: EXTENSION_CAPABILITY_VERSIONS.dynamicTool,
-            }
-          : {}),
+        ...(capability === undefined
+          ? {}
+          : { [capability]: EXTENSION_CAPABILITY_VERSIONS[capability] }),
       });
     },
   );

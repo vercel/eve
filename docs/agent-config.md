@@ -63,7 +63,7 @@ to compaction calls.
 ### Choose the model dynamically
 
 To select a model from the incoming prompt with an AI SDK evaluation model, use
-[`autoModel` from `eve/experimental/evaluate`](./guides/evaluate).
+[`auto` from `eve/models`](./guides/evaluate).
 
 `model` also accepts `defineDynamic({ events })`. Each matching handler must
 return the concrete model for its scope; a dynamic model has no compiled

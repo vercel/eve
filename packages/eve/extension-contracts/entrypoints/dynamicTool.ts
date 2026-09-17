@@ -7,4 +7,4 @@ export {
   defineDurableSchema,
   defineDynamic,
 } from "../../src/public/tools/index.ts";
-export { autoModel } from "../../src/public/experimental/evaluate/index.ts";
+export { auto } from "../../src/public/models/index.ts";

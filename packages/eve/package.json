@@ -211,6 +211,16 @@
       "eve-source": "./dist/src/public/workflow-modules.d.ts",
       "types": "./dist/src/public/workflow-modules.d.ts"
     },
+    "./ai": {
+      "types": "./dist/src/public/ai/index.d.ts",
+      "import": "./dist/src/public/ai/index.js",
+      "default": "./dist/src/public/ai/index.js"
+    },
+    "./models": {
+      "types": "./dist/src/public/models/index.d.ts",
+      "import": "./dist/src/public/models/index.js",
+      "default": "./dist/src/public/models/index.js"
+    },
     "./models/anthropic": {
       "types": "./dist/src/public/models/anthropic/index.d.ts",
       "import": "./dist/src/public/models/anthropic/index.js",
@@ -437,11 +447,6 @@
       "types": "./dist/src/self-modification/config.d.ts",
       "import": "./dist/src/self-modification/config.js",
       "default": "./dist/src/self-modification/config.js"
-    },
-    "./experimental/evaluate": {
-      "types": "./dist/src/public/experimental/evaluate/index.d.ts",
-      "import": "./dist/src/public/experimental/evaluate/index.js",
-      "default": "./dist/src/public/experimental/evaluate/index.js"
     }
   },
   "publishConfig": {

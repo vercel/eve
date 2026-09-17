@@ -16,9 +16,9 @@ import type {
   PublicAgentStaticModelDefinition,
 } from "#shared/agent-definition.js";
 
-import { DEFAULT_EVALUATION_MODEL, evaluate } from "./evaluate.js";
+import { DEFAULT_EVALUATION_MODEL, evaluate } from "#ai/evaluate.js";
 
-type AutoModelOption =
+type AutoOption =
   | string
   | {
       readonly model: PublicAgentStaticModelDefinition;
@@ -26,8 +26,8 @@ type AutoModelOption =
       readonly reasoning?: AgentReasoningDefinition;
     };
 
-interface AutoModelConfig<
-  T extends Readonly<Record<string, AutoModelOption>> = Readonly<Record<string, AutoModelOption>>,
+interface AutoConfig<
+  T extends Readonly<Record<string, AutoOption>> = Readonly<Record<string, AutoOption>>,
 > {
   /** Evaluation model instance or ID. Defaults to TypeSafe Jev through AI SDK model resolution. */
   readonly model?: EvaluationModel;
@@ -45,7 +45,7 @@ function turnId(event: unknown): string {
     typeof event.data.turnId !== "string" ||
     !event.data.turnId
   ) {
-    throw new Error("autoModel requires a step.started event with a turn ID.");
+    throw new Error("auto requires a step.started event with a turn ID.");
   }
   return event.data.turnId;
 }
@@ -67,7 +67,7 @@ function routingState(ctx: DynamicResolveContext): Parameters<typeof evaluate>[0
     if (!text.trim()) continue;
     if (text.length + characters > 16_000) {
       if (messages.length === 0) {
-        throw new Error("The latest message is too long for autoModel routing.");
+        throw new Error("The latest message is too long for auto routing.");
       }
       break;
     }
@@ -76,14 +76,14 @@ function routingState(ctx: DynamicResolveContext): Parameters<typeof evaluate>[0
   }
 
   if (!messages.some((message) => message.role === "user")) {
-    throw new Error("autoModel requires user text to select a model.");
+    throw new Error("auto requires user text to select a model.");
   }
   return { messages };
 }
 
 /** Select a language model from the current prompt with an AI SDK evaluation model. */
-export function autoModel<const T extends Readonly<Record<string, AutoModelOption>>>(
-  config: AutoModelConfig<T>,
+export function auto<const T extends Readonly<Record<string, AutoOption>>>(
+  config: AutoConfig<T>,
 ): DynamicSentinel<PublicAgentDynamicModelResult> {
   if (
     !isRecord(config) ||
@@ -104,7 +104,7 @@ export function autoModel<const T extends Readonly<Record<string, AutoModelOptio
     )
   ) {
     throw new Error(
-      "autoModel requires descriptions or { model, description, reasoning? } option entries and, when provided, a valid evaluation model.",
+      "auto requires descriptions or { model, description, reasoning? } option entries and, when provided, a valid evaluation model.",
     );
   }
 
@@ -115,7 +115,7 @@ export function autoModel<const T extends Readonly<Record<string, AutoModelOptio
     description: typeof option === "string" ? option : option.description,
     reasoning: typeof option === "string" ? undefined : option.reasoning,
   }));
-  if (options.length === 0) throw new Error("autoModel requires at least one option.");
+  if (options.length === 0) throw new Error("auto requires at least one option.");
 
   const models = new Map<string, PublicAgentDynamicModelResult>(
     options.map(({ key, model, reasoning }) => [

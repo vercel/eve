@@ -90,11 +90,9 @@ export async function deriveExtensionCapabilityRequirements(input: {
     required.add("config");
   }
   if (usesState) required.add("state");
-  // The evaluation entrypoint can be used from any contribution or shared helper.
-  if (input.runtimeImports.includes("eve/experimental/evaluate")) {
-    required.add("tool");
-    required.add("dynamicTool");
-  }
+  // Runtime imports can use these capabilities outside manifest-declared tools.
+  if (input.runtimeImports.includes("eve/ai")) required.add("tool");
+  if (input.runtimeImports.includes("eve/models")) required.add("dynamicTool");
 
   return Object.fromEntries(
     (Object.keys(EXTENSION_CAPABILITY_VERSIONS) as ExtensionCapability[])
