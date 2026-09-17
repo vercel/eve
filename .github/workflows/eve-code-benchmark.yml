@@ -1,0 +1,292 @@
+name: eve-code benchmark
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/eve-code-benchmark.yml"
+      - "scripts/eve-code-benchmark*.mjs"
+      - "apps/fixtures/eve-code-bench/**"
+      - "packages/eve-code/**"
+      - "packages/eve/**"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - "pnpm-workspace.yaml"
+      - "turbo.json"
+      - ".nvmrc"
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: eve-code-benchmark-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  BENCHMARK_REVISION: 4c87e8d4f0cca6965f5a4d0415a22fa38776d871
+  BENCHMARK_MODEL: ${{ vars.EVE_CODE_BENCH_MODEL || 'openai/gpt-5.6-terra' }}
+
+jobs:
+  benchmark:
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout exact agent head
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Record checked out SHA
+        id: head
+        env:
+          EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          actual_sha="$(git rev-parse HEAD)"
+          test "$actual_sha" = "$EXPECTED_SHA"
+          echo "sha=$actual_sha" >> "$GITHUB_OUTPUT"
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Check benchmark wiring and publication
+        run: node --test scripts/eve-code-benchmark.test.mjs
+
+      - name: Check private runner access
+        env:
+          HAS_RUNNER_TOKEN: ${{ secrets.EVE_BENCH_READ_TOKEN != '' }}
+        run: |
+          test "$HAS_RUNNER_TOKEN" = true || { echo 'Configure EVE_BENCH_READ_TOKEN with read-only Contents access to vercel-labs/eve-bench.' >&2; exit 1; }
+
+      - name: Install workspace dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build local eve and eve-code
+        run: pnpm exec turbo run build --filter=eve-code
+
+      - name: Checkout pinned benchmark runner separately
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: vercel-labs/eve-bench
+          ref: ${{ env.BENCHMARK_REVISION }}
+          token: ${{ secrets.EVE_BENCH_READ_TOKEN }}
+          path: .eve-bench-runner
+          persist-credentials: false
+
+      - name: Install benchmark runner dependencies
+        working-directory: .eve-bench-runner
+        run: |
+          test "$(git rev-parse HEAD)" = "$BENCHMARK_REVISION"
+          npm ci
+
+      - name: Snapshot workspace source identity
+        id: source
+        env:
+          TESTED_SHA: ${{ steps.head.outputs.sha }}
+        run: |
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          import { realpath, writeFile } from 'node:fs/promises';
+          import { hashTree } from './.eve-bench-runner/src/harnesses/e0/snapshot.ts';
+          const agent = 'apps/fixtures/eve-code-bench';
+          for (const name of ['eve', 'eve-code']) {
+            assert.equal(await realpath(`${agent}/node_modules/${name}`), await realpath(`packages/${name}`), `${name} must resolve to the workspace source, not an npm release`);
+          }
+          const source = {
+            gitSha: process.env.TESTED_SHA,
+            agentSha256: await hashTree(`${agent}/agent`),
+            extensionSha256: await hashTree('packages/eve-code/extension'),
+            eveDistSha256: await hashTree('packages/eve/dist'),
+          };
+          await writeFile(`${process.env.RUNNER_TEMP}/eve-code-benchmark-source.json`, JSON.stringify(source, null, 2));
+          NODE
+
+      # swe-lean also contains MCP tasks, which this terminal-only harness does not support.
+      - name: Run terminal-only single smoke task
+        id: smoke
+        timeout-minutes: 20
+        env:
+          AI_GATEWAY_API_KEY: ${{ secrets.AI_GATEWAY_API_KEY }}
+          TESTED_SHA: ${{ steps.head.outputs.sha }}
+        run: |
+          test -n "$AI_GATEWAY_API_KEY" || { echo 'AI_GATEWAY_API_KEY is required for the smoke task.' >&2; exit 1; }
+          node .eve-bench-runner/release/action-runner.mjs \
+            --harness e0 \
+            --agent-before "$GITHUB_WORKSPACE/apps/fixtures/eve-code-bench" \
+            --agent-ref "$TESTED_SHA" \
+            --agent-repository "$GITHUB_REPOSITORY" \
+            --agent-path apps/fixtures/eve-code-bench \
+            --model "$BENCHMARK_MODEL" \
+            --dataset swe-lean \
+            --task log-summary-date-ranges \
+            --attempts 1 \
+            --concurrency 1 \
+            --native-build false \
+            --output benchmark-results
+
+      - name: Verify executed bundle source identity
+        run: |
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          import { readFile } from 'node:fs/promises';
+          const expected = JSON.parse(await readFile(`${process.env.RUNNER_TEMP}/eve-code-benchmark-source.json`, 'utf8'));
+          const job = JSON.parse(await readFile('benchmark-results/jobs/baseline/job.json', 'utf8'));
+          for (const [key, value] of Object.entries(expected)) {
+            assert.equal(job.bundle?.source?.[key], value, `Executed bundle source mismatch: ${key}`);
+          }
+          NODE
+
+      - name: Summarize smoke execution
+        if: ${{ always() }}
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          EXECUTION_RESULT: ${{ job.status }}
+          REPORT_PATH: ${{ github.workspace }}/benchmark-results/report.json
+        with:
+          # Shared inline workflow code, never code loaded from a report artifact or PR checkout.
+          script: &report_smoke |
+            const fs = require('node:fs/promises');
+            const { constants } = require('node:fs');
+            const path = require('node:path');
+            const publish = process.env.PUBLISH_COMMENT === 'true';
+            const pr = context.payload.pull_request;
+            const repository = `${context.repo.owner}/${context.repo.repo}`;
+            if (publish && (!pr || pr.head.repo?.full_name !== repository)) return;
+            const sha = pr?.head.sha ?? context.sha;
+            const runUrl = `${process.env.GITHUB_SERVER_URL}/${repository}/actions/runs/${context.runId}/attempts/${process.env.GITHUB_RUN_ATTEMPT}`;
+            const marker = '<!-- eve-code-benchmark -->';
+            const status = ['success', 'failure', 'cancelled', 'skipped'].includes(process.env.EXECUTION_RESULT)
+              ? process.env.EXECUTION_RESULT : 'unknown';
+            let validReport = false;
+            let metrics = 'Report unavailable or invalid; inspect the run logs and any partial job artifacts. No task result is claimed.';
+            try {
+              const file = await fs.open(process.env.REPORT_PATH, constants.O_RDONLY | constants.O_NOFOLLOW);
+              let report;
+              try {
+                if (!(await file.stat()).isFile()) throw new Error('Not a regular file');
+                const buffer = Buffer.alloc(256 * 1024 + 1);
+                const { bytesRead } = await file.read(buffer, 0, buffer.length, 0);
+                if (bytesRead === buffer.length) throw new Error('Report exceeds 256 KiB');
+                report = JSON.parse(buffer.subarray(0, bytesRead).toString('utf8'));
+              } finally {
+                await file.close();
+              }
+              const m = report.manifest;
+              const s = report.results?.baseline?.summary;
+              if (report.schemaVersion !== '1' || report.mode !== 'baseline' ||
+                  m?.schemaVersion !== '2' || m.mode !== 'baseline' || m.harness !== 'e0' ||
+                  m.runnerRevision !== process.env.BENCHMARK_REVISION ||
+                  m.agent?.repository !== repository || m.agent?.path !== 'apps/fixtures/eve-code-bench' ||
+                  m.arms?.baseline?.sourceRevision !== sha || Object.keys(m.arms).length !== 1 ||
+                  m.model !== process.env.BENCHMARK_MODEL || m.dataset !== 'swe-lean' ||
+                  m.task !== 'log-summary-date-ranges' || m.attempts !== 1 || m.concurrency !== 1 || m.nativeBuild !== false ||
+                  s?.tasks !== 1 || s.attempts !== 1 || ![0, 1].includes(s.resolved) ||
+                  typeof s.meanReward !== 'number' || !Number.isFinite(s.meanReward) || s.meanReward < 0 || s.meanReward > 1) {
+                throw new Error('Unexpected smoke report');
+              }
+              metrics = `Tasks: 1; attempts: 1; resolved: ${s.resolved}; mean reward: ${s.meanReward.toFixed(3)}.`;
+              validReport = true;
+            } catch {
+              core.warning('Smoke report missing or invalid; publishing a status-only fallback.');
+            }
+            const model = (process.env.BENCHMARK_MODEL ?? '').replace(/[^A-Za-z0-9_./:-]/g, '?').slice(0, 120);
+            const body = [
+              marker, '## eve-code benchmark', '',
+              'Terminal-only single smoke task: `swe-lean / log-summary-date-ranges`, one attempt, concurrency 1, native image build disabled.',
+              'This is not full swe-lean coverage, does not test MCP tasks, and is not a before/after comparison.', '',
+              `${status === 'success' && validReport ? 'Tested' : 'Requested'} head SHA: \`${sha}\`. Setup failures may prevent execution.`,
+              `Runner: \`${process.env.BENCHMARK_REVISION}\`. Model: \`${model}\`.`,
+              `Execution/setup status: **${status}**. Execution success alone does not mean the task was resolved.`,
+              metrics, '', `[Run and artifacts](${runUrl})`,
+            ].join('\n');
+            await core.summary.addRaw(body).write();
+            if (!publish) {
+              await fs.mkdir(path.dirname(process.env.REPORT_PATH), { recursive: true });
+              await fs.writeFile(path.join(path.dirname(process.env.REPORT_PATH), 'summary.md'), body);
+              return;
+            }
+            let existing;
+            for (let page = 1; page <= 10; page++) {
+              const { data } = await github.rest.issues.listComments({ ...context.repo, issue_number: pr.number, per_page: 100, page });
+              existing = data.find(comment => comment.user?.login === 'github-actions[bot]' && comment.user?.type === 'Bot' && comment.body?.startsWith(marker));
+              if (existing || data.length < 100) break;
+              if (page === 10) {
+                core.warning('Comment search limit reached; skipping publication rather than creating a duplicate.');
+                return;
+              }
+            }
+            // Check immediately before mutation, including on reruns of an older workflow attempt.
+            const { data: current } = await github.rest.pulls.get({ ...context.repo, pull_number: pr.number });
+            if (current.state !== 'open' || current.head.sha !== sha || current.head.repo?.full_name !== repository) {
+              core.info('Skipping stale, closed, or no-longer-same-repository pull request.');
+              return;
+            }
+            if (existing) {
+              await github.rest.issues.updateComment({ ...context.repo, comment_id: existing.id, body });
+            } else {
+              await github.rest.issues.createComment({ ...context.repo, issue_number: pr.number, body });
+            }
+
+      - name: Preserve expected source identity
+        if: ${{ always() && steps.source.outcome == 'success' }}
+        run: |
+          mkdir -p benchmark-results
+          cp "$RUNNER_TEMP/eve-code-benchmark-source.json" benchmark-results/expected-source.json
+
+      - name: Upload smoke report
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: eve-code-benchmark-report-${{ github.run_attempt }}
+          path: |
+            benchmark-results/report.json
+            benchmark-results/report.md
+            benchmark-results/summary.md
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Upload smoke job artifacts
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: eve-code-benchmark-jobs-${{ github.run_attempt }}
+          path: |
+            benchmark-results/jobs/
+            benchmark-results/manifest.json
+            benchmark-results/expected-source.json
+          if-no-files-found: warn
+          retention-days: 7
+
+  publish:
+    needs: benchmark
+    if: ${{ always() && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && needs.benchmark.result != 'skipped' }}
+    permissions:
+      actions: read
+      pull-requests: write
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Download only this attempt's known report artifact
+        continue-on-error: true
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: eve-code-benchmark-report-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/eve-code-benchmark-report
+
+      - name: Publish sticky smoke comment
+        if: ${{ always() }}
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          PUBLISH_COMMENT: "true"
+          EXECUTION_RESULT: ${{ needs.benchmark.result }}
+          REPORT_PATH: ${{ runner.temp }}/eve-code-benchmark-report/report.json
+        with:
+          script: *report_smoke

@@ -22,21 +22,35 @@ To enable the authenticated `gh` tool, configure `github` with `connector`, `org
 
 ## Sandbox bootstrap
 
-Install the CLI tooling in the consumer sandbox during `bootstrap`:
+Install CLI tooling and computer-use assets during `bootstrap`, then start the desktop and driver in `onSession`. Computer use requires an apt-based Linux image with root or passwordless sudo; it cannot run on the `just-bash` backend. Include both revalidation keys so cached templates rebuild when either helper changes:
 
 ```ts
+// agent/sandbox.ts
 import { defineSandbox } from "eve/sandbox";
 import { vercel } from "eve/sandbox/vercel";
-import { CODE_TOOLING_REVALIDATION_KEY, installCodeTooling } from "eve-code/sandbox";
+import {
+  CODE_TOOLING_REVALIDATION_KEY,
+  COMPUTER_USE_REVALIDATION_KEY,
+  installCodeTooling,
+  installComputerUse,
+  startComputerUse,
+} from "eve-code/sandbox";
 
 export default defineSandbox({
   backend: vercel(),
-  revalidationKey: () => CODE_TOOLING_REVALIDATION_KEY,
+  revalidationKey: () => `${CODE_TOOLING_REVALIDATION_KEY}:${COMPUTER_USE_REVALIDATION_KEY}`,
   async bootstrap({ use }) {
-    await installCodeTooling(await use(), { vercel: true });
+    const sandbox = await use();
+    await installCodeTooling(sandbox, { vercel: true });
+    await installComputerUse(sandbox);
+  },
+  async onSession({ use }) {
+    await startComputerUse(await use());
   },
 });
 ```
+
+Mounting the extension exposes `computer_use` but does not install or start its driver. Bootstrap caches files, not running processes; `onSession` starts the driver for each new session. If the driver exits or the backend restores only filesystem state, call `startComputerUse` again before using the tool; reattachment does not necessarily rerun `onSession`. Stop recordings with `record_stop` to finalize the MP4 at the returned sandbox path. A five-minute watchdog also finalizes forgotten recordings, and the driver attempts finalization on `SIGINT` or `SIGTERM`; abrupt VM termination cannot guarantee a finalized MP4.
 
 Bootstrap ensures `gh`, installs wrappers for `gh`, `vc`, and `gh-signed-commit`, and installs TypeScript diagnostics. For repositories requiring verified signatures, stage the intended changes and use `gh-signed-commit`.
 
@@ -57,6 +71,14 @@ pnpm exec oxlint packages/eve-code
 pnpm exec oxfmt --check packages/eve-code
 ```
 
-Tests live under `test/`, outside the extension distribution. Unit and integration tests run through the workspace's matching test tasks. The integration task waits for eve's integration task because that task rebuilds the runtime files these tests import. Scenario tests exercise temporary files, local Git repositories, and subprocesses; they need Node.js 24 or newer, Git, and Bash, but no model or service credentials.
+Tests live under `test/`, outside the extension distribution. Unit and integration tests run through the workspace's matching test tasks. The package integration task depends only on eve's build. The root integration command runs the framework suite before the other packages because that suite rebuilds the runtime files they import. Scenario tests exercise temporary files, local Git repositories, and subprocesses; they need Node.js 24 or newer, Git, and Bash, but no model or service credentials.
 
 The `typescript-compiler` development alias supplies the JavaScript compiler API used by the diagnostics worker test. The workspace's TypeScript 7 CLI remains the package typechecker. `prepack` builds the extension; installation does not run the extension CLI before the local framework has been built.
+
+## PR benchmark
+
+The [eve-code benchmark workflow](../../.github/workflows/eve-code-benchmark.yml) runs a single terminal smoke task on same-repository PR updates and supports manual dispatch. It checks out the exact head SHA, builds the local framework, and uses a pinned `vercel-labs/eve-bench` runner to rebuild this extension from source through the public `apps/fixtures/eve-code-bench` fixture. Source hashes are checked against the executed bundle so a stale build or registry release cannot stand in for the PR.
+
+The workflow publishes a job summary, downloadable reports and job artifacts, and one updated PR comment labeled with the tested SHA. Older runs cannot replace a newer head's comment. Setup failures also produce a status comment. Fork PRs do not receive the model secret and are skipped.
+
+Configure `AI_GATEWAY_API_KEY` as a repository secret. The pinned runner repository is private, so also configure `EVE_BENCH_READ_TOKEN` with read-only Contents access to `vercel-labs/eve-bench`; it is used only by checkout and is not passed to the agent or report publisher. The root model defaults to `openai/gpt-5.6-terra`; override it with the `EVE_CODE_BENCH_MODEL` repository variable. The extension worker retains its own configured model. Each run uses one attempt of `swe-lean / log-summary-date-ranges`, with concurrency one and a 20-minute execution limit. This smoke report is not a regression comparison or full dataset coverage; it does not exercise MCP tasks, Connect authentication, desktop provisioning, or consumer-owned PR-watch workflows.
