@@ -65,13 +65,13 @@ function streamingTurnEvents(): MessageStreamEvent[] {
   ] as UnstampedMessageStreamEvent[]);
 }
 
-function startedResponse(): Response {
+function startedResponse(deliveryId = "delivery_1"): Response {
   return new Response(
     JSON.stringify({
       ok: true,
       sessionId: "session_1",
       status: "accepted",
-      deliveryId: "delivery_1",
+      deliveryId,
     }),
     {
       headers: { "content-type": "application/json", [EVE_SESSION_ID_HEADER]: "session_1" },
@@ -331,7 +331,7 @@ describe("EveAgentStore prewarming", () => {
     );
     await first;
 
-    expect(JSON.parse(fetchMock.mock.calls[0]![1]!.body as string)).toEqual({});
+    expect(fetchMock.mock.calls[0]![1]!.body).toBeUndefined();
     expect(store.snapshot.session?.sessionId).toBe("session_1");
     expect(store.snapshot.status).toBe("ready");
     expect(onSessionChange).toHaveBeenCalledWith({ sessionId: "session_1", streamIndex: 0 });
@@ -386,6 +386,54 @@ describe("EveAgentStore prewarming", () => {
     expect(store.snapshot.status).toBe("ready");
     expect(fetchMock.mock.calls.filter(([, init]) => init?.method !== "POST")).toHaveLength(1);
     expect(store.snapshot.session?.streamIndex).toBe(6);
+  });
+
+  it("uses the latest turn headers when the continuous stream reconnects", async () => {
+    const live = controlledStreamResponse();
+    const reconnected = controlledStreamResponse();
+    const streamAuthorizations: Array<string | null> = [];
+    let delivery = 0;
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (_request, init) => {
+      if (init?.method === "POST") return startedResponse(`delivery_${(delivery += 1)}`);
+      streamAuthorizations.push(new Headers(init?.headers).get("authorization"));
+      return streamAuthorizations.length === 1 ? live.response : reconnected.response;
+    });
+    const store = createStore({
+      initialSession: { sessionId: "session_1", streamIndex: 0 },
+      reducer: defaultMessageReducer(),
+    });
+    const events = turnEvents();
+    const emitTurn = (deliveryId: string, idPrefix: string) => {
+      for (const event of events) {
+        live.emit({
+          ...event,
+          meta: { ...event.meta, deliveryIds: [deliveryId], id: `${idPrefix}-${event.meta.id}` },
+        });
+      }
+    };
+
+    const first = store.send({
+      headers: { authorization: "Bearer old" },
+      message: "Hello",
+      streamReconnectPolicy: {
+        streamIdleReconnectPolicy: { baseDelayMs: 1, maxAttempts: 5, maxDelayMs: 1 },
+      },
+    });
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    emitTurn("delivery_1", "first");
+    await first;
+
+    const second = store.send({
+      headers: { authorization: "Bearer fresh" },
+      message: "Hello again",
+    });
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+    emitTurn("delivery_2", "second");
+    await second;
+
+    live.close();
+    await vi.waitFor(() => expect(streamAuthorizations).toHaveLength(2));
+    expect(streamAuthorizations).toEqual(["Bearer old", "Bearer fresh"]);
   });
 });
 

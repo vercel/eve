@@ -19,15 +19,17 @@ export class SessionEventStream {
   readonly caughtUp = this.#caughtUp.promise;
   #ended = false;
   #error: unknown;
+  #headers: Readonly<Record<string, string>> | undefined;
 
   constructor(session: ClientSession, options: SessionEventStreamOptions) {
+    this.#headers = options.headers;
     void this.caughtUp.catch(() => {});
     if (!options.catchUp) this.#caughtUp.resolve();
     void (async () => {
       try {
         for await (const event of followClientSession(session, {
           signal: this.#controller.signal,
-          headers: options.headers,
+          resolveHeaders: () => this.#headers,
           streamReconnectPolicy: options.streamReconnectPolicy,
           startIndex: options.startIndex,
           onCaughtUp: options.catchUp ? () => this.#caughtUp.resolve() : undefined,
@@ -56,6 +58,10 @@ export class SessionEventStream {
 
   get ended(): boolean {
     return this.#ended;
+  }
+
+  setHeaders(headers: Readonly<Record<string, string>> | undefined): void {
+    this.#headers = headers;
   }
 
   close(): void {

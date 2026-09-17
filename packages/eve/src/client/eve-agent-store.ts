@@ -405,6 +405,7 @@ export class EveAgentStore<TData> {
     const submissionId = this.#projectOptimisticMessage(preparedInput);
     if (submissionId !== undefined) turn.followUpSubmissionIds.add(submissionId);
     this.#publish();
+    this.#ensureStream({ headers: preparedInput.headers });
 
     let dispatch!: Promise<void>;
     dispatch = (async () => {
@@ -478,7 +479,10 @@ export class EveAgentStore<TData> {
   #ensureStream(
     options: Omit<SessionEventStreamOptions, "onEvent" | "onError"> = {},
   ): SessionEventStream {
-    if (this.#stream !== undefined && !this.#stream.ended) return this.#stream;
+    if (this.#stream !== undefined && !this.#stream.ended) {
+      if ("headers" in options) this.#stream.setHeaders(options.headers);
+      return this.#stream;
+    }
     if (this.#session === undefined)
       throw new Error("A session is required before opening its stream.");
     const session = this.#session;

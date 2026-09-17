@@ -36,6 +36,7 @@ const followSession = Symbol("followClientSession");
 interface FollowSessionOptions extends StreamOptions {
   readonly headers?: Readonly<Record<string, string>>;
   readonly onCaughtUp?: () => void;
+  readonly resolveHeaders?: () => Readonly<Record<string, string>> | undefined;
 }
 
 /**
@@ -290,6 +291,7 @@ export class ClientSession {
         headers: options?.headers,
         keepAlive: options?.keepAlive,
         onCaughtUp: options?.onCaughtUp,
+        resolveHeaders: options?.resolveHeaders,
         signal: options?.signal,
         startIndex,
         streamReconnectPolicy: options?.streamReconnectPolicy,
@@ -318,13 +320,14 @@ export class ClientSession {
     readonly signal?: AbortSignal;
     readonly startIndex: number;
     readonly streamReconnectPolicy?: StreamOptions["streamReconnectPolicy"];
+    readonly resolveHeaders?: () => Readonly<Record<string, string>> | undefined;
   }): AsyncIterable<MessageStreamEvent> {
     return followStreamIterable({
       onCaughtUp: input.onCaughtUp,
       follow: input.follow,
       host: this.#context.host,
       keepAlive: input.keepAlive,
-      resolveHeaders: () => this.#context.resolveHeaders(input.headers),
+      resolveHeaders: () => this.#context.resolveHeaders(input.resolveHeaders?.() ?? input.headers),
       redirect: this.#context.redirect,
       sessionId: this.#state.sessionId,
       signal: input.signal,

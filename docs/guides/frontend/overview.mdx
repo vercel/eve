@@ -376,6 +376,10 @@ const agent = useEveAgent({
 });
 ```
 
+Headers supplied to `send()` apply to that turn request and become the credentials used by the
+continuous session stream on its next reconnect. A later send replaces them with that turn's
+headers.
+
 When a framework integration mounts multiple named agents, pass `agent` instead of `host`:
 
 ```tsx
