@@ -955,6 +955,7 @@ describe("EveTUIRunner idle session follow", () => {
     try {
       await vi.advanceTimersByTimeAsync(130_000);
       expect(connections).toBeGreaterThanOrEqual(8);
+      expect(idleEvents).toContainEqual({ type: "step-start", modelId: "test-model" });
       expect(idleEvents).toContainEqual({
         type: "assistant-complete",
         id: "text:wake-turn:0",

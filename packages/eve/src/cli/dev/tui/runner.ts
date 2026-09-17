@@ -170,7 +170,7 @@ export type AgentTUIStreamUsage = {
 };
 
 export type AgentTUIStreamEvent =
-  | { type: "step-start" }
+  | { type: "step-start"; modelId?: string }
   | { type: "step-finish"; usage?: AgentTUIStreamUsage }
   | { type: "assistant-delta"; id: string; delta: string }
   | { type: "assistant-complete"; id: string; text?: string | null }
@@ -2235,7 +2235,7 @@ async function* eveEventsToTUIStream(
 
       case "step.started":
         stepEpoch += 1;
-        yield { type: "step-start" };
+        yield { type: "step-start", modelId: event.data.modelId };
         break;
 
       case "step.completed": {

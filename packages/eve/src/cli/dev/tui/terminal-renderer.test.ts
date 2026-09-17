@@ -5388,6 +5388,35 @@ describe("TerminalRenderer status line", () => {
     input.type("done");
     input.enter();
     await prompt;
+    await renderer.renderStream(
+      {
+        events: (async function* (): AsyncIterable<AgentTUIStreamEvent> {
+          yield { type: "step-start", modelId: "openai/gpt-5.6-luna" };
+          expect(screen.snapshot()).toContain("dynamic model · openai/gpt-5.6-luna");
+          yield { type: "step-start", modelId: "openai/gpt-5.6-sol" };
+          expect(screen.snapshot()).toContain("dynamic model · openai/gpt-5.6-sol");
+          expect(screen.snapshot()).not.toContain("openai/gpt-5.6-luna");
+          yield { type: "finish" };
+        })(),
+      },
+      { submittedPrompt: "hi", continueSession: true },
+    );
+    expect(screen.snapshot()).toContain("dynamic model · openai/gpt-5.6-sol");
+    await renderer.renderStream(
+      {
+        events: (async function* (): AsyncIterable<AgentTUIStreamEvent> {
+          expect(screen.snapshot()).toContain("dynamic model");
+          expect(screen.snapshot()).not.toContain("openai/gpt-5.6-sol");
+          yield { type: "step-start", modelId: "openai/gpt-5.6-luna" };
+          yield { type: "finish" };
+        })(),
+      },
+      { submittedPrompt: "hello again", continueSession: true },
+    );
+    expect(screen.snapshot()).toContain("dynamic model · openai/gpt-5.6-luna");
+    renderer.renderSessionBoundary();
+    expect(screen.snapshot()).toContain("dynamic model");
+    expect(screen.snapshot()).not.toContain("openai/gpt-5.6-luna");
     renderer.shutdown();
   });
 

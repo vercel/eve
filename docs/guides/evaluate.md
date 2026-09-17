@@ -37,7 +37,8 @@ does not add a TypeSafe credential or transport layer. During `eve dev`, a
 Gateway evaluator uses the same connection selected through `/login` as Gateway
 language models. A configured AI SDK default provider still owns string model
 resolution during development. The TUI footer displays `dynamic model` when the
-agent uses `autoModel`.
+agent uses `autoModel`, then adds the resolved model for the current turn, such as
+`dynamic model · openai/gpt-5.6-luna`.
 
 ## Use a provider directly
 
