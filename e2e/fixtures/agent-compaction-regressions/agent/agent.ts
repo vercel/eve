@@ -19,8 +19,9 @@ const TEST_CONTEXT_WINDOW_TOKENS = 32_000;
 // The compiled fixture's instructions and 13 advertised tools occupy ~2,823
 // tokens. Reserve them in addition to the summarizer's history budget.
 const TEST_REQUEST_ENVELOPE_TOKENS = 2_823;
-// Scripted usage supplies pressure without starving the real summarizer's transcript.
-const TEST_HISTORY_BUDGET_TOKENS = 2_048;
+// Keep completed tool reports out of the verbatim tail so these cases verify
+// their evidence survives in the assistant checkpoint consumed by the script.
+const TEST_HISTORY_BUDGET_TOKENS = 640;
 const COMPACTION_PRESSURE_USAGE = { inputTokens: TEST_REQUEST_ENVELOPE_TOKENS + 4_096 };
 const MAX_TOOL_CALLS = 10;
 
