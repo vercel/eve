@@ -71,7 +71,9 @@ function resolveStreamReconnectPolicy(
       : DEFAULT_STREAM_RECONNECT_POLICY.retryableErrorStatuses,
     streamIdleReconnectPolicy: resolveRetryPolicy(configured?.streamIdleReconnectPolicy, {
       ...DEFAULT_STREAM_RECONNECT_POLICY.streamIdleReconnectPolicy,
-      ...(keepAlive ? { maxAttempts: Infinity } : {}),
+      maxAttempts: keepAlive
+        ? Infinity
+        : DEFAULT_STREAM_RECONNECT_POLICY.streamIdleReconnectPolicy.maxAttempts,
     }),
     streamOpenReconnectPolicy: resolveRetryPolicy(
       configured?.streamOpenReconnectPolicy,
