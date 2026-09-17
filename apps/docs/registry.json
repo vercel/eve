@@ -1863,197 +1863,197 @@
         {
           "path": "registry/channel/web/app/_components/agent-chat.tsx",
           "type": "registry:file",
-          "target": "app/_components/agent-chat.tsx"
+          "target": "apps/web/app/_components/agent-chat.tsx"
         },
         {
           "path": "registry/channel/web/app/_components/agent-message.tsx",
           "type": "registry:file",
-          "target": "app/_components/agent-message.tsx"
+          "target": "apps/web/app/_components/agent-message.tsx"
         },
         {
           "path": "registry/channel/web/app/globals.css",
           "type": "registry:file",
-          "target": "app/globals.css"
+          "target": "apps/web/app/globals.css"
         },
         {
           "path": "registry/channel/web/app/icon.svg",
           "type": "registry:file",
-          "target": "app/icon.svg"
+          "target": "apps/web/app/icon.svg"
         },
         {
           "path": "registry/channel/web/app/apple-icon.tsx",
           "type": "registry:file",
-          "target": "app/apple-icon.tsx"
+          "target": "apps/web/app/apple-icon.tsx"
         },
         {
           "path": "registry/channel/web/app/layout.tsx",
           "type": "registry:file",
-          "target": "app/layout.tsx"
+          "target": "apps/web/app/layout.tsx"
         },
         {
           "path": "registry/channel/web/app/page.tsx",
           "type": "registry:file",
-          "target": "app/page.tsx"
+          "target": "apps/web/app/page.tsx"
         },
         {
           "path": "registry/channel/web/app/s/[sessionId]/page.tsx",
           "type": "registry:file",
-          "target": "app/s/[sessionId]/page.tsx"
+          "target": "apps/web/app/s/[sessionId]/page.tsx"
         },
         {
           "path": "registry/channel/web/app/s/page.tsx",
           "type": "registry:file",
-          "target": "app/s/page.tsx"
+          "target": "apps/web/app/s/page.tsx"
         },
         {
           "path": "registry/channel/web/components.json",
           "type": "registry:file",
-          "target": "components.json"
+          "target": "apps/web/components.json"
         },
         {
           "path": "registry/channel/web/components/ai-elements/chain-of-thought.tsx",
           "type": "registry:file",
-          "target": "components/ai-elements/chain-of-thought.tsx"
+          "target": "apps/web/components/ai-elements/chain-of-thought.tsx"
         },
         {
           "path": "registry/channel/web/components/ai-elements/code-block.tsx",
           "type": "registry:file",
-          "target": "components/ai-elements/code-block.tsx"
+          "target": "apps/web/components/ai-elements/code-block.tsx"
         },
         {
           "path": "registry/channel/web/components/ai-elements/conversation.tsx",
           "type": "registry:file",
-          "target": "components/ai-elements/conversation.tsx"
+          "target": "apps/web/components/ai-elements/conversation.tsx"
         },
         {
           "path": "registry/channel/web/components/ai-elements/message.tsx",
           "type": "registry:file",
-          "target": "components/ai-elements/message.tsx"
+          "target": "apps/web/components/ai-elements/message.tsx"
         },
         {
           "path": "registry/channel/web/components/ai-elements/prompt-input.tsx",
           "type": "registry:file",
-          "target": "components/ai-elements/prompt-input.tsx"
+          "target": "apps/web/components/ai-elements/prompt-input.tsx"
         },
         {
           "path": "registry/channel/web/components/ai-elements/question.tsx",
           "type": "registry:file",
-          "target": "components/ai-elements/question.tsx"
+          "target": "apps/web/components/ai-elements/question.tsx"
         },
         {
           "path": "registry/channel/web/components/ai-elements/reasoning.tsx",
           "type": "registry:file",
-          "target": "components/ai-elements/reasoning.tsx"
+          "target": "apps/web/components/ai-elements/reasoning.tsx"
         },
         {
           "path": "registry/channel/web/components/ai-elements/shimmer.tsx",
           "type": "registry:file",
-          "target": "components/ai-elements/shimmer.tsx"
+          "target": "apps/web/components/ai-elements/shimmer.tsx"
         },
         {
           "path": "registry/channel/web/components/ai-elements/tool.tsx",
           "type": "registry:file",
-          "target": "components/ai-elements/tool.tsx"
+          "target": "apps/web/components/ai-elements/tool.tsx"
         },
         {
           "path": "registry/channel/web/components/ui/badge.tsx",
           "type": "registry:file",
-          "target": "components/ui/badge.tsx"
+          "target": "apps/web/components/ui/badge.tsx"
         },
         {
           "path": "registry/channel/web/components/ui/button-group.tsx",
           "type": "registry:file",
-          "target": "components/ui/button-group.tsx"
+          "target": "apps/web/components/ui/button-group.tsx"
         },
         {
           "path": "registry/channel/web/components/ui/button.tsx",
           "type": "registry:file",
-          "target": "components/ui/button.tsx"
+          "target": "apps/web/components/ui/button.tsx"
         },
         {
           "path": "registry/channel/web/components/ui/collapsible.tsx",
           "type": "registry:file",
-          "target": "components/ui/collapsible.tsx"
+          "target": "apps/web/components/ui/collapsible.tsx"
         },
         {
           "path": "registry/channel/web/components/ui/command.tsx",
           "type": "registry:file",
-          "target": "components/ui/command.tsx"
+          "target": "apps/web/components/ui/command.tsx"
         },
         {
           "path": "registry/channel/web/components/ui/dialog.tsx",
           "type": "registry:file",
-          "target": "components/ui/dialog.tsx"
+          "target": "apps/web/components/ui/dialog.tsx"
         },
         {
           "path": "registry/channel/web/components/ui/dropdown-menu.tsx",
           "type": "registry:file",
-          "target": "components/ui/dropdown-menu.tsx"
+          "target": "apps/web/components/ui/dropdown-menu.tsx"
         },
         {
           "path": "registry/channel/web/components/ui/hover-card.tsx",
           "type": "registry:file",
-          "target": "components/ui/hover-card.tsx"
+          "target": "apps/web/components/ui/hover-card.tsx"
         },
         {
           "path": "registry/channel/web/components/ui/input-group.tsx",
           "type": "registry:file",
-          "target": "components/ui/input-group.tsx"
+          "target": "apps/web/components/ui/input-group.tsx"
         },
         {
           "path": "registry/channel/web/components/ui/input.tsx",
           "type": "registry:file",
-          "target": "components/ui/input.tsx"
+          "target": "apps/web/components/ui/input.tsx"
         },
         {
           "path": "registry/channel/web/components/ui/select.tsx",
           "type": "registry:file",
-          "target": "components/ui/select.tsx"
+          "target": "apps/web/components/ui/select.tsx"
         },
         {
           "path": "registry/channel/web/components/ui/separator.tsx",
           "type": "registry:file",
-          "target": "components/ui/separator.tsx"
+          "target": "apps/web/components/ui/separator.tsx"
         },
         {
           "path": "registry/channel/web/components/ui/spinner.tsx",
           "type": "registry:file",
-          "target": "components/ui/spinner.tsx"
+          "target": "apps/web/components/ui/spinner.tsx"
         },
         {
           "path": "registry/channel/web/components/ui/textarea.tsx",
           "type": "registry:file",
-          "target": "components/ui/textarea.tsx"
+          "target": "apps/web/components/ui/textarea.tsx"
         },
         {
           "path": "registry/channel/web/components/ui/tooltip.tsx",
           "type": "registry:file",
-          "target": "components/ui/tooltip.tsx"
+          "target": "apps/web/components/ui/tooltip.tsx"
         },
         {
           "path": "registry/channel/web/css.d.ts",
           "type": "registry:file",
-          "target": "css.d.ts"
+          "target": "apps/web/css.d.ts"
         },
         {
           "path": "registry/channel/web/lib/utils.ts",
           "type": "registry:file",
-          "target": "lib/utils.ts"
+          "target": "apps/web/lib/utils.ts"
         },
         {
           "path": "registry/channel/web/next-env.d.ts",
           "type": "registry:file",
-          "target": "next-env.d.ts"
+          "target": "apps/web/next-env.d.ts"
         },
         {
           "path": "registry/channel/web/next.config.ts",
           "type": "registry:file",
-          "target": "next.config.ts"
+          "target": "apps/web/next.config.ts"
         },
         {
           "path": "registry/channel/web/postcss.config.mjs",
           "type": "registry:file",
-          "target": "postcss.config.mjs"
+          "target": "apps/web/postcss.config.mjs"
         }
       ]
     },

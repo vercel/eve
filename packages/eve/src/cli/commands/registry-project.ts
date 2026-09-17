@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import {
@@ -85,22 +85,24 @@ function parseRegistryMapping(argument: string): { namespace: string; url: strin
   return { namespace, url };
 }
 
-/** Resolves the one package directory the Web Chat registry item installs into. */
+/** Resolves and prepares the root package that owns Web Chat. */
 export async function prepareWebChatProjectRoot(appRoot: string): Promise<string> {
-  const context = await resolveEveProjectContext(appRoot);
-  const webRoot = join(context.environmentRoot, "apps", "web");
-  const packageJsonPath = join(webRoot, "package.json");
-  try {
-    await readFile(packageJsonPath, "utf8");
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-    await mkdir(webRoot, { recursive: true });
-    await writeFile(
-      packageJsonPath,
-      `${JSON.stringify({ name: "web", private: true }, null, 2)}\n`,
-    );
-  }
-  return webRoot;
+  const root = (await resolveEveProjectContext(appRoot)).environmentRoot;
+  const packageJsonPath = join(root, "package.json");
+  const source = await readFile(packageJsonPath, "utf8");
+  const document = JSON.parse(source) as {
+    scripts?: Record<string, string>;
+    [key: string]: unknown;
+  };
+  const scripts = { ...document.scripts };
+  scripts["dev:web"] ??= "next dev apps/web";
+  scripts["build:web"] ??= "next build apps/web";
+  await writeFile(
+    packageJsonPath,
+    `${JSON.stringify({ ...document, scripts }, null, 2)}\n`,
+    "utf8",
+  );
+  return root;
 }
 
 /** Reads registry namespace mappings from package.json. */
@@ -186,7 +188,7 @@ export function addWebRegistryTsconfig(source: string, path: string): string {
 
 /** Prepares the TypeScript host configuration shadcn registry items expect. */
 export async function prepareWebRegistryProject(appRoot: string): Promise<void> {
-  const path = join(appRoot, "tsconfig.json");
+  const path = join(appRoot, "apps", "web", "tsconfig.json");
   let source: string;
   try {
     source = await readFile(path, "utf8");
