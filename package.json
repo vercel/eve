@@ -23,7 +23,7 @@
     "release": "pnpm build && node ./scripts/assert-changeset-publish-packages.mjs && changeset publish",
     "test": "pnpm test:unit && pnpm test:integration",
     "test:e2e": "turbo run test:e2e --concurrency=1",
-    "test:integration": "turbo run test:integration",
+    "test:integration": "turbo run test:integration --filter=eve && turbo run test:integration --filter=\"!eve\"",
     "test:scenario": "turbo run test:scenario",
     "test:tui": "pnpm --filter eve run test:tui",
     "test:unit": "turbo run test:unit",
@@ -46,5 +46,5 @@
   "engines": {
     "node": ">=24"
   },
-  "packageManager": "pnpm@12.4.2"
+  "packageManager": "pnpm@11.25.0"
 }
