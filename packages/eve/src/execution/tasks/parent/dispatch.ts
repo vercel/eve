@@ -6,7 +6,7 @@ import {
   lookupTaskEntries,
   readTaskView,
 } from "#execution/tasks/parent/control-shared.js";
-import type { BackgroundTask } from "#execution/tasks/parent/delegate.js";
+import type { TaskWorkflowInvocation } from "#harness/workflow-invocations.js";
 import { sendTaskCommand } from "#execution/tasks/parent/run-parent.js";
 import { wakeTaskParentStep } from "#execution/tasks/child/steps.js";
 import { sessionCommandHookToken } from "#execution/session-inbox/address.js";
@@ -34,7 +34,7 @@ export async function executeTaskControlAction(input: {
 }): Promise<{
   readonly result: RuntimeActionResult;
   readonly session: RuntimeSession;
-  readonly pendingTask?: BackgroundTask;
+  readonly pendingTask?: TaskWorkflowInvocation;
 }> {
   const { action, session } = input;
   const taskIds = readTaskIds(action.input);

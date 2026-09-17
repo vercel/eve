@@ -3,6 +3,7 @@
  * The parent commits its session index before releasing the workflow body.
  */
 import type { HarnessSession } from "#harness/types.js";
+import type { TaskWorkflowInvocation } from "#harness/workflow-invocations.js";
 import {
   readLatestTaskView,
   sendTaskCommand,
@@ -19,9 +20,6 @@ import {
   type SessionAuth,
 } from "#context/keys.js";
 
-/** A prepared background task: identity plus its started durable run. */
-export type BackgroundTask = import("#harness/workflow-invocations.js").TaskWorkflowInvocation;
-
 export function createTaskAgentDispatchContext(
   ctx: ContextReader,
   auth: SessionAuth,
@@ -33,7 +31,7 @@ export function createTaskAgentDispatchContext(
   };
 }
 
-export type BackgroundTaskDraft = Omit<BackgroundTask, "address"> & {
+export type BackgroundTaskDraft = Omit<TaskWorkflowInvocation, "address"> & {
   readonly address: { readonly hookToken: string };
 };
 
@@ -94,7 +92,7 @@ export async function acknowledgeDelegatedTasksStep(input: {
 /** Silently terminates a task whose child dispatch failed before parent indexing. */
 export async function rejectDelegatedDispatch(input: {
   readonly error: JsonValue;
-  readonly task: BackgroundTask;
+  readonly task: TaskWorkflowInvocation;
 }): Promise<void> {
   await sendTaskCommand({
     command: { data: input.error, kind: "reject-dispatch" },

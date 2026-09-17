@@ -7,7 +7,7 @@ import {
 } from "#execution/coordination-dispatch-shared.js";
 import { createDurableSessionState } from "#execution/durable-session-store.js";
 import { executeTaskControlAction } from "#execution/tasks/parent/dispatch.js";
-import type { BackgroundTask } from "#execution/tasks/parent/delegate.js";
+import type { TaskWorkflowInvocation } from "#harness/workflow-invocations.js";
 import { cancelBackgroundAgentTask } from "#execution/tools/subagent/task-cancel.js";
 import { startWorkflowTask } from "#execution/tools/workflow/start.js";
 import type { RuntimeActionResult } from "#shared/action-types.js";
@@ -36,7 +36,7 @@ export async function dispatchCoordinationStep(
   const { batch, session } = prepared;
   let nextSession = session;
   const results: RuntimeActionResult[] = [];
-  const pendingTasks: BackgroundTask[] = [];
+  const pendingTasks: TaskWorkflowInvocation[] = [];
 
   for (const entry of prepared.plan) {
     if (entry.kind === "workflow-task") {
