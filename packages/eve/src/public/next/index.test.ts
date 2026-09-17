@@ -342,6 +342,24 @@ describe("withEve", () => {
     });
   });
 
+  it("starts a managed local production agent when Next loads production server config", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.mocked(resolveEveDestinationPrefix).mockResolvedValueOnce("http://127.0.0.1:4274");
+
+    await withEve<TestConfig>({})("phase-production-server", {
+      defaultConfig: {},
+    });
+
+    expect(resolveEveDestinationPrefix).toHaveBeenCalledWith({
+      appRoot: process.cwd(),
+      devServerTimeoutMs: undefined,
+      logLabel: undefined,
+      phase: "phase-production-server",
+      productionDestinationPrefix: "http://127.0.0.1:4274",
+      productionServerOrigin: "http://127.0.0.1:4274",
+    });
+  });
+
   it("adds named agent rewrites with derived and per-agent service prefixes", async () => {
     vi.stubEnv("NODE_ENV", "production");
     vi.stubEnv("EVE_NEXT_PRODUCTION_ORIGIN", "https://agent.example.com");
