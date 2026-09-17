@@ -819,7 +819,9 @@ describe("createVercelSandbox", () => {
       .mockResolvedValueOnce(templateSandbox)
       .mockResolvedValueOnce(sessionSandbox);
     const resolveSessionCreateOptions = vi.fn(({ session }) => ({
-      mounts: { "/workspace/repos": { drive: `e0-${session.id}` } },
+      mounts: {
+        "/workspace/repos": { drive: `e0-${session.id}`, mode: "read-write" as const },
+      },
     }));
     const backend = createTestVercelSandbox({
       loadSandboxModule: async () =>
@@ -844,7 +846,7 @@ describe("createVercelSandbox", () => {
     });
     expect(create.mock.calls[0]?.[0]).not.toHaveProperty("mounts");
     expect(create.mock.calls[1]?.[0]).toMatchObject({
-      mounts: { "/workspace/repos": { drive: "e0-parent-session" } },
+      mounts: { "/workspace/repos": { drive: "e0-parent-session", mode: "read-write" } },
     });
   });
 

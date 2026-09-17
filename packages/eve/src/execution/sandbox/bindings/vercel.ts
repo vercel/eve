@@ -85,8 +85,7 @@ export function createVercelSandbox(
   input: CreateVercelSandboxInput = {},
 ): SandboxBackend<VercelSandboxBootstrapUseOptions, VercelSandboxSessionUseOptions> {
   const loadSandboxModule =
-    input.loadSandboxModule ??
-    (async () => await import("#compiled/@vercel/sandbox-drives/index.js"));
+    input.loadSandboxModule ?? (async () => await import("#compiled/@vercel/sandbox/index.js"));
   const loadDeleteSandboxModule =
     input.loadDeleteSandboxModule ??
     (async () => await import("#compiled/@vercel/sandbox/index.js"));

@@ -1,4 +1,4 @@
-import type * as Vercel from "#compiled/@vercel/sandbox-drives/index.js";
+import type * as Vercel from "#compiled/@vercel/sandbox/index.js";
 
 type VercelCreateOptions = NonNullable<Parameters<typeof Vercel.Sandbox.create>[0]>;
 
