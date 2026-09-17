@@ -4533,7 +4533,8 @@ export class TerminalRenderer implements AgentTUIRenderer {
     }
     if (this.#logLevelHintActive) input.logLevel = this.#logs;
     const agentModel = this.#agentHeader?.info?.agent.model;
-    if (agentModel?.id !== undefined) input.model = agentModel.id;
+    if (agentModel?.routing.kind === "dynamic") input.model = "dynamic model";
+    else if (agentModel?.id !== undefined) input.model = agentModel.id;
     // "provider-default" is the absent-setting sentinel, not a level worth showing.
     if (agentModel?.reasoning !== undefined && agentModel.reasoning !== "provider-default") {
       input.reasoning = agentModel.reasoning;

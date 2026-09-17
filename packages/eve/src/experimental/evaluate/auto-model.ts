@@ -170,7 +170,8 @@ export function autoModel<const T extends Readonly<Record<string, AutoModelOptio
 
         const result = await evaluate({
           model:
-            typeof evaluationModel === "string"
+            typeof evaluationModel === "string" &&
+            Reflect.get(globalThis, "AI_SDK_DEFAULT_PROVIDER") == null
               ? (localGatewayEvaluationModel(evaluationModel) ?? evaluationModel)
               : evaluationModel,
           state: routingState(ctx),

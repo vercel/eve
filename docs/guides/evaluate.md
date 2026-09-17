@@ -35,7 +35,9 @@ export default defineAgent({
 Configure Gateway authentication as you would for any other AI SDK model. eve
 does not add a TypeSafe credential or transport layer. During `eve dev`, a
 Gateway evaluator uses the same connection selected through `/login` as Gateway
-language models.
+language models. A configured AI SDK default provider still owns string model
+resolution during development. The TUI footer displays `dynamic model` when the
+agent uses `autoModel`.
 
 ## Use a provider directly
 

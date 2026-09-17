@@ -5350,6 +5350,47 @@ describe("TerminalRenderer status line", () => {
     renderer.shutdown();
   });
 
+  it("shows dynamic model below the prompt after replacing a static model", async () => {
+    const { screen, input, renderer } = makeRenderer();
+    const info = agentInfoWithModel("openai/gpt-5.6-sol");
+    const header = { name: "Weather Agent", serverUrl: "http://localhost:3000", info };
+    renderer.renderAgentHeader(header);
+    const prompt = renderer.readPrompt();
+    renderer.renderAgentHeader({
+      ...header,
+      info: {
+        ...info,
+        agent: {
+          ...info.agent,
+          model: {
+            routing: {
+              kind: "dynamic",
+              resolver: {
+                eventNames: ["step.started"],
+                slug: "model",
+                logicalPath: "agent.ts",
+                owner: { kind: "application" },
+                sourceId: "agent-model",
+                sourceKind: "module",
+              },
+            },
+          },
+        },
+      },
+    });
+    const lines = screen.snapshot().split("\n");
+    const promptRow = lines.findIndex((line) => line.includes("❯"));
+    expect(promptRow).toBeGreaterThan(-1);
+    const footer = lines.slice(promptRow + 1).join("\n");
+    expect(footer).toContain("dynamic model");
+    expect(footer).not.toContain("openai/gpt-5.6-sol");
+    expect(footer).not.toContain("⚠ ai-gateway");
+    input.type("done");
+    input.enter();
+    await prompt;
+    renderer.shutdown();
+  });
+
   it("suppresses the status line while a setup flow panel is open", () => {
     const { screen, renderer } = makeRenderer();
     renderer.renderNotice("anchor");
