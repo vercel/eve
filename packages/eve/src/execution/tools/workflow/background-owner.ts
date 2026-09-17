@@ -71,7 +71,7 @@ export async function runBackgroundWorkflowTool(
       }
       if (message.kind === "outcome") {
         invocationSettled = true;
-        const transitioned = await transitionTask(message);
+        const transitioned = await commitTaskTransition(message);
         if (
           (transitioned || view.status === "cancelled") &&
           dispatchAcknowledged &&
@@ -90,18 +90,16 @@ export async function runBackgroundWorkflowTool(
       if (request.requestCoordinates === undefined) {
         answerHooks.set(request.replyTo, { runId: request.from.runId });
       }
-      if (
-        await transitionTask({
-          kind: "require-input",
-          inputRequests: workflowToolRunInputRequests(request),
-        })
-      ) {
-        await wakeWorkflowTaskInputRequestParentStep({
-          request,
-          taskId: view.taskId,
-          token: input.parentContinuationToken,
-        });
-      }
+      const accepted = await commitTaskTransition({
+        kind: "require-input",
+        inputRequests: workflowToolRunInputRequests(request),
+      });
+      if (!accepted) continue;
+      await wakeWorkflowTaskInputRequestParentStep({
+        request,
+        taskId: view.taskId,
+        token: input.parentContinuationToken,
+      });
       continue;
     }
 
@@ -174,7 +172,7 @@ export async function runBackgroundWorkflowTool(
     }
 
     const previous = view;
-    const accepted = await transitionTask(command);
+    const accepted = await commitTaskTransition(command);
     if (!accepted) return;
     if (command.kind === "cancel") {
       bodyController.abort(new Error(`Task ${view.taskId} was cancelled.`));
@@ -191,7 +189,7 @@ export async function runBackgroundWorkflowTool(
     }
   }
 
-  async function transitionTask(
+  async function commitTaskTransition(
     command: TaskCommand | Extract<WorkflowToolRunMessage, { kind: "outcome" }>,
   ): Promise<boolean> {
     const result = applyTaskTransition(view, command);
@@ -242,7 +240,7 @@ export async function runBackgroundWorkflowTool(
       const requestId = "attemptId" in event.data ? event.data.attemptId : undefined;
       if (requestId !== undefined && event.type === "authorization.required") {
         const existingRequests = view.status === "input_required" ? view.inputRequests : [];
-        await transitionTask({
+        await commitTaskTransition({
           kind: "require-input",
           inputRequests: [
             ...existingRequests,
@@ -250,7 +248,7 @@ export async function runBackgroundWorkflowTool(
           ],
         });
       } else if (requestId !== undefined) {
-        await transitionTask({ kind: "answered", requestIds: [requestId] });
+        await commitTaskTransition({ kind: "answered", requestIds: [requestId] });
       }
 
       await wakeTaskAuthorizationParentStep({
