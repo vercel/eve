@@ -830,9 +830,12 @@ describe("turn cancellation integration", () => {
         expect(firstTurn.at(-1)?.type).toBe("session.waiting");
         expect(filterEventsByType(firstTurn, "turn.completed")).toHaveLength(1);
 
-        // The stable inbox accepts a late cancel and the parked owner consumes it as a no-op.
+        // Hook aliases can be observed out of order. Target the completed turn so
+        // a delayed cancellation cannot apply to the follow-up, as in the client.
+        const completedTurnId = filterEventsByType(firstTurn, "turn.started")[0]!.data.turnId;
         await resumeHook(sessionInboxHookToken(sessionCommandHookToken(run.runId)), {
           kind: "cancel",
+          turnId: completedTurnId,
         });
 
         await waitForHook(
