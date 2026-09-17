@@ -263,6 +263,9 @@ export function mockSandbox(input: MockSandboxInput = {}): MockSandbox {
     async stop(): Promise<void> {
       await input.stop?.();
     },
+    async stopExisting(): Promise<void> {
+      await input.stop?.();
+    },
   };
 
   return {

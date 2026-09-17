@@ -6,6 +6,8 @@ export type {
   SandboxBackendTags,
   SandboxBackendRuntimeContext,
   SandboxBackendCreateInput,
+  SandboxBackendStopExistingInput,
+  SandboxBackendStopExistingResult,
   SandboxBackendPrewarmInput,
   SandboxBackendPrewarmResult,
   SandboxBackend,

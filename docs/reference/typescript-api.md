@@ -103,6 +103,7 @@ import template from "../../prompts/template.txt?raw";
 | --------------------------- | ---------------------------------------------------------------------------- |
 | `ctx.session`               | Current session, turn, auth, and optional parent lineage (read-only)         |
 | `ctx.getSandbox()`          | Live sandbox handle; `stop()` releases compute but preserves durable state   |
+| `ctx.stopSandbox()`         | Release owned compute without opening or resuming a sandbox                  |
 | `ctx.getSkill(identifier)`  | Handle for a named skill visible to the current agent                        |
 | `ctx.getToken(provider)`    | Resolve a bearer token for an inline auth provider such as `connect("...")`  |
 | `ctx.requireAuth(provider)` | Evict and re-authorize an inline provider, commonly after a downstream `401` |

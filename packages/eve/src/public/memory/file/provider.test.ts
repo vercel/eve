@@ -404,6 +404,7 @@ function toolsContext(): MemoryToolsContext {
 function operationContext() {
   return {
     abortSignal: signal,
+    stopSandbox: async () => undefined,
     getSandbox: async () => {
       throw new Error("not available");
     },

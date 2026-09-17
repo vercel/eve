@@ -48,6 +48,12 @@ export function buildCallbackContext(): SessionContext {
       });
     },
 
+    stopSandbox(): Promise<void> {
+      const access = ctx.get(SandboxKey);
+      if (access === undefined) return Promise.resolve();
+      return access.stopExisting?.() ?? Promise.resolve();
+    },
+
     getSkill(identifier: string): SkillHandle {
       const access = ctx.get(SandboxKey);
       if (access === undefined) {
