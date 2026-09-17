@@ -1,3 +1,4 @@
+import { isAgentReasoningDefinition } from "#internal/runtime-model.js";
 import type {
   AgentDefinition,
   AgentBuildDefinition,
@@ -131,20 +132,8 @@ function normalizeAgentReasoningDefinition(
   value: unknown,
   message: string,
 ): NonNullable<NormalizedAgentDefinition["reasoning"]> {
-  const reasoning = expectString(value, message);
-
-  switch (reasoning) {
-    case "provider-default":
-    case "none":
-    case "minimal":
-    case "low":
-    case "medium":
-    case "high":
-    case "xhigh":
-      return reasoning;
-    default:
-      throw new Error(message);
-  }
+  if (!isAgentReasoningDefinition(value)) throw new Error(message);
+  return value;
 }
 
 function normalizeAgentModelDefinition(

@@ -214,6 +214,21 @@ export function normalizeUserContent(
   return parts.length === content.length ? content : parts;
 }
 
+export function createTurnInputMessages(input: StepInput | undefined): UserModelMessage[] {
+  const messages = [...(readClientContext(input) ?? []), ...(input?.context ?? [])].map((content) =>
+    createFrameworkUserMessage("context.instruction", content),
+  );
+  const content = normalizeUserContent(input?.message);
+  if (content === undefined) return messages;
+  const kind = frameworkMessageKindForStepInput(input);
+  return [
+    ...messages,
+    kind === undefined
+      ? createUserMessage("user", content)
+      : createFrameworkUserMessage(kind, content),
+  ];
+}
+
 /** Removes blank text blocks that some providers reject from model-bound history. */
 export function normalizeModelMessages(messages: readonly ModelMessage[]): ModelMessage[] {
   return messages.flatMap((message) => {

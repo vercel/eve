@@ -5,6 +5,7 @@ import {
   prepareDynamicInstructionPreamble,
 } from "#context/dynamic-instruction-lifecycle.js";
 import { refreshDynamicSessionSubagentsForRuntimeRevision } from "#context/dynamic-subagent-lifecycle.js";
+import { drainMemoryCommit, prepareMemoryPreamble } from "#context/memory-lifecycle.js";
 import {
   rebindMissingCompiledDynamicToolCallbacks,
   refreshDynamicSessionToolsForRuntimeRevision,
@@ -36,7 +37,13 @@ import { matchAuthorizationCallbacks } from "#execution/authorization-callback-m
 import { isTurnCancellation, throwIfTurnAborted } from "#harness/turn-cancellation.js";
 import { setChannelContext } from "#execution/channel-context.js";
 import { activeTurnId } from "#harness/active-turn-id.js";
-import { coalesceTurnInputs, type UserModelMessage } from "#harness/messages.js";
+import {
+  coalesceTurnInputs,
+  createTurnInputMessages,
+  validateHarnessModelMessages,
+  type UserModelMessage,
+} from "#harness/messages.js";
+import { consumeDeferredStepInput } from "#harness/pending-input-batches.js";
 import type { HarnessSession, StepInput, StepResult } from "#harness/types.js";
 import type { DurableStepResult, TurnStepInput } from "#execution/session/turn-step-types.js";
 import { resolveSessionStepResult } from "#execution/session/turn-step-result.js";
@@ -451,7 +458,16 @@ async function runSessionStep(input: TurnStepInput): Promise<DurableStepResult> 
             if (firstCall && completedAuths) {
               let emissionState = getHarnessEmissionState(schemaSession.state);
               if (isHarnessBetweenTurns(schemaSession)) {
+                const turnInput = createTurnInputMessages(
+                  consumeDeferredStepInput({ session: schemaSession, input: stepInput }).input,
+                );
                 prepareDynamicInstructionPreamble(ctx, history.messages(schemaSession));
+                prepareMemoryPreamble(ctx, {
+                  history: schemaSession.history,
+                  input: turnInput,
+                  projector: history.projector,
+                  state: schemaSession.state,
+                });
                 let instructionMessages: readonly UserModelMessage[] = [];
                 const traceContext = await prepareWorkflowPreambleTrace({
                   emissionState,
@@ -462,14 +478,23 @@ async function runSessionStep(input: TurnStepInput): Promise<DurableStepResult> 
                     handleEvent,
                     {},
                     emissionState,
+                    history.projector({
+                      messages: [...schemaSession.history, ...turnInput],
+                      state: schemaSession.state,
+                    }),
                     runtimeIdentity,
                     traceContext,
                   );
                 } finally {
                   instructionMessages = drainDynamicInstructionUserMessages(ctx);
+                  const memoryCommit = drainMemoryCommit(ctx);
                   schemaSession = {
                     ...schemaSession,
-                    history: [...schemaSession.history, ...instructionMessages],
+                    history: validateHarnessModelMessages([
+                      ...(memoryCommit?.history ?? schemaSession.history),
+                      ...instructionMessages,
+                    ]),
+                    state: memoryCommit?.state ?? schemaSession.state,
                   };
                 }
                 schemaSession = setHarnessEmissionState(schemaSession, emissionState);

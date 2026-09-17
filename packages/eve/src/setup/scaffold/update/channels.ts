@@ -426,6 +426,8 @@ async function findCompetingNextConfigFiles(projectRoot: string): Promise<string
 
 export interface EnsureChannelOptions {
   projectRoot: string;
+  /** Root for environment files shared by workspace agents. */
+  environmentRoot?: string;
   kind: ChannelKind;
   /** Manager that owns generated project configuration. Defaults to pnpm. */
   packageManager?: PackageManagerKind;
@@ -612,7 +614,7 @@ async function ensureSlackChannel(
     template = buildSlackConnectTemplate(connectorUid);
   } else {
     template = SLACK_ENV_TEMPLATE;
-    const envExamplePath = join(options.projectRoot, ".env.example");
+    const envExamplePath = join(options.environmentRoot ?? options.projectRoot, ".env.example");
     const envExampleExisted = await pathExists(envExamplePath);
     envExampleRollback = {
       path: envExamplePath,

@@ -62,6 +62,9 @@ to compaction calls.
 
 ### Choose the model dynamically
 
+To select a model from the incoming prompt with an AI SDK evaluation model, use
+[`autoModel` from `eve/experimental/evaluate`](./guides/evaluate).
+
 `model` also accepts `defineDynamic({ events })`. Each matching handler must
 return the concrete model for its scope; a dynamic model has no compiled
 default.
@@ -99,7 +102,7 @@ fails the turn.
   model without valid credentials fails at request time.
 - **Serialization.** Session/turn selections must be model id strings; return
   live `LanguageModel` objects only from `step.started`.
-- **Selection object.** `{ model, modelContextWindowTokens?, modelOptions? }`.
+- **Selection object.** `{ model, reasoning?, modelContextWindowTokens?, modelOptions? }`.
   When `modelContextWindowTokens` is omitted, eve resolves it from the AI
   Gateway catalog and caches successful metadata in durable session state for
   24 hours. Set it explicitly for an unlisted or custom model. Dynamic agents
@@ -126,6 +129,10 @@ Supported values are `"provider-default"`, `"none"`, `"minimal"`, `"low"`,
 `"medium"`, `"high"`, and `"xhigh"`. The selected model and provider determine
 which levels are available and how they map to provider-native settings. Use
 `modelOptions.providerOptions` when you need provider-specific reasoning controls.
+A dynamic model selection can return `reasoning` alongside `model` to override
+the agent-level setting for that selection. Omitting it inherits the agent setting;
+`"provider-default"` explicitly uses the provider's default.
+
 Run `eve set --reasoning high` to update this field from the command line.
 
 ## Compaction

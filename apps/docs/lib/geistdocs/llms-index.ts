@@ -12,7 +12,8 @@ Documentation links below point directly to Markdown. Remove the \`.md\` suffix 
 
 ## Introduction
 
-- [Getting Started](${EVE_ORIGIN}/docs/getting-started.md): Create a project, configure a model, understand its layout, and run it locally.
+- [Getting Started](${EVE_ORIGIN}/docs/getting-started.md): Create a project, configure model credentials, and run your first agent.
+- [Project Structure](${EVE_ORIGIN}/docs/concepts/project-structure.md): Choose a layout for agents and application code, add specialist subagents, and grow into an agent workspace.
 
 ## Core Concepts
 
@@ -79,6 +80,7 @@ Documentation links below point directly to Markdown. Remove the \`.md\` suffix 
 
 ## API Reference and Discovery
 
+- [Agent Files](${EVE_ORIGIN}/docs/reference/agent-files.md): Look up filesystem slots, path-derived names, and discovery rules.
 - [TypeScript API Reference](${EVE_ORIGIN}/docs/reference/typescript-api.md): Find public \`define*\` helpers, runtime context, and import paths.
 - [CLI Reference](${EVE_ORIGIN}/docs/reference/cli.md): Find every eve command and option.
 - [Responsible Use](${EVE_ORIGIN}/docs/responsible-use.md): Review deployer responsibilities and safeguards.

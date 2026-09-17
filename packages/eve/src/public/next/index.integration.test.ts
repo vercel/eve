@@ -310,29 +310,29 @@ describe("withEve Vercel config", () => {
       routes: expect.arrayContaining([
         expect.objectContaining({
           destination: { service: "eve-research", type: "service" },
-          src: "^/eve/agents/research/eve/v1/(.*)$",
+          src: "^/eve/research/v1/(.*)$",
         }),
         expect.objectContaining({
           destination: { service: "eve-support", type: "service" },
-          src: "^/eve/agents/support/eve/v1/(.*)$",
+          src: "^/eve/support/v1/(.*)$",
         }),
         expect.objectContaining({
           destination: { service: "eve-research", type: "service" },
-          src: "^/eve/agents/research/?$",
+          src: "^/eve/research/?$",
         }),
         expect.objectContaining({
           destination: { service: "eve-support", type: "service" },
-          src: "^/eve/agents/support/?$",
+          src: "^/eve/support/?$",
         }),
       ]),
       services: expect.objectContaining({
         "eve-research": expect.objectContaining({
           buildCommand: expect.stringContaining("EVE_INTERNAL_AGENT_WORKSPACE_MEMBER=1"),
-          routePrefix: "/eve/agents/research",
+          routePrefix: "/eve/research",
         }),
         "eve-support": expect.objectContaining({
           buildCommand: expect.stringContaining("EVE_INTERNAL_AGENT_WORKSPACE_MEMBER=1"),
-          routePrefix: "/eve/agents/support",
+          routePrefix: "/eve/support",
         }),
       }),
     });
@@ -400,25 +400,25 @@ describe("withEve Vercel config", () => {
             service: "eve-billing",
             type: "service",
           },
-          src: "^/eve/agents/billing/eve/v1/(.*)$",
+          src: "^/eve/billing/v1/(.*)$",
         },
         {
           destination: {
             service: "eve-support",
             type: "service",
           },
-          src: "^/eve/agents/support/eve/v1/(.*)$",
+          src: "^/eve/support/v1/(.*)$",
         },
       ],
       services: {
         "eve-billing": {
           buildCommand:
-            "cd '../../../agents/billing' && export EVE_INTERNAL_BUILD_OUTPUT_DIRECTORY='../../.eve/vercel-services/eve-billing/.vercel/output' && export EVE_INTERNAL_HOST_BUILD_OUTPUT_DIRECTORY='../../.vercel/output' && export EVE_PUBLIC_ROUTE_PREFIX='/eve/agents/billing' && pnpm build:billing-agent",
+            "cd '../../../agents/billing' && export EVE_INTERNAL_BUILD_OUTPUT_DIRECTORY='../../.eve/vercel-services/eve-billing/.vercel/output' && export EVE_INTERNAL_HOST_BUILD_OUTPUT_DIRECTORY='../../.vercel/output' && export EVE_PUBLIC_ROUTE_PREFIX='/eve/billing' && pnpm build:billing-agent",
           framework: "eve",
           outputDirectory: ".vercel/output",
           routes: [
             {
-              src: "^/eve/agents/billing/eve/v1/(.*)$",
+              src: "^/eve/billing/v1/(.*)$",
               transforms: [
                 {
                   args: "/eve/v1/$1",
@@ -429,16 +429,16 @@ describe("withEve Vercel config", () => {
             },
           ],
           root: ".eve/vercel-services/eve-billing",
-          routePrefix: "/eve/agents/billing",
+          routePrefix: "/eve/billing",
         },
         "eve-support": {
           buildCommand:
-            "cd '../../../agents/support' && export EVE_INTERNAL_BUILD_OUTPUT_DIRECTORY='../../.eve/vercel-services/eve-support/.vercel/output' && export EVE_INTERNAL_HOST_BUILD_OUTPUT_DIRECTORY='../../.vercel/output' && export EVE_PUBLIC_ROUTE_PREFIX='/eve/agents/support' && node 'node_modules/eve/bin/eve.js' build",
+            "cd '../../../agents/support' && export EVE_INTERNAL_BUILD_OUTPUT_DIRECTORY='../../.eve/vercel-services/eve-support/.vercel/output' && export EVE_INTERNAL_HOST_BUILD_OUTPUT_DIRECTORY='../../.vercel/output' && export EVE_PUBLIC_ROUTE_PREFIX='/eve/support' && node 'node_modules/eve/bin/eve.js' build",
           framework: "eve",
           outputDirectory: ".vercel/output",
           routes: [
             {
-              src: "^/eve/agents/support/eve/v1/(.*)$",
+              src: "^/eve/support/v1/(.*)$",
               transforms: [
                 {
                   args: "/eve/v1/$1",
@@ -449,7 +449,7 @@ describe("withEve Vercel config", () => {
             },
           ],
           root: ".eve/vercel-services/eve-support",
-          routePrefix: "/eve/agents/support",
+          routePrefix: "/eve/support",
         },
       },
       version: 3,
@@ -474,7 +474,7 @@ describe("withEve Vercel config", () => {
                 service: "eve-billing",
                 type: "service",
               },
-              src: "^/eve/agents/billing/eve/v1/(.*)$",
+              src: "^/eve/billing/v1/(.*)$",
             },
             { handle: "filesystem" },
           ],
@@ -485,7 +485,7 @@ describe("withEve Vercel config", () => {
               framework: "eve",
               name: "eve-support",
               root: "agents/support",
-              routePrefix: "/eve/agents/support",
+              routePrefix: "/eve/support",
               schema: "experimentalServicesV2",
             },
           ],
@@ -519,26 +519,26 @@ describe("withEve Vercel config", () => {
             service: "eve-billing",
             type: "service",
           },
-          src: "^/eve/agents/billing/eve/v1/(.*)$",
+          src: "^/eve/billing/v1/(.*)$",
         },
         {
           destination: {
             service: "eve-support",
             type: "service",
           },
-          src: "^/eve/agents/support/eve/v1/(.*)$",
+          src: "^/eve/support/v1/(.*)$",
         },
         { handle: "filesystem" },
       ],
       services: {
         "eve-billing": {
           buildCommand:
-            "cd '../../../agents/billing' && export EVE_INTERNAL_BUILD_OUTPUT_DIRECTORY='../../.eve/vercel-services/eve-billing/.vercel/output' && export EVE_INTERNAL_HOST_BUILD_OUTPUT_DIRECTORY='../../.vercel/output' && export EVE_PUBLIC_ROUTE_PREFIX='/eve/agents/billing' && node 'node_modules/eve/bin/eve.js' build",
+            "cd '../../../agents/billing' && export EVE_INTERNAL_BUILD_OUTPUT_DIRECTORY='../../.eve/vercel-services/eve-billing/.vercel/output' && export EVE_INTERNAL_HOST_BUILD_OUTPUT_DIRECTORY='../../.vercel/output' && export EVE_PUBLIC_ROUTE_PREFIX='/eve/billing' && node 'node_modules/eve/bin/eve.js' build",
           framework: "eve",
           outputDirectory: ".vercel/output",
           routes: [
             {
-              src: "^/eve/agents/billing/eve/v1/(.*)$",
+              src: "^/eve/billing/v1/(.*)$",
               transforms: [
                 {
                   args: "/eve/v1/$1",
@@ -549,7 +549,7 @@ describe("withEve Vercel config", () => {
             },
           ],
           root: ".eve/vercel-services/eve-billing",
-          routePrefix: "/eve/agents/billing",
+          routePrefix: "/eve/billing",
         },
         "eve-support": {
           buildCommand: "eve build:support",
@@ -557,7 +557,7 @@ describe("withEve Vercel config", () => {
           framework: "eve",
           routes: [
             {
-              src: "^/eve/agents/support/eve/v1/(.*)$",
+              src: "^/eve/support/v1/(.*)$",
               transforms: [
                 {
                   args: "/eve/v1/$1",
@@ -568,7 +568,7 @@ describe("withEve Vercel config", () => {
             },
           ],
           root: "agents/support",
-          routePrefix: "/eve/agents/support",
+          routePrefix: "/eve/support",
           schema: "experimentalServicesV2",
         },
       },

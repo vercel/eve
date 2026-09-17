@@ -39,7 +39,10 @@ function hasSettledOutcomes(
 
 /** Searches the catalog and installs one selected item with its required setup. */
 export async function runRegistryFlow(input: {
+  /** Project root for registry configuration, Vercel state, and deployment. */
   appRoot: string;
+  /** Selected agent project where registry payloads and setup are applied. */
+  installRoot?: string;
   prompter: Prompter;
   signal?: AbortSignal;
   /** Registry item supplied by `/add <item>`, installed directly. */
@@ -87,6 +90,7 @@ export async function runRegistryFlow(input: {
     const installRegistryItem =
       input.deps?.installRegistryItem ??
       (await import("#cli/commands/registry.js")).installRegistryItem;
+    const installRoot = input.installRoot ?? input.appRoot;
     const detectDeployment =
       input.deps?.detectDeployment ??
       (await import("#setup/project-resolution.js")).detectDeployment;
@@ -99,7 +103,7 @@ export async function runRegistryFlow(input: {
       input.onItemStart?.(item, index, items.length);
       try {
         const install = (signal = input.signal) =>
-          installRegistryItem(input.appRoot, item.address, {
+          installRegistryItem(installRoot, item.address, {
             silent: true,
             prompter: input.prompter,
             signal,

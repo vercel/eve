@@ -137,7 +137,7 @@ This makes caller authority turn-scoped even when the remote child session is pe
 
 Identity forwarding does not make a persistent session private to one caller. Conversation history, tool outputs, and other child-session state still persist. If those values must not be visible across users, give each user a distinct child session or enforce that ownership at the application boundary.
 
-Forwarding is explicit on both sides. The receiver names which forwarders it trusts with `eveChannel({ trustedForwarders })` (see [Auth & route protection](./auth-and-route-protection#accepting-forwarded-identity-from-another-deployment)); a receiver that refuses the forwarder — or has no `trustedForwarders` at all — rejects with a 403 and the dispatch fails.
+Forwarding identity is explicit on both sides. The receiver names which deployments it trusts with `eveChannel({ trustedForwarders })` (see [Auth & route protection](./auth-and-route-protection#accepting-forwarded-identity-from-another-deployment)); refusing the forwarder rejects a forwarded principal with a 403. The same trust decision covers parent session lineage and, with principal forwarding, trace-content constraints.
 
 ## Trace propagation
 
@@ -146,6 +146,10 @@ dispatching turn and carries `gen_ai.conversation.id` so you can find the
 traces for one conversation. Trace context is observability metadata, not an
 authorization grant. See [OpenTelemetry](../observability/otel#trace-topology)
 for the trace topology.
+
+eve carries parent session lineage separately. The receiver accepts it only
+when `trustedForwarders` approves the authenticated caller; otherwise, trace
+correlation continues without it.
 
 ## Preserving trace content
 

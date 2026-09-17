@@ -321,6 +321,7 @@ async function executeSetupCommand(
       case "add": {
         const flow = await flows.runRegistryFlow({
           appRoot,
+          installRoot: input.agentRoot,
           prompter,
           signal,
           initialAddress: input.initialRegistryAddress,

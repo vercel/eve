@@ -6,6 +6,7 @@ import {
   PreparedMemoryCompactionKey,
   PreparedMemoryPreambleKey,
   TurnMemoryLocksKey,
+  type PreparedMemoryPreamble,
 } from "#context/keys.js";
 import { buildCallbackContext } from "#context/build-callback-context.js";
 import { buildResolveContext } from "#context/dynamic-resolve-context.js";
@@ -41,19 +42,8 @@ import {
 const fallbackAbortSignal = new AbortController().signal;
 const log = createLogger("memory");
 
-export function prepareMemoryPreamble(
-  ctx: AlsContext,
-  input: {
-    readonly history: readonly ModelMessage[];
-    readonly input: readonly ModelMessage[];
-    readonly state?: Readonly<Record<string, unknown>>;
-  },
-): void {
-  ctx.setVirtualContext(PreparedMemoryPreambleKey, {
-    history: input.history,
-    input: input.input,
-    state: input.state,
-  });
+export function prepareMemoryPreamble(ctx: AlsContext, input: PreparedMemoryPreamble): void {
+  ctx.setVirtualContext(PreparedMemoryPreambleKey, input);
 }
 
 export async function dispatchMemoryTurnStarted(input: {
@@ -150,10 +140,15 @@ export async function dispatchMemoryTurnStarted(input: {
     history: prepared.history,
     state: prepared.state,
   });
-  const projectedMessages = [
+  const recalledMessages = [
     ...projectMemoryHistory({ locks, messages: committed.history }),
     ...prepared.input,
   ];
+  const projectedMessages =
+    prepared.projector?.({
+      messages: recalledMessages,
+      state: committed.state,
+    }) ?? recalledMessages;
   input.ctx.setVirtualContext(PendingMemoryCommitKey, {
     history: committed.history,
     projectedMessages,

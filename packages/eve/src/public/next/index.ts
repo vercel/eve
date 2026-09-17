@@ -6,6 +6,7 @@ import { assertValidPublicAgentName } from "#internal/agent-name.js";
 import { findEveProjectContext } from "#internal/project-context.js";
 import { quoteVercelShellArgument, toVercelRelativePath } from "#internal/vercel/build-command.js";
 import { EVE_ROUTE_PREFIX } from "#protocol/routes.js";
+import { joinEveRoutePath } from "#shared/eve-route-path.js";
 import { resolveEveBinaryPath } from "#shared/resolve-eve-binary.js";
 import { resolveEveDestinationPrefix } from "./server.js";
 import { ensureEveVercelOutputConfig } from "./vercel-output-config.js";
@@ -19,7 +20,7 @@ export const EVE_NEXT_SERVICE_PREFIX = "/_eve_internal/eve";
 const EVE_NEXT_PRODUCTION_ORIGIN_ENV = "EVE_NEXT_PRODUCTION_ORIGIN";
 const EVE_NEXT_PRODUCTION_PORT_ENV = "EVE_NEXT_PRODUCTION_PORT";
 const DEFAULT_EVE_NEXT_PRODUCTION_PORT = 4274;
-const EVE_NAMED_AGENT_ROUTE_PREFIX = "/eve/agents";
+const EVE_NAMED_AGENT_ROUTE_PREFIX = "/eve";
 
 type ArrayElement<T> = T extends readonly (infer TElement)[] ? TElement : never;
 type NextRewrites = Awaited<ReturnType<NonNullable<NextConfig["rewrites"]>>>;
@@ -115,7 +116,7 @@ export interface WithEveOptions {
    */
   readonly eveRoot?: string;
   /**
-   * Named eve agents to mount under `/eve/agents/<name>/eve/v1/*`.
+   * Named eve agents to mount under `/eve/<name>/v1/*`.
    *
    * Use this when one Next.js app needs to talk to multiple eve agents outside
    * a project-level `agents/` workspace. When unset, withEve discovers that
@@ -196,7 +197,7 @@ function createNamedAgentServicePrefix(basePrefix: string, name: string): string
 }
 
 function createAgentRewriteSource(publicRoutePrefix: string): string {
-  return joinRoutePrefix(publicRoutePrefix, `${EVE_ROUTE_PREFIX}/:path+`);
+  return joinEveRoutePath(publicRoutePrefix, `${EVE_ROUTE_PREFIX}/:path+`);
 }
 
 function normalizeOrigin(origin: string): string {

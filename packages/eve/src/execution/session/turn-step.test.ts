@@ -38,6 +38,7 @@ import { setHarnessEmissionState } from "#harness/emission-state.js";
 import { getPendingAuthorization, setPendingAuthorization } from "#harness/authorization.js";
 import { getProxyInputRequests, upsertProxyInputRequests } from "#harness/proxy-input-requests.js";
 import { appendPendingInputBatch } from "#harness/input-requests.js";
+import { queueDeferredStepInput } from "#harness/pending-input-batches.js";
 import type { HarnessSession, StepFn, StepResult } from "#harness/types.js";
 import { createEmptyHookRegistry, createRuntimeHookRegistry } from "#runtime/hooks/registry.js";
 import {
@@ -56,6 +57,7 @@ import {
 } from "#execution/durable-session-store.js";
 import { buildRuntimeIdentity, createExecutionNodeStep } from "#execution/node-step.js";
 import { defineTool } from "#tools/definition.js";
+import { defineMemory } from "#public/memory/index.js";
 import { stampDurableDynamicCallback } from "#tools/durable-callbacks.js";
 import { dispatchCoordinationStep } from "#execution/coordination-dispatch-step.js";
 import { runProxySubagentEventStep } from "#subagents/event-proxy-step.js";
@@ -3049,7 +3051,14 @@ describe("turnStep", () => {
     ]);
   });
 
-  it("clears pending authorization after a matching callback resumes the turn", async () => {
+  it.each([
+    [false, "none"],
+    [true, "none"],
+    [false, "current"],
+    [true, "current"],
+    [false, "deferred"],
+    [true, "deferred"],
+  ] as const)("auth resume (%s, %s)", async (withMemory, inputKind) => {
     const challenge = {
       attemptId: "attempt-statuspage",
       challenge: {
@@ -3072,11 +3081,39 @@ describe("turnStep", () => {
     const instructionHandler = vi.fn(
       (_event: unknown, _context: { readonly messages: readonly ModelMessage[] }) => null,
     );
+    const toolHandler = vi.fn(
+      (_event: unknown, _context: { readonly messages: readonly ModelMessage[] }) => null,
+    );
+    const recall = vi.fn(async () => ({
+      messages: [{ content: "Recalled context", id: "item" }],
+    }));
+    const memories = withMemory
+      ? [
+          {
+            ...defineMemory({
+              namespace: "test",
+              scope: "alice",
+              provider: { recall: { "turn.started": recall } },
+            }),
+            logicalPath: "memory/profile.ts",
+            slot: "profile",
+            sourceId: "memory/profile.ts",
+            sourceKind: "module",
+            visibility: "scope",
+          },
+        ]
+      : [];
     const session = createStubSession({
       history: [{ content: "visible", kind: "user", role: "user" }, hidden],
       state: setPendingAuthorization({ retained: "yes" }, { challenges: [challenge] }),
     });
-    installSessionStoreMocks([session]);
+    const turnInput = {
+      context: ["Current context"],
+      message: "Alice follows up after signing in.",
+    };
+    installSessionStoreMocks([
+      inputKind === "deferred" ? queueDeferredStepInput(session, turnInput) : session,
+    ]);
     vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue({
       adapterRegistry: {
         adaptersByKind: new Map([[threadContextAdapter.kind, threadContextAdapter]]),
@@ -3085,6 +3122,7 @@ describe("turnStep", () => {
       graph: {
         nodesByNodeId: new Map(),
         root: {
+          agent: { memories, connections: [] },
           sandboxRegistry: { sandbox: null },
           turnAgent: TestTurnAgent,
         },
@@ -3093,6 +3131,16 @@ describe("turnStep", () => {
       hookRegistry: createEmptyHookRegistry(),
       resolvedAgent: {
         config: {},
+        dynamicToolResolvers: [
+          {
+            eventNames: ["turn.started"],
+            events: { "turn.started": toolHandler },
+            logicalPath: "tools/auth.ts",
+            slug: "auth",
+            sourceId: "tools/auth.ts",
+            sourceKind: "module",
+          },
+        ],
         dynamicInstructionsResolvers: [
           {
             eventNames: ["session.started", "turn.started"],
@@ -3126,6 +3174,7 @@ describe("turnStep", () => {
       input: {
         kind: "deliver",
         payloads: [
+          ...(inputKind === "current" ? [turnInput] : []),
           {
             authorizationCallback: {
               attemptId: "attempt-statuspage",
@@ -3141,7 +3190,9 @@ describe("turnStep", () => {
     });
 
     expect(observedPendingAuth).toBeUndefined();
-    expect(observedStepInput).toBeUndefined();
+    expect(observedStepInput).toEqual(
+      inputKind === "current" ? { message: `thread=unset; user=${turnInput.message}` } : undefined,
+    );
     expect(result).toMatchObject({
       action: "park",
       hasPendingAuthorization: false,
@@ -3159,6 +3210,31 @@ describe("turnStep", () => {
       });
     }
     expect(persistedSession?.history).toContain(hidden);
+    const expectedInput =
+      inputKind === "none"
+        ? []
+        : inputKind === "current"
+          ? [{ content: `thread=unset; user=${turnInput.message}`, kind: "user", role: "user" }]
+          : [
+              { content: "Current context", kind: "context.instruction", role: "user" },
+              { content: "Alice follows up after signing in.", kind: "user", role: "user" },
+            ];
+    expect(toolHandler).toHaveBeenCalledOnce();
+    expect(toolHandler.mock.calls[0]?.[1].messages).toEqual([
+      { content: "visible", kind: "user", role: "user" },
+      ...(withMemory ? [{ content: "Recalled context", kind: "memory.load", role: "user" }] : []),
+      ...expectedInput,
+    ]);
+    if (withMemory) {
+      expect(recall).toHaveBeenCalledOnce();
+      expect(recall).toHaveBeenCalledWith(
+        expect.objectContaining({ turn: expect.objectContaining({ input: expectedInput }) }),
+      );
+      expect(
+        persistedSession?.history.some((message) => message.content === "Recalled context"),
+      ).toBe(true);
+      expect(persistedSession?.state?.["eve.memory"]).toBeDefined();
+    }
   });
 });
 

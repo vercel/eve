@@ -117,6 +117,30 @@ describe("ensureChannel", () => {
     ]);
   });
 
+  test("writes a workspace agent's portable Slack environment example at the shared root", async () => {
+    const environmentRoot = await createTempDir();
+    const projectRoot = join(environmentRoot, "agents", "support");
+    await mkdir(join(projectRoot, "agent"), { recursive: true });
+    await writeFile(join(projectRoot, "package.json"), "{}\n", "utf8");
+
+    await ensureChannel({
+      projectRoot,
+      environmentRoot,
+      kind: "slack",
+      slackCredentials: "environment",
+    });
+
+    await expect(readFile(join(projectRoot, "agent/channels/slack.ts"), "utf8")).resolves.toContain(
+      "slackChannel",
+    );
+    await expect(readFile(join(environmentRoot, ".env.example"), "utf8")).resolves.toBe(
+      "\nSLACK_BOT_TOKEN=\nSLACK_SIGNING_SECRET=\n",
+    );
+    await expect(readFile(join(projectRoot, ".env.example"), "utf8")).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+  });
+
   test("rolls back the environment example when portable Slack scaffolding fails", async () => {
     const projectRoot = await createTempDir();
     await mkdir(join(projectRoot, "agent/channels/slack.ts"), { recursive: true });

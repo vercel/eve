@@ -47,7 +47,8 @@ export const createIntegrationRedirects = (source: string, destination: string):
 export const docsRedirects: DocsRedirect[] = [
   ...createDocsRedirects("/introduction", "/getting-started"),
   ...createDocsRedirects("/installation", "/getting-started"),
-  ...createDocsRedirects("/project-structure", "/getting-started"),
+  ...createDocsRedirects("/project-structure", "/concepts/project-structure"),
+  ...createDocsRedirects("/getting-started/project-structure", "/concepts/project-structure"),
   ...createDocsRedirects("/channels", "/channels/overview"),
   ...createDocsRedirects("/channels/http", "/channels/eve"),
   ...createDocsRedirects("/reference/http-api", "/channels/eve"),
@@ -63,6 +64,7 @@ export const docsRedirects: DocsRedirect[] = [
   ...createDocsRedirects("/guides/acp", "/protocols/acp"),
   ...createDocsRedirects("/guides/ucp", "/protocols/ucp"),
   ...createDocsRedirects("/guides/deployment", "/guides/deployment/overview"),
+  ...createDocsRedirects("/guides/frontend/add-a-web-app", "/guides/frontend/nextjs"),
   ...createDocsRedirects("/deployment", "/guides/deployment/overview"),
   ...createDocsRedirects("/deployment/overview", "/guides/deployment/overview"),
   ...createDocsRedirects("/deployment/vercel", "/guides/deployment/vercel"),
@@ -78,7 +80,8 @@ export const docsRedirects: DocsRedirect[] = [
   ...createDocsRedirects("/evals", "/evals/overview"),
   ...createDocsRedirects("/advanced/evals", "/evals/overview"),
   ...createDocsRedirects("/getting-started/installation", "/getting-started"),
-  ...createDocsRedirects("/getting-started/project-structure", "/getting-started"),
+  ...createDocsRedirects("/getting-started/multiple-root-agents", "/concepts/project-structure"),
+  ...createDocsRedirects("/multi-agent-projects", "/concepts/project-structure"),
   ...createDocsRedirects("/getting-started/first-agent", "/tutorial/first-agent"),
 ];
 
@@ -86,7 +89,7 @@ export const rootMarkdownRedirects: DocsRedirect[] = [
   ["/getting-started", "/getting-started"],
   ["/install-integrations", "/install-integrations"],
   ["/installation", "/getting-started"],
-  ["/project-structure", "/getting-started"],
+  ["/project-structure", "/concepts/project-structure"],
   ["/instructions", "/instructions"],
   ["/tools/overview", "/tools"],
   ["/skills", "/skills"],

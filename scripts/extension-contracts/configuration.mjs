@@ -26,6 +26,7 @@ export const PUBLIC_SURFACES = [
       "src/public/tools/index.ts",
       "src/public/tools/web-search.ts",
       "src/public/tools/workflow.ts",
+      "src/public/experimental/evaluate/index.ts",
     ],
     capabilities: ["tool", "dynamicTool"],
   },

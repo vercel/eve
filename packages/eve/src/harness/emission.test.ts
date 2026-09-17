@@ -165,6 +165,7 @@ describe("emitTurnPreamble", () => {
       },
       { message: "hello" },
       { sequence: 0, sessionStarted: false, stepIndex: 0, turnId: "" },
+      [{ role: "user", content: "hello" }],
       undefined,
       trace,
     );

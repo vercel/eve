@@ -58,15 +58,24 @@ function isBrandedWorkspaceSubagent(value: unknown): value is BrandedWorkspaceSu
   return typeof value === "object" && value !== null && Reflect.has(value, WORKSPACE_AGENT_NAME);
 }
 
+function workspaceAgentRoutePrefix(name: string): string {
+  const callerRoutePrefix = normalizePublicRoutePrefix(process.env.EVE_PUBLIC_ROUTE_PREFIX);
+  const namespace =
+    callerRoutePrefix?.slice(0, callerRoutePrefix.lastIndexOf("/")) ??
+    (process.env.VERCEL_ENV === "development" ? "" : "/eve");
+  return `${namespace}/${name}`;
+}
+
 function defaultWorkspaceAgentTransport(name: string): WorkspaceAgentTransport {
   const auth = vercelOidc();
   return {
     auth: async () => {
       requireVercelWorkspaceEnvironment();
-      return auth();
+      return process.env.VERCEL_ENV === "development" ? { headers: {} } : auth();
     },
     url: () => {
       requireVercelWorkspaceEnvironment();
+      const development = process.env.VERCEL_ENV === "development";
       const host =
         process.env.VERCEL_ENV === "production"
           ? process.env.VERCEL_PROJECT_PRODUCTION_URL
@@ -76,10 +85,7 @@ function defaultWorkspaceAgentTransport(name: string): WorkspaceAgentTransport {
           "The default workspace-agent transport requires VERCEL_URL, or VERCEL_PROJECT_PRODUCTION_URL in production.",
         );
       }
-      const callerRoutePrefix = normalizePublicRoutePrefix(process.env.EVE_PUBLIC_ROUTE_PREFIX);
-      const peerRoutePrefix =
-        callerRoutePrefix?.startsWith("/eve/agents/") === true ? `/eve/agents/${name}` : `/${name}`;
-      return `https://${host}${peerRoutePrefix}`;
+      return `${development ? "http" : "https"}://${host}${workspaceAgentRoutePrefix(name)}`;
     },
   };
 }

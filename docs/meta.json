@@ -21,6 +21,7 @@
     "---Integrate---",
     "install-integrations",
     "extensions",
+    "guides/evaluate",
     "guides/remote-agents",
     "protocols",
     "guides/frontend",

@@ -79,7 +79,7 @@ export default defineWorkspaceAgent({
 });
 ```
 
-The helper uses the peer's root `defineAgent({ description })` value as the model-visible tool description. Pass `description` to override it for this caller. When `transport` is omitted, eve selects the built-in transport for the runtime environment. Vercel deployments route through the current deployment and authenticate with the caller's Vercel OIDC token. A workspace hosted through `withEve()` in a Next.js app uses its `/eve/agents/<name>` mount; a hostless workspace uses `/<name>`. Outside Vercel, provide an explicit transport with `url` and optional `auth` or `headers`:
+The helper uses the peer's root `defineAgent({ description })` value as the model-visible tool description. Pass `description` to override it for this caller. When `transport` is omitted, eve selects the built-in transport for the Vercel runtime environment. Local `vercel dev` routes workspace calls without deployment credentials; Vercel deployments route calls through the current deployment and authenticate with the caller's Vercel OIDC token. Named peers use their `/eve/<name>` mount. Outside those environments, provide an explicit transport with `url` and optional `auth` or `headers`:
 
 ```ts title="agents/foreman/agent/subagents/research.ts"
 import { defineWorkspaceAgent } from "eve";
@@ -96,7 +96,7 @@ export default defineWorkspaceAgent({
 
 An explicit transport replaces the environment default completely. The receiving peer must still accept the transport's credentials through its channel authentication policy. Set `forwardPrincipal: true` only when the peer trusts the caller to forward user identity, as described in [Remote agents](./guides/remote-agents#forward-the-callers-identity).
 
-Use the peer's directory name under `agents/`. eve requires an exact workspace-member match, so add another declared subagent file for each additional peer. `eve dev` does not provide local workspace routing; configure an explicit transport to target a separately running peer.
+Use the peer's directory name under `agents/`. eve requires an exact workspace-member match, so add another declared subagent file for each additional peer. Run `vercel dev --local` with a root `vercel.ts` composed by `withEve` to start every member and enable the default local workspace transport. `eve dev` starts only the selected agent; use an explicit transport if it must call a separately running peer.
 
 ### Conditional availability
 

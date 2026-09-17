@@ -29,6 +29,13 @@ const REMOTE_TARGET = {
   serverUrl: "https://example.com/",
   workspaceRoot: APP_ROOT,
 } as const;
+const WORKSPACE_AGENT_ROOT = "/tmp/weather-workspace/agents/support";
+const WORKSPACE_TARGET = {
+  kind: "local",
+  serverUrl: "http://localhost:3000",
+  workspaceRoot: "/tmp/weather-workspace",
+  agentRoot: WORKSPACE_AGENT_ROOT,
+} as const;
 
 function context(renderer: Partial<AgentTUIRenderer> = {}): PromptCommandHandlerContext {
   return {
@@ -206,6 +213,36 @@ describe("createPromptCommandHandler", () => {
       expect(runTuiSetupCommand).toHaveBeenNthCalledWith(
         2,
         expect.not.objectContaining({ initialRegistryAddress: expect.anything() }),
+      );
+    } finally {
+      vi.doUnmock("./setup-commands.js");
+      vi.resetModules();
+    }
+  });
+
+  it("installs /add items into the selected workspace agent", async () => {
+    const runTuiSetupCommand = vi.fn(async () => ({
+      message: "Added Slack",
+      preserveFlowDiagnostics: true,
+    }));
+    vi.doMock("./setup-commands.js", () => ({
+      SETUP_FLOW_CONFIG: { add: { title: "Add to your agent", indicator: "pulse" } },
+      runTuiSetupCommand,
+    }));
+
+    try {
+      const handler = createPromptCommandHandler({ target: WORKSPACE_TARGET });
+      await handler.handle(
+        { type: "extension", name: "add", argument: "channel/slack" },
+        context({ setupFlow: setupFlowRenderer() }),
+      );
+
+      expect(runTuiSetupCommand).toHaveBeenCalledWith(
+        expect.objectContaining({
+          agentRoot: WORKSPACE_AGENT_ROOT,
+          appRoot: WORKSPACE_TARGET.workspaceRoot,
+          command: "add",
+        }),
       );
     } finally {
       vi.doUnmock("./setup-commands.js");

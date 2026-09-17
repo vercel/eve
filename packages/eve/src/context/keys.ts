@@ -31,6 +31,7 @@ import type { DynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agen
 import type { DynamicRemoteAgentConfig } from "#runtime/subagents/dynamic-remote-agent-config.js";
 import type { SandboxAccess } from "#sandbox/state.js";
 import type { RunMode } from "#shared/run-mode.js";
+import type { HistoryViewProjector } from "#shared/history-view.js";
 import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
 import type { PreparedRuntimeDelegationTool } from "#runtime/sessions/turn.js";
 import type { MemoryScope, MemoryTurnContext } from "#public/memory/index.js";
@@ -247,6 +248,7 @@ export const TurnMemoryLocksKey = new ContextKey<Readonly<Record<string, LockedM
 );
 
 export interface PreparedMemoryPreamble {
+  readonly projector?: HistoryViewProjector;
   readonly history: readonly ModelMessage[];
   readonly input: readonly ModelMessage[];
   readonly state?: Readonly<Record<string, unknown>>;

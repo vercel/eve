@@ -3,7 +3,7 @@
  * `/eve/v1/*` transport surface is mounted under on its callback origin.
  *
  * Multi-agent host integrations mount each named agent under
- * `/eve/agents/<name>/eve/v1/*` and strip that prefix before requests reach
+ * `/eve/<name>/v1/*` and strip that prefix before requests reach
  * the eve service, so a running agent cannot recover its own public mount
  * from an inbound request. The integration exports this variable in the
  * generated service build command, the eve CLI resolves it once into the

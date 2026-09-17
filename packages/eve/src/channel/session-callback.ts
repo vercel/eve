@@ -2,6 +2,7 @@ import { z } from "#compiled/zod/index.js";
 
 import type { SessionCallback } from "#channel/types.js";
 import { createEveCallbackRoutePath } from "#protocol/routes.js";
+import { normalizePublicEveRoutePath } from "#shared/eve-route-path.js";
 import { isReservedIpAddress } from "#shared/network-address.js";
 
 export type SessionCallbackParseResult =
@@ -72,16 +73,17 @@ export function parseSessionCallback(value: unknown): SessionCallbackParseResult
 
 function readCallbackUrlToken(url: URL): string | null {
   // The callback route may be mounted behind a public route prefix (e.g.
-  // `/eve/agents/<name>/eve/v1/callback/<token>`), so locate the route
+  // `/eve/<name>/v1/callback/<token>`), so locate the route
   // suffix instead of anchoring at the path start. `tokenPrefix` begins
   // with `/`, so a match is always segment-aligned.
   const tokenPrefix = createEveCallbackRoutePath("");
-  const prefixIndex = url.pathname.lastIndexOf(tokenPrefix);
+  const pathname = normalizePublicEveRoutePath(url.pathname);
+  const prefixIndex = pathname.lastIndexOf(tokenPrefix);
   if (prefixIndex === -1) {
     return null;
   }
 
-  const encodedToken = url.pathname.slice(prefixIndex + tokenPrefix.length);
+  const encodedToken = pathname.slice(prefixIndex + tokenPrefix.length);
   if (encodedToken.length === 0 || encodedToken.includes("/")) {
     return null;
   }

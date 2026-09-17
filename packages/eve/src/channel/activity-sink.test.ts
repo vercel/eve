@@ -13,6 +13,14 @@ describe("parseActivitySink", () => {
     expect(parseActivitySink(sink)).toEqual(sink);
   });
 
+  it("accepts a compact named-agent activity capability URL", () => {
+    const sink = {
+      url: `https://agent.example.com/eve/support/v1/activity/${token}`,
+      version: 1 as const,
+    };
+    expect(parseActivitySink(sink)).toEqual(sink);
+  });
+
   it("rejects missing opaque tokens and reserved sink hosts", () => {
     expect(() =>
       parseActivitySink({ url: "https://agent.example.com/eve/v1/activity/short", version: 1 }),

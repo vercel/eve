@@ -223,4 +223,4 @@ Troubleshooting:
 
 - [`agent.ts`](../agent-config): the agent config these helpers configure
 - [Tools](../tools): `defineTool`, the most-used helper
-- [Project layout](../getting-started#project-layout): where each define\* lives on disk
+- [Agent Files](/docs/reference/agent-files): where each define\* lives on disk
