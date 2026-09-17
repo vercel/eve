@@ -1,0 +1,17 @@
+---
+title: "Default Sandbox"
+description: "Let eve select the sandbox provider for the current environment."
+---
+
+`DefaultSandbox.environment()` preserves eve's standard behavior without exposing provider-specific live creation options.
+
+```ts
+import { DefaultSandbox, defineSandbox } from "eve/sandbox";
+
+export const environment = DefaultSandbox.environment();
+export default defineSandbox(() => environment.open());
+```
+
+On Vercel, it selects [Vercel Sandbox](/docs/sandbox/vercel). Elsewhere, it tries [Docker](/docs/sandbox/docker), [microsandbox](/docs/sandbox/microsandbox), and [just-bash](/docs/sandbox/just-bash), in that order, according to host support.
+
+Use a provider directly when you need its image, VM, network, compute, or mount options.

@@ -38,9 +38,9 @@ describe("self-modification filesystem", () => {
   it("mounts authored source read-write and traces, logs, and eve docs read-only", async () => {
     const appRoot = await createAppRoot();
     const filesystem = await createSelfModificationFilesystem({
-      appRoot,
       defaultFilesystem: new justBash.InMemoryFs(),
       justBash,
+      resolveProjectPath: (path) => join(appRoot, path),
     });
 
     expect(await filesystem.readFile("/traces/trace-1/segments/span.otlp.json")).toBe("trace\n");
@@ -65,9 +65,9 @@ describe("self-modification filesystem", () => {
   it("mounts empty trace and log directories when nothing has been captured", async () => {
     const appRoot = await createAppRoot({ traces: false, logs: false });
     const filesystem = await createSelfModificationFilesystem({
-      appRoot,
       defaultFilesystem: new justBash.InMemoryFs(),
       justBash,
+      resolveProjectPath: (path) => join(appRoot, path),
     });
 
     expect(await filesystem.readdir("/traces")).toEqual([]);

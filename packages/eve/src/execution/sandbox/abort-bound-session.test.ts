@@ -21,7 +21,6 @@ function createRecordingSession(calls: RecordedCall[]): SandboxSession {
   const commandResult: SandboxCommandResult = { exitCode: 0, stderr: "", stdout: "" };
 
   return {
-    id: "sbx_recording",
     resolvePath: (path: string) => `/workspace/${path}`,
     run: async (options) => {
       record("run", options.abortSignal);
@@ -93,7 +92,7 @@ describe("bindSandboxAbortSignal", () => {
     expect(new Set(calls.map((call) => call.abortSignal)).size).toBe(calls.length);
   });
 
-  it("does not accumulate backend listeners on the bound signal", async () => {
+  it("does not accumulate provider listeners on the bound signal", async () => {
     const calls: RecordedCall[] = [];
     const recordingSession = createRecordingSession(calls);
     const listenerSession: SandboxSession = {
@@ -155,8 +154,6 @@ describe("bindSandboxAbortSignal", () => {
     const calls: RecordedCall[] = [];
     const session = createRecordingSession(calls);
     const bound = bindSandboxAbortSignal(session, new AbortController().signal);
-
-    expect(bound.id).toBe("sbx_recording");
     expect(bound.resolvePath("nested/file.txt")).toBe("/workspace/nested/file.txt");
   });
 });

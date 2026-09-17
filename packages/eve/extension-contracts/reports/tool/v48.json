@@ -1,0 +1,23 @@
+{
+  "kind": "eve-extension-capability-contract",
+  "capability": "tool",
+  "epoch": 48,
+  "sha256": "ff68729189812dff0618b7b8ba0c72ab61d2683812fd8d1dfa6918221ec95409",
+  "exports": [
+    "WorkflowTool",
+    "WorkflowToolInput",
+    "WorkflowToolOptions",
+    "defaultWebSearch",
+    "defineTool",
+    "defineWorkflowTool",
+    "disableTool",
+    "evaluate",
+    "isDisabledToolSentinel",
+    "isWebSearchToolDefinition",
+    "toolOutput",
+    "toolOutputPart",
+    "toolResultFrom",
+    "webSearch",
+    "workflow"
+  ]
+}

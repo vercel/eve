@@ -55,7 +55,7 @@ export const ROOT_COMPILED_AGENT_NODE_ID = "__root__";
 /**
  * Current compiled manifest schema version.
  */
-export const COMPILED_AGENT_MANIFEST_VERSION = 48;
+export const COMPILED_AGENT_MANIFEST_VERSION = 49;
 
 /**
  * Compiled channel entry preserved in the compiled manifest.
@@ -726,20 +726,15 @@ const compiledScheduleDefinitionSchema = z.discriminatedUnion("sourceKind", [
 const compiledSandboxDefinitionSchema = z
   .object({
     /**
-     * Stable name of the authored backend (`"local"`, `"vercel"`,
-     * `"local-just-bash"`, or a custom backend's name), captured at
-     * compile time so build pipelines can make backend-aware decisions
-     * (for example including the optional just-bash engine package in
-     * hosted output). Absent when the definition omits `backend` or the
-     * backend's name could not be resolved at compile time.
+     * Stable provider name from the exported environment, captured at compile
+     * time so build pipelines can make provider-aware decisions.
      */
-    backendName: z.string().optional(),
-    description: z.string().optional(),
+    providerName: z.string().optional(),
+    environmentExportName: z.string().optional(),
     inheritsParent: z.boolean().optional(),
     exportName: z.string().optional(),
     logicalPath: z.string(),
-    revalidationKey: z.string().optional(),
-    sourceHash: z.string(),
+    revisionHash: z.string(),
     sourceId: z.string(),
     sourceKind: z.literal("module"),
   })

@@ -22,9 +22,9 @@ interface ExtensionCapabilityContract {
 const EXTENSION_CAPABILITY_CONTRACTS = {
   extension: { current: 1, supported: [1], dropped: {} },
   tool: {
-    current: 47,
+    current: 48,
     supported: [
-      1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 28, 29, 30, 31, 32, 34, 35, 44, 45, 46, 47,
+      1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 28, 29, 30, 31, 32, 34, 35, 44, 45, 46, 48,
     ],
     dropped: {
       14: "TaskExec.delegated was removed; migrate to workflow-backed background tools",
@@ -50,13 +50,14 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
       41: "workflow no longer accepts agents and its options argument is optional; use workflow() or workflow({ maxSubagents })",
       42: "Legacy session history migration was removed; user-role messages require current provenance kinds.",
       43: "Legacy session history migration was removed; user-role messages require current provenance kinds.",
+      47: "Sandbox sessions no longer expose core identity and mutable networking is provider-specific.",
     },
   },
   dynamicTool: {
-    current: 45,
+    current: 46,
     supported: [
       1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 22, 28, 29, 30, 31, 32,
-      33, 41, 42, 43, 44, 45,
+      33, 41, 42, 43, 44, 46,
     ],
     dropped: {
       21: "Message and reasoning append events now expose deltas instead of cumulative snapshots.",
@@ -72,17 +73,19 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
       38: "workflowMaxSubagents was removed with experimental_workflow; configure generated-program limits with the workflow factory",
       39: "Legacy session history migration was removed; user-role messages require current provenance kinds.",
       40: "Legacy session history migration was removed; user-role messages require current provenance kinds.",
+      45: "Sandbox sessions no longer expose core identity and mutable networking is provider-specific.",
     },
   },
   channel: {
-    current: 25,
-    supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 14, 15, 16, 17, 18, 23, 24, 25],
+    current: 26,
+    supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 14, 15, 16, 17, 18, 23, 24, 26],
     dropped: {
       12: "Message and reasoning append events now expose deltas instead of cumulative snapshots.",
       19: "Continuation rekey was removed; channel extensions must use additive continuation.alias instead.",
       20: "Continuation rekey was removed; channel extensions must use additive continuation.alias instead.",
       21: "Continuation rekey was removed; channel extensions must use additive continuation.alias instead.",
       22: "Continuation rekey was removed; channel extensions must use additive continuation.alias instead.",
+      25: "Sandbox sessions no longer expose core identity and mutable networking is provider-specific.",
     },
   },
   schedule: {
@@ -102,16 +105,17 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
     },
   },
   connection: {
-    current: 21,
-    supported: [1, 2, 3, 4, 5, 6, 7, 8, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21],
+    current: 22,
+    supported: [1, 2, 3, 4, 5, 6, 7, 8, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 22],
     dropped: {
       9: "Dynamic connection resolvers no longer receive conversation or channel continuation data",
       10: "Message and reasoning append events now expose deltas instead of cumulative snapshots.",
+      21: "Sandbox sessions no longer expose core identity and mutable networking is provider-specific.",
     },
   },
   hook: {
-    current: 23,
-    supported: [10, 11, 12, 13, 14, 15, 17, 18, 19, 20, 21, 22, 23],
+    current: 24,
+    supported: [10, 11, 12, 13, 14, 15, 17, 18, 19, 20, 21, 22, 24],
     dropped: {
       1: "Model identity moved from session.started runtime metadata to step.started call attribution.",
       2: "Model identity moved from session.started runtime metadata to step.started call attribution.",
@@ -123,6 +127,7 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
       8: "Model identity moved from session.started runtime metadata to step.started call attribution.",
       9: "Model identity moved from session.started runtime metadata to step.started call attribution.",
       16: "Message and reasoning append events now expose deltas instead of cumulative snapshots.",
+      23: "Sandbox sessions no longer expose core identity and mutable networking is provider-specific.",
     },
   },
   skill: { current: 1, supported: [1], dropped: {} },
@@ -142,7 +147,13 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
     },
   },
   config: { current: 1, supported: [1], dropped: {} },
-  state: { current: 6, supported: [1, 2, 3, 4, 5, 6], dropped: {} },
+  state: {
+    current: 7,
+    supported: [1, 2, 3, 4, 5, 7],
+    dropped: {
+      6: "Sandbox sessions no longer expose core identity and mutable networking is provider-specific.",
+    },
+  },
 } as const satisfies Record<string, ExtensionCapabilityContract>;
 
 /** One independently versioned extension-facing contract. */

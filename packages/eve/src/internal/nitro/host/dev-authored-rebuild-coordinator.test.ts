@@ -51,13 +51,10 @@ vi.mock("#internal/nitro/development-generation.js", () => ({
   discardDevelopmentGeneration: mocks.discardDevelopmentGeneration,
 }));
 vi.mock("#internal/nitro/host/artifacts-config.js", () => ({
-  createDevelopmentNitroArtifactsConfig: () => ({}),
-}));
-vi.mock("#internal/nitro/routes/runtime-artifacts.js", () => ({
-  resolveNitroCompiledArtifactsSource: () => ({}),
+  createDevelopmentGenerationArtifactsSource: () => ({ kind: "disk" }),
 }));
 vi.mock("#execution/sandbox/development-prewarm.js", () => ({
-  startDevelopmentSandboxPrewarmInBackground: vi.fn(),
+  prewarmDevelopmentSandboxes: vi.fn(async () => {}),
 }));
 
 function createHost(

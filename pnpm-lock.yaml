@@ -823,6 +823,31 @@ importers:
         specifier: 'catalog:'
         version: 7.0.2
 
+  e2e/fixtures/agent-microsandbox-dockerfile:
+    dependencies:
+      '@eve-e2e/config':
+        specifier: workspace:*
+        version: link:../e2e-config
+      '@workflow/world-postgres':
+        specifier: 'catalog:'
+        version: 5.0.0-beta.42(@opentelemetry/api@1.9.1)(@types/pg@8.20.0)(@upstash/redis@1.38.4)(sql.js@1.14.1)(supports-color@10.2.2)(typescript@7.0.2)
+      eve:
+        specifier: workspace:*
+        version: link:../../../packages/eve
+      microsandbox:
+        specifier: 0.5.5
+        version: 0.5.5
+      zod:
+        specifier: 'catalog:'
+        version: 4.5.4
+    devDependencies:
+      '@types/node':
+        specifier: 'catalog:'
+        version: 24.13.3
+      typescript:
+        specifier: 'catalog:'
+        version: 7.0.2
+
   e2e/fixtures/agent-model:
     dependencies:
       '@eve-e2e/config':
@@ -12625,6 +12650,7 @@ packages:
   microsandbox@0.5.5:
     resolution: {integrity: sha512-AJBFSIK4TYEO6pNfuXfceq3BcqOj2hxBEQjiXYNv6C4UtGDE2CNSzLwGzT2CCkuucRy+9EWvO8KS/zSZMgd/CA==}
     engines: {node: '>= 22'}
+    hasBin: true
 
   mime-db@1.52.0:
     resolution: {integrity: sha512-sPU4uV7dYlvtWJxwwxHD0PuihVNiE7TyAbQ5SWxDCB9mUYvOgroQOwYQQOKPJ8CIbE+1ETVlOoK1UC2nU3gYvg==}

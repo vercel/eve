@@ -1,6 +1,9 @@
-export { docker } from "#public/sandbox/backends/docker.js";
+export {
+  DockerSandbox,
+  type DockerSandboxEnvironmentOptions,
+  type DockerSandboxRuntimeOptions,
+} from "#sandbox/providers/docker.js";
 export type {
-  DockerSandboxCreateOptions,
   DockerSandboxNetworkPolicy,
   DockerSandboxPullPolicy,
 } from "#public/sandbox/docker-sandbox.js";

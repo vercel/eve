@@ -13,45 +13,16 @@ import type { RuntimeSandboxTemplatePlan } from "#runtime/sandbox/template-plan.
 
 /*
  * Template keys include this version for sandbox runtime contract changes
- * that are not captured by source or resource hashes. Version 7 writes static
- * skill seed files to the sandbox user's $HOME/.agents/skills directory.
+ * that are not captured by revision or resource hashes. Version 9 moves native
+ * identity and preparation input discovery into providers.
  */
-const RUNTIME_SANDBOX_CONTRACT_VERSION = 7;
+const RUNTIME_SANDBOX_CONTRACT_VERSION = 9;
 
 /**
  * Input for deriving the stable runtime keys used for one sandbox definition.
  */
-interface CreateRuntimeSandboxKeysInput {
-  readonly backendName: string;
-  readonly compiledArtifactsSource: RuntimeCompiledArtifactsSource;
-  readonly nodeId: string;
-  readonly sessionId: string;
-  readonly sourceId: string;
-  readonly templatePlan: RuntimeSandboxTemplatePlan;
-}
-
 /**
- * Creates the stable runtime template and session keys for one sandbox
- * definition under the current artifact source and backend.
- *
- * Both keys derive from one {@link RuntimeSandboxKeyParts} value, so the
- * coupling holds by construction: the session key rotates exactly when
- * the template content rotates.
- */
-export async function createRuntimeSandboxKeys(input: CreateRuntimeSandboxKeysInput): Promise<{
-  readonly sessionKey: string;
-  readonly templateKey: string | null;
-}> {
-  const parts = await deriveRuntimeSandboxKeyParts(input);
-  return {
-    sessionKey: buildRuntimeSandboxSessionKey(input, parts),
-    templateKey: buildRuntimeSandboxTemplateKey(input, parts),
-  };
-}
-
-/**
- * Creates the stable reusable template key for one sandbox definition,
- * or `null` when the sandbox should start from a fresh backend runtime.
+ * Creates the stable private artifact-storage key for one sandbox definition.
  *
  * The template key factors in the graph `nodeId` so that two
  * runtime agents (root and subagents) do not collide on the same
@@ -59,28 +30,31 @@ export async function createRuntimeSandboxKeys(input: CreateRuntimeSandboxKeysIn
  * path.
  */
 export async function createRuntimeSandboxTemplateKey(input: {
-  readonly backendName: string;
+  readonly providerName: string;
   readonly compiledArtifactsSource: RuntimeCompiledArtifactsSource;
+  readonly configurationHash?: string;
   readonly nodeId: string;
   readonly sourceId: string;
   readonly templatePlan: RuntimeSandboxTemplatePlan;
-}): Promise<string | null> {
+}): Promise<string> {
   return buildRuntimeSandboxTemplateKey(input, await deriveRuntimeSandboxKeyParts(input));
 }
 
 /**
  * The facts both keys derive from, computed once per derivation:
- * compile metadata, the partition scope, and the sandbox definition's
- * version hash (`null` when the sandbox needs no template).
+ * compile metadata, the partition scope, and the sandbox generation hash
+ * (`null` when the sandbox needs no template).
  */
 interface RuntimeSandboxKeyParts {
   readonly metadata: CompileMetadata | null;
   readonly scope: string;
-  readonly versionHash: string | null;
+  readonly templateHash: string;
 }
 
 async function deriveRuntimeSandboxKeyParts(input: {
-  readonly backendName: string;
+  readonly providerName: string;
+  readonly configurationHash?: string;
+  readonly environmentConfigurationHash?: string;
   readonly compiledArtifactsSource: RuntimeCompiledArtifactsSource;
   readonly nodeId: string;
   readonly sourceId: string;
@@ -88,57 +62,26 @@ async function deriveRuntimeSandboxKeyParts(input: {
 }): Promise<RuntimeSandboxKeyParts> {
   const metadata = await loadCompileMetadataForKeys(input.compiledArtifactsSource);
   const scope = await resolveRuntimeSandboxScope(input);
-  const versionHash =
-    input.templatePlan.kind === "none"
-      ? null
-      : resolveRuntimeSandboxVersionHash({
-          nodeId: input.nodeId,
-          sourceId: input.sourceId,
-          templatePlan: input.templatePlan,
-        });
-  return { metadata, scope, versionHash };
+  const templateHash = createStableHash(
+    `${resolveRuntimeSandboxTemplateHash({
+      nodeId: input.nodeId,
+      sourceId: input.sourceId,
+      templatePlan: input.templatePlan,
+    })}:${input.environmentConfigurationHash ?? input.configurationHash ?? ""}`,
+  );
+  return { metadata, scope, templateHash };
 }
 
 function buildRuntimeSandboxTemplateKey(
-  input: { readonly backendName: string },
+  input: { readonly providerName: string },
   parts: RuntimeSandboxKeyParts,
-): string | null {
-  if (parts.versionHash === null) {
-    return null;
-  }
-
+): string {
   const templateHash = createStableHash(
-    `${resolvePackageVersionForTemplateKey(parts.metadata)}:${RUNTIME_SANDBOX_CONTRACT_VERSION}:${parts.versionHash}`,
+    `${resolvePackageVersionForTemplateKey(parts.metadata)}:${RUNTIME_SANDBOX_CONTRACT_VERSION}:${parts.templateHash}`,
   ).slice(0, 20);
 
   return sanitizeRuntimeSandboxKey(
-    `eve-sbx-tpl-${input.backendName}-${parts.scope}-${templateHash}`,
-  );
-}
-
-/**
- * Builds the session sandbox key for one sandbox definition.
- *
- * Session keys are pinned per durable session: the scope is stable across
- * deployments so a session reattaches to the same sandbox after a redeploy
- * and keeps its `/workspace` state. The key also folds in the sandbox
- * definition's version hash, so changing the sandbox itself (bootstrap
- * source, `revalidationKey`, or workspace seed content) rotates the
- * session sandbox onto the new template — unrelated source changes do not.
- * The eve package version deliberately does not participate: upgrading
- * eve must not discard session sandbox state.
- */
-function buildRuntimeSandboxSessionKey(
-  input: { readonly backendName: string; readonly nodeId: string; readonly sessionId: string },
-  parts: RuntimeSandboxKeyParts,
-): string {
-  const version = createStableHash(
-    `${RUNTIME_SANDBOX_CONTRACT_VERSION}:${parts.versionHash ?? "none"}`,
-  ).slice(0, 12);
-  const nodeScope = sanitizeRuntimeSandboxKey(input.nodeId);
-
-  return sanitizeRuntimeSandboxKey(
-    `eve-sbx-ses-${input.backendName}-${parts.scope}-${version}-${input.sessionId}-${nodeScope}`,
+    `eve-sbx-tpl-${input.providerName}-${parts.scope}-${templateHash}`,
   );
 }
 
@@ -182,14 +125,18 @@ async function loadCompileMetadataForKeys(
  * compiled-artifacts cache key.
  */
 async function resolveRuntimeSandboxScope(input: {
-  readonly backendName: string;
+  readonly providerName: string;
   readonly compiledArtifactsSource: RuntimeCompiledArtifactsSource;
 }): Promise<string> {
-  if (input.backendName === "vercel") {
+  if (input.providerName === "vercel") {
     const projectId = resolveVercelProjectIdFromEnvironment();
     if (projectId !== undefined) {
       return createStableHash(`vercel-project:${projectId}`).slice(0, 16);
     }
+  }
+
+  if (input.compiledArtifactsSource.sandboxScope !== undefined) {
+    return input.compiledArtifactsSource.sandboxScope;
   }
 
   const appRoot = getRuntimeCompiledArtifactsSandboxAppRoot(input.compiledArtifactsSource);
@@ -203,7 +150,7 @@ async function resolveRuntimeSandboxScope(input: {
   );
 }
 
-function resolveRuntimeSandboxVersionHash(input: {
+function resolveRuntimeSandboxTemplateHash(input: {
   readonly nodeId: string;
   readonly sourceId: string;
   readonly templatePlan: Exclude<RuntimeSandboxTemplatePlan, { readonly kind: "none" }>;
@@ -211,14 +158,9 @@ function resolveRuntimeSandboxVersionHash(input: {
   // No seed files means empty content, independent of unrelated application source.
   const contentHash = input.templatePlan.contentHash ?? "";
 
-  if (input.templatePlan.kind === "bootstrap") {
-    const revalidationKey = input.templatePlan.revalidationKey ?? "";
-    return createStableHash(
-      `bootstrap:${revalidationKey}:${input.templatePlan.sourceHash}:${contentHash}:${input.nodeId}:${input.sourceId}`,
-    );
-  }
-
-  return createStableHash(`workspace-content:${contentHash}:${input.nodeId}:${input.sourceId}`);
+  return createStableHash(
+    `prepared:${input.templatePlan.revisionHash}:${contentHash}:${input.nodeId}:${input.sourceId}`,
+  );
 }
 
 function createStableHash(value: string): string {

@@ -386,7 +386,7 @@ function attachInheritedSandboxWorkspaceResources(input: {
   );
 
   for (const [nodeId, node] of input.nodesByNodeId) {
-    if (node.sandboxRegistry.sandbox.definition.inheritsParent !== true) continue;
+    if (node.sandboxRegistry.sandbox.definition.kind !== "parent") continue;
     if (node.agent.dynamicSkillResolvers.length > 0) {
       throw new ResolveRuntimeAgentGraphError(
         `Sandbox "${node.sandboxRegistry.sandbox.definition.logicalPath}" selects parent.sandbox but agent node "${nodeId}" defines dynamic skills. Remove the child dynamic skills or give the child its own sandbox.`,
@@ -432,7 +432,7 @@ function resolveSandboxOwnerNode(input: {
       nodeId: input.nodeId,
     });
   }
-  if (node.sandboxRegistry.sandbox.definition.inheritsParent !== true) return node;
+  if (node.sandboxRegistry.sandbox.definition.kind !== "parent") return node;
 
   const parentNodeId = input.parentNodeIdByChildNodeId.get(input.nodeId);
   if (parentNodeId === undefined) {

@@ -22,7 +22,8 @@ export interface PreparedSelfModificationWorkspace {
   readonly targetBranch: string;
 }
 
-type CheckoutSandbox = Pick<SandboxSession, "run" | "setNetworkPolicy">;
+type CheckoutSandbox = Pick<SandboxSession, "run"> &
+  Required<Pick<SandboxSession, "setNetworkPolicy">>;
 
 /** Prepares a token-free remote and immutable target-branch checkout for one child session. */
 export async function prepareSelfModificationWorkspace(input: {

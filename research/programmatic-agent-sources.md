@@ -577,24 +577,24 @@ compilation use the same composer and normalizers as production.
 After migration, the framework provides exactly these default identities
 through source composition:
 
-| Identity                     | Definition                             | Registered for   | Notes                                                                 |
-| ---------------------------- | -------------------------------------- | ---------------- | --------------------------------------------------------------------- |
-| `agent.ts`                   | `defineAgent`                          | every local node | default model config; phase-one composition                           |
-| `sandbox.ts`                 | `defineSandbox({})`                    | every local node | selects `defaultSandbox()`; stable semantic revision                  |
-| `tools/bash.ts`              | `defineTool`                           | every local node | ordinary executor                                                     |
-| `tools/read_file.ts`         | `defineTool`                           | every local node | ordinary executor                                                     |
-| `tools/write_file.ts`        | `defineTool`                           | every local node | ordinary executor                                                     |
-| `tools/todo.ts`              | `defineTool`                           | every local node | ordinary executor                                                     |
-| `tools/web_fetch.ts`         | `defineTool`                           | every local node | ordinary executor                                                     |
-| `tools/load_skill.ts`        | `defineTool`                           | every local node | ordinary executor                                                     |
-| `tools/connection_search.ts` | `defineDynamic`                        | every local node | discovers and qualifies connection tools                              |
-| `tools/ask_question.ts`      | internal native tool + `request-input` | every local node | visibility: `requires-request-input`                                  |
-| `tools/agent.ts`             | internal native tool + `dispatch`      | root node        | action: `subagent-call`; visibility: `root-session`                   |
-| `tools/task_update.ts`       | internal native tool + `dispatch`      | root node        | action: `task-update`; tasks mode; visibility: `delegated-task-child` |
-| `tools/task_cancel.ts`       | internal native tool + `dispatch`      | root node        | action: `task-cancel`; tasks mode; visibility: `root-session`         |
-| `tools/web_search.ts`        | `webSearch` sentinel + `provider-tool` | every local node | materialized at eligible model calls                                  |
-| `channels/eve.ts`            | `eveChannel` factory                   | root node        | complete `/eve/v1` surface: protocol, callbacks, health, info         |
-| `channels/home.ts`           | `defineChannel`                        | root node        | `GET` and `HEAD` at `/`                                               |
+| Identity                     | Definition                                | Registered for   | Notes                                                                 |
+| ---------------------------- | ----------------------------------------- | ---------------- | --------------------------------------------------------------------- |
+| `agent.ts`                   | `defineAgent`                             | every local node | default model config; phase-one composition                           |
+| `sandbox.ts`                 | `defineSandbox(() => environment.open())` | every local node | exports `DefaultSandbox.environment()`; stable semantic revision      |
+| `tools/bash.ts`              | `defineTool`                              | every local node | ordinary executor                                                     |
+| `tools/read_file.ts`         | `defineTool`                              | every local node | ordinary executor                                                     |
+| `tools/write_file.ts`        | `defineTool`                              | every local node | ordinary executor                                                     |
+| `tools/todo.ts`              | `defineTool`                              | every local node | ordinary executor                                                     |
+| `tools/web_fetch.ts`         | `defineTool`                              | every local node | ordinary executor                                                     |
+| `tools/load_skill.ts`        | `defineTool`                              | every local node | ordinary executor                                                     |
+| `tools/connection_search.ts` | `defineDynamic`                           | every local node | discovers and qualifies connection tools                              |
+| `tools/ask_question.ts`      | internal native tool + `request-input`    | every local node | visibility: `requires-request-input`                                  |
+| `tools/agent.ts`             | internal native tool + `dispatch`         | root node        | action: `subagent-call`; visibility: `root-session`                   |
+| `tools/task_update.ts`       | internal native tool + `dispatch`         | root node        | action: `task-update`; tasks mode; visibility: `delegated-task-child` |
+| `tools/task_cancel.ts`       | internal native tool + `dispatch`         | root node        | action: `task-cancel`; tasks mode; visibility: `root-session`         |
+| `tools/web_search.ts`        | `webSearch` sentinel + `provider-tool`    | every local node | materialized at eligible model calls                                  |
+| `channels/eve.ts`            | `eveChannel` factory                      | root node        | complete `/eve/v1` surface: protocol, callbacks, health, info         |
+| `channels/home.ts`           | `defineChannel`                           | root node        | `GET` and `HEAD` at `/`                                               |
 
 Every identity above is replaceable and disableable through ordinary slot
 composition. `glob` and `grep` are published at `eve/tools/glob` and
@@ -755,11 +755,11 @@ long qualified names, and persisted callback identity remain unchanged.
 
 ### Default sandbox
 
-Register a public `defineSandbox({})` value at `sandbox.ts` for all local nodes.
-An authored `sandbox.ts` replaces it through normal source composition. The
-standard semantics of a selected sandbox definition with no explicit backend
-still choose `defaultSandbox()` for the current environment, but graph
-resolution never invents a framework sandbox. Every successfully compiled
+Register a public `defineSandbox(() => environment.open())` value and exported
+`DefaultSandbox.environment()` at `sandbox.ts` for all local nodes. An authored
+`sandbox.ts` replaces both through normal source composition. Provider selection
+belongs to the exported environment; graph resolution never invents a framework
+sandbox. Every successfully compiled
 local node contains exactly one selected sandbox with a source ID and binding;
 disabling the only candidate cannot be repaired by a runtime fallback.
 

@@ -60,10 +60,10 @@ export function createTestAgentInfoResult(
         logicalPath: "sandbox.ts",
         owner,
       },
-      hasBootstrap: false,
-      hasOnSession: false,
+      environmentExportName: "environment",
       logicalPath: "sandbox.ts",
       owner,
+      revisionHash: "sandbox-revision",
       sourceId: "sandbox.ts",
       sourceKind: "module",
     },
@@ -71,7 +71,7 @@ export function createTestAgentInfoResult(
     skills: { dynamic: [], static: [] },
     subagents: { local: [], total: 0 },
     tools: { dynamic: [], static: [] },
-    version: 4,
+    version: 5,
     workspace: { resourceRoot: null, rootEntries: [] },
   };
 }

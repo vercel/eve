@@ -90,7 +90,7 @@ async function publish(input: unknown, toolContext: ToolContext) {
   const title = input.title;
   const operationId = publicationOperationId(toolContext);
   const sandbox = await toolContext.getSandbox();
-  return await withSelfModificationWorkspaceLock(`sandbox:${sandbox.id}`, async () => {
+  return await withSelfModificationWorkspaceLock(`sandbox:${toolContext.session.id}`, async () => {
     const workspace = await readPreparedSelfModificationWorkspace({
       ...deployed,
       sandbox,

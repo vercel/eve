@@ -84,7 +84,7 @@ describe("validateSessionCheckpointStep", () => {
 
 function createCheckpoint(): SessionCheckpoint {
   return {
-    version: 4,
+    version: 6,
     sessionTimeoutMs: false,
     mode: "conversation",
     serializedContext: {},

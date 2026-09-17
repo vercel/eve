@@ -15,7 +15,7 @@ describe("just-bash sandbox deletion", () => {
     await writeFile(join(rootPath, "state.txt"), "persisted");
     const dispose = vi.fn(async () => {});
     const sandbox = {
-      captureState: vi.fn(async () => null),
+      captureState: vi.fn(async () => ({ rootPath })),
       dispose,
       readFileBytes: vi.fn(async () => null),
       removePath: vi.fn(async () => {}),
@@ -26,9 +26,9 @@ describe("just-bash sandbox deletion", () => {
       },
       writeFiles: vi.fn(async () => {}),
     } satisfies BashSandbox;
-    const handle = createJustBashHandle(sandbox, "just-bash");
+    const handle = createJustBashHandle(sandbox);
 
-    await handle.delete();
+    await handle.onSessionDelete();
 
     expect(dispose).toHaveBeenCalledTimes(1);
     await expect(access(rootPath)).rejects.toMatchObject({ code: "ENOENT" });

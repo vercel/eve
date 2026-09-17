@@ -2,18 +2,23 @@ import { randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
-import type { SandboxNetworkPolicy } from "#shared/sandbox-network-policy.js";
+import {
+  isSandboxNetworkPolicy,
+  type SandboxNetworkPolicy,
+} from "#shared/sandbox-network-policy.js";
 
 export const MICROSANDBOX_METADATA_VERSION = 2;
 export const MICROSANDBOX_METADATA_FILE_NAME = "metadata.json";
 
 export interface MicrosandboxTemplateMetadata {
+  readonly image?: string;
   readonly optionsHash: string;
   readonly snapshotName: string;
   readonly version: typeof MICROSANDBOX_METADATA_VERSION;
 }
 
 export interface MicrosandboxSessionMetadata {
+  readonly image?: string;
   readonly networkPolicy?: SandboxNetworkPolicy;
   readonly optionsHash: string;
   readonly sandboxName: string;
@@ -37,6 +42,7 @@ export async function readTemplateMetadata(
     return null;
   }
   return {
+    image: typeof metadata.image === "string" ? metadata.image : undefined,
     optionsHash: metadata.optionsHash,
     snapshotName: metadata.snapshotName,
     version: MICROSANDBOX_METADATA_VERSION,
@@ -63,12 +69,14 @@ export function readSessionMetadataRecord(value: unknown): MicrosandboxSessionMe
   if (
     value.version !== MICROSANDBOX_METADATA_VERSION ||
     typeof value.optionsHash !== "string" ||
-    typeof value.sandboxName !== "string"
+    typeof value.sandboxName !== "string" ||
+    (value.networkPolicy !== undefined && !isSandboxNetworkPolicy(value.networkPolicy))
   ) {
     return null;
   }
   return {
-    networkPolicy: value.networkPolicy as SandboxNetworkPolicy | undefined,
+    image: typeof value.image === "string" ? value.image : undefined,
+    networkPolicy: value.networkPolicy,
     optionsHash: value.optionsHash,
     sandboxName: value.sandboxName,
     stateSnapshotName:

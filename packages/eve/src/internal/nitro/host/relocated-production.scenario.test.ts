@@ -3,7 +3,6 @@ import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { prewarmBuiltAppSandboxes } from "#execution/sandbox/prewarm.js";
 import { useScenarioApp } from "#internal/testing/scenario-app.js";
 import { buildApplication } from "./build-application.js";
 import { startProductionServer } from "./start-production-server.js";
@@ -32,17 +31,16 @@ describe("relocated production applications", () => {
         "apps/service/agent/skills/probe.md":
           "---\ndescription: Probe the sandbox.\n---\nProbe content.",
         "apps/service/agent/sandbox/sandbox.ts": [
-          'import { justbash } from "eve/sandbox/just-bash";',
+          'import { defineSandbox } from "eve/sandbox";',
+          'import { JustBashSandbox } from "eve/sandbox/just-bash";',
           'import { marker } from "@/marker";',
-          "export default {",
-          "  backend: justbash(),",
-          '  revalidationKey: () => "relocated-v1",',
-          "  async bootstrap({ use }) {",
-          "    const sandbox = await use();",
+          "export const environment = JustBashSandbox.environment({",
+          "  prepare: async (sandbox) => {",
           "    const result = await sandbox.run({ command: `echo ${marker}` });",
           '    if (result.stdout.trim() !== "app-bootstrap") throw new Error("Wrong app alias");',
           "  },",
-          "};",
+          "});",
+          "export default defineSandbox(() => environment.open());",
         ].join("\n"),
         "apps/service/agent/extensions/acme.ts":
           'import extension from "@acme/relocated"; export default extension();',
@@ -90,19 +88,6 @@ describe("relocated production applications", () => {
     await expect(access(buildRoot)).rejects.toMatchObject({ code: "ENOENT" });
 
     const runtimeAppRoot = join(runtimeRoot, "apps", "service");
-    const prewarmedRoots: string[] = [];
-    const seededPaths: string[] = [];
-    await prewarmBuiltAppSandboxes({
-      appRoot: runtimeAppRoot,
-      dispatch: async ({ backend, input }) => {
-        prewarmedRoots.push(input.runtimeContext.appRoot);
-        seededPaths.push(...(input.seedFiles ?? []).map((file) => file.path));
-        return await backend.prewarm(input);
-      },
-    });
-    expect(prewarmedRoots).toEqual([runtimeAppRoot]);
-    expect(seededPaths).toContain("$HOME/.agents/skills/probe/SKILL.md");
-
     const server = await startProductionServer(runtimeAppRoot, { host: "127.0.0.1", port: 0 });
     try {
       expect((await fetch(new URL("/eve/v1/health", server.url))).status).toBe(200);

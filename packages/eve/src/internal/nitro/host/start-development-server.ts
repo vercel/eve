@@ -5,7 +5,7 @@ import type { Nitro } from "nitro/types";
 
 import { createDevelopmentApplicationNitro } from "#internal/nitro/host/create-application-nitro.js";
 import { DrainedNitroDevServer } from "#internal/nitro/host/drained-nitro-dev-server.js";
-import { createDevelopmentNitroArtifactsConfig } from "#internal/nitro/host/artifacts-config.js";
+import { createDevelopmentGenerationArtifactsSource } from "#internal/nitro/host/artifacts-config.js";
 import type { AuthoredSourceWatcherHandle } from "#internal/nitro/host/dev-authored-source-watcher.js";
 import { prepareDevelopmentApplicationHost } from "#internal/nitro/host/prepare-application-host.js";
 import { buildDevelopmentHostCandidate } from "#internal/nitro/host/dev-host-candidate.js";
@@ -23,12 +23,11 @@ import { toErrorMessage } from "#shared/errors.js";
 import { isLoopbackServerUrl } from "#shared/network-address.js";
 import { readDevelopmentRuntimeArtifactsRevision } from "#services/dev-client/runtime-artifacts.js";
 import { handleDevRuntimeArtifactsRequest } from "#internal/nitro/routes/dev-runtime-artifacts.js";
-import { resolveNitroCompiledArtifactsSource } from "#internal/nitro/routes/runtime-artifacts.js";
 import {
   pruneLocalSandboxTemplatesInBackground,
   stopDevelopmentSandboxResources,
 } from "#execution/sandbox/bindings/local.js";
-import { startDevelopmentSandboxPrewarmInBackground } from "#execution/sandbox/development-prewarm.js";
+import { prewarmDevelopmentSandboxes } from "#execution/sandbox/development-prewarm.js";
 import {
   createDevelopmentSandboxRunId,
   EVE_DEVELOPMENT_SANDBOX_RUN_ID_ENV,
@@ -436,11 +435,19 @@ async function startNitroDevelopmentServer(
       options.onBootProgress,
     );
     preparedDevelopmentHost = preparedHost;
-    const compiledArtifactsSource = resolveNitroCompiledArtifactsSource(
-      createDevelopmentNitroArtifactsConfig({
-        appRoot: preparedHost.appRoot,
-        configuredWorld: preparedHost.compileResult.manifest.config.experimental?.workflow?.world,
-      }),
+    await devBootPhase(
+      "preparing sandbox templates",
+      () =>
+        prewarmDevelopmentSandboxes({
+          appRoot: preparedHost.appRoot,
+          compiledArtifactsSource: createDevelopmentGenerationArtifactsSource({
+            appRoot: preparedHost.appRoot,
+            configuredWorld:
+              preparedHost.compileResult.manifest.config.experimental?.workflow?.world,
+            runtimeAppRoot: preparedHost.generation.runtimeAppRoot,
+          }),
+        }),
+      options.onBootProgress,
     );
     pruneLocalSandboxTemplatesInBackground(preparedHost.appRoot);
     const activeNitro = await devBootPhase(
@@ -523,10 +530,6 @@ async function startNitroDevelopmentServer(
       options.onBootProgress,
     );
     await workflowWorld?.start();
-    startDevelopmentSandboxPrewarmInBackground({
-      appRoot: preparedHost.appRoot,
-      compiledArtifactsSource,
-    });
 
     const rebuildCoordinator = await createDevelopmentAuthoredRebuildCoordinator({
       devServer: activeDevServer,

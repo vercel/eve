@@ -1,18 +1,18 @@
 import { toErrorMessage } from "#shared/errors.js";
 
 /**
- * The slice of `SandboxBackendHandle` the shutdown registry needs.
+ * The provider handle capability the shutdown registry needs.
  * Structural so handles of any session-options generic register without
  * variance friction.
  */
 export interface ShutdownCapableSandboxHandle {
-  shutdown(): Promise<void>;
+  onRuntimeShutdown(): Promise<void>;
 }
 
 /**
- * Process-level registry of live sandbox backend handles, keyed by
- * backend name and session key so repeated `create` calls for the same
- * session replace rather than accumulate entries.
+ * Process-level registry of live sandbox provider handles, keyed by
+ * provider name and durable session ID so a resumed handle replaces the
+ * previous handle for that session rather than accumulating entries.
  *
  * `ensureSandboxAccess` registers every handle it opens; the server
  * shutdown path drains the registry so no sandbox compute outlives the
@@ -20,28 +20,27 @@ export interface ShutdownCapableSandboxHandle {
  */
 const activeSandboxHandles = new Map<string, ShutdownCapableSandboxHandle>();
 
-function createActiveSandboxHandleKey(backendName: string, sessionKey: string): string {
-  return `${backendName}\0${sessionKey}`;
+function createActiveSandboxHandleKey(providerName: string, sessionId: string): string {
+  return `${providerName}\0${sessionId}`;
 }
 
 /**
- * Registers a live sandbox handle for shutdown tracking. A handle
- * created later for the same backend and session key replaces the
- * previous entry.
+ * Registers a live sandbox handle for shutdown tracking. A later handle
+ * for the same provider and durable session replaces the previous entry.
  */
 export function trackActiveSandboxHandle(input: {
-  readonly backendName: string;
+  readonly providerName: string;
   readonly handle: ShutdownCapableSandboxHandle;
-  readonly sessionKey: string;
+  readonly sessionId: string;
 }): void {
   activeSandboxHandles.set(
-    createActiveSandboxHandleKey(input.backendName, input.sessionKey),
+    createActiveSandboxHandleKey(input.providerName, input.sessionId),
     input.handle,
   );
 }
 
 /**
- * Stops every tracked sandbox by calling `shutdown()` on each handle in
+ * Stops every tracked sandbox by invoking its runtime-shutdown hook in
  * parallel, then clears the registry. Failures are logged and never
  * thrown so one misbehaving sandbox cannot block server shutdown.
  */
@@ -51,7 +50,7 @@ export async function shutdownActiveSandboxHandles(input?: {
   const entries = [...activeSandboxHandles.entries()];
   activeSandboxHandles.clear();
 
-  const results = await Promise.allSettled(entries.map(([, handle]) => handle.shutdown()));
+  const results = await Promise.allSettled(entries.map(([, handle]) => handle.onRuntimeShutdown()));
 
   for (const [index, result] of results.entries()) {
     if (result.status === "rejected") {

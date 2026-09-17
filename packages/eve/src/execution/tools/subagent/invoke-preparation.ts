@@ -94,7 +94,7 @@ export async function prepareOwnerAgentInvocation(input: {
         session,
       }),
     ],
-    planSharesSandbox: ({ bundle, plan }) => ownerPlanSharesSandbox({ bundle, plan }),
+    planReusesOwnerSandbox: ({ bundle, plan }) => ownerPlanReusesSandbox({ bundle, plan }),
     serializedContext: input.serializedContext,
   });
 }
@@ -209,7 +209,7 @@ function classifyFreshStart(input: {
   };
 }
 
-function ownerPlanSharesSandbox(input: {
+function ownerPlanReusesSandbox(input: {
   readonly bundle: CompiledBundle;
   readonly plan: readonly OwnerAgentDispatchPlanEntry[];
 }): boolean {
@@ -222,7 +222,7 @@ function ownerPlanSharesSandbox(input: {
     return (
       isSelfDelegation ||
       input.bundle.graph?.nodesByNodeId.get(action.nodeId)?.sandboxRegistry.sandbox.definition
-        .inheritsParent === true
+        .kind === "parent"
     );
   });
 }

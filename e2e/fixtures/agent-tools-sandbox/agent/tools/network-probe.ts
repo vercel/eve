@@ -7,7 +7,7 @@ import { z } from "zod";
  * and reports whether it was blocked.
  *
  * The assertion the eval gates on is self-contained: under `deny-all` the
- * sandbox has no egress at all (the Docker backend detaches every network, the
+ * sandbox has no egress at all (the Docker provider detaches every network, the
  * Vercel firewall blocks the request), so `curl` fails without depending on
  * any external host being reachable. `blocked` plus a network-failure `stderr`
  * signature distinguishes a policy block from `curl` being missing.
@@ -18,6 +18,9 @@ export default defineTool({
   inputSchema: z.object({}),
   async execute(_input, ctx) {
     const sandbox = await ctx.getSandbox();
+    if (sandbox.setNetworkPolicy === undefined) {
+      throw new Error("The selected sandbox provider does not support mutable network policies.");
+    }
     await sandbox.setNetworkPolicy("deny-all");
     const result = await sandbox.run({
       command: "curl -sS --max-time 5 -o /dev/null https://example.com",

@@ -22,7 +22,7 @@ export function bindSandboxAbortSignal<TSession extends SandboxSession>(
   const compose = (callSignal: AbortSignal | undefined): AbortSignal =>
     AbortSignal.any(callSignal === undefined ? [abortSignal] : [abortSignal, callSignal]);
 
-  return {
+  const bound = {
     ...session,
     run: (options: SandboxRunOptions) =>
       session.run({ ...options, abortSignal: compose(options.abortSignal) }),
@@ -42,5 +42,8 @@ export function bindSandboxAbortSignal<TSession extends SandboxSession>(
       session.writeTextFile({ ...options, abortSignal: compose(options.abortSignal) }),
     removePath: (options: SandboxRemovePathOptions) =>
       session.removePath({ ...options, abortSignal: compose(options.abortSignal) }),
-  } as TSession;
+  } satisfies SandboxSession;
+
+  // The spread retains provider-specific lifecycle methods not declared on SandboxSession.
+  return bound as TSession;
 }

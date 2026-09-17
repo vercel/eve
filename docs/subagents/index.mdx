@@ -180,7 +180,7 @@ A declared subagent inherits nothing from the root's authored slots. Discovery t
 | Tools        | Inherited except root-only    | Own `tools/`                           |
 | Connections  | Inherited                     | Own `connections/`                     |
 | Skills       | Inherited                     | Own `skills/`                          |
-| Sandbox      | Shared with parent            | Own `sandbox/`, else framework default |
+| Sandbox      | Reuses the parent sandbox     | Own `sandbox/`, else framework default |
 | Hooks        | Inherited                     | Own `hooks/`                           |
 | Extensions   | Inherited contributions       | Own `extensions/`                      |
 | State        | Fresh                         | Fresh                                  |
@@ -189,7 +189,7 @@ A declared subagent inherits nothing from the root's authored slots. Discovery t
 
 For a declared subagent this means authoring or mounting anything the child needs. When two subagents need the same procedure, package the skill in a [workspace extension](./extensions#use-an-extension-in-a-workspace) and mount that extension in each subagent. Share typed helpers through `lib/`. The sandbox does not inherit from the parent; eve selects the default sandbox source unless the subagent authors `subagents/<id>/sandbox.ts` or seeds files via `subagents/<id>/sandbox/workspace/`.
 
-The root built-in `agent` tool is the exception. Its children share the root's sandbox and tools because they are copies of the same agent working on the same files.
+The root built-in `agent` tool is the exception. Its children reuse the root's sandbox and tools because they are copies of the same agent working on the same files.
 
 `defineState` is never shared, for either kind. Each child starts with fresh durable state.
 

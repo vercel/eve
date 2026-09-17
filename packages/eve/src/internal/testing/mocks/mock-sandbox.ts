@@ -116,7 +116,6 @@ export interface MockSandbox {
  * Builds an in-memory {@link MockSandbox} from a declarative descriptor.
  */
 export function mockSandbox(input: MockSandboxInput = {}): MockSandbox {
-  const sandboxId = input.id ?? "sbx_mock";
   const files = new Map<string, string>();
   const fileBytes = new Map<string, Buffer>();
   const writes: MockSandboxWrite[] = [];
@@ -179,7 +178,6 @@ export function mockSandbox(input: MockSandboxInput = {}): MockSandbox {
   }
 
   const baseSession: SandboxSession = {
-    id: sandboxId,
     resolvePath(path: string): string {
       return resolveWorkspacePath(path);
     },
@@ -249,10 +247,7 @@ export function mockSandbox(input: MockSandboxInput = {}): MockSandbox {
 
   const access: SandboxAccess = {
     async captureState(): Promise<SandboxState> {
-      return {
-        initialized: false,
-        session: null,
-      };
+      return { session: null };
     },
     async delete(): Promise<void> {
       await input.delete?.();

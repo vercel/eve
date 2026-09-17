@@ -34,8 +34,13 @@ import { emitVercelAgentSummary } from "#internal/nitro/host/build-vercel-agent-
 import { tryReadExtensionBuildConfig } from "#internal/nitro/host/build-extension.js";
 import { copyHostMiddlewareFunctions } from "#internal/nitro/host/copy-host-middleware.js";
 import { normalizeVercelServiceCrons } from "#internal/nitro/host/normalize-vercel-service-crons.js";
-import { prepareProductionApplicationHost } from "#internal/nitro/host/prepare-application-host.js";
+import {
+  prepareProductionApplicationHost,
+  refreshProductionCompiledArtifacts,
+} from "#internal/nitro/host/prepare-application-host.js";
+import { createProductionNitroArtifactsConfig } from "#internal/nitro/host/artifacts-config.js";
 import { runVercelBuildPrewarm } from "#internal/nitro/host/vercel-build-prewarm.js";
+import { prewarmAppSandboxes } from "#execution/sandbox/prewarm.js";
 import type { ApplicationBuildOptions } from "#internal/nitro/host/types.js";
 import { findClosestVercelOutputDirectory } from "#shared/vercel-output-directory.js";
 import { toErrorMessage } from "#shared/errors.js";
@@ -311,6 +316,7 @@ async function buildApplicationInWorkspace(
     );
   }
   const publicRoutePrefix = options.publicRoutePrefix ?? inferredPublicRoutePrefix;
+  const sandboxScope = createProductionNitroArtifactsConfig(workspace.appRoot).sandboxScope;
   const nitro = await measureBuildPhase(profiler, "nitro.create", () =>
     createProductionApplicationNitro(preparedHost, {
       buildDir: workspace.nitro.buildDir,
@@ -321,26 +327,33 @@ async function buildApplicationInWorkspace(
   );
 
   try {
-    // Run sandbox prewarm before bundling so a prewarm failure aborts the
-    // build before we spend time producing output we would never deploy.
-    if (isVercelBuild && !options.skipVercelSandboxPrewarm) {
-      await measureBuildPhase(profiler, "sandbox.prewarm", () =>
-        runVercelBuildPrewarm({
-          appRoot: preparedHost.appRoot,
-          compiledArtifactsSource: createDiskRuntimeCompiledArtifactsSource(
-            workspace.compiler.rootDir,
-            {
-              moduleMapLoaderPath: resolvePackageSourceFilePath(
-                "src/internal/authored-module-map-loader.ts",
-              ),
-              sandboxAppRoot: preparedHost.appRoot,
-            },
-          ),
-          log(message) {
-            console.log(message);
+    // Complete sandbox preparation before bundling so runtime never needs to
+    // mutate or repair the prepared artifacts embedded in production output.
+    if (!options.skipVercelSandboxPrewarm) {
+      const prewarmInput = {
+        appRoot: preparedHost.appRoot,
+        compiledArtifactsSource: createDiskRuntimeCompiledArtifactsSource(
+          workspace.compiler.rootDir,
+          {
+            moduleMapLoaderPath: resolvePackageSourceFilePath(
+              "src/internal/authored-module-map-loader.ts",
+            ),
+            sandboxAppRoot: preparedHost.appRoot,
+            sandboxScope,
           },
-        }),
-      );
+        ),
+        log(message: string) {
+          console.log(message);
+        },
+      };
+      await measureBuildPhase(profiler, "sandbox.prewarm", async () => {
+        if (isVercelBuild) {
+          await runVercelBuildPrewarm(prewarmInput);
+        } else {
+          await prewarmAppSandboxes(prewarmInput);
+        }
+      });
+      await refreshProductionCompiledArtifacts(preparedHost, workspace.host.artifactsDir);
     }
     await buildNitroOutput(nitro, profiler, "nitro");
     if (isVercelBuild) {

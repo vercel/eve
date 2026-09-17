@@ -56,7 +56,7 @@ that has not reached its next turn dispatch has not migrated yet.
 Transparent rollback to the former execution model is unsupported. Retire and
 restart affected sessions before rolling back.
 
-Nitro hosts the HTTP routes and workflow entrypoints. It does not supply the workflow state store or the sandbox runtime. Those are separate adapters: Workflow uses the active world implementation, and Sandbox uses the backend from `agent/sandbox` or `defaultBackend()`.
+Nitro hosts the HTTP routes and workflow entrypoints. It does not supply the workflow state store or the sandbox runtime. Those are separate adapters: Workflow uses the active world implementation, and Sandbox uses the backend from `agent/sandbox` or the default sandbox environment.
 
 For advanced self-hosted deployments, the root `agent.ts` can select the installed Workflow world package to use with `experimental.workflow.world`:
 

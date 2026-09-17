@@ -1,48 +1,29 @@
-/**
- * Image pull behavior for the Docker sandbox backend.
- *
- * - `"if-not-present"` (default): pull the base image only when it is
- *   missing from the local image store.
- * - `"always"`: pull before every template build so the image floats to
- *   the registry's latest digest.
- * - `"never"`: never pull; fail when the image is missing locally.
- */
+import type { SandboxSession } from "#shared/sandbox-session.js";
+import type {
+  SandboxNetworkOptions,
+  SandboxNetworkPolicy,
+} from "#shared/sandbox-network-policy.js";
+
+/** Image pull behavior for Docker sandbox environments. */
 export type DockerSandboxPullPolicy = "if-not-present" | "always" | "never";
 
-/**
- * Initial network policy for sandboxes created by the Docker backend.
- * Docker supports coarse-grained egress control only: `"allow-all"`
- * attaches the container to the default bridge network, `"deny-all"`
- * runs it with networking disabled. Domain-level policies and
- * credential brokering require `vercel()`.
- */
-export type DockerSandboxNetworkPolicy = "allow-all" | "deny-all";
+/** Coarse-grained egress policy for one live Docker sandbox. */
+export type DockerSandboxNetworkPolicy = Extract<SandboxNetworkPolicy, "allow-all" | "deny-all">;
 
-/**
- * Options accepted by `docker(opts)`.
- */
-export interface DockerSandboxCreateOptions {
-  /**
-   * Base container image for templates and sessions. Defaults to eve's
-   * published `ghcr.io/vercel/eve` image, tagged with the installed eve
-   * version without build metadata or `EVE_SANDBOX_IMAGE_TAG` when set. Framework setup creates
-   * `/workspace` and verifies Bash. Install
-   * any authored runtime tools in sandbox bootstrap or provide them through a
-   * custom image.
-   */
+/** Options shared by every sandbox created from one Docker environment. */
+export interface DockerSandboxEnvironmentOptions {
+  /** Base container image. Defaults to eve's published sandbox image. */
   readonly image?: string;
-  /**
-   * Environment variables baked into every container the backend
-   * creates (template builds and sessions).
-   */
+  /** Environment variables baked into template builds and live containers. */
   readonly env?: Readonly<Record<string, string>>;
-  /**
-   * Base image pull behavior. Defaults to `"if-not-present"`.
-   */
+  /** Base image pull behavior. @default "if-not-present" */
   readonly pullPolicy?: DockerSandboxPullPolicy;
-  /**
-   * Initial network policy for created containers. Defaults to
-   * `"allow-all"`.
-   */
+  /** Idempotent setup captured in the prepared image. */
+  readonly prepare?: (sandbox: SandboxSession) => Promise<void> | void;
+}
+
+/** Options applied when eve creates one live Docker sandbox. */
+export interface DockerSandboxRuntimeOptions extends SandboxNetworkOptions {
+  /** Initial network policy for this container. @default "allow-all" */
   readonly networkPolicy?: DockerSandboxNetworkPolicy;
 }

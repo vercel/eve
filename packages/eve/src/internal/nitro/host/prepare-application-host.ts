@@ -132,6 +132,17 @@ export async function prepareProductionApplicationHost(
   });
 }
 
+export async function refreshProductionCompiledArtifacts(
+  host: PreparedApplicationHost,
+  outDir: string,
+): Promise<void> {
+  await writeCompiledArtifactsFiles({
+    compileResult: host.compileResult,
+    defaultWorkflowWorld: resolveProductionWorkflowWorldTarget(),
+    outDir,
+  });
+}
+
 function createPreparedApplicationHost(input: {
   readonly compileResult: CompileAgentResult;
   readonly compiledArtifacts: PreparedApplicationHost["compiledArtifacts"];

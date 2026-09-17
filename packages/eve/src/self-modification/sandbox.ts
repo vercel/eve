@@ -1,15 +1,14 @@
-import { shellQuote } from "#shared/shell-quote.js";
-import { SANDBOX_BACKEND_PROBES, type DefaultSandboxProbes } from "#sandbox/backends/default.js";
 import {
-  defaultBackend,
   defineSandbox,
-  type SandboxBackend,
-  type SandboxDefinition,
-} from "#public/sandbox/index.js";
-import { justbash } from "#public/sandbox/just-bash.js";
-import { microsandbox } from "#public/sandbox/microsandbox.js";
-import { vercel } from "#public/sandbox/vercel.js";
-
+  type RuntimeSandboxSession,
+  type SandboxSelectorContext,
+} from "#public/definitions/sandbox.js";
+import { JustBashSandbox } from "#sandbox/providers/just-bash.js";
+import { MicrosandboxSandbox } from "#sandbox/providers/microsandbox.js";
+import { SANDBOX_PROVIDER_PROBES, type DefaultSandboxProbes } from "#sandbox/providers/default.js";
+import { VercelSandbox } from "#sandbox/providers/vercel.js";
+import { bindSandboxEnvironment } from "#shared/sandbox-environment.js";
+import { shellQuote } from "#shared/shell-quote.js";
 import { resolveSelfModificationConfig, type SelfModificationConfig } from "./config.js";
 import { createGitHubCredentialProvider } from "./credentials.js";
 import { createSelfModificationFilesystem } from "./filesystem.js";
@@ -18,47 +17,48 @@ import { resolveSelfModificationMode } from "./mode.js";
 import { SELF_MODIFICATION_BASELINE_NETWORK_POLICY } from "./network-policy.js";
 
 export interface SelfModificationSandboxOptions {
-  /**
-   * Production backend. Deployed self-modification owns an allow-all network
-   * policy and temporarily adds a credential transform while checking out its
-   * source. When omitted, eve selects Vercel Sandbox on Vercel or microsandbox
-   * on a supported self-hosted system.
-   */
-  readonly backend?: SandboxBackend;
-  /** Policy shared with the agent and extension mount. */
   readonly config?: SelfModificationConfig;
 }
 
-type SelfModificationSandboxProbes = Pick<
-  DefaultSandboxProbes,
-  "isDeployedOnVercel" | "isMicrosandboxSupported"
->;
+export interface SelfModificationSandbox {
+  (context: SandboxSelectorContext): Promise<RuntimeSandboxSession> | RuntimeSandboxSession;
+}
 
-/** Defines the local source mount or isolated production proposal workspace. */
+type Probes = Pick<DefaultSandboxProbes, "isDeployedOnVercel" | "isMicrosandboxSupported">;
+type DeployedSelfModificationEnvironment =
+  | ReturnType<typeof MicrosandboxSandbox.environment>
+  | ReturnType<typeof VercelSandbox.environment>;
+
 export function defineSelfModificationSandbox(
   options: SelfModificationSandboxOptions = {},
-): SandboxDefinition {
+): SelfModificationSandbox {
   const config = resolveSelfModificationConfig(options.config);
+  const mode = resolveSelfModificationMode(config);
+  if (mode !== "deployed") {
+    const environment =
+      mode === "local"
+        ? JustBashSandbox.environment({ filesystem: createSelfModificationFilesystem })
+        : JustBashSandbox.environment();
+    return bindSandboxEnvironment(
+      defineSandbox(() => environment.open()),
+      environment,
+    );
+  }
 
-  return defineSandbox({
-    backend: () => {
-      const mode = resolveSelfModificationMode(config);
-      if (mode === "local") return justbash({ filesystem: createSelfModificationFilesystem });
-      if (mode === "disabled") return options.backend ?? defaultBackend();
-      return selectDeployedSelfModificationBackend(options.backend, SANDBOX_BACKEND_PROBES);
-    },
-    async onSession({ ctx, use }) {
-      if (resolveSelfModificationMode(config) !== "deployed" || config.deployed === undefined)
-        return;
-      if (ctx.session.parent === undefined) {
-        throw new Error(
-          "Production self-modification workspaces require a delegated child session.",
-        );
+  const environment = selectDeployedSelfModificationEnvironment(SANDBOX_PROVIDER_PROBES);
+  return bindSandboxEnvironment(
+    defineSandbox(async ({ session }) => {
+      const sandbox = await environment.open({
+        networkPolicy: SELF_MODIFICATION_BASELINE_NETWORK_POLICY,
+      });
+      if (config.deployed === undefined) return sandbox;
+      if (session.parent === undefined)
+        throw new Error("Production self-modification requires a child session.");
+      if (sandbox.setNetworkPolicy === undefined) {
+        throw new Error("Production self-modification requires mutable sandbox network policy.");
       }
-
+      const capableSandbox = { ...sandbox, setNetworkPolicy: sandbox.setNetworkPolicy };
       const deployed = config.deployed;
-      const sandbox = await use();
-      await sandbox.setNetworkPolicy(SELF_MODIFICATION_BASELINE_NETWORK_POLICY);
       const token = await createGitHubCredentialProvider(deployed.credentials).resolve({
         capability: "checkout",
         repository: deployed.repository,
@@ -66,52 +66,34 @@ export function defineSelfModificationSandbox(
       await prepareSelfModificationWorkspace({
         directory: deployed.directory,
         repository: deployed.repository,
-        sandbox,
+        sandbox: capableSandbox,
         targetBranch: deployed.targetBranch,
         token,
       });
-      const applicationRoot =
+      const root =
         deployed.directory === "." ? REPOSITORY_PATH : `${REPOSITORY_PATH}/${deployed.directory}`;
-      const mounted = await sandbox.run({
-        command: `rm -rf /source && ln -s ${shellQuote(`${applicationRoot}/agent`)} /source`,
+      const result = await sandbox.run({
+        command: `rm -rf /source && ln -s ${shellQuote(`${root}/agent`)} /source`,
       });
-      if (mounted.exitCode !== 0) {
-        throw new Error("Self-modification could not mount the production agent source.");
-      }
-    },
-  });
+      if (result.exitCode !== 0)
+        throw new Error("Self-modification could not mount the agent source.");
+      return sandbox;
+    }),
+    environment,
+  );
 }
 
-/**
- * Deployed self-modification deliberately selects a backend that can inject
- * GitHub auth at the network boundary, keeping the credential outside the
- * sandbox and agent. Docker and just-bash do not provide that separation.
- * Internal—exported for tests, which inject availability probes.
- */
-export function selectDeployedSelfModificationBackend(
-  configured: SandboxBackend | undefined,
-  probes: SelfModificationSandboxProbes,
-): SandboxBackend {
-  if (configured !== undefined) {
-    if (configured.name === "vercel" || configured.name === "microsandbox") return configured;
-    throw unsupportedBackend(configured.name);
-  }
+export function selectDeployedSelfModificationEnvironment(
+  probes: Probes,
+): DeployedSelfModificationEnvironment {
   if (probes.isDeployedOnVercel()) {
-    return vercel({ networkPolicy: SELF_MODIFICATION_BASELINE_NETWORK_POLICY });
+    return VercelSandbox.environment();
   }
   if (probes.isMicrosandboxSupported()) {
-    return microsandbox({ networkPolicy: SELF_MODIFICATION_BASELINE_NETWORK_POLICY });
+    return MicrosandboxSandbox.environment();
   }
-  throw unsupportedBackend();
-}
-
-function unsupportedBackend(name?: string): Error {
-  const reason =
-    name === undefined
-      ? "No supported backend is available."
-      : `The configured ${name} backend does not support them.`;
-  return new Error(
-    `Deployed self-modification requires runtime credential transforms. ${reason} Use vercel() on Vercel or microsandbox() on a supported self-hosted system.`,
+  throw new Error(
+    "Deployed self-modification requires runtime credential transforms. No supported provider is available. Use Vercel Sandbox or microsandbox on a supported self-hosted system.",
   );
 }
 

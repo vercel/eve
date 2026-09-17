@@ -1513,7 +1513,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
     }
 
     const status = subagentToolStatus(update.status);
-    // Subagents share the session's sandbox, so their reads and writes feed
+    // Subagents reuse the session's sandbox, so their reads and writes feed
     // the same file-content cache and their write blocks diff the same way.
     const presentation =
       update.status === "preparing"

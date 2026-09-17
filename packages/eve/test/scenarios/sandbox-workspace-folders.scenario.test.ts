@@ -7,7 +7,8 @@ import { discoverAgent } from "../../src/discover/discover-agent.js";
 import { resolveDiscoveryProject } from "../../src/discover/project.js";
 // The just-bash engine keeps this scenario hermetic (no Docker daemon
 // requirement); the workspace devDependency provides the install.
-import { createJustBashSandboxBackend } from "../../src/execution/sandbox/bindings/just-bash.js";
+import { createJustBashSandboxProvider } from "../../src/execution/sandbox/bindings/just-bash.js";
+import { createSandboxProviderHarness } from "../../src/internal/testing/sandbox-provider-harness.js";
 import { useScenarioApp } from "../../src/internal/testing/scenario-app.js";
 import { SANDBOX_WORKSPACES_DESCRIPTOR } from "../../src/internal/testing/scenario-apps/sandbox-workspaces.js";
 import { materializeWorkspaceDirectory } from "../../src/runtime/workspace/seed-files.js";
@@ -38,64 +39,60 @@ describe("sandbox workspace folder convention", () => {
     ).flat();
 
     const appRoot = await createScratchDirectory("eve-sandbox-workspace-folders-");
-    const backend = createJustBashSandboxBackend();
+    const backend = createSandboxProviderHarness(createJustBashSandboxProvider(), undefined);
 
-    await backend.prewarm({
-      runtimeContext: { appRoot },
+    await backend.prepare({
+      appRoot,
       seedFiles: files.map((file) => ({ content: file.content, path: file.path })),
-      templateKey: "template-default-workspace",
     });
 
-    const handle = await backend.create({
-      runtimeContext: { appRoot },
-      sessionKey: "session-default-workspace",
-      templateKey: "template-default-workspace",
+    const handle = await backend.openSession({
+      appRoot,
+      sandboxName: "session-default-workspace",
     });
 
-    const notesContent = await handle.session.readTextFile({ path: "/workspace/notes.md" });
+    const notesContent = await handle.sandbox.readTextFile({ path: "/workspace/notes.md" });
     expect(notesContent).not.toBeNull();
-    expect(handle.session.resolvePath("/workspace/notes.md")).toBe("/workspace/notes.md");
-    expect(handle.session.resolvePath("notes.md")).toBe("/workspace/notes.md");
+    expect(handle.sandbox.resolvePath("/workspace/notes.md")).toBe("/workspace/notes.md");
+    expect(handle.sandbox.resolvePath("notes.md")).toBe("/workspace/notes.md");
 
     // Missing files resolve to `null` instead of throwing.
-    const missing = await handle.session.readTextFile({ path: "/workspace/does-not-exist.txt" });
+    const missing = await handle.sandbox.readTextFile({ path: "/workspace/does-not-exist.txt" });
     expect(missing).toBeNull();
 
     // writeFile round-trip: the session can layer a new file on top of
     // the seeded workspace without running a shell command.
-    await handle.session.writeTextFile({ content: "round-trip", path: "/workspace/authored.txt" });
-    const roundTrip = await handle.session.readTextFile({ path: "/workspace/authored.txt" });
+    await handle.sandbox.writeTextFile({ content: "round-trip", path: "/workspace/authored.txt" });
+    const roundTrip = await handle.sandbox.readTextFile({ path: "/workspace/authored.txt" });
     expect(roundTrip).toBe("round-trip");
 
-    await handle.shutdown();
+    await handle.onRuntimeShutdown();
   });
 
   it("opens an empty prewarmed template when the sandbox has no authored workspace files", async () => {
     const appRoot = await createScratchDirectory("eve-sandbox-no-workspace-");
-    const backend = createJustBashSandboxBackend();
+    const backend = createSandboxProviderHarness(createJustBashSandboxProvider(), undefined);
 
-    await backend.prewarm({
-      runtimeContext: { appRoot },
+    await backend.prepare({
+      appRoot,
       seedFiles: [],
-      templateKey: "template-empty-workspace",
     });
 
-    const handle = await backend.create({
-      runtimeContext: { appRoot },
-      sessionKey: "session-empty-workspace",
-      templateKey: "template-empty-workspace",
+    const handle = await backend.openSession({
+      appRoot,
+      sandboxName: "session-empty-workspace",
     });
 
     // An empty prewarmed template snapshots a clean `/workspace` and
     // nothing else; the session opens against it without writing
     // anything visible at the workspace root.
-    const result = await handle.session.run({
+    const result = await handle.sandbox.run({
       command: "ls /workspace 2>/dev/null | wc -l",
     });
     expect(result.exitCode).toBe(0);
     expect(Number(result.stdout.trim())).toBe(0);
 
-    await handle.shutdown();
+    await handle.onRuntimeShutdown();
   });
 
   it("materializes a fixture default workspace folder into a deterministic file list", async () => {
