@@ -10,12 +10,14 @@ import type {
 } from "#public/sandbox/vercel-image-sandbox.js";
 import type { SandboxEnvironment } from "#shared/sandbox-environment.js";
 import { defineSandboxProvider } from "#shared/sandbox-provider.js";
+import type { MutableNetworkSandboxSession } from "#shared/sandbox-session.js";
 
 const provider = defineSandboxProvider<
   ExperimentalVercelImageEnvironmentOptions,
   ExperimentalVercelImageRuntimeOptions,
   VercelImagePreparedArtifact,
-  VercelImageSessionState
+  VercelImageSessionState,
+  MutableNetworkSandboxSession
 >({
   name: VERCEL_IMAGE_PROVIDER_NAME,
   environment: (options) => createVercelImageSandboxProvider(options),
@@ -25,7 +27,7 @@ export const ExperimentalVercelDockerfile = {
   name: VERCEL_IMAGE_PROVIDER_NAME,
   environment(
     options: ExperimentalVercelImageEnvironmentOptions = {},
-  ): SandboxEnvironment<ExperimentalVercelImageRuntimeOptions> {
+  ): SandboxEnvironment<ExperimentalVercelImageRuntimeOptions, MutableNetworkSandboxSession> {
     return provider.environment(options);
   },
 };
