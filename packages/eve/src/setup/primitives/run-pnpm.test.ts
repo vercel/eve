@@ -76,6 +76,30 @@ describe("runPnpmInstall", () => {
     );
   });
 
+  test("supports prompt-free installs with a scoped release-age override", async () => {
+    expect(
+      packageManagerInstallSucceeded(
+        await runPnpmInstall("/tmp/eve-agent", {
+          autoApprove: true,
+          minimumReleaseAgeMinutes: 0,
+        }),
+      ),
+    ).toBe(true);
+
+    expect(mockedSpawn).toHaveBeenCalledWith(
+      "pnpm",
+      [
+        "--dir",
+        "/tmp/eve-agent",
+        "install",
+        "--no-frozen-lockfile",
+        "--yes",
+        "--config.minimum-release-age=0",
+      ],
+      expect.objectContaining({ cwd: "/tmp/eve-agent", stdio: "inherit" }),
+    );
+  });
+
   test("installs a claimed workspace member with native workspace semantics", async () => {
     mockedExistsSync.mockImplementation((path) => path === "/tmp/pnpm-workspace.yaml");
     mockMembershipProbe(["/tmp", "/tmp/eve-agent"]);

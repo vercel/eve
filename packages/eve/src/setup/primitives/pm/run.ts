@@ -195,7 +195,7 @@ export function spawnPnpm(
 
 export function runPnpmInstall(
   projectRoot: string,
-  options: RunPackageManagerOptions = {},
+  options: RunInstallOptions = {},
 ): Promise<PackageManagerInstallResult> {
   return runPackageManagerInstall("pnpm", projectRoot, options);
 }

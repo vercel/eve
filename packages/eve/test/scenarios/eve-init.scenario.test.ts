@@ -16,6 +16,12 @@ import { useTemporaryDirectories } from "../../src/internal/testing/use-temporar
 const EVE_BIN_PATH = fileURLToPath(new URL("../../bin/eve.js", import.meta.url));
 const runFile = promisify(execFile);
 const RELEASE_AGE_MINUTES = "2880";
+const PNPM_INIT_INSTALL_ARGUMENTS = [
+  "install",
+  "--no-frozen-lockfile",
+  "--yes",
+  "--config.minimum-release-age=0",
+] as const;
 
 const createScratchDirectory = useTemporaryDirectories();
 
@@ -206,7 +212,8 @@ describe("eve init smoke", () => {
       "minimumReleaseAgeStrict: true",
     );
 
-    // Exercise publication lag even when the checkout's version is already available on npm.
+    // Exercise the unpublished eve override independently of the initial
+    // scaffold install's release-age bypass.
     const manifestPath = join(projectDir, "package.json");
     const manifest = JSON.parse(await readFile(manifestPath, "utf8")) as {
       dependencies: Record<string, string>;
@@ -214,10 +221,17 @@ describe("eve init smoke", () => {
     manifest.dependencies.eve = "0.0.0-eve-init-unpublished";
     await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
     await expect(
-      runFile("pnpm", ["add", "--ignore-scripts", "--lockfile-only", "is-number@7.0.0"], {
-        cwd: projectDir,
-        env,
-      }),
+      runFile(
+        "pnpm",
+        [
+          "add",
+          "--ignore-scripts",
+          "--lockfile-only",
+          "--config.minimum-release-age=0",
+          "is-number@7.0.0",
+        ],
+        { cwd: projectDir, env },
+      ),
     ).resolves.toMatchObject({ stderr: expect.any(String) });
     const lockfile = (await loadYaml(join(projectDir, "pnpm-lock.yaml"))) as {
       overrides?: Record<string, string>;
@@ -256,7 +270,7 @@ describe("eve init smoke", () => {
     await expect(pathExists(join(projectDir, "vercel.json"))).resolves.toBe(false);
     expect(await fakePnpm.readCalls()).toEqual([
       {
-        args: ["--dir", canonicalProjectDir, "install", "--no-frozen-lockfile"],
+        args: ["--dir", canonicalProjectDir, ...PNPM_INIT_INSTALL_ARGUMENTS],
         cwd: canonicalProjectDir,
       },
     ]);
@@ -294,7 +308,9 @@ describe("eve init smoke", () => {
       "export default withEve(nextConfig);",
     );
     const [installCall, ...remainingCalls] = await fakePnpm.readCalls();
-    expect(installCall?.args.slice(-2)).toEqual(["install", "--no-frozen-lockfile"]);
+    expect(installCall?.args.slice(-PNPM_INIT_INSTALL_ARGUMENTS.length)).toEqual(
+      PNPM_INIT_INSTALL_ARGUMENTS,
+    );
     expect(remainingCalls).toEqual([]);
   });
 
@@ -355,7 +371,9 @@ describe("eve init smoke", () => {
       "minimumReleaseAgeStrict: true",
     );
     const calls = await fakePnpm.readCalls();
-    expect(calls[0]?.args.slice(-2)).toEqual(["install", "--no-frozen-lockfile"]);
+    expect(calls[0]?.args.slice(-PNPM_INIT_INSTALL_ARGUMENTS.length)).toEqual(
+      PNPM_INIT_INSTALL_ARGUMENTS,
+    );
     expect(calls).toHaveLength(1);
   });
 
@@ -374,7 +392,7 @@ describe("eve init smoke", () => {
     await expect(pathExists(join(scratch, ".git"))).resolves.toBe(true);
     expect(await fakePnpm.readCalls()).toEqual([
       {
-        args: ["--dir", canonicalProjectDir, "install", "--no-frozen-lockfile"],
+        args: ["--dir", canonicalProjectDir, ...PNPM_INIT_INSTALL_ARGUMENTS],
         cwd: canonicalProjectDir,
       },
     ]);
@@ -413,7 +431,7 @@ describe("eve init smoke", () => {
     await expect(pathExists(join(scratch, ".git"))).resolves.toBe(true);
     expect(await fakePnpm.readCalls()).toEqual([
       {
-        args: ["--dir", canonicalProjectDir, "install", "--no-frozen-lockfile"],
+        args: ["--dir", canonicalProjectDir, ...PNPM_INIT_INSTALL_ARGUMENTS],
         cwd: canonicalProjectDir,
       },
     ]);
@@ -441,7 +459,7 @@ describe("eve init smoke", () => {
     // later in a controllable background process.
     expect(await fakePnpm.readCalls()).toEqual([
       {
-        args: ["--dir", canonicalProjectDir, "install", "--no-frozen-lockfile"],
+        args: ["--dir", canonicalProjectDir, ...PNPM_INIT_INSTALL_ARGUMENTS],
         cwd: canonicalProjectDir,
       },
     ]);

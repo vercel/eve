@@ -401,6 +401,8 @@ async function runInitSteps(input: {
       project.packageManager,
       project.projectPath,
       {
+        autoApprove: true,
+        minimumReleaseAgeMinutes: 0,
         progressDetails: process.stdout.isTTY === true && !debug,
         onOutput: (line) => {
           if (line.text.trim() !== "") {

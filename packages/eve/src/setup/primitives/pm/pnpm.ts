@@ -242,6 +242,10 @@ export const pnpmPackageManager = {
   installArguments: (options) => [
     "install",
     "--no-frozen-lockfile",
+    ...(options.autoApprove === true ? ["--yes"] : []),
+    ...(options.minimumReleaseAgeMinutes === undefined
+      ? []
+      : [`--config.minimum-release-age=${options.minimumReleaseAgeMinutes}`]),
     ...(options.ignoreWorkspace === true ? ["--ignore-workspace"] : []),
   ],
   prepareArguments: (projectRoot, args) => ["--dir", projectRoot, ...args],
