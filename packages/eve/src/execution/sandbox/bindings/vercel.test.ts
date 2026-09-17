@@ -1234,10 +1234,7 @@ describe("createVercelSandbox", () => {
         }),
       },
     };
-    const stableDelete = vi.fn().mockResolvedValue(undefined);
-    const stableGet = vi.fn().mockResolvedValue({ delete: stableDelete });
     const backend = createTestVercelSandbox({
-      loadDeleteSandboxModule: async () => ({ Sandbox: { get: stableGet } }) as never,
       loadSandboxModule: async () => sandboxModule as never,
     });
 
@@ -1248,14 +1245,13 @@ describe("createVercelSandbox", () => {
       templateKey: "template-key",
     });
 
-    expect(staleSession.delete).not.toHaveBeenCalled();
-    expect(stableGet).toHaveBeenCalledWith({
+    expect(sandboxModule.Sandbox.get).toHaveBeenCalledWith({
       fetch: expect.any(Function),
       name: "persisted-sandbox-name",
       resume: false,
       signal: undefined,
     });
-    expect(stableDelete).toHaveBeenCalledWith({
+    expect(staleSession.delete).toHaveBeenCalledWith({
       deleteOrphanSnapshots: true,
       signal: undefined,
     });
@@ -1302,9 +1298,12 @@ describe("createVercelSandbox", () => {
     const stableDelete = vi.fn(async () => {
       order.push("sandbox-delete");
     });
-    const stableGet = vi.fn(async () => {
-      order.push("sandbox-get");
-      return { delete: stableDelete };
+    const get = vi.fn(async ({ name, resume }: { name: string; resume?: boolean }) => {
+      if (name === "session" && resume === false) {
+        order.push("sandbox-get");
+        return { delete: stableDelete };
+      }
+      return null;
     });
     const sandboxModule = {
       Sandbox: {
@@ -1312,11 +1311,10 @@ describe("createVercelSandbox", () => {
           .fn()
           .mockResolvedValueOnce(templateSandbox)
           .mockResolvedValueOnce(sessionSandbox),
-        get: vi.fn().mockResolvedValue(null),
+        get,
       },
     };
     const backend = createTestVercelSandbox({
-      loadDeleteSandboxModule: async () => ({ Sandbox: { get: stableGet } }) as never,
       loadSandboxModule: async () => sandboxModule as never,
     });
     await backend.prewarm({
@@ -1334,7 +1332,7 @@ describe("createVercelSandbox", () => {
     await expect(handle.delete({ abortSignal })).resolves.toBeUndefined();
 
     expect(order).toEqual(["stop", "sandbox-get", "sandbox-delete"]);
-    expect(stableGet).toHaveBeenCalledWith({
+    expect(get).toHaveBeenCalledWith({
       fetch: expect.any(Function),
       name: "session",
       resume: false,

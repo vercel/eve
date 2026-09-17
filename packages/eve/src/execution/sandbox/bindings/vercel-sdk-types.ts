@@ -7,7 +7,3 @@ export type VercelGetOptions = Parameters<typeof Vercel.Sandbox.get>[0];
 export type VercelModule = typeof Vercel;
 
 export type VercelSandbox = Vercel.Sandbox;
-
-export type VercelDeleteGetOptions = Parameters<typeof Vercel.Sandbox.get>[0];
-
-export type VercelDeleteModule = typeof Vercel;
