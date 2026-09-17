@@ -15,6 +15,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { DynamicModelSelectionError } from "#context/dynamic-model-lifecycle.js";
 import { dispatchDynamicInstructionEvent } from "#context/dynamic-instruction-lifecycle.js";
+import { dispatchDynamicSkillEvent } from "#context/dynamic-skill-lifecycle.js";
+import { dispatchMemoryLifecycleEvent } from "#context/memory-event-lifecycle.js";
+import { defineMemory } from "#public/memory/index.js";
 import {
   AuthKey,
   ChannelInstrumentationKey,
@@ -2221,6 +2224,120 @@ describe("createToolLoopHarness", () => {
   }
 
   const LIMIT_REQUEST_ID = "test-session:limit:input:12";
+
+  it.each([false, true])(
+    "passes deferred input and history to turn resolvers while a session limit is open (memory: %s)",
+    async (withMemory) => {
+      const ctx = new ContextContainer();
+      ctx.set(SandboxKey, mockSandbox().access);
+      ctx.set(SessionIdKey, "test-session");
+      ctx.set(SessionKey, {
+        sessionId: "test-session",
+        auth: { current: null, initiator: null },
+        turn: { id: "turn_0", sequence: 0 },
+      });
+      const hidden = { content: "Hidden history", kind: "user" as const, role: "user" as const };
+      const snapshots: (readonly ModelMessage[])[] = [];
+      const recall = vi.fn(async () => ({
+        messages: [{ content: "Remembered context", id: "item" }],
+      }));
+      const memories = withMemory
+        ? [
+            {
+              ...defineMemory({
+                namespace: "test",
+                scope: "alice",
+                provider: { recall: { "turn.started": recall } },
+              }),
+              logicalPath: "memory/profile.ts",
+              slot: "profile",
+              sourceId: "memory/profile.ts",
+              sourceKind: "module" as const,
+              visibility: "scope" as const,
+            },
+          ]
+        : [];
+      const runStep = createToolLoopHarness(
+        createTestConfig(
+          "conversation",
+          async (event, messages) => {
+            const lifecycleMessages = await dispatchMemoryLifecycleEvent({
+              appRoot: "/app",
+              ctx,
+              event,
+              memories,
+              messages,
+              nodeId: "__root__",
+            });
+            await dispatchDynamicSkillEvent({
+              ctx,
+              event,
+              messages: lifecycleMessages,
+              resolvers: [
+                {
+                  eventNames: ["turn.started"],
+                  events: {
+                    "turn.started": (_event, context) => {
+                      snapshots.push((context as DynamicResolveContext).messages);
+                      return null;
+                    },
+                  },
+                  logicalPath: "skills/context.ts",
+                  slug: "context",
+                  sourceId: "skills/context.ts",
+                  sourceKind: "module",
+                },
+              ],
+            });
+          },
+          { historyProjector: ({ messages }) => messages.filter((message) => message !== hidden) },
+        ),
+      );
+      const first = await contextStorage.run(ctx, () =>
+        runStep({ ...createLimitReachedSession(), history: [hidden] }, { message: "Hi again" }),
+      );
+      const second = await contextStorage.run(ctx, () =>
+        runStep(
+          first.session,
+          attachClientContext(
+            {
+              context: ["Current context"],
+              message: "Alice has a follow-up question.",
+            },
+            ["Current page"],
+          ),
+        ),
+      );
+
+      expect(snapshots).toHaveLength(2);
+      expect(snapshots[1]).toContainEqual({ content: "Hi again", kind: "user", role: "user" });
+      expect(snapshots[1]).not.toContain(hidden);
+      expect(snapshots[1]?.slice(-3)).toEqual([
+        { content: "Current page", kind: "context.instruction", role: "user" },
+        { content: "Current context", kind: "context.instruction", role: "user" },
+        { content: "Alice has a follow-up question.", kind: "user", role: "user" },
+      ]);
+      expect(
+        second.session.history.some(
+          (message) => message.content === "Alice has a follow-up question.",
+        ),
+      ).toBe(false);
+      expect(second.next).toBeNull();
+      expect(ToolLoopAgent).not.toHaveBeenCalled();
+      if (withMemory) {
+        expect(recall).toHaveBeenCalledTimes(2);
+        expect(snapshots[1]).toContainEqual({
+          content: "Remembered context",
+          kind: "memory.load",
+          role: "user",
+        });
+        expect(
+          second.session.history.some((message) => message.content === "Remembered context"),
+        ).toBe(true);
+        expect(second.session.state?.["eve.memory"]).toBeDefined();
+      }
+    },
+  );
 
   it("parks on a deterministic continuation prompt when the session reaches its token limit", async () => {
     const { emit, events } = createEventCollector();

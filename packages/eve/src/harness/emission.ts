@@ -79,6 +79,7 @@ export async function emitTurnPreamble(
   emitFn: HarnessEmitFn,
   input: StepInput,
   state: HarnessEmissionState,
+  messages: readonly ModelMessage[],
   runtimeIdentity?: RuntimeIdentity,
   traceContext?: RuntimeTraceContext,
 ): Promise<HarnessEmissionState> {
@@ -92,7 +93,10 @@ export async function emitTurnPreamble(
   }
 
   if (!steering) {
-    await emitFn(createTurnStartedEvent({ sequence: state.sequence, trace: traceContext, turnId }));
+    await emitFn(
+      createTurnStartedEvent({ sequence: state.sequence, trace: traceContext, turnId }),
+      messages,
+    );
   }
 
   if (input.message !== undefined) {

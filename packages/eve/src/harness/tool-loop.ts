@@ -150,6 +150,7 @@ import {
   frameworkMessageKindForStepInput,
   normalizeModelMessages,
   normalizeUserContent,
+  createTurnInputMessages,
   resolveAssistantStepText,
   type HarnessModelMessage,
   type UserModelMessage,
@@ -859,31 +860,42 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         pending.deferredMessage === true &&
         hasStepInput(input)
       ) {
+        const deferredInput = createTurnInputMessages(effectiveStepInput);
         if (store !== undefined) {
           prepareDynamicInstructionPreamble(
             store,
             projectHistory(parkedSession.history, parkedSession.state),
           );
+          prepareMemoryPreamble(store, {
+            history: parkedSession.history,
+            input: deferredInput,
+            projector: config.historyProjector,
+            state: parkedSession.state,
+          });
         }
         let instructionMessages: UserModelMessage[] = [];
+        let memoryCommit: ReturnType<typeof drainMemoryCommit> = undefined;
         try {
           const traceContext = await preparePreambleTrace();
           emissionState = await emitTurnPreamble(
             emit,
             preambleStepInput ?? {},
             emissionState,
+            projectHistory([...parkedSession.history, ...deferredInput], parkedSession.state),
             config.runtimeIdentity,
             traceContext,
           );
         } catch (error) {
           instructionMessages =
             store === undefined ? [] : drainDynamicInstructionUserMessages(store);
+          memoryCommit = store === undefined ? undefined : drainMemoryCommit(store);
           parkedSession = {
             ...parkedSession,
             history: validateHarnessModelMessages([
-              ...parkedSession.history,
+              ...(memoryCommit?.history ?? parkedSession.history),
               ...instructionMessages,
             ]),
+            state: memoryCommit?.state ?? parkedSession.state,
           };
           session = parkedSession;
           return failBoundaryEvent(error, {
@@ -894,9 +906,14 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
           });
         }
         instructionMessages = store === undefined ? [] : drainDynamicInstructionUserMessages(store);
+        memoryCommit = store === undefined ? undefined : drainMemoryCommit(store);
         parkedSession = {
           ...parkedSession,
-          history: validateHarnessModelMessages([...parkedSession.history, ...instructionMessages]),
+          history: validateHarnessModelMessages([
+            ...(memoryCommit?.history ?? parkedSession.history),
+            ...instructionMessages,
+          ]),
+          state: memoryCommit?.state ?? parkedSession.state,
         };
         emissionState = await emitTurnEpilogue(emit, emissionState, config.mode);
         return {
@@ -1005,24 +1022,20 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         prepareMemoryPreamble(store, {
           history: pending.messages,
           input: [...ephemeralContextMessages, ...preparedTurnInput],
+          projector: config.historyProjector,
           state: pending.session.state,
         });
       }
       try {
         const traceContext = await preparePreambleTrace();
         emissionState = await emitTurnPreamble(
-          (event) =>
-            emit(
-              event,
-              event.type === "turn.started"
-                ? projectHistory(
-                    [...pending.messages, ...ephemeralContextMessages, ...preparedTurnInput],
-                    pending.session.state,
-                  )
-                : undefined,
-            ),
+          emit,
           preambleStepInput ?? {},
           emissionState,
+          projectHistory(
+            [...pending.messages, ...ephemeralContextMessages, ...preparedTurnInput],
+            pending.session.state,
+          ),
           config.runtimeIdentity,
           traceContext,
         );

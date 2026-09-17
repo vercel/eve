@@ -335,6 +335,8 @@ A dynamic connection, tool, or skill whose name matches an **authored** one **ov
 
 At `turn.started`, model, tool, skill, and subagent resolvers receive the visible conversation history and incoming message in `ctx.messages`, oldest first. Request context is included, and history projection still applies. Read these messages from the handler's second argument; the event itself contains turn metadata. Instruction resolvers use the separate snapshot described under [Dynamic instructions](#dynamic-instructions).
 
+This also applies while a session-limit prompt keeps the incoming message queued and when authorization completes. Authorization callbacks without new or queued input receive the visible history. When memory recall runs, its results appear in the projected snapshot before incoming input.
+
 ### Execution order
 
 When a stream event fires, three things happen in order.
