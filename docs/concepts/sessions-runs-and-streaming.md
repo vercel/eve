@@ -36,9 +36,7 @@ React, Vue, and Svelte apps reach for [`useEveAgent()`](../guides/frontend/overv
 Create and park a conversation session before its first turn by omitting `message`:
 
 ```bash
-curl -X POST http://127.0.0.1:2000/eve/v1/session \
-  -H 'content-type: application/json' \
-  -d '{}'
+curl -X POST http://127.0.0.1:2000/eve/v1/session
 ```
 
 eve starts the durable workflow, establishes its inbox, and waits for the first message before

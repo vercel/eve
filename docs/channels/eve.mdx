@@ -45,11 +45,8 @@ curl -X POST https://<deployment>/eve/v1/session
 # {"ok":true,"sessionId":"wrun_A","status":"accepted"}
 ```
 
-The workflow establishes its inbox and parks before session initialization or `turn_0`.
-No `session.started` or `session.waiting` event is emitted until a message arrives. The first
-message invokes `onMessage`, then runs session-scoped hooks, dynamic definitions, and sandbox
-setup with that message's auth and context. Its `title` sets the prewarmed workflow's title;
-if omitted, eve derives the title from the first message. Later messages do not rename it.
+See [Start a session](../concepts/sessions-runs-and-streaming#start-a-session) for the
+initialization boundary, first-turn identity, readiness response, and retry behavior.
 
 The create request still requires route auth. Session audience and the timeout are selected
 at creation; they do not change when the first message arrives. Task mode and turn-scoped
@@ -63,11 +60,6 @@ curl -X POST https://<deployment>/eve/v1/session \
   -d '{"message":"What is the weather in Paris?"}'
 # {"ok":true,"sessionId":"wrun_A","status":"accepted"}
 ```
-
-The `202` response means Workflow accepted the durable run. The route does not wait for command
-inbox or continuation-token ownership. The inbox may still be starting, so an immediate follow-up
-can return `409 session_not_ready`; retry that code with bounded backoff. The event-stream client retries the
-brief window before the new run becomes readable.
 
 Authenticated callers that may retry a create request can pass their own `operationId` for
 create-once semantics. Once the operation owner is active, the same operation under the same
