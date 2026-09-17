@@ -10,13 +10,22 @@ import type {
   SandboxProviderHandle,
   SandboxProviderImplementation,
 } from "#shared/sandbox-provider.js";
+import type {
+  FixedNetworkSandboxSession,
+  MutableNetworkSandboxSession,
+} from "#shared/sandbox-session.js";
 
 export const VERCEL_REUSED_IMAGE_PROVIDER_NAME = "vercel-reused-image";
 
 export function createVercelReusedImageSandboxProvider(
   environmentOptions: ExperimentalVercelReusedImageEnvironmentOptions | undefined,
   input: CreateVercelImageProviderInput = {},
-): SandboxProviderImplementation<undefined, VercelImagePreparedArtifact, VercelImageSessionState> {
+): SandboxProviderImplementation<
+  undefined,
+  VercelImagePreparedArtifact,
+  VercelImageSessionState,
+  FixedNetworkSandboxSession
+> {
   const underlying = createVercelImageSandboxProvider(
     { region: environmentOptions?.region },
     {
@@ -33,8 +42,8 @@ export function createVercelReusedImageSandboxProvider(
 
   return {
     prepare: underlying.prepare,
-    async resume(context, _options, artifact, state) {
-      return reusedHandle(await underlying.resume(context, runtimeOptions, artifact, state));
+    async resume(context, artifact, state) {
+      return reusedHandle(await underlying.resume(context, artifact, state));
     },
     async start(context, _options, artifact) {
       const result = await underlying.start(context, runtimeOptions, artifact);
@@ -43,7 +52,9 @@ export function createVercelReusedImageSandboxProvider(
   };
 }
 
-function reusedHandle(handle: SandboxProviderHandle): SandboxProviderHandle {
+function reusedHandle(
+  handle: SandboxProviderHandle<MutableNetworkSandboxSession>,
+): SandboxProviderHandle<FixedNetworkSandboxSession> {
   const { setNetworkPolicy: _setNetworkPolicy, ...sandbox } = handle.sandbox;
   return {
     sandbox,

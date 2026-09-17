@@ -78,7 +78,6 @@ describe("createVercelReusedImageSandboxProvider", () => {
   it("returns a logical view without mutable network or native teardown", async () => {
     const value = fixture();
     const result = await value.provider.start(context("session-a"), undefined, artifact);
-    expect(result.handle.sandbox.setNetworkPolicy).toBeUndefined();
     await result.handle.onSessionStop();
     await result.handle.onRuntimeShutdown();
     await result.handle.onSessionDelete();
@@ -90,7 +89,7 @@ describe("createVercelReusedImageSandboxProvider", () => {
     const started = await first.provider.start(context("session-a"), undefined, artifact);
     const second = fixture(true);
     await expect(
-      second.provider.resume(context("session-b"), undefined, artifact, started.state),
+      second.provider.resume(context("session-b"), artifact, started.state),
     ).resolves.toBeTruthy();
     expect(second.create).not.toHaveBeenCalled();
   });
