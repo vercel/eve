@@ -5,6 +5,13 @@ import { defineTool } from "#tools/definition.js";
 import { serializeInputSchema } from "#tools/schema.js";
 
 describe("defineDurableSchema", () => {
+  it("leaves JSON-only schemas unchanged without adding a runtime validation contract", () => {
+    const source = { type: "string", minLength: 1 };
+    const schema = defineDurableSchema({ closure: {}, schema: () => source });
+    expect(schema).toBe(source);
+    expect(readDurableSchema(schema)).toBeUndefined();
+    expectTypeOf(schema).toEqualTypeOf<typeof source>();
+  });
   it("leaves absent optional output schemas undefined", () => {
     const schema = defineDurableSchema({ closure: {}, schema: () => undefined });
     expectTypeOf(schema).toEqualTypeOf<undefined>();

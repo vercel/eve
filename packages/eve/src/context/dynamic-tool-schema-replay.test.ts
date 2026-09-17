@@ -15,15 +15,14 @@ import {
   SessionDynamicToolRuntimeRevisionKey,
   StaticModelReferenceKey,
 } from "#context/keys.js";
-import { defineTool } from "#tools/definition.js";
+import {
+  defineTool,
+  type PublicToolInputSchema,
+  type PublicToolOutputSchema,
+} from "#tools/definition.js";
 import { defineDurableSchema } from "#tools/durable-schema.js";
 import { clearDurableDynamicCallbacks, defineDurableCallback } from "#tools/durable-callbacks.js";
-import {
-  isToolSchema,
-  serializeInputSchema,
-  type ToolSchemaSource,
-  type ToolSchema,
-} from "#tools/schema.js";
+import { isToolSchema, serializeInputSchema, type ToolSchema } from "#tools/schema.js";
 import { createStepStartedEvent, type UnstampedMessageStreamEvent } from "#protocol/message.js";
 import type { DynamicToolEntry } from "#tools/dynamic.js";
 import type { ResolvedDynamicToolResolver } from "#runtime/types.js";
@@ -46,7 +45,7 @@ function event(scope: "session" | "turn" | "step"): UnstampedMessageStreamEvent 
     : ({ type: `${scope}.started`, data: {} } as UnstampedMessageStreamEvent);
 }
 
-function tool(inputSchema: ToolSchemaSource, outputSchema?: ToolSchemaSource) {
+function tool(inputSchema: PublicToolInputSchema, outputSchema?: PublicToolOutputSchema) {
   return defineTool({
     description: "Validated tool",
     inputSchema: defineDurableSchema({ closure: {}, schema: () => inputSchema }),

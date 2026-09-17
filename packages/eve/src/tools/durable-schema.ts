@@ -6,7 +6,6 @@ import type {
 import {
   serializeInputSchema,
   serializeOutputSchema,
-  toInputSchema,
   type ToolSchema,
   type ToolSchemaSource,
 } from "#tools/schema.js";
@@ -25,12 +24,9 @@ export function hasSchemaValidator(source: unknown): source is StandardSchemaV1 
   );
 }
 
-type DurableSchema<TSchema> = TSchema extends undefined
-  ? undefined
-  : ToolSchema<
-      TSchema extends StandardSchemaV1 ? StandardSchemaV1.InferInput<TSchema> : unknown,
-      TSchema extends StandardSchemaV1 ? StandardSchemaV1.InferOutput<TSchema> : unknown
-    >;
+type DurableSchema<TSchema> = TSchema extends StandardSchemaV1
+  ? ToolSchema<StandardSchemaV1.InferInput<TSchema>, StandardSchemaV1.InferOutput<TSchema>>
+  : TSchema;
 
 /**
  * Defines a replayable schema for dynamic tools returned by provider packages.
@@ -45,13 +41,12 @@ export function defineDurableSchema<
   readonly schema: (closure: TClosure) => TSchema;
 }): DurableSchema<TSchema> {
   const source = input.schema(input.closure);
-  if (source === undefined) return undefined as DurableSchema<TSchema>;
-  const validator = hasSchemaValidator(source) ? source : toInputSchema(source);
+  if (!hasSchemaValidator(source)) return source as DurableSchema<TSchema>;
   const schema: ToolSchema = {
     "~standard": {
       version: 1,
       vendor: "eve",
-      validate: (value) => validator["~standard"].validate(value),
+      validate: (value) => source["~standard"].validate(value),
       jsonSchema: {
         input: () => serializeInputSchema(source),
         output: () => serializeOutputSchema(source),
