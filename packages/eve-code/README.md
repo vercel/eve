@@ -86,6 +86,14 @@ Dataset selection, execution, comparisons, and report generation belong to eve-b
 CI runs the full eight-task SWE-lean suite against the original eve-code baseline (`ca27ee898`), this PR's eve-code, Codex, and OpenCode. The latter two support the suite's MCP tasks. The native eve-bench action publishes the same table to the CI summary, PR comment, and the block below. Only a completed comparison updates this block; its source revision identifies the code tested. The rest of this README is left unchanged.
 
 <!-- eve-code-benchmark:start -->
+swe-lean@v2 · openai/gpt-5.6-terra · 8 tasks × 1 attempt(s) · 11304338b35c vs ca27ee898e28
 
-No completed SWE-lean comparison has been published by CI yet.
+| Harness | Passed | Score | Δbaseline | Time | Cost |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| baseline | 7/8 | 87.5% | — | 954.3s | $0.80 |
+| candidate | 6/8 | 75.0% | -12.5 pp | 400.1s | $0.60 |
+| codex | 7/8 | 87.5% | +0.0 pp | 687.5s | unreported |
+| opencode | 8/8 | 100.0% | +12.5 pp | 1456.4s | $1.12 |
+
+[CI run](<https://github.com/vercel/eve/actions/runs/35264574875>)
 <!-- eve-code-benchmark:end -->
