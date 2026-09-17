@@ -16,9 +16,6 @@ export default defineEval({
     t.log(
       `Pending generation observed ${observedAt - Date.parse(started.meta.at)} ms after step.started.`,
     );
-    // The Postgres world can publish step.started before the live turn installs its command
-    // listener. The deterministic model remains blocked for 30 seconds while this race settles.
-    await new Promise((resolve) => setTimeout(resolve, 250));
     const correction = await live.session.start("Alice corrected the report year to 2025.", {
       turnPolicy: "steer",
     });
