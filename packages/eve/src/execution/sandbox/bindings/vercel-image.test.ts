@@ -1,0 +1,132 @@
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+import {
+  createVercelImageSandboxProvider,
+  type VercelImagePreparedArtifact,
+} from "#execution/sandbox/bindings/vercel-image.js";
+import { createFakeVercelOidcToken } from "#internal/testing/vercel-oidc-token.js";
+import { VERCEL_EVE_SANDBOX_IMAGE } from "#execution/sandbox/bindings/eve-image.js";
+import type {
+  SandboxProviderPrepareContext,
+  SandboxProviderSessionContext,
+} from "#shared/sandbox-provider.js";
+
+const artifact: VercelImagePreparedArtifact = {
+  image: `vcr.vercel.com/account/project/image@sha256:${"a".repeat(64)}`,
+  mounts: [],
+  version: 1,
+};
+
+afterEach(() => vi.unstubAllEnvs());
+
+function context(sessionId = "session-a"): SandboxProviderSessionContext {
+  return {
+    host: {
+      loadOptionalPackage: async ({ importModule }) => await importModule(),
+      resolveProjectPath: (path) => path,
+    },
+    session: {
+      auth: { current: null, initiator: null },
+      id: sessionId,
+      turn: { id: "turn", sequence: 0 },
+    },
+    storagePath: "/tmp/eve-sandbox",
+  };
+}
+
+function createProvider(input: { readonly existing?: boolean } = {}) {
+  const sandbox = {
+    delete: vi.fn(async () => {}),
+    name: "native",
+    status: "running",
+    tags: undefined,
+    update: vi.fn(async () => {}),
+  };
+  const create = vi.fn(async () => sandbox);
+  const get = vi.fn(async () => (input.existing ? sandbox : null));
+  vi.stubEnv(
+    "VERCEL_OIDC_TOKEN",
+    createFakeVercelOidcToken({
+      owner: "account",
+      owner_id: "team-id",
+      project: "project",
+      project_id: "project-id",
+    }),
+  );
+  vi.stubEnv("VERCEL_ORG_ID", "team-id");
+  vi.stubEnv("VERCEL_PROJECT_ID", "project-id");
+  const publish = vi.fn(async () => artifact.image);
+  const provider = createVercelImageSandboxProvider(
+    {},
+    {
+      createImagePublisher: () => ({ publish }),
+      ensureBaseRuntime: vi.fn(async () => {}),
+      hydrateResources: vi.fn(async () => {}),
+      loadModule: async () => ({ Sandbox: { create, get } }) as never,
+      waitForImage: vi.fn(async () => {}),
+    },
+  );
+  return { create, get, provider, publish, sandbox };
+}
+
+function prepareContext(hasDockerfile = true): SandboxProviderPrepareContext {
+  const error = Object.assign(new Error("missing"), { code: "ENOENT" });
+  return {
+    files: {
+      list: async () => (hasDockerfile ? ["Dockerfile"] : []),
+      read: async () => {
+        if (!hasDockerfile) throw error;
+        return Buffer.from("FROM alpine:3.22\n");
+      },
+      readText: async () => "FROM alpine:3.22\n",
+    },
+    host: context().host,
+    resources: { source: { kind: "none" } },
+    storagePath: "/tmp/eve-sandbox",
+  };
+}
+
+describe("createVercelImageSandboxProvider", () => {
+  it("uses the eve base image when no Dockerfile exists", async () => {
+    const { provider, publish } = createProvider();
+    await expect(provider.prepare(prepareContext(false))).resolves.toEqual({
+      image: VERCEL_EVE_SANDBOX_IMAGE,
+      mounts: [],
+      version: 1,
+    });
+    expect(publish).not.toHaveBeenCalled();
+  });
+
+  it("starts with deterministic session state and resumes the same native sandbox", async () => {
+    const first = createProvider();
+    const started = await first.provider.start(context("session-a"), {}, artifact);
+    expect(started.state).toMatchObject({
+      sandboxName: expect.stringMatching(/^eve-sbx-vercel-image-/u),
+      version: 2,
+    });
+    const second = createProvider({ existing: true });
+    await expect(
+      second.provider.resume(context("session-a"), artifact, started.state),
+    ).resolves.toBeTruthy();
+    expect(second.create).not.toHaveBeenCalled();
+  });
+
+  it("derives distinct native identity for each eve session", async () => {
+    const first = createProvider();
+    const startedA = await first.provider.start(context("session-a"), {}, artifact);
+    const second = createProvider();
+    const startedB = await second.provider.start(context("session-b"), {}, artifact);
+    expect(startedB.state).not.toEqual(startedA.state);
+  });
+
+  it("rejects incompatible serialized session state", async () => {
+    const { provider } = createProvider();
+    await expect(
+      provider.resume(context("session-a"), artifact, {
+        generation: "wrong",
+        sandboxName: "wrong",
+        version: 2,
+      }),
+    ).rejects.toThrow("incompatible");
+  });
+});

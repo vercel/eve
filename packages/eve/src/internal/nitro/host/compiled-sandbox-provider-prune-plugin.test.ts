@@ -17,6 +17,18 @@ describe("createCompiledSandboxProviderPrunePlugin", () => {
     expect(source).toContain("MicrosandboxSandbox");
   });
 
+  it("removes OCI publication code from hosted runtime bundles", () => {
+    const plugin = createCompiledSandboxProviderPrunePlugin();
+    const resolved = plugin.resolveId?.(
+      "/repo/packages/eve/src/execution/sandbox/bindings/oci-image-publisher.ts",
+      undefined,
+    );
+    if (resolved == null) throw new Error("Expected OCI publisher to resolve to a runtime stub.");
+    const id = typeof resolved === "object" ? resolved.id : resolved;
+
+    expect(plugin.load?.(id)).toContain("createOciImagePublisher = pruned");
+  });
+
   it.each(["docker.ts", "just-bash.ts", "local.js", "local.ts", "microsandbox.ts"])(
     "keeps the hosted local-backend stub aligned for %s",
     (fileName) => {

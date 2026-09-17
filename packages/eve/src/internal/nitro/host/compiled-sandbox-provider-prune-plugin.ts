@@ -1,12 +1,15 @@
 const PRUNED_DEFAULT_SANDBOX_MODULE_ID = "\0eve-pruned-default-sandbox-provider";
 const PRUNED_LOCAL_SANDBOX_MODULE_ID = "\0eve-pruned-local-sandbox-providers";
 const PRUNED_LOCAL_SANDBOX_PROVIDER_MODULE_ID = "\0eve-pruned-local-sandbox-provider-constructors";
+const PRUNED_OCI_IMAGE_PUBLISHER_MODULE_ID = "\0eve-pruned-oci-image-publisher";
 const PRUNED_OPTIONAL_ENGINE_INSTALL_MODULE_ID = "\0eve-pruned-optional-engine-install";
 const DEFAULT_PROVIDER_SOURCE_RE = /(?:^|[/\\#])sandbox[/\\]providers[/\\]default\.(?:js|ts)$/;
 const LOCAL_BINDING_SOURCE_RE =
   /[/\\]bindings[/\\](?:docker|just-bash|local|microsandbox)\.(?:js|ts)$/;
 const LOCAL_PROVIDER_SOURCE_RE =
   /(?:^|[/\\#])sandbox[/\\]providers[/\\](?:docker|just-bash|microsandbox)\.(?:js|ts)$/;
+const OCI_IMAGE_PUBLISHER_SOURCE_RE =
+  /[/\\]execution[/\\]sandbox[/\\]bindings[/\\]oci-image-publisher\.(?:js|ts)$/;
 const OPTIONAL_ENGINE_INSTALL_SOURCE_RE =
   /[/\\]internal[/\\]application[/\\]optional-package-install\.(?:js|ts)$/;
 
@@ -38,6 +41,18 @@ export function createCompiledSandboxProviderPrunePlugin(): BundlerPluginShape {
           "export const DefaultSandbox = VercelSandbox;",
           "export const SANDBOX_PROVIDER_PROBES = {};",
           "export function defineDefaultSandboxProvider() { return VercelSandbox; }",
+          "",
+        ].join("\n");
+      }
+      if (
+        id === PRUNED_OCI_IMAGE_PUBLISHER_MODULE_ID ||
+        OCI_IMAGE_PUBLISHER_SOURCE_RE.test(sourcePath)
+      ) {
+        return [
+          "function pruned() {",
+          '  throw new Error("OCI images cannot be published from a hosted server runtime.");',
+          "}",
+          "export const createOciImagePublisher = pruned;",
           "",
         ].join("\n");
       }
@@ -101,6 +116,9 @@ export function createCompiledSandboxProviderPrunePlugin(): BundlerPluginShape {
       if (DEFAULT_PROVIDER_SOURCE_RE.test(sourcePath)) return PRUNED_DEFAULT_SANDBOX_MODULE_ID;
       if (LOCAL_PROVIDER_SOURCE_RE.test(sourcePath)) {
         return PRUNED_LOCAL_SANDBOX_PROVIDER_MODULE_ID;
+      }
+      if (OCI_IMAGE_PUBLISHER_SOURCE_RE.test(sourcePath)) {
+        return PRUNED_OCI_IMAGE_PUBLISHER_MODULE_ID;
       }
       if (OPTIONAL_ENGINE_INSTALL_SOURCE_RE.test(sourcePath)) {
         return PRUNED_OPTIONAL_ENGINE_INSTALL_MODULE_ID;

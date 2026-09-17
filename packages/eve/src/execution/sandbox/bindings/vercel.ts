@@ -157,7 +157,7 @@ export function createVercelSandbox(
         { cause: error },
       );
     }
-    const handle = createHandle({
+    const handle = createVercelSandboxHandle({
       createOptions: sessionCreateOptions,
       loadDeleteSandboxModule,
       sandbox: session.sandbox,
@@ -206,7 +206,7 @@ export function createVercelSandbox(
         throw new Error(`Vercel sandbox session "${state.sandboxName}" no longer exists.`);
       }
       await ensureVercelSandboxBaseRuntime(sandbox);
-      return createHandle({ createOptions, loadDeleteSandboxModule, sandbox });
+      return createVercelSandboxHandle({ createOptions, loadDeleteSandboxModule, sandbox });
     },
     async start(context, options, artifact) {
       const sandboxName = vercelSessionName(context.session.id, options, artifact, createOptions);
@@ -508,7 +508,7 @@ function createSessionCreateParams(
   };
 }
 
-function createHandle(input: {
+export function createVercelSandboxHandle(input: {
   readonly createOptions: VercelCreateOptions;
   readonly loadDeleteSandboxModule: () => Promise<VercelModule>;
   readonly sandbox: VercelSandbox;
@@ -540,7 +540,7 @@ function createHandle(input: {
   };
 }
 
-function createVercelInternalSandboxSession(sandbox: VercelSandbox): InternalSandboxSession {
+export function createVercelInternalSandboxSession(sandbox: VercelSandbox): InternalSandboxSession {
   return {
     resolvePath: resolveVercelSandboxPath,
     async spawn(options: SandboxSpawnOptions): Promise<SandboxProcess> {
