@@ -96,8 +96,74 @@ describe("runPnpmInstall", () => {
         "--yes",
         "--config.minimum-release-age=0",
       ],
-      expect.objectContaining({ cwd: "/tmp/eve-agent", stdio: "inherit" }),
+      expect.objectContaining({ cwd: "/tmp/eve-agent", stdio: ["inherit", "pipe", "pipe"] }),
     );
+  });
+
+  test("retries without auto-approval when pnpm rejects the option", async () => {
+    mockedSpawn.mockImplementationOnce(() => {
+      const child = createMockChildProcess();
+      queueMicrotask(() => {
+        child.stderr.emit("data", Buffer.from("ERROR Unknown option: 'yes'\n"));
+        child.stderr.emit("data", Buffer.from("For help, run: pnpm help install\n"));
+        child.emit("close", 1);
+      });
+      return child;
+    });
+    const onOutput = vi.fn();
+
+    expect(
+      packageManagerInstallSucceeded(
+        await runPnpmInstall("/tmp/eve-agent", {
+          autoApprove: true,
+          minimumReleaseAgeMinutes: 0,
+          onOutput,
+        }),
+      ),
+    ).toBe(true);
+
+    expect(mockedSpawn.mock.calls.map(([, args]) => args)).toEqual([
+      [
+        "--dir",
+        "/tmp/eve-agent",
+        "install",
+        "--no-frozen-lockfile",
+        "--yes",
+        "--config.minimum-release-age=0",
+      ],
+      [
+        "--dir",
+        "/tmp/eve-agent",
+        "install",
+        "--no-frozen-lockfile",
+        "--config.minimum-release-age=0",
+      ],
+    ]);
+    expect(onOutput).not.toHaveBeenCalled();
+  });
+
+  test("does not retry other pnpm install failures", async () => {
+    mockedSpawn.mockImplementationOnce(() => {
+      const child = createMockChildProcess();
+      queueMicrotask(() => {
+        child.stderr.emit("data", Buffer.from("ERR_PNPM_FETCH_500 Registry unavailable\n"));
+        child.emit("close", 1);
+      });
+      return child;
+    });
+    const onOutput = vi.fn();
+
+    expect(
+      packageManagerInstallSucceeded(
+        await runPnpmInstall("/tmp/eve-agent", { autoApprove: true, onOutput }),
+      ),
+    ).toBe(false);
+
+    expect(mockedSpawn).toHaveBeenCalledTimes(1);
+    expect(onOutput).toHaveBeenCalledWith({
+      stream: "stderr",
+      text: "ERR_PNPM_FETCH_500 Registry unavailable",
+    });
   });
 
   test("installs a claimed workspace member with native workspace semantics", async () => {

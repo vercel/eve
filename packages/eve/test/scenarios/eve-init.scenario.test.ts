@@ -22,6 +22,9 @@ const PNPM_INIT_INSTALL_ARGUMENTS = [
   "--yes",
   "--config.minimum-release-age=0",
 ] as const;
+const PNPM_FALLBACK_INSTALL_ARGUMENTS = PNPM_INIT_INSTALL_ARGUMENTS.filter(
+  (argument) => argument !== "--yes",
+);
 
 const createScratchDirectory = useTemporaryDirectories();
 
@@ -70,7 +73,10 @@ function withoutCodingAgentMarkers(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   return scrubbed;
 }
 
-async function createFakePnpmEnvironment(scratch: string): Promise<{
+async function createFakePnpmEnvironment(
+  scratch: string,
+  options: { rejectAutoApprove?: boolean } = {},
+): Promise<{
   env: NodeJS.ProcessEnv;
   readCalls(): Promise<PackageManagerCall[]>;
 }> {
@@ -86,6 +92,15 @@ async function createFakePnpmEnvironment(scratch: string): Promise<{
       "  process.env.EVE_INIT_PNPM_LOG,",
       "  `${JSON.stringify({ args, cwd: process.cwd() })}\\n`,",
       ");",
+      ...(options.rejectAutoApprove === true
+        ? [
+            'if (args.includes("--yes")) {',
+            "  console.error(\"ERROR Unknown option: 'yes'\");",
+            '  console.error("For help, run: pnpm help install");',
+            "  process.exit(1);",
+            "}",
+          ]
+        : []),
       'if (args.includes("install")) {',
       '  writeFileSync(join(process.cwd(), "pnpm-lock.yaml"), "lockfileVersion: 9.0\\n");',
       "}",
@@ -288,6 +303,27 @@ describe("eve init smoke", () => {
     await expect(
       runFile("git", ["status", "--porcelain"], { cwd: projectDir }),
     ).resolves.toMatchObject({ stdout: "" });
+  });
+
+  it("retries without auto-approval when pnpm rejects the option", async () => {
+    const scratch = await createScratchDirectory("eve-init-pnpm-fallback-");
+    const fakePnpm = await createFakePnpmEnvironment(scratch, { rejectAutoApprove: true });
+
+    const result = await runEveBin(scratch, ["init", "fallback-agent"], fakePnpm.env);
+
+    expect(result.exitCode, result.stderr).toBe(0);
+    expect(result.stderr).not.toContain("Unknown option");
+    const projectDir = await realpath(join(scratch, "fallback-agent"));
+    expect(await fakePnpm.readCalls()).toEqual([
+      {
+        args: ["--dir", projectDir, ...PNPM_INIT_INSTALL_ARGUMENTS],
+        cwd: projectDir,
+      },
+      {
+        args: ["--dir", projectDir, ...PNPM_FALLBACK_INSTALL_ARGUMENTS],
+        cwd: projectDir,
+      },
+    ]);
   });
 
   it("adds Web Chat without Vercel configuration", async () => {

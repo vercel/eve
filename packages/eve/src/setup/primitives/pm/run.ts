@@ -2,7 +2,11 @@ import { spawn } from "node:child_process";
 
 import type { PackageManagerKind } from "../../package-manager.js";
 import { armProcessAbort } from "../process-abort.js";
-import { createProcessOutputBuffer, type ProcessOutputHandler } from "../process-output.js";
+import {
+  createProcessOutputBuffer,
+  type ProcessOutputHandler,
+  type ProcessOutputLine,
+} from "../process-output.js";
 import { getPackageManagerStrategy } from "./index.js";
 import {
   createPackageProcessStdoutCollector,
@@ -126,6 +130,21 @@ export type PackageManagerInstallResult =
   | { kind: "workspace-probe-failed"; result: PackageManagerProcessResult }
   | { kind: "workspace-probe-unrecognized"; result: PackageManagerProcessResult };
 
+const PNPM_AUTO_APPROVE_REJECTION = /Unknown option:\s*['"]yes['"]/iu;
+const PNPM_INSTALL_HELP = /^\s*For help, run:\s*pnpm help install\s*$/iu;
+
+function forwardProcessOutput(
+  line: ProcessOutputLine,
+  onOutput: ProcessOutputHandler | undefined,
+): void {
+  if (onOutput !== undefined) {
+    onOutput(line);
+    return;
+  }
+  const stream = line.stream === "stdout" ? process.stdout : process.stderr;
+  stream.write(`${line.text}\n`);
+}
+
 export function packageManagerInstallSucceeded(result: PackageManagerInstallResult): boolean {
   return result.kind === "installed" && resultSucceeded(result.result);
 }
@@ -169,15 +188,37 @@ export async function runPackageManagerInstall(
     if (claimed === undefined) return { kind: "workspace-probe-unrecognized", result: probe };
     if (!claimed) installOptions = { ...options, ignoreWorkspace: true };
   }
-  return {
-    kind: "installed",
-    result: await spawnPackageManager(
+  let autoApproveRejected = false;
+  const canRetryWithoutAutoApprove = kind === "pnpm" && installOptions.autoApprove === true;
+  const firstAttemptOptions = canRetryWithoutAutoApprove
+    ? {
+        ...options,
+        onOutput: (line: ProcessOutputLine) => {
+          if (PNPM_AUTO_APPROVE_REJECTION.test(line.text)) {
+            autoApproveRejected = true;
+            return;
+          }
+          if (autoApproveRejected && PNPM_INSTALL_HELP.test(line.text)) return;
+          forwardProcessOutput(line, options.onOutput);
+        },
+      }
+    : options;
+  let result = await spawnPackageManager(
+    kind,
+    projectRoot,
+    strategy.installArguments(installOptions),
+    firstAttemptOptions,
+  );
+  // pnpm 11 accepts --yes; pnpm 9 and 10 reject it before starting the install.
+  if (!resultSucceeded(result) && autoApproveRejected) {
+    result = await spawnPackageManager(
       kind,
       projectRoot,
-      strategy.installArguments(installOptions),
+      strategy.installArguments({ ...installOptions, autoApprove: false }),
       options,
-    ),
-  };
+    );
+  }
+  return { kind: "installed", result };
 }
 
 /** The argv that runs the locally installed eve binary's `dev` command. */
