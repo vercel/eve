@@ -7,7 +7,7 @@ export default defineEval({
       "Bob uses evaluate-request to review a missing answer from the evaluation service.",
     );
     turn.expectOk();
-    turn.calledTool("evaluate-request");
+    turn.calledTool("evaluate-request", { status: "failed", count: 1 });
     turn.messageIncludes('"isError":true');
     t.succeeded();
   },
