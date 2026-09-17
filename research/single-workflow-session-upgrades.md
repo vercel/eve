@@ -131,7 +131,7 @@ Idle excludes all of the following:
 - other pending, buffered, or queued commands or deliveries, including a batched arrival;
 - an active model or tool step, cancellation rollback, or caller/result settlement;
 - pending human input or authorization, including waits surfaced by descendants;
-- any live task, subagent, or authored workflow tool, including background work;
+- any live task, active subagent turn or lease, or authored workflow tool, including background work;
 - pending coordination, result application, or callback processing for that work.
 
 Unknown eligibility means skip. Session-lifetime timeout and activity collection are
@@ -143,9 +143,12 @@ re-check when a turn settles or a backlog drains. Only a later delivery that is 
 eligible can trigger an upgrade, so a continuously busy session may stay on old code indefinitely.
 
 That rule is the core simplification. Remembering a target and pursuing it later means moving live
-waits, callback ownership, and task handles between deployments, which is a cross-version
-coordination protocol: the thing this proposal deletes. Deferring to the next idle delivery costs
-nothing in protocol and only delays code alignment for busy sessions.
+waits, callback ownership, and active task or subagent leases between deployments, which is a
+cross-version coordination protocol: the thing this proposal deletes. Idle subagent handles are
+not leases: a `parked` conversation handle or `available` task-owned handle retains only the stable
+address of an independently owned child session, so those handles move with settled session state.
+Deferring to the next idle delivery costs nothing in protocol and only delays code alignment for
+busy sessions.
 
 HITL responses, tool and subagent results, cancellation, reset, clear, and compact never trigger
 upgrades. eve never cancels or restarts work to make a session eligible.
@@ -168,14 +171,18 @@ context and lifecycle metadata:
 - event sequence, remaining limits, the complete claimed session-hook set, and original configured timeout duration.
 
 The single triggering delivery travels alongside the checkpoint. The checkpoint never carries a
-command backlog, live waits, callback ownership, or task/subagent/tool handles; the eligibility rule
-guarantees none exist.
+command backlog, live waits, callback ownership, active subagent leases, or live task/tool
+ownership; the eligibility rule guarantees none exist. It may carry `parked` conversation handles
+or `available` task-owned handles, which retain only the stable address of an independently owned
+child session. The child session itself does not move with its parent: a later continuation carries
+a caller and is therefore not handoff-eligible, so the child keeps executing on the deployment that
+owns it.
 
 The successor rebuilds instructions, models, tools, skills, and compiled configuration from its own
 bundle. Before claiming hooks, it shares the source's idle-state inspection: parse all retained
-tasks (including settled entries) and handle state, and require pending-work registries to be absent
-or canonically empty. Task and handle readers preserve additive metadata on updates but still
-validate known fields and lifecycle rules. An unreadable checkpoint is refused before activation,
+tasks (including settled entries) and handle state, require every retained handle to be `parked` or
+`available`, and require pending-work registries to be absent or canonically empty. Task and handle
+readers preserve additive metadata on updates but still validate known fields and lifecycle rules. An unreadable checkpoint is refused before activation,
 so the previous owner can recover and process the triggering delivery. Authored state stays opaque. There is no migration chain and no author-facing
 state migration API, so raw `defineState` values must remain readable by the target code. The
 public event stream is not a checkpoint (it omits private history and framework state), and the
@@ -433,9 +440,13 @@ claim measured latency or a fixed count for arbitrary authored integrations.
 - An eligible A→B delivery starts one successor on B and preserves identity, connected stream and
   cursor, settled state, limits, timeout duration, and every claimed session hook. Owner and authored code
   report B. An unreadable checkpoint recovers A's ownership and processes the delivery once.
-- Every unsafe category skips: parked HITL, background tasks, batched deliveries, queued commands.
-  Work stays on A. Settlement and queue draining trigger nothing; only a fresh eligible delivery
-  does. No remembered target or live handle crosses versions.
+- Every unsafe category skips: parked HITL, background tasks, active subagent turns or leases,
+  batched deliveries, and queued commands. Work stays on A. Settlement and queue draining trigger
+  nothing; only a fresh eligible delivery does. No remembered target or active handle crosses
+  versions.
+- `parked` conversation handles and `available` task-owned handles cross with settled state. The
+  successor can resume them by stable child address, while the child continues on the deployment
+  that owns it.
 - Inject concurrent deliveries and replay failures at every handoff step. Verify FIFO order, no
   lost accepted commands, no duplicated model/tool work, and one activated owner. Cover
   disposal-time arrivals, partial claims, failed starts, and uncertain activation.
