@@ -14,7 +14,7 @@ releases.
 
 ## Choose from Gateway models
 
-By default, `autoModel` evaluates with `typesafe-ai/jev-latest`. Like other AI SDK
+By default, `autoModel` evaluates with `typesafe-ai/jev`. Like other AI SDK
 model strings, it uses Vercel AI Gateway unless the application has configured a
 different global default provider.
 

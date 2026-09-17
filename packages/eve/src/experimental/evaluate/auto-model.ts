@@ -36,7 +36,7 @@ interface AutoModelConfig<
   readonly options: T;
 }
 
-const DEFAULT_EVALUATION_MODEL = "typesafe-ai/jev-latest";
+const DEFAULT_EVALUATION_MODEL = "typesafe-ai/jev";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);

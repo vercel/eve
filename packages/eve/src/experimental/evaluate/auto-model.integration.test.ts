@@ -70,8 +70,8 @@ describe("autoModel", () => {
     try {
       const handler = autoModel({ options }).events["step.started"]!;
       await expect(handler(event(), context())).resolves.toBe("openai/small");
-      expect(runtime.localEvaluationModel).toHaveBeenCalledWith("typesafe-ai/jev-latest");
-      expect(evaluationModelFactory).toHaveBeenCalledWith("typesafe-ai/jev-latest");
+      expect(runtime.localEvaluationModel).toHaveBeenCalledWith("typesafe-ai/jev");
+      expect(evaluationModelFactory).toHaveBeenCalledWith("typesafe-ai/jev");
     } finally {
       if (previous === undefined) Reflect.deleteProperty(globalThis, "AI_SDK_DEFAULT_PROVIDER");
       else Reflect.set(globalThis, "AI_SDK_DEFAULT_PROVIDER", previous);
@@ -85,7 +85,7 @@ describe("autoModel", () => {
     const handler = autoModel({ options }).events["step.started"]!;
 
     await expect(handler(event(), context())).resolves.toBe("openai/small");
-    expect(runtime.localEvaluationModel).toHaveBeenCalledWith("typesafe-ai/jev-latest");
+    expect(runtime.localEvaluationModel).toHaveBeenCalledWith("typesafe-ai/jev");
     expect(evaluator.doEvaluate).toHaveBeenCalledOnce();
   });
 

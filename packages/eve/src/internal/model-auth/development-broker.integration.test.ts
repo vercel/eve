@@ -225,7 +225,7 @@ it("streams through the same Gateway model after switching teams and then to a k
 });
 
 it("evaluates through the Gateway connection selected by /login", async () => {
-  const model = localGatewayEvaluationModel("typesafe-ai/jev-latest");
+  const model = localGatewayEvaluationModel("typesafe-ai/jev");
   if (!model) throw new Error("Expected a Gateway evaluation model");
   expect(JSON.stringify(model)).not.toContain("account-token");
   expect(mocks.gateway).not.toHaveBeenCalled();
@@ -252,7 +252,7 @@ it("evaluates through the Gateway connection selected by /login", async () => {
   expect(String(url)).toBe("https://ai-gateway.vercel.sh/v4/ai/evaluation-model");
   expect(init.headers.get("authorization")).toBe("Bearer account-token");
   expect(init.headers.get("x-vercel-ai-gateway-team")).toBe("team_a");
-  expect(init.headers.get("ai-model-id")).toBe("typesafe-ai/jev-latest");
+  expect(init.headers.get("ai-model-id")).toBe("typesafe-ai/jev");
   expect(init.headers.has(DEVELOPMENT_WORKFLOW_TRANSPORT_HEADER)).toBe(false);
   expect(init.body).not.toContain("account-token");
 });

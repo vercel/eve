@@ -103,6 +103,25 @@ describe("BOOT_DETECTIONS", () => {
     expect(await detectSetupIssues(context({ info }))).toEqual([]);
   });
 
+  it.each([{}, { EVE_MODEL_CONNECTION: "vercel" }, { AI_GATEWAY_API_KEY: "key" }])(
+    "does not diagnose dynamic routing as a missing connection",
+    async (env) => {
+      const info = infoWithRouting({
+        kind: "dynamic",
+        resolver: {
+          eventNames: ["step.started"],
+          slug: "model",
+          logicalPath: "agent.ts",
+          owner: { kind: "application" },
+          sourceId: "agent-model",
+          sourceKind: "module",
+        },
+      });
+      expect(await detectSetupIssues(context({ env, info }))).toEqual([]);
+      expect(normalizeLocalModelEndpoint(info, env)).toBe(info);
+    },
+  );
+
   it("stays quiet when the runtime resolved linked-project OIDC", async () => {
     const info = infoWithRouting(
       { kind: "gateway", target: "openai" },
