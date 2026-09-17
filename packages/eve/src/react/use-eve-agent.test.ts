@@ -1,4 +1,4 @@
-import { createElement, StrictMode } from "react";
+import { createElement, StrictMode, useState } from "react";
 import { act, create as createRenderer } from "react-test-renderer";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -199,6 +199,155 @@ describe("useEveAgent", () => {
     });
     expect(streams[1]?.signal.aborted).toBe(true);
     expect(streams[1]?.cancel).toHaveBeenCalledOnce();
+  });
+
+  it("prewarms when the option changes from false to true without replacing the session", async () => {
+    let creates = 0;
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (_request, init) => {
+      if (init?.method === "POST") return createStartedMessageResponse(`session_${++creates}`, "");
+      return createEagerStreamResponse([createSessionWaitingEvent()]);
+    });
+    let agent: UseEveAgentHelpers<EveMessageData> | undefined;
+    function Chat({
+      label: _label,
+      prewarm,
+    }: {
+      readonly label: string;
+      readonly prewarm: boolean;
+    }) {
+      agent = useEveAgent({ prewarm });
+      return null;
+    }
+    let root: ReturnType<typeof create> | undefined;
+
+    await act(async () => {
+      root = create(createElement(Chat, { label: "initial", prewarm: false }));
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    await act(async () => {
+      root?.update(createElement(Chat, { label: "first character", prewarm: true }));
+    });
+    await act(async () => {
+      await vi.waitFor(() => expect(agent?.session?.sessionId).toBe("session_1"));
+    });
+
+    await act(async () => {
+      root?.update(createElement(Chat, { label: "rerender", prewarm: true }));
+    });
+    await act(async () => {
+      root?.update(createElement(Chat, { label: "cleared", prewarm: false }));
+    });
+    await act(async () => {
+      root?.update(createElement(Chat, { label: "typed again", prewarm: true }));
+    });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    });
+
+    expect(creates).toBe(1);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(agent?.session?.sessionId).toBe("session_1");
+  });
+
+  it("does not abort prewarming when the option changes to false", async () => {
+    const accepted = createDeferred<Response>();
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockReturnValueOnce(accepted.promise)
+      .mockResolvedValueOnce(createEagerStreamResponse([createSessionWaitingEvent()]));
+    let agent: UseEveAgentHelpers<EveMessageData> | undefined;
+    function Chat({ prewarm }: { readonly prewarm: boolean }) {
+      agent = useEveAgent({ prewarm });
+      return null;
+    }
+    let root: ReturnType<typeof create> | undefined;
+
+    await act(async () => {
+      root = create(createElement(Chat, { prewarm: false }));
+    });
+    await act(async () => {
+      root?.update(createElement(Chat, { prewarm: true }));
+    });
+    await act(async () => {
+      await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
+    });
+    const createSignal = fetchMock.mock.calls[0]![1]?.signal;
+
+    await act(async () => {
+      root?.update(createElement(Chat, { prewarm: false }));
+    });
+    expect(createSignal?.aborted).toBe(false);
+
+    await act(async () => {
+      accepted.resolve(createStartedMessageResponse("session_1", ""));
+      await vi.waitFor(() => expect(agent?.session?.sessionId).toBe("session_1"));
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not retry failed prewarming on unrelated renders", async () => {
+    const error = new Error("create failed");
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockRejectedValue(error);
+    let agent: UseEveAgentHelpers<EveMessageData> | undefined;
+    function Chat({ label: _label }: { readonly label: string }) {
+      agent = useEveAgent({ prewarm: true });
+      return null;
+    }
+    let root: ReturnType<typeof create> | undefined;
+
+    await act(async () => {
+      root = create(createElement(Chat, { label: "initial" }));
+    });
+    await act(async () => {
+      await vi.waitFor(() => expect(agent?.status).toBe("error"));
+    });
+
+    await act(async () => {
+      root?.update(createElement(Chat, { label: "rerender" }));
+    });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    });
+
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(agent?.error).toBe(error);
+  });
+
+  it("uses the latest batched prewarm value after reset", async () => {
+    let creates = 0;
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (_request, init) => {
+      if (init?.method === "POST") return createStartedMessageResponse(`session_${++creates}`, "");
+      return createEagerStreamResponse([createSessionWaitingEvent()]);
+    });
+    let agent: UseEveAgentHelpers<EveMessageData> | undefined;
+    let setPrewarm: ((value: boolean) => void) | undefined;
+    function Chat() {
+      const [prewarm, setPrewarmState] = useState(true);
+      setPrewarm = setPrewarmState;
+      agent = useEveAgent({ prewarm });
+      return null;
+    }
+
+    await act(async () => {
+      create(createElement(Chat));
+    });
+    await act(async () => {
+      await vi.waitFor(() => expect(agent?.session?.sessionId).toBe("session_1"));
+    });
+
+    await act(async () => {
+      setPrewarm?.(false);
+      agent?.reset();
+    });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    });
+
+    expect(creates).toBe(1);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(agent?.session).toBeUndefined();
   });
 
   it("keeps the helpers object stable across renders without store changes", async () => {

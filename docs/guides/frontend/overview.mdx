@@ -98,9 +98,43 @@ export function Chat() {
 }
 ```
 
-Prewarming defaults to `false`: the first send creates the session. Enable it when your
-application's auth, headers, and any chat-record binding are ready at mount. Applications
-that prepare those in the submit handler should keep the default.
+In React, `prewarm` is a live boolean. Use component state to wait until the user starts
+composing a message:
+
+```tsx
+import { useEveAgent } from "eve/react";
+import { useState } from "react";
+
+export function Chat() {
+  const [message, setMessage] = useState("");
+  const agent = useEveAgent({ prewarm: message.length > 0 });
+
+  return (
+    <>
+      <input value={message} onChange={(event) => setMessage(event.currentTarget.value)} />
+      <button
+        onClick={() => {
+          setMessage("");
+          agent.reset();
+        }}
+        type="button"
+      >
+        New chat
+      </button>
+    </>
+  );
+}
+```
+
+An initial `true` value or a later `false` to `true` change prepares the current owned session.
+Changing `prewarm` back to `false` does not abort creation or discard an existing session. If
+a reset and state update happen in the same event, React applies both before deciding whether
+to prepare the next session. Vue and Svelte read `prewarm` when their binding is created; call
+their returned `prewarm()` method for interaction-driven creation.
+
+Prewarming defaults to `false`: the first send creates the session. Set it to `true` only after
+your application's auth, headers, and any chat-record binding are ready. Applications that
+prepare those in the submit handler should keep the default until then.
 
 Prewarming starts the workflow and establishes its inbox, then parks before session hooks,
 dynamic definitions, or sandbox setup run. The first message passes through the channel's
@@ -117,7 +151,9 @@ events are not a prerequisite for sending.
 A failed create sets `error` and calls `onError` when no send is waiting. A waiting send can
 fall back to creating a session with its message. After creation succeeds, initialization
 failures arrive on the stream during the first turn. The configured session timeout starts
-at creation, so an unused prewarmed session can expire before its first message.
+at creation, so an unused prewarmed session can expire before its first message. React does not
+retry a failed prewarm on unrelated renders while the option remains `true`; call `prewarm()`,
+change the option from `false` to `true` again, reset, or send a message to recover.
 
 The hook keeps consuming one session stream across turns and idle periods. Replies,
 authorization updates, and turns started elsewhere all update the same projection. A turn settling
@@ -125,9 +161,9 @@ does not close the connection. The transport reconnects from its cursor after a 
 server's renewable 60-second lease; lease renewal does not start a turn or clear UI state.
 Unmounting or resetting closes the local stream without cancelling the old durable session.
 
-`reset()` reuses the hook instance and clears the conversation. With `prewarm: true`, it
-immediately prepares the next owned session; otherwise, the next send creates it. An explicitly supplied
-`session` remains externally owned and is never replaced by prewarming or reset. Use
+`reset()` reuses the hook instance and clears the conversation. When `prewarm` is true after
+the reset, it prepares the next owned session; otherwise, the next send creates it. An explicitly
+supplied `session` remains externally owned and is never replaced by prewarming or reset. Use
 `initialSession` with `resume: true` to restore a saved chat.
 
 `data.messages` are eve-owned `EveMessage[]`. Common text, reasoning, file, and dynamic-tool parts follow the [AI SDK `UIMessage`](https://ai-sdk.dev/docs/reference/ai-sdk-core/ui-message) rendering convention, but the types are not interchangeable. eve also exposes authorization and HITL metadata, and a file part's URL can be absent. Adapt those parts before passing messages to an API typed as `UIMessage[]`.
@@ -351,7 +387,7 @@ then save a final snapshot in `onFinish`.
 
 `initialEvents` must be an ordered prefix of the same session's stream, but its endpoint does not have to line up exactly with where the stream resumes. When the event count matches `initialSession.streamIndex`, catch-up continues from that cursor. A partial or overlapping saved log falls back to index `0`. Every event carries a stable [`meta.id`](/docs/concepts/sessions-runs-and-streaming#the-event-envelope), and the store drops any event whose id it has already applied, so an overlapping replay renders once and `onEvent` only fires for events your UI has not seen.
 
-For multiple chat threads, keep one saved event log and session cursor per thread. `agent`, `host`, `reducer`, `session`, `initialEvents`, `initialSession`, `auth`, `headers`, `optimistic`, `prewarm`, and `resume` are read when the hook creates its store, so remount the chat component when switching threads, for example with `key={chat.id}`.
+For multiple chat threads, keep one saved event log and session cursor per thread. `agent`, `host`, `reducer`, `session`, `initialEvents`, `initialSession`, `auth`, `headers`, `optimistic`, and `resume` are read when the hook creates its store, so remount the chat component when switching threads, for example with `key={chat.id}`. React reads `prewarm` on every render.
 
 Pass `resume: true` with `initialSession` to rebuild the projection from the durable stream after mount. While `status` is `"resuming"`, render hydrated `data` but disable message and HITL submission; do not present cancellation or active-turn progress controls. If catch-up finds an in-flight turn, `status` changes to `"streaming"` before the binding follows it to a boundary. The stream reports its initial durable tail so catch-up can finish without closing the connection or waiting for an idle timeout. A settled tail changes directly to `"ready"`; a newer turn or pending authorization remains `"streaming"`. The connection stays open to receive later events. A terminal session failure changes to `"error"`.
 

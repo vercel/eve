@@ -54,7 +54,7 @@ export interface UseEveAgentHelpers<TData> extends UseEveAgentSnapshot<TData> {
   readonly resume: () => Promise<void>;
   /** Creates the session without starting its first turn. */
   readonly prewarm: () => Promise<void>;
-  /** Resets the session: detaches any local stream, recreates the owned session, and clears events and projected data. */
+  /** Resets the session: detaches any local stream and clears events and projected data. */
   readonly reset: () => void;
   /** Sends a message. While a turn is active, pass `turnPolicy: "steer"` to replace it. */
   readonly send: <TOutput = unknown>(
@@ -111,7 +111,16 @@ export interface UseEveAgentOptions<TData> extends EveAgentStoreCallbacks<TData>
    * @default true
    */
   readonly optimistic?: boolean;
-  /** Prewarm an owned session on mount and after reset. @default false */
+  /**
+   * Prewarm an owned session when true. React observes this value across renders;
+   * changing it from false to true prepares the current session, and reset checks
+   * the latest rendered value before preparing the next session.
+   *
+   * Changing the value to false does not discard an existing session or abort
+   * session creation already in flight.
+   *
+   * @default false
+   */
   readonly prewarm?: boolean;
   readonly reducer?: EveAgentReducer<TData>;
   /**
@@ -142,8 +151,8 @@ export function useEveAgent<TData>(
  * infer `TData`.
  *
  * Session-shaping options (`host`, `reducer`, `session`, `initialEvents`,
- * `initialSession`, `auth`, `headers`, `optimistic`, `prewarm`, `resume`) are
- * read once when the store is created; remount to change them. Lifecycle
+ * `initialSession`, `auth`, `headers`, `optimistic`, `resume`) are read once
+ * when the store is created; remount to change them. `prewarm` and lifecycle
  * callbacks (`onError`, `onEvent`, `onFinish`, `onSessionChange`, `prepareSend`)
  * refresh on every render.
  */
@@ -153,6 +162,8 @@ export function useEveAgent<TData>(
   const storeRef = useRef<EveAgentStore<TData> | undefined>(undefined);
   const resumeOnMountRef = useRef(options.resume ?? false);
   const [autoResumePending, setAutoResumePending] = useState(resumeOnMountRef.current);
+  const [prewarmResetGeneration, setPrewarmResetGeneration] = useState(0);
+  const shouldPrewarm = options.prewarm ?? false;
 
   if (!storeRef.current) {
     if (
@@ -170,7 +181,6 @@ export function useEveAgent<TData>(
       initialEvents: options.initialEvents,
       initialSession: options.initialSession,
       optimistic: options.optimistic,
-      prewarm: options.prewarm,
       reducer,
       session: options.session,
     });
@@ -203,6 +213,11 @@ export function useEveAgent<TData>(
     };
   }, [store]);
   useEffect(() => {
+    if (!shouldPrewarm) return;
+    const timeout = setTimeout(() => void store.prewarm().catch(() => {}), 0);
+    return () => clearTimeout(timeout);
+  }, [prewarmResetGeneration, shouldPrewarm, store]);
+  useEffect(() => {
     if (!resumeOnMountRef.current) return;
     let active = true;
     const finish = () => {
@@ -216,7 +231,10 @@ export function useEveAgent<TData>(
   }, [store]);
 
   const cancel = useCallback(() => store.cancel(), [store]);
-  const reset = useCallback(() => store.reset(), [store]);
+  const reset = useCallback(() => {
+    store.reset();
+    setPrewarmResetGeneration((generation) => generation + 1);
+  }, [store]);
   const prewarm = useCallback(() => store.prewarm(), [store]);
   const resume = useCallback(() => store.resume(), [store]);
   const send = useCallback(

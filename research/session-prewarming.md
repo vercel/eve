@@ -1,7 +1,7 @@
 ---
 issue: https://github.com/vercel/eve/issues/1476
 status: implemented
-last_updated: "2026-09-16"
+last_updated: "2026-09-17"
 ---
 
 # Session prewarming
@@ -13,9 +13,12 @@ without a message. They return an accepted session ID. `session.send(message)` s
 message to that ID; `create({ message })` still creates and starts a turn in one request.
 
 React, Vue, and Svelte accept `useEveAgent({ prewarm: true })` to prewarm on mount and after
-reset. The default is `false`. The explicit `prewarm()` method resolves on `202 Accepted`;
-concurrent calls share the same request. Applications must have auth, headers, and any chat-row
-binding ready before opting into automatic prewarming.
+reset. The default is `false`. React also observes the boolean across renders: a `false` to `true`
+change prepares the current owned session, while `true` to `false` does not abort or discard one.
+Reset reevaluates the value after batched React state updates. Vue and Svelte keep construction-time
+option semantics. The explicit `prewarm()` method resolves on `202 Accepted`; concurrent calls
+share the same request. Applications must have auth, headers, and any chat-row binding ready before
+opting into automatic prewarming.
 
 Eval contexts expose `t.session(options?)` to create an accepted session without a turn,
 and `t.send(message, options?)` to create a fresh session with its first message in one
@@ -41,7 +44,7 @@ step or harness mode is needed.
 
 ```mermaid
 flowchart LR
-  Mount["mount with prewarm: true"] --> Create["start workflow + establish inbox"]
+  Trigger["mount, reset, or React false → true with prewarm enabled"] --> Create["start workflow + establish inbox"]
   Create --> Wait["wait before initialization"]
   Send["send message"] --> Channel["onMessage"]
   Channel --> Wait
