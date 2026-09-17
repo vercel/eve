@@ -25,10 +25,10 @@ import {
   createVercelSandboxHandle,
 } from "#execution/sandbox/bindings/vercel.js";
 import {
-  createVercelImageResourcePublisher,
+  prepareVercelImageResource,
+  resolveVercelImageMounts,
   VercelImageResourceUnavailableError,
   type VercelImageMountArtifact,
-  type VercelImageResourcePublisher,
 } from "#execution/sandbox/bindings/vercel-image-resources.js";
 import type {
   VercelCreateOptions,
@@ -81,7 +81,6 @@ export interface CreateVercelImageProviderInput {
     readonly identity: Readonly<Record<string, string>>;
     readonly tags: Readonly<Record<string, string>>;
   };
-  readonly resourcePublisher?: VercelImageResourcePublisher;
   readonly waitForImage?: () => Promise<void>;
 }
 
@@ -114,8 +113,6 @@ export function createVercelImageSandboxProvider(
       identity: { sessionId: context.session.id },
       tags: { sessionId: context.session.id },
     }));
-  const resourcePublisher =
-    input.resourcePublisher ?? createVercelImageResourcePublisher({ loadModule });
   const waitForImage = input.waitForImage ?? (async () => await sleep(2_000));
   const createOptions: VercelCreateOptions = {
     timeout: DEFAULT_SANDBOX_TIMEOUT_MS,
@@ -140,8 +137,9 @@ export function createVercelImageSandboxProvider(
       created = true;
       try {
         const credentials = await getVercelSandboxCredentials(createOptions);
-        const mounts = await resourcePublisher.resolveMounts({
+        const mounts = await resolveVercelImageMounts({
           createOptions,
+          module,
           mounts: artifact.mounts,
           signal: createOptions.signal,
         });
@@ -234,18 +232,21 @@ export function createVercelImageSandboxProvider(
               environmentOptions,
               resources: context.resources,
             });
+      const module = await loadModule();
       const preparedMounts = await Promise.all(
         [context.resources.workspace, context.resources.skills]
           .filter((resource) => resource !== undefined)
-          .map((resource) =>
-            resourcePublisher.prepare({
-              createOptions,
-              resource,
-              signal: createOptions.signal,
-            }),
+          .map(
+            async (resource) =>
+              await prepareVercelImageResource({
+                createOptions,
+                module,
+                resource,
+                signal: createOptions.signal,
+              }),
           ),
       );
-      return { image, mounts: preparedMounts.map((mount) => mount.artifact), version: 1 };
+      return { image, mounts: preparedMounts, version: 1 };
     },
     async resume(_context, artifact, stateValue) {
       const state = requireSessionState(stateValue);

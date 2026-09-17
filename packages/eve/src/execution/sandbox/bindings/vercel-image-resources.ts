@@ -30,89 +30,70 @@ export class VercelImageResourceUnavailableError extends Error {
   }
 }
 
-export interface VercelImageResourcePublisher {
-  prepare(input: {
-    readonly createOptions: VercelCreateOptions;
-    readonly resource: SandboxProviderResourceTree;
-    readonly signal?: AbortSignal;
-  }): Promise<{ readonly artifact: VercelImageMountArtifact; readonly reused: boolean }>;
-  resolveMounts(input: {
-    readonly createOptions: VercelCreateOptions;
-    readonly mounts: readonly VercelImageMountArtifact[];
-    readonly signal?: AbortSignal;
-  }): Promise<Record<string, ReturnType<VercelDrive["snapshot"]>>>;
+export async function prepareVercelImageResource(input: {
+  readonly createOptions: VercelCreateOptions;
+  readonly module: VercelModule;
+  readonly resource: SandboxProviderResourceTree;
+  readonly signal?: AbortSignal;
+}): Promise<VercelImageMountArtifact> {
+  const credentials = await getVercelSandboxCredentials(input.createOptions);
+  const fetch = getVercelSandboxFetch(input.createOptions);
+  const region = readRegion(input.createOptions);
+  const driveName = resourceDriveName(region, input.resource.key);
+  const existing = await findDrive({
+    credentials,
+    driveName,
+    fetch,
+    module: input.module,
+    region,
+    signal: input.signal,
+  });
+  const drive =
+    existing ??
+    (await input.module.Drive.getOrCreate({
+      ...credentials,
+      fetch,
+      name: driveName,
+      region,
+      signal: input.signal,
+    }));
+  await populateDrive({
+    createOptions: input.createOptions,
+    drive,
+    module: input.module,
+    resource: input.resource,
+    signal: input.signal,
+  });
+  return {
+    driveName,
+    mountPath: input.resource.mountPath,
+    region,
+    resourceKey: input.resource.key,
+  };
 }
 
-export function createVercelImageResourcePublisher(
-  input: {
-    readonly loadModule?: () => Promise<VercelModule>;
-  } = {},
-): VercelImageResourcePublisher {
-  const loadModule =
-    input.loadModule ?? (async () => await import("#compiled/@vercel/sandbox/index.js"));
-  return {
-    async prepare(prepareInput) {
-      const module = await loadModule();
-      const credentials = await getVercelSandboxCredentials(prepareInput.createOptions);
-      const fetch = getVercelSandboxFetch(prepareInput.createOptions);
-      const region = readRegion(prepareInput.createOptions);
-      const driveName = resourceDriveName(region, prepareInput.resource.key);
-      const existing = await findDrive({
-        credentials,
-        driveName,
-        fetch,
-        module,
-        region,
-        signal: prepareInput.signal,
-      });
-      const drive =
-        existing ??
-        (await module.Drive.getOrCreate({
-          ...credentials,
-          fetch,
-          name: driveName,
-          region,
-          signal: prepareInput.signal,
-        }));
-      const reused = await populateDrive({
-        createOptions: prepareInput.createOptions,
-        drive,
-        module,
-        resource: prepareInput.resource,
-        signal: prepareInput.signal,
-      });
-      return {
-        artifact: {
-          driveName,
-          mountPath: prepareInput.resource.mountPath,
-          region,
-          resourceKey: prepareInput.resource.key,
-        },
-        reused: existing !== null && reused,
-      };
-    },
-    async resolveMounts(resolveInput) {
-      const module = await loadModule();
-      const credentials = await getVercelSandboxCredentials(resolveInput.createOptions);
-      const fetch = getVercelSandboxFetch(resolveInput.createOptions);
-      const mounts: Record<string, ReturnType<VercelDrive["snapshot"]>> = {};
-      for (const artifact of resolveInput.mounts) {
-        const drive = await findDrive({
-          credentials,
-          driveName: artifact.driveName,
-          fetch,
-          module,
-          region: artifact.region,
-          signal: resolveInput.signal,
-        });
-        if (drive === null) {
-          throw new VercelImageResourceUnavailableError(artifact.resourceKey);
-        }
-        mounts[artifact.mountPath] = drive.snapshot();
-      }
-      return mounts;
-    },
-  };
+export async function resolveVercelImageMounts(input: {
+  readonly createOptions: VercelCreateOptions;
+  readonly module: VercelModule;
+  readonly mounts: readonly VercelImageMountArtifact[];
+  readonly signal?: AbortSignal;
+}): Promise<Record<string, ReturnType<VercelDrive["snapshot"]>>> {
+  const credentials = await getVercelSandboxCredentials(input.createOptions);
+  const fetch = getVercelSandboxFetch(input.createOptions);
+  const mounts: Record<string, ReturnType<VercelDrive["snapshot"]>> = {};
+  for (const artifact of input.mounts) {
+    const drive = await findDrive({
+      credentials,
+      driveName: artifact.driveName,
+      fetch,
+      module: input.module,
+      region: artifact.region,
+      signal: input.signal,
+    });
+    if (drive === null) throw new VercelImageResourceUnavailableError(artifact.resourceKey);
+    mounts[artifact.mountPath] = drive.snapshot();
+  }
+  return mounts;
 }
 
 async function findDrive(input: {
