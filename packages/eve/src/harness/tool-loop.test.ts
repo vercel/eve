@@ -1665,6 +1665,42 @@ describe("createToolLoopHarness", () => {
     ).rejects.toThrow(/Dynamic model selection is required/);
   });
 
+  it("passes projected history and incoming input to turn.started on every turn", async () => {
+    setupMockAgent({
+      finishReason: "stop",
+      response: { messages: [{ content: "ok", role: "assistant" }] },
+      text: "ok",
+      toolCalls: [],
+      toolResults: [],
+    });
+    const snapshots: (readonly ModelMessage[] | undefined)[] = [];
+    const hidden = { content: "Hidden context", kind: "user" as const, role: "user" as const };
+    const runStep = createToolLoopHarness(
+      createTestConfig(
+        "conversation",
+        async (event, messages) => {
+          if (event.type === "turn.started") snapshots.push(messages);
+        },
+        {
+          historyProjector: ({ messages }) => messages.filter((message) => message !== hidden),
+        },
+      ),
+    );
+
+    const first = await runStep(createTestSession({ history: [hidden] }), { message: "Hello" });
+    await runStep(first.session, { context: ["Current context"], message: "Follow up" });
+
+    expect(snapshots).toEqual([
+      [{ content: "Hello", kind: "user", role: "user" }],
+      [
+        { content: "Hello", kind: "user", role: "user" },
+        { content: "ok", role: "assistant" },
+        { content: "Current context", kind: "context.instruction", role: "user" },
+        { content: "Follow up", kind: "user", role: "user" },
+      ],
+    ]);
+  });
+
   it("emits a terminal failure when no dynamic model selection is active", async () => {
     const { emit, events } = createEventCollector();
     const runStep = createToolLoopHarness(createTestConfig("conversation", emit));

@@ -333,6 +333,8 @@ A dynamic connection, tool, or skill whose name matches an **authored** one **ov
 
 ¹ Workflow recovery can redeliver a resolver event, so keep resolvers idempotent. Replaying a parked callback does not depend on running the resolver again — except for the one-shot rebind described under [Identity and redeploys](#identity-and-redeploys).
 
+At `turn.started`, model, tool, skill, and subagent resolvers receive the visible conversation history and incoming message in `ctx.messages`, oldest first. Request context is included, and history projection still applies. Read these messages from the handler's second argument; the event itself contains turn metadata. Instruction resolvers use the separate snapshot described under [Dynamic instructions](#dynamic-instructions).
+
 ### Execution order
 
 When a stream event fires, three things happen in order.

@@ -12,6 +12,17 @@ const agent: AgentDefinition = defineAgent({
   experimental,
   model: defineDynamic({
     events: {
+      "turn.started": (_event, ctx) => {
+        const text = lastUserText(ctx.messages);
+        if (text.length === 0) throw new Error("Turn resolver did not receive incoming input.");
+        if (
+          text.includes('"selected again"') &&
+          !ctx.messages.some((message) => message.role === "assistant")
+        ) {
+          throw new Error("Turn resolver did not receive message history.");
+        }
+        return { model, modelContextWindowTokens: 1_000_000 };
+      },
       "step.started": (_event, ctx) => {
         const text = lastUserText(ctx.messages);
 

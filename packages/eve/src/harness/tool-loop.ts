@@ -1011,7 +1011,16 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       try {
         const traceContext = await preparePreambleTrace();
         emissionState = await emitTurnPreamble(
-          emit,
+          (event) =>
+            emit(
+              event,
+              event.type === "turn.started"
+                ? projectHistory(
+                    [...pending.messages, ...ephemeralContextMessages, ...preparedTurnInput],
+                    pending.session.state,
+                  )
+                : undefined,
+            ),
           preambleStepInput ?? {},
           emissionState,
           config.runtimeIdentity,
