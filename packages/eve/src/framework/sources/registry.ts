@@ -9,7 +9,7 @@ import {
   type ProgrammaticModuleNamespace,
 } from "#compiler/source-graph.js";
 
-const revision = `eve@${resolveInstalledPackageInfo().version}:compiled-manifest-v50`;
+const revision = `eve@${resolveInstalledPackageInfo().version}:compiled-manifest-v52`;
 
 const localDefaults = defineProgrammaticAgentSource({
   id: "eve:defaults",

@@ -4,7 +4,11 @@ import { afterAll, afterEach, beforeEach, describe, expect, it, onTestFinished, 
 
 import { buildAdapterContext } from "#channel/adapter-context.js";
 import { callAdapterEventHandler, type ChannelAdapter } from "#channel/adapter.js";
-import { isCompiledChannel, type CompiledChannel } from "#channel/compiled-channel.js";
+import {
+  getChannelBuildMetadata,
+  isCompiledChannel,
+  type CompiledChannel,
+} from "#channel/compiled-channel.js";
 import type { ChannelFrom, ChannelSource } from "#channel/channel-operations.js";
 import { isHttpRouteDefinition } from "#channel/routes.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
@@ -490,6 +494,23 @@ describe("slackChannel()", () => {
     const channel = slackChannel({ turnPolicy: "queue" });
 
     expect(channel).toMatchObject({ turnPolicy: "queue" });
+  });
+
+  it("preserves Connect credential metadata for compilation", () => {
+    const vercelConnect = {
+      connector: "slack/my-agent",
+      requirement: {
+        reference: "connector:slack/my-agent",
+        service: "slack",
+        subjectTypes: ["app" as const],
+        method: "slack",
+      },
+    };
+    const credentials = { botToken: "xoxb-test", vercelConnect };
+
+    expect(getChannelBuildMetadata(slackChannel({ credentials }), "slack")).toMatchObject({
+      externalCredentials: vercelConnect,
+    });
   });
 
   it("classifies from durable state through the audience hook", () => {
