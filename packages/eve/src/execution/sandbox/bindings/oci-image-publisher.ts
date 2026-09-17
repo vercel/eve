@@ -32,6 +32,7 @@ export interface OciImagePublisher {
 
 export function createOciImagePublisher(input: {
   readonly authToken: string;
+  readonly engine?: "buildah" | "docker";
   readonly registry: string;
   readonly runner?: OciCommandRunner;
   readonly username: string;
@@ -39,7 +40,7 @@ export function createOciImagePublisher(input: {
   const runner = input.runner ?? createOciCommandRunner();
   return {
     async publish(publishInput) {
-      const engine = resolveOciEngine();
+      const engine = input.engine ?? (process.env.VERCEL ? "buildah" : "docker");
       if (engine === "docker" || !hasRegistryAuthFile()) {
         await login({
           authToken: input.authToken,
@@ -55,12 +56,6 @@ export function createOciImagePublisher(input: {
       return `${stripImageTag(publishInput.imageReference)}@${digest}`;
     },
   };
-}
-
-function resolveOciEngine(): "buildah" | "docker" {
-  const configured = process.env.EVE_OCI_BUILDER?.trim().toLowerCase();
-  if (configured === "buildah" || configured === "docker") return configured;
-  return process.env.VERCEL ? "buildah" : "docker";
 }
 
 async function login(input: {

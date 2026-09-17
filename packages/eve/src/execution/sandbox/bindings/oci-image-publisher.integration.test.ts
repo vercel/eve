@@ -20,7 +20,6 @@ afterEach(() => vi.unstubAllEnvs());
 
 describe("createOciImagePublisher", () => {
   it("builds, authenticates, and publishes with Docker without exposing the token on argv", async () => {
-    vi.stubEnv("EVE_OCI_BUILDER", "docker");
     const calls: Array<{
       args: readonly string[];
       command: string;
@@ -36,6 +35,7 @@ describe("createOciImagePublisher", () => {
     };
     const publisher = createOciImagePublisher({
       authToken: "secret-token",
+      engine: "docker",
       registry: "registry.example.com",
       runner,
       username: "account",
@@ -68,7 +68,6 @@ describe("createOciImagePublisher", () => {
   });
 
   it("uses buildah with a standard auth file and returns its digest", async () => {
-    vi.stubEnv("EVE_OCI_BUILDER", "buildah");
     const directory = await mkdtemp(join(tmpdir(), "eve-oci-auth-test-"));
     const authFile = join(directory, "auth.json");
     await writeFile(authFile, "{}\n");
@@ -84,6 +83,7 @@ describe("createOciImagePublisher", () => {
     };
     const publisher = createOciImagePublisher({
       authToken: "secret-token",
+      engine: "buildah",
       registry: "registry.example.com",
       runner,
       username: "account",
@@ -106,7 +106,6 @@ describe("createOciImagePublisher", () => {
   });
 
   it("redacts credentials from authentication failures", async () => {
-    vi.stubEnv("EVE_OCI_BUILDER", "docker");
     const runner: OciCommandRunner = {
       async run(_command, args) {
         if (args[0] === "login") throw new Error("rejected secret-token");
@@ -115,6 +114,7 @@ describe("createOciImagePublisher", () => {
     };
     const publisher = createOciImagePublisher({
       authToken: "secret-token",
+      engine: "docker",
       registry: "registry.example.com",
       runner,
       username: "account",
@@ -126,7 +126,6 @@ describe("createOciImagePublisher", () => {
   });
 
   it("fails when the registry does not return a content digest", async () => {
-    vi.stubEnv("EVE_OCI_BUILDER", "docker");
     const runner: OciCommandRunner = {
       async run(_command, args) {
         return args[0] === "inspect"
@@ -136,6 +135,7 @@ describe("createOciImagePublisher", () => {
     };
     const publisher = createOciImagePublisher({
       authToken: "secret-token",
+      engine: "docker",
       registry: "registry.example.com",
       runner,
       username: "account",

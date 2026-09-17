@@ -122,7 +122,6 @@ export function createVercelImageSandboxProvider(
   };
 
   async function openSession(
-    context: import("#shared/sandbox-provider.js").SandboxProviderSessionContext,
     options: Readonly<ExperimentalVercelImageRuntimeOptions> | undefined,
     artifactValue: SandboxPreparedArtifact,
     nativeTags: Readonly<Record<string, string>>,
@@ -151,7 +150,7 @@ export function createVercelImageSandboxProvider(
           source: _source,
           ...imageCreateOptions
         } = createOptions;
-        const { onSession: _onSession, ...runtimeOptions } = options ?? {};
+        const runtimeOptions = options ?? {};
         sandbox = await createImageSandboxWithRetry({
           create: async () =>
             await module.Sandbox.create({
@@ -187,7 +186,6 @@ export function createVercelImageSandboxProvider(
       try {
         await ensureBaseRuntime(sandbox);
         await hydrateResources(session);
-        await options?.onSession?.({ sandbox: session, session: context.session });
       } catch (error) {
         try {
           await sandbox.delete({ signal: createOptions.signal });
@@ -282,7 +280,7 @@ export function createVercelImageSandboxProvider(
     async start(context, options, artifact) {
       const nativeSession = resolveNativeSession(context);
       const sandboxName = sessionName(identityPrefix, nativeSession.identity, options, artifact);
-      const result = await openSession(context, options, artifact, nativeSession.tags, sandboxName);
+      const result = await openSession(options, artifact, nativeSession.tags, sandboxName);
       return {
         handle: result.handle,
         state: { generation: imageGeneration(artifact, createOptions), sandboxName, version: 2 },
