@@ -4,6 +4,7 @@ import { withInstrumentationDecision } from "#instrumentation/content.js";
 import type {
   InstrumentationInputRequestedEvent,
   InstrumentationInputResolvedEvent,
+  InstrumentationSessionStartedEvent,
 } from "#instrumentation/lifecycle.js";
 
 const scope = {
@@ -15,6 +16,27 @@ const scope = {
 };
 
 describe("withInstrumentationDecision", () => {
+  it("treats the session title as input content", () => {
+    const event = {
+      agentName: "general",
+      channelAudience: "public",
+      idempotencyKey: "session:session-1",
+      rootSessionId: "session-1",
+      scheduleId: "daily-report",
+      sessionId: "session-1",
+      title: "Private title",
+      type: "session.started",
+    } satisfies InstrumentationSessionStartedEvent;
+
+    expect(
+      withInstrumentationDecision(event, {
+        action: "record",
+        recordInputs: false,
+        recordOutputs: true,
+      }),
+    ).toEqual(expect.objectContaining({ scheduleId: "daily-report", title: undefined }));
+  });
+
   it("treats input requests as outputs and user responses as inputs", () => {
     const requested = withInstrumentationDecision(
       {
@@ -75,6 +97,37 @@ describe("withInstrumentationDecision", () => {
     expect(withInstrumentationDecision(resolved, decision)).toEqual(
       expect.objectContaining({ error, response: undefined }),
     );
+  });
+
+  it("treats recalled memory records as inputs", () => {
+    const completed = {
+      idempotencyKey: "memory-1",
+      operationName: "search_memory",
+      outputRecords: [{ content: "The user prefers dark mode.", id: "preference" }],
+      phase: "turn.started",
+      recordCount: 1,
+      rootSessionId: "session-1",
+      sessionId: "session-1",
+      slot: "profile",
+      storeId: "memscope1_scope",
+      turnId: "turn-1",
+      type: "memory.operation.completed",
+    } as const;
+
+    expect(
+      withInstrumentationDecision(completed, {
+        action: "record",
+        recordInputs: true,
+        recordOutputs: false,
+      }),
+    ).toBe(completed);
+    expect(
+      withInstrumentationDecision(completed, {
+        action: "record",
+        recordInputs: false,
+        recordOutputs: true,
+      }),
+    ).toEqual(expect.objectContaining({ outputRecords: undefined }));
   });
 
   it("reduces provider metadata to structural output when outputs are disabled", () => {

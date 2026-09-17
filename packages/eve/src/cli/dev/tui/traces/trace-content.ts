@@ -2,9 +2,7 @@
  * Formats span attribute values for the `/traces` detail panel. Payload
  * attributes render as readable structure — prompt messages as a chat-like
  * transcript with role-prefixed blocks and hanging indents, JSON as
- * pretty-printed blocks — instead of one wrapped blob. Provider transport
- * noise was already stripped at capture time (see `agent-otel-provider.ts`),
- * so what remains here is presentation only.
+ * pretty-printed blocks — instead of one wrapped blob.
  *
  * Every returned line fits the given width; wrapped continuations keep a
  * two-space hanging indent so they read as part of their block.
@@ -35,8 +33,8 @@ export function formatAttributeContent(
     if (Array.isArray(value)) return prettyJson(value, width);
     return [stripTerminalControls(shortJson(value))];
   }
-  if (key === "ai.prompt.messages") {
-    const transcript = messageTranscript(value, dim, width);
+  if (key === "gen_ai.input.messages") {
+    const transcript = genAiMessageTranscript(value, dim, width);
     if (transcript !== undefined) return transcript;
   }
   return formatPayloadContent(value, width);
@@ -61,38 +59,18 @@ export function formatPayloadContent(text: string, width: number): string[] {
   return wrapPlainText(text, width);
 }
 
-function messageTranscript(
+function genAiMessageTranscript(
   raw: string,
   dim: (text: string) => string,
   width: number,
 ): string[] | undefined {
   const parsed = parseJson(raw);
   if (!Array.isArray(parsed)) return undefined;
-  // Long conversations are front-truncated at capture time with an
-  // `eve.truncated` marker; it renders as a notice, not a message.
-  let omitted = 0;
-  const messages: Record<string, unknown>[] = [];
-  for (const item of parsed) {
-    if (isRecord(item) && isRecord(item["eve.truncated"])) {
-      const count = item["eve.truncated"].omittedMessages;
-      if (typeof count === "number") {
-        omitted += count;
-        continue;
-      }
-    }
-    messages.push(item);
-  }
-  if (!messages.every((message) => typeof message.role === "string")) {
-    return undefined;
-  }
+  if (!parsed.every(isGenAiMessage)) return undefined;
   const lines: string[] = [];
-  if (omitted > 0) {
-    lines.push(
-      dim(`… ${omitted} earlier message${omitted === 1 ? "" : "s"} omitted (long context)`),
-    );
-  }
-  for (const message of messages) {
-    const parts = messageContentParts(message.content);
+  const toolNames = new Map<string, string>();
+  for (const message of parsed) {
+    const parts = genAiMessageParts(message.parts, toolNames);
     const role =
       message.role === "tool" ? toolRoleLabel(parts) : stripTerminalControls(String(message.role));
     // The first part sits beside the role prefix; the rest hang underneath.
@@ -116,46 +94,37 @@ interface MessageContentPart {
   readonly name?: string;
 }
 
-function messageContentParts(content: unknown): MessageContentPart[] {
-  if (typeof content === "string") return [{ text: stripTerminalControls(content) }];
-  if (!Array.isArray(content)) return [{ text: shortJson(content) }];
+function genAiMessageParts(value: unknown, toolNames: Map<string, string>): MessageContentPart[] {
+  if (!Array.isArray(value)) return [{ text: shortJson(value) }];
   const parts: MessageContentPart[] = [];
-  for (const part of content) {
+  for (const part of value) {
     if (!isRecord(part) || typeof part.type !== "string") {
       parts.push({ text: shortJson(part) });
       continue;
     }
-    if (part.type === "text" && typeof part.text === "string") {
-      parts.push({ text: stripTerminalControls(part.text) });
+    if (part.type === "text" && typeof part.content === "string") {
+      parts.push({ text: stripTerminalControls(part.content) });
     } else if (part.type === "reasoning") {
-      const text = typeof part.text === "string" ? stripTerminalControls(part.text.trim()) : "";
+      const text =
+        typeof part.content === "string" ? stripTerminalControls(part.content.trim()) : "";
       parts.push({ dim: true, text: text.length > 0 ? `⟨reasoning⟩ ${text}` : "⟨reasoning⟩" });
-    } else if (part.type === "tool-call" && typeof part.toolName === "string") {
-      const name = stripTerminalControls(part.toolName);
-      parts.push({ name, text: `→ ${name}(${shortJson(part.input)})` });
-    } else if (part.type === "tool-result" && typeof part.toolName === "string") {
-      const name = stripTerminalControls(part.toolName);
-      parts.push({ name, text: toolOutputText(part.output) });
+    } else if (part.type === "tool_call" && typeof part.name === "string") {
+      const name = stripTerminalControls(part.name);
+      if (typeof part.id === "string") toolNames.set(part.id, name);
+      parts.push({ name, text: `→ ${name}(${shortJson(part.arguments)})` });
+    } else if (part.type === "tool_call_response") {
+      const name = typeof part.id === "string" ? toolNames.get(part.id) : undefined;
+      parts.push({ name, text: toolResponseText(part.response) });
     } else {
       parts.push({ text: shortJson(part) });
     }
   }
-  if (parts.length === 0) parts.push({ text: shortJson(content) });
+  if (parts.length === 0) parts.push({ text: shortJson(value) });
   return parts;
 }
 
-/**
- * Unwraps the AI SDK's typed output envelopes: `{"type":"text","value":"…"}`
- * renders as the text, `{"type":"json","value":{…}}` as the inner payload's
- * compact JSON. Everything else renders as compact JSON.
- */
-function toolOutputText(output: unknown): string {
-  if (isRecord(output) && typeof output.type === "string" && "value" in output) {
-    if (output.type === "text" && typeof output.value === "string")
-      return stripTerminalControls(output.value);
-    return shortJson(output.value);
-  }
-  return shortJson(output);
+function toolResponseText(response: unknown): string {
+  return typeof response === "string" ? stripTerminalControls(response) : shortJson(response);
 }
 
 /** Pretty-prints a JSON value with two-space indents, wrapped to `width`. */
@@ -225,6 +194,12 @@ function parseJson(value: string): unknown {
   } catch {
     return undefined;
   }
+}
+
+function isGenAiMessage(
+  value: unknown,
+): value is Record<string, unknown> & { readonly role: string } {
+  return isRecord(value) && typeof value.role === "string";
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

@@ -8,6 +8,7 @@ import { clearTurnClientContextState } from "#harness/turn-client-context.js";
  * workflow runtime recreates the harness at each `"use step"` boundary.
  */
 export interface HarnessEmissionState {
+  readonly assistantOutputStarted?: boolean;
   readonly sessionStarted: boolean;
   readonly sequence: number;
   readonly stepIndex: number;

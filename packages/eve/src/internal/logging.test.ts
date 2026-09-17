@@ -1,10 +1,19 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  ROOT_CONTEXT,
+  SpanStatusCode,
+  context,
+  trace,
+  type Span,
+} from "#compiled/@opentelemetry/api/index.js";
+import { withErrorContent } from "#tracing/error-content-context.js";
 
 import {
   createErrorId,
   createLogger,
   formatError,
   logError,
+  recordErrorOnSpan,
   setLogRecordSubscriber,
   type LogRecord,
 } from "#internal/logging.js";
@@ -19,6 +28,61 @@ describe("createErrorId", () => {
     const b = createErrorId();
     expect(a).not.toBe(b);
     expect(a.length).toBeGreaterThan(0);
+  });
+});
+
+describe("span error content policy", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  function mockSpan() {
+    return {
+      addEvent: vi.fn(),
+      end: vi.fn(),
+      recordException: vi.fn(),
+      setAttribute: vi.fn(),
+      setStatus: vi.fn(),
+      spanContext: vi.fn<Span["spanContext"]>(),
+    };
+  }
+
+  it.each([undefined, true, false])("records error content with policy %s", (allowed) => {
+    const span = mockSpan();
+    vi.spyOn(trace, "getActiveSpan").mockReturnValue(span);
+    vi.spyOn(context, "active").mockReturnValue(
+      allowed === undefined ? ROOT_CONTEXT : withErrorContent(ROOT_CONTEXT, allowed),
+    );
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const error = new Error("error content");
+    recordErrorOnSpan(span, error);
+    createLogger("test").error("failed", { error });
+    logError(createLogger("test"), "failed", error);
+
+    expect(span.setStatus).toHaveBeenCalledTimes(3);
+    if (allowed === false) {
+      expect(span.recordException).not.toHaveBeenCalled();
+      expect(span.setStatus.mock.calls).toEqual(
+        Array.from({ length: 3 }, () => [{ code: SpanStatusCode.ERROR }]),
+      );
+    } else {
+      expect(span.recordException).toHaveBeenCalledTimes(3);
+      expect(span.setStatus).toHaveBeenCalledWith({
+        code: SpanStatusCode.ERROR,
+        message: "error content",
+      });
+    }
+  });
+
+  it.each([undefined, false])("does not mark a log-only event as a failure (%s)", (allowed) => {
+    const span = mockSpan();
+    vi.spyOn(trace, "getActiveSpan").mockReturnValue(span);
+    vi.spyOn(context, "active").mockReturnValue(
+      allowed === undefined ? ROOT_CONTEXT : withErrorContent(ROOT_CONTEXT, allowed),
+    );
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    createLogger("test").error("log content", { reason: "detail" });
+    expect(span.setStatus).not.toHaveBeenCalled();
+    expect(span.recordException).not.toHaveBeenCalled();
+    expect(span.addEvent).toHaveBeenCalledTimes(allowed === false ? 0 : 1);
   });
 });
 

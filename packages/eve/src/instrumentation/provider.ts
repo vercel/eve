@@ -64,6 +64,16 @@ export type {
   InstrumentationUsage,
 } from "#instrumentation/lifecycle.js";
 export type {
+  InstrumentationMemoryOperation,
+  InstrumentationMemoryOperationCompletedEvent,
+  InstrumentationMemoryOperationEvent,
+  InstrumentationMemoryOperationFailedEvent,
+  InstrumentationMemoryOperationName,
+  InstrumentationMemoryOperationStartedEvent,
+  InstrumentationMemoryOperationTerminalEvent,
+  InstrumentationMemoryRecord,
+} from "#instrumentation/memory.js";
+export type {
   InstrumentationCapture,
   TraceCaptureContext,
   TraceCapturePolicy,

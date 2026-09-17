@@ -11,6 +11,7 @@ import {
   type ProgrammaticAgentModule,
 } from "#compiler/source-graph.js";
 import { compileAgentManifest } from "#compiler/normalize-manifest.js";
+import { assertRootOnlyConfig } from "#compiler/normalize-manifest-helpers.js";
 import type { CompilerDiagnostic } from "#compiler/diagnostics.js";
 import { createProgrammaticCompiledModuleMap } from "#compiler/module-map.js";
 import { validateCompiledModuleMap } from "#compiler/validate-artifact.js";
@@ -29,7 +30,6 @@ import { defineWorkflowTool } from "#tools/workflow-definition.js";
 import { defineTool, disableTool } from "#tools/definition.js";
 import { defineMemory } from "#public/memory/index.js";
 import { defineDynamic } from "#dynamic/definition.js";
-import { experimental_workflow } from "#tools/workflow.js";
 import { webSearch } from "#tools/provided/web-search.js";
 
 function manifest() {
@@ -54,6 +54,26 @@ function registry(modules: readonly ProgrammaticAgentModule[]) {
 }
 
 describe("compileAgentManifest source graph", () => {
+  it("allows subagents to configure Workflow model calls per step", () => {
+    expect(() =>
+      assertRootOnlyConfig(
+        { experimental: { workflow: { modelCallsPerStep: 4 } } } as never,
+        false,
+        "child",
+      ),
+    ).not.toThrow();
+  });
+
+  it("keeps Workflow world selection root-only", () => {
+    expect(() =>
+      assertRootOnlyConfig(
+        { experimental: { workflow: { world: "@workflow/world-postgres" } } } as never,
+        false,
+        "child",
+      ),
+    ).toThrow('Remove "experimental.workflow.world" from "child".');
+  });
+
   it("freezes source metadata behind an immutable registry map", () => {
     const sourceRegistry = registry([]);
 
@@ -184,7 +204,17 @@ describe("compileAgentManifest source graph", () => {
     );
   });
 
-  it.each(["agent", "task_cancel", "task_update"])(
+  it("does not install task_update from the framework registry", async () => {
+    const compiled = await compileAgentManifest(manifest());
+
+    expect(compiled.tools.map((tool) => tool.name)).toContain("task_cancel");
+    expect(compiled.tools.map((tool) => tool.name)).not.toContain("task_update");
+    expect(Object.values(compiled.bindings).map((binding) => binding.logicalPath)).not.toContain(
+      "tools/task_update.ts",
+    );
+  });
+
+  it.each(["agent", "task_cancel"])(
     "rejects overriding closed framework tool %s",
     async (toolName) => {
       const sourceRegistry = registry([
@@ -383,10 +413,6 @@ describe("compileAgentManifest source graph", () => {
         }),
       },
       {
-        logicalPath: "tools/workflow.ts",
-        loadNamespace: async () => ({ default: experimental_workflow() }),
-      },
-      {
         logicalPath: "tools/web_search.ts",
         loadNamespace: async () => ({ default: webSearch({ provider: "parallel" }) }),
       },
@@ -449,7 +475,6 @@ describe("compileAgentManifest source graph", () => {
       "tools/dynamic.ts": { compile: true, runtimeEntry: true },
       "tools/executable.ts": { compile: true, runtimeEntry: true },
       "tools/web_search.ts": { compile: true, runtimeEntry: false },
-      "tools/workflow.ts": { compile: true, runtimeEntry: false },
     });
   });
 

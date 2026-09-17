@@ -14,9 +14,8 @@ export function resolveInheritedTokenLimit(input: {
   readonly configured: UsageLimit | undefined;
   readonly inherited: UsageLimit | undefined;
 }): UsageLimit | undefined {
-  if (input.inherited === undefined || input.inherited === false) {
-    return input.configured;
-  }
+  if (input.inherited === undefined) return input.configured;
+  if (input.inherited === false) return input.configured ?? false;
   if (input.configured === undefined || input.configured === false) {
     return input.inherited;
   }

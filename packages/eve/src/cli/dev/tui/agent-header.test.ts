@@ -22,12 +22,12 @@ describe("buildAgentHeader", () => {
     const card = plain.join("\n");
     const titleIndex = plain.findIndex((line) => line.includes("Weather Agent"));
 
-    expect(plain[0]).toBe(`╭${"─".repeat(66)}╮`);
-    expect(plain[titleIndex]).toMatch(/^│ ☰eve \(v\d+\.\d+\.\d+\) +Weather Agent │$/u);
+    expect(plain).toHaveLength(1);
+    expect(plain[titleIndex]).toMatch(/^eve v\d+\.\d+\.\d+ +Weather Agent$/u);
     expect(card).not.toContain("model");
     expect(card).not.toContain("instructions");
     expect(card).not.toContain("⣿");
-    expect(lines[0]).toBe(theme.colors.dim(plain[0]!));
+    expect(lines[0]).toContain(theme.colors.bold("eve"));
   });
 
   it("renders only known fields before agent inspection", () => {
@@ -40,21 +40,21 @@ describe("buildAgentHeader", () => {
     }).join("\n");
 
     expect(card).toContain("weather-agent");
-    expect(card).toContain("Tip: Use the /help command to see every command.");
+    expect(card).toContain("Use the /help command to see every command.");
   });
 
   it("renders the /add tip with a blue command", () => {
     const theme = createTheme({ color: true, unicode: false });
     const tip = AGENT_HEADER_TIPS.find((candidate) => candidate.includes("/add"));
 
-    expect(tip).toBe("Use the /add command to install an integration.");
+    expect(tip).toBe("/add to extend your agent · /help for commands");
     if (tip === undefined) return;
 
     const line = buildAgentHeader({ info: INFO, theme, width: 120, tip }).find((candidate) =>
-      candidate.includes("Tip:"),
+      candidate.includes("/add"),
     );
 
-    expect(stripAnsi(line ?? "")).toContain(`| Tip: ${tip}`);
+    expect(stripAnsi(line ?? "")).toContain(tip);
     expect(line).toContain(theme.colors.blue("/add"));
   });
 

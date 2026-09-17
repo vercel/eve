@@ -10,7 +10,7 @@ const sha = "a".repeat(40);
 const manifest = {
   sourceSha: sha,
   version: `0.33.0+main.${sha}`,
-  tarball: `https://packages.example.com/${sha}/eve.tgz`,
+  tarball: `https://pkg.eve.dev/${sha}/eve.tgz`,
   sha256: "b".repeat(64),
 };
 
@@ -26,40 +26,43 @@ function response() {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  process.env.VERCEL_GIT_COMMIT_SHA = sha;
   get.mockImplementation(async (pathname) => ({
     stream: new Blob([
-      pathname.endsWith("manifest.json") ? JSON.stringify(manifest) : "package bytes",
+      pathname.endsWith("eve.tgz") ? "package bytes" : JSON.stringify(manifest),
     ]).stream(),
   }));
 });
 
 describe("package route", () => {
-  test("resolves main through the deployment commit", async () => {
+  test("resolves main through its published pointer", async () => {
     const res = response();
     await handler({ query: { ref: "main" } }, res);
 
-    expect(get).toHaveBeenCalledWith(`packages/${sha}/manifest.json`, {
-      access: "private",
-    });
+    expect(get).toHaveBeenCalledWith("packages/refs/main.json", { access: "private" });
     expect(res.setHeader).toHaveBeenCalledWith("Cache-Control", "public, max-age=60");
     expect(res.redirect).toHaveBeenCalledWith(302, manifest.tarball);
   });
 
-  test("serves the current main manifest", async () => {
+  test("resolves a pull request through its published pointer", async () => {
     const res = response();
-    await handler({ query: { ref: "main", manifest: "1" } }, res);
+    await handler({ query: { ref: "123" } }, res);
+
+    expect(get).toHaveBeenCalledWith("packages/refs/pr/123.json", { access: "private" });
+    expect(res.redirect).toHaveBeenCalledWith(302, manifest.tarball);
+  });
+
+  test("serves mutable pointer manifests", async () => {
+    const res = response();
+    await handler({ query: { ref: "123", manifest: "1" } }, res);
 
     expect(res.status).toHaveBeenCalledWith(200);
     expect(res.json).toHaveBeenCalledWith(manifest);
   });
 
-  test("serves SHA tarballs but not SHA latest manifests", async () => {
+  test("serves SHA tarballs but not SHA manifests", async () => {
     const artifact = response();
     await handler({ query: { ref: sha } }, artifact);
-    expect(get).toHaveBeenLastCalledWith(`packages/${sha}/eve.tgz`, {
-      access: "private",
-    });
+    expect(get).toHaveBeenLastCalledWith(`packages/${sha}/eve.tgz`, { access: "private" });
     expect(artifact.setHeader).toHaveBeenCalledWith(
       "Cache-Control",
       "public, max-age=31536000, immutable",
@@ -70,6 +73,19 @@ describe("package route", () => {
     const latest = response();
     await handler({ query: { ref: sha, manifest: "1" } }, latest);
     expect(latest.status).toHaveBeenCalledWith(404);
+  });
+
+  test("rejects pointers that redirect outside the package host", async () => {
+    get.mockResolvedValueOnce({
+      stream: new Blob([
+        JSON.stringify({ ...manifest, tarball: "https://example.com/eve.tgz" }),
+      ]).stream(),
+    });
+    const res = response();
+    await handler({ query: { ref: "main" } }, res);
+
+    expect(res.status).toHaveBeenCalledWith(404);
+    expect(res.redirect).not.toHaveBeenCalled();
   });
 
   test("rejects unsupported refs and missing artifacts", async () => {

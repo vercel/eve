@@ -802,13 +802,16 @@ function createScriptedServer(
   } = {},
 ) {
   const pendingTurns = [...turns];
-  const streamQueues = new Map<string, UnstampedMessageStreamEvent[][]>();
+  const streamQueues = new Map<
+    string,
+    { events: readonly UnstampedMessageStreamEvent[]; deliveryId?: string }[]
+  >();
   const posts: Array<{ body: unknown; method: string; url: string }> = [];
   const cancels: string[] = [];
 
   for (const stream of options.streams ?? []) {
     const queue = streamQueues.get(stream.sessionId) ?? [];
-    queue.push([...stream.events]);
+    queue.push({ events: stream.events });
     streamQueues.set(stream.sessionId, queue);
   }
 
@@ -840,36 +843,42 @@ function createScriptedServer(
         }
 
         posts.push({ body: JSON.parse(String(init?.body)), method, url });
+        const deliveryId = `delivery_${posts.length}`;
         const queue = streamQueues.get(next.sessionId) ?? [];
-        queue.push([...next.events]);
+        queue.push({ events: next.events, deliveryId });
         streamQueues.set(next.sessionId, queue);
 
         return Response.json(
           {
             ok: true,
             sessionId: next.sessionId,
+            deliveryId,
           },
           { status: posts.length === 1 ? 202 : 200 },
         );
       }
 
       const sessionId = decodeURIComponent(new URL(url).pathname.split("/").at(-2) ?? "");
-      const events = streamQueues.get(sessionId)?.shift();
-      if (events === undefined) {
+      const stream = streamQueues.get(sessionId)?.shift();
+      if (stream === undefined) {
         return Response.json({ error: "No stream.", ok: false }, { status: 404 });
       }
 
-      return streamResponse(events);
+      return streamResponse(stream.events, stream.deliveryId);
     },
   };
 }
 
-function streamResponse(events: readonly UnstampedMessageStreamEvent[]): Response {
+function streamResponse(
+  events: readonly UnstampedMessageStreamEvent[],
+  deliveryId?: string,
+): Response {
   const encoder = new TextEncoder();
   return new Response(
     new ReadableStream<Uint8Array>({
       start(controller) {
         for (const event of stampTestEvents(events)) {
+          if (deliveryId !== undefined) Object.assign(event.meta, { deliveryIds: [deliveryId] });
           controller.enqueue(encoder.encode(`${JSON.stringify(event)}\n`));
         }
         controller.close();

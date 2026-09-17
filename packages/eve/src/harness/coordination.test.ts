@@ -4,6 +4,7 @@ import {
 } from "#subagents/handles/query.js";
 import { describe, expect, it } from "vitest";
 
+import { createPresentedRuntimeActionRequestFromToolCall } from "#harness/action-presentation.js";
 import {
   createCoordinationRequestFromToolCall,
   createRuntimeActionRequestFromToolCall,
@@ -21,6 +22,7 @@ import { toolOutput } from "#tools/model-output.js";
 import { getSessionTokenUsage, setTurnUsageState } from "#harness/turn-tag-state.js";
 import type { HarnessSession } from "#harness/types.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
+import { isRuntimeWorkflowToolAction } from "#shared/action-types.js";
 
 const CHILD_SESSION_ID = "local-child-123456789012";
 const CHILD_CONTINUATION_TOKEN = "subagent:private-token";
@@ -64,6 +66,142 @@ describe("createRuntimeActionRequestFromToolCall", () => {
       callId: "call-skill",
       input: { skill: "research" },
       kind: "load-skill",
+    });
+  });
+
+  it("preserves workflow identity without changing observable action data", () => {
+    const action = createRuntimeActionRequestFromToolCall({
+      toolCall: {
+        input: { service: "api" },
+        toolCallId: "call-deploy",
+        toolName: "deploy",
+        type: "tool-call",
+      },
+      tools: new Map([
+        [
+          "deploy",
+          {
+            description: "Deploy.",
+            inputSchema: jsonSchema({ type: "object" }),
+            name: "deploy",
+            workflowId: "workflow//./agent/tools/deploy//execute",
+          },
+        ],
+      ]),
+    });
+
+    expect(action).toEqual({
+      callId: "call-deploy",
+      input: { service: "api" },
+      kind: "tool-call",
+      toolName: "deploy",
+    });
+    expect(JSON.stringify(action)).toBe(
+      '{"callId":"call-deploy","input":{"service":"api"},"kind":"tool-call","toolName":"deploy"}',
+    );
+    expect(isRuntimeWorkflowToolAction(action)).toBe(true);
+  });
+
+  it("uses the tool-authored label start callback without exposing it in event data", () => {
+    const action = createPresentedRuntimeActionRequestFromToolCall({
+      toolCall: {
+        input: { environment: "production", secret: "hidden" },
+        toolCallId: "call-deploy",
+        toolName: "deploy",
+        type: "tool-call",
+      },
+      tools: new Map([
+        [
+          "deploy",
+          {
+            label: {
+              start: (input) =>
+                `Deploy to ${String((input as { environment: unknown }).environment)}`,
+            },
+            description: "Deploy.",
+            inputSchema: jsonSchema({ type: "object" }),
+            name: "deploy",
+          },
+        ],
+      ]),
+    });
+
+    expect(action).toEqual({
+      action: {
+        callId: "call-deploy",
+        input: { environment: "production", secret: "hidden" },
+        kind: "tool-call",
+        toolName: "deploy",
+      },
+      presentationLabel: "Deploy to production",
+    });
+  });
+
+  it("does not let the label start callback callback mutate the action input", () => {
+    const result = createPresentedRuntimeActionRequestFromToolCall({
+      toolCall: {
+        input: { nested: { value: "original" } },
+        toolCallId: "call-mutate",
+        toolName: "mutate",
+        type: "tool-call",
+      },
+      tools: new Map([
+        [
+          "mutate",
+          {
+            label: {
+              start: (input) => {
+                const mutable = input as { nested: { value: string }; self?: unknown };
+                mutable.nested.value = "changed";
+                mutable.self = mutable;
+                throw new Error("presentation failed");
+              },
+            },
+            description: "Mutate.",
+            inputSchema: jsonSchema({ type: "object" }),
+            name: "mutate",
+          },
+        ],
+      ]),
+    });
+
+    expect(result).toEqual({
+      action: {
+        callId: "call-mutate",
+        input: { nested: { value: "original" } },
+        kind: "tool-call",
+        toolName: "mutate",
+      },
+    });
+  });
+
+  it("ignores an label start callback callback that fails", () => {
+    expect(
+      createPresentedRuntimeActionRequestFromToolCall({
+        toolCall: {
+          input: {},
+          toolCallId: "call-deploy",
+          toolName: "deploy",
+          type: "tool-call",
+        },
+        tools: new Map([
+          [
+            "deploy",
+            {
+              label: {
+                start: () => {
+                  throw new Error("presentation failed");
+                },
+              },
+              description: "Deploy.",
+              inputSchema: jsonSchema({ type: "object" }),
+              name: "deploy",
+            },
+          ],
+        ]),
+      }),
+    ).toEqual({
+      action: { callId: "call-deploy", input: {}, kind: "tool-call", toolName: "deploy" },
     });
   });
 
@@ -124,14 +262,14 @@ describe("createCoordinationRequestFromToolCall", () => {
   it("reserves runtime actions for task controls", () => {
     expect(
       createCoordinationRequestFromToolCall({
-        toolCall: { ...toolCall, toolName: "task_update" },
+        toolCall: { ...toolCall, input: { taskIds: ["task-1"] }, toolName: "task_cancel" },
         tools: new Map([
           [
-            "task_update",
+            "task_cancel",
             {
-              description: "Update a task.",
+              description: "Cancel tasks.",
               inputSchema: jsonSchema({ type: "object" }),
-              name: "task_update",
+              name: "task_cancel",
               runtimeAction: { kind: "task-control" as const },
             },
           ],
@@ -141,9 +279,9 @@ describe("createCoordinationRequestFromToolCall", () => {
       kind: "runtime-action",
       request: {
         callId: "call-1",
-        input: { message: "research this" },
+        input: { taskIds: ["task-1"] },
         kind: "tool-call",
-        toolName: "task_update",
+        toolName: "task_cancel",
       },
     });
   });
@@ -154,7 +292,7 @@ function createParkedSession(): HarnessSession {
     agent: { modelReference: { id: "test-model" }, system: "", tools: [] },
     compaction: { recentWindowSize: 10, threshold: 100_000 },
     continuationToken: "http:test-session",
-    history: [{ content: "delegate this", role: "user" }],
+    history: [{ content: "delegate this", kind: "user", role: "user" }],
     sessionId: "test-session",
   };
 

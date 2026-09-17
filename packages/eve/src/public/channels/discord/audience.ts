@@ -11,7 +11,6 @@ export function discordInstrumentationMetadata(
   state: DiscordChannelState,
 ): DiscordInstrumentationMetadata {
   return {
-    audience: state.audience ?? "unknown",
     channelId: state.channelId,
     guildId: state.guildId,
   };

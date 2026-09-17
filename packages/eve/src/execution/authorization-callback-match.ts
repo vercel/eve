@@ -5,10 +5,11 @@ import type { AuthorizationCallback } from "#shared/connection-types.js";
 
 export interface MatchedAuthorizationCallback {
   readonly authorization: ConnectionAuthorizationChallenge;
-  readonly result: { readonly name: string } & AuthorizationResult;
+  readonly candidateId?: string;
+  readonly result: { readonly name: string; readonly attemptId: string } & AuthorizationResult;
 }
 
-/** Matches current callbacks by attempt ID and legacy callbacks only to legacy state. */
+/** Matches each callback to exactly one pending authorization attempt. */
 export function matchAuthorizationCallbacks(
   pending: PendingAuthorizationState,
   payloads: readonly DeliverPayload[],
@@ -26,7 +27,6 @@ export function matchAuthorizationCallbacks(
           attemptId?: string;
           callback: AuthorizationCallback;
           connectionName: string;
-          legacy?: true;
         }
       | undefined;
     if (callback === undefined) {
@@ -36,15 +36,13 @@ export function matchAuthorizationCallbacks(
 
     const challenge = pending.challenges.find((candidate) => {
       if (candidate.name !== callback.connectionName) return false;
-      return callback.legacy === true
-        ? candidate.attemptId === undefined
-        : candidate.attemptId === callback.attemptId;
+      return typeof callback.attemptId === "string" && candidate.attemptId === callback.attemptId;
     });
-    const attemptKey = challenge?.attemptId ?? challenge?.name;
+    const attemptKey = challenge?.attemptId;
     if (
       challenge === undefined ||
       attemptKey === undefined ||
-      (challenge.principal === undefined && callback.legacy !== true) ||
+      challenge.principal === undefined ||
       matchedAttemptKeys.has(attemptKey)
     ) {
       continue;
@@ -53,8 +51,9 @@ export function matchAuthorizationCallbacks(
     matchedAttemptKeys.add(attemptKey);
     matches.push({
       authorization: challenge.challenge,
+      candidateId: challenge.candidateId,
       result: {
-        attemptId: challenge.attemptId,
+        attemptId: attemptKey,
         callback: callback.callback,
         hookUrl: challenge.hookUrl,
         instanceId: challenge.instanceId,

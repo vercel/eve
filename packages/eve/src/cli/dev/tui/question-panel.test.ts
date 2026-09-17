@@ -31,16 +31,15 @@ function render(state: {
 }
 
 describe("renderQuestionPanel", () => {
-  it("opens with the rule hugging the prompt and closes on the dismiss hint", () => {
+  it("opens with a borderless prompt and closes on the dismiss hint", () => {
     const rows = render({ cursor: 0 });
 
-    expect(rows[0]).toBe("▔".repeat(60));
+    expect(rows[0]).toBe("  What type of options would you like to see?");
     expect(rows).toContain("  What type of options would you like to see?");
-    expect(rows.find((row) => row.includes("1. Available Tools"))).toContain("▶");
+    expect(rows.find((row) => row.includes("1. Available Tools"))).toContain("›");
     expect(rows).toContain("        See 4 tools I can use");
     expect(rows).toContain("     2. Connected Services");
-    // The rule hugs the question; the panel closes on its one quiet hint.
-    expect(rows[1]).toBe("  What type of options would you like to see?");
+    expect(rows[1]).toBe("");
     expect(rows.at(-1)).toBe("  Esc to dismiss");
   });
 
@@ -48,9 +47,9 @@ describe("renderQuestionPanel", () => {
     const rows = render({ cursor: 1 });
     const selected = rows.find((row) => row.includes("Connected Services"));
 
-    expect(selected).toContain(" ▶ 2. Connected Services ");
+    expect(selected).toContain(" › 2. Connected Services ");
     expect(selected).toContain("↵");
-    expect(rows.find((row) => row.includes("Available Tools"))).not.toContain("▶");
+    expect(rows.find((row) => row.includes("Available Tools"))).not.toContain("›");
   });
 
   it("keeps every row's number and label in the same columns as the cursor moves", () => {

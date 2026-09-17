@@ -61,20 +61,31 @@ function setupMockAgentForToolExecution(toolName: string, args: unknown): void {
     const prepareStep = settings.prepareStep as
       | ((...args: unknown[]) => Promise<unknown>)
       | undefined;
-    const onStepFinish = settings.onStepFinish as
+    const onStepStart = settings.onStepStart as
       | ((...args: unknown[]) => Promise<unknown>)
       | undefined;
+    const onStepEnd = settings.onStepEnd as ((...args: unknown[]) => Promise<unknown>) | undefined;
 
     this.generate = vi.fn().mockImplementation(async (options: { messages: unknown[] }) => {
+      let preparedMessages = options.messages;
       if (prepareStep) {
-        await prepareStep({
+        const prepared = await prepareStep({
           messages: options.messages,
           steps: [],
           stepNumber: 0,
           model: {},
           context: undefined,
         });
+        if (
+          prepared !== null &&
+          typeof prepared === "object" &&
+          "messages" in prepared &&
+          Array.isArray(prepared.messages)
+        ) {
+          preparedMessages = prepared.messages;
+        }
       }
+      if (onStepStart) await onStepStart({ messages: preparedMessages });
 
       const tools = (
         settings as {
@@ -106,7 +117,7 @@ function setupMockAgentForToolExecution(toolName: string, args: unknown): void {
         usage: undefined,
       };
 
-      if (onStepFinish) await onStepFinish(result);
+      if (onStepEnd) await onStepEnd(result);
       return { ...result, responseMessages: result.response.messages };
     });
 
@@ -163,6 +174,9 @@ function createTestNode(
 
 async function createNodeWithSourceOwnedTools(input: {
   readonly names: readonly string[];
+  readonly owner?:
+    | { readonly kind: "application" }
+    | { readonly feature: string; readonly kind: "framework" };
   readonly turnTools?: StaticRuntimeTurnAgent["tools"];
 }): Promise<ResolvedRuntimeAgentNode> {
   const toolRegistry = await createRuntimeToolRegistry({
@@ -173,7 +187,7 @@ async function createNodeWithSourceOwnedTools(input: {
       inputSchema: name === AGENT_TOOL_NAME ? SUBAGENT_TOOL_INPUT_SCHEMA : null,
       logicalPath: `tools/${name}.ts`,
       name,
-      owner: { feature: "test", kind: "framework" },
+      owner: input.owner ?? { feature: "test", kind: "framework" },
       sourceId: `framework:tools/${name}.ts`,
       sourceKind: "module",
     })),
@@ -214,6 +228,22 @@ function createNoopRuntime(): Runtime {
 }
 
 describe("createNodeHarnessTools", () => {
+  it("adds the framework label start callback to provider-managed web search", async () => {
+    const node = await createNodeWithSourceOwnedTools({ names: ["web_search"] });
+    const label = createNodeHarnessTools({ node }).get("web_search")?.label?.start;
+
+    expect(label?.({ query: "Slack plan blocks" })).toBe("Search Slack plan blocks");
+  });
+
+  it("does not add the framework label to an authored web_search override", async () => {
+    const node = await createNodeWithSourceOwnedTools({
+      names: ["web_search"],
+      owner: { kind: "application" },
+    });
+
+    expect(createNodeHarnessTools({ node }).get("web_search")?.label?.start).toBeUndefined();
+  });
+
   it("keeps the compiled framework question tool client-side", async () => {
     const node = await createNodeWithSourceOwnedTools({ names: ["ask_question"] });
 
@@ -235,16 +265,12 @@ describe("createNodeHarnessTools", () => {
     expect(agentTool?.execute).toBeDefined();
   });
 
-  it("lowers compiled task-control tools from their framework definitions", async () => {
-    const node = await createNodeWithSourceOwnedTools({
-      names: ["task_cancel", "task_update"],
-    });
+  it("lowers task_cancel from its framework definition", async () => {
+    const node = await createNodeWithSourceOwnedTools({ names: ["task_cancel"] });
     const tools = createNodeHarnessTools({ node });
 
-    for (const name of ["task_cancel", "task_update"]) {
-      expect(tools.get(name)?.runtimeAction).toEqual({ kind: "task-control" });
-      expect(tools.get(name)?.execute).toBeUndefined();
-    }
+    expect(tools.get("task_cancel")?.runtimeAction).toEqual({ kind: "task-control" });
+    expect(tools.get("task_cancel")?.execute).toBeUndefined();
     expect(tools.has("task_sleep")).toBe(false);
   });
 
@@ -288,10 +314,10 @@ describe("createNodeHarnessTools", () => {
 
   it("does not recreate task tools absent from the compiled graph", async () => {
     const tools = createNodeHarnessTools({
-      node: await createNodeWithSourceOwnedTools({ names: ["task_update"] }),
+      node: await createNodeWithSourceOwnedTools({ names: [] }),
     });
 
-    expect(tools.has("task_update")).toBe(true);
+    expect(tools.has("task_update")).toBe(false);
     expect(tools.has("task_cancel")).toBe(false);
   });
 });

@@ -22,6 +22,7 @@ export type {
   AgentLimitsDefinition,
   PublicAgentModelSelectionDefinition as AgentModelSelectionDefinition,
   AgentWorkflowDefinition,
+  AgentWorkflowRetentionDefinition,
   AgentWorkflowWorldDefinition,
   PublicAgentModelDefinition as AgentModelDefinition,
   PublicAgentStaticModelDefinition as AgentStaticModelDefinition,

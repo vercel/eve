@@ -1,15 +1,15 @@
 import {
-  extractCodexAccountIdFromToken,
-  extractCodexAccountLabelFromToken,
-  readCodexJwtExpirationMs,
-} from "./auth.js";
+  getDefaultChatGptCredentialStore,
+  type ChatGptCredentialStore,
+} from "./credential-store.js";
 import {
   CodexAppServerClient,
+  CodexBinaryNotFoundError,
   type CodexAppServer,
   type CodexAppServerOptions,
 } from "./codex-app-server.js";
-
-const TOKEN_REFRESH_WINDOW_MS = 5 * 60_000;
+import { ChatGptSignInRequiredError } from "./oauth.js";
+import { ChatGptSignedOutError, isChatGptTokenFresh, type ChatGptToken } from "./token.js";
 
 export type ChatGptAuthState =
   | { readonly kind: "checking" }
@@ -21,55 +21,79 @@ export type ChatGptAuthState =
   | { readonly kind: "reauth-required" }
   | { readonly kind: "unavailable"; readonly reason: string };
 
-export interface ChatGptToken {
-  readonly accountId?: string;
-  readonly accountLabel?: string;
-  readonly expiresAt?: number;
-  readonly token: string;
-}
+export type { ChatGptToken } from "./token.js";
 
 export interface CodexTokenBroker {
+  credentialOwner(): ChatGptCredentialOwner | undefined;
   getToken(input: { readonly reason: "rejected" | "request" }): Promise<ChatGptToken>;
   refreshState(): Promise<ChatGptAuthState>;
   state(): ChatGptAuthState;
 }
 
+export type ChatGptCredentialOwner = "codex" | "eve";
+
 export interface CodexTokenBrokerOptions extends CodexAppServerOptions {
   readonly appServer?: CodexAppServer;
+  readonly store?: ChatGptCredentialStore;
+  readonly fetch?: typeof fetch;
   readonly now?: () => number;
 }
 
 export function createCodexTokenBroker(options: CodexTokenBrokerOptions = {}): CodexTokenBroker {
   const appServer = options.appServer ?? new CodexAppServerClient(options);
+  const store = options.store ?? getDefaultChatGptCredentialStore();
   const now = options.now ?? Date.now;
+  let credentialOwner: ChatGptCredentialOwner | undefined;
   let currentState: ChatGptAuthState = { kind: "checking" };
   let cached: ChatGptToken | undefined;
   let resolution: { readonly forced: boolean; readonly promise: Promise<ChatGptToken> } | undefined;
+  let stateRefresh: Promise<ChatGptAuthState> | undefined;
 
   return {
+    credentialOwner() {
+      return credentialOwner;
+    },
     getToken(input) {
       return getToken(input.reason);
     },
-    async refreshState() {
-      if (currentState.kind === "signed-out" || currentState.kind === "reauth-required") {
-        appServer.restart?.();
-      }
-      cached = undefined;
-      try {
-        await getToken("request");
-      } catch {
-        // The state is the reportable result; callers should not need exception control flow.
-      }
-      return currentState;
+    refreshState() {
+      if (stateRefresh !== undefined) return stateRefresh;
+      const promise = refreshAuthState();
+      stateRefresh = promise;
+      void promise.finally(() => {
+        if (stateRefresh === promise) stateRefresh = undefined;
+      });
+      return promise;
     },
     state() {
       return currentState;
     },
   };
 
+  async function refreshAuthState(): Promise<ChatGptAuthState> {
+    if (resolution !== undefined) await resolution.promise.catch(() => undefined);
+    if (
+      credentialOwner === "codex" &&
+      (currentState.kind === "signed-out" || currentState.kind === "reauth-required")
+    ) {
+      appServer.restart?.();
+    } else if (credentialOwner === "eve") {
+      // Re-probe at an explicit readiness boundary so a newly installed Codex
+      // becomes authoritative without changing owners in the middle of a request.
+      credentialOwner = undefined;
+    }
+    cached = undefined;
+    try {
+      await getToken("request");
+    } catch {
+      // The state is the reportable result; callers should not need exception control flow.
+    }
+    return currentState;
+  }
+
   function getToken(reason: "rejected" | "request"): Promise<ChatGptToken> {
     const forced = reason === "rejected";
-    if (!forced && cached !== undefined && isFresh(cached, now())) {
+    if (!forced && cached !== undefined && isChatGptTokenFresh(cached, now())) {
       return Promise.resolve(cached);
     }
     if (resolution !== undefined && (!forced || resolution.forced)) {
@@ -90,43 +114,35 @@ export function createCodexTokenBroker(options: CodexTokenBrokerOptions = {}): C
 
   async function resolveToken(forceRefresh: boolean): Promise<ChatGptToken> {
     try {
-      const status = await appServer.getAuthStatus({ refreshToken: forceRefresh });
-      if (status.authMethod !== "chatgpt" || status.authToken === undefined) {
-        cached = undefined;
-        currentState = forceRefresh ? { kind: "reauth-required" } : { kind: "signed-out" };
-        throw new Error(
-          "ChatGPT subscription authentication is unavailable. Run `codex login`, then retry.",
-        );
-      }
-      const token = tokenFrom(status.authToken);
-      if (!forceRefresh && !isFresh(token, now())) {
-        const refreshed = await appServer.getAuthStatus({ refreshToken: true });
-        if (refreshed.authMethod !== "chatgpt" || refreshed.authToken === undefined) {
-          cached = undefined;
-          currentState = { kind: "reauth-required" };
-          throw new Error(
-            "ChatGPT subscription authentication could not be refreshed. Run `codex login`, then retry.",
-          );
+      let token: ChatGptToken;
+      if (credentialOwner === "eve") {
+        token = await store.resolveToken({ forceRefresh, fetch: options.fetch, now });
+      } else {
+        try {
+          token = await appServer.resolveToken({ forceRefresh, now });
+          credentialOwner = "codex";
+        } catch (error) {
+          if (!(error instanceof CodexBinaryNotFoundError)) {
+            credentialOwner ??= "codex";
+            throw error;
+          }
+          credentialOwner = "eve";
+          token = await store.resolveToken({ forceRefresh, fetch: options.fetch, now });
         }
-        return accept(refreshed.authToken);
       }
       cached = token;
       currentState = readyState(token);
       return token;
     } catch (error) {
-      if (currentState.kind === "checking" || currentState.kind === "ready") {
+      cached = undefined;
+      if (error instanceof ChatGptSignInRequiredError) currentState = { kind: "reauth-required" };
+      else if (error instanceof ChatGptSignedOutError) currentState = { kind: "signed-out" };
+      else {
         const reason = error instanceof Error ? error.message : String(error);
         currentState = { kind: "unavailable", reason };
       }
       throw error;
     }
-  }
-
-  function accept(rawToken: string): ChatGptToken {
-    const token = tokenFrom(rawToken);
-    cached = token;
-    currentState = readyState(token);
-    return token;
   }
 }
 
@@ -137,25 +153,9 @@ export function getDefaultCodexTokenBroker(): CodexTokenBroker {
   return defaultBroker;
 }
 
-function tokenFrom(token: string): ChatGptToken {
-  const accountId = extractCodexAccountIdFromToken(token);
-  const accountLabel = extractCodexAccountLabelFromToken(token);
-  const expiresAt = readCodexJwtExpirationMs(token);
-  return {
-    token,
-    ...(accountId !== undefined && { accountId }),
-    ...(accountLabel !== undefined && { accountLabel }),
-    ...(expiresAt !== undefined && { expiresAt }),
-  };
-}
-
 function readyState(token: ChatGptToken): ChatGptAuthState {
   return {
     kind: "ready",
     ...(token.accountLabel !== undefined && { accountLabel: token.accountLabel }),
   };
-}
-
-function isFresh(token: ChatGptToken, now: number): boolean {
-  return token.expiresAt === undefined || token.expiresAt - TOKEN_REFRESH_WINDOW_MS > now;
 }

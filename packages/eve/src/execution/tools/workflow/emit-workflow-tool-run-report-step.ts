@@ -9,7 +9,7 @@ import type { JsonValue } from "#shared/json.js";
 
 export async function emitWorkflowToolRunReportStep(input: {
   readonly from: WorkflowToolRunRef;
-  readonly parentWritable: WritableStream<Uint8Array>;
+  readonly sessionWritable: WritableStream<Uint8Array>;
   readonly update: JsonValue;
 }): Promise<void> {
   "use step";
@@ -24,7 +24,7 @@ export async function emitWorkflowToolRunReportStep(input: {
     stepIndex: input.from.stepIndex,
     turnId: input.from.turnId,
   });
-  const writer = input.parentWritable.getWriter();
+  const writer = input.sessionWritable.getWriter();
   try {
     await writer.write(encodeMessageStreamEvent(stampMessageStreamEvent(event)));
   } finally {

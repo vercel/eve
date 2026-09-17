@@ -134,6 +134,22 @@ describe("createInstrumentationHandleEvent", () => {
     ]);
   });
 
+  it("forwards the source event to the durable handler", async () => {
+    const source = createSessionStartedEvent();
+    let forwarded: unknown;
+    const handleEvent = createInstrumentationHandleEvent({
+      handleEvent: async (event) => {
+        forwarded = event;
+      },
+      hooks: { capturesContent: false, publish: async () => {} },
+      sessionId: "session-1",
+    })!;
+
+    await handleEvent(source);
+
+    expect(forwarded).toBe(source);
+  });
+
   it("does not change execution mode when hooks have no durable handler", () => {
     expect(
       createInstrumentationHandleEvent({
@@ -385,6 +401,7 @@ describe("createInstrumentationHandleEvent", () => {
         callId: "workflow-1",
         idempotencyKey: actionIdempotencyKey("session-1", "turn-1", "workflow-1"),
         input: { report: "weekly" },
+        isWorkflowTool: true,
         kind: "tool-call",
         name: "publish",
         scope,

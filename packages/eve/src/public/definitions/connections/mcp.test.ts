@@ -14,6 +14,17 @@ describe("defineMcpClientConnection", () => {
     expect(definition.auth).toMatchObject({ getToken, principalType: "app" });
   });
 
+  it("normalizes credentialOwner into the runtime principalType", () => {
+    const getToken = async () => ({ token: "test-token" });
+    const definition = defineMcpClientConnection({
+      auth: { credentialOwner: "user", getToken },
+      description: "test connection",
+      url: "https://mcp.example.com",
+    });
+
+    expect(definition.auth).toEqual({ getToken, principalType: "user" });
+  });
+
   it("preserves context-aware auth resolvers for runtime resolution", () => {
     const definition = defineMcpClientConnection({
       auth: (ctx) => ({

@@ -2,7 +2,7 @@ import { getWorkflowMetadata } from "#compiled/@workflow/core/index.js";
 
 import type { SessionContext } from "#context/session-context.js";
 import { agent } from "#execution/tools/subagent/invoke-agent.js";
-import type { WorkflowToolContext } from "#tools/workflow-definition.js";
+import type { AgentInput, WorkflowToolContext } from "#tools/workflow-definition.js";
 import { ask, attachWorkflowToolRunContext } from "#execution/tools/workflow/ask.js";
 import {
   type WorkflowToolRunOutcome,
@@ -54,7 +54,10 @@ export async function executeWorkflowBody(
 ): Promise<WorkflowBodyResult> {
   const from = createWorkflowBodyRef(input);
   const ctx = createWorkflowBodyContext(input, signal);
-  attachWorkflowToolRunContext(ctx, { from, owner: input.owner });
+  attachWorkflowToolRunContext(ctx, {
+    from,
+    owner: input.owner,
+  });
   let reportCount = 0;
 
   try {
@@ -135,15 +138,20 @@ function createWorkflowBodyContext(
     );
   };
   const ctx: ToolContext & WorkflowToolContext = {
-    agent: (input) => agent(ctx, input),
+    agent: ((target: string, agentInput: AgentInput) =>
+      agent(ctx, target, agentInput)) as WorkflowToolContext["agent"],
     ask: (request) => ask(ctx, request),
     abortSignal: signal,
     callId: input.callId,
     getSandbox: () => unavailable("getSandbox()", "the session sandbox belongs to the turn"),
     getSkill: () => unavailable("getSkill()", "skills are read through the session sandbox"),
     getToken: () =>
-      unavailable("getToken()", 'read credentials from the environment inside a "use step" helper'),
-    requireAuth: () => unavailable("requireAuth()", "a workflow body cannot park on authorization"),
+      unavailable("getToken()", 'pass ctx directly to a "use step" helper to resolve credentials'),
+    requireAuth: () =>
+      unavailable(
+        "requireAuth()",
+        'pass ctx directly to a "use step" helper to request authorization',
+      ),
     session: input.session,
     toolName: input.toolName,
   };

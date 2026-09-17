@@ -10,7 +10,7 @@ import type {
   FetchFileResult,
   FetchFileFunction,
 } from "#shared/channel-definition.js";
-import type { ChannelAudienceMetadata } from "#shared/channel-audience.js";
+import type { ChannelAudienceProjector } from "#channel/audience.js";
 
 const log = createLogger("channel.adapter");
 
@@ -28,8 +28,8 @@ const log = createLogger("channel.adapter");
  * {@link ContextAccessor} that tools and providers use).
  *
  * `session` is a live handle to the current session — id, auth,
- * optional channel continuation address, including an imperative `rekey()`
- * for channels that need to re-key the session mid-turn (e.g. Slack's
+ * optional channel continuation address, including an imperative `alias()`
+ * for channels that need to add an alias for the session mid-turn (e.g. Slack's
  * auto-anchor on first post).
  */
 export interface ChannelAdapterContext<TState = Record<string, unknown>> {
@@ -103,9 +103,7 @@ export type ChannelEventHandlers<TCtx extends ChannelAdapterContext<any> = Chann
  */
 export type { FetchFileContext, FetchFileResult };
 
-export type ChannelInstrumentationMetadata = Readonly<
-  Record<string, unknown> & ChannelAudienceMetadata
->;
+export type ChannelInstrumentationMetadata = Readonly<Record<string, unknown>>;
 
 export type ChannelInstrumentationMetadataProjector = (
   state: Record<string, unknown> | undefined,
@@ -177,6 +175,7 @@ export type ChannelAdapter<TCtx extends ChannelAdapterContext<any> = ChannelAdap
    */
   readonly instrumentation?: {
     readonly metadata?: ChannelInstrumentationMetadataProjector;
+    readonly audience?: ChannelAudienceProjector;
   };
 } & ChannelEventHandlers<TCtx>;
 

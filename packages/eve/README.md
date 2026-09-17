@@ -156,6 +156,7 @@ These files ship inside the installed package at `node_modules/eve/docs/`:
 - [Getting Started](https://eve.dev/docs/getting-started) — install, scaffold, and run locally
 - [Project Layout](https://eve.dev/docs/getting-started#project-layout) — every authored directory in depth
 - [`agent.ts`](https://eve.dev/docs/agent-config) — agent config reference
+- [Automatic Model Selection](https://eve.dev/docs/guides/evaluate) — choose an agent model for each request
 - [TypeScript API Reference](https://eve.dev/docs/reference/typescript-api) — complete `define*` and runtime helper reference
 - [Vercel Deployment](https://eve.dev/docs/guides/deployment/overview) — deploy to production
 

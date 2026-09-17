@@ -4,7 +4,10 @@ import { withoutDeclinedContent } from "#tracing/content-attributes.js";
 
 const ATTRIBUTES = {
   "agent.channel.delivery.input": '{"message":"private"}',
-  "ai.prompt.messages": "what the user said",
+  "agent.session.title": "Private title",
+  "agent.trace.content.input": true,
+  "agent.trace.content.output": true,
+  "gen_ai.input.messages": "what the user said",
   "ai.response.finish_reason": "stop",
   "ai.response.text": "what the model said",
   "gen_ai.request.model": "test-model",
@@ -33,6 +36,8 @@ describe("withoutDeclinedContent", () => {
     expect(
       withoutDeclinedContent(ATTRIBUTES, { recordInputs: false, recordOutputs: true }),
     ).toEqual({
+      "agent.trace.content.input": false,
+      "agent.trace.content.output": true,
       "ai.response.finish_reason": "stop",
       "ai.response.text": "what the model said",
       "gen_ai.request.model": "test-model",
@@ -46,7 +51,10 @@ describe("withoutDeclinedContent", () => {
       withoutDeclinedContent(ATTRIBUTES, { recordInputs: true, recordOutputs: false }),
     ).toEqual({
       "agent.channel.delivery.input": '{"message":"private"}',
-      "ai.prompt.messages": "what the user said",
+      "agent.session.title": "Private title",
+      "agent.trace.content.input": true,
+      "agent.trace.content.output": false,
+      "gen_ai.input.messages": "what the user said",
       "ai.response.finish_reason": "stop",
       "gen_ai.request.model": "test-model",
       "gen_ai.tool.call.arguments": "{}",
@@ -61,6 +69,8 @@ describe("withoutDeclinedContent", () => {
     expect(
       withoutDeclinedContent(ATTRIBUTES, { recordInputs: false, recordOutputs: false }),
     ).toEqual({
+      "agent.trace.content.input": false,
+      "agent.trace.content.output": false,
       "ai.response.finish_reason": "stop",
       "gen_ai.request.model": "test-model",
       "gen_ai.tool.name": "weather",
@@ -71,5 +81,34 @@ describe("withoutDeclinedContent", () => {
     const attributes = { ...ATTRIBUTES };
     withoutDeclinedContent(attributes, { recordInputs: false, recordOutputs: false });
     expect(attributes).toEqual(ATTRIBUTES);
+  });
+
+  it("narrows content policy attributes even when no content is present", () => {
+    expect(
+      withoutDeclinedContent(
+        {
+          "agent.trace.content.input": true,
+          "agent.trace.content.output": true,
+        },
+        { recordInputs: false, recordOutputs: true },
+      ),
+    ).toEqual({
+      "agent.trace.content.input": false,
+      "agent.trace.content.output": true,
+    });
+  });
+
+  it("redacts recalled memory records as input content", () => {
+    const searched = {
+      "gen_ai.memory.records": '[{"content":"Private preference"}]',
+      "gen_ai.operation.name": "search_memory",
+    };
+
+    expect(withoutDeclinedContent(searched, { recordInputs: false, recordOutputs: true })).toEqual({
+      "gen_ai.operation.name": "search_memory",
+    });
+    expect(
+      withoutDeclinedContent(searched, { recordInputs: true, recordOutputs: false }),
+    ).toBeUndefined();
   });
 });

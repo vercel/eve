@@ -16,7 +16,7 @@ describe("AgentTraceSpanProcessor", () => {
     processor.onEnd(unrelated);
     expect(child.onStart).not.toHaveBeenCalled();
 
-    const turn = span("trace-1", { "agent.session.id": "session-1" });
+    const turn = span("trace-1", { "gen_ai.conversation.id": "session-1" });
     const user = span("trace-1");
     processor.onStart(turn, {});
     processor.onStart(user, {});
@@ -25,7 +25,7 @@ describe("AgentTraceSpanProcessor", () => {
     expect(child.onStart).toHaveBeenCalledTimes(2);
     expect(child.onEnd).toHaveBeenCalledTimes(2);
 
-    processor.releaseSession("session-1");
+    processor.releaseConversation("session-1");
     processor.onEnd(span("trace-1"));
     expect(child.onEnd).toHaveBeenCalledTimes(2);
   });
@@ -34,28 +34,28 @@ describe("AgentTraceSpanProcessor", () => {
     const processor = new AgentTraceSpanProcessor([]);
     expect([...processor.activeTraceIds()]).toEqual([]);
 
-    processor.onStart(span("trace-1", { "agent.session.id": "session-1" }), {});
-    processor.onStart(span("trace-2", { "agent.session.id": "session-2" }), {});
+    processor.onStart(span("trace-1", { "gen_ai.conversation.id": "session-1" }), {});
+    processor.onStart(span("trace-2", { "gen_ai.conversation.id": "session-2" }), {});
     expect([...processor.activeTraceIds()].sort()).toEqual(["trace-1", "trace-2"]);
 
-    expect(processor.releaseSession("session-1")).toBe(true);
+    expect(processor.releaseConversation("session-1")).toBe(true);
     expect([...processor.activeTraceIds()]).toEqual(["trace-2"]);
   });
 
   it("releases every trace a session owns", () => {
     const processor = new AgentTraceSpanProcessor([]);
-    processor.onStart(span("trace-1", { "agent.session.id": "session-1" }), {});
-    processor.onStart(span("trace-2", { "agent.session.id": "session-1" }), {});
+    processor.onStart(span("trace-1", { "gen_ai.conversation.id": "session-1" }), {});
+    processor.onStart(span("trace-2", { "gen_ai.conversation.id": "session-1" }), {});
     expect([...processor.activeTraceIds()].sort()).toEqual(["trace-1", "trace-2"]);
 
-    expect(processor.releaseSession("session-1")).toBe(true);
+    expect(processor.releaseConversation("session-1")).toBe(true);
     expect([...processor.activeTraceIds()]).toEqual([]);
   });
 
   it("reports no release for a session it never owned", () => {
     const processor = new AgentTraceSpanProcessor([]);
 
-    expect(processor.releaseSession("session-unknown")).toBe(false);
+    expect(processor.releaseConversation("session-unknown")).toBe(false);
   });
 
   it("keeps a shared trace pinned when a subagent child finishes first", () => {
@@ -66,12 +66,12 @@ describe("AgentTraceSpanProcessor", () => {
       shutdown: vi.fn(async () => {}),
     };
     const processor = new AgentTraceSpanProcessor([child]);
-    const owned = { "agent.session.id": "session-1" };
-    const delegated = { "agent.session.id": "child-1" };
+    const owned = { "gen_ai.conversation.id": "session-1" };
+    const delegated = { "gen_ai.conversation.id": "child-1" };
     processor.onStart(span("trace-1", owned), {});
     processor.onStart(span("trace-1", delegated), {});
 
-    expect(processor.releaseSession("child-1")).toBe(false);
+    expect(processor.releaseConversation("child-1")).toBe(false);
     expect([...processor.activeTraceIds()]).toEqual(["trace-1"]);
 
     // The parent is still writing to the trace the child recorded into.
@@ -79,7 +79,7 @@ describe("AgentTraceSpanProcessor", () => {
     processor.onEnd(later);
     expect(child.onEnd).toHaveBeenCalledWith(later);
 
-    expect(processor.releaseSession("session-1")).toBe(true);
+    expect(processor.releaseConversation("session-1")).toBe(true);
     expect([...processor.activeTraceIds()]).toEqual([]);
   });
 
@@ -91,7 +91,7 @@ describe("AgentTraceSpanProcessor", () => {
       shutdown: vi.fn(async () => {}),
     };
     const processor = new AgentTraceSpanProcessor([child]);
-    processor.onStart(span("trace-1", { "agent.session.id": "session-1" }), {});
+    processor.onStart(span("trace-1", { "gen_ai.conversation.id": "session-1" }), {});
 
     const workflow = span("trace-1", {}, "workflow");
     processor.onStart(workflow, {});

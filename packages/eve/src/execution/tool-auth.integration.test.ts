@@ -204,8 +204,8 @@ describe("tool-hosted authorization", () => {
 
   it("resolves and caches an inline provider on a plain tool", async () => {
     let calls = 0;
-    const inlineAuth: AuthorizationDefinition = {
-      principalType: "app",
+    const inlineAuth = {
+      credentialOwner: "app" as const,
       async getToken(): Promise<TokenResult> {
         calls += 1;
         return { token: `inline-${calls}` };
@@ -372,7 +372,7 @@ describe("tool-hosted authorization", () => {
     expect(isAuthorizationSignal(result)).toBe(true);
     if (!isAuthorizationSignal(result)) throw new Error("expected signal");
     expect(receivedCallbackUrl).toBe(
-      `http://localhost:2000/eve/v1/connections/search_notion__mcp.notion.com_notion/callback/${result.challenges[0]?.attemptId}/session_auth%3Aauth`,
+      `http://localhost:2000/eve/v1/connections/search_notion__mcp.notion.com_notion/callback/${result.challenges[0]?.attemptId}/eve%3Ainbox%3Av1%3Aeve%3Asession%3Asession_auth%3Ainbox`,
     );
     expect(result.challenges[0]?.hookUrl).toBe(receivedCallbackUrl);
   });

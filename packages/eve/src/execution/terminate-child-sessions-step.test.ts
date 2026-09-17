@@ -431,6 +431,7 @@ function indexedTask(taskId: string): SessionTaskIndexEntry {
   return {
     taskInboxToken: `${taskId}:inbox`,
     createdByTurnId: "turn-1",
+    dispatchContext: { auth: { current: null, initiator: null } },
     metadata: {
       kind: "tool",
       name: "research",
@@ -468,7 +469,6 @@ function makeSessionState(
                 [SESSION_TASKS_STATE_KEY]: { tasks, version: 2 },
               },
       },
-      version: 1,
     },
     version: 1,
   };

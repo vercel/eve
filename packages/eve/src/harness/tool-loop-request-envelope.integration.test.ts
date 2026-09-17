@@ -3,6 +3,7 @@ import type { LanguageModel } from "ai";
 import { describe, expect, it } from "vitest";
 
 import { ContextContainer, contextStorage } from "#context/container.js";
+import { PendingSkillAnnouncementKey } from "#context/dynamic-skill-lifecycle.js";
 import { SessionDynamicInstructionsKey } from "#context/keys.js";
 import { mockModel, type MockModelRequest } from "#evals/mock-model.js";
 import { createToolLoopHarness } from "#harness/tool-loop.js";
@@ -78,6 +79,35 @@ describe("model request envelope accounting", () => {
     );
   });
 
+  it("does not let a persisted announcement mask later instruction growth", async () => {
+    const ctx = new ContextContainer();
+    ctx.set(PendingSkillAnnouncementKey, "Available skill description ".repeat(600));
+    let summaries = 0;
+    const task = mockModel({
+      respond: () => ({ text: "Done.", usage: { inputTokens: 8_000 } }),
+    });
+    const summary = mockModel({
+      respond: () => {
+        summaries++;
+        return "Earlier work is summarized.";
+      },
+    });
+    const runStep = createToolLoopHarness({
+      mode: "conversation",
+      tools: new Map(),
+      resolveModel: async (reference) =>
+        (reference.id === "summary" ? summary : task) as LanguageModel,
+    });
+    const first = await contextStorage.run(ctx, () =>
+      runStep(session(), { message: "First task." }),
+    );
+    expect(summaries).toBe(0);
+    expect(JSON.stringify(first.session.history)).toContain("Available skill description");
+    setInstructions(ctx, 600);
+    await contextStorage.run(ctx, () => runStep(first.session, { message: "Second task." }));
+    expect(summaries).toBe(1);
+  });
+
   it("rechecks instructions added before an empty-response retry", async () => {
     const ctx = new ContextContainer();
     const requests: MockModelRequest[] = [];
@@ -114,7 +144,7 @@ describe("model request envelope accounting", () => {
             lastKnownInputTokens: 8_000,
             lastKnownPromptMessageCount: 1,
           },
-          history: [{ role: "user", content: "Earlier task." }],
+          history: [{ role: "user", kind: "user", content: "Earlier task." }],
         },
         { message: "Continue." },
       ),

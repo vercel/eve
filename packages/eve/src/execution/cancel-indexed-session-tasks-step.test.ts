@@ -64,6 +64,7 @@ describe("cancelAllIndexedSessionTasksStep", () => {
 function indexedTask(taskId: string): SessionTaskIndexEntry {
   return {
     createdByTurnId: "turn_0",
+    dispatchContext: { auth: { current: null, initiator: null } },
     executor: { data: {}, kind: "workflow" },
     metadata: { kind: "tool", name: "research" },
     taskId,
@@ -86,7 +87,6 @@ function makeSessionState(tasks: readonly SessionTaskIndexEntry[]): DurableSessi
         sessionId: "parent-session",
         state: { [SESSION_TASKS_STATE_KEY]: { tasks, version: 2 } },
       },
-      version: 1,
     },
     version: 1,
   };

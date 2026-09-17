@@ -4,7 +4,7 @@ import {
   withoutDeclinedContent,
   type ResolvedContentOptions,
 } from "#tracing/content-attributes.js";
-import { hasSessionRelease, type LocalTracesProcessor } from "#tracing/local-traces.js";
+import { hasConversationRelease, type LocalTracesProcessor } from "#tracing/local-traces.js";
 import { normalizeChannelAudience } from "#shared/channel-audience.js";
 import type { ChannelAudience } from "#shared/channel-audience.js";
 import {
@@ -89,10 +89,10 @@ function policyFilteringProcessor(
     shutdown: () => downstream.shutdown(),
   };
 
-  if (!hasSessionRelease(downstream)) return filtering;
+  if (!hasConversationRelease(downstream)) return filtering;
   const releasing: LocalTracesProcessor = {
     ...filtering,
-    releaseSession: (sessionId) => downstream.releaseSession(sessionId),
+    releaseConversation: (conversationId) => downstream.releaseConversation(conversationId),
   };
   return releasing;
 }

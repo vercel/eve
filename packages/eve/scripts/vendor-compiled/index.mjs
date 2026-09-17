@@ -29,7 +29,6 @@ import vercelDetectAgent from "./@vercel/detect-agent.mjs";
 import vercelOidc from "./@vercel/oidc.mjs";
 import vercelOtel from "./@vercel/otel.mjs";
 import vercelSandbox from "./@vercel/sandbox.mjs";
-import vercelSandboxDrives from "./@vercel/sandbox-drives.mjs";
 import workflowBuilders from "./@workflow/builders.mjs";
 import workflowCore from "./@workflow/core.mjs";
 import workflowErrors from "./@workflow/errors.mjs";
@@ -48,6 +47,7 @@ import grayMatter from "./gray-matter.mjs";
 import jose from "./jose.mjs";
 import jsoncParser from "./jsonc-parser.mjs";
 import jsonSchema from "./json-schema.mjs";
+import justSecrets from "./just-secrets.mjs";
 import marked from "./marked.mjs";
 import picocolors from "./picocolors.mjs";
 import semver from "./semver.mjs";
@@ -75,6 +75,7 @@ export const MODULES = [
   jose,
   jsoncParser,
   jsonSchema,
+  justSecrets,
   marked,
   mcp,
   modelContextProtocolServer,
@@ -96,7 +97,6 @@ export const MODULES = [
   vercelOidc,
   vercelOtel,
   vercelSandbox,
-  vercelSandboxDrives,
   workflowBuilders,
   workflowCore,
   workflowErrors,

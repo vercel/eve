@@ -12,11 +12,7 @@ import { workflowToolContextErrorMessage } from "#shared/workflow-tool-context.j
 // be different bundled copies of this module.
 const WORKFLOW_TOOL_RUN_CONTEXT = Symbol.for("eve.workflow-tool-run.context");
 
-interface WorkflowToolRunContext {
-  /** Compatibility for already-started two-run background workflows. */
-  readonly admission?: Promise<
-    { readonly status: "accepted" } | { readonly status: "rejected"; readonly reason: string }
-  >;
+export interface WorkflowToolRunContext {
   readonly from: WorkflowToolRunRef;
   readonly owner: WorkflowToolRunOwner;
 }
@@ -46,18 +42,18 @@ function readWorkflowToolRunContext(
   return context;
 }
 
+export function findWorkflowToolRunContext(value: unknown): WorkflowToolRunContext | undefined {
+  return typeof value === "object" && value !== null
+    ? (value as WorkflowToolRunContextCarrier)[WORKFLOW_TOOL_RUN_CONTEXT]
+    : undefined;
+}
+
 export function readWorkflowToolRunRef(ctx: ToolContext): WorkflowToolRunRef {
   return readWorkflowToolRunContext(ctx, "agent").from;
 }
 
 export function readWorkflowToolRunOwner(ctx: ToolContext): WorkflowToolRunOwner {
   return readWorkflowToolRunContext(ctx, "agent").owner;
-}
-
-export function readWorkflowToolRunAdmission(
-  ctx: ToolContext,
-): WorkflowToolRunContext["admission"] {
-  return readWorkflowToolRunContext(ctx, "agent").admission;
 }
 
 /** Returns an answer hook which may be awaited or raced with another workflow operation. */

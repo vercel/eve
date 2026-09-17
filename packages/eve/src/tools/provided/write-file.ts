@@ -1,6 +1,7 @@
 import { z } from "#compiled/zod/index.js";
 
 import { type WriteFileInput, executeWriteFileOnSandbox } from "#execution/sandbox/write-file.js";
+import { toolLabel } from "#tools/tool-label.js";
 import { defineTool, type ToolDefinition } from "#tools/definition.js";
 
 /**
@@ -28,6 +29,7 @@ export type WriteFileToolOutput = z.infer<typeof WRITE_FILE_OUTPUT_SCHEMA>;
  * Framework-owned executor that delegates to the default sandbox.
  */
 export const writeFile: ToolDefinition<WriteFileToolInput, WriteFileToolOutput> = defineTool({
+  label: { start: (input) => toolLabel("Write", input.filePath) },
   description: [
     "Writes a file to the local filesystem.",
     "",

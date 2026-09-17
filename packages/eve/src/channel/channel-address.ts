@@ -22,7 +22,7 @@ import type {
   TurnPolicy,
 } from "#channel/types.js";
 import { DEFAULT_TURN_POLICY } from "#channel/types.js";
-import { isReservedSessionCommandToken } from "#execution/session-command-token.js";
+import { isReservedSessionCommandToken } from "#execution/session-inbox/address.js";
 import type { RunMode } from "#shared/run-mode.js";
 
 interface BaseChannelAddressDeliveryOptions {

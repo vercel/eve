@@ -61,7 +61,6 @@ function fakeFlows(overrides: Partial<TuiSetupFlows> = {}): TuiSetupFlows {
     runInstallVercelCliFlow: vi.fn<TuiSetupFlows["runInstallVercelCliFlow"]>(async () => ({
       kind: "installed",
     })),
-    runLoginFlow: vi.fn<TuiSetupFlows["runLoginFlow"]>(async () => ({ kind: "logged-in" })),
     runModelFlow: vi.fn<TuiSetupFlows["runModelFlow"]>(async () => ({
       kind: "done",
       accessChanged: true,
@@ -77,7 +76,7 @@ function fakeFlows(overrides: Partial<TuiSetupFlows> = {}): TuiSetupFlows {
 }
 
 function run(input: {
-  command: "vc:install" | "vc:login" | "model" | "add" | "deploy";
+  command: "model" | "add" | "deploy";
   flows: TuiSetupFlows;
   renderer?: TuiSetupCommandRenderer;
   initialModelStep?: "provider";
@@ -122,7 +121,7 @@ describe("runTuiSetupCommand", () => {
     const flows = fakeFlows({
       runRegistryFlow: vi.fn<TuiSetupFlows["runRegistryFlow"]>(async ({ prompter }) => {
         await prompter.select({
-          message: "Add experimental/self-modification?",
+          message: "Add eve/self-modification?",
           options: [{ value: "install", label: "Install and set up" }],
         });
         return registryResult();
@@ -186,8 +185,7 @@ describe("runTuiSetupCommand", () => {
         Object.entries(SETUP_FLOW_CONFIG).map(([command, config]) => [command, config.indicator]),
       ),
     ).toEqual({
-      "vc:install": "pulse",
-      "vc:login": "pulse",
+      login: "pulse",
       model: "pulse",
       add: "pulse",
       deploy: "spinner",
@@ -199,12 +197,12 @@ describe("runTuiSetupCommand", () => {
     await expect(run({ command: "model", flows })).resolves.toEqual({
       message: "Model changed to openai/gpt-5.5. Live on your next prompt.",
       preserveFlowDiagnostics: false,
-      effect: { kind: "model-access-changed" },
+      effect: { kind: "model-access-changed", reload: true },
     });
     expect(flows.runModelFlow).toHaveBeenCalledWith(
       expect.objectContaining({
         appRoot: APP_ROOT,
-        deps: expect.objectContaining({ runProviderFlow: expect.any(Function) }),
+        deps: expect.objectContaining({ pickModelSettings: expect.any(Function) }),
       }),
     );
   });
@@ -241,39 +239,23 @@ describe("runTuiSetupCommand", () => {
     });
   });
 
-  it("hands model-owned subprocesses both the terminal and suspended runtime", async () => {
-    const calls: string[] = [];
+  it("keeps model setup attached to the TUI panel", async () => {
     const renderer = fakePanelRenderer();
-    renderer.withInheritedStdio = async (task) => {
-      calls.push("terminal:release");
-      const result = await task();
-      calls.push("terminal:restore");
-      return result;
-    };
+    renderer.withInheritedStdio = vi.fn(async (task) => task());
+    const exclusiveCalls = vi.fn();
     const withExclusiveTerminal = async <T>(task: () => Promise<T>): Promise<T> => {
-      calls.push("runtime:suspend");
-      const result = await task();
-      calls.push("runtime:resume");
-      return result;
+      exclusiveCalls();
+      return task();
     };
-    const flows = fakeFlows({
-      runModelFlow: vi.fn<TuiSetupFlows["runModelFlow"]>(async (input) => {
-        await input.withExclusiveTerminal?.(async () => {
-          calls.push("codex");
-        });
-        return { kind: "cancelled" };
-      }),
-    });
+    const flows = fakeFlows();
 
     await run({ command: "model", flows, renderer, withExclusiveTerminal });
 
-    expect(calls).toEqual([
-      "terminal:release",
-      "runtime:suspend",
-      "codex",
-      "runtime:resume",
-      "terminal:restore",
-    ]);
+    expect(flows.runModelFlow).toHaveBeenCalledWith(
+      expect.not.objectContaining({ withExclusiveTerminal: expect.anything() }),
+    );
+    expect(renderer.withInheritedStdio).not.toHaveBeenCalled();
+    expect(exclusiveCalls).not.toHaveBeenCalled();
   });
 
   it("forwards an automatic provider entry to the model flow", async () => {
@@ -300,7 +282,7 @@ describe("runTuiSetupCommand", () => {
         "Model changed to openai/gpt-5.5. Live on your next prompt.\n" +
         "AI Gateway via Project selected.",
       preserveFlowDiagnostics: false,
-      effect: { kind: "model-access-changed" },
+      effect: { kind: "model-access-changed", reload: true },
     });
   });
 
@@ -315,7 +297,7 @@ describe("runTuiSetupCommand", () => {
     await expect(run({ command: "model", flows })).resolves.toEqual({
       message: "AI Gateway via Project selected.",
       preserveFlowDiagnostics: false,
-      effect: { kind: "model-access-changed" },
+      effect: { kind: "model-access-changed", reload: true },
     });
   });
 
@@ -330,7 +312,7 @@ describe("runTuiSetupCommand", () => {
     await expect(run({ command: "model", flows })).resolves.toEqual({
       message: "AI Gateway via API key selected.",
       preserveFlowDiagnostics: false,
-      effect: { kind: "model-access-changed" },
+      effect: { kind: "model-access-changed", reload: true },
     });
   });
 
@@ -345,7 +327,7 @@ describe("runTuiSetupCommand", () => {
     await expect(run({ command: "model", flows })).resolves.toEqual({
       message: "ChatGPT subscription selected.",
       preserveFlowDiagnostics: false,
-      effect: { kind: "model-access-changed" },
+      effect: { kind: "model-access-changed", reload: true },
     });
   });
 
@@ -354,7 +336,7 @@ describe("runTuiSetupCommand", () => {
       runModelFlow: vi.fn<TuiSetupFlows["runModelFlow"]>(async () => ({ kind: "cancelled" })),
     });
     await expect(run({ command: "model", flows })).resolves.toEqual({
-      message: "/model dismissed.",
+      message: "",
       cancelled: true,
       preserveFlowDiagnostics: false,
     });
@@ -461,17 +443,38 @@ describe("runTuiSetupCommand", () => {
     ],
     ["empty", registryResult(), "No integrations selected."],
     ["deployed", registryResult({ deployed: "production" }), "No integrations selected."],
-    ["cancelled", { kind: "cancelled" as const }, "/add dismissed."],
+    ["cancelled", { kind: "cancelled" as const }, ""],
   ] as const)("reports a %s registry flow", async (_case, result, message) => {
     const runRegistryFlow = vi.fn(async () => result);
     const outcome = await run({ command: "add", flows: fakeFlows({ runRegistryFlow }) });
-    expect(outcome).toMatchObject({ message, preserveFlowDiagnostics: true });
+    expect(outcome).toMatchObject({
+      message,
+      preserveFlowDiagnostics: result.kind !== "cancelled",
+    });
     if (result.kind === "done" && result.result.items.length > 0)
       expect(outcome.tone).toBe("success");
     if (result.kind === "done" && result.result.deployed === "production") {
       expect(outcome.effect).toEqual({ kind: "deployed" });
     }
-    expect(runRegistryFlow).toHaveBeenCalledWith(expect.objectContaining({ appRoot: APP_ROOT }));
+    expect(runRegistryFlow).toHaveBeenCalledWith(
+      expect.objectContaining({ appRoot: APP_ROOT, installRoot: undefined }),
+    );
+  });
+
+  it("keeps shared setup at the workspace root while installing into its agent", async () => {
+    const runRegistryFlow = vi.fn<TuiSetupFlows["runRegistryFlow"]>(async () => registryResult());
+    await run({
+      command: "add",
+      agentRoot: "/tmp/project/agents/support",
+      flows: fakeFlows({ runRegistryFlow }),
+    });
+
+    expect(runRegistryFlow).toHaveBeenCalledWith(
+      expect.objectContaining({
+        appRoot: APP_ROOT,
+        installRoot: "/tmp/project/agents/support",
+      }),
+    );
   });
 
   it("reports completed items and skipped failures together", async () => {
@@ -595,10 +598,10 @@ describe("runTuiSetupCommand", () => {
     renderer.fireInterrupt("ctrl-c");
 
     await expect(result).resolves.toEqual({
-      message: "/add interrupted.",
+      message: "",
       cancelled: true,
-      tone: "error",
-      preserveFlowDiagnostics: true,
+      tone: undefined,
+      preserveFlowDiagnostics: false,
     });
   });
 
@@ -617,10 +620,10 @@ describe("runTuiSetupCommand", () => {
     renderer.fireInterrupt();
 
     await expect(result).resolves.toEqual({
-      message: "/add interrupted.",
+      message: "",
       cancelled: true,
-      tone: "error",
-      preserveFlowDiagnostics: true,
+      tone: undefined,
+      preserveFlowDiagnostics: false,
     });
   });
 
@@ -648,52 +651,11 @@ describe("runTuiSetupCommand", () => {
     renderer.fireInterrupt();
 
     await expect(result).resolves.toEqual({
-      message: "/model interrupted.",
-      tone: "error",
-      preserveFlowDiagnostics: true,
-      effect: { kind: "model-access-changed" },
-    });
-  });
-
-  it("reports a completed login and refreshes the link identity", async () => {
-    const flows = fakeFlows({
-      runLoginFlow: vi.fn<TuiSetupFlows["runLoginFlow"]>(async () => ({ kind: "logged-in" })),
-    });
-    await expect(run({ command: "vc:login", flows })).resolves.toEqual({
-      message: "Logged in to Vercel.",
+      message: "",
+      cancelled: true,
+      tone: undefined,
       preserveFlowDiagnostics: false,
-      effect: { kind: "refresh-identity" },
-    });
-  });
-
-  it("reports an already-authenticated login as a no-op", async () => {
-    const flows = fakeFlows({
-      runLoginFlow: vi.fn<TuiSetupFlows["runLoginFlow"]>(async () => ({ kind: "already" })),
-    });
-    await expect(run({ command: "vc:login", flows })).resolves.toEqual({
-      message: "You're already logged in to Vercel.",
-      preserveFlowDiagnostics: false,
-    });
-  });
-
-  it("routes a missing CLI from /vc:login to /vc:install", async () => {
-    const flows = fakeFlows({
-      runLoginFlow: vi.fn<TuiSetupFlows["runLoginFlow"]>(async () => ({ kind: "cli-missing" })),
-    });
-    await expect(run({ command: "vc:login", flows })).resolves.toEqual({
-      message:
-        "The Vercel CLI isn't installed — run /vc:install to install it, then retry /vc:login.",
-      preserveFlowDiagnostics: true,
-    });
-  });
-
-  it("reports an unavailable Vercel API without asking the user to log in again", async () => {
-    const flows = fakeFlows({
-      runLoginFlow: vi.fn<TuiSetupFlows["runLoginFlow"]>(async () => ({ kind: "unavailable" })),
-    });
-    await expect(run({ command: "vc:login", flows })).resolves.toEqual({
-      message: "Couldn't reach Vercel — check your connection, then retry /vc:login.",
-      preserveFlowDiagnostics: true,
+      effect: { kind: "model-access-changed", reload: true },
     });
   });
 
@@ -713,13 +675,13 @@ describe("runTuiSetupCommand", () => {
     });
 
     await expect(run({ command: "add", flows })).resolves.toMatchObject({
-      message: expect.stringMatching(/^Added Web Chat[\s\S]*run \/vc:login/),
+      message: expect.stringMatching(/^Added Web Chat[\s\S]*run \/deploy/),
       partial: true,
       tone: "error",
     });
   });
 
-  it("routes a forbidden (SSO) scope error to /vc:login with a re-auth message", async () => {
+  it("routes a forbidden (SSO) scope error to /deploy with a re-auth message", async () => {
     const flows = fakeFlows({
       runDeployFlow: vi.fn<TuiSetupFlows["runDeployFlow"]>(async () => {
         throw new HumanActionRequiredError({
@@ -731,7 +693,7 @@ describe("runTuiSetupCommand", () => {
     });
     await expect(run({ command: "deploy", flows })).resolves.toEqual({
       message:
-        "Vercel denied access to that team — run /vc:login to re-authenticate (for example to complete SSO), or pick a team you can access, then retry /deploy.",
+        "Vercel denied access to that team — check your team access and SSO, then retry /deploy.",
       tone: "error",
       preserveFlowDiagnostics: true,
     });
@@ -752,7 +714,7 @@ describe("runTuiSetupCommand", () => {
     });
   });
 
-  it("routes a missing-CLI action to the install command instead of /vc:login", async () => {
+  it("routes a missing-CLI action to the install command instead of /deploy", async () => {
     const flows = fakeFlows({
       runDeployFlow: vi.fn<TuiSetupFlows["runDeployFlow"]>(async () => {
         throw new HumanActionRequiredError({
@@ -763,35 +725,9 @@ describe("runTuiSetupCommand", () => {
       }),
     });
     await expect(run({ command: "deploy", flows })).resolves.toEqual({
-      message:
-        "The Vercel CLI isn't installed — run /vc:install to install it, then retry /deploy.",
+      message: "The Vercel CLI isn't installed — run /deploy to install it, then retry /deploy.",
       tone: "error",
       preserveFlowDiagnostics: true,
-    });
-  });
-
-  it("reports an installed CLI and refreshes the link identity", async () => {
-    const flows = fakeFlows({
-      runInstallVercelCliFlow: vi.fn<TuiSetupFlows["runInstallVercelCliFlow"]>(async () => ({
-        kind: "installed",
-      })),
-    });
-    await expect(run({ command: "vc:install", flows })).resolves.toEqual({
-      message: "Installed the Vercel CLI. Run /vc:login next.",
-      preserveFlowDiagnostics: false,
-      effect: { kind: "refresh-identity" },
-    });
-  });
-
-  it("reports an already-installed CLI as a no-op", async () => {
-    const flows = fakeFlows({
-      runInstallVercelCliFlow: vi.fn<TuiSetupFlows["runInstallVercelCliFlow"]>(async () => ({
-        kind: "already",
-      })),
-    });
-    await expect(run({ command: "vc:install", flows })).resolves.toEqual({
-      message: "The Vercel CLI is already installed.",
-      preserveFlowDiagnostics: false,
     });
   });
 });

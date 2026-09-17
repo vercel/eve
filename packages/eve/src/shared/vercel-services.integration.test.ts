@@ -50,6 +50,7 @@ describe("ensureEveVercelServicesConfig", () => {
           buildCommand:
             "cd '../../..' && export EVE_INTERNAL_BUILD_OUTPUT_DIRECTORY='.eve/vercel-services/eve/.vercel/output' && export EVE_INTERNAL_HOST_BUILD_OUTPUT_DIRECTORY='.vercel/output' && node 'node_modules/eve/bin/eve.js' build",
           framework: "eve",
+          outputDirectory: ".vercel/output",
           routes: [
             {
               src: "^/eve/v1/(.*)$",

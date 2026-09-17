@@ -13,7 +13,7 @@
   },
   "dependencies": {
     "@auth/core": "0.41.2",
-    "@vercel/connect": "catalog:",
+    "@vercel/connect": "2.2.0",
     "ai": "catalog:",
     "eve": "workspace:*",
     "next": "catalog:",

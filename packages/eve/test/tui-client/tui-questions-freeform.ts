@@ -52,7 +52,7 @@ run({ app: "agent-tui-client", kind: "local-build" }, async (target) => {
   input.type(promptLines.join(" · "));
   input.enter();
 
-  await screen.waitForText("▶ 1. Production", 60_000);
+  await screen.waitForText("› 1. Production", 60_000);
   console.log(theme.muted("[tui-freeform] select UI live, highlight on Production"));
 
   await sleep(500);
@@ -61,7 +61,7 @@ run({ app: "agent-tui-client", kind: "local-build" }, async (target) => {
   input.emit("data", Buffer.from("\x1B[B")); // → Staging
   input.emit("data", Buffer.from("\x1B[B")); // → Preview
   input.emit("data", Buffer.from("\x1B[B")); // → Type your own answer
-  await screen.waitForText("▶ 4. Type your own answer", 2_000);
+  await screen.waitForText("› 4. Type your own answer", 2_000);
   console.log(theme.muted("[tui-freeform] highlight moved to freeform row"));
 
   // The freeform row focuses its inline elbow editor the moment the cursor

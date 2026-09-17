@@ -1,11 +1,48 @@
 import { describe, expect, it } from "vitest";
 
-import { readForwardedAudienceBaggage, writeForwardedAudienceBaggage } from "#protocol/baggage.js";
+import {
+  readBaggageMember,
+  readForwardedAudienceBaggage,
+  readForwardedParentSessionBaggage,
+  writeForwardedAudienceBaggage,
+  writeForwardedParentSessionBaggage,
+} from "#protocol/baggage.js";
 
 const PUBLIC_OUTPUTS = {
   ceiling: { recordInputs: false, recordOutputs: true },
   originAudience: "public",
 } as const;
+const PARENT = {
+  callId: "call-1",
+  rootSessionId: "root-session",
+  sessionId: "parent-session",
+  turn: { id: "turn-1", sequence: 2 },
+} as const;
+
+describe("baggage member parsing", () => {
+  it.each(["eve.audience", "eve.conversation.id"])("uses the same wire rules for %s", (key) => {
+    expect(readBaggageMember(`${key} = public%2Fone+two ; flag ; source=a%3Db`, key)).toEqual({
+      value: "public/one+two",
+      properties: [{ key: "flag" }, { key: "source", value: "a=b" }],
+    });
+    expect(readBaggageMember(`${key}=a,${key}=a`, key)).toBe("malformed");
+    expect(readBaggageMember(`${key}=%ZZ`, key)).toBe("malformed");
+    expect(readBaggageMember(`${key}=value\n`, key)).toBe("malformed");
+    expect(readBaggageMember(`${key}=value,vendor=${"a".repeat(8192)}`, key)).toBe("malformed");
+    expect(readBaggageMember(`${key}=%FF`, key)).toEqual({ value: "\ufffd", properties: [] });
+    expect(readBaggageMember(`${key}=%EF%BB%BFvalue`, key)).toEqual({
+      value: "\ufeffvalue",
+      properties: [],
+    });
+  });
+
+  it("decodes audience and property values before applying the policy schema", () => {
+    expect(readForwardedAudienceBaggage("eve.audience=%70ublic;ceiling=%691o0")).toEqual({
+      originAudience: "public",
+      ceiling: { recordInputs: true, recordOutputs: false },
+    });
+  });
+});
 
 describe("readForwardedAudienceBaggage", () => {
   it.each([
@@ -63,6 +100,20 @@ describe("readForwardedAudienceBaggage", () => {
 });
 
 describe("writeForwardedAudienceBaggage", () => {
+  it("preserves the assertion at the byte limit and rejects overflow", () => {
+    const assertion = "eve.audience=public;ceiling=i0o1";
+    const baggage = `vendor=${"a".repeat(8192 - assertion.length - "vendor=,".length)}`;
+    const result = writeForwardedAudienceBaggage(baggage, PUBLIC_OUTPUTS);
+    expect(new TextEncoder().encode(result).byteLength).toBe(8192);
+    expect(readForwardedAudienceBaggage(result!)).toEqual(PUBLIC_OUTPUTS);
+    expect(() => writeForwardedAudienceBaggage(`${baggage}a`, PUBLIC_OUTPUTS)).toThrow(
+      "Cannot forward baggage: header exceeds 8192 bytes",
+    );
+    expect(() => writeForwardedAudienceBaggage(`${baggage}\u00e9`, PUBLIC_OUTPUTS)).toThrow(
+      "Cannot forward baggage: header exceeds 8192 bytes",
+    );
+  });
+
   it("preserves unrelated entries and replaces authored Eve assertions", () => {
     expect(
       writeForwardedAudienceBaggage(
@@ -91,5 +142,26 @@ describe("writeForwardedAudienceBaggage", () => {
     expect(
       writeForwardedAudienceBaggage("eve.audience=public;ceiling=i1o1", undefined),
     ).toBeUndefined();
+  });
+});
+
+describe("forwarded parent session baggage", () => {
+  it("round-trips lineage while preserving unrelated members", () => {
+    const baggage = writeForwardedParentSessionBaggage("vendor=value", PARENT);
+    expect(baggage).toContain("vendor=value");
+    expect(readForwardedParentSessionBaggage(baggage!)).toEqual(PARENT);
+  });
+
+  it.each([null, "vendor=value"])("returns absent for %s", (value) => {
+    expect(readForwardedParentSessionBaggage(value)).toBe("absent");
+  });
+
+  it.each([
+    "eve.parent_session=not-json",
+    `eve.parent_session=${encodeURIComponent(JSON.stringify({ ...PARENT, callId: "" }))}`,
+    `eve.parent_session=${encodeURIComponent(JSON.stringify({ ...PARENT, turn: { id: "turn-1" } }))}`,
+    `eve.parent_session=${encodeURIComponent(JSON.stringify(PARENT))};extra=yes`,
+  ])("rejects malformed lineage %s", (value) => {
+    expect(readForwardedParentSessionBaggage(value)).toBe("malformed");
   });
 });

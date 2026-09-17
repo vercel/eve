@@ -10,15 +10,12 @@ import { CODING_AGENT_ENV_MARKERS } from "../../src/cli/agent-detection.js";
 import { loadYaml } from "../../src/evals/loaders/yaml.js";
 import { DEFAULT_AGENT_MODEL_ID } from "../../src/shared/default-agent-model.js";
 import { pathExists } from "../../src/setup/path-exists.js";
+import { ensureScenarioEveTarballPath } from "../../src/internal/testing/scenario-app.js";
 import { useTemporaryDirectories } from "../../src/internal/testing/use-temporary-app-roots.js";
 
 const EVE_BIN_PATH = fileURLToPath(new URL("../../bin/eve.js", import.meta.url));
 const runFile = promisify(execFile);
 const RELEASE_AGE_MINUTES = "2880";
-// Changesets opens Version Packages PRs on `changeset-release/<base>`. Those
-// PRs bump package.json before npm has that version, so a real registry
-// install of the scaffolded eve range cannot succeed yet.
-const isChangesetReleasePr = process.env.GITHUB_HEAD_REF?.startsWith("changeset-release/") === true;
 
 const createScratchDirectory = useTemporaryDirectories();
 
@@ -167,43 +164,66 @@ async function createFakeNpmEnvironment(scratch: string): Promise<{
 }
 
 describe("eve init smoke", () => {
-  it.skipIf(isChangesetReleasePr)(
-    "resolves a standalone pnpm scaffold under the release-age policy",
-    async () => {
-      const scratch = await createScratchDirectory("eve-init-release-age-");
-      const workspacePolicy = (await loadYaml(
-        fileURLToPath(new URL("../../../../pnpm-workspace.yaml", import.meta.url)),
-      )) as { minimumReleaseAgeExclude: string[] };
-      const env = {
-        ...withoutCodingAgentMarkers(process.env),
-        // The agent path skips the interactive dev handoff, which cannot run
-        // against the real pnpm install this scenario performs.
-        AI_AGENT: "claude",
-        CI: "true",
-        PNPM_CONFIG_MINIMUM_RELEASE_AGE: RELEASE_AGE_MINUTES,
-        // Use the repository's reviewed dependency exceptions for the current
-        // release without adding bypasses to scaffolded projects.
-        PNPM_CONFIG_MINIMUM_RELEASE_AGE_EXCLUDE: JSON.stringify([
-          "eve",
-          ...workspacePolicy.minimumReleaseAgeExclude,
-        ]),
-      };
+  it("resolves a standalone pnpm scaffold under the release-age policy", async () => {
+    const scratch = await createScratchDirectory("eve-init-release-age-");
+    const eveTarball = `file:${await ensureScenarioEveTarballPath()}`;
+    const pnpmfile = join(scratch, "scaffold-pnpmfile.cjs");
+    // The package under test need not have reached npm; registry dependencies still use the policy.
+    await writeFile(
+      pnpmfile,
+      [
+        "module.exports = { hooks: { updateConfig(config) {",
+        `  return { ...config, overrides: { ...config.overrides, eve: ${JSON.stringify(eveTarball)} } };`,
+        "} } };\n",
+      ].join("\n"),
+    );
+    const workspacePolicy = (await loadYaml(
+      fileURLToPath(new URL("../../../../pnpm-workspace.yaml", import.meta.url)),
+    )) as { minimumReleaseAgeExclude: string[] };
+    const env = {
+      ...withoutCodingAgentMarkers(process.env),
+      // The agent path skips the interactive dev handoff, which cannot run
+      // against the real pnpm install this scenario performs.
+      AI_AGENT: "claude",
+      CI: "true",
+      PNPM_CONFIG_GLOBAL_PNPMFILE: pnpmfile,
+      PNPM_CONFIG_MINIMUM_RELEASE_AGE: RELEASE_AGE_MINUTES,
+      // Use the repository's reviewed dependency exceptions for the current
+      // release without adding bypasses to scaffolded projects.
+      PNPM_CONFIG_MINIMUM_RELEASE_AGE_EXCLUDE: JSON.stringify(
+        workspacePolicy.minimumReleaseAgeExclude,
+      ),
+    };
 
-      const result = await runEveBin(scratch, ["init", "policy-agent"], env);
+    const result = await runEveBin(scratch, ["init", "policy-agent"], env);
 
-      expect(result.exitCode, result.stderr).toBe(0);
-      const projectDir = join(scratch, "policy-agent");
-      await expect(
-        readFile(join(projectDir, "pnpm-workspace.yaml"), "utf8"),
-      ).resolves.not.toContain("minimumReleaseAgeExclude:");
-      await expect(
-        runFile("pnpm", ["add", "--ignore-scripts", "--lockfile-only", "is-number@7.0.0"], {
-          cwd: projectDir,
-          env,
-        }),
-      ).resolves.toMatchObject({ stderr: expect.any(String) });
-    },
-  );
+    expect(result.exitCode, result.stderr).toBe(0);
+    const projectDir = join(scratch, "policy-agent");
+    await expect(readFile(join(projectDir, "pnpm-workspace.yaml"), "utf8")).resolves.not.toContain(
+      "minimumReleaseAgeExclude:",
+    );
+    await expect(readFile(join(projectDir, "pnpm-workspace.yaml"), "utf8")).resolves.toContain(
+      "minimumReleaseAgeStrict: true",
+    );
+
+    // Exercise publication lag even when the checkout's version is already available on npm.
+    const manifestPath = join(projectDir, "package.json");
+    const manifest = JSON.parse(await readFile(manifestPath, "utf8")) as {
+      dependencies: Record<string, string>;
+    };
+    manifest.dependencies.eve = "0.0.0-eve-init-unpublished";
+    await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+    await expect(
+      runFile("pnpm", ["add", "--ignore-scripts", "--lockfile-only", "is-number@7.0.0"], {
+        cwd: projectDir,
+        env,
+      }),
+    ).resolves.toMatchObject({ stderr: expect.any(String) });
+    const lockfile = (await loadYaml(join(projectDir, "pnpm-lock.yaml"))) as {
+      overrides?: Record<string, string>;
+    };
+    expect(lockfile.overrides?.eve).toBe(eveTarball);
+  });
 
   it("creates the base template with the default model and no Vercel state", async () => {
     const scratch = await createScratchDirectory("eve-init-");
@@ -237,10 +257,6 @@ describe("eve init smoke", () => {
     expect(await fakePnpm.readCalls()).toEqual([
       {
         args: ["--dir", canonicalProjectDir, "install", "--no-frozen-lockfile"],
-        cwd: canonicalProjectDir,
-      },
-      {
-        args: ["--dir", canonicalProjectDir, "exec", "eve", "dev", "--onboard"],
         cwd: canonicalProjectDir,
       },
     ]);
@@ -277,9 +293,9 @@ describe("eve init smoke", () => {
     expect(await readFile(join(projectDir, "next.config.ts"), "utf8")).toContain(
       "export default withEve(nextConfig);",
     );
-    const [installCall, devCall] = await fakePnpm.readCalls();
+    const [installCall, ...remainingCalls] = await fakePnpm.readCalls();
     expect(installCall?.args.slice(-2)).toEqual(["install", "--no-frozen-lockfile"]);
-    expect(devCall?.args.slice(-4)).toEqual(["exec", "eve", "dev", "--onboard"]);
+    expect(remainingCalls).toEqual([]);
   });
 
   it("adds Web Chat through npm without writing pnpm configuration", async () => {
@@ -301,10 +317,6 @@ describe("eve init smoke", () => {
     expect(await fakeNpm.readCalls()).toEqual([
       {
         args: ["install"],
-        cwd: canonicalProjectDir,
-      },
-      {
-        args: ["exec", "--", "eve", "dev", "--onboard"],
         cwd: canonicalProjectDir,
       },
     ]);
@@ -344,7 +356,7 @@ describe("eve init smoke", () => {
     );
     const calls = await fakePnpm.readCalls();
     expect(calls[0]?.args.slice(-2)).toEqual(["install", "--no-frozen-lockfile"]);
-    expect(calls[1]?.args.slice(-3)).toEqual(["exec", "eve", "dev"]);
+    expect(calls).toHaveLength(1);
   });
 
   it("scaffolds the current directory for a coding agent that omits the target", async () => {
@@ -402,10 +414,6 @@ describe("eve init smoke", () => {
     expect(await fakePnpm.readCalls()).toEqual([
       {
         args: ["--dir", canonicalProjectDir, "install", "--no-frozen-lockfile"],
-        cwd: canonicalProjectDir,
-      },
-      {
-        args: ["--dir", canonicalProjectDir, "exec", "eve", "dev", "--onboard"],
         cwd: canonicalProjectDir,
       },
     ]);

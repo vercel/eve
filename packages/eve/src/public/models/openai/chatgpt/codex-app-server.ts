@@ -1,7 +1,20 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { createInterface, type Interface } from "node:readline";
 
-import { isObject } from "#shared/guards.js";
+import { resolveInstalledPackageInfo } from "#internal/application/package.js";
+import { isErrnoCode, isObject } from "#shared/guards.js";
+import {
+  extractCodexAccountIdFromToken,
+  extractCodexAccountLabelFromToken,
+  readCodexJwtExpirationMs,
+} from "./auth.js";
+import { ChatGptSignInRequiredError } from "./oauth.js";
+import {
+  ChatGptSignedOutError,
+  isChatGptTokenFresh,
+  type ChatGptToken,
+  type ChatGptTokenResolutionInput,
+} from "./token.js";
 
 interface RpcError {
   readonly code?: number;
@@ -21,7 +34,7 @@ export interface CodexAuthStatus {
 }
 
 export interface CodexAppServer {
-  getAuthStatus(input: { readonly refreshToken: boolean }): Promise<CodexAuthStatus>;
+  resolveToken(input: ChatGptTokenResolutionInput): Promise<ChatGptToken>;
   restart?(): void;
 }
 
@@ -50,6 +63,14 @@ export interface CodexAppServerOptions {
   readonly spawnProcess?: SpawnCodexAppServer;
 }
 
+/** Raised only when the `codex` executable cannot be found. */
+export class CodexBinaryNotFoundError extends Error {
+  constructor(cause?: unknown) {
+    super("The `codex` CLI was not found.", { cause });
+    this.name = "CodexBinaryNotFoundError";
+  }
+}
+
 /** Minimal authenticated subset of Codex's JSONL app-server protocol. */
 export class CodexAppServerClient implements CodexAppServer {
   readonly #command: string;
@@ -63,10 +84,30 @@ export class CodexAppServerClient implements CodexAppServer {
     this.#spawnProcess = options.spawnProcess ?? spawnCodexAppServer;
   }
 
-  async getAuthStatus(input: { readonly refreshToken: boolean }): Promise<CodexAuthStatus> {
+  async resolveToken(input: ChatGptTokenResolutionInput): Promise<ChatGptToken> {
+    let status = await this.#getAuthStatus(input.forceRefresh);
+    if (status.authMethod !== "chatgpt" || status.authToken === undefined) {
+      throw input.forceRefresh
+        ? new ChatGptSignInRequiredError()
+        : new ChatGptSignedOutError(
+            "ChatGPT subscription is not signed in to Codex. Run `codex login` or sign in from /login.",
+          );
+    }
+    let token = tokenFromCodex(status.authToken);
+    if (!input.forceRefresh && !isChatGptTokenFresh(token, input.now())) {
+      status = await this.#getAuthStatus(true);
+      if (status.authMethod !== "chatgpt" || status.authToken === undefined) {
+        throw new ChatGptSignInRequiredError();
+      }
+      token = tokenFromCodex(status.authToken);
+    }
+    return token;
+  }
+
+  async #getAuthStatus(refreshToken: boolean): Promise<CodexAuthStatus> {
     const connection = await this.#connect();
     try {
-      return await connection.getAuthStatus(input);
+      return await connection.getAuthStatus({ refreshToken });
     } catch (error) {
       if (connection.exited) this.#connection = undefined;
       throw error;
@@ -107,7 +148,6 @@ class CodexAppServerConnection {
 
   private constructor(child: CodexAppServerProcess) {
     this.#child = child;
-    // The broker must not keep the agent runtime alive during normal shutdown.
     child.unref();
     unrefStream(child.stdin);
     unrefStream(child.stdout);
@@ -143,14 +183,18 @@ class CodexAppServerConnection {
         stdio: ["pipe", "pipe", "pipe"],
       });
     } catch (error) {
-      throw codexUnavailableError(error);
+      throw appServerError(error);
     }
 
     const connection = new CodexAppServerConnection(child);
     try {
       await connection.#request("initialize", {
         capabilities: null,
-        clientInfo: { name: "eve", title: "eve", version: "0.35.0" },
+        clientInfo: {
+          name: "eve",
+          title: "eve",
+          version: resolveInstalledPackageInfo().version,
+        },
       });
       connection.#notify("initialized", {});
       return connection;
@@ -220,7 +264,7 @@ class CodexAppServerConnection {
   #fail(error: Error): void {
     if (this.#exited) return;
     this.#exited = true;
-    this.#failure = codexUnavailableError(error);
+    this.#failure = appServerError(error);
     this.#lines.close();
     for (const pending of this.#pending.values()) pending.reject(this.#failure);
     this.#pending.clear();
@@ -242,12 +286,20 @@ function unrefStream(stream: NodeJS.ReadableStream | NodeJS.WritableStream): voi
   if ("unref" in stream && typeof stream.unref === "function") stream.unref();
 }
 
-function codexUnavailableError(error: unknown): Error {
-  if (error instanceof Error && "code" in error && error.code === "ENOENT") {
-    return new Error(
-      "ChatGPT subscription authentication requires the Codex CLI. Install or upgrade `codex`, then run `codex login`.",
-    );
-  }
+function tokenFromCodex(token: string): ChatGptToken {
+  const accountId = extractCodexAccountIdFromToken(token);
+  const accountLabel = extractCodexAccountLabelFromToken(token);
+  const expiresAt = readCodexJwtExpirationMs(token);
+  return {
+    token,
+    ...(accountId !== undefined && { accountId }),
+    ...(accountLabel !== undefined && { accountLabel }),
+    ...(expiresAt !== undefined && { expiresAt }),
+  };
+}
+
+function appServerError(error: unknown): Error {
+  if (isErrnoCode(error, "ENOENT")) return new CodexBinaryNotFoundError(error);
   const message = error instanceof Error ? error.message : String(error);
-  return new Error(`Codex app-server is unavailable: ${message}`);
+  return new Error(`Codex app-server is unavailable: ${message}`, { cause: error });
 }

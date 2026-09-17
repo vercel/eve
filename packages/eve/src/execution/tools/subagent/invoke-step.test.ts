@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   dispatchAgentInvocation,
+  dispatchTaskAgentInvocationStep,
   releaseAgentInvocationOwnerStep,
   settleTaskAgentInvocationStep,
 } from "#execution/tools/subagent/invoke-step.js";
@@ -10,7 +11,19 @@ import { startSubagent } from "#execution/tools/subagent/start.js";
 import { prepareOwnerAgentInvocation } from "#execution/tools/subagent/invoke-preparation.js";
 import { readDurableSession } from "#execution/durable-session-store.js";
 import { getAgentHandleStore, setAgentHandleStore } from "#subagents/handles/store.js";
+import { readLatestTaskView } from "#execution/tasks/parent/run-parent.js";
+import { recordSessionTask } from "#tasks/session-index.js";
+import {
+  AuthKey,
+  InitiatorAuthKey,
+  SessionDynamicSubagentSelectionsKey,
+  TurnDynamicSubagentSelectionsKey,
+} from "#context/keys.js";
 
+vi.mock("#compiled/@workflow/core/index.js", async (importOriginal) => ({
+  ...(await importOriginal()),
+  getWorkflowMetadata: vi.fn(() => ({ url: "https://parent.example" })),
+}));
 vi.mock("#subagents/handle-dispatch.js", async (importOriginal) => ({
   ...(await importOriginal()),
   dispatchToClaimedAgentAddress: vi.fn(),
@@ -28,6 +41,7 @@ vi.mock("#execution/durable-session-store.js", async (importOriginal) => ({
   ...(await importOriginal()),
   readDurableSession: vi.fn(),
 }));
+vi.mock("#execution/tasks/parent/run-parent.js", () => ({ readLatestTaskView: vi.fn() }));
 const action = {
   callId: "call-1",
   description: "Research",
@@ -37,6 +51,15 @@ const action = {
   nodeId: "subagents/research",
   subagentName: "research",
 };
+const creatorAuth = {
+  attributes: {},
+  authenticator: "test-idp",
+  principalId: "creator-current",
+  principalType: "user" as const,
+};
+const sessionInitiatorAuth = { ...creatorAuth, principalId: "session-initiator" };
+const receiverAuth = { ...creatorAuth, principalId: "receiver-current" };
+const receiverInitiatorAuth = { ...creatorAuth, principalId: "receiver-initiator" };
 const availableRecord = {
   address: { continuationToken: "child", kind: "agent/local" as const, sessionId: "child" },
   identity: { id: "agent-1", name: "research", nodeId: "subagents/research" },
@@ -75,7 +98,7 @@ const called = {
 };
 beforeEach(() => {
   vi.clearAllMocks();
-  vi.mocked(readDurableSession).mockResolvedValue(session as never);
+  vi.mocked(readDurableSession).mockReturnValue(session as never);
 });
 
 describe("owner agent invocation dispatch", () => {
@@ -95,12 +118,11 @@ describe("owner agent invocation dispatch", () => {
           phase: "claimed",
           ownerId: "task-1",
         }),
-        parentToken: "agent-reply",
-        taskId: "task-1",
+        reply: { kind: "reply", parentToken: "agent-reply", taskId: "task-1" },
       }),
     );
     expect(dispatched).toMatchObject({ agentId: "agent-1", kind: "dispatched" });
-    expect(getAgentHandleStore(dispatched.sessionState.snapshot?.session.state)?.handles).toEqual([
+    expect(getAgentHandleStore(dispatched.sessionState.snapshot.session.state)?.handles).toEqual([
       expect.objectContaining({
         identity: availableRecord.identity,
         phase: "claimed",
@@ -121,7 +143,7 @@ describe("owner agent invocation dispatch", () => {
       ...session,
       state: setAgentHandleStore(undefined, { handles: [claimed] }),
     };
-    vi.mocked(readDurableSession).mockResolvedValue(claimedSession as never);
+    vi.mocked(readDurableSession).mockReturnValue(claimedSession as never);
     vi.mocked(prepareOwnerAgentInvocation).mockResolvedValue({
       ...prepared,
       session: claimedSession,
@@ -158,7 +180,7 @@ describe("owner agent invocation dispatch", () => {
     expect(first.kind).toBe("dispatched");
     const firstHandle =
       first.kind === "dispatched"
-        ? getAgentHandleStore(first.sessionState.snapshot?.session.state)?.handles[0]
+        ? getAgentHandleStore(first.sessionState.snapshot.session.state)?.handles[0]
         : undefined;
     expect(firstHandle).toMatchObject({
       identity: { id: "agent-1" },
@@ -166,7 +188,7 @@ describe("owner agent invocation dispatch", () => {
       phase: "claimed",
     });
 
-    vi.mocked(readDurableSession).mockResolvedValue({
+    vi.mocked(readDurableSession).mockReturnValue({
       ...session,
       state: setAgentHandleStore(undefined, { handles: [availableRecord] }),
     } as never);
@@ -192,6 +214,229 @@ describe("owner agent invocation dispatch", () => {
     ).toEqual(["agent-1", "agent-1"]);
   });
 
+  it.each([
+    { dispatchKind: "start", taskKind: "subagent", observed: true },
+    { dispatchKind: "resume", taskKind: "subagent", observed: true },
+    { dispatchKind: "start", taskKind: "tool", observed: true },
+    { dispatchKind: "resume", taskKind: "tool", observed: true },
+    { dispatchKind: "start", taskKind: "subagent", observed: false },
+    { dispatchKind: "resume", taskKind: "subagent", observed: false },
+  ] as const)(
+    "resolves task activity for $dispatchKind ($taskKind, observed=$observed)",
+    async ({ dispatchKind, taskKind, observed }) => {
+      const serializedContext = {
+        [AuthKey.name]: receiverAuth,
+        [InitiatorAuthKey.name]: receiverInitiatorAuth,
+        [SessionDynamicSubagentSelectionsKey.name]: { source: "receiver-session" },
+        [TurnDynamicSubagentSelectionsKey.name]: { source: "receiver-turn" },
+        "eve.test": "preserved",
+      };
+      const taskDispatchContext = {
+        auth: { current: creatorAuth, initiator: sessionInitiatorAuth },
+        sessionDynamicSubagentSelections: { source: "creator-session" } as never,
+        turnDynamicSubagentSelections: { source: "creator-turn" } as never,
+      };
+      const planningContext = {
+        ...serializedContext,
+        [AuthKey.name]: creatorAuth,
+        [InitiatorAuthKey.name]: sessionInitiatorAuth,
+        [SessionDynamicSubagentSelectionsKey.name]: { source: "creator-session" },
+        [TurnDynamicSubagentSelectionsKey.name]: { source: "creator-turn" },
+      };
+      const taskWork = {
+        callId: "task-call",
+        id: "work:task",
+        kind: "task" as const,
+        name: "research",
+        parentId: "work:root",
+        rootSessionId: "root-session",
+        rootTurnId: "root-turn",
+      };
+      const indexedSession = recordSessionTask(session as never, {
+        activityWorkIdentity: taskWork,
+        createdByTurnId: "turn-1",
+        dispatchContext: taskDispatchContext,
+        metadata: { kind: taskKind, name: "research" },
+        taskId: "task-1",
+        taskInboxToken: "task-token",
+        taskRunId: "task-run",
+      });
+      vi.mocked(readDurableSession).mockReturnValue(indexedSession as never);
+      vi.mocked(readLatestTaskView).mockResolvedValue({
+        metadata: { kind: "subagent", name: "research" },
+        status: "working",
+        taskId: "task-1",
+      });
+      vi.mocked(prepareOwnerAgentInvocation).mockResolvedValue({
+        ...prepared,
+        auth: creatorAuth,
+        activityObserver: observed
+          ? {
+              sink: { url: "https://parent.example/activity", version: 1 },
+              workIdentity: {
+                id: "work:root",
+                kind: "root-turn",
+                rootSessionId: "root-session",
+                rootTurnId: "root-turn",
+              },
+            }
+          : undefined,
+        initiatorAuth: sessionInitiatorAuth,
+        plan: [
+          dispatchKind === "start"
+            ? { kind: "start", target: { action, kind: "local", source: { type: "runtime" } } }
+            : { kind: "resume", action, agentId: "agent-1" },
+        ],
+        serializedContext: planningContext,
+        session: indexedSession,
+      } as never);
+      vi.mocked(startSubagent).mockResolvedValue(called);
+      vi.mocked(dispatchToClaimedAgentAddress).mockResolvedValue(called);
+
+      const result = await dispatchTaskAgentInvocationStep({
+        ownerId: "task-1",
+        replyTo: "agent-reply",
+        request: {
+          input: { message: "Find it", target: "research" },
+          invocationId: "call-1",
+          kind: "agent-invoke",
+        },
+        serializedContext,
+        sessionState: {} as never,
+        taskId: "task-1",
+      });
+
+      const taskObserver =
+        observed && taskKind === "subagent"
+          ? { sink: { url: "https://parent.example/activity", version: 1 }, workIdentity: taskWork }
+          : undefined;
+      if (dispatchKind === "start") {
+        expect(startSubagent).toHaveBeenCalledWith(
+          expect.objectContaining({
+            auth: creatorAuth,
+            initiatorAuth: sessionInitiatorAuth,
+            taskActivityObserver: taskObserver,
+          }),
+        );
+      } else {
+        expect(dispatchToClaimedAgentAddress).toHaveBeenCalledWith(
+          expect.objectContaining({ activityObserver: taskObserver, auth: creatorAuth }),
+        );
+      }
+      expect(prepareOwnerAgentInvocation).toHaveBeenCalledWith(
+        expect.objectContaining({ serializedContext: planningContext }),
+      );
+      expect(result).toMatchObject({ serializedContext });
+    },
+  );
+
+  it("uses an anonymous task's captured auth despite an authenticated receiving turn", async () => {
+    const serializedContext = {
+      [AuthKey.name]: receiverAuth,
+      [InitiatorAuthKey.name]: receiverInitiatorAuth,
+      [SessionDynamicSubagentSelectionsKey.name]: { source: "receiver-session" },
+      [TurnDynamicSubagentSelectionsKey.name]: { source: "receiver-turn" },
+    };
+    const planningContext = {
+      [AuthKey.name]: null,
+      [InitiatorAuthKey.name]: sessionInitiatorAuth,
+    };
+    const indexedSession = recordSessionTask(session as never, {
+      createdByTurnId: "turn-1",
+      dispatchContext: {
+        auth: { current: null, initiator: sessionInitiatorAuth },
+      },
+      metadata: { kind: "subagent", name: "research" },
+      taskId: "task-1",
+      taskInboxToken: "task-token",
+      taskRunId: "task-run",
+    });
+    vi.mocked(readDurableSession).mockReturnValue(indexedSession as never);
+    vi.mocked(readLatestTaskView).mockResolvedValue({
+      metadata: { kind: "subagent", name: "research" },
+      status: "working",
+      taskId: "task-1",
+    });
+    vi.mocked(prepareOwnerAgentInvocation).mockResolvedValue({
+      ...prepared,
+      auth: null,
+      initiatorAuth: sessionInitiatorAuth,
+      plan: [{ kind: "start", target: { action, kind: "local", source: { type: "runtime" } } }],
+      serializedContext: planningContext,
+      session: indexedSession,
+    } as never);
+    vi.mocked(startSubagent).mockResolvedValue(called);
+
+    const result = await dispatchTaskAgentInvocationStep({
+      ownerId: "task-1",
+      replyTo: "agent-reply",
+      request: {
+        input: { message: "Find it", target: "research" },
+        invocationId: "call-1",
+        kind: "agent-invoke",
+      },
+      serializedContext,
+      sessionState: { sessionId: "parent" } as never,
+      taskId: "task-1",
+    });
+
+    expect(startSubagent).toHaveBeenCalledWith(
+      expect.objectContaining({ auth: null, initiatorAuth: sessionInitiatorAuth }),
+    );
+    expect(prepareOwnerAgentInvocation).toHaveBeenCalledWith(
+      expect.objectContaining({ serializedContext: planningContext }),
+    );
+    expect(result).toMatchObject({ serializedContext });
+  });
+
+  it("rejects only nested dispatch for a legacy task without creator context", async () => {
+    vi.mocked(readDurableSession).mockReturnValue({
+      ...session,
+      state: {
+        ...session.state,
+        "eve.tasks": {
+          tasks: [
+            {
+              createdByTurnId: "turn-1",
+              metadata: { kind: "subagent", name: "research" },
+              taskId: "task-1",
+              taskInboxToken: "task-token",
+              taskRunId: "task-run",
+            },
+          ],
+          version: 2,
+        },
+      },
+    } as never);
+    vi.mocked(readLatestTaskView).mockResolvedValue({
+      metadata: { kind: "subagent", name: "research" },
+      status: "working",
+      taskId: "task-1",
+    });
+
+    await expect(
+      dispatchTaskAgentInvocationStep({
+        ownerId: "task-1",
+        replyTo: "agent-reply",
+        request: {
+          input: { message: "Find it", target: "research" },
+          invocationId: "call-1",
+          kind: "agent-invoke",
+        },
+        serializedContext: { "eve.auth": receiverAuth },
+        sessionState: { sessionId: "parent" } as never,
+        taskId: "task-1",
+      }),
+    ).resolves.toMatchObject({
+      kind: "failed",
+      result: {
+        isError: true,
+        output: { code: "AGENT_INVOCATION_AUTH_UNAVAILABLE" },
+      },
+    });
+    expect(prepareOwnerAgentInvocation).not.toHaveBeenCalled();
+  });
+
   it("starts a fresh agent with task-owned handle semantics", async () => {
     const reserved = {
       callId: "call-1",
@@ -200,7 +445,7 @@ describe("owner agent invocation dispatch", () => {
       phase: "reserved" as const,
       ownerId: "task-1",
     };
-    vi.mocked(readDurableSession).mockResolvedValue({
+    vi.mocked(readDurableSession).mockReturnValue({
       ...session,
       state: setAgentHandleStore(undefined, { handles: [reserved] }),
     } as never);
@@ -232,7 +477,7 @@ describe("owner agent invocation dispatch", () => {
         }),
       }),
     );
-    expect(getAgentHandleStore(dispatched.sessionState.snapshot?.session.state)?.handles).toEqual(
+    expect(getAgentHandleStore(dispatched.sessionState.snapshot.session.state)?.handles).toEqual(
       expect.arrayContaining([expect.objectContaining({ ownerId: "task-1", phase: "claimed" })]),
     );
   });
@@ -246,12 +491,13 @@ describe("task-owned agent settlement", () => {
       phase: "claimed" as const,
       ownerId: "task-1",
     };
-    vi.mocked(readDurableSession).mockResolvedValue({
+    vi.mocked(readDurableSession).mockReturnValue({
       ...session,
       state: setAgentHandleStore(undefined, { handles: [claimed] }),
     } as never);
 
     const settled = await settleTaskAgentInvocationStep({
+      serializedContext: {},
       result: {
         callId: "call-1",
         kind: "subagent-result",
@@ -274,8 +520,7 @@ describe("task-owned agent settlement", () => {
       taskId: "task-1",
     });
 
-    const handles =
-      getAgentHandleStore(settled.sessionState.snapshot?.session.state)?.handles ?? [];
+    const handles = getAgentHandleStore(settled.sessionState.snapshot.session.state)?.handles ?? [];
     expect(handles).toEqual(
       kind === "parked" ? [expect.objectContaining({ phase: "available" })] : [],
     );
@@ -288,7 +533,7 @@ describe("task-owned agent settlement", () => {
       ownerId: "workflow-run-1",
       phase: "claimed" as const,
     };
-    vi.mocked(readDurableSession).mockResolvedValue({
+    vi.mocked(readDurableSession).mockReturnValue({
       ...session,
       state: setAgentHandleStore(undefined, { handles: [claimed] }),
     } as never);
@@ -298,7 +543,7 @@ describe("task-owned agent settlement", () => {
       sessionState: {} as never,
     });
 
-    expect(getAgentHandleStore(released.sessionState.snapshot?.session.state)?.handles).toEqual([
+    expect(getAgentHandleStore(released.sessionState.snapshot.session.state)?.handles).toEqual([
       availableRecord,
     ]);
   });
@@ -310,7 +555,7 @@ describe("task-owned agent settlement", () => {
       ownerId: "workflow-run-1",
       phase: "claimed" as const,
     };
-    vi.mocked(readDurableSession).mockResolvedValue({
+    vi.mocked(readDurableSession).mockReturnValue({
       ...session,
       state: setAgentHandleStore(undefined, { handles: [claimed] }),
     } as never);
@@ -321,7 +566,7 @@ describe("task-owned agent settlement", () => {
       sessionState: {} as never,
     });
 
-    expect(getAgentHandleStore(released.sessionState.snapshot?.session.state)?.handles).toEqual([
+    expect(getAgentHandleStore(released.sessionState.snapshot.session.state)?.handles).toEqual([
       {
         address: availableRecord.address,
         identity: availableRecord.identity,
@@ -338,12 +583,13 @@ describe("task-owned agent settlement", () => {
       phase: "claimed" as const,
       ownerId: "workflow-run-1",
     };
-    vi.mocked(readDurableSession).mockResolvedValue({
+    vi.mocked(readDurableSession).mockReturnValue({
       ...session,
       state: setAgentHandleStore(undefined, { handles: [claimed] }),
     } as never);
 
     const settled = await settleTaskAgentInvocationStep({
+      serializedContext: {},
       ownerId: "workflow-run-1",
       result: {
         callId: "call-1",
@@ -365,7 +611,7 @@ describe("task-owned agent settlement", () => {
       sessionState: {} as never,
     });
 
-    expect(getAgentHandleStore(settled.sessionState.snapshot?.session.state)?.handles).toEqual([
+    expect(getAgentHandleStore(settled.sessionState.snapshot.session.state)?.handles).toEqual([
       {
         address: availableRecord.address,
         identity: availableRecord.identity,

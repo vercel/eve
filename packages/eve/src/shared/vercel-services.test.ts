@@ -13,6 +13,7 @@ const GENERATED: Extract<EnsureEveVercelServicesConfigResult, { mode: "generated
     eve: {
       buildCommand: "eve build",
       framework: "eve",
+      outputDirectory: ".vercel/output",
       routes: [createEveServiceRequestPathRoute()],
       root: ".eve/vercel-services/eve",
     },

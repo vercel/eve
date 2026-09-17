@@ -54,7 +54,9 @@ async function waitForReleaseRequests(
   const requests = new Map<string, InputRequest>();
   let session = initialSession;
   collectReleaseRequests(initialTurn, requests);
-  for (let attempt = 0; attempt < FANOUT_SIZE && requests.size < FANOUT_SIZE; attempt += 1) {
+  // The parent completion may be the first watched boundary before child HITL
+  // callbacks arrive, so allow one boundary in addition to the ten requests.
+  for (let attempt = 0; attempt <= FANOUT_SIZE && requests.size < FANOUT_SIZE; attempt += 1) {
     const sessionId = session.sessionId;
     if (sessionId === undefined) throw new Error("Task fanout has no parent session id.");
     const live = t.target.watchTurn(sessionId, {

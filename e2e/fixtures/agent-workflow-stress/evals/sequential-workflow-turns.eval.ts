@@ -25,10 +25,7 @@ export default defineEval({
         `turn ${String(turnNumber).padStart(3, "0")}/${TURN_COUNT} completed in ${elapsedSeconds.toFixed(3)}s`,
       );
 
-      if (sessionId === undefined) {
-        sessionId = result.sessionId;
-        t.log(`workflow run id: ${sessionId}`);
-      }
+      sessionId ??= result.sessionId;
 
       const turn = result.expectOk();
 

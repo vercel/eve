@@ -207,14 +207,14 @@ vi.mock("#execution/sandbox/development-prewarm.js", () => ({
   startDevelopmentSandboxPrewarmInBackground: mocks.startDevelopmentSandboxPrewarmInBackground,
 }));
 
-vi.mock("#execution/sandbox/bindings/local.js", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("#execution/sandbox/bindings/local.js")>();
+vi.mock("#execution/sandbox/bindings/local.js", () => ({
+  pruneLocalSandboxTemplatesInBackground: mocks.pruneLocalSandboxTemplatesInBackground,
+  stopDevelopmentSandboxResources: mocks.stopDevelopmentSandboxResources,
+}));
 
-  return {
-    ...actual,
-    pruneLocalSandboxTemplatesInBackground: mocks.pruneLocalSandboxTemplatesInBackground,
-    stopDevelopmentSandboxResources: mocks.stopDevelopmentSandboxResources,
-  };
+beforeEach(() => {
+  mocks.fsControl.stateReadError = undefined;
+  mocks.fsControl.stateWriteError = undefined;
 });
 
 const developmentServerStatePath = join("/tmp/eve-test", ".eve", "dev-server-state.v1.json");
@@ -348,8 +348,6 @@ describe("createDevelopmentServer", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.fetch.mockImplementation(async () => Response.json({ revision: "test" }));
-    mocks.fsControl.stateReadError = undefined;
-    mocks.fsControl.stateWriteError = undefined;
     mocks.authoredSourceWatcher.close.mockResolvedValue(undefined);
     mocks.authoredSourceWatcher.flush.mockResolvedValue(undefined);
     mocks.authoredSourceWatcher.rebuild.mockResolvedValue(undefined);

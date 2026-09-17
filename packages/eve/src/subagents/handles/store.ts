@@ -208,20 +208,20 @@ export type AgentHandleStoreCommandResult =
 
 const nonEmptyString = z.string().min(1);
 
-const identitySchema = z.strictObject({
+const identitySchema = z.looseObject({
   id: nonEmptyString,
   name: nonEmptyString,
   nodeId: nonEmptyString,
 });
 
-const startOperationSchema = z.strictObject({
+const startOperationSchema = z.looseObject({
   callId: nonEmptyString,
   id: nonEmptyString,
   kind: z.literal("start"),
   parentTurnId: nonEmptyString,
 });
 
-const continueOperationSchema = z.strictObject({
+const continueOperationSchema = z.looseObject({
   callId: nonEmptyString,
   id: nonEmptyString,
   kind: z.literal("continue"),
@@ -230,30 +230,30 @@ const continueOperationSchema = z.strictObject({
 });
 
 const startTargetSchema: z.ZodType<AgentStartTarget> = z.discriminatedUnion("kind", [
-  z.strictObject({ continuationToken: nonEmptyString, kind: z.literal("agent/local") }),
-  z.strictObject({ continuationToken: nonEmptyString, kind: z.literal("agent/self") }),
-  z.strictObject({
+  z.looseObject({ continuationToken: nonEmptyString, kind: z.literal("agent/local") }),
+  z.looseObject({ continuationToken: nonEmptyString, kind: z.literal("agent/self") }),
+  z.looseObject({
     callbackBaseUrl: z.url(),
-    credentialResolver: z.strictObject({ resolverId: nonEmptyString.optional() }).optional(),
+    credentialResolver: z.looseObject({ resolverId: nonEmptyString.optional() }).optional(),
     kind: z.literal("agent/remote"),
     url: z.url(),
   }),
 ]);
 
 const addressSchema: z.ZodType<AgentAddress> = z.discriminatedUnion("kind", [
-  z.strictObject({
+  z.looseObject({
     continuationToken: nonEmptyString,
     kind: z.literal("agent/local"),
     sessionId: nonEmptyString,
   }),
-  z.strictObject({
+  z.looseObject({
     continuationToken: nonEmptyString,
     kind: z.literal("agent/self"),
     sessionId: nonEmptyString,
   }),
-  z.strictObject({
+  z.looseObject({
     callbackBaseUrl: z.url(),
-    credentialResolver: z.strictObject({ resolverId: nonEmptyString.optional() }).optional(),
+    credentialResolver: z.looseObject({ resolverId: nonEmptyString.optional() }).optional(),
     kind: z.literal("agent/remote"),
     sessionId: nonEmptyString,
     url: z.url(),
@@ -296,19 +296,19 @@ const agentHandleStoreCommandSchema: z.ZodType<AgentHandleStoreCommand> = z.disc
 );
 
 const turnOwnedAgentHandleSchema: z.ZodType<TurnOwnedAgentHandle> = z.discriminatedUnion("phase", [
-  z.strictObject({
+  z.looseObject({
     identity: identitySchema,
     operation: startOperationSchema,
     phase: z.literal("starting"),
     target: startTargetSchema,
   }),
-  z.strictObject({
+  z.looseObject({
     address: addressSchema,
     identity: identitySchema,
     operation: z.discriminatedUnion("kind", [startOperationSchema, continueOperationSchema]),
     phase: z.literal("running"),
   }),
-  z.strictObject({
+  z.looseObject({
     address: addressSchema,
     identity: identitySchema,
     lastStatus: z.string().max(MAX_STATUS_LENGTH),
@@ -317,14 +317,14 @@ const turnOwnedAgentHandleSchema: z.ZodType<TurnOwnedAgentHandle> = z.discrimina
 ]);
 
 const taskOwnedAgentHandleSchema: z.ZodType<TaskOwnedAgentHandle> = z.discriminatedUnion("phase", [
-  z.strictObject({
+  z.looseObject({
     callId: nonEmptyString.optional(),
     identity: identitySchema,
     operationId: nonEmptyString,
     phase: z.literal("reserved"),
     ownerId: nonEmptyString,
   }),
-  z.strictObject({
+  z.looseObject({
     address: addressSchema,
     callId: nonEmptyString.optional(),
     identity: identitySchema,
@@ -332,7 +332,7 @@ const taskOwnedAgentHandleSchema: z.ZodType<TaskOwnedAgentHandle> = z.discrimina
     phase: z.literal("claimed"),
     ownerId: nonEmptyString,
   }),
-  z.strictObject({
+  z.looseObject({
     address: addressSchema,
     identity: identitySchema,
     phase: z.literal("available"),
@@ -345,7 +345,7 @@ const agentHandleSchema: z.ZodType<AgentHandle> = z.union([
 ]);
 
 const agentHandleStoreSchema: z.ZodType<AgentHandleStore> = z
-  .strictObject({
+  .looseObject({
     handles: z.array(agentHandleSchema),
   })
   .refine(
@@ -369,7 +369,7 @@ export function formatAgentStatus(output: unknown): string {
  * Validates one agent handle store about to be persisted, returning the
  * parsed value. Throws instead of writing an invalid store: transitions run
  * this on every write, which is the invariant that lets the schema-free
- * driver-side reader (`query.ts`) trust stored values without revalidating.
+ * owner-side reader (`query.ts`) trust stored values without revalidating.
  */
 export function assertPersistableAgentHandleStore(store: AgentHandleStore): AgentHandleStore {
   const parsed = agentHandleStoreSchema.safeParse(store);

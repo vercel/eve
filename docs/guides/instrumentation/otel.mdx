@@ -1,0 +1,154 @@
+---
+title: "OpenTelemetry"
+description: "Configure OpenTelemetry destinations, content capture, and managed exports with Instrumentation Providers."
+url: "/observability/otel"
+---
+
+<Callout type="warning" title="Experimental">
+  This API is experimental and may change without a deprecation period.
+</Callout>
+
+Use the built-in APIs from `eve/instrumentation/otel` to configure eve's
+OpenTelemetry pipeline. This page requires the experimental
+[Instrumentation Providers](./instrumentation-providers) layout.
+
+## Configure OpenTelemetry
+
+OpenTelemetry configuration has two parts:
+
+- `otel()` declares process-wide settings such as the resource, sampler,
+  propagators, and trace capture policy. Declare it at most once.
+- `otelIntegration()` adds one destination. Declare one file per exporter or
+  processor chain.
+
+Add `agent/instrumentation/otel.ts` when you need process-wide settings or
+want to control the content eve writes to OpenTelemetry spans:
+
+```ts title="agent/instrumentation/otel.ts"
+import { otel } from "eve/instrumentation/otel";
+
+export default otel({
+  resource: { "deployment.environment": process.env.VERCEL_ENV ?? "development" },
+  tracePolicy: ({ audience, environment }) => ({
+    emit: true,
+    recordInputs: audience === "public" || environment === "development",
+    recordOutputs: audience === "public" || environment === "development",
+  }),
+});
+```
+
+The OpenTelemetry `tracePolicy` is a capture ceiling shared by every OTel
+destination. A destination cannot restore content excluded by this policy. It
+does not affect lifecycle-event providers created with `defineInstrumentation()`.
+See [Audience](../channels/overview#audience) for how channels classify the
+conversation passed to this policy.
+
+## Add an OpenTelemetry destination
+
+Most agents only need a destination:
+
+```ts title="agent/instrumentation/braintrust.ts"
+import { BraintrustExporter } from "@braintrust/otel";
+import { otelIntegration } from "eve/instrumentation/otel";
+
+export default otelIntegration({
+  traceExporter: new BraintrustExporter({ filterAISpans: true }),
+});
+```
+
+Pass `spanProcessors` to `otelIntegration()` when a custom destination needs
+filtering or transformation. `exportPolicy` is for the built-in
+`localTraces()` and `agentRuns()` destinations below.
+
+## Trace topology
+
+OpenTelemetry destinations receive the following trace topology for an ordinary
+agent turn:
+
+```text
+invoke_agent <agent>
+  └── agent.step
+        ├── chat <model>
+        └── agent.action
+              └── execute_tool <tool>
+```
+
+Each turn starts a new trace. The first subagent trace links to its caller with
+`eve.link.type=agent.dispatch`; the link is not an authorization grant. For a
+remote agent, `trustedForwarders` lets the receiver accept the sender's session
+lineage and trace-content policy. See [Remote agents](../guides/remote-agents#preserving-trace-content).
+Use `gen_ai.conversation.id` to find the traces for one conversation in your
+destination's span-search surface.
+
+## Manage built-in destinations
+
+The provider layout has two environment-specific defaults:
+
+- `local` records local traces during `eve dev`.
+- `agent-runs` exports to Vercel Agent Runs in preview and production
+  deployments.
+
+Omitting these files preserves the defaults. Reconfigure a destination by
+exporting `localTraces()` or `agentRuns()` from the matching file. Disable one
+explicitly:
+
+```ts title="agent/instrumentation/local.ts"
+import { disableInstrumentation } from "eve/instrumentation";
+
+export default disableInstrumentation();
+```
+
+## Filter a managed destination
+
+`localTraces()` and `agentRuns()` accept an `exportPolicy`. It filters spans
+and attributes before that destination's processors receive them:
+
+```ts title="agent/instrumentation/agent-runs.ts"
+import { agentRuns } from "eve/instrumentation/otel";
+
+export default agentRuns({
+  exportPolicy: {
+    span: ({ name }) => name !== "internal.cache.refresh",
+    attribute: ({ key }) => (key === "customer.id" ? { action: "drop" } : { action: "keep" }),
+  },
+});
+```
+
+Return `false` from `span` to omit that span from this destination. Return
+`{ action: "keep" }`, `{ action: "drop" }`, or
+`{ action: "replace", value }` from `attribute` to retain, remove, or change
+one attribute.
+
+### Further narrow a built-in destination
+
+Use the content redactors to further narrow what a built-in destination
+receives after the process-wide `otel({ tracePolicy })` has admitted a trace.
+For example, keep the spans in Agent Runs while redacting their inputs and
+outputs unless the session is public:
+
+```ts title="agent/instrumentation/agent-runs.ts"
+import {
+  agentRuns,
+  composeSpanExportPolicies,
+  redactSpanInputs,
+  redactSpanOutputs,
+} from "eve/instrumentation/otel";
+
+export default agentRuns({
+  exportPolicy: composeSpanExportPolicies(
+    redactSpanInputs(({ audience }) => audience !== "public"),
+    redactSpanOutputs(({ audience }) => audience !== "public"),
+  ),
+});
+```
+
+`redactSpanInputs()` removes eve's known prompt, instruction, document, and
+tool-argument attributes. `redactSpanOutputs()` removes response, reasoning,
+tool-result, exception, and status attributes. They narrow only this
+destination; they do not mutate spans sent to another destination.
+
+## What to read next
+
+- [Instrumentation Providers](./instrumentation-providers): add lifecycle-event providers.
+- [Instrumentation](../observability/instrumentation): configure the current single-file API.
+- [Local development](../guides/dev-tui): inspect local traces in the TUI.

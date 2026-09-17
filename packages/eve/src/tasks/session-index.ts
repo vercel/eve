@@ -1,9 +1,16 @@
 import { z } from "#compiled/zod/index.js";
 
 import type { HarnessSession, SessionStateMap } from "#harness/types.js";
+import { parseActivityWorkIdentityV1, type ActivityWorkIdentityV1 } from "#protocol/activity.js";
 import type { JsonValue } from "#shared/json.js";
 import type { TaskExecutorBinding } from "#tools/task.js";
 import { sameTaskMetadata, type TaskMetadata, type TaskView } from "#tasks/types.js";
+import { type DurableDynamicSubagentSelection, type SessionAuth } from "#context/keys.js";
+import {
+  getTaskCohortId,
+  SESSION_TASKS_STATE_KEY,
+  SESSION_TASKS_STATE_VERSION,
+} from "#tasks/session-task-cohorts.js";
 
 /**
  * Session-state key for the parent's live-task index.
@@ -14,8 +21,7 @@ import { sameTaskMetadata, type TaskMetadata, type TaskView } from "#tasks/types
  * threads through step results, while callback routes and child
  * executors must update tasks without holding the current snapshot.
  */
-export const SESSION_TASKS_STATE_KEY = "eve.tasks";
-const SESSION_TASKS_STATE_VERSION = 2;
+export { SESSION_TASKS_STATE_KEY } from "#tasks/session-task-cohorts.js";
 
 /**
  * One task owned by this session. Immutable model-safe metadata keeps the
@@ -27,6 +33,8 @@ const SESSION_TASKS_STATE_VERSION = 2;
  * `taskId` only, and lookup verifies ownership through this index.
  */
 export interface SessionTaskIndexEntry {
+  readonly activityWorkIdentity?: ActivityWorkIdentityV1;
+  readonly dispatchContext: SessionTaskDispatchContext;
   readonly taskId: string;
   readonly taskRunId: string;
   /** Immutable fallback once the owning workflow run expires. */
@@ -34,6 +42,8 @@ export interface SessionTaskIndexEntry {
   readonly taskInboxToken: string;
   readonly createdByStepIndex?: number;
   readonly createdByTurnId: string;
+  /** Immutable join target; absent on the task that starts a cohort. */
+  readonly cohortId?: string;
   readonly executor?: TaskExecutorBinding;
   readonly metadata: TaskMetadata;
 }
@@ -43,11 +53,54 @@ const taskMetadataSchema = z.looseObject({
   name: z.string().min(1),
 }) as z.ZodType<TaskMetadata>;
 
+export interface TaskAgentDispatchContext {
+  readonly auth: SessionAuth;
+  readonly sessionDynamicSubagentSelections?: Readonly<
+    Record<string, DurableDynamicSubagentSelection>
+  >;
+  readonly turnDynamicSubagentSelections?: Readonly<
+    Record<string, DurableDynamicSubagentSelection>
+  >;
+}
+
+export const LEGACY_TASK_AGENT_DISPATCH_CONTEXT = { legacy: true } as const;
+export type SessionTaskDispatchContext =
+  | TaskAgentDispatchContext
+  | typeof LEGACY_TASK_AGENT_DISPATCH_CONTEXT;
+
+const sessionAuthContextSchema = z.strictObject({
+  attributes: z.record(z.string(), z.union([z.string(), z.array(z.string()).readonly()])),
+  authenticator: z.string(),
+  issuer: z.string().optional(),
+  principalId: z.string(),
+  principalType: z.string(),
+  subject: z.string().optional(),
+});
+const dynamicSubagentSelectionsSchema = z.record(
+  z.string(),
+  z.custom<DurableDynamicSubagentSelection>(),
+);
+
+const taskAgentDispatchContextSchema: z.ZodType<TaskAgentDispatchContext> = z.strictObject({
+  auth: z.strictObject({
+    current: sessionAuthContextSchema.nullable(),
+    initiator: sessionAuthContextSchema.nullable(),
+  }),
+  sessionDynamicSubagentSelections: dynamicSubagentSelectionsSchema.optional(),
+  turnDynamicSubagentSelections: dynamicSubagentSelectionsSchema.optional(),
+});
+const sessionTaskDispatchContextSchema = z.union([
+  taskAgentDispatchContextSchema,
+  z.strictObject({ legacy: z.literal(true) }),
+]);
+
 const taskViewBaseShape = {
+  // Terminal views never carry pending requests; the loose object must say so explicitly.
+  inputRequests: z.never().optional(),
   executor: z
-    .strictObject({
+    .looseObject({
       binding: z
-        .strictObject({
+        .looseObject({
           data: z.record(z.string(), z.custom<JsonValue>()),
           kind: z.string().min(1),
         })
@@ -57,9 +110,10 @@ const taskViewBaseShape = {
   metadata: taskMetadataSchema,
   taskId: z.string().min(1),
   usage: z
-    .strictObject({
+    .looseObject({
       cacheReadTokens: z.number().nonnegative(),
       cacheWriteTokens: z.number().nonnegative(),
+      costUsd: z.number().finite().nonnegative().optional(),
       inputTokens: z.number().nonnegative(),
       outputTokens: z.number().nonnegative(),
     })
@@ -69,29 +123,42 @@ const taskViewBaseShape = {
 /**
  * Terminal views only, on purpose: the index caches a view solely as
  * the expired-run fallback, and the discriminated arms encode the terminal
- * status/output invariants structurally (strict objects reject
- * `inputRequests` and mismatched outputs).
+ * status/output invariants structurally (explicit fields reject
+ * `inputRequests` and mismatched outputs while preserving additive metadata).
  */
 const taskViewSchema: z.ZodType<TaskView> = z.discriminatedUnion("status", [
-  z.strictObject({
+  z.looseObject({
     ...taskViewBaseShape,
-    lastOutput: z.strictObject({ data: z.custom<JsonValue>(), type: z.literal("result") }),
+    lastOutput: z.looseObject({ data: z.custom<JsonValue>(), type: z.literal("result") }),
     status: z.literal("completed"),
   }),
-  z.strictObject({
+  z.looseObject({
     ...taskViewBaseShape,
-    lastOutput: z.strictObject({ data: z.custom<JsonValue>(), type: z.literal("error") }),
+    lastOutput: z.looseObject({ data: z.custom<JsonValue>(), type: z.literal("error") }),
     status: z.literal("failed"),
   }),
-  z.strictObject({ ...taskViewBaseShape, status: z.literal("cancelled") }),
+  z.looseObject({
+    ...taskViewBaseShape,
+    lastOutput: z.never().optional(),
+    status: z.literal("cancelled"),
+  }),
 ]);
 
-const sessionTaskIndexEntrySchema: z.ZodType<SessionTaskIndexEntry> = z.strictObject({
+type StoredSessionTaskIndexEntry = Omit<SessionTaskIndexEntry, "dispatchContext"> & {
+  readonly dispatchContext?: SessionTaskDispatchContext;
+};
+
+const storedSessionTaskIndexEntrySchema: z.ZodType<StoredSessionTaskIndexEntry> = z.looseObject({
+  activityWorkIdentity: z
+    .custom<ActivityWorkIdentityV1>((value) => parseActivityWorkIdentityV1(value) !== undefined)
+    .optional(),
   taskInboxToken: z.string().min(1),
   createdByStepIndex: z.number().int().nonnegative().optional(),
   createdByTurnId: z.string().min(1),
+  cohortId: z.string().min(1).optional(),
+  dispatchContext: sessionTaskDispatchContextSchema.optional(),
   executor: z
-    .strictObject({
+    .looseObject({
       data: z.record(z.string(), z.custom<JsonValue>()),
       kind: z.string().min(1),
     })
@@ -103,8 +170,8 @@ const sessionTaskIndexEntrySchema: z.ZodType<SessionTaskIndexEntry> = z.strictOb
 });
 
 const sessionTaskIndexSchema = z
-  .strictObject({
-    tasks: z.array(sessionTaskIndexEntrySchema),
+  .looseObject({
+    tasks: z.array(storedSessionTaskIndexEntrySchema),
     version: z.literal(SESSION_TASKS_STATE_VERSION),
   })
   .refine(
@@ -125,6 +192,7 @@ const sessionTaskIndexSchema = z
   );
 
 interface SessionTaskIndex {
+  readonly [key: string]: unknown;
   readonly tasks: readonly SessionTaskIndexEntry[];
   readonly version: typeof SESSION_TASKS_STATE_VERSION;
 }
@@ -138,9 +206,13 @@ interface SessionTaskIndex {
 export function getSessionTaskIndex(
   state: SessionStateMap | undefined,
 ): readonly SessionTaskIndexEntry[] {
+  return readSessionTaskIndex(state).tasks;
+}
+
+function readSessionTaskIndex(state: SessionStateMap | undefined): SessionTaskIndex {
   const raw = state?.[SESSION_TASKS_STATE_KEY];
   if (raw === undefined) {
-    return [];
+    return { tasks: [], version: SESSION_TASKS_STATE_VERSION };
   }
   const version = typeof raw === "object" && raw !== null ? Reflect.get(raw, "version") : undefined;
   if (version !== SESSION_TASKS_STATE_VERSION) {
@@ -154,7 +226,13 @@ export function getSessionTaskIndex(
       `Corrupt task index under session state key "${SESSION_TASKS_STATE_KEY}": ${parsed.error.message}`,
     );
   }
-  return parsed.data.tasks;
+  return {
+    ...parsed.data,
+    tasks: parsed.data.tasks.map((entry): SessionTaskIndexEntry => ({
+      ...entry,
+      dispatchContext: entry.dispatchContext ?? LEGACY_TASK_AGENT_DISPATCH_CONTEXT,
+    })),
+  };
 }
 
 /** Caches one terminal view beside its task-run address. */
@@ -165,17 +243,48 @@ export function cacheTerminalTaskView(
   if (!isValidTerminalView(view)) {
     throw new Error(`Cannot cache invalid terminal task "${view.taskId}".`);
   }
-  const entries = getSessionTaskIndex(state);
+  const stored = readSessionTaskIndex(state);
+  const entries = stored.tasks;
   const index = entries.findIndex((entry) => entry.taskId === view.taskId);
   if (index < 0) return state;
   if (!sameTaskMetadata(entries[index]!.metadata, view.metadata)) {
     throw new Error(`Task view metadata does not match index entry "${view.taskId}".`);
   }
   const tasks = [...entries];
-  tasks[index] = { ...tasks[index]!, terminalView: view };
+  const previous = tasks[index]!.terminalView;
+  tasks[index] = {
+    ...tasks[index]!,
+    terminalView: taskViewSchema.parse({
+      ...previous,
+      ...view,
+      metadata: { ...previous?.metadata, ...view.metadata },
+      lastOutput:
+        view.lastOutput === undefined
+          ? undefined
+          : {
+              ...previous?.lastOutput,
+              ...view.lastOutput,
+            },
+      usage: view.usage === undefined ? undefined : { ...previous?.usage, ...view.usage },
+      executor:
+        view.executor === undefined
+          ? undefined
+          : {
+              ...previous?.executor,
+              ...view.executor,
+              binding:
+                view.executor.binding === undefined
+                  ? undefined
+                  : {
+                      ...previous?.executor?.binding,
+                      ...view.executor.binding,
+                    },
+            },
+    }),
+  };
   return {
     ...state,
-    [SESSION_TASKS_STATE_KEY]: { tasks, version: SESSION_TASKS_STATE_VERSION },
+    [SESSION_TASKS_STATE_KEY]: { ...stored, tasks },
   };
 }
 
@@ -203,20 +312,53 @@ export function findSessionTaskEntry(
 }
 
 /**
- * Records one task, replacing any entry with the same id so replayed
- * creation for the same originating call stays idempotent.
+ * Joins the indexed cohort that still has unreported/nonterminal work. Cached
+ * terminal siblings remain members until the whole cohort settles. Membership
+ * and creation provenance survive replay, even after that cohort has settled.
  */
 export function recordSessionTask(
   session: HarnessSession,
-  entry: SessionTaskIndexEntry,
+  entry: Omit<SessionTaskIndexEntry, "cohortId">,
 ): HarnessSession {
-  const existing = getSessionTaskIndex(session.state);
-  const tasks = [...existing.filter((candidate) => candidate.taskId !== entry.taskId), entry];
+  const stored = readSessionTaskIndex(session.state);
+  const tasks = [...stored.tasks];
+  const index = tasks.findIndex((candidate) => candidate.taskId === entry.taskId);
+  const previous = tasks[index];
+  if (previous !== undefined) {
+    tasks[index] = {
+      ...previous,
+      ...entry,
+      metadata: { ...previous.metadata, ...entry.metadata },
+      activityWorkIdentity:
+        entry.activityWorkIdentity === undefined
+          ? previous.activityWorkIdentity
+          : {
+              ...previous.activityWorkIdentity,
+              ...entry.activityWorkIdentity,
+            },
+      executor:
+        entry.executor === undefined
+          ? previous.executor
+          : { ...previous.executor, ...entry.executor },
+      cohortId: previous.cohortId,
+      createdByStepIndex: previous.createdByStepIndex,
+      createdByTurnId: previous.createdByTurnId,
+      dispatchContext: previous.dispatchContext,
+      terminalView: previous.terminalView ?? entry.terminalView,
+    };
+  } else {
+    const pending = tasks.find((candidate) => candidate.terminalView === undefined);
+    tasks.push({
+      ...entry,
+      cohortId: pending === undefined ? undefined : getTaskCohortId(pending),
+    });
+  }
   return {
     ...session,
     state: {
       ...session.state,
       [SESSION_TASKS_STATE_KEY]: {
+        ...stored,
         tasks,
         version: SESSION_TASKS_STATE_VERSION,
       } satisfies SessionTaskIndex,

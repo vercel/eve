@@ -79,6 +79,13 @@ export const { bot, channel, send } = chatSdkChannel({
 
 Use `routes` when a provider requires a fixed URL or when you are migrating an existing endpoint without changing the provider's settings.
 
+## Audience
+
+Workspace-visible threads are `public`. DMs and private or external threads
+are `private`; threads without a known visibility are `unknown`. The audience
+controls observability content capture, not access to the thread. See
+[Audience](./overview#audience) for the shared channel model.
+
 ## How the channel handles messages
 
 ### Dispatch
@@ -101,7 +108,9 @@ bot.onNewMention(async (thread, message) => {
 
 ### Steering
 
-Messages default to `turnPolicy: "steer"`: a message sent while an eve turn is active is durably buffered, then cancels that turn and starts as its replacement. Set `turnPolicy: "queue"` when the active turn should finish first:
+Messages default to `turnPolicy: "steer"`. Before assistant answer output or local tool execution begins, steering interrupts pending model generation and applies the correction in the same turn. Executing tools finish and checkpoint their results first. After answer output starts, steering waits for the next committed workflow boundary. Reasoning and search progress do not count as answer output; interrupted provider-managed search may run again.
+
+Set `turnPolicy: "queue"` when the active turn should finish first:
 
 ```ts
 bot.onSubscribedMessage(async (thread, message) => {
@@ -112,7 +121,7 @@ bot.onSubscribedMessage(async (thread, message) => {
 });
 ```
 
-Cancellation-backed steering emits `turn.cancelled`, and the replacement message starts a new turn with a new turn ID. Partial output and completed side effects from the interrupted turn are not rolled back. If no turn is active, the message is sent normally. You can set the policy once on `chatSdkChannel({ turnPolicy })` or override it per `send(...)`.
+Steering preserves the turn ID and completed tool work. If no turn is active, the message starts a turn normally. You can set the policy once on `chatSdkChannel({ turnPolicy })` or override it per `send(...)`.
 
 This policy controls overlapping eve turns. Chat SDK's separate `concurrency` option controls overlapping webhook handlers; use `concurrency: "concurrent"` when each inbound message should reach the steering path immediately.
 

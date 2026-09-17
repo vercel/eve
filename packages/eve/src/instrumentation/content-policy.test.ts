@@ -17,13 +17,18 @@ const event: InstrumentationEvent = {
   type: "model.call.started",
 };
 
+const contentContext = (
+  audience: "public" | "private" | "unknown",
+  environment: "development" | "preview" | "production" = "production",
+) => ({ audience, environment });
+
 describe("instrumentationEventForTraceDecision", () => {
   it("applies directional OTel content decisions", () => {
     expect(
       instrumentationEventForTraceDecision(
         event,
         { action: "record", recordInputs: false, recordOutputs: true },
-        "public",
+        contentContext("public"),
       ),
     ).toMatchObject({ input: undefined });
   });
@@ -42,7 +47,7 @@ describe("instrumentationEventForTraceDecision", () => {
           type: "input.requested",
         },
         decision,
-        "public",
+        contentContext("public"),
       ),
     ).toMatchObject({ request: { prompt: "Approve weather?" } });
     expect(
@@ -57,7 +62,7 @@ describe("instrumentationEventForTraceDecision", () => {
           type: "input.resolved",
         },
         decision,
-        "public",
+        contentContext("public"),
       ),
     ).toMatchObject({ response: undefined });
   });
@@ -67,7 +72,7 @@ describe("instrumentationEventForTraceDecision", () => {
       instrumentationEventForTraceDecision(
         event,
         { action: "record", recordInputs: true, recordOutputs: true },
-        "private",
+        contentContext("private"),
       ),
     ).toMatchObject({ input: undefined });
   });
@@ -77,15 +82,15 @@ describe("instrumentationEventForTraceDecision", () => {
       instrumentationEventForTraceDecision(
         event,
         { action: "record", recordInputs: true, recordOutputs: false },
-        "private",
+        contentContext("private"),
         { applyAudienceCeiling: false },
       ),
     ).toMatchObject({ input: { instructions: "private prompt" } });
   });
 
   it("removes content from dropped OTel traces", () => {
-    expect(instrumentationEventForTraceDecision(event, { action: "drop" }, "public")).toMatchObject(
-      { input: undefined },
-    );
+    expect(
+      instrumentationEventForTraceDecision(event, { action: "drop" }, contentContext("public")),
+    ).toMatchObject({ input: undefined });
   });
 });

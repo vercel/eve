@@ -1,10 +1,5 @@
 import type { ToolSet } from "ai";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
-import {
-  ensureWorkflowContinuationSecurity,
-  getWorkflowContinuationSecurity,
-} from "#harness/workflow-continuation-security.js";
-import { applyWorkflowTool } from "#harness/workflow-sandbox.js";
 import type { HarnessSession, HarnessToolMap } from "#harness/types.js";
 
 type AdvertisedToolSession = Pick<HarnessSession, "rootSessionId" | "taskId">;
@@ -23,9 +18,6 @@ type AdvertisedModelToolsInput = {
   readonly modelTools: ToolSet;
   readonly session: HarnessSession;
   readonly tools: HarnessToolMap;
-  readonly workflow?: {
-    readonly maxSubagents?: number;
-  };
 };
 
 type AdvertisedModelTools = {
@@ -63,35 +55,10 @@ async function getAdvertisedModelTools(
   input: AdvertisedModelToolsInput,
 ): Promise<AdvertisedModelTools> {
   const tools = filterUnavailableToolMap(input.tools, input.session);
-  if (input.workflow === undefined) {
-    return {
-      harnessTools: tools,
-      modelTools: input.modelTools,
-      session: input.session,
-    };
-  }
-
-  const workflowHostTools = filterWorkflowHostToolsForRootSession(tools, input.session);
-  if (workflowHostTools.size === 0) {
-    return {
-      harnessTools: tools,
-      modelTools: input.modelTools,
-      session: input.session,
-    };
-  }
-
-  const session = ensureWorkflowContinuationSecurity(input.session);
-  const { modelTools } = await applyWorkflowTool({
-    continuationSecurity: getWorkflowContinuationSecurity(session),
-    harnessTools: workflowHostTools,
-    maxSubagents: input.workflow.maxSubagents,
-    tools: input.modelTools,
-  });
-
   return {
     harnessTools: tools,
-    modelTools,
-    session,
+    modelTools: input.modelTools,
+    session: input.session,
   };
 }
 
@@ -121,24 +88,6 @@ function filterUnavailableToolMap(
       continue;
     }
     filteredTools.set(name, tool);
-  }
-  return filteredTools;
-}
-
-function filterWorkflowHostToolsForRootSession(
-  tools: HarnessToolMap,
-  session: AdvertisedToolSession,
-): HarnessToolMap {
-  const filteredTools = new Map<string, HarnessToolDefinition>();
-
-  if (session.rootSessionId !== undefined) {
-    return filteredTools;
-  }
-
-  for (const [name, tool] of tools) {
-    if (tool.resultKind === "subagent") {
-      filteredTools.set(name, tool);
-    }
   }
   return filteredTools;
 }

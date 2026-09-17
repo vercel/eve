@@ -58,12 +58,26 @@ describe("resolveInitTarget", () => {
     });
   });
 
-  it("requires explicit current-directory syntax for an existing package", async () => {
-    const projectPath = await createScratchDirectory("eve-init-target-package-");
+  it.each([undefined, ".", "./", "nested/../."] as const)(
+    "adds to an existing package when target is %j",
+    async (target) => {
+      const projectPath = await createScratchDirectory("eve-init-target-package-");
+      await writeFile(join(projectPath, "package.json"), "{}\n");
+
+      await expect(resolveTarget(projectPath, target)).resolves.toEqual({
+        kind: "existing",
+        projectPath,
+      });
+    },
+  );
+
+  it("adds to an existing package addressed by a relative path", async () => {
+    const parentDirectory = await createScratchDirectory("eve-init-target-parent-package-");
+    const projectPath = join(parentDirectory, "existing-app");
+    await mkdir(projectPath);
     await writeFile(join(projectPath, "package.json"), "{}\n");
 
-    await expect(resolveTarget(projectPath)).rejects.toThrow("explicit `eve init .`");
-    await expect(resolveTarget(projectPath, ".")).resolves.toEqual({
+    await expect(resolveTarget(parentDirectory, "existing-app")).resolves.toEqual({
       kind: "existing",
       projectPath,
     });
@@ -76,6 +90,18 @@ describe("resolveInitTarget", () => {
     await writeFile(join(projectPath, "package.json"), "{}\n");
 
     await expect(resolveTarget(projectPath, ".")).rejects.toThrow("An eve project already exists");
+  });
+
+  it("stops when a path target is an eve agent workspace", async () => {
+    const parentDirectory = await createScratchDirectory("eve-init-target-workspace-parent-");
+    const projectPath = join(parentDirectory, "workspace");
+    await mkdir(join(projectPath, "agents", "support", "agent"), { recursive: true });
+    await writeFile(join(projectPath, "agents", "support", "agent", "agent.ts"), "export {};\n");
+    await writeFile(join(projectPath, "package.json"), "{}\n");
+
+    await expect(resolveTarget(parentDirectory, "workspace")).rejects.toThrow(
+      "An eve project already exists",
+    );
   });
 
   it("lists arbitrary content instead of guessing how to integrate it", async () => {

@@ -25,6 +25,20 @@ function authProvider(auth: ConnectionAuthDefinition | undefined): ConnectionAut
 }
 
 describe("normalizeMcpClientConnectionDefinition", () => {
+  it.each([undefined, true, false])("preserves protocolVersionDiscovery %s", (value) => {
+    const result = normalizeMcpClientConnectionDefinition(
+      validInput({ protocolVersionDiscovery: value }),
+      MSG,
+    );
+    expect(result.protocolVersionDiscovery).toBe(value);
+  });
+
+  it.each([null, "false", 0, {}])("rejects a non-boolean protocolVersionDiscovery: %j", (value) => {
+    expect(() =>
+      normalizeMcpClientConnectionDefinition(validInput({ protocolVersionDiscovery: value }), MSG),
+    ).toThrow('"protocolVersionDiscovery" must be a boolean.');
+  });
+
   describe("happy path", () => {
     it("accepts a valid definition with a getToken function", () => {
       const result = normalizeMcpClientConnectionDefinition(validInput(), MSG);
@@ -61,6 +75,17 @@ describe("normalizeMcpClientConnectionDefinition", () => {
       );
 
       expect(result.auth).toMatchObject({ getToken, principalType: "app" });
+    });
+
+    it("normalizes credentialOwner into the runtime principalType", () => {
+      const getToken = async () => ({ token: "x" });
+      const result = normalizeMcpClientConnectionDefinition(
+        validInput({ auth: { credentialOwner: "user", getToken } }),
+        MSG,
+      );
+
+      expect(result.auth).toMatchObject({ getToken, principalType: "user" });
+      expect(result.auth).not.toHaveProperty("credentialOwner");
     });
 
     it("preserves a context-aware auth resolver without invoking it at build time", () => {
@@ -263,6 +288,21 @@ describe("normalizeMcpClientConnectionDefinition", () => {
           MSG,
         ),
       ).toThrow(/"auth\.principalType" field must be "app" or "user"/);
+    });
+
+    it("rejects both credential ownership fields", () => {
+      expect(() =>
+        normalizeMcpClientConnectionDefinition(
+          validInput({
+            auth: {
+              credentialOwner: "app",
+              getToken: async () => ({ token: "x" }),
+              principalType: "app",
+            },
+          }),
+          MSG,
+        ),
+      ).toThrow(/must not provide both "credentialOwner" and "principalType"/);
     });
 
     it('rejects interactive auth with principalType "app"', () => {

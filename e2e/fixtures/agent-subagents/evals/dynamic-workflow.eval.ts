@@ -15,31 +15,51 @@ function isFanOutProgram(input: unknown): boolean {
   );
 }
 
-/** Dynamic Workflow smoke: sandboxed JavaScript fans out durable children. */
+/** Generated workflow-program smoke: sandboxed JavaScript fans out durable children. */
 export default defineEval({
   tags: ["real-model"],
   description:
-    "Dynamic Workflow smoke: model-authored JavaScript fans out two local subagent calls and combines their results.",
+    "Generated workflow-program smoke: model-authored JavaScript fans out two local subagent calls and combines their results.",
   async test(t) {
-    const turn = await t.send(
-      "Use the Workflow tool exactly once to fan out two independent echo-marker subagent calls. In its JavaScript, create the messages 'workflow alpha' and 'workflow beta', map them through echo-marker inside Promise.all, and return the resulting two-element array. Do not call echo-marker outside Workflow. Then reply with the returned array verbatim as JSON.",
+    const parent = await t.start(
+      "Use the workflow tool exactly once to fan out two independent echo-marker subagent calls. In its JavaScript, create the messages 'workflow alpha' and 'workflow beta', map them through ctx.agent calls to echo-marker inside Promise.all, and return the resulting two-element array. Do not call echo-marker outside workflow. Then reply with the returned array verbatim as JSON.",
     );
+    const firstCalled = await parent.waitForEvent("subagent.called", {
+      data: { name: "echo-marker" },
+    });
+    const firstChild = t.target.watchTurn(firstCalled.data.childSessionId).result();
+    const secondCalled = await parent.waitForEvent("subagent.called", {
+      data: {
+        callId: (callId) => callId !== firstCalled.data.callId,
+        name: "echo-marker",
+      },
+    });
+    if (secondCalled.data.childSessionId === firstCalled.data.childSessionId) {
+      throw new Error("Parallel workflow calls reused one child session.");
+    }
+    const secondChild = t.target.watchTurn(secondCalled.data.childSessionId).result();
+    const [turn, firstChildTurn, secondChildTurn] = await Promise.all([
+      parent.result(),
+      firstChild,
+      secondChild,
+    ]);
+    const latestCallAt = [firstCalled.meta.at, secondCalled.meta.at].sort().at(-1)!;
 
     t.succeeded();
-    t.calledTool("Workflow", { input: isFanOutProgram, count: 1 });
-    // Parallel fan-out: both echo-marker subagents are called before either
-    // completes. subagent.completed can be emitted more than once if the
-    // resolution step re-runs before commit (benign duplicate — client state is
-    // built from callId-deduped action.result), so tolerate >=2 here; the exact
-    // distinct count is pinned by calledSubagent below.
-    turn.eventOrder([
-      { type: "subagent.called", data: { name: "echo-marker" }, count: 2 },
-      { type: "subagent.completed", data: { subagentName: "echo-marker" }, count: (n) => n >= 2 },
-    ]);
-    t.calledSubagent("echo-marker", {
-      output: /SUBAGENT_TOKEN=echo-marker-9F2X/,
-      count: 2,
-    });
+    t.calledTool("workflow", { input: isFanOutProgram, count: 1 });
+    turn.calledSubagent("echo-marker", { count: 2, status: "pending" });
+    firstChildTurn.eventsSatisfy(
+      "first child does not complete before both children start",
+      (events) =>
+        events.some((event) => event.type === "turn.completed" && event.meta.at > latestCallAt),
+    );
+    secondChildTurn.eventsSatisfy(
+      "second child does not complete before both children start",
+      (events) =>
+        events.some((event) => event.type === "turn.completed" && event.meta.at > latestCallAt),
+    );
+    firstChildTurn.messageIncludes(SUBAGENT_TOKEN);
+    secondChildTurn.messageIncludes(SUBAGENT_TOKEN);
     t.messageIncludes(DOUBLE_SUBAGENT_TOKEN);
     t.noFailedActions();
   },

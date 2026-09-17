@@ -21,7 +21,7 @@ describe("postSessionCallbackRequest", () => {
     vi.restoreAllMocks();
   });
 
-  it.each(["task.update", "turn.completed", "turn.failed"])(
+  it.each(["session.completed", "turn.completed", "turn.failed"])(
     "logs %s HTTP failures with correlation fields and a redacted destination",
     async (kind) => {
       const response = new Response("private response body", { status: 404 });
@@ -78,7 +78,7 @@ describe("postSessionCallbackRequest", () => {
 
       await expect(
         postSessionCallbackRequest({
-          body: { kind: "task.update", taskId: "task-1" },
+          body: { kind: "session.completed", taskId: "task-1" },
           url: callbackUrl,
           timeoutMs: 123,
         }),

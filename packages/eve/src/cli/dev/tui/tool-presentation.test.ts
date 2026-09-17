@@ -177,7 +177,6 @@ describe("presentTool", () => {
       load_skill: { skill: "commit" },
       read_file: { filePath: "/workspace/a.ts" },
       task_cancel: { taskIds: ["task_abc"] },
-      task_update: { message: "Finished the next region." },
       todo: { todos: [] },
       web_fetch: { url: "https://example.com" },
       web_search: { query: "eve framework" },
@@ -198,6 +197,18 @@ describe("presentTool", () => {
 
   it("does not retain semantic copy for the removed task_sleep tool", () => {
     expect(presentTool("task_sleep", { seconds: 30 }).title).toBe("task_sleep");
+  });
+
+  it("does not retain semantic copy for the removed task_update tool", () => {
+    const presentation = presentTool("task_update", { message: "Checking the next region." });
+    expect(presentation.title).toBe("task_update");
+    expect(presentation.subtitle).toContain('message="Checking the next region."');
+    expect(presentation.group).toBeUndefined();
+    expect(presentation.doneTitle).toBeUndefined();
+    expect(presentPreparingTool("task_update")).toMatchObject({
+      title: "task_update",
+      subtitle: "preparing…",
+    });
   });
 
   it("presents a named subagent dispatch as a delegation", () => {

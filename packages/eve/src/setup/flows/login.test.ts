@@ -141,3 +141,16 @@ describe("runLoginFlow", () => {
     expect(runVercelLogin.mock.calls[0]?.[0].signal?.aborted).toBe(true);
   });
 });
+
+it("does not start browser login when remote access only permits credential reuse", async () => {
+  const runVercelLogin = vi.fn(async () => true);
+  await expect(
+    runLoginFlow({
+      appRoot: APP_ROOT,
+      prompter: createFakePrompter().prompter,
+      allowLogin: false,
+      deps: { getVercelAuthStatus: authProbe("logged-out"), runVercelLogin },
+    }),
+  ).resolves.toEqual({ kind: "failed" });
+  expect(runVercelLogin).not.toHaveBeenCalled();
+});

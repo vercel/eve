@@ -28,7 +28,6 @@ import {
   parseOfficialRegistrySearchMetadata,
   type RegistrySearchMetadata,
 } from "./registry-metadata.js";
-import { runRegistryPackage } from "./registry-package.js";
 import { prepareDeclaredPnpmBuildPolicy } from "./registry-pnpm-build-policy-flow.js";
 import {
   printRegistrySearchResults,
@@ -39,11 +38,11 @@ import {
 import type { runRegistrySetupCommand } from "./registry-setup-command.js";
 import { serializeHeadlessSetupEvent } from "./setup-headless.js";
 import {
-  addRegistryMappings,
   assertCanInstallWebChat,
   prepareWebRegistryProject,
   readRegistryConfig,
 } from "./registry-project.js";
+export { runRegistryAddCommand } from "./registry-add-command.js";
 export type { RegistryCommandLogger } from "./registry-recovery.js";
 export interface AddCommandOptions {
   skipInstall?: boolean;
@@ -333,6 +332,14 @@ async function searchRegistryCatalog(
     : new Map<string, RegistrySearchMetadata>();
   const official = resultsBySource.get(OFFICIAL_CATALOG);
   if (official !== undefined) {
+    const visibleItems = official.items.filter(
+      (item) => metadataByAddress.get(searchItemAddress(item))?.hidden !== true,
+    );
+    official.items = visibleItems;
+    official.pagination = {
+      ...official.pagination,
+      total: visibleItems.length,
+    };
     official.items.sort((left, right) => {
       const rank = (item: RegistrySearchItem) =>
         metadataByAddress.get(searchItemAddress(item))?.implementation === "native" ? 0 : 1;
@@ -489,45 +496,6 @@ export async function runAddCommand(
       : undefined;
     assertCompatibleEveVersion(eveMetadata?.requires);
 
-    if (eveMetadata?.components !== undefined) {
-      if (!isOfficialItemAddress(address))
-        throw new Error("Registry packages require the official eve registry.");
-      const completion = await runRegistryPackage({
-        logger,
-        appRoot,
-        item,
-        components: eveMetadata.components,
-        config,
-        options,
-        dependencies,
-        operations: {
-          itemAddress,
-          metadata: eveMetadataFromRegistryItem,
-          assertCompatibleVersion: assertCompatibleEveVersion,
-          runSetups: ({ item: packageItem, setups, prompter }) =>
-            runDeclaredSetups({
-              logger,
-              appRoot,
-              item: packageItem,
-              setups,
-              options: {
-                yes: options.yes,
-                force: options.overwrite,
-                nonInteractive: options.nonInteractive,
-                answers: options.answers,
-                prompter,
-                signal: options.signal,
-              },
-              dependencies,
-              cancelledReminder: setupReminder(packageItem, "cancelled"),
-              resumeCommand: setupResumeCommand(packageItem),
-            }),
-          setupReminder: (packageItem) => setupReminder(packageItem, "skipped"),
-        },
-      });
-      return reportCompletion(logger, item, completion, options);
-    }
-
     if (options.skipInstall === true) {
       if (eveMetadata?.setup === undefined) {
         throw new Error(`Registry item "${item}" does not declare a setup flow.`);
@@ -637,25 +605,6 @@ export async function runAddCommand(
       resumeCommand: setupResumeCommand(item),
     });
     return reportCompletion(logger, item, completion, options);
-  });
-}
-/** Adds registry namespace mappings to the project's package.json. */
-export async function runRegistryAddCommand(
-  logger: RegistryCommandLogger,
-  appRoot: string,
-  mappings: readonly string[],
-): Promise<void> {
-  await runRegistryAction(logger, appRoot, async () => {
-    const result = await addRegistryMappings(appRoot, mappings);
-    for (const namespace of result.skippedBuiltIn) {
-      logger.log(`Skipped ${namespace} because it is built in.`);
-    }
-    for (const namespace of result.skippedExisting) {
-      logger.log(`Skipped ${namespace} because it is already configured.`);
-    }
-    if (result.added.length > 0) {
-      logger.log(`Added ${result.added.join(", ")} to package.json.`);
-    }
   });
 }
 /** Lists registry items from every configured source or one selected source. */

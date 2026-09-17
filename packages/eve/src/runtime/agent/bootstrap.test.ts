@@ -82,7 +82,9 @@ describe("createResolvedRuntimeTurnAgent agent-messaging gating", () => {
       tools: [createFrameworkAgentTool()],
     });
 
-    expect(turnAgent.initialMessages).toEqual([{ content: "Pinned user context.", role: "user" }]);
+    expect(turnAgent.initialMessages).toEqual([
+      { content: "Pinned user context.", kind: "context.instruction", role: "user" },
+    ]);
     expect(turnAgent.instructions).toContainEqual(
       "Instructions (instructions/system)\nSystem policy.",
     );

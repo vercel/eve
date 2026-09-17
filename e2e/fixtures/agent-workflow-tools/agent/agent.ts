@@ -7,7 +7,36 @@ import { mockModel, type MockModelRequest, type MockModelResponse } from "eve/ev
  * service "api"; once the turn holds a tool result the reply echoes it.
  */
 function respond(request: MockModelRequest): MockModelResponse | string {
-  const message = [...request.userMessages].reverse().find((entry) => entry.trim() !== "") ?? "";
+  const message =
+    [...request.userMessages]
+      .reverse()
+      .find(
+        (entry) =>
+          /^(WORKFLOW-|(?:Background task|Deploy) task_)/u.test(entry) ||
+          entry.includes("private-catalog"),
+      ) ?? "";
+  if (message.includes("private-catalog")) {
+    const result = request.toolResults.find((entry) => entry.name === "connection_search");
+    if (result === undefined) {
+      return {
+        toolCalls: [
+          {
+            name: "connection_search",
+            input: { connection: "private-catalog", keywords: "items" },
+          },
+        ],
+      };
+    }
+    return JSON.stringify(result.output);
+  }
+
+  const stepAuth = /WORKFLOW-STEP-AUTH-(IMPLICIT|EXPLICIT|REJECTED)/u.exec(message);
+  if (stepAuth !== null) {
+    const result = request.toolResults.find((entry) => entry.name === "authorize_service");
+    return result === undefined
+      ? { toolCalls: [{ input: { service: stepAuth[1] }, name: "authorize_service" }] }
+      : String(result.output);
+  }
   const probe = /WORKFLOW-PROBE-blocking-local-(hitl|auth)/u.exec(message);
   if (probe !== null) {
     const result = request.toolResults.find((entry) => entry.name === "blocking_agent_probe");

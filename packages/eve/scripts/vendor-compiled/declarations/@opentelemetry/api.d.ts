@@ -5,6 +5,8 @@ export interface TraceState {
   unset(key: string): TraceState;
 }
 
+export declare function createTraceState(rawTraceState?: string): TraceState;
+
 export interface SpanContext {
   isRemote?: boolean;
   spanId: string;
@@ -44,6 +46,7 @@ export interface Tracer {
 }
 
 export interface Context {
+  getValue(key: symbol): unknown;
   setValue(key: symbol, value: unknown): Context;
 }
 

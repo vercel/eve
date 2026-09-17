@@ -1,5 +1,5 @@
 import type { EveEvalContext, EveEvalSession, EveEvalTurn, InputRequest } from "eve/evals";
-import { satisfies } from "eve/evals/expect";
+import { equals, satisfies } from "eve/evals/expect";
 
 export type TaskEvalSessionDriver = Pick<
   EveEvalSession,
@@ -29,6 +29,25 @@ export function requireSessionStreamIndex(
   const state = session.state;
   if (state === undefined) throw new Error(`${operation} has no session state.`);
   return state.streamIndex;
+}
+
+/** Observe completion on a child's stream without requiring a parent notification. */
+export async function waitForChildResult(
+  t: EveEvalContext,
+  sessionId: string,
+  expected: string,
+): Promise<EveEvalTurn> {
+  let startIndex = 0;
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    const live = t.target.watchTurn(sessionId, { startIndex });
+    const turn = (await live.result()).expectOk();
+    startIndex = requireSessionStreamIndex(live.session, "Child completion");
+    if (turn.message === undefined || !turn.events.some((event) => event.type === "turn.completed"))
+      continue;
+    await t.require(turn.message, equals(expected));
+    return turn;
+  }
+  throw new Error(`Child ${sessionId} did not complete with its expected result.`);
 }
 
 /** Waits across server-initiated parent turns for one task-owned input request. */

@@ -321,6 +321,13 @@ function stateOwner(event: InstrumentationEvent): InstrumentationStateOwner {
   ) {
     return { sessionId: event.sessionId, turnId: event.turnId };
   }
+  if (
+    event.type === "memory.operation.started" ||
+    event.type === "memory.operation.completed" ||
+    event.type === "memory.operation.failed"
+  ) {
+    return { sessionId: event.sessionId, turnId: event.turnId };
+  }
   if (!("scope" in event)) return {};
   if (event.type.startsWith("action.") || event.type.startsWith("input.")) {
     return { sessionId: event.scope.sessionId, turnId: event.scope.turnId };

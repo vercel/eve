@@ -1,4 +1,4 @@
-export type PromptCommandExtensionName = "model" | "add" | "deploy" | "vc:install" | "vc:login";
+export type PromptCommandExtensionName = "login" | "model" | "add" | "deploy";
 
 type PromptCommandTarget = "local" | "remote";
 
@@ -95,25 +95,17 @@ const PROMPT_COMMAND_DEFINITIONS = [
     targets: ["local", "remote"],
   },
   {
-    name: "vc:install",
+    name: "login",
     aliases: [],
-    description: "Install the Vercel CLI",
+    description: "Connect a model provider",
     takesArgument: false,
-    build: () => ({ type: "extension", name: "vc:install", argument: "" }),
-    targets: ["local", "remote"],
-  },
-  {
-    name: "vc:login",
-    aliases: [],
-    description: "Authenticate with Vercel",
-    takesArgument: false,
-    build: () => ({ type: "extension", name: "vc:login", argument: "" }),
-    targets: ["local", "remote"],
+    build: () => ({ type: "extension", name: "login", argument: "" }),
+    targets: ["local"],
   },
   {
     name: "model",
     aliases: [],
-    description: "Configure the agent's model and provider",
+    description: "Choose a model and its settings",
     argumentHint: "[provider/model]",
     takesArgument: true,
     build: (argument) => ({ type: "extension", name: "model", argument }),

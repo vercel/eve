@@ -17,9 +17,11 @@ import { handoffReferences, reviewReferences } from "../release-reports";
 
 const TEST_CONTEXT_WINDOW_TOKENS = 32_000;
 // The compiled fixture's instructions and 13 advertised tools occupy ~2,823
-// tokens. Keep the original 640-token history pressure after reserving them.
+// tokens. Reserve them in addition to the summarizer's history budget.
 const TEST_REQUEST_ENVELOPE_TOKENS = 2_823;
-const TEST_HISTORY_BUDGET_TOKENS = 640;
+// Scripted usage supplies pressure without starving the real summarizer's transcript.
+const TEST_HISTORY_BUDGET_TOKENS = 2_048;
+const COMPACTION_PRESSURE_USAGE = { inputTokens: TEST_REQUEST_ENVELOPE_TOKENS + 4_096 };
 const MAX_TOOL_CALLS = 10;
 
 type RegressionCase =
@@ -182,6 +184,7 @@ const taskModel = mockModel({
       }
       handoffCallCounts.set(regressionCase, handoffCalls + 1);
       return {
+        usage: COMPACTION_PRESSURE_USAGE,
         toolCalls: [
           {
             id: `prepare-handoff-${handoffCalls + 1}`,
@@ -198,6 +201,7 @@ const taskModel = mockModel({
     }
     toolCallCounts.set(regressionCase, reviewCalls + 1);
     return {
+      usage: COMPACTION_PRESSURE_USAGE,
       toolCalls: [
         {
           id: `${subject}-review-${reviewCalls + 1}`,
@@ -255,7 +259,9 @@ function withFullRequestUsage(respond: MockModelResponder): MockModelResponder {
     return {
       ...(typeof response === "string" ? { text: response } : response),
       usage: {
-        inputTokens: TEST_REQUEST_ENVELOPE_TOKENS + Math.ceil(JSON.stringify(history).length / 4),
+        inputTokens:
+          (typeof response === "string" ? undefined : response.usage?.inputTokens) ??
+          TEST_REQUEST_ENVELOPE_TOKENS + Math.ceil(JSON.stringify(history).length / 4),
       },
     };
   };

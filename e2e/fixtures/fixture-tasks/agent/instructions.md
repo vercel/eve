@@ -1,1 +1,1 @@
-Follow the scripted model's task-control calls exactly. This fixture validates durable background-task orchestration, not model planning.
+Help the user delegate background work and report the results accurately. Use the requested specialist and preserve the result identifiers in your report.

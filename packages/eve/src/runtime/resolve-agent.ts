@@ -118,10 +118,6 @@ export async function resolveAgent(input: ResolveAgentInput): Promise<ResolvedAg
     channels: resolvedChannels,
     connections: resolvedConnections,
     dynamicConnectionResolvers: resolvedDynamicConnectionResolvers,
-    workflowTool:
-      input.manifest.workflowTool === undefined
-        ? undefined
-        : { maxSubagents: input.manifest.workflowTool.maxSubagents },
     dynamicInstructionsResolvers: resolvedDynamicInstructionsResolvers,
     dynamicSkillResolvers: resolvedDynamicSkillResolvers,
     dynamicToolResolvers: resolvedDynamicToolResolvers,
@@ -245,7 +241,11 @@ function createResolvedAgentConfig(
       workflow:
         manifest.config.experimental.workflow === undefined
           ? undefined
-          : { world: manifest.config.experimental.workflow.world },
+          : {
+              modelCallsPerStep: manifest.config.experimental.workflow.modelCallsPerStep,
+              retention: manifest.config.experimental.workflow.retention,
+              world: manifest.config.experimental.workflow.world,
+            },
     };
   }
 

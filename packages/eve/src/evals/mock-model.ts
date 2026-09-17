@@ -1,6 +1,7 @@
 import type { LanguageModel } from "ai";
 import { MockLanguageModelV3 } from "ai/test";
 
+import { markMockModel } from "#internal/mock-model-identity.js";
 import { AGENTS_SNIPPET_LABEL } from "#subagents/handles/prompt.js";
 import { isPendingApprovalsSnippet } from "#harness/hitl/approval-prompt.js";
 
@@ -125,16 +126,18 @@ export function mockModel(
   const respond = normalizeResponder(options.respond);
   const modelId = options.modelId ?? DEFAULT_MODEL_ID;
 
-  return new MockLanguageModelV3({
-    modelId,
-    provider: options.provider ?? DEFAULT_PROVIDER,
-    doGenerate: async (callOptions) =>
-      createGenerateResult(await respond(createRequest(callOptions)), callOptions, modelId),
-    doStream: async (callOptions) =>
-      createStreamResult(
+  return markMockModel(
+    new MockLanguageModelV3({
+      modelId,
+      provider: options.provider ?? DEFAULT_PROVIDER,
+      doGenerate: async (callOptions) =>
         createGenerateResult(await respond(createRequest(callOptions)), callOptions, modelId),
-      ),
-  });
+      doStream: async (callOptions) =>
+        createStreamResult(
+          createGenerateResult(await respond(createRequest(callOptions)), callOptions, modelId),
+        ),
+    }),
+  );
 }
 
 function normalizeOptions(input: MockModelOptions | MockModelResponder | string): MockModelOptions {

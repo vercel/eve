@@ -13,7 +13,10 @@ import type {
   InstrumentationHooks,
 } from "#instrumentation/lifecycle.js";
 import { channelDeliveryIdempotencyKey } from "#instrumentation/lifecycle.js";
-import { normalizeChannelAudience } from "#shared/channel-audience.js";
+import {
+  ConversationContextKey,
+  UNKNOWN_CONVERSATION_CONTEXT,
+} from "#shared/conversation-context.js";
 
 export interface ChannelDeliveryStartInstrumentation {
   readonly agentName?: string;
@@ -47,11 +50,12 @@ export async function instrumentChannelDelivery(
     for (const item of active) {
       const policyAgentName = item.policyAgentName ?? item.agentName;
       if (policyAgentName === undefined) continue;
+      const conversation = input.ctx.get(ConversationContextKey) ?? UNKNOWN_CONVERSATION_CONTEXT;
       const hooks =
         input.hooks.forTrace?.({
           agentName: policyAgentName,
-          audience: normalizeChannelAudience(item.delivery.channelAudience),
-          channelType: item.channelType,
+          ...conversation,
+          audience: item.delivery.channelAudience ?? conversation.audience,
         }) ?? input.hooks;
       await hooks.publish({
         agentName: item.agentName,
@@ -73,14 +77,13 @@ export async function instrumentChannelDelivery(
 
   if (input.hooks === undefined || input.delivery.deliveryMetadata === undefined) return;
 
-  const active: ActiveChannelDelivery[] = [];
-  const channel = input.ctx.get(ChannelInstrumentationKey);
-  const channelAudience = normalizeChannelAudience(channel?.metadata.audience);
+  const active: ActiveChannelDelivery[] = [...(input.ctx.get(ActiveChannelDeliveriesKey) ?? [])];
+  const conversation = input.ctx.get(ConversationContextKey) ?? UNKNOWN_CONVERSATION_CONTEXT;
+  const channelAudience = conversation.audience;
   const hooks =
     input.hooks.forTrace?.({
       agentName: input.policyAgentName,
-      audience: channelAudience,
-      channelType: channel?.channelType,
+      ...conversation,
     }) ?? input.hooks;
   for (const metadata of input.delivery.deliveryMetadata) {
     const payload = input.delivery.payloads[metadata.payloadIndex];
@@ -97,7 +100,7 @@ export async function instrumentChannelDelivery(
       !capturesInputs || payload === undefined ? undefined : projectDeliveryInput(payload);
     const item: ActiveChannelDelivery = {
       agentName: input.agentName,
-      channelType: channel?.channelType,
+      channelType: input.ctx.get(ChannelInstrumentationKey)?.channelType,
       delivery,
       policyAgentName: input.policyAgentName,
       rootSessionId: input.rootSessionId,
@@ -105,6 +108,15 @@ export async function instrumentChannelDelivery(
       sessionId: input.sessionId,
       turnId: input.turnId,
     };
+    if (
+      active.some(
+        (candidate) =>
+          candidate.sessionId === item.sessionId &&
+          candidate.delivery.deliveryId === item.delivery.deliveryId,
+      )
+    ) {
+      continue;
+    }
     active.push(item);
     await hooks?.publish({
       agentName: item.agentName,
@@ -113,8 +125,10 @@ export async function instrumentChannelDelivery(
       input: deliveryInput,
       parentTraceContext: input.ctx.get(ParentTraceContextKey),
       rootSessionId: input.rootSessionId,
+      sequence: input.sequence,
       sessionId: input.sessionId,
       traceSeed: input.ctx.get(SessionTraceSeedKey),
+      turnId: input.turnId,
       type: "channel.delivery.started",
     });
   }

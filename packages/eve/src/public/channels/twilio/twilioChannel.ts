@@ -45,7 +45,6 @@ import {
 import { type TwilioAuthToken, type TwilioWebhookUrl } from "#public/channels/twilio/verify.js";
 import { readNonEmptyString } from "#shared/guards.js";
 import { defineChannel, GET, POST, type Channel } from "#public/definitions/channel.js";
-import type { ChannelAudience } from "#shared/channel-audience.js";
 
 const log = createLogger("twilio.channel");
 
@@ -79,7 +78,6 @@ export interface TwilioChannelState {
 
 /** Per-session instrumentation snapshot for Twilio runtime telemetry. Reports the active phone-number pair and the most recent message and call SIDs. */
 export interface TwilioInstrumentationMetadata extends Record<string, unknown> {
-  readonly audience: ChannelAudience;
   readonly from: string | null;
   readonly lastCallSid: string | null;
   readonly lastMessageSid: string | null;
@@ -311,13 +309,13 @@ export function twilioChannel(config: TwilioChannelConfig): TwilioChannel {
     },
     metadata(state): TwilioInstrumentationMetadata {
       return {
-        audience: "private",
         from: state.from,
         lastCallSid: state.lastCallSid ?? null,
         lastMessageSid: state.lastMessageSid ?? null,
         to: state.to,
       };
     },
+    audience: () => "private",
 
     context(state, session) {
       return rebuildTwilioContext(state, session, config);

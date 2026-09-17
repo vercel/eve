@@ -20,9 +20,58 @@ export type EveCliTelemetryEvent = {
   readonly value: string;
 };
 
+export type EveCliSetupFlow = "init" | "extension_init" | "onboarding";
+export type EveCliSetupStep =
+  | "resolve_target"
+  | "scaffold"
+  | "install_dependencies"
+  | "initialize_git"
+  | "handoff"
+  | "connection_ready"
+  | "first_response"
+  | "model_provider"
+  | "model_settings"
+  | "registry_channels"
+  | "registry_integrations"
+  | "registry_review"
+  | "registry_install";
+export type EveCliSetupTerminalResult = "completed" | "cancelled" | "error";
+
+/** A bounded, non-sensitive reason for a failed setup terminal event. */
+export type EveCliSetupFailureCode =
+  | "target_resolution"
+  | "target_conflict"
+  | "target_invalid"
+  | "target_filesystem"
+  | "workspace_input"
+  | "scaffolding"
+  | "package_manager_not_found"
+  | "package_manager_start_failed"
+  | "workspace_probe_failed"
+  | "workspace_probe_unrecognized"
+  | "dependency_installation"
+  | "git_initialization"
+  | "handoff"
+  | "onboarding";
+
+export type EveCliSetupStepEvent = {
+  flow: EveCliSetupFlow;
+  step: EveCliSetupStep;
+  registrySelectedCount?: number;
+};
+
+export type EveCliSetupTerminalEvent = {
+  flow: EveCliSetupFlow;
+  step: EveCliSetupStep;
+  result: EveCliSetupTerminalResult;
+  failureCode?: EveCliSetupFailureCode;
+};
+
 export type EveCliTelemetry = {
   trackCommand(command: string): void;
   trackDevContext(context: { target: "local" | "remote"; ui: "tui" | "headless" }): void;
+  trackSetupStep(input: EveCliSetupStepEvent): void;
+  trackSetupTerminal(input: EveCliSetupTerminalEvent): void;
   trackOutcome(outcome: "success" | "usage_error" | "error"): void;
   notify(logger: { error(message: string): void }): Promise<void>;
   flush(): Promise<void>;
@@ -38,6 +87,30 @@ async function isEnabled(): Promise<boolean> {
 
 function event(key: string, value: string): EveCliTelemetryEvent {
   return { id: randomUUID(), event_time: Date.now(), key, value };
+}
+
+function setupFailureCode(step: EveCliSetupStep): EveCliSetupFailureCode {
+  switch (step) {
+    case "resolve_target":
+      return "target_resolution";
+    case "scaffold":
+      return "scaffolding";
+    case "install_dependencies":
+    case "registry_install":
+      return "dependency_installation";
+    case "initialize_git":
+      return "git_initialization";
+    case "handoff":
+      return "handoff";
+    case "connection_ready":
+    case "first_response":
+    case "model_provider":
+    case "model_settings":
+    case "registry_channels":
+    case "registry_integrations":
+    case "registry_review":
+      return "onboarding";
+  }
 }
 
 const CLI_TELEMETRY_COMMANDS = new Map<string, string>([
@@ -109,6 +182,9 @@ export function createEveCliTelemetry(version: string): EveCliTelemetry {
     event("stdin_is_tty", process.stdin.isTTY ? "true" : "false"),
   ];
   const sessionId = randomUUID();
+  const setupEvents: EveCliTelemetryEvent[] = [];
+  let activeSetup: { flow: EveCliSetupFlow; step: EveCliSetupStep } | undefined;
+  let setupTerminalRecorded = false;
 
   return {
     trackCommand(command) {
@@ -117,7 +193,33 @@ export function createEveCliTelemetry(version: string): EveCliTelemetry {
     trackDevContext(context) {
       events.push(event("target", context.target), event("ui", context.ui));
     },
+    trackSetupStep(input) {
+      activeSetup = { flow: input.flow, step: input.step };
+      setupEvents.push(event("setup_flow", input.flow), event("setup_step", input.step));
+      if (input.registrySelectedCount !== undefined) {
+        setupEvents.push(event("registry_selected_count", String(input.registrySelectedCount)));
+      }
+    },
+    trackSetupTerminal(input) {
+      setupTerminalRecorded = true;
+      setupEvents.push(
+        event("setup_flow", input.flow),
+        event("setup_terminal_step", input.step),
+        event("setup_terminal_result", input.result),
+      );
+      if (input.result === "error") {
+        setupEvents.push(
+          event("setup_failure_code", input.failureCode ?? setupFailureCode(input.step)),
+        );
+      }
+    },
     trackOutcome(outcome) {
+      if (activeSetup !== undefined && !setupTerminalRecorded) {
+        this.trackSetupTerminal({
+          ...activeSetup,
+          result: outcome === "success" ? "completed" : "error",
+        });
+      }
       events.push(event("outcome", outcome));
     },
     async notify(logger) {
@@ -145,13 +247,16 @@ export function createEveCliTelemetry(version: string): EveCliTelemetry {
     async flush() {
       if (!(await isEnabled()) || events.length === 0) return;
       try {
-        const identity = isEphemeralEveTelemetryEnvironment()
+        const ephemeralIdentity = isEphemeralEveTelemetryEnvironment();
+        const identity = ephemeralIdentity
           ? createEveTelemetryIdentity()
           : await readOrCreateEveTelemetryIdentity();
         events.push(
+          event("identity_kind", ephemeralIdentity ? "ephemeral" : "persistent"),
           event("installation_id", identity.installationId),
           event("project_id", await resolveEveTelemetryProjectId({ identity })),
         );
+        events.push(...setupEvents);
       } catch {
         return;
       }

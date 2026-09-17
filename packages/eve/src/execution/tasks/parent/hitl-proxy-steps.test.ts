@@ -1,18 +1,37 @@
+import { createTestSessionState } from "#internal/testing/session-state.js";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { ContextContainer } from "#context/container.js";
+import { serializeContext } from "#context/serialize.js";
 import { readDurableSession } from "#execution/durable-session-store.js";
 import {
   recordTerminalTaskViewsStep,
   recordTaskInputRequestStep,
 } from "#execution/tasks/parent/hitl-proxy-steps.js";
 import { readLatestTaskView } from "#execution/tasks/parent/run-parent.js";
+import { bindSessionInstrumentation } from "#instrumentation/runtime.js";
+import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
+import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
 import { getAgentHandleStore, setAgentHandleStore } from "#subagents/handles/store.js";
 import { getProxyInputRequests } from "#harness/proxy-input-requests.js";
 import { getSessionTaskIndex } from "#tasks/session-index.js";
 
-vi.mock("#execution/durable-session-store.js", () => ({ readDurableSession: vi.fn() }));
+const flushInstrumentation = vi.hoisted(() => vi.fn());
+const publishBackgroundTaskSettlements = vi.hoisted(() => vi.fn());
+
+vi.mock("#execution/durable-session-store.js", async (importOriginal) => ({
+  ...(await importOriginal()),
+  readDurableSession: vi.fn(),
+}));
 vi.mock("#execution/tasks/parent/run-parent.js", () => ({ readLatestTaskView: vi.fn() }));
-vi.mock("#shared/input.js", () => ({
+vi.mock("#instrumentation/runtime.js", () => ({
+  bindSessionInstrumentation: vi.fn(),
+}));
+vi.mock("#runtime/sessions/compiled-agent-cache.js", () => ({
+  getCompiledRuntimeAgentBundle: vi.fn(),
+}));
+vi.mock("#shared/input.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("#shared/input.js")>()),
   isInputRequest: vi.fn(
     (value: unknown) =>
       typeof value === "object" &&
@@ -37,19 +56,19 @@ const request = {
   turnId: "turn-1",
 };
 
-const sessionState = {
+const sessionState = createTestSessionState({
   continuationToken: "parent-token",
   emissionState: { sequence: 0, sessionStarted: true, stepIndex: 0, turnId: "turn-1" },
   hasProxyInputRequests: false,
   sessionId: "parent-session",
   version: 1,
-} as const;
+});
 const remoteReplyTo = "eve:eve:op:0123456789abcdef0123456789abcdef";
 
 describe("recordTaskInputRequestStep", () => {
   beforeEach(() => {
     vi.resetAllMocks();
-    vi.mocked(readDurableSession).mockResolvedValue({
+    vi.mocked(readDurableSession).mockReturnValue({
       agent: { system: "" },
       continuationToken: "parent-token",
       history: [],
@@ -59,6 +78,7 @@ describe("recordTaskInputRequestStep", () => {
           tasks: [
             {
               createdByTurnId: "turn-1",
+              dispatchContext: { auth: { current: null, initiator: null } },
               metadata: { kind: "tool", name: "export" },
               taskId: "task-1",
               taskInboxToken: "task-token",
@@ -87,7 +107,7 @@ describe("recordTaskInputRequestStep", () => {
       sessionState: { hasProxyInputRequests: true },
     });
     expect(
-      getProxyInputRequests(result.sessionState.snapshot?.session.state).get("task-1:req-1"),
+      getProxyInputRequests(result.sessionState.snapshot.session.state).get("task-1:req-1"),
     ).toEqual({
       childContinuationToken: request.replyTo,
       childRequestId: "req-1",
@@ -111,7 +131,7 @@ describe("recordTaskInputRequestStep", () => {
   });
 
   it("records a narrowed remote response route for a claimed remote child", async () => {
-    vi.mocked(readDurableSession).mockResolvedValue({
+    vi.mocked(readDurableSession).mockReturnValue({
       agent: { system: "" },
       continuationToken: "parent-token",
       history: [],
@@ -122,6 +142,7 @@ describe("recordTaskInputRequestStep", () => {
             tasks: [
               {
                 createdByTurnId: "turn-1",
+                dispatchContext: { auth: { current: null, initiator: null } },
                 metadata: { kind: "tool", name: "export" },
                 taskId: "task-1",
                 taskInboxToken: "task-token",
@@ -164,7 +185,7 @@ describe("recordTaskInputRequestStep", () => {
     const result = await recordTaskInputRequestStep({ request: remoteRequest, sessionState });
 
     expect(
-      getProxyInputRequests(result.sessionState.snapshot?.session.state).get("task-1:remote-req"),
+      getProxyInputRequests(result.sessionState.snapshot.session.state).get("task-1:remote-req"),
     ).toMatchObject({
       childResponseUrl:
         "https://remote.example/eve/v1/task-input/eve%3Atask-input%3A0123456789abcdef0123456789abcdef",
@@ -173,8 +194,16 @@ describe("recordTaskInputRequestStep", () => {
 });
 
 describe("recordTerminalTaskViewsStep", () => {
+  beforeEach(() => {
+    vi.resetAllMocks();
+    vi.mocked(bindSessionInstrumentation).mockReturnValue({
+      flush: flushInstrumentation,
+      publishBackgroundTaskSettlements,
+    } as never);
+  });
+
   it("caches an owned terminal view and releases the task's agent lease", async () => {
-    vi.mocked(readDurableSession).mockResolvedValue({
+    vi.mocked(readDurableSession).mockReturnValue({
       agent: { system: "" },
       continuationToken: "parent-token",
       history: [],
@@ -185,6 +214,7 @@ describe("recordTerminalTaskViewsStep", () => {
             tasks: [
               {
                 createdByTurnId: "turn-1",
+                dispatchContext: { auth: { current: null, initiator: null } },
                 metadata: { agentId: "agent-1", kind: "subagent", mode: "local", name: "research" },
                 taskId: "task-1",
                 taskInboxToken: "task-token",
@@ -218,12 +248,75 @@ describe("recordTerminalTaskViewsStep", () => {
       taskId: "task-1",
     };
 
-    const result = await recordTerminalTaskViewsStep({ sessionState, views: [view] });
-    const state = result.snapshot?.session.state;
+    const result = await recordTerminalTaskViewsStep({
+      serializedContext: {},
+      sessionState,
+      views: [view],
+    });
+    const state = result.sessionState.snapshot.session.state;
 
     expect(getSessionTaskIndex(state)[0]?.terminalView).toEqual(view);
     expect(getAgentHandleStore(state)?.handles).toEqual([
       expect.objectContaining({ phase: "available" }),
     ]);
+    expect(result.serializedContext).toEqual({});
+  });
+
+  it("settles instrumentation from an accepted terminal task view", async () => {
+    const bundle = {
+      compiledArtifactsSource: { kind: "bundled" },
+      nodeId: "__root__",
+      turnAgent: { id: "parent-agent" },
+    } as never;
+    vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue(bundle);
+    const context = new ContextContainer();
+    context.set(BundleKey, bundle);
+    const serializedContext = serializeContext(context);
+    vi.mocked(readDurableSession).mockReturnValue({
+      agent: { system: "" },
+      continuationToken: "parent-token",
+      history: [],
+      sessionId: "parent-session",
+      state: {
+        "eve.tasks": {
+          tasks: [
+            {
+              createdByTurnId: "turn-1",
+              dispatchContext: { auth: { current: null, initiator: null } },
+              metadata: { kind: "tool", name: "export" },
+              taskId: "task-1",
+              taskInboxToken: "task-token",
+              taskRunId: "task-run",
+            },
+          ],
+          version: 2,
+        },
+      },
+    });
+    const view = {
+      lastOutput: { data: "done", type: "result" as const },
+      metadata: { kind: "tool", name: "export" },
+      status: "completed" as const,
+      taskId: "task-1",
+    };
+
+    const result = await recordTerminalTaskViewsStep({
+      serializedContext,
+      sessionState,
+      views: [view],
+    });
+
+    expect(bindSessionInstrumentation).toHaveBeenCalledWith({
+      agentName: "parent-agent",
+      ctx: expect.any(ContextContainer),
+      rootSessionId: "parent-session",
+      sessionId: "parent-session",
+    });
+    expect(publishBackgroundTaskSettlements).toHaveBeenCalledWith({
+      acceptedAtMs: expect.any(Number),
+      views: [view],
+    });
+    expect(flushInstrumentation).toHaveBeenCalledOnce();
+    expect(result.serializedContext).not.toBe(serializedContext);
   });
 });
