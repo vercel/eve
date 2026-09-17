@@ -58,7 +58,6 @@ function fixture(existing = false) {
         ensureBaseRuntime: vi.fn(async () => {}),
         hydrateResources: vi.fn(async () => {}),
         loadModule: async () => ({ Sandbox: { create, get } }) as never,
-        resourcePublisher: { prepare: vi.fn(), resolveMounts: vi.fn(async () => ({})) },
         waitForImage: vi.fn(async () => {}),
       },
     ),
