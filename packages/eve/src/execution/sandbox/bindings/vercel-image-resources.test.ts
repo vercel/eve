@@ -1,6 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { createVercelImageResourcePublisher } from "#execution/sandbox/bindings/vercel-image-resources.js";
+import {
+  prepareVercelImageResource,
+  resolveVercelImageMounts,
+} from "#execution/sandbox/bindings/vercel-image-resources.js";
 import { createFakeVercelOidcToken } from "#internal/testing/vercel-oidc-token.js";
 
 function setCredentials() {
@@ -31,7 +34,7 @@ function createDrive(name = "drive") {
 
 afterEach(() => vi.unstubAllEnvs());
 
-describe("createVercelImageResourcePublisher", () => {
+describe("Vercel image resources", () => {
   it("creates and populates a content-addressed Drive", async () => {
     setCredentials();
     const drive = createDrive();
@@ -54,11 +57,11 @@ describe("createVercelImageResourcePublisher", () => {
         })),
       },
     };
-    const publisher = createVercelImageResourcePublisher({
-      loadModule: async () => module as never,
+    const result = await prepareVercelImageResource({
+      createOptions: {},
+      module: module as never,
+      resource: resource(),
     });
-
-    const result = await publisher.prepare({ createOptions: {}, resource: resource() });
 
     expect(module.Drive.getOrCreate).toHaveBeenCalledWith(
       expect.objectContaining({ name: expect.stringMatching(/^eve-sbx-res-[a-f0-9]{32}$/u) }),
@@ -74,8 +77,7 @@ describe("createVercelImageResourcePublisher", () => {
       { signal: undefined },
     );
     expect(remove).toHaveBeenCalledOnce();
-    expect(result.reused).toBe(false);
-    expect(result.artifact).toMatchObject({
+    expect(result).toMatchObject({
       mountPath: "/eve/resources/workspace",
       region: "iad1",
       resourceKey: "workspace-key",
@@ -101,13 +103,13 @@ describe("createVercelImageResourcePublisher", () => {
         })),
       },
     };
-    const publisher = createVercelImageResourcePublisher({
-      loadModule: async () => module as never,
-    });
-
-    await expect(publisher.prepare({ createOptions: {}, resource: resource() })).rejects.toThrow(
-      "conflicts with existing content",
-    );
+    await expect(
+      prepareVercelImageResource({
+        createOptions: {},
+        module: module as never,
+        resource: resource(),
+      }),
+    ).rejects.toThrow("conflicts with existing content");
   });
 
   it("strictly resolves prepared Drives without creating replacements", async () => {
@@ -119,12 +121,9 @@ describe("createVercelImageResourcePublisher", () => {
       },
       Sandbox: { create: vi.fn() },
     };
-    const publisher = createVercelImageResourcePublisher({
-      loadModule: async () => module as never,
-    });
-
     await expect(
-      publisher.resolveMounts({
+      resolveVercelImageMounts({
+        module: module as never,
         createOptions: {},
         mounts: [
           {
