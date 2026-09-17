@@ -14,7 +14,8 @@ export interface WorkflowTaskPayload {
   readonly dispatchContext: TaskAgentDispatchContext;
   readonly activityWorkIdentity?: ActivityWorkIdentityV1;
   readonly cohortId?: string;
-  readonly terminalView?: TaskView;
+  /** Read through readWorkflowTaskView before consuming retained output. */
+  readonly terminalView?: unknown;
 }
 
 interface WorkflowInvocationBase {
@@ -127,7 +128,7 @@ const invocationSchema: z.ZodType<WorkflowInvocation> = z.discriminatedUnion("li
         .custom<ActivityWorkIdentityV1>((value) => parseActivityWorkIdentityV1(value) !== undefined)
         .optional(),
       cohortId: z.string().min(1).optional(),
-      terminalView: taskViewSchema.optional(),
+      terminalView: z.unknown().optional(),
     }),
   }),
 ]);
@@ -149,18 +150,21 @@ const registrySchema = z
       if (tasks.has(task.taskId))
         ctx.addIssue({ code: "custom", message: "Task ids must be unique." });
       tasks.add(task.taskId);
-      if (
-        task.terminalView !== undefined &&
-        (task.terminalView.taskId !== task.taskId ||
-          !sameTaskMetadata(task.terminalView.metadata, task.metadata))
-      ) {
-        ctx.addIssue({
-          code: "custom",
-          message: "Cached terminal views must match their invocation task payload.",
-        });
-      }
     }
   });
+
+/** Decode retained output only when it is consumed, independently of ownership reads. */
+export function readWorkflowTaskView(task: WorkflowTaskPayload): TaskView | undefined {
+  if (task.terminalView === undefined) return undefined;
+  const result = taskViewSchema.safeParse(task.terminalView);
+  if (!result.success)
+    throw new Error(`Corrupt workflow task result "${task.taskId}": ${result.error.message}`);
+  if (result.data.taskId !== task.taskId || !sameTaskMetadata(result.data.metadata, task.metadata))
+    throw new Error(
+      `Corrupt workflow task result "${task.taskId}": terminal view does not match its owner.`,
+    );
+  return result.data;
+}
 
 function readRegistry(state: SessionStateMap | undefined): z.infer<typeof registrySchema> {
   if (state?.["eve.tasks"] !== undefined || state?.["eve.runtime.workflowToolRuns"] !== undefined) {
@@ -284,6 +288,7 @@ export function registerWorkflowInvocation<T extends { readonly state?: SessionS
       };
     }
   }
+  if (entry.lifetime === "session") readWorkflowTaskView(entry.task);
   if (previous === undefined) invocations.push(entry);
   else
     invocations[index] = {
@@ -310,7 +315,7 @@ export function cacheWorkflowTaskView(
   if (entry === undefined || entry.lifetime !== "session") return state;
   if (!sameTaskMetadata(entry.task.metadata, terminal.metadata))
     throw new Error(`Task view metadata does not match invocation "${view.taskId}".`);
-  const previous = entry.task.terminalView;
+  const previous = readWorkflowTaskView(entry.task);
   invocations[index] = {
     ...entry,
     task: {

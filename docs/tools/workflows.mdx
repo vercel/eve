@@ -492,6 +492,11 @@ as cancelled whether or not it did. A body parked on a hook or a `sleep` does no
 it is abandoned when the grace period ends. Steps that received the signal are how you clean up
 first.
 
+The caller waits up to 35 seconds for a cooperatively cancelled run to settle before forcing it
+to stop. This includes time for the run to publish its outcome after body cleanup. A background
+task records its cancelled status before cleanup finishes, so that status alone does not mean
+its work has stopped.
+
 ## Workflow tool examples
 
 ### Approve with a deadline and an escalation

@@ -65,15 +65,10 @@ export interface CoordinationDispatchInput {
   readonly sessionState: DurableSessionState;
 }
 
-/** Owner-side results plus any task-control work that still needs acknowledgement. */
+/** Owner-side results and the updated session. */
 export interface CoordinationDispatchResult {
   readonly results: readonly RuntimeActionResult[];
   readonly sessionState: DurableSessionState;
-  readonly pendingTasks: readonly {
-    readonly taskInboxToken: string;
-    readonly taskId: string;
-    readonly taskRunId: string;
-  }[];
 }
 
 /** Everything preflight produces before either step's dispatch loop runs. */

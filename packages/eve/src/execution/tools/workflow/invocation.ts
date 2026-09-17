@@ -1,3 +1,4 @@
+import { WORKFLOW_CANCELLATION_CLEANUP_MS } from "#execution/tools/workflow/cancellation-policy.js";
 import { sleep } from "#compiled/@workflow/core/index.js";
 import { normalizeSerializableError } from "#execution/workflow-errors.js";
 import {
@@ -68,7 +69,9 @@ async function* runInvocation(
       return;
     }
     // Cleanup can close prompts and release child agents, but cannot undo cancellation.
-    const deadline = started ? sleep("30s").then(() => "cancel" as const) : undefined;
+    const deadline = started
+      ? sleep(WORKFLOW_CANCELLATION_CLEANUP_MS).then(() => "cancel" as const)
+      : undefined;
     try {
       while (started) {
         const read = await raceChannelReads([reader], deadline);

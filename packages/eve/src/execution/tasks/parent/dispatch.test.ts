@@ -1,6 +1,12 @@
+import type { HarnessSession } from "#harness/types.js";
+import { WORKFLOW_CANCELLATION_SETTLE_MS } from "#execution/tools/workflow/cancellation-policy.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { cancelOwnedTask, isTaskControlAction } from "#execution/tasks/parent/dispatch.js";
+import {
+  cancelOwnedTask,
+  executeTaskControlAction,
+  isTaskControlAction,
+} from "#execution/tasks/parent/dispatch.js";
 import { readLatestTaskView, sendTaskCommand } from "#execution/tasks/parent/run-parent.js";
 import { resumeSessionInbox } from "#execution/session-inbox/resume.js";
 
@@ -44,6 +50,49 @@ describe("task cancellation", () => {
 
   afterEach(() => {
     vi.useRealTimers();
+  });
+
+  it("cancels a live task despite an unrelated malformed retained result", async () => {
+    vi.mocked(readLatestTaskView).mockResolvedValue({
+      metadata: entry.task.metadata,
+      status: "cancelled",
+      taskId: entry.task.taskId,
+    });
+    const session: HarnessSession = {
+      agent: { modelReference: { id: "test" }, system: "", tools: [] },
+      compaction: { recentWindowSize: 4, threshold: 100_000 },
+      history: [],
+      continuationToken: "parent",
+      sessionId: "parent-session",
+      state: {
+        "eve.runtime.workflowInvocations": {
+          version: 1,
+          invocations: [
+            {
+              ...entry,
+              callId: "old",
+              task: { ...entry.task, taskId: "old", terminalView: { status: "completed" } },
+            },
+            entry,
+          ],
+        },
+      },
+    };
+    await expect(
+      executeTaskControlAction({
+        action: {
+          kind: "tool-call",
+          callId: "cancel",
+          toolName: "task_cancel",
+          input: { taskIds: [entry.task.taskId] },
+        },
+        session,
+      }),
+    ).resolves.toMatchObject({ result: { kind: "tool-result" } });
+    expect(sendTaskCommand).toHaveBeenCalledExactlyOnceWith({
+      command: { kind: "cancel" },
+      taskInboxToken: entry.address.hookToken,
+    });
   });
 
   it("cancels task-owned work after cancellation commits", async () => {
@@ -104,6 +153,23 @@ describe("task cancellation", () => {
     expect(cancelOwnedWork).not.toHaveBeenCalled();
   });
 
+  it("allows cleanup lasting longer than one second without force-stopping or duplicating delivery", async () => {
+    vi.mocked(readLatestTaskView).mockResolvedValue({
+      metadata: entry.task.metadata,
+      status: "cancelled",
+      taskId: entry.task.taskId,
+    });
+    getRun.mockReturnValue({ status: Promise.resolve("running") });
+    const cancelled = cancelOwnedTask({ entry });
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(cancelRun).not.toHaveBeenCalled();
+    getRun.mockReturnValue({ status: Promise.resolve("completed") });
+    await vi.advanceTimersByTimeAsync(250);
+    await cancelled;
+    expect(cancelRun).not.toHaveBeenCalled();
+    expect(resumeSessionInbox).not.toHaveBeenCalled();
+  });
+
   it("hard-cancels a task run that does not unwind cooperatively", async () => {
     vi.mocked(readLatestTaskView).mockResolvedValue({
       metadata: entry.task.metadata,
@@ -134,7 +200,7 @@ describe("task cancellation", () => {
     >[0]["session"];
     const cancelled = cancelOwnedTask({ entry, session });
 
-    await vi.advanceTimersByTimeAsync(999);
+    await vi.advanceTimersByTimeAsync(WORKFLOW_CANCELLATION_SETTLE_MS - 1);
     expect(cancelRun).not.toHaveBeenCalled();
     expect(resumeSessionInbox).not.toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(1);

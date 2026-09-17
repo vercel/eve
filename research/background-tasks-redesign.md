@@ -276,6 +276,34 @@ failed once before passing in isolation and in the full rerun; the cause remains
 its assertion now includes captured events for diagnosis. Typechecking, production build, focused
 lint, formatting, and invariant guards passed.
 
+## Ownership and cancellation consolidation
+
+Ownership reads no longer decode every retained result, and both invocation lifetimes share
+cancellation escalation. The persisted registry remains version 1 and checkpoints remain version 5.
+
+- Removed the unused coordination `pendingTasks` acknowledgement list. Real background admission
+  still persists ownership before sending `ready`.
+- `settleWorkflowToolRunCancellation` owns polling and forced stop for both lifetimes. Body cleanup
+  retains its 30-second limit; callers allow 35 seconds for cleanup and outcome publication. This
+  replaces the task-specific one-second cutoff. Cancellation status is committed before work stops.
+- Both child-owner paths use the same cancellation function and attempt every claimed child.
+  Turn cancellation starts child cancellation alongside workflow cancellation. Background child
+  failures remain retryable; all child requests settle before the helper returns or throws.
+- Registry ownership and routing reads validate addresses, identity, and ownership metadata.
+  `readWorkflowTaskView` validates the selected retained result and its task identity when consumed.
+  A malformed old result cannot block cancelling an unrelated live invocation or removing a waiting
+  invocation. Handoff still validates every retained result, even when other work is pending.
+
+Cohort membership, delivery eligibility, creator context, and session-lifetime retention are unchanged.
+No corruption recovery or quarantine mechanism was added.
+
+Validation: all 800 unit files passed (8,692 tests, one skipped), and 73 integration tests passed
+across workflow execution, task dispatch, turn cancellation, forced-stop notification, and handoff.
+After final helper changes, the 29 workflow/cancellation integration tests and five child-cancellation
+unit tests passed again. Typechecking, production build, lint, formatting, invariant guards, and all
+89 published-doc checks passed. The first unit run exposed a missing active-turn marker in the new
+cancellation fixture; correcting the fixture made it exercise the intended path.
+
 ## Remaining proof gaps and migration risks
 
 The prototype does not yet demonstrate these full boundaries:

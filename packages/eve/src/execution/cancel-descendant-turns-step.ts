@@ -60,13 +60,6 @@ export async function cancelDescendantTurnsStep(input: {
     return;
   }
 
-  await Promise.all(
-    workflowToolRuns.map((record) =>
-      cancelWorkflowToolRun(record.address, "The turn that called the tool was cancelled."),
-    ),
-  );
-  if (running.length === 0) return;
-
   let remoteContext:
     | Promise<{
         readonly ctx: ContextContainer;
@@ -79,13 +72,16 @@ export async function cancelDescendantTurnsStep(input: {
       registry: ctx.require(BundleKey).subagentRegistry.subagentsByNodeId,
     })));
 
-  await Promise.all(
-    running.map((handle) =>
+  await Promise.all([
+    ...workflowToolRuns.map((record) =>
+      cancelWorkflowToolRun(record.address, "The turn that called the tool was cancelled."),
+    ),
+    ...running.map((handle) =>
       handle.address.kind === "agent/remote"
         ? cancelRemoteDescendant({ handle, remoteContext: getRemoteContext() })
         : cancelLocalDescendant({ handle }),
     ),
-  );
+  ]);
 }
 
 async function cancelLocalDescendant(input: {

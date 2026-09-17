@@ -2,7 +2,11 @@ import type { DeliverHookPayload } from "#channel/types.js";
 import { markFrameworkStepInput } from "#harness/messages.js";
 import type { SessionStateMap, StepInput } from "#harness/types.js";
 import { EMPTY_DELIVERY_SENTINEL } from "#shared/empty-delivery.js";
-import { getTaskInvocations, type TaskWorkflowInvocation } from "#harness/workflow-invocations.js";
+import {
+  readWorkflowTaskView,
+  getTaskInvocations,
+  type TaskWorkflowInvocation,
+} from "#harness/workflow-invocations.js";
 import { getTaskCohortId } from "#tasks/session-task-cohorts.js";
 
 export const TASK_DELIVERY_CONTEXT_LABEL = "[Task state]";
@@ -76,12 +80,15 @@ function projectTaskCohort(cohort: readonly TaskWorkflowInvocation[]): {
   readonly phase: "pending" | "settled";
 } {
   const settled = cohort.every((entry) => entry.task.terminalView !== undefined);
-  const tasks = cohort.map((entry) => ({
-    name: entry.task.metadata.name,
-    output: settled ? entry.task.terminalView?.lastOutput : undefined,
-    status: entry.task.terminalView?.status ?? "pending",
-    taskId: entry.task.taskId,
-  }));
+  const tasks = cohort.map((entry) => {
+    const view = readWorkflowTaskView(entry.task);
+    return {
+      name: entry.task.metadata.name,
+      output: settled ? view?.lastOutput : undefined,
+      status: view?.status ?? "pending",
+      taskId: entry.task.taskId,
+    };
+  });
 
   return {
     context: `${TASK_DELIVERY_CONTEXT_LABEL}\n${JSON.stringify({ tasks })}`,

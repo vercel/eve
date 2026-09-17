@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { HarnessSession } from "#harness/types.js";
 import {
+  readWorkflowTaskView,
   cacheWorkflowTaskView,
   findTaskInvocation,
   getTaskInvocations,
@@ -356,14 +357,20 @@ describe("session task index", () => {
       },
       { ...terminalView, taskId: "task_other" },
     ]) {
+      const [entry] = getTaskInvocations({
+        "eve.runtime.workflowInvocations": {
+          version: 1,
+          invocations: [{ ...base, task: { ...base.task, terminalView: invalidView } }],
+        },
+      });
+      expect(entry?.address).toEqual(base.address);
+      expect(() => readWorkflowTaskView(entry!.task)).toThrow("Corrupt workflow task result");
       expect(() =>
-        getTaskInvocations({
-          "eve.runtime.workflowInvocations": {
-            version: 1,
-            invocations: [{ ...base, task: { ...base.task, terminalView: invalidView } }],
-          },
+        registerWorkflowInvocation(createSession(), {
+          ...base,
+          task: { ...base.task, terminalView: invalidView },
         }),
-      ).toThrow("Corrupt workflow invocation registry");
+      ).toThrow("Corrupt workflow task result");
     }
   });
 

@@ -1,12 +1,13 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { EntityConflictError, HookNotFoundError } from "#compiled/@workflow/errors/index.js";
-import { cancelRun, getWorld, resumeHook } from "#internal/workflow/runtime.js";
+import { cancelRun, getRun, getWorld, resumeHook } from "#internal/workflow/runtime.js";
 import { logError } from "#internal/logging.js";
-import { cancelWorkflowToolRun } from "./cancel.js";
+import { cancelWorkflowToolRun, settleWorkflowToolRunCancellation } from "./cancel.js";
 
 vi.mock("#compiled/@workflow/core/runtime.js", () => ({
   cancelRun: vi.fn(),
+  getRun: vi.fn(),
   getWorld: vi.fn(),
   resumeHook: vi.fn(),
 }));
@@ -23,13 +24,43 @@ const reason = "The calling turn was cancelled.";
 describe("cancelWorkflowToolRun", () => {
   beforeEach(() => {
     vi.resetAllMocks();
+    vi.useFakeTimers();
+    vi.mocked(getRun).mockReturnValue({ status: Promise.resolve("completed") } as ReturnType<
+      typeof getRun
+    >);
     vi.mocked(getWorld).mockResolvedValue(world);
   });
+
+  afterEach(() => vi.useRealTimers());
 
   it("lets a registered workflow cancel cooperatively", async () => {
     await cancelWorkflowToolRun(address, reason);
 
     expect(resumeHook).toHaveBeenCalledWith(address.hookToken, { kind: "cancel", reason });
+    expect(cancelRun).not.toHaveBeenCalled();
+  });
+
+  it("allows slow cooperative cleanup before escalating a stuck waiting run", async () => {
+    vi.mocked(getRun).mockReturnValue({ status: Promise.resolve("running") } as ReturnType<
+      typeof getRun
+    >);
+    const cancelled = cancelWorkflowToolRun(address, reason);
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(cancelRun).not.toHaveBeenCalled();
+    await vi.runAllTimersAsync();
+    await cancelled;
+    expect(cancelRun).toHaveBeenCalledExactlyOnceWith(world, address.runId, {
+      cancelReason: reason,
+    });
+  });
+
+  it("does not mistake a status lookup failure for successful cancellation", async () => {
+    vi.mocked(getRun).mockImplementation(() => {
+      throw new Error("status unavailable");
+    });
+    await expect(settleWorkflowToolRunCancellation(address.runId, reason)).rejects.toThrow(
+      "status unavailable",
+    );
     expect(cancelRun).not.toHaveBeenCalled();
   });
 

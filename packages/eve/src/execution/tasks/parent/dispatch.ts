@@ -33,7 +33,6 @@ export async function executeTaskControlAction(input: {
 }): Promise<{
   readonly result: RuntimeActionResult;
   readonly session: RuntimeSession;
-  readonly pendingTask?: TaskWorkflowInvocation;
 }> {
   const { action, session } = input;
   const taskIds = readTaskIds(action.input);

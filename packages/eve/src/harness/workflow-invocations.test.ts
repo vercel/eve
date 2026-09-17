@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { SessionStateMap } from "#harness/types.js";
 import {
+  readWorkflowTaskView,
   cacheWorkflowTaskView,
   findTurnInvocation,
   getWorkflowInvocations,
@@ -85,6 +86,29 @@ describe("shared workflow invocation ownership", () => {
     expect(JSON.stringify(removeTurnInvocations({ state: restored }, "turn-a").state)).toBe(
       beforeReport,
     );
+  });
+
+  it("preserves malformed historical results during unrelated ownership mutations", () => {
+    const old = task("old");
+    const retained = { ...old, task: { ...old.task, terminalView: { status: "completed" } } };
+    let session: { state?: SessionStateMap } = {
+      state: { "eve.runtime.workflowInvocations": { version: 1, invocations: [retained] } },
+    };
+    session = registerWorkflowInvocation(session, waiting("turn-b"));
+    session = registerWorkflowInvocation(session, task("live"));
+    session = {
+      ...session,
+      state: cacheWorkflowTaskView(session.state, {
+        taskId: "live",
+        metadata: old.task.metadata,
+        status: "cancelled",
+      }),
+    };
+    session = removeTurnInvocations(session, "turn-b");
+    const entries = getWorkflowInvocations(session.state);
+    expect(entries[0]).toEqual(retained);
+    expect(() => readWorkflowTaskView(retained.task)).toThrow("Corrupt workflow task result");
+    expect(entries).toHaveLength(2);
   });
 
   it("does not change lifetime on replay", () => {

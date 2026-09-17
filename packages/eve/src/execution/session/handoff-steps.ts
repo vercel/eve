@@ -1,4 +1,4 @@
-import { getWorkflowInvocations } from "#harness/workflow-invocations.js";
+import { getWorkflowInvocations, readWorkflowTaskView } from "#harness/workflow-invocations.js";
 import { deserializeContext } from "#context/serialize.js";
 import { readDurableSession, type DurableSessionState } from "#execution/durable-session-store.js";
 import {
@@ -16,6 +16,9 @@ export function isSessionStateIdleForHandoff(sessionState: DurableSessionState):
   const { state } = readDurableSession(sessionState);
   // Parse all entries, including terminal tasks, before any busy-work shortcut.
   const invocations = getWorkflowInvocations(state);
+  for (const entry of invocations) {
+    if (entry.lifetime === "session") readWorkflowTaskView(entry.task);
+  }
   const handles = getAgentHandleStore(state);
 
   // These registries are deleted when work settles. Their ordinary readers

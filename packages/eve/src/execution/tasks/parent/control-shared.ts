@@ -3,7 +3,11 @@ import { readLatestTaskView } from "#execution/tasks/parent/run-parent.js";
 import { isTaskWorkflowTargetGone } from "#execution/tasks/workflow-target.js";
 import type { RuntimeActionResult, RuntimeToolCallActionRequest } from "#shared/action-types.js";
 import { taskViewsToJson } from "#tasks/json.js";
-import { findTaskInvocation, type TaskWorkflowInvocation } from "#harness/workflow-invocations.js";
+import {
+  readWorkflowTaskView,
+  findTaskInvocation,
+  type TaskWorkflowInvocation,
+} from "#harness/workflow-invocations.js";
 import type { TaskView } from "#tasks/types.js";
 
 /**
@@ -46,7 +50,7 @@ export async function readTaskView(entry: TaskWorkflowInvocation): Promise<TaskV
     );
   } catch (error) {
     if (isTaskWorkflowTargetGone(error) && entry.task.terminalView !== undefined) {
-      return entry.task.terminalView;
+      return readWorkflowTaskView(entry.task)!;
     }
     throw error;
   }

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { createTestSessionState } from "#internal/testing/session-state.js";
 import { isSessionStateIdleForHandoff } from "#execution/session/handoff-steps.js";
 import {
+  readWorkflowTaskView,
   cacheWorkflowTaskView,
   getTaskInvocations,
   registerWorkflowInvocation,
@@ -167,7 +168,7 @@ describe("additive durable state", () => {
       status: "cancelled",
     });
     expect(
-      getTaskInvocations(restored(cancelled))[0]?.task.terminalView?.lastOutput,
+      readWorkflowTaskView(getTaskInvocations(restored(cancelled))[0]!.task)?.lastOutput,
     ).toBeUndefined();
   });
 });
@@ -237,6 +238,21 @@ describe("handoff state inspection", () => {
         }),
       ),
     ).toThrow("Corrupt workflow invocation registry");
+  });
+  it("validates retained results even when other work prevents handoff", () => {
+    expect(() =>
+      isSessionStateIdleForHandoff(
+        checkpoint({
+          "eve.runtime.pendingAuthorization": {},
+          "eve.runtime.workflowInvocations": {
+            version: 1,
+            invocations: [
+              { ...task, task: { ...task.task, terminalView: { status: "completed" } } },
+            ],
+          },
+        }),
+      ),
+    ).toThrow("Corrupt workflow task result");
   });
   it.each([
     ["eve.runtime.pendingAuthorization", false],

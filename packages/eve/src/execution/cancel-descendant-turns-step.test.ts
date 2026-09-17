@@ -1,3 +1,4 @@
+import { cancelWorkflowToolRun } from "#execution/tools/workflow/cancel.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { deserializeContext } from "#context/serialize.js";
@@ -11,6 +12,8 @@ import {
 import { requestWorkflowTurnCancellation } from "#execution/workflow-runtime.js";
 import { AGENT_HANDLES_STATE_KEY, type AgentHandle } from "#subagents/handles/store.js";
 import type { HarnessSession } from "#harness/types.js";
+
+vi.mock("#execution/tools/workflow/cancel.js", () => ({ cancelWorkflowToolRun: vi.fn() }));
 
 vi.mock("#context/serialize.js", () => ({
   deserializeContext: vi.fn(),
@@ -112,6 +115,61 @@ describe("cancelDescendantTurnsStep", () => {
       remote: { ...remote, url: "https://remote.example.com" },
       sessionId: "remote-child",
     });
+  });
+
+  it("signals owned children while their workflow is still unwinding", async () => {
+    let settle!: () => void;
+    vi.mocked(cancelWorkflowToolRun).mockReturnValueOnce(
+      new Promise<void>((resolve) => {
+        settle = resolve;
+      }),
+    );
+    vi.mocked(requestWorkflowTurnCancellation).mockResolvedValue({
+      status: "accepted",
+      sessionId: "local-child",
+    });
+    const cancellation = cancelDescendantTurnsStep({
+      serializedContext: {},
+      sessionState: createDurableSessionState({
+        session: createSession({
+          "eve.harness.emission": {
+            turnId: "turn_0",
+            stepIndex: 0,
+            sequence: 0,
+            sessionStarted: true,
+          },
+          "eve.runtime.workflowInvocations": {
+            version: 1,
+            invocations: [
+              {
+                lifetime: "turn",
+                callId: "call",
+                toolName: "research",
+                resultKind: "tool",
+                origin: { turnId: "turn_0", stepIndex: 0 },
+                address: { runId: "workflow", hookToken: "hook" },
+              },
+            ],
+          },
+          [AGENT_HANDLES_STATE_KEY]: {
+            handles: [
+              {
+                phase: "claimed",
+                ownerId: "workflow",
+                operationId: "op",
+                identity: LOCAL_RUNNING_HANDLE.identity,
+                address: LOCAL_RUNNING_HANDLE.address,
+              },
+            ],
+          },
+        }),
+      }),
+    });
+    await Promise.resolve();
+    expect(cancelWorkflowToolRun).toHaveBeenCalled();
+    expect(requestWorkflowTurnCancellation).toHaveBeenCalledWith({ sessionId: "local-child" });
+    settle();
+    await cancellation;
   });
 
   it("does not deserialize remote context for local-only descendants", async () => {
