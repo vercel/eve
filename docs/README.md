@@ -18,6 +18,7 @@ Important naming note:
 | Create a project and run your first agent                | [Getting Started](./getting-started.mdx)                                                                                     |
 | Look up agent files and discovery rules                  | [Agent Files](./reference/agent-files.md)                                                                                    |
 | Set the model, reasoning, or other agent-wide config     | [Agents](./agent-config.md)                                                                                                  |
+| Choose an agent model automatically for each request     | [Automatic Model Selection](./guides/evaluate.md)                                                                            |
 | Change what the agent does and how it behaves            | [Instructions](./instructions.mdx)                                                                                           |
 | Give the agent a typed capability it can call            | [Tools](./tools/overview.mdx)                                                                                                |
 | Require approval, or ask the user something mid-turn     | [Human in the Loop](./tools/human-in-the-loop.md)                                                                            |
