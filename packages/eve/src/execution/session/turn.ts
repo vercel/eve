@@ -94,6 +94,7 @@ export class SessionExecution {
       const pendingCallIds =
         result.action === "park" ? result.pendingCoordinationCallIds : undefined;
       const hasBackgroundTasks = (result.backgroundTasks?.length ?? 0) > 0;
+      const settled = result.action === "park" && result.settled !== undefined;
 
       if (hasBackgroundTasks) {
         if (result.backgroundTaskState === undefined) {
@@ -109,7 +110,7 @@ export class SessionExecution {
       await cursor.apply({
         serializedContext: result.serializedContext,
         sessionState:
-          result.action === "cancelled" || turn.signal.aborted
+          result.action === "cancelled" || (!settled && turn.signal.aborted)
             ? (result.backgroundTaskState ?? result.sessionState)
             : result.sessionState,
       });
@@ -117,7 +118,7 @@ export class SessionExecution {
       turn.resetSteering();
 
       if (result.action === "cancelled") return await this.finishCancelledTurn();
-      if (turn.signal.aborted && (pendingCallIds === undefined || hasBackgroundTasks)) {
+      if (!settled && turn.signal.aborted && (pendingCallIds === undefined || hasBackgroundTasks)) {
         return await this.finishCancelledTurn();
       }
 

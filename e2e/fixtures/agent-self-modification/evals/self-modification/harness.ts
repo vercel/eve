@@ -132,34 +132,43 @@ export class SelfModificationHarness {
   ): Promise<SelfModificationRun> {
     const liveParent = await (session ?? (await this.#t.session())).start(prompt);
     this.#turns.add(liveParent);
+    const parent = await liveParent.result();
+    parent.expectOk();
+    const call = parent.requireToolCall(SELF_MODIFICATION_AGENT);
+    const agentId = typeof call.input.agentId === "string" ? call.input.agentId : undefined;
+    const message = agentId === undefined ? undefined : call.input.message;
+    if (agentId !== undefined && (typeof message !== "string" || message.length === 0))
+      throw new Error("Self-modification continuation omitted its message.");
+
+    let called = [...this.#turns]
+      .filter((turn) => turn.sessionId === parent.sessionId)
+      .flatMap((turn) => turn.events)
+      .find(
+        (event) =>
+          event.type === "subagent.called" &&
+          event.data.name === SELF_MODIFICATION_AGENT &&
+          (agentId === undefined
+            ? liveParent.events.includes(event)
+            : event.data.agentId === agentId),
+      );
     let continuation: EveEvalLiveTurn | undefined;
-    const called = await liveParent
-      .waitForEvent("subagent.called", {
-        data: { name: SELF_MODIFICATION_AGENT },
-      })
-      .catch(async (error) => {
-        this.#t.signal.throwIfAborted();
-        const parent = await liveParent.result();
-        parent.expectOk();
-        parent.requireToolCall(SELF_MODIFICATION_AGENT);
-        const startIndex = liveParent.session.state?.streamIndex;
-        if (startIndex === undefined) throw error;
-        continuation = this.#t.target.watchTurn(parent.sessionId, { startIndex });
-        this.#turns.add(continuation);
-        return continuation.waitForEvent("subagent.called", {
-          data: { name: SELF_MODIFICATION_AGENT },
-        });
+    if (called?.type !== "subagent.called") {
+      continuation = this.#t.target.watchTurn(parent.sessionId, {
+        startIndex: liveParent.session.state.streamIndex,
       });
-    const liveChild = this.#t.target.watchTurn(called.data.childSessionId);
-    this.#turns.add(liveChild);
-    const [parent, child] = await Promise.all([
-      liveParent.result(),
-      liveChild.result(),
+      this.#turns.add(continuation);
+      called = await continuation.waitForEvent("subagent.called", {
+        data: { name: SELF_MODIFICATION_AGENT, ...(agentId === undefined ? {} : { agentId }) },
+      });
+    }
+    const [child] = await Promise.all([
+      this.#readChild(
+        called.data.childSessionId,
+        typeof message === "string" ? message : undefined,
+      ),
       continuation?.result().then((turn) => turn.expectOk()),
     ]);
-    parent.expectOk();
     this.#t.calledSubagent(SELF_MODIFICATION_AGENT);
-    child.expectOk();
     return { child, parent, session: liveParent.session };
   }
 
@@ -253,6 +262,31 @@ export class SelfModificationHarness {
     }
     await this.#post("rebuild?force=1", signal);
     await rm(this.#backupRoot, { recursive: true, force: true });
+  }
+
+  async #readChild(sessionId: string, message?: string): Promise<EveEvalTurn> {
+    let startIndex =
+      [...this.#turns].reverse().find((turn) => turn.sessionId === sessionId)?.session.state
+        .streamIndex ?? 0;
+    for (let turns = 0; turns < 16; turns++) {
+      this.#t.signal.throwIfAborted();
+      const live = this.#t.target.watchTurn(sessionId, { startIndex });
+      this.#turns.add(live);
+      const turn = await live.result();
+      turn.expectOk();
+      // A reused child may have unseen diagnostic turns. Wait for the turn
+      // that actually received this delegation, including mid-turn steering.
+      if (
+        message === undefined ||
+        turn.events.some(
+          (event) => event.type === "message.received" && event.data.message?.includes(message),
+        )
+      )
+        return turn;
+      if (turn.status !== "waiting") break;
+      startIndex = live.session.state.streamIndex;
+    }
+    throw new Error("Self-modification child did not receive the delegated message.");
   }
 
   async #runTurn(session: EveEvalSession, prompt: string): Promise<EveEvalTurn> {

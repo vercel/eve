@@ -2285,6 +2285,38 @@ describe("turnStep", () => {
     });
   });
 
+  it("keeps a settled turn when cancellation arrives after its waiting boundary", async () => {
+    const controller = new AbortController();
+    const session = createStubSession();
+    installSessionStoreMocks([session]);
+    vi.mocked(createExecutionNodeStep).mockImplementation(() => {
+      return async (stepSession): Promise<StepResult> => {
+        controller.abort(new TurnCancelledError());
+        return {
+          next: null,
+          session: stepSession,
+          settledTurn: { output: "settled answer" },
+        };
+      };
+    });
+
+    const result = await turnStep({
+      abortSignal: controller.signal,
+      input: {
+        kind: "deliver",
+        payloads: [{ message: "hello" }],
+      },
+      sessionWritable: createTestWritable(),
+      serializedContext: createSerializedContext(),
+      sessionState: createStubSessionState(),
+    });
+
+    expect(result).toMatchObject({
+      action: "park",
+      settled: { output: "settled answer" },
+    });
+  });
+
   it("reports each settled turn's usage as a delta, not the cumulative session totals", async () => {
     const usageStateAfterTurn = (
       totals: Readonly<Record<string, number>>,

@@ -524,6 +524,71 @@ describe("SessionExecution background task checkpoints", () => {
     expect(queue.pendingCount).toBe(1);
   });
 
+  it.each([false, true])(
+    "keeps a settled turn when a late cancellation races its checkpoint (background tasks: %s)",
+    async (backgroundTasks) => {
+      const followUp: DeliverHookPayload = {
+        kind: "deliver",
+        payloads: [{ message: "Follow up after completion." }],
+      };
+      const cancel = { kind: "cancel", turnId: "turn_0" } as const;
+      let interrupt: (payload: SessionInboxPayload) => void = () => {};
+      const queue = new SessionInputQueue();
+      const inbox: SessionInbox = {
+        claimedTokens: [],
+        claimSessionHook: vi.fn(),
+        claimSessionHooks: vi.fn(),
+        drain: vi.fn().mockReturnValueOnce([cancel, followUp]).mockReturnValue([]),
+        hasPending: () => false,
+        next: vi.fn(),
+        restore: vi.fn(),
+        onDelivery: () => () => {},
+        onInterrupt: (handler) => {
+          interrupt = handler;
+          return () => {};
+        },
+      };
+      const completedState = state("http:completed");
+      const execution = createExecution({ inbox, queue, sessionState: state("") });
+      vi.mocked(cancelDescendantTurnsStep).mockClear();
+      vi.mocked(acknowledgeDelegatedTasksStep).mockReset();
+      vi.mocked(turnStep)
+        .mockReset()
+        .mockImplementationOnce(async (input) => {
+          interrupt(cancel);
+          expect(input.abortSignal?.aborted).toBe(true);
+          return {
+            action: "park",
+            hasPendingAuthorization: false,
+            hasPendingInputBatch: false,
+            serializedContext: input.serializedContext,
+            sessionState: completedState,
+            settled: { output: "Done." },
+            ...(backgroundTasks
+              ? {
+                  backgroundTaskState: state("http:background"),
+                  backgroundTasks: [
+                    {
+                      callId: "call-1",
+                      taskId: "task-1",
+                      taskInboxToken: "inbox-1",
+                      taskRunId: "run-1",
+                    },
+                  ],
+                }
+              : {}),
+          };
+        });
+      await expect(execution.runTurn(undefined)).resolves.toMatchObject({
+        kind: "park",
+        settled: { output: "Done." },
+      });
+      expect(execution.cursor.sessionState).toBe(completedState);
+      expect(cancelDescendantTurnsStep).not.toHaveBeenCalled();
+      expect(queue.pendingCount).toBe(1);
+    },
+  );
+
   it("routes a task-owned answer to a descendant while waiting for runtime results", async () => {
     const sessionState = { ...state(""), hasProxyInputRequests: true };
     const taskAnswer: DeliverHookPayload = {

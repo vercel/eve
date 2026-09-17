@@ -538,7 +538,9 @@ async function runSessionStep(input: TurnStepInput): Promise<DurableStepResult> 
 
             return runHarnessStep(schemaSession, stepInput);
           });
-          throwIfTurnAborted(input.abortSignal);
+          // The waiting boundary may reach the client before this step returns.
+          // Its settled result wins over a cancellation of that completed turn.
+          if (result.settledTurn === undefined) throwIfTurnAborted(input.abortSignal);
           completedModelCall = { result, serializedContext: serializeContext(ctx) };
           return result;
         },
