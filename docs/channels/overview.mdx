@@ -88,6 +88,7 @@ eve's first-class channels use eve-owned runtimes for webhook handling, verifica
 | ------------------------------------------- | ---------------------------------------------------------- |
 | A web app / browser chat UI                 | eve channel + [`useEveAgent`](../guides/frontend/overview) |
 | Local tooling, SDK clients, `curl`          | [eve HTTP channel](./eve) (default)                        |
+| A2A agents delegating durable work          | [A2A](./a2a)                                               |
 | MCP clients delegating durable work         | [MCP](./mcp)                                               |
 | Slack mentions, DMs, buttons                | [Slack](./slack)                                           |
 | iMessage and SMS                            | [Linq](./linq)                                             |
@@ -111,6 +112,7 @@ Where an eve agent communicates with people, you may be required to disclose tha
 
 - [eve HTTP channel](./eve): the default session API behind the TUI, SDK clients, and browser UIs
 - [Slack](./slack): the most common platform channel, end to end
+- [A2A](./a2a): expose the agent for Agent Card discovery and A2A delegation
 - [MCP](./mcp): expose the agent as a durable invocation service
 - [Linq](./linq), [Photon](./photon), [Discord](./discord), [Teams](./teams), [Telegram](./telegram), [Twilio](./twilio), [GitHub](./github), and [Linear](./linear): the other first-class platform channels
 - [Chat SDK adapters](./chat-sdk): reach services eve has no first-class channel for

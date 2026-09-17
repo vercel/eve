@@ -1,0 +1,156 @@
+---
+title: "A2A Channel"
+description: "Publish an eve agent for discovery and durable delegation through the A2A 1.0 JSON-RPC protocol."
+---
+
+The A2A channel lets another agent discover and delegate durable work to an eve agent. It publishes
+an [Agent Card](#agent-card) and an authenticated A2A 1.0 JSON-RPC endpoint.
+
+## Configure the channel
+
+Create `agent/channels/a2a.ts`. This public example is suitable only when anonymous invocation is
+intentional:
+
+```ts title="agent/channels/a2a.ts"
+import { none } from "eve/channels/auth";
+import { a2aChannel } from "eve/channels/a2a";
+
+export default a2aChannel({
+  auth: none(),
+});
+```
+
+The channel registers:
+
+```text
+GET  /.well-known/agent-card.json
+POST /eve/v1/a2a
+```
+
+Set `route` to change the JSON-RPC endpoint. The Agent Card always uses the standard well-known
+path and advertises the configured route on the request's public origin.
+
+## Authenticate callers
+
+Use an eve route-auth policy and publish the matching A2A security declaration. The policy enforces
+access; the declaration tells A2A clients which credential to obtain.
+
+```ts title="agent/channels/a2a.ts"
+import { oauthResource, oidc } from "eve/channels/auth";
+import { a2aChannel } from "eve/channels/a2a";
+
+const issuer = "https://auth.example.com";
+const resource = "https://agent.example.com/eve/v1/a2a";
+
+export default a2aChannel({
+  auth: oauthResource(oidc({ issuer, audiences: [resource] }), {
+    issuer,
+    resource,
+    requiredScopes: ["a2a.invoke"],
+  }),
+});
+```
+
+Every A2A operation reruns `auth`. A task belongs to the principal that created it; another
+principal receives the same `TaskNotFoundError` as an unknown task. Primary authentication failures
+remain HTTP `401` or `403` responses and do not create an A2A task.
+
+`oidc()` verifies the issuer and audience. `oauthResource()` enforces every `requiredScopes` entry
+against the verified token's `scope` claim, advertises those scopes through protected-resource
+metadata, and lets `a2aChannel()` derive the matching OIDC scheme and requirement for the Agent
+Card. The scope claim may be a space-delimited string or a string array. Use a custom auth policy
+and explicit `security` when your provider uses another claim such as `scp`.
+
+## Agent Card
+
+`GET /.well-known/agent-card.json` returns an A2A 1.0 Agent Card containing:
+
+- the compiled agent name and description;
+- the JSON-RPC endpoint and protocol version;
+- the configured security schemes and requirements;
+- one derived agent-level skill, or `card.skills` when provided;
+- supported input and output media types; and
+- the capabilities implemented by this release.
+
+Override public metadata explicitly:
+
+```ts
+export default a2aChannel({
+  auth: none(),
+  card: {
+    version: "2.4.0",
+    provider: {
+      organization: "Acme",
+      url: "https://acme.example.com",
+    },
+    documentationUrl: "https://acme.example.com/agents/travel",
+    skills: [
+      {
+        id: "travel-planning",
+        name: "Travel planning",
+        description: "Plans multi-city itineraries.",
+        tags: ["travel", "itinerary"],
+      },
+    ],
+  },
+});
+```
+
+The card is public, so include only metadata safe for anonymous callers. eve does not publish the
+contents of `agent/skills/` automatically. `card.version` defaults to the installed eve version;
+set it to the agent application's release version when you maintain one. Responses include
+`Cache-Control` and an `ETag` for revalidation.
+
+## Delegate work
+
+An A2A client sends `A2A-Version: 1.0` and calls `SendMessage`:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": "request-1",
+  "method": "SendMessage",
+  "params": {
+    "configuration": { "returnImmediately": true },
+    "message": {
+      "messageId": "message-1",
+      "role": "ROLE_USER",
+      "parts": [{ "text": "Plan a three-day visit to Tokyo." }]
+    }
+  }
+}
+```
+
+The response contains a server-generated A2A Task. `taskId` and `contextId` both map to the durable
+eve task session in this release. Call `GetTask` until the task completes, fails, requires input, or
+is canceled. Use `CancelTask` to request cooperative cancellation.
+
+When a task reaches `TASK_STATE_INPUT_REQUIRED`, continue it with `SendMessage` and the returned
+`taskId`. A single free-form question accepts one text part. Structured input batches accept a data
+part containing `{ "responses": [...] }` with eve input response IDs.
+
+## Current protocol surface
+
+| A2A operation          | Support                                                     |
+| ---------------------- | ----------------------------------------------------------- |
+| `SendMessage`          | Start work and continue input-required tasks.               |
+| `GetTask`              | Read an owner-scoped task snapshot.                         |
+| `CancelTask`           | Request cooperative cancellation.                           |
+| `ListTasks`            | Not yet supported.                                          |
+| Streaming operations   | Not yet supported and advertised as `streaming: false`.     |
+| Push notifications     | Not supported and advertised as `pushNotifications: false`. |
+| `GetExtendedAgentCard` | Not supported and advertised as `extendedAgentCard: false`. |
+
+The channel supports the A2A 1.0 JSON-RPC binding only. Requests require HTTPS outside loopback,
+matching `Host`, same-origin browser `Origin`, `Content-Type: application/json`, and
+`A2A-Version: 1.0`. Request bodies are limited to 1 MiB, and raw file parts are rejected.
+
+This channel is ingress only. It lets external A2A clients call eve; it does not make an eve agent
+call another A2A server.
+
+## What to read next
+
+- [Authentication](../guides/auth-and-route-protection): configure inbound route authentication.
+- [Sessions, runs & streaming](../concepts/sessions-runs-and-streaming): understand the durable
+  session behind each task.
+- [MCP channel](./mcp): expose the same durable invocation kernel through MCP tools.

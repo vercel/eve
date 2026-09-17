@@ -36,7 +36,62 @@ describe("oauthResource", () => {
     });
   });
 
+  it("enforces required OAuth scopes and advertises them by default", async () => {
+    const auth = oauthResource(
+      () => ({ ...principal, attributes: { scope: "profile calendar.read" } }),
+      {
+        issuer: "https://auth.example",
+        requiredScopes: ["agent:invoke"],
+      },
+    );
+
+    const response = await routeAuth(new Request("https://agent.example/mcp"), auth);
+    expect(response).toBeInstanceOf(Response);
+    if (!(response instanceof Response)) throw new Error("Expected a forbidden response.");
+    expect(response.status).toBe(403);
+    expect(response.headers.get("www-authenticate")).toContain('error="insufficient_scope"');
+    expect(response.headers.get("www-authenticate")).toContain('scope="agent:invoke"');
+    expect(readOAuthResourceOptions(auth)).toMatchObject({
+      requiredScopes: ["agent:invoke"],
+      scopes: ["agent:invoke"],
+    });
+  });
+
+  it("accepts string-array scope claims when all required scopes are present", async () => {
+    const scopedPrincipal = {
+      ...principal,
+      attributes: { scope: ["agent:invoke", "profile"] },
+    };
+    const auth = oauthResource(() => scopedPrincipal, {
+      issuer: "https://auth.example",
+      requiredScopes: ["agent:invoke"],
+    });
+
+    await expect(routeAuth(new Request("https://agent.example/mcp"), auth)).resolves.toBe(
+      scopedPrincipal,
+    );
+  });
+
   it("rejects invalid resource metadata at authoring time", () => {
+    expect(() =>
+      oauthResource(() => principal, {
+        issuer: "https://auth.example",
+        requiredScopes: [],
+      }),
+    ).toThrow("requiredScopes must contain non-empty individual scope names");
+    expect(() =>
+      oauthResource(() => principal, {
+        issuer: "https://auth.example",
+        requiredScopes: ["agent invoke"],
+      }),
+    ).toThrow("requiredScopes must contain non-empty individual scope names");
+    expect(() =>
+      oauthResource(() => principal, {
+        issuer: "https://auth.example",
+        requiredScopes: ["agent:invoke"],
+        scopes: ["profile"],
+      }),
+    ).toThrow("scopes must include every required scope");
     expect(() =>
       oauthResource(() => principal, {
         authorizationServers: [],

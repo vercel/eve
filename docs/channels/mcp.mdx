@@ -58,14 +58,14 @@ export default mcpChannel({
   auth: oauthResource(authenticateRequest, {
     issuer,
     resource,
-    scopes: ["agent:invoke"],
+    requiredScopes: ["agent:invoke"],
   }),
 });
 ```
 
-The authorization server identified by `issuer` must issue tokens accepted by the wrapped verifier. `scopes` advertises what clients should request; the verifier remains responsible for signature, expiration, audience/resource, and scope enforcement.
+The authorization server identified by `issuer` must issue tokens accepted by the wrapped verifier. `requiredScopes` rejects verified principals whose `scope` claim lacks `agent:invoke` and advertises that scope through protected-resource metadata. The claim may be a space-delimited string or a string array.
 
-`oauthResource()` does not issue tokens or run an authorization server. It decorates an ordinary inbound `AuthFn` with OAuth protected-resource metadata so `mcpChannel()` can publish discovery and add `resource_metadata` to Bearer challenges. Client registration, consent, token issuance, and authorization-server metadata remain the identity provider's responsibility.
+`oauthResource()` does not issue tokens or run an authorization server. It decorates an ordinary inbound `AuthFn` with OAuth protected-resource metadata and optional scope enforcement so `mcpChannel()` can publish discovery and add `resource_metadata` to Bearer challenges. Client registration, consent, token issuance, and authorization-server metadata remain the identity provider's responsibility.
 
 Most hosted MCP clients (Claude, ChatGPT, Grok, and similar) register themselves with the authorization server through Dynamic Client Registration ([RFC 7591](https://www.rfc-editor.org/rfc/rfc7591)) the first time a user connects. Choose an issuer that supports it, or pre-register each client with the issuer before the demo. If registration fails, the client stops before it ever reaches eve.
 
@@ -99,7 +99,7 @@ export default mcpChannel({
 });
 ```
 
-`verifyOidc()` uses the issuer's discovery document to validate the token signature and claims. Returning `sessionAuth` accepts the request and binds invocation ownership to that verified principal. Returning `null` lets the auth walk continue; when no strategy accepts the request, eve returns `401`.
+`verifyOidc()` uses the issuer's discovery document to validate the token signature and claims. Returning `sessionAuth` accepts the request and binds invocation ownership to that verified principal. Returning `null` lets the auth walk continue; when no strategy accepts the request, eve returns `401`. This custom example advertises `scopes` but does not enforce them; add `requiredScopes` or perform provider-specific authorization inside `verifyToken` when the endpoint requires a scope.
 
 You can wrap any strategy in `oauthResource()`, including `vercelOidc()`, but the advertised authorization server must issue tokens that strategy accepts. `vercelOidc()` by itself is preconfigured Vercel workload identity and does not advertise an interactive login.
 
@@ -119,7 +119,7 @@ oauthResource(verifyToken, {
   issuer,
   metadataPath: "/.well-known/custom-resource",
   resource: "https://agent.example.com/eve/v1/mcp",
-  scopes: ["agent:invoke"],
+  requiredScopes: ["agent:invoke"],
 });
 ```
 
