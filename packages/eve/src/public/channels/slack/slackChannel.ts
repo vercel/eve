@@ -650,11 +650,34 @@ export type SlackApprovalChannelResolver = (
   ctx: SessionContext,
 ) => SlackApprovalChannel | Promise<SlackApprovalChannel>;
 
+export interface SlackAppConfig {
+  /** Hex color used behind the Slack app's information hovercard. */
+  readonly backgroundColor?: string;
+  /** Short Slack app description, up to 140 characters. */
+  readonly description?: string;
+  /** Display name used for the Slack app. */
+  readonly name?: string;
+}
+
+export interface SlackBotConfig {
+  /** Slack bot display name. Invalid characters are normalized to hyphens. */
+  readonly displayName?: string;
+}
+
 export interface SlackChannelConfig {
   /** Slack API transport overrides: base URLs and a custom fetch. */
   readonly api?: SlackTransportOptions;
   readonly credentials?: SlackChannelCredentials;
-  readonly botName?: string;
+  /** Slack app presentation. */
+  readonly app?: SlackAppConfig;
+  /** Slack bot presentation. */
+  readonly bot?: SlackBotConfig;
+  /** Additional Slack Events API bot events delivered to this channel. */
+  readonly eventSubscriptions?: readonly string[];
+  /** Additional Slack bot OAuth scopes required by this channel. */
+  readonly scopes?: readonly string[];
+  /** Slack bot OAuth scopes an installer may decline without blocking installation. */
+  readonly optionalScopes?: readonly string[];
 
   /**
    * Chooses where each input request is delivered. Direct-message requests go to the
@@ -1066,7 +1089,15 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
     renderers: activityRenderers,
   });
   const credentials = config.credentials as { readonly vercelConnect?: unknown } | undefined;
-  const manifest = defineSlackAppManifest({ botName: config.botName });
+  const manifest = defineSlackAppManifest({
+    appName: config.app?.name,
+    backgroundColor: config.app?.backgroundColor,
+    botDisplayName: config.bot?.displayName,
+    botEvents: config.eventSubscriptions,
+    botScopes: config.scopes,
+    description: config.app?.description,
+    optionalBotScopes: config.optionalScopes,
+  });
   setChannelBuildMetadata(channel, (channelName) => ({
     externalCredentials: credentials?.vercelConnect,
     manifest: manifest.build(channelName),

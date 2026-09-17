@@ -17,6 +17,7 @@ import { createProgrammaticCompiledModuleMap } from "#compiler/module-map.js";
 import { validateCompiledModuleMap } from "#compiler/validate-artifact.js";
 import { frameworkAgentSourceRegistry } from "#framework/sources/registry.js";
 import { defineAgent } from "#public/definitions/agent.js";
+import { slackChannel } from "#public/channels/slack/slackChannel.js";
 import { defineChannel, GET, POST } from "#public/definitions/channel.js";
 import { defineMcpClientConnection } from "#public/definitions/connections/mcp.js";
 import { defineHook } from "#public/definitions/hook.js";
@@ -836,6 +837,63 @@ describe("compileAgentManifest source graph", () => {
       expect.objectContaining({ code: "compile/channel-route-shadowed", severity: "warning" }),
     );
     expect(compiled.diagnosticsSummary.warnings).toBe(1);
+  });
+
+  it("preserves Slack bot configuration on compiled channel routes", async () => {
+    const sourceRegistry = registry([
+      {
+        logicalPath: "channels/support.ts",
+        loadNamespace: async () => ({
+          default: slackChannel({
+            app: {
+              backgroundColor: "#000000",
+              description: "Answers support questions.",
+              name: "Support agent",
+            },
+            bot: { displayName: "Support Agent" },
+            eventSubscriptions: ["message.channels"],
+            optionalScopes: ["reactions:write"],
+            scopes: ["channels:history"],
+          }),
+        }),
+      },
+    ]);
+
+    const compiled = await compileAgentManifest(manifest(), { sourceRegistries: [sourceRegistry] });
+
+    const support = compiled.channelRoutes.effective.find(
+      (channel) => channel.logicalPath === "channels/support.ts",
+    );
+    expect(support?.manifest).toEqual({
+      $type: "https://docs.slack.dev/reference/app-manifest/",
+      display_information: {
+        background_color: "#000000",
+        description: "Answers support questions.",
+        name: "Support agent",
+      },
+      features: {
+        app_home: {
+          home_tab_enabled: false,
+          messages_tab_enabled: true,
+          messages_tab_read_only_enabled: false,
+        },
+        bot_user: { display_name: "support-agent" },
+      },
+      oauth_config: {
+        scopes: {
+          bot: ["app_mentions:read", "chat:write", "channels:history", "reactions:write"],
+          bot_optional: ["reactions:write"],
+        },
+      },
+      settings: {
+        event_subscriptions: {
+          bot_events: ["app_mention", "message.channels"],
+        },
+        org_deploy_enabled: false,
+        socket_mode_enabled: false,
+        token_rotation_enabled: false,
+      },
+    });
   });
 
   it("rejects duplicate routes emitted by one selected channel", async () => {
