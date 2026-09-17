@@ -53,4 +53,6 @@ function reusedHandle(handle: SandboxProviderHandle): SandboxProviderHandle {
   };
 }
 
-async function preserveReusedCompute(): Promise<void> {}
+async function preserveReusedCompute(): Promise<void> {
+  return;
+}
