@@ -21,7 +21,11 @@ const agent: AgentDefinition = defineAgent({
         ) {
           throw new Error("Turn resolver did not receive message history.");
         }
-        return { model, modelContextWindowTokens: 1_000_000 };
+        // Turn selections are durable; the step resolver supplies the live mock.
+        return {
+          model: typeof model === "string" ? model : "openai/gpt-5.6-sol",
+          modelContextWindowTokens: 1_000_000,
+        };
       },
       "step.started": (_event, ctx) => {
         const text = lastUserText(ctx.messages);
