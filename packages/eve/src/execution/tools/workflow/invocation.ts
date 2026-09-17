@@ -55,11 +55,14 @@ export async function runWorkflowToolInvocation(
       if (body === undefined) break;
       cleanupDeadline ??= sleep(WORKFLOW_CANCELLATION_CLEANUP_MS).then(() => "cancel");
     }
-    // Hook persistence does not mean the owner has consumed every report yet.
     if (
+      // Wait for the body to produce its final outcome.
       bodyResult !== undefined &&
+      // Persisted reports must also finish delivery before settlement.
       consumedReports >= bodyResult.reportCount &&
+      // Handle buffered commands, especially cancellation, before publishing the outcome.
       owner.commands.landed.length === 0 &&
+      // Propagate a command-read failure instead of hiding it behind completion.
       owner.commands.failure === undefined
     ) {
       outcome = bodyResult.outcome;
