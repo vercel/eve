@@ -201,7 +201,7 @@ test("builds local eve-code dependency graph and installs the independently pinn
   );
   assert.match(
     step("Checkout pinned benchmark runner separately"),
-    /repository: vercel-labs\/eve-bench\n\s+ref: \$\{\{ env.BENCHMARK_REVISION \}\}\n\s+token: \$\{\{ secrets.EVE_BENCH_READ_TOKEN \}\}\n\s+path: .eve-bench-runner/,
+    /repository: vercel-labs\/eve-bench\n\s+ref: \$\{\{ env.BENCHMARK_REVISION \}\}\n\s+ssh-key: \$\{\{ secrets.EVE_BENCH_SSH_KEY \}\}\n\s+path: .eve-bench-runner/,
   );
   assert.match(
     step("Install benchmark runner dependencies"),
@@ -229,13 +229,14 @@ test("only the bounded smoke step gets the gateway secret; publication has no ch
   assert.equal((workflow.match(/secrets\./g) ?? []).length, 3);
   assert.match(
     step("Check private runner access"),
-    /HAS_RUNNER_TOKEN: \$\{\{ secrets.EVE_BENCH_READ_TOKEN != '' \}\}/,
+    /HAS_RUNNER_KEY: \$\{\{ secrets.EVE_BENCH_SSH_KEY != '' \}\}/,
   );
   assert.ok(
     workflow.indexOf(step("Check private runner access")) <
       workflow.indexOf(step("Install workspace dependencies")),
   );
-  assert.doesNotMatch(step("Run terminal-only single smoke task"), /EVE_BENCH_READ_TOKEN/);
+  assert.doesNotMatch(step("Run terminal-only single smoke task"), /EVE_BENCH_SSH_KEY/);
+  assert.doesNotMatch(step("Checkout pinned benchmark runner separately"), /\n\s+token:/);
   assert.match(
     step("Run terminal-only single smoke task"),
     /AI_GATEWAY_API_KEY: \$\{\{ secrets.AI_GATEWAY_API_KEY \}\}/,

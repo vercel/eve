@@ -62,9 +62,9 @@ jobs:
 
       - name: Check private runner access
         env:
-          HAS_RUNNER_TOKEN: ${{ secrets.EVE_BENCH_READ_TOKEN != '' }}
+          HAS_RUNNER_KEY: ${{ secrets.EVE_BENCH_SSH_KEY != '' }}
         run: |
-          test "$HAS_RUNNER_TOKEN" = true || { echo 'Configure EVE_BENCH_READ_TOKEN with read-only Contents access to vercel-labs/eve-bench.' >&2; exit 1; }
+          test "$HAS_RUNNER_KEY" = true || { echo 'Configure EVE_BENCH_SSH_KEY with a read-only deploy key for vercel-labs/eve-bench.' >&2; exit 1; }
 
       - name: Install workspace dependencies
         run: pnpm install --frozen-lockfile
@@ -77,7 +77,7 @@ jobs:
         with:
           repository: vercel-labs/eve-bench
           ref: ${{ env.BENCHMARK_REVISION }}
-          token: ${{ secrets.EVE_BENCH_READ_TOKEN }}
+          ssh-key: ${{ secrets.EVE_BENCH_SSH_KEY }}
           path: .eve-bench-runner
           persist-credentials: false
 
