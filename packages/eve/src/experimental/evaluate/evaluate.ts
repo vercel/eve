@@ -8,7 +8,7 @@ import { localGatewayEvaluationModel } from "#internal/model-auth/transport.js";
 
 export const DEFAULT_EVALUATION_MODEL = "typesafe-ai/jev";
 
-/** Evaluate typed questions against shared state using eve's model authentication. */
+/** Evaluate typed questions about the state you pass to it using eve's model authentication. */
 export function evaluate<const Questions extends Record<string, EvaluationQuestion>>({
   model = DEFAULT_EVALUATION_MODEL,
   ...options

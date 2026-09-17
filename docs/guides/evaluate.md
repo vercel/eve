@@ -106,7 +106,7 @@ agent's reasoning setting.
 
 ## Evaluate inside a tool
 
-Use `evaluate` to ask choice, score, or boolean questions against shared state.
+Use `evaluate` to ask choice, score, or boolean questions about the state you pass to it.
 It defaults to `typesafe-ai/jev` and uses the same authentication as `autoModel`,
 including the Gateway connection selected through `/login` during `eve dev`.
 Pass `model` to use another evaluation model ID or a provider instance. A configured
