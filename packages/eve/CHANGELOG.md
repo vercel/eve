@@ -1,5 +1,12 @@
 # eve
 
+## 0.59.1
+
+### Patch Changes
+
+- 7ef42fd: Add `auto({ model?, instructions?, criteria? })` for evaluation-model tool approvals, defaulting to TypeSafe Jev and failing closed to user approval. Approval policies now receive the active turn's cancellation signal.
+- 1e872e3: Set `tool: false` on an agent or export a same-named `disableTool()` to hide its derived agent tool. Hidden subagents remain callable from authored workflow tools through `ctx.agent()`.
+
 ## 0.59.0
 
 ### Minor Changes
