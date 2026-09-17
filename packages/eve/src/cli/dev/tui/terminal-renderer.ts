@@ -1789,6 +1789,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
     this.#nextSubmittedPromptOrigin = undefined;
     this.#fileContents.clear();
     this.#turnClock.reset();
+    this.#syncBackgroundActivityTicker();
   }
 
   /**
@@ -2904,7 +2905,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
     this.#flowInterrupt = undefined;
     this.#disarmFlowIdleTrap();
     this.#detachInput();
-    this.#stopTicker();
+    this.#clearTicker();
     this.#live.clear();
     this.#removeLogCapture();
     this.#altScreen.enter({ cursor: "visible", mouse: false });
@@ -2925,6 +2926,8 @@ export class TerminalRenderer implements AgentTUIRenderer {
       if (this.#setupFlow !== undefined) {
         this.#startTicker();
         this.#armFlowIdleTrap();
+      } else {
+        this.#syncBackgroundActivityTicker();
       }
       this.#live.reset();
       this.#paint();
@@ -3394,9 +3397,9 @@ export class TerminalRenderer implements AgentTUIRenderer {
     return this.#blocks.some(
       (block) =>
         block.live &&
-        (block.kind === "subagent" ||
-          block.kind === "subagent-step" ||
-          block.kind === "subagent-tool"),
+        block.subagentCallId !== undefined &&
+        (this.#backgroundSubagentCallIds.has(block.subagentCallId) ||
+          this.#provisionalSubagentCallIds.has(block.subagentCallId)),
     );
   }
 
