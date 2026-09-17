@@ -31,6 +31,7 @@ import { defineTool, disableTool } from "#tools/definition.js";
 import { defineMemory } from "#public/memory/index.js";
 import { defineDynamic } from "#dynamic/definition.js";
 import { webSearch } from "#tools/provided/web-search.js";
+import { agent as agentTool } from "#tools/framework/agent.js";
 
 function manifest() {
   return createAgentSourceManifest({
@@ -135,6 +136,45 @@ describe("compileAgentManifest source graph", () => {
     expect(() => validateCompiledModuleMap(compiled, moduleMap)).not.toThrow();
   });
 
+  it("omits the built-in agent tool when the root sets tool false", async () => {
+    const sourceRegistry = registry([
+      {
+        logicalPath: "agent.ts",
+        loadNamespace: async () => ({
+          default: defineAgent({ model: "openai/gpt-5.4", tool: false }),
+        }),
+      },
+    ]);
+
+    const compiled = await compileAgentManifest(manifest(), {
+      sourceRegistries: [sourceRegistry],
+    });
+
+    expect(compiled.config.tool).toBe(false);
+    expect(compiled.tools.map((tool) => tool.name)).not.toContain("agent");
+  });
+
+  it("lets an authored agent tool override root tool false", async () => {
+    const sourceRegistry = registry([
+      {
+        logicalPath: "agent.ts",
+        loadNamespace: async () => ({
+          default: defineAgent({ model: "openai/gpt-5.4", tool: false }),
+        }),
+      },
+      {
+        logicalPath: "tools/agent.ts",
+        loadNamespace: async () => ({ default: agentTool }),
+      },
+    ]);
+
+    const compiled = await compileAgentManifest(manifest(), {
+      sourceRegistries: [sourceRegistry],
+    });
+
+    expect(compiled.tools.map((tool) => tool.name)).toContain("agent");
+  });
+
   it("omits default tools while preserving authored tools and same-slug overrides", async () => {
     const sourceRegistry = registry([
       {
@@ -201,6 +241,27 @@ describe("compileAgentManifest source graph", () => {
       compileAgentManifest(manifest(), { sourceRegistries: [sourceRegistry] }),
     ).rejects.toThrow(
       'The required "connection_search" tool cannot be disabled. Remove "agent/tools/connection_search.ts" or export a replacement tool from it.',
+    );
+  });
+
+  it("allows disableTool for the root agent tool", async () => {
+    const sourceRegistry = registry([
+      {
+        logicalPath: "tools/agent.ts",
+        loadNamespace: async () => ({ default: disableTool() }),
+      },
+    ]);
+
+    const compiled = await compileAgentManifest(manifest(), {
+      sourceRegistries: [sourceRegistry],
+    });
+
+    expect(compiled.tools.map((tool) => tool.name)).not.toContain("agent");
+    expect(compiled.sourceComposition.entries).toContainEqual(
+      expect.objectContaining({
+        kind: "disabled",
+        source: expect.objectContaining({ logicalPath: "tools/agent.ts" }),
+      }),
     );
   });
 

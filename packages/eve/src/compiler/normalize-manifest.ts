@@ -36,8 +36,10 @@ import { compileAgentConfig } from "#compiler/normalize-agent-config.js";
 import { compileChannelDefinition } from "#compiler/normalize-channel.js";
 import { compileConnectionDefinition } from "#compiler/normalize-connection.js";
 import {
+  applyAgentToolPolicy,
   applyDefaultToolPolicy,
   assertFrameworkToolPolicy,
+  canDisableToolWithoutSelectedSource,
 } from "#compiler/default-tool-policy.js";
 import {
   loadModuleBackedDefinition,
@@ -178,6 +180,7 @@ class AgentGraphCompiler {
       source: phaseOne.selectedConfig.source,
     });
     assertRootOnlyConfig(config, input.isRoot, input.manifest.agentId);
+    applyAgentToolPolicy(phaseOne, config);
     applyDefaultToolPolicy(phaseOne, config);
 
     const externalDependencies = mergeExternalDependencies(
@@ -286,6 +289,7 @@ class AgentGraphCompiler {
           source: phaseOne.selectedConfig.source,
         });
         assertRootOnlyConfig(config, false, source.manifest.agentId);
+        applyAgentToolPolicy(phaseOne, config);
         applyDefaultToolPolicy(phaseOne, config);
       } else {
         dynamicBuildDependencies = normalized.build?.externalDependencies;
@@ -610,7 +614,11 @@ class AgentGraphCompiler {
           });
           assertFrameworkToolPolicy(candidate, result);
           if (result.kind === "disabled") {
-            state.composed = disableComposedCandidate({ candidate, composed: state.composed });
+            state.composed = disableComposedCandidate({
+              allowUnmatched: canDisableToolWithoutSelectedSource(state, result.name),
+              candidate,
+              composed: state.composed,
+            });
             delete state.bindings[candidate.sourceId];
             selectedSourceIds.delete(candidate.sourceId);
           } else if (result.kind === "tool") {

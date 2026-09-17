@@ -11,7 +11,13 @@ const childModel = mockModel({
 });
 
 const config = e2eAgentConfig({
-  mock: ({ lastUserMessage, toolResults, userMessages }) => {
+  mock: ({ lastUserMessage, toolResults, tools, userMessages }) => {
+    if (lastUserMessage === "E2E_DISABLED_ROOT_AGENT_TOOL") {
+      if (tools.some((tool) => tool.name === "agent")) {
+        throw new Error("The disabled built-in agent tool was exposed to the model.");
+      }
+      return "DISABLED-ROOT-AGENT-TOOL-HIDDEN";
+    }
     if (lastUserMessage?.includes("favorite word") && lastUserMessage.includes("?")) {
       const remembered = userMessages
         .map((message) => /My favorite word is (\w+)/u.exec(message)?.[1])

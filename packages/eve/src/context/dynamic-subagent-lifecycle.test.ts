@@ -80,6 +80,53 @@ describe("dynamic subagent lifecycle", () => {
     expect(getDynamicSubagentSelection(ctx, resolver.nodeId)).toBeDefined();
   });
 
+  it("keeps a tool-disabled dynamic subagent available without advertising it", async () => {
+    const ctx = createContext();
+    const created = createResolver();
+    const resolver: ResolvedDynamicSubagentResolver = {
+      ...created.resolver,
+      events: {
+        "session.started": () =>
+          defineAgent({
+            description: "Route internally.",
+            model: "openai/gpt-5.5",
+            modelContextWindowTokens: 200_000,
+            tool: false,
+          }),
+      },
+    };
+
+    await dispatchDynamicSubagentEvent({
+      ctx,
+      event: createSessionStartedEvent(),
+      messages: [],
+      resolvers: [resolver],
+    });
+
+    expect(buildDynamicSubagentTools(ctx)).toEqual([]);
+    expect(getDynamicSubagentSelection(ctx, resolver.nodeId)).toBeDefined();
+  });
+
+  it("applies a same-named disabled tool to a dynamic subagent", async () => {
+    const ctx = createContext();
+    const created = createResolver();
+    const resolver: ResolvedDynamicSubagentResolver = {
+      ...created.resolver,
+      events: { "session.started": () => created.agentConfig },
+      tool: false,
+    };
+
+    await dispatchDynamicSubagentEvent({
+      ctx,
+      event: createSessionStartedEvent(),
+      messages: [],
+      resolvers: [resolver],
+    });
+
+    expect(buildDynamicSubagentTools(ctx)).toEqual([]);
+    expect(getDynamicSubagentSelection(ctx, resolver.nodeId)).toBeDefined();
+  });
+
   it("lets a turn-scoped null hide a session-scoped selection", async () => {
     const ctx = createContext();
     const created = createResolver({
@@ -303,6 +350,29 @@ describe("dynamic subagent lifecycle", () => {
     expect(JSON.stringify(getDynamicSubagentSelection(ctx, resolver.nodeId))).not.toContain(
       "Bearer selected",
     );
+  });
+
+  it("keeps a tool-disabled dynamic remote subagent available without advertising it", async () => {
+    const ctx = createContext();
+    const remoteAgent = defineRemoteAgent({
+      description: "Route remotely.",
+      tool: false,
+      url: "https://research.example.com",
+    });
+    const created = createResolver({ handler: () => remoteAgent });
+
+    await dispatchDynamicSubagentEvent({
+      ctx,
+      event: createSessionStartedEvent(),
+      messages: [],
+      resolvers: [created.resolver],
+    });
+
+    expect(buildDynamicSubagentTools(ctx)).toEqual([]);
+    expect(getDynamicSubagentSelection(ctx, created.resolver.nodeId)).toMatchObject({
+      kind: "remote",
+      remoteAgent: { tool: false },
+    });
   });
 
   it("runs dynamic remote selections in the background", async () => {

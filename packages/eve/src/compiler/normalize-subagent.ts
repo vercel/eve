@@ -31,6 +31,7 @@ export type NormalizedSubagentConfig =
       readonly kind: "remote";
       readonly outputSchema?: JsonObject;
       readonly path: string;
+      readonly tool?: boolean;
       readonly url?: string;
     };
 
@@ -64,7 +65,17 @@ export function normalizeSubagentConfig(value: unknown, message: string): Normal
     const record = expectObjectRecord(value, message);
     expectOnlyKnownKeys(
       record,
-      ["auth", "description", "forwardPrincipal", "headers", "kind", "outputSchema", "path", "url"],
+      [
+        "auth",
+        "description",
+        "forwardPrincipal",
+        "headers",
+        "kind",
+        "outputSchema",
+        "path",
+        "tool",
+        "url",
+      ],
       message,
     );
     if (record.forwardPrincipal !== undefined) {
@@ -79,6 +90,7 @@ export function normalizeSubagentConfig(value: unknown, message: string): Normal
       kind: "remote",
       outputSchema,
       path: record.path === undefined ? EVE_SESSION_ROUTE_PATH : expectString(record.path, message),
+      tool: record.tool === undefined ? undefined : expectBoolean(record.tool, message),
       url: typeof record.url === "function" ? undefined : expectString(record.url, message),
     };
   }

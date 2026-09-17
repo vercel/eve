@@ -32,6 +32,16 @@ describe("defineWorkspaceAgent", () => {
     });
   });
 
+  it("preserves the workspace peer tool setting", () => {
+    const subagent = defineWorkspaceAgent({
+      name: "research",
+      tool: false,
+      transport: { url: "https://research.internal" },
+    });
+
+    expect(subagent.tool).toBe(false);
+  });
+
   it("uses the local Vercel router without deployment credentials in development", async () => {
     vi.stubEnv("VERCEL", "1");
     vi.stubEnv("VERCEL_ENV", "development");

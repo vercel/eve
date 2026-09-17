@@ -472,6 +472,7 @@ export function composeAgentModuleCandidates(
 }
 
 export function disableComposedCandidate(input: {
+  readonly allowUnmatched?: boolean;
   readonly candidate: AgentSourceCandidate;
   readonly composed: ComposedAgentModuleCandidates;
 }): ComposedAgentModuleCandidates {
@@ -483,7 +484,7 @@ export function disableComposedCandidate(input: {
   const replaced = input.composed.composition.entries.some(
     (entry) => entry.kind === "shadowed" && entry.winnerSourceId === input.candidate.sourceId,
   );
-  if (!replaced) {
+  if (!replaced && input.allowUnmatched !== true) {
     throw new Error(
       `Source "${input.candidate.logicalPath}" disables a slot with no lower-precedence source.`,
     );

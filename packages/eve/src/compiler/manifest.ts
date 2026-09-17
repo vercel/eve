@@ -55,7 +55,7 @@ export const ROOT_COMPILED_AGENT_NODE_ID = "__root__";
 /**
  * Current compiled manifest schema version.
  */
-export const COMPILED_AGENT_MANIFEST_VERSION = 48;
+export const COMPILED_AGENT_MANIFEST_VERSION = 49;
 
 /**
  * Compiled channel entry preserved in the compiled manifest.
@@ -610,6 +610,7 @@ const compiledAgentConfigBaseFields = {
     .enum(["provider-default", "none", "minimal", "low", "medium", "high", "xhigh"])
     .optional(),
   source: moduleSourceRefSchema,
+  tool: z.boolean().optional(),
   limits: compiledAgentLimitsDefinitionSchema.optional(),
 };
 
@@ -1223,6 +1224,7 @@ function cloneCompiledAgentDefinition(config: CompiledAgentDefinition): Compiled
             sessionTimeoutMs: config.limits.sessionTimeoutMs,
           },
     source: { ...config.source },
+    tool: config.tool,
   };
 
   if (config.dynamicModel !== undefined) {

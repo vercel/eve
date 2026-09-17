@@ -57,6 +57,7 @@ describe("definition helper exact inputs", () => {
     });
 
     expect(agent.description).toBe("type-test");
+    expect(defineAgent({ model: "openai/gpt-5.5", tool: false }).tool).toBe(false);
     expect(agent.experimental.workflow.modelCallsPerStep).toBe(4);
     expect(agent.experimental.workflow.retention).toBe(0);
     expect(agent.limits.maxInputTokensPerSession).toBe(200_000);

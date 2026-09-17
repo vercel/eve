@@ -331,6 +331,7 @@ export type InternalAgentDefinition = {
   outputSchema?: JsonObject;
   reasoning?: AgentReasoningDefinition;
   source?: ModuleSourceRef;
+  tool?: boolean;
   limits?: AgentLimitsDefinition;
 };
 
@@ -370,6 +371,14 @@ type PublicAgentDefinitionBase = {
    * Framework-owned runtime limits for this agent's runs.
    */
   readonly limits?: AgentLimitsDefinition;
+  /**
+   * Whether eve exposes this agent to its parent model as a tool. On the root
+   * agent, this controls the built-in `agent` tool. Defaults to `true`.
+   *
+   * A subagent with this set to `false` remains callable through `ctx.agent()`
+   * in workflow tools.
+   */
+  readonly tool?: boolean;
   /**
    * Optional structured return type used when this agent runs in task mode
    * (for example as a subagent, schedule, or remote job). Interactive

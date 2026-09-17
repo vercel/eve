@@ -38,15 +38,18 @@ The copy uses the root's instructions, connections, auth, and sandbox. It receiv
 
 The parent transfers data to the child through the `message` input it gives the subagent. Do not include sensitive data in a subagent request unless that child and its inherited tools, connections, sandbox, and telemetry path are appropriate for that data.
 
-To prevent the root session from delegating to a fresh copy of itself, disable `agent` the same way as any other built-in tool:
+To prevent the root session from delegating to a fresh copy of itself, set `tool: false` on the root agent:
 
-```ts title="agent/tools/agent.ts"
-import { disableTool } from "eve/tools";
+```ts title="agent/agent.ts"
+import { defineAgent } from "eve";
 
-export default disableTool();
+export default defineAgent({
+  model: "anthropic/claude-opus-4.8",
+  tool: false,
+});
 ```
 
-An authored root tool at `agent/tools/agent.ts` takes priority over the built-in.
+You can also export `disableTool()` from `agent/tools/agent.ts`. An authored root tool at that path takes priority over `tool: false` and the built-in.
 
 ## Declared subagents
 
@@ -61,7 +64,21 @@ export default defineAgent({
 });
 ```
 
-`description` is required. The parent reads it to decide whether to delegate, so the compiler rejects any subagent whose `agent.ts` leaves it out. Every declared local or remote subagent runs as a durable background task: the call returns `{ status: "working", taskId, agentId }` immediately, then task notifications wake the parent with completion, failure, or cancellation. Human input requests surface separately on the parent session.
+`description` is required. The parent reads it to decide whether to delegate, so the compiler rejects any subagent whose `agent.ts` leaves it out. Set `tool: false` to keep the subagent out of the parent model's tools while allowing an authored [workflow tool](/docs/tools/workflows) to call it by name through `ctx.agent()`:
+
+```ts title="agent/subagents/researcher/agent.ts"
+import { defineAgent } from "eve";
+
+export default defineAgent({
+  description: "Investigate ambiguous questions for the routing workflow.",
+  model: "anthropic/claude-opus-4.8",
+  tool: false,
+});
+```
+
+The parent can alternatively export `disableTool()` from a same-named tool path, such as `agent/tools/researcher.ts`. This suppresses the derived model tool without removing `researcher` from the workflow invocation registry. A same-named authored tool replaces the model-facing surface while the workflow can still call the underlying subagent with `ctx.agent("researcher", ...)`.
+
+Every declared local or remote subagent runs as a durable background task: the call returns `{ status: "working", taskId, agentId }` immediately, then task notifications wake the parent with completion, failure, or cancellation. Human input requests surface separately on the parent session.
 
 `task_cancel` is available to sessions that own background tasks, including a child that starts nested background work.
 
@@ -195,7 +212,7 @@ The root built-in `agent` tool is the exception. Its children share the root's s
 
 ## What the parent sees
 
-eve lowers every subagent visible to the current agent (the root built-in copy, declared, or [remote](./guides/remote-agents)) into a model-visible tool with the same `{ message, agentId?, outputSchema? }` shape. The parent packs `message` with everything the child needs, since the child never sees the parent's history. Set `outputSchema` to require structured output for that turn; the child remains available for follow-up messages afterward.
+eve lowers every tool-enabled subagent visible to the current agent (the root built-in copy, declared, or [remote](./guides/remote-agents)) into a model-visible tool with the same `{ message, agentId?, outputSchema? }` shape. The parent packs `message` with everything the child needs, since the child never sees the parent's history. Set `outputSchema` to require structured output for that turn; the child remains available for follow-up messages afterward.
 
 Declared subagents can call nested subagents defined under their own directories. eve does not apply a separate depth limit; nesting ends where the authored directory tree ends. The built-in `agent` follows the stricter root-only rule above, so `limits.maxSubagentDepth` no longer exists.
 
@@ -211,7 +228,7 @@ A directly declared subagent's tool name is the bare path-derived name, with no 
 }
 ```
 
-Because the name lives in the same runtime tool namespace as authored tools, a subagent named `researcher` collides with a tool named `researcher`. eve rejects static collisions at build time and active dynamic collisions at runtime rather than picking a winner, so keep subagent directory names distinct from tool names.
+By default, a subagent named `researcher` collides with an authored tool named `researcher`. Set the subagent's `tool` to `false` when the authored tool intentionally wraps that subagent; the authored tool becomes the model-facing capability while `ctx.agent("researcher", ...)` continues to address the child. A same-named `disableTool()` removes the model-facing capability entirely. Other static and active dynamic collisions remain errors.
 
 Do not rely on subagent delegation by itself as an approval boundary. Put sensitive tools behind `approval`, connection approval, route/session authorization, or other controls wherever those tools can be called.
 

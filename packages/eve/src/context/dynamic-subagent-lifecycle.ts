@@ -46,20 +46,26 @@ async function resolveSelections(input: {
           name: resolver.name,
           value: result,
         });
+        const effectiveRemoteAgent =
+          resolver.tool === false ? { ...remoteAgent, tool: false as const } : remoteAgent;
         const prepared = createPreparedRuntimeSubagentTool({
-          description: remoteAgent.description,
+          description: effectiveRemoteAgent.description,
           kind: "remote",
           logicalPath: resolver.logicalPath,
           name: resolver.name,
           nodeId: resolver.nodeId,
-          outputSchema: remoteAgent.outputSchema,
-          path: remoteAgent.path,
+          outputSchema: effectiveRemoteAgent.outputSchema,
+          path: effectiveRemoteAgent.path,
           sourceId: resolver.sourceId,
           sourceKind: resolver.sourceKind,
-          url: remoteAgent.url,
+          tool: effectiveRemoteAgent.tool,
+          url: effectiveRemoteAgent.url,
         });
 
-        return [resolver.nodeId, { kind: "remote", prepared, remoteAgent }] as const;
+        return [
+          resolver.nodeId,
+          { kind: "remote", prepared, remoteAgent: effectiveRemoteAgent },
+        ] as const;
       }
 
       const agentConfig = normalizeDynamicSubagentAgentConfig({
@@ -68,19 +74,24 @@ async function resolveSelections(input: {
         value: result,
       });
       const resolvedAgentConfig = await agentConfig;
+      const effectiveAgentConfig =
+        resolver.tool === false
+          ? { ...resolvedAgentConfig, tool: false as const }
+          : resolvedAgentConfig;
       const prepared = createPreparedRuntimeSubagentTool({
-        description: resolvedAgentConfig.description,
+        description: effectiveAgentConfig.description,
         kind: "subagent",
         logicalPath: resolver.logicalPath,
         name: resolver.name,
         nodeId: resolver.nodeId,
         sourceId: resolver.sourceId,
         sourceKind: resolver.sourceKind,
+        tool: effectiveAgentConfig.tool,
       });
 
       return [
         resolver.nodeId,
-        { agentConfig: resolvedAgentConfig, kind: "subagent", prepared },
+        { agentConfig: effectiveAgentConfig, kind: "subagent", prepared },
       ] as const;
     }),
   );
@@ -169,7 +180,11 @@ export function buildDynamicSubagentTools(input: ContextReader): readonly Harnes
       );
     }
     names.add(selection.prepared.name);
-    tools.push(createPreparedWorkflowToolHarnessDefinition(selection.prepared));
+    const modelVisible =
+      selection.kind === "subagent"
+        ? selection.agentConfig.tool !== false
+        : selection.remoteAgent.tool !== false;
+    if (modelVisible) tools.push(createPreparedWorkflowToolHarnessDefinition(selection.prepared));
   }
 
   return tools;

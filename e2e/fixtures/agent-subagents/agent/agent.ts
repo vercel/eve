@@ -13,6 +13,30 @@ if (process.env.EVE_E2E_MODEL === "mock") {
   process.env.EVE_MOCK_AUTHORED_MODELS = "1";
 }
 
+const TOOL_FALSE_PROBE = "E2E_TOOL_FALSE_SUBAGENT";
+const DISABLED_TOOL_PROBE = "E2E_DISABLED_SUBAGENT";
+const hiddenSubagentProbe = mockModel({
+  modelId: "hidden-subagent-probe",
+  respond(request) {
+    const probe = [...request.userMessages]
+      .reverse()
+      .find(
+        (message) => message.includes(TOOL_FALSE_PROBE) || message.includes(DISABLED_TOOL_PROBE),
+      );
+    const target = probe?.includes(TOOL_FALSE_PROBE) ? "tool-hidden" : "disabled-hidden";
+    if (request.tools.some((tool) => tool.name === target)) {
+      throw new Error(`Internal subagent ${target} was exposed to the model.`);
+    }
+    if (!request.tools.some((tool) => tool.name === "invoke-hidden")) {
+      throw new Error("The visible invoke-hidden workflow tool is missing.");
+    }
+    const result = request.toolResults.find((entry) => entry.name === "invoke-hidden");
+    return result === undefined
+      ? { toolCalls: [{ name: "invoke-hidden", input: { target } }] }
+      : JSON.stringify(result.output);
+  },
+});
+
 const base = e2eAgentConfig();
 const { model, modelContextWindowTokens, ...agentConfig } = base;
 const defaultModel = typeof model === "string" ? model : `${model.provider}/${model.modelId}`;
@@ -130,6 +154,14 @@ export default defineAgent({
               : message.content.map((part) => (part.type === "text" ? part.text : "")).join(""),
           ];
         });
+        if (
+          messages.some(
+            (message) =>
+              message.includes(TOOL_FALSE_PROBE) || message.includes(DISABLED_TOOL_PROBE),
+          )
+        ) {
+          return { model: hiddenSubagentProbe, modelContextWindowTokens: 1_000_000 };
+        }
         // Both models must reach the real authorization boundary, including denied lookups.
         if (messages.includes(WORKSPACE_LOOKUP_MESSAGE)) {
           return { model: workspaceReader, modelContextWindowTokens: 1_000_000 };

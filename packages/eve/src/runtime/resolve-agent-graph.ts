@@ -1,3 +1,4 @@
+import { stripLogicalPathExtension } from "#discover/filesystem.js";
 import type {
   CompiledAgentManifest,
   CompiledAgentNodeManifest,
@@ -141,6 +142,14 @@ async function resolveRuntimeAgentNode(
     workspaceResourceRoot: agent.workspaceResourceRoot,
   });
   const subagentRegistry = createRuntimeSubagentRegistry({
+    disabledToolNames: input.manifest.sourceComposition.entries.flatMap((entry) => {
+      if (entry.kind !== "disabled" || !entry.source.logicalPath.startsWith("tools/")) return [];
+      return [
+        stripLogicalPathExtension(entry.source.logicalPath)
+          .replace(/^tools\//, "")
+          .replaceAll("/", "-"),
+      ];
+    }),
     reservedToolNames: [
       LOAD_SKILL_TOOL_NAME,
       ...toolRegistry.preparedTools.map((tool) => tool.name),
@@ -233,10 +242,14 @@ async function resolveRuntimeSubagent(input: {
   readonly subagentNodesById: ReadonlyMap<string, CompiledSubagentNode>;
 }): Promise<ResolvedRuntimeSubagentNode> {
   const variant:
-    | { readonly description: string; readonly dynamic?: never }
-    | { readonly description?: never; readonly dynamic: ResolvedDynamicSubagentDefinition } =
+    | { readonly description: string; readonly dynamic?: never; readonly tool?: boolean }
+    | {
+        readonly description?: never;
+        readonly dynamic: ResolvedDynamicSubagentDefinition;
+        readonly tool?: never;
+      } =
     input.sourceRef.configResolver === undefined
-      ? { description: input.sourceRef.description }
+      ? { description: input.sourceRef.description, tool: input.sourceRef.agent.config.tool }
       : {
           dynamic: await resolveDynamicSubagentDefinition({
             definition: input.sourceRef.configResolver,
@@ -296,6 +309,7 @@ async function resolveRuntimeRemoteAgent(input: {
     path: string;
     sourceId: string;
     sourceKind: "module";
+    tool?: boolean;
     url: string;
   } = {
     description: input.sourceRef.description,
@@ -307,6 +321,7 @@ async function resolveRuntimeRemoteAgent(input: {
     path: input.sourceRef.path,
     sourceId: input.sourceRef.sourceId,
     sourceKind: "module",
+    tool: input.sourceRef.tool,
     url: await resolveRemoteAgentUrl({
       bakedUrl: input.sourceRef.url,
       logicalPath: input.sourceRef.logicalPath,

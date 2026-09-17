@@ -190,6 +190,7 @@ function createResolvedAgentConfig(
     outputSchema?: NonNullable<ResolvedAgent["config"]>["outputSchema"];
     reasoning?: NonNullable<ResolvedAgent["config"]>["reasoning"];
     source?: NonNullable<ResolvedAgent["config"]>["source"];
+    tool?: boolean;
     limits?: NonNullable<ResolvedAgent["config"]>["limits"];
   } = {
     name: manifest.config.name,
@@ -259,6 +260,10 @@ function createResolvedAgentConfig(
 
   if (manifest.config.source !== undefined) {
     config.source = createResolvedModuleSourceRef(manifest.config.source);
+  }
+
+  if (manifest.config.tool !== undefined) {
+    config.tool = manifest.config.tool;
   }
 
   if (manifest.config.limits !== undefined) {

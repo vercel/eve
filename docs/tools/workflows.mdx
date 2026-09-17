@@ -111,7 +111,7 @@ export default workflow({ maxSubagents: 20 });
 ```
 
 The model supplies an async function body through the tool's `js` input. Its only host capability is
-`ctx.agent(name, { message, agentId?, outputSchema? })`. For example:
+`ctx.agent(name, { message, agentId?, outputSchema? })`. This can invoke subagents configured with `tool: false` or hidden by a same-named `disableTool()` file. Include those path-derived names in the workflow tool description or agent instructions when the model writes the program. For example:
 
 ```js
 const [triage, review] = await Promise.all([
@@ -317,8 +317,7 @@ const result = await ctx.agent("reviewer", {
 });
 ```
 
-The first argument is the model-visible subagent name. eve assigns each call a replay-stable
-invocation identity, including repeated and parallel calls to the same subagent. Pass `agentId` to
+The first argument is the subagent's path-derived name. It can identify a model-visible subagent or one hidden with `tool: false` or `disableTool()`. eve assigns each call a replay-stable invocation identity, including repeated and parallel calls to the same subagent. Pass `agentId` to
 continue an existing child. An inline `outputSchema` requires structured output and determines the
 return type, so `result` in the example is typed as `{ findings: string[] }`.
 

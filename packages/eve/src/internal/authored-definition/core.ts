@@ -62,6 +62,7 @@ export function normalizeAgentDefinition(
       "modelOptions",
       "outputSchema",
       "reasoning",
+      "tool",
     ],
     message,
   );
@@ -119,6 +120,10 @@ export function normalizeAgentDefinition(
 
   if (record.reasoning !== undefined) {
     definition.reasoning = normalizeAgentReasoningDefinition(record.reasoning, message);
+  }
+
+  if (record.tool !== undefined) {
+    definition.tool = expectBoolean(record.tool, message);
   }
 
   if (record.limits !== undefined) {

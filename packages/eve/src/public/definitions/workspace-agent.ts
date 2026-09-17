@@ -31,6 +31,11 @@ export interface WorkspaceAgentDefinition {
   readonly outputSchema?: StandardJSONSchemaV1<unknown, unknown> | JsonObject;
   /** Name of the peer workspace member, such as `research`. */
   readonly name: string;
+  /**
+   * Whether eve exposes this workspace peer to the parent model as a tool.
+   * Defaults to `true`; `false` keeps it callable from workflow tools.
+   */
+  readonly tool?: boolean;
   /** Overrides environment-aware workspace routing and service authentication. */
   readonly transport?: WorkspaceAgentTransport;
 }
@@ -44,6 +49,7 @@ export function defineWorkspaceAgent(definition: WorkspaceAgentDefinition): Remo
     forwardPrincipal: definition.forwardPrincipal,
     headers: transport.headers,
     outputSchema: definition.outputSchema,
+    tool: definition.tool,
     url: transport.url,
   }) as BrandedWorkspaceSubagent;
   Object.defineProperty(remote, WORKSPACE_AGENT_NAME, { value: definition.name });

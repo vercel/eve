@@ -10,6 +10,15 @@ import { defineDynamic } from "#dynamic/definition.js";
 const FAILURE_MESSAGE = "Expected the agent config to match the public eve shape.";
 
 describe("normalizeAgentDefinition", () => {
+  it("normalizes agent tool visibility", () => {
+    expect(
+      normalizeAgentDefinition({ model: "openai/gpt-5.5", tool: false }, FAILURE_MESSAGE).tool,
+    ).toBe(false);
+    expect(() =>
+      normalizeAgentDefinition({ model: "openai/gpt-5.5", tool: "no" }, FAILURE_MESSAGE),
+    ).toThrow(FAILURE_MESSAGE);
+  });
+
   it("accepts provider-agnostic reasoning effort", () => {
     const definition = normalizeAgentDefinition(
       {

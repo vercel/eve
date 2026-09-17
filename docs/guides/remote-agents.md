@@ -29,6 +29,7 @@ export default defineRemoteAgent({
 | `headers`          | `HeadersValue`                                | No       | none              | Static or lazily resolved request headers.                                                                                                               |
 | `path`             | `string`                                      | No       | `/eve/v1/session` | Route appended to `url` for the create-session request.                                                                                                  |
 | `outputSchema`     | `StandardSchema \| JSON Schema`               | No       | none              | Structured return type for the first turn of each fresh remote session. A continuation may provide its own per-call schema.                              |
+| `tool`             | `boolean`                                     | No       | `true`            | Expose the remote agent as a tool to the parent model. Set `false` to allow only `ctx.agent()` calls from authored workflow tools.                       |
 
 ## Dynamic remote agents
 
@@ -80,7 +81,7 @@ The function may be async and must return a non-empty string. `auth` and `header
 
 ## Calling a remote agent
 
-To the model, a remote agent is another subagent tool. You call it the same way you call a local subagent, with a `message` and an optional `outputSchema`. The message must carry the full task, including any context the remote agent needs, because it never receives the parent's conversation history.
+By default, a remote agent is another subagent tool to the model. The model calls it the same way it calls a local subagent, with a `message` and an optional `outputSchema`. Set `tool: false` when an authored workflow tool should be the only model-facing routing surface; the workflow can still call the remote agent by its path-derived name through `ctx.agent()`. The message must carry the full task, including any context the remote agent needs, because it never receives the parent's conversation history.
 
 To require structured output, set an `outputSchema` on the agent definition for fresh delegations or on an individual call for that turn. The structured value arrives in the task's completion notification, and the remote child remains available for follow-up messages. See [Subagents](../subagents) for continuation behavior.
 
