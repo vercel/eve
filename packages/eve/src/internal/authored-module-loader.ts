@@ -210,7 +210,10 @@ export async function bundleExtensionDistributionGraph(input: {
   readonly entries: readonly ExtensionDistributionGraphEntry[];
   readonly packageRoot: string;
   readonly runtimeDependencies: readonly string[];
-}): Promise<ReadonlyMap<string, string>> {
+}): Promise<{
+  readonly files: ReadonlyMap<string, string>;
+  readonly imports: readonly string[];
+}> {
   const plugins = [
     createAuthoredDirectiveGuardPlugin(),
     createAuthoredRelativeExtensionResolverPlugin({ extensions: RESOLVE_EXTENSIONS }),
@@ -248,12 +251,14 @@ export async function bundleExtensionDistributionGraph(input: {
     });
 
     const files = new Map<string, string>();
+    const imports = new Set<string>();
     for (const item of result.output) {
       if (item.type === "chunk") {
         files.set(item.fileName, removeRolldownModuleRegionComments(item.code));
+        for (const specifier of [...item.imports, ...item.dynamicImports]) imports.add(specifier);
       }
     }
-    return files;
+    return { files, imports: [...imports] };
   } catch (error) {
     throw createAuthoredModuleBundleError(input.packageRoot, error);
   }

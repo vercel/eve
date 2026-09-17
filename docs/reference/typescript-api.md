@@ -138,7 +138,7 @@ import template from "../../prompts/template.txt?raw";
 | `eve/local-dev`                                                             | `getLocalDevCapability`, `LocalDevCapability`                                                                                  |
 | `eve/models/openai`                                                         | `openai`, `chatgpt`, deprecated `experimental_chatgpt`                                                                         |
 | `eve/models/anthropic`                                                      | `anthropic`                                                                                                                    |
-| [`eve/experimental/evaluate`](../guides/evaluate)                           | Experimental `autoModel`                                                                                                       |
+| [`eve/experimental/evaluate`](../guides/evaluate)                           | Experimental `autoModel` and standalone `evaluate`                                                                             |
 | `eve/evals`                                                                 | `defineEval`, `defineEvalConfig`, `mockModel`, eval types                                                                      |
 | `eve/evals/expect`                                                          | `includes`, `equals`, `matches`, `similarity`                                                                                  |
 | `eve/evals/reporters`                                                       | `Braintrust`, `JUnit`, `EvalReporter`                                                                                          |

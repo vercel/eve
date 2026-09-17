@@ -23,7 +23,7 @@ export async function emitExtensionDistribution(input: {
   readonly stagedDistRoot: string;
   readonly stagedOutDir: string;
   readonly transactionRoot: string;
-}): Promise<void> {
+}): Promise<readonly string[]> {
   const sourceFiles = await collectExtensionSourceFiles(input.sourceRoot);
   const skillPackageRoots = input.manifest.skills
     .filter((skill) => skill.sourceKind === "skill-package")
@@ -44,7 +44,7 @@ export async function emitExtensionDistribution(input: {
     packageRoot: input.appRoot,
     runtimeDependencies: input.runtimeDependencies,
   });
-  for (const [fileName, code] of emitted) {
+  for (const [fileName, code] of emitted.files) {
     const outputPath = join(input.stagedOutDir, fileName);
     await mkdir(dirname(outputPath), { recursive: true });
     await writeFile(outputPath, code, "utf8");
@@ -69,6 +69,7 @@ export async function emitExtensionDistribution(input: {
     );
   }
   await emitDeclarationBarrels(input);
+  return emitted.imports;
 }
 
 /**
