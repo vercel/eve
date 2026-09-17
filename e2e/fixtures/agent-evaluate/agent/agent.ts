@@ -8,6 +8,21 @@ const { experimental } = e2eAgentConfig();
 export default defineAgent({
   experimental,
   model: fixtureModel(async (request) => {
+    if (request.userMessages.some((text) => text.includes("evaluate-request"))) {
+      const result = request.toolResults.find((result) => result.name === "evaluate-request");
+      if (result) return JSON.stringify({ isError: result.isError, output: result.output });
+      return {
+        toolCalls: [
+          {
+            id: "evaluate-request-1",
+            name: "evaluate-request",
+            input: {
+              missingAnswer: request.userMessages.some((text) => text.includes("missing answer")),
+            },
+          },
+        ],
+      };
+    }
     if (request.userMessages.some((text) => text.includes("parallel investigations"))) {
       const completed = request.messages.filter((message) =>
         message.text.includes("child-result:"),

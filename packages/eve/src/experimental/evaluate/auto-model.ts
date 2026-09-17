@@ -1,9 +1,6 @@
 import { createHash } from "node:crypto";
 
-import {
-  experimental_evaluate as evaluate,
-  type Experimental_EvaluationModel as EvaluationModel,
-} from "ai";
+import { type Experimental_EvaluationModel as EvaluationModel } from "ai";
 
 import { loadContext } from "#context/container.js";
 import { ContextKey } from "#context/key.js";
@@ -13,12 +10,13 @@ import {
   type DynamicSentinel,
 } from "#dynamic/definition.js";
 import { isAgentReasoningDefinition, isRuntimeLanguageModel } from "#internal/runtime-model.js";
-import { localGatewayEvaluationModel } from "#internal/model-auth/transport.js";
 import type {
   AgentReasoningDefinition,
   PublicAgentDynamicModelResult,
   PublicAgentStaticModelDefinition,
 } from "#shared/agent-definition.js";
+
+import { DEFAULT_EVALUATION_MODEL, evaluate } from "./evaluate.js";
 
 type AutoModelOption =
   | string
@@ -35,8 +33,6 @@ interface AutoModelConfig<
   readonly model?: EvaluationModel;
   readonly options: T;
 }
-
-const DEFAULT_EVALUATION_MODEL = "typesafe-ai/jev";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -169,11 +165,7 @@ export function autoModel<const T extends Readonly<Record<string, AutoModelOptio
         if (previous?.turnId === currentTurnId) return models.get(previous.model)!;
 
         const result = await evaluate({
-          model:
-            typeof evaluationModel === "string" &&
-            Reflect.get(globalThis, "AI_SDK_DEFAULT_PROVIDER") == null
-              ? (localGatewayEvaluationModel(evaluationModel) ?? evaluationModel)
-              : evaluationModel,
+          model: evaluationModel,
           state: routingState(ctx),
           questions: {
             route: {

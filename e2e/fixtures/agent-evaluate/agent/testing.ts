@@ -10,7 +10,7 @@ export const routing = defineState("evaluate-fixture.routing", () => ({
   reasoning: "unselected",
 }));
 
-const evaluationModel = {
+export const evaluationModel: Exclude<Experimental_EvaluationModel, string> = {
   specificationVersion: "v4",
   provider: "fixture",
   modelId: "fixture-evaluator",
@@ -37,7 +37,7 @@ const evaluationModel = {
       response: { modelId: "fixture-evaluator" },
     };
   },
-} satisfies Exclude<Experimental_EvaluationModel, string>;
+};
 
 /** Run the real router with deterministic evaluation and language models. */
 export function fixtureModel(respond: MockModelResponder) {
