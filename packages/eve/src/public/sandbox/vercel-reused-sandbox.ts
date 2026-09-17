@@ -4,5 +4,4 @@ import type {
 } from "#public/sandbox/vercel-image-sandbox.js";
 
 export type ExperimentalVercelReusedImageEnvironmentOptions =
-  ExperimentalVercelImageEnvironmentOptions &
-    Omit<ExperimentalVercelImageRuntimeOptions, "onSession">;
+  ExperimentalVercelImageEnvironmentOptions & ExperimentalVercelImageRuntimeOptions;
