@@ -9,7 +9,8 @@
     "start": "eve start",
     "typecheck": "pnpm validate:transitions && eve build && tsc",
     "validate:transitions": "node scripts/validate-transitions.mjs",
-    "test:e2e": "eve eval --strict"
+    "test:e2e": "eve eval --strict",
+    "test:unit": "node --test evals/lifecycle-model.test.mjs"
   },
   "dependencies": {
     "@eve-e2e/config": "workspace:*",

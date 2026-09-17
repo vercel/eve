@@ -7,6 +7,8 @@ export type AuthoringBenchmarkSupport = "supported" | "candidate" | "superseded"
 export interface AuthoringBenchmarkModel {
   readonly id: string;
   readonly model: string;
+  /** Model reference sent to the native harness when it differs from the public model ID. */
+  readonly agentModel?: string;
   readonly displayName: string;
   readonly harness: "OpenCode" | "Claude Code" | "Codex";
   readonly support: AuthoringBenchmarkSupport;
@@ -63,6 +65,14 @@ export const benchmarkModels = [
     support: "supported",
   },
   {
+    id: "gpt-6-astra-high",
+    model: "openai/gpt-6-astra",
+    agentModel: "openai/gpt-6-astra?reasoningEffort=high",
+    displayName: "GPT-6 Astra (high)",
+    harness: "Codex",
+    support: "supported",
+  },
+  {
     id: "claude-sonnet-5",
     model: "anthropic/claude-sonnet-5",
     displayName: "Claude Sonnet 5",
@@ -94,6 +104,27 @@ export const benchmarkModels = [
     id: "gemini-3-1-pro-preview",
     model: "google/gemini-3.1-pro-preview",
     displayName: "Gemini 3.1 Pro Preview",
+    harness: "OpenCode",
+    support: "supported",
+  },
+  {
+    id: "gemini-3-8-flash",
+    model: "google/gemini-3.8-flash",
+    displayName: "Gemini 3.8 Flash",
+    harness: "OpenCode",
+    support: "supported",
+  },
+  {
+    id: "minimax-m3",
+    model: "minimax/minimax-m3",
+    displayName: "MiniMax M3",
+    harness: "OpenCode",
+    support: "supported",
+  },
+  {
+    id: "kimi-k2-7-code",
+    model: "moonshotai/kimi-k2.7-code",
+    displayName: "Kimi K2.7 Code",
     harness: "OpenCode",
     support: "supported",
   },

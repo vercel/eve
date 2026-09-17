@@ -25,7 +25,10 @@ The default webhook route is `/eve/v1/photon`. The channel verifies forwarded
 webhooks with same-project Vercel OIDC by default, derives user auth from each
 message author, marks accepted messages as read, and continues the same eve
 session for every message in an iMessage conversation. A new accepted message
-cooperatively cancels an active turn and steers its replacement turn.
+steers the active turn. Steering can interrupt pending model generation before
+answer output or local tool execution begins. Executing tools finish first;
+after answer output starts, steering waits for the next committed workflow
+boundary. See [Overlapping messages](./overview#overlapping-messages).
 
 Set `turnPolicy: "queue"` when every response should finish before Photon starts the next message.
 

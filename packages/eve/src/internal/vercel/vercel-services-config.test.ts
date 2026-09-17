@@ -16,6 +16,15 @@ describe("parseVercelServicesConfig", () => {
     });
   });
 
+  it("rejects duplicate names in service arrays", () => {
+    expect(() =>
+      createServiceConfigRecord([
+        { framework: "nextjs", name: "web" },
+        { framework: "nuxtjs", name: "web" },
+      ]),
+    ).toThrow('Duplicate Vercel service name "web".');
+  });
+
   it.each([
     [null, /must contain a JSON object/],
     [{ services: null }, /services must be a JSON object or named service array/],
@@ -23,6 +32,7 @@ describe("parseVercelServicesConfig", () => {
     [{ services: [{}] }, /must have a non-empty name/],
     [{ services: { eve: { framework: 42 } } }, /framework must be a string/],
     [{ services: { eve: { mount: false } } }, /mount must be a string or JSON object/],
+    [{ services: { eve: { outputDirectory: 42 } } }, /outputDirectory must be a string/],
     [{ services: { eve: { routes: {} } } }, /routes must be an array/],
     [{ routes: {} }, /routes must be an array/],
     [{ routes: [{ destination: 42 }] }, /destination must be a string or JSON object/],

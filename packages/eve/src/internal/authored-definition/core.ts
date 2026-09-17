@@ -1,3 +1,4 @@
+import { isAgentReasoningDefinition } from "#internal/runtime-model.js";
 import type {
   AgentDefinition,
   AgentBuildDefinition,
@@ -15,7 +16,10 @@ import {
   expectString,
   getOptionalStringRecordProperty,
 } from "#internal/authored-module.js";
-import type { PublicAgentStaticModelDefinition } from "#shared/agent-definition.js";
+import {
+  AGENT_WORKFLOW_RETENTION_VALUES,
+  type PublicAgentStaticModelDefinition,
+} from "#shared/agent-definition.js";
 import {
   isDynamicSentinel,
   type DynamicEvents,
@@ -128,20 +132,8 @@ function normalizeAgentReasoningDefinition(
   value: unknown,
   message: string,
 ): NonNullable<NormalizedAgentDefinition["reasoning"]> {
-  const reasoning = expectString(value, message);
-
-  switch (reasoning) {
-    case "provider-default":
-    case "none":
-    case "minimal":
-    case "low":
-    case "medium":
-    case "high":
-    case "xhigh":
-      return reasoning;
-    default:
-      throw new Error(message);
-  }
+  if (!isAgentReasoningDefinition(value)) throw new Error(message);
+  return value;
 }
 
 function normalizeAgentModelDefinition(
@@ -258,14 +250,43 @@ function normalizeAgentWorkflowDefinition(
   message: string,
 ): AgentWorkflowDefinition {
   const record = expectObjectRecord(value, message);
-  expectOnlyKnownKeys(record, ["world"], message);
+  expectOnlyKnownKeys(record, ["modelCallsPerStep", "retention", "world"], message);
   const normalizedDefinition: Mutable<AgentWorkflowDefinition> = {};
+
+  if (record.modelCallsPerStep !== undefined) {
+    normalizedDefinition.modelCallsPerStep = expectPositiveInteger(
+      record.modelCallsPerStep,
+      message,
+    );
+  }
+
+  if (record.retention !== undefined) {
+    normalizedDefinition.retention = normalizeAgentWorkflowRetentionDefinition(
+      record.retention,
+      message,
+    );
+  }
 
   if (record.world !== undefined) {
     normalizedDefinition.world = normalizeAgentWorkflowWorldDefinition(record.world, message);
   }
 
   return normalizedDefinition;
+}
+
+function normalizeAgentWorkflowRetentionDefinition(
+  value: unknown,
+  message: string,
+): NonNullable<AgentWorkflowDefinition["retention"]> {
+  const match = AGENT_WORKFLOW_RETENTION_VALUES.find((accepted) => accepted === value);
+  if (match === undefined) {
+    const accepted = AGENT_WORKFLOW_RETENTION_VALUES.map((entry) => JSON.stringify(entry)).join(
+      " or ",
+    );
+    throw new Error(`${message} "experimental.workflow.retention" must be ${accepted}.`);
+  }
+
+  return match;
 }
 
 function normalizeAgentWorkflowWorldDefinition(

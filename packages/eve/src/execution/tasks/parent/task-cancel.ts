@@ -14,10 +14,10 @@ export type TaskExecutorCancel = (input: TaskExecutorCancelContext) => Promise<v
 const TASK_RUN_CANCEL_GRACE_MS = 1_000;
 const TASK_RUN_CANCEL_POLL_MS = 50;
 
-/** Cancels policy-specific work associated with one task. */
+/** Cancels task-owned work and reports whether the lifecycle run was forcibly stopped. */
 export async function cancelTaskOwnedWork(
   input: TaskExecutorCancelContext & { readonly cancelOwnedWork?: TaskExecutorCancel },
-): Promise<void> {
+): Promise<boolean> {
   const workflowToolRun = readWorkflowToolExecutorAddress(input.entry.executor);
   if (workflowToolRun !== undefined) {
     await cancelWorkflowToolRun(workflowToolRun, `Task ${input.entry.taskId} was cancelled.`);
@@ -27,9 +27,9 @@ export async function cancelTaskOwnedWork(
   while (Date.now() < deadline) {
     try {
       const status = await getRun(input.entry.taskRunId).status;
-      if (status !== "pending" && status !== "running") return;
+      if (status !== "pending" && status !== "running") return false;
     } catch {
-      return;
+      return false;
     }
     await new Promise((resolve) => setTimeout(resolve, TASK_RUN_CANCEL_POLL_MS));
   }
@@ -40,4 +40,5 @@ export async function cancelTaskOwnedWork(
   } catch {
     // The merged task run may have completed during its cooperative unwind.
   }
+  return true;
 }

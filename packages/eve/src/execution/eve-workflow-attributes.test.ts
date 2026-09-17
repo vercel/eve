@@ -3,7 +3,6 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   buildSessionAttributes,
   buildSubagentRootAttributes,
-  buildTurnAttributes,
   deriveSessionTitle,
   EVE_SESSION_TITLE_MAX_CHARS,
   isWorkflowTraceContentVisible,
@@ -19,16 +18,37 @@ import {
   ChannelInstrumentationKey,
   ChannelRequestIdKey,
   ScheduleIdKey,
+  SessionTitleKey,
   SessionTraceSeedKey,
 } from "#context/keys.js";
 import { CHANNEL_CONTEXT_KEY_NAME } from "#context/key-names.js";
+import { ConversationContextKey } from "#shared/conversation-context.js";
+
+const publicConversation = {
+  audience: "public",
+  channel: { kind: "channel:slack", name: "slack" },
+  environment: "production",
+  mode: "conversation",
+  principalType: "anonymous",
+} as const;
+
+const unknownConversation = {
+  audience: "unknown",
+  channel: { kind: "http" },
+  environment: "production",
+  mode: "conversation",
+  principalType: "anonymous",
+} as const;
 
 const slackChannelCtx = {
-  "eve.channel": { kind: "slack", state: { team: "T1" }, audience: "public" },
+  "eve.channel": { kind: "slack", state: { team: "T1" } },
+  [ConversationContextKey.name]: publicConversation,
+  [SessionTitleKey.name]: "ship the thing please",
 } satisfies Record<string, unknown>;
 
 const subagentChainCtx = {
-  "eve.channel": { kind: "slack", state: {}, audience: "public" },
+  "eve.channel": { kind: "slack", state: {} },
+  [ConversationContextKey.name]: publicConversation,
   "eve.parentSession": {
     callId: "call_subagent_0",
     sessionId: "wrun_parent_subagent",
@@ -62,17 +82,15 @@ describe("readScheduleId", () => {
 });
 
 describe("isWorkflowTraceContentVisible", () => {
-  it("reads audience from the shared serialized channel slot", () => {
+  it("reads audience from the shared serialized conversation slot", () => {
     expect(
-      isWorkflowTraceContentVisible({
-        [CHANNEL_CONTEXT_KEY_NAME]: { audience: "public", kind: "slack" },
-      }),
+      isWorkflowTraceContentVisible({ [ConversationContextKey.name]: publicConversation }),
     ).toBe(true);
   });
 
   it("uses the effective decision from a forwarded trace seed", () => {
     const serializedContext = {
-      [CHANNEL_CONTEXT_KEY_NAME]: { audience: "unknown", kind: "http" },
+      [ConversationContextKey.name]: unknownConversation,
       [SessionTraceSeedKey.name]: {
         decision: { action: "record", recordInputs: true, recordOutputs: true },
         forwardedTracePolicy: {
@@ -83,29 +101,69 @@ describe("isWorkflowTraceContentVisible", () => {
         traceFlags: 1,
         traceId: "2".repeat(32),
       },
-      [ChannelInstrumentationKey.name]: {
-        kind: "eve",
-        metadata: { audience: "public" },
-      },
+      [ChannelInstrumentationKey.name]: { kind: "eve", metadata: {} },
     };
 
     expect(isWorkflowTraceContentVisible(serializedContext)).toBe(true);
-    expect(buildSessionAttributes({ inputMessage: "research", serializedContext })).toMatchObject({
+    expect(buildSessionAttributes({ serializedContext })).toMatchObject({
       "$eve.is_trace_content_visible": true,
     });
   });
 
-  it("does not infer forwarded acceptance from projected metadata", () => {
+  it("uses the inherited decision for a verified local subagent", () => {
     const serializedContext = {
-      [CHANNEL_CONTEXT_KEY_NAME]: { audience: "unknown", kind: "http" },
-      [ChannelInstrumentationKey.name]: {
-        kind: "eve",
-        metadata: { audience: "public" },
+      [CHANNEL_CONTEXT_KEY_NAME]: { audience: "unknown", kind: "agent/local" },
+      [SessionTraceSeedKey.name]: {
+        decision: { action: "record", recordInputs: true, recordOutputs: true },
+        spanId: "1".repeat(16),
+        traceFlags: 1,
+        traceId: "2".repeat(32),
+      },
+      "eve.parentSession": {
+        callId: "call-1",
+        rootSessionId: "root-session",
+        sessionId: "parent-session",
+        turn: { id: "turn-1", sequence: 0 },
       },
     };
 
+    expect(isWorkflowTraceContentVisible(serializedContext)).toBe(true);
+    expect(
+      buildSubagentRootAttributes({
+        identity: { nodeId: "subagents/general" },
+        parentCallId: "call-1",
+        parentSessionId: "parent-session",
+        parentTurnId: "turn-1",
+        rootSessionId: "root-session",
+        serializedContext,
+      }),
+    ).toMatchObject({
+      "$eve.is_trace_content_visible": true,
+    });
+  });
+
+  it("does not trust an unbound serialized trace decision", () => {
+    expect(
+      isWorkflowTraceContentVisible({
+        [CHANNEL_CONTEXT_KEY_NAME]: { audience: "unknown", kind: "http" },
+        [SessionTraceSeedKey.name]: {
+          decision: { action: "record", recordInputs: true, recordOutputs: true },
+          spanId: "1".repeat(16),
+          traceFlags: 1,
+          traceId: "2".repeat(32),
+        },
+      }),
+    ).toBe(false);
+  });
+
+  it("does not infer forwarded acceptance from projected metadata", () => {
+    const serializedContext = {
+      [ConversationContextKey.name]: unknownConversation,
+      [ChannelInstrumentationKey.name]: { kind: "eve", metadata: {} },
+    };
+
     expect(isWorkflowTraceContentVisible(serializedContext)).toBe(false);
-    expect(buildSessionAttributes({ inputMessage: "research", serializedContext })).toMatchObject({
+    expect(buildSessionAttributes({ serializedContext })).toMatchObject({
       "$eve.is_trace_content_visible": false,
     });
   });
@@ -126,7 +184,7 @@ describe("isWorkflowTraceContentVisible", () => {
     };
 
     expect(isWorkflowTraceContentVisible(serializedContext)).toBe(false);
-    expect(buildSessionAttributes({ inputMessage: "research", serializedContext })).toMatchObject({
+    expect(buildSessionAttributes({ serializedContext })).toMatchObject({
       "$eve.is_trace_content_visible": false,
     });
   });
@@ -245,9 +303,8 @@ describe("deriveSessionTitle", () => {
 });
 
 describe("buildSessionAttributes", () => {
-  it("emits type=session with trigger and derived title", () => {
+  it("emits type=session with trigger and stored title", () => {
     const attrs = buildSessionAttributes({
-      inputMessage: "ship the thing please",
       serializedContext: slackChannelCtx,
     });
 
@@ -263,10 +320,13 @@ describe("buildSessionAttributes", () => {
     });
   });
 
+  it("omits the title when the root context has none", () => {
+    expect(buildSessionAttributes({ serializedContext: {} })["$eve.title"]).toBeUndefined();
+  });
+
   it("marks unknown sessions denied while retaining their stored title", () => {
     const attrs = buildSessionAttributes({
-      inputMessage: "hi",
-      serializedContext: {},
+      serializedContext: { [SessionTitleKey.name]: "hi" },
     });
 
     expect(attrs["$eve.trigger"]).toBeUndefined();
@@ -277,8 +337,10 @@ describe("buildSessionAttributes", () => {
 
   it("stamps hosted OTEL enablement without suppressing the stored title", () => {
     const attrs = buildSessionAttributes({
-      inputMessage: "private prompt",
-      serializedContext: { "eve.otelTraceEnabled": true },
+      serializedContext: {
+        "eve.otelTraceEnabled": true,
+        [SessionTitleKey.name]: "private prompt",
+      },
     });
 
     expect(attrs["$eve.is_otel_trace_enabled"]).toBe(true);
@@ -286,12 +348,12 @@ describe("buildSessionAttributes", () => {
     expect(attrs["$eve.title"]).toBe("private prompt");
   });
 
-  it("allows unknown session content during local eve dev", () => {
-    vi.stubEnv("EVE_DEV", "1");
-
+  it("allows unknown session content in development", () => {
     const attrs = buildSessionAttributes({
-      inputMessage: "local prompt",
-      serializedContext: {},
+      serializedContext: {
+        [ConversationContextKey.name]: { ...unknownConversation, environment: "development" },
+        [SessionTitleKey.name]: "local prompt",
+      },
     });
 
     expect(attrs["$eve.is_trace_content_visible"]).toBe(true);
@@ -300,7 +362,6 @@ describe("buildSessionAttributes", () => {
 
   it("emits the channel request id when present", () => {
     const attrs = buildSessionAttributes({
-      inputMessage: "hi",
       serializedContext: {
         ...slackChannelCtx,
         [ChannelRequestIdKey.name]: "req_session",
@@ -312,7 +373,6 @@ describe("buildSessionAttributes", () => {
 
   it("emits the schedule while retaining the target channel trigger", () => {
     const attrs = buildSessionAttributes({
-      inputMessage: "run the scheduled task",
       serializedContext: {
         ...slackChannelCtx,
         [ScheduleIdKey.name]: "dynamic-tasks",
@@ -325,7 +385,6 @@ describe("buildSessionAttributes", () => {
 
   it("emits $eve.trace_id from a sampled trace seed", () => {
     const attrs = buildSessionAttributes({
-      inputMessage: "hi",
       serializedContext: {
         ...slackChannelCtx,
         "eve.sessionTraceSeed": { spanId: "a".repeat(16), traceFlags: 1, traceId: "b".repeat(32) },
@@ -337,7 +396,6 @@ describe("buildSessionAttributes", () => {
 
   it("withholds $eve.trace_id from an unsampled trace seed", () => {
     const attrs = buildSessionAttributes({
-      inputMessage: "hi",
       serializedContext: {
         ...slackChannelCtx,
         "eve.sessionTraceSeed": { spanId: "a".repeat(16), traceFlags: 0, traceId: "b".repeat(32) },
@@ -402,50 +460,6 @@ describe("buildSubagentRootAttributes", () => {
     });
 
     expect(attrs["$eve.trace_id"]).toBe("f".repeat(32));
-  });
-});
-
-describe("buildTurnAttributes", () => {
-  it("emits type=turn with parent and root session", () => {
-    const attrs = buildTurnAttributes({
-      parentSessionId: "wrun_session_123",
-      rootSessionId: "wrun_session_123",
-      serializedContext: slackChannelCtx,
-    });
-
-    expect(attrs).toEqual({
-      "$eve.channel_request_id": undefined,
-      "$eve.is_otel_trace_enabled": false,
-      "$eve.is_trace_content_visible": true,
-      "$eve.trace_id": undefined,
-      "$eve.type": "turn",
-      "$eve.parent": "wrun_session_123",
-      "$eve.root": "wrun_session_123",
-    });
-  });
-
-  it("emits the channel request id when present", () => {
-    const attrs = buildTurnAttributes({
-      parentSessionId: "wrun_session_123",
-      requestId: "req_turn",
-      rootSessionId: "wrun_session_123",
-      serializedContext: slackChannelCtx,
-    });
-
-    expect(attrs["$eve.channel_request_id"]).toBe("req_turn");
-  });
-
-  it("emits $eve.trace_id from a sampled trace seed", () => {
-    const attrs = buildTurnAttributes({
-      parentSessionId: "wrun_session_123",
-      rootSessionId: "wrun_session_123",
-      serializedContext: {
-        ...slackChannelCtx,
-        "eve.sessionTraceSeed": { spanId: "c".repeat(16), traceFlags: 1, traceId: "d".repeat(32) },
-      },
-    });
-
-    expect(attrs["$eve.trace_id"]).toBe("d".repeat(32));
   });
 });
 

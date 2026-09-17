@@ -1,6 +1,7 @@
 import { copyFile, mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
+import type { AuthoredWorkflowModules } from "#internal/workflow-bundle/builder-support.js";
 import type { CompileMetadata } from "#compiler/artifacts.js";
 import type { CompileAgentResult } from "#compiler/compile-agent.js";
 import { stringifyEsmImportSpecifier } from "#internal/application/import-specifier.js";
@@ -41,6 +42,7 @@ type InstrumentationPluginLayout =
  * vendored workflow bundles for one application.
  */
 export interface GeneratedCompiledArtifactsFiles {
+  readonly authoredWorkflowModules?: AuthoredWorkflowModules;
   /**
    * Shared bundled-artifacts bootstrap installed by Nitro and vendored
    * workflow handlers.
@@ -105,6 +107,7 @@ export async function writeCompiledArtifactsFiles(input: {
   );
 
   const generatedArtifacts: GeneratedCompiledArtifactsFiles = {
+    authoredWorkflowModules: prepared.authoredWorkflowModules,
     bootstrapPath,
     workflowWorldPluginPath,
   };
@@ -167,6 +170,7 @@ function instrumentationSourcePathsOf(layout: InstrumentationLayout): readonly s
 // bootstrap references no authored module, and the instrumentation bundle is
 // copied out of the generation into the stable host directory.
 export async function writeDevelopmentCompiledArtifactsFiles(input: {
+  readonly authoredWorkflowModules?: AuthoredWorkflowModules;
   readonly compileResult: CompileAgentResult;
   readonly outDir: string;
   readonly runtimeAppRoot: string;
@@ -194,6 +198,7 @@ export async function writeDevelopmentCompiledArtifactsFiles(input: {
   );
 
   const generatedArtifacts: GeneratedCompiledArtifactsFiles = {
+    authoredWorkflowModules: input.authoredWorkflowModules,
     bootstrapPath,
     workflowWorldPluginPath,
   };
@@ -375,16 +380,22 @@ const workflowWorld = await workflowWorldModule.createWorld({
   }
 
   if (packageName === "@workflow/world-vercel") {
+    const defaultsImportSpecifier = stringifyEsmImportSpecifier(
+      resolvePackageSourceFilePath("src/internal/workflow/vercel-world-defaults.ts"),
+    );
     const moduleImportSpecifier = resolvePackageCompiledFilePath(
       `src/compiled/${packageName}/index.js`,
     );
     const createWorldSource = `
 const workflowWorld = await workflowWorldModule.createWorld({
   headers: { "User-Agent": ${JSON.stringify(buildPackageUserAgent())} },
-});`.trimStart();
+});
+applyVercelWorkflowWorldDefaults(workflowWorld);`.trimStart();
     return {
       moduleImportSpecifier,
-      extraImportLines: [],
+      extraImportLines: [
+        `import { applyVercelWorkflowWorldDefaults } from ${defaultsImportSpecifier};`,
+      ],
       runtimeImports: "getWorld, setWorld",
       createWorldSource,
     };

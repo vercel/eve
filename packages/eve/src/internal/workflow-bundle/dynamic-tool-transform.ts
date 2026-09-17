@@ -2,7 +2,7 @@
  * Stamps callbacks passed to authored `defineTool()` calls with durable replay
  * descriptors. Each callback body is hoisted into a module-suffix function and
  * the live callback is stamped with that function plus the lexical values its
- * body references; identity `(toolName, phase)` is assigned at resolve time.
+ * body references; the session, scope, and resolver bind its identity at resolve time.
  */
 
 import { parseWithNitroRolldownAst } from "#internal/bundler/nitro-rolldown.js";
@@ -14,6 +14,9 @@ import {
 } from "#internal/workflow-bundle/dynamic-tool-ast-references.js";
 
 type CallbackPhase =
+  | "labelComplete"
+  | "labelDelta"
+  | "labelStart"
   | "approvalKey"
   | "approvalRequest"
   | "approvalResponse"
@@ -21,10 +24,14 @@ type CallbackPhase =
   | "toModelOutput";
 type CallbackPropertyName =
   | "approvalKey"
+  | "label"
   | "approval"
   | "execute"
+  | "start"
   | "request"
   | "response"
+  | "complete"
+  | "delta"
   | "toModelOutput";
 
 interface CallbackInfo {
@@ -184,18 +191,45 @@ function collectToolCallbacks(
   }
   collectCallbackProperty(
     source,
-    findProperty(tool, "toModelOutput"),
-    "toModelOutput",
-    "toModelOutput",
-    results,
-    nestedScopes,
-  );
-
-  collectCallbackProperty(
-    source,
     findProperty(tool, "approvalKey"),
     "approvalKey",
     "approvalKey",
+    results,
+    nestedScopes,
+  );
+  const label = findProperty(tool, "label");
+  const labelValue = label?.value as AstNode | undefined;
+  if (labelValue?.type === "ObjectExpression") {
+    collectCallbackProperty(
+      source,
+      findProperty(labelValue, "start"),
+      "labelStart",
+      "start",
+      results,
+      nestedScopes,
+    );
+    collectCallbackProperty(
+      source,
+      findProperty(labelValue, "complete"),
+      "labelComplete",
+      "complete",
+      results,
+      nestedScopes,
+    );
+    collectCallbackProperty(
+      source,
+      findProperty(labelValue, "delta"),
+      "labelDelta",
+      "delta",
+      results,
+      nestedScopes,
+    );
+  }
+  collectCallbackProperty(
+    source,
+    findProperty(tool, "toModelOutput"),
+    "toModelOutput",
+    "toModelOutput",
     results,
     nestedScopes,
   );

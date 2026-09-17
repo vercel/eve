@@ -70,12 +70,23 @@ Every slot needs a provider. The provider decides how memory is stored, how
 relevant context is retrieved, and whether the agent captures conversation
 automatically or only through explicit tool calls.
 
-| Provider                              | Ships as                | Recall                                                 | Capture                                              |
-| ------------------------------------- | ----------------------- | ------------------------------------------------------ | ---------------------------------------------------- |
-| [Supermemory](#supermemory)           | `@supermemory/eve`      | Semantic search over stored memories                   | Automatic after each turn, plus tools                |
-| [Upstash AgentKit](#upstash-agentkit) | `@upstash/agentkit-eve` | Ranked Redis Search recall or a Redis document backend | Automatic user-message capture or model-driven tools |
-| [File memory](#file-memory)           | Built into eve          | One bounded document per scope                         | Model-driven `save_memory` / `remove_memory`         |
-| [Your own provider](#build-your-own)  | Your code               | Whatever your store returns                            | Whatever rules you implement                         |
+| Provider                                | Ships as                | Recall                                                 | Capture                                              |
+| --------------------------------------- | ----------------------- | ------------------------------------------------------ | ---------------------------------------------------- |
+| [File memory](#file-memory)             | Built into eve          | One bounded document per scope                         | Model-driven `save_memory` / `remove_memory`         |
+| [Supermemory](#supermemory)             | `@supermemory/eve`      | Semantic search over stored memories                   | Automatic after each turn, plus tools                |
+| [Upstash AgentKit](#upstash-agentkit)   | `@upstash/agentkit-eve` | Ranked Redis Search recall or a Redis document backend | Automatic user-message capture or model-driven tools |
+| [Kybernesis Arcana](#kybernesis-arcana) | `@kybernesis/arcana`    | Semantic search and brain notes                        | Model-driven tools or optional automatic capture     |
+| [Your own provider](#build-your-own)    | Your code               | Whatever your store returns                            | Whatever rules you implement                         |
+
+### File memory
+
+`fileMemory()` from `eve/memory/file` keeps one bounded document per scope and
+gives the model `save_memory` and `remove_memory` tools. It does not extract
+facts automatically; the model decides what to save. It needs no external
+service in `eve dev` and stores to Vercel Blob when deployed to Vercel, which
+makes it the shortest path to a working slot.
+
+Read [File memory](/docs/memory/file) for size limits, storage backends, and options.
 
 ### Supermemory
 
@@ -137,15 +148,36 @@ export default defineMemory({
 See the [Upstash AgentKit integration page](/integrations/upstash-agentkit) for
 options.
 
-### File memory
+### Kybernesis Arcana
 
-`fileMemory()` from `eve/memory/file` keeps one bounded document per scope and
-gives the model `save_memory` and `remove_memory` tools. It does not extract
-facts automatically; the model decides what to save. It needs no external
-service in `eve dev` and stores to Vercel Blob when deployed to Vercel, which
-makes it the shortest path to a working slot.
+[Kybernesis Arcana](https://github.com/KybernesisAI/platform/tree/master/packages/arcana#readme)
+backs a memory slot with semantic search and brain notes. It gives the model
+tools to remember, recall, and search memory; capture is disabled by default.
 
-Read [File memory](/docs/memory/file) for size limits, storage backends, and options.
+```bash
+eve add memory/arcana
+```
+
+The command installs `@kybernesis/arcana` and writes an `arcana` slot:
+
+```ts title="agent/memory/arcana.ts"
+import { arcanaMemory } from "@kybernesis/arcana/memory";
+import { defineMemory } from "eve/memory";
+import { byPrincipal } from "eve/memory/scope";
+
+export default defineMemory({
+  description: "Recall and manage durable context for the current user.",
+  provider: arcanaMemory({
+    apiKey: process.env.ARCANA_API_KEY!,
+    workspace: process.env.ARCANA_WORKSPACE!,
+  }),
+  scope: byPrincipal,
+});
+```
+
+Set `capture: { enabled: true }` when you want Arcana to capture completed
+turns automatically. See the [Arcana package documentation](https://github.com/KybernesisAI/platform/tree/master/packages/arcana#readme)
+for provider options.
 
 ### Build your own
 

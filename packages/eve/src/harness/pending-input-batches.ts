@@ -1,5 +1,7 @@
 import type { ModelMessage } from "ai";
 
+import { contextStorage } from "#context/container.js";
+import { ActivityRootTurnIdKey } from "#context/keys.js";
 import type { InputRequest } from "#shared/input.js";
 import type { HarnessSession, SessionStateMap, StepInput } from "#harness/types.js";
 import { coalesceTurnInputs } from "#harness/messages.js";
@@ -27,6 +29,7 @@ export interface PendingInputBatchEvent {
  */
 export interface PendingInputBatch {
   readonly event?: PendingInputBatchEvent;
+  readonly activityRootTurnId?: string;
   readonly requests: readonly InputRequest[];
   readonly responseAuthRequiredRequestIds?: readonly string[];
   readonly responseMessages: readonly ModelMessage[];
@@ -133,6 +136,7 @@ function setPendingInputBatches(
   } else {
     state[PENDING_INPUT_BATCHES_KEY] = batches.map((batch) => ({
       event: batch.event,
+      activityRootTurnId: batch.activityRootTurnId,
       responseAuthRequiredRequestIds: batch.responseAuthRequiredRequestIds,
       requests: [...batch.requests],
       responseMessages: [...batch.responseMessages],
@@ -148,6 +152,7 @@ function setPendingInputBatches(
  */
 export function appendPendingInputBatch(input: {
   readonly event?: PendingInputBatchEvent;
+  readonly activityRootTurnId?: string;
   readonly requests: readonly InputRequest[];
   readonly responseAuthRequiredRequestIds?: readonly string[];
   readonly responseMessages: readonly ModelMessage[];
@@ -157,11 +162,33 @@ export function appendPendingInputBatch(input: {
     ...getPendingInputBatches(input.session.state),
     {
       event: input.event,
+      activityRootTurnId:
+        input.activityRootTurnId ?? contextStorage.getStore()?.get(ActivityRootTurnIdKey),
       responseAuthRequiredRequestIds: input.responseAuthRequiredRequestIds,
       requests: input.requests,
       responseMessages: input.responseMessages,
     },
   ]);
+}
+
+export function activityRootTurnIdForInputResponses(
+  state: SessionStateMap | undefined,
+  requestIds: ReadonlySet<string>,
+): string | undefined {
+  return getPendingInputBatches(state).find((batch) =>
+    batch.requests.some((request) => requestIds.has(request.requestId)),
+  )?.activityRootTurnId;
+}
+
+export function activityRequestIdsForRootTurn(
+  state: SessionStateMap | undefined,
+  rootTurnId: string,
+): readonly string[] {
+  return getPendingInputBatches(state).flatMap((batch) =>
+    batch.activityRootTurnId === rootTurnId
+      ? batch.requests.map((request) => request.requestId)
+      : [],
+  );
 }
 
 // ---------------------------------------------------------------------------

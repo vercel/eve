@@ -28,6 +28,15 @@ import { LocalTraceSpanProcessor } from "#tracing/local-trace-span-processor.js"
 const temporaryDirectories: string[] = [];
 const require = createRequire(import.meta.url);
 
+const traceContext = (audience: "public" | "private" | "unknown") => ({
+  agentName: "weather",
+  audience,
+  channel: { kind: "http" as const },
+  environment: "production" as const,
+  mode: "conversation" as const,
+  principalType: "anonymous",
+});
+
 afterEach(async () => {
   await Promise.all(
     temporaryDirectories.splice(0).map((path) => rm(path, { force: true, recursive: true })),
@@ -59,7 +68,7 @@ describe("local instrumentation runtime", () => {
     };
     const delivery = runtimeTrace.getTracer("workflow").startSpan("workflow.delivery");
     const activeContext = runtimeTrace.setSpan(COMPILED_ROOT_CONTEXT, delivery);
-    const hooks = runtime.hooks.forTrace!({ agentName: "weather", audience: "unknown" });
+    const hooks = runtime.hooks.forTrace!(traceContext("unknown"));
 
     const exerciseRuntime = async () => {
       await hooks.publish({
@@ -197,15 +206,33 @@ describe("local instrumentation runtime", () => {
     );
     const spans = spanGroups.flat();
     expect(formatTraceTree(spans)).toEqual([
-      "agent.session",
-      "  invoke_agent weather",
-      "    agent.step",
-      "      agent.action",
-      "        execute_tool weather",
-      "          user.tool-work",
-      "      chat model-1",
-      "        user.model-work",
+      "invoke_agent weather",
+      "  agent.step",
+      "    agent.action",
+      "      execute_tool weather",
+      "        user.tool-work",
+      "    chat model-1",
+      "      user.model-work",
     ]);
+    for (const exported of spans.filter((span) => !span.name.startsWith("user."))) {
+      expect(exported.attributes).toEqual(
+        expect.arrayContaining([
+          { key: "resource.name", value: { stringValue: exported.name } },
+          {
+            key: "operation.name",
+            value: {
+              stringValue: exported.name.startsWith("invoke_agent ")
+                ? "invoke_agent"
+                : exported.name.startsWith("execute_tool ")
+                  ? "execute_tool"
+                  : exported.name.startsWith("chat ")
+                    ? "chat"
+                    : exported.name,
+            },
+          },
+        ]),
+      );
+    }
     expect(span(spans, "agent.step").links).toEqual([
       expect.objectContaining({
         attributes: expect.arrayContaining([
@@ -220,7 +247,7 @@ describe("local instrumentation runtime", () => {
     ]);
     const listed = await listLocalTraces(appRoot);
     expect(listed).toHaveLength(1);
-    expect(listed[0]).toMatchObject({ sessionId: "session-1", traceId });
+    expect(listed[0]).toMatchObject({ conversationId: "session-1", traceId });
   });
 
   it("keeps segments from overlapping worker writers", async () => {
@@ -251,6 +278,7 @@ describe("local instrumentation runtime", () => {
 });
 
 interface OtlpSpan {
+  readonly attributes: ReadonlyArray<{ readonly key: string; readonly value: unknown }>;
   readonly links?: ReadonlyArray<{
     readonly attributes: ReadonlyArray<{ readonly key: string; readonly value: unknown }>;
     readonly spanId: string;

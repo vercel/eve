@@ -1,3 +1,4 @@
+import type { AuthoredWorkflowModules } from "#internal/workflow-bundle/builder-support.js";
 import type { CompiledAgentManifest } from "#compiler/manifest.js";
 import {
   bundleAuthoredModuleForGeneration,
@@ -11,6 +12,7 @@ interface PreparedAuthoredRuntimeInstrumentation {
 }
 
 export interface PreparedAuthoredRuntimeModules {
+  readonly authoredWorkflowModules: AuthoredWorkflowModules;
   readonly instrumentation?: PreparedAuthoredRuntimeInstrumentation;
   readonly moduleMapCode: string;
   /** Identity of authored sources shared by the workflow driver and step registrations. */
@@ -22,8 +24,11 @@ export async function prepareAuthoredRuntimeModules(input: {
   readonly manifest: CompiledAgentManifest;
   readonly moduleMapPath: string;
 }): Promise<PreparedAuthoredRuntimeModules> {
-  const { code: moduleMapCode, workflowSourceFingerprint } =
-    await bundleAuthoredModuleMapForGeneration(input);
+  const {
+    authoredWorkflowModules,
+    code: moduleMapCode,
+    workflowSourceFingerprint,
+  } = await bundleAuthoredModuleMapForGeneration(input);
   const providersEnabled = input.manifest.config.experimental?.instrumentationProviders ?? false;
   const layout = providersEnabled
     ? resolveInstrumentationLayout({ agentRoot: input.manifest.agentRoot, providersEnabled: true })
@@ -42,6 +47,6 @@ export async function prepareAuthoredRuntimeModules(input: {
   }
 
   return instrumentation === undefined
-    ? { moduleMapCode, workflowSourceFingerprint }
-    : { instrumentation, moduleMapCode, workflowSourceFingerprint };
+    ? { authoredWorkflowModules, moduleMapCode, workflowSourceFingerprint }
+    : { authoredWorkflowModules, instrumentation, moduleMapCode, workflowSourceFingerprint };
 }

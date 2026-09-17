@@ -3,9 +3,7 @@ import { describe, expect, it } from "vitest";
 
 import { getAdvertisedTools } from "#harness/advertised-tools.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
-import type { HarnessSession, HarnessToolMap } from "#harness/types.js";
-import { buildToolSet } from "#harness/tools.js";
-import { WORKFLOW_TOOL_NAME } from "#shared/workflow-sandbox.js";
+import type { HarnessToolMap } from "#harness/types.js";
 
 describe("getAdvertisedTools", () => {
   it("keeps the built-in agent tool in the root session", () => {
@@ -60,37 +58,6 @@ describe("getAdvertisedTools", () => {
 
     expect([...advertisedTools.keys()]).toEqual(["add", "agent"]);
   });
-
-  it("does not add Workflow in runtime subagent sessions", async () => {
-    const tools = new Map([["delegate", createSubagentTool("delegate")]]) satisfies HarnessToolMap;
-
-    const advertisedTools = await getAdvertisedTools({
-      modelTools: buildToolSet({ tools }),
-      session: createSession({ rootSessionId: "root-session" }),
-      tools,
-      workflow: {},
-    });
-
-    expect(Object.keys(advertisedTools.modelTools)).toEqual(["delegate"]);
-    expect(advertisedTools.modelTools[WORKFLOW_TOOL_NAME]).toBeUndefined();
-  });
-
-  it("adds Workflow in root sessions", async () => {
-    const tools = new Map([
-      ["add", createTool("add")],
-      ["delegate", createSubagentTool("delegate")],
-    ]) satisfies HarnessToolMap;
-
-    const advertisedTools = await getAdvertisedTools({
-      modelTools: buildToolSet({ tools }),
-      session: createSession(),
-      tools,
-      workflow: {},
-    });
-
-    expect([...advertisedTools.harnessTools.keys()]).toEqual(["add", "delegate"]);
-    expect(advertisedTools.modelTools[WORKFLOW_TOOL_NAME]).toBeDefined();
-  });
 });
 
 describe("getAdvertisedTools for definition arrays", () => {
@@ -103,23 +70,23 @@ describe("getAdvertisedTools for definition arrays", () => {
     expect(advertisedTools.map((tool) => tool.name)).toEqual(["add", "delegate"]);
   });
 
-  it("keeps the task tools in the root session", () => {
+  it("keeps root-session tools in the root session", () => {
     const tools = new Map([
       ["add", createTool("add")],
-      ["task_cancel", createTaskControlTool("task_cancel", ["root-session"])],
-      ["task_update", createTaskControlTool("task_update", ["delegated-task-child"])],
+      ["root_only", createAvailableTool("root_only", ["root-session"])],
+      ["child_only", createAvailableTool("child_only", ["delegated-task-child"])],
     ]) satisfies HarnessToolMap;
 
     const advertisedTools = getAdvertisedTools({ session: {}, tools });
 
-    expect([...advertisedTools.keys()]).toEqual(["add", "task_cancel"]);
+    expect([...advertisedTools.keys()]).toEqual(["add", "root_only"]);
   });
 
   it("exposes delegated-task-child tools from persisted session ownership", () => {
     const tools = new Map([
       ["add", createTool("add")],
-      ["task_cancel", createTaskControlTool("task_cancel", ["root-session"])],
-      ["task_update", createTaskControlTool("task_update", ["delegated-task-child"])],
+      ["root_only", createAvailableTool("root_only", ["root-session"])],
+      ["child_only", createAvailableTool("child_only", ["delegated-task-child"])],
     ]) satisfies HarnessToolMap;
 
     const advertisedTools = getAdvertisedTools({
@@ -127,19 +94,22 @@ describe("getAdvertisedTools for definition arrays", () => {
       tools,
     });
 
-    expect([...advertisedTools.keys()]).toEqual(["add", "task_update"]);
+    expect([...advertisedTools.keys()]).toEqual(["add", "child_only"]);
   });
 
-  it("removes task_update from sessions without task ownership", () => {
-    const tools = new Map([
-      ["add", createTool("add")],
-      ["task_update", createTaskControlTool("task_update", ["delegated-task-child"])],
-    ]) satisfies HarnessToolMap;
+  it.each([{}, { rootSessionId: "root-session" }])(
+    "removes delegated-task-child tools from sessions without task ownership (%j)",
+    (session) => {
+      const tools = new Map([
+        ["add", createTool("add")],
+        ["child_only", createAvailableTool("child_only", ["delegated-task-child"])],
+      ]) satisfies HarnessToolMap;
 
-    const advertisedTools = getAdvertisedTools({ session: {}, tools });
+      const advertisedTools = getAdvertisedTools({ session, tools });
 
-    expect([...advertisedTools.keys()]).toEqual(["add"]);
-  });
+      expect([...advertisedTools.keys()]).toEqual(["add"]);
+    },
+  );
 });
 
 function createTool(name: string): HarnessToolDefinition {
@@ -165,28 +135,12 @@ function createBuiltInAgentTool(): HarnessToolDefinition {
   };
 }
 
-function createTaskControlTool(
+function createAvailableTool(
   name: string,
   availability: NonNullable<HarnessToolDefinition["behavior"]>["availability"],
 ): HarnessToolDefinition {
   return {
     ...createTool(name),
     behavior: { availability },
-    runtimeAction: { kind: "task-control" },
-  };
-}
-
-function createSession(overrides: Partial<HarnessSession> = {}): HarnessSession {
-  return {
-    agent: {
-      modelReference: { id: "test-model" },
-      system: "",
-      tools: [],
-    },
-    compaction: { recentWindowSize: 4, threshold: 1_000_000 },
-    continuationToken: "test-token",
-    history: [],
-    sessionId: "test-session",
-    ...overrides,
   };
 }

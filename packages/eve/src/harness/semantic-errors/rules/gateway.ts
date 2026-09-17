@@ -39,6 +39,25 @@ export const GATEWAY_RULES: readonly SemanticErrorRule[] = [
     hint: "Add a valid credit card or credits in the Vercel dashboard, then retry.",
   },
   {
+    id: "gateway-credit-exhausted",
+    name: "AI Gateway credit balance exhausted",
+    tags: ["gateway", "config", "recoverable"],
+    when: anyOf(
+      typeIs("insufficient_funds"),
+      messageMatches(/A positive credit balance is required/i),
+    ),
+    message: "AI Gateway requires a positive credit balance to process requests.",
+    hint: "Add credits in the Vercel dashboard, then retry.",
+  },
+  {
+    id: "gateway-budget-exhausted",
+    name: "AI Gateway project budget exceeded",
+    tags: ["gateway", "config", "recoverable"],
+    when: anyOf(typeIs("quota_for_entity_exceeded"), messageMatches(/Project budget exceeded/i)),
+    message: "The AI Gateway project budget has been exceeded.",
+    hint: "Ask your administrator to increase the project budget, then retry.",
+  },
+  {
     id: "gateway-free-tier-model-restricted",
     name: "Model unavailable on AI Gateway free tier",
     tags: ["gateway", "config", "recoverable"],

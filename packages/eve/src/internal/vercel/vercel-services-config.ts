@@ -29,9 +29,11 @@ export interface VercelRouteConfig {
 
 export interface VercelServiceConfig {
   readonly buildCommand?: string;
+  readonly devCommand?: string;
   readonly entrypoint?: string;
   readonly framework?: string;
   readonly mount?: string | VercelServiceMount;
+  readonly outputDirectory?: string;
   readonly routes?: readonly VercelRouteConfig[];
   readonly routePrefix?: string;
   readonly root?: string;
@@ -41,6 +43,7 @@ export interface VercelServiceConfig {
 export interface GeneratedVercelServiceConfig extends VercelServiceConfig {
   readonly buildCommand: string;
   readonly framework: "eve";
+  readonly outputDirectory: ".vercel/output";
   readonly root: string;
   readonly routes: readonly VercelRouteConfig[];
 }
@@ -132,9 +135,11 @@ function parseServiceConfig(value: JsonValue, path: string): VercelServiceConfig
   return {
     ...service,
     buildCommand: optionalString(service.buildCommand, `${path}.buildCommand`),
+    devCommand: optionalString(service.devCommand, `${path}.devCommand`),
     entrypoint: optionalString(service.entrypoint, `${path}.entrypoint`),
     framework: optionalString(service.framework, `${path}.framework`),
     mount: parseMount(service.mount, `${path}.mount`),
+    outputDirectory: optionalString(service.outputDirectory, `${path}.outputDirectory`),
     routes: parseArray(service.routes, `${path}.routes`, parseRoute),
     routePrefix: optionalString(service.routePrefix, `${path}.routePrefix`),
     root: optionalString(service.root, `${path}.root`),
@@ -201,7 +206,15 @@ export function createServiceConfigRecord(
 ): Record<string, VercelServiceConfig> {
   if (services === undefined) return {};
   if (!isNamedServiceArray(services)) return services;
-  return Object.fromEntries(services.map(({ name, ...service }) => [name, service]));
+
+  const record: Record<string, VercelServiceConfig> = {};
+  for (const { name, ...service } of services) {
+    if (Object.hasOwn(record, name)) {
+      throw new Error(`Duplicate Vercel service name ${JSON.stringify(name)}.`);
+    }
+    record[name] = service;
+  }
+  return record;
 }
 
 export function hasServices(

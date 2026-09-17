@@ -3,6 +3,7 @@ import { join } from "node:path";
 
 import { EVE_ROUTE_PREFIX } from "#protocol/routes.js";
 import { atomicWriteFile } from "#shared/atomic-write-file.js";
+import { joinEveRoutePath } from "#shared/eve-route-path.js";
 import { normalizePublicRoutePrefix } from "#shared/public-route-prefix.js";
 
 const VERCEL_OUTPUT_CONFIG_FILE_NAME = "config.json";
@@ -66,7 +67,7 @@ function normalizeCronPath(
 
   return {
     ...cron,
-    path: `${publicRoutePrefix}${cron.path}`,
+    path: joinEveRoutePath(publicRoutePrefix, cron.path),
   };
 }
 

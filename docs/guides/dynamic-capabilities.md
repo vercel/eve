@@ -68,21 +68,33 @@ availability depends on the caller, tenant, environment, or a feature flag.
 Return the child definition to configure and expose it. Return `null` to omit
 it from the parent's model-visible tools.
 
+The example below exposes a finance subagent to enterprise callers and gives
+it the model that the parent would use at that point:
+
 ```ts title="agent/subagents/finance/agent.ts"
 import { defineAgent, defineDynamic } from "eve";
 
 export default defineDynamic({
   events: {
-    "session.started": (_event, ctx) =>
-      ctx.session.auth.current?.attributes.plan === "enterprise"
-        ? defineAgent({
-            description: "Analyze financial and accounting data.",
-            model: "openai/gpt-5.5",
-          })
-        : null,
+    "session.started": (_event, ctx) => {
+      if (ctx.session.auth.current?.attributes.plan !== "enterprise") {
+        return null;
+      }
+
+      return defineAgent({
+        description: "Analyze financial and accounting data.",
+        model: ctx.model ? ctx.model.id : "openai/gpt-5.5-mini",
+      });
+    },
   },
 });
 ```
+
+`ctx.model` is the parent's effective model when the resolver runs. In this
+example, this dynamic subagent uses the parent's effective model when it is
+available falls back to `openai/gpt-5.5-mini` if the parent has not selected
+one yet. The returned child config snapshots the model ID; a later parent
+model change does not retarget the child.
 
 eve always compiles the subagent's filesystem resources, including its
 instructions, tools, skills, connections, sandbox, and nested subagents. It
@@ -124,9 +136,9 @@ shadows the session selection for that turn, including when the turn handler
 returns `null`. If a resolver throws or returns an invalid definition, eve logs the
 failure and omits the subagent.
 
-The resolved set applies to local and remote direct delegation. Background subagents are not
-exposed inside the model-authored `Workflow` tool. eve
-also checks availability again before starting the child, so a stale or
+The resolved set applies to local and remote direct delegation. An authored workflow tool can
+also call a selected subagent through `ctx.agent`. A generated program can call it through the
+provided `workflow` tool. eve checks availability again before starting the child, so a stale or
 manually constructed call fails with `SUBAGENT_UNAVAILABLE`. Treat conditional
 availability as capability composition, not as the only authorization
 boundary: sensitive child tools still need their own authorization and
@@ -166,7 +178,7 @@ export default defineDynamic({
             description: `${account.label} (${account.accountId})`,
             instanceKey: account.accountId,
             auth: {
-              principalType: "user",
+              credentialOwner: "user",
               getToken: ({ principal }) => mintAccountToken(principal, account),
             },
           }),
@@ -255,15 +267,50 @@ Closure values must be JSON-serializable. Plain objects, arrays, strings, finite
 
 Dynamic tools retain their authored input and output validators, including Standard Schema transformations and Zod refinements. JSON Schema remains the model-visible description. For session-scoped tools, eve re-runs the owning `session.started` resolver after a process restart or validator-cache eviction to restore its live validators; replay fails with an explicit error if they are unavailable, rather than accepting input against a weaker JSON Schema. Keep resolvers idempotent.
 
-Call expressions such as `execute: makeExecutor()` are not transformed. Put the callback body directly in `defineTool()` inside an authored module; eve-provided factories, including [memory provider tools](../memory), may also supply pre-registered callbacks. eve rejects a dynamic tool if any present callback lacks durable metadata.
+Call expressions such as `execute: makeExecutor()` are not transformed. Put the callback body directly in `defineTool()` inside an authored module; eve rejects a dynamic tool if a callback lacks durable metadata.
+
+### Create dynamic tools in a package
+
+Prefer an [extension](../extensions) for reusable eve integrations. Extensions contribute a namespaced set of capabilities that consumers can override. Author the final `defineTool()` calls in the extension source. Then build the package with `eve extension build` so eve transforms its callbacks.
+
+Use `defineDurableCallback` when a provider package must return dynamic `defineTool()` values directly. eve cannot transform callback code inside an installed dependency. Put every per-tool value in the helper's `closure`. The callback receives that snapshot as its first argument. The closure follows the same JSON-serializability rules as transformed captures.
+
+```ts title="provider-package/search.ts"
+import { defineDurableCallback, defineTool } from "eve/tools";
+import { z } from "zod";
+
+interface SearchInput {
+  query: string;
+}
+
+export function createSearchTool(baseUrl: string) {
+  return defineTool({
+    description: "Search the provider catalog.",
+    inputSchema: z.object({ query: z.string() }),
+    execute: defineDurableCallback({
+      closure: { baseUrl },
+      callback: async ({ baseUrl }, { query }: SearchInput) => {
+        const response = await fetch(`${baseUrl}/search?q=${encodeURIComponent(query)}`);
+        return response.json();
+      },
+    }),
+  });
+}
+```
+
+Wrap every callback property with the helper. This includes labels, approval policies, `approvalKey`, `execute`, and `toModelOutput`.
+
+`closure` is the callback's only durable snapshot. Store the identifiers and configuration needed to reproduce the call there. Reconstruct clients or look up live runtime state when the callback runs. The callback may call stable imported functions, but it must not capture runtime objects outside `closure`. Those values disappear on a cold start.
+
+eve-provided factories, including [memory provider tools](../memory), use the same durable callback mechanism.
 
 ### Identity and redeploys
 
-A parked call binds to its callback by **tool name and phase** — the same identity a static tool uses — never by source position. This gives dynamic tools static-tool semantics across deploys:
+A parked call binds to its callback within its session, lifecycle scope, and resolver entry. Another session or scope can expose the same tool name without replacing that binding. Callback identity does not depend on source position:
 
-- Editing a callback body (or anything else that does not change tool names) is safe: replaying a parked call runs the latest deployed code with the closure values snapshotted when the call was made.
-- If a persisted callback has no registered implementation (fresh process after a crash, or after a redeploy), eve re-runs `session.started` resolvers once to rebind it, then replays.
-- If the tool no longer exists under that name, replay fails closed with an explicit error instead of invoking something else. Ordinary turn-scoped and step-scoped tools are not rebound; a parked call to a missing one errors. Framework-provided resolvers such as memory provider-tool wrappers opt into the same generic missing-callback rebind while preserving their locked scope.
+- Editing a callback body while keeping its resolver entry and tool names is safe: replaying a parked call runs the latest deployed code with the closure values snapshotted when the call was made.
+- If a persisted session-scoped callback has no registered implementation (a fresh process, a redeploy, or an expired in-process binding), eve re-runs `session.started` resolvers once to rebind it, then replays.
+- If the owning resolver no longer returns that tool, replay fails closed with an explicit error instead of invoking something else. Ordinary turn-scoped and step-scoped tools are not rebound; a parked call to a missing one errors. Framework-provided resolvers such as memory provider-tool wrappers opt into the same generic missing-callback rebind while preserving their locked scope.
 
 ### Naming
 
@@ -287,6 +334,10 @@ A dynamic connection, tool, or skill whose name matches an **authored** one **ov
 | `step.started`    | Before each model call                                | That model call                 |
 
 ¹ Workflow recovery can redeliver a resolver event, so keep resolvers idempotent. Replaying a parked callback does not depend on running the resolver again — except for the one-shot rebind described under [Identity and redeploys](#identity-and-redeploys).
+
+At `turn.started`, model, tool, skill, and subagent resolvers receive the visible conversation history and incoming message in `ctx.messages`, oldest first. Request context is included, and history projection still applies. Read these messages from the handler's second argument; the event itself contains turn metadata. Instruction resolvers use the separate snapshot described under [Dynamic instructions](#dynamic-instructions).
+
+This also applies while a session-limit prompt keeps the incoming message queued and when authorization completes. Authorization callbacks without new or queued input receive the visible history. When memory recall runs, its results appear in the projected snapshot before incoming input.
 
 ### Execution order
 

@@ -5,6 +5,7 @@
  */
 import type { ActivityObserverConfig } from "#channel/types.js";
 import type { HarnessSession } from "#harness/types.js";
+import type { ActivityWorkIdentityV1 } from "#protocol/activity.js";
 import {
   readLatestTaskView,
   sendTaskCommand,
@@ -12,14 +13,23 @@ import {
   startTaskRun,
   waitForTaskCommandOwner,
 } from "#execution/tasks/parent/run-parent.js";
-import { sessionCommandHookToken } from "#execution/session-command-token.js";
+import { sessionCommandHookToken } from "#execution/session-inbox/address.js";
 import type { JsonValue } from "#shared/json.js";
 import type { TaskExecutorBinding } from "#tools/task.js";
 import { deriveTaskInboxToken, deriveTaskId } from "#tasks/task-id.js";
 import { isTerminalTaskStatus, type TaskMetadata } from "#tasks/types.js";
+import type { TaskAgentDispatchContext } from "#tasks/session-index.js";
+import type { ContextReader } from "#context/key.js";
+import {
+  SessionDynamicSubagentSelectionsKey,
+  TurnDynamicSubagentSelectionsKey,
+  type SessionAuth,
+} from "#context/keys.js";
 
 /** A prepared background task: identity plus its started durable run. */
 export interface BackgroundTask {
+  readonly activityWorkIdentity?: ActivityWorkIdentityV1;
+  readonly dispatchContext: TaskAgentDispatchContext;
   readonly taskInboxToken: string;
   readonly createdByStepIndex?: number;
   readonly createdByTurnId: string;
@@ -29,11 +39,23 @@ export interface BackgroundTask {
   readonly taskRunId: string;
 }
 
+export function createTaskAgentDispatchContext(
+  ctx: ContextReader,
+  auth: SessionAuth,
+): TaskAgentDispatchContext {
+  return {
+    auth,
+    sessionDynamicSubagentSelections: ctx.get(SessionDynamicSubagentSelectionsKey),
+    turnDynamicSubagentSelections: ctx.get(TurnDynamicSubagentSelectionsKey),
+  };
+}
+
 type BackgroundTaskDraft = Omit<BackgroundTask, "taskRunId">;
 
 /** Derives the replay-stable task identity before its owning run is started. */
 export function prepareBackgroundTask(input: {
   readonly callId: string;
+  readonly dispatchContext: TaskAgentDispatchContext;
   readonly metadata: TaskMetadata;
   readonly parentSessionId: string;
   readonly parentStepIndex?: number;
@@ -52,6 +74,7 @@ export function prepareBackgroundTask(input: {
     }),
     createdByStepIndex: input.parentStepIndex ?? 0,
     createdByTurnId: input.parentTurnId,
+    dispatchContext: input.dispatchContext,
     metadata: input.metadata,
     taskId,
   };
@@ -61,6 +84,7 @@ export function prepareBackgroundTask(input: {
 export async function beginBackgroundTask(input: {
   readonly activityObserver?: ActivityObserverConfig;
   readonly callId: string;
+  readonly dispatchContext: TaskAgentDispatchContext;
   readonly metadata: TaskMetadata;
   readonly parentSessionId: string;
   readonly parentStepIndex?: number;

@@ -1,5 +1,5 @@
 import {
-  isEveDevEnvironment,
+  resolveInstrumentationEnvironment,
   resolveEveEvaluationRunId,
 } from "#internal/application/dev-environment.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
@@ -23,9 +23,4 @@ export function createInstrumentationSetupContext(agentName: string): ProviderSe
     evaluation: evaluationRunId === undefined ? undefined : { runId: evaluationRunId },
     frameworkVersion: resolveInstalledPackageInfo().version,
   };
-}
-
-function resolveInstrumentationEnvironment(): ProviderSetupContext["environment"] {
-  if (isEveDevEnvironment() || process.env.VERCEL_ENV === "development") return "development";
-  return process.env.VERCEL_ENV === "preview" ? "preview" : "production";
 }

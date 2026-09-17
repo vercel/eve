@@ -659,11 +659,14 @@ describe("WorkflowBundleBuilder", () => {
     }
   });
 
-  it("keeps the sleep tool schemas out of the workflow driver", async () => {
-    const tempRoot = await mkdtemp(join(tmpdir(), "eve-workflow-bundle-sleep-tool-"));
+  it.each([
+    ["sleep tool", "src/execution/tools/sleep-workflow.ts", "executeSleepTool"],
+    ["session owner", "src/execution/session/entry.ts", "nextTurnDelivery"],
+  ])("keeps the %s schemas out of the workflow driver", async (_name, sourcePath, marker) => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "eve-workflow-bundle-no-schemas-"));
     const outDir = join(tempRoot, "workflow-build");
     const compiledArtifactsBootstrapPath = join(tempRoot, "compiled-artifacts-bootstrap.mjs");
-    const sleepWorkflowPath = resolvePackageSourceFilePath("src/execution/tools/sleep-workflow.ts");
+    const workflowPath = resolvePackageSourceFilePath(sourcePath);
 
     try {
       await writeFile(compiledArtifactsBootstrapPath, "export {};\n");
@@ -677,7 +680,7 @@ describe("WorkflowBundleBuilder", () => {
           rootDir: resolvePackageRoot(),
           watch: false,
         },
-        [sleepWorkflowPath],
+        [workflowPath],
       );
 
       await builder.build();
@@ -691,7 +694,7 @@ describe("WorkflowBundleBuilder", () => {
       const encodedChunks = JSON.parse(encodedChunksMatch?.[1] ?? "[]") as string[];
       const decodedWorkflowCode = Buffer.from(encodedChunks.join(""), "base64").toString("utf8");
 
-      expect(decodedWorkflowCode).toContain("executeSleepTool");
+      expect(decodedWorkflowCode).toContain(marker);
       expect(decodedWorkflowCode).not.toContain("compiled/zod");
     } finally {
       await rm(tempRoot, { force: true, recursive: true });
@@ -834,6 +837,10 @@ describe("WorkflowBundleBuilder", () => {
 
       const builder = new FixtureWorkflowBundleBuilder(
         {
+          authoredWorkflowModules: {
+            directiveModules: [toolPath, stepsPath, join(appRoot, "agent", "lib", "run.ts")],
+            workflowModules: [toolPath, join(appRoot, "agent", "lib", "run.ts")],
+          },
           agentName: "test-agent",
           appRoot,
           compiledArtifactsBootstrapPath,
@@ -866,6 +873,30 @@ describe("WorkflowBundleBuilder", () => {
       expect(workflowCode).not.toContain("node:crypto");
     } finally {
       await rm(tempRoot, { force: true, recursive: true });
+    }
+  });
+  it("rejects unresolved workflow imports before emitting a VM bundle", async () => {
+    const root = await mkdtemp(join(tmpdir(), "eve-workflow-missing-import-"));
+    const flow = join(root, "flow.ts");
+    try {
+      await writeFile(
+        flow,
+        'import { value } from "missing-workflow-package"; export async function flow() { "use workflow"; return value; }',
+      );
+      const builder = new FixtureWorkflowBundleBuilder(
+        {
+          agentName: "missing-import",
+          appRoot: root,
+          rootDir: root,
+          outDir: join(root, "out"),
+          compiledArtifactsBootstrapPath: join(root, "bootstrap.mjs"),
+          watch: false,
+        },
+        [flow],
+      );
+      await expect(builder.build()).rejects.toThrow("missing-workflow-package");
+    } finally {
+      await rm(root, { recursive: true, force: true });
     }
   });
 });

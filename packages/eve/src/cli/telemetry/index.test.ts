@@ -135,6 +135,9 @@ describe("createEveCliTelemetry", () => {
     expect(events).toContainEqual(expect.objectContaining({ key: "target", value: "remote" }));
     expect(events).toContainEqual(expect.objectContaining({ key: "ui", value: "headless" }));
     expect(events).toContainEqual(
+      expect.objectContaining({ key: "identity_kind", value: "persistent" }),
+    );
+    expect(events).toContainEqual(
       expect.objectContaining({ key: "installation_id", value: "installation_123" }),
     );
     expect(events).toContainEqual(
@@ -143,6 +146,98 @@ describe("createEveCliTelemetry", () => {
     expect(resolveEveTelemetryProjectId).toHaveBeenCalledWith({
       identity: { installationId: "installation_123", projectSalt: "project_salt_123" },
     });
+  });
+
+  it("records timestamped connection readiness and first response without content", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("EVE_TELEMETRY_DEBUG", "1");
+    const write = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    const telemetry = createEveCliTelemetry("1.0.0");
+    telemetry.trackCommand("dev");
+    telemetry.trackSetupStep({ flow: "onboarding", step: "connection_ready" });
+    telemetry.trackSetupTerminal({
+      flow: "onboarding",
+      step: "model_provider",
+      result: "completed",
+    });
+    telemetry.trackSetupStep({ flow: "onboarding", step: "first_response" });
+    await telemetry.flush();
+    const events = JSON.parse(String(write.mock.calls[0]?.[0]).replace("[eve telemetry] ", ""));
+    for (const value of ["connection_ready", "first_response"])
+      expect(events).toContainEqual(
+        expect.objectContaining({ key: "setup_step", value, event_time: expect.any(Number) }),
+      );
+  });
+
+  it("records the furthest init stage without error details", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("EVE_TELEMETRY_DEBUG", "1");
+    const write = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    const telemetry = createEveCliTelemetry("1.0.0");
+    telemetry.trackCommand("init");
+    telemetry.trackSetupStep({ flow: "init", step: "resolve_target" });
+    telemetry.trackSetupStep({ flow: "init", step: "install_dependencies" });
+
+    await telemetry.flush();
+
+    const events = JSON.parse(
+      String(write.mock.calls[0]?.[0]).replace("[eve telemetry] ", ""),
+    ) as Array<{ key: string; value: string }>;
+    expect(events).toContainEqual(
+      expect.objectContaining({ key: "setup_step", value: "install_dependencies" }),
+    );
+    expect(events).toContainEqual(
+      expect.objectContaining({ key: "setup_step", value: "resolve_target" }),
+    );
+  });
+
+  it("records the final onboarding stage without user selections", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("EVE_TELEMETRY_DEBUG", "1");
+    const write = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    const telemetry = createEveCliTelemetry("1.0.0");
+    telemetry.trackCommand("dev");
+    telemetry.trackSetupStep({ flow: "onboarding", step: "model_provider" });
+    telemetry.trackSetupTerminal({ flow: "onboarding", step: "registry_install", result: "error" });
+
+    await telemetry.flush();
+
+    const events = JSON.parse(
+      String(write.mock.calls[0]?.[0]).replace("[eve telemetry] ", ""),
+    ) as Array<{ key: string; value: string }>;
+    expect(events).toContainEqual(
+      expect.objectContaining({ key: "setup_terminal_step", value: "registry_install" }),
+    );
+    expect(events).toContainEqual(
+      expect.objectContaining({ key: "setup_step", value: "model_provider" }),
+    );
+    expect(events).toContainEqual(
+      expect.objectContaining({ key: "setup_failure_code", value: "dependency_installation" }),
+    );
+  });
+
+  it("records an explicit bounded setup failure category", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("EVE_TELEMETRY_DEBUG", "1");
+    const write = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    const telemetry = createEveCliTelemetry("1.0.0");
+    telemetry.trackCommand("init");
+    telemetry.trackSetupStep({ flow: "init", step: "resolve_target" });
+    telemetry.trackSetupTerminal({
+      flow: "init",
+      step: "resolve_target",
+      result: "error",
+      failureCode: "target_resolution",
+    });
+
+    await telemetry.flush();
+
+    const events = JSON.parse(
+      String(write.mock.calls[0]?.[0]).replace("[eve telemetry] ", ""),
+    ) as Array<{ key: string; value: string }>;
+    expect(events).toContainEqual(
+      expect.objectContaining({ key: "setup_failure_code", value: "target_resolution" }),
+    );
   });
 
   it("skips telemetry when identity initialization fails", async () => {
@@ -168,7 +263,15 @@ describe("createEveCliTelemetry", () => {
 
     expect(readOrCreateEveTelemetryIdentity).not.toHaveBeenCalled();
     expect(createEveTelemetryIdentity).toHaveBeenCalledOnce();
-    expect(String(write.mock.calls[0]?.[0])).toContain("ephemeral_installation_123");
+    const events = JSON.parse(
+      String(write.mock.calls[0]?.[0]).replace("[eve telemetry] ", ""),
+    ) as Array<{ key: string; value: string }>;
+    expect(events).toContainEqual(
+      expect.objectContaining({ key: "identity_kind", value: "ephemeral" }),
+    );
+    expect(events).toContainEqual(
+      expect.objectContaining({ key: "installation_id", value: "ephemeral_installation_123" }),
+    );
   });
 
   it("flushes an allowlisted outcome through a telemetry-disabled child process", async () => {

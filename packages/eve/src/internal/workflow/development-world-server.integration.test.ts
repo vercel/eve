@@ -3,7 +3,7 @@ import { join } from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { turnWorkflowReference, workflowEntryReference } from "#execution/workflow-runtime.js";
+import { workflowEntryReference } from "#execution/workflow-runtime.js";
 import { useTemporaryDirectories } from "#internal/testing/use-temporary-app-roots.js";
 import { getDevelopmentWorkflowGeneration } from "#internal/workflow/development-generation-context.js";
 import { deriveEveWorkflowQueuePrefix } from "#internal/workflow/queue-namespace.js";
@@ -106,7 +106,7 @@ describe("parent development Workflow World", () => {
     }
   });
 
-  it("pins a turn delivery to its recorded generation", async () => {
+  it("pins every workflow delivery to its recorded generation", async () => {
     const appRoot = await createScratchDirectory("eve-parent-workflow-world-");
     await seedGeneration(appRoot, "generation-a");
     await seedGeneration(appRoot, "generation-b");
@@ -123,7 +123,7 @@ describe("parent development Workflow World", () => {
             deploymentId: "generation-a",
             executionContext: {},
             input: new Uint8Array(),
-            workflowName: turnWorkflowReference.workflowId,
+            workflowName: workflowEntryReference.workflowId,
           },
           eventType: "run_created",
           specVersion: 6,
@@ -138,8 +138,9 @@ describe("parent development Workflow World", () => {
     }
   });
 
-  it("routes the generation-neutral driver to active and rejects untrusted deliveries", async () => {
+  it("honors exact run input generations and rejects untrusted deliveries", async () => {
     const appRoot = await createScratchDirectory("eve-parent-workflow-routing-");
+    await seedGeneration(appRoot, "generation-a");
     await seedGeneration(appRoot, "generation-b");
     const world = createWorld({ activeGenerationId: () => "generation-b", appRoot });
     connectWorkerToWorld(world, appRoot);
@@ -156,7 +157,7 @@ describe("parent development Workflow World", () => {
             workflowName: workflowEntryReference.workflowId,
           },
         }),
-      ).resolves.toBe("generation-b");
+      ).resolves.toBe("generation-a");
 
       const untrusted = await createWorkerQueueHandler()(
         new Request("http://localhost/.well-known/workflow/v1/flow", {
@@ -183,7 +184,7 @@ describe("parent development Workflow World", () => {
           deploymentId: "generation-a",
           executionContext: {},
           input: new Uint8Array(),
-          workflowName: turnWorkflowReference.workflowId,
+          workflowName: workflowEntryReference.workflowId,
         },
         eventType: "run_created",
         specVersion: 6,
@@ -212,6 +213,36 @@ describe("parent development Workflow World", () => {
     }
   });
 
+  it("routes a pre-start health check to the active generation before its run exists", async () => {
+    const appRoot = await createScratchDirectory("eve-parent-workflow-health-check-");
+    await seedGeneration(appRoot, "generation-b");
+    const world = createWorld({ activeGenerationId: () => "generation-b", appRoot });
+    connectWorkerToWorld(world, appRoot);
+
+    try {
+      await world.start();
+      const payload = { __healthCheck: true, correlationId: "probe", runId: RUN_ID };
+      const handled = vi.fn(async () => {
+        expect(getDevelopmentWorkflowGeneration()?.generationId).toBe("generation-b");
+      });
+      const handler = createDevelopmentWorkflowWorld().createQueueHandler(QUEUE_PREFIX, handled);
+      const response = await handler(
+        new Request("http://localhost/.well-known/workflow/v1/flow", {
+          body: JSON.stringify(payload),
+          headers: {
+            ...deliveryHeaders({}),
+            "x-vqs-queue-name": `${QUEUE_PREFIX}health_check`,
+          },
+          method: "POST",
+        }),
+      );
+      expect(response.status, await response.text()).toBe(200);
+      expect(handled).toHaveBeenCalledWith(payload, expect.any(Object));
+    } finally {
+      await world.close();
+    }
+  });
+
   it("acknowledges and drops a delivery whose generation is permanently missing", async () => {
     const appRoot = await createScratchDirectory("eve-parent-workflow-dropped-delivery-");
     await seedGeneration(appRoot, "generation-a");
@@ -228,7 +259,7 @@ describe("parent development Workflow World", () => {
             deploymentId: "generation-a",
             executionContext: {},
             input: new Uint8Array(),
-            workflowName: turnWorkflowReference.workflowId,
+            workflowName: workflowEntryReference.workflowId,
           },
           eventType: "run_created",
           specVersion: 6,
@@ -277,7 +308,7 @@ describe("parent development Workflow World", () => {
             deploymentId: "generation-a",
             executionContext: {},
             input: new Uint8Array(),
-            workflowName: turnWorkflowReference.workflowId,
+            workflowName: workflowEntryReference.workflowId,
           },
           eventType: "run_created",
           specVersion: 6,
@@ -413,7 +444,7 @@ function deliveryHeaders(input: { readonly secret?: string }): Record<string, st
     [DEVELOPMENT_WORKFLOW_DELIVERY_HEADER]: input.secret ?? SECRET,
     "x-vqs-message-attempt": "1",
     "x-vqs-message-id": "msg_test",
-    "x-vqs-queue-name": `${QUEUE_PREFIX}${turnWorkflowReference.workflowId}`,
+    "x-vqs-queue-name": `${QUEUE_PREFIX}${workflowEntryReference.workflowId}`,
   };
 }
 

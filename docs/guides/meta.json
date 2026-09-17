@@ -4,7 +4,6 @@
     "deployment",
     "auth-and-route-protection",
     "instrumentation",
-    "instrumentation-providers",
     "hooks",
     "session-context",
     "dynamic-capabilities",

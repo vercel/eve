@@ -4,38 +4,14 @@
   "homepage": "https://eve.dev",
   "items": [
     {
-      "name": "linear",
+      "name": "eve/self-modification",
       "type": "registry:item",
-      "title": "Linear",
-      "description": "Receive delegated Linear work and give your agent tools for issues, projects, and comments.",
+      "title": "Self-modification",
+      "description": "Add a source editing subagent with local edits and official registry installation.",
+      "dependencies": ["just-bash", "@vercel/connect"],
       "meta": {
         "eve": {
-          "requires": ">=0.30.6",
-          "components": [
-            {
-              "item": "channel/linear-agent",
-              "label": "Linear Channel",
-              "description": "Interact with your eve agent natively in Linear",
-              "default": true
-            },
-            {
-              "item": "connection/linear",
-              "label": "Linear MCP",
-              "description": "Use the Linear MCP",
-              "default": true
-            }
-          ]
-        }
-      }
-    },
-    {
-      "name": "experimental/self-modification",
-      "type": "registry:item",
-      "title": "Self-modification (Experimental)",
-      "description": "Add an experimental, development-only source editing subagent to an eve project.",
-      "dependencies": ["just-bash"],
-      "meta": {
-        "eve": {
+          "requires": ">=0.54.4",
           "install": {
             "pnpm": {
               "buildScripts": [
@@ -47,22 +23,87 @@
                 }
               ]
             }
-          }
+          },
+          "setup": [
+            {
+              "package": "eve",
+              "bin": "eve",
+              "args": ["integration", "setup", "self-modification-production"]
+            }
+          ]
         }
       },
       "files": [
         {
-          "path": "registry/experimental/self-modification/agent.ts",
+          "path": "registry/eve/self-modification/config.ts",
+          "type": "registry:file",
+          "target": "agent/subagents/self-modification/config.ts"
+        },
+        {
+          "path": "registry/eve/self-modification/agent.ts",
           "type": "registry:file",
           "target": "agent/subagents/self-modification/agent.ts"
         },
         {
-          "path": "registry/experimental/self-modification/sandbox.ts",
+          "path": "registry/eve/self-modification/sandbox.ts",
           "type": "registry:file",
           "target": "agent/subagents/self-modification/sandbox.ts"
         },
         {
-          "path": "registry/experimental/self-modification/extension.ts",
+          "path": "registry/eve/self-modification/extension.ts",
+          "type": "registry:file",
+          "target": "agent/subagents/self-modification/extensions/selfmod.ts"
+        }
+      ]
+    },
+    {
+      "name": "experimental/self-modification",
+      "type": "registry:item",
+      "title": "Self-modification (Experimental)",
+      "description": "Add an experimental source editing subagent with local edits and official registry installation.",
+      "dependencies": ["just-bash", "@vercel/connect"],
+      "meta": {
+        "eve": {
+          "hidden": true,
+          "install": {
+            "pnpm": {
+              "buildScripts": [
+                {
+                  "packages": ["node-liblzma", "@mongodb-js/zstd"],
+                  "optional": true,
+                  "recommendedAction": "ignore-optional",
+                  "reason": "These optional just-bash compression accelerators are not required by the self-modification agent."
+                }
+              ]
+            }
+          },
+          "setup": [
+            {
+              "package": "eve",
+              "bin": "eve",
+              "args": ["integration", "setup", "self-modification"]
+            }
+          ]
+        }
+      },
+      "files": [
+        {
+          "path": "registry/eve/self-modification/config.ts",
+          "type": "registry:file",
+          "target": "agent/subagents/self-modification/config.ts"
+        },
+        {
+          "path": "registry/eve/self-modification/agent.ts",
+          "type": "registry:file",
+          "target": "agent/subagents/self-modification/agent.ts"
+        },
+        {
+          "path": "registry/eve/self-modification/sandbox.ts",
+          "type": "registry:file",
+          "target": "agent/subagents/self-modification/sandbox.ts"
+        },
+        {
+          "path": "registry/eve/self-modification/extension.ts",
           "type": "registry:file",
           "target": "agent/subagents/self-modification/extensions/selfmod.ts"
         }
@@ -359,19 +400,6 @@
           "path": "registry/tools/task_cancel.ts",
           "type": "registry:file",
           "target": "agent/tools/task_cancel.ts"
-        }
-      ]
-    },
-    {
-      "name": "tool/task_update",
-      "type": "registry:item",
-      "title": "Task Update",
-      "description": "Report background-task progress to the parent agent.",
-      "files": [
-        {
-          "path": "registry/tools/task_update.ts",
-          "type": "registry:file",
-          "target": "agent/tools/task_update.ts"
         }
       ]
     },
@@ -1652,24 +1680,22 @@
       "name": "channel/teams",
       "type": "registry:item",
       "title": "Microsoft Teams",
-      "description": "Bring your agent into Teams chats and channels.",
-      "envVars": {
-        "TEAMS_APP_ID": "",
-        "TEAMS_APP_PASSWORD": ""
-      },
-      "files": [
-        {
-          "path": "registry/channels/teams.ts",
-          "type": "registry:file",
-          "target": "agent/channels/teams.ts"
-        }
-      ],
+      "description": "Run an eve agent as a managed Microsoft Teams bot, with guided Vercel Connect setup.",
       "meta": {
         "eve": {
+          "setup": {
+            "command": "eve",
+            "package": "eve",
+            "bin": "eve",
+            "args": ["integration", "setup", "teams"]
+          },
+          "requires": ">=0.53.0",
           "docs": "/docs/channels/teams",
           "implementation": "native"
         }
-      }
+      },
+      "dependencies": ["@vercel/connect@>=2.1.0"],
+      "devDependencies": ["vercel@>=58.5.1"]
     },
     {
       "name": "channel/telegram",
@@ -1762,7 +1788,7 @@
       "devDependencies": ["vercel@>=58.5.1"]
     },
     {
-      "name": "channel/linear-agent",
+      "name": "channel/linear",
       "type": "registry:item",
       "title": "Linear Agent",
       "description": "Delegate Linear issues and comments through Agent Sessions, with guided Vercel Connect setup.",

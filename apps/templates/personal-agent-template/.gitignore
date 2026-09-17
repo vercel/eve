@@ -1,0 +1,16 @@
+node_modules
+.env
+.env.*
+!.env.example
+.eve
+.vercel
+.workflow-data
+.next
+.output
+.nitro
+dist
+.data
+.DS_Store
+*.tsbuildinfo
+.nuxt
+.pnpm-store

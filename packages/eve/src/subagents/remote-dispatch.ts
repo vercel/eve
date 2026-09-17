@@ -19,8 +19,12 @@ import type { ForwardedPrincipal } from "#channel/forwarded-principal.js";
 import type { HeadersValue } from "#client/types.js";
 import { createWorkflowCallbackUrl } from "#execution/workflow-callback-url.js";
 import { createRemoteAgentRouteUrl } from "#subagents/remote-route-url.js";
-import { formatTraceparent } from "#protocol/traceparent.js";
-import { formatSubagentInput, normalizeRequestedOutputSchema } from "#subagents/invocation.js";
+import { formatTraceparent, writeAgentDispatchTracestate } from "#protocol/traceparent.js";
+import {
+  formatSubagentInput,
+  normalizeRequestedOutputSchema,
+  type SubagentParentContext,
+} from "#subagents/invocation.js";
 import type { HarnessSession } from "#harness/types.js";
 import type { RuntimeRemoteAgentDispatchRequest } from "#shared/action-types.js";
 import type { RuntimeSubagentRegistry } from "#runtime/subagents/registry.js";
@@ -30,8 +34,12 @@ import type { ResolvedRuntimeRemoteAgentNode } from "#runtime/types.js";
 import { expectFunction, expectObjectRecord } from "#internal/authored-module.js";
 import type { JsonObject } from "#shared/json.js";
 import { readTaskIdFromInboxToken } from "#tasks/task-inbox-token.js";
-import { writeForwardedAudienceBaggage } from "#protocol/baggage.js";
+import {
+  writeForwardedAudienceBaggage,
+  writeForwardedParentSessionBaggage,
+} from "#protocol/baggage.js";
 import { decisionToTraceContentCeiling } from "#shared/forwarded-trace-policy.js";
+import { writeConversationBaggage } from "#tracing/conversation-context.js";
 
 const CreateSessionResponseSchema = z.object({
   ok: z.literal(true),
@@ -58,7 +66,6 @@ export async function startRemoteAgentSession(input: {
   /** The dispatching turn's session principal, forwarded when `remote.forwardPrincipal` is set. */
   readonly auth?: SessionAuthContext | null;
   readonly callbackBaseUrl: string | undefined;
-  readonly callbackToken?: string;
   readonly originAudience?: ChannelAudience;
   readonly activityObserver?: ActivityObserverConfig;
   /** The root initiator's principal, forwarded alongside {@link auth}. */
@@ -69,12 +76,14 @@ export async function startRemoteAgentSession(input: {
    * created instead of starting a second one.
    */
   readonly operationId?: string;
-  readonly parentTraceContext?: SessionTraceContext;
+  readonly parent?: Omit<SubagentParentContext, "lineage"> & {
+    readonly lineage?: SubagentParentContext["lineage"];
+  };
   readonly remote: ResolvedRuntimeRemoteAgentNode;
   readonly session: HarnessSession;
   readonly taskId?: string;
 }): Promise<RemoteAgentSessionCoordinates> {
-  const callbackToken = input.callbackToken ?? input.session.continuationToken;
+  const callbackToken = input.parent?.continuationToken ?? input.session.continuationToken;
   if (!callbackToken) {
     throw new Error("Cannot dispatch remote agent without a parent continuation token.");
   }
@@ -127,20 +136,28 @@ export async function startRemoteAgentSession(input: {
   }
 
   const headers = await resolveRemoteAgentRequestHeaders(input.remote);
-  const traceparent = formatTraceparent(input.parentTraceContext);
-  if (traceparent !== undefined) {
-    setHeader(headers, "traceparent", traceparent);
-  }
+  const traceparent = formatTraceparent(input.parent?.traceContext);
+  if (traceparent !== undefined) setHeader(headers, "traceparent", traceparent);
+  setHeader(
+    headers,
+    "tracestate",
+    writeAgentDispatchTracestate(readHeader(headers, "tracestate"), input.parent?.traceContext),
+  );
   const baggage = writeForwardedAudienceBaggage(
     readHeader(headers, "baggage"),
     buildForwardedTraceAssertion({
       forwardedPrincipal,
       originAudience: input.originAudience,
-      parentTraceContext: input.parentTraceContext,
+      parentTraceContext: input.parent?.traceContext,
       traceparent,
     }),
   );
-  setHeader(headers, "baggage", baggage);
+  const conversationBaggage = writeConversationBaggage(baggage, input.parent?.conversationId);
+  setHeader(
+    headers,
+    "baggage",
+    writeForwardedParentSessionBaggage(conversationBaggage, input.parent?.lineage),
+  );
   const response = await fetch(createRemoteAgentSessionUrl(input.remote), {
     body: JSON.stringify(requestBody),
     headers: {
@@ -202,7 +219,7 @@ export async function continueRemoteAgentSession(input: {
   readonly activityObserver?: ActivityObserverConfig;
   /** The dispatching turn's session principal, forwarded when `remote.forwardPrincipal` is set. */
   readonly auth: SessionAuthContext | null;
-  readonly callback: {
+  readonly callback?: {
     readonly callId: string;
     readonly subagentName: string;
     readonly taskId?: string;

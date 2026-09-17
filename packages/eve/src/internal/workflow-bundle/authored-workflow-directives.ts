@@ -59,7 +59,7 @@ export async function prepareAuthoredWorkflowDirectives(input: {
   const body = program.body ?? [];
   if (body.some((node) => node.source?.value === "eve/workflow")) {
     throw new Error(
-      `${input.filePath}: "eve/workflow" has been removed. Use defineWorkflowTool() from "eve/tools" and call ctx.agent(input) or ctx.ask(request) in its executor.`,
+      `${input.filePath}: "eve/workflow" has been removed. Use defineWorkflowTool() from "eve/tools" and call ctx.agent(target, input) or ctx.ask(request) in its executor.`,
     );
   }
   for (const statement of body) {

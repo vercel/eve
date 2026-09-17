@@ -17,7 +17,21 @@ describe("defineWorkflowTool", () => {
       async execute(input, ctx) {
         expectTypeOf(input).toEqualTypeOf<{ service: string }>();
         expectTypeOf(ctx).toEqualTypeOf<WorkflowToolContext>();
-        // @ts-expect-error Workflow bodies do not have turn-owned token access.
+        const review = ctx.agent("researcher", {
+          message: "Review the deployment.",
+          outputSchema: {
+            properties: {
+              findings: { items: { type: "string" }, type: "array" },
+              score: { type: "number" },
+            },
+            required: ["findings"],
+            type: "object",
+          },
+        });
+        expectTypeOf(review).toEqualTypeOf<Promise<{ findings: string[]; score?: number }>>();
+        // @ts-expect-error The subagent name is the first argument, not part of the input.
+        void ctx.agent({ message: "Review the deployment.", target: "researcher" });
+        // Token capabilities are available when this context is passed into a step.
         void ctx.getToken;
         // @ts-expect-error Workflow bodies do not have a session sandbox.
         void ctx.getSandbox;

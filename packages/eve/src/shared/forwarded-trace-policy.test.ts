@@ -88,7 +88,7 @@ describe("applyLiveDeliveryAudienceCeiling", () => {
     ["private", forwardedTracePolicy, false],
     ["private", undefined, false],
   ] as const)("handles the %s delivery audience", (audience, policy, recordsContent) => {
-    expect(applyLiveDeliveryAudienceCeiling(decision, audience, policy)).toEqual({
+    expect(applyLiveDeliveryAudienceCeiling(decision, audience, policy, "production")).toEqual({
       action: "record",
       recordInputs: recordsContent,
       recordOutputs: recordsContent,

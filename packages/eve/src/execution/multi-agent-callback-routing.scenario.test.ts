@@ -13,7 +13,7 @@ import {
   notifyTurnCallerStep,
   resolveInitialTurnCallerStep,
 } from "#subagents/parent-notification.js";
-import { fireSessionCallbackStep, fireTaskUpdateCallbackStep } from "#subagents/callback-step.js";
+import { fireSessionCallbackStep } from "#subagents/callback-step.js";
 import { startRemoteAgentSession } from "#subagents/remote-dispatch.js";
 import { resolveWorkflowCallbackBaseUrl } from "#execution/workflow-callback-url.js";
 import { authHookToken, CallbackBaseUrlKey, getHookUrl } from "#harness/authorization.js";
@@ -22,6 +22,7 @@ import {
   createEveConnectionCallbackRoutePath,
 } from "#protocol/routes.js";
 import { ensureEveVercelOutputConfig } from "#public/next/vercel-output-config.js";
+import { joinEveRoutePath } from "#shared/eve-route-path.js";
 import type { HarnessSession } from "#harness/types.js";
 
 /**
@@ -49,12 +50,12 @@ import type { HarnessSession } from "#harness/types.js";
 const DEPLOYMENT_AGENTS = [
   {
     name: "support",
-    publicRoutePrefix: "/eve/agents/support",
+    publicRoutePrefix: "/eve/support",
     serviceName: "eve-support",
   },
   {
     name: "billing",
-    publicRoutePrefix: "/eve/agents/billing",
+    publicRoutePrefix: "/eve/billing",
     serviceName: "eve-billing",
   },
 ] as const;
@@ -289,7 +290,7 @@ describe("multi-agent callback routing", () => {
         remoteAgentName: "research",
       },
       callbackBaseUrl: resolveWorkflowCallbackBaseUrl(deploymentOrigin),
-      callbackToken,
+      parent: { continuationToken: callbackToken },
       remote: {
         description: "remote research agent",
         kind: "remote",
@@ -320,7 +321,10 @@ describe("multi-agent callback routing", () => {
 
       expect(remoteSessionId).toBe("remote-session-1");
       expect(callback.url).toBe(
-        `${deploymentOrigin}${agent.publicRoutePrefix}${createEveCallbackRoutePath(callbackToken)}`,
+        `${deploymentOrigin}${joinEveRoutePath(
+          agent.publicRoutePrefix,
+          createEveCallbackRoutePath(callbackToken),
+        )}`,
       );
 
       // Remote-side create-session validation (public/channels/eve.ts):
@@ -364,10 +368,9 @@ describe("multi-agent callback routing", () => {
       const hookUrl = contextStorage.run(ctx, () => getHookUrl("linear", attemptId));
 
       expect(hookUrl).toBe(
-        `${deploymentOrigin}${agent.publicRoutePrefix}${createEveConnectionCallbackRoutePath(
-          "linear",
-          attemptId,
-          authHookToken(sessionId),
+        `${deploymentOrigin}${joinEveRoutePath(
+          agent.publicRoutePrefix,
+          createEveConnectionCallbackRoutePath("linear", attemptId, authHookToken(sessionId)),
         )}`,
       );
 
@@ -398,7 +401,7 @@ describe("multi-agent callback routing", () => {
     }
   });
 
-  it.each(["session.completed", "task.update", "turn.completed", "turn.failed"] as const)(
+  it.each(["session.completed", "turn.completed", "turn.failed"] as const)(
     "logs %s delivery failures when the public route prefix is absent",
     async (kind) => {
       stubAgentRuntimeEnvironment(undefined);
@@ -423,15 +426,7 @@ describe("multi-agent callback routing", () => {
         [SessionCallbackKey.name]: sessionCallback,
       };
       const deliver = async () => {
-        if (kind === "task.update") {
-          await fireTaskUpdateCallbackStep({
-            callback: sessionCallback,
-            callId: "call-support",
-            message: "private progress",
-            updateEpoch: "turn-child",
-            updateIndex: 1,
-          });
-        } else if (kind === "session.completed") {
+        if (kind === "session.completed") {
           await fireSessionCallbackStep({
             output: "report done",
             serializedContext,

@@ -28,12 +28,13 @@ function bareToken(name: string): string {
 
 const NODE_ENGINE_TOKEN = bareToken("NODE_ENGINE");
 
+export const DEFAULT_CONNECT_PACKAGE_VERSION = "2.2.0";
+
 const TOKEN_SOURCES: Readonly<Record<string, TokenSource>> = {
   [versionToken("EVE_PACKAGE")]: { kind: "eve-version" },
   [versionToken("EVE_PACKAGE_DEPENDENCY")]: { kind: "eve-version" },
   [NODE_ENGINE_TOKEN]: { kind: "eve-node-engine" },
   [versionToken("AI_SDK")]: { kind: "catalog", packageName: "ai" },
-  [versionToken("VERCEL_CONNECT")]: { kind: "catalog", packageName: "@vercel/connect" },
   [versionToken("NEXT")]: { kind: "catalog", packageName: "next" },
   [versionToken("REACT")]: { kind: "catalog", packageName: "react" },
   [versionToken("REACT_DOM")]: { kind: "catalog", packageName: "react-dom" },
@@ -137,7 +138,7 @@ function resolveTokenFromDevTree(token: string): string | undefined {
  * of need when the running code is unstamped. The published package is stamped
  * by the build (`scripts/stamp-version-tokens.mjs`), so the fallback only ever
  * fires in a dev tree — tsc watch emits and tests running from `src` — where
- * the live workspace catalog *is* the truth the stamp would have captured.
+ * the live package and workspace manifests are the sources the stamp would have captured.
  * Outside a dev tree an unstamped token still throws, because writing the
  * literal token into a scaffolded package.json would break the generated
  * project.

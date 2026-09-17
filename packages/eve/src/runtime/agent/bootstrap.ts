@@ -1,10 +1,15 @@
-import type { ModelMessage } from "ai";
+import type { HarnessModelMessage } from "#harness/messages.js";
+
+import { createFrameworkUserMessage } from "#harness/messages.js";
 
 import { composeRuntimeBasePrompt } from "#runtime/prompt/compose.js";
 import type { PreparedRuntimeTool } from "#runtime/sessions/turn.js";
 import type { ResolvedAgent, ResolvedAgentDefinition } from "#runtime/types.js";
 import type { WorkspaceRuntimeSpec } from "#runtime/workspace/types.js";
-import type { InternalAgentModelDefinition } from "#shared/agent-definition.js";
+import type {
+  AgentReasoningDefinition,
+  InternalAgentModelDefinition,
+} from "#shared/agent-definition.js";
 import type { ModuleSourceRef } from "#shared/source-ref.js";
 import type { AvailableSkillDescription } from "#execution/skills/instructions.js";
 
@@ -17,7 +22,9 @@ export const BOOTSTRAP_RUNTIME_MODEL_ID = "eve-bootstrap-model";
 /**
  * Runtime-owned model identifier prepared for one harness turn.
  */
-export type RuntimeModelReference = Readonly<InternalAgentModelDefinition>;
+export type RuntimeModelReference = Readonly<
+  InternalAgentModelDefinition & { reasoning?: AgentReasoningDefinition }
+>;
 
 /**
  * Runtime-owned reference to a dynamic model resolver authored in `agent.ts`.
@@ -35,7 +42,7 @@ interface RuntimeTurnAgentBase {
   readonly availableSkills?: readonly AvailableSkillDescription[];
   readonly id: string;
   readonly instructions: readonly string[];
-  readonly initialMessages?: readonly ModelMessage[];
+  readonly initialMessages?: readonly HarnessModelMessage[];
   /**
    * Optional model used only for compaction summaries.
    *
@@ -107,7 +114,7 @@ export function createResolvedRuntimeTurnAgent(input: {
     id,
     initialMessages: agent.instructions
       .filter((entry) => entry.role === "user" && entry.content.trim().length > 0)
-      .map((entry) => ({ content: entry.content.trim(), role: "user" as const })),
+      .map((entry) => createFrameworkUserMessage("context.instruction", entry.content.trim())),
     instructions: composeRuntimeBasePrompt({
       connections: agent.connections,
       instructions: agent.instructions,

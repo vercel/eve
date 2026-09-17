@@ -30,7 +30,6 @@ async function createPostBuildFixture(
 
   await mkdir(join(packageRoot, "scripts"), { recursive: true });
   await mkdir(join(packageRoot, "dist", "src", "chunks"), { recursive: true });
-  await mkdir(join(packageRoot, "dist", "src", "cli", "commands"), { recursive: true });
   await mkdir(join(packageRoot, "dist", "src", "internal", "application"), {
     recursive: true,
   });
@@ -55,7 +54,6 @@ async function createPostBuildFixture(
       '  react: "19.2.6"',
       '  react-dom: "19.2.6"',
       '  streamdown: "2.5.0"',
-      '  "@vercel/connect": "3.0.0"',
       '  "@types/react": "19.2.15"',
       '  "@types/react-dom": "19.2.3"',
       '  zod: "4.0.0"',
@@ -106,11 +104,6 @@ describe("post-build scripts", () => {
       "utf8",
     );
     await writeFile(
-      join(packageRoot, "dist", "src", "cli", "commands", "channels.js"),
-      'export const connect = "__VERCEL_CONNECT_VERSION__";\n',
-      "utf8",
-    );
-    await writeFile(
       join(packageRoot, "dist", "src", "chunks", "scaffold-abc123.js"),
       [
         'export const ai = "__AI_SDK_VERSION__";',
@@ -136,9 +129,6 @@ describe("post-build scripts", () => {
     await expect(
       readFile(join(packageRoot, "dist", "src", "internal", "application", "package.js"), "utf8"),
     ).resolves.toBe('export const version = "1.2.3";\n');
-    await expect(
-      readFile(join(packageRoot, "dist", "src", "cli", "commands", "channels.js"), "utf8"),
-    ).resolves.toBe('export const connect = "3.0.0";\n');
     await expect(
       readFile(join(packageRoot, "dist", "src", "chunks", "scaffold-abc123.js"), "utf8"),
     ).resolves.toBe(

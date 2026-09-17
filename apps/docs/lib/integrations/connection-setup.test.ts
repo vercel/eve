@@ -93,10 +93,12 @@ describe("Kernel extension setup", () => {
 
     expect(integration.type).toBe("extension");
     expect(integration.install).toContain("eve add extension/kernel");
-    expect(integration.quickStart).toContain(
-      'kernel({ connect: "mcp.onkernel.com/eve-extension" })',
-    );
+    expect(integration.quickStart).toContain('kernel({ connect: "kernel/kernel-mcp" })');
     expect(integration.configure).toContain("KERNEL_API_KEY");
+    expect(integration.relatedResources?.map((resource) => resource.href)).toEqual([
+      "https://vercel.com/kb/guide/build-a-browser-agent",
+      "https://vercel.com/kb/guide/software-factory-browser",
+    ]);
   });
 });
 

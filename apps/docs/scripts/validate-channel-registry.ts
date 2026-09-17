@@ -39,15 +39,18 @@ const registrySlugsByCatalogSlug: Readonly<Record<string, string>> = {
   eve: "web",
   linq: "linq",
   photon: "photon-imessage",
+  "linear-agent": "linear",
 };
 
 const setupKindsByCatalogSlug: Readonly<Record<string, string>> = {
+  slack: "slack",
   discord: "discord",
   github: "github",
   "linear-agent": "linear",
   eve: "web",
   linq: "linq",
   photon: "photon",
+  teams: "teams",
 };
 
 const adapterDependenciesByCatalogSlug: Readonly<Record<string, string>> = {
@@ -128,8 +131,6 @@ for (const [index, item] of items.entries()) {
 
   const entry = registryEntries[index];
   if (entry === undefined) throw new Error(`Unexpected channel registry item "${item.name}".`);
-  const registrySlug = expectedSlugs[index];
-
   if (entry.slug === "eve") {
     if (
       item.dependencies?.some((dependency) => dependency === "ai" || dependency.startsWith("ai@"))
@@ -145,20 +146,9 @@ for (const [index, item] of items.entries()) {
     }
   }
 
-  if (
-    entry.slug === "slack" ||
-    entry.slug === "discord" ||
-    entry.slug === "github" ||
-    entry.slug === "linear-agent" ||
-    entry.slug === "eve" ||
-    entry.slug === "linq" ||
-    entry.slug === "photon"
-  ) {
-    const expectedArgs = [
-      "integration",
-      "setup",
-      setupKindsByCatalogSlug[entry.slug] ?? registrySlug,
-    ];
+  const setupKind = setupKindsByCatalogSlug[entry.slug];
+  if (setupKind !== undefined) {
+    const expectedArgs = ["integration", "setup", setupKind];
     if (
       JSON.stringify(setups) !==
       JSON.stringify([{ command: "eve", package: "eve", bin: "eve", args: expectedArgs }])

@@ -48,7 +48,7 @@ describe("readDevSessionEvents", () => {
       eventType: "run_created",
       eventData: {
         deploymentId: "dpl_test",
-        workflowName: "turnWorkflow",
+        workflowName: "sessionWorkflow",
         input: [],
       },
     });

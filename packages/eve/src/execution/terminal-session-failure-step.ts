@@ -8,7 +8,7 @@ const log = createLogger("execution.workflow-entry");
 /** Emits a terminal `session.failed` to the adapter and durable stream. */
 export async function emitTerminalSessionFailureStep(input: {
   readonly error: unknown;
-  readonly parentWritable: WritableStream<Uint8Array>;
+  readonly sessionWritable: WritableStream<Uint8Array>;
   readonly serializedContext: Record<string, unknown>;
   readonly turnId?: string;
 }): Promise<void> {
@@ -42,7 +42,7 @@ export async function emitTerminalSessionFailureStep(input: {
   await emitTerminalSessionEvent({
     errorId: typeof details.errorId === "string" ? details.errorId : undefined,
     event: createSessionFailedEvent({ code, details, message, sessionId }),
-    parentWritable: input.parentWritable,
+    sessionWritable: input.sessionWritable,
     serializedContext: input.serializedContext,
     turnId: input.turnId,
   });

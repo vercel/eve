@@ -17,6 +17,7 @@ import type { TokenUsage } from "#shared/token-usage.js";
 import type { InternalToolDefinition } from "#tools/definition.js";
 import type { AgentReasoningDefinition } from "#shared/agent-definition.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
+import type { HarnessModelMessage } from "#harness/messages.js";
 import type { SessionInstrumentation } from "#instrumentation/runtime.js";
 import type { HistoryViewProjector, PreparedHistoryView } from "#shared/history-view.js";
 
@@ -79,7 +80,7 @@ export interface HarnessSession {
   readonly agent: SessionAgent;
   readonly compaction: CompactionConfig;
   readonly continuationToken: string;
-  readonly history: ModelMessage[];
+  readonly history: HarnessModelMessage[];
   readonly limits?: SessionLimits;
   readonly outputSchema?: JsonObject;
   /**
@@ -96,12 +97,6 @@ export interface HarnessSession {
   readonly state?: SessionStateMap;
   /** Framework task that owns this durable session, when present. */
   readonly taskId?: string;
-  /**
-   * Effective maximum subagent calls one `Workflow` invocation may dispatch
-   * for this session, configured by `experimental_workflow({ maxSubagents })`.
-   * When omitted, the dispatch step applies the framework default.
-   */
-  readonly workflowMaxSubagents?: number;
 }
 
 export function requireSessionModelReference(session: HarnessSession): RuntimeModelReference {
@@ -159,8 +154,8 @@ export interface StepInput {
   /** Internal actor attribution for `message`. */
   readonly messageAuth?: SessionAuthContext | null;
   /**
-   * Context strings from the channel delivery. Each entry is appended
-   * as a `role: "user"` message to `session.history` before the
+   * Context strings from the channel delivery. Each entry is appended as a
+   * synthetic user-role message to `session.history` before the
    * delivery message. Populated by channels via `SendPayload.context`.
    */
   readonly context?: readonly string[];
@@ -217,10 +212,12 @@ export interface SettledTurn {
  * Result returned by one harness step invocation.
  */
 export interface StepResult {
+  readonly steered?: true;
   /** Background-tool effects projected onto the session that entered this step. */
   readonly backgroundTaskSession?: HarnessSession;
   /** Durable tasks started by background tools and awaiting the parent commit barrier. */
   readonly backgroundTasks?: readonly {
+    readonly callId?: string;
     readonly taskInboxToken: string;
     readonly taskId: string;
     readonly taskRunId: string;
@@ -277,6 +274,7 @@ export type HandleEventFn = (
  * Dependencies injected into the tool-loop harness at construction time.
  */
 export interface ToolLoopHarnessConfig {
+  readonly steeringSignal?: AbortSignal;
   /** Cancellation signal for the active turn. */
   readonly abortSignal?: AbortSignal;
   /**
@@ -289,21 +287,6 @@ export interface ToolLoopHarnessConfig {
   readonly clearOnly?: boolean;
   /** Forces one context-compaction pass without running a model turn. */
   readonly compactOnly?: boolean;
-  /**
-   * Exposes the `Workflow` orchestration tool — an isolated JavaScript sandbox
-   * whose only callable operations are this agent's subagents and remote
-   * agents. Resolved from the `experimental_workflow(...)` definition exported
-   * by `agent/tools/workflow.ts`. Only root sessions ever see the tool.
-   * Defaults to `false`.
-   */
-  readonly workflow?: boolean;
-  /**
-   * Maximum subagent calls one `Workflow` invocation may dispatch, from the
-   * authored Workflow tool definition. Advertised in the tool description;
-   * the dispatch step enforces it. Defaults to
-   * {@link import("#harness/workflow-subagent-limit.js").DEFAULT_WORKFLOW_MAX_SUBAGENTS}.
-   */
-  readonly workflowMaxSubagents?: number;
   readonly handleEvent?: HandleEventFn;
   /** Projects raw durable history before it crosses a message-bearing boundary. */
   readonly historyProjector?: HistoryViewProjector;
@@ -330,7 +313,7 @@ export interface ToolLoopHarnessConfig {
    * re-injection). The harness appends the returned messages to the
    * compacted history.
    */
-  readonly onCompaction?: () => readonly ModelMessage[];
+  readonly onCompaction?: () => readonly HarnessModelMessage[];
   /** Resolves persisted step-scoped tools before an approval policy reads them. */
   readonly resolveStepDynamicTools?: (input: {
     readonly ctx: AlsContext;

@@ -1,5 +1,114 @@
 # @eve/buzz-acp-adapter
 
+## 0.0.29
+
+### Patch Changes
+
+- Updated dependencies [9f301b6]
+- Updated dependencies [29af29d]
+- Updated dependencies [bfc899d]
+- Updated dependencies [910bb45]
+- Updated dependencies [ab5b8e9]
+- Updated dependencies [987c3a0]
+- Updated dependencies [0fa8916]
+- Updated dependencies [fd9a007]
+- Updated dependencies [16e11f9]
+  - eve@0.58.0
+
+## 0.0.28
+
+### Patch Changes
+
+- Updated dependencies [32aca9b]
+- Updated dependencies [7b17b27]
+- Updated dependencies [f21e63f]
+- Updated dependencies [7b17b27]
+- Updated dependencies [e1ae8eb]
+- Updated dependencies [f21e63f]
+- Updated dependencies [fe6451c]
+- Updated dependencies [032860c]
+- Updated dependencies [7b17b27]
+- Updated dependencies [7b17b27]
+- Updated dependencies [7b17b27]
+- Updated dependencies [ba0b866]
+- Updated dependencies [7b17b27]
+- Updated dependencies [7b17b27]
+- Updated dependencies [8bb62e2]
+- Updated dependencies [7b17b27]
+- Updated dependencies [7b17b27]
+- Updated dependencies [7b17b27]
+- Updated dependencies [a08e4bb]
+- Updated dependencies [7b17b27]
+- Updated dependencies [61d4097]
+- Updated dependencies [61d4097]
+- Updated dependencies [53fad6c]
+- Updated dependencies [7b17b27]
+- Updated dependencies [fe6451c]
+- Updated dependencies [7b17b27]
+- Updated dependencies [7b17b27]
+- Updated dependencies [1e6437b]
+  - eve@0.57.0
+
+## 0.0.27
+
+### Patch Changes
+
+- Updated dependencies [8bc931f]
+- Updated dependencies [57d6be5]
+- Updated dependencies [a63fb18]
+- Updated dependencies [51998ab]
+- Updated dependencies [56cde32]
+- Updated dependencies [7ea3b7a]
+- Updated dependencies [23e2e7c]
+- Updated dependencies [6ce61cd]
+- Updated dependencies [bca1b4a]
+- Updated dependencies [a7f2387]
+  - eve@0.56.0
+
+## 0.0.26
+
+### Patch Changes
+
+- Updated dependencies [c500167]
+- Updated dependencies [520f498]
+- Updated dependencies [d63d6b7]
+- Updated dependencies [bf1175d]
+- Updated dependencies [15c7a2e]
+- Updated dependencies [7a63a68]
+- Updated dependencies [bef74fe]
+- Updated dependencies [dafa558]
+- Updated dependencies [7ad2740]
+- Updated dependencies [0f79075]
+- Updated dependencies [09425a0]
+- Updated dependencies [638aed5]
+- Updated dependencies [0e0f3cc]
+  - eve@0.55.0
+
+## 0.0.25
+
+### Patch Changes
+
+- Updated dependencies [f60c64b]
+- Updated dependencies [84c9604]
+- Updated dependencies [dea8cd8]
+- Updated dependencies [47bd3d7]
+- Updated dependencies [6d0485b]
+- Updated dependencies [9381078]
+- Updated dependencies [879d4e5]
+  - eve@0.54.0
+
+## 0.0.24
+
+### Patch Changes
+
+- Updated dependencies [0f8caf4]
+- Updated dependencies [7090a95]
+- Updated dependencies [67ee820]
+- Updated dependencies [8c1430c]
+- Updated dependencies [2b2ad19]
+- Updated dependencies [86e13ff]
+  - eve@0.53.0
+
 ## 0.0.23
 
 ### Patch Changes

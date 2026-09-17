@@ -1,0 +1,168 @@
+---
+title: "Instrumentation Providers"
+description: "Configure experimental instrumentation providers, handle lifecycle events, and control the content each provider receives."
+url: "/observability/instrumentation-providers"
+---
+
+<Callout type="warning" title="Experimental">
+  This API is experimental and may change without a deprecation period.
+</Callout>
+
+Instrumentation providers split observability into files under `agent/instrumentation/`. Each provider handles eve lifecycle events without owning the rest of the telemetry pipeline. Configure OpenTelemetry destinations with the [built-in OpenTelemetry APIs](./otel).
+
+Enable it explicitly in `agent.ts`:
+
+```ts title="agent/agent.ts"
+import { defineAgent } from "eve";
+
+export default defineAgent({
+  model: "anthropic/claude-sonnet-5",
+  experimental: {
+    instrumentationProviders: true,
+  },
+});
+```
+
+The provider directory replaces `agent/instrumentation.ts`; the two layouts cannot be used together. See [Instrumentation](../observability/instrumentation) for the current single-file API.
+
+## Add a provider
+
+The filename identifies the provider slot. A lifecycle-event provider file
+must default-export `defineInstrumentation(...)` or `disableInstrumentation()`.
+See [OpenTelemetry](./otel) for the supported OTel declarations.
+
+```text
+agent/instrumentation/
+  audit.ts  lifecycle event provider
+```
+
+This provider records action timing and identity without receiving tool arguments or results:
+
+```ts title="agent/instrumentation/audit.ts"
+import { defineInstrumentation } from "eve/instrumentation";
+
+export default defineInstrumentation({
+  events: {
+    "action.started": (event, ctx) => {
+      ctx.state.set({ name: event.name, startedAt: Date.now() });
+    },
+    "action.completed": (event, ctx) => {
+      const started = ctx.state.get() as { name: string; startedAt: number } | undefined;
+      if (started === undefined) return;
+
+      console.log({
+        action: started.name,
+        durationMs: Date.now() - started.startedAt,
+        outcome: event.outcome,
+      });
+    },
+  },
+});
+```
+
+`ctx.state` is JSON storage scoped to this provider and operation. It survives durable suspension and is released after the terminal event.
+
+## Control inputs and outputs
+
+Each provider has an independent `tracePolicy`. It decides whether the provider
+receives a trace and whether its events include input or output content.
+
+```ts title="agent/instrumentation/audit.ts"
+import { defineInstrumentation } from "eve/instrumentation";
+
+export default defineInstrumentation({
+  tracePolicy: ({ audience, environment }) => ({
+    emit: true,
+    recordInputs: audience === "public" || environment === "development",
+    recordOutputs: audience === "public" || environment === "development",
+  }),
+  events: {
+    "model.call.started": (event) => {
+      console.log("input", event.input);
+    },
+    "model.call.completed": (event) => {
+      console.log("output", event.content);
+    },
+  },
+});
+```
+
+The function receives `agentName`, `channel`, `audience`, `mode`,
+`environment`, and `principalType`. `audience` is `"public"`, `"private"`, or
+`"unknown"`; `environment` is `"development"`, `"preview"`, or
+`"production"`.
+
+Without a policy, or when it returns `true`, eve sends the provider metadata
+for every trace. It includes input and output content in these cases:
+
+| Environment           | Audience               | Content            |
+| --------------------- | ---------------------- | ------------------ |
+| Development           | Any                    | Inputs and outputs |
+| Preview or production | `public`               | Inputs and outputs |
+| Preview or production | `private` or `unknown` | Metadata only      |
+
+Return `{ emit: false }` to not sample the trace for this provider. Return
+`{ emit: true, recordInputs, recordOutputs }` to choose the two content
+directions explicitly. Inputs include model prompts, tool arguments, channel
+input, and user responses. Outputs include model responses, tool results,
+requests for user input, provider metadata, and error details. Omitted content
+fields are unavailable to the handler.
+
+The channel assigns the audience once when it creates the session. It controls
+content capture, not access. See [Audience](../channels/overview#audience) for
+how the channel derives `public`, `private`, and `unknown`.
+
+## Redact fields in a custom provider
+
+Lifecycle events are immutable snapshots. Copy the fields you need into a destination-specific payload and redact that copy before sending it:
+
+```ts title="agent/instrumentation/audit.ts"
+import { defineInstrumentation } from "eve/instrumentation";
+
+export default defineInstrumentation({
+  tracePolicy: () => ({
+    emit: true,
+    recordInputs: true,
+    recordOutputs: false,
+  }),
+  events: {
+    "action.started": async (event) => {
+      await sendAuditRecord({
+        id: event.idempotencyKey,
+        input: redactApiKey(event.input),
+        kind: event.kind,
+        name: event.name,
+      });
+    },
+  },
+});
+
+function redactApiKey(value: unknown): unknown {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return value;
+
+  const record = value as Record<string, unknown>;
+  return "apiKey" in record ? { ...record, apiKey: "[redacted]" } : record;
+}
+
+async function sendAuditRecord(record: unknown): Promise<void> {
+  // Send the sanitized record to your provider.
+  void record;
+}
+```
+
+Prefer `recordInputs: false` or `recordOutputs: false` when the destination does not need an entire content direction. Use field-level redaction only when the destination needs part of that content.
+
+## Lifecycle events
+
+Providers can handle session, channel delivery, turn, model attempt, model call, action, input request, and tool call events. Start and terminal events share an `idempotencyKey`, which can serve as a destination row ID.
+
+An ordinary tool emits both `action.*` and `tool.call.*` events. Use `action.*` for eve's durable dispatch lifecycle, including tools, skills, subagents, and remote agents. Use `tool.call.*` only when you need the AI SDK's in-process tool execution boundary.
+
+Handlers for different providers run concurrently and are failure-isolated. Do not depend on provider execution order. Use `flush` to drain buffered records and `shutdown` to release resources.
+
+## What to read next
+
+- [Instrumentation](../observability/instrumentation): configure the current single-file API
+- [OpenTelemetry](./otel): configure OTel destinations and managed exports.
+- [Local development](../guides/dev-tui): inspect local traces in the TUI
+- [Hooks](../guides/hooks): react to runtime events outside the instrumentation provider API

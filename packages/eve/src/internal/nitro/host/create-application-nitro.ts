@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { resolveAuthoredTsConfigPath } from "#internal/authored-module-loader.js";
 import { createNitro } from "nitro/builder";
 import type { Nitro } from "nitro/types";
 import { EVE_PACKAGE_NAME } from "#internal/package-name.js";
@@ -76,10 +77,10 @@ function resolveProductionNitroPreset(): "vercel" | undefined {
   return process.env.VERCEL ? "vercel" : undefined;
 }
 
-/** Whether any agent needs the dynamic Workflow sandbox runtime. */
-function manifestEnablesWorkflow(manifest: CompiledAgentManifest): boolean {
+/** Whether any agent exposes a generated-program tool that needs the workflow sandbox runtime. */
+function manifestHasWorkflowProgram(manifest: CompiledAgentManifest): boolean {
   const nodes = [manifest, ...manifest.subagents.map((subagent) => subagent.agent)];
-  return nodes.some((node) => node.workflowTool !== undefined);
+  return nodes.some((node) => node.tools.some((tool) => tool.workflowProgram !== undefined));
 }
 
 function manifestHasWebSocketChannel(manifest: CompiledAgentManifest): boolean {
@@ -637,7 +638,10 @@ function createApplicationNitroBundlerConfiguration(
     createExtensionExternalDependencyPlugin(extensionMounts),
     extensionScopePlugin,
   ].filter((plugin) => plugin !== null);
-  const nitroRolldownConfig = createNitroBundlerConfig(nitroBundlerPlugins);
+  const nitroRolldownConfig = {
+    ...createNitroBundlerConfig(nitroBundlerPlugins),
+    tsconfig: resolveAuthoredTsConfigPath(preparedHost.appRoot),
+  };
   const nitroRollupConfig = createNitroBundlerConfig(nitroBundlerPlugins);
   const tracedAppDependencies = collectHostedTraceDependencies(
     preparedHost,
@@ -658,7 +662,7 @@ function createApplicationNitroPlugins(preparedHost: PreparedApplicationHost): s
     preparedHost.compiledArtifacts.bootstrapPath,
     preparedHost.compiledArtifacts.workflowWorldPluginPath,
   ];
-  if (manifestEnablesWorkflow(preparedHost.compileResult.manifest)) {
+  if (manifestHasWorkflowProgram(preparedHost.compileResult.manifest)) {
     nitroPlugins.push(
       resolvePackageSourceFilePath("src/internal/nitro/host/workflow-sandbox-runtime-plugin.ts"),
     );

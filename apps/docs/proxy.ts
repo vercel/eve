@@ -9,7 +9,7 @@ const geistdocsProxy = createProxy({
   config: geistdocsConfig,
   markdownRoutes,
   trackMarkdownRequest: trackMdRequest,
-  before: ({ request }) => (request.nextUrl.pathname === "/nights" ? NextResponse.next() : null),
+  before: ({ request }) => (request.nextUrl.pathname === "/eves" ? NextResponse.next() : null),
 });
 
 const proxy = async (request: NextRequest, context: NextFetchEvent) =>

@@ -76,7 +76,7 @@ describe("CLI command registration", () => {
         resolveAgent: async () => undefined as never,
         root: process.cwd(),
       },
-      { trackDevContext: () => {} },
+      { trackDevContext: () => {}, trackSetupStep: () => {}, trackSetupTerminal: () => {} },
     );
     const paths: string[] = [];
     const visit = (command: (typeof program.commands)[number], parentPath = ""): void => {
@@ -311,11 +311,20 @@ describe("bare eve command", () => {
     await runCli([], logger, { findApplicationRoot });
 
     expect(findApplicationRoot).toHaveBeenCalledWith(resolve(process.cwd()));
-    expect(runInitCommand).toHaveBeenCalledWith(logger, resolve(process.cwd()), undefined, {
-      channelWebNextjs: undefined,
-      model: undefined,
-      reasoning: undefined,
-    });
+    expect(runInitCommand).toHaveBeenCalledWith(
+      logger,
+      resolve(process.cwd()),
+      undefined,
+      {
+        agents: undefined,
+        channelWebNextjs: undefined,
+        model: undefined,
+        reasoning: undefined,
+      },
+      undefined,
+      expect.any(Function),
+      expect.any(Function),
+    );
   });
 
   it("runs dev from the enclosing eve application", async () => {
@@ -384,11 +393,20 @@ describe("eve init compatibility flags", () => {
       logger,
     );
 
-    expect(runInitCommand).toHaveBeenCalledWith(logger, resolve(process.cwd()), "my-agent", {
-      channelWebNextjs: undefined,
-      model: "openai/gpt-5.6-sol",
-      reasoning: "high",
-    });
+    expect(runInitCommand).toHaveBeenCalledWith(
+      logger,
+      resolve(process.cwd()),
+      "my-agent",
+      {
+        agents: undefined,
+        channelWebNextjs: undefined,
+        model: "openai/gpt-5.6-sol",
+        reasoning: "high",
+      },
+      undefined,
+      expect.any(Function),
+      expect.any(Function),
+    );
   });
 
   it("rejects unsupported reasoning before running the init command", async () => {
@@ -469,6 +487,54 @@ describe("eve dev --input", () => {
       ),
     ).rejects.toThrow("--input requires the interactive UI");
   });
+
+  it.each([false, true])(
+    "starts the composer before the host is ready (onboard: %s)",
+    async (onboard) => {
+      let release!: () => void;
+      const ready = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const startup = {
+        renderer: {},
+        finish: vi.fn(() => ({ draft: "", queuedPrompt: undefined })),
+        shutdown: vi.fn(async () => {}),
+      };
+      const startDevelopmentTuiStartup = vi.fn(async () => startup);
+      const runDevelopmentTui = vi.fn(async () => {});
+      vi.doMock("#cli/dev/tui/tui.js", () => ({ startDevelopmentTuiStartup, runDevelopmentTui }));
+      const startHost = vi.fn(() => ({
+        start: async () => {
+          await ready;
+          return {
+            kind: "started" as const,
+            appRoot: "/canonical/app",
+            url: "http://127.0.0.1:4321/",
+          };
+        },
+        close: async () => {},
+      }));
+      try {
+        await withInteractiveTerminal(async () => {
+          const run = runCli(
+            onboard ? ["dev", "--onboard"] : ["dev"],
+            { error: () => {}, log: () => {} },
+            { startHost },
+          );
+          try {
+            await vi.waitFor(() => expect(startDevelopmentTuiStartup).toHaveBeenCalledOnce());
+            expect(runDevelopmentTui).not.toHaveBeenCalled();
+          } finally {
+            release();
+            await run;
+          }
+        });
+        expect(runDevelopmentTui).toHaveBeenCalledWith(expect.objectContaining({ startup }));
+      } finally {
+        vi.doUnmock("#cli/dev/tui/tui.js");
+      }
+    },
+  );
 
   it("forwards the internal init onboarding handoff to the local TUI", async () => {
     const startHost = vi.fn(() => ({

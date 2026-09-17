@@ -71,12 +71,7 @@ export interface Block {
   subtitle?: string;
   /** Main multi-line content (markdown for prose, plain for logs). */
   body?: string;
-  /**
-   * User blocks only: how a mid-turn message reached the transcript. A
-   * steered message (Esc pop, displacing the running turn) marks itself
-   * with the accent arrow above its bar; a queued one (drained at the turn
-   * boundary) carries the arrow below. Absent for ordinary typed prompts.
-   */
+  /** User blocks only: steered messages use a yellow gutter. */
   promptOrigin?: "steer" | "queue";
   /** Reasoning trace shown above `body` (subagent steps). */
   reasoning?: string;
@@ -154,6 +149,8 @@ export interface ToolGroupItem {
 export interface RenderBlockContext {
   /** Current shared square-pulse frame for live activity blocks. */
   activityPulse: string;
+  /** Whether prose responses are parsed and styled as Markdown. */
+  renderMarkdown?: boolean;
   /**
    * Kind and title of the block rendered immediately above this one. Lets a
    * sandbox block detect that it continues a run (label suppressed, lines
@@ -220,7 +217,7 @@ function renderBody(
       return renderUser(block, width, theme);
     case "assistant":
     case "subagent-step":
-      return renderProse(block, width, theme);
+      return renderProse(block, width, theme, context);
     case "reasoning":
       return renderReasoning(block, width, theme);
     case "tool":
@@ -267,19 +264,20 @@ function renderBody(
 }
 
 function renderUser(block: Block, width: number, theme: Theme): string[] {
-  const bar = theme.colors.cyan(theme.glyph.user);
+  const bar =
+    block.promptOrigin === "steer"
+      ? theme.colors.yellow(theme.glyph.user)
+      : theme.colors.cyan(theme.glyph.user);
   const lines = wrap(block.body ?? "", width - 2);
-  const rows = lines.map((line) => `${bar} ${line}`);
-  // Mid-turn provenance rides the gutter in the bar's own accent: a steered
-  // message pushed itself ahead of the running turn (arrow above), a queued
-  // one waited for the boundary (arrow below).
-  const arrow = theme.colors.cyan(theme.glyph.arrowUp);
-  if (block.promptOrigin === "steer") return [arrow, ...rows];
-  if (block.promptOrigin === "queue") return [...rows, arrow];
-  return rows;
+  return lines.map((line) => `${bar} ${line}`);
 }
 
-function renderProse(block: Block, width: number, theme: Theme): string[] {
+function renderProse(
+  block: Block,
+  width: number,
+  theme: Theme,
+  context: RenderBlockContext,
+): string[] {
   const rows: string[] = [];
   const isSubagent = block.kind === "subagent-step";
   // A collapsed child message is one activity row in its section — the
@@ -292,9 +290,9 @@ function renderProse(block: Block, width: number, theme: Theme): string[] {
     if (line === undefined) return [];
     return [theme.colors.dim(sliceVisible(line, Math.max(1, width)))];
   }
-  // Bold at the terminal's DEFAULT foreground: black on a light theme,
-  // white on a dark one. Explicit bright-white (SGR 97) would vanish on
-  // light backgrounds.
+  // The brand anchors every top-level response; Markdown styles the content
+  // following it, rather than replacing the response gutter.
+  const markdown = context.renderMarkdown ?? true;
   const glyph = isSubagent ? "" : `${theme.colors.bold(theme.glyph.brand)} `;
   const indent = isSubagent ? "" : "  ";
 
@@ -308,7 +306,7 @@ function renderProse(block: Block, width: number, theme: Theme): string[] {
   }
 
   if (body.length > 0) {
-    const rendered = renderMarkdown(body, width - indent.length)
+    const rendered = (markdown ? renderMarkdown(body, width - indent.length) : body)
       .split("\n")
       .flatMap((line) => wrapVisibleLine(line, width - indent.length));
     rendered.forEach((line, index) => {
@@ -437,9 +435,8 @@ function paintCommands(line: string, theme: Theme): string {
 
 /**
  * A slash command invocation under the user gutter. Automatic commands use
- * the same row so their result can follow it. The `❯`/`›` glyphs remain
- * exclusive to live input because the TUI tests use `›` (the empty prompt's
- * quiet mark) to detect a ready prompt.
+ * the same row so their result can follow it. The `❯` glyph remains
+ * exclusive to live input because the TUI tests use `❯` to detect a ready prompt.
  */
 function renderCommand(block: Block, theme: Theme): string[] {
   const c = theme.colors;

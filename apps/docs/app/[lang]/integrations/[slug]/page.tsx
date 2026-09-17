@@ -17,6 +17,7 @@ import { translations } from "@/geistdocs";
 import { Markdown } from "../components/markdown";
 import { SetupTabs } from "../components/setup-tabs";
 import { IntegrationDocsLink } from "./integration-docs-link";
+import { RelatedResources } from "./related-resources";
 
 const typeLabel = {
   channel: "Channel",
@@ -179,6 +180,14 @@ const IntegrationDetailPage = async ({ params }: PageProps<"/[lang]/integrations
             </Markdown>
           )}
         </Section>
+        {integration.relatedResources?.length ? (
+          <Section id="related-resources" title="Related resources">
+            <RelatedResources
+              integration={integration.slug}
+              resources={integration.relatedResources}
+            />
+          </Section>
+        ) : null}
       </div>
     </main>
   );

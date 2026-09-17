@@ -153,7 +153,16 @@ describe("telegramChannel() inbound route", () => {
   ] as const)("maps %s chats to the %s audience", (chatType, audience) => {
     const adapter = withState(getAdapter(telegramChannel()), { chatType });
 
-    expect(adapter.instrumentation?.metadata?.(adapter.state)).toMatchObject({ audience });
+    expect(
+      adapter.instrumentation?.audience?.({
+        auth: null,
+        caller: { type: "anonymous" },
+        channel: { kind: "channel:telegram" },
+        environment: "production",
+        mode: "conversation",
+        state: adapter.state,
+      }),
+    ).toBe(audience);
   });
 
   it("dispatches verified private messages with Telegram auth and chat-wide token", async () => {
@@ -330,7 +339,7 @@ describe("telegramChannel() inbound route", () => {
     });
   });
 
-  it("marks replies to bot messages as possible freeform HITL answers", async () => {
+  it("keeps direct approval replies as fallback text for option prompts", async () => {
     const channel = telegramChannel({
       api: { fetch: fakeTelegramFetch() },
       credentials: { botToken: "bot-token", webhookSecretToken: SECRET },
@@ -346,13 +355,14 @@ describe("telegramChannel() inbound route", () => {
           from: { id: 99, is_bot: true, username: "testbot" },
           chat: { id: 42, type: "private" },
         },
-        text: "approved",
+        text: "approve",
       },
     });
 
     const [, input] = send.mock.calls[0]!;
     expect(input).toMatchObject({
-      inputResponses: [{ requestId: "telegram_reply:55", text: "approved" }],
+      inputResponses: [{ requestId: "telegram_reply:55", text: "approve" }],
+      message: expect.stringContaining("approve"),
     });
   });
 
@@ -672,7 +682,7 @@ describe("telegramChannel() default event handlers", () => {
     expect(ctx.state.pendingFreeformReplies).toEqual({ "51": "call_1" });
   });
 
-  it("hydrates unknown private message posts without re-keying the session", async () => {
+  it("hydrates unknown private message posts without aliasing the session", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(
         JSON.stringify({
@@ -740,7 +750,7 @@ describe("telegramChannel() default event handlers", () => {
     expect(ctx.state.conversationId).toBeNull();
   });
 
-  it("hydrates unknown group message posts and re-keys to the posted message id", async () => {
+  it("hydrates unknown group message posts and adds an alias for to the posted message id", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(
         JSON.stringify({
@@ -808,7 +818,7 @@ describe("telegramChannel() default event handlers", () => {
     expect(ctx.state.conversationId).toBe("caller-selected");
   });
 
-  it("group message posts re-key the session to the posted message id", async () => {
+  it("group message posts alias the session to the posted message id", async () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValue(

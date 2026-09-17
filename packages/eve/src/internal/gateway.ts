@@ -29,6 +29,6 @@ export function resolveProviderHeaders(model: LanguageModel): Record<string, str
   return Object.fromEntries(appendPackageUserAgent(new Headers()));
 }
 
-function isGatewayModel(model: LanguageModel): boolean {
+export function isGatewayModel(model: LanguageModel): boolean {
   return typeof model === "string" || model.provider?.split(".")[0] === "gateway";
 }

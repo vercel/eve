@@ -307,11 +307,11 @@ export function teamsChannel(config: TeamsChannelConfig = {}): TeamsChannel {
       credentials: config.credentials,
     }),
     metadata: (state) => ({
-      audience: teamsAudience(state.conversationType),
       channelId: state.channelId,
       conversationType: state.conversationType,
       teamId: state.teamId,
     }),
+    audience: ({ state }) => teamsAudience(state.conversationType),
 
     context(state, session) {
       return rebuildTeamsContext(state, session, config);
@@ -505,7 +505,7 @@ function buildTeamsHandle(input: {
     state.replyToActivityId = posted.id;
     const conversationId = state.conversationId;
     if (conversationId) {
-      input.session?.continuation?.rekey(
+      input.session?.continuation?.alias(
         teamsContinuationToken({
           conversationId,
           replyToActivityId: posted.id,

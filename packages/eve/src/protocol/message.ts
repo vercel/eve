@@ -29,6 +29,15 @@ export const EVE_MESSAGE_STREAM_CONTENT_TYPE = "application/x-ndjson; charset=ut
 export const EVE_MESSAGE_STREAM_FORMAT = "ndjson";
 export const EVE_MESSAGE_STREAM_VERSION = "25";
 
+/** Version of transport control records understood by this eve release. */
+export const EVE_STREAM_CONTROL_VERSION = "1";
+export const EVE_STREAM_CONTROL_VERSION_QUERY = "streamControlVersion";
+/** Internal record emitted when a leased HTTP response should be renewed. */
+export const EVE_STREAM_LEASE_ENDED_CONTROL = {
+  $eve: "stream.lease-ended",
+  version: 1,
+} as const;
+
 /**
  * eve-owned finish reason for one completed assistant step.
  *
@@ -61,6 +70,8 @@ export interface StepCompletedProviderMetadata {
  * or replaying a finished session — yields the same values every time.
  */
 export interface MessageStreamEventMeta {
+  /** Server-issued message delivery identities, retained across the turn's workflow steps. */
+  readonly deliveryIds?: readonly string[];
   /** ISO-8601 emission time. */
   readonly at: string;
   /**
@@ -222,9 +233,16 @@ export type MessageReceivedPart =
  * action lifecycles by call ID rather than assume one event contains every call
  * from an assistant step.
  */
+export interface ActionPresentation {
+  readonly label?: string;
+}
+
+export type ActionPresentationByCallId = Readonly<Record<string, ActionPresentation>>;
+
 export interface ActionsRequestedStreamEvent {
   data: {
     actions: readonly RuntimeActionRequest[];
+    presentation?: ActionPresentationByCallId;
     sequence: number;
     stepIndex: number;
     turnId: string;
@@ -308,6 +326,7 @@ export interface InputResolvedStreamEvent {
 export interface ActionResultStreamEvent {
   data: {
     error?: ActionResultError;
+    presentation?: ActionPresentationByCallId;
     result: RuntimeActionResult;
     sequence: number;
     stepIndex: number;
@@ -323,6 +342,7 @@ export interface ActionResultStreamEvent {
  */
 export interface ActionPartialStreamEvent {
   data: {
+    presentation?: ActionPresentationByCallId;
     result: RuntimeToolResultActionResult;
     sequence: number;
     stepIndex: number;
@@ -1083,6 +1103,7 @@ function basenameOf(path: string): string {
  */
 export function createActionsRequestedEvent(input: {
   readonly actions: readonly RuntimeActionRequest[];
+  readonly presentation?: ActionPresentationByCallId;
   readonly sequence: number;
   readonly stepIndex: number;
   readonly turnId: string;
@@ -1090,12 +1111,19 @@ export function createActionsRequestedEvent(input: {
   return {
     data: {
       actions: input.actions,
+      ...optionalPresentation(input.presentation),
       sequence: input.sequence,
       stepIndex: input.stepIndex,
       turnId: input.turnId,
     },
     type: "actions.requested",
   };
+}
+
+function optionalPresentation(presentation: ActionPresentationByCallId | undefined): {
+  readonly presentation?: ActionPresentationByCallId;
+} {
+  return presentation === undefined ? {} : { presentation };
 }
 
 /** Creates an `action.input.appended` event for streamed tool input text. */
@@ -1265,6 +1293,7 @@ export function createInputResolvedEvent(input: {
  * derived from the synthesized denial output.
  */
 export function createActionResultEvent(input: {
+  readonly presentation?: ActionPresentationByCallId;
   readonly rejected?: boolean;
   readonly result: RuntimeActionResult;
   readonly sequence: number;
@@ -1279,6 +1308,7 @@ export function createActionResultEvent(input: {
   return {
     data: {
       error: outcome.error,
+      ...optionalPresentation(input.presentation),
       result: input.result,
       sequence: input.sequence,
       status: outcome.status,
@@ -1291,6 +1321,7 @@ export function createActionResultEvent(input: {
 
 /** Creates an `action.partial` event for one preliminary tool-result snapshot. */
 export function createActionPartialEvent(input: {
+  readonly presentation?: ActionPresentationByCallId;
   readonly result: RuntimeToolResultActionResult;
   readonly sequence: number;
   readonly stepIndex: number;
@@ -1298,6 +1329,7 @@ export function createActionPartialEvent(input: {
 }): ActionPartialStreamEvent {
   return {
     data: {
+      ...optionalPresentation(input.presentation),
       result: input.result,
       sequence: input.sequence,
       stepIndex: input.stepIndex,
@@ -1693,13 +1725,18 @@ export function createSessionCompletedEvent(): SessionCompletedStreamEvent {
  * One stamping seam is what makes the persisted stream and authored hooks
  * observe the same `meta.id`.
  */
-export function stampMessageStreamEvent(event: UnstampedMessageStreamEvent): MessageStreamEvent {
+export function stampMessageStreamEvent(
+  event: UnstampedMessageStreamEvent,
+  deliveryIds?: readonly string[],
+): MessageStreamEvent {
+  const meta: { at: string; id: string; deliveryIds?: readonly string[] } = {
+    at: new Date().toISOString(),
+    id: createEventId(),
+  };
+  if (deliveryIds !== undefined && deliveryIds.length > 0) meta.deliveryIds = deliveryIds;
   return {
     ...event,
-    meta: {
-      at: new Date().toISOString(),
-      id: createEventId(),
-    },
+    meta,
   };
 }
 

@@ -134,13 +134,11 @@ describe("renderCommandSuggestions", () => {
     const state = moveTypeaheadSelection(typeaheadFor(COMMANDS, "/"), 1);
     const colored = createTheme({ color: true, unicode: true });
     const rendered = renderCommandSuggestions(state, colored, 80);
-    expect(rendered[1]).toContain(
-      colored.colors.inverse(colored.colors.blue(` ${colored.glyph.selectedPointer} /model `)),
-    );
+    expect(rendered[1]).toContain(colored.colors.bold(` ${colored.glyph.selectedPointer} /model`));
     const rows = rendered.map(stripAnsi);
     expect(rows).toHaveLength(COMMANDS.length);
     expect(rows[0]?.startsWith("   /help")).toBe(true);
-    expect(rows[1]?.startsWith(" ▶ /model ")).toBe(true);
+    expect(rows[1]?.startsWith(" › /model ")).toBe(true);
     expect(rows[1]).toContain(theme.glyph.selectedPointer);
     expect(rows[0]).not.toContain(theme.glyph.selectedPointer);
     expect(rows[1]).toContain("/model");

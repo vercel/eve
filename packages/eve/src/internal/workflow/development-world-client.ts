@@ -9,7 +9,6 @@ import { resolvePackageSourceFilePath } from "#internal/application/package.js";
 import { readFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 
-import { turnWorkflowReference } from "#execution/workflow-runtime.js";
 import {
   decodeDevelopmentWorldJson,
   decodeDevelopmentWorldValue,
@@ -236,13 +235,13 @@ function createQueueHandler(
  * an untrusted caller controls participates.
  */
 async function resolveDeliveryGenerationId(message: unknown): Promise<string> {
-  if (!isRecord(message)) {
+  // Capability probes may name a run before start() persists its record.
+  if (!isRecord(message) || message.__healthCheck === true) {
     return await call<string>("resolveLatestDeploymentId");
   }
   const runInput = isRecord(message.runInput) ? message.runInput : undefined;
   if (runInput !== undefined) {
-    return runInput.workflowName === turnWorkflowReference.workflowId &&
-      typeof runInput.deploymentId === "string"
+    return typeof runInput.deploymentId === "string"
       ? runInput.deploymentId
       : await call<string>("resolveLatestDeploymentId");
   }
@@ -255,13 +254,11 @@ async function resolveDeliveryGenerationId(message: unknown): Promise<string> {
   if (runId === undefined) {
     return await call<string>("resolveLatestDeploymentId");
   }
-  const run = await call<{ readonly deploymentId: string; readonly workflowName: string }>(
-    "runs.get",
-    [runId, { resolveData: "none" }],
-  );
-  return run.workflowName === turnWorkflowReference.workflowId
-    ? run.deploymentId
-    : await call<string>("resolveLatestDeploymentId");
+  const run = await call<{ readonly deploymentId: string }>("runs.get", [
+    runId,
+    { resolveData: "none" },
+  ]);
+  return run.deploymentId;
 }
 
 async function readGenerationRuntimeAppRoot(

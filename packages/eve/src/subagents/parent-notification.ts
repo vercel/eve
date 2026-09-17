@@ -28,7 +28,7 @@ import { readTaskIdFromInboxToken } from "#tasks/task-inbox-token.js";
 const log = createLogger("execution.delegated-parent-notification");
 
 /**
- * Resumes the parent driver's hook with a delegated subagent result.
+ * Resumes the parent owner's hook with a delegated subagent result.
  * No-op for root sessions.
  *
  * `usage` — the completed child's session-total token spend — is
@@ -76,7 +76,7 @@ export async function notifyDelegatedParentStep(input: {
   });
 }
 
-/** Settled turn payload forwarded from the driver to the caller. */
+/** Settled turn payload forwarded from the owner to the caller. */
 export interface SettledTurnNotification {
   readonly output: unknown;
   readonly isError?: boolean;

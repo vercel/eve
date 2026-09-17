@@ -2,6 +2,7 @@
   "title": "Core Concepts",
   "defaultOpen": false,
   "pages": [
+    "project-structure",
     "execution-model-and-durability",
     "sessions-runs-and-streaming",
     "state",

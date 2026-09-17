@@ -40,3 +40,36 @@ describe("withSpinner", () => {
     expect(task).toHaveBeenCalledOnce();
   });
 });
+
+it("does not flash a spinner for quick work", async () => {
+  vi.useFakeTimers();
+  try {
+    const { prompter } = createFakePrompter();
+    const spinner = vi.fn();
+    prompter.log.spinner = spinner;
+    await withSpinner(prompter, "Loading…", async () => 42, 150);
+    await vi.advanceTimersByTimeAsync(200);
+    expect(spinner).not.toHaveBeenCalled();
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it("shows slow work and clears its spinner on failure", async () => {
+  vi.useFakeTimers();
+  try {
+    const { prompter } = createFakePrompter();
+    const stop = vi.fn();
+    prompter.log.spinner = vi.fn(() => ({ stop }));
+    const task = Promise.withResolvers<void>();
+    const result = withSpinner(prompter, "Loading…", () => task.promise, 150);
+    const assertion = expect(result).rejects.toThrow("Failed");
+    await vi.advanceTimersByTimeAsync(150);
+    expect(prompter.log.spinner).toHaveBeenCalledExactlyOnceWith("Loading…");
+    task.reject(new Error("Failed"));
+    await assertion;
+    expect(stop).toHaveBeenCalledOnce();
+  } finally {
+    vi.useRealTimers();
+  }
+});

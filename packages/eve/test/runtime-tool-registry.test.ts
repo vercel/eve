@@ -46,24 +46,23 @@ describe("createRuntimeToolRegistry", () => {
     });
   });
 
-  it("carries task_update availability into the prepared tool descriptor", async () => {
+  it("carries delegated-task-child availability into the prepared tool descriptor", async () => {
     const registry = await createRuntimeToolRegistry({
       tools: [
         createResolvedToolDefinition({
           behavior: {
             availability: ["delegated-task-child"],
-            handling: { action: "task-update", kind: "dispatch" },
           },
-          logicalPath: "tools/task_update.ts",
-          name: "task_update",
-          sourceId: "framework:tools/task_update.ts",
+          logicalPath: "tools/child_only.ts",
+          name: "child_only",
+          sourceId: "tools/child_only.ts",
         }),
       ],
     });
 
     expect(registry.preparedTools[0]?.behavior).toEqual({
       availability: ["delegated-task-child"],
-      handling: { kind: "dispatch", target: { kind: "task-update" } },
+      handling: undefined,
       presentation: undefined,
     });
   });
@@ -128,6 +127,40 @@ describe("createRuntimeToolRegistry", () => {
       target: {
         kind: "workflow-tool-call",
         workflowId: subagentToolExecuteWorkflowReference.workflowId,
+      },
+    });
+  });
+
+  it("uses the shared stable workflow for a restored application-owned agent tool", async () => {
+    const registry = await createRuntimeToolRegistry(
+      {
+        tools: [
+          createResolvedToolDefinition({
+            behavior: {
+              availability: ["root-session"],
+              handling: { action: "self-agent", kind: "dispatch" },
+            },
+            logicalPath: "tools/agent.ts",
+            name: "agent",
+            sourceId: "tools/agent.ts",
+          }),
+        ],
+      },
+      { nodeId: "__root__" },
+    );
+
+    const prepared = registry.preparedTools[0];
+    expect(prepared?.task).toEqual({
+      nodeId: "__root__",
+      resultKind: "subagent",
+      workflowId: subagentToolExecuteWorkflowReference.workflowId,
+    });
+    expect(prepared?.behavior?.handling).toEqual({
+      kind: "dispatch",
+      target: {
+        kind: "self-agent-call",
+        nodeId: "__root__",
+        subagentName: "agent",
       },
     });
   });

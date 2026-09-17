@@ -24,7 +24,7 @@ function createSession(): HarnessSession {
     compaction: { recentWindowSize: 10, threshold: 100_000 },
     continuationToken: "http:retry-integration-session",
     history: [
-      { content: "Complete the long task.", role: "user" },
+      { content: "Complete the long task.", kind: "user", role: "user" },
       { content: "Prior work is complete.", role: "assistant" },
     ],
     sessionId: "retry-integration-session",

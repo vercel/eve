@@ -43,6 +43,7 @@ export interface CompileFromMemoryToolInput {
   readonly inputSchema?: JsonObject | null;
   readonly outputSchema?: JsonObject;
   readonly execute?: ToolDefinition["execute"];
+  readonly label?: ToolDefinition["label"];
   readonly approval?: ToolDefinition["approval"];
   readonly toModelOutput?: ToolDefinition["toModelOutput"];
 }
@@ -117,6 +118,7 @@ export async function compileFromMemory(
 
 function createMemoryToolDefinition(input: CompileFromMemoryToolInput): ToolDefinition {
   return defineTool({
+    label: input.label,
     approval: input.approval,
     description: input.description ?? `${input.name} test tool.`,
     execute:

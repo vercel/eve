@@ -27,11 +27,17 @@ export type EveAddOutcome =
       readonly changed?: readonly string[];
     };
 
-interface HeadlessEvent {
+export interface HeadlessEvent {
   readonly version?: number;
   readonly type: string;
   readonly item?: string;
+  readonly completedItems?: readonly string[];
+  readonly deploymentRequired?: boolean;
+  readonly installed?: boolean;
   readonly message?: string;
+  readonly question?: unknown;
+  readonly url?: string;
+  readonly userCode?: string;
   readonly failureCode?: string;
   readonly rolledBack?: boolean;
   readonly changed?: readonly string[];
@@ -129,7 +135,8 @@ export function readTerminalHeadlessEvent(output: string): HeadlessEvent | undef
       (event.type === "completed" ||
         event.type === "blocked" ||
         event.type === "failed" ||
-        event.type === "cancelled")
+        event.type === "cancelled" ||
+        event.type === "external_action")
     ) {
       terminal = event;
     }

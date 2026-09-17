@@ -1,5 +1,5 @@
-import type { ChannelAudience } from "#shared/channel-audience.js";
 import { shouldCaptureInstrumentationContent } from "#shared/instrumentation-content.js";
+import type { ConversationContext } from "#shared/conversation-context.js";
 import {
   DROP_INSTRUMENTATION,
   type InstrumentationDecision,
@@ -8,11 +8,7 @@ import {
 /** @deprecated Use `TraceCapturePolicy` to select directional content. */
 export type InstrumentationCapture = "content" | "metadata";
 
-export interface TraceCaptureContext {
-  readonly agentName: string;
-  readonly audience: ChannelAudience;
-  readonly channelType?: string;
-}
+export type TraceCaptureContext = { readonly agentName: string } & ConversationContext;
 
 export type TracePolicyDecision =
   | { readonly emit: false }
@@ -42,18 +38,14 @@ export function resolveTracePolicy(
   onError?: (error: unknown) => void,
 ): InstrumentationDecision {
   try {
-    const decision = policy?.({
-      agentName: trace.agentName,
-      audience: trace.audience,
-      channelType: trace.channelType,
-    });
+    const decision = policy?.(trace);
     return resolveTracePolicyDecision(
       decision ?? {
         emit: true,
-        recordInputs: trace.audience === "public",
-        recordOutputs: trace.audience === "public",
+        recordInputs: trace.audience === "public" || trace.environment === "development",
+        recordOutputs: trace.audience === "public" || trace.environment === "development",
       },
-      trace.audience,
+      trace,
     );
   } catch (error) {
     try {
@@ -65,11 +57,14 @@ export function resolveTracePolicy(
 
 export function resolveTracePolicyDecision(
   decision: TracePolicyDecision | boolean,
-  audience: ChannelAudience,
+  context: {
+    readonly audience: TraceCaptureContext["audience"];
+    readonly environment: TraceCaptureContext["environment"];
+  },
 ): InstrumentationDecision {
   if (decision === false) return DROP_INSTRUMENTATION;
   if (decision === true) {
-    const content = shouldCaptureInstrumentationContent(audience);
+    const content = shouldCaptureInstrumentationContent(context);
     return { action: "record", recordInputs: content, recordOutputs: content };
   }
   if (!decision.emit) return DROP_INSTRUMENTATION;

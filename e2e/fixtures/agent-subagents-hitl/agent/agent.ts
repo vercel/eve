@@ -1,6 +1,6 @@
 import { e2eAgentConfig } from "@eve-e2e/config";
 import { defineAgent } from "eve";
-import type { MockModelRequest, MockModelResponse } from "eve/evals";
+import { mockModel, type MockModelRequest, type MockModelResponse } from "eve/evals";
 
 const COLLISION_MARKER = "MIXED-PARK-COMPLETE-7K2M";
 const STOCK_PRICE = "178.92";
@@ -58,6 +58,8 @@ function respond(request: MockModelRequest): MockModelResponse | string {
 }
 
 export default defineAgent({
-  ...e2eAgentConfig({ mock: respond }),
-  reasoning: "high",
+  ...e2eAgentConfig(),
+  // Parking coverage requires both actions in one step; children still use the matrix model.
+  model: mockModel(respond),
+  modelContextWindowTokens: 1_000_000,
 });

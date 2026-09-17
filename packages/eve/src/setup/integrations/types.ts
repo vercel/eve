@@ -20,7 +20,10 @@ export type SetupPresenter = Pick<Prompter, "log" | "note"> & {
 };
 
 export interface SetupPrepareContext {
+  /** Selected agent project where authored files are changed. */
   readonly appRoot: string;
+  /** Project root for shared dependencies, Vercel links, and environment files. */
+  readonly projectRoot: string;
   readonly asker: Asker;
   readonly environment: IntegrationSetupEnvironment;
   readonly presenter: SetupPresenter;
@@ -30,7 +33,10 @@ export interface SetupPrepareContext {
 }
 
 export interface SetupApplyContext {
+  /** Selected agent project where authored files are changed. */
   readonly appRoot: string;
+  /** Project root for shared dependencies, Vercel links, and environment files. */
+  readonly projectRoot: string;
   readonly presenter: SetupPresenter;
   signal?: AbortSignal;
   force?: boolean;
@@ -44,6 +50,7 @@ interface SetupIntegrationDefinition<Plan> {
   readonly kind: string;
   readonly label: string;
   readonly hint?: string;
+  describeEnvironment?(environment: IntegrationSetupEnvironment): string;
   prepare(context: SetupPrepareContext): Promise<Plan>;
   apply(plan: Plan, context: SetupApplyContext): Promise<RegistrySetupCompletion>;
 }
@@ -52,6 +59,7 @@ export interface SetupIntegration {
   readonly kind: string;
   readonly label: string;
   hint?: string;
+  describeEnvironment?(environment: IntegrationSetupEnvironment): string;
   run(input: {
     prepare: SetupPrepareContext;
     apply: SetupApplyContext;
@@ -76,5 +84,7 @@ export function defineSetupIntegration<Plan>(
     },
   };
   if (definition.hint !== undefined) registered.hint = definition.hint;
+  if (definition.describeEnvironment !== undefined)
+    registered.describeEnvironment = definition.describeEnvironment;
   return registered;
 }

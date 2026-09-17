@@ -41,6 +41,7 @@ export function authoringExperiment(options: {
 }
 
 function nativeModel(benchmark: AuthoringBenchmarkModel): string {
-  if (benchmark.harness !== "Claude Code") return benchmark.model;
-  return benchmark.model.replace(/^anthropic\//u, "");
+  const model = benchmark.agentModel ?? benchmark.model;
+  if (benchmark.harness !== "Claude Code") return model;
+  return model.replace(/^anthropic\//u, "");
 }

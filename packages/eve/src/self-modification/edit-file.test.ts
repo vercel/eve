@@ -3,6 +3,12 @@ import { describe, expect, it } from "vitest";
 import editFile, { applyExactEdits } from "./extension/tools/edit_file.js";
 
 describe("applyExactEdits", () => {
+  it("describes exact matching and JSON-safe encoding", () => {
+    const schema = JSON.stringify(editFile.inputSchema);
+    expect(schema).toContain("Unique exact text from the current file");
+    expect(schema).toContain("Encode control characters, quotes, and backslashes");
+  });
+
   it("replaces one exact match", () => {
     expect(applyExactEdits("before old after", [{ oldText: "old", newText: "new" }])).toBe(
       "before new after",
@@ -55,6 +61,28 @@ describe("applyExactEdits", () => {
     expect(() => applyExactEdits("current", [{ oldText: "", newText: "new" }])).toThrow(
       "oldText must not be empty",
     );
+  });
+
+  it("applies one multiline exact edit from JSON-encoded arguments", async () => {
+    let content = "before\nold first\nold second\nafter";
+    let writes = 0;
+    const sandbox = {
+      readTextFile: async () => content,
+      resolvePath: (path: string) => path,
+      writeTextFile: async (input: { readonly content: string }) => {
+        writes += 1;
+        content = input.content;
+      },
+    };
+    const input = JSON.parse(
+      '{"path":"/source/file.ts","edits":[{"oldText":"old first\\nold second","newText":"new first\\nnew second"}]}',
+    );
+
+    await expect(
+      editFile.execute(input, { getSandbox: async () => sandbox } as never),
+    ).resolves.toEqual({ path: "/source/file.ts", replacements: 1 });
+    expect(content).toBe("before\nnew first\nnew second\nafter");
+    expect(writes).toBe(1);
   });
 
   it("edits the current sandbox file", async () => {

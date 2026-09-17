@@ -28,9 +28,9 @@
  * - `$eve.invocation_owner` — SHA-256 fingerprint of the invocation's initiating principal
  * - `$eve.is_trace_content_visible` — whether observability may read content-bearing workflow data
  * - `$eve.is_otel_trace_enabled` — whether hosted Agent Runs OTEL is enabled for the run
- * - `$eve.trace_id` — trace id of the `agent.session` span, read from the pre-allocated
- *   trace seed in the serialized context. Present only when the trace is sampled;
- *   absence means no exported OTEL trace exists.
+ * - `$eve.trace_id` — sampled trace seed available in the serialized context when
+ *   tagging the run. This is a trace link, not a session-wide trace identity or
+ *   confirmation that a destination retained the trace.
  */
 
 import { CHANNEL_CONTEXT_KEY_NAME } from "#context/key-names.js";
@@ -38,13 +38,17 @@ import {
   ChannelRequestIdKey,
   OtelTraceEnabledKey,
   ScheduleIdKey,
+  SessionTitleKey,
   SessionTraceSeedKey,
   type SessionTraceSeed,
 } from "#context/keys.js";
 import type { EveAttributeValue } from "#runtime/attributes/normalize.js";
 import { isNonEmptyString } from "#shared/guards.js";
 import { shouldCaptureInstrumentationContent } from "#shared/instrumentation-content.js";
-import { normalizeChannelAudience } from "#shared/channel-audience.js";
+import {
+  ConversationContextKey,
+  normalizeConversationContext,
+} from "#shared/conversation-context.js";
 import { isSampledTrace } from "#tracing/sampled-trace.js";
 import { resolveForwardedTraceSeed } from "#shared/forwarded-trace-policy.js";
 
@@ -63,7 +67,6 @@ export interface SessionIdentitySummary {
 /** Untyped channel adapter snapshot as it survives serialization. */
 interface SerializedChannelAdapter {
   readonly kind?: unknown;
-  readonly audience?: unknown;
 }
 
 /** Untyped session parent snapshot as it survives serialization. */
@@ -103,15 +106,19 @@ export function isWorkflowTraceContentVisible(serializedContext: Record<string, 
   const seed = serializedContext[SessionTraceSeedKey.name] as SessionTraceSeed | undefined;
   if (seed !== undefined) {
     const traceState = resolveForwardedTraceSeed(seed)!;
-    if (traceState.forwardedTracePolicy !== undefined) {
+    if (
+      traceState.forwardedTracePolicy !== undefined ||
+      readParentSessionId(serializedContext) !== undefined
+    ) {
       const decision = traceState.decision;
       return decision?.action === "record" && decision.recordInputs && decision.recordOutputs;
     }
   }
-  const channel = serializedContext[CHANNEL_CONTEXT_KEY_NAME] as
-    | SerializedChannelAdapter
-    | undefined;
-  return shouldCaptureInstrumentationContent(normalizeChannelAudience(channel?.audience));
+  const conversation = normalizeConversationContext(serializedContext[ConversationContextKey.name]);
+  return shouldCaptureInstrumentationContent({
+    audience: conversation?.audience ?? "unknown",
+    environment: conversation?.environment ?? "production",
+  });
 }
 
 export function isWorkflowOtelTraceEnabled(serializedContext: Record<string, unknown>): boolean {
@@ -163,7 +170,7 @@ export function readParentSessionId(
  * site (see {@link "#channel/types.js".SessionParent}) so a subagent
  * five levels deep can still attribute itself to the top user-facing
  * session without walking the chain. Returns `undefined` for top-level
- * runs, which carry no `eve.parentSession`.
+ * runs, which carry no verified `eve.parentSession`.
  */
 export function readRootSessionId(serializedContext: Record<string, unknown>): string | undefined {
   return readParentLineage(serializedContext).rootSessionId;
@@ -185,6 +192,12 @@ export function readChannelRequestId(
 export function readScheduleId(serializedContext: Record<string, unknown>): string | undefined {
   const scheduleId = serializedContext[ScheduleIdKey.name];
   return isNonEmptyString(scheduleId) ? scheduleId : undefined;
+}
+
+/** Reads the bounded title stored for a top-level session. */
+export function readSessionTitle(serializedContext: Record<string, unknown>): string | undefined {
+  const title = serializedContext[SessionTitleKey.name];
+  return isNonEmptyString(title) ? title : undefined;
 }
 
 /**
@@ -259,7 +272,6 @@ function collectMessageText(message: unknown): string | undefined {
  * so its own `workflowRunId` already identifies the chain root.
  */
 export function buildSessionAttributes(input: {
-  readonly inputMessage: unknown;
   readonly serializedContext: Record<string, unknown>;
 }): Record<string, EveAttributeValue> {
   const isTraceContentVisible = isWorkflowTraceContentVisible(input.serializedContext);
@@ -272,7 +284,7 @@ export function buildSessionAttributes(input: {
     "$eve.trace_id": readSessionTraceId(input.serializedContext),
     "$eve.type": "session",
     "$eve.trigger": readChannelKind(input.serializedContext),
-    "$eve.title": deriveSessionTitle(input.inputMessage),
+    "$eve.title": readSessionTitle(input.serializedContext),
   };
 }
 
@@ -305,32 +317,5 @@ export function buildSubagentRootAttributes(input: {
     "$eve.root": input.rootSessionId,
     "$eve.subagent": input.identity.nodeId,
     "$eve.trigger": readChannelKind(input.serializedContext),
-  };
-}
-
-/**
- * Builds the `$eve.*` attribute payload for one turn workflow run.
- *
- * Turns live one level below their session: `$eve.parent` always points
- * to the parent's sessionId (which is the session-row's
- * `workflowRunId`), and `$eve.root` denormalizes the chain root (equal
- * to `$eve.parent` for turns of top-level sessions). Turn ordering is
- * recovered from each run's `createdAt`, so no explicit sequence tag is
- * emitted.
- */
-export function buildTurnAttributes(input: {
-  readonly parentSessionId: string;
-  readonly requestId?: string;
-  readonly rootSessionId: string;
-  readonly serializedContext: Record<string, unknown>;
-}): Record<string, EveAttributeValue> {
-  return {
-    "$eve.channel_request_id": input.requestId,
-    "$eve.is_otel_trace_enabled": isWorkflowOtelTraceEnabled(input.serializedContext),
-    "$eve.is_trace_content_visible": isWorkflowTraceContentVisible(input.serializedContext),
-    "$eve.trace_id": readSessionTraceId(input.serializedContext),
-    "$eve.type": "turn",
-    "$eve.parent": input.parentSessionId,
-    "$eve.root": input.rootSessionId,
   };
 }

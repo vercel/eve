@@ -15,12 +15,14 @@ describe("registry metadata", () => {
             eve: { docs: "/docs/channels/photon", implementation: "native" },
           },
         },
+        { name: "experimental/self-modification", meta: { eve: { hidden: true } } },
         { name: "extension/browser" },
       ],
     });
 
     expect([...metadata]).toEqual([
       ["channel/photon-imessage", { docs: "/docs/channels/photon", implementation: "native" }],
+      ["experimental/self-modification", { hidden: true }],
     ]);
   });
 

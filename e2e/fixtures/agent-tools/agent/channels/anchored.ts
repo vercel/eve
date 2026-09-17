@@ -93,7 +93,7 @@ export default defineChannel({
         continuation !== undefined &&
         !continuation.token.endsWith(`:${anchorToken}`)
       ) {
-        continuation.rekey(anchorToken);
+        continuation.alias(anchorToken);
       }
     },
   },

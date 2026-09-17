@@ -336,11 +336,11 @@ describe("withEve", () => {
       expect.arrayContaining([
         {
           destination: `https://agent.example.com${EVE_NEXT_SERVICE_PREFIX}/support/eve/v1/:path+`,
-          source: "/eve/agents/support/eve/v1/:path+",
+          source: "/eve/support/v1/:path+",
         },
         {
           destination: "https://agent.example.com/_eve_internal/billing/eve/v1/:path+",
-          source: "/eve/agents/billing/eve/v1/:path+",
+          source: "/eve/billing/v1/:path+",
         },
       ]),
     );
@@ -350,14 +350,14 @@ describe("withEve", () => {
           appRoot: expect.stringContaining("/agents/billing"),
           buildCommand: "pnpm build:billing-agent",
           name: "billing",
-          publicRoutePrefix: "/eve/agents/billing",
+          publicRoutePrefix: "/eve/billing",
           servicePrefix: "/_eve_internal/billing",
         },
         {
           appRoot: expect.stringContaining("/agents/support"),
           buildCommand: "node 'node_modules/eve/bin/eve.js' build",
           name: "support",
-          publicRoutePrefix: "/eve/agents/support",
+          publicRoutePrefix: "/eve/support",
           servicePrefix: `${EVE_NEXT_SERVICE_PREFIX}/support`,
         },
       ],
@@ -385,11 +385,11 @@ describe("withEve", () => {
       expect.arrayContaining([
         {
           destination: "http://127.0.0.1:4274/eve/v1/:path+",
-          source: "/eve/agents/billing/eve/v1/:path+",
+          source: "/eve/billing/v1/:path+",
         },
         {
           destination: "http://127.0.0.1:4275/eve/v1/:path+",
-          source: "/eve/agents/support/eve/v1/:path+",
+          source: "/eve/support/v1/:path+",
         },
       ]),
     );
@@ -405,7 +405,7 @@ describe("withEve", () => {
     await expect(config.rewrites?.()).resolves.toEqual(
       expect.objectContaining({
         beforeFiles: expect.arrayContaining([
-          expect.objectContaining({ source: "/eve/agents/support2/eve/v1/:path+" }),
+          expect.objectContaining({ source: "/eve/support2/v1/:path+" }),
         ]),
       }),
     );

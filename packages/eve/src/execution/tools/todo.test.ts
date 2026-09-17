@@ -10,6 +10,7 @@ import {
   type TodoState,
   TodoStateKey,
 } from "#execution/tools/todo.js";
+import { isFrameworkUserMessage } from "#harness/messages.js";
 
 function runInContext(
   fn: () => unknown,
@@ -147,6 +148,8 @@ describe("getTodoCompactionMessage", () => {
     });
 
     expect(message).toBeDefined();
+    expect(message === undefined ? false : isFrameworkUserMessage(message)).toBe(true);
+    expect(message).toMatchObject({ kind: "context.state", role: "user" });
     const text = String(message?.content ?? "");
     expect(text).toContain("[Your task list was preserved");
     expect(text).toContain("[x] [high] Fix bug");

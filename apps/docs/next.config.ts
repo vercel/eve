@@ -1,4 +1,5 @@
 import { createRequire } from "node:module";
+import path from "node:path";
 import { createGeistdocs } from "@vercel/geistdocs/next";
 import type { NextConfig } from "next";
 import {
@@ -12,15 +13,16 @@ const withGeistdocs = createGeistdocs();
 const require = createRequire(import.meta.url);
 const wgslLoader = require.resolve("@vgpu/wgsl/loader-webpack");
 
-const localSiteHost = "localhost:3000";
+const localSite = process.env.PORTLESS_URL ?? "localhost:3000";
 
 const config: NextConfig = {
   cacheComponents: true,
   partialPrefetching: true,
+  outputFileTracingRoot: path.resolve(import.meta.dirname, "../.."),
 
   env: {
     NEXT_PUBLIC_VERCEL_PROJECT_PRODUCTION_URL:
-      process.env.NEXT_PUBLIC_VERCEL_PROJECT_PRODUCTION_URL ?? localSiteHost,
+      process.env.NEXT_PUBLIC_VERCEL_PROJECT_PRODUCTION_URL ?? localSite,
   },
 
   // The integrations gallery sources identity from the workspace package
@@ -55,6 +57,11 @@ const config: NextConfig = {
 
   async redirects() {
     return [
+      {
+        source: "/nights",
+        destination: "/eves",
+        permanent: true,
+      },
       {
         source: "/docs",
         destination: "/docs/getting-started",

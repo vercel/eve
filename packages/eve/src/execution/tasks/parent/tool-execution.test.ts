@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ContextContainer, contextStorage } from "#context/container.js";
+import { SessionKey } from "#context/keys.js";
 import { backgroundToolExecutionProvider } from "#execution/tasks/parent/tool-execution.js";
 import { beginBackgroundTask } from "#execution/tasks/parent/delegate.js";
 import { sendTaskCommand, sendTaskInboundPayload } from "#execution/tasks/parent/run-parent.js";
@@ -11,7 +12,10 @@ import {
 } from "#harness/background-tools.js";
 import type { HarnessSession } from "#harness/types.js";
 
-vi.mock("#execution/tasks/parent/delegate.js", () => ({ beginBackgroundTask: vi.fn() }));
+vi.mock("#execution/tasks/parent/delegate.js", () => ({
+  beginBackgroundTask: vi.fn(),
+  createTaskAgentDispatchContext: vi.fn(() => ({ auth: { current: null, initiator: null } })),
+}));
 vi.mock("#execution/tasks/parent/run-parent.js", () => ({
   sendTaskCommand: vi.fn(),
   sendTaskInboundPayload: vi.fn(),
@@ -24,6 +28,7 @@ describe("ordinary background tool execution", () => {
     vi.mocked(sendTaskInboundPayload).mockResolvedValue("delivered");
     vi.mocked(beginBackgroundTask).mockResolvedValue({
       createdByTurnId: "turn-1",
+      dispatchContext: { auth: { current: null, initiator: null } },
       metadata: { kind: "tool", name: "export" },
       taskId: "task-1",
       taskInboxToken: "inbox-1",
@@ -33,6 +38,11 @@ describe("ordinary background tool execution", () => {
 
   it("returns the fixed receipt while routing yields and the final return separately", async () => {
     const ctx = new ContextContainer();
+    ctx.setVirtualContext(SessionKey, {
+      auth: { current: null, initiator: null },
+      sessionId: "session-1",
+      turn: { id: "turn-1", sequence: 0 },
+    });
     const session: HarnessSession = setHarnessEmissionState(
       {
         agent: { modelReference: { id: "openai/gpt-5.4" }, system: "", tools: [] },

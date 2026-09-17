@@ -73,6 +73,13 @@ export interface ConnectionSpec extends ConnectionSetupSpec {
   openapi?: ConnectionIdentity["openapi"];
 }
 
+/** A guide, package, or reference linked from an integration's Related resources section. */
+export interface RelatedResource {
+  title: string;
+  description: string;
+  href: string;
+}
+
 export interface Integration {
   /** URL slug and lookup key, derived once and reused everywhere. */
   slug: string;
@@ -99,7 +106,33 @@ export interface Integration {
   configure?: string;
   /** Structured connection spec; present only for `type: "connection"`. */
   connection?: ConnectionSpec;
+  /** Guides and references shown after Configure; omitted when empty. */
+  relatedResources?: RelatedResource[];
 }
+
+/** Shared by the GitHub, Linear, and GitHub Tools integrations Foreman builds on. */
+const softwareFactoryGuide: RelatedResource = {
+  title: "Build a software factory with eve",
+  description:
+    "Deploy Foreman, an eve agent system that turns GitHub issues or Linear tickets into reviewed draft pull requests while leaving merge decisions to humans.",
+  href: "https://vercel.com/kb/guide/eve-software-factory",
+};
+
+/** Shared by the Slack, GitHub, Datadog, and Vercel integrations the incident response agent uses. */
+const incidentResponseGuide: RelatedResource = {
+  title: "Build an incident response SRE agent with eve",
+  description:
+    "Deploy a Slack-based investigation agent that connects to Datadog, GitHub, and Vercel, tests root-cause hypotheses, and posts evidence-linked findings in threads.",
+  href: "https://vercel.com/kb/guide/eve-incident-sre-agent",
+};
+
+/** Shared by the Slack and Notion integrations the marketing team template publishes through. */
+const marketingTeamGuide: RelatedResource = {
+  title: "Run a marketing team from Slack with eve",
+  description:
+    "Deploy a Slack-facing lead agent that routes requests to marketing specialists who publish to Notion, Typefully, and Resend, with approval gates on irreversible actions.",
+  href: "https://vercel.com/kb/guide/marketing-team-eve",
+};
 
 /** Docs presentation overlay shared by every integration kind. */
 interface Presentation {
@@ -108,6 +141,8 @@ interface Presentation {
   keywords?: string[];
   /** Optional gallery pill (e.g. "Chat SDK") shown next to the type label. */
   badge?: string;
+  /** Guides and references shown after Configure. */
+  relatedResources?: RelatedResource[];
 }
 
 /** Channel overlay: presentation plus hand-authored setup markdown. */
@@ -174,6 +209,7 @@ vercel connect create slack --triggers
 \`\`\`
 
 The channel handles mentions, DMs, typing indicators, delivery, and human-in-the-loop consent with sensible defaults. See the [Slack channel docs](/docs/channels/slack) for customizing each behavior.`,
+    relatedResources: [marketingTeamGuide, incidentResponseGuide],
   },
   discord: {
     logo: "discord",
@@ -333,6 +369,7 @@ export default githubChannel({
 });
 \`\`\``,
     configure: `Sign in to Vercel, then let the guided flow create or link a project, provision the GitHub App, and attach its verified webhook trigger to \`/eve/v1/github\`. Deploy, install the app from Vercel Connect, then add its \`@handle\` invocation token to a new issue, pull request, or review comment. GitHub may not autocomplete or render the token as a linked mention. See the [GitHub channel docs](/docs/channels/github) for permissions and events.`,
+    relatedResources: [softwareFactoryGuide, incidentResponseGuide],
   },
   "linear-agent": {
     logo: "linear",
@@ -341,7 +378,7 @@ export default githubChannel({
     install: `Add this channel from eve's registry to create a Vercel Connect client, route verified Agent Session events, and write \`agent/channels/linear.ts\`:
 
 \`\`\`bash
-eve add channel/linear-agent
+eve add channel/linear
 \`\`\``,
     quickStart: `The guided setup writes \`agent/channels/linear.ts\`:
 
@@ -355,6 +392,7 @@ export default linearChannel({
 });
 \`\`\``,
     configure: `Sign in to Vercel, then let the guided flow create or link a project, provision the Linear app, and attach its verified AgentSessionEvent trigger to \`/eve/v1/linear\`. Deploy, install the app in your Linear workspace from Vercel Connect, then delegate an issue or mention the agent. See the [Linear channel docs](/docs/channels/linear) for Agent Activity behavior.`,
+    relatedResources: [softwareFactoryGuide],
   },
   eve: {
     logo: "eve",
@@ -1183,6 +1221,14 @@ export default channel;
 
 See the [Email (Resend) adapter documentation](https://chat-sdk.dev/adapters/vendor-official/resend) for all supported events and credentials.`,
     configure: `Verify a sending domain in Resend, set \`RESEND_API_KEY\`, \`RESEND_WEBHOOK_SECRET\`, and \`RESEND_FROM_ADDRESS\`, then point the Resend inbound webhook at \`/eve/v1/resend\`. This is a vendor-official Chat SDK adapter. See the [Chat SDK channel docs](/docs/channels/chat-sdk) for eve session dispatch, state, streaming, and human-in-the-loop behavior.`,
+    relatedResources: [
+      {
+        title: "Give your eve agent an email inbox with Resend",
+        description:
+          "Wire an eve agent to email through the Chat SDK channel and Resend adapter so it can hold threaded, multi-turn conversations, send proactive messages, and process attachments.",
+        href: "https://vercel.com/kb/guide/eve-agent-with-resend",
+      },
+    ],
   },
 };
 const baseExtensionPresentations: Record<string, ExtensionPresentation> = {
@@ -1353,8 +1399,8 @@ The extension requires Node.js 24 or later and eve 0.25 or later. It mounts Kern
     quickStart: `Create and attach a Kernel connector with [Vercel Connect](https://vercel.com/connect):
 
 \`\`\`bash
-vercel connect create mcp.onkernel.com --name eve-extension
-vercel connect attach mcp.onkernel.com/eve-extension
+vercel connect create kernel --name kernel-mcp --connection-method mcp
+vercel connect attach kernel/kernel-mcp
 \`\`\`
 
 Then mount the extension under \`agent/extensions/\`:
@@ -1362,7 +1408,7 @@ Then mount the extension under \`agent/extensions/\`:
 \`\`\`ts title="agent/extensions/kernel.ts"
 import kernel from "@onkernel/eve-extension";
 
-export default kernel({ connect: "mcp.onkernel.com/eve-extension" });
+export default kernel({ connect: "kernel/kernel-mcp" });
 \`\`\`
 
 The filename supplies the \`kernel\` namespace. The extension adds browser management, Playwright, computer control, managed auth, profiles, proxies, and replay tools under \`kernel__browser__*\`, along with the \`browse\` skill.`,
@@ -1373,6 +1419,20 @@ export { default } from "@onkernel/eve-extension";
 \`\`\`
 
 The default mount can execute JavaScript in the browser VM and reuse authenticated browser sessions. For team or multi-tenant agents, prefer Vercel Connect so each user authenticates separately, and add an approval gate by overriding the extension's \`browser\` connection. See the [Kernel eve extension guide](https://www.kernel.sh/docs/integrations/vercel/eve-extension) for API-key configuration, connection overrides, the complete tool list, and security guidance.`,
+    relatedResources: [
+      {
+        title: "How to build a browser agent that works behind a login",
+        description:
+          "Combine eve, Vercel Connect, and Kernel managed auth so a user signs in once and the agent drives the authenticated browser without handling credentials.",
+        href: "https://vercel.com/kb/guide/build-a-browser-agent",
+      },
+      {
+        title: "Give your software factory a browser",
+        description:
+          "Attach Kernel's cloud browser to the eve software factory so Foreman can reproduce flow bugs, verify fixes on preview deployments, and save what it learns.",
+        href: "https://vercel.com/kb/guide/software-factory-browser",
+      },
+    ],
   },
   jetty: {
     logo: "jetty",
@@ -1494,6 +1554,7 @@ export default githubExtension({
 \`\`\`
 
 For local or non-Vercel deployments, omit \`connector\` and set \`GITHUB_TOKEN\`; the extension also accepts an explicit \`token\`. Prefer fine-grained credentials, expose only the presets the agent needs, and keep approval enabled for writes. See the [GitHub Tools eve documentation](https://github-tools.com/frameworks/eve#eve-extension) for token authentication, per-tool overrides, commit attribution, and the complete tool catalog.`,
+    relatedResources: [softwareFactoryGuide, incidentResponseGuide],
   },
   hindsight: {
     logo: "hindsight",
@@ -1732,7 +1793,7 @@ The filename creates the \`supermemory\` memory slot, so the provider's tools ar
 
 Supermemory automatically recalls relevant context before a turn and captures completed turns. It also provides tools to search, read sessions and documents, remember context, extract files, URLs, or text, and forget memories. The provider sends stored conversations and extracted sources to Supermemory; configure its retention and data handling for your application before enabling it for sensitive data.
 
-Keep \`SUPERMEMORY_API_KEY\` in the environment rather than prompts or source control. You can change the container-tag prefix, automatic search, capture policy, and profile-context time zone through \`supermemory(...)\`. See the [Supermemory eve provider documentation](https://github.com/supermemoryai/eve-supermemory#readme) for all options and tool behavior.`,
+Keep \`SUPERMEMORY_API_KEY\` in the environment rather than prompts or source control. You can change the container-tag prefix, automatic search, capture policy, and profile-context time zone through \`supermemory(...)\`. See the [Supermemory eve provider documentation](https://supermemory.ai/docs/integrations/eve) for all options and tool behavior.`,
   },
 };
 
@@ -1785,6 +1846,14 @@ export default browser({
 Also configure the [sandbox network policy](/docs/sandbox#network-policy) for defense in depth. Treat saved browser state, cookies, screenshots, downloads, and recordings as sensitive data. Do not place passwords or session tokens in prompts. Use the extension's per-tool overrides to gate or disable actions your agent should not take unattended.
 
 The extension also supports inline screenshots, session naming, proxies, and production pre-installation. See the [agent-browser eve extension documentation](https://github.com/vercel-labs/agent-browser/tree/main/packages/%40agent-browser/eve) for the complete options and example app.`,
+    relatedResources: [
+      {
+        title: "Give your eve agent a browser",
+        description:
+          "Changelog introducing the agent-browser extension, which gives eve agents sandboxed tools to navigate, read, click, fill forms, take screenshots, and inspect network activity.",
+        href: "https://vercel.com/changelog/give-your-eve-agent-a-browser",
+      },
+    ],
   },
 };
 
@@ -1826,12 +1895,23 @@ const connectionPresentations: Record<string, ConnectionPresentation> = {
       user: "Select None when prompted for a token authentication method. Each user completes OAuth when needed.",
       app: "Enter a team-scoped [Vercel token](https://vercel.com/kb/guide/how-do-i-use-a-vercel-api-access-token) when prompted, then copy the returned connector UID into the App example. This avoids per-user OAuth, though the Vercel token still belongs to the user who created it.",
     },
+    relatedResources: [
+      incidentResponseGuide,
+      softwareFactoryGuide,
+      {
+        title: "Manage Vercel projects with a software factory",
+        description:
+          "Add Vercel's hosted MCP server to the eve software factory so Foreman can read build logs, runtime errors, and deployment history through app-scoped Vercel Connect auth and a read-only tool allowlist.",
+        href: "https://vercel.com/kb/guide/software-factory-vercel-mcp",
+      },
+    ],
   },
   linear: {
     logo: "linear",
     docsHref: "/docs/connections/mcp",
     keywords: ["mcp", "issues", "project management", "oauth", "connect"],
     authModes: ["user", "app"],
+    relatedResources: [softwareFactoryGuide],
   },
   notion: {
     logo: "notion",
@@ -1840,6 +1920,7 @@ const connectionPresentations: Record<string, ConnectionPresentation> = {
     authModes: ["user", "app", "jwtBearer"],
     configureNote:
       "The OpenAPI setup sends the required `Notion-Version` header; bump it as Notion ships new API versions.",
+    relatedResources: [marketingTeamGuide],
   },
   datadog: {
     logo: "datadog",
@@ -1848,6 +1929,7 @@ const connectionPresentations: Record<string, ConnectionPresentation> = {
     authModes: ["jwtBearer"],
     configureNote:
       "Match the MCP `url` to your Datadog site (`datadoghq.com`, `datadoghq.eu`, and so on).",
+    relatedResources: [incidentResponseGuide],
   },
   honeycomb: {
     logo: "honeycomb",
@@ -2158,7 +2240,7 @@ type InstrumentationPresentation = ChannelPresentation;
 const instrumentationPresentations: Record<string, InstrumentationPresentation> = {
   braintrust: {
     logo: "braintrust",
-    docsHref: "/docs/guides/instrumentation",
+    docsHref: "/docs/observability/instrumentation",
     keywords: ["otel", "opentelemetry", "tracing", "observability", "evals", "monitoring"],
     install: `Add the Braintrust integration from eve's registry:
 
@@ -2202,11 +2284,11 @@ export default defineInstrumentation(
   }) as Parameters<typeof defineInstrumentation>[0],
 );
 \`\`\``,
-    configure: `Create an API key in the Braintrust dashboard and expose it as \`BRAINTRUST_API_KEY\`. Replace the hook's \`app\` metadata with your app name. Spans land in the Braintrust project named after your agent. See the [instrumentation guide](/docs/guides/instrumentation) for the trace hierarchy and the \`recordInputs\`/\`recordOutputs\` controls.`,
+    configure: `Create an API key in the Braintrust dashboard and expose it as \`BRAINTRUST_API_KEY\`. Replace the hook's \`app\` metadata with your app name. Spans land in the Braintrust project named after your agent. See the [instrumentation guide](/docs/observability/instrumentation) for the trace hierarchy and the \`recordInputs\`/\`recordOutputs\` controls.`,
   },
   "posthog-instrumentation": {
     logo: "posthog",
-    docsHref: "/docs/guides/instrumentation",
+    docsHref: "/docs/observability/instrumentation",
     keywords: ["otel", "opentelemetry", "tracing", "observability", "generations", "analytics"],
     install: `Add PostHog AI Observability from eve's registry:
 
@@ -2251,11 +2333,11 @@ export default defineInstrumentation({
   },
 });
 \`\`\``,
-    configure: `Copy your project token and client API host from PostHog's project settings and expose them as \`POSTHOG_PROJECT_TOKEN\` and \`POSTHOG_HOST\`. Remove the \`events\` handler to capture generations anonymously. PostHog groups turns using \`eve.session.id\` and preserves eve's trace hierarchy. See [PostHog's eve installation guide](https://posthog.com/docs/ai-observability/installation/eve) for verification steps and the [instrumentation guide](/docs/guides/instrumentation) for input and output capture controls.`,
+    configure: `Copy your project token and client API host from PostHog's project settings and expose them as \`POSTHOG_PROJECT_TOKEN\` and \`POSTHOG_HOST\`. Remove the \`events\` handler to capture generations anonymously. PostHog groups turns using \`eve.session.id\` and preserves eve's trace hierarchy. See [PostHog's eve installation guide](https://posthog.com/docs/ai-observability/installation/eve) for verification steps and the [instrumentation guide](/docs/observability/instrumentation) for input and output capture controls.`,
   },
   "sentry-instrumentation": {
     logo: "sentry",
-    docsHref: "/docs/guides/instrumentation",
+    docsHref: "/docs/observability/instrumentation",
     keywords: ["otel", "opentelemetry", "tracing", "observability", "otlp", "errors"],
     install: `Add Sentry instrumentation from eve's registry. Sentry ingests OTLP directly, so no Sentry SDK is required:
 
@@ -2283,11 +2365,11 @@ export default defineInstrumentation({
     }),
 });
 \`\`\``,
-    configure: `Copy the OTLP traces endpoint and public key from your Sentry project under **Settings → Client Keys (DSN)** and expose them as environment variables. Sentry's OTLP intake accepts traces only, and span events are dropped at ingestion. See the [instrumentation guide](/docs/guides/instrumentation) for the trace hierarchy and the \`recordInputs\`/\`recordOutputs\` controls.`,
+    configure: `Copy the OTLP traces endpoint and public key from your Sentry project under **Settings → Client Keys (DSN)** and expose them as environment variables. Sentry's OTLP intake accepts traces only, and span events are dropped at ingestion. See the [instrumentation guide](/docs/observability/instrumentation) for the trace hierarchy and the \`recordInputs\`/\`recordOutputs\` controls.`,
   },
   "datadog-instrumentation": {
     logo: "datadog",
-    docsHref: "/docs/guides/instrumentation",
+    docsHref: "/docs/observability/instrumentation",
     keywords: ["otel", "opentelemetry", "tracing", "observability", "apm", "otlp"],
     install: `Add Datadog instrumentation from eve's registry:
 
@@ -2312,11 +2394,12 @@ export default defineInstrumentation({
     }),
 });
 \`\`\``,
-    configure: `Datadog's direct OTLP trace intake is site-specific (for example \`datadoghq.com\` vs \`datadoghq.eu\`) and currently in Preview; look up the endpoint for your site in Datadog's OTLP intake docs. For production, Datadog recommends routing through an OpenTelemetry Collector with the Datadog exporter instead. See the [instrumentation guide](/docs/guides/instrumentation) for the trace hierarchy and the \`recordInputs\`/\`recordOutputs\` controls.`,
+    configure: `Datadog's direct OTLP trace intake is site-specific (for example \`datadoghq.com\` vs \`datadoghq.eu\`) and currently in Preview; look up the endpoint for your site in Datadog's OTLP intake docs. For production, Datadog recommends routing through an OpenTelemetry Collector with the Datadog exporter instead. See the [instrumentation guide](/docs/observability/instrumentation) for the trace hierarchy and the \`recordInputs\`/\`recordOutputs\` controls.`,
+    relatedResources: [incidentResponseGuide],
   },
   "honeycomb-instrumentation": {
     logo: "honeycomb",
-    docsHref: "/docs/guides/instrumentation",
+    docsHref: "/docs/observability/instrumentation",
     keywords: ["otel", "opentelemetry", "tracing", "observability", "queries", "otlp"],
     install: `Add Honeycomb instrumentation from eve's registry. Honeycomb ingests OTLP directly:
 
@@ -2342,11 +2425,11 @@ export default defineInstrumentation({
     }),
 });
 \`\`\``,
-    configure: `Create an ingest key under your Honeycomb environment settings and expose it as \`HONEYCOMB_API_KEY\`. Spans arrive in a dataset named after your agent (the OTel service name). EU teams use \`https://api.eu1.honeycomb.io/v1/traces\`. See the [instrumentation guide](/docs/guides/instrumentation) for the trace hierarchy and the \`recordInputs\`/\`recordOutputs\` controls.`,
+    configure: `Create an ingest key under your Honeycomb environment settings and expose it as \`HONEYCOMB_API_KEY\`. Spans arrive in a dataset named after your agent (the OTel service name). EU teams use \`https://api.eu1.honeycomb.io/v1/traces\`. See the [instrumentation guide](/docs/observability/instrumentation) for the trace hierarchy and the \`recordInputs\`/\`recordOutputs\` controls.`,
   },
   arize: {
     logo: "arize",
-    docsHref: "/docs/guides/instrumentation",
+    docsHref: "/docs/observability/instrumentation",
     keywords: ["otel", "opentelemetry", "tracing", "llm observability", "evaluation", "otlp"],
     install: `Add Arize instrumentation from eve's registry. Arize AX ingests OTLP directly:
 
@@ -2376,11 +2459,11 @@ export default defineInstrumentation({
     }),
 });
 \`\`\``,
-    configure: `Copy the space ID and API key from your Arize AX space settings and expose them as \`ARIZE_SPACE_ID\` and \`ARIZE_API_KEY\`. The \`openinference.project.name\` resource attribute routes spans to a project named after your agent. See the [instrumentation guide](/docs/guides/instrumentation) for the trace hierarchy and the \`recordInputs\`/\`recordOutputs\` controls.`,
+    configure: `Copy the space ID and API key from your Arize AX space settings and expose them as \`ARIZE_SPACE_ID\` and \`ARIZE_API_KEY\`. The \`openinference.project.name\` resource attribute routes spans to a project named after your agent. See the [instrumentation guide](/docs/observability/instrumentation) for the trace hierarchy and the \`recordInputs\`/\`recordOutputs\` controls.`,
   },
   raindrop: {
     logo: "raindrop",
-    docsHref: "/docs/guides/instrumentation",
+    docsHref: "/docs/observability/instrumentation",
     keywords: ["otel", "opentelemetry", "tracing", "observability", "ai issues", "otlp"],
     install: `Add Raindrop instrumentation from eve's registry. Raindrop ingests OTLP directly:
 
@@ -2408,11 +2491,11 @@ export default defineInstrumentation({
     }),
 });
 \`\`\``,
-    configure: `Create a write key in the Raindrop dashboard and expose it as \`RAINDROP_WRITE_KEY\`. Raindrop's Vercel AI SDK integration picks up the AI SDK spans eve emits on every turn. See the [instrumentation guide](/docs/guides/instrumentation) for the trace hierarchy and the \`recordInputs\`/\`recordOutputs\` controls.`,
+    configure: `Create a write key in the Raindrop dashboard and expose it as \`RAINDROP_WRITE_KEY\`. Raindrop's Vercel AI SDK integration picks up the AI SDK spans eve emits on every turn. See the [instrumentation guide](/docs/observability/instrumentation) for the trace hierarchy and the \`recordInputs\`/\`recordOutputs\` controls.`,
   },
   jaeger: {
     logo: "jaeger",
-    docsHref: "/docs/guides/instrumentation",
+    docsHref: "/docs/observability/instrumentation",
     keywords: ["otel", "opentelemetry", "tracing", "observability", "local", "self-hosted"],
     install: `Add Jaeger instrumentation from eve's registry:
 
@@ -2442,7 +2525,7 @@ export default defineInstrumentation({
 docker run --rm -p 16686:16686 -p 4318:4318 jaegertracing/jaeger:latest
 \`\`\`
 
-Point the exporter at your collector's OTLP HTTP endpoint when self-hosting. See the [instrumentation guide](/docs/guides/instrumentation) for the trace hierarchy and the \`recordInputs\`/\`recordOutputs\` controls.`,
+Point the exporter at your collector's OTLP HTTP endpoint when self-hosting. See the [instrumentation guide](/docs/observability/instrumentation) for the trace hierarchy and the \`recordInputs\`/\`recordOutputs\` controls.`,
   },
 };
 
@@ -2465,6 +2548,7 @@ function buildChannel(entry: IntegrationEntry): Integration {
     install: presentation.install,
     quickStart: presentation.quickStart,
     configure: presentation.configure,
+    relatedResources: presentation.relatedResources,
   };
 }
 
@@ -2479,7 +2563,8 @@ function buildConnection(entry: IntegrationEntry): Integration {
     throw new Error(`Catalog connection "${entry.slug}" is missing its connection identity.`);
   }
   const identity: ConnectionIdentity = entry.connection;
-  const { logo, docsHref, keywords, quickStart, configure, ...setup } = presentation;
+  const { logo, docsHref, keywords, quickStart, configure, relatedResources, ...setup } =
+    presentation;
   const spec: ConnectionSpec = {
     ...setup,
     description: identity.description,
@@ -2498,6 +2583,7 @@ function buildConnection(entry: IntegrationEntry): Integration {
     quickStart,
     configure,
     connection: spec,
+    relatedResources,
   };
 }
 
@@ -2519,6 +2605,7 @@ function buildExtension(entry: IntegrationEntry): Integration {
     install: presentation.install,
     quickStart: presentation.quickStart,
     configure: presentation.configure,
+    relatedResources: presentation.relatedResources,
   };
 }
 
@@ -2540,6 +2627,7 @@ function buildMemory(entry: IntegrationEntry): Integration {
     install: presentation.install,
     quickStart: presentation.quickStart,
     configure: presentation.configure,
+    relatedResources: presentation.relatedResources,
   };
 }
 
@@ -2561,6 +2649,7 @@ function buildInstrumentation(entry: IntegrationEntry): Integration {
     install: presentation.install,
     quickStart: presentation.quickStart,
     configure: presentation.configure,
+    relatedResources: presentation.relatedResources,
   };
 }
 

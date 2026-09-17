@@ -3,5 +3,7 @@ export {
   type DynamicToolEvents,
   type DynamicToolResult,
   type DynamicToolSet,
+  defineDurableCallback,
   defineDynamic,
 } from "../../src/public/tools/index.ts";
+export { autoModel } from "../../src/public/experimental/evaluate/index.ts";

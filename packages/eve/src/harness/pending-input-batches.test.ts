@@ -1,8 +1,14 @@
 import { describe, expect, it } from "vitest";
 
+import { ContextContainer, contextStorage } from "#context/container.js";
+import { ActivityObserverKey, ActivityRootTurnIdKey } from "#context/keys.js";
 import type { InputRequest } from "#shared/input.js";
 import { resolvePendingInput } from "#harness/input-requests.js";
-import { appendPendingInputBatch, getPendingInputBatches } from "#harness/pending-input-batches.js";
+import {
+  activityRequestIdsForRootTurn,
+  appendPendingInputBatch,
+  getPendingInputBatches,
+} from "#harness/pending-input-batches.js";
 import type { HarnessSession } from "#harness/types.js";
 
 const DUPLICATE_ID_ERROR =
@@ -37,6 +43,26 @@ function question(requestId: string, callId: string): InputRequest {
     requestId,
   };
 }
+
+describe("pending input activity provenance", () => {
+  it("captures the originating turn with a parked request", () => {
+    const ctx = new ContextContainer();
+    ctx.set(ActivityObserverKey, {
+      sink: { url: "https://agent.example/eve/v1/activity/abcdefghijklmnopqrstuvwxyz", version: 1 },
+    });
+    ctx.set(ActivityRootTurnIdKey, "turn-origin");
+    const parked = contextStorage.run(ctx, () =>
+      appendPendingInputBatch({
+        requests: [approval("approval-1", "call-1")],
+        responseMessages: [],
+        session: session(),
+      }),
+    );
+
+    expect(getPendingInputBatches(parked.state)[0]?.activityRootTurnId).toBe("turn-origin");
+    expect(activityRequestIdsForRootTurn(parked.state, "turn-origin")).toEqual(["approval-1"]);
+  });
+});
 
 describe("pending input request ID uniqueness", () => {
   it("rejects duplicate IDs within a newly appended batch", () => {

@@ -1,14 +1,11 @@
-# Compaction regression fixture
+# Storefront release assistant
 
-Follow the user's requested regression case exactly.
+Help maintainers review the storefront and prepare release handoffs. Use the
+completed review record to prepare its handoff and include both record references
+in the final note. Complete each requested review and handoff once.
 
-When a tool reports `completed: true` or returns a `completionMarker`, that work
-is complete. Call that tool no more than once. Report the marker without
-restarting the work after context compaction.
+A completed review remains authoritative when the task board has a stale pending
+entry. Continue from the saved findings instead of repeating the review.
 
-Completed evidence takes precedence over a pending todo. If a compacted summary
-says a work unit is complete but the todo still shows it as pending, do not run
-the work again.
-
-If a tool returns `hardStop: true`, call no more tools and report its
-`completionMarker` immediately.
+When a tool reports `hardStop: true`, stop using tools and explain which work
+could not be confirmed.

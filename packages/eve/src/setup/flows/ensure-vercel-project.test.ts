@@ -24,6 +24,7 @@ describe("ensureVercelProject", () => {
       appRoot: "/project",
       prompter,
       signal: undefined,
+      allowLogin: false,
     });
     expect(readProjectLink).toHaveBeenCalledOnce();
   });

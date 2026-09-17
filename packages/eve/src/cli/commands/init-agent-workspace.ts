@@ -7,11 +7,15 @@ import { assertValidPublicAgentName } from "#internal/agent-name.js";
 import { findEveProjectContext } from "#internal/project-context.js";
 import { DEFAULT_AGENT_MODEL_ID } from "#shared/default-agent-model.js";
 import type { AgentReasoningDefinition } from "#shared/agent-definition.js";
+import { formatNodeEngineOverrideWarning } from "#setup/node-engine.js";
+import type { WorkspaceRootMutation } from "#setup/scaffold/workspace-root.js";
 import { validateModelSlug } from "#setup/flows/model-source-change.js";
 import { pathExists } from "#setup/path-exists.js";
 import { createPrompter } from "#setup/prompter.js";
 import { agentTemplateFiles } from "#setup/scaffold/create/project.js";
 import { writeTextFile } from "#setup/scaffold/files.js";
+
+import { InitTargetError } from "./init-telemetry.js";
 
 export interface InitCommandOptions {
   agents?: readonly string[];
@@ -23,6 +27,15 @@ export interface InitCommandOptions {
 export interface InitCliLogger {
   error(message: string): void;
   log(message: string): void;
+}
+
+export function formatWorkspaceRootMutationWarning(mutation: WorkspaceRootMutation): string {
+  const target = mutation.kind === "package-json" ? "package.json" : "configuration";
+  const suffix =
+    mutation.nodeEngineOverride === undefined
+      ? ""
+      : ` (${formatNodeEngineOverrideWarning(mutation.nodeEngineOverride)})`;
+  return `Updated workspace root ${target} at ${mutation.path}${suffix}`;
 }
 
 function validateAgentNames(names: readonly string[]): void {
@@ -82,25 +95,48 @@ export async function addAgentsToWorkspace(
   const context = await findEveProjectContext(workspaceRoot);
   if (context?.kind !== "workspace") return false;
   if (options.channelWebNextjs === true) {
-    throw new Error("--channel-web-nextjs is not supported when adding a workspace agent.");
+    throw new InitTargetError(
+      "workspace_input",
+      "--channel-web-nextjs is not supported when adding a workspace agent.",
+    );
   }
   let names = options.agents;
   if (target !== undefined && names !== undefined) {
-    throw new Error("Pass either an agent name or --agents, not both.");
+    throw new InitTargetError(
+      "workspace_input",
+      "Pass either an agent name or --agents, not both.",
+    );
   }
   if (names === undefined && target !== undefined) names = [target];
   if (names === undefined) {
     if (!(process.stdin.isTTY && process.stdout.isTTY)) {
-      throw new Error(
+      throw new InitTargetError(
+        "workspace_input",
         "This directory is an eve agent workspace. Pass an agent name, for example: eve init billing.",
       );
     }
     names = [await createPrompter().text({ message: "Name the new agent" })];
   }
-  validateAgentNames(names);
-  if (options.model !== undefined) {
-    const rejection = await validateModel(workspaceRoot, options.model);
-    if (rejection !== null) throw new Error(rejection);
+  try {
+    validateAgentNames(names);
+    if (options.model !== undefined) {
+      const rejection = await validateModel(workspaceRoot, options.model);
+      if (rejection !== null) throw new Error(rejection);
+    }
+  } catch (error) {
+    throw new InitTargetError(
+      "workspace_input",
+      error instanceof Error ? error.message : String(error),
+    );
+  }
+  for (const name of names) {
+    const appRoot = join(workspaceRoot, "agents", name);
+    if (await pathExists(appRoot)) {
+      throw new InitTargetError(
+        "target_conflict",
+        `Cannot create agent ${JSON.stringify(name)} because ${appRoot} already exists.`,
+      );
+    }
   }
   for (const name of names) await writeWorkspaceAgent(workspaceRoot, name, options);
   logger.log(

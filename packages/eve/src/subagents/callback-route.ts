@@ -13,7 +13,6 @@ import { jsonValueSchema } from "#shared/json-schemas.js";
 import type { JsonValue } from "#shared/json.js";
 import { isInputRequest } from "#shared/input.js";
 import { tokenUsageWithCostSchema, type TokenUsage } from "#shared/token-usage.js";
-import type { TaskInboundUpdate } from "#tasks/types.js";
 import { readTaskIdFromInboxToken } from "#tasks/task-inbox-token.js";
 
 const ZERO_TOKEN_USAGE: TokenUsage = {
@@ -111,15 +110,6 @@ const taskTurnStartedCallbackSchema = z.object({
   turnId: z.string().min(1),
 });
 
-const taskUpdateCallbackSchema = z.object({
-  callId: z.string().min(1),
-  kind: z.literal("task.update"),
-  message: z.string().min(1),
-  taskId: z.string().min(1),
-  updateEpoch: z.string().min(1),
-  updateIndex: eventCoordinateSchema,
-});
-
 /**
  * Turn callbacks must carry the explicit `AgentTurnOutcome` envelope:
  * the receiving parent settles the child's handle from `outcome.kind`, so
@@ -181,17 +171,6 @@ export async function handleSessionCallbackRequest(
   if (taskEvent !== undefined) {
     try {
       await resumeHook(token, taskEvent);
-    } catch {
-      return Response.json({ error: "Session callback not pending.", ok: false }, { status: 404 });
-    }
-    return Response.json({ ok: true }, { status: 202 });
-  }
-
-  const update = projectTaskUpdate(body, token);
-  if (update instanceof Response) return update;
-  if (update !== undefined) {
-    try {
-      await resumeHook(token, update);
     } catch {
       return Response.json({ error: "Session callback not pending.", ok: false }, { status: 404 });
     }
@@ -283,28 +262,6 @@ function rejectDirectTaskTurnStarted(value: unknown, token: string): Response | 
     { error: "Direct subagent task turn callbacks are no longer accepted.", ok: false },
     { status: 410 },
   );
-}
-
-function projectTaskUpdate(
-  value: unknown,
-  token: string,
-): TaskInboundUpdate | Response | undefined {
-  if (callbackKind(value) !== "task.update") return undefined;
-  const parsed = taskUpdateCallbackSchema.safeParse(value);
-  if (!parsed.success) {
-    return Response.json({ error: "Invalid task update callback.", ok: false }, { status: 400 });
-  }
-  if (readTaskIdFromInboxToken(token) !== undefined) {
-    const tokenRejection = rejectMismatchedTaskToken(token, parsed.data.taskId);
-    if (tokenRejection !== undefined) return tokenRejection;
-  }
-  return {
-    callId: parsed.data.callId,
-    kind: "task-update",
-    message: parsed.data.message,
-    updateEpoch: parsed.data.updateEpoch,
-    updateIndex: parsed.data.updateIndex,
-  };
 }
 
 function rejectMismatchedTaskToken(token: string, taskId: string): Response | undefined {

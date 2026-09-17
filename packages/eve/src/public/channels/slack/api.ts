@@ -173,6 +173,8 @@ export type SlackPostInput = SlackPostWithFiles &
  * thread.
  */
 export interface SlackUploadFilesOptions {
+  /** Upload as snippets with this Slack syntax type (for example, `markdown`). */
+  readonly snippetType?: string;
   /** Override the channel id. Defaults to the binding's `channelId`. */
   readonly channelId?: string;
   /** Override the thread ts. Defaults to the binding's `threadTs`. */
@@ -420,7 +422,8 @@ export function buildSlackBinding(input: {
   ): Promise<SlackUploadFilesResult> {
     const channelId = options?.channelId ?? input.channelId;
     const threadTs = options?.threadTs ?? currentThreadTs;
-    return uploadSlackFiles(files.map(toSlackFileUpload), {
+    const uploads = files.map((file) => toSlackFileUpload(file, options?.snippetType));
+    return uploadSlackFiles(uploads, {
       ...createSlackApiOptions(input.botToken, context),
       channelId: channelId || undefined,
       initialComment: options?.initialComment,
@@ -648,10 +651,11 @@ function normalizeSlackApiBody(body: unknown): Record<string, unknown> {
   return {};
 }
 
-function toSlackFileUpload(file: FileUpload): SlackFileUpload {
+function toSlackFileUpload(file: FileUpload, snippetType?: string): SlackFileUpload {
   return {
     data: normalizeFileData(file.data),
     filename: file.filename,
+    snippetType,
   };
 }
 

@@ -127,7 +127,7 @@ function providerOptions(
       hint:
         selectionExplicit && selectedProvider === "chatgpt"
           ? "Current"
-          : "Authenticate through the Codex CLI",
+          : "Sign in with your ChatGPT account",
       checked: (selectionExplicit && selectedProvider === "chatgpt") || undefined,
     },
     {

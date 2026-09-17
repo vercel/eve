@@ -3,7 +3,7 @@ import { sleep } from "workflow";
 import { z } from "zod";
 
 /**
- * Parks the turn on a long durable sleep so a steer can cancel it. Exercises
+ * Parks the turn on a long durable sleep until explicitly cancelled. Exercises
  * cancellation cascading into a workflow tool run.
  */
 export default defineWorkflowTool({

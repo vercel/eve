@@ -1,3 +1,4 @@
+import { createTestSessionState } from "#internal/testing/session-state.js";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
@@ -5,7 +6,10 @@ import {
   emitRecordedTaskInputRequestStep,
   runProxySubagentEventStep,
 } from "#subagents/event-proxy-step.js";
-import { recordTaskInputRequestStep } from "#execution/tasks/parent/hitl-proxy-steps.js";
+import {
+  recordTaskInputRequestStep,
+  recordTerminalTaskViewsStep,
+} from "#execution/tasks/parent/hitl-proxy-steps.js";
 import { acceptTaskAuthorizationEventStep } from "#execution/tools/subagent/accept-event-step.js";
 import { routeProxiedDeliverStep } from "#execution/proxied-deliver-step.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
@@ -18,6 +22,7 @@ vi.mock("#subagents/event-proxy-step.js", () => ({
 }));
 vi.mock("#execution/tasks/parent/hitl-proxy-steps.js", () => ({
   recordTaskInputRequestStep: vi.fn(),
+  recordTerminalTaskViewsStep: vi.fn(),
 }));
 vi.mock("#execution/tools/subagent/accept-event-step.js", () => ({
   acceptTaskAuthorizationEventStep: vi.fn(),
@@ -32,13 +37,14 @@ vi.mock("#execution/tools/workflow/resume-hook-step.js", () => ({
   resumeHookStep: vi.fn(),
 }));
 
-const state = (hasProxyInputRequests: boolean): DurableSessionState => ({
-  continuationToken: "parent-token",
-  emissionState: { sequence: 0, sessionStarted: true, stepIndex: 0, turnId: "" },
-  hasProxyInputRequests,
-  sessionId: "parent-session",
-  version: 1,
-});
+const state = (hasProxyInputRequests: boolean): DurableSessionState =>
+  createTestSessionState({
+    continuationToken: "parent-token",
+    emissionState: { sequence: 0, sessionStarted: true, stepIndex: 0, turnId: "" },
+    hasProxyInputRequests,
+    sessionId: "parent-session",
+    version: 1,
+  });
 
 const taskRequest = {
   replyTo: "eve:workflow-tool-run-answer:run-1:0",
@@ -79,7 +85,7 @@ describe("task HITL delivery routing", () => {
         kind: "deliver",
         payloads: [{ task: { inputRequests: [taskRequest] } }],
       },
-      parentWritable: new WritableStream<Uint8Array>(),
+      sessionWritable: new WritableStream<Uint8Array>(),
       serializedContext: {},
       sessionState: state(false),
     });
@@ -98,6 +104,42 @@ describe("task HITL delivery routing", () => {
     );
   });
 
+  it("adopts instrumentation context returned with terminal task views", async () => {
+    const recordedState = state(false);
+    const view = {
+      lastOutput: { data: "done", type: "result" as const },
+      metadata: { kind: "tool", name: "publish" },
+      status: "completed" as const,
+      taskId: "task-1",
+    };
+    vi.mocked(recordTerminalTaskViewsStep).mockResolvedValue({
+      serializedContext: { trace: "settled" },
+      sessionState: recordedState,
+    });
+
+    const result = await routeDeliverToChildren({
+      delivery: {
+        kind: "deliver",
+        payloads: [{ task: { views: [view] } }],
+      },
+      sessionWritable: new WritableStream<Uint8Array>(),
+      serializedContext: { trace: "open" },
+      sessionState: state(false),
+    });
+
+    expect(recordTerminalTaskViewsStep).toHaveBeenCalledWith({
+      serializedContext: { trace: "open" },
+      sessionState: state(false),
+      views: [view],
+    });
+    expect(result).toEqual({
+      kind: "continue",
+      remainder: undefined,
+      serializedContext: { trace: "settled" },
+      sessionState: recordedState,
+    });
+  });
+
   it("drops an unowned task envelope before it can reach the parent model", async () => {
     vi.mocked(recordTaskInputRequestStep).mockResolvedValue({
       accepted: false,
@@ -109,7 +151,7 @@ describe("task HITL delivery routing", () => {
         kind: "deliver",
         payloads: [{ task: { inputRequests: [{ ...taskRequest, taskId: "foreign-task" }] } }],
       },
-      parentWritable: new WritableStream<Uint8Array>(),
+      sessionWritable: new WritableStream<Uint8Array>(),
       serializedContext: {},
       sessionState: state(false),
     });
@@ -154,7 +196,7 @@ describe("task HITL delivery routing", () => {
           },
         ],
       },
-      parentWritable: new WritableStream<Uint8Array>(),
+      sessionWritable: new WritableStream<Uint8Array>(),
       serializedContext: {},
       sessionState: state(false),
     });
@@ -211,7 +253,7 @@ describe("task HITL delivery routing", () => {
           },
         ],
       },
-      parentWritable: new WritableStream<Uint8Array>(),
+      sessionWritable: new WritableStream<Uint8Array>(),
       serializedContext: { source: "parent" },
       sessionState: state(false),
     });
@@ -263,7 +305,7 @@ describe("task HITL delivery routing", () => {
         taskDeliveryId: "task-delivery-1",
         turnPolicy: "queue",
       },
-      parentWritable: new WritableStream<Uint8Array>(),
+      sessionWritable: new WritableStream<Uint8Array>(),
       serializedContext: {},
       sessionState: routedState,
     });

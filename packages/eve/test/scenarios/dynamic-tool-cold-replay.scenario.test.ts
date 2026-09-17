@@ -130,7 +130,6 @@ describe("dynamic tool cold replay", () => {
     async () => {
       const app = await scenarioApp(DYNAMIC_TOOL_COLD_REPLAY_DESCRIPTOR);
       const pinnedEnv = {
-        VERCEL_DEPLOYMENT_ID: "dynamic-tool-cold-replay",
         WORKFLOW_INLINE_OWNERSHIP_LEASE_SECONDS: "1",
       };
       let server = await startEveDev(app.appRoot, { env: pinnedEnv });
@@ -199,8 +198,8 @@ describe("dynamic tool cold replay", () => {
         }
 
         // The fresh process rebinds persisted callbacks by re-running session
-        // resolvers exactly once (identity is the tool name, so the same
-        // definitions re-register); replay itself never depends on it.
+        // resolvers exactly once for this session; the same resolver entries
+        // re-register without replacing another session's bindings.
         const resolverRunsAfterRestart = (
           await readFile(join(app.appRoot, ".dynamic-resolver-runs"), "utf8")
         )

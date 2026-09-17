@@ -4,17 +4,17 @@ import type { ModelMessage, ToolModelMessage } from "ai";
  * Converts provider-executed tool outcomes into replay-safe model messages.
  *
  * Provider SDKs can return a tool call and its result inside one assistant
- * message. When the result is provider-executed but the call lacks the matching
- * marker, each matching call is rewritten as a normal call and consecutive
- * results are moved into a tool message at their original position. Native
- * provider-owned call/result pairs remain untouched. Text before a result
- * remains before it; text after a result remains after it.
+ * message. Each matching call is rewritten as a normal call and consecutive
+ * results are moved into a tool message at their original position when the
+ * call lacks the matching marker or shares an assistant message with a local
+ * tool call. Native provider-only call/result pairs remain untouched. Text
+ * before a result remains before it; text after a result remains after it.
  */
 export function normalizeProviderToolHistory(input: {
   readonly messages: readonly ModelMessage[];
   readonly providerExecutedOutcomeIds: ReadonlySet<string>;
 }): { readonly messages: ModelMessage[]; readonly outcomeEndsResponse: boolean } {
-  const toolCallIdsToNormalize = findUnmarkedProviderToolCalls(input);
+  const toolCallIdsToNormalize = findProviderToolCallsToNormalize(input);
   if (input.providerExecutedOutcomeIds.size === 0) {
     return { messages: [...input.messages], outcomeEndsResponse: false };
   }
@@ -83,7 +83,7 @@ export function normalizeProviderToolHistory(input: {
   };
 }
 
-function findUnmarkedProviderToolCalls(input: {
+function findProviderToolCallsToNormalize(input: {
   readonly messages: readonly ModelMessage[];
   readonly providerExecutedOutcomeIds: ReadonlySet<string>;
 }): ReadonlySet<string> {
@@ -92,11 +92,18 @@ function findUnmarkedProviderToolCalls(input: {
   for (const message of input.messages) {
     if (message.role !== "assistant" || !Array.isArray(message.content)) continue;
 
+    const hasLocalToolCall = message.content.some(
+      (part) =>
+        part.type === "tool-call" &&
+        part.providerExecuted !== true &&
+        !input.providerExecutedOutcomeIds.has(part.toolCallId),
+    );
+
     for (const part of message.content) {
       if (
         part.type === "tool-call" &&
-        part.providerExecuted !== true &&
-        input.providerExecutedOutcomeIds.has(part.toolCallId)
+        input.providerExecutedOutcomeIds.has(part.toolCallId) &&
+        (part.providerExecuted !== true || hasLocalToolCall)
       ) {
         result.add(part.toolCallId);
       }

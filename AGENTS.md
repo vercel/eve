@@ -203,6 +203,13 @@ new eval under the matching fixture's `evals/` directory. E2E evals must be
 deterministic and self-contained. Keep e2e free of external service startup
 and injected env requirements (beyond model-provider credentials).
 
+Write model-facing eval prompts as benign, process-oriented narratives. Use
+neutral named actors such as Alice and Bob, and describe the ordinary workflow
+that produces the state under test. Avoid terse, adversarial, or probe-like
+wording when a natural scenario can test the same behavior. Such wording can
+trigger provider refusals and cause live-model flake. Do not weaken the
+behavior or security boundary under test.
+
 Do not set `VERCEL_TEAM_ID` at build: sandbox template keys must derive
 identically at build and runtime, and Vercel has no team variable at runtime.
 

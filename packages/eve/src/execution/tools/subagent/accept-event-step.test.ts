@@ -1,3 +1,4 @@
+import { createTestSessionState } from "#internal/testing/session-state.js";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { readDurableSession } from "#execution/durable-session-store.js";
@@ -5,16 +6,19 @@ import { readLatestTaskView } from "#execution/tasks/parent/run-parent.js";
 import { acceptTaskAuthorizationEventStep } from "#execution/tools/subagent/accept-event-step.js";
 import { setAgentHandleStore } from "#subagents/handles/store.js";
 
-vi.mock("#execution/durable-session-store.js", () => ({ readDurableSession: vi.fn() }));
+vi.mock("#execution/durable-session-store.js", async (importOriginal) => ({
+  ...(await importOriginal()),
+  readDurableSession: vi.fn(),
+}));
 vi.mock("#execution/tasks/parent/run-parent.js", () => ({ readLatestTaskView: vi.fn() }));
 
-const sessionState = {
+const sessionState = createTestSessionState({
   continuationToken: "parent-token",
   emissionState: { sequence: 0, sessionStarted: true, stepIndex: 0, turnId: "turn-1" },
   hasProxyInputRequests: false,
   sessionId: "parent-session",
   version: 1,
-} as const;
+});
 const hookPayload = {
   callId: "call-1",
   childSessionId: "child-1",
@@ -36,6 +40,7 @@ const taskIndex = {
     tasks: [
       {
         createdByTurnId: "turn-1",
+        dispatchContext: { auth: { current: null, initiator: null } },
         metadata: { kind: "tool", name: "export" },
         taskId: "task-1",
         taskInboxToken: "task-token",
@@ -47,7 +52,7 @@ const taskIndex = {
 };
 
 function mockSession(handles: readonly unknown[]): void {
-  vi.mocked(readDurableSession).mockResolvedValue({
+  vi.mocked(readDurableSession).mockReturnValue({
     agent: { system: "" },
     continuationToken: "parent-token",
     history: [],
@@ -88,6 +93,28 @@ describe("acceptTaskAuthorizationEventStep", () => {
       }),
     ).resolves.toBe(true);
     expect(readLatestTaskView).toHaveBeenCalledWith({ taskRunId: "task-run" });
+  });
+
+  it("accepts the owning workflow tool's event without an agent handle", async () => {
+    mockSession([]);
+    const event = {
+      ...hookPayload,
+      childSessionId: "task-run",
+      subagentName: "export",
+      event: { ...hookPayload.event, data: { ...hookPayload.event.data, turnId: "turn-1" } },
+    };
+    await expect(
+      acceptTaskAuthorizationEventStep({
+        delivery: { hookPayload: event, taskId: "task-1" },
+        sessionState,
+      }),
+    ).resolves.toBe(true);
+    await expect(
+      acceptTaskAuthorizationEventStep({
+        delivery: { hookPayload: { ...event, childSessionId: "different-run" }, taskId: "task-1" },
+        sessionState,
+      }),
+    ).resolves.toBe(false);
   });
 
   it("accepts the first authorization event while the task child start is still reserved", async () => {

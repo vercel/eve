@@ -8,10 +8,8 @@ export default defineWorkflowTool({
   async execute({ service }, ctx) {
     "use workflow";
 
-    return await ctx.agent({
-      key: "background-child",
+    return await ctx.agent("workflow-marker", {
       message: `${service}:background`,
-      target: "workflow-marker",
     });
   },
 });

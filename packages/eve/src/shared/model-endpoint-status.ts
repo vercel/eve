@@ -28,5 +28,5 @@ export type ModelEndpointStatus =
       state: ChatGptEndpointState;
       accountLabel?: string;
     }
-  | { kind: "gateway"; connected: true; credential: "api-key" | "oidc" }
+  | { kind: "gateway"; connected: true; credential: "api-key" | "oidc" | "oauth"; team?: string }
   | { kind: "gateway"; connected: false };

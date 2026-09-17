@@ -16,7 +16,7 @@ eve eval --timeout 60000       # per-eval timeout in milliseconds
 eve eval --max-concurrency 4   # cap concurrent eval executions (default 8)
 eve eval --junit .eve/junit.xml  # write JUnit XML
 eve eval --list                # print discovered evals without running
-eve eval --verbose             # stream per-eval t.log lines to stdout
+eve eval --verbose             # stream per-eval logs and workflow run IDs
 eve eval --json                # machine-readable output
 eve eval --skip-report         # skip config and eval-defined reporters (e.g. Braintrust)
 ```
@@ -36,6 +36,8 @@ Tag filters compose: `--tag` keeps evals carrying at least one listed tag, then 
 An eval that calls `t.skip(reason)` is reported as skipped, does not count as passed or failed, and never changes the exit code.
 
 `eve eval --json` flushes the complete report before exiting, including when stdout is piped to another process or redirected to a file.
+
+With `--verbose`, eve prefixes each line with its eval ID. It streams authored `t.log()` lines as they occur, then prints the workflow run ID for every captured primary and secondary session. Use those `wrun_...` IDs to find the corresponding runs in your workflow provider.
 
 ## Artifacts
 

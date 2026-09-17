@@ -77,7 +77,7 @@ export async function prepareLinearSetup(
   );
   const existing = await deps.findConnector({
     project,
-    projectRoot: context.appRoot,
+    projectRoot: context.projectRoot,
     slug,
     signal: context.signal,
   });
@@ -121,14 +121,14 @@ export async function applyLinearSetup(
           connector: plan.connector.connector,
           log: context.presenter.log,
           project: plan.project,
-          projectRoot: context.appRoot,
+          projectRoot: context.projectRoot,
           signal: context.signal,
         }),
         plan.connector.connector)
       : await deps.provisionConnector({
           log: context.presenter.log,
           project: plan.project,
-          projectRoot: context.appRoot,
+          projectRoot: context.projectRoot,
           slug: plan.connector.slug,
           signal: context.signal,
         });

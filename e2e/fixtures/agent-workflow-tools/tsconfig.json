@@ -12,7 +12,10 @@
     "declaration": false,
     "noEmit": true,
     "types": ["node", "eve/workflow-modules"],
-    "allowImportingTsExtensions": true
+    "allowImportingTsExtensions": true,
+    "paths": {
+      "@/*": ["./*"]
+    }
   },
   "include": ["agent/**/*.ts", "evals/**/*.ts"]
 }

@@ -1,6 +1,6 @@
 import type { UserContent } from "ai";
 
-import type { SessionInboxAddress } from "#execution/wire/session-inbox-contract.js";
+import type { SessionInboxAddress } from "#execution/session-inbox/address.js";
 import type { MessageStreamEvent, UnstampedMessageStreamEvent } from "#protocol/message.js";
 import type { CancelTurnResult as ProtocolCancelTurnResult } from "#protocol/cancel-turn.js";
 import type { RunMode } from "#shared/run-mode.js";
@@ -15,6 +15,7 @@ import type { AgentLimitsDefinition } from "#shared/agent-definition.js";
 import type { JsonObject } from "#shared/json.js";
 import type { InstrumentationDecision } from "#shared/instrumentation-decision.js";
 import type { ForwardedTraceAssertion } from "#shared/forwarded-trace-policy.js";
+import type { ConversationContext } from "#shared/conversation-context.js";
 import type {
   TaskAgentRequestDelivery,
   TaskAuthorizationEventDelivery,
@@ -228,7 +229,7 @@ export type SessionCommand =
   | { readonly kind: "reset"; readonly reason?: string };
 
 export type SessionSendCommandResult =
-  | { readonly status: "accepted"; readonly sessionId: string }
+  | { readonly status: "accepted"; readonly sessionId: string; readonly deliveryId?: string }
   | { readonly status: "session_not_active" };
 
 /** Result of terminally resetting a session. */
@@ -290,6 +291,8 @@ export interface DeliverHookPayload {
 /** Internal deadline signal sent through the stable session command inbox. */
 export interface SessionTimeoutHookPayload {
   readonly kind: "session-timeout";
+  /** The owner run that armed this timer; a later owner ignores a predecessor's deadline. */
+  readonly ownerRunId: string;
 }
 
 /** Requests a context compaction without delivering model input. */
@@ -463,6 +466,8 @@ export interface RunInput {
    */
   readonly channelName?: string;
   readonly channelMetadata?: ChannelInstrumentationProjection;
+  /** Parent conversation classification inherited by a local subagent. */
+  readonly inheritedConversation?: ConversationContext;
   /** Inbound channel operation that created this session. */
   readonly delivery?: ChannelDeliveryMetadata;
   /**
@@ -470,6 +475,12 @@ export interface RunInput {
    * request was accepted with no credentials.
    */
   readonly auth: SessionAuthContext | null;
+  /**
+   * Route-authenticated principal used to classify the conversation. This
+   * stays separate from `auth` because a channel may project a different
+   * principal into session auth after route authentication.
+   */
+  readonly audienceAuth?: SessionAuthContext | null;
   /**
    * Session-level capabilities. When omitted, every flag is
    * interpreted as `false`. Channel routes that can reach a human
@@ -494,10 +505,11 @@ export interface RunInput {
   readonly activityObserver?: ActivityObserverConfig;
   /**
    * Session continuation token for delivery and hook creation. Channels can
-   * re-key the session during the first turn via
-   * `ctx.session.continuation.rekey(...)` (e.g. Slack adopts its first
+   * add a continuation address during the first turn via
+   * `ctx.session.continuation.alias(...)` (e.g. Slack adopts its first
    * post's `ts` as the thread root), so an initial placeholder token is
-   * acceptable when full identity isn't known until the first message. ID-only
+   * acceptable when full identity isn't known until the first message. Earlier
+   * addresses remain valid after an alias. ID-only
    * transports omit this field.
    */
   readonly continuationToken?: string;
@@ -522,6 +534,8 @@ export interface RunInput {
     readonly outputSchema?: JsonObject;
   };
   readonly mode: RunMode;
+  /** Observability correlation only; never grants delegated-session privileges. */
+  readonly conversationId?: string;
   readonly parent?: SessionParent;
   /**
    * Dispatching parent's open trace window. Handed down rather than looked up

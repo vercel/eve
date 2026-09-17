@@ -21,15 +21,17 @@ import { ContextKey } from "#context/key.js";
 import {
   SESSION_INBOX_CONTEXT_KEY,
   type SessionInboxAddress,
-} from "#execution/wire/session-inbox-contract.js";
+} from "#execution/session-inbox/address.js";
 import { SESSION_CALLBACK_CONTEXT_KEY_NAME } from "#context/key-names.js";
 import type { InstrumentationChannelDeliveryRef } from "#instrumentation/lifecycle.js";
+import type { UserModelMessage } from "#harness/messages.js";
 import type { HandleEventFn } from "#harness/types.js";
 import type { PersistedDynamicToolMetadata } from "#context/dynamic-tool-metadata.js";
 import type { DynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agent-config.js";
 import type { DynamicRemoteAgentConfig } from "#runtime/subagents/dynamic-remote-agent-config.js";
 import type { SandboxAccess } from "#sandbox/state.js";
 import type { RunMode } from "#shared/run-mode.js";
+import type { HistoryViewProjector } from "#shared/history-view.js";
 import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
 import type { PreparedRuntimeDelegationTool } from "#runtime/sessions/turn.js";
 import type { MemoryScope, MemoryTurnContext } from "#public/memory/index.js";
@@ -74,8 +76,13 @@ export interface Session {
 export const AuthKey = new ContextKey<SessionAuthContext | null>("eve.auth");
 export const InitiatorAuthKey = new ContextKey<SessionAuthContext | null>("eve.initiatorAuth");
 export const SessionIdKey = new ContextKey<string>("eve.sessionId");
+export const ConversationIdKey = new ContextKey<string>("eve.conversationId");
 export const SessionInboxKey = new ContextKey<SessionInboxAddress>(SESSION_INBOX_CONTEXT_KEY);
 export const ContinuationTokenKey = new ContextKey<string>("eve.continuationToken");
+/** Every channel continuation address requested for this session, in claim order. */
+export const ContinuationHookTokensKey = new ContextKey<readonly string[]>(
+  "eve.continuationHookTokens",
+);
 export const ChannelRequestIdKey = new ContextKey<string>("eve.channelRequestId");
 /** Parent-verified local client provenance, valid only for the current dev host secret. */
 export interface LocalDevRequestProvenance {
@@ -88,13 +95,22 @@ export const LocalDevRequestKey = new ContextKey<LocalDevRequestProvenance>(
 );
 /** Authored schedule whose dispatch created this session. */
 export const ScheduleIdKey = new ContextKey<string>("eve.scheduleId");
+/** Display title derived from the session's initial input. */
+export const SessionTitleKey = new ContextKey<string>("eve.sessionTitle");
 export const ChannelDeliveryKey = new ContextKey<ChannelDeliveryMetadata>("eve.channelDelivery");
+/** Accepted messages whose response owns the current turn's durable stream events. */
+export const TurnDeliveryIdsKey = new ContextKey<readonly string[]>("eve.turnDeliveryIds");
 /** Task-reporting phase for the active root turn. */
 export const TurnTaskDeliveryKey = new ContextKey<"none" | "initiating" | "pending" | "settled">(
   "eve.turnTaskDelivery",
 );
-/** Framework-authored task state supplied to the model without altering user-message history. */
-export const TurnTaskStateKey = new ContextKey<string>("eve.turnTaskState");
+/** Last framework announcements recorded in the retained session history. */
+export interface HistoryState {
+  readonly availableSkills?: string;
+  readonly taskState?: string;
+  readonly deliveryInstruction?: string;
+}
+export const HistoryStateKey = new ContextKey<HistoryState>("eve.historyState");
 export interface ActiveChannelDelivery {
   readonly agentName?: string;
   readonly channelType?: string;
@@ -128,6 +144,12 @@ export const OtelTraceEnabledKey = new ContextKey<boolean>("eve.otelTraceEnabled
  */
 export const CapabilitiesKey = new ContextKey<SessionCapabilities>("eve.capabilities");
 export const ActivityObserverKey = new ContextKey<ActivityObserverConfig>("eve.activityObserver");
+/** Originating root turn that owns the current user-visible activity artifact. */
+export const ActivityRootTurnIdKey = new ContextKey<string>("eve.activityRootTurnId");
+/** Pending HITL request identities that keep the current activity artifact open. */
+export const ActivityPendingBlockersKey = new ContextKey<readonly string[]>(
+  "eve.activityPendingBlockers",
+);
 
 /**
  * Optional framework-owned caller callback captured when the session is created.
@@ -147,6 +169,11 @@ export const HandleEventKey = new ContextKey<HandleEventFn>("eve.internal.handle
 // ---------------------------------------------------------------------------
 // Dynamic model keys
 // ---------------------------------------------------------------------------
+
+/** Static model configured for the effective turn agent, or `null` for a dynamic-only agent. */
+export const StaticModelReferenceKey = new ContextKey<RuntimeModelReference | null>(
+  "eve.staticModelReference",
+);
 
 /** Session-scoped dynamic model selection (from `session.started`). */
 export const SessionDynamicModelReferenceKey = new ContextKey<RuntimeModelReference | null>(
@@ -221,6 +248,7 @@ export const TurnMemoryLocksKey = new ContextKey<Readonly<Record<string, LockedM
 );
 
 export interface PreparedMemoryPreamble {
+  readonly projector?: HistoryViewProjector;
   readonly history: readonly ModelMessage[];
   readonly input: readonly ModelMessage[];
   readonly state?: Readonly<Record<string, unknown>>;
@@ -331,6 +359,6 @@ export const DynamicInstructionResolveMessagesKey = new ContextKey<readonly Mode
 );
 
 /** User-role results waiting to be committed immediately after a preamble. */
-export const PendingDynamicInstructionUserMessagesKey = new ContextKey<readonly ModelMessage[]>(
+export const PendingDynamicInstructionUserMessagesKey = new ContextKey<readonly UserModelMessage[]>(
   "eve.pendingDynamicInstructionUserMessages",
 );

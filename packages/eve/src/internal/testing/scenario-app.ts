@@ -284,7 +284,8 @@ async function installScenarioDependencies(input: {
       "--no-audit",
       "--no-fund",
       "--ignore-scripts",
-      "--prefer-offline",
+      // The workspace's installed AI SDK version may be newer than cached registry metadata.
+      "--prefer-online",
     ]);
     return;
   }

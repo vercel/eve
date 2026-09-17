@@ -48,13 +48,13 @@ interface ProxySubagentEventResult {
 export async function runProxySubagentEventStep(input: {
   readonly answerHook?: AnswerHookRoute;
   readonly hookPayload: SubagentEventHookPayload;
-  readonly parentWritable: WritableStream<Uint8Array>;
+  readonly sessionWritable: WritableStream<Uint8Array>;
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
 }): Promise<ProxySubagentEventResult> {
   "use step";
 
-  const durableSession = await readDurableSession(input.sessionState);
+  const durableSession = readDurableSession(input.sessionState);
   const ctx = await deserializeContext(input.serializedContext);
 
   return emitProxiedSubagentEvent({
@@ -62,20 +62,20 @@ export async function runProxySubagentEventStep(input: {
     ctx,
     durableSession,
     hookPayload: input.hookPayload,
-    parentWritable: input.parentWritable,
+    sessionWritable: input.sessionWritable,
   });
 }
 
 /** Emits a task request whose proxy routes were committed by a prior step. */
 export async function emitRecordedTaskInputRequestStep(input: {
   readonly request: TaskInputRequestDelivery;
-  readonly parentWritable: WritableStream<Uint8Array>;
+  readonly sessionWritable: WritableStream<Uint8Array>;
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
 }): Promise<ProxySubagentEventResult> {
   "use step";
 
-  const durableSession = await readDurableSession(input.sessionState);
+  const durableSession = readDurableSession(input.sessionState);
   const ctx = await deserializeContext(input.serializedContext);
   return await emitProxiedSubagentEvent({
     ctx,
@@ -93,7 +93,7 @@ export async function emitRecordedTaskInputRequestStep(input: {
       kind: "subagent-input-request",
       subagentName: input.request.taskId,
     },
-    parentWritable: input.parentWritable,
+    sessionWritable: input.sessionWritable,
     recordProxyInputRequests: false,
   });
 }
@@ -104,7 +104,7 @@ export async function emitProxiedSubagentEvent(input: {
   readonly ctx: ContextContainer;
   readonly durableSession: DurableSession;
   readonly hookPayload: SubagentEventHookPayload;
-  readonly parentWritable: WritableStream<Uint8Array>;
+  readonly sessionWritable: WritableStream<Uint8Array>;
   readonly recordProxyInputRequests?: boolean;
 }): Promise<ProxySubagentEventResult> {
   const { ctx } = input;
@@ -119,7 +119,7 @@ export async function emitProxiedSubagentEvent(input: {
     turnAgent: effectiveAgent.turnAgent,
   });
   const adapterCtx = buildAdapterContext(adapter, ctx);
-  const writer = input.parentWritable.getWriter();
+  const writer = input.sessionWritable.getWriter();
 
   let proxyEntries: ProxyInputRequestEntries | undefined;
   let scopedSession: HarnessSession;

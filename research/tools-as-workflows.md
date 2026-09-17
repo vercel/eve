@@ -1,7 +1,7 @@
 ---
 issue: https://github.com/vercel/eve/issues/1084
 status: implemented
-last_updated: "2026-09-04"
+last_updated: "2026-09-10"
 ---
 
 # Tools as workflows
@@ -21,9 +21,7 @@ export default defineWorkflowTool({
   inputSchema: z.object({ service: z.string() }),
   async execute({ service }, ctx) {
     "use workflow";
-    const review = await ctx.agent({
-      key: "review",
-      target: "reviewer",
+    const review = await ctx.agent("reviewer", {
       message: `Review ${service} for deployment.`,
     });
     const answer = await ctx.ask({
@@ -41,7 +39,7 @@ export default defineWorkflowTool({
 ```
 
 The executor receives `WorkflowToolContext`: `session`, `callId`, `toolName`, `abortSignal`,
-`agent(input)`, and `ask(request)`. Ordinary `ToolContext`, channel contexts, and schedule contexts
+`agent(target, input)`, and `ask(request)`. Ordinary `ToolContext`, channel contexts, and schedule contexts
 have no `agent` or `ask` methods. Shared helpers can accept `WorkflowToolContext` explicitly.
 The turn-owned `getSandbox`, `getSkill`, `getToken`, and `requireAuth` methods are absent from this
 public type. Side effects and credential reads belong in top-level `"use step"` helpers.
@@ -80,9 +78,10 @@ error, or cancellation resolves the model's tool call. With `execution: "backgro
 receives a task receipt. Ordinary yields are stream-only progress; yielding
 `task.postMessage(message)` wakes the owning agent, as does completion.
 
-`ctx.agent` delegates to a visible subagent. Its required `key` is unique within the run and keeps
-invocation identity stable across replay. `ctx.ask` publishes an input request on the session's
-channel and returns an awaitable answer. It can be raced against `sleep`; finishing or cancelling
+`ctx.agent` delegates to the visible subagent named by its first argument. eve derives a unique,
+replay-stable invocation identity for each call from its durable reply hook, including repeated and
+parallel calls to the same subagent. `ctx.ask` publishes an input request on the session's channel
+and returns an awaitable answer. It can be raced against `sleep`; finishing or cancelling
 the run withdraws pending requests. The existing owner hooks and message protocol stay internal.
 
 An async generator's `yield` reports progress. `ctx.abortSignal` remains durable and supports
@@ -93,7 +92,7 @@ their existing behavior.
 
 - Replace `defineTool` with `defineWorkflowTool` for workflow tools and keep the executor's
   `"use workflow"` directive.
-- Replace `agent(ctx, input)` with `ctx.agent(input)` and `ask(ctx, request)` with `ctx.ask(request)`.
+- Replace `agent(ctx, input)` with `ctx.agent(target, input)` and `ask(ctx, request)` with `ctx.ask(request)`.
 - Remove imports from `eve/workflow`; that entry point is removed. Import `WorkflowToolContext`,
   `AgentInput`, `ToolInputRequest`, and `ToolInputResponse` from `eve/tools` when needed.
 

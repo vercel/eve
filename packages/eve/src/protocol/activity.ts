@@ -11,6 +11,7 @@ export interface ActivityWorkIdentityV1 {
   readonly callId?: string;
   readonly id: string;
   readonly kind: ActivityWorkKind;
+  readonly label?: string;
   readonly name?: string;
   readonly parentId?: string;
   readonly rootSessionId: string;
@@ -42,6 +43,7 @@ export interface ActivityActionIdentityV1 {
 }
 
 export interface ActivityActionStateV1 extends ActivityActionIdentityV1 {
+  readonly label?: string;
   readonly phase: ActivityActionPhase;
   readonly settledAt?: string;
   readonly startedAt: string;
@@ -90,6 +92,12 @@ export type ActivityEventV1 =
       readonly settledAt: string;
     }
   | {
+      readonly actionId: string;
+      readonly eventId: string;
+      readonly kind: "action.label.updated";
+      readonly label: string;
+    }
+  | {
       readonly blocker: ActivityBlockerIdentityV1;
       readonly eventId: string;
       readonly kind: "blocker.started";
@@ -119,21 +127,7 @@ export interface ActivitySnapshotV1 {
 }
 
 export function parseActivityWorkIdentityV1(value: unknown): ActivityWorkIdentityV1 | undefined {
-  if (
-    !isRecord(value) ||
-    !hasOnlyKeys(value, [
-      "callId",
-      "id",
-      "kind",
-      "name",
-      "parentId",
-      "rootSessionId",
-      "rootTurnId",
-      "sessionId",
-      "turnId",
-    ])
-  )
-    return undefined;
+  if (!isRecord(value)) return undefined;
   const kind = value.kind;
   if (
     !isOneOf(kind, ["root-turn", "subagent", "remote-agent", "task"] as const) ||
@@ -141,6 +135,7 @@ export function parseActivityWorkIdentityV1(value: unknown): ActivityWorkIdentit
     !isIdentity(value.rootSessionId) ||
     !isIdentity(value.rootTurnId) ||
     !isOptionalIdentity(value.callId) ||
+    !isOptionalBoundedString(value.label) ||
     !isOptionalBoundedString(value.name) ||
     !isOptionalIdentity(value.parentId) ||
     !isOptionalIdentity(value.sessionId) ||
@@ -148,9 +143,11 @@ export function parseActivityWorkIdentityV1(value: unknown): ActivityWorkIdentit
   )
     return undefined;
   return {
+    ...value,
     callId: value.callId,
     id: value.id,
     kind,
+    label: value.label,
     name: value.name,
     parentId: value.parentId,
     rootSessionId: value.rootSessionId,
@@ -232,6 +229,21 @@ function parseKnownEvent(value: Record<string, unknown>): ActivityEventV1 | null
         kind: "action.settled",
         outcome: value.outcome,
         settledAt: value.settledAt,
+      };
+    }
+    case "action.label.updated": {
+      if (!hasOnlyKeys(value, ["actionId", "eventId", "kind", "label"])) return undefined;
+      if (
+        !isIdentity(value.actionId) ||
+        !isIdentity(value.eventId) ||
+        !isBoundedString(value.label)
+      )
+        return undefined;
+      return {
+        actionId: value.actionId,
+        eventId: value.eventId,
+        kind: "action.label.updated",
+        label: value.label,
       };
     }
     case "blocker.started": {

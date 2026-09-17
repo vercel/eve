@@ -12,7 +12,8 @@ Documentation links below point directly to Markdown. Remove the \`.md\` suffix 
 
 ## Introduction
 
-- [Getting Started](${EVE_ORIGIN}/docs/getting-started.md): Create a project, configure a model, understand its layout, and run it locally.
+- [Getting Started](${EVE_ORIGIN}/docs/getting-started.md): Create a project, configure model credentials, and run your first agent.
+- [Project Structure](${EVE_ORIGIN}/docs/concepts/project-structure.md): Choose a layout for agents and application code, add specialist subagents, and grow into an agent workspace.
 
 ## Core Concepts
 
@@ -63,7 +64,7 @@ Documentation links below point directly to Markdown. Remove the \`.md\` suffix 
 - [Deploy to Vercel](${EVE_ORIGIN}/docs/guides/deployment/vercel.md): Build and deploy with Vercel Workflow and Vercel Sandbox.
 - [Self-Hosting](${EVE_ORIGIN}/docs/guides/deployment/self-hosting.md): Run eve as a Node service or container.
 - [Authentication](${EVE_ORIGIN}/docs/guides/auth-and-route-protection.md): Secure an agent's HTTP routes and establish caller identity.
-- [Observability](${EVE_ORIGIN}/docs/guides/instrumentation.md): Trace agents with OpenTelemetry and inspect workflow metadata.
+- [Instrumentation](${EVE_ORIGIN}/docs/observability/instrumentation.md): Trace agents with OpenTelemetry and inspect workflow metadata.
 - [Terminal UI](${EVE_ORIGIN}/docs/guides/dev-tui.md): Work with a local or deployed agent from the interactive terminal UI.
 
 ## Tutorial
@@ -79,6 +80,7 @@ Documentation links below point directly to Markdown. Remove the \`.md\` suffix 
 
 ## API Reference and Discovery
 
+- [Agent Files](${EVE_ORIGIN}/docs/reference/agent-files.md): Look up filesystem slots, path-derived names, and discovery rules.
 - [TypeScript API Reference](${EVE_ORIGIN}/docs/reference/typescript-api.md): Find public \`define*\` helpers, runtime context, and import paths.
 - [CLI Reference](${EVE_ORIGIN}/docs/reference/cli.md): Find every eve command and option.
 - [Responsible Use](${EVE_ORIGIN}/docs/responsible-use.md): Review deployer responsibilities and safeguards.
@@ -88,6 +90,7 @@ Documentation links below point directly to Markdown. Remove the \`.md\` suffix 
 
 ## Optional
 
+- [Changelog](${EVE_ORIGIN}/changelog.md): Read eve release notes, including breaking changes and fixes. Follow the next-page links for older releases.
 - [Integrations](${EVE_ORIGIN}/integrations): Browse official channels, connections, extensions, and instrumentation providers.
 - [Templates](${EVE_ORIGIN}/templates): Browse complete example projects and their source.
 - [Official eve Skill](https://github.com/vercel/eve/blob/main/skills/eve/SKILL.md): Install or inspect the coding-agent skill; its guidance defers to version-matched bundled docs.

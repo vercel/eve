@@ -12,6 +12,7 @@ import { getChannelActivityPresentation } from "#channel/activity-renderer.js";
 import type {
   CancelTurnInput,
   CancelTurnResult,
+  DeliverHookPayload,
   DispatchContinuationInput,
   DispatchSessionInput,
   GetEventStreamOptions,
@@ -32,7 +33,7 @@ import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import { createLogger, logError } from "#internal/logging.js";
 import {
   cancelRun,
-  getRawHookByToken,
+  getHookByToken,
   getRun,
   getWorld,
   start,
@@ -54,7 +55,11 @@ import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-
 import { buildRunContext } from "#execution/runtime-context.js";
 import { resolveEffectiveAgentRuntime } from "#execution/effective-agent-config.js";
 import { parseNdjsonStream } from "#execution/ndjson-stream.js";
-import type { WorkflowEntryInput } from "#execution/workflow-entry.js";
+import type {
+  HandoffWorkflowEntryInput,
+  InitialWorkflowEntryInput,
+} from "#execution/session/entry-input.js";
+import type { SessionCheckpoint } from "#execution/session/handoff.js";
 import type { ActivityCollectorInput } from "#execution/activity-collector.js";
 import { createEveActivityRoutePath } from "#protocol/routes.js";
 import {
@@ -64,8 +69,16 @@ import {
 import { walkCauseChain } from "#shared/errors.js";
 import { buildInvocationAttributes } from "#internal/invocation/metadata.js";
 import { isAgentTraceContext } from "#tracing/agent-trace-context.js";
-import { sessionCommandHookToken } from "#execution/session-command-token.js";
-import { resumeSessionInbox } from "#execution/wire/session-inbox-resume.js";
+import {
+  sessionCommandHookToken,
+  sessionInboxHookToken,
+} from "#execution/session-inbox/address.js";
+import {
+  AcceptedSessionIdentityError,
+  resolveSessionInbox,
+  resumeSessionInbox,
+} from "#execution/session-inbox/resume.js";
+import type { SessionInboxAddress } from "#execution/session-inbox/address.js";
 import type { DynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agent-config.js";
 import { initializeSessionInstrumentation } from "#instrumentation/runtime.js";
 import {
@@ -73,7 +86,6 @@ import {
   SESSION_TIMEOUT_WORKFLOW_NAME,
   TASK_RUN_WORKFLOW_NAME,
   WORKFLOW_TOOL_RUN_WORKFLOW_NAME,
-  TURN_WORKFLOW_NAME,
   WORKFLOW_ENTRY_NAME,
 } from "#execution/stable-workflow-names.js";
 const EVE_PACKAGE_INFO = resolveInstalledPackageInfo();
@@ -88,24 +100,18 @@ interface WorkflowHookRecord {
   readonly runId: string;
 }
 
+interface SessionInboxOwnerRecord extends WorkflowHookRecord {
+  readonly sessionId: string;
+}
+
 /**
  * Stable workflow reference used by `start()` to locate the workflow
  * entrypoint registered by the Workflow DevKit builder. The id omits
- * the package version stamp so the long-lived driver can rotate across
+ * the package version stamp so the long-lived owner can rotate across
  * deployments without rewriting the registry key.
  */
 export const workflowEntryReference = {
   workflowId: `workflow//${STABLE_ID_BASE}//${WORKFLOW_ENTRY_NAME}`,
-};
-
-/**
- * Stable workflow reference used by the driver to dispatch per-turn
- * child workflow runs. The id omits the package version stamp so an
- * explicitly stamped accepting deployment can resolve the workflow even
- * when its eve version differs from the driver's deployment.
- */
-export const turnWorkflowReference = {
-  workflowId: `workflow//${STABLE_ID_BASE}//${TURN_WORKFLOW_NAME}`,
 };
 
 /** Stable workflow reference for session deadline timers. */
@@ -129,8 +135,8 @@ export const workflowToolRunWorkflowReference = {
 };
 
 /**
- * Creates a workflow-backed runtime whose long-lived driver owns the
- * event stream and dispatches each turn as a child workflow run.
+ * Creates a workflow-backed runtime whose current owner executes turns and
+ * whose original run retains the public event stream across owner handoffs.
  */
 export function createWorkflowRuntime(config: {
   readonly compiledArtifactsSource: RuntimeCompiledArtifactsSource;
@@ -152,9 +158,11 @@ export function createWorkflowRuntime(config: {
       initializeSessionInstrumentation({
         agentName: effectiveAgent.turnAgent.id,
         ctx,
-        parentTraceContext: input.parentTraceContext,
       });
       const sessionTimeoutMs = effectiveAgent.limits?.sessionTimeoutMs;
+      // Retention is always the authored value: `experimental` cannot be
+      // selected by a dynamic subagent config, so there is nothing to resolve.
+      const retention = bundle.resolvedAgent.config?.experimental?.workflow?.retention;
       let collectorRunId: string | undefined;
       let activityObserver = input.activityObserver;
       if (
@@ -178,6 +186,7 @@ export function createWorkflowRuntime(config: {
           const collector = await startWorkflowOnCurrentDeployment(
             activityCollectorWorkflowReference,
             [collectorInput],
+            { experimental_retention: retention },
           );
           collectorRunId = collector.runId;
           const fallbackOrigin = process.env.VERCEL_URL
@@ -200,13 +209,15 @@ export function createWorkflowRuntime(config: {
       const serializedContext = serializeContext(ctx);
       const parentLineage = readParentLineage(serializedContext);
       const workflowInput: {
-        -readonly [K in keyof WorkflowEntryInput]: WorkflowEntryInput[K];
+        -readonly [K in keyof InitialWorkflowEntryInput]: InitialWorkflowEntryInput[K];
       } = {
+        kind: "initial",
         input: input.input,
-        limits: input.limits,
+        ownerDeploymentId: await resolveCurrentWorkflowDeploymentId(),
         serializedContext,
       };
       const taskId = input.taskId ?? input.callback?.taskId;
+      if (input.limits !== undefined) workflowInput.limits = input.limits;
       if (taskId !== undefined) workflowInput.taskId = taskId;
       if (collectorRunId !== undefined) {
         workflowInput.activityCollectorRunId = collectorRunId;
@@ -217,10 +228,12 @@ export function createWorkflowRuntime(config: {
       if (sessionTimeoutMs !== undefined) {
         workflowInput.sessionTimeoutMs = sessionTimeoutMs;
       }
+      if (retention !== undefined) {
+        workflowInput.retention = retention;
+      }
       const sessionAttributes =
         parentLineage.sessionId === undefined
           ? buildSessionAttributes({
-              inputMessage: input.title ?? input.input.message,
               serializedContext,
             })
           : buildSubagentRootAttributes({
@@ -240,10 +253,17 @@ export function createWorkflowRuntime(config: {
 
       let run: Awaited<ReturnType<typeof startWorkflowOnCurrentDeployment>>;
       try {
-        run = await startWorkflowOnCurrentDeployment(workflowEntryReference, [workflowInput], {
+        const startOptions: StartOptionsWithoutDeploymentId = {
           allowReservedAttributes: true,
           attributes: normalizeEveAttributes(attributes),
-        });
+        };
+        if (retention !== undefined) startOptions.experimental_retention = retention;
+        run = await startWorkflowOnDeployment(
+          workflowEntryReference,
+          [workflowInput],
+          workflowInput.ownerDeploymentId,
+          startOptions,
+        );
       } catch (error) {
         await cancelActivityCollector(collectorRunId);
         logError(log, "failed to start workflow run", error, {
@@ -278,7 +298,7 @@ export function createWorkflowRuntime(config: {
     async dispatchSession<TCommand extends SessionCommand>(
       input: DispatchSessionInput<TCommand>,
     ): Promise<SessionCommandResult<TCommand>> {
-      return await dispatchWorkflowCommand(sessionCommandHookToken(input.sessionId), input.command);
+      return await dispatchWorkflowCommand({ sessionId: input.sessionId }, input.command);
     },
 
     async getEventStream(
@@ -305,8 +325,7 @@ export function createWorkflowRuntime(config: {
       continuationToken: string,
     ): Promise<{ sessionId: string } | undefined> {
       try {
-        const hook = await getRawHookByToken(continuationToken);
-        return { sessionId: hook.runId };
+        return await resolveSessionInbox(continuationToken);
       } catch (error) {
         if (HookNotFoundError.is(error)) {
           return undefined;
@@ -318,6 +337,37 @@ export function createWorkflowRuntime(config: {
       }
     },
   };
+}
+
+export interface SessionOwnerStartInput {
+  readonly activationToken: string;
+  /** Original run whose stream stays the public session stream. */
+  readonly anchorRunId: string;
+  readonly checkpoint: SessionCheckpoint;
+  readonly delivery: DeliverHookPayload;
+  readonly targetDeploymentId: string;
+}
+
+/** Starts a successor owner and binds its output to the original session stream. */
+export async function startSessionOwnerStep(input: SessionOwnerStartInput): Promise<void> {
+  "use step";
+  const workflowInput: HandoffWorkflowEntryInput = {
+    activationToken: input.activationToken,
+    checkpoint: input.checkpoint,
+    delivery: input.delivery,
+    kind: "handoff",
+    ownerDeploymentId: input.targetDeploymentId,
+    sessionWritable: getRun(input.anchorRunId).getWritable<Uint8Array>(),
+    sessionId: input.anchorRunId,
+  };
+  await startWorkflowOnDeployment(
+    workflowEntryReference,
+    [workflowInput],
+    input.targetDeploymentId,
+    input.checkpoint.retention === undefined
+      ? undefined
+      : { experimental_retention: input.checkpoint.retention },
+  );
 }
 
 function normalizePersistedEvent(value: unknown): MessageStreamEvent {
@@ -338,12 +388,13 @@ async function cancelActivityCollector(runId: string | undefined): Promise<void>
 }
 
 async function dispatchWorkflowCommand<TCommand extends SessionCommand>(
-  token: string,
+  token: string | SessionInboxAddress,
   command: TCommand,
 ): Promise<SessionCommandResult<TCommand>> {
-  let hook: WorkflowHookRecord;
+  let hook: SessionInboxOwnerRecord;
   try {
-    hook = normalizeWorkflowHook(await resumeSessionInbox(token, command));
+    const resumed = await resumeSessionInbox(token, command);
+    hook = { runId: resumed.ownerRunId, sessionId: await resumed.sessionId };
   } catch (error) {
     if (isInactiveCommandTarget(error)) {
       return inactiveCommandResult(command);
@@ -356,10 +407,17 @@ async function dispatchWorkflowCommand<TCommand extends SessionCommand>(
   }
 
   if (command.kind === "reset") {
-    await waitForCommandHookRelease(sessionCommandHookToken(hook.runId), hook.runId);
+    const addressedToken =
+      typeof token === "string" ? token : sessionCommandHookToken(token.sessionId);
+    const tokens = new Set([sessionCommandHookToken(hook.sessionId), addressedToken]);
+    await Promise.all(
+      [...tokens].map((logicalToken) =>
+        waitForHookRelease(sessionInboxHookToken(logicalToken), hook.runId),
+      ),
+    );
   }
 
-  return activeCommandResult(command, hook.runId);
+  return activeCommandResult(command, hook.sessionId);
 }
 
 function activeCommandResult<TCommand extends SessionCommand>(
@@ -369,8 +427,8 @@ function activeCommandResult<TCommand extends SessionCommand>(
   const result =
     command.kind === "reset"
       ? { previousSessionId: sessionId, status: "reset" as const }
-      : command.kind === "cancel"
-        ? { sessionId, status: "accepted" as const }
+      : command.kind === "send" && command.delivery !== undefined
+        ? { sessionId, status: "accepted" as const, deliveryId: command.delivery.deliveryId }
         : { sessionId, status: "accepted" as const };
   return result as SessionCommandResult<TCommand>;
 }
@@ -397,10 +455,11 @@ export async function requestWorkflowTurnCancellation(
   if (input.taskId !== undefined) command.taskId = input.taskId;
   if (input.tasks !== undefined) command.tasks = input.tasks;
   if (input.turnId !== undefined) command.turnId = input.turnId;
-  return await dispatchWorkflowCommand(sessionCommandHookToken(input.sessionId), command);
+  return await dispatchWorkflowCommand({ sessionId: input.sessionId }, command);
 }
 
 function isInactiveCommandTarget(error: unknown): boolean {
+  if (error instanceof AcceptedSessionIdentityError) return false;
   if (HookNotFoundError.is(error)) return true;
   for (const candidate of walkCauseChain(error)) {
     if (
@@ -423,7 +482,7 @@ export async function waitForCommandHookOwner(token: string): Promise<WorkflowHo
   const deadline = Date.now() + COMMAND_HOOK_READY_TIMEOUT_MS;
   while (true) {
     try {
-      return normalizeWorkflowHook(await getRawHookByToken(token));
+      return normalizeWorkflowHook(await getHookByToken(token));
     } catch (error) {
       if (!HookNotFoundError.is(error) || Date.now() >= deadline) throw error;
       await new Promise<void>((resolve) => setTimeout(resolve, 20));
@@ -431,19 +490,19 @@ export async function waitForCommandHookOwner(token: string): Promise<WorkflowHo
   }
 }
 
-async function waitForCommandHookRelease(token: string, sessionId: string): Promise<void> {
+async function waitForHookRelease(token: string, ownerRunId: string): Promise<void> {
   const deadline = Date.now() + COMMAND_HOOK_READY_TIMEOUT_MS;
   while (true) {
     try {
-      const owner = normalizeWorkflowHook(await getRawHookByToken(token));
-      if (owner.runId !== sessionId) return;
+      const owner = normalizeWorkflowHook(await getHookByToken(token));
+      if (owner.runId !== ownerRunId) return;
     } catch (error) {
       if (HookNotFoundError.is(error)) return;
       throw error;
     }
 
     if (Date.now() >= deadline) {
-      throw new Error(`Timed out waiting for session "${sessionId}" to release its command inbox.`);
+      throw new Error(`Timed out waiting for session "${ownerRunId}" to release inbox "${token}".`);
     }
     await new Promise<void>((resolve) => setTimeout(resolve, 20));
   }
@@ -458,7 +517,7 @@ export async function startWorkflowOnCurrentDeployment<TArgs extends unknown[], 
   return await startWorkflowOnDeployment(
     workflow,
     args,
-    process.env.VERCEL_DEPLOYMENT_ID?.trim() || undefined,
+    await resolveCurrentWorkflowDeploymentId(),
     options,
   );
 }
@@ -467,33 +526,28 @@ export async function startWorkflowOnCurrentDeployment<TArgs extends unknown[], 
  * Starts on the deployment that accepted a delivery when one was stamped,
  * otherwise stays on the deployment executing this call.
  */
-export async function startWorkflowOnAcceptedDeployment<TArgs extends unknown[], TResult>(
-  workflow: WorkflowFunction<TArgs, TResult> | WorkflowMetadata,
-  args: TArgs,
-  acceptedDeploymentId: string | undefined,
-  options?: StartOptionsWithoutDeploymentId,
-): Promise<Run<unknown> | Run<TResult>> {
-  if (acceptedDeploymentId === undefined) {
-    return await startWorkflowOnCurrentDeployment(workflow, args, options);
-  }
-
-  return await startWorkflowOnDeployment(workflow, args, acceptedDeploymentId, options);
-}
 
 async function startWorkflowOnDeployment<TArgs extends unknown[], TResult>(
   workflow: WorkflowFunction<TArgs, TResult> | WorkflowMetadata,
   args: TArgs,
-  deploymentId: string | undefined,
+  deploymentId: string,
   options?: StartOptionsWithoutDeploymentId,
 ): Promise<Run<unknown> | Run<TResult>> {
   return await withWorkflowStartContext(async () => {
-    if (deploymentId !== undefined) {
-      return await start(workflow, args, { ...options, deploymentId });
+    if (deploymentId.length === 0 || deploymentId === "latest") {
+      throw new Error("Workflow starts require an exact deployment id.");
     }
-    return options === undefined
-      ? await start(workflow, args)
-      : await start(workflow, args, options);
+    return await start(workflow, args, { ...options, deploymentId });
   });
+}
+
+async function resolveCurrentWorkflowDeploymentId(): Promise<string> {
+  const deploymentId =
+    process.env.VERCEL_DEPLOYMENT_ID?.trim() || (await (await getWorld()).getDeploymentId());
+  if (deploymentId.length === 0 || deploymentId === "latest") {
+    throw new Error("Workflow runtime could not resolve an exact deployment id.");
+  }
+  return deploymentId;
 }
 
 async function withWorkflowStartContext<TResult>(callback: () => Promise<TResult>) {

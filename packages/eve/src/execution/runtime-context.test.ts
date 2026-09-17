@@ -3,6 +3,7 @@ import { ContextContainer, contextStorage, loadContext } from "#context/containe
 import {
   AuthKey,
   ChannelInstrumentationKey,
+  ContinuationHookTokensKey,
   ContinuationTokenKey,
   ParentTraceContextKey,
   type Session,
@@ -11,9 +12,11 @@ import {
   SessionIdKey,
   SessionKey,
   ScheduleIdKey,
+  SessionTitleKey,
 } from "#context/keys.js";
 import { setChannelContext } from "#execution/channel-context.js";
 import { buildRunContext } from "#execution/runtime-context.js";
+import { ConversationContextKey } from "#shared/conversation-context.js";
 
 function createTestSession(
   input: { readonly auth?: SessionAuthContext | null; readonly parent?: Session["parent"] } = {},
@@ -164,6 +167,7 @@ describe("buildRunContext", () => {
     });
 
     expect(ctx.require(AuthKey)).toEqual(testAuth);
+    expect(ctx.require(ContinuationHookTokensKey)).toEqual(["t"]);
     expect(ctx.get(SessionIdKey)).toBeUndefined();
   });
 
@@ -202,6 +206,36 @@ describe("buildRunContext", () => {
     expect(ctx.require(ScheduleIdKey)).toBe("dynamic-tasks");
   });
 
+  it("stores a title only for top-level sessions", () => {
+    const root = buildRunContext({
+      bundle: createMinimalBundle(),
+      run: {
+        auth: null,
+        adapter: { kind: "http" },
+        input: { message: "Investigate the incident" },
+        mode: "conversation",
+      },
+    });
+    const child = buildRunContext({
+      bundle: createMinimalBundle(),
+      run: {
+        auth: null,
+        adapter: { kind: "subagent" },
+        input: { message: "Delegated prompt" },
+        mode: "task",
+        parent: {
+          callId: "call-1",
+          rootSessionId: "root-session",
+          sessionId: "parent-session",
+          turn: { id: "turn-1", sequence: 0 },
+        },
+      },
+    });
+
+    expect(root.get(SessionTitleKey)).toBe("Investigate the incident");
+    expect(child.get(SessionTitleKey)).toBeUndefined();
+  });
+
   it("does not invent a continuation for an ID-only run", () => {
     const ctx = buildRunContext({
       bundle: createMinimalBundle(),
@@ -214,6 +248,7 @@ describe("buildRunContext", () => {
     });
 
     expect(ctx.get(ContinuationTokenKey)).toBeUndefined();
+    expect(ctx.get(ContinuationHookTokensKey)).toBeUndefined();
   });
 
   it("does not throw when channel has no onContext", () => {
@@ -272,10 +307,17 @@ describe("buildRunContext", () => {
     expect(ctx.get(ActivityObserverKey)).toEqual({ sink, workIdentity });
   });
 
-  it("grafts parent metadata onto the child's own kind", () => {
+  it("grafts parent custom metadata and inherits the conversation audience", () => {
     const parentProjection = {
       kind: "channel:slack",
-      metadata: { audience: "public" as const, threadTs: "1234.5678", userId: "U123" },
+      metadata: { threadTs: "1234.5678", userId: "U123" },
+    };
+    const inheritedConversation = {
+      audience: "public" as const,
+      channel: { kind: "channel:slack" as const, name: "slack" },
+      environment: "production" as const,
+      mode: "conversation" as const,
+      principalType: "user",
     };
     const ctx = buildRunContext({
       bundle: createMinimalBundle(),
@@ -283,6 +325,7 @@ describe("buildRunContext", () => {
         auth: null,
         adapter: { kind: "subagent" },
         channelMetadata: parentProjection,
+        inheritedConversation,
         continuationToken: "t",
         input: { message: "hi" },
         mode: "task",
@@ -291,18 +334,16 @@ describe("buildRunContext", () => {
 
     const result = ctx.get(ChannelInstrumentationKey)!;
     expect(result.kind).toBe("subagent");
-    expect(result.metadata).toEqual({
-      audience: "public",
-      threadTs: "1234.5678",
-      userId: "U123",
+    expect(result.metadata).toEqual({ threadTs: "1234.5678", userId: "U123" });
+    expect(ctx.get(ConversationContextKey)).toEqual({
+      ...inheritedConversation,
+      channel: { kind: "subagent", name: undefined },
+      mode: "task",
+      principalType: "anonymous",
     });
 
     setChannelContext(ctx, { kind: "subagent", state: { persisted: true } });
-    expect(ctx.get(ChannelInstrumentationKey)?.metadata).toEqual({
-      audience: "public",
-      threadTs: "1234.5678",
-      userId: "U123",
-    });
+    expect(ctx.get(ChannelInstrumentationKey)?.metadata).toEqual(parentProjection.metadata);
   });
 
   it("uses the adapter's own projection when channelMetadata is not provided", () => {
@@ -320,7 +361,7 @@ describe("buildRunContext", () => {
     const projection = ctx.get(ChannelInstrumentationKey);
     expect(projection).toBeDefined();
     expect(projection!.kind).toBe("http");
-    expect(projection!.metadata).toEqual({ audience: "unknown" });
+    expect(projection!.metadata).toEqual({});
   });
 
   it("keeps forwarded origin policy separate from inherited channel metadata", () => {
@@ -333,7 +374,7 @@ describe("buildRunContext", () => {
       run: {
         auth: null,
         adapter: { kind: "eve" },
-        channelMetadata: { kind: "eve", metadata: { audience: "unknown" } },
+        channelMetadata: { kind: "eve", metadata: {} },
         input: { message: "hi" },
         mode: "task",
         parentTraceContext: {
@@ -346,6 +387,6 @@ describe("buildRunContext", () => {
     });
 
     expect(ctx.get(ParentTraceContextKey)?.forwardedTracePolicy).toEqual(forwardedTracePolicy);
-    expect(ctx.get(ChannelInstrumentationKey)?.metadata.audience).toBe("unknown");
+    expect(ctx.get(ConversationContextKey)?.audience).toBe("private");
   });
 });

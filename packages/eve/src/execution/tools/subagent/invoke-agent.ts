@@ -5,20 +5,18 @@ import type {
   SubagentAuthorizationEventHookPayload,
   SubagentInputRequestHookPayload,
 } from "#channel/types.js";
-import {
-  readWorkflowToolRunAdmission,
-  readWorkflowToolRunOwner,
-  readWorkflowToolRunRef,
-} from "#execution/tools/workflow/ask.js";
+import { readWorkflowToolRunOwner, readWorkflowToolRunRef } from "#execution/tools/workflow/ask.js";
 import { resumeHookStep } from "#execution/tools/workflow/resume-hook-step.js";
 import type { RuntimeSubagentChildResult, RuntimeSubagentResult } from "#shared/action-types.js";
 import type { JsonValue } from "#shared/json.js";
 import type { JsonObject } from "#shared/json.js";
 import { disposeHook } from "#execution/hook-ownership.js";
-import { sessionCommandHookToken } from "#execution/session-command-token.js";
+import {
+  sessionCommandHookToken,
+  sessionInboxHookToken,
+} from "#execution/session-inbox/address.js";
 import type { AgentInput } from "#tools/workflow-definition.js";
 import type { ToolContext } from "#tools/definition.js";
-import type { TaskInboundUpdate } from "#tasks/types.js";
 
 export type InternalAgentInput = {
   readonly agentId?: string;
@@ -29,7 +27,7 @@ export type InternalAgentInput = {
 
 /**
  * Asks the owning session to spawn an agent for a workflow tool run. Spawning
- * needs owner-held material (auth, capabilities, admission, the agent handle
+ * needs owner-held material (auth, capabilities, the agent handle
  * store) that a workflow tool body never has.
  */
 export interface AgentInvocationRequest {
@@ -51,27 +49,22 @@ export type AgentInvocationEvent =
   | SubagentAuthorizationEventHookPayload
   | SubagentInputRequestHookPayload;
 
-export type AgentInvocationReply =
-  | AgentInvocationEvent
-  | RuntimeActionResultHookPayload
-  | TaskInboundUpdate;
+export type AgentInvocationReply = AgentInvocationEvent | RuntimeActionResultHookPayload;
 
-const AGENT_INVOCATION_IDS = Symbol.for("eve.workflow-tool-run.agent-invocation-ids");
-
-/** Invokes an agent from a task-owned background workflow tool. */
-export async function agent(ctx: ToolContext, input: AgentInput): Promise<JsonValue> {
-  validateAgentInput(input, true);
+/** Invokes an agent from a workflow tool. */
+export async function agent(
+  ctx: ToolContext,
+  target: string,
+  input: AgentInput,
+): Promise<JsonValue> {
   readWorkflowToolRunRef(ctx);
-  return await invokeAgent(
-    ctx,
-    {
-      agentId: input.agentId,
-      message: input.message,
-      outputSchema: input.outputSchema,
-      target: input.target,
-    },
-    { invocationId: `${ctx.callId}:${input.key}` },
-  );
+  validateAgentInput({ ...input, target });
+  return await invokeAgent(ctx, {
+    agentId: input.agentId,
+    message: input.message,
+    outputSchema: input.outputSchema,
+    target,
+  });
 }
 
 /** Invokes an agent with a framework-selected replay-stable invocation id. */
@@ -83,29 +76,24 @@ export async function invokeAgent(
 export async function invokeAgent(
   ctx: ToolContext,
   input: InternalAgentInput,
-  options: { readonly invocationId: string; readonly returnResult?: false },
+  options?: { readonly invocationId?: string; readonly returnResult?: false },
 ): Promise<JsonValue>;
 export async function invokeAgent(
   ctx: ToolContext,
   input: InternalAgentInput,
-  options: { readonly invocationId: string; readonly returnResult?: boolean },
+  options: { readonly invocationId?: string; readonly returnResult?: boolean } = {},
 ): Promise<JsonValue | RuntimeSubagentResult> {
-  validateAgentInput(input, false);
+  validateAgentInput(input);
   const run = readWorkflowToolRunRef(ctx);
   const owner = readWorkflowToolRunOwner(ctx);
-  const admission = readWorkflowToolRunAdmission(ctx);
-  claimInvocationId(ctx, options.invocationId);
-  if (admission !== undefined) {
-    const admitted = await admission;
-    if (admitted.status === "rejected") throw new Error(admitted.reason);
-  }
   const replies = createHook<AgentInvocationReply>();
+  const invocationId = options.invocationId ?? `${ctx.callId}:${replies.token}`;
   try {
     await resumeHookStep(owner.inbox, {
       kind: "request",
       from: run,
       replyTo: replies.token,
-      request: { input, invocationId: options.invocationId, kind: "agent-invoke" },
+      request: { input, invocationId, kind: "agent-invoke" },
     });
 
     const iterator = replies[Symbol.asyncIterator]();
@@ -116,7 +104,7 @@ export async function invokeAgent(
       if (reply.kind === "runtime-action-result") {
         const result = reply.results.find(
           (candidate): candidate is RuntimeSubagentResult =>
-            candidate.kind === "subagent-result" && candidate.callId === options.invocationId,
+            candidate.kind === "subagent-result" && candidate.callId === invocationId,
         );
         if (result !== undefined) {
           if (result.origin === "child") {
@@ -137,9 +125,11 @@ export async function invokeAgent(
         await resumeHookStep(owner.inbox, {
           kind: "request",
           from: run,
+          // Current session inboxes use their physical token. A remote child's
+          // create-once operation hook is already a narrowed reply capability.
           replyTo:
             reply.childSessionInbox?.sessionId === reply.childSessionId
-              ? sessionCommandHookToken(reply.childSessionInbox.sessionId)
+              ? sessionInboxHookToken(sessionCommandHookToken(reply.childSessionInbox.sessionId))
               : reply.childContinuationToken,
           request: {
             kind: "input-batch",
@@ -150,14 +140,6 @@ export async function invokeAgent(
             stepIndex: reply.event.stepIndex,
             turnId: reply.event.turnId,
           },
-        });
-        continue;
-      }
-      if (reply.kind === "task-update") {
-        await resumeHookStep(owner.inbox, {
-          kind: "report",
-          from: run,
-          update: reply.message,
         });
         continue;
       }
@@ -197,36 +179,11 @@ async function nextAgentReply(
   }
 }
 
-export function validateAgentInput(
-  input: InternalAgentInput | AgentInput,
-  requireKey: boolean,
-): void {
-  if (
-    requireKey &&
-    (typeof (input as AgentInput).key !== "string" || (input as AgentInput).key.trim() === "")
-  ) {
-    throw new TypeError("agent() requires a non-empty `key`.");
-  }
+export function validateAgentInput(input: InternalAgentInput): void {
   if (typeof input.target !== "string" || input.target.trim() === "") {
-    throw new TypeError("agent() requires a non-empty `target`.");
+    throw new TypeError("agent() requires a non-empty agent name as its first argument.");
   }
   if (typeof input.message !== "string" || input.message.trim() === "") {
     throw new TypeError("agent() requires a non-empty `message`.");
-  }
-}
-
-function claimInvocationId(ctx: ToolContext, invocationId: string): void {
-  const holder = ctx as ToolContext & { [AGENT_INVOCATION_IDS]?: Set<string> };
-  const ids = holder[AGENT_INVOCATION_IDS] ?? new Set<string>();
-  if (ids.has(invocationId)) {
-    const separator = invocationId.lastIndexOf(":");
-    const key = separator < 0 ? invocationId : invocationId.slice(separator + 1);
-    throw new TypeError(
-      `agent() invocation key "${key}" was already used in this run; keys must be unique per run.`,
-    );
-  }
-  ids.add(invocationId);
-  if (holder[AGENT_INVOCATION_IDS] === undefined) {
-    Object.defineProperty(holder, AGENT_INVOCATION_IDS, { enumerable: false, value: ids });
   }
 }

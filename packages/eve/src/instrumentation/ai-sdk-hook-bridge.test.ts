@@ -23,13 +23,19 @@ const scope: InstrumentationAttemptScope = {
   turnId: "turn-1",
 };
 
+const traceContext = (audience: "public" | "private" | "unknown" = "unknown") => ({
+  agentName: "test-agent",
+  audience,
+  channel: { kind: "http" as const },
+  environment: "production" as const,
+  mode: "conversation" as const,
+  principalType: "anonymous",
+});
+
 function createInstrumentationHooks(
   ...args: Parameters<typeof createUnboundInstrumentationHooks>
 ): ReturnType<typeof createUnboundInstrumentationHooks> {
-  return createUnboundInstrumentationHooks(...args).forTrace!({
-    agentName: "test-agent",
-    audience: "unknown",
-  });
+  return createUnboundInstrumentationHooks(...args).forTrace!(traceContext());
 }
 
 describe("createAiSdkHookBridge", () => {
@@ -469,6 +475,7 @@ describe("createAiSdkHookBridge", () => {
           { type: "some-future-kind" },
         ],
         finishReason: "tool-calls",
+        modelId: "response-model",
         performance: { responseTimeMs: 1 },
         responseId: "response-1",
         usage: {
@@ -514,6 +521,8 @@ describe("createAiSdkHookBridge", () => {
         ],
         finishReason: "tool-calls",
         idempotencyKey: modelCallIdempotencyKey(scope, 0),
+        responseModelId: "response-model",
+        responseId: "response-1",
         scope,
         type: "model.call.completed",
         usage: {

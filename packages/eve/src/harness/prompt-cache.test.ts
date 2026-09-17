@@ -1,4 +1,4 @@
-import type { LanguageModel, ModelMessage, ToolSet } from "ai";
+import { createGateway, type LanguageModel, type ModelMessage, type ToolSet } from "ai";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -18,6 +18,17 @@ function makeObjectModel(provider: string, modelId = "test-model"): LanguageMode
 }
 
 describe("detectPromptCachePath", () => {
+  it("keeps automatic caching for Gateway provider objects used by local auth", () => {
+    const model = createGateway({ apiKey: "test-key" })("anthropic/claude-opus-5");
+    expect(detectPromptCachePath(model)).toEqual({ kind: "gateway-auto" });
+  });
+
+  it("recognizes namespaced Gateway providers", () => {
+    expect(detectPromptCachePath(makeObjectModel("gateway.language-model"))).toEqual({
+      kind: "gateway-auto",
+    });
+  });
+
   it("returns gateway-auto for any string model id", () => {
     expect(detectPromptCachePath("anthropic/claude-sonnet-4-5")).toEqual({
       kind: "gateway-auto",

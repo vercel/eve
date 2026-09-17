@@ -8,6 +8,7 @@ import type {
   RuntimeToolCallActionRequest,
   RuntimeWorkflowTaskRequest,
 } from "#shared/action-types.js";
+import { markRuntimeWorkflowToolAction } from "#shared/action-types.js";
 import { parseJsonObject, type JsonObject } from "#shared/json.js";
 import type { AgentTurnOutcome } from "#shared/agent-turn-outcome.js";
 import { findRunningAgentHandle, isResultBoundToRunningHandle } from "#subagents/handles/query.js";
@@ -424,27 +425,20 @@ export function createRuntimeActionRequestFromToolCall(input: {
   readonly tools: HarnessToolMap;
 }): RuntimeActionRequest {
   const definition = input.tools.get(input.toolCall.toolName);
-
-  if (definition?.frameworkAction === "load-skill") {
-    return {
-      callId: input.toolCall.toolCallId,
-      input: resolveToolCallInputObject(input.toolCall.input, {
-        callId: input.toolCall.toolCallId,
-        toolName: input.toolCall.toolName,
-      }),
-      kind: "load-skill",
-    };
-  }
-
-  return {
+  const toolInput = resolveToolCallInputObject(input.toolCall.input, {
     callId: input.toolCall.toolCallId,
-    input: resolveToolCallInputObject(input.toolCall.input, {
-      callId: input.toolCall.toolCallId,
-      toolName: input.toolCall.toolName,
-    }),
+    toolName: input.toolCall.toolName,
+  });
+  if (definition?.frameworkAction === "load-skill") {
+    return { callId: input.toolCall.toolCallId, input: toolInput, kind: "load-skill" };
+  }
+  const action: RuntimeActionRequest = {
+    callId: input.toolCall.toolCallId,
+    input: toolInput,
     kind: "tool-call",
     toolName: input.toolCall.toolName,
   };
+  return definition?.workflowId === undefined ? action : markRuntimeWorkflowToolAction(action);
 }
 
 /** Projects one deferred harness tool call into task/control coordination. */

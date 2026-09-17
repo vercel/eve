@@ -1,6 +1,6 @@
 {
   "name": "eve",
-  "version": "0.52.2",
+  "version": "0.58.1",
   "private": false,
   "description": "Filesystem-first framework for durable backend AI agents that run anywhere.",
   "keywords": [
@@ -85,6 +85,12 @@
       "types": "./dist/src/public/next/index.d.ts",
       "import": "./dist/src/public/next/index.js",
       "default": "./dist/src/public/next/index.js"
+    },
+    "./vercel": {
+      "eve-source": "./src/public/vercel/index.ts",
+      "types": "./dist/src/public/vercel/index.d.ts",
+      "import": "./dist/src/public/vercel/index.js",
+      "default": "./dist/src/public/vercel/index.js"
     },
     "./nuxt": {
       "types": "./dist/src/public/nuxt/index.d.ts",
@@ -186,11 +192,6 @@
       "import": "./dist/src/public/tools/task-cancel.js",
       "default": "./dist/src/public/tools/task-cancel.js"
     },
-    "./tools/task_update": {
-      "types": "./dist/src/public/tools/task-update.d.ts",
-      "import": "./dist/src/public/tools/task-update.js",
-      "default": "./dist/src/public/tools/task-update.js"
-    },
     "./tools/glob": {
       "types": "./dist/src/public/tools/glob.d.ts",
       "import": "./dist/src/public/tools/glob.js",
@@ -209,6 +210,11 @@
     "./workflow-modules": {
       "eve-source": "./dist/src/public/workflow-modules.d.ts",
       "types": "./dist/src/public/workflow-modules.d.ts"
+    },
+    "./models/anthropic": {
+      "types": "./dist/src/public/models/anthropic/index.d.ts",
+      "import": "./dist/src/public/models/anthropic/index.js",
+      "default": "./dist/src/public/models/anthropic/index.js"
     },
     "./models/openai": {
       "types": "./dist/src/public/models/openai/index.d.ts",
@@ -289,6 +295,11 @@
       "types": "./dist/src/public/context/index.d.ts",
       "import": "./dist/src/public/context/index.js",
       "default": "./dist/src/public/context/index.js"
+    },
+    "./internal/workflow-step-execution": {
+      "types": "./dist/src/execution/tools/workflow/step-execution.d.ts",
+      "import": "./dist/src/execution/tools/workflow/step-execution.js",
+      "default": "./dist/src/execution/tools/workflow/step-execution.js"
     },
     "./internal/programmatic-source-loader": {
       "types": "./dist/src/internal/programmatic-source-loader.d.ts",
@@ -420,6 +431,17 @@
       "types": "./dist/src/setup/index.d.ts",
       "import": "./dist/src/setup/index.js",
       "default": "./dist/src/setup/index.js"
+    },
+    "./self-modification/config": {
+      "eve-source": "./src/self-modification/config.ts",
+      "types": "./dist/src/self-modification/config.d.ts",
+      "import": "./dist/src/self-modification/config.js",
+      "default": "./dist/src/self-modification/config.js"
+    },
+    "./experimental/evaluate": {
+      "types": "./dist/src/public/experimental/evaluate/index.d.ts",
+      "import": "./dist/src/public/experimental/evaluate/index.js",
+      "default": "./dist/src/public/experimental/evaluate/index.js"
     }
   },
   "publishConfig": {
@@ -452,7 +474,7 @@
   "devDependencies": {
     "@agentclientprotocol/sdk": "1.3.0",
     "@ai-sdk/anthropic": "catalog:",
-    "@ai-sdk/code-mode": "1.0.39",
+    "@ai-sdk/code-mode": "catalog:",
     "@ai-sdk/google": "catalog:",
     "@ai-sdk/mcp": "catalog:",
     "@ai-sdk/openai": "catalog:",
@@ -483,21 +505,21 @@
     "@vercel/oidc": "3.8.0",
     "@vercel/otel": "catalog:",
     "@vercel/sandbox": "catalog:",
-    "@vercel/sandbox-drives": "catalog:",
     "@vercel/sdk": "1.28.8",
-    "@workflow/builders": "5.0.0-beta.48",
-    "@workflow/core": "5.0.0-beta.48",
-    "@workflow/errors": "5.0.0-beta.20",
+    "@workflow/builders": "5.0.0-beta.51",
+    "@workflow/core": "5.0.0-beta.51",
+    "@workflow/errors": "5.0.0-beta.21",
     "@workflow/serde": "5.0.0-beta.2",
     "@workflow/utils": "5.0.0-beta.10",
-    "@workflow/world": "5.0.0-beta.33",
-    "@workflow/world-local": "5.0.0-beta.42",
-    "@workflow/world-vercel": "5.0.0-beta.44",
+    "@workflow/world": "5.0.0-beta.35",
+    "@workflow/world-local": "5.0.0-beta.44",
+    "@workflow/world-vercel": "5.0.0-beta.46",
     "ai": "catalog:",
     "autoevals": "0.0.132",
     "chat": "4.34.0",
     "chokidar": "5.0.0",
     "commander": "14.0.3",
+    "dd-trace": "6.13.0",
     "emulate": "0.6.0",
     "env-runner": "0.1.16",
     "eventsource-parser": "3.1.0",
@@ -506,6 +528,7 @@
     "jose": "6.2.3",
     "jsonc-parser": "3.3.1",
     "just-bash": "3.1.0",
+    "just-secrets": "0.0.2",
     "marked": "catalog:",
     "microsandbox": "0.5.5",
     "next": "catalog:",
@@ -527,6 +550,7 @@
     "@opentelemetry/api": "^1.0.0",
     "ai": "catalog:",
     "braintrust": "^3.0.0",
+    "dd-trace": "^6.13.0",
     "just-bash": "^3.1.0",
     "microsandbox": "^0.5.0"
   },
@@ -535,6 +559,9 @@
       "optional": true
     },
     "braintrust": {
+      "optional": true
+    },
+    "dd-trace": {
       "optional": true
     },
     "just-bash": {

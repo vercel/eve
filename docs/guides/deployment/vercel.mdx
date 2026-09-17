@@ -7,7 +7,7 @@ Deploy eve to Vercel when you want the framework’s managed build and runtime i
 
 ## Prepare the Vercel project
 
-Link the agent directory to a Vercel project:
+Run this from the project root to link it to a Vercel project. For an eve agent workspace, use the workspace root, not a member directory:
 
 ```bash
 eve link
@@ -51,27 +51,74 @@ See [Sandbox](../../sandbox) for resource limits, network policy, and lifecycle 
 
 ## Deploy the agent
 
-A project containing only several independently addressed root agents can use eve's hostless workspace layout:
+For a single-agent project without a frontend, use `eve build`. For an agent-only workspace, run it from the workspace root: eve generates a separately built service and a `/<name>/eve/v1/*` transport route for each member. All members deploy together in one Vercel project. See [Project Structure](../../concepts/project-structure) for workspace membership and layout rules.
 
-```text
-my-project/
-├── package.json
-└── agents/
-    ├── support/
-    │   └── agent/
-    └── research/
-        └── agent/
+A Next.js-centered project uses [`withEve` in `next.config.ts`](../frontend/nextjs) and its Next.js build command. If you author the project's broader service graph in `vercel.ts`, use the configuration below instead.
+
+### Compose agents with other Vercel services
+
+Use `withEve` from `eve/vercel` when the agents and other applications are peer services. The helper contributes workspace agents to a Vercel service graph; it does not manage or require a particular frontend framework. Unlike `eve/next`, this keeps the project lifecycle separate from Next.js. Both integrations deploy the agent services together in one Vercel project.
+
+`eve/vercel` currently requires an `agents/` workspace, even if it has only one member. It does not support a standalone root `agent/`.
+
+For a workspace with a peer Next.js frontend under `apps/web/`, replace `vercel.json` with a root `vercel.ts`. The frontend uses an ordinary Next.js config without `eve/next`:
+
+```typescript title="vercel.ts"
+import { withEve } from "eve/vercel";
+
+export default await withEve({
+  services: {
+    web: {
+      framework: "nextjs",
+      root: "apps/web",
+    },
+  },
+  routes: [
+    {
+      src: "^(.*)$",
+      destination: { type: "service", service: "web" },
+    },
+  ],
+});
 ```
 
-In an eve workspace, eve discovers direct `agents/<name>/` children that contain nested or flat agent files and do not have their own `package.json`. Their directory names become their public identities, exposed at `/<name>/eve/v1/*`. A child with its own `package.json` is a separate package rather than a member of the parent eve workspace. Run an agent-specific command from a member directory or pass `--agent <name>` at the workspace root; interactive commands open a picker when the name is omitted. Run project-level build, link, and deploy commands from the workspace root. Workspace members share the root package, dependencies, and build scripts.
+Vercel evaluates `vercel.ts` before resolving the service graph. `withEve` adds the root agent, or every direct workspace member, as an independently built service and returns a plain Vercel configuration. Named workspace agents mount at `/eve/<name>/v1/*`; a root agent mounts at `/eve/v1/*`. Vercel then builds the frontend and each eve agent separately. The frontend does not need `withEve` in its framework configuration or a build script that builds the agents.
 
-Create this layout with `eve init my-project --agents support,research`, or add one agent to an existing workspace with `eve init billing`.
+The Web Chat installer does not support agent workspaces. Create the frontend using the [React chat example](../frontend/overview#basic-chat-react), and configure authentication for every exposed agent. To self-host the same source layout, replace Vercel composition with your own [process and proxy configuration](./self-hosting#run-workspace-members).
 
-With no authored `vercel.json#services`, `eve build` derives the complete Vercel Services graph on every build. If `vercel.json` declares `services`, that authored graph is authoritative instead; use `vercel build` to build and validate the complete project. This supports heterogeneous projects with frontends, private APIs, bindings, and other non-eve services without generated configuration files.
+Run Vercel CLI 59.16.0 or newer with `vercel dev --local` to start the complete service graph locally. Named agents use the same `/eve/<name>/v1/*` routes in development, and default `defineWorkspaceAgent` transports can call peers without deployment credentials. Run `eve dev` instead when you only need one agent and the eve terminal UI.
 
-An authored eve service routed at `/eve/v1` already uses the protocol path; callbacks remain at `/eve/v1/callback/*`. A named mount such as `/support` adds that mount before the protocol path, giving `/support/eve/v1/callback/*`.
+Generated transport routes are inserted before a filesystem handler or, when no filesystem handler exists, before authored routes. `withEve` throws instead of overwriting an authored service key or exact transport route that belongs to a generated agent. Remove the authored route, and remove or rename the authored service; `withEve` adds both automatically. Names in the array form of `services` must also be unique. Other service names, routes, bindings, and Cron Jobs remain authored in `vercel.ts`.
 
-Deploy the linked project to production:
+Custom agent channel endpoints are not published automatically. Expose one explicitly by routing it to the generated service:
+
+```typescript title="vercel.ts"
+import { withEve } from "eve/vercel";
+
+export default await withEve({
+  services: {
+    web: { framework: "nextjs", root: "apps/web" },
+  },
+  routes: [
+    {
+      src: "^/webhooks/github$",
+      destination: { type: "service", service: "eve-triage" },
+    },
+    {
+      src: "^(.*)$",
+      destination: { type: "service", service: "web" },
+    },
+  ],
+});
+```
+
+A Vercel project can use only one configuration source, so remove `vercel.json` when adopting `vercel.ts`. Keep `eve` in the root package dependencies so Vercel can import `eve/vercel` while evaluating the configuration. `withEve` discovers the workspace containing its evaluation directory, including Vercel's temporary `.vercel` configuration directory. Pass `{ root: "/absolute/workspace/path" }` as the second argument only when you need to select a specific workspace root.
+
+An authored eve service routed at `/eve/v1` already uses the protocol path; callbacks remain at `/eve/v1/callback/*`. A named mount such as `/eve/support` adds that mount before the protocol path, giving `/eve/support/v1/callback/*`.
+
+### Deploy the project
+
+Deploy the linked project to production from its root:
 
 ```bash
 eve deploy
@@ -94,11 +141,18 @@ Vercel uses the generated output to configure these services:
 
 ## Verify the deployment
 
-Check the health route and connect the development TUI:
+For a single unnamed agent, check the health route and connect the development TUI:
 
 ```bash
-curl https://your_agent.vercel.app/support/eve/v1/health
-eve dev https://your_agent.vercel.app/support
+curl https://your_agent.vercel.app/eve/v1/health
+eve dev https://your_agent.vercel.app
+```
+
+For a workspace agent, include its public `/eve/<name>` mount. For example:
+
+```bash
+curl https://your_agent.vercel.app/eve/support/v1/health
+eve dev https://your_agent.vercel.app/eve/support
 ```
 
 Set `VERCEL_AUTOMATION_BYPASS_SECRET` locally before connecting if the deployment uses Deployment Protection.
@@ -107,12 +161,12 @@ Set `VERCEL_AUTOMATION_BYPASS_SECRET` locally before connecting if the deploymen
 
 Vercel detects eve and can add an **Agent Runs** tab under the project’s **Observability** view. Use it to browse sessions and inspect each conversation trace.
 
-The Agent Runs tab requires enablement for your Vercel team. Contact your Vercel representative if the tab doesn’t appear. For third-party tracing backends, configure [OpenTelemetry instrumentation](../instrumentation).
+The Agent Runs tab requires enablement for your Vercel team. Contact your Vercel representative if the tab doesn’t appear. For third-party tracing backends, configure [OpenTelemetry instrumentation](../../observability/instrumentation).
 
 ## Continue configuring production
 
 Use these guides to secure and observe the deployed agent:
 
 - [Authentication](../auth-and-route-protection): configure who can call the deployed agent
-- [Observability](../instrumentation): export traces and diagnose runtime failures
+- [Instrumentation](../../observability/instrumentation): export traces and diagnose runtime failures
 - [Sandbox](../../sandbox): configure resources, isolation, and network access
