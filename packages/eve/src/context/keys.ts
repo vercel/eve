@@ -75,6 +75,8 @@ export interface Session {
 
 export const AuthKey = new ContextKey<SessionAuthContext | null>("eve.auth");
 export const InitiatorAuthKey = new ContextKey<SessionAuthContext | null>("eve.initiatorAuth");
+/** Analytics-only provenance for sessions started by `eve eval`. */
+export const EvaluationKey = new ContextKey<true>("eve.internal.evaluation");
 export const SessionIdKey = new ContextKey<string>("eve.sessionId");
 export const ConversationIdKey = new ContextKey<string>("eve.conversationId");
 export const SessionInboxKey = new ContextKey<SessionInboxAddress>(SESSION_INBOX_CONTEXT_KEY);

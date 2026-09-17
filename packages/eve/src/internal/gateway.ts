@@ -1,5 +1,6 @@
 import type { LanguageModel } from "ai";
 
+import { EVE_EVAL_HEADER, EVE_EVAL_HEADER_VALUE } from "#internal/evaluation.js";
 import { appendPackageUserAgent, withPackageUserAgent } from "#internal/user-agent.js";
 
 const GATEWAY_BASE_URL = "https://ai-gateway.vercel.sh";
@@ -18,15 +19,27 @@ export const AI_GATEWAY_MODELS_CATALOG_URL = `${GATEWAY_BASE_URL}/v1/models/cata
  */
 export const vercelGatewayFetch: typeof globalThis.fetch = withPackageUserAgent();
 
+/** Framework-owned attribution applied to one AI Gateway request. */
+export interface GatewayRequestAttribution {
+  readonly evaluation?: true;
+  readonly referer?: string;
+  readonly title?: string;
+}
+
 /**
- * Request headers eve attaches for a model's provider, or `undefined` when
- * the provider needs none. Gateway-routed models (bare ids and `gateway.*`
- * instances) get the eve User-Agent product token so AI Gateway can attribute
- * the traffic; direct-provider models get no extra headers.
+ * Request headers eve attaches to a Gateway-routed model call. Direct-provider
+ * models get no extra headers.
  */
-export function resolveProviderHeaders(model: LanguageModel): Record<string, string> | undefined {
+export function resolveGatewayRequestHeaders(
+  model: LanguageModel,
+  attribution: GatewayRequestAttribution = {},
+): Record<string, string> | undefined {
   if (!isGatewayModel(model)) return undefined;
-  return Object.fromEntries(appendPackageUserAgent(new Headers()));
+  const headers: Record<string, string> = Object.fromEntries(appendPackageUserAgent(new Headers()));
+  if (attribution.title) headers["x-title"] = attribution.title;
+  if (attribution.referer) headers["http-referer"] = attribution.referer;
+  if (attribution.evaluation === true) headers[EVE_EVAL_HEADER] = EVE_EVAL_HEADER_VALUE;
+  return headers;
 }
 
 export function isGatewayModel(model: LanguageModel): boolean {

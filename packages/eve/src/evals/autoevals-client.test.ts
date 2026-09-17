@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Factuality } from "autoevals";
+import { MockLanguageModelV3 } from "ai/test";
+import { EVE_EVAL_HEADER, EVE_EVAL_HEADER_VALUE } from "#internal/evaluation.js";
 
 const mocks = vi.hoisted(() => ({ generateText: vi.fn() }));
 
@@ -35,7 +37,28 @@ describe("createAutoevalsClient", () => {
 
     expect(mocks.generateText).toHaveBeenCalledWith(
       expect.objectContaining({
-        headers: { "user-agent": expect.stringMatching(/^eve\/.+/) },
+        headers: {
+          "user-agent": expect.stringMatching(/^eve\/.+/),
+          [EVE_EVAL_HEADER]: EVE_EVAL_HEADER_VALUE,
+        },
+      }),
+    );
+  });
+
+  it("does not attach the eval marker to direct-provider judge calls", async () => {
+    mocks.generateText.mockResolvedValueOnce({ text: "ok", toolCalls: [] });
+    const client = createAutoevalsClient({
+      languageModel: new MockLanguageModelV3({
+        provider: "openai.responses",
+        modelId: "gpt-5.5",
+      }),
+    });
+
+    await client.chat.completions.create({ messages: [], model: "gpt-5.5" });
+
+    expect(mocks.generateText).toHaveBeenCalledWith(
+      expect.objectContaining({
+        headers: undefined,
       }),
     );
   });

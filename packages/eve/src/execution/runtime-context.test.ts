@@ -5,6 +5,7 @@ import {
   ChannelInstrumentationKey,
   ContinuationHookTokensKey,
   ContinuationTokenKey,
+  EvaluationKey,
   ParentTraceContextKey,
   type Session,
   type SessionAuthContext,
@@ -184,6 +185,21 @@ describe("buildRunContext", () => {
     });
 
     expect(ctx.require(AuthKey)).toBeNull();
+  });
+
+  it("preserves eval provenance in the durable context", () => {
+    const ctx = buildRunContext({
+      bundle: createMinimalBundle(),
+      run: {
+        auth: null,
+        adapter: { kind: "http" },
+        evaluation: true,
+        input: { message: "hi" },
+        mode: "conversation",
+      },
+    });
+
+    expect(ctx.get(EvaluationKey)).toBe(true);
   });
 
   it("inherits schedule provenance independently from run auth", () => {

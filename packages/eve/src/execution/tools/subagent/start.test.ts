@@ -68,4 +68,34 @@ describe("startSubagent", () => {
       expect(other).not.toHaveBeenCalled();
     },
   );
+
+  it("forwards eval provenance to child dispatch", async () => {
+    await startSubagent({
+      auth: null,
+      batchEvent: { sequence: 1, turnId: "turn-1" },
+      bundle: {} as never,
+      callbackBaseUrl: "https://parent.example",
+      capabilities: undefined,
+      channelMetadata: undefined,
+      currentSession: {} as never,
+      evaluation: true,
+      fanoutSize: 1,
+      initiatorAuth: null,
+      parentContinuationToken: "parent-token",
+      sandboxSessionId: "parent-session",
+      session: { rootSessionId: "root-session", sessionId: "parent-session" } as never,
+      trace: { originAudience: "private", parentTraceContext: undefined },
+      target: {
+        action: { callId: "child-action" } as never,
+        kind: "local",
+        source: { type: "runtime" },
+      },
+    });
+
+    expect(startLocalSubagent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        parent: expect.objectContaining({ evaluation: true }),
+      }),
+    );
+  });
 });

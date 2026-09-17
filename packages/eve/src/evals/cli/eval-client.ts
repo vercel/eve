@@ -1,5 +1,6 @@
 import { Client } from "#client/client.js";
-import type { ClientOptions } from "#client/types.js";
+import type { ClientOptions, HeadersValue } from "#client/types.js";
+import { EVE_EVAL_HEADER, EVE_EVAL_HEADER_VALUE } from "#internal/evaluation.js";
 import { resolveDevelopmentClientOptions } from "#services/dev-client/client-options.js";
 import {
   resolveVerifiedRemoteDevelopmentClient,
@@ -17,16 +18,21 @@ export function resolveEvalClientOptions(
   target: Pick<EveEvalTargetHandle, "kind" | "url">,
 ): ClientOptions {
   if (target.kind === "local") {
-    return { host: target.url };
+    return { host: target.url, headers: { [EVE_EVAL_HEADER]: EVE_EVAL_HEADER_VALUE } };
   }
 
   const options = resolveDevelopmentClientOptions(target.url);
   const explicitToken = process.env.EVE_EVAL_AUTH_TOKEN?.trim();
   if (explicitToken) {
-    return { ...options, auth: { bearer: explicitToken }, redirect: "manual" };
+    return {
+      ...options,
+      auth: { bearer: explicitToken },
+      headers: { [EVE_EVAL_HEADER]: EVE_EVAL_HEADER_VALUE },
+      redirect: "manual",
+    };
   }
 
-  return options;
+  return { ...options, headers: { [EVE_EVAL_HEADER]: EVE_EVAL_HEADER_VALUE } };
 }
 
 export interface CreateEvalClientOptions {
@@ -54,5 +60,23 @@ export async function createEvalClient(
   return new Client({
     ...base,
     ...verified,
+    headers: mergeHeaders(base.headers, verified.headers),
   });
+}
+
+function mergeHeaders(
+  first: HeadersValue | undefined,
+  second: HeadersValue | undefined,
+): HeadersValue | undefined {
+  if (first === undefined) return second;
+  if (second === undefined) return first;
+  return async () => ({
+    ...(await resolveHeaders(first)),
+    ...(await resolveHeaders(second)),
+    [EVE_EVAL_HEADER]: EVE_EVAL_HEADER_VALUE,
+  });
+}
+
+async function resolveHeaders(headers: HeadersValue): Promise<Readonly<Record<string, string>>> {
+  return typeof headers === "function" ? await headers() : headers;
 }

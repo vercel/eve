@@ -4,7 +4,9 @@ import { describe, expect, it, vi } from "vitest";
 import { buildAdapterContext } from "#channel/adapter-context.js";
 import { callAdapterEventHandler, type ChannelAdapter } from "#channel/adapter.js";
 import { isCompiledChannel } from "#channel/compiled-channel.js";
+import { EVE_EVALUATION_ENV_FLAG } from "#internal/application/dev-environment.js";
 import { readClientContext } from "#internal/client-context.js";
+import { EVE_EVAL_HEADER, EVE_EVAL_HEADER_VALUE } from "#internal/evaluation.js";
 import { attachRouteSessionCreator } from "#internal/nitro/routes/channel-route-context.js";
 import { mockChannelContext } from "#internal/testing/mocks/mock-channel-operations.js";
 import { type AuthFn, none } from "#public/channels/auth.js";
@@ -59,10 +61,13 @@ type MockSendOptions = Pick<
   | "title"
 >;
 
-function createJsonMessageRequest(body: unknown): Request {
+function createJsonMessageRequest(
+  body: unknown,
+  headers: Readonly<Record<string, string>> = {},
+): Request {
   return new Request("https://example.com/eve/v1/session", {
     body: JSON.stringify(body),
-    headers: { "content-type": "application/json" },
+    headers: { "content-type": "application/json", ...headers },
     method: "POST",
   });
 }
@@ -1004,6 +1009,48 @@ describe("eveChannel — create session idempotency", () => {
 });
 
 describe("eveChannel — create session (text)", () => {
+  it("marks a session created by an eval client", async () => {
+    const handler = createEveCreateHandler({ auth: none() });
+
+    const response = await handler.fetch(
+      createJsonMessageRequest({ message: "hi" }, { [EVE_EVAL_HEADER]: EVE_EVAL_HEADER_VALUE }),
+    );
+
+    expect(response.status).toBe(202);
+    const runInput = handler.createSession.mock.calls[0]?.[0] as RunInput;
+    expect(runInput.evaluation).toBe(true);
+  });
+
+  it.each([undefined, "", "0", "true"])(
+    "does not mark a session for a non-eval request header value (%s)",
+    async (value) => {
+      const handler = createEveCreateHandler({ auth: none() });
+      const headers: Record<string, string> =
+        value === undefined ? {} : { [EVE_EVAL_HEADER]: value };
+
+      const response = await handler.fetch(createJsonMessageRequest({ message: "hi" }, headers));
+
+      expect(response.status).toBe(202);
+      const runInput = handler.createSession.mock.calls[0]?.[0] as RunInput;
+      expect(runInput.evaluation).toBeUndefined();
+    },
+  );
+
+  it("marks sessions served by a local eval process", async () => {
+    vi.stubEnv(EVE_EVALUATION_ENV_FLAG, "1");
+    try {
+      const handler = createEveCreateHandler({ auth: none() });
+
+      const response = await handler.fetch(createJsonMessageRequest({ message: "hi" }));
+
+      expect(response.status).toBe(202);
+      const runInput = handler.createSession.mock.calls[0]?.[0] as RunInput;
+      expect(runInput.evaluation).toBe(true);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
   it("returns a structured 500 when session creation fails", async () => {
     const handler = createEveCreateHandler({ auth: none() });
     handler.send.mockRejectedValue(new Error("backing store outage"));

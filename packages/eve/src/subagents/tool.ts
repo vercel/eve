@@ -143,6 +143,7 @@ export function buildSubagentRunInput(input: {
     auth,
     capabilities,
     channelMetadata,
+    ...(input.parent.evaluation === true ? { evaluation: true as const } : {}),
     inheritedConversation,
     continuationToken: childContinuationToken,
     initiatorAuth,

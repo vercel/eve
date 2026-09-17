@@ -20,6 +20,7 @@ import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import type { HarnessModelMessage } from "#harness/messages.js";
 import type { SessionInstrumentation } from "#instrumentation/runtime.js";
 import type { HistoryViewProjector, PreparedHistoryView } from "#shared/history-view.js";
+import type { GatewayRequestAttribution } from "#internal/gateway.js";
 
 /**
  * Serializable tool definition stored on the session.
@@ -288,6 +289,8 @@ export interface ToolLoopHarnessConfig {
   /** Forces one context-compaction pass without running a model turn. */
   readonly compactOnly?: boolean;
   readonly handleEvent?: HandleEventFn;
+  /** Gateway request attribution prepared by the execution layer. */
+  readonly gatewayAttribution?: GatewayRequestAttribution;
   /** Projects raw durable history before it crosses a message-bearing boundary. */
   readonly historyProjector?: HistoryViewProjector;
   /** Execution-prepared view of the history supplied to the first harness step. */

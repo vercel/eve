@@ -41,6 +41,7 @@ export async function startSubagent(input: {
     typeof buildSubagentRunInput
   >[0]["inheritedConversation"];
   readonly currentSession: RuntimeSession;
+  readonly evaluation?: true;
   readonly fanoutSize: number;
   readonly initiatorAuth: Parameters<typeof buildSubagentRunInput>[0]["initiatorAuth"];
   readonly localDevRequest?: LocalDevRequestProvenance;
@@ -70,6 +71,7 @@ export async function startSubagent(input: {
       turn: { id: input.batchEvent.turnId, sequence: input.batchEvent.sequence },
     },
     continuationToken: input.parentContinuationToken,
+    ...(input.evaluation === true ? { evaluation: true as const } : {}),
     traceContext: trace.parentTraceContext,
     originAudience: trace.originAudience,
   };

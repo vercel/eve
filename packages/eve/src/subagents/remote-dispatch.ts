@@ -32,6 +32,7 @@ import type { DynamicRemoteAgentConfig } from "#runtime/subagents/dynamic-remote
 import type { CompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
 import type { ResolvedRuntimeRemoteAgentNode } from "#runtime/types.js";
 import { expectFunction, expectObjectRecord } from "#internal/authored-module.js";
+import { EVE_EVAL_HEADER, EVE_EVAL_HEADER_VALUE } from "#internal/evaluation.js";
 import type { JsonObject } from "#shared/json.js";
 import { readTaskIdFromInboxToken } from "#tasks/task-inbox-token.js";
 import {
@@ -136,6 +137,9 @@ export async function startRemoteAgentSession(input: {
   }
 
   const headers = await resolveRemoteAgentRequestHeaders(input.remote);
+  if (input.parent?.evaluation === true) {
+    setHeader(headers, EVE_EVAL_HEADER, EVE_EVAL_HEADER_VALUE);
+  }
   const traceparent = formatTraceparent(input.parent?.traceContext);
   if (traceparent !== undefined) setHeader(headers, "traceparent", traceparent);
   setHeader(
