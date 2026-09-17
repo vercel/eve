@@ -5,6 +5,7 @@ import {
   type VercelImagePreparedArtifact,
 } from "#execution/sandbox/bindings/vercel-image.js";
 import { createFakeVercelOidcToken } from "#internal/testing/vercel-oidc-token.js";
+import { VERCEL_EVE_SANDBOX_IMAGE } from "#execution/sandbox/bindings/eve-image.js";
 import type {
   SandboxProviderPrepareContext,
   SandboxProviderSessionContext,
@@ -87,11 +88,14 @@ function prepareContext(hasDockerfile = true): SandboxProviderPrepareContext {
 }
 
 describe("createVercelImageSandboxProvider", () => {
-  it("requires a colocated Dockerfile", async () => {
-    const { provider } = createProvider();
-    await expect(provider.prepare(prepareContext(false))).rejects.toThrow(
-      "requires agent/sandbox/Dockerfile",
-    );
+  it("uses the eve base image when no Dockerfile exists", async () => {
+    const { provider, publish } = createProvider();
+    await expect(provider.prepare(prepareContext(false))).resolves.toEqual({
+      image: VERCEL_EVE_SANDBOX_IMAGE,
+      mounts: [],
+      version: 1,
+    });
+    expect(publish).not.toHaveBeenCalled();
   });
 
   it("starts with deterministic session state and resumes the same native sandbox", async () => {
