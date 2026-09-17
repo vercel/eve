@@ -49,7 +49,7 @@ export function createVercelImageResourcePublisher(
   } = {},
 ): VercelImageResourcePublisher {
   const loadModule =
-    input.loadModule ?? (async () => await import("#compiled/@vercel/sandbox-drives/index.js"));
+    input.loadModule ?? (async () => await import("#compiled/@vercel/sandbox/index.js"));
   return {
     async prepare(prepareInput) {
       const module = await loadModule();
