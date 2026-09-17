@@ -80,14 +80,17 @@ export async function runWorkflowToolInvocation(
           ),
         };
       }
-      read = await raceChannelReads(
-        [
-          ...(commandsOpen ? [owner.commands] : []),
-          ...(body === undefined ? [] : [body.inbox.reader]),
-          ...(body === undefined || bodyResult !== undefined ? [] : [body.reader]),
-        ],
-        cleanupDeadline,
-      );
+      const readers: Array<
+        | typeof owner.commands
+        | WorkflowToolRunOwnerInbox["reader"]
+        | ChannelReader<"body", WorkflowBodyResult>
+      > = [];
+      if (commandsOpen) readers.push(owner.commands);
+      if (body !== undefined) {
+        readers.push(body.inbox.reader);
+        if (bodyResult === undefined) readers.push(body.reader);
+      }
+      read = await raceChannelReads(readers, cleanupDeadline);
     } catch (error) {
       if (owner.commands.failure !== undefined) throw error;
       outcome = { status: "failed", error: normalizeSerializableError(error) };
