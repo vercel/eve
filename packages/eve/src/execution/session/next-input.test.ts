@@ -490,25 +490,35 @@ function batchingInput(count = 100, crossTurn = false) {
         history: [],
         agent: { system: "" },
         state: {
-          "eve.tasks": {
-            version: 2,
-            tasks: Array.from({ length: count }, (_, index) => ({
-              taskId: `task_${index}`,
-              cohortId: "task_0",
-              taskRunId: `run-${index}`,
-              taskInboxToken: `inbox-${index}`,
-              createdByTurnId: crossTurn ? `turn-${index + 1}` : "turn-1",
-              dispatchContext: { auth: { current: null, initiator: null } },
-              metadata: { kind: "subagent", name: "worker" },
-            })).concat([
-              {
-                taskId: "other-cohort",
-                cohortId: "other-cohort",
-                taskRunId: "other-run",
-                taskInboxToken: "other-inbox",
-                createdByTurnId: "turn-2",
+          "eve.runtime.workflowInvocations": {
+            version: 1,
+            invocations: Array.from({ length: count }, (_, index) => ({
+              callId: `task_${index}`,
+              toolName: "worker",
+              resultKind: "tool" as const,
+              lifetime: "session" as const,
+              origin: { turnId: crossTurn ? `turn-${index + 1}` : "turn-1", stepIndex: 0 },
+              address: { runId: `run-${index}`, hookToken: `inbox-${index}` },
+              task: {
+                taskId: `task_${index}`,
+                cohortId: "task_0",
                 dispatchContext: { auth: { current: null, initiator: null } },
                 metadata: { kind: "subagent", name: "worker" },
+              },
+            })).concat([
+              {
+                callId: "other-cohort",
+                toolName: "worker",
+                resultKind: "tool" as const,
+                lifetime: "session" as const,
+                origin: { turnId: "turn-2", stepIndex: 0 },
+                address: { runId: "other-run", hookToken: "other-inbox" },
+                task: {
+                  taskId: "other-cohort",
+                  cohortId: "other-cohort",
+                  dispatchContext: { auth: { current: null, initiator: null } },
+                  metadata: { kind: "subagent", name: "worker" },
+                },
               },
             ]),
           },

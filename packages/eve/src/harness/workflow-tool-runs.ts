@@ -1,55 +1,44 @@
 import type { HarnessSession, SessionStateMap } from "#harness/types.js";
 import type { RuntimeToolResultActionResult } from "#shared/action-types.js";
+import {
+  getWorkflowInvocations,
+  findTurnInvocation,
+  registerWorkflowInvocation,
+  removeTurnInvocations,
+  type TurnWorkflowInvocation,
+} from "#harness/workflow-invocations.js";
 
-const WORKFLOW_TOOL_RUNS_STATE_KEY = "eve.runtime.workflowToolRuns";
+export type WorkflowToolRunRecord = TurnWorkflowInvocation;
+export const recordWorkflowToolRun = registerWorkflowInvocation;
 
-/** A workflow tool run the active turn waits on. Background runs live in the task index. */
-export interface WorkflowToolRunRecord {
-  readonly callId: string;
-  readonly hookToken: string;
-  readonly runId: string;
-  readonly toolName: string;
-  readonly resultKind?: "subagent" | "tool";
-}
-
-// Schema-free: this is bundled into the workflow driver.
 export function getWorkflowToolRuns(
   state: SessionStateMap | undefined,
-): readonly WorkflowToolRunRecord[] {
-  const raw = state?.[WORKFLOW_TOOL_RUNS_STATE_KEY];
-  return Array.isArray(raw) ? (raw as readonly WorkflowToolRunRecord[]) : [];
+  turnId?: string,
+): readonly TurnWorkflowInvocation[] {
+  return getWorkflowInvocations(state).filter(
+    (entry): entry is TurnWorkflowInvocation =>
+      entry.lifetime === "turn" && (turnId === undefined || entry.origin.turnId === turnId),
+  );
 }
-
+/** Results without an originating turn may bind only when exactly one recorded turn owns the call. */
 export function findWorkflowToolRun(
   state: SessionStateMap | undefined,
   callId: string,
-): WorkflowToolRunRecord | undefined {
-  return getWorkflowToolRuns(state).find((record) => record.callId === callId);
+  turnId?: string,
+): TurnWorkflowInvocation | undefined {
+  if (turnId !== undefined) return findTurnInvocation(state, turnId, callId);
+  const candidates = getWorkflowToolRuns(state).filter((entry) => entry.callId === callId);
+  return candidates.length === 1 ? candidates[0] : undefined;
 }
-
-export function recordWorkflowToolRun<T extends { readonly state?: SessionStateMap }>(
-  session: T,
-  record: WorkflowToolRunRecord,
-): T {
-  const others = getWorkflowToolRuns(session.state).filter(
-    (entry) => entry.callId !== record.callId,
-  );
-  return writeWorkflowToolRuns(session, [...others, record]);
-}
-
 export function removeWorkflowToolRun<T extends { readonly state?: SessionStateMap }>(
   session: T,
   callId: string,
+  turnId: string,
 ): T {
-  const records = getWorkflowToolRuns(session.state);
-  const remaining = records.filter((entry) => entry.callId !== callId);
-  return remaining.length === records.length ? session : writeWorkflowToolRuns(session, remaining);
+  return removeTurnInvocations(session, turnId, callId);
 }
-
-export function clearWorkflowToolRuns(session: HarnessSession): HarnessSession {
-  return getWorkflowToolRuns(session.state).length === 0
-    ? session
-    : writeWorkflowToolRuns(session, []);
+export function clearWorkflowToolRuns(session: HarnessSession, turnId: string): HarnessSession {
+  return removeTurnInvocations(session, turnId);
 }
 
 /** The turn inbox is shared; a result settles a call only if the turn recorded that run. */
@@ -70,17 +59,4 @@ export function isInboxSubagentResultFromRecordedWorkflowToolRun(
 ): boolean {
   const record = findWorkflowToolRun(state, result.callId);
   return record?.resultKind === "subagent" && record.toolName === result.subagentName;
-}
-
-function writeWorkflowToolRuns<T extends { readonly state?: SessionStateMap }>(
-  session: T,
-  records: readonly WorkflowToolRunRecord[],
-): T {
-  const state = { ...session.state };
-  if (records.length === 0) {
-    delete state[WORKFLOW_TOOL_RUNS_STATE_KEY];
-  } else {
-    state[WORKFLOW_TOOL_RUNS_STATE_KEY] = records;
-  }
-  return { ...session, state: Object.keys(state).length > 0 ? state : undefined };
 }

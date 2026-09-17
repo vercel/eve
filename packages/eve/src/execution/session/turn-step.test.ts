@@ -546,18 +546,23 @@ describe("routeProxiedDeliverStep", () => {
           options?.owned === false
             ? undefined
             : {
-                "eve.tasks": {
-                  tasks: [
+                "eve.runtime.workflowInvocations": {
+                  version: 1,
+                  invocations: [
                     {
-                      taskInboxToken: "task-token",
-                      createdByTurnId: "turn-parent",
-                      dispatchContext: { auth: { current: null, initiator: null } },
-                      metadata: { kind: "tool", name: "research" },
-                      taskId: "task-1",
-                      taskRunId: "run-1",
+                      callId: "task-1",
+                      toolName: "research",
+                      resultKind: "tool" as const,
+                      lifetime: "session" as const,
+                      origin: { turnId: "turn-parent", stepIndex: 0 },
+                      address: { runId: "run-1", hookToken: "task-token" },
+                      task: {
+                        dispatchContext: { auth: { current: null, initiator: null } },
+                        metadata: { kind: "tool", name: "research" },
+                        taskId: "task-1",
+                      },
                     },
                   ],
-                  version: 2,
                 },
               },
       }),
@@ -700,18 +705,23 @@ describe("recordTaskInputRequestStep", () => {
   it("records an exact route only for a current task owned by this parent", async () => {
     const session = createStubSession({
       state: {
-        "eve.tasks": {
-          tasks: [
+        "eve.runtime.workflowInvocations": {
+          version: 1,
+          invocations: [
             {
-              taskInboxToken: "task-token",
-              createdByTurnId: "turn-parent",
-              dispatchContext: { auth: { current: null, initiator: null } },
-              metadata: { kind: "tool", name: "research" },
-              taskId: "task-1",
-              taskRunId: "run-1",
+              callId: "task-1",
+              toolName: "research",
+              resultKind: "tool" as const,
+              lifetime: "session" as const,
+              origin: { turnId: "turn-parent", stepIndex: 0 },
+              address: { runId: "run-1", hookToken: "task-token" },
+              task: {
+                dispatchContext: { auth: { current: null, initiator: null } },
+                metadata: { kind: "tool", name: "research" },
+                taskId: "task-1",
+              },
             },
           ],
-          version: 2,
         },
       },
     });
@@ -1112,12 +1122,17 @@ describe("turnStep", () => {
     vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue(bundle);
 
     const task = {
-      createdByTurnId: "turn_0",
-      dispatchContext: { auth: { current: null, initiator: null } },
-      metadata: { kind: "report", name: "daily_report" },
-      taskId: "task_report",
-      taskInboxToken: "task-token",
-      taskRunId: "task-run",
+      callId: "task_report",
+      toolName: "daily_report",
+      resultKind: "tool" as const,
+      lifetime: "session" as const,
+      origin: { turnId: "turn_0", stepIndex: 0 },
+      address: { runId: "task-run", hookToken: "task-token" },
+      task: {
+        dispatchContext: { auth: { current: null, initiator: null } },
+        metadata: { kind: "report", name: "daily_report" },
+        taskId: "task_report",
+      },
     };
     const emissionState = {
       sequence: 0,
@@ -1128,21 +1143,21 @@ describe("turnStep", () => {
     const pending = createStubSession({
       state: {
         "eve.harness.emission": emissionState,
-        "eve.tasks": { tasks: [task], version: 2 },
+        "eve.runtime.workflowInvocations": { version: 1, invocations: [task] },
       },
     });
     const terminalView = {
       lastOutput: { data: "report complete", type: "result" as const },
-      metadata: task.metadata,
+      metadata: task.task.metadata,
       status: "completed" as const,
-      taskId: task.taskId,
+      taskId: task.task.taskId,
     };
     const settled = createStubSession({
       state: {
         "eve.harness.emission": { ...emissionState, sequence: 1, turnId: "turn_1" },
-        "eve.tasks": {
-          tasks: [{ ...task, terminalView }],
-          version: 2,
+        "eve.runtime.workflowInvocations": {
+          version: 1,
+          invocations: [{ ...task, task: { ...task.task, terminalView: terminalView } }],
         },
       },
     });
@@ -2646,24 +2661,29 @@ describe("turnStep", () => {
     const metadata = { kind: "report-probe", name: "report_probe" } as const;
     const session = createStubSession({
       state: {
-        "eve.tasks": {
-          tasks: [
+        "eve.runtime.workflowInvocations": {
+          version: 1,
+          invocations: [
             {
-              taskInboxToken: "task-token",
-              createdByTurnId: "turn-parent",
-              dispatchContext: { auth: { current: null, initiator: null } },
-              metadata,
-              taskId: "task_1",
-              taskRunId: "run_1",
-              terminalView: {
-                lastOutput: { data: { result: "done" }, type: "result" },
+              callId: "task_1",
+              toolName: metadata.name,
+              resultKind: "tool" as const,
+              lifetime: "session" as const,
+              origin: { turnId: "turn-parent", stepIndex: 0 },
+              address: { runId: "run_1", hookToken: "task-token" },
+              task: {
+                dispatchContext: { auth: { current: null, initiator: null } },
                 metadata,
-                status: "completed",
                 taskId: "task_1",
+                terminalView: {
+                  lastOutput: { data: { result: "done" }, type: "result" },
+                  metadata,
+                  status: "completed",
+                  taskId: "task_1",
+                },
               },
             },
           ],
-          version: 2,
         },
       },
     });
@@ -2755,19 +2775,23 @@ describe("turnStep", () => {
           stepIndex: 1,
           turnId: "turn_0",
         },
-        "eve.tasks": {
-          tasks: [
+        "eve.runtime.workflowInvocations": {
+          version: 1,
+          invocations: [
             {
-              createdByStepIndex: 0,
-              createdByTurnId: "turn_0",
-              dispatchContext: { auth: { current: null, initiator: null } },
-              metadata: { kind: "report-probe", name: "report_probe" },
-              taskId: "task_1",
-              taskInboxToken: "task-token",
-              taskRunId: "run_1",
+              callId: "task_1",
+              toolName: "report_probe",
+              resultKind: "tool" as const,
+              lifetime: "session" as const,
+              origin: { turnId: "turn_0", stepIndex: 0 },
+              address: { runId: "run_1", hookToken: "task-token" },
+              task: {
+                dispatchContext: { auth: { current: null, initiator: null } },
+                metadata: { kind: "report-probe", name: "report_probe" },
+                taskId: "task_1",
+              },
             },
           ],
-          version: 2,
         },
       },
     });

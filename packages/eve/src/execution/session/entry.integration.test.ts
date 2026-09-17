@@ -1511,19 +1511,25 @@ describe("workflowEntry integration", () => {
               Object.assign(session, {
                 state: {
                   ...session.state,
-                  "eve.tasks": {
-                    version: 2,
-                    tasks: [
+                  "eve.runtime.workflowInvocations": {
+                    version: 1,
+                    invocations: [
                       {
-                        taskId: "task",
-                        taskRunId: "run",
-                        taskInboxToken: 42,
-                        createdByTurnId: "turn",
-                        metadata: { kind: "tool", name: "research" },
-                        terminalView: {
+                        callId: "task",
+                        toolName: "research",
+                        resultKind: "tool" as const,
+                        lifetime: "session" as const,
+                        origin: { turnId: "turn", stepIndex: 0 },
+                        address: { runId: "run", hookToken: 42 },
+                        task: {
                           taskId: "task",
                           metadata: { kind: "tool", name: "research" },
-                          status: "cancelled",
+                          terminalView: {
+                            taskId: "task",
+                            metadata: { kind: "tool", name: "research" },
+                            status: "cancelled",
+                          },
+                          dispatchContext: { auth: { current: null, initiator: null } },
                         },
                       },
                     ],
@@ -1585,9 +1591,17 @@ describe("workflowEntry integration", () => {
           ).toBe(false);
           const candidateHooks = await world.hooks.list({ runId: candidateId! });
           expect(candidateHooks.data).toEqual([]);
-          const steps = await world.steps.list({ runId: anchor.runId, resolveData: "all" });
-          const turns = steps.data.filter((step) => step.stepName.endsWith("//turnStep"));
-          expect(turns).toHaveLength(2);
+          const turns = await vi.waitFor(
+            async () => {
+              const steps = await world.steps.list({ runId: anchor.runId, resolveData: "all" });
+              const turns = steps.data.filter((step) => step.stepName.endsWith("//turnStep"));
+              expect(turns).toHaveLength(2);
+              // The waiting event is streamed before the step's return value is persisted.
+              expect(turns.every((step) => step.output !== undefined)).toBe(true);
+              return turns;
+            },
+            { timeout: 5000 },
+          );
           const histories = await Promise.all(
             turns.map(async (step) => {
               const output = await hydrateStepReturnValue(step.output, anchor.runId, undefined);

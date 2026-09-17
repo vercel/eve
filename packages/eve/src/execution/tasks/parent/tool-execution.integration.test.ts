@@ -44,12 +44,17 @@ const handle = {
   phase: "claimed" as const,
 };
 const entry = {
-  createdByTurnId: "turn-1",
-  dispatchContext: { auth: { current: null, initiator: null } },
-  metadata: { agentId: identity.id, kind: "subagent", name: identity.name },
-  taskId: handle.ownerId,
-  taskInboxToken: "original-task-inbox",
-  taskRunId: "original-task-run",
+  callId: handle.ownerId,
+  toolName: { agentId: identity.id, kind: "subagent", name: identity.name }.name,
+  resultKind: "tool" as const,
+  lifetime: "session" as const,
+  origin: { turnId: "turn-1", stepIndex: 0 },
+  address: { runId: "original-task-run", hookToken: "original-task-inbox" },
+  task: {
+    dispatchContext: { auth: { current: null, initiator: null } },
+    metadata: { agentId: identity.id, kind: "subagent", name: identity.name },
+    taskId: handle.ownerId,
+  },
 };
 
 function createSession(owned = true): HarnessSession {
@@ -138,7 +143,7 @@ describe("background subagent steering", () => {
         input: { agentId: identity.id, message: "Use the updated instruction" },
       }),
     );
-    expect(receipt).toEqual({ agentId: identity.id, status: "working", taskId: entry.taskId });
+    expect(receipt).toEqual({ agentId: identity.id, status: "working", taskId: entry.task.taskId });
     const session = await scope.commit();
     expect(getAgentHandleStore(session.state)?.handles).toEqual([handle]);
     expect(getSessionTaskIndex(session.state)).toEqual([entry]);
@@ -172,25 +177,29 @@ describe("background subagent steering", () => {
     await scope.execute("new-call", "");
     const committed = await scope.commit();
     const task = getSessionTaskIndex(committed.state).find(
-      (candidate) => candidate.taskId !== entry.taskId,
+      (candidate) => candidate.task.taskId !== entry.task.taskId,
     );
 
-    expect(task?.dispatchContext).toEqual({
+    expect(task?.task.dispatchContext).toEqual({
       auth: { current: creatorCurrent, initiator: creatorInitiator },
     });
     if (task === undefined) throw new Error("Expected created task");
     const replayed = recordSessionTask(committed, {
       ...task,
-      dispatchContext: {
-        auth: {
-          current: { ...creatorCurrent, principalId: "later-current" },
-          initiator: { ...creatorInitiator, principalId: "later-initiator" },
+      task: {
+        ...task.task,
+        dispatchContext: {
+          auth: {
+            current: { ...creatorCurrent, principalId: "later-current" },
+            initiator: { ...creatorInitiator, principalId: "later-initiator" },
+          },
         },
       },
     });
     expect(
-      getSessionTaskIndex(replayed.state).find((candidate) => candidate.taskId === task.taskId)
-        ?.dispatchContext,
+      getSessionTaskIndex(replayed.state).find(
+        (candidate) => candidate.task.taskId === task.task.taskId,
+      )?.task.dispatchContext,
     ).toEqual({ auth: { current: creatorCurrent, initiator: creatorInitiator } });
   });
 
@@ -210,10 +219,10 @@ describe("background subagent steering", () => {
     await scope.execute("new-call", "");
     const committed = await scope.commit();
     const task = getSessionTaskIndex(committed.state).find(
-      (candidate) => candidate.taskId !== entry.taskId,
+      (candidate) => candidate.task.taskId !== entry.task.taskId,
     );
 
-    expect(task?.dispatchContext).toEqual({
+    expect(task?.task.dispatchContext).toEqual({
       auth: { current: null, initiator: sessionInitiator },
     });
   });
@@ -235,15 +244,15 @@ describe("background subagent steering", () => {
       await scope.execute("new-call", "", identity.name, resultKind);
       const committed = await scope.commit();
       const task = getSessionTaskIndex(committed.state).find(
-        (candidate) => candidate.taskId !== entry.taskId,
+        (candidate) => candidate.task.taskId !== entry.task.taskId,
       );
 
       expect(task).toBeDefined();
       if (resultKind === "tool") {
-        expect(task?.activityWorkIdentity).toBeUndefined();
+        expect(task?.task.activityWorkIdentity).toBeUndefined();
         return;
       }
-      expect(task?.activityWorkIdentity).toMatchObject({
+      expect(task?.task.activityWorkIdentity).toMatchObject({
         callId: "new-call",
         kind: "task",
         name: "research",
@@ -279,12 +288,14 @@ describe("background subagent steering", () => {
     );
     const committed = await scope.commit();
     const task = getSessionTaskIndex(committed.state).find(
-      (candidate) => candidate.taskId !== entry.taskId,
+      (candidate) => candidate.task.taskId !== entry.task.taskId,
     );
 
     expect(task).toMatchObject({
-      activityWorkIdentity: { label: "Investigator", name: "research" },
-      metadata: { name: "research" },
+      task: {
+        activityWorkIdentity: { label: "Investigator", name: "research" },
+        metadata: { name: "research" },
+      },
     });
   });
 
@@ -298,7 +309,7 @@ describe("background subagent steering", () => {
     const scope = await createScope(
       recordSessionTask(createSession(), {
         ...entry,
-        metadata: { ...entry.metadata, agentId: "another-child" },
+        task: { ...entry.task, metadata: { ...entry.task.metadata, agentId: "another-child" } },
       }),
     );
     await expect(scope.execute()).rejects.toThrow("AGENT_BUSY");
@@ -379,8 +390,8 @@ describe("background subagent steering", () => {
     const scope = await createScope();
     const receipts = await Promise.all([scope.execute("first-call"), scope.execute("second-call")]);
     expect(receipts).toEqual([
-      { agentId: identity.id, status: "working", taskId: entry.taskId },
-      { agentId: identity.id, status: "working", taskId: entry.taskId },
+      { agentId: identity.id, status: "working", taskId: entry.task.taskId },
+      { agentId: identity.id, status: "working", taskId: entry.task.taskId },
     ]);
     expect(steerBackgroundAgent).toHaveBeenCalledTimes(2);
     expect(startTaskRun).not.toHaveBeenCalled();

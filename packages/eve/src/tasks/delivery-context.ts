@@ -46,11 +46,15 @@ export function resolveTaskDeliveryContext(input: {
     }
   | undefined {
   const entries = getSessionTaskIndex(input.state);
-  const delivered = entries.find((entry) => input.taskDeliveryId.startsWith(`${entry.taskId}:`));
+  const delivered = entries.find((entry) =>
+    input.taskDeliveryId.startsWith(`${entry.task.taskId}:`),
+  );
   if (delivered === undefined) return undefined;
 
-  const cohort = entries.filter((entry) => getTaskCohortId(entry) === getTaskCohortId(delivered));
-  return { ...projectTaskCohort(cohort), rootTurnId: delivered.createdByTurnId };
+  const cohort = entries.filter(
+    (entry) => getTaskCohortId(entry.task) === getTaskCohortId(delivered.task),
+  );
+  return { ...projectTaskCohort(cohort), rootTurnId: delivered.origin.turnId };
 }
 
 /** Returns model context for durable tasks launched by the active parent turn. */
@@ -59,9 +63,9 @@ export function resolveInitiatingTaskContext(input: {
   readonly turnId: string;
 }): { readonly context: string; readonly phase: "initiating" } | undefined {
   const cohort = getSessionTaskIndex(input.state).filter(
-    (entry) => entry.createdByTurnId === input.turnId,
+    (entry) => entry.origin.turnId === input.turnId,
   );
-  if (!cohort.some((entry) => entry.terminalView === undefined)) {
+  if (!cohort.some((entry) => entry.task.terminalView === undefined)) {
     return undefined;
   }
   return { ...projectTaskCohort(cohort), phase: "initiating" };
@@ -71,12 +75,12 @@ function projectTaskCohort(cohort: readonly SessionTaskIndexEntry[]): {
   readonly context: string;
   readonly phase: "pending" | "settled";
 } {
-  const settled = cohort.every((entry) => entry.terminalView !== undefined);
+  const settled = cohort.every((entry) => entry.task.terminalView !== undefined);
   const tasks = cohort.map((entry) => ({
-    name: entry.metadata.name,
-    output: settled ? entry.terminalView?.lastOutput : undefined,
-    status: entry.terminalView?.status ?? "pending",
-    taskId: entry.taskId,
+    name: entry.task.metadata.name,
+    output: settled ? entry.task.terminalView?.lastOutput : undefined,
+    status: entry.task.terminalView?.status ?? "pending",
+    taskId: entry.task.taskId,
   }));
 
   return {

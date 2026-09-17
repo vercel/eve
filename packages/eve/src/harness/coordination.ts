@@ -313,23 +313,25 @@ export async function resolvePendingCoordination(input: {
   // Drop a finished run's unanswered requests so a late click cannot reach it.
   for (const result of readyResults) {
     if (result.kind !== "tool-result") continue;
-    const record = findWorkflowToolRun(nextSession.state, result.callId);
+    const record = findWorkflowToolRun(nextSession.state, result.callId, batch.event.turnId);
     if (record === undefined) continue;
     nextSession = removeWorkflowToolRun(
       clearProxyInputRequestsWhere(
         nextSession,
-        (route) => route.answerHook?.runId === record.runId,
+        (route) => route.answerHook?.runId === record.address.runId,
       ),
       record.callId,
+      batch.event.turnId,
     );
   }
   for (const result of readyResults) {
     if (result.kind !== "subagent-result") continue;
-    const record = findWorkflowToolRun(nextSession.state, result.callId);
+    const record = findWorkflowToolRun(nextSession.state, result.callId, batch.event.turnId);
     if (record?.resultKind !== "subagent") continue;
     nextSession = removeWorkflowToolRun(
-      clearProxyInputRequestsForChild(nextSession, record.hookToken),
+      clearProxyInputRequestsForChild(nextSession, record.address.hookToken),
       record.callId,
+      batch.event.turnId,
     );
   }
 

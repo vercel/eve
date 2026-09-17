@@ -21,14 +21,19 @@ const conversation: ConversationContext = {
 };
 
 const sessionState = {
-  "eve.runtime.workflowToolRuns": [
-    {
-      callId: "workflow",
-      hookToken: "workflow-hook",
-      runId: "workflow-run",
-      toolName: "coordinate",
-    },
-  ],
+  "eve.runtime.workflowInvocations": {
+    version: 1,
+    invocations: [
+      {
+        callId: "workflow",
+        toolName: "coordinate",
+        resultKind: "tool" as const,
+        lifetime: "turn" as const,
+        origin: { turnId: "turn-1", stepIndex: 0 },
+        address: { runId: "workflow-run", hookToken: "workflow-hook" },
+      },
+    ],
+  },
 };
 
 describe("agent invocation trace coordinator", () => {

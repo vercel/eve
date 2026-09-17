@@ -1,14 +1,14 @@
 ---
 issue: https://github.com/vercel/eve/issues/1084
 status: draft
-last_updated: "2026-09-16"
+last_updated: "2026-09-17"
 ---
 
 # Background tasks: one workflow invocation runtime
 
 **Prototype result: background work is a session-owned workflow invocation.** Waiting and
-background tools now enter through one durable workflow kind and share body execution, report
-drainage, and cancellation finality. The background owner retains admission, human-input state,
+background tools now enter through one durable workflow kind, use one session invocation registry,
+and share body execution, report drainage, and cancellation finality. The background owner retains admission, human-input state,
 child ownership, accounting, and session delivery; it no longer translates workflow traffic into a
 second executor protocol.
 
@@ -42,19 +42,73 @@ adapter delivers messages to its waiting turn. The background owner creates the 
 `ready`; its admitted work remains session-bound and survives the initiating turn. [Foreground adapter][prototype-blocking],
 [background adapter][prototype-background]
 
-| Concern                             | Before                                                        | Prototype                                           |
-| ----------------------------------- | ------------------------------------------------------------- | --------------------------------------------------- |
-| Workflow-body execution owners      | 2 direct callers of `executeWorkflowBody`                     | 1 shared invocation reader                          |
-| Background executor implementations | Workflow body or inline `defineTool` body                     | Workflow body only                                  |
-| Durable workflow kinds              | Foreground workflow-tool run and background task run          | One workflow-tool run entry                         |
-| Mutable lifecycle writers           | Foreground run record and background `TaskView` writer        | Unchanged; each lifetime keeps one writer           |
-| Persistent records                  | Harness workflow-tool-run record and session task-index entry | Unchanged; no result ledger added                   |
-| Authored background protocols       | Return/yield plus `TaskExec`/`TaskMessage`                    | Return/yield plus workflow context                  |
-| Terminal report classifier          | Successful `:ready:completed` delivery ID suffix              | Stable terminal delivery ID, retained after routing |
+| Concern                             | Before                                               | Prototype                                           |
+| ----------------------------------- | ---------------------------------------------------- | --------------------------------------------------- |
+| Workflow-body execution owners      | 2 direct callers of `executeWorkflowBody`            | 1 shared invocation reader                          |
+| Background executor implementations | Workflow body or inline `defineTool` body            | Workflow body only                                  |
+| Durable workflow kinds              | Foreground workflow-tool run and background task run | One workflow-tool run entry                         |
+| Persistent records                  | Separate workflow-tool-run and task registries       | One invocation registry, with task payloads         |
+| Authored background protocols       | Return/yield plus `TaskExec`/`TaskMessage`           | Return/yield plus workflow context                  |
+| Terminal report classifier          | Successful `:ready:completed` delivery ID suffix     | Stable terminal delivery ID, retained after routing |
 
-A task is the public handle for an admitted session-owned invocation. The session index still
-checks ownership and groups results. Turn-owned records remain separate because turn completion
-must clear them without discarding background work.
+A task is the public handle for an admitted session-owned invocation. Both lifetimes now live in
+`eve.runtime.workflowInvocations`; task lookup and waiting-run lookup are filtered views of that
+registry. Cleanup selects the originating turn and `lifetime: "turn"`, so it cannot discard
+session-owned work. [Registry][prototype-registry]
+
+## Shared state and retention
+
+Store invocation identity and ownership once; keep task-specific behavior in a typed `task` payload.
+The identity is `(origin.turnId, callId)` within the owning session. `taskId` remains the public task
+handle. No additional invocation ID or generic extension system is introduced.
+
+```ts
+type Invocation = {
+  callId: string;
+  toolName: string;
+  resultKind: "tool" | "subagent";
+  origin: { turnId: string; stepIndex: number };
+  address: { runId: string; hookToken: string };
+} & (
+  | { lifetime: "turn" }
+  | {
+      lifetime: "session";
+      task: {
+        taskId: string;
+        metadata: TaskMetadata;
+        dispatchContext: TaskAgentDispatchContext;
+        activityWorkIdentity?: ActivityWorkIdentityV1;
+        cohortId?: string;
+        terminalView?: TaskView;
+      };
+    }
+);
+```
+
+The code names are `WorkflowInvocation` and `WorkflowTaskPayload`. `TaskAgentDispatchContext`
+captures the creator's authentication and dynamic subagent selections; it must not be replaced
+with the authentication of a later input delivery. `TaskMetadata` describes the public task,
+`ActivityWorkIdentityV1` links its activity stream, and `TaskView` is its public status/output view.
+`cohortId` groups overlapping work for one combined report.
+
+| State                                                      | Owner and lifetime                                                                                                          |
+| ---------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| Common identity, origin, run address                       | Session registry; waiting entries are removed when their call settles or their turn is cancelled                            |
+| Task metadata, creator context, cohort membership          | Typed task payload; retained for the session lifetime                                                                       |
+| Working/input-required status, pending questions, progress | Background run and its existing streams                                                                                     |
+| Final task status and output                               | Run-owned `TaskView`, cached in `task.terminalView`; retained for the session lifetime, including after the combined report |
+| Pending deliveries and report deduplication                | Existing session input queue                                                                                                |
+
+Registration precedes the `ready` admission command. A waiting outcome is matched against its
+originating turn, call ID, and run ID. Authorization can end the visible turn while its workflow
+call remains pending; cancellation uses the pending coordination batch's originating turn in that
+case. Results without an origin can bind only to an unambiguous recorded call. Replaying
+registration preserves original creator context,
+cohort membership, and any cached terminal view. Reusing a task ID for another turn is rejected.
+
+**Retention decision:** completed, failed, and cancelled task payloads stay until the session ends.
+Report delivery does not prune them. This avoids a second cleanup protocol for now; retained state
+therefore grows with task count and final output size. Live progress is not copied into this registry.
 
 ## What was eliminated
 
@@ -74,14 +128,16 @@ The prototype deletes these responsibilities rather than renaming them:
 - Workflow-to-task outcome, progress, and question wrappers. The background owner consumes
   workflow messages directly; only session delivery and public view projection adapt their shape.
 - Pre-admission progress buffering: the workflow body cannot emit before `ready` starts it.
+- The separate `eve.tasks` and `eve.runtime.workflowToolRuns` stores, their independent write
+  paths, and task-specific copies of creation provenance and run address.
 
 These responsibilities were retained or relocated:
 
 - Body start, report drainage, cancellation cleanup, and final outcome construction live in the shared invocation reader.
 - Admission, compensation, child reservation/claiming, steering, task cancellation, and session
   indexing remain in the task owner.
-- Foreground workflow-tool-run records and background task records remain separate projections
-  because they have different ownership lifetimes.
+- Waiting-run and task lookup remain filtered projections of the shared invocation registry.
+  The lifetime discriminator controls cleanup.
 - The session input queue still buffers active-turn deliveries and performs cohort release.
 
 ## Size comparison
@@ -140,6 +196,10 @@ the third executor argument, and replacing parent messages with progress or the 
 A dependency on an intermediate result belongs inside the owning workflow through `ctx.agent`,
 `ctx.ask`, or another durable operation.
 
+Existing sessions containing either old registry key are rejected by the new runtime. Conversation
+import can stop discoverable old runs and retain conversation history, but does not migrate pending
+work. Completed task payloads also require the new format before deployment handoff.
+
 ## Demonstrated behavior
 
 | Requirement                                                   | Evidence                                                              |
@@ -156,12 +216,15 @@ A dependency on an intermediate result belongs inside the owning workflow throug
 | Duplicate terminal delivery                                   | Existing session next-input deduplication unit test                   |
 | Cross-turn cohort membership                                  | Existing session next-input cross-turn unit test                      |
 | Forced-stop cancellation notification                         | Cancellation integration test                                         |
+| Mixed invocation lifetimes and retained terminal payloads     | Shared registry unit test and turn-cancellation integration tests     |
+| Completion after authorization ends the visible turn          | Workflow authorization integration tests                              |
 | Extension migration boundary                                  | Generated capability reports and invariant guard                      |
 
 Exact checks run in this worktree:
 
-- Full unit tier: **798 files passed; 8,678 tests passed; 1 skipped**.
-- Workflow/task integration slice: **3 files, 42 tests passed**, including forced-stop cancellation.
+- Full unit tier: **799 files passed; 8,676 tests passed; 1 skipped**.
+- Workflow/session integration slices: **7 files, 107 tests passed**, including authorization, handoff,
+  telemetry, forced-stop cancellation, and retention during active or paused turn cancellation.
 - TypeScript `--noEmit`, fresh production TypeScript/Rolldown build, focused lint, formatting,
   `git diff --check`, extension-contract generation, and `guard:invariants`: passed.
 - Documentation frontmatter/navigation, import snippets, and MDX compilation: passed for all 89
@@ -202,7 +265,7 @@ error.
 ## Recommendation
 
 Retain the shared invocation runtime and the three approved scope reductions as one change. Do not
-replace `TaskView` or the session task index with raw Workflow status: doing so would discard
+replace run-owned `TaskView` or typed task payloads with raw Workflow status: doing so would discard
 `input_required`, final cancellation ownership, child identity/accounting, and replay-stable cohort
 membership. Before production merge, add CI E2E coverage for the combined-path gaps above,
 especially initiating-turn cancellation and active-parent report release.
@@ -210,3 +273,4 @@ especially initiating-turn cancellation and active-parent report release.
 [prototype-invocation]: ../packages/eve/src/execution/tools/workflow/invocation.ts
 [prototype-blocking]: ../packages/eve/src/execution/tools/workflow/workflow.ts
 [prototype-background]: ../packages/eve/src/execution/tools/workflow/background-owner.ts
+[prototype-registry]: ../packages/eve/src/harness/workflow-invocations.ts

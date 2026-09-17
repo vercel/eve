@@ -253,13 +253,18 @@ describe("owner agent invocation dispatch", () => {
         rootTurnId: "root-turn",
       };
       const indexedSession = recordSessionTask(session as never, {
-        activityWorkIdentity: taskWork,
-        createdByTurnId: "turn-1",
-        dispatchContext: taskDispatchContext,
-        metadata: { kind: taskKind, name: "research" },
-        taskId: "task-1",
-        taskInboxToken: "task-token",
-        taskRunId: "task-run",
+        callId: "task-1",
+        toolName: { kind: taskKind, name: "research" }.name,
+        resultKind: "tool" as const,
+        lifetime: "session" as const,
+        origin: { turnId: "turn-1", stepIndex: 0 },
+        address: { runId: "task-run", hookToken: "task-token" },
+        task: {
+          activityWorkIdentity: taskWork,
+          dispatchContext: taskDispatchContext,
+          metadata: { kind: taskKind, name: "research" },
+          taskId: "task-1",
+        },
       });
       vi.mocked(readDurableSession).mockReturnValue(indexedSession as never);
       vi.mocked(readLatestTaskView).mockResolvedValue({
@@ -342,14 +347,19 @@ describe("owner agent invocation dispatch", () => {
       [InitiatorAuthKey.name]: sessionInitiatorAuth,
     };
     const indexedSession = recordSessionTask(session as never, {
-      createdByTurnId: "turn-1",
-      dispatchContext: {
-        auth: { current: null, initiator: sessionInitiatorAuth },
+      callId: "task-1",
+      toolName: "research",
+      resultKind: "tool" as const,
+      lifetime: "session" as const,
+      origin: { turnId: "turn-1", stepIndex: 0 },
+      address: { runId: "task-run", hookToken: "task-token" },
+      task: {
+        dispatchContext: {
+          auth: { current: null, initiator: sessionInitiatorAuth },
+        },
+        metadata: { kind: "subagent", name: "research" },
+        taskId: "task-1",
       },
-      metadata: { kind: "subagent", name: "research" },
-      taskId: "task-1",
-      taskInboxToken: "task-token",
-      taskRunId: "task-run",
     });
     vi.mocked(readDurableSession).mockReturnValue(indexedSession as never);
     vi.mocked(readLatestTaskView).mockResolvedValue({
@@ -389,22 +399,27 @@ describe("owner agent invocation dispatch", () => {
     expect(result).toMatchObject({ serializedContext });
   });
 
-  it("rejects only nested dispatch for a legacy task without creator context", async () => {
+  it("rejects missing creator context before dispatching with receiver authentication", async () => {
     vi.mocked(readDurableSession).mockReturnValue({
       ...session,
       state: {
         ...session.state,
-        "eve.tasks": {
-          tasks: [
+        "eve.runtime.workflowInvocations": {
+          version: 1,
+          invocations: [
             {
-              createdByTurnId: "turn-1",
-              metadata: { kind: "subagent", name: "research" },
-              taskId: "task-1",
-              taskInboxToken: "task-token",
-              taskRunId: "task-run",
+              callId: "task-1",
+              toolName: "research",
+              resultKind: "tool" as const,
+              lifetime: "session" as const,
+              origin: { turnId: "turn-1", stepIndex: 0 },
+              address: { runId: "task-run", hookToken: "task-token" },
+              task: {
+                metadata: { kind: "subagent", name: "research" },
+                taskId: "task-1",
+              },
             },
           ],
-          version: 2,
         },
       },
     } as never);
@@ -427,13 +442,7 @@ describe("owner agent invocation dispatch", () => {
         sessionState: { sessionId: "parent" } as never,
         taskId: "task-1",
       }),
-    ).resolves.toMatchObject({
-      kind: "failed",
-      result: {
-        isError: true,
-        output: { code: "AGENT_INVOCATION_AUTH_UNAVAILABLE" },
-      },
-    });
+    ).rejects.toThrow("Corrupt workflow invocation registry");
     expect(prepareOwnerAgentInvocation).not.toHaveBeenCalled();
   });
 

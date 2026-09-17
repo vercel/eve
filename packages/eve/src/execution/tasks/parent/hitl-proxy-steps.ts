@@ -45,7 +45,7 @@ export async function recordTaskInputRequestStep(input: {
   if (entry === undefined || requests.length === 0 || !requests.every(isInputRequest)) {
     return { accepted: false, sessionState: input.sessionState };
   }
-  const view = await readLatestTaskView({ taskRunId: entry.taskRunId });
+  const view = await readLatestTaskView({ taskRunId: entry.address.runId });
   const requestIds = requests.map((request) => request.requestId);
   if (
     view?.status !== "input_required" ||

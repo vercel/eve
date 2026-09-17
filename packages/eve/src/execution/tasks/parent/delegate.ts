@@ -3,7 +3,6 @@
  * The parent commits its session index before releasing the workflow body.
  */
 import type { HarnessSession } from "#harness/types.js";
-import type { ActivityWorkIdentityV1 } from "#protocol/activity.js";
 import {
   readLatestTaskView,
   sendTaskCommand,
@@ -21,16 +20,7 @@ import {
 } from "#context/keys.js";
 
 /** A prepared background task: identity plus its started durable run. */
-export interface BackgroundTask {
-  readonly activityWorkIdentity?: ActivityWorkIdentityV1;
-  readonly dispatchContext: TaskAgentDispatchContext;
-  readonly taskInboxToken: string;
-  readonly createdByStepIndex?: number;
-  readonly createdByTurnId: string;
-  readonly metadata: TaskMetadata;
-  readonly taskId: string;
-  readonly taskRunId: string;
-}
+export type BackgroundTask = import("#harness/workflow-invocations.js").TaskWorkflowInvocation;
 
 export function createTaskAgentDispatchContext(
   ctx: ContextReader,
@@ -43,7 +33,9 @@ export function createTaskAgentDispatchContext(
   };
 }
 
-type BackgroundTaskDraft = Omit<BackgroundTask, "taskRunId">;
+export type BackgroundTaskDraft = Omit<BackgroundTask, "address"> & {
+  readonly address: { readonly hookToken: string };
+};
 
 /** Derives the replay-stable task identity before its owning run is started. */
 export function prepareBackgroundTask(input: {
@@ -61,15 +53,18 @@ export function prepareBackgroundTask(input: {
     parentTurnId: input.parentTurnId,
   });
   return {
-    taskInboxToken: deriveTaskInboxToken({
-      parentContinuationToken: input.session.continuationToken,
-      taskId,
-    }),
-    createdByStepIndex: input.parentStepIndex ?? 0,
-    createdByTurnId: input.parentTurnId,
-    dispatchContext: input.dispatchContext,
-    metadata: input.metadata,
-    taskId,
+    callId: input.callId,
+    toolName: input.metadata.name,
+    resultKind: input.metadata.kind === "subagent" ? "subagent" : "tool",
+    lifetime: "session",
+    origin: { turnId: input.parentTurnId, stepIndex: input.parentStepIndex ?? 0 },
+    address: {
+      hookToken: deriveTaskInboxToken({
+        parentContinuationToken: input.session.continuationToken,
+        taskId,
+      }),
+    },
+    task: { dispatchContext: input.dispatchContext, metadata: input.metadata, taskId },
   };
 }
 
@@ -103,7 +98,7 @@ export async function rejectDelegatedDispatch(input: {
 }): Promise<void> {
   await sendTaskCommand({
     command: { data: input.error, kind: "reject-dispatch" },
-    taskInboxToken: input.task.taskInboxToken,
+    taskInboxToken: input.task.address.hookToken,
     retryUnreachable: { attempts: 20, delayMs: 250 },
   });
 }

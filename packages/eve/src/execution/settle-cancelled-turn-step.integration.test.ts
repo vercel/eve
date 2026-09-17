@@ -5,7 +5,13 @@ import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-a
 import { createDurableSessionState } from "#execution/durable-session-store.js";
 import { settleCancelledTurnStep } from "#execution/settle-cancelled-turn-step.js";
 import { setHarnessEmissionState } from "#harness/emission.js";
+import { setPendingCoordinationBatch } from "#harness/coordination.js";
 import { recordWorkflowToolRun } from "#harness/workflow-tool-runs.js";
+import {
+  getWorkflowInvocations,
+  registerWorkflowInvocation,
+  type TaskWorkflowInvocation,
+} from "#harness/workflow-invocations.js";
 import { deriveAgentOperationId } from "#subagents/handles/operation-id.js";
 import {
   AGENT_HANDLES_STATE_KEY,
@@ -166,10 +172,11 @@ describe("settleCancelledTurnStep handle store", () => {
     await runtime.run(async () => {
       const session = recordWorkflowToolRun(createCancelledTurnSession([CLAIMED_HANDLE]), {
         callId: "workflow-call",
-        hookToken: "workflow-hook",
         resultKind: "tool",
-        runId: "workflow-run",
         toolName: "Workflow",
+        lifetime: "turn" as const,
+        origin: { turnId: "turn-1", stepIndex: 0 },
+        address: { runId: "workflow-run", hookToken: "workflow-hook" },
       });
       const result = await settleCancelledTurnStep({
         sessionWritable: new WritableStream<Uint8Array>({ write() {} }),
@@ -189,4 +196,68 @@ describe("settleCancelledTurnStep handle store", () => {
       });
     });
   });
+  it.each([false, true])(
+    "retains task payloads on turn cancellation (paused=%s)",
+    async (paused) => {
+      const runtime = await createTestRuntime({ agent: { name: "settle-mixed-invocations" } });
+      await runtime.run(async () => {
+        const background: TaskWorkflowInvocation = {
+          callId: "background-call",
+          lifetime: "session",
+          resultKind: "tool",
+          toolName: "research",
+          origin: { turnId: "turn-1", stepIndex: 0 },
+          address: { runId: "background-run", hookToken: "background-hook" },
+          task: {
+            taskId: "background-task",
+            metadata: { kind: "tool", name: "research" },
+            dispatchContext: { auth: { current: null, initiator: null } },
+          },
+        };
+        let session = registerWorkflowInvocation(createCancelledTurnSession([]), background);
+        session = registerWorkflowInvocation(session, {
+          ...background,
+          callId: "completed-call",
+          task: {
+            ...background.task,
+            taskId: "completed-task",
+            terminalView: {
+              taskId: "completed-task",
+              metadata: background.task.metadata,
+              status: "completed",
+              lastOutput: { type: "result", data: "retained output" },
+            },
+          },
+        });
+        const tasks = getWorkflowInvocations(session.state);
+        session = recordWorkflowToolRun(session, {
+          callId: "waiting-call",
+          toolName: "research",
+          resultKind: "tool",
+          lifetime: "turn",
+          origin: { turnId: "turn-1", stepIndex: 0 },
+          address: { runId: "waiting-run", hookToken: "waiting-hook" },
+        });
+        if (paused)
+          session = setPendingCoordinationBatch({
+            event: { sequence: 3, stepIndex: 1, turnId: "turn-1" },
+            responseMessages: [],
+            runtimeActions: [],
+            tasks: [],
+            session: setHarnessEmissionState(session, {
+              sequence: 4,
+              stepIndex: 0,
+              sessionStarted: true,
+              turnId: "",
+            }),
+          });
+        const result = await settleCancelledTurnStep({
+          sessionWritable: new WritableStream<Uint8Array>({ write() {} }),
+          serializedContext: buildSerializedContext(),
+          sessionState: createDurableSessionState({ session }),
+        });
+        expect(getWorkflowInvocations(result.sessionState.snapshot.session.state)).toEqual(tasks);
+      });
+    },
+  );
 });

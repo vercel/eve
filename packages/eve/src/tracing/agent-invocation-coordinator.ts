@@ -55,7 +55,8 @@ export function prepareAgentInvocationTrace(input: {
       : readTaskActionTrace(input.serializedContext, input.sessionId, input.taskId);
   const parentActionCallId =
     input.taskId === undefined
-      ? getWorkflowToolRuns(input.sessionState).find((run) => run.runId === input.ownerId)?.callId
+      ? getWorkflowToolRuns(input.sessionState).find((run) => run.address.runId === input.ownerId)
+          ?.callId
       : taskAction?.callId;
   const turnId = taskAction?.turnId ?? input.turnId;
   const parentTurnContext = readTurnTraceContext(input.serializedContext, input.sessionId, turnId);

@@ -528,9 +528,11 @@ describe("resolvePendingCoordination", () => {
     });
     const withRun = recordWorkflowToolRun(parked, {
       callId: "call-1",
-      hookToken: "eve:workflow-tool-run:op-1",
-      runId: "run-1",
       toolName: "deploy",
+      resultKind: "tool" as const,
+      lifetime: "turn" as const,
+      origin: { turnId: "turn_0", stepIndex: 0 },
+      address: { runId: "run-1", hookToken: "eve:workflow-tool-run:op-1" },
     });
     const answerToken = "eve:workflow-tool-run-answer:run-1:0";
     const session = upsertProxyInputRequests({

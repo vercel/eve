@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AGENT_HANDLES_STATE_KEY, type AgentHandle } from "#subagents/handles/store.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import { terminateChildSessionsStep } from "#execution/terminate-child-sessions-step.js";
-import { SESSION_TASKS_STATE_KEY, type SessionTaskIndexEntry } from "#tasks/session-index.js";
+import { type SessionTaskIndexEntry } from "#tasks/session-index.js";
 
 const COMPILED_BUNDLE = {
   subagentRegistry: { subagentsByNodeId: new Map() },
@@ -429,15 +429,23 @@ function startingHandle(input: {
 
 function indexedTask(taskId: string): SessionTaskIndexEntry {
   return {
-    taskInboxToken: `${taskId}:inbox`,
-    createdByTurnId: "turn-1",
-    dispatchContext: { auth: { current: null, initiator: null } },
-    metadata: {
+    callId: taskId,
+    toolName: {
       kind: "tool",
       name: "research",
+    }.name,
+    resultKind: "tool" as const,
+    lifetime: "session" as const,
+    origin: { turnId: "turn-1", stepIndex: 0 },
+    address: { runId: `run-${taskId}`, hookToken: `${taskId}:inbox` },
+    task: {
+      dispatchContext: { auth: { current: null, initiator: null } },
+      metadata: {
+        kind: "tool",
+        name: "research",
+      },
+      taskId,
     },
-    taskId,
-    taskRunId: `run-${taskId}`,
   };
 }
 
@@ -466,7 +474,7 @@ function makeSessionState(
             ? { [AGENT_HANDLES_STATE_KEY]: { handles } }
             : {
                 [AGENT_HANDLES_STATE_KEY]: { handles },
-                [SESSION_TASKS_STATE_KEY]: { tasks, version: 2 },
+                "eve.runtime.workflowInvocations": { version: 1, invocations: tasks },
               },
       },
     },

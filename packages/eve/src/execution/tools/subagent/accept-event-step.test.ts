@@ -36,18 +36,23 @@ const hookPayload = {
   subagentName: "research",
 };
 const taskIndex = {
-  "eve.tasks": {
-    tasks: [
+  "eve.runtime.workflowInvocations": {
+    version: 1,
+    invocations: [
       {
-        createdByTurnId: "turn-1",
-        dispatchContext: { auth: { current: null, initiator: null } },
-        metadata: { kind: "tool", name: "export" },
-        taskId: "task-1",
-        taskInboxToken: "task-token",
-        taskRunId: "task-run",
+        callId: "task-1",
+        toolName: "export",
+        resultKind: "tool" as const,
+        lifetime: "session" as const,
+        origin: { turnId: "turn-1", stepIndex: 0 },
+        address: { runId: "task-run", hookToken: "task-token" },
+        task: {
+          dispatchContext: { auth: { current: null, initiator: null } },
+          metadata: { kind: "tool", name: "export" },
+          taskId: "task-1",
+        },
       },
     ],
-    version: 2,
   },
 };
 

@@ -877,12 +877,17 @@ describe("tool loop generate approval resume (real AI SDK)", () => {
       if (historyKey === "taskState") {
         ctx.set(TurnTaskDeliveryKey, "initiating");
         session = recordSessionTask(session, {
-          createdByTurnId: "turn-1",
-          dispatchContext: { auth: { current: null, initiator: null } },
-          metadata: { kind: "report-probe", name: "analysis" },
-          taskId: "analysis",
-          taskInboxToken: "task-token",
-          taskRunId: "task-run",
+          callId: "analysis",
+          toolName: "analysis",
+          resultKind: "tool" as const,
+          lifetime: "session" as const,
+          origin: { turnId: "turn-1", stepIndex: 0 },
+          address: { runId: "task-run", hookToken: "task-token" },
+          task: {
+            dispatchContext: { auth: { current: null, initiator: null } },
+            metadata: { kind: "report-probe", name: "analysis" },
+            taskId: "analysis",
+          },
         });
       } else {
         ctx.set(PendingSkillAnnouncementKey, runtimeContextAnnouncement);

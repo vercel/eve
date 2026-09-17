@@ -16,7 +16,7 @@ export const cancelBackgroundAgentTask: TaskExecutorCancel = async (input) => {
   if (input.session === undefined || input.serializedContext === undefined) return;
   const session = input.session as RuntimeSession;
   const handle = getAgentHandleStore(session.state)?.handles.find(
-    (candidate) => candidate.phase === "claimed" && candidate.ownerId === input.entry.taskId,
+    (candidate) => candidate.phase === "claimed" && candidate.ownerId === input.entry.task.taskId,
   );
   if (handle === undefined || handle.phase !== "claimed") return;
   if (handle.address.kind !== "agent/remote") {

@@ -60,7 +60,7 @@ export async function cancelAllIndexedSessionTasksStep(input: {
     } catch (error) {
       logError(log, "failed to cancel indexed task", error, {
         parentSessionId: durable.sessionId,
-        taskId: entry.taskId,
+        taskId: entry.task.taskId,
       });
     }
   }

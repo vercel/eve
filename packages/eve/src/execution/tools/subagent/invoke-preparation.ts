@@ -78,8 +78,8 @@ export async function prepareOwnerAgentInvocation(input: {
       requests: [action],
       event: {
         ...event,
-        stepIndex: task?.createdByStepIndex ?? event.stepIndex,
-        turnId: task?.createdByTurnId ?? activeTurnId(event),
+        stepIndex: task?.origin.stepIndex ?? event.stepIndex,
+        turnId: task?.origin.turnId ?? activeTurnId(event),
       },
     },
     ctx,

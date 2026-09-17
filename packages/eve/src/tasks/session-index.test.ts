@@ -2,8 +2,6 @@ import { describe, expect, it } from "vitest";
 
 import type { HarnessSession } from "#harness/types.js";
 import {
-  LEGACY_TASK_AGENT_DISPATCH_CONTEXT,
-  SESSION_TASKS_STATE_KEY,
   cacheTerminalTaskView,
   findSessionTaskEntry,
   getSessionTaskIndex,
@@ -41,21 +39,23 @@ describe("session task index", () => {
 
   it("records a task and finds it by id", () => {
     const session = recordSessionTask(createSession(), {
-      dispatchContext,
-      taskInboxToken: "task:token-1",
-      createdByTurnId: "turn-1",
-      metadata,
-      taskId: "task_a",
-      taskRunId: "run-1",
+      callId: "task_a",
+      toolName: metadata.name,
+      resultKind: "tool" as const,
+      lifetime: "session" as const,
+      origin: { turnId: "turn-1", stepIndex: 0 },
+      address: { runId: "run-1", hookToken: "task:token-1" },
+      task: { dispatchContext, metadata, taskId: "task_a" },
     });
 
     expect(findSessionTaskEntry(session.state, "task_a")).toEqual({
-      dispatchContext,
-      taskInboxToken: "task:token-1",
-      createdByTurnId: "turn-1",
-      metadata,
-      taskId: "task_a",
-      taskRunId: "run-1",
+      callId: "task_a",
+      toolName: metadata.name,
+      resultKind: "tool" as const,
+      lifetime: "session" as const,
+      origin: { turnId: "turn-1", stepIndex: 0 },
+      address: { runId: "run-1", hookToken: "task:token-1" },
+      task: { dispatchContext, metadata, taskId: "task_a" },
     });
     expect(findSessionTaskEntry(session.state, "task_other")).toBeUndefined();
   });
@@ -71,17 +71,17 @@ describe("session task index", () => {
       rootTurnId: "root-turn",
     };
     const session = recordSessionTask(createSession(), {
-      activityWorkIdentity,
-      dispatchContext,
-      taskInboxToken: "task:token-1",
-      createdByTurnId: "turn-1",
-      metadata,
-      taskId: "task_a",
-      taskRunId: "run-1",
+      callId: "task_a",
+      toolName: metadata.name,
+      resultKind: "tool" as const,
+      lifetime: "session" as const,
+      origin: { turnId: "turn-1", stepIndex: 0 },
+      address: { runId: "run-1", hookToken: "task:token-1" },
+      task: { activityWorkIdentity, dispatchContext, metadata, taskId: "task_a" },
     });
 
     const restoredState = JSON.parse(JSON.stringify(session.state));
-    expect(findSessionTaskEntry(restoredState, "task_a")?.activityWorkIdentity).toEqual(
+    expect(findSessionTaskEntry(restoredState, "task_a")?.task.activityWorkIdentity).toEqual(
       activityWorkIdentity,
     );
   });
@@ -95,97 +95,112 @@ describe("session task index", () => {
     } as const;
 
     const session = recordSessionTask(createSession(), {
-      dispatchContext,
-      taskInboxToken: "task:token-1",
-      createdByTurnId: "turn-1",
-      metadata: subagentMetadata,
-      taskId: "task_a",
-      taskRunId: "run-1",
+      callId: "task_a",
+      toolName: subagentMetadata.name,
+      resultKind: "tool" as const,
+      lifetime: "session" as const,
+      origin: { turnId: "turn-1", stepIndex: 0 },
+      address: { runId: "run-1", hookToken: "task:token-1" },
+      task: { dispatchContext, metadata: subagentMetadata, taskId: "task_a" },
     });
 
-    expect(findSessionTaskEntry(session.state, "task_a")?.metadata).toEqual(subagentMetadata);
+    expect(findSessionTaskEntry(session.state, "task_a")?.task.metadata).toEqual(subagentMetadata);
   });
 
   it("keeps a terminal view when replayed activity presentation changes", () => {
     let session = recordSessionTask(createSession(), {
-      activityWorkIdentity: {
-        callId: "call-1",
-        id: "work:task",
-        kind: "task",
-        label: "First label",
-        name: "research",
-        parentId: "work:root",
-        rootSessionId: "root-session",
-        rootTurnId: "root-turn",
+      callId: "task_a",
+      toolName: metadata.name,
+      resultKind: "tool" as const,
+      lifetime: "session" as const,
+      origin: { turnId: "turn-1", stepIndex: 0 },
+      address: { runId: "run-1", hookToken: "task:token-1" },
+      task: {
+        activityWorkIdentity: {
+          callId: "call-1",
+          id: "work:task",
+          kind: "task",
+          label: "First label",
+          name: "research",
+          parentId: "work:root",
+          rootSessionId: "root-session",
+          rootTurnId: "root-turn",
+        },
+        dispatchContext,
+        metadata,
+        taskId: "task_a",
       },
-      dispatchContext,
-      taskInboxToken: "task:token-1",
-      createdByTurnId: "turn-1",
-      metadata,
-      taskId: "task_a",
-      taskRunId: "run-1",
     });
     session = {
       ...session,
       state: cacheTerminalTaskView(session.state, terminal("task_a", "completed")),
     };
     session = recordSessionTask(session, {
-      activityWorkIdentity: {
-        callId: "call-1",
-        id: "work:task",
-        kind: "task",
-        label: "Second label",
-        name: "research",
-        parentId: "work:root",
-        rootSessionId: "root-session",
-        rootTurnId: "root-turn",
+      callId: "task_a",
+      toolName: metadata.name,
+      resultKind: "tool" as const,
+      lifetime: "session" as const,
+      origin: { turnId: "turn-1", stepIndex: 0 },
+      address: { runId: "run-2", hookToken: "task:token-2" },
+      task: {
+        activityWorkIdentity: {
+          callId: "call-1",
+          id: "work:task",
+          kind: "task",
+          label: "Second label",
+          name: "research",
+          parentId: "work:root",
+          rootSessionId: "root-session",
+          rootTurnId: "root-turn",
+        },
+        dispatchContext,
+        metadata,
+        taskId: "task_a",
       },
-      dispatchContext,
-      taskInboxToken: "task:token-2",
-      createdByTurnId: "turn-1",
-      metadata,
-      taskId: "task_a",
-      taskRunId: "run-2",
     });
 
     expect(findSessionTaskEntry(session.state, "task_a")).toMatchObject({
-      activityWorkIdentity: { label: "Second label" },
-      terminalView: terminal("task_a", "completed"),
+      task: {
+        activityWorkIdentity: { label: "Second label" },
+        terminalView: terminal("task_a", "completed"),
+      },
     });
   });
 
   it("replaces the entry on replayed creation instead of duplicating it", () => {
     let session = recordSessionTask(createSession(), {
-      dispatchContext,
-      taskInboxToken: "task:token-1",
-      createdByTurnId: "turn-1",
-      metadata,
-      taskId: "task_a",
-      taskRunId: "run-1",
+      callId: "task_a",
+      toolName: metadata.name,
+      resultKind: "tool" as const,
+      lifetime: "session" as const,
+      origin: { turnId: "turn-1", stepIndex: 0 },
+      address: { runId: "run-1", hookToken: "task:token-1" },
+      task: { dispatchContext, metadata, taskId: "task_a" },
     });
     session = recordSessionTask(session, {
-      dispatchContext,
-      taskInboxToken: "task:token-2",
-      createdByTurnId: "turn-1",
-      metadata,
-      taskId: "task_a",
-      taskRunId: "run-2",
+      callId: "task_a",
+      toolName: metadata.name,
+      resultKind: "tool" as const,
+      lifetime: "session" as const,
+      origin: { turnId: "turn-1", stepIndex: 0 },
+      address: { runId: "run-2", hookToken: "task:token-2" },
+      task: { dispatchContext, metadata, taskId: "task_a" },
     });
 
     const entries = getSessionTaskIndex(session.state);
     expect(entries).toHaveLength(1);
-    expect(entries[0]?.taskRunId).toBe("run-2");
+    expect(entries[0]?.address.runId).toBe("run-2");
   });
 
   function task(taskId: string, createdByTurnId: string) {
     return {
-      createdByStepIndex: 0,
-      createdByTurnId,
-      dispatchContext,
-      metadata,
-      taskId,
-      taskInboxToken: `inbox-${taskId}`,
-      taskRunId: `run-${taskId}`,
+      callId: taskId,
+      toolName: metadata.name,
+      resultKind: "tool" as const,
+      lifetime: "session" as const,
+      origin: { turnId: createdByTurnId, stepIndex: 0 },
+      address: { runId: `run-${taskId}`, hookToken: `inbox-${taskId}` },
+      task: { dispatchContext, metadata, taskId },
     };
   }
 
@@ -202,10 +217,10 @@ describe("session task index", () => {
     const second = task("task_b", "turn-2");
     const session = recordSessionTask(initial, second);
     const entries = getSessionTaskIndex(session.state);
-    expect(entries.map(getTaskCohortId)).toEqual(["task_a", "task_a"]);
-    expect(entries.map((entry) => entry.createdByTurnId)).toEqual(["turn-1", "turn-2"]);
-    expect(entries[0]?.cohortId).toBeUndefined();
-    expect(entries[1]?.cohortId).toBe("task_a");
+    expect(entries.map((entry) => getTaskCohortId(entry.task))).toEqual(["task_a", "task_a"]);
+    expect(entries.map((entry) => entry.origin.turnId)).toEqual(["turn-1", "turn-2"]);
+    expect(entries[0]?.task.cohortId).toBeUndefined();
+    expect(entries[1]?.task.cohortId).toBe("task_a");
     const restored = createSession(JSON.parse(JSON.stringify(initial.state)));
     expect(recordSessionTask(restored, second).state).toEqual(session.state);
     expect(getSessionTaskIndex(initial.state)).toHaveLength(1);
@@ -221,11 +236,9 @@ describe("session task index", () => {
         state: cacheTerminalTaskView(session.state, terminal("task_a", status)),
       };
       session = recordSessionTask(session, task("task_c", "turn-2"));
-      expect(getSessionTaskIndex(session.state).map(getTaskCohortId)).toEqual([
-        "task_a",
-        "task_a",
-        "task_a",
-      ]);
+      expect(
+        getSessionTaskIndex(session.state).map((entry) => getTaskCohortId(entry.task)),
+      ).toEqual(["task_a", "task_a", "task_a"]);
       expect([...getSessionTaskCohorts(session.state).values()]).toEqual([
         { cohortId: "task_a", settled: true },
         { cohortId: "task_a", settled: false },
@@ -239,12 +252,9 @@ describe("session task index", () => {
       }
       // Even another creation in the same turn must not reopen a settled cohort.
       session = recordSessionTask(session, task("task_d", "turn-2"));
-      expect(getSessionTaskIndex(session.state).map(getTaskCohortId)).toEqual([
-        "task_a",
-        "task_a",
-        "task_a",
-        "task_d",
-      ]);
+      expect(
+        getSessionTaskIndex(session.state).map((entry) => getTaskCohortId(entry.task)),
+      ).toEqual(["task_a", "task_a", "task_a", "task_d"]);
     },
   );
 
@@ -259,51 +269,57 @@ describe("session task index", () => {
     }
     session = recordSessionTask(session, task("task_c", "turn-3"));
     session = recordSessionTask(session, {
-      ...task("task_a", "turn-replay"),
-      createdByStepIndex: 9,
-      taskRunId: "run-replayed",
+      ...task("task_a", "turn-1"),
+      origin: { ...task("task_a", "turn-1").origin, stepIndex: 9 },
+      address: { ...task("task_a", "turn-1").address, runId: "run-replayed" },
     });
     session = recordSessionTask(session, {
-      ...task("task_b", "turn-replay"),
-      createdByStepIndex: 9,
+      ...task("task_b", "turn-2"),
+      origin: { ...task("task_b", "turn-2").origin, stepIndex: 9 },
     });
     expect(
       getSessionTaskIndex(session.state).map((entry) => ({
-        taskId: entry.taskId,
-        cohortId: getTaskCohortId(entry),
-        turnId: entry.createdByTurnId,
-        stepIndex: entry.createdByStepIndex,
-        settled: entry.terminalView !== undefined,
+        taskId: entry.task.taskId,
+        cohortId: getTaskCohortId(entry.task),
+        turnId: entry.origin.turnId,
+        stepIndex: entry.origin.stepIndex,
+        settled: entry.task.terminalView !== undefined,
       })),
     ).toEqual([
       { taskId: "task_a", cohortId: "task_a", turnId: "turn-1", stepIndex: 0, settled: true },
       { taskId: "task_b", cohortId: "task_a", turnId: "turn-2", stepIndex: 0, settled: true },
       { taskId: "task_c", cohortId: "task_c", turnId: "turn-3", stepIndex: 0, settled: false },
     ]);
-    expect(findSessionTaskEntry(session.state, "task_a")?.taskRunId).toBe("run-replayed");
+    expect(findSessionTaskEntry(session.state, "task_a")?.address.runId).toBe("run-replayed");
     session = recordSessionTask(session, task("task_d", "turn-4"));
-    expect(findSessionTaskEntry(session.state, "task_d")?.cohortId).toBe("task_c");
+    expect(findSessionTaskEntry(session.state, "task_d")?.task.cohortId).toBe("task_c");
   });
 
   it.each(["", null, 42])("rejects an invalid additive cohort identity: %j", (cohortId) => {
     expect(() =>
       getSessionTaskIndex({
-        [SESSION_TASKS_STATE_KEY]: {
-          tasks: [{ ...task("task_a", "turn-1"), cohortId }],
-          version: 2,
+        "eve.runtime.workflowInvocations": {
+          version: 1,
+          invocations: [
+            {
+              ...task("task_a", "turn-1"),
+              task: { ...task("task_a", "turn-1").task, cohortId: cohortId },
+            },
+          ],
         },
       }),
-    ).toThrow(/Corrupt task index/u);
+    ).toThrow(/Corrupt workflow invocation registry/u);
   });
 
   it("retains only terminal views as expired-run fallbacks", () => {
     const base = {
-      dispatchContext,
-      taskInboxToken: "task:token-1",
-      createdByTurnId: "turn-1",
-      metadata,
-      taskId: "task_a",
-      taskRunId: "run-1",
+      callId: "task_a",
+      toolName: metadata.name,
+      resultKind: "tool" as const,
+      lifetime: "session" as const,
+      origin: { turnId: "turn-1", stepIndex: 0 },
+      address: { runId: "run-1", hookToken: "task:token-1" },
+      task: { dispatchContext, metadata, taskId: "task_a" },
     };
     const terminalView = {
       lastOutput: { data: "done", type: "result" as const },
@@ -312,8 +328,11 @@ describe("session task index", () => {
       taskId: "task_a",
     };
 
-    const session = recordSessionTask(createSession(), { ...base, terminalView });
-    expect(findSessionTaskEntry(session.state, "task_a")?.terminalView).toEqual(terminalView);
+    const session = recordSessionTask(createSession(), {
+      ...base,
+      task: { ...base.task, terminalView: terminalView },
+    });
+    expect(findSessionTaskEntry(session.state, "task_a")?.task.terminalView).toEqual(terminalView);
     for (const invalidView of [
       { metadata, status: "working", taskId: "task_a" },
       { metadata, status: "completed", taskId: "task_a" },
@@ -340,71 +359,74 @@ describe("session task index", () => {
     ]) {
       expect(() =>
         getSessionTaskIndex({
-          [SESSION_TASKS_STATE_KEY]: {
-            tasks: [{ ...base, terminalView: invalidView }],
-            version: 2,
+          "eve.runtime.workflowInvocations": {
+            version: 1,
+            invocations: [{ ...base, task: { ...base.task, terminalView: invalidView } }],
           },
         }),
-      ).toThrow(`Corrupt task index under session state key "${SESSION_TASKS_STATE_KEY}"`);
+      ).toThrow("Corrupt workflow invocation registry");
     }
   });
 
   it("throws on a corrupt index instead of treating it as absent", () => {
     expect(() =>
       getSessionTaskIndex({
-        [SESSION_TASKS_STATE_KEY]: { tasks: [{ taskId: 42 }], version: 2 },
+        "eve.runtime.workflowInvocations": { version: 1, invocations: [{ taskId: 42 }] },
       }),
-    ).toThrow(`Corrupt task index under session state key "${SESSION_TASKS_STATE_KEY}"`);
+    ).toThrow("Corrupt workflow invocation registry");
   });
 
-  it("normalizes a task without creator context to an explicit legacy state", () => {
-    expect(
+  it("rejects missing creator context", () => {
+    const entry = task("task_a", "turn-1");
+    expect(() =>
       getSessionTaskIndex({
-        [SESSION_TASKS_STATE_KEY]: {
-          tasks: [
-            {
-              createdByTurnId: "turn-1",
-              metadata,
-              taskId: "task_a",
-              taskInboxToken: "task:token-1",
-              taskRunId: "run-1",
-            },
-          ],
-          version: 2,
+        "eve.runtime.workflowInvocations": {
+          version: 1,
+          invocations: [{ ...entry, task: { ...entry.task, dispatchContext: undefined } }],
         },
-      })[0]?.dispatchContext,
-    ).toEqual(LEGACY_TASK_AGENT_DISPATCH_CONTEXT);
+      }),
+    ).toThrow("Corrupt workflow invocation registry");
+  });
+
+  it("rejects reassigning a task id to another originating turn", () => {
+    const session = recordSessionTask(createSession(), task("task_a", "turn-1"));
+    expect(() => recordSessionTask(session, task("task_a", "turn-2"))).toThrow(
+      "Task ids must be unique",
+    );
   });
 
   it("rejects unrecognized task dispatch context fields", () => {
     expect(() =>
       getSessionTaskIndex({
-        [SESSION_TASKS_STATE_KEY]: {
-          tasks: [
+        "eve.runtime.workflowInvocations": {
+          version: 1,
+          invocations: [
             {
-              createdByTurnId: "turn-1",
-              dispatchContext: {
-                auth: { current: null, initiator: null },
-                unexpected: "receiver-context",
+              callId: "task_a",
+              toolName: metadata.name,
+              resultKind: "tool" as const,
+              lifetime: "session" as const,
+              origin: { turnId: "turn-1", stepIndex: 0 },
+              address: { runId: "run-1", hookToken: "task:token-1" },
+              task: {
+                dispatchContext: {
+                  auth: { current: null, initiator: null },
+                  unexpected: "receiver-context",
+                },
+                metadata,
+                taskId: "task_a",
               },
-              metadata,
-              taskId: "task_a",
-              taskInboxToken: "task:token-1",
-              taskRunId: "run-1",
             },
           ],
-          version: 2,
         },
       }),
-    ).toThrow(`Corrupt task index under session state key "${SESSION_TASKS_STATE_KEY}"`);
+    ).toThrow("Corrupt workflow invocation registry");
   });
 
-  it("rejects the old task index version explicitly", () => {
+  it("rejects an unsupported registry version", () => {
     expect(() =>
-      getSessionTaskIndex({ [SESSION_TASKS_STATE_KEY]: { tasks: [], version: 1 } }),
-    ).toThrow(
-      `Unsupported task index version 1 under session state key "${SESSION_TASKS_STATE_KEY}"`,
-    );
+      getSessionTaskIndex({ "eve.runtime.workflowInvocations": { version: 99, invocations: [] } }),
+    ).toThrow("Corrupt workflow invocation registry");
   });
 });
 

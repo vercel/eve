@@ -65,8 +65,9 @@ async function handleWorkflowToolRunOutcome(
   const recorded = findWorkflowToolRun(
     cursor.sessionState.snapshot.session.state,
     message.from.callId,
+    message.from.turnId,
   );
-  if (recorded?.runId !== message.from.runId) return undefined;
+  if (recorded?.address.runId !== message.from.runId) return undefined;
 
   const result: RuntimeSubagentResult | RuntimeToolResultActionResult =
     recorded.resultKind === "subagent"
@@ -128,8 +129,9 @@ async function handleWorkflowToolRunRequest(
     const recorded = findWorkflowToolRun(
       cursor.sessionState.snapshot.session.state,
       message.from.callId,
+      message.from.turnId,
     );
-    if (recorded?.runId !== message.from.runId) {
+    if (recorded?.address.runId !== message.from.runId) {
       if (message.request.kind === "agent-invoke") {
         await resumeHookStep(message.replyTo, {
           kind: "runtime-action-result",

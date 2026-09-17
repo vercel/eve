@@ -1,3 +1,4 @@
+import { getPendingCoordinationBatch } from "#harness/coordination.js";
 import { buildAdapterContext } from "#channel/adapter-context.js";
 import { callAdapterEventHandler } from "#channel/adapter.js";
 import { dispatchStreamEventHooks } from "#context/hook-lifecycle.js";
@@ -142,10 +143,13 @@ export async function settleCancelledTurnStep(input: {
   // gone, so a child settlement can never reach this store again. This is the
   // last write that can park turn-owned `running` and workflow-owned `claimed`
   // handles.
-  const workflowToolRuns = getWorkflowToolRuns(session.state);
+  const owningTurnId =
+    getPendingCoordinationBatch(session.state)?.event.turnId ??
+    input.sessionState.emissionState.turnId;
+  const workflowToolRuns = getWorkflowToolRuns(session.state, owningTurnId);
   session = abandonAgentInvocationOwners(
     session,
-    new Set(workflowToolRuns.map((run) => run.runId)),
+    new Set(workflowToolRuns.map((run) => run.address.runId)),
   );
   const cancelledSession = reconcileSessionContinuationToken(
     ctx,
@@ -155,6 +159,7 @@ export async function settleCancelledTurnStep(input: {
           clearPendingCoordinationBatch(
             clearWorkflowToolRuns(
               abandonRunningAgentTurns({ ...session, outputSchema: undefined }),
+              owningTurnId,
             ),
           ),
         ),

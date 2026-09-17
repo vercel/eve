@@ -78,7 +78,7 @@ export async function cancelOwnedTask(input: {
 }): Promise<TaskView> {
   const delivery = await sendTaskCommand({
     command: { kind: "cancel" },
-    taskInboxToken: input.entry.taskInboxToken,
+    taskInboxToken: input.entry.address.hookToken,
   });
   let view = await readTaskView(input.entry);
   for (
@@ -90,7 +90,9 @@ export async function cancelOwnedTask(input: {
     view = await readTaskView(input.entry);
   }
   if (!isTerminalTaskStatus(view.status)) {
-    throw new Error(`Task "${input.entry.taskId}" did not commit cancellation before timeout.`);
+    throw new Error(
+      `Task "${input.entry.task.taskId}" did not commit cancellation before timeout.`,
+    );
   }
   if (view.status !== "cancelled") return view;
 

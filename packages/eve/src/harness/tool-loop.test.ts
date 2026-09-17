@@ -303,12 +303,17 @@ const analysisTaskAnnouncement =
 
 function recordBackgroundTask(session: HarnessSession, taskId = "analysis"): HarnessSession {
   return recordSessionTask(session, {
-    createdByTurnId: activeTurnId(getHarnessEmissionState(session.state)),
-    dispatchContext: { auth: { current: null, initiator: null } },
-    metadata: { kind: "report-probe", name: taskId },
-    taskId,
-    taskInboxToken: `token-${taskId}`,
-    taskRunId: `run-${taskId}`,
+    callId: taskId,
+    toolName: { kind: "report-probe", name: taskId }.name,
+    resultKind: "tool" as const,
+    lifetime: "session" as const,
+    origin: { turnId: activeTurnId(getHarnessEmissionState(session.state)), stepIndex: 0 },
+    address: { runId: `run-${taskId}`, hookToken: `token-${taskId}` },
+    task: {
+      dispatchContext: { auth: { current: null, initiator: null } },
+      metadata: { kind: "report-probe", name: taskId },
+      taskId,
+    },
   });
 }
 

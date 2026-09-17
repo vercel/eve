@@ -21,12 +21,17 @@ vi.mock("#internal/workflow/runtime.js", () => ({
 }));
 
 const entry = {
-  createdByTurnId: "turn-1",
-  dispatchContext: { auth: { current: null, initiator: null } },
-  metadata: { kind: "tool", name: "export" },
-  taskId: "task-1",
-  taskInboxToken: "task-token",
-  taskRunId: "task-run",
+  callId: "task-1",
+  toolName: "export",
+  resultKind: "tool" as const,
+  lifetime: "session" as const,
+  origin: { turnId: "turn-1", stepIndex: 0 },
+  address: { runId: "task-run", hookToken: "task-token" },
+  task: {
+    dispatchContext: { auth: { current: null, initiator: null } },
+    metadata: { kind: "tool", name: "export" },
+    taskId: "task-1",
+  },
 } as const;
 
 describe("task cancellation", () => {
@@ -43,9 +48,9 @@ describe("task cancellation", () => {
 
   it("cancels task-owned work after cancellation commits", async () => {
     vi.mocked(readLatestTaskView).mockResolvedValue({
-      metadata: entry.metadata,
+      metadata: entry.task.metadata,
       status: "cancelled",
-      taskId: entry.taskId,
+      taskId: entry.task.taskId,
     });
     const cancelled = cancelOwnedTask({ entry });
     await vi.runAllTimersAsync();
@@ -60,9 +65,9 @@ describe("task cancellation", () => {
 
   it("retries child cancellation after the cancelled task's inbox has closed", async () => {
     vi.mocked(readLatestTaskView).mockResolvedValue({
-      metadata: entry.metadata,
+      metadata: entry.task.metadata,
       status: "cancelled",
-      taskId: entry.taskId,
+      taskId: entry.task.taskId,
     });
     const cancelOwnedWork = vi
       .fn()
@@ -89,10 +94,10 @@ describe("task cancellation", () => {
 
   it("leaves child work untouched when completion won the cancellation race", async () => {
     vi.mocked(readLatestTaskView).mockResolvedValue({
-      metadata: entry.metadata,
+      metadata: entry.task.metadata,
       lastOutput: { type: "result", data: "Finished" },
       status: "completed",
-      taskId: entry.taskId,
+      taskId: entry.task.taskId,
     });
     const cancelOwnedWork = vi.fn();
     await cancelOwnedTask({ cancelOwnedWork, entry });
@@ -101,9 +106,9 @@ describe("task cancellation", () => {
 
   it("hard-cancels a task run that does not unwind cooperatively", async () => {
     vi.mocked(readLatestTaskView).mockResolvedValue({
-      metadata: entry.metadata,
+      metadata: entry.task.metadata,
       status: "cancelled",
-      taskId: entry.taskId,
+      taskId: entry.task.taskId,
     });
     getRun.mockReturnValue({ status: Promise.resolve("running") });
 
@@ -117,7 +122,11 @@ describe("task cancellation", () => {
   });
 
   it("preserves the committed parent notification when cancellation stops a slow task run", async () => {
-    const view = { metadata: entry.metadata, status: "cancelled", taskId: entry.taskId } as const;
+    const view = {
+      metadata: entry.task.metadata,
+      status: "cancelled",
+      taskId: entry.task.taskId,
+    } as const;
     vi.mocked(readLatestTaskView).mockResolvedValue(view);
     getRun.mockReturnValue({ status: Promise.resolve("running") });
     const session = { sessionId: "parent-session" } as Parameters<
@@ -146,7 +155,11 @@ describe("task cancellation", () => {
   });
 
   it("retries the parent notification after the cancelled task inbox is gone", async () => {
-    const view = { metadata: entry.metadata, status: "cancelled", taskId: entry.taskId } as const;
+    const view = {
+      metadata: entry.task.metadata,
+      status: "cancelled",
+      taskId: entry.task.taskId,
+    } as const;
     vi.mocked(readLatestTaskView).mockResolvedValue(view);
     getRun.mockReturnValue({ status: Promise.resolve("running") });
     vi.mocked(resumeSessionInbox).mockRejectedValueOnce(new Error("temporary delivery failure"));

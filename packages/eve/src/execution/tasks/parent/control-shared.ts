@@ -42,11 +42,11 @@ export async function readTaskViews(
 export async function readTaskView(entry: SessionTaskIndexEntry): Promise<TaskView> {
   try {
     return (
-      (await readLatestTaskView({ taskRunId: entry.taskRunId })) ?? createPendingTaskView(entry)
+      (await readLatestTaskView({ taskRunId: entry.address.runId })) ?? createPendingTaskView(entry)
     );
   } catch (error) {
-    if (isTaskWorkflowTargetGone(error) && entry.terminalView !== undefined) {
-      return entry.terminalView;
+    if (isTaskWorkflowTargetGone(error) && entry.task.terminalView !== undefined) {
+      return entry.task.terminalView;
     }
     throw error;
   }
@@ -55,9 +55,9 @@ export async function readTaskView(entry: SessionTaskIndexEntry): Promise<TaskVi
 /** The placeholder view for a run that has not published anything yet. */
 function createPendingTaskView(entry: SessionTaskIndexEntry): TaskView {
   const view: TaskView = {
-    metadata: entry.metadata,
+    metadata: entry.task.metadata,
     status: "working",
-    taskId: entry.taskId,
+    taskId: entry.task.taskId,
   };
 
   return view;

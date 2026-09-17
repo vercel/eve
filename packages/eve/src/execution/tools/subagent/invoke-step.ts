@@ -351,16 +351,13 @@ export async function dispatchTaskAgentInvocationStep(
     const session = readDurableSession(input.sessionState);
     const entry = findSessionTaskEntry(session.state, input.taskId);
     if (entry === undefined) return { kind: "not-admitted", sessionState: input.sessionState };
-    const view = await readLatestTaskView({ taskRunId: entry.taskRunId });
+    const view = await readLatestTaskView({ taskRunId: entry.address.runId });
     if (view === undefined || isTerminalTaskStatus(view.status)) {
       return { kind: "not-admitted", sessionState: input.sessionState };
     }
-    if ("legacy" in entry.dispatchContext) {
-      return missingTaskDispatchContext(input);
-    }
-    taskDispatchContext = entry.dispatchContext;
-    if (entry.metadata.kind === "subagent") {
-      activityWorkIdentity = entry.activityWorkIdentity;
+    taskDispatchContext = entry.task.dispatchContext;
+    if (entry.task.metadata.kind === "subagent") {
+      activityWorkIdentity = entry.task.activityWorkIdentity;
     }
   }
   const dispatched = await dispatchAgentInvocation({
@@ -373,26 +370,6 @@ export async function dispatchTaskAgentInvocationStep(
         : applyTaskDispatchContext(input.serializedContext, taskDispatchContext),
   });
   return dispatched;
-}
-
-function missingTaskDispatchContext(
-  input: Parameters<typeof dispatchTaskAgentInvocationStep>[0],
-): TaskAgentInvocationDispatchResult {
-  return {
-    kind: "failed",
-    result: {
-      callId: input.request.invocationId,
-      isError: true,
-      kind: "subagent-result",
-      origin: "dispatch",
-      output: {
-        code: "AGENT_INVOCATION_AUTH_UNAVAILABLE",
-        message: "The background task predates captured authentication context.",
-      },
-      subagentName: input.request.input.target,
-    },
-    sessionState: input.sessionState,
-  };
 }
 
 function applyTaskDispatchContext(

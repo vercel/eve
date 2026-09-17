@@ -38,12 +38,17 @@ export async function startSlowCancelledTaskStep(input: {
   const run = await start(slowCancelledTaskWorkflow, [{ taskId, taskInboxToken }]);
   await waitForCommandHookOwner(taskInboxToken);
   return {
-    createdByTurnId: "turn_0",
-    dispatchContext: { auth: { current: null, initiator: null } },
-    metadata: { kind: "tool", name: "slow-cancel" },
-    taskId,
-    taskInboxToken,
-    taskRunId: run.runId,
+    callId: taskId,
+    toolName: { kind: "tool", name: "slow-cancel" }.name,
+    resultKind: "tool" as const,
+    lifetime: "session" as const,
+    origin: { turnId: "turn_0", stepIndex: 0 },
+    address: { runId: run.runId, hookToken: taskInboxToken },
+    task: {
+      dispatchContext: { auth: { current: null, initiator: null } },
+      metadata: { kind: "tool", name: "slow-cancel" },
+      taskId,
+    },
   };
 }
 
@@ -57,7 +62,7 @@ export async function cancelSlowTaskFromParentStep(input: {
     entry: input.entry,
     session: { sessionId: input.sessionId } as HarnessSession,
   });
-  return { view, taskRunStatus: await getRun(input.entry.taskRunId).status };
+  return { view, taskRunStatus: await getRun(input.entry.address.runId).status };
 }
 
 export async function taskCancelNotificationWorkflow() {

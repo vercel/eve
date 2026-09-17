@@ -50,13 +50,17 @@ describe("background invocation origin", () => {
           { sessionStarted: true, sequence: 3, stepIndex: 2, turnId: "turn-3" },
         ),
         {
-          taskId: "task",
-          taskRunId: "task-run",
-          taskInboxToken: "task-inbox",
-          createdByTurnId: "turn-1",
-          createdByStepIndex: 0,
-          dispatchContext: { auth: { current: null, initiator: null } },
-          metadata: { kind: "subagent", name: "research", agentId: "agent" },
+          callId: "task",
+          toolName: { kind: "subagent", name: "research", agentId: "agent" }.name,
+          resultKind: "tool" as const,
+          lifetime: "session" as const,
+          origin: { turnId: "turn-1", stepIndex: 0 },
+          address: { runId: "task-run", hookToken: "task-inbox" },
+          task: {
+            taskId: "task",
+            dispatchContext: { auth: { current: null, initiator: null } },
+            metadata: { kind: "subagent", name: "research", agentId: "agent" },
+          },
         },
       );
       await prepareOwnerAgentInvocation({

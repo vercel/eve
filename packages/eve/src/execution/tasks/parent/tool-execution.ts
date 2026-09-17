@@ -244,9 +244,9 @@ class BackgroundToolExecutionScope implements BackgroundToolExecutor {
         ? [
             {
               callId: record.callId,
-              taskInboxToken: record.task.taskInboxToken,
-              taskId: record.task.taskId,
-              taskRunId: record.task.taskRunId,
+              taskInboxToken: record.task.address.hookToken,
+              taskId: record.task.task.taskId,
+              taskRunId: record.task.address.runId,
             },
           ]
         : [],
@@ -280,7 +280,7 @@ class BackgroundToolExecutionScope implements BackgroundToolExecutor {
     record.task = task;
 
     record.settled = true;
-    return { ...started.receipt, status: "working", taskId: task.taskId };
+    return { ...started.receipt, status: "working", taskId: task.task.taskId };
   }
 
   private async startTask(input: {
@@ -368,10 +368,15 @@ class BackgroundToolExecutionScope implements BackgroundToolExecutor {
       parentTurnId,
       session: this.initialSession,
     };
-    const task: Omit<BackgroundTask, "taskRunId"> = {
-      ...prepareBackgroundTask(taskInput),
-      activityWorkIdentity:
-        workflow.resultKind === "subagent" ? taskInput.activityObserver?.workIdentity : undefined,
+    const prepared = prepareBackgroundTask(taskInput);
+    const task = {
+      ...prepared,
+      resultKind: workflow.resultKind ?? "tool",
+      task: {
+        ...prepared.task,
+        activityWorkIdentity:
+          workflow.resultKind === "subagent" ? taskInput.activityObserver?.workIdentity : undefined,
+      },
     };
     if (
       workflow.resultKind === "subagent" &&
@@ -384,7 +389,7 @@ class BackgroundToolExecutionScope implements BackgroundToolExecutor {
         callId: taskInput.callId,
         kind: "reserve",
         operationId: identity.operation.id,
-        ownerId: task.taskId,
+        ownerId: task.task.taskId,
       });
       if (reservation.kind !== "ready") {
         throw new Error(`Agent handle store rejected start operation "${identity.operation.id}".`);
@@ -411,16 +416,16 @@ class BackgroundToolExecutionScope implements BackgroundToolExecutor {
         invokedName: subagentProjection.metadata.name,
         kind: "claim",
         operationId,
-        ownerId: task.taskId,
+        ownerId: task.task.taskId,
       });
       if (claim.kind === "busy" && claim.handle.phase === "claimed") {
         const handle = claim.handle;
         const entry = findSessionTaskEntry(this.agentHandleSession.state, handle.ownerId);
         if (
-          entry?.metadata.kind === "subagent" &&
-          entry.metadata.agentId === handle.identity.id &&
-          entry.metadata.name === handle.identity.name &&
-          entry.terminalView === undefined
+          entry?.task.metadata.kind === "subagent" &&
+          entry.task.metadata.agentId === handle.identity.id &&
+          entry.task.metadata.name === handle.identity.name &&
+          entry.task.terminalView === undefined
         ) {
           await steerBackgroundAgent({
             ctx: input.ctx,
@@ -431,7 +436,7 @@ class BackgroundToolExecutionScope implements BackgroundToolExecutor {
           });
           return {
             kind: "steered",
-            receipt: { agentId: handle.identity.id, taskId: entry.taskId, status: "working" },
+            receipt: { agentId: handle.identity.id, taskId: entry.task.taskId, status: "working" },
           };
         }
       }
@@ -440,15 +445,15 @@ class BackgroundToolExecutionScope implements BackgroundToolExecutor {
       } else {
         input.record.claim = {
           operationId,
-          taskId: task.taskId,
+          taskId: task.task.taskId,
         };
       }
     }
     await startTaskRun({
       activityObserver: taskInput.activityObserver,
-      initialView: { metadata: task.metadata, status: "working", taskId: task.taskId },
+      initialView: { metadata: task.task.metadata, status: "working", taskId: task.task.taskId },
       parentContinuationToken: sessionCommandHookToken(this.initialSession.sessionId),
-      taskInboxToken: task.taskInboxToken,
+      taskInboxToken: task.address.hookToken,
       workflow: {
         agents: resolveWorkflowAgentMetadata(input.ctx),
         callId: taskInput.callId,
@@ -461,10 +466,10 @@ class BackgroundToolExecutionScope implements BackgroundToolExecutor {
         workflowId: workflow.workflowId,
       },
     });
-    const owner = await waitForTaskCommandOwner({ taskInboxToken: task.taskInboxToken });
+    const owner = await waitForTaskCommandOwner({ taskInboxToken: task.address.hookToken });
     const backgroundTask = {
       ...task,
-      taskRunId: owner.runId,
+      address: { ...task.address, runId: owner.runId },
     };
     input.record.task = backgroundTask;
     if (workflow.resultKind !== "subagent") {
@@ -512,7 +517,7 @@ class BackgroundToolExecutionScope implements BackgroundToolExecutor {
         this.applyAgentHandleCommand({
           agentId: record.reservation.agentId,
           kind: "remove",
-          ownerId: record.task.taskId,
+          ownerId: record.task.task.taskId,
         });
       }
     }

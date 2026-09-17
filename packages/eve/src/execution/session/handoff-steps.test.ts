@@ -37,19 +37,25 @@ describe("validateSessionCheckpointStep", () => {
     deserializeContextMock.mockResolvedValue({ require: vi.fn() });
     readDurableSessionMock.mockReturnValue({
       state: {
-        "eve.tasks": {
-          version: 2,
-          tasks: [
+        "eve.runtime.workflowInvocations": {
+          version: 1,
+          invocations: [
             {
-              taskId: "task",
-              taskRunId: "run",
-              taskInboxToken: 42,
-              createdByTurnId: "turn",
-              metadata: { kind: "tool", name: "research" },
-              terminalView: {
+              callId: "task",
+              toolName: "research",
+              resultKind: "tool" as const,
+              lifetime: "session" as const,
+              origin: { turnId: "turn", stepIndex: 0 },
+              address: { runId: "run", hookToken: 42 },
+              task: {
                 taskId: "task",
                 metadata: { kind: "tool", name: "research" },
-                status: "cancelled",
+                terminalView: {
+                  taskId: "task",
+                  metadata: { kind: "tool", name: "research" },
+                  status: "cancelled",
+                },
+                dispatchContext: { auth: { current: null, initiator: null } },
               },
             },
           ],
@@ -57,7 +63,7 @@ describe("validateSessionCheckpointStep", () => {
       },
     });
     await expect(validateSessionCheckpointStep({ checkpoint: createCheckpoint() })).rejects.toThrow(
-      "Corrupt task index",
+      "Corrupt workflow invocation registry",
     );
   });
 

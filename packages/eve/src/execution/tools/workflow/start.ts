@@ -68,9 +68,10 @@ export async function startWorkflowTask(input: {
     return {
       session: recordWorkflowToolRun(session, {
         callId: task.callId,
-        hookToken: started.hookToken,
+        lifetime: "turn",
+        origin: { turnId: batchEvent.turnId, stepIndex: batchEvent.stepIndex },
+        address: started,
         resultKind: task.resultKind ?? "tool",
-        runId: started.runId,
         toolName: task.toolName,
       }),
     };

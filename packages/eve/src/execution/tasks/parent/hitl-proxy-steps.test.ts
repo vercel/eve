@@ -74,18 +74,23 @@ describe("recordTaskInputRequestStep", () => {
       history: [],
       sessionId: "parent-session",
       state: {
-        "eve.tasks": {
-          tasks: [
+        "eve.runtime.workflowInvocations": {
+          version: 1,
+          invocations: [
             {
-              createdByTurnId: "turn-1",
-              dispatchContext: { auth: { current: null, initiator: null } },
-              metadata: { kind: "tool", name: "export" },
-              taskId: "task-1",
-              taskInboxToken: "task-token",
-              taskRunId: "task-run",
+              callId: "task-1",
+              toolName: "export",
+              resultKind: "tool" as const,
+              lifetime: "session" as const,
+              origin: { turnId: "turn-1", stepIndex: 0 },
+              address: { runId: "task-run", hookToken: "task-token" },
+              task: {
+                dispatchContext: { auth: { current: null, initiator: null } },
+                metadata: { kind: "tool", name: "export" },
+                taskId: "task-1",
+              },
             },
           ],
-          version: 2,
         },
       },
     });
@@ -138,18 +143,23 @@ describe("recordTaskInputRequestStep", () => {
       sessionId: "parent-session",
       state: setAgentHandleStore(
         {
-          "eve.tasks": {
-            tasks: [
+          "eve.runtime.workflowInvocations": {
+            version: 1,
+            invocations: [
               {
-                createdByTurnId: "turn-1",
-                dispatchContext: { auth: { current: null, initiator: null } },
-                metadata: { kind: "tool", name: "export" },
-                taskId: "task-1",
-                taskInboxToken: "task-token",
-                taskRunId: "task-run",
+                callId: "task-1",
+                toolName: "export",
+                resultKind: "tool" as const,
+                lifetime: "session" as const,
+                origin: { turnId: "turn-1", stepIndex: 0 },
+                address: { runId: "task-run", hookToken: "task-token" },
+                task: {
+                  dispatchContext: { auth: { current: null, initiator: null } },
+                  metadata: { kind: "tool", name: "export" },
+                  taskId: "task-1",
+                },
               },
             ],
-            version: 2,
           },
         },
         {
@@ -210,18 +220,29 @@ describe("recordTerminalTaskViewsStep", () => {
       sessionId: "parent-session",
       state: setAgentHandleStore(
         {
-          "eve.tasks": {
-            tasks: [
+          "eve.runtime.workflowInvocations": {
+            version: 1,
+            invocations: [
               {
-                createdByTurnId: "turn-1",
-                dispatchContext: { auth: { current: null, initiator: null } },
-                metadata: { agentId: "agent-1", kind: "subagent", mode: "local", name: "research" },
-                taskId: "task-1",
-                taskInboxToken: "task-token",
-                taskRunId: "task-run",
+                callId: "task-1",
+                toolName: { agentId: "agent-1", kind: "subagent", mode: "local", name: "research" }
+                  .name,
+                resultKind: "tool" as const,
+                lifetime: "session" as const,
+                origin: { turnId: "turn-1", stepIndex: 0 },
+                address: { runId: "task-run", hookToken: "task-token" },
+                task: {
+                  dispatchContext: { auth: { current: null, initiator: null } },
+                  metadata: {
+                    agentId: "agent-1",
+                    kind: "subagent",
+                    mode: "local",
+                    name: "research",
+                  },
+                  taskId: "task-1",
+                },
               },
             ],
-            version: 2,
           },
         },
         {
@@ -255,7 +276,7 @@ describe("recordTerminalTaskViewsStep", () => {
     });
     const state = result.sessionState.snapshot.session.state;
 
-    expect(getSessionTaskIndex(state)[0]?.terminalView).toEqual(view);
+    expect(getSessionTaskIndex(state)[0]?.task.terminalView).toEqual(view);
     expect(getAgentHandleStore(state)?.handles).toEqual([
       expect.objectContaining({ phase: "available" }),
     ]);
@@ -278,18 +299,23 @@ describe("recordTerminalTaskViewsStep", () => {
       history: [],
       sessionId: "parent-session",
       state: {
-        "eve.tasks": {
-          tasks: [
+        "eve.runtime.workflowInvocations": {
+          version: 1,
+          invocations: [
             {
-              createdByTurnId: "turn-1",
-              dispatchContext: { auth: { current: null, initiator: null } },
-              metadata: { kind: "tool", name: "export" },
-              taskId: "task-1",
-              taskInboxToken: "task-token",
-              taskRunId: "task-run",
+              callId: "task-1",
+              toolName: "export",
+              resultKind: "tool" as const,
+              lifetime: "session" as const,
+              origin: { turnId: "turn-1", stepIndex: 0 },
+              address: { runId: "task-run", hookToken: "task-token" },
+              task: {
+                dispatchContext: { auth: { current: null, initiator: null } },
+                metadata: { kind: "tool", name: "export" },
+                taskId: "task-1",
+              },
             },
           ],
-          version: 2,
         },
       },
     });

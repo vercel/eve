@@ -32,7 +32,9 @@ describe("trace retention by live work", () => {
     );
     const before = serializeContext(context);
     expect(() =>
-      pruneAgentTraceState(context, "session", { "eve.tasks": { version: 1, tasks: [] } }),
+      pruneAgentTraceState(context, "session", {
+        "eve.runtime.workflowInvocations": { version: 99, invocations: [] },
+      }),
     ).not.toThrow();
     expect(serializeContext(context)).toEqual(before);
     expect(warn).toHaveBeenCalledWith(
@@ -64,28 +66,38 @@ describe("trace retention by live work", () => {
       new ContextAgentTraceStateStore().setActionAnchor("key", anchor),
     );
     const task = {
-      dispatchContext: { auth: { current: null, initiator: null } },
-      taskId: deriveTaskId({ callId: "call", parentSessionId: "session", parentTurnId: "turn" }),
-      taskRunId: "task-run",
-      taskInboxToken: "task-token",
-      createdByTurnId: "turn",
-      metadata: { kind: "tool", name: "workflow" },
+      callId: deriveTaskId({ callId: "call", parentSessionId: "session", parentTurnId: "turn" }),
+      toolName: "workflow",
+      resultKind: "tool" as const,
+      lifetime: "session" as const,
+      origin: { turnId: "turn", stepIndex: 0 },
+      address: { runId: "task-run", hookToken: "task-token" },
+      task: {
+        dispatchContext: { auth: { current: null, initiator: null } },
+        taskId: deriveTaskId({ callId: "call", parentSessionId: "session", parentTurnId: "turn" }),
+        metadata: { kind: "tool", name: "workflow" },
+      },
     };
-    pruneAgentTraceState(context, "session", { "eve.tasks": { version: 2, tasks: [task] } });
+    pruneAgentTraceState(context, "session", {
+      "eve.runtime.workflowInvocations": { version: 1, invocations: [task] },
+    });
     expect(serializeContext(context)[AGENT_TRACE_CONTEXT_KEY]).toMatchObject({
       actionAnchors: { key: anchor },
     });
     pruneAgentTraceState(context, "session", {
-      "eve.tasks": {
-        version: 2,
-        tasks: [
+      "eve.runtime.workflowInvocations": {
+        version: 1,
+        invocations: [
           {
             ...task,
-            terminalView: {
-              taskId: task.taskId,
-              metadata: task.metadata,
-              status: "completed",
-              lastOutput: { type: "result", data: "done" },
+            task: {
+              ...task.task,
+              terminalView: {
+                taskId: task.task.taskId,
+                metadata: task.task.metadata,
+                status: "completed",
+                lastOutput: { type: "result", data: "done" },
+              },
             },
           },
         ],

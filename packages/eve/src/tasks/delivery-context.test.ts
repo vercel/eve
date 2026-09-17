@@ -11,7 +11,7 @@ import {
   TASK_DELIVERY_INITIATING_INSTRUCTION,
   TASK_DELIVERY_SETTLED_INSTRUCTION,
 } from "#tasks/delivery-context.js";
-import { SESSION_TASKS_STATE_KEY, type SessionTaskIndexEntry } from "#tasks/session-index.js";
+import { type SessionTaskIndexEntry } from "#tasks/session-index.js";
 import type { TaskView } from "#tasks/types.js";
 
 const metadata = { kind: "report-probe", name: "report_probe" } as const;
@@ -78,7 +78,7 @@ describe("resolveInitiatingTaskContext", () => {
           taskEntry("task_1", "turn_1"),
           {
             ...taskEntry("task_2", "turn_2"),
-            cohortId: "task_1",
+            task: { ...taskEntry("task_2", "turn_2").task, cohortId: "task_1" },
           },
         ]),
         turnId: "turn_1",
@@ -110,7 +110,10 @@ describe("resolveTaskDeliveryContext", () => {
     } satisfies TaskView;
     const state = taskState([
       taskEntry("task_1", "turn_1", completed),
-      { ...taskEntry("task_2", "turn_2"), cohortId: "task_1" },
+      {
+        ...taskEntry("task_2", "turn_2"),
+        task: { ...taskEntry("task_2", "turn_2").task, cohortId: "task_1" },
+      },
       taskEntry("task_3", "turn_1"),
     ]);
 
@@ -142,7 +145,10 @@ describe("resolveTaskDeliveryContext", () => {
       resolveTaskDeliveryContext({
         state: taskState([
           taskEntry("task_1", "turn_1", first),
-          { ...taskEntry("task_2", "turn_2", second), cohortId: "task_1" },
+          {
+            ...taskEntry("task_2", "turn_2", second),
+            task: { ...taskEntry("task_2", "turn_2", second).task, cohortId: "task_1" },
+          },
         ]),
         taskDeliveryId: "task_2:ready:completed",
       }),
@@ -171,7 +177,10 @@ describe("resolveTaskDeliveryContext", () => {
     const state = taskState([
       taskEntry("task_previous", "turn_1", previous),
       taskEntry("task_failed", "turn_1", failed),
-      { ...taskEntry("task_cancelled", "turn_2", cancelled), cohortId: "task_failed" },
+      {
+        ...taskEntry("task_cancelled", "turn_2", cancelled),
+        task: { ...taskEntry("task_cancelled", "turn_2", cancelled).task, cohortId: "task_failed" },
+      },
     ]);
     const result = resolveTaskDeliveryContext({
       state,
@@ -206,16 +215,23 @@ function taskEntry(
   terminalView?: TaskView,
 ): SessionTaskIndexEntry {
   return {
-    createdByTurnId,
-    dispatchContext: { auth: { current: null, initiator: null } },
-    metadata,
-    taskId,
-    taskInboxToken: `inbox-${taskId}`,
-    taskRunId: `run-${taskId}`,
-    terminalView,
+    callId: taskId,
+    toolName: metadata.name,
+    resultKind: "tool" as const,
+    lifetime: "session" as const,
+    origin: { turnId: createdByTurnId, stepIndex: 0 },
+    address: { runId: `run-${taskId}`, hookToken: `inbox-${taskId}` },
+    task: {
+      dispatchContext: { auth: { current: null, initiator: null } },
+      metadata,
+      taskId,
+      terminalView,
+    },
   };
 }
 
 function taskState(tasks: readonly ReturnType<typeof taskEntry>[]): SessionStateMap {
-  return { [SESSION_TASKS_STATE_KEY]: { tasks, version: 2 } } as SessionStateMap;
+  return {
+    "eve.runtime.workflowInvocations": { version: 1, invocations: tasks },
+  } as SessionStateMap;
 }

@@ -20,7 +20,7 @@ export async function cancelTaskOwnedWork(
   const deadline = Date.now() + TASK_RUN_CANCEL_GRACE_MS;
   while (Date.now() < deadline) {
     try {
-      const status = await getRun(input.entry.taskRunId).status;
+      const status = await getRun(input.entry.address.runId).status;
       if (status !== "pending" && status !== "running") return false;
     } catch {
       return false;
@@ -28,8 +28,8 @@ export async function cancelTaskOwnedWork(
     await new Promise((resolve) => setTimeout(resolve, TASK_RUN_CANCEL_POLL_MS));
   }
   try {
-    await cancelRun(await getWorld(), input.entry.taskRunId, {
-      cancelReason: `Task ${input.entry.taskId} was cancelled.`,
+    await cancelRun(await getWorld(), input.entry.address.runId, {
+      cancelReason: `Task ${input.entry.task.taskId} was cancelled.`,
     });
   } catch {
     // The merged task run may have completed during its cooperative unwind.

@@ -1,3 +1,4 @@
+import { getPendingCoordinationBatch } from "#harness/coordination.js";
 import type { CancelTurnResult } from "#channel/types.js";
 import { deserializeContext } from "#context/serialize.js";
 import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
@@ -40,8 +41,12 @@ export async function cancelDescendantTurnsStep(input: {
   let workflowToolRuns: readonly WorkflowToolRunRecord[];
   try {
     const session = readDurableSession(input.sessionState);
-    workflowToolRuns = getWorkflowToolRuns(session.state);
-    const workflowOwnerIds = new Set(workflowToolRuns.map((run) => run.runId));
+    workflowToolRuns = getWorkflowToolRuns(
+      session.state,
+      getPendingCoordinationBatch(session.state)?.event.turnId ??
+        input.sessionState.emissionState.turnId,
+    );
+    const workflowOwnerIds = new Set(workflowToolRuns.map((run) => run.address.runId));
     running = (getAgentHandleStore(session.state)?.handles ?? []).filter(
       (handle): handle is RunningAgentHandle =>
         handle.phase === "running" ||
@@ -56,7 +61,7 @@ export async function cancelDescendantTurnsStep(input: {
 
   await Promise.all(
     workflowToolRuns.map((record) =>
-      cancelWorkflowToolRun(record, "The turn that called the tool was cancelled."),
+      cancelWorkflowToolRun(record.address, "The turn that called the tool was cancelled."),
     ),
   );
   if (running.length === 0) return;

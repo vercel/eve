@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import { cancelAllIndexedSessionTasksStep } from "#execution/cancel-indexed-session-tasks-step.js";
-import { SESSION_TASKS_STATE_KEY, type SessionTaskIndexEntry } from "#tasks/session-index.js";
+import { type SessionTaskIndexEntry } from "#tasks/session-index.js";
 
 const { cancelOwnedTaskMock, deserializeContextMock, hydrateDurableSessionMock } = vi.hoisted(
   () => ({
@@ -63,12 +63,17 @@ describe("cancelAllIndexedSessionTasksStep", () => {
 
 function indexedTask(taskId: string): SessionTaskIndexEntry {
   return {
-    createdByTurnId: "turn_0",
-    dispatchContext: { auth: { current: null, initiator: null } },
-    metadata: { kind: "tool", name: "research" },
-    taskId,
-    taskInboxToken: `${taskId}-inbox`,
-    taskRunId: `${taskId}-run`,
+    callId: taskId,
+    toolName: "research",
+    resultKind: "tool" as const,
+    lifetime: "session" as const,
+    origin: { turnId: "turn_0", stepIndex: 0 },
+    address: { runId: `${taskId}-run`, hookToken: `${taskId}-inbox` },
+    task: {
+      dispatchContext: { auth: { current: null, initiator: null } },
+      metadata: { kind: "tool", name: "research" },
+      taskId,
+    },
   };
 }
 
@@ -84,7 +89,7 @@ function makeSessionState(tasks: readonly SessionTaskIndexEntry[]): DurableSessi
         continuationToken: "http:test",
         history: [],
         sessionId: "parent-session",
-        state: { [SESSION_TASKS_STATE_KEY]: { tasks, version: 2 } },
+        state: { "eve.runtime.workflowInvocations": { version: 1, invocations: tasks } },
       },
     },
     version: 1,
