@@ -265,6 +265,12 @@ Write callback properties as inline function expressions, arrows, method shortha
 
 Closure values must be JSON-serializable. Plain objects, arrays, strings, finite numbers, booleans, and `null` are supported; `undefined` object properties are omitted. Functions, class instances, `Date`, `Map`, symbols, non-finite numbers, and cyclic values fail resolution with the tool name and callback phase instead of being serialized lossily.
 
+Dynamic tools preserve authored input and output validation, including Zod refinements and transformations. JSON Schema describes the tool to the model; the authored validator checks its input and output. eve transforms inline `inputSchema` and `outputSchema` expressions into schema factories and snapshots the JSON-serializable values they capture, just as it does for callbacks.
+
+Write schemas inline in `defineTool()`, or reference a stable module-level schema. A schema stored in a resolver-local variable is a non-serializable capture; inline its construction instead. Schema factories must be synchronous and deterministic for their captured values. Keep external reads in the resolver and capture the resulting JSON data. Imported functions and module-level values remain live code, so they must not hide per-session state.
+
+Schema factories use the same session, scope, resolver entry, and recovery rules as the tool's callbacks. A recovered factory receives its original captures, even if re-running the resolver produces different values. If a required factory is missing, validation fails explicitly; eve does not substitute its JSON Schema description.
+
 Call expressions such as `execute: makeExecutor()` are not transformed. Put the callback body directly in `defineTool()` inside an authored module; eve rejects a dynamic tool if a callback lacks durable metadata.
 
 ### Create dynamic tools in a package
@@ -297,6 +303,22 @@ export function createSearchTool(baseUrl: string) {
 ```
 
 Wrap every callback property with the helper. This includes labels, approval policies, `approvalKey`, `execute`, and `toModelOutput`.
+
+For live schemas created in a provider package, use `defineDurableSchema` from `eve/tools`. Put the schema's per-tool values in `closure` and construct the schema in `schema`. Plain JSON Schema objects need no helper.
+
+```ts
+import { defineDurableSchema } from "eve/tools";
+import { z } from "zod";
+
+export function amountSchema(limit: number) {
+  return defineDurableSchema({
+    closure: { limit },
+    schema: ({ limit }) => z.object({ amount: z.number().refine((amount) => amount <= limit) }),
+  });
+}
+```
+
+Pass the result as `inputSchema` or `outputSchema` in `defineTool()`. Rebuild existing extensions with the current `eve extension build` to generate schema factories. A live dynamic schema without a durable factory is rejected at resolution with instructions to inline its construction or use `defineDurableSchema`.
 
 `closure` is the callback's only durable snapshot. Store the identifiers and configuration needed to reproduce the call there. Reconstruct clients or look up live runtime state when the callback runs. The callback may call stable imported functions, but it must not capture runtime objects outside `closure`. Those values disappear on a cold start.
 

@@ -2,7 +2,11 @@ import { describe, expect, it, vi } from "vitest";
 
 import { ConnectionRegistryKey } from "#context/providers/connection-key.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
-import { AuthKey, SessionIdKey } from "#context/keys.js";
+import { AuthKey, SessionIdKey, StaticModelReferenceKey } from "#context/keys.js";
+import { buildDynamicTools } from "#context/build-dynamic-tools.js";
+import { dispatchDynamicToolEvent } from "#context/dynamic-tool-lifecycle.js";
+import { createStepStartedEvent } from "#protocol/message.js";
+import { isToolSchema } from "#tools/schema.js";
 import {
   CallbackBaseUrlKey,
   isAuthorizationSignal,
@@ -16,7 +20,7 @@ import type {
 } from "#shared/connection-types.js";
 import type { ConnectionRegistry } from "#runtime/connections/registry-types.js";
 import connectionSearch from "#tools/framework/connection-search.js";
-import type { ResolvedConnectionDefinition } from "#runtime/types.js";
+import type { ResolvedConnectionDefinition, ResolvedDynamicToolResolver } from "#runtime/types.js";
 import { isBrandedToolEntry, type DynamicToolSet } from "#tools/dynamic.js";
 import type { DynamicResolveContext } from "#dynamic/definition.js";
 import { readDurableDynamicToolCallbacks } from "#tools/durable-callbacks.js";
@@ -80,6 +84,51 @@ function registry(input: {
 }
 
 describe("connection dynamic tools", () => {
+  it("survives lifecycle resolution with both authored schema validators", async () => {
+    const ctx = new ContextContainer();
+    ctx.set(SessionIdKey, "connection-schema-replay");
+    ctx.set(StaticModelReferenceKey, null);
+    ctx.set(
+      ConnectionRegistryKey,
+      registry({
+        connections: [connection("linear")],
+        loadTools: { linear: async () => [] },
+      }),
+    );
+    const resolver: ResolvedDynamicToolResolver = {
+      slug: "connection-search",
+      sourceId: "eve:connection-search",
+      sourceKind: "module",
+      logicalPath: "tools/connection-search.ts",
+      eventNames: ["step.started"],
+      events: getConnectionSearchResolver().events as ResolvedDynamicToolResolver["events"],
+    };
+    await contextStorage.run(ctx, () =>
+      dispatchDynamicToolEvent({
+        ctx,
+        resolvers: [resolver],
+        messages: [],
+        event: createStepStartedEvent({
+          modelId: "test",
+          turnId: "turn",
+          stepIndex: 0,
+          sequence: 0,
+        }),
+      }),
+    );
+    const tools = buildDynamicTools(ctx);
+    expect(tools.map((tool) => tool.name)).toEqual(["connection_search"]);
+    const tool = tools[0]!;
+    if (!isToolSchema(tool.inputSchema) || !isToolSchema(tool.outputSchema)) {
+      throw new Error("Expected both connection search schemas");
+    }
+    expect(await tool.inputSchema["~standard"].validate({ keywords: 42 })).toHaveProperty("issues");
+    expect(await tool.inputSchema["~standard"].validate({ keywords: "issues" })).toEqual({
+      value: { keywords: "issues" },
+    });
+    expect(await tool.outputSchema["~standard"].validate("invalid")).toHaveProperty("issues");
+  });
+
   it("contributes no tools when no connections are available", async () => {
     const ctx = new ContextContainer();
     ctx.set(

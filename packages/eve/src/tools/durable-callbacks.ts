@@ -1,3 +1,4 @@
+import { readDurableSchema } from "#tools/durable-schema.js";
 import type { Approval } from "#approval/definition.js";
 import { resolveApprovalPolicy } from "#approval/definition.js";
 import type { JsonObject, JsonPrimitive } from "#shared/json.js";
@@ -10,7 +11,9 @@ export type DurableDynamicCallbackPhase =
   | "approvalRequest"
   | "approvalResponse"
   | "execute"
-  | "toModelOutput";
+  | "toModelOutput"
+  | "inputSchema"
+  | "outputSchema";
 
 export type DurableDynamicCallbackFn = (closure: JsonObject, ...args: never[]) => unknown;
 
@@ -27,6 +30,8 @@ export interface DurableDynamicCallbackReference {
 
 export interface DurableDynamicToolCallbacks {
   readonly execute: DurableDynamicCallbackReference;
+  readonly inputSchema?: DurableDynamicCallbackReference;
+  readonly outputSchema?: DurableDynamicCallbackReference;
   readonly label?: {
     readonly complete?: DurableDynamicCallbackReference;
     readonly delta?: DurableDynamicCallbackReference;
@@ -46,6 +51,8 @@ export interface StampedDurableDynamicCallback {
 
 export type LiveDurableDynamicToolCallbacks = Partial<{
   execute: StampedDurableDynamicCallback;
+  inputSchema: StampedDurableDynamicCallback;
+  outputSchema: StampedDurableDynamicCallback;
   label: {
     readonly complete?: StampedDurableDynamicCallback;
     readonly delta?: StampedDurableDynamicCallback;
@@ -169,6 +176,8 @@ function durableCallbackPhases(
     DurableDynamicCallbackReference | undefined,
   ])[] = [
     ["execute", callbacks.execute],
+    ["inputSchema", callbacks.inputSchema],
+    ["outputSchema", callbacks.outputSchema],
     ["labelComplete", callbacks.label?.complete],
     ["labelDelta", callbacks.label?.delta],
     ["labelStart", callbacks.label?.start],
@@ -190,7 +199,7 @@ type DurableCallbackJsonValue<T> = T extends (...args: never[]) => unknown
         ? DurableCallbackJsonObject<T>
         : never;
 
-type DurableCallbackJsonObject<T extends object> =
+export type DurableCallbackJsonObject<T extends object> =
   Extract<keyof T, symbol> extends never
     ? {
         readonly [TKey in keyof T]:
@@ -255,6 +264,8 @@ export function stampDurableDynamicToolCallbacks(
 }
 
 export function collectDurableDynamicToolCallbacks(input: {
+  readonly inputSchema?: unknown;
+  readonly outputSchema?: unknown;
   readonly label?: {
     readonly complete?: (...args: never[]) => unknown;
     readonly delta?: (...args: never[]) => unknown;
@@ -281,6 +292,10 @@ export function collectDurableDynamicToolCallbacks(input: {
   const execute = readDurableDynamicCallback(input.execute);
   const toModelOutput = readDurableDynamicCallback(input.toModelOutput);
   const callbacks: LiveDurableDynamicToolCallbacks = {};
+  const inputSchema = readDurableSchema(input.inputSchema);
+  const outputSchema = readDurableSchema(input.outputSchema);
+  if (inputSchema !== undefined) callbacks.inputSchema = inputSchema;
+  if (outputSchema !== undefined) callbacks.outputSchema = outputSchema;
   if (execute !== undefined) callbacks.execute = execute;
   if (labelComplete !== undefined || labelDelta !== undefined || labelStart !== undefined) {
     callbacks.label = {

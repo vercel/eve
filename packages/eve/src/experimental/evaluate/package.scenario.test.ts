@@ -26,6 +26,20 @@ export const evaluationModel = {
 import { autoModel } from "eve/experimental/evaluate";
 import { anthropic } from "eve/models/anthropic";
 export default defineAgent({ model: autoModel({ options: { "openai/gpt-5.6-sol": "Investigations", my_secret_model: { model: anthropic("sonnet-5"), reasoning: "low", description: "Routine work" } } }) });`,
+      "agent/tools/classify.ts": `import { defineTool } from "eve/tools";
+import { evaluate } from "eve/experimental/evaluate";
+export default defineTool({
+  description: "Classify an incident",
+  inputSchema: { type: "object", properties: {}, additionalProperties: false },
+  async execute(_input, ctx) {
+    const result = await evaluate({
+      state: { incident: "Alice needs an export summary." },
+      questions: { category: { type: "choice", instructions: "Choose a category.", criteria: { routine: "Routine work", investigation: "Investigation" } } },
+      abortSignal: ctx.abortSignal,
+    });
+    return result.answers.category.choice;
+  },
+});`,
       "agent/subagents/worker/instructions.md": "Review the assigned evidence.",
       "agent/subagents/worker/agent.ts": `import { defineAgent } from "eve";
 import { autoModel } from "eve/experimental/evaluate";

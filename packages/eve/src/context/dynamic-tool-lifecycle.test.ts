@@ -1142,6 +1142,7 @@ describe("dispatchDynamicToolEvent", () => {
         },
       });
       stampDurableDynamicToolCallbacks(entry, {
+        inputSchema: { callback: () => entry.inputSchema, closure: {} },
         execute: { callback: stepFn as never, closure: {} },
       });
       return { background_task: entry };

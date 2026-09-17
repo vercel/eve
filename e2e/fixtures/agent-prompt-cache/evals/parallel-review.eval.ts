@@ -18,14 +18,19 @@ export default ["first", "later"].map((launchTurn) =>
       const session = await t.session();
       if (launchTurn === "later") {
         const planning = await session.send(
-          "Eight workshops have twelve places each. How many places is that in total?",
+          "Alice is planning a community centre event with eight workshops and twelve places per workshop. " +
+            "Please calculate the total number of places. Bob is preparing the purchasing sheets and will send them next for review.",
         );
         expectHealthyTurn(planning);
         planning.messageIncludes("96");
         planning.notEvent("actions.requested");
       }
 
-      const started = await session.send(reviewPacket());
+      const started = await session.send(
+        launchTurn === "later"
+          ? `Bob has the purchasing sheets ready for the event we just discussed.\n\n${reviewPacket()}`
+          : reviewPacket(),
+      );
       const taskIds = expectFiveReviewers(started);
       const turns = await waitForReviews(t, started, taskIds);
       await expectParallelReviews(t, turns);

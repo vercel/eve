@@ -1,3 +1,5 @@
+import { z } from "#compiled/zod/index.js";
+import { isToolSchema } from "#tools/schema.js";
 import { describe, expect, it } from "vitest";
 
 import { buildDynamicTools } from "#context/build-dynamic-tools.js";
@@ -63,7 +65,9 @@ function resolver(version: () => number): ResolvedDynamicToolResolver {
           approval: always(),
           description: "Save a field.",
           execute: async () => `${version()}:${String(context.memory.scope.value)}`,
-          inputSchema: {},
+          inputSchema: z.object({
+            scope: z.string().refine((value) => value === context.memory.scope.value),
+          }),
         }),
       }),
     },
@@ -134,6 +138,13 @@ describe("memory provider tools", () => {
       async () => await replayed.execute!({}, { messages: [], toolCallId: "call_1" }),
     );
     expect(output).toBe("2:user_1");
+    if (!isToolSchema(replayed.inputSchema)) throw new Error("Expected live schema");
+    expect(await replayed.inputSchema["~standard"].validate({ scope: "user_2" })).toHaveProperty(
+      "issues",
+    );
+    expect(await replayed.inputSchema["~standard"].validate({ scope: "user_1" })).toEqual({
+      value: { scope: "user_1" },
+    });
   });
 
   it("omits tools when the provider has no tool factory", async () => {

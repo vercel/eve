@@ -42,6 +42,7 @@ import {
 } from "#tools/durable-callbacks.js";
 import { toErrorMessage } from "#shared/errors.js";
 import { parseJsonObject } from "#shared/json.js";
+import { hasSchemaValidator } from "#tools/durable-schema.js";
 import { serializeInputSchema, serializeOutputSchema } from "#tools/schema.js";
 import type { ResolvedDynamicToolResolver } from "#runtime/types.js";
 
@@ -133,11 +134,15 @@ function validateReference(input: {
   readonly stamped: StampedDurableDynamicCallback | undefined;
   readonly required: boolean;
 }): DurableDynamicCallbackReference | undefined {
+  const schemaPhase = input.phase === "inputSchema" || input.phase === "outputSchema";
+  const authoringHint = schemaPhase
+    ? "Write the schema expression inline in defineTool() or use defineDurableSchema() for a provider package."
+    : "Author the callback inline in transformed source or use an eve durable callback helper.";
   if (input.stamped === undefined) {
     if (input.required) {
       throw new Error(
         `Dynamic tool "${input.name}" callback "${input.phase}" does not have a durable descriptor. ` +
-          "Author the callback inline in transformed source or use an eve durable callback helper.",
+          authoringHint,
       );
     }
     return undefined;
@@ -159,7 +164,7 @@ function validateReference(input: {
   if (typeof input.stamped.callback !== "function") {
     throw new Error(
       `Dynamic tool "${input.name}" callback "${input.phase}" does not have a durable descriptor. ` +
-        "Author the callback inline in transformed source or use an eve durable callback helper.",
+        authoringHint,
     );
   }
   let closure: DurableDynamicCallbackReference["closure"];
@@ -167,7 +172,10 @@ function validateReference(input: {
     closure = parseJsonObject(input.stamped.closure);
   } catch (error) {
     throw new Error(
-      `Dynamic tool "${input.name}" callback "${input.phase}" has a non-serializable capture. ${toErrorMessage(error)}`,
+      `Dynamic tool "${input.name}" callback "${input.phase}" has a non-serializable capture. ${toErrorMessage(error)}` +
+        (schemaPhase
+          ? " Inline the schema construction or reference a stable module-level schema; put only JSON data in its closure."
+          : ""),
     );
   }
   registerDurableDynamicCallback({
@@ -187,6 +195,8 @@ export function validateDurableDynamicToolCallbacks(
   const unknownPhases = Object.keys(raw).filter(
     (key) =>
       key !== "execute" &&
+      key !== "inputSchema" &&
+      key !== "outputSchema" &&
       key !== "label" &&
       key !== "approvalKey" &&
       key !== "approvalRequest" &&
@@ -261,8 +271,25 @@ export function validateDurableDynamicToolCallbacks(
     required: entry.toModelOutput !== undefined,
   });
 
+  const inputSchema = validateReference({
+    name,
+    owner,
+    phase: "inputSchema",
+    stamped: raw.inputSchema,
+    required: hasSchemaValidator(entry.inputSchema),
+  });
+  const outputSchema = validateReference({
+    name,
+    owner,
+    phase: "outputSchema",
+    stamped: raw.outputSchema,
+    required: hasSchemaValidator(entry.outputSchema),
+  });
+
   const callbacks: {
     execute: DurableDynamicCallbackReference;
+    inputSchema?: DurableDynamicCallbackReference;
+    outputSchema?: DurableDynamicCallbackReference;
     label?: {
       complete?: DurableDynamicCallbackReference;
       delta?: DurableDynamicCallbackReference;
@@ -273,6 +300,8 @@ export function validateDurableDynamicToolCallbacks(
     approvalResponse?: DurableDynamicCallbackReference;
     toModelOutput?: DurableDynamicCallbackReference;
   } = { execute };
+  if (inputSchema !== undefined) callbacks.inputSchema = inputSchema;
+  if (outputSchema !== undefined) callbacks.outputSchema = outputSchema;
   if (labelComplete !== undefined || labelDelta !== undefined || labelStart !== undefined) {
     callbacks.label = {
       complete: labelComplete,

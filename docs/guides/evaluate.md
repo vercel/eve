@@ -1,12 +1,13 @@
 ---
 title: Automatic Model Selection
-description: "Choose an agent model from the current request with an AI SDK evaluation model."
+description: "Choose agent models automatically or evaluate typed questions in your tools and application code."
 ---
 
 Use `autoModel` to choose an agent model from an allowlist before inference begins.
 It uses the [AI SDK evaluation API](https://ai-sdk.dev/docs/ai-sdk-core/evaluation),
 so the evaluator can be a Vercel AI Gateway model ID or an evaluation model from
-an installed provider.
+an installed provider. Use `evaluate` from the same entrypoint to ask typed
+questions in your own tools or application code.
 
 `eve/experimental/evaluate` is experimental. Its API can change between eve
 releases, and the AI SDK evaluation model specification can change in patch
@@ -102,6 +103,54 @@ model.
 Supported reasoning values are `"provider-default"`, `"none"`, `"minimal"`,
 `"low"`, `"medium"`, `"high"`, and `"xhigh"`. An omitted value inherits the
 agent's reasoning setting.
+
+## Evaluate inside a tool
+
+Use `evaluate` to ask choice, score, or boolean questions about the state you pass to it.
+It defaults to `typesafe-ai/jev` and uses the same authentication as `autoModel`,
+including the Gateway connection selected through `/login` during `eve dev`.
+Pass `model` to use another evaluation model ID or a provider instance. A configured
+AI SDK default provider takes precedence over the local Gateway connection.
+
+```ts title="agent/tools/classify-request.ts"
+import { evaluate } from "eve/experimental/evaluate";
+import { defineTool } from "eve/tools";
+import { z } from "zod";
+
+export default defineTool({
+  description: "Choose the team that can help with a customer request.",
+  inputSchema: z.object({ request: z.string().min(1).max(8000) }),
+  async execute({ request }, ctx) {
+    const result = await evaluate({
+      state: { request },
+      questions: {
+        team: {
+          type: "choice",
+          instructions: "Select the team best suited to handle the request.",
+          criteria: {
+            billing: "Invoices, payments, and refunds",
+            support: "Product questions and troubleshooting",
+          },
+        },
+      },
+      abortSignal: ctx.abortSignal,
+    });
+    return { team: result.answers.team.choice };
+  },
+});
+```
+
+The choice above is typed as `"billing" | "support"`. Each question appears under
+its authored key in `result.answers`. Results also include token usage, warnings,
+provider metadata, and response metadata.
+
+`evaluate` accepts AI SDK evaluation options, including `maxRetries`, `headers`,
+and `providerOptions`. Pass an `abortSignal` to cancel the request. Input and
+answer validation, retries, and provider errors follow AI SDK semantics.
+
+You can also call `evaluate` outside a tool; it does not require an active eve
+session. Each call performs its own evaluation. `autoModel` uses this function
+and adds the per-turn routing behavior described below.
 
 ## Runtime behavior
 

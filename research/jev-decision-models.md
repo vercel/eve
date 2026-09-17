@@ -1,24 +1,26 @@
 ---
 issue: "TBD (maintainer-requested research; no matching issue found)"
 status: implemented
-last_updated: "2026-09-16"
+last_updated: "2026-09-17"
 ---
 
 # Evaluation model routing in eve
 
 ## Recommendation
 
-Add only `autoModel` at `eve/experimental/evaluate`. Build it on AI SDK's
-`experimental_evaluate` API instead of owning a TypeSafe client, AI Gateway
-transport, credential resolver, or public decision API. Default to the
-`typesafe-ai/jev` model string. AI SDK model strings use its default
-provider, normally Vercel AI Gateway; explicit model instances use the provider
-package that created them.
+Expose `autoModel` and standalone `evaluate` at `eve/experimental/evaluate`.
+Build both on AI SDK's `experimental_evaluate` API. `evaluate` accepts the SDK's
+state, typed questions, and request options, with an optional model defaulting to
+`typesafe-ai/jev`. It returns the SDK's typed answers and response metadata.
 
-Keep the first integration narrow: select an allowlisted language model from the
-incoming task. Defer a generic agent-facing decision tool. Asking the main model
-to generate tool arguments adds output tokens and latency before the cheaper
-evaluation can happen.
+`autoModel` calls the shared `evaluate` wrapper. Model strings use the configured
+AI SDK default provider; without an override, the wrapper resolves eve's local
+Gateway connection when available and otherwise leaves Gateway resolution to the
+SDK. Explicit provider instances retain their own authentication.
+
+Tool authors can call `evaluate` with structured state and pass `ctx.abortSignal`.
+Application code can use it without an active eve session. Standalone calls are
+not cached; durable per-turn selection remains specific to `autoModel`.
 
 The API is experimental because AI SDK's evaluation model specification is also
 experimental and can change in patch releases. The implemented authoring API is
@@ -160,12 +162,10 @@ direct provider behavior.
 
 ## Scope boundaries
 
-The first release intentionally does not expose `experimental_evaluate`, a
-TypeSafe-specific `decide` function, decision schemas, direct HTTP clients,
-credentials, custom retry logic, provider fallbacks, confidence thresholds, or
-an agent-callable decision tool. Applications that need arbitrary evaluations
-can call AI SDK directly. eve adds only the lifecycle and durable routing policy
-needed to use an evaluation result as an agent model.
+eve owns the `evaluate` wrapper and its default model and authentication behavior.
+AI SDK owns evaluation schemas, validation, retries, errors, and result metadata.
+The integration adds no TypeSafe-specific `decide` function, direct HTTP client,
+provider fallback, confidence threshold, or built-in agent-callable decision tool.
 
 No live Jev inference or independent quality, latency, or cost benchmark was run
 for this research. Deterministic tests use AI SDK evaluation model mocks and

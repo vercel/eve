@@ -68,7 +68,7 @@ export async function buildExtensionPackage(
   let preserveTransactionRoot = false;
   try {
     await mkdir(stagedDistRoot, { recursive: true });
-    await emitExtensionDistribution({
+    const runtimeImports = await emitExtensionDistribution({
       appRoot,
       declarationModule,
       declarationsRoot: join(transactionRoot, "declarations"),
@@ -88,6 +88,7 @@ export async function buildExtensionPackage(
         ? {}
         : { build: { externalDependencies: config.externalDependencies } }),
       requires: await deriveExtensionCapabilityRequirements({
+        runtimeImports,
         declarationModule,
         manifest,
         packageName: config.packageName,

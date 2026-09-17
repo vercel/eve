@@ -24,6 +24,11 @@ import { createErrorId, createLogger, formatError, logError } from "#internal/lo
 import { formatLanguageModelGatewayId } from "#internal/runtime-model.js";
 import { contextStorage } from "#context/container.js";
 import {
+  estimateRequestEnvelope,
+  getRequestEnvelopeTokens,
+  setRequestEnvelopeTokens,
+} from "#harness/request-envelope.js";
+import {
   AuthKey,
   HistoryStateKey,
   ParentSessionKey,
@@ -81,6 +86,7 @@ import {
   shouldCompact,
 } from "#harness/compaction.js";
 import { createCurrentMessages } from "#harness/current-messages.js";
+import { estimateTokens } from "#harness/token-estimate.js";
 import {
   accumulateTurnUsage,
   getTurnUsageState,
@@ -624,6 +630,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
             messages: [...session.history],
             model: resolvedModel.model,
             onCompaction: config.onCompaction,
+            requestEnvelopeTokens: getRequestEnvelopeTokens(session),
             resolveModel: config.resolveModel,
             runtimeIdentity: config.runtimeIdentity,
             session,
@@ -1196,42 +1203,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     const cachePath = detectPromptCachePath(model);
     const marker = cachePath.kind === "anthropic-direct" ? getAnthropicCacheMarker() : undefined;
 
-    // --- Compaction ---------------------------------------------------------
-    //
-    // Runs before `agent.stream()` so the compacted messages flow through
-    // `messages` (which the harness uses to rebuild session history).
     const attributionHeaders = buildGatewayAttributionHeaders(model, config.runtimeIdentity);
-
-    const clientContextTailLength =
-      turnClientContext === undefined
-        ? undefined
-        : Math.max(0, messages.length - turnClientContext.insertionIndex);
-    const compaction = await maybeCompact({
-      abortSignal: config.abortSignal,
-      auth: ctx?.get(AuthKey) ?? null,
-      emit,
-      emissionState,
-      historyProjector: config.historyProjector,
-      messages: [...messages],
-      model,
-      onCompaction: config.onCompaction,
-      promptMessages: createModelMessages(messages),
-      resolveModel: config.resolveModel,
-      runtimeIdentity: config.runtimeIdentity,
-      session,
-      telemetry: stepInstrumentation?.telemetry(),
-    });
-    session = compaction.session;
-    if (compaction.compacted) {
-      messages = compaction.messages;
-      if (turnClientContext !== undefined && clientContextTailLength !== undefined) {
-        turnClientContext = {
-          ...turnClientContext,
-          insertionIndex: Math.max(0, messages.length - clientContextTailLength),
-        };
-        session = setTurnClientContextState(session, turnClientContext);
-      }
-    }
     projectedMessages = validateHarnessModelMessages(
       normalizeModelMessages(projectHistory(createModelMessages(messages), session.state)),
     );
@@ -1272,34 +1244,37 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
      * `console.error(error)` handler inside `streamText`. Errors are
      * handled by the harness catch block and emitted as stream events.
      */
-    // Persist framework announcements before the new input, or after earlier
-    // tool results on a continuation, so later requests retain the full prefix.
-    const currentMessages = createCurrentMessages(messages, {
-      historyState: ctx?.get(HistoryStateKey),
-      currentTurnMessages: preparedTurnInput,
-      projectedMessages,
-    });
-    if (ctx !== undefined) {
-      currentMessages.addSystem(buildDynamicInstructionMessages(ctx));
-    }
-    const taskContext =
-      ctx?.get(TurnTaskDeliveryKey) === "initiating"
-        ? resolveInitiatingTaskContext({ state: session.state, turnId })
-        : undefined;
-    currentMessages.addAnnouncements({
-      availableSkills: ctx?.get(PendingSkillAnnouncementKey),
-      taskState: taskContext?.context,
-      deliveryInstruction: deliveryPolicy.instruction,
-    });
-    const pendingApprovals = renderPendingApprovalsInstruction(
-      getPendingInputBatches(session.state).flatMap((batch) => batch.requests),
-    );
-    if (pendingApprovals !== undefined) {
-      currentMessages.add(pendingApprovals, "context.state", {
-        cacheFriendly: false,
+    const createRequestMessages = () => {
+      // Persist framework announcements before the new input, or after earlier
+      // tool results on a continuation, so later requests retain the full prefix.
+      const currentMessages = createCurrentMessages(messages, {
+        historyState: ctx?.get(HistoryStateKey),
+        currentTurnMessages: preparedTurnInput,
+        projectedMessages,
       });
-    }
-    const promptMessages = currentMessages.history;
+      if (ctx !== undefined) {
+        currentMessages.addSystem(buildDynamicInstructionMessages(ctx));
+      }
+      const taskContext =
+        ctx?.get(TurnTaskDeliveryKey) === "initiating"
+          ? resolveInitiatingTaskContext({ state: session.state, turnId })
+          : undefined;
+      currentMessages.addAnnouncements({
+        availableSkills: ctx?.get(PendingSkillAnnouncementKey),
+        taskState: taskContext?.context,
+        deliveryInstruction: deliveryPolicy.instruction,
+      });
+      const pendingApprovals = renderPendingApprovalsInstruction(
+        getPendingInputBatches(session.state).flatMap((batch) => batch.requests),
+      );
+      if (pendingApprovals !== undefined) {
+        currentMessages.add(pendingApprovals, "context.state", {
+          cacheFriendly: false,
+        });
+      }
+      return currentMessages;
+    };
+    let currentMessages = createRequestMessages();
     let interruptedUsage: TokenUsageDelta | undefined;
     const finishSteeredStep = (): StepResult => {
       throwIfTurnAborted(config.abortSignal);
@@ -1318,7 +1293,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         steered: true,
         next: runStep,
         session: setHarnessEmissionState(
-          { ...session, history: [...promptMessages] },
+          { ...session, history: [...currentMessages.history] },
           advanceStep(emissionState),
         ),
       };
@@ -1326,9 +1301,15 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
 
     // Hydrate `eve-sandbox:` ref FileParts into inline bytes for the model call
     // only. Session history remains ref-only across future step boundaries.
-    const modelMessages = await hydrateSandboxAttachments(currentMessages.nonSystemMessages);
+    let modelMessages: ModelMessage[] = [];
 
-    const prepareModelCallInput = (extraSystemNote?: string) => {
+    const withTrailingUserNote = (
+      messages: readonly ModelMessage[],
+      note?: string,
+    ): ModelMessage[] =>
+      note ? [...messages, createFrameworkUserMessage("execution.retry", note)] : [...messages];
+
+    const prepareModelInstructions = (extraSystemNote?: string) => {
       const extraSystemEntry: SystemModelMessage[] = extraSystemNote
         ? [{ role: "system" as const, content: extraSystemNote }]
         : [];
@@ -1348,6 +1329,11 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
           ? mergeSystemInstructions(markedInstructions)
           : (session.agent.system ?? undefined);
 
+      return instructions;
+    };
+
+    const prepareModelCallInput = (extraSystemNote?: string) => {
+      const instructions = prepareModelInstructions(extraSystemNote);
       return {
         instructions,
         telemetryRuntimeContext: stepInstrumentation?.resolveRuntimeContext({
@@ -1376,31 +1362,18 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     type ModelCallOptions = {
       disabledProviderTools?: ReadonlySet<string>;
       extraSystemNote?: string;
-      preparedInput?: ReturnType<typeof prepareModelCallInput>;
       retryReason?: "empty-response";
       suppressStepStartedEmission?: boolean;
       trailingUserNote?: string;
     };
     let modelCallCoordinationTools = config.tools;
+    let requestEnvelopeTokens = 0;
+    let compactionFailure: { readonly error: unknown } | undefined;
+    const throwIfCompactionFailed = () => {
+      if (compactionFailure !== undefined) throw compactionFailure.error;
+    };
 
-    const runSingleModelCall = async (
-      opts: ModelCallOptions & { readonly attemptIndex: number },
-    ): Promise<HarnessStepResult> => {
-      generation.begin();
-      const { instructions, telemetryRuntimeContext = {} } =
-        opts.preparedInput ?? prepareModelCallInput(opts.extraSystemNote);
-      // Label the reissued call's telemetry; without this a retry is only
-      // visible as a second LLM span under one step.
-      if (opts.retryReason) {
-        telemetryRuntimeContext["eve.retry.reason"] = opts.retryReason;
-      }
-      // Trailing rather than an extraSystemNote prepend: keeps the provider's
-      // cached prompt prefix valid, and handleStepResult rebuilds history
-      // from the step's prompt messages, so the note exists only on this
-      // call's wire request.
-      const callMessages = opts.trailingUserNote
-        ? [...modelMessages, createFrameworkUserMessage("execution.retry", opts.trailingUserNote)]
-        : [...modelMessages];
+    const prepareModelTools = async (opts: ModelCallOptions) => {
       const harnessTools = buildHarnessToolsWithDynamicSubagents(config.tools, ctx);
       const backgroundBatch = createBackgroundToolCallBatch();
       const advertisedHarnessTools = getAdvertisedTools({
@@ -1470,6 +1443,102 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
           };
       }
 
+      return { effectiveTools, backgroundBatch, advertisedHarnessTools };
+    };
+
+    const runSingleModelCall = async (
+      opts: ModelCallOptions & { readonly attemptIndex: number },
+    ): Promise<HarnessStepResult> => {
+      let { effectiveTools, backgroundBatch, advertisedHarnessTools } =
+        await prepareModelTools(opts);
+      currentMessages = createRequestMessages();
+      requestEnvelopeTokens = await estimateRequestEnvelope({
+        history: projectedMessages,
+        instructions: prepareModelInstructions(opts.extraSystemNote),
+        messages: withTrailingUserNote(currentMessages.nonSystemMessages, opts.trailingUserNote),
+        tools: effectiveTools,
+      });
+      const clientContextTailLength =
+        turnClientContext === undefined
+          ? undefined
+          : Math.max(0, messages.length - turnClientContext.insertionIndex);
+      const compaction = await (async () => {
+        try {
+          return await maybeCompact({
+            abortSignal: config.abortSignal,
+            auth: ctx?.get(AuthKey) ?? null,
+            emit,
+            emissionState,
+            historyProjector: config.historyProjector,
+            messages: [...messages],
+            model,
+            onCompaction: config.onCompaction,
+            promptMessages: createModelMessages(messages),
+            requestEnvelopeTokens,
+            resolveModel: config.resolveModel,
+            runtimeIdentity: config.runtimeIdentity,
+            session,
+            telemetry: stepInstrumentation?.telemetry(),
+          });
+        } catch (error) {
+          compactionFailure = { error };
+          throw error;
+        }
+      })();
+      session = compaction.session;
+      if (compaction.compacted) {
+        messages = compaction.messages;
+        if (turnClientContext !== undefined && clientContextTailLength !== undefined) {
+          turnClientContext = {
+            ...turnClientContext,
+            insertionIndex: Math.max(0, messages.length - clientContextTailLength),
+          };
+          session = setTurnClientContextState(session, turnClientContext);
+        }
+        session = {
+          ...session,
+          compaction: {
+            recentWindowSize: session.compaction.recentWindowSize,
+            threshold: session.compaction.threshold,
+            thresholdPercent: session.compaction.thresholdPercent,
+          },
+        };
+        projectedMessages = validateHarnessModelMessages(
+          normalizeModelMessages(projectHistory(createModelMessages(messages), session.state)),
+        );
+        currentMessages = createRequestMessages();
+        ({ effectiveTools, backgroundBatch, advertisedHarnessTools } =
+          await prepareModelTools(opts));
+        requestEnvelopeTokens = await estimateRequestEnvelope({
+          history: projectedMessages,
+          instructions: prepareModelInstructions(opts.extraSystemNote),
+          messages: withTrailingUserNote(currentMessages.nonSystemMessages, opts.trailingUserNote),
+          tools: effectiveTools,
+        });
+      }
+      // New announcements join durable history, so they must not inflate the
+      // envelope baseline and hide instruction growth on the next step.
+      requestEnvelopeTokens = Math.max(
+        0,
+        requestEnvelopeTokens -
+          (estimateTokens(currentMessages.history) - estimateTokens(messages)),
+      );
+      generation.begin();
+      modelMessages = await hydrateSandboxAttachments(currentMessages.nonSystemMessages);
+      const { instructions, telemetryRuntimeContext = {} } = prepareModelCallInput(
+        opts.extraSystemNote,
+      );
+      // Label the reissued call's telemetry; without this a retry is only
+      // visible as a second LLM span under one step.
+      if (opts.retryReason) {
+        telemetryRuntimeContext["eve.retry.reason"] = opts.retryReason;
+      }
+      // Trailing rather than an extraSystemNote prepend: keeps the provider's
+      // cached prompt prefix valid, and handleStepResult rebuilds history
+      // from the step's prompt messages, so the note exists only on this
+      // call's wire request.
+      const callMessages = withTrailingUserNote(modelMessages, opts.trailingUserNote);
+
       const instrumentationTurnId = activeTurnId(emissionState);
       const attempt = stepInstrumentation?.prepareAttempt({
         attemptIndex: opts.attemptIndex,
@@ -1535,7 +1604,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         runtimeContext: telemetryRuntimeContext,
         stopWhen: isStepCount(1),
         telemetry: attempt?.telemetry,
-        toolApproval: buildToolApproval(modelTools),
+        toolApproval: buildToolApproval(effectiveTools),
         tools: effectiveTools,
       };
       const agent = new ToolLoopAgent(agentSettings);
@@ -1658,19 +1727,15 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
           runSingleModelCall({
             ...opts,
             attemptIndex: nextModelAttemptIndex++,
-            preparedInput: attempt === 1 ? opts.preparedInput : undefined,
             suppressStepStartedEmission: attempt === 1 ? opts.suppressStepStartedEmission : true,
           }),
         {
           sessionId: session.sessionId,
           turnId: emissionState.turnId,
+          canRetry: () => compactionFailure === undefined,
         },
         generation.signal,
       );
-
-    // Resolve first-attempt instrumentation after step.started dynamic
-    // capabilities have updated the effective prompt and toolset.
-    const initialModelCallInput = prepareModelCallInput();
 
     const limitResult = await enforceSessionUsageLimit({
       config,
@@ -1686,10 +1751,10 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     let result: HarnessStepResult;
     try {
       result = await runOneModelCall({
-        preparedInput: initialModelCallInput,
         suppressStepStartedEmission: true,
       });
     } catch (error) {
+      throwIfCompactionFailed();
       throwIfTurnAborted(config.abortSignal);
 
       if (generation.interrupted) {
@@ -1720,6 +1785,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
             }),
         ],
       });
+      throwIfCompactionFailed();
       throwIfTurnAborted(config.abortSignal);
 
       if (generation.interrupted) return finishSteeredStep();
@@ -1947,11 +2013,12 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         emissionState: generation.outputStarted
           ? { ...emissionState, assistantOutputStarted: true }
           : emissionState,
+        requestEnvelopeTokens,
         durableModelPromptMessageCount:
           turnClientContext === undefined || turnClientContext.messages.length === 0
             ? modelMessages.length
             : undefined,
-        promptMessages,
+        promptMessages: currentMessages.history,
         result,
         runStep,
         session,
@@ -2489,6 +2556,7 @@ async function handleStepResult(input: {
   readonly emit?: ToolLoopHarnessConfig["handleEvent"];
   readonly emissionState: ReturnType<typeof getHarnessEmissionState>;
   readonly durableModelPromptMessageCount?: number;
+  readonly requestEnvelopeTokens?: number;
   readonly promptMessages: readonly HarnessModelMessage[];
   readonly result: HarnessStepResult;
   readonly runStep: StepFn;
@@ -2539,14 +2607,19 @@ async function handleStepResult(input: {
   });
   const responseMessages = normalizedProviderHistory.messages;
 
-  const baseSession: HarnessSession = {
-    ...session,
-    compaction: createNextCompactionConfig(
-      session.compaction,
-      input.durableModelPromptMessageCount,
-      result,
-    ),
-  };
+  const baseSession = setRequestEnvelopeTokens(
+    {
+      ...session,
+      compaction: createNextCompactionConfig(
+        session.compaction,
+        input.durableModelPromptMessageCount,
+        result,
+      ),
+    },
+    result.usage?.inputTokens !== undefined && input.durableModelPromptMessageCount !== undefined
+      ? input.requestEnvelopeTokens
+      : undefined,
+  );
 
   const approvalRequests = extractToolApprovalInputRequests({
     content: result.content ?? [],
@@ -3115,6 +3188,7 @@ async function maybeCompact(input: {
   readonly onCompaction?: ToolLoopHarnessConfig["onCompaction"];
   /** Model-visible prompt used only to decide whether durable history needs compaction. */
   readonly promptMessages?: readonly HarnessModelMessage[];
+  readonly requestEnvelopeTokens?: number;
   readonly resolveModel: ToolLoopHarnessConfig["resolveModel"];
   readonly runtimeIdentity?: ToolLoopHarnessConfig["runtimeIdentity"];
   readonly session: HarnessSession;
@@ -3132,7 +3206,13 @@ async function maybeCompact(input: {
     input.historyProjector?.({ messages: promptMessages, state: session.state }) ?? promptMessages,
   );
   const needsSummary =
-    input.force === true || shouldCompact(projectedPromptMessages, session.compaction);
+    input.force === true ||
+    shouldCompact(
+      projectedPromptMessages,
+      session.compaction,
+      input.requestEnvelopeTokens,
+      getRequestEnvelopeTokens(session),
+    );
   const needsMemoryCanonicalization = shouldCanonicalizeMemory(messages);
 
   if (!needsSummary && !needsMemoryCanonicalization) {
@@ -3164,7 +3244,12 @@ async function maybeCompact(input: {
         sequence: emissionState.sequence,
         sessionId: session.sessionId,
         turnId: emissionState.turnId,
-        usageInputTokens: getInputTokenCount(projectedPromptMessages, session.compaction),
+        usageInputTokens: getInputTokenCount(
+          projectedPromptMessages,
+          session.compaction,
+          input.requestEnvelopeTokens,
+          getRequestEnvelopeTokens(session),
+        ),
       }),
       projectedPromptMessages,
     );
@@ -3175,16 +3260,40 @@ async function maybeCompact(input: {
     input.historyProjector?.({ messages: canonical.ordinary, state: session.state }) ??
       canonical.ordinary,
   );
+  const requestEnvelopeTokens = input.requestEnvelopeTokens ?? 0;
+  const historyCompaction: CompactionConfig = {
+    ...session.compaction,
+    threshold: Math.max(1, session.compaction.threshold - requestEnvelopeTokens),
+    lastKnownInputTokens:
+      session.compaction.lastKnownInputTokens === undefined
+        ? undefined
+        : Math.max(
+            0,
+            session.compaction.lastKnownInputTokens -
+              Math.min(getRequestEnvelopeTokens(session) ?? 0, requestEnvelopeTokens),
+          ),
+  };
   const compactedOrdinary = needsSummary
     ? await compactMessages(
         [...ordinary],
         compaction.model,
-        session.compaction,
+        historyCompaction,
         providerOptions,
         input.telemetry,
         buildGatewayAttributionHeaders(compaction.model, input.runtimeIdentity),
         input.abortSignal,
         input.force === true,
+        input.requestEnvelopeTokens === undefined
+          ? undefined
+          : Math.max(
+              0,
+              getInputTokenCount(
+                projectedPromptMessages,
+                session.compaction,
+                requestEnvelopeTokens,
+                getRequestEnvelopeTokens(session),
+              ) - requestEnvelopeTokens,
+            ),
       )
     : [...ordinary];
   messages = validateHarnessModelMessages([...canonical.memory, ...compactedOrdinary]);
@@ -3246,7 +3355,11 @@ function resolveApprovalKeyFromTools(
  */
 async function runModelCallWithRetries<T>(
   fn: (attempt: number) => Promise<T>,
-  diag: { readonly sessionId: string; readonly turnId: string },
+  diag: {
+    readonly sessionId: string;
+    readonly turnId: string;
+    readonly canRetry?: () => boolean;
+  },
   signal: AbortSignal,
 ): Promise<T> {
   for (let attempt = 1; ; attempt++) {
@@ -3255,7 +3368,11 @@ async function runModelCallWithRetries<T>(
       return await fn(attempt);
     } catch (error) {
       signal.throwIfAborted();
-      if (attempt === MODEL_CALL_MAX_ATTEMPTS || classifyModelCallError(error) !== "retry") {
+      if (
+        diag.canRetry?.() === false ||
+        attempt === MODEL_CALL_MAX_ATTEMPTS ||
+        classifyModelCallError(error) !== "retry"
+      ) {
         throw error;
       }
       const delayMs =

@@ -9912,9 +9912,9 @@ describe("createToolLoopHarness", () => {
       "session.started",
       "turn.started",
       "message.received",
+      "step.started",
       "compaction.requested",
       "compaction.completed",
-      "step.started",
       "message.completed",
       "step.completed",
       "turn.completed",
@@ -9943,7 +9943,7 @@ describe("createToolLoopHarness", () => {
     });
   });
 
-  it("selects the model from the pre-compaction view and dispatches step consumers after rewrite", async () => {
+  it("resolves model and step capabilities before compacting the final request", async () => {
     vi.mocked(shouldCompact).mockReturnValue(true);
     const compactedHistory: HarnessModelMessage[] = [
       { content: "Summary of our conversation so far:", kind: "context.compaction", role: "user" },
@@ -9999,7 +9999,7 @@ describe("createToolLoopHarness", () => {
     ];
     expect(preCompactionModelViews).toEqual([preCompactionView]);
     expect(vi.mocked(compactMessages).mock.calls[0]?.[0]).toEqual(preCompactionView);
-    expect(stepViews).toEqual([compactedHistory]);
+    expect(stepViews).toEqual([preCompactionView]);
   });
 
   it("clears static and dynamic user instructions without rerunning lifecycle events", async () => {
@@ -10236,9 +10236,11 @@ describe("createToolLoopHarness", () => {
     expect(call?.[2]).toEqual(
       expect.objectContaining({
         recentWindowSize: 10,
-        threshold: 100_000,
+        threshold: expect.any(Number),
       }),
     );
+    expect(call?.[2].threshold).toBeLessThan(100_000);
+    expect(call?.[2].threshold).toBeGreaterThan(99_000);
     expect(call?.[3]).toBeUndefined();
   });
 
@@ -12995,6 +12997,8 @@ describe("createToolLoopHarness", () => {
           { content: "Hi", kind: "user" as const, role: "user" },
         ],
         session.compaction,
+        expect.any(Number),
+        undefined,
       );
       expect(vi.mocked(compactMessages).mock.calls[0]?.[0]).toEqual([
         { content: "earlier", kind: "user" as const, role: "user" },
