@@ -487,6 +487,26 @@ export function withEve<TConfig extends EveNextConfig>(
         productionDestination,
       };
     });
+    const resolveAgentDestinationPrefix = async (agent: (typeof agentsWithDestinations)[number]) =>
+      await resolveEveDestinationPrefix({
+        appRoot: agent.appRoot,
+        devServerTimeoutMs,
+        logLabel: agent.name,
+        phase,
+        productionDestinationPrefix: agent.productionDestination.destinationPrefix,
+        productionServerOrigin: agent.productionDestination.localServerOrigin,
+        workspaceAgentName: agent.workspaceMember === true ? agent.name : undefined,
+      });
+
+    if (process.env.NODE_ENV === "production" && phase === "phase-production-server") {
+      await Promise.all(
+        agentsWithDestinations.map(async (agent) => {
+          if (agent.productionDestination.localServerOrigin !== undefined) {
+            await resolveAgentDestinationPrefix(agent);
+          }
+        }),
+      );
+    }
 
     return {
       ...nextConfig,
@@ -495,15 +515,7 @@ export function withEve<TConfig extends EveNextConfig>(
           resolveExistingRewrites(existingRewrites),
           Promise.all(
             agentsWithDestinations.map(async (agent) => {
-              const destinationPrefix = await resolveEveDestinationPrefix({
-                appRoot: agent.appRoot,
-                devServerTimeoutMs,
-                logLabel: agent.name,
-                phase,
-                productionDestinationPrefix: agent.productionDestination.destinationPrefix,
-                productionServerOrigin: agent.productionDestination.localServerOrigin,
-                workspaceAgentName: agent.workspaceMember === true ? agent.name : undefined,
-              });
+              const destinationPrefix = await resolveAgentDestinationPrefix(agent);
 
               return createEveRewriteRule({
                 destinationPrefix,

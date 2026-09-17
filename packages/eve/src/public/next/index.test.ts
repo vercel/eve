@@ -360,6 +360,42 @@ describe("withEve", () => {
     });
   });
 
+  it("starts every named managed local production agent when Next loads production server config", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.mocked(resolveEveDestinationPrefix)
+      .mockResolvedValueOnce("http://127.0.0.1:4274")
+      .mockResolvedValueOnce("http://127.0.0.1:4275");
+
+    await withEve<TestConfig>(
+      {},
+      {
+        agents: {
+          billing: "./agents/billing",
+          support: "./agents/support",
+        },
+      },
+    )("phase-production-server", {
+      defaultConfig: {},
+    });
+
+    expect(resolveEveDestinationPrefix).toHaveBeenNthCalledWith(1, {
+      appRoot: `${process.cwd()}/agents/billing`,
+      devServerTimeoutMs: undefined,
+      logLabel: "billing",
+      phase: "phase-production-server",
+      productionDestinationPrefix: "http://127.0.0.1:4274",
+      productionServerOrigin: "http://127.0.0.1:4274",
+    });
+    expect(resolveEveDestinationPrefix).toHaveBeenNthCalledWith(2, {
+      appRoot: `${process.cwd()}/agents/support`,
+      devServerTimeoutMs: undefined,
+      logLabel: "support",
+      phase: "phase-production-server",
+      productionDestinationPrefix: "http://127.0.0.1:4275",
+      productionServerOrigin: "http://127.0.0.1:4275",
+    });
+  });
+
   it("adds named agent rewrites with derived and per-agent service prefixes", async () => {
     vi.stubEnv("NODE_ENV", "production");
     vi.stubEnv("EVE_NEXT_PRODUCTION_ORIGIN", "https://agent.example.com");
