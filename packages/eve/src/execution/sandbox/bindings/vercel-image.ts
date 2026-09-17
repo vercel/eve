@@ -1,6 +1,7 @@
 import { setTimeout as sleep } from "node:timers/promises";
 
 import { hydrateSandboxFromImmutableResources } from "#execution/sandbox/bindings/immutable-resources.js";
+import { VERCEL_EVE_SANDBOX_IMAGE } from "#execution/sandbox/bindings/eve-image.js";
 import {
   createVercelNetworkPolicySetter,
   ensureVercelSandboxBaseRuntime,
@@ -223,24 +224,16 @@ export function createVercelImageSandboxProvider(
         files: context.files,
         storagePath: context.storagePath,
       });
-      if (dockerfile === undefined) {
-        throw new Error("The Vercel image environment requires agent/sandbox/Dockerfile.");
-      }
-      const credentials = await getVercelSandboxCredentials(createOptions);
-      const imageReference = resolveImageReference(
-        credentials,
-        createSandboxProviderIdentity({
-          dockerfile: dockerfile.contentHash,
-          environment: environmentOptions,
-          resources: sandboxProviderResourceIdentity(context.resources),
-          version: 1,
-        }),
-      );
-      const image = await createImagePublisher({
-        authToken: credentials.token,
-        registry: OCI_REGISTRY,
-        username: credentials.teamId,
-      }).publish({ dockerfile, imageReference, signal: createOptions.signal });
+      const image =
+        dockerfile === undefined
+          ? VERCEL_EVE_SANDBOX_IMAGE
+          : await publishDockerfileImage({
+              createImagePublisher,
+              createOptions,
+              dockerfile,
+              environmentOptions,
+              resources: context.resources,
+            });
       const preparedMounts = await Promise.all(
         [context.resources.workspace, context.resources.skills]
           .filter((resource) => resource !== undefined)
@@ -287,6 +280,38 @@ export function createVercelImageSandboxProvider(
       };
     },
   };
+}
+
+async function publishDockerfileImage(input: {
+  readonly createImagePublisher: NonNullable<
+    CreateVercelImageProviderInput["createImagePublisher"]
+  >;
+  readonly createOptions: VercelCreateOptions;
+  readonly dockerfile: NonNullable<Awaited<ReturnType<typeof materializeSandboxDockerfile>>>;
+  readonly environmentOptions: ExperimentalVercelImageEnvironmentOptions | undefined;
+  readonly resources: import("#shared/sandbox-provider.js").SandboxProviderResources;
+}): Promise<string> {
+  const credentials = await getVercelSandboxCredentials(input.createOptions);
+  const imageReference = resolveImageReference(
+    credentials,
+    createSandboxProviderIdentity({
+      dockerfile: input.dockerfile.contentHash,
+      environment: input.environmentOptions,
+      resources: sandboxProviderResourceIdentity(input.resources),
+      version: 1,
+    }),
+  );
+  return await input
+    .createImagePublisher({
+      authToken: credentials.token,
+      registry: OCI_REGISTRY,
+      username: credentials.teamId,
+    })
+    .publish({
+      dockerfile: input.dockerfile,
+      imageReference,
+      signal: input.createOptions.signal,
+    });
 }
 
 function vercelImageIdentityOptions(options: object): object {
@@ -365,7 +390,7 @@ function requirePreparedArtifact(artifact: SandboxPreparedArtifact): VercelImage
     !isSandboxPreparedArtifactRecord(artifact) ||
     artifact.version !== 1 ||
     typeof artifact.image !== "string" ||
-    !DIGEST_PINNED_IMAGE.test(artifact.image) ||
+    (artifact.image !== VERCEL_EVE_SANDBOX_IMAGE && !DIGEST_PINNED_IMAGE.test(artifact.image)) ||
     !Array.isArray(artifact.mounts) ||
     !artifact.mounts.every(isMountArtifact) ||
     new Set(artifact.mounts.map((mount) => mount.mountPath)).size !== artifact.mounts.length
