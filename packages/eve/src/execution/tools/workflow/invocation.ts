@@ -24,7 +24,6 @@ export async function* runWorkflowToolInvocation(
   signal: AbortSignal,
   cancelled?: Promise<never>,
 ): AsyncGenerator<WorkflowToolRunMessage> {
-  const reader = createChannelReader("body", executeWorkflowToolInvocation(input, signal));
   let onAbort: (() => void) | undefined;
   const cancellation =
     cancelled ??
@@ -34,18 +33,53 @@ export async function* runWorkflowToolInvocation(
       else signal.addEventListener("abort", onAbort, { once: true });
     });
   cancellation.catch(() => {});
-  let started = false;
   try {
+    if (signal.aborted) throw signal.reason;
+    const inbox = openWorkflowToolRunOwnerInbox();
+    const bodyReader = createChannelReader(
+      "body",
+      awaitBodyResult(executeWorkflowBody({ ...input, owner: inbox.owner }, signal)),
+    );
+    let consumedReports = 0;
+    let bodyResult: WorkflowBodyResult | undefined;
+    let cleanupDeadline: Promise<"cancel"> | undefined;
+
     while (true) {
-      if (signal.aborted) throw signal.reason;
-      started = true;
-      const read = await raceChannelReads([reader], cancellation);
-      if (read === "cancel" || read.next.done) return;
-      if (signal.aborted && read.next.value.kind === "outcome") throw signal.reason;
-      if (read.next.value.kind === "outcome" && onAbort !== undefined)
-        signal.removeEventListener("abort", onAbort);
+      if (signal.aborted && cleanupDeadline === undefined) {
+        cleanupDeadline = sleep(WORKFLOW_CANCELLATION_CLEANUP_MS).then(() => "cancel");
+      }
+      // Hook persistence does not mean the owner has consumed every report yet.
+      if (bodyResult !== undefined && consumedReports >= bodyResult.reportCount) {
+        if (signal.aborted) break;
+        if (onAbort !== undefined) signal.removeEventListener("abort", onAbort);
+        yield { from: createWorkflowBodyRef(input), kind: "outcome", result: bodyResult.outcome };
+        return;
+      }
+
+      let read;
+      try {
+        read = await raceChannelReads(
+          bodyResult === undefined ? [inbox.reader, bodyReader] : [inbox.reader],
+          cleanupDeadline ?? cancellation,
+        );
+      } catch (error) {
+        // Keep the same pending reads while switching from execution to bounded cleanup.
+        if (signal.aborted && cleanupDeadline === undefined) continue;
+        throw error;
+      }
+      if (read === "cancel") break;
+      if (read.channel === "body") {
+        if (read.next.done) throw new Error("Workflow body ended without an outcome.");
+        bodyResult = read.next.value;
+        continue;
+      }
+      if (read.next.done) {
+        if (signal.aborted) break;
+        return;
+      }
+      if (read.next.value.kind === "outcome") continue;
+      if (read.next.value.kind === "report") consumedReports += 1;
       yield read.next.value;
-      if (read.next.value.kind === "outcome") return;
     }
   } catch (error) {
     if (!signal.aborted) {
@@ -56,67 +90,18 @@ export async function* runWorkflowToolInvocation(
       };
       return;
     }
-    // Cleanup can close prompts and release child agents, but cannot undo cancellation.
-    const deadline = started
-      ? sleep(WORKFLOW_CANCELLATION_CLEANUP_MS).then(() => "cancel" as const)
-      : undefined;
-    try {
-      while (started) {
-        const read = await raceChannelReads([reader], deadline);
-        if (read === "cancel" || read.next.done || read.next.value.kind === "outcome") break;
-        yield read.next.value;
-      }
-    } catch {}
-    yield {
-      from: createWorkflowBodyRef(input),
-      kind: "outcome",
-      result: {
-        status: "cancelled",
-        reason:
-          signal.reason instanceof Error ? signal.reason.message : String(signal.reason ?? ""),
-      },
-    };
   } finally {
     if (onAbort !== undefined) signal.removeEventListener("abort", onAbort);
   }
-}
-
-async function* executeWorkflowToolInvocation(
-  input: WorkflowToolInvocationInput,
-  signal: AbortSignal,
-): AsyncGenerator<WorkflowToolRunMessage> {
-  const inbox = openWorkflowToolRunOwnerInbox();
-  const bodyReader = createChannelReader(
-    "body",
-    awaitBodyResult(executeWorkflowBody({ ...input, owner: inbox.owner }, signal)),
-  );
-  let consumedReports = 0;
-  let bodyResult: WorkflowBodyResult | undefined;
-
-  while (true) {
-    // Hook persistence does not mean the owner has consumed every report yet.
-    if (bodyResult !== undefined && consumedReports >= bodyResult.reportCount) {
-      yield {
-        from: createWorkflowBodyRef(input),
-        kind: "outcome",
-        result: bodyResult.outcome,
-      };
-      return;
-    }
-
-    const read = await raceChannelReads(
-      bodyResult === undefined ? [inbox.reader, bodyReader] : [inbox.reader],
-    );
-    if (read.channel === "body") {
-      if (read.next.done) throw new Error("Workflow body ended without an outcome.");
-      bodyResult = read.next.value;
-      continue;
-    }
-    if (read.next.done) return;
-    if (read.next.value.kind === "outcome") continue;
-    if (read.next.value.kind === "report") consumedReports += 1;
-    yield read.next.value;
-  }
+  // Cleanup cannot undo cancellation, even when the body returns success.
+  yield {
+    from: createWorkflowBodyRef(input),
+    kind: "outcome",
+    result: {
+      status: "cancelled",
+      reason: signal.reason instanceof Error ? signal.reason.message : String(signal.reason ?? ""),
+    },
+  };
 }
 
 async function* awaitBodyResult(

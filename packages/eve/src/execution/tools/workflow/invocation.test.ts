@@ -1,5 +1,6 @@
 import { beforeEach, expect, it, vi } from "vitest";
 
+import type { WorkflowToolRunMessage } from "#execution/tools/workflow/messages.js";
 import { runWorkflowToolInvocation } from "#execution/tools/workflow/invocation.js";
 
 const mocks = vi.hoisted(() => ({
@@ -167,4 +168,41 @@ it("does not start a body cancelled before its first read", async () => {
   expect(mocks.executeWorkflowBody).not.toHaveBeenCalled();
   expect(mocks.openWorkflowToolRunOwnerInbox).not.toHaveBeenCalled();
   expect(mocks.sleep).not.toHaveBeenCalled();
+});
+
+it("preserves the pending inbox read across cancellation and drains the report before settling", async () => {
+  const controller = new AbortController();
+  const pending = Promise.withResolvers<IteratorResult<WorkflowToolRunMessage>>();
+  const next = vi.fn(() => pending.promise);
+  const report: WorkflowToolRunMessage = {
+    from: {
+      callId: input.callId,
+      execution: input.execution,
+      input: input.input,
+      runId: "run-1",
+      sequence: 0,
+      stepIndex: 0,
+      toolName: input.toolName,
+      turnId: "turn-1",
+    },
+    kind: "report",
+    update: "cleanup progress",
+  };
+  mocks.sleep.mockReturnValue(new Promise<void>(() => {}));
+  mocks.openWorkflowToolRunOwnerInbox.mockReturnValue({
+    owner: { inbox: "owner" },
+    reader: createChannelReader("workflow", { [Symbol.asyncIterator]: () => ({ next }) }),
+  });
+  const invocation = runWorkflowToolInvocation(input, controller.signal);
+  const first = invocation.next();
+  await vi.waitFor(() => expect(next).toHaveBeenCalledOnce());
+  controller.abort(new Error("stop"));
+  await vi.waitFor(() => expect(mocks.sleep).toHaveBeenCalledOnce());
+  pending.resolve({ done: false, value: report });
+  await expect(first).resolves.toEqual({ done: false, value: report });
+  expect(next).toHaveBeenCalledOnce();
+  await expect(invocation.next()).resolves.toMatchObject({
+    value: { kind: "outcome", result: { status: "cancelled", reason: "stop" } },
+  });
+  await expect(invocation.next()).resolves.toMatchObject({ done: true });
 });
