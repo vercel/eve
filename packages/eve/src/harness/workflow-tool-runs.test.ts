@@ -1,11 +1,10 @@
+import { registerWorkflowInvocation } from "#harness/workflow-invocations.js";
 import { describe, expect, it } from "vitest";
-
 import {
   clearWorkflowToolRuns,
   findWorkflowToolRun,
   getWorkflowToolRuns,
   isInboxToolResultFromRecordedWorkflowToolRun,
-  recordWorkflowToolRun,
   removeWorkflowToolRun,
 } from "#harness/workflow-tool-runs.js";
 import type { HarnessSession } from "#harness/types.js";
@@ -25,11 +24,11 @@ function session(state?: HarnessSession["state"]): HarnessSession {
 
 describe("workflow tool run records", () => {
   it("records, finds, and removes runs by call id", () => {
-    const recorded = recordWorkflowToolRun(session({ other: true }), RECORD);
+    const recorded = registerWorkflowInvocation(session({ other: true }), RECORD);
     expect(getWorkflowToolRuns(recorded.state)).toEqual([RECORD]);
     expect(findWorkflowToolRun(recorded.state, "call_1", "turn-1")).toEqual(RECORD);
 
-    const replaced = recordWorkflowToolRun(recorded, {
+    const replaced = registerWorkflowInvocation(recorded, {
       ...RECORD,
       address: { ...RECORD.address, runId: "wrun_2" },
     });
@@ -44,13 +43,13 @@ describe("workflow tool run records", () => {
   });
 
   it("drops the state map entirely when nothing else is recorded", () => {
-    const recorded = recordWorkflowToolRun(session(), RECORD);
+    const recorded = registerWorkflowInvocation(session(), RECORD);
     expect(clearWorkflowToolRuns(recorded, "turn-1").state).toBeUndefined();
     expect(clearWorkflowToolRuns(session(), "turn-1")).toEqual(session());
   });
 
   it("binds inbox tool results to the recorded run by call id and tool name", () => {
-    const state = recordWorkflowToolRun(
+    const state = registerWorkflowInvocation(
       session({
         "eve.harness.emission": {
           turnId: "turn-1",
@@ -79,9 +78,9 @@ describe("workflow tool run records", () => {
   });
 
   it("finds a paused call after authorization has ended the visible turn", () => {
-    const recorded = recordWorkflowToolRun(session(), RECORD);
+    const recorded = registerWorkflowInvocation(session(), RECORD);
     expect(findWorkflowToolRun(recorded.state, RECORD.callId)).toEqual(RECORD);
-    const overlapping = recordWorkflowToolRun(recorded, {
+    const overlapping = registerWorkflowInvocation(recorded, {
       ...RECORD,
       origin: { turnId: "another-turn", stepIndex: 0 },
     });

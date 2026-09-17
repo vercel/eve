@@ -162,7 +162,7 @@ const registrySchema = z
     }
   });
 
-function readRegistry(state: SessionStateMap | undefined) {
+function readRegistry(state: SessionStateMap | undefined): z.infer<typeof registrySchema> {
   if (state?.["eve.tasks"] !== undefined || state?.["eve.runtime.workflowToolRuns"] !== undefined) {
     throw new Error(
       "Unsupported workflow invocation state: start a new session or import its conversation.",
@@ -217,17 +217,16 @@ export function findTurnInvocation(
 
 function writeRegistry(
   state: SessionStateMap | undefined,
-  invocations: readonly WorkflowInvocation[],
+  registry: z.infer<typeof registrySchema>,
 ): SessionStateMap | undefined {
-  if (invocations.length === 0) {
+  if (registry.invocations.length === 0) {
     const next = { ...state };
     delete next[WORKFLOW_INVOCATIONS_STATE_KEY];
     return Object.keys(next).length === 0 ? undefined : next;
   }
-  const registry = readRegistry(state);
   return {
     ...state,
-    [WORKFLOW_INVOCATIONS_STATE_KEY]: registrySchema.parse({ ...registry, invocations }),
+    [WORKFLOW_INVOCATIONS_STATE_KEY]: registrySchema.parse(registry),
   };
 }
 
@@ -236,7 +235,8 @@ export function registerWorkflowInvocation<T extends { readonly state?: SessionS
   session: T,
   entry: WorkflowInvocation,
 ): T {
-  const invocations = [...getWorkflowInvocations(session.state)];
+  const registry = readRegistry(session.state);
+  const invocations = [...registry.invocations];
   const index = invocations.findIndex(
     (candidate) =>
       candidate.origin.turnId === entry.origin.turnId && candidate.callId === entry.callId,
@@ -251,17 +251,11 @@ export function registerWorkflowInvocation<T extends { readonly state?: SessionS
     throw new Error("Replayed invocation changed its ownership or tool identity.");
   }
   if (entry.lifetime === "session") {
-    const pending = invocations.find(
-      (candidate): candidate is TaskWorkflowInvocation =>
-        candidate.lifetime === "session" && candidate.task.terminalView === undefined,
-    );
     if (previous?.lifetime === "session") {
       if (entry.task.taskId !== previous.task.taskId)
         throw new Error("Replayed invocation changed its task identity.");
       entry = {
-        ...previous,
         ...entry,
-        origin: previous.origin,
         task: {
           ...previous.task,
           ...entry.task,
@@ -276,6 +270,10 @@ export function registerWorkflowInvocation<T extends { readonly state?: SessionS
         },
       };
     } else {
+      const pending = invocations.find(
+        (candidate): candidate is TaskWorkflowInvocation =>
+          candidate.lifetime === "session" && candidate.task.terminalView === undefined,
+      );
       entry = {
         ...entry,
         task: {
@@ -294,7 +292,7 @@ export function registerWorkflowInvocation<T extends { readonly state?: SessionS
       origin: previous.origin,
       address: { ...previous.address, ...entry.address },
     };
-  return { ...session, state: writeRegistry(session.state, invocations) };
+  return { ...session, state: writeRegistry(session.state, { ...registry, invocations }) };
 }
 
 /** Task payloads remain available for the session lifetime, including after report delivery. */
@@ -303,7 +301,8 @@ export function cacheWorkflowTaskView(
   view: TaskView,
 ): SessionStateMap | undefined {
   const terminal = taskViewSchema.parse(view);
-  const invocations = [...getWorkflowInvocations(state)];
+  const registry = readRegistry(state);
+  const invocations = [...registry.invocations];
   const index = invocations.findIndex(
     (entry) => entry.lifetime === "session" && entry.task.taskId === terminal.taskId,
   );
@@ -328,7 +327,7 @@ export function cacheWorkflowTaskView(
       }),
     },
   };
-  return writeRegistry(state, invocations);
+  return writeRegistry(state, { ...registry, invocations });
 }
 
 /** Removes only this turn's waiting calls. Session-owned task payloads are never pruned here. */
@@ -337,7 +336,8 @@ export function removeTurnInvocations<T extends { readonly state?: SessionStateM
   turnId: string,
   callId?: string,
 ): T {
-  const entries = getWorkflowInvocations(session.state);
+  const registry = readRegistry(session.state);
+  const entries = registry.invocations;
   const remaining = entries.filter(
     (entry) =>
       entry.lifetime !== "turn" ||
@@ -346,5 +346,5 @@ export function removeTurnInvocations<T extends { readonly state?: SessionStateM
   );
   return remaining.length === entries.length
     ? session
-    : { ...session, state: writeRegistry(session.state, remaining) };
+    : { ...session, state: writeRegistry(session.state, { ...registry, invocations: remaining }) };
 }

@@ -40,8 +40,7 @@ export async function runBackgroundWorkflowTool(
   const commands = createHook<TaskRunInboundPayload>({ token: input.taskInboxToken });
   const commandReader = createChannelReader("commands", commands);
   let view = input.initialView;
-  let dispatchAcknowledged = false;
-  let dispatchRejected = false;
+  let admitted = false;
   let updateIndex = 0;
   const answerHooks = new Map<string, AnswerHookRoute>();
   const bodyController = new AbortController();
@@ -72,11 +71,7 @@ export async function runBackgroundWorkflowTool(
       if (message.kind === "outcome") {
         invocationSettled = true;
         const transitioned = await commitTaskTransition(message);
-        if (
-          (transitioned || view.status === "cancelled") &&
-          dispatchAcknowledged &&
-          !dispatchRejected
-        ) {
+        if (transitioned || view.status === "cancelled") {
           await wakeTaskParentStep({ token: input.parentContinuationToken, view });
         }
         continue;
@@ -103,16 +98,39 @@ export async function runBackgroundWorkflowTool(
       continue;
     }
 
-    await applyPayload(read.next.value);
+    const payload = read.next.value;
+    if (payload.kind === "task-command") {
+      if (payload.command.kind === "ready") {
+        if (admitted) continue;
+        admitted = true;
+        if (isTerminalTaskStatus(view.status)) {
+          invocationSettled = true;
+          await wakeTaskParentStep({ token: input.parentContinuationToken, view });
+        } else {
+          invocationReader = createWorkflowToolInvocationReader(
+            { ...input.workflow, execution: "background" },
+            bodyController.signal,
+          );
+        }
+        continue;
+      }
+      if (payload.command.kind === "reject-dispatch") {
+        if (admitted) continue;
+        await commitTaskTransition(payload.command);
+        return;
+      }
+    }
+
+    await applyPayload(payload);
   }
 
   function isFinished(): boolean {
-    return isTerminalTaskStatus(view.status) && dispatchAcknowledged && invocationSettled;
+    return isTerminalTaskStatus(view.status) && admitted && invocationSettled;
   }
 
   async function handleReport(report: WorkflowToolRunReport): Promise<void> {
     const index = updateIndex++;
-    if (dispatchRejected || isTerminalTaskStatus(view.status)) return;
+    if (isTerminalTaskStatus(view.status)) return;
     if (view.metadata.kind === "subagent") {
       await wakeTaskUpdateParentStep({
         token: input.parentContinuationToken,
@@ -134,22 +152,6 @@ export async function runBackgroundWorkflowTool(
   }
 
   async function applyPayload(payload: TaskRunInboundPayload): Promise<void> {
-    const isReady = payload.kind === "task-command" && payload.command.kind === "ready";
-    const isRejected =
-      payload.kind === "task-command" && payload.command.kind === "reject-dispatch";
-    if (isReady || isRejected) dispatchAcknowledged = true;
-    if (isRejected) dispatchRejected = true;
-    if (isReady || isRejected) {
-      if (isRejected || isTerminalTaskStatus(view.status)) {
-        invocationSettled = true;
-      } else if (invocationReader === undefined && !invocationSettled) {
-        invocationReader = createWorkflowToolInvocationReader(
-          { ...input.workflow, execution: "background" },
-          bodyController.signal,
-        );
-      }
-    }
-
     let command: TaskCommand | undefined;
     if (payload.kind === "input-response") {
       command =
@@ -166,10 +168,6 @@ export async function runBackgroundWorkflowTool(
       return;
     }
     if (command === undefined) return;
-    if (isReady && isTerminalTaskStatus(view.status)) {
-      await wakeTaskParentStep({ token: input.parentContinuationToken, view });
-      return;
-    }
 
     const previous = view;
     const accepted = await commitTaskTransition(command);
@@ -179,8 +177,7 @@ export async function runBackgroundWorkflowTool(
       if (invocationReader === undefined) invocationSettled = true;
     }
     if (
-      !dispatchRejected &&
-      dispatchAcknowledged &&
+      admitted &&
       (command.kind !== "cancel" || invocationSettled) &&
       !isTerminalTaskStatus(previous.status) &&
       isTerminalTaskStatus(view.status)
@@ -209,7 +206,7 @@ export async function runBackgroundWorkflowTool(
       await handleStepAuthorization(request, replyTo);
       return;
     }
-    if (dispatchRejected || isTerminalTaskStatus(view.status)) {
+    if (isTerminalTaskStatus(view.status)) {
       return;
     }
     if (request.kind === "authorization-request") {
@@ -233,8 +230,7 @@ export async function runBackgroundWorkflowTool(
   ): Promise<void> {
     const event = request.event.event;
     const closesDisplayedPrompt = event.type === "authorization.completed";
-    const canForward =
-      !dispatchRejected && (!isTerminalTaskStatus(view.status) || closesDisplayedPrompt);
+    const canForward = !isTerminalTaskStatus(view.status) || closesDisplayedPrompt;
 
     if (canForward) {
       const requestId = "attemptId" in event.data ? event.data.attemptId : undefined;

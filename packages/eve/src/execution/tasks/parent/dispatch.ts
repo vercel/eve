@@ -15,7 +15,6 @@ import {
   type TaskExecutorCancel,
 } from "#execution/tasks/parent/task-cancel.js";
 import type { RuntimeActionResult, RuntimeToolCallActionRequest } from "#shared/action-types.js";
-import type { SessionTaskIndexEntry } from "#tasks/session-index.js";
 import { isTerminalTaskStatus, type TaskView } from "#tasks/types.js";
 import { TASK_CANCEL_TOOL_NAME, TASK_TOOL_NAMES } from "#tools/framework/task-contract.js";
 
@@ -72,7 +71,7 @@ export async function executeTaskControlAction(input: {
 /** Commits cancellation, then stops task-owned child work and its lifecycle run. */
 export async function cancelOwnedTask(input: {
   readonly cancelOwnedWork?: TaskExecutorCancel;
-  readonly entry: SessionTaskIndexEntry;
+  readonly entry: TaskWorkflowInvocation;
   readonly serializedContext?: Record<string, unknown>;
   readonly session?: RuntimeSession;
 }): Promise<TaskView> {

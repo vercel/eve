@@ -20,7 +20,7 @@ import { isInputRequest } from "#shared/input.js";
 import { getAgentHandleStore } from "#subagents/handles/store.js";
 import { applyTaskAgentHandleCommand } from "#subagents/handles/transitions.js";
 import { createEveTaskInputRoutePath } from "#protocol/routes.js";
-import { cacheTerminalTaskView, findSessionTaskEntry } from "#tasks/session-index.js";
+import { cacheWorkflowTaskView, findTaskInvocation } from "#harness/workflow-invocations.js";
 import type { TaskInputRequestDelivery, TaskView } from "#tasks/types.js";
 
 const log = createLogger("execution.tasks.parent");
@@ -40,7 +40,7 @@ export async function recordTaskInputRequestStep(input: {
   "use step";
 
   const durableSession = readDurableSession(input.sessionState);
-  const entry = findSessionTaskEntry(durableSession.state, input.request.taskId);
+  const entry = findTaskInvocation(durableSession.state, input.request.taskId);
   const requests = input.request.requests ?? [input.request.request];
   if (entry === undefined || requests.length === 0 || !requests.every(isInputRequest)) {
     return { accepted: false, sessionState: input.sessionState };
@@ -119,8 +119,8 @@ export async function recordTerminalTaskViewsStep(input: {
   let session = durableSession;
   const acceptedViews: TaskView[] = [];
   for (const view of input.views) {
-    if (findSessionTaskEntry(session.state, view.taskId) === undefined) continue;
-    const state = cacheTerminalTaskView(session.state, view);
+    if (findTaskInvocation(session.state, view.taskId) === undefined) continue;
+    const state = cacheWorkflowTaskView(session.state, view);
     if (state !== session.state) session = { ...session, state };
     acceptedViews.push(view);
     session = applyTaskAgentHandleCommand(session, {

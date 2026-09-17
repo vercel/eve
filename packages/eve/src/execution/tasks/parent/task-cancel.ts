@@ -1,8 +1,8 @@
 import { cancelRun, getRun, getWorld } from "#internal/workflow/runtime.js";
-import type { SessionTaskIndexEntry } from "#tasks/session-index.js";
+import type { TaskWorkflowInvocation } from "#harness/workflow-invocations.js";
 
 export interface TaskExecutorCancelContext {
-  readonly entry: SessionTaskIndexEntry;
+  readonly entry: TaskWorkflowInvocation;
   readonly serializedContext?: Record<string, unknown>;
   readonly session?: unknown;
 }

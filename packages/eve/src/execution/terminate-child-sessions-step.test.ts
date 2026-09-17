@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AGENT_HANDLES_STATE_KEY, type AgentHandle } from "#subagents/handles/store.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import { terminateChildSessionsStep } from "#execution/terminate-child-sessions-step.js";
-import { type SessionTaskIndexEntry } from "#tasks/session-index.js";
+import type { TaskWorkflowInvocation } from "#harness/workflow-invocations.js";
 
 const COMPILED_BUNDLE = {
   subagentRegistry: { subagentsByNodeId: new Map() },
@@ -427,7 +427,7 @@ function startingHandle(input: {
   };
 }
 
-function indexedTask(taskId: string): SessionTaskIndexEntry {
+function indexedTask(taskId: string): TaskWorkflowInvocation {
   return {
     callId: taskId,
     toolName: {
@@ -451,7 +451,7 @@ function indexedTask(taskId: string): SessionTaskIndexEntry {
 
 function makeSessionState(
   handles: readonly AgentHandle[],
-  tasks: readonly SessionTaskIndexEntry[] = [],
+  tasks: readonly TaskWorkflowInvocation[] = [],
 ): DurableSessionState {
   return {
     continuationToken: "parent-token",

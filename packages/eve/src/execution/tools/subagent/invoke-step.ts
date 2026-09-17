@@ -39,7 +39,10 @@ import {
   AGENT_UNREACHABLE,
   formatAgentBusyMessage,
 } from "#subagents/agent-handle-errors.js";
-import { findSessionTaskEntry } from "#tasks/session-index.js";
+import {
+  findTaskInvocation,
+  type TaskAgentDispatchContext,
+} from "#harness/workflow-invocations.js";
 import { isTerminalTaskStatus } from "#tasks/types.js";
 import type { RuntimeSubagentChildResult } from "#shared/action-types.js";
 import {
@@ -62,7 +65,6 @@ import {
   SessionDynamicSubagentSelectionsKey,
   TurnDynamicSubagentSelectionsKey,
 } from "#context/keys.js";
-import type { TaskAgentDispatchContext } from "#tasks/session-index.js";
 
 export type AgentInvocationDispatchResult =
   | {
@@ -349,7 +351,7 @@ export async function dispatchTaskAgentInvocationStep(
   let taskDispatchContext: TaskAgentDispatchContext | undefined;
   if (input.taskId !== undefined) {
     const session = readDurableSession(input.sessionState);
-    const entry = findSessionTaskEntry(session.state, input.taskId);
+    const entry = findTaskInvocation(session.state, input.taskId);
     if (entry === undefined) return { kind: "not-admitted", sessionState: input.sessionState };
     const view = await readLatestTaskView({ taskRunId: entry.address.runId });
     if (view === undefined || isTerminalTaskStatus(view.status)) {

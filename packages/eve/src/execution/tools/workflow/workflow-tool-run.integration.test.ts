@@ -601,7 +601,7 @@ describe("workflow tools", () => {
             event.data.result.kind === "tool-result" &&
             event.data.result.toolName === "confirm_deploy",
         );
-        expect(progress).toBeGreaterThanOrEqual(0);
+        expect(progress, JSON.stringify(answered)).toBeGreaterThanOrEqual(0);
         expect(resultIndex).toBeGreaterThan(progress);
         const results = filterEventsByType(answered, "action.result");
         expect(results.map((event) => JSON.stringify(event.data.result.output))).toContainEqual(

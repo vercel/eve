@@ -3,13 +3,9 @@ import type { RuntimeToolResultActionResult } from "#shared/action-types.js";
 import {
   getWorkflowInvocations,
   findTurnInvocation,
-  registerWorkflowInvocation,
   removeTurnInvocations,
   type TurnWorkflowInvocation,
 } from "#harness/workflow-invocations.js";
-
-export type WorkflowToolRunRecord = TurnWorkflowInvocation;
-export const recordWorkflowToolRun = registerWorkflowInvocation;
 
 export function getWorkflowToolRuns(
   state: SessionStateMap | undefined,

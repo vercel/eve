@@ -3,7 +3,6 @@ import {
   isResultBoundToRunningHandle,
 } from "#subagents/handles/query.js";
 import { describe, expect, it } from "vitest";
-
 import { createPresentedRuntimeActionRequestFromToolCall } from "#harness/action-presentation.js";
 import {
   createCoordinationRequestFromToolCall,
@@ -17,7 +16,8 @@ import { deriveAgentOperationId } from "#subagents/handles/operation-id.js";
 import { deriveAgentId, getAgentHandleStore } from "#subagents/handles/store.js";
 import { confirmAgentStarted, prepareAgentStart } from "#subagents/handles/transitions.js";
 import { getProxyInputRequests, upsertProxyInputRequests } from "#harness/proxy-input-requests.js";
-import { getWorkflowToolRuns, recordWorkflowToolRun } from "#harness/workflow-tool-runs.js";
+import { getWorkflowToolRuns } from "#harness/workflow-tool-runs.js";
+import { registerWorkflowInvocation } from "#harness/workflow-invocations.js";
 import { toolOutput } from "#tools/model-output.js";
 import { getSessionTokenUsage, setTurnUsageState } from "#harness/turn-tag-state.js";
 import type { HarnessSession } from "#harness/types.js";
@@ -526,7 +526,7 @@ describe("resolvePendingCoordination", () => {
         },
       ],
     });
-    const withRun = recordWorkflowToolRun(parked, {
+    const withRun = registerWorkflowInvocation(parked, {
       callId: "call-1",
       toolName: "deploy",
       resultKind: "tool" as const,

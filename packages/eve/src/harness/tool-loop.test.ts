@@ -11,7 +11,6 @@ import {
 } from "ai";
 import { MockLanguageModelV3 } from "ai/test";
 import { afterEach, describe, expect, it, vi } from "vitest";
-
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { DynamicModelSelectionError } from "#context/dynamic-model-lifecycle.js";
 import { dispatchDynamicInstructionEvent } from "#context/dynamic-instruction-lifecycle.js";
@@ -80,7 +79,7 @@ import {
   appendPendingInputBatch,
 } from "#harness/input-requests.js";
 import { activeTurnId } from "#harness/active-turn-id.js";
-import { recordSessionTask } from "#tasks/session-index.js";
+import { registerWorkflowInvocation } from "#harness/workflow-invocations.js";
 import { getPendingCoordinationBatch } from "#harness/coordination.js";
 import { AGENT_HANDLES_STATE_KEY } from "#subagents/handles/store.js";
 import { BackgroundToolExecutorKey } from "#harness/background-tools.js";
@@ -302,7 +301,7 @@ const analysisTaskAnnouncement =
   '[Task state]\n{"tasks":[{"name":"analysis","status":"pending","taskId":"analysis"}]}';
 
 function recordBackgroundTask(session: HarnessSession, taskId = "analysis"): HarnessSession {
-  return recordSessionTask(session, {
+  return registerWorkflowInvocation(session, {
     callId: taskId,
     toolName: { kind: "report-probe", name: taskId }.name,
     resultKind: "tool" as const,

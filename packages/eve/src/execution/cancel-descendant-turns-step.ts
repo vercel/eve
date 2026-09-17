@@ -10,7 +10,8 @@ import {
 } from "#subagents/remote-dispatch.js";
 import { cancelWorkflowToolRun } from "#execution/tools/workflow/cancel.js";
 import { requestWorkflowTurnCancellation } from "#execution/workflow-runtime.js";
-import { getWorkflowToolRuns, type WorkflowToolRunRecord } from "#harness/workflow-tool-runs.js";
+import { getWorkflowToolRuns } from "#harness/workflow-tool-runs.js";
+import type { TurnWorkflowInvocation } from "#harness/workflow-invocations.js";
 import { getAgentHandleStore, type AgentHandle } from "#subagents/handles/store.js";
 import { createLogger, logError } from "#internal/logging.js";
 import type { RuntimeSubagentRegistry } from "#runtime/subagents/registry.js";
@@ -38,7 +39,7 @@ export async function cancelDescendantTurnsStep(input: {
   "use step";
 
   let running: readonly RunningAgentHandle[];
-  let workflowToolRuns: readonly WorkflowToolRunRecord[];
+  let workflowToolRuns: readonly TurnWorkflowInvocation[];
   try {
     const session = readDurableSession(input.sessionState);
     workflowToolRuns = getWorkflowToolRuns(

@@ -1,6 +1,5 @@
 import { createTestSessionState } from "#internal/testing/session-state.js";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-
 import { ContextContainer } from "#context/container.js";
 import { serializeContext } from "#context/serialize.js";
 import { readDurableSession } from "#execution/durable-session-store.js";
@@ -14,7 +13,7 @@ import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
 import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
 import { getAgentHandleStore, setAgentHandleStore } from "#subagents/handles/store.js";
 import { getProxyInputRequests } from "#harness/proxy-input-requests.js";
-import { getSessionTaskIndex } from "#tasks/session-index.js";
+import { getTaskInvocations } from "#harness/workflow-invocations.js";
 
 const flushInstrumentation = vi.hoisted(() => vi.fn());
 const publishBackgroundTaskSettlements = vi.hoisted(() => vi.fn());
@@ -276,7 +275,7 @@ describe("recordTerminalTaskViewsStep", () => {
     });
     const state = result.sessionState.snapshot.session.state;
 
-    expect(getSessionTaskIndex(state)[0]?.task.terminalView).toEqual(view);
+    expect(getTaskInvocations(state)[0]?.task.terminalView).toEqual(view);
     expect(getAgentHandleStore(state)?.handles).toEqual([
       expect.objectContaining({ phase: "available" }),
     ]);

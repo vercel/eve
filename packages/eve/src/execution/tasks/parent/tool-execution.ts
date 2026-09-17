@@ -1,4 +1,8 @@
-import type { TaskWorkflowInvocation } from "#harness/workflow-invocations.js";
+import {
+  type TaskWorkflowInvocation,
+  findTaskInvocation,
+  registerWorkflowInvocation,
+} from "#harness/workflow-invocations.js";
 import type { ContextContainer } from "#context/container.js";
 import { loadContext } from "#context/container.js";
 import { ActivityObserverKey } from "#context/keys.js";
@@ -19,7 +23,6 @@ import {
 import { deriveBackgroundTaskActivityObserver } from "#execution/activity-work.js";
 import { projectToolStartLabel } from "#harness/action-presentation.js";
 import type { ToolExecuteOptions } from "#tools/definition.js";
-import { findSessionTaskEntry, recordSessionTask } from "#tasks/session-index.js";
 import type { AgentView } from "#subagents/handles/prompt.js";
 import {
   createTaskAgentDispatchContext,
@@ -230,7 +233,7 @@ class BackgroundToolExecutionScope implements BackgroundToolExecutor {
     let next = session;
     for (const record of this.records) {
       if (!record.settled || record.task === undefined) continue;
-      next = recordSessionTask(next, record.task);
+      next = registerWorkflowInvocation(next, record.task);
     }
     if (this.agentHandlesChanged) {
       next = writeHandles(next, getAgentHandleStore(this.agentHandleSession.state)?.handles ?? []);
@@ -420,7 +423,7 @@ class BackgroundToolExecutionScope implements BackgroundToolExecutor {
       });
       if (claim.kind === "busy" && claim.handle.phase === "claimed") {
         const handle = claim.handle;
-        const entry = findSessionTaskEntry(this.agentHandleSession.state, handle.ownerId);
+        const entry = findTaskInvocation(this.agentHandleSession.state, handle.ownerId);
         if (
           entry?.task.metadata.kind === "subagent" &&
           entry.task.metadata.agentId === handle.identity.id &&

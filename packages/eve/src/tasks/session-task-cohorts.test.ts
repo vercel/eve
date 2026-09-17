@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { getSessionTaskIndex } from "#tasks/session-index.js";
+import { getTaskInvocations } from "#harness/workflow-invocations.js";
 import { getTaskCohortId, getSessionTaskCohorts } from "#tasks/session-task-cohorts.js";
 
 describe("workflow task cohort lookup", () => {
@@ -25,7 +25,7 @@ describe("workflow task cohort lookup", () => {
       },
     };
     expect([...getSessionTaskCohorts(state)]).toEqual(
-      getSessionTaskIndex(state).map((task) => [
+      getTaskInvocations(state).map((task) => [
         task.task.taskId,
         { cohortId: getTaskCohortId(task.task), settled: task.task.terminalView !== undefined },
       ]),

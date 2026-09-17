@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { WorkflowToolRunMessage } from "#execution/tools/workflow/messages.js";
 import { runBackgroundWorkflowTool } from "#execution/tools/workflow/background-owner.js";
-import type { TaskView } from "#tasks/types.js";
+import type { TaskCommand, TaskView } from "#tasks/types.js";
 import {
   createAuthorizationRequiredEvent,
   createAuthorizationCompletedEvent,
@@ -11,7 +11,6 @@ import {
 const mocks = vi.hoisted(() => ({
   appendTaskProgressStep: vi.fn(),
   appendTaskViewStep: vi.fn(),
-  cancelWorkflowToolRunStep: vi.fn(),
   claimHookOwnership: vi.fn(),
   createChannelReader: vi.fn((channel: string) => ({ channel, iterator: [][Symbol.iterator]() })),
   createHook: vi.fn(() => ({ token: "task-token" })),
@@ -43,9 +42,6 @@ vi.mock("#execution/tasks/child/steps.js", () => ({
   wakeTaskParentStep: mocks.wakeTaskParentStep,
   wakeTaskUpdateParentStep: mocks.wakeTaskUpdateParentStep,
   wakeWorkflowTaskInputRequestParentStep: mocks.wakeWorkflowTaskInputRequestParentStep,
-}));
-vi.mock("#execution/tools/workflow/cancel.js", () => ({
-  cancelWorkflowToolRunStep: mocks.cancelWorkflowToolRunStep,
 }));
 vi.mock("#execution/tools/workflow/owner-channels.js", () => ({
   createChannelReader: mocks.createChannelReader,
@@ -120,7 +116,7 @@ function queueOwnerRequest(value: WorkflowToolRunMessage) {
   });
 }
 
-function queueCommand(command: import("#tasks/types.js").TaskCommand) {
+function queueCommand(command: TaskCommand) {
   mocks.raceChannelReads.mockResolvedValueOnce({
     channel: "commands",
     next: { done: false, value: { kind: "task-command", command } },
@@ -180,7 +176,7 @@ describe("runBackgroundWorkflowTool", () => {
     expect(mocks.resumeHookStep).toHaveBeenCalledTimes(4);
     expect(mocks.wakeTaskParentStep).not.toHaveBeenCalled();
     for (let i = 0; i < 4; i++) {
-      expect(mocks.appendTaskViewStep.mock.invocationCallOrder[i + 2]).toBeLessThan(
+      expect(mocks.appendTaskViewStep.mock.invocationCallOrder[i + 1]).toBeLessThan(
         mocks.wakeTaskAuthorizationParentStep.mock.invocationCallOrder[i]!,
       );
       expect(mocks.wakeTaskAuthorizationParentStep.mock.invocationCallOrder[i]).toBeLessThan(
@@ -254,26 +250,27 @@ describe("runBackgroundWorkflowTool", () => {
       next: { done: true, value: undefined },
     });
 
-    await runBackgroundWorkflowTool({
-      initialView,
-      parentContinuationToken: "parent-token",
-      taskInboxToken: "task-token",
-      workflow: {
-        callId: "call-1",
-        input: {},
-        session: {
-          auth: { current: null, initiator: null },
-          id: "session-1",
-          turn: { id: "turn-1", sequence: 0 },
-        },
-        stepIndex: 0,
-        toolName: "worker",
-        workflowId: "workflow//eve//worker",
-      },
-    });
+    await runBackgroundWorkflowTool(workflowInput);
 
     expect(mocks.createWorkflowToolInvocationReader).not.toHaveBeenCalled();
   });
+
+  it.each(["ready", "reject-dispatch"] as const)(
+    "does not start pre-admission cancelled work after %s",
+    async (kind) => {
+      queueCommand({ kind: "cancel" });
+      queueCommand(kind === "ready" ? { kind } : { kind, data: "step failed" });
+
+      await runBackgroundWorkflowTool(workflowInput);
+
+      expect(mocks.createWorkflowToolInvocationReader).not.toHaveBeenCalled();
+      expect(mocks.wakeTaskParentStep).toHaveBeenCalledTimes(kind === "ready" ? 1 : 0);
+      expect(mocks.appendTaskViewStep).toHaveBeenLastCalledWith({
+        activityObserver: undefined,
+        view: { ...initialView, status: "cancelled" },
+      });
+    },
+  );
 
   it("starts the workflow body only after ready", async () => {
     mocks.raceChannelReads
@@ -283,23 +280,7 @@ describe("runBackgroundWorkflowTool", () => {
       })
       .mockResolvedValueOnce({ channel: "commands", next: { done: true, value: undefined } });
 
-    await runBackgroundWorkflowTool({
-      initialView,
-      parentContinuationToken: "parent-token",
-      taskInboxToken: "task-token",
-      workflow: {
-        callId: "call-1",
-        input: {},
-        session: {
-          auth: { current: null, initiator: null },
-          id: "session-1",
-          turn: { id: "turn-1", sequence: 0 },
-        },
-        stepIndex: 0,
-        toolName: "worker",
-        workflowId: "workflow//eve//worker",
-      },
-    });
+    await runBackgroundWorkflowTool(workflowInput);
 
     expect(mocks.createWorkflowToolInvocationReader).toHaveBeenCalledOnce();
     expect(mocks.createWorkflowToolInvocationReader).toHaveBeenCalledWith(
@@ -389,28 +370,37 @@ describe("runBackgroundWorkflowTool", () => {
         },
       });
 
-    await runBackgroundWorkflowTool({
-      initialView,
-      parentContinuationToken: "parent-token",
-      taskInboxToken: "task-token",
-      workflow: {
-        callId: "call-1",
-        input: {},
-        session: {
-          auth: { current: null, initiator: null },
-          id: "session-1",
-          turn: { id: "turn-1", sequence: 0 },
-        },
-        stepIndex: 0,
-        toolName: "worker",
-        workflowId: "workflow//eve//worker",
-      },
-    });
+    await runBackgroundWorkflowTool(workflowInput);
 
     expect(mocks.wakeTaskParentStep).toHaveBeenCalledWith({
       token: "parent-token",
       view: expect.objectContaining({ status: "cancelled" }),
     });
+  });
+
+  it("ignores duplicate admission commands while cancelled work finishes cleanup", async () => {
+    queueCommand({ kind: "ready" });
+    queueCommand({ kind: "cancel" });
+    queueCommand({ kind: "ready" });
+    queueCommand({ kind: "reject-dispatch", data: "late rejection" });
+    queueOwnerRequest(authorizationRequest("cleanup", true));
+    queueOwnerRequest({
+      from: bufferedAgentRequest.from,
+      kind: "outcome",
+      result: { status: "cancelled", reason: "stop" },
+    });
+
+    await runBackgroundWorkflowTool(workflowInput);
+
+    expect(mocks.raceChannelReads).toHaveBeenCalledTimes(6);
+    expect(mocks.createWorkflowToolInvocationReader).toHaveBeenCalledOnce();
+    expect(mocks.resumeHookStep).toHaveBeenCalledExactlyOnceWith("ack-cleanup", null, {
+      ifPresent: true,
+    });
+    expect(mocks.wakeTaskParentStep).toHaveBeenCalledOnce();
+    expect(mocks.resumeHookStep.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.wakeTaskParentStep.mock.invocationCallOrder[0]!,
+    );
   });
 
   it("keeps explicit cancellation final when the invocation completes late", async () => {
@@ -435,26 +425,9 @@ describe("runBackgroundWorkflowTool", () => {
         },
       });
 
-    await runBackgroundWorkflowTool({
-      initialView,
-      parentContinuationToken: "parent-token",
-      taskInboxToken: "task-token",
-      workflow: {
-        callId: "call-1",
-        input: {},
-        session: {
-          auth: { current: null, initiator: null },
-          id: "session-1",
-          turn: { id: "turn-1", sequence: 0 },
-        },
-        stepIndex: 0,
-        toolName: "worker",
-        workflowId: "workflow//eve//worker",
-      },
-    });
+    await runBackgroundWorkflowTool(workflowInput);
 
     expect(mocks.appendTaskViewStep.mock.calls.map(([input]) => input.view.status)).toEqual([
-      "working",
       "working",
       "cancelled",
     ]);
@@ -492,23 +465,7 @@ describe("runBackgroundWorkflowTool", () => {
           },
         },
       });
-    await runBackgroundWorkflowTool({
-      initialView,
-      parentContinuationToken: "parent-token",
-      taskInboxToken: "task-token",
-      workflow: {
-        callId: "call-1",
-        input: {},
-        session: {
-          auth: { current: null, initiator: null },
-          id: "session-1",
-          turn: { id: "turn-1", sequence: 0 },
-        },
-        stepIndex: 0,
-        toolName: "worker",
-        workflowId: "workflow//eve//worker",
-      },
-    });
+    await runBackgroundWorkflowTool(workflowInput);
     expect(mocks.appendTaskProgressStep).toHaveBeenCalledWith({
       progress: expect.objectContaining({ update: "Review the export" }),
     });

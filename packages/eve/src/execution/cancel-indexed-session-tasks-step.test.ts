@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import { cancelAllIndexedSessionTasksStep } from "#execution/cancel-indexed-session-tasks-step.js";
-import { type SessionTaskIndexEntry } from "#tasks/session-index.js";
+import type { TaskWorkflowInvocation } from "#harness/workflow-invocations.js";
 
 const { cancelOwnedTaskMock, deserializeContextMock, hydrateDurableSessionMock } = vi.hoisted(
   () => ({
@@ -61,7 +61,7 @@ describe("cancelAllIndexedSessionTasksStep", () => {
   });
 });
 
-function indexedTask(taskId: string): SessionTaskIndexEntry {
+function indexedTask(taskId: string): TaskWorkflowInvocation {
   return {
     callId: taskId,
     toolName: "research",
@@ -77,7 +77,7 @@ function indexedTask(taskId: string): SessionTaskIndexEntry {
   };
 }
 
-function makeSessionState(tasks: readonly SessionTaskIndexEntry[]): DurableSessionState {
+function makeSessionState(tasks: readonly TaskWorkflowInvocation[]): DurableSessionState {
   return {
     continuationToken: "http:test",
     emissionState: { sequence: 0, sessionStarted: false, stepIndex: 0, turnId: "" },

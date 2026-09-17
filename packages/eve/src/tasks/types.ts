@@ -77,7 +77,6 @@ export function readTaskInputRequestId(request: TaskInputRequest): string | unde
 interface TaskViewBase {
   readonly taskId: string;
   readonly metadata: TaskMetadata;
-  /** Private executor state, excluded from model-visible JSON. */
   /** Retained for accounting, excluded from model-visible JSON. */
   readonly usage?: TaskUsage;
 }

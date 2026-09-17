@@ -6,7 +6,7 @@ import { cancelOwnedTask } from "#execution/tasks/parent/dispatch.js";
 import { cancelBackgroundAgentTask } from "#execution/tools/subagent/task-cancel.js";
 import { createLogger, logError } from "#internal/logging.js";
 import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
-import { getSessionTaskIndex } from "#tasks/session-index.js";
+import { getTaskInvocations } from "#harness/workflow-invocations.js";
 
 const log = createLogger("execution.cancel-indexed-session-tasks");
 
@@ -29,7 +29,7 @@ export async function cancelAllIndexedSessionTasksStep(input: {
 
   let entries;
   try {
-    entries = getSessionTaskIndex(durable.state);
+    entries = getTaskInvocations(durable.state);
   } catch (error) {
     logError(log, "failed to read the task index", error, {
       parentSessionId: durable.sessionId,

@@ -2,10 +2,10 @@ import { describe, expect, it } from "vitest";
 import { createTestSessionState } from "#internal/testing/session-state.js";
 import { isSessionStateIdleForHandoff } from "#execution/session/handoff-steps.js";
 import {
-  cacheTerminalTaskView,
-  getSessionTaskIndex,
-  recordSessionTask,
-} from "#tasks/session-index.js";
+  cacheWorkflowTaskView,
+  getTaskInvocations,
+  registerWorkflowInvocation,
+} from "#harness/workflow-invocations.js";
 import { parseActivityWorkIdentityV1 } from "#protocol/activity.js";
 import type { HarnessSession } from "#harness/types.js";
 import type { AgentHandle, AgentHandlePhase } from "#subagents/handles/store.js";
@@ -105,9 +105,9 @@ describe("additive durable state", () => {
       authored: { opaque: true },
       "eve.runtime.workflowInvocations": { version: 1, invocations: [task], futureIndex: true },
     };
-    expect(getSessionTaskIndex(restored(state))).toEqual([task]);
+    expect(getTaskInvocations(restored(state))).toEqual([task]);
     expect(parseActivityWorkIdentityV1(activity)).toEqual(activity);
-    const updated = recordSessionTask(session(restored(state)), {
+    const updated = registerWorkflowInvocation(session(restored(state)), {
       callId: "task",
       toolName: metadata.name,
       resultKind: "tool" as const,
@@ -126,7 +126,7 @@ describe("additive durable state", () => {
         },
       },
     });
-    const saved = cacheTerminalTaskView(updated.state, {
+    const saved = cacheWorkflowTaskView(updated.state, {
       taskId: "task",
       metadata,
       status: "completed",
@@ -157,17 +157,17 @@ describe("additive durable state", () => {
       },
     });
     expect(isSessionStateIdleForHandoff(checkpoint(restored(saved!)))).toBe(true);
-    const cancelled = cacheTerminalTaskView(saved, {
+    const cancelled = cacheWorkflowTaskView(saved, {
       taskId: "task",
       metadata,
       status: "cancelled",
     });
-    expect(getSessionTaskIndex(restored(cancelled))[0]?.task.terminalView).toMatchObject({
+    expect(getTaskInvocations(restored(cancelled))[0]?.task.terminalView).toMatchObject({
       futureView: true,
       status: "cancelled",
     });
     expect(
-      getSessionTaskIndex(restored(cancelled))[0]?.task.terminalView?.lastOutput,
+      getTaskInvocations(restored(cancelled))[0]?.task.terminalView?.lastOutput,
     ).toBeUndefined();
   });
 });

@@ -12,7 +12,7 @@ import { prepareOwnerAgentInvocation } from "#execution/tools/subagent/invoke-pr
 import { readDurableSession } from "#execution/durable-session-store.js";
 import { getAgentHandleStore, setAgentHandleStore } from "#subagents/handles/store.js";
 import { readLatestTaskView } from "#execution/tasks/parent/run-parent.js";
-import { recordSessionTask } from "#tasks/session-index.js";
+import { registerWorkflowInvocation } from "#harness/workflow-invocations.js";
 import {
   AuthKey,
   InitiatorAuthKey,
@@ -252,7 +252,7 @@ describe("owner agent invocation dispatch", () => {
         rootSessionId: "root-session",
         rootTurnId: "root-turn",
       };
-      const indexedSession = recordSessionTask(session as never, {
+      const indexedSession = registerWorkflowInvocation(session as never, {
         callId: "task-1",
         toolName: { kind: taskKind, name: "research" }.name,
         resultKind: "tool" as const,
@@ -346,7 +346,7 @@ describe("owner agent invocation dispatch", () => {
       [AuthKey.name]: null,
       [InitiatorAuthKey.name]: sessionInitiatorAuth,
     };
-    const indexedSession = recordSessionTask(session as never, {
+    const indexedSession = registerWorkflowInvocation(session as never, {
       callId: "task-1",
       toolName: "research",
       resultKind: "tool" as const,

@@ -256,6 +256,26 @@ registry requires `SOCKET_PASSWORD_B64`. Dependencies were installed from the lo
 frozen lockfile, and the underlying checks were invoked directly. No credential value was read or
 printed. Local E2E was not run because the repository marks it CI-only.
 
+## Correctness and entropy review
+
+Admission starts an invocation; only its outcome settles running work. A duplicate `ready` after
+cancellation previously set the settled flag and exited before cleanup messages were consumed.
+That defect was carried through from the old task owner. Admission is now accepted once; rejection
+before admission returns without starting the body. The regression test first failed after consuming
+only three of six messages, then passed with cleanup acknowledged before terminal delivery.
+
+The review also removed seven registry/type aliases and the task-index facade. Callers now use the
+workflow invocation registry directly. Mutations reuse their parsed registry rather than reading it
+again during the write, and replay registration merges common fields once. Persisted formats and
+task-payload retention are unchanged by these corrections.
+
+This pass ran the full unit suite (799 files, 8,678 passed, one skipped), then 51 focused tests
+after the final registry and admission edits. All 64 integration tests across workflow execution,
+background dispatch, cancellation, and approval passed on rerun. The progress-after-answer test
+failed once before passing in isolation and in the full rerun; the cause remains unconfirmed, and
+its assertion now includes captured events for diagnosis. Typechecking, production build, focused
+lint, formatting, and invariant guards passed.
+
 ## Remaining proof gaps and migration risks
 
 The prototype does not yet demonstrate these full boundaries:

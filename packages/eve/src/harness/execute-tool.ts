@@ -43,7 +43,7 @@ export interface HarnessToolDefinition {
    * exists because the value must survive past the tool map. `buildToolSet`,
    * `createCoordinationRequestFromToolCall`, and the workflow sandbox host
    * tool copy it into the `RuntimeWorkflowTaskRequest`, which `startWorkflowTask`
-   * persists on the `WorkflowToolRunRecord` in session state and the run echoes
+   * persists on the `TurnWorkflowInvocation` in session state and the run echoes
    * back on every `WorkflowToolRunRef` inbox message. The owner turn then routes
    * outcomes, counts the workflow subagent budget, and decides whether child
    * usage accrues without access to a `HarnessToolMap`. Harness-side readers

@@ -6,7 +6,6 @@ import { createDurableSessionState } from "#execution/durable-session-store.js";
 import { settleCancelledTurnStep } from "#execution/settle-cancelled-turn-step.js";
 import { setHarnessEmissionState } from "#harness/emission.js";
 import { setPendingCoordinationBatch } from "#harness/coordination.js";
-import { recordWorkflowToolRun } from "#harness/workflow-tool-runs.js";
 import {
   getWorkflowInvocations,
   registerWorkflowInvocation,
@@ -170,7 +169,7 @@ describe("settleCancelledTurnStep handle store", () => {
     const runtime = await createTestRuntime({ agent: { name: "settle-cancel-claim" } });
 
     await runtime.run(async () => {
-      const session = recordWorkflowToolRun(createCancelledTurnSession([CLAIMED_HANDLE]), {
+      const session = registerWorkflowInvocation(createCancelledTurnSession([CLAIMED_HANDLE]), {
         callId: "workflow-call",
         resultKind: "tool",
         toolName: "Workflow",
@@ -230,7 +229,7 @@ describe("settleCancelledTurnStep handle store", () => {
           },
         });
         const tasks = getWorkflowInvocations(session.state);
-        session = recordWorkflowToolRun(session, {
+        session = registerWorkflowInvocation(session, {
           callId: "waiting-call",
           toolName: "research",
           resultKind: "tool",

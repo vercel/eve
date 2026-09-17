@@ -3,7 +3,7 @@ import { readLatestTaskView } from "#execution/tasks/parent/run-parent.js";
 import { isTaskWorkflowTargetGone } from "#execution/tasks/workflow-target.js";
 import type { RuntimeActionResult, RuntimeToolCallActionRequest } from "#shared/action-types.js";
 import { taskViewsToJson } from "#tasks/json.js";
-import { findSessionTaskEntry, type SessionTaskIndexEntry } from "#tasks/session-index.js";
+import { findTaskInvocation, type TaskWorkflowInvocation } from "#harness/workflow-invocations.js";
 import type { TaskView } from "#tasks/types.js";
 
 /**
@@ -17,12 +17,12 @@ export function lookupTaskEntries(
   session: RuntimeSession,
   taskIds: readonly string[],
 ):
-  | { readonly entries: SessionTaskIndexEntry[]; readonly kind: "found" }
+  | { readonly entries: TaskWorkflowInvocation[]; readonly kind: "found" }
   | { readonly kind: "unknown"; readonly unknown: string[] } {
-  const entries: SessionTaskIndexEntry[] = [];
+  const entries: TaskWorkflowInvocation[] = [];
   const unknown: string[] = [];
   for (const taskId of taskIds) {
-    const entry = findSessionTaskEntry(session.state, taskId);
+    const entry = findTaskInvocation(session.state, taskId);
     if (entry === undefined) {
       unknown.push(taskId);
     } else {
@@ -34,12 +34,12 @@ export function lookupTaskEntries(
 
 /** Reads the latest view of every entry, defaulting to `working`. */
 export async function readTaskViews(
-  entries: readonly SessionTaskIndexEntry[],
+  entries: readonly TaskWorkflowInvocation[],
 ): Promise<TaskView[]> {
   return Promise.all(entries.map(readTaskView));
 }
 
-export async function readTaskView(entry: SessionTaskIndexEntry): Promise<TaskView> {
+export async function readTaskView(entry: TaskWorkflowInvocation): Promise<TaskView> {
   try {
     return (
       (await readLatestTaskView({ taskRunId: entry.address.runId })) ?? createPendingTaskView(entry)
@@ -53,14 +53,12 @@ export async function readTaskView(entry: SessionTaskIndexEntry): Promise<TaskVi
 }
 
 /** The placeholder view for a run that has not published anything yet. */
-function createPendingTaskView(entry: SessionTaskIndexEntry): TaskView {
-  const view: TaskView = {
+function createPendingTaskView(entry: TaskWorkflowInvocation): TaskView {
+  return {
     metadata: entry.task.metadata,
     status: "working",
     taskId: entry.task.taskId,
   };
-
-  return view;
 }
 
 /** One successful task-control result carrying full task views. */

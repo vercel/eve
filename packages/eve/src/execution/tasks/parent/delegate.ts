@@ -3,7 +3,10 @@
  * The parent commits its session index before releasing the workflow body.
  */
 import type { HarnessSession } from "#harness/types.js";
-import type { TaskWorkflowInvocation } from "#harness/workflow-invocations.js";
+import type {
+  TaskWorkflowInvocation,
+  TaskAgentDispatchContext,
+} from "#harness/workflow-invocations.js";
 import {
   readLatestTaskView,
   sendTaskCommand,
@@ -12,7 +15,6 @@ import {
 import type { JsonValue } from "#shared/json.js";
 import { deriveTaskInboxToken, deriveTaskId } from "#tasks/task-id.js";
 import { isTerminalTaskStatus, type TaskMetadata } from "#tasks/types.js";
-import type { TaskAgentDispatchContext } from "#tasks/session-index.js";
 import type { ContextReader } from "#context/key.js";
 import {
   SessionDynamicSubagentSelectionsKey,

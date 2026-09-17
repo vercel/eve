@@ -7,7 +7,7 @@ import { cancelOwnedTask } from "#execution/tasks/parent/dispatch.js";
 import { waitForCommandHookOwner } from "#execution/workflow-runtime.js";
 import { getRun, start } from "#internal/workflow/runtime.js";
 import type { HarnessSession } from "#harness/types.js";
-import type { SessionTaskIndexEntry } from "#tasks/session-index.js";
+import type { TaskWorkflowInvocation } from "#harness/workflow-invocations.js";
 import type { TaskCommandHookPayload } from "#tasks/types.js";
 
 /** Models a task whose view commits before its executor finishes unwinding. */
@@ -30,7 +30,7 @@ export async function slowCancelledTaskWorkflow(input: {
 
 export async function startSlowCancelledTaskStep(input: {
   readonly sessionId: string;
-}): Promise<SessionTaskIndexEntry> {
+}): Promise<TaskWorkflowInvocation> {
   "use step";
 
   const taskId = `${input.sessionId}-task`;
@@ -53,7 +53,7 @@ export async function startSlowCancelledTaskStep(input: {
 }
 
 export async function cancelSlowTaskFromParentStep(input: {
-  readonly entry: SessionTaskIndexEntry;
+  readonly entry: TaskWorkflowInvocation;
   readonly sessionId: string;
 }) {
   "use step";
