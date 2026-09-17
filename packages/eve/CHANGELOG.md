@@ -1,5 +1,26 @@
 # eve
 
+## 0.59.0
+
+### Minor Changes
+
+- 6ddfa9b: Eval session ownership is now explicit: `t.session()` creates an empty session, and every `t.send()` creates a fresh session and returns a turn with `.session` for follow-ups. Replace `t.newSession()` with `await t.session()`, move conversation state and operations from `t` to the session handle, and read replies from `turn.message`.
+- 7973fa2: Preserve dynamic tool validation through durable schema factories that replay the original captured values, including Zod refinements and transformations. Rebuild extensions with the current eve compiler; provider packages must wrap live dynamic schemas with `defineDurableSchema`, and resolver-local schema objects must be constructed inline or moved to module scope.
+- 9bff372: Use stable `@vercel/sandbox` v3.3 for Drive support instead of the obsolete beta alias. Vercel sandbox mount types now follow the stable SDK, including `snapshot` mounts.
+
+### Patch Changes
+
+- e301818: Account for effective instructions and tool schemas before each model call so dynamic capability growth triggers context compaction. Preserve provider-reported usage without counting unchanged schemas twice, and reserve room for the final request while compacting history.
+- 3121ca1: Show the model selected by a dynamic resolver beside `dynamic model` in the TUI footer. Update it as each model step starts and clear the previous selection when starting a new turn or resetting the session.
+- 6ddfa9b: Eval judges now retain the latest prompt across approval responses and stream reads, and include the text sent with file attachments.
+- 5b45f9b: Allow idle sessions with resumable subagents to move to a newer deployment. Parked and available child handles now remain usable after the parent session handoff instead of pinning the parent to its previous deployment.
+- 7e48f0e: Keep the dev TUI’s activity indicator animating while a background subagent is still running after its parent turn completes.
+- db5cee3: Add standalone `evaluate` to `eve/experimental/evaluate` for typed evaluations in tools and application code. It shares model authentication with `autoModel`, including the Gateway connection selected during `eve dev`.
+- 6ddfa9b: Fix frontend session resume so unused prewarmed sessions accept their first message and steering messages during resumed turns settle without leaving the composer busy.
+- 6ddfa9b: Create conversation sessions before their first turn through the eve HTTP channel, TypeScript client, eval drivers, and frontend bindings so applications can move durable session startup off the first-message path.
+  
+  Frontend bindings support opt-in `prewarm: true`, keep consuming the session stream across turns, and retry a starting inbox without waiting for stream events. Session initialization runs with the first message's identity and context.
+
 ## 0.58.1
 
 ### Patch Changes
