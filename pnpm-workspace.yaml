@@ -66,8 +66,3 @@ minimumReleaseAgeExclude:
   - "@vercel/*"
   - "@workflow/*"
   - workflow
-
-# Remove after upgrading to a release containing https://github.com/vercel/workflow/pull/4219.
-# Unkeyed hook wakes must interrupt pending inline steps in Postgres fixtures.
-patchedDependencies:
-  "@workflow/world-postgres@5.0.0-beta.42": patches/@workflow__world-postgres@5.0.0-beta.42.patch
