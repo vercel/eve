@@ -18,7 +18,13 @@
     {
       "label": "Extension fixtures declare a broad eve peer range like published extensions",
       "dependencies": ["eve"],
-      "packages": ["gadget-extension", "gizmo-extension", "js-only-extension", "toolkit-extension"],
+      "packages": [
+        "eve-code",
+        "gadget-extension",
+        "gizmo-extension",
+        "js-only-extension",
+        "toolkit-extension"
+      ],
       "dependencyTypes": ["peer"],
       "isIgnored": true
     },

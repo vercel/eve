@@ -1,0 +1,11 @@
+{
+  "extends": ["//"],
+  "tasks": {
+    "test:integration": {
+      "dependsOn": ["eve#test:integration"]
+    },
+    "test:scenario": {
+      "dependsOn": ["^build"]
+    }
+  }
+}
