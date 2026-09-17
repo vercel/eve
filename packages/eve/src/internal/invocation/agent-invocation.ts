@@ -12,6 +12,7 @@ export interface AgentInvocationAuthorizationRequest {
 interface AgentInvocationBase {
   readonly invocationId: string;
   readonly createdAt: string;
+  readonly updatedAt?: string;
   readonly expiresAt?: string;
 }
 
@@ -52,3 +53,13 @@ export type AgentInvocationMutationResult =
   | { readonly type: "success"; readonly invocation: AgentInvocation }
   | { readonly type: "conflict"; readonly message: string }
   | { readonly type: "not_found" };
+
+/** A bounded listing cannot claim a complete count beyond its storage window. */
+export class InvocationListingLimitError extends Error {
+  constructor() {
+    super(
+      "Task listing exceeds the workflow scan limit. Supply contextId to look up a specific task.",
+    );
+    this.name = "InvocationListingLimitError";
+  }
+}

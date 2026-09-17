@@ -32,3 +32,9 @@ export {
   type RemoteAgentUrl,
   defineRemoteAgent,
 } from "#public/definitions/remote-agent.js";
+
+export {
+  defineA2AAgent,
+  type A2AAgentDefinition,
+  type A2AAgentDefinitionInput,
+} from "#public/definitions/a2a-agent.js";

@@ -620,6 +620,7 @@ const MCP_INPUT_REQUEST_SCHEMA = inputRequestSchema.safeExtend({
 
 const AGENT_INVOCATION_BASE_SCHEMA = z.strictObject({
   createdAt: z.iso.datetime(),
+  updatedAt: z.iso.datetime().optional(),
   expiresAt: z.iso.datetime().optional(),
   invocationId: z.string(),
 });

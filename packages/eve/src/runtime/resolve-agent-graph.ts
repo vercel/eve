@@ -297,6 +297,7 @@ async function resolveRuntimeRemoteAgent(input: {
   );
 
   const resolvedRemoteAgent: {
+    a2a?: ResolvedRuntimeRemoteAgentNode["a2a"];
     auth?: ResolvedRuntimeRemoteAgentNode["auth"];
     description: string;
     forwardPrincipal?: boolean;
@@ -328,6 +329,13 @@ async function resolveRuntimeRemoteAgent(input: {
       resolvedUrl: resolvedRecord.url,
     }),
   };
+
+  if (resolvedRecord.kind === "a2a") {
+    resolvedRemoteAgent.a2a = resolvedExportValue as NonNullable<
+      ResolvedRuntimeRemoteAgentNode["a2a"]
+    >;
+    return resolvedRemoteAgent;
+  }
 
   if (typeof resolvedRecord.auth === "function") {
     resolvedRemoteAgent.auth = resolvedRecord.auth as ResolvedRuntimeRemoteAgentNode["auth"];

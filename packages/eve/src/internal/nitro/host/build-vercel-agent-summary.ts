@@ -3,6 +3,7 @@ import { dirname } from "node:path";
 
 import type {
   CompiledAgentManifest,
+  CompiledRemoteAgentNode,
   CompiledChannelDefinition,
   CompiledConnectionDefinition,
   CompiledInstructionsDefinition,
@@ -66,7 +67,7 @@ export function buildVercelAgentSummary(input: {
         : {
             logicalPath: manifest.sandbox.logicalPath,
           },
-    subagents: manifest.subagents.map(toSubagentEntry),
+    subagents: [...manifest.subagents, ...manifest.remoteAgents].map(toSubagentEntry),
     diagnostics: {
       errors: manifest.diagnosticsSummary.errors,
       warnings: manifest.diagnosticsSummary.warnings,
@@ -177,10 +178,23 @@ function toChannelEntry(channel: CompiledChannelDefinition): VercelEveChannelEnt
   return entry;
 }
 
-function toSubagentEntry(subagent: CompiledSubagentNode): VercelEveSubagentEntry {
-  return {
+function toSubagentEntry(
+  subagent: CompiledSubagentNode | CompiledRemoteAgentNode,
+): VercelEveSubagentEntry {
+  const entry: {
+    name: string;
+    description?: string;
+    logicalPath: string;
+    protocol?: "a2a";
+    vercelConnect?: { connector: string };
+  } = {
     name: subagent.name,
     description: subagent.description,
     logicalPath: subagent.logicalPath,
   };
+  if ("protocol" in subagent && subagent.protocol === "a2a") {
+    entry.protocol = "a2a";
+    entry.vercelConnect = subagent.vercelConnect;
+  }
+  return entry;
 }

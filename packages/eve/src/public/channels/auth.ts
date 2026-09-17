@@ -806,7 +806,9 @@ export function placeholderAuth(): AuthFn<Request> {
  * argument.
  */
 export function none<TEvent = unknown>(): AuthFn<TEvent> {
-  return () => ANONYMOUS_SESSION_AUTH_CONTEXT;
+  const policy = () => ANONYMOUS_SESSION_AUTH_CONTEXT;
+  Object.defineProperty(policy, Symbol.for("eve.channels.auth.none"), { value: true });
+  return policy;
 }
 
 /**

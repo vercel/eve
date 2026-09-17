@@ -18,7 +18,7 @@ export function invocationInputRequestId(pendingBatchId: string, requestId: stri
 }
 
 /** Fixed-width fingerprint used to bind an invocation to its initiating principal. */
-export function invocationOwnerKey(auth: SessionAuthContext | null): string {
+export function invocationOwnerKey(auth: SessionAuthContext | null, scope?: string): string {
   const identity =
     auth === null
       ? ["anonymous"]
@@ -29,7 +29,9 @@ export function invocationOwnerKey(auth: SessionAuthContext | null): string {
           auth.principalId,
           auth.subject ?? "",
         ];
-  return createHash("sha256").update(JSON.stringify(identity), "utf8").digest("hex");
+  return createHash("sha256")
+    .update(JSON.stringify(scope === undefined ? identity : [scope, identity]), "utf8")
+    .digest("hex");
 }
 
 export function buildInvocationAttributes(

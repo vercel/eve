@@ -274,7 +274,7 @@ async function waitForCallback(
     if (next.done) {
       throw new Error("Authorization callback closed before sign-in completed.");
     }
-    const callback = readCallback(next.value, challenge);
+    const callback = readWorkflowAuthorizationCallback(next.value, challenge);
     if (callback !== undefined) {
       return callback;
     }
@@ -297,7 +297,7 @@ async function withAbort<T>(pending: PromiseLike<T>, signal: AbortSignal): Promi
   }
 }
 
-function readCallback(
+export function readWorkflowAuthorizationCallback(
   value: unknown,
   challenge: IdentifiedAuthorizationChallenge,
 ): AuthorizationCallback | undefined {

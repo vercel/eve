@@ -1,3 +1,4 @@
+import { sendA2ACommand } from "#subagents/a2a-dispatch.js";
 import type { RuntimeSession } from "#subagents/handle-dispatch.js";
 import type { TaskExecutorCancel } from "#execution/tasks/parent/task-cancel.js";
 import { requestWorkflowTurnCancellation } from "#execution/workflow-runtime.js";
@@ -21,6 +22,10 @@ export const cancelBackgroundAgentTask: TaskExecutorCancel = async (input) => {
   if (handle === undefined || handle.phase !== "claimed") return;
   if (handle.address.kind !== "agent/remote") {
     await requestWorkflowTurnCancellation({ sessionId: handle.address.sessionId });
+    return;
+  }
+  if (handle.address.protocol === "a2a") {
+    await sendA2ACommand(handle.address.sessionId, { kind: "cancel" });
     return;
   }
   const ctx = await deserializeContext(input.serializedContext);
@@ -52,7 +57,9 @@ export async function cancelAgentInvocationOwnerStep(input: {
       candidate.phase === "claimed" && candidate.ownerId === input.ownerId,
   );
   if (handles.length === 0) return;
-  const remoteContext = handles.some((handle) => handle.address.kind === "agent/remote")
+  const remoteContext = handles.some(
+    (handle) => handle.address.kind === "agent/remote" && handle.address.protocol !== "a2a",
+  )
     ? await deserializeContext(input.serializedContext)
     : undefined;
   await Promise.all(
@@ -60,6 +67,10 @@ export async function cancelAgentInvocationOwnerStep(input: {
       try {
         if (handle.address.kind !== "agent/remote") {
           await requestWorkflowTurnCancellation({ sessionId: handle.address.sessionId });
+          return;
+        }
+        if (handle.address.protocol === "a2a") {
+          await sendA2ACommand(handle.address.sessionId, { kind: "cancel" });
           return;
         }
         const bundle = remoteContext!.require(BundleKey);

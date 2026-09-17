@@ -1,3 +1,4 @@
+import { sendA2ACommand, resolveDynamicA2ADefinition } from "#subagents/a2a-dispatch.js";
 import { z } from "#compiled/zod/index.js";
 import { CancelTurnResponseSchema } from "#protocol/cancel-turn.js";
 import { ResetResponseSchema, type ResetResponse } from "#protocol/reset-session.js";
@@ -357,11 +358,18 @@ function buildForwardedPrincipalField(input: {
 
 export async function cancelRemoteAgentTurn(input: {
   readonly headers?: Record<string, string>;
-  readonly remote: Pick<ResolvedRuntimeRemoteAgentNode, "auth" | "headers" | "name" | "url">;
+  readonly remote: Pick<
+    ResolvedRuntimeRemoteAgentNode,
+    "a2a" | "auth" | "headers" | "name" | "url"
+  >;
   readonly sessionId: string;
   readonly taskId?: string;
   readonly turnId?: string;
 }): Promise<CancelTurnResult> {
+  if (input.remote.a2a !== undefined) {
+    await sendA2ACommand(input.sessionId, { kind: "cancel" });
+    return { status: "accepted", sessionId: input.sessionId };
+  }
   const headers = input.headers ?? (await resolveRemoteAgentRequestHeaders(input.remote));
   const response = await fetch(createRemoteAgentCancelTurnUrl(input.remote, input.sessionId), {
     body:
@@ -420,9 +428,16 @@ function setHeader(headers: Record<string, string>, name: string, value: string 
 /** Retires one exact remote child session through eve's authenticated reset route. */
 export async function resetRemoteAgentSession(input: {
   readonly headers?: Record<string, string>;
-  readonly remote: Pick<ResolvedRuntimeRemoteAgentNode, "auth" | "headers" | "name" | "url">;
+  readonly remote: Pick<
+    ResolvedRuntimeRemoteAgentNode,
+    "a2a" | "auth" | "headers" | "name" | "url"
+  >;
   readonly sessionId: string;
 }): Promise<ResetResponse> {
+  if (input.remote.a2a !== undefined) {
+    await sendA2ACommand(input.sessionId, { kind: "cancel" });
+    return { ok: true, status: "reset", previousSessionId: input.sessionId };
+  }
   const headers = input.headers ?? (await resolveRemoteAgentRequestHeaders(input.remote));
   const response = await fetch(
     createRemoteAgentRouteUrl(input.remote.url, createEveSessionResetRoutePath(input.sessionId)),
@@ -463,9 +478,13 @@ export function resolveRemoteAgentForAction(input: {
     if (definition === undefined) {
       throw new Error(`Missing remote agent "${input.remoteAgentName}" in runtime registry.`);
     }
-    const credentials = resolveDynamicRemoteAgentCredentials(input.dynamicRemoteAgent);
+    const configA2A = input.dynamicRemoteAgent.protocol === "a2a";
+    const credentials = configA2A
+      ? {}
+      : resolveDynamicRemoteAgentCredentials(input.dynamicRemoteAgent);
     const config = input.dynamicRemoteAgent;
     const remote: {
+      a2a?: ResolvedRuntimeRemoteAgentNode["a2a"];
       auth?: ResolvedRuntimeRemoteAgentNode["auth"];
       description: string;
       forwardPrincipal?: boolean;
@@ -491,6 +510,13 @@ export function resolveRemoteAgentForAction(input: {
       sourceKind: "module",
       url: config.url,
     };
+    if (configA2A) {
+      const factory =
+        config.credentialsStepId === undefined
+          ? undefined
+          : getStepRegistry().get(config.credentialsStepId);
+      remote.a2a = resolveDynamicA2ADefinition(config, factory);
+    }
     if (config.forwardPrincipal !== undefined) {
       remote.forwardPrincipal = config.forwardPrincipal;
     }

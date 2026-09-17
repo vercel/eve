@@ -1,3 +1,4 @@
+import { extractVercelConnectMarker } from "#compiler/normalize-connection.js";
 import {
   expectBoolean,
   expectFunction,
@@ -29,6 +30,8 @@ export type NormalizedSubagentConfig =
   | {
       readonly description: string;
       readonly kind: "remote";
+      readonly protocol?: "a2a";
+      readonly vercelConnect?: { readonly connector: string };
       readonly outputSchema?: JsonObject;
       readonly path: string;
       readonly tool?: boolean;
@@ -55,6 +58,24 @@ export function normalizeSubagentConfig(value: unknown, message: string): Normal
     return build === undefined
       ? { eventNames, kind: "dynamic" }
       : { build, eventNames, kind: "dynamic" };
+  }
+
+  if (typeof value === "object" && value !== null && "kind" in value && value.kind === "a2a") {
+    const record = expectObjectRecord(value, message);
+    expectOnlyKnownKeys(
+      record,
+      ["kind", "url", "description", "auth", "headers", "allowedInterfaceOrigins", "outputSchema"],
+      message,
+    );
+    return {
+      kind: "remote",
+      protocol: "a2a",
+      vercelConnect: extractVercelConnectMarker(record.auth),
+      description: expectString(record.description, message),
+      path: "/eve/v1/a2a",
+      url: typeof record.url === "function" ? undefined : expectString(record.url, message),
+      outputSchema: serializeOutputSchema(record.outputSchema as ToolSchemaSource | undefined),
+    };
   }
 
   if (

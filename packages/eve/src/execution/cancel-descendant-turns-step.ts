@@ -1,3 +1,4 @@
+import { sendA2ACommand } from "#subagents/a2a-dispatch.js";
 import type { CancelTurnResult } from "#channel/types.js";
 import { deserializeContext } from "#context/serialize.js";
 import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
@@ -76,7 +77,7 @@ export async function cancelDescendantTurnsStep(input: {
   await Promise.all(
     running.map((handle) =>
       handle.address.kind === "agent/remote"
-        ? cancelRemoteDescendant({ handle, remoteContext: getRemoteContext() })
+        ? cancelRemoteDescendant({ handle, remoteContext: getRemoteContext })
         : cancelLocalDescendant({ handle }),
     ),
   );
@@ -109,7 +110,7 @@ async function cancelLocalDescendant(input: {
 }
 
 async function cancelRemoteDescendant(input: {
-  readonly remoteContext: Promise<{
+  readonly remoteContext: () => Promise<{
     readonly ctx: ContextContainer;
     readonly registry: RuntimeSubagentRegistry["subagentsByNodeId"];
   }>;
@@ -121,7 +122,11 @@ async function cancelRemoteDescendant(input: {
   }
   const childUrl = handle.address.url;
   try {
-    const { ctx, registry } = await input.remoteContext;
+    if (handle.address.protocol === "a2a") {
+      await sendA2ACommand(handle.address.sessionId, { kind: "cancel" });
+      return;
+    }
+    const { ctx, registry } = await input.remoteContext();
     const selection = getDynamicSubagentSelection(ctx, handle.identity.nodeId);
     const resolved = await resolveRemoteAgentForAction({
       dynamicRemoteAgent: selection?.kind === "remote" ? selection.remoteAgent : undefined,

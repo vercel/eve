@@ -1,3 +1,4 @@
+import { sendA2ACommand } from "#subagents/a2a-dispatch.js";
 import { deserializeContext } from "#context/serialize.js";
 import type { ContextContainer } from "#context/container.js";
 import { getDynamicSubagentSelection } from "#context/dynamic-subagent-lifecycle.js";
@@ -43,7 +44,10 @@ export async function terminateChildSessionsStep(input: {
 
   const handles = getAgentHandleStore(session.state)?.handles ?? [];
   const hasRemoteHandle = handles.some(
-    (handle) => "address" in handle && handle.address.kind === "agent/remote",
+    (handle) =>
+      "address" in handle &&
+      handle.address.kind === "agent/remote" &&
+      handle.address.protocol !== "a2a",
   );
   let runtimeContext:
     | {
@@ -78,7 +82,9 @@ export async function terminateChildSessionsStep(input: {
       continue;
     }
     try {
-      if (handle.address.kind === "agent/remote") {
+      if (handle.address.kind === "agent/remote" && handle.address.protocol === "a2a") {
+        await sendA2ACommand(handle.address.sessionId, { kind: "cancel" });
+      } else if (handle.address.kind === "agent/remote") {
         if (handle.address.credentialResolver !== undefined) {
           const resolverId = handle.address.credentialResolver.resolverId;
           const headers =

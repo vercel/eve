@@ -167,6 +167,10 @@ export function createCompiledRemoteAgent(input: {
   if (input.sourceRef.exportName !== undefined) {
     Object.assign(node, { exportName: input.sourceRef.exportName });
   }
+  if (input.definition.protocol !== undefined)
+    Object.assign(node, { protocol: input.definition.protocol });
+  if (input.definition.vercelConnect !== undefined)
+    Object.assign(node, { vercelConnect: input.definition.vercelConnect });
   if (input.definition.outputSchema !== undefined) {
     Object.assign(node, { outputSchema: input.definition.outputSchema });
   }

@@ -4,6 +4,7 @@ import type {
   PublicAgentStaticModelDefinition,
 } from "#shared/agent-definition.js";
 import type { ExactDefinition } from "#public/definitions/exact.js";
+import type { A2AAgentDefinition } from "#public/definitions/a2a-agent.js";
 import type { RemoteAgentDefinition } from "#public/definitions/remote-agent.js";
 import { defineDynamic as defineDynamicBase } from "#dynamic/definition.js";
 import type { DynamicEvents, DynamicSentinel } from "#dynamic/definition.js";
@@ -56,7 +57,10 @@ export type DynamicLocalSubagentDefinition = Extract<
 > & { readonly description: string };
 
 /** Definition a dynamic subagent resolver may select at runtime. */
-export type DynamicSubagentDefinition = DynamicLocalSubagentDefinition | RemoteAgentDefinition;
+export type DynamicSubagentDefinition =
+  | DynamicLocalSubagentDefinition
+  | RemoteAgentDefinition
+  | A2AAgentDefinition;
 
 type DynamicEventHandler<TEvents extends DynamicEvents> = Extract<
   NonNullable<TEvents[keyof TEvents]>,

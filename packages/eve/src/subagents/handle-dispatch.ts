@@ -1,5 +1,6 @@
 /** Continuation delivery for task-owned agent sessions. */
 
+import { sendA2ACommand } from "#subagents/a2a-dispatch.js";
 import type { ActivityObserverConfig, SessionAuthContext } from "#channel/types.js";
 import { AGENT_UNREACHABLE } from "#subagents/agent-handle-errors.js";
 import type { AgentAddress, AgentIdentity } from "#subagents/handles/store.js";
@@ -165,6 +166,30 @@ async function deliverToAgentAddress(input: {
       ? (reply.taskId ?? readTaskIdFromInboxToken(reply.parentToken))
       : undefined;
 
+  if (address.kind === "agent/remote" && address.protocol === "a2a") {
+    if (reply.kind === "steer") {
+      return err({
+        cause: new Error("A2A agents accept continuation after a task result."),
+        deliveryAmbiguous: false,
+        permanent: false,
+      });
+    }
+    try {
+      await sendA2ACommand(address.sessionId, {
+        kind: "send",
+        auth: input.auth,
+        invocation: {
+          callId: action.callId,
+          message: readSubagentMessage(action),
+          replyToken: reply.parentToken,
+          outputSchema: normalizeRequestedOutputSchema(action.input.outputSchema),
+        },
+      });
+      return ok(undefined);
+    } catch (cause) {
+      return err({ cause, deliveryAmbiguous: true, permanent: false });
+    }
+  }
   if (address.kind === "agent/remote") {
     let resolvedRemote;
     try {

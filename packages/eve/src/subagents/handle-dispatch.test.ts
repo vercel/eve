@@ -1,8 +1,10 @@
+import { sendA2ACommand } from "#subagents/a2a-dispatch.js";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
 import { dispatchToClaimedAgentAddress } from "./handle-dispatch.js";
 import { continueRemoteAgentSession, resolveRemoteAgentForAction } from "./remote-dispatch.js";
 
+vi.mock("#subagents/a2a-dispatch.js", () => ({ sendA2ACommand: vi.fn() }));
 vi.mock("#execution/workflow-runtime.js", () => ({ createWorkflowRuntime: vi.fn() }));
 vi.mock("#subagents/remote-dispatch.js", async (importOriginal) => ({
   ...(await importOriginal()),
@@ -87,6 +89,35 @@ describe("claimed child delivery", () => {
       deliveryPermanent: true,
     });
     expect(dispatchSession).toHaveBeenCalledTimes(1);
+  });
+
+  it("continues an A2A handle without re-resolving a dynamic definition", async () => {
+    const result = await dispatchToClaimedAgentAddress({
+      ...input,
+      reply: { kind: "reply", parentToken: "next-reply" },
+      handle: {
+        ...input.handle,
+        address: {
+          kind: "agent/remote",
+          protocol: "a2a",
+          sessionId: "bridge",
+          url: "https://peer.example",
+          callbackBaseUrl: "https://parent.example",
+        },
+      },
+    });
+    expect(result.kind).toBe("called");
+    expect(sendA2ACommand).toHaveBeenCalledWith("bridge", {
+      kind: "send",
+      auth: null,
+      invocation: {
+        callId: "update-call",
+        replyToken: "next-reply",
+        message: "Use Alice's updated requirements",
+        outputSchema: undefined,
+      },
+    });
+    expect(resolveRemoteAgentForAction).not.toHaveBeenCalled();
   });
 
   it("steers a remote child without replacing its callback", async () => {

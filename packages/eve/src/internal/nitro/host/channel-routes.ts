@@ -71,7 +71,7 @@ function addChannelVirtualHandler(
   }
 
   const routeKey = createChannelRouteKey(input.route);
-  const virtualId = `${EVE_CHANNEL_VIRTUAL_ID_PREFIX}${routeKey}`;
+  const virtualId = `${EVE_CHANNEL_VIRTUAL_ID_PREFIX}${routeKey}.mjs`;
   const dispatchModulePath = stringifyEsmImportSpecifier(
     resolvePackageSourceFilePath("src/internal/nitro/routes/channel-dispatch.ts"),
   );
@@ -123,7 +123,7 @@ function addChannelCorsPreflightHandler(
   route: ApplicationChannelPreflightRoute,
 ): void {
   const routeKey = createChannelRouteKey(route);
-  const virtualId = `${EVE_CHANNEL_VIRTUAL_ID_PREFIX}${routeKey}`;
+  const virtualId = `${EVE_CHANNEL_VIRTUAL_ID_PREFIX}${routeKey}.mjs`;
   const nitroH3ModulePath = stringifyEsmImportSpecifier(resolvePackageDependencyPath("nitro/h3"));
 
   nitro.options.handlers.push({

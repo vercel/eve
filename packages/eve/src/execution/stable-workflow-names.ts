@@ -11,6 +11,7 @@ export const WORKFLOW_TOOL_RUN_WORKFLOW_NAME = "workflowToolRunWorkflow";
 export const ACTIVITY_COLLECTOR_WORKFLOW_NAME = "activityCollectorWorkflow";
 
 export const STABLE_WORKFLOW_NAMES: ReadonlySet<string> = new Set([
+  "a2aAgentWorkflow",
   WORKFLOW_ENTRY_NAME,
   TURN_WORKFLOW_NAME,
   SESSION_TIMEOUT_WORKFLOW_NAME,

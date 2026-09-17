@@ -118,7 +118,7 @@ function isRemoteAgentDefinition(value: unknown): boolean {
   return (
     typeof value === "object" &&
     value !== null &&
-    (value as { readonly kind?: unknown }).kind === "remote"
+    ["remote", "a2a"].includes(String((value as { readonly kind?: unknown }).kind))
   );
 }
 

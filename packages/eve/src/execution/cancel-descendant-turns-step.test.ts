@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { deserializeContext } from "#context/serialize.js";
+import { sendA2ACommand } from "#subagents/a2a-dispatch.js";
 import { cancelDescendantTurnsStep } from "#execution/cancel-descendant-turns-step.js";
 import { createDurableSessionState } from "#execution/durable-session-store.js";
 import {
@@ -14,6 +15,10 @@ import type { HarnessSession } from "#harness/types.js";
 
 vi.mock("#context/serialize.js", () => ({
   deserializeContext: vi.fn(),
+}));
+
+vi.mock("#subagents/a2a-dispatch.js", () => ({
+  sendA2ACommand: vi.fn(),
 }));
 
 vi.mock("./workflow-runtime.js", () => ({
@@ -129,6 +134,26 @@ describe("cancelDescendantTurnsStep", () => {
       sessionId: "local-child",
     });
     expect(deserializeContext).not.toHaveBeenCalled();
+  });
+
+  it("cancels an A2A bridge without resolving a removed dynamic definition", async () => {
+    const session = createSession({
+      [AGENT_HANDLES_STATE_KEY]: {
+        handles: [
+          {
+            ...REMOTE_RUNNING_HANDLE,
+            address: { ...REMOTE_RUNNING_HANDLE.address, protocol: "a2a" },
+          },
+        ],
+      },
+    });
+    await cancelDescendantTurnsStep({
+      serializedContext: {},
+      sessionState: createDurableSessionState({ session }),
+    });
+    expect(sendA2ACommand).toHaveBeenCalledWith("remote-child", { kind: "cancel" });
+    expect(deserializeContext).not.toHaveBeenCalled();
+    expect(resolveRemoteAgentForAction).not.toHaveBeenCalled();
   });
 
   it("uses the selected dynamic remote config when cancelling", async () => {

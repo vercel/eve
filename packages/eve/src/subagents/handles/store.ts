@@ -64,6 +64,7 @@ export type AgentStartTarget =
     }
   | {
       readonly kind: "agent/remote";
+      readonly protocol?: "a2a";
       /** Deliver target base URL; never model-visible. */
       readonly url: string;
       /** Callback base URL stub captured at dispatch; never model-visible. */
@@ -86,6 +87,7 @@ export type AgentAddress =
     }
   | {
       readonly kind: "agent/remote";
+      readonly protocol?: "a2a";
       readonly sessionId: string;
       readonly url: string;
       readonly callbackBaseUrl: string;
@@ -236,6 +238,7 @@ const startTargetSchema: z.ZodType<AgentStartTarget> = z.discriminatedUnion("kin
     callbackBaseUrl: z.url(),
     credentialResolver: z.looseObject({ resolverId: nonEmptyString.optional() }).optional(),
     kind: z.literal("agent/remote"),
+    protocol: z.literal("a2a").optional(),
     url: z.url(),
   }),
 ]);
@@ -255,6 +258,7 @@ const addressSchema: z.ZodType<AgentAddress> = z.discriminatedUnion("kind", [
     callbackBaseUrl: z.url(),
     credentialResolver: z.looseObject({ resolverId: nonEmptyString.optional() }).optional(),
     kind: z.literal("agent/remote"),
+    protocol: z.literal("a2a").optional(),
     sessionId: nonEmptyString,
     url: z.url(),
   }),

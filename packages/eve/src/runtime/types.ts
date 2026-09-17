@@ -307,6 +307,7 @@ export type ResolvedRuntimeSubagentNode = Readonly<
 export type ResolvedRuntimeRemoteAgentNode = Readonly<
   ModuleSourceRef &
     Node & {
+      a2a?: import("#public/definitions/a2a-agent.js").A2AAgentDefinitionInput;
       auth?: OutboundAuthFn;
       description: string;
       forwardPrincipal?: boolean;

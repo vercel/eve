@@ -22,6 +22,8 @@ export type CompiledRemoteAgentNode = Readonly<
   ModuleSourceRef &
     Node & {
       description: string;
+      protocol?: "a2a";
+      vercelConnect?: { readonly connector: string };
       backing: { readonly kind: "resource"; readonly sourcePath: string };
       binding: CompiledModuleBinding;
       entryPath: string;
@@ -82,6 +84,8 @@ export const compiledRemoteAgentNodeSchema: z.ZodType<CompiledRemoteAgentNode> =
         usage: z.object({ compile: z.boolean(), runtimeEntry: z.boolean() }).strict(),
       })
       .strict(),
+    protocol: z.literal("a2a").optional(),
+    vercelConnect: z.object({ connector: z.string() }).strict().optional(),
     description: z.string(),
     entryPath: z.string(),
     exportName: z.string().optional(),

@@ -1,3 +1,4 @@
+import { startA2ASubagent } from "#subagents/a2a-dispatch.js";
 import type { DispatchOutcome, RuntimeSession } from "#subagents/handle-dispatch.js";
 import { deriveChildActivityObserverConfig } from "#execution/activity-work.js";
 import { createRemoteAgentStartFailureResult } from "#execution/dispatch-action-failures.js";
@@ -85,23 +86,27 @@ export async function startRemoteSubagent(input: {
         : input.dynamicRemoteAgent.credentialsStepId,
   };
   try {
-    const child = await startRemoteAgentSession({
-      action,
-      auth: input.auth,
-      callbackBaseUrl,
-      originAudience: input.parent.originAudience,
-      initiatorAuth: input.initiatorAuth,
-      operationId: operation.id,
-      parent: input.parent,
-      activityObserver,
-      remote: resolvedRemote,
-      session: input.session,
-      taskId: input.taskId,
-    });
+    const child =
+      resolvedRemote.a2a !== undefined
+        ? await startA2ASubagent(input)
+        : await startRemoteAgentSession({
+            action,
+            auth: input.auth,
+            callbackBaseUrl,
+            originAudience: input.parent.originAudience,
+            initiatorAuth: input.initiatorAuth,
+            operationId: operation.id,
+            parent: input.parent,
+            activityObserver,
+            remote: resolvedRemote,
+            session: input.session,
+            taskId: input.taskId,
+          });
     const address = {
       callbackBaseUrl,
       credentialResolver,
       kind: "agent/remote",
+      protocol: resolvedRemote.a2a === undefined ? undefined : "a2a",
       sessionId: child.sessionId,
       url: resolvedRemote.url,
     } as const;

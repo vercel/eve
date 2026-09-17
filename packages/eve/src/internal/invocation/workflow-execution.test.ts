@@ -14,12 +14,13 @@ import type { HandleMessageStreamEvent } from "#protocol/message.js";
 import { normalizeEveAttributes } from "#runtime/attributes/normalize.js";
 
 const runsGet = vi.fn();
+const runsList = vi.fn();
 const cancel = vi.fn();
 const returnValue = vi.fn();
 const getReadable = vi.fn();
 
 vi.mock("#internal/workflow/runtime.js", () => ({
-  getWorld: async () => ({ runs: { get: runsGet } }),
+  getWorld: async () => ({ runs: { get: runsGet, list: runsList } }),
   getRun: () => ({
     cancel,
     get returnValue() {
@@ -76,6 +77,44 @@ describe("WorkflowAgentInvocationExecution", () => {
       invocationId: "wrun_invocation",
       status: "working",
     });
+  });
+
+  it("isolates A2A tasks from other channel scopes even for the same principal", async () => {
+    const a2a = new WorkflowAgentInvocationExecution({ createSession, from, scope: "a2a:planner" });
+    runsGet.mockResolvedValue(run({ status: "running" }));
+    await expect(a2a.read({ auth, invocationId: "wrun_invocation" })).resolves.toBeUndefined();
+    runsGet.mockResolvedValue(run({ status: "running", ownerKey: a2a.ownerKey(auth) }));
+    await expect(a2a.read({ auth, invocationId: "wrun_invocation" })).resolves.toMatchObject({
+      status: "working",
+    });
+    await expect(
+      execution().read({ auth, invocationId: "wrun_invocation" }),
+    ).resolves.toBeUndefined();
+  });
+
+  it("filters canonical run metadata before reading task content and follows bounded pages", async () => {
+    const own = run({ status: "running" });
+    runsList
+      .mockResolvedValueOnce({
+        data: [run({ status: "running", ownerKey: "someone-else" })],
+        cursor: "next",
+        hasMore: true,
+      })
+      .mockResolvedValueOnce({ data: [own], hasMore: false });
+    runsGet.mockResolvedValue(own);
+    expect(await execution().list({ auth })).toHaveLength(1);
+    expect(runsGet).toHaveBeenCalledTimes(1);
+    expect(runsList).toHaveBeenLastCalledWith({
+      pagination: { cursor: "next", limit: 100, sortOrder: "desc" },
+      resolveData: "none",
+    });
+  });
+
+  it("fails explicitly when listing cannot compute a complete owner-scoped result", async () => {
+    runsList.mockResolvedValue({ data: [], hasMore: true, cursor: "more" });
+    await expect(execution().list({ auth })).rejects.toThrow("Supply contextId");
+    expect(runsList).toHaveBeenCalledTimes(10);
+    expect(runsGet).not.toHaveBeenCalled();
   });
 
   it("requires the same authenticated principal for invocation access", async () => {
@@ -527,6 +566,7 @@ describe("WorkflowAgentInvocationExecution", () => {
     );
 
     await expect(execution().read({ auth, invocationId: "wrun_invocation" })).resolves.toEqual({
+      updatedAt: "2026-07-20T00:00:00.000Z",
       createdAt: "2026-07-20T00:00:00.000Z",
       error: {
         code: -32603,
@@ -652,6 +692,7 @@ function run(input: { error?: unknown; ownerKey?: string; status: string }) {
   return {
     attributes,
     createdAt: new Date("2026-07-20T00:00:00.000Z"),
+    updatedAt: new Date("2026-07-20T00:00:00.000Z"),
     error: input.error,
     input: [{ serializedContext: { "eve.initiatorAuth": auth } }],
     runId: "wrun_invocation",

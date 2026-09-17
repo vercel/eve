@@ -18,6 +18,10 @@ type DispatcherRequestInit = Omit<RequestInit, "dispatcher"> & {
 /** Options for an SSRF-safe HTTPS request. */
 export interface PublicUrlRequestOptions {
   readonly headers: Readonly<Record<string, string>>;
+  readonly method?: "GET" | "POST";
+  readonly body?: string;
+  readonly redirect?: "manual";
+  readonly allowLoopback?: boolean;
   readonly maxResponseSize: number;
   readonly signal: AbortSignal;
 }
@@ -33,7 +37,7 @@ export async function requestPublicUrl(
   urlText: string,
   options: PublicUrlRequestOptions,
 ): Promise<Response> {
-  let url = parseHttpsUrl(urlText);
+  let url = validatePublicUrl(urlText, options.allowLoopback);
 
   for (let redirectCount = 0; ; redirectCount++) {
     const { dispatcher, response } = await requestOnce(url, options);
@@ -42,6 +46,7 @@ export async function requestPublicUrl(
       const location = response.headers.get("location");
 
       if (
+        options.redirect !== "manual" &&
         location !== null &&
         REDIRECT_STATUSES.has(response.status) &&
         redirectCount < MAX_REDIRECTS
@@ -58,7 +63,13 @@ export async function requestPublicUrl(
   }
 }
 
-function parseHttpsUrl(urlText: string): URL {
+export function validatePublicUrl(urlText: string, allowLoopback = false): URL {
+  const url = parseHttpsUrl(urlText, allowLoopback);
+  if (!(allowLoopback && isLoopbackHostname(url.hostname))) assertPublicHostname(url.hostname);
+  return url;
+}
+
+function parseHttpsUrl(urlText: string, allowLoopback = false): URL {
   let url: URL;
 
   try {
@@ -67,7 +78,12 @@ function parseHttpsUrl(urlText: string): URL {
     throw new Error("URL must be a valid absolute https:// URL.");
   }
 
-  if (url.protocol !== "https:") {
+  if (url.username || url.password || url.hash)
+    throw new Error("URL must not contain credentials or a fragment.");
+  if (
+    url.protocol !== "https:" &&
+    !(allowLoopback && url.protocol === "http:" && isLoopbackHostname(url.hostname))
+  ) {
     throw new Error("URL must start with https://");
   }
 
@@ -78,11 +94,12 @@ async function requestOnce(
   url: URL,
   options: PublicUrlRequestOptions,
 ): Promise<{ readonly dispatcher: Dispatcher1Wrapper; readonly response: Response }> {
-  assertPublicHostname(url.hostname);
+  const loopback = options.allowLoopback === true && isLoopbackHostname(url.hostname);
+  if (!loopback) assertPublicHostname(url.hostname);
   const { Agent, Dispatcher1Wrapper } = await import("undici");
   const agent = new Agent({
     connect: {
-      lookup: createPublicLookup(),
+      lookup: createPublicLookup(loopback),
     },
   });
   const dispatcher = new Dispatcher1Wrapper(agent);
@@ -90,6 +107,8 @@ async function requestOnce(
   try {
     const response = await fetchWithDispatcher(url, {
       dispatcher,
+      method: options.method,
+      body: options.body,
       headers: options.headers,
       redirect: "manual",
       signal: options.signal,
@@ -129,7 +148,7 @@ function assertPublicAddress(address: string): void {
   }
 }
 
-function createPublicLookup(): LookupFunction {
+function createPublicLookup(allowLoopback = false): LookupFunction {
   return (hostname, lookupOptions, callback) => {
     lookup(hostname, { all: true, verbatim: true }, (error, addresses) => {
       if (error !== null) {
@@ -139,7 +158,7 @@ function createPublicLookup(): LookupFunction {
 
       try {
         for (const { address } of addresses) {
-          assertPublicAddress(address);
+          if (!(allowLoopback && isLoopbackHostname(address))) assertPublicAddress(address);
         }
       } catch (error) {
         callback(error as Error, "", 0);

@@ -133,7 +133,9 @@ export async function compileConnectionDefinition(
  * the structural marker contract — any object with a non-empty
  * `vercelConnect.connector` string is recognized.
  */
-function extractVercelConnectMarker(auth: unknown): { readonly connector: string } | undefined {
+export function extractVercelConnectMarker(
+  auth: unknown,
+): { readonly connector: string } | undefined {
   if (auth === null || typeof auth !== "object") {
     return undefined;
   }

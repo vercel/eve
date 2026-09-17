@@ -308,7 +308,7 @@ export async function dispatchAgentInvocation(input: {
     childSessionId: outcome.address.sessionId,
     name: outcome.name,
     remote:
-      outcome.address.kind === "agent/remote"
+      outcome.address.kind === "agent/remote" && outcome.address.protocol !== "a2a"
         ? {
             resolverId:
               dynamicRemoteAgent === undefined

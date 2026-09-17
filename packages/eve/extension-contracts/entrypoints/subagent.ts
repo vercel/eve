@@ -1,4 +1,7 @@
 export {
+  defineA2AAgent,
+  type A2AAgentDefinition,
+  type A2AAgentDefinitionInput,
   type AgentCompactionDefinition,
   type AgentDefinition,
   type AgentModelDefinition,

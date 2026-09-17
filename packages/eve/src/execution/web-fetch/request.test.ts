@@ -86,6 +86,39 @@ afterEach(() => {
 });
 
 describe("requestPublicUrl", () => {
+  it("does not follow a POST redirect or forward its credentials", async () => {
+    queueResponse({ status: 307, headers: { location: "https://other.example/rpc" } });
+    const response = await requestPublicUrl("https://example.com/rpc", {
+      ...REQUEST_OPTIONS,
+      method: "POST",
+      body: "{}",
+      redirect: "manual",
+      headers: { authorization: "Bearer test" },
+    });
+    expect(response.status).toBe(307);
+    expect(networkMocks.fetch).toHaveBeenCalledOnce();
+    expect(networkMocks.fetch.mock.calls[0]?.[1]).toMatchObject({
+      method: "POST",
+      body: "{}",
+      redirect: "manual",
+    });
+  });
+
+  it("allows explicit development loopback without allowing public names to resolve privately", async () => {
+    queueLookup([{ address: "127.0.0.1", family: 4 }]);
+    queueResponse({ body: "local" });
+    expect(
+      await (
+        await requestPublicUrl("http://localhost/rpc", { ...REQUEST_OPTIONS, allowLoopback: true })
+      ).text(),
+    ).toBe("local");
+    queueLookup([{ address: "127.0.0.1", family: 4 }]);
+    queueResponse({});
+    await expect(
+      requestPublicUrl("https://example.com/rpc", { ...REQUEST_OPTIONS, allowLoopback: true }),
+    ).rejects.toThrow("private");
+  });
+
   it("rejects HTTP and non-network URLs", async () => {
     for (const url of ["http://example.com", "file:///etc/passwd"]) {
       await expect(requestPublicUrl(url, REQUEST_OPTIONS), url).rejects.toThrow(

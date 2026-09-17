@@ -27,7 +27,7 @@ export async function transformDynamicRemoteAgentCredentials(
 ): Promise<{ code: string } | null> {
   if (
     !source.includes("defineDynamic") ||
-    !source.includes("defineRemoteAgent") ||
+    (!source.includes("defineRemoteAgent") && !source.includes("defineA2AAgent")) ||
     (!source.includes("auth") && !source.includes("headers"))
   ) {
     return null;
@@ -50,7 +50,7 @@ function findCredentialsFactories(
     if (
       node.type !== "CallExpression" ||
       node.callee?.type !== "Identifier" ||
-      node.callee.name !== "defineRemoteAgent" ||
+      (node.callee.name !== "defineRemoteAgent" && node.callee.name !== "defineA2AAgent") ||
       node.arguments?.length !== 1 ||
       node.start === undefined ||
       node.end === undefined

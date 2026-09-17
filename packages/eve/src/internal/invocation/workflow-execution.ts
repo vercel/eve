@@ -1,3 +1,4 @@
+import { InvocationListingLimitError } from "#internal/invocation/agent-invocation.js";
 import type { UserContent } from "ai";
 import { RunExpiredError, WorkflowRunNotFoundError } from "#compiled/@workflow/errors/index.js";
 
@@ -30,10 +31,16 @@ import { parseJsonValue } from "#shared/json.js";
 export class WorkflowAgentInvocationExecution {
   readonly #createSession: RouteSessionCreator;
   readonly #from: ChannelFrom;
+  readonly #scope?: string;
 
-  constructor(input: { readonly createSession: RouteSessionCreator; readonly from: ChannelFrom }) {
+  constructor(input: {
+    readonly createSession: RouteSessionCreator;
+    readonly from: ChannelFrom;
+    readonly scope?: string;
+  }) {
     this.#createSession = input.createSession;
     this.#from = input.from;
+    this.#scope = input.scope;
   }
 
   async create(input: {
@@ -48,7 +55,7 @@ export class WorkflowAgentInvocationExecution {
       continuationToken,
       externalInvocation: {
         continuationToken,
-        ownerKey: invocationOwnerKey(input.auth),
+        ownerKey: this.ownerKey(input.auth),
       },
       input: { message: input.message, outputSchema: input.outputSchema },
       mode: "task",
@@ -75,15 +82,18 @@ export class WorkflowAgentInvocationExecution {
     if (isTerminalRunStatus(run.status)) {
       const events =
         run.status === "failed" ? await readRecentPersistedEvents(input.invocationId) : [];
-      return await terminalInvocation(run, events);
+      return { ...(await terminalInvocation(run, events)), updatedAt: run.updatedAt.toISOString() };
     }
     const events = await readRecentPersistedEvents(input.invocationId);
-    return projectNonterminal(
-      run.runId,
-      run.createdAt.toISOString(),
-      run.expiredAt?.toISOString(),
-      events,
-    );
+    return {
+      ...projectNonterminal(
+        run.runId,
+        run.createdAt.toISOString(),
+        run.expiredAt?.toISOString(),
+        events,
+      ),
+      updatedAt: run.updatedAt.toISOString(),
+    };
   }
 
   async update(input: {
@@ -160,14 +170,77 @@ export class WorkflowAgentInvocationExecution {
     return await this.read(input);
   }
 
+  ownerKey(auth: SessionAuthContext | null): string {
+    return invocationOwnerKey(auth, this.#scope);
+  }
+
+  async history(input: {
+    readonly auth: SessionAuthContext | null;
+    readonly invocationId: string;
+    readonly limit?: number;
+  }): Promise<
+    readonly { readonly id: string; readonly role: "user" | "agent"; readonly value: JsonValue }[]
+  > {
+    if (
+      input.limit === 0 ||
+      (await this.#readInvocationRun(input.invocationId, input.auth)) === undefined
+    )
+      return [];
+    const events = await readRecentPersistedEvents(input.invocationId);
+    const messages: { id: string; role: "user" | "agent"; value: JsonValue }[] = [];
+    for (const event of events) {
+      if (event.type === "message.received")
+        messages.push({ id: event.meta.id, role: "user", value: event.data.message });
+      if (
+        event.type === "message.completed" &&
+        event.data.finishReason !== "tool-calls" &&
+        event.data.message !== null
+      ) {
+        messages.push({ id: event.meta.id, role: "agent", value: safeJson(event.data.message) });
+      }
+    }
+    return messages.slice(-Math.min(input.limit ?? 64, 64));
+  }
+
+  async list(input: {
+    readonly auth: SessionAuthContext | null;
+  }): Promise<readonly AgentInvocation[]> {
+    const world = await getWorld();
+    const ownerKey = this.ownerKey(input.auth);
+    const ids: string[] = [];
+    let cursor: string | undefined;
+    for (let pageIndex = 0; pageIndex < 10; pageIndex++) {
+      const page = await world.runs.list({
+        pagination: { cursor, limit: 100, sortOrder: "desc" },
+        resolveData: "none",
+      });
+      // Canonical metadata is available in every world. Authorize before
+      // reading invocation history or results; analytics is optional and can lag.
+      for (const run of page.data) {
+        if (
+          run.attributes[INVOCATION_OWNER_ATTRIBUTE] === ownerKey &&
+          run.attributes[INVOCATION_TOKEN_ATTRIBUTE] !== undefined
+        )
+          ids.push(run.runId);
+      }
+      if (!page.hasMore) break;
+      if (pageIndex === 9 || !page.cursor) throw new InvocationListingLimitError();
+      cursor = page.cursor;
+    }
+    const invocations: AgentInvocation[] = [];
+    for (const invocationId of ids) {
+      const invocation = await this.read({ auth: input.auth, invocationId });
+      if (invocation !== undefined) invocations.push(invocation);
+    }
+    return invocations;
+  }
+
   async #readInvocationRun(invocationId: string, auth: SessionAuthContext | null) {
     const world = await getWorld();
     try {
       const run = await world.runs.get(invocationId);
       if (run.attributes[INVOCATION_TOKEN_ATTRIBUTE] === undefined) return undefined;
-      return run.attributes[INVOCATION_OWNER_ATTRIBUTE] === invocationOwnerKey(auth)
-        ? run
-        : undefined;
+      return run.attributes[INVOCATION_OWNER_ATTRIBUTE] === this.ownerKey(auth) ? run : undefined;
     } catch (error) {
       if (WorkflowRunNotFoundError.is(error) || RunExpiredError.is(error)) return undefined;
       throw error;

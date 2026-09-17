@@ -12,6 +12,8 @@ import type { JsonObject } from "#shared/json.js";
 import { serializeOutputSchema, type ToolSchemaSource } from "#tools/schema.js";
 
 export interface DynamicRemoteAgentConfig {
+  readonly protocol?: "a2a";
+  readonly allowedInterfaceOrigins?: readonly string[];
   readonly credentialsStepId?: string;
   readonly description: string;
   readonly forwardPrincipal?: boolean;
@@ -25,7 +27,7 @@ export async function normalizeDynamicRemoteAgentConfig(input: {
   readonly name: string;
   readonly value: unknown;
 }): Promise<DynamicRemoteAgentConfig> {
-  const message = `Dynamic subagent "${input.name}" must return defineAgent(...), defineRemoteAgent(...), or null.`;
+  const message = `Dynamic subagent "${input.name}" must return defineAgent(...), defineRemoteAgent(...), defineA2AAgent(...), or null.`;
   const record = expectObjectRecord(input.value, message);
   expectOnlyKnownKeys(
     record,
@@ -39,17 +41,18 @@ export async function normalizeDynamicRemoteAgentConfig(input: {
       "path",
       "tool",
       "url",
+      "allowedInterfaceOrigins",
     ],
     message,
   );
 
-  if (record.kind !== "remote") {
+  if (record.kind !== "remote" && record.kind !== "a2a") {
     throw new Error(message);
   }
 
   const url = await resolveUrl(record.url, message);
   const credentialsStepId = readCredentialsStepId(record);
-  validateCredentials(record, message);
+  if (record.kind !== "a2a") validateCredentials(record, message);
   if (
     (record.auth !== undefined || record.headers !== undefined) &&
     credentialsStepId === undefined
@@ -85,6 +88,20 @@ export async function normalizeDynamicRemoteAgentConfig(input: {
     config.tool = expectBoolean(record.tool, message);
   }
 
+  if (record.kind === "a2a") {
+    const origins = record.allowedInterfaceOrigins;
+    if (
+      origins !== undefined &&
+      (!Array.isArray(origins) ||
+        origins.some((origin) => typeof origin !== "string" || new URL(origin).origin !== origin))
+    )
+      throw new Error("Invalid A2A allowedInterfaceOrigins.");
+    return {
+      ...config,
+      protocol: "a2a",
+      allowedInterfaceOrigins: origins as string[] | undefined,
+    };
+  }
   return config;
 }
 

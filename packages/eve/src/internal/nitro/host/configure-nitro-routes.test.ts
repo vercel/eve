@@ -216,7 +216,9 @@ describe("Nitro route configuration", () => {
     const healthHandler = nitro.options.handlers.find(
       (handler) => handler.route === EVE_HEALTH_ROUTE_PATH && handler.method === "GET",
     );
-    expect(healthHandler?.handler).toBe(`#nitro/virtual/eve-channel/GET ${EVE_HEALTH_ROUTE_PATH}`);
+    expect(healthHandler?.handler).toBe(
+      `#nitro/virtual/eve-channel/GET ${EVE_HEALTH_ROUTE_PATH}.mjs`,
+    );
 
     const virtualSource = nitro.options.virtual[healthHandler?.handler ?? ""];
     expect(virtualSource).toContain("dispatchChannelRequest");
@@ -231,7 +233,7 @@ describe("Nitro route configuration", () => {
     const homeHandler = nitro.options.handlers.find(
       (handler) => handler.route === "/" && handler.method === "GET",
     );
-    expect(homeHandler?.handler).toBe("#nitro/virtual/eve-channel/GET /");
+    expect(homeHandler?.handler).toBe("#nitro/virtual/eve-channel/GET /.mjs");
 
     const virtualSource = nitro.options.virtual[homeHandler?.handler ?? ""];
     expect(virtualSource).toContain("dispatchChannelRequest");
@@ -252,7 +254,9 @@ describe("Nitro route configuration", () => {
     const headHandler = nitro.options.handlers.find(
       (handler) => handler.route === EVE_HEALTH_ROUTE_PATH && handler.method === "HEAD",
     );
-    expect(headHandler?.handler).toBe(`#nitro/virtual/eve-channel/HEAD ${EVE_HEALTH_ROUTE_PATH}`);
+    expect(headHandler?.handler).toBe(
+      `#nitro/virtual/eve-channel/HEAD ${EVE_HEALTH_ROUTE_PATH}.mjs`,
+    );
 
     const virtualSource = nitro.options.virtual[headHandler?.handler ?? ""];
     expect(virtualSource).toContain("dispatchChannelRequest");
@@ -376,26 +380,26 @@ describe("Nitro route configuration", () => {
     await configureProductionNitroRoutes(prodNitro, createPreparedHost());
 
     expect(devNitro.options.handlers).toContainEqual({
-      handler: `#nitro/virtual/eve-channel/GET ${EVE_INFO_ROUTE_PATH}`,
+      handler: `#nitro/virtual/eve-channel/GET ${EVE_INFO_ROUTE_PATH}.mjs`,
       method: "GET",
       route: EVE_INFO_ROUTE_PATH,
     });
     expect(prodNitro.options.handlers).toContainEqual({
-      handler: `#nitro/virtual/eve-channel/GET ${EVE_INFO_ROUTE_PATH}`,
+      handler: `#nitro/virtual/eve-channel/GET ${EVE_INFO_ROUTE_PATH}.mjs`,
       method: "GET",
       route: EVE_INFO_ROUTE_PATH,
     });
     expect(
-      devNitro.options.virtual[`#nitro/virtual/eve-channel/GET ${EVE_INFO_ROUTE_PATH}`],
+      devNitro.options.virtual[`#nitro/virtual/eve-channel/GET ${EVE_INFO_ROUTE_PATH}.mjs`],
     ).toContain('"kind":"development"');
     expect(
-      prodNitro.options.virtual[`#nitro/virtual/eve-channel/GET ${EVE_INFO_ROUTE_PATH}`],
+      prodNitro.options.virtual[`#nitro/virtual/eve-channel/GET ${EVE_INFO_ROUTE_PATH}.mjs`],
     ).toContain('"kind":"production"');
     expect(
-      devNitro.options.virtual[`#nitro/virtual/eve-channel/GET ${EVE_INFO_ROUTE_PATH}`],
+      devNitro.options.virtual[`#nitro/virtual/eve-channel/GET ${EVE_INFO_ROUTE_PATH}.mjs`],
     ).toContain("dispatchChannelRequest");
     expect(
-      prodNitro.options.virtual[`#nitro/virtual/eve-channel/GET ${EVE_INFO_ROUTE_PATH}`],
+      prodNitro.options.virtual[`#nitro/virtual/eve-channel/GET ${EVE_INFO_ROUTE_PATH}.mjs`],
     ).toContain("dispatchChannelRequest");
     expect(devNitro.options.virtual[`#eve-route${EVE_INFO_ROUTE_PATH}`]).toBeUndefined();
     expect(prodNitro.options.virtual[`#eve-route${EVE_INFO_ROUTE_PATH}`]).toBeUndefined();

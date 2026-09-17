@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { normalizeSubagentConfig } from "#compiler/normalize-subagent.js";
+import { defineA2AAgent } from "#public/definitions/a2a-agent.js";
 import { defineAgent } from "#public/definitions/agent.js";
 import { defineRemoteAgent } from "#public/definitions/remote-agent.js";
 
@@ -34,6 +35,35 @@ describe("normalizeSubagentConfig", () => {
         "Invalid subagent.",
       ),
     ).toMatchObject({ definition: { tool: false }, kind: "local" });
+  });
+
+  it("compiles A2A metadata without resolving URLs or persisting credentials", () => {
+    const url = () => {
+      throw new Error("Compilation must not resolve this URL");
+    };
+    const definition = defineA2AAgent({
+      url,
+      description: "Plans a trip.",
+      auth: {
+        getToken: async () => ({ token: "private-token" }),
+        vercelConnect: { connector: "travel/planner" },
+      },
+      headers: { "x-api-key": "private-key" },
+    });
+    const result = normalizeSubagentConfig(definition, "Invalid A2A subagent");
+    expect(result).toMatchObject({
+      kind: "remote",
+      protocol: "a2a",
+      vercelConnect: { connector: "travel/planner" },
+    });
+    expect(JSON.stringify(result)).not.toContain("private");
+    expect(() =>
+      defineA2AAgent({
+        url: "https://example.com",
+        description: "Planner",
+        allowedInterfaceOrigins: ["https://example.com/path"],
+      }),
+    ).toThrow("exact origins");
   });
 
   it("normalizes a remote subagent", () => {
