@@ -15,7 +15,7 @@ import {
   patchWorkspaceRootPackageJson,
   type WorkspaceRootMutation,
 } from "../workspace-root.js";
-import { WEB_APP_TEMPLATE_FILES } from "./web-template.js";
+import { WEB_CHANNEL_TEMPLATE } from "./web-template.js";
 
 export const CURRENT_DIRECTORY_PROJECT_NAME = ".";
 
@@ -102,7 +102,7 @@ export function agentTemplateFiles(
 ): Record<string, string> {
   return {
     "agent/agent.ts": renderAgentTemplate(model, reasoning),
-    "agent/channels/eve.ts": WEB_APP_TEMPLATE_FILES["agent/channels/eve.ts"],
+    "agent/channels/eve.ts": WEB_CHANNEL_TEMPLATE,
     "agent/instructions.md": AGENT_INSTRUCTIONS_TEMPLATE,
   };
 }
@@ -266,7 +266,7 @@ eve deploy
 
 \`eve deploy\` links a Vercel project if needed and deploys the agent to production. See the [eve deployment documentation](https://eve.dev/docs/guides/deployment/vercel) for authentication, environment variables, and deployment options.
 `,
-  "agent/channels/eve.ts": WEB_APP_TEMPLATE_FILES["agent/channels/eve.ts"],
+  "agent/channels/eve.ts": WEB_CHANNEL_TEMPLATE,
   "agent/instructions.md": AGENT_INSTRUCTIONS_TEMPLATE,
   "tsconfig.json": `{
   "compilerOptions": {

@@ -74,7 +74,7 @@ Use separate packages or projects when agents need independent dependencies or r
 
 Choose how the frontend and agents run together independently of how many agents you have:
 
-- **Add agents to a Next.js application:** use [`eve/next`](/docs/guides/frontend/nextjs) in `next.config.ts`. Next.js owns the application lifecycle; the integration starts agent processes and proxies requests locally, and contributes separate agent services on Vercel. A root Next.js app can sit beside either `agent/` or `agents/`; workspace members are discovered automatically.
+- **Add agents to a Next.js application:** use [`eve/next`](/docs/guides/frontend/nextjs) in `next.config.ts`. Next.js owns the application lifecycle; the integration starts agent processes and proxies requests locally, and contributes separate agent services on Vercel. A root Next.js app can sit beside either `agent/` or `agents/`; workspace members are discovered automatically. A peer app such as `apps/web/` can select its eve project with `eveRoot: "../.."`.
 - **Add a frontend to an agent workspace:** keep the frontend as a peer application, for example under `apps/web/`. On Vercel, use [`eve/vercel` in root `vercel.ts`](/docs/guides/deployment/vercel#compose-agents-with-other-vercel-services) to contribute the agents alongside the frontend service. For [self-hosting](/docs/guides/deployment/self-hosting#run-workspace-members), run the services with your process manager and configure a reverse proxy. The frontend does not need `eve/next`.
 
 `apps/web/` is an organizational convention, not an eve filesystem slot. Deployment configuration owns peer services; eve discovers only the agents. Both Vercel integrations deploy the services together, not as independent releases.
