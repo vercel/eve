@@ -1,3 +1,4 @@
+import { updatePendingAuthorizations } from "#client/session-utils.js";
 import type { ActiveTurn } from "#client/eve-agent-store-state.js";
 import type { MessageResponse } from "#client/message-response.js";
 import type { CancelSessionResult, SendTurnPayload } from "#client/types.js";
@@ -17,14 +18,6 @@ export function collectPendingAuthorizations(events: readonly MessageStreamEvent
   const pending = new Set<string>();
   for (const event of events) updatePendingAuthorizations(pending, event);
   return pending;
-}
-
-export function updatePendingAuthorizations(pending: Set<string>, event: MessageStreamEvent): void {
-  if (event.type === "authorization.required" && event.data.webhookUrl !== undefined) {
-    pending.add(event.data.name);
-  } else if (event.type === "authorization.completed") {
-    pending.delete(event.data.name);
-  }
 }
 
 export function assertExclusiveTurnInput(input: SendTurnPayload): void {
@@ -119,5 +112,19 @@ export async function followSteeredTurns(
       }
       if (turn.receivedFollowUps >= turn.acceptedFollowUps) return;
     }
+  }
+}
+
+/** Aborts a caller's wait without cancelling shared work owned by the store. */
+export async function waitWithSignal<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
+  if (signal === undefined) return await promise;
+  const aborted = Promise.withResolvers<never>();
+  const onAbort = () => aborted.reject(signal.reason);
+  signal.addEventListener("abort", onAbort, { once: true });
+  if (signal.aborted) onAbort();
+  try {
+    return await Promise.race([aborted.promise, promise]);
+  } finally {
+    signal.removeEventListener("abort", onAbort);
   }
 }

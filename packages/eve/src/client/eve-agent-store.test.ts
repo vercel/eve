@@ -201,6 +201,61 @@ afterEach(() => {
 });
 
 describe("EveAgentStore prewarming", () => {
+  it("settles a send aborted during preparation without creating a session", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch");
+    const store = createStore({ reducer: defaultMessageReducer() });
+    const preparation = Promise.withResolvers<never>();
+    store.setCallbacks({ prepareSend: () => preparation.promise });
+    const controller = new AbortController();
+    const send = store.send({ message: "Hello", signal: controller.signal });
+    controller.abort();
+    await send;
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(store.snapshot.status).toBe("ready");
+  });
+
+  it("aborts a send waiting for prewarm without cancelling shared session creation", async () => {
+    const accepted = Promise.withResolvers<Response>();
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockReturnValueOnce(accepted.promise)
+      .mockResolvedValueOnce(controlledStreamResponse().response);
+    const store = createStore({ reducer: defaultMessageReducer() });
+    const prewarm = store.prewarm();
+    const controller = new AbortController();
+    const send = store.send({ message: "Hello", signal: controller.signal });
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
+    controller.abort();
+    await send;
+    expect(store.snapshot.status).toBe("ready");
+    expect(fetchMock.mock.calls[0]![1]!.signal!.aborted).toBe(false);
+    accepted.resolve(startedResponse());
+    await prewarm;
+    expect(store.snapshot.session?.sessionId).toBe("session_1");
+    expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
+  });
+
+  it.each(["reset", "detach"] as const)("aborts prewarm transport on %s", async (action) => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(
+      (_request, init) =>
+        new Promise((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () => reject(init.signal?.reason), {
+            once: true,
+          });
+        }),
+    );
+    const store = createStore({ reducer: defaultMessageReducer() });
+    const prewarm = expect(store.prewarm()).rejects.toMatchObject({ name: "AbortError" });
+    const send = store.send({ message: "Hello" });
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
+    if (action === "reset") store.reset();
+    else detachEveAgentStore(store);
+    await Promise.all([prewarm, send]);
+    expect(store.snapshot.status).toBe("ready");
+    expect(store.snapshot.error).toBeUndefined();
+    expect(store.snapshot.session).toBeUndefined();
+  });
+
   it("reports a standalone creation failure and allows another prewarm", async () => {
     const error = new Error("create failed");
     const fetchMock = vi
@@ -386,6 +441,24 @@ describe("EveAgentStore prewarming", () => {
     expect(store.snapshot.status).toBe("ready");
     expect(fetchMock.mock.calls.filter(([, init]) => init?.method !== "POST")).toHaveLength(1);
     expect(store.snapshot.session?.streamIndex).toBe(6);
+  });
+
+  it("honors a send's disabled reconnect policy on an existing prewarmed stream", async () => {
+    const live = controlledStreamResponse();
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(startedResponse())
+      .mockResolvedValueOnce(live.response)
+      .mockResolvedValueOnce(startedResponse());
+    const store = createStore({ reducer: defaultMessageReducer() });
+    await store.prewarm();
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    const send = store.send({ message: "Hello", streamReconnectPolicy: { reconnect: false } });
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+    live.close();
+    await send;
+    expect(store.snapshot.status).toBe("error");
+    expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 
   it("uses the latest turn headers when the continuous stream reconnects", async () => {
@@ -1129,6 +1202,68 @@ describe("EveAgentStore session resume", () => {
 });
 
 describe("EveAgentStore steering", () => {
+  it("prepares a steering message once when the active turn finishes during preparation", async () => {
+    const live = controlledStreamResponse();
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(startedResponse())
+      .mockResolvedValueOnce(live.response)
+      .mockResolvedValueOnce(startedResponse("delivery_2"));
+    const store = createStore({ reducer: defaultMessageReducer() });
+    const first = store.send({ message: "First" });
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    const preparation = Promise.withResolvers<void>();
+    const prepareSend = vi.fn(async (input) => {
+      await preparation.promise;
+      return input;
+    });
+    store.setCallbacks({ prepareSend });
+    const second = store.send({ message: "Second", turnPolicy: "steer" });
+    for (const event of turnEvents()) live.emit(event);
+    await first;
+    preparation.resolve();
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+    for (const event of turnEvents())
+      live.emit({
+        ...event,
+        meta: { ...event.meta, id: `second-${event.meta.id}`, deliveryIds: ["delivery_2"] },
+      });
+    await second;
+    expect(prepareSend).toHaveBeenCalledOnce();
+    expect(store.snapshot.status).toBe("ready");
+  });
+
+  it("aborts steering transport on reset without publishing into the new conversation", async () => {
+    const live = controlledStreamResponse();
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(startedResponse())
+      .mockResolvedValueOnce(live.response)
+      .mockImplementationOnce(
+        (_request, init) =>
+          new Promise((_resolve, reject) => {
+            init?.signal?.addEventListener("abort", () => reject(init.signal?.reason), {
+              once: true,
+            });
+          }),
+      );
+    const store = createStore({ reducer: defaultMessageReducer() });
+    const first = store.send({ message: "First" });
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    const steering = expect(
+      store.send({ message: "Instead", turnPolicy: "steer" }),
+    ).rejects.toMatchObject({ name: "AbortError" });
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+    store.reset();
+    const onChange = vi.fn();
+    store.subscribe(onChange);
+    await Promise.all([first, steering]);
+    expect(onChange).not.toHaveBeenCalled();
+    expect(store.snapshot.status).toBe("ready");
+    expect(store.snapshot.events).toEqual([]);
+    expect(store.snapshot.error).toBeUndefined();
+  });
+
   it.each([true, false])(
     "completes steering received in the active turn (optimistic=%s)",
     async (optimistic) => {

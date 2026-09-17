@@ -748,6 +748,23 @@ describe("ClientSession", () => {
     expect(result.inputRequests.map((request) => request.requestId)).toEqual(["approval_1"]);
   });
 
+  it("does not rewind the shared cursor when a historical reader stops early", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      createStreamResponse([
+        {
+          type: "session.waiting",
+          data: { continuationToken: "session-id", wait: "next-user-message" },
+        },
+      ]),
+    );
+    const session = createSession({ sessionId: "session_1", streamIndex: 7 });
+    for await (const _event of session.stream({ startIndex: 0 })) {
+      expect(session.state.streamIndex).toBe(7);
+      break;
+    }
+    expect(session.state.streamIndex).toBe(7);
+  });
+
   it("opens a one-shot tail-relative stream without advancing the absolute cursor", async () => {
     const requests: string[] = [];
     vi.spyOn(globalThis, "fetch").mockImplementation(async (request) => {

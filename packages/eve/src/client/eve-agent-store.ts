@@ -6,6 +6,7 @@ import type {
   EveAgentStoreSnapshot,
   EveAgentStoreStatus,
   PendingMessageSubmission,
+  PrepareSend,
 } from "#client/eve-agent-store-state.js";
 import { consumeMessageResponse, type MessageResponse } from "#client/message-response.js";
 import {
@@ -13,7 +14,7 @@ import {
   type SessionEventReader,
   type SessionEventStreamOptions,
 } from "#client/session-event-stream.js";
-import type { EveAgentReducer, EveAgentReducerEvent } from "#client/reducer.js";
+import { EveAgentProjection } from "#client/eve-agent-projection.js";
 import type { ClientSession } from "#client/session.js";
 import { createEventDeduper } from "#protocol/event-dedupe.js";
 import { isCurrentTurnBoundaryEvent, type MessageStreamEvent } from "#protocol/message.js";
@@ -27,8 +28,9 @@ import {
   isSettledSessionTail,
   summarizeUserContent,
   toTerminalStreamFailureError,
-  updatePendingAuthorizations,
+  waitWithSignal,
 } from "#client/eve-agent-store-helpers.js";
+import { updatePendingAuthorizations } from "#client/session-utils.js";
 import { toError } from "#shared/errors.js";
 import type { CancelSessionResult, SendTurnPayload } from "#client/types.js";
 
@@ -56,7 +58,7 @@ export class EveAgentStore<TData> {
   readonly #pendingAuthorizations = new Set<string>();
   readonly #externalSession: boolean;
   readonly #optimistic: boolean;
-  readonly #reducer: EveAgentReducer<TData>;
+  readonly #projection: EveAgentProjection<TData>;
   readonly #subscribers = new Set<() => void>();
 
   /** Ids already folded into the projection: `initialEvents` and a reconnect can overlap. */
@@ -64,13 +66,12 @@ export class EveAgentStore<TData> {
 
   #activeTurn: ActiveTurn | undefined;
   #callbacks: EveAgentStoreCallbacks<TData> = {};
-  #data: TData;
   #error: Error | undefined;
   #events: readonly MessageStreamEvent[];
   #pendingMessageSubmissions: readonly PendingMessageSubmission[] = [];
   #prewarmGeneration = 0;
   #prewarmPromise: Promise<void> | undefined;
-  #projectionEvents: readonly EveAgentReducerEvent[];
+  #prewarmController: AbortController | undefined;
   #resumePromise: Promise<void> | undefined;
   #session: ClientSession | undefined;
   #snapshot: EveAgentStoreSnapshot<TData>;
@@ -94,9 +95,8 @@ export class EveAgentStore<TData> {
       updatePendingAuthorizations(this.#pendingAuthorizations, event);
     }
     this.#events = initialEvents;
-    this.#projectionEvents = [...this.#events];
+    this.#projection = new EveAgentProjection(init.reducer, this.#events);
     this.#optimistic = init.optimistic ?? true;
-    this.#reducer = init.reducer;
     this.#session =
       init.session ??
       (init.initialSession === undefined
@@ -105,7 +105,6 @@ export class EveAgentStore<TData> {
             streamIndex: init.initialSession.streamIndex,
           }));
 
-    this.#data = this.#reduceProjectionEvents(this.#projectionEvents);
     this.#snapshot = this.#createSnapshot();
   }
 
@@ -141,9 +140,11 @@ export class EveAgentStore<TData> {
     }
 
     const generation = this.#prewarmGeneration;
+    const controller = new AbortController();
+    this.#prewarmController = controller;
     const promise = (async () => {
       try {
-        const created = await client.sessions.create();
+        const created = await client.sessions.create({ signal: controller.signal });
         if (generation !== this.#prewarmGeneration) return;
         this.#session = created.session;
         this.#error = undefined;
@@ -167,18 +168,28 @@ export class EveAgentStore<TData> {
     })();
     this.#prewarmPromise = promise;
     const clear = () => {
-      if (this.#prewarmPromise === promise) this.#prewarmPromise = undefined;
+      if (this.#prewarmPromise === promise) {
+        this.#prewarmPromise = undefined;
+        this.#prewarmController = undefined;
+      }
     };
     void promise.then(clear, clear);
     return promise;
   }
 
   async send<TOutput = unknown>(input: SendTurnPayload<TOutput>): Promise<void> {
+    return await this.#submit(input, this.#callbacks.prepareSend);
+  }
+
+  async #submit<TOutput>(
+    input: SendTurnPayload<TOutput>,
+    prepareSend?: PrepareSend,
+  ): Promise<void> {
     if (this.#activeTurn !== undefined) {
       if (this.#status === "resuming") {
         throw new Error("eve session is resuming.");
       }
-      return await this.#sendFollowUp(this.#activeTurn, input);
+      return await this.#sendFollowUp(this.#activeTurn, input, prepareSend);
     }
 
     const turn = createActiveTurn((turn) =>
@@ -195,7 +206,12 @@ export class EveAgentStore<TData> {
 
     let reader: SessionEventReader | undefined;
     try {
-      const preparedInput = (await this.#callbacks.prepareSend?.(input)) ?? input;
+      const preparedInput = await (prepareSend === undefined
+        ? input
+        : waitWithSignal(
+            Promise.resolve(prepareSend(input)),
+            createAbortSignal(input.signal, turn.abortController.signal),
+          ));
       assertExclusiveTurnInput(preparedInput);
 
       if (!this.#isActiveTurn(turn)) {
@@ -246,14 +262,7 @@ export class EveAgentStore<TData> {
       }
     } finally {
       reader?.[Symbol.dispose]();
-      if (this.#isActiveTurn(turn)) {
-        turn.resolveResponse(undefined);
-        this.#activeTurn = undefined;
-        this.#callbacks.onSessionChange?.(this.#session?.state);
-        this.#publish();
-        this.#callbacks.onFinish?.(this.#snapshot);
-        turn.resolveCompletion();
-      }
+      this.#finishTurn(turn);
     }
   }
 
@@ -323,14 +332,7 @@ export class EveAgentStore<TData> {
         this.#callbacks.onError?.(this.#error);
       }
     } finally {
-      if (this.#isActiveTurn(turn)) {
-        turn.resolveResponse(undefined);
-        this.#activeTurn = undefined;
-        this.#callbacks.onSessionChange?.(session.state);
-        this.#publish();
-        this.#callbacks.onFinish?.(this.#snapshot);
-        turn.resolveCompletion();
-      }
+      this.#finishTurn(turn);
     }
   }
 
@@ -360,8 +362,8 @@ export class EveAgentStore<TData> {
     this.#stream?.close();
     this.#stream = undefined;
     this.#activeTurn?.abortController.abort();
-    this.#prewarmGeneration += 1;
-    this.#prewarmPromise = undefined;
+    this.#resetPrewarm();
+    this.#resumePromise = undefined;
   }
 
   reset(): void {
@@ -373,14 +375,13 @@ export class EveAgentStore<TData> {
     turn?.resolveResponse(undefined);
     turn?.resolveCompletion();
     turn?.abortController.abort();
-    this.#prewarmGeneration += 1;
-    this.#prewarmPromise = undefined;
+    this.#resetPrewarm();
+    this.#resumePromise = undefined;
     if (!this.#externalSession) this.#session = undefined;
     this.#events = [];
     this.#seenEvents = createEventDeduper();
     this.#pendingMessageSubmissions = [];
-    this.#projectionEvents = [];
-    this.#data = this.#reducer.initial();
+    this.#projection.reset();
     this.#error = undefined;
     this.#status = "ready";
     this.#callbacks.onSessionChange?.(this.#session?.state);
@@ -388,38 +389,52 @@ export class EveAgentStore<TData> {
     if (this.#autoPrewarm && this.#attached) void this.prewarm().catch(() => {});
   }
 
-  async #sendFollowUp<TOutput>(turn: ActiveTurn, input: SendTurnPayload<TOutput>): Promise<void> {
+  async #sendFollowUp<TOutput>(
+    turn: ActiveTurn,
+    input: SendTurnPayload<TOutput>,
+    prepareSend?: PrepareSend,
+  ): Promise<void> {
     if (input.message === undefined || input.turnPolicy !== "steer") {
       throw new Error(
         'eve session is already processing a turn. Send a message with turnPolicy: "steer" to guide it at the next boundary.',
       );
     }
 
-    const preparedInput = (await this.#callbacks.prepareSend?.(input)) ?? input;
+    const generation = this.#prewarmGeneration;
+    const signal = createAbortSignal(input.signal, turn.abortController.signal);
+    const preparedInput =
+      (await waitWithSignal(Promise.resolve(prepareSend?.(input)), signal)) ?? input;
+    if (generation !== this.#prewarmGeneration) return;
     assertExclusiveTurnInput(preparedInput);
     if (preparedInput.message === undefined || preparedInput.turnPolicy !== "steer") {
       throw new Error('An in-flight follow-up requires a message with turnPolicy: "steer".');
     }
-    if (!this.#isActiveTurn(turn)) return await this.send(preparedInput);
+    if (!this.#isActiveTurn(turn)) return await this.#submit(preparedInput);
 
     const submissionId = this.#projectOptimisticMessage(preparedInput);
     if (submissionId !== undefined) turn.followUpSubmissionIds.add(submissionId);
     this.#publish();
-    this.#ensureStream({ headers: preparedInput.headers });
+    this.#ensureStream({
+      headers: preparedInput.headers,
+      streamReconnectPolicy: preparedInput.streamReconnectPolicy,
+    });
 
     let dispatch!: Promise<void>;
     dispatch = (async () => {
       try {
-        await turn.response;
+        const signal = createAbortSignal(preparedInput.signal, turn.abortController.signal);
+        await waitWithSignal(turn.response, signal);
         if (!this.#isActiveTurn(turn) || this.#session === undefined) {
           throw new Error("The active eve turn ended before the follow-up could be sent.");
         }
         const { message, ...options } = preparedInput;
-        await this.#session.send(message, options);
+        await this.#session.send(message, { ...options, signal });
         turn.acceptedFollowUps += 1;
       } catch (error) {
-        this.#failPendingMessageSubmission(toError(error), submissionId);
-        this.#publish();
+        if (this.#isActiveTurn(turn)) {
+          this.#failPendingMessageSubmission(toError(error), submissionId);
+          this.#publish();
+        }
         throw error;
       } finally {
         turn.followUpDispatches.delete(dispatch);
@@ -440,9 +455,12 @@ export class EveAgentStore<TData> {
     };
     if (this.#prewarmPromise !== undefined) {
       // A failed speculative create must not prevent the user's message from being sent.
-      await this.#prewarmPromise.catch((error: unknown) => {
-        if (this.#session !== undefined) throw error;
-      });
+      await waitWithSignal(
+        this.#prewarmPromise.catch((error: unknown) => {
+          if (this.#session !== undefined) throw error;
+        }),
+        input.signal,
+      );
       input.signal?.throwIfAborted();
     }
     if (this.#session === undefined) {
@@ -480,7 +498,7 @@ export class EveAgentStore<TData> {
     options: Omit<SessionEventStreamOptions, "onEvent" | "onError"> = {},
   ): SessionEventStream {
     if (this.#stream !== undefined && !this.#stream.ended) {
-      if ("headers" in options) this.#stream.setHeaders(options.headers);
+      this.#stream.setOptions(options);
       return this.#stream;
     }
     if (this.#session === undefined)
@@ -505,6 +523,26 @@ export class EveAgentStore<TData> {
     return this.#stream;
   }
 
+  #resetPrewarm(): void {
+    this.#prewarmGeneration += 1;
+    this.#prewarmController?.abort();
+    this.#prewarmController = undefined;
+    this.#prewarmPromise = undefined;
+  }
+
+  #finishTurn(turn: ActiveTurn): void {
+    if (!this.#isActiveTurn(turn)) return;
+    turn.resolveResponse(undefined);
+    this.#activeTurn = undefined;
+    try {
+      this.#callbacks.onSessionChange?.(this.#session?.state);
+      this.#publish();
+      this.#callbacks.onFinish?.(this.#snapshot);
+    } finally {
+      turn.resolveCompletion();
+    }
+  }
+
   #isActiveTurn(turn: ActiveTurn): boolean {
     return this.#activeTurn === turn;
   }
@@ -522,7 +560,7 @@ export class EveAgentStore<TData> {
     };
     this.#pendingMessageSubmissions = [...this.#pendingMessageSubmissions, pending];
     if (this.#optimistic)
-      this.#appendProjectionEvent({
+      this.#projection.append({
         data: {
           createdAt: pending.createdAt,
           message: pending.message,
@@ -538,7 +576,7 @@ export class EveAgentStore<TData> {
       return;
     }
 
-    this.#appendProjectionEvent({
+    this.#projection.append({
       data: {
         createdAt: Date.now(),
         responses: input.inputResponses,
@@ -574,7 +612,7 @@ export class EveAgentStore<TData> {
       if (this.#activeTurn?.followUpSubmissionIds.delete(submissionId))
         this.#activeTurn.receivedFollowUpEvents.add(event);
       this.#pendingMessageSubmissions = this.#pendingMessageSubmissions.slice(1);
-      this.#replaceProjectionEvent(
+      this.#projection.replace(
         (candidate) =>
           candidate.type === "client.message.submitted" &&
           candidate.data.submissionId === submissionId,
@@ -583,7 +621,7 @@ export class EveAgentStore<TData> {
       return;
     }
 
-    this.#appendProjectionEvent(event);
+    this.#projection.append(event);
   }
 
   #applyTerminalStreamFailure(event: MessageStreamEvent): void {
@@ -611,7 +649,7 @@ export class EveAgentStore<TData> {
     this.#pendingMessageSubmissions = this.#pendingMessageSubmissions.filter(
       (candidate) => candidate.id !== pending.id,
     );
-    this.#replaceProjectionEvent(
+    this.#projection.replace(
       (event) =>
         event.type === "client.message.submitted" && event.data.submissionId === pending.id,
       {
@@ -628,42 +666,9 @@ export class EveAgentStore<TData> {
     );
   }
 
-  #appendProjectionEvent(event: EveAgentReducerEvent): void {
-    this.#projectionEvents = [...this.#projectionEvents, event];
-    this.#data = this.#reducer.reduce(this.#data, event);
-  }
-
-  #replaceProjectionEvent(
-    predicate: (event: EveAgentReducerEvent) => boolean,
-    replacement: EveAgentReducerEvent,
-  ): void {
-    let replaced = false;
-    this.#projectionEvents = this.#projectionEvents.map((event) => {
-      if (!replaced && predicate(event)) {
-        replaced = true;
-        return replacement;
-      }
-      return event;
-    });
-
-    if (!replaced) {
-      this.#projectionEvents = [...this.#projectionEvents, replacement];
-    }
-
-    this.#data = this.#reduceProjectionEvents(this.#projectionEvents);
-  }
-
-  #reduceProjectionEvents(events: readonly EveAgentReducerEvent[]): TData {
-    let data = this.#reducer.initial();
-    for (const event of events) {
-      data = this.#reducer.reduce(data, event);
-    }
-    return data;
-  }
-
   #createSnapshot(): EveAgentStoreSnapshot<TData> {
     return {
-      data: this.#data,
+      data: this.#projection.data,
       error: this.#error,
       events: this.#events,
       session: this.#session?.state,

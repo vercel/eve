@@ -88,6 +88,7 @@ interface FollowStreamInput {
   readonly host: string;
   /** Keep reconnecting after empty streams until the consumer aborts or stops iteration. */
   readonly keepAlive?: boolean;
+  readonly resolveReconnectPolicy?: () => StreamReconnectPolicy | undefined;
   readonly streamReconnectPolicy?: StreamReconnectPolicy;
   /** @internal Test override for reconnecting an open stream that stops producing bytes. */
   readonly streamReadIdleTimeoutMs?: number;
@@ -127,8 +128,14 @@ export async function* followStreamIterable(
     );
   }
 
-  const retryPolicy = resolveStreamReconnectPolicy(input.streamReconnectPolicy);
-  const idleRetryPolicy = retryPolicy.streamIdleReconnectPolicy;
+  const resolvePolicy = () =>
+    resolveStreamReconnectPolicy(
+      input.resolveReconnectPolicy === undefined
+        ? input.streamReconnectPolicy
+        : input.resolveReconnectPolicy(),
+    );
+  let retryPolicy = resolvePolicy();
+  let idleRetryPolicy = retryPolicy.streamIdleReconnectPolicy;
   let startIndex = input.startIndex;
   let reconnectDelayMs = idleRetryPolicy.baseDelayMs;
   let idleReconnects = 0;
@@ -137,6 +144,8 @@ export async function* followStreamIterable(
   let caughtUp = false;
 
   while (true) {
+    retryPolicy = resolvePolicy();
+    idleRetryPolicy = retryPolicy.streamIdleReconnectPolicy;
     let connection: OpenedStream;
     try {
       connection = await openStreamBody({
@@ -205,6 +214,7 @@ export async function* followStreamIterable(
       connection.close();
     }
 
+    idleRetryPolicy = resolvePolicy().streamIdleReconnectPolicy;
     if (input.signal?.aborted || input.startIndex < 0 || idleRetryPolicy.maxAttempts === 0) {
       return;
     }

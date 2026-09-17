@@ -32,6 +32,7 @@ export default defineEval({
       const authored = await selfMod.request(
         [
           `Alice needs a reusable ${TOOL_NAME} action for inventory planning in future conversations.`,
+          `Keep this change scoped to ${TOOL_PATH}; verify it through tool calls without adding other files.`,
           "Accept non-negative integer onHand, incoming, and target quantities, each no greater than 1000000.",
           "Return reorderUnits as the target minus both on-hand and incoming stock, floored at zero.",
           "This action only calculates a recommendation; it must not place an order or contact external services.",
@@ -70,7 +71,10 @@ export default defineEval({
         { on: offered.message },
       );
 
-      await selfMod.request("Yes, please do.", authored.session);
+      await selfMod.request(
+        `Yes, please repair ${TOOL_PATH}. Keep this repair scoped to that file and verify it through tool calls without adding other files.`,
+        authored.session,
+      );
       await selfMod.assertOnlyChanged([TOOL_PATH]);
       await selfMod.apply();
 

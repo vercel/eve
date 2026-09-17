@@ -1,3 +1,4 @@
+import { updatePendingAuthorizations } from "#client/session-utils.js";
 import type { MessageStreamEvent } from "#protocol/message.js";
 import { EVE_SESSION_ID_HEADER, isCurrentTurnBoundaryEvent } from "#protocol/message.js";
 import { EVE_SESSION_ROUTE_PATH, createEveSessionRoutePath } from "#protocol/routes.js";
@@ -37,6 +38,7 @@ const followSession = Symbol("followClientSession");
 interface FollowSessionOptions extends StreamOptions {
   readonly headers?: Readonly<Record<string, string>>;
   readonly onCaughtUp?: () => void;
+  readonly resolveReconnectPolicy?: () => StreamOptions["streamReconnectPolicy"];
   readonly resolveHeaders?: () => Readonly<Record<string, string>> | undefined;
 }
 
@@ -255,11 +257,7 @@ export class ClientSession {
           if (!terminal && event.meta?.deliveryIds !== undefined && !matches) continue;
           started = true;
         }
-        if (event.type === "authorization.required" && event.data.webhookUrl !== undefined) {
-          pendingAuthorizations.add(event.data.name);
-        } else if (event.type === "authorization.completed") {
-          pendingAuthorizations.delete(event.data.name);
-        }
+        updatePendingAuthorizations(pendingAuthorizations, event);
         reachedBoundary =
           isCurrentTurnBoundaryEvent(event) &&
           (event.type !== "session.waiting" || pendingAuthorizations.size === 0);
@@ -274,10 +272,7 @@ export class ClientSession {
         );
       }
     } finally {
-      this.#state = {
-        sessionId: this.#state.sessionId,
-        streamIndex: Math.max(this.#state.streamIndex, initialStreamIndex + eventCount),
-      };
+      this.#advanceStreamIndex(initialStreamIndex + eventCount);
     }
   }
 
@@ -286,35 +281,33 @@ export class ClientSession {
   ): AsyncGenerator<MessageStreamEvent> {
     const startIndex = options?.startIndex ?? this.#state.streamIndex;
     let eventCount = 0;
-    try {
-      for await (const event of this.#readStream({
-        follow: options?.follow,
-        headers: options?.headers,
-        keepAlive: options?.keepAlive,
-        onCaughtUp: options?.onCaughtUp,
-        resolveHeaders: options?.resolveHeaders,
-        signal: options?.signal,
-        startIndex,
-        streamReconnectPolicy: options?.streamReconnectPolicy,
-      })) {
-        eventCount += 1;
-        if (startIndex >= 0) {
-          this.#state = { sessionId: this.#state.sessionId, streamIndex: startIndex + eventCount };
-        }
-        yield event;
-      }
-    } finally {
-      if (startIndex >= 0) {
-        this.#state = {
-          sessionId: this.#state.sessionId,
-          streamIndex: startIndex + eventCount,
-        };
-      }
+    for await (const event of this.#readStream({
+      follow: options?.follow,
+      headers: options?.headers,
+      keepAlive: options?.keepAlive,
+      onCaughtUp: options?.onCaughtUp,
+      resolveHeaders: options?.resolveHeaders,
+      resolveReconnectPolicy: options?.resolveReconnectPolicy,
+      signal: options?.signal,
+      startIndex,
+      streamReconnectPolicy: options?.streamReconnectPolicy,
+    })) {
+      eventCount += 1;
+      if (startIndex >= 0) this.#advanceStreamIndex(startIndex + eventCount);
+      yield event;
     }
+  }
+
+  #advanceStreamIndex(streamIndex: number): void {
+    this.#state = {
+      sessionId: this.#state.sessionId,
+      streamIndex: Math.max(this.#state.streamIndex, streamIndex),
+    };
   }
 
   #readStream(input: {
     readonly onCaughtUp?: () => void;
+    readonly resolveReconnectPolicy?: () => StreamOptions["streamReconnectPolicy"];
     readonly follow?: boolean;
     readonly headers?: Readonly<Record<string, string>>;
     readonly keepAlive?: boolean;
@@ -334,6 +327,7 @@ export class ClientSession {
       signal: input.signal,
       startIndex: input.startIndex,
       streamReconnectPolicy: input.streamReconnectPolicy,
+      resolveReconnectPolicy: input.resolveReconnectPolicy,
     });
   }
 }

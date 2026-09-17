@@ -20,9 +20,10 @@ export class SessionEventStream {
   #ended = false;
   #error: unknown;
   #headers: Readonly<Record<string, string>> | undefined;
+  #reconnectPolicy: StreamOptions["streamReconnectPolicy"];
 
   constructor(session: ClientSession, options: SessionEventStreamOptions) {
-    this.#headers = options.headers;
+    this.setOptions(options);
     void this.caughtUp.catch(() => {});
     if (!options.catchUp) this.#caughtUp.resolve();
     void (async () => {
@@ -30,7 +31,7 @@ export class SessionEventStream {
         for await (const event of followClientSession(session, {
           signal: this.#controller.signal,
           resolveHeaders: () => this.#headers,
-          streamReconnectPolicy: options.streamReconnectPolicy,
+          resolveReconnectPolicy: () => this.#reconnectPolicy,
           startIndex: options.startIndex,
           onCaughtUp: options.catchUp ? () => this.#caughtUp.resolve() : undefined,
         })) {
@@ -60,8 +61,9 @@ export class SessionEventStream {
     return this.#ended;
   }
 
-  setHeaders(headers: Readonly<Record<string, string>> | undefined): void {
-    this.#headers = headers;
+  setOptions(options: Pick<SessionEventStreamOptions, "headers" | "streamReconnectPolicy">): void {
+    if ("headers" in options) this.#headers = options.headers;
+    if ("streamReconnectPolicy" in options) this.#reconnectPolicy = options.streamReconnectPolicy;
   }
 
   close(): void {
