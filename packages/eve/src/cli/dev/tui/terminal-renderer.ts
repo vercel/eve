@@ -551,6 +551,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
   /** The clearable setup attention line (`⚠ … · /deploy`), rendered in the live footer. */
   #setupAttention?: string;
   #resolvedModelId?: string;
+  #modelTurnId?: string;
   /**
    * The pinned todo panel above the input, replaced wholesale by each `todo`
    * tool-call input. Cleared (and committed to the transcript) once every
@@ -995,7 +996,6 @@ export class TerminalRenderer implements AgentTUIRenderer {
     this.#turnCancelled = false;
     this.#cancelRequestedByUser = false;
     this.#currentSubmittedPrompt = options?.submittedPrompt;
-    if (options?.submittedPrompt !== undefined) this.#resolvedModelId = undefined;
     this.#messageQueue.beginTurn();
     this.#requestTurnCancel = result.cancel;
     this.#sendSteering = result.steer;
@@ -1772,6 +1772,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
    */
   #clearConversationState(): void {
     this.#resolvedModelId = undefined;
+    this.#modelTurnId = undefined;
     this.#childToolCallIds.clear();
     this.#parentToolBlockIds.clear();
     this.#subagentHeaders.clear();
@@ -3606,11 +3607,20 @@ export class TerminalRenderer implements AgentTUIRenderer {
     turnState: RenderTurnState,
   ): void {
     switch (event.type) {
+      case "turn-start":
+        if (event.turnId !== this.#modelTurnId) {
+          this.#modelTurnId = event.turnId;
+          this.#resolvedModelId = undefined;
+          this.#paint();
+        }
+        break;
+
       case "step-start":
         this.#resolvedModelId =
-          event.modelId === undefined
-            ? undefined
-            : stripTerminalControls(event.modelId).replace(/\s+/gu, " ").trim() || undefined;
+          typeof event.modelId === "string"
+            ? stripTerminalControls(event.modelId.slice(0, 256)).replace(/\s+/gu, " ").trim() ||
+              undefined
+            : undefined;
         this.#paint();
         break;
 

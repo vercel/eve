@@ -27,6 +27,29 @@ function streamOf(events: AgentTUIStreamEvent[]): AgentTUIStreamResult {
   };
 }
 
+function agentInfoWithDynamicModel(): AgentInfoResult {
+  const info = createTestAgentInfoResult({ name: "Weather Agent" });
+  return {
+    ...info,
+    agent: {
+      ...info.agent,
+      model: {
+        routing: {
+          kind: "dynamic",
+          resolver: {
+            eventNames: ["step.started"],
+            slug: "model",
+            logicalPath: "agent.ts",
+            owner: { kind: "application" },
+            sourceId: "agent-model",
+            sourceKind: "module",
+          },
+        },
+      },
+    },
+  };
+}
+
 function makeRenderer(columns = 80, rows = 30) {
   const screen = new MockScreen({ columns, rows });
   const input = new MockUserInput();
@@ -5356,28 +5379,7 @@ describe("TerminalRenderer status line", () => {
     const header = { name: "Weather Agent", serverUrl: "http://localhost:3000", info };
     renderer.renderAgentHeader(header);
     const prompt = renderer.readPrompt();
-    renderer.renderAgentHeader({
-      ...header,
-      info: {
-        ...info,
-        agent: {
-          ...info.agent,
-          model: {
-            routing: {
-              kind: "dynamic",
-              resolver: {
-                eventNames: ["step.started"],
-                slug: "model",
-                logicalPath: "agent.ts",
-                owner: { kind: "application" },
-                sourceId: "agent-model",
-                sourceKind: "module",
-              },
-            },
-          },
-        },
-      },
-    });
+    renderer.renderAgentHeader({ ...header, info: agentInfoWithDynamicModel() });
     const lines = screen.snapshot().split("\n");
     const promptRow = lines.findIndex((line) => line.includes("❯"));
     expect(promptRow).toBeGreaterThan(-1);
@@ -5405,6 +5407,7 @@ describe("TerminalRenderer status line", () => {
     await renderer.renderStream(
       {
         events: (async function* (): AsyncIterable<AgentTUIStreamEvent> {
+          yield { type: "turn-start", turnId: "next-turn" };
           expect(screen.snapshot()).toContain("dynamic model");
           expect(screen.snapshot()).not.toContain("openai/gpt-5.6-sol");
           yield { type: "step-start", modelId: "openai/gpt-5.6-luna" };
@@ -5419,6 +5422,61 @@ describe("TerminalRenderer status line", () => {
     expect(screen.snapshot()).not.toContain("openai/gpt-5.6-luna");
     renderer.shutdown();
   });
+
+  it("clears an idle turn's model before resolution and preserves same-turn continuations", async () => {
+    const { screen, renderer } = makeRenderer();
+    renderer.renderAgentHeader({
+      name: "Weather Agent",
+      serverUrl: "http://localhost:3000",
+      info: agentInfoWithDynamicModel(),
+    });
+    await renderer.renderIdleStream(
+      streamOf([
+        { type: "turn-start", turnId: "first" },
+        { type: "step-start", modelId: "openai/gpt-5.6-sol" },
+      ]),
+    );
+    expect(screen.snapshot()).toContain("dynamic model · openai/gpt-5.6-sol");
+    await renderer.renderIdleStream(streamOf([{ type: "turn-start", turnId: "first" }]));
+    expect(screen.snapshot()).toContain("dynamic model · openai/gpt-5.6-sol");
+    await renderer.renderIdleStream(
+      streamOf([
+        { type: "turn-start", turnId: "wake" },
+        { type: "error", errorText: "Model selection failed" },
+      ]),
+    );
+    expect(screen.snapshot()).toContain("dynamic model");
+    expect(screen.snapshot()).not.toContain("openai/gpt-5.6-sol");
+    expect(screen.snapshot()).toContain("Model selection failed");
+    renderer.shutdown();
+  });
+
+  it.each([null, 42, {}, "x".repeat(10_000)])(
+    "bounds model display data without interrupting the stream (%#)",
+    async (modelId) => {
+      const { screen, renderer } = makeRenderer(320);
+      renderer.renderAgentHeader({
+        name: "Weather Agent",
+        serverUrl: "http://localhost:3000",
+        info: agentInfoWithDynamicModel(),
+      });
+      await renderer.renderIdleStream(
+        streamOf([
+          { type: "step-start", modelId } as AgentTUIStreamEvent,
+          { type: "assistant-complete", id: "answer", text: "Hello Alice." },
+        ]),
+      );
+      expect(screen.snapshot()).toContain("Hello Alice.");
+      expect(screen.snapshot()).toContain("dynamic model");
+      if (typeof modelId === "string") {
+        expect(screen.snapshot()).toContain("x".repeat(256));
+        expect(screen.snapshot()).not.toContain("x".repeat(257));
+      } else {
+        expect(screen.snapshot()).not.toContain("dynamic model ·");
+      }
+      renderer.shutdown();
+    },
+  );
 
   it("suppresses the status line while a setup flow panel is open", () => {
     const { screen, renderer } = makeRenderer();
