@@ -13,6 +13,7 @@ import {
   type DynamicSentinel,
 } from "#dynamic/definition.js";
 import { isAgentReasoningDefinition, isRuntimeLanguageModel } from "#internal/runtime-model.js";
+import { localGatewayEvaluationModel } from "#internal/model-auth/transport.js";
 import type {
   AgentReasoningDefinition,
   PublicAgentDynamicModelResult,
@@ -35,7 +36,7 @@ interface AutoModelConfig<
   readonly options: T;
 }
 
-const DEFAULT_EVALUATION_MODEL = "typesafe-ai/jev-latest";
+const DEFAULT_EVALUATION_MODEL = "typesafe-ai/jev";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -168,7 +169,11 @@ export function autoModel<const T extends Readonly<Record<string, AutoModelOptio
         if (previous?.turnId === currentTurnId) return models.get(previous.model)!;
 
         const result = await evaluate({
-          model: evaluationModel,
+          model:
+            typeof evaluationModel === "string" &&
+            Reflect.get(globalThis, "AI_SDK_DEFAULT_PROVIDER") == null
+              ? (localGatewayEvaluationModel(evaluationModel) ?? evaluationModel)
+              : evaluationModel,
           state: routingState(ctx),
           questions: {
             route: {

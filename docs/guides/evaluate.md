@@ -14,7 +14,7 @@ releases.
 
 ## Choose from Gateway models
 
-By default, `autoModel` evaluates with `typesafe-ai/jev-latest`. Like other AI SDK
+By default, `autoModel` evaluates with `typesafe-ai/jev`. Like other AI SDK
 model strings, it uses Vercel AI Gateway unless the application has configured a
 different global default provider.
 
@@ -33,7 +33,12 @@ export default defineAgent({
 ```
 
 Configure Gateway authentication as you would for any other AI SDK model. eve
-does not add a TypeSafe credential or transport layer.
+does not add a TypeSafe credential or transport layer. During `eve dev`, a
+Gateway evaluator uses the same connection selected through `/login` as Gateway
+language models. A configured AI SDK default provider still owns string model
+resolution during development. The TUI footer displays `dynamic model` when the
+agent uses `autoModel`, then adds the resolved model for the current turn, such as
+`dynamic model · openai/gpt-5.6-luna`.
 
 ## Use a provider directly
 

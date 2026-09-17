@@ -11,7 +11,7 @@ last_updated: "2026-09-16"
 Add only `autoModel` at `eve/experimental/evaluate`. Build it on AI SDK's
 `experimental_evaluate` API instead of owning a TypeSafe client, AI Gateway
 transport, credential resolver, or public decision API. Default to the
-`typesafe-ai/jev-latest` model string. AI SDK model strings use its default
+`typesafe-ai/jev` model string. AI SDK model strings use its default
 provider, normally Vercel AI Gateway; explicit model instances use the provider
 package that created them.
 
@@ -121,7 +121,8 @@ evaluation model adapters that use structured language-model output. Those
 adapters evaluate all questions in one prompt, do not reproduce Jev's native
 independent-question execution, and omit Choice and Score distributions.
 
-The AI SDK documentation uses `typesafe-ai/jev-latest` as the Gateway model ID.
+The [Gateway model catalog](https://vercel.com/ai-gateway/models/jev) uses
+`typesafe-ai/jev` as the Gateway model ID.
 Using it as an AI SDK string keeps Gateway API keys, Vercel OIDC, request headers,
 endpoint selection, and future protocol changes inside AI SDK. A direct TypeSafe
 setup installs `@ai-sdk/typesafe-ai` and supplies its model instance. eve does not

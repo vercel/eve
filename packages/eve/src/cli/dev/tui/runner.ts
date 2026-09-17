@@ -170,7 +170,8 @@ export type AgentTUIStreamUsage = {
 };
 
 export type AgentTUIStreamEvent =
-  | { type: "step-start" }
+  | { type: "turn-start"; turnId: string }
+  | { type: "step-start"; modelId?: string }
   | { type: "step-finish"; usage?: AgentTUIStreamUsage }
   | { type: "assistant-delta"; id: string; delta: string }
   | { type: "assistant-complete"; id: string; text?: string | null }
@@ -2231,11 +2232,12 @@ async function* eveEventsToTUIStream(
         // boundary then no-ops instead of hitting the next turn.
         if (event.data.turnId !== turnState.turnId) visibleTurnCompleted = false;
         turnState.turnId = event.data.turnId;
+        yield { type: "turn-start", turnId: event.data.turnId };
         break;
 
       case "step.started":
         stepEpoch += 1;
-        yield { type: "step-start" };
+        yield { type: "step-start", modelId: event.data.modelId };
         break;
 
       case "step.completed": {

@@ -1793,7 +1793,7 @@ The filename creates the \`supermemory\` memory slot, so the provider's tools ar
 
 Supermemory automatically recalls relevant context before a turn and captures completed turns. It also provides tools to search, read sessions and documents, remember context, extract files, URLs, or text, and forget memories. The provider sends stored conversations and extracted sources to Supermemory; configure its retention and data handling for your application before enabling it for sensitive data.
 
-Keep \`SUPERMEMORY_API_KEY\` in the environment rather than prompts or source control. You can change the container-tag prefix, automatic search, capture policy, and profile-context time zone through \`supermemory(...)\`. See the [Supermemory eve provider documentation](https://github.com/supermemoryai/eve-supermemory#readme) for all options and tool behavior.`,
+Keep \`SUPERMEMORY_API_KEY\` in the environment rather than prompts or source control. You can change the container-tag prefix, automatic search, capture policy, and profile-context time zone through \`supermemory(...)\`. See the [Supermemory eve provider documentation](https://supermemory.ai/docs/integrations/eve) for all options and tool behavior.`,
   },
 };
 

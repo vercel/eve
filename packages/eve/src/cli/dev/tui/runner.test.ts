@@ -959,6 +959,8 @@ describe("EveTUIRunner idle session follow", () => {
     try {
       await vi.advanceTimersByTimeAsync(130_000);
       expect(connections).toBeGreaterThanOrEqual(8);
+      expect(idleEvents).toContainEqual({ type: "turn-start", turnId: "wake-turn" });
+      expect(idleEvents).toContainEqual({ type: "step-start", modelId: "test-model" });
       expect(idleEvents).toContainEqual({
         type: "assistant-complete",
         id: "text:wake-turn:0",
@@ -2504,6 +2506,10 @@ describe("EveTUIRunner reused step indexes", () => {
         event.type === "assistant-complete" && event.text !== undefined ? [event.text] : [],
       ),
     ).toEqual(["First answer.", "Follow-up answer."]);
+    expect(emitted.filter((event) => event.type === "turn-start")).toEqual([
+      { type: "turn-start", turnId: "turn_0" },
+      { type: "turn-start", turnId: "turn_1" },
+    ]);
   });
 
   it("renders the post-subagent message that the harness emits under a reused stepIndex", async () => {

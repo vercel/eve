@@ -550,6 +550,8 @@ export class TerminalRenderer implements AgentTUIRenderer {
   #setupFlow?: SetupFlowState;
   /** The clearable setup attention line (`⚠ … · /deploy`), rendered in the live footer. */
   #setupAttention?: string;
+  #resolvedModelId?: string;
+  #modelTurnId?: string;
   /**
    * The pinned todo panel above the input, replaced wholesale by each `todo`
    * tool-call input. Cleared (and committed to the transcript) once every
@@ -669,6 +671,12 @@ export class TerminalRenderer implements AgentTUIRenderer {
   renderAgentHeader(options: AgentHeaderOptions): void {
     this.#startupHeader = undefined;
     this.#title = options.name;
+    if (
+      this.#agentHeader?.info?.agent.model.routing.kind !== "dynamic" ||
+      options.info?.agent.model.routing.kind !== "dynamic"
+    ) {
+      this.#resolvedModelId = undefined;
+    }
     this.#agentHeader = options;
     this.#start();
     const body = this.#renderAgentHeaderRows().join("\n");
@@ -1763,6 +1771,8 @@ export class TerminalRenderer implements AgentTUIRenderer {
    * not count across a cut), tool-call ownership maps, and the turn clock.
    */
   #clearConversationState(): void {
+    this.#resolvedModelId = undefined;
+    this.#modelTurnId = undefined;
     this.#childToolCallIds.clear();
     this.#parentToolBlockIds.clear();
     this.#subagentHeaders.clear();
@@ -3597,6 +3607,23 @@ export class TerminalRenderer implements AgentTUIRenderer {
     turnState: RenderTurnState,
   ): void {
     switch (event.type) {
+      case "turn-start":
+        if (event.turnId !== this.#modelTurnId) {
+          this.#modelTurnId = event.turnId;
+          this.#resolvedModelId = undefined;
+          this.#paint();
+        }
+        break;
+
+      case "step-start":
+        this.#resolvedModelId =
+          typeof event.modelId === "string"
+            ? stripTerminalControls(event.modelId.slice(0, 256)).replace(/\s+/gu, " ").trim() ||
+              undefined
+            : undefined;
+        this.#paint();
+        break;
+
       case "step-finish":
         // Step usage reports are per-step deltas (extractStepUsage in the
         // harness), so summing them yields true session totals. The
@@ -4533,7 +4560,12 @@ export class TerminalRenderer implements AgentTUIRenderer {
     }
     if (this.#logLevelHintActive) input.logLevel = this.#logs;
     const agentModel = this.#agentHeader?.info?.agent.model;
-    if (agentModel?.id !== undefined) input.model = agentModel.id;
+    if (agentModel?.routing.kind === "dynamic") {
+      input.model =
+        this.#resolvedModelId === undefined
+          ? "dynamic model"
+          : `dynamic model · ${this.#resolvedModelId}`;
+    } else if (agentModel?.id !== undefined) input.model = agentModel.id;
     // "provider-default" is the absent-setting sentinel, not a level worth showing.
     if (agentModel?.reasoning !== undefined && agentModel.reasoning !== "provider-default") {
       input.reasoning = agentModel.reasoning;

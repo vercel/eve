@@ -8,10 +8,17 @@ import { anthropic } from "#public/models/anthropic/index.js";
 
 import { autoModel } from "./auto-model.js";
 
-const runtime = vi.hoisted(() => ({ state: undefined as ContextContainer | undefined }));
+const runtime = vi.hoisted(() => ({
+  localEvaluationModel: vi.fn(),
+  state: undefined as ContextContainer | undefined,
+}));
 vi.mock("#context/container.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("#context/container.js")>()),
   loadContext: () => runtime.state!,
+}));
+vi.mock("#internal/model-auth/transport.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("#internal/model-auth/transport.js")>()),
+  localGatewayEvaluationModel: runtime.localEvaluationModel,
 }));
 
 const options = {
@@ -51,6 +58,7 @@ function evaluationModel(choice = "openai/small", modelId = "fixture-evaluator")
 
 beforeEach(() => {
   runtime.state = new ContextContainer();
+  runtime.localEvaluationModel.mockReset();
 });
 
 describe("autoModel", () => {
@@ -62,11 +70,43 @@ describe("autoModel", () => {
     try {
       const handler = autoModel({ options }).events["step.started"]!;
       await expect(handler(event(), context())).resolves.toBe("openai/small");
-      expect(evaluationModelFactory).toHaveBeenCalledWith("typesafe-ai/jev-latest");
+      expect(runtime.localEvaluationModel).not.toHaveBeenCalled();
+      expect(evaluationModelFactory).toHaveBeenCalledWith("typesafe-ai/jev");
     } finally {
       if (previous === undefined) Reflect.deleteProperty(globalThis, "AI_SDK_DEFAULT_PROVIDER");
       else Reflect.set(globalThis, "AI_SDK_DEFAULT_PROVIDER", previous);
     }
+  });
+
+  it("preserves a custom default provider when the local Gateway connection is available", async () => {
+    const evaluator = evaluationModel();
+    const localEvaluator = evaluationModel("openai/large");
+    runtime.localEvaluationModel.mockReturnValue(localEvaluator.model);
+    const evaluationModelFactory = vi.fn(() => evaluator.model);
+    const previous = Reflect.get(globalThis, "AI_SDK_DEFAULT_PROVIDER");
+    Reflect.set(globalThis, "AI_SDK_DEFAULT_PROVIDER", { evaluationModel: evaluationModelFactory });
+    try {
+      const handler = autoModel({ model: "internal-router", options }).events["step.started"]!;
+      await expect(handler(event(), context())).resolves.toBe("openai/small");
+      expect(evaluationModelFactory).toHaveBeenCalledWith("internal-router");
+      expect(evaluator.doEvaluate).toHaveBeenCalledOnce();
+      expect(runtime.localEvaluationModel).not.toHaveBeenCalled();
+      expect(localEvaluator.doEvaluate).not.toHaveBeenCalled();
+    } finally {
+      if (previous === undefined) Reflect.deleteProperty(globalThis, "AI_SDK_DEFAULT_PROVIDER");
+      else Reflect.set(globalThis, "AI_SDK_DEFAULT_PROVIDER", previous);
+    }
+  });
+
+  it("uses the local Gateway connection for a string evaluation model", async () => {
+    const evaluator = evaluationModel();
+    runtime.localEvaluationModel.mockReturnValue(evaluator.model);
+
+    const handler = autoModel({ options }).events["step.started"]!;
+
+    await expect(handler(event(), context())).resolves.toBe("openai/small");
+    expect(runtime.localEvaluationModel).toHaveBeenCalledWith("typesafe-ai/jev");
+    expect(evaluator.doEvaluate).toHaveBeenCalledOnce();
   });
 
   it("routes provider language models by alias and preserves reasoning", async () => {
