@@ -11,10 +11,15 @@ export default defineEval({
     }
     const conversation = await t.session();
     const live = await conversation.start("Alice is preparing the 2026 report.");
-    await live.waitForEvent("step.started");
+    const started = await live.waitForEvent("step.started");
+    const observedAt = Date.now();
+    t.log(
+      `Pending generation observed ${observedAt - Date.parse(started.meta.at)} ms after step.started.`,
+    );
     const correction = await live.session.start("Alice corrected the report year to 2025.", {
       turnPolicy: "steer",
     });
+    t.log(`Steering accepted ${Date.now() - observedAt} ms after observing pending generation.`);
     const result = await live.result();
     await correction.result();
     result.event("turn.started", { count: 1 });
