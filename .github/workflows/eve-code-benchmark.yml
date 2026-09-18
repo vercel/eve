@@ -24,8 +24,19 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 360
     steps:
+      # vercel/eve is public and eve-bench is private; GitHub never lets a public
+      # repository `uses:` a private action, so fetch the pinned runner with a
+      # read-only deploy key and run it as a local action instead.
+      - name: Checkout pinned eve-bench action
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: vercel-labs/eve-bench
+          ref: main
+          ssh-key: ${{ secrets.EVE_BENCH_SSH_KEY }}
+          path: .eve-bench-action
+          persist-credentials: false
       - name: Benchmark current eve-code source
-        uses: vercel-labs/eve-bench@2895a70f36c61535897c0bac771eb03cd89cda91
+        uses: ./.eve-bench-action
         with:
           harness: eve-code
           agent-repository: vercel/eve
