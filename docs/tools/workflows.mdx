@@ -79,14 +79,16 @@ or days later, the run resumes, deploys, and returns. The model sees one tool re
   `start`, `getRun`, and `resumeHook` from `workflow/api` belong in steps. Your app does not install
   the SDK; for types, new projects list `eve/workflow-modules` in the tsconfig `types`.
 - In the body, `ctx` has `session`, `callId`, `toolName`, `abortSignal`, `agent`, `agents`, and `ask`.
-  `getToken` and `requireAuth` work inside a `"use step"` helper that receives `ctx` as a direct argument;
-  they throw in the workflow body. `getSandbox` and `getSkill` remain unavailable.
+  A `"use step"` helper that receives `ctx` directly gets a restricted `WorkflowStepToolContext` with
+  `session`, `callId`, `toolName`, `abortSignal`, `getToken`, and `requireAuth`. Read `ctx.agents`, call
+  `ctx.agent()`, and call `ctx.ask()` in the workflow body; pass only the serializable values the step needs.
+  `getSandbox` and `getSkill` remain unavailable.
 - The tool's input must be a JSON object. Workflow bodies are for static tools under `agent/tools/`,
   not tools returned from `defineDynamic` resolvers.
 
-`ctx.agent`, `ctx.agents`, and `ctx.ask` are available only on `WorkflowToolContext`. Ordinary tools, channel
-handlers, and schedule handlers do not receive these methods. A shared helper may accept
-`WorkflowToolContext` from `eve/tools` and use the context supplied by a workflow tool body.
+`ctx.agent`, `ctx.agents`, and `ctx.ask` are available only on `WorkflowToolContext` in the workflow body.
+Ordinary tools, channel handlers, schedule handlers, and workflow steps do not receive these methods. Type
+step helpers with `WorkflowStepToolContext` from `eve/tools` when they need step-safe context capabilities.
 
 Workflow executors require `defineWorkflowTool`. Adding `"use workflow"` to `defineTool`, a bare
 tool object, a channel handler, or a schedule handler fails the build. To start a session from a
@@ -217,9 +219,9 @@ The provider declaration and the API request both stay inside the step:
 
 ```ts
 import { connect } from "@vercel/connect/eve";
-import type { WorkflowToolContext } from "eve/tools";
+import type { WorkflowStepToolContext } from "eve/tools";
 
-async function readRepository(ctx: WorkflowToolContext, repository: string) {
+async function readRepository(ctx: WorkflowStepToolContext, repository: string) {
   "use step";
   const provider = connect("github/my-agent");
   const { token } = await ctx.getToken(provider);
@@ -360,23 +362,24 @@ Define the model-visible router under `agent/tools/`. Build the JEV criteria fro
 
 ```ts title="agent/tools/agent-router.ts"
 import { evaluate } from "eve/ai";
-import { defineWorkflowTool, type WorkflowToolContext } from "eve/tools";
+import { defineWorkflowTool } from "eve/tools";
 import { z } from "zod";
 
-async function chooseTarget(task: string, ctx: WorkflowToolContext) {
+async function chooseTarget(
+  task: string,
+  criteria: Record<"researcher" | "operator", string>,
+  abortSignal: AbortSignal,
+) {
   "use step";
 
   const result = await evaluate({
-    abortSignal: ctx.abortSignal,
+    abortSignal,
     state: { task },
     questions: {
       route: {
         type: "choice",
         instructions: "Which specialist should handle this task?",
-        criteria: {
-          researcher: ctx.agents.researcher.description,
-          operator: ctx.agents.operator.description,
-        },
+        criteria,
       },
     },
   });
@@ -390,7 +393,14 @@ export default defineWorkflowTool({
   async execute({ task }, ctx) {
     "use workflow";
 
-    const target = await chooseTarget(task, ctx);
+    const target = await chooseTarget(
+      task,
+      {
+        researcher: ctx.agents.researcher.description,
+        operator: ctx.agents.operator.description,
+      },
+      ctx.abortSignal,
+    );
 
     return ctx.agent(target, { message: task });
   },

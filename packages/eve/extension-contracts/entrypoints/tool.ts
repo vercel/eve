@@ -6,6 +6,7 @@ export {
   toolOutput,
   toolOutputPart,
   toolResultFrom,
+  type WorkflowStepToolContext,
 } from "../../src/public/tools/index.ts";
 export {
   agentRouter,
