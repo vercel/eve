@@ -345,6 +345,11 @@ function projectManifest(input: {
   for (const source of input.manifest.subagents) {
     const name = projection.name(source.subagentId);
     const logicalPath = projection.logicalPath(source.logicalPath);
+    if (name === "agent") {
+      throw new Error(
+        `Subagent "${logicalPath}" uses the reserved name "agent". Rename its path; eve reserves "agent" for the built-in root-copy target.`,
+      );
+    }
     const projectedSource = {
       ...source,
       logicalPath,
