@@ -154,6 +154,23 @@ describe("createNodeEsmCompatBannerPlugin", () => {
     expect(result?.code).not.toContain("__eveCreateRequire");
   });
 
+  describe.each(["using", "await using"])("%s declarations", (declaration) => {
+    it.each(["__filename", "__dirname", "require"])(
+      "parses an existing %s binding instead of injecting a duplicate",
+      (name) => {
+        const parse = vi.fn(() => programWithTopLevelBindings(name));
+        const code = `${declaration} /* resource */ ${name} = { [Symbol.dispose]() {} };`;
+        const result = createNodeEsmCompatBannerPlugin({ includeRequire: true }).renderChunk.call(
+          { parse },
+          code,
+        );
+
+        expect(parse).toHaveBeenCalledOnce();
+        expect(result?.code).not.toContain(`const ${name} =`);
+      },
+    );
+  });
+
   it("omits bindings declared later in a top-level variable list", () => {
     const plugin = createNodeEsmCompatBannerPlugin({ includeRequire: true });
     const chunk =

@@ -173,10 +173,10 @@ export function createNodeEsmCompatBannerPlugin(
 
 const DECLARATION_TRIVIA = String.raw`(?:\s|/\*[\s\S]*?\*/|//[^\r\n\u2028\u2029]*[\r\n\u2028\u2029])*`;
 const PATH_BINDING_DECLARATION = new RegExp(
-  String.raw`(?:\b(?:var|let|const)\b|,)${DECLARATION_TRIVIA}(?:__filename|__dirname)\b`,
+  String.raw`(?:\b(?:var|let|const|using)\b|,)${DECLARATION_TRIVIA}(?:__filename|__dirname)\b`,
 );
 const REQUIRE_BINDING_DECLARATION = new RegExp(
-  String.raw`(?:\b(?:var|let|const)\b|,)${DECLARATION_TRIVIA}require\b`,
+  String.raw`(?:\b(?:var|let|const|using)\b|,)${DECLARATION_TRIVIA}require\b`,
 );
 
 function mayDeclareCompatibilityBinding(
