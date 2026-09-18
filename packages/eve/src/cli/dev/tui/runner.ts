@@ -53,7 +53,6 @@ import {
   localFailureHint,
 } from "./errors.js";
 
-import { pickAgentHeaderTip } from "./agent-header.js";
 import { probeAgentInfo } from "#services/dev-client/agent-info-probe.js";
 import { parseLogDisplayMode } from "./log-display-mode.js";
 import {
@@ -253,8 +252,6 @@ export type AgentTUIAgentHeader = {
   name: string;
   serverUrl: string;
   info?: AgentInfoResult;
-  /** Message-of-the-day line shown below the startup card (local sessions only). */
-  tip?: string;
 };
 
 export type AgentTUIRenderer = {
@@ -428,7 +425,6 @@ export interface PromptCommandHandler {
 }
 
 type TuiStartup = {
-  readonly headerTip: string;
   finish(): { draft: string; queuedPrompt: string | undefined };
 };
 
@@ -572,7 +568,6 @@ export class EveTUIRunner {
    * refreshes don't re-roll it mid-session. Local sessions only — every
    * tip references local-only slash commands.
    */
-  readonly #headerTip: string;
   #agentInfo?: AgentInfoResult;
   /**
    * approval-id → input-request map populated as `input.requested` events
@@ -640,7 +635,6 @@ export class EveTUIRunner {
     }
     this.#subagentPump = new SubagentPump(pumpOptions);
     this.#name = options.name ?? "eve";
-    this.#headerTip = options.startup?.headerTip ?? pickAgentHeaderTip();
     this.#withExclusiveTerminal = options.withExclusiveTerminal;
     this.#tools = options.tools ?? "full";
     this.#reasoning = options.reasoning ?? "full";
@@ -756,7 +750,6 @@ export class EveTUIRunner {
       serverUrl,
     };
     if (headerInfo !== undefined) header.info = headerInfo;
-    if (this.#appRoot !== undefined && !this.#onboard) header.tip = this.#headerTip;
     this.#renderer.renderAgentHeader?.(header);
     return headerInfo;
   }

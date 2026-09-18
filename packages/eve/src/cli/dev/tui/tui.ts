@@ -20,7 +20,6 @@ import { createDevDiagnostics, type DevDiagnostics } from "../diagnostics.js";
 
 import { createPromptCommandHandler } from "./prompt-command-handler.js";
 import { promptCommandsFor } from "./prompt-commands.js";
-import { pickAgentHeaderTip } from "./agent-header.js";
 import { formatRemoteAuthChallengeMessage } from "./remote-auth-result.js";
 import { probeMcpConnection } from "./mcp-connection-status.js";
 import { EveTUIRunner, type EveTUIRunnerOptions } from "./runner.js";
@@ -53,7 +52,6 @@ export interface RunDevelopmentTuiInput extends TuiDisplayOptions {
 
 export interface DevelopmentTuiStartup {
   readonly diagnostics: DevDiagnostics | undefined;
-  readonly headerTip: string;
   readonly renderer: TerminalRenderer;
   finish(): { draft: string; queuedPrompt: string | undefined };
   shutdown(): Promise<void>;
@@ -67,7 +65,6 @@ export async function startDevelopmentTuiStartup(
   },
 ): Promise<DevelopmentTuiStartup> {
   const diagnostics = await createDevDiagnostics(input.appRoot).catch(() => undefined);
-  const headerTip = pickAgentHeaderTip();
   const renderer = new TerminalRenderer({
     ...input,
     diagnostics,
@@ -75,12 +72,10 @@ export async function startDevelopmentTuiStartup(
   });
   renderer.beginStartupDraft({
     initialDraft: input.initialInput,
-    tip: headerTip,
     title: input.name ?? "eve",
   });
   return {
     diagnostics,
-    headerTip,
     renderer,
     finish: () => renderer.finishStartupDraft(),
     async shutdown() {
