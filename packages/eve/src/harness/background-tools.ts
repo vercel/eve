@@ -8,6 +8,7 @@ export interface BackgroundExecutableTool {
   readonly label?: InternalToolLabelDefinition;
   readonly executeInput?: (input: unknown) => JsonValue;
   readonly name: string;
+  /** Selected agent definition's runtime graph ID; absent for authored workflow tools. */
   readonly nodeId?: string;
 
   /** Registered durable workflow body run by the session-owned task. */

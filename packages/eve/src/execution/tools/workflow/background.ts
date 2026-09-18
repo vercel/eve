@@ -7,6 +7,7 @@ import { UNSPECIFIED_INPUT_SCHEMA, toInputSchema, toOutputSchema } from "#tools/
 export interface WorkflowToolHarnessDefinitionInput {
   readonly definition: HarnessToolDefinition;
   readonly executeInput?: (input: unknown) => JsonValue;
+  /** Selected agent definition's runtime graph ID; absent for authored workflow tools. */
   readonly nodeId?: string;
 
   readonly workflowId: string;
