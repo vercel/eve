@@ -411,8 +411,6 @@ import { agentRouter } from "eve/tools/agent-router";
 export default agentRouter();
 ```
 
-`agentRouter()` sets `availableInSubagents: false`, so a delegated root copy does not inherit the router tool. Tool authors can set the same option on any `defineTool` or `defineWorkflowTool` definition that should be available only in a top-level root session.
-
 Its input is `{ message: string, outputSchema?: object }`. `agentRouter()` ignores entries without a non-empty description. With two or more described targets, it sends the message and effective descriptions to JEV, then invokes the selected name through `ctx.agent()`. It invokes a sole target without evaluation and forwards an optional `outputSchema`. In a top-level root session, the candidates include the root-copy `agent`; delegated root copies and declared subagent contexts include only their declared targets.
 
 This pattern controls specialist selection, not whether the parent model delegates at all. Route before the parent model runs if every incoming request must go through JEV.
