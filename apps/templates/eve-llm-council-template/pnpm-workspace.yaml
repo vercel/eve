@@ -1,3 +1,5 @@
+enableGlobalVirtualStore: false
+
 allowBuilds:
   sharp: true
   esbuild: true

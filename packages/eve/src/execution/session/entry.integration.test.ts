@@ -1585,7 +1585,6 @@ describe("workflowEntry integration", () => {
           ).toBe(false);
           const candidateHooks = await world.hooks.list({ runId: candidateId! });
           expect(candidateHooks.data).toEqual([]);
-          await waitForParkedTurnStep(anchor.runId, 2);
           const steps = await world.steps.list({ runId: anchor.runId, resolveData: "all" });
           const turns = steps.data.filter((step) => step.stepName.endsWith("//turnStep"));
           expect(turns).toHaveLength(2);

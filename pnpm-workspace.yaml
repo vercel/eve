@@ -1,4 +1,4 @@
-enableGlobalVirtualStore: true
+enableGlobalVirtualStore: false
 
 packages:
   - apps/*
@@ -6,26 +6,6 @@ packages:
   - apps/frameworks/*
   - e2e/fixtures/*
   - packages/*
-
-packageExtensions:
-  "@nuxt/kit@4.5.2":
-    dependencies:
-      "@nuxt/schema": "4.5.2" # Published types import schema, but kit only declares it as a dev dependency.
-  "@nuxt/schema@4.5.2":
-    dependencies:
-      c12: "^3.3.4" # DefineNuxtConfig extends c12's DefineConfig in the published types.
-  next@16.3.4:
-    peerDependencies:
-      "@types/react": "^19.0.0" # The bundled OG types augment React's HTMLAttributes.
-    peerDependenciesMeta:
-      "@types/react":
-        optional: true
-  streamdown@2.5.0:
-    peerDependencies:
-      "@types/react": "^18.0.0 || ^19.0.0" # Published component types import React types.
-    peerDependenciesMeta:
-      "@types/react":
-        optional: true
 
 allowBuilds:
   "@google/genai": false # No-op preinstall.
