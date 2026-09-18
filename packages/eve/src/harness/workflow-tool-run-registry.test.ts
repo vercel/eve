@@ -1,3 +1,4 @@
+import { runInNewContext } from "node:vm";
 import { describe, expect, it } from "vitest";
 import type { SessionStateMap } from "#harness/types.js";
 import {
@@ -142,6 +143,42 @@ describe("shared workflow invocation ownership", () => {
     expect(Object.isFrozen(context.auth.current?.attributes.roles)).toBe(true);
     expect(context.sessionDynamicSubagentSelections).not.toBe(selections);
     expect(context.sessionDynamicSubagentSelections?.researcher).toBe(selections.researcher);
+  });
+
+  it("reads creator auth and dynamic selections restored in the workflow VM", () => {
+    const entry = task("task-a");
+    const state = {
+      "eve.runtime.workflowInvocations": {
+        version: 2,
+        invocations: [
+          {
+            ...entry,
+            task: {
+              ...entry.task,
+              dispatchContext: {
+                auth: {
+                  current: {
+                    attributes: { roles: ["researcher"] },
+                    authenticator: "test",
+                    principalId: "alice",
+                    principalType: "user",
+                  },
+                  initiator: null,
+                },
+                sessionDynamicSubagentSelections: { researcher: { futureSelection: true } },
+                turnDynamicSubagentSelections: {},
+              },
+            },
+          },
+        ],
+      },
+    };
+    const restored = runInNewContext("JSON.parse(input)", { input: JSON.stringify(state) });
+    expect(Object.getPrototypeOf(restored)).not.toBe(Object.prototype);
+    expect(getWorkflowToolRuns(restored)).toEqual(
+      state["eve.runtime.workflowInvocations"].invocations,
+    );
+    expect(() => registerWorkflowToolRun({ state: restored }, waiting("turn-b"))).not.toThrow();
   });
 
   it.each([

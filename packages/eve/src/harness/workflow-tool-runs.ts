@@ -1,5 +1,5 @@
 import type { RuntimeToolResultActionResult } from "#shared/action-types.js";
-import { isNonEmptyString, isObject, isPlainRecord } from "#shared/guards.js";
+import { isNonEmptyString, isObject } from "#shared/guards.js";
 import type { SessionStateMap } from "#harness/types.js";
 import { parseActivityWorkIdentityV1, type ActivityWorkIdentityV1 } from "#protocol/activity.js";
 import type { SessionAuthContext } from "#channel/types.js";
@@ -56,6 +56,16 @@ function isTaskMetadata(value: unknown): value is TaskMetadata {
   return isObject(value) && isNonEmptyString(value.kind) && isNonEmptyString(value.name);
 }
 
+/** Workflow checkpoints can carry records created in another VM realm. */
+function isRecord(value: unknown): value is Record<string, unknown> {
+  if (!isObject(value)) return false;
+  const constructor = value.constructor;
+  return (
+    typeof constructor !== "function" ||
+    (isObject(constructor.prototype) && Object.hasOwn(constructor.prototype, "isPrototypeOf"))
+  );
+}
+
 function isSessionAuthContext(value: unknown): value is SessionAuthContext | null {
   return (
     value === null ||
@@ -70,7 +80,7 @@ function isSessionAuthContext(value: unknown): value is SessionAuthContext | nul
           "subject",
         ].includes(key),
       ) &&
-      isPlainRecord(value.attributes) &&
+      isRecord(value.attributes) &&
       Object.values(value.attributes).every(
         (attribute) =>
           typeof attribute === "string" ||
@@ -96,9 +106,9 @@ function isTaskAgentDispatchContext(value: unknown): value is TaskAgentDispatchC
     isSessionAuthContext(value.auth.current) &&
     isSessionAuthContext(value.auth.initiator) &&
     (value.sessionDynamicSubagentSelections === undefined ||
-      isPlainRecord(value.sessionDynamicSubagentSelections)) &&
+      isRecord(value.sessionDynamicSubagentSelections)) &&
     (value.turnDynamicSubagentSelections === undefined ||
-      isPlainRecord(value.turnDynamicSubagentSelections))
+      isRecord(value.turnDynamicSubagentSelections))
   );
 }
 
