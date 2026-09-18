@@ -1,4 +1,4 @@
-import { defineExtension } from "#public/extension/index.js";
+import { defineExtension } from "eve/extension";
 import { z } from "zod";
 
 import { isAgentReasoningDefinition, isRuntimeLanguageModel } from "#internal/runtime-model.js";

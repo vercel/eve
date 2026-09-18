@@ -255,6 +255,56 @@ describe("development generation artifacts", () => {
     expect(tool.default.execute()).toBe("configured");
   });
 
+  it("honors disabled local self-modification in the materialized development graph", async () => {
+    const previousDev = process.env.EVE_DEV;
+    process.env.EVE_DEV = "1";
+    try {
+      const app = await scenarioApp({
+        files: {
+          "agent/agent.mjs": 'export default { model: "openai/gpt-5.4" };\n',
+          "agent/instructions.md": "Use the available tools.",
+          "agent/extensions/self-modification.mjs": [
+            'import selfModification from "eve/self-modification";',
+            "export default selfModification({ local: { enabled: false } });",
+            "",
+          ].join("\n"),
+        },
+        name: "disabled-local-self-modification-generation",
+      });
+      await mkdir(join(app.appRoot, "node_modules"), { recursive: true });
+      await symlink(resolvePackageRoot(), join(app.appRoot, "node_modules", "eve"), "junction");
+
+      const compileResult = await compileAgent({ startPath: app.appRoot });
+      const snapshot = await stageDevelopmentGeneration(compileResult);
+      const moduleMap = await loadCompiledModuleMapFromAuthoredSource({
+        compiledArtifactsSource: createAuthoredSourceRuntimeCompiledArtifactsSource(
+          snapshot.runtimeAppRoot,
+        ),
+      });
+      const child = compileResult.manifest.subagents[0];
+      if (child?.configResolver === undefined) throw new Error("expected a dynamic subagent");
+      const modules = moduleMap.nodes[child.nodeId]!.modules;
+      const agent = modules[child.configResolver.sourceId] as {
+        default: { events: Record<string, Function> };
+      };
+      for (const event of ["session.started", "turn.started"]) {
+        await expect(agent.default.events[event]!({}, { model: null })).resolves.toBeNull();
+      }
+
+      const sandbox = modules[child.agent.sandbox.sourceId] as {
+        defineSelfModificationSandbox(options: { backend: { name: string } }): {
+          backend(): { name: string };
+        };
+      };
+      const backend = { name: "disabled-local-test" };
+      // Local mode ignores this backend and installs the writable host filesystem instead.
+      expect(sandbox.defineSelfModificationSandbox({ backend }).backend()).toBe(backend);
+    } finally {
+      if (previousDev === undefined) delete process.env.EVE_DEV;
+      else process.env.EVE_DEV = previousDev;
+    }
+  });
+
   it("materializes a mounted extension from a physical installed directory", async () => {
     const packageName = "@acme/physical-extension";
     const app = await scenarioApp({

@@ -35,6 +35,16 @@ describe("createGenerationPackageBoundaryPlugin", () => {
         kind: "import-statement",
       }),
     ).resolves.toEqual({ external: true, id: "eve/tools" });
+    await expect(
+      resolveId.call(
+        context,
+        "eve/self-modification",
+        join(PACKAGE_ROOT, "agent/extensions/edit.ts"),
+        {
+          kind: "import-statement",
+        },
+      ),
+    ).resolves.toBeUndefined();
   });
 
   it("resolves package-private imports from the importing dependency", async () => {
