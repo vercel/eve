@@ -31,7 +31,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: vercel-labs/eve-bench
-          ref: 72efd61b86b25934df4fcbd2a1a72697db035241
+          ref: 82082da2323e9729ffb99bfc7ca919425f83ec70
           ssh-key: ${{ secrets.EVE_BENCH_SSH_KEY }}
           path: .eve-bench-action
           persist-credentials: false
