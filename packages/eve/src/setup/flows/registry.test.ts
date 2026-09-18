@@ -118,6 +118,31 @@ describe("runRegistryFlow", () => {
     expect(flow.browseRegistryCatalog).not.toHaveBeenCalled();
     expect(flow.installRegistryItem).toHaveBeenCalledOnce();
   });
+  it("reports an installation failure without another decision prompt", async () => {
+    const flow = deps();
+    flow.installRegistryItem = vi.fn(async () => {
+      throw new Error("Dependency installation failed.");
+    });
+    const fake = createFakePrompter();
+
+    await expect(
+      runRegistryFlow({
+        appRoot: "/agent",
+        initialAddress: "connection/linear",
+        prompter: fake.prompter,
+        deps: flow,
+      }),
+    ).resolves.toMatchObject({
+      kind: "done",
+      result: {
+        failures: [{ title: "connection/linear", message: "Dependency installation failed." }],
+      },
+    });
+
+    expect(fake.prompter.log.error).not.toHaveBeenCalled();
+    expect(fake.selectMessages).toEqual([]);
+  });
+
   it("cancels before installing anything", async () => {
     const flow = deps();
     const fake = createFakePrompter({

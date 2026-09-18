@@ -1,6 +1,6 @@
 import type { RegistryCatalogItem } from "#cli/commands/registry.js";
 import { HumanActionRequiredError } from "#setup/human-action.js";
-import type { Prompter, SingleSelectOptions } from "#setup/prompter.js";
+import type { Prompter } from "#setup/prompter.js";
 import { WizardCancelledError } from "#setup/step.js";
 import { withSpinner } from "#setup/with-spinner.js";
 
@@ -120,20 +120,7 @@ export async function runRegistryFlow(input: {
         if (error instanceof HumanActionRequiredError) throw error;
         const message = error instanceof Error ? error.message : String(error);
         const failureMessage = message.trim() || "Installation failed.";
-        const summary = failureMessage.split("\n").find((line) => line.trim() !== "");
         activeSession.addFailure(label(item), failureMessage);
-        const request: SingleSelectOptions<"skip" | "cancel"> = {
-          message: `Couldn't add ${label(item)}`,
-          options: [
-            { value: "skip", label: `Skip ${label(item)}` },
-            { value: "cancel", label: "Cancel setup" },
-          ],
-        };
-        if (summary !== undefined) request.description = summary;
-        const action = await input.prompter.select(request);
-        if (action === "cancel") {
-          return { kind: "done", result: { ...activeSession.result(), cancelled: true } };
-        }
       }
     }
     return {
