@@ -1,4 +1,4 @@
-import { readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import {
@@ -197,7 +197,11 @@ export async function prepareWebRegistryProject(appRoot: string): Promise<void> 
   try {
     source = await readFile(path, "utf8");
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      await mkdir(join(appRoot, "apps", "web"), { recursive: true });
+      await writeFile(path, WEB_APP_TEMPLATE_FILES["tsconfig.json"], "utf8");
+      return;
+    }
     throw new Error(
       `Could not add Web Chat because ${path} could not be read: ${errorMessage(error)}`,
     );
