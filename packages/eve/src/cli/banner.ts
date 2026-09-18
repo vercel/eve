@@ -6,7 +6,7 @@ export const EVE_WORDMARK = "eve";
 
 /**
  * The boot banner shared by every CLI command that announces itself: the eve
- * badge plus the installed version. Init prints it after preparing the terminal.
+ * badge plus the installed version. Init prints it before its progress row.
  */
 export function eveCliBanner(): string {
   const { version } = resolveInstalledPackageInfo();

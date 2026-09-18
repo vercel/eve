@@ -13,7 +13,6 @@ import type {
 import { eveCliBanner, EVE_WORDMARK } from "#cli/banner.js";
 import { formatElapsed } from "#cli/format-elapsed.js";
 import { startCliLiveRow } from "#cli/ui/live-row.js";
-import { startFreshScreen } from "#cli/ui/fresh-screen.js";
 import { createLogger, isLogLevelEnabled } from "#internal/logging.js";
 import { DEFAULT_AGENT_MODEL_ID } from "#shared/default-agent-model.js";
 import type { NodeEngineOverride } from "#setup/node-engine.js";
@@ -500,7 +499,6 @@ export async function runInitCommand(
 ): Promise<void> {
   const agentLaunched = await dependencies.isCodingAgentLaunch();
   const interactive = dependencies.hasInteractiveTerminal();
-  if (interactive && !agentLaunched) startFreshScreen();
   logger.log(eveCliBanner());
 
   trackStep?.("resolve_target");

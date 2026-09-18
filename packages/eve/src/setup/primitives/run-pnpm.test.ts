@@ -288,7 +288,7 @@ describe("runPackageManagerInstall", () => {
 describe("eveDevArguments", () => {
   test.each([
     ["npm", ["exec", "--", "eve", "dev"]],
-    ["pnpm", ["exec", "eve", "dev"]],
+    ["pnpm", ["--reporter=silent", "exec", "eve", "dev"]],
     ["yarn", ["eve", "dev"]],
     ["bun", ["x", "eve", "dev"]],
   ] as const)("maps %s to its local-binary invocation", (kind, expectedArgs) => {

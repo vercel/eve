@@ -239,7 +239,8 @@ export const pnpmPackageManager = {
       ? { filesSkipped: [], filesWritten: [filePath] }
       : { filesSkipped: [filePath], filesWritten: [] };
   },
-  devArguments: () => ["exec", "eve", "dev"],
+  // Dependency verification can run before exec; keep its reporter out of the TUI.
+  devArguments: () => ["--reporter=silent", "exec", "eve", "dev"],
   installArguments: (options) => [
     "install",
     "--no-frozen-lockfile",

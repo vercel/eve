@@ -29,7 +29,6 @@ import {
 } from "#setup/scaffold/index.js";
 import { pathExists } from "#setup/path-exists.js";
 import { WizardCancelledError } from "#setup/step.js";
-import * as freshScreen from "#cli/ui/fresh-screen.js";
 
 import type { GitInitResult } from "./init-git.js";
 import {
@@ -307,34 +306,45 @@ describe("runInitCommand", () => {
   );
 
   it.each([
-    { interactive: true, agent: false, fresh: true },
-    { interactive: false, agent: false, fresh: false },
-    { interactive: true, agent: true, fresh: false },
-  ])(
-    "prepares the screen before the banner only for a human terminal (%j)",
-    async ({ interactive, agent, fresh }) => {
-      const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-screen-"));
-      const order: string[] = [];
-      const startScreen = vi.spyOn(freshScreen, "startFreshScreen").mockImplementation(() => {
-        order.push("fresh screen");
-      });
-      const output = logger();
-      const log = output.log;
-      output.log = (message) => {
-        order.push(stripAnsi(message));
-        log(message);
-      };
-      const deps = { ...dependencies(), hasInteractiveTerminal: () => interactive };
-      deps.isCodingAgentLaunch.mockResolvedValue(agent);
+    { interactive: true, agent: false },
+    { interactive: false, agent: false },
+    { interactive: true, agent: true },
+  ])("keeps init inline with the shell command (%j)", async ({ interactive, agent }) => {
+    vi.stubEnv("CI", "");
+    vi.stubEnv("TERM", "xterm-256color");
+    const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-inline-"));
+    const screen = new MockScreen({ columns: 100, rows: 30 });
+    const properties = ["isTTY", "rows", "columns"] as const;
+    const original = properties.map((key) => Object.getOwnPropertyDescriptor(process.stdout, key));
+    for (const key of properties) {
+      Object.defineProperty(process.stdout, key, { configurable: true, value: screen[key] });
+    }
+    vi.spyOn(process.stdout, "write").mockImplementation((chunk) => screen.write(String(chunk)));
+    const output = logger();
+    output.log = (message) => {
+      screen.write(`${message}\n`);
+    };
+    const deps = { ...dependencies(), hasInteractiveTerminal: () => interactive };
+    deps.isCodingAgentLaunch.mockResolvedValue(agent);
+    screen.write("$ pnpm dlx eve init agent\n");
+    try {
       await runInitCommand(output, parentDirectory, "agent", {}, deps);
-      expect(startScreen).toHaveBeenCalledTimes(fresh ? 1 : 0);
-      expect(order[fresh ? 1 : 0]).toContain("☰eve");
-      expect(order.filter((line) => line.includes("☰eve"))).toHaveLength(1);
-      if (fresh) expect(order[0]).toBe("fresh screen");
-      expect(deps.spawnPackageManager).toHaveBeenCalledTimes(fresh ? 1 : 0);
-      expect(output.messages.join("\n")).not.toContain("$ eve dev");
-    },
-  );
+      const transcript = stripAnsi(screen.snapshot());
+      expect(transcript).toMatch(/^\$ pnpm dlx eve init agent\n☰eve/u);
+      expect(transcript).not.toContain("\n\n\n");
+      expect(screen.rawOutput()).not.toContain("\u001B[H");
+      expect(screen.rawOutput()).not.toContain("\u001B[2J");
+      expect(screen.rawOutput()).not.toContain("\u001B[3J");
+      expect(transcript.match(/☰eve/gu)).toHaveLength(1);
+      expect(deps.spawnPackageManager).toHaveBeenCalledTimes(interactive && !agent ? 1 : 0);
+    } finally {
+      for (const [index, key] of properties.entries()) {
+        const descriptor = original[index];
+        if (descriptor === undefined) Reflect.deleteProperty(process.stdout, key);
+        else Object.defineProperty(process.stdout, key, descriptor);
+      }
+    }
+  });
 
   it("returns after scaffolding without opening the TUI in a noninteractive terminal", async () => {
     const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-headless-"));
@@ -371,6 +381,7 @@ describe("runInitCommand", () => {
       '"agents/**/*.ts"',
     );
     expect(deps.spawnPackageManager).toHaveBeenCalledWith("pnpm", projectRoot, [
+      "--reporter=silent",
       "exec",
       "eve",
       "dev",
@@ -487,6 +498,7 @@ describe("runInitCommand", () => {
     );
     expect(deps.tryInitializeGit).toHaveBeenCalledWith(projectPath);
     expect(deps.spawnPackageManager).toHaveBeenCalledWith("pnpm", projectPath, [
+      "--reporter=silent",
       "exec",
       "eve",
       "dev",
@@ -661,6 +673,7 @@ describe("runInitCommand", () => {
       );
       expect(deps.tryInitializeGit).toHaveBeenCalledWith(projectPath);
       expect(deps.spawnPackageManager).toHaveBeenCalledWith("pnpm", projectPath, [
+        "--reporter=silent",
         "exec",
         "eve",
         "dev",
@@ -764,7 +777,7 @@ describe("runInitCommand", () => {
     ["npm", "package-lock.json", "bun", ["exec", "--", "eve", "dev", "--onboard"]],
     ["yarn", "yarn.lock", "npm", ["eve", "dev", "--onboard"]],
     ["bun", "bun.lock", "npm", ["x", "eve", "dev", "--onboard"]],
-    ["pnpm", "pnpm-lock.yaml", "npm", ["exec", "eve", "dev", "--onboard"]],
+    ["pnpm", "pnpm-lock.yaml", "npm", ["--reporter=silent", "exec", "eve", "dev", "--onboard"]],
   ] as const)(
     "scaffolds a fresh named project with the ancestor %s lockfile before the launcher",
     async (kind, lockfile, invokingManager, devArguments) => {
@@ -1036,6 +1049,7 @@ describe("runInitCommand", () => {
       `Git initialization failed during commit: commit refused\nThe eve agent was created successfully. Git repository metadata and staged files were preserved at "${projectPath}"; the initial commit is optional.\n\nTo create it later, configure Git identity and run:\n  git -C ${JSON.stringify(projectPath)} commit -m "Initial commit from eve"`,
     );
     expect(deps.spawnPackageManager).toHaveBeenCalledWith("pnpm", projectPath, [
+      "--reporter=silent",
       "exec",
       "eve",
       "dev",
@@ -1063,6 +1077,7 @@ describe("runInitCommand", () => {
       expect.anything(),
     );
     expect(deps.spawnPackageManager).toHaveBeenCalledWith("pnpm", projectPath, [
+      "--reporter=silent",
       "exec",
       "eve",
       "dev",
@@ -1131,6 +1146,7 @@ describe("runInitCommand", () => {
     // An existing project's history is its own; only fresh scaffolds get git init.
     expect(deps.tryInitializeGit).not.toHaveBeenCalled();
     expect(deps.spawnPackageManager).toHaveBeenCalledWith("pnpm", projectRoot, [
+      "--reporter=silent",
       "exec",
       "eve",
       "dev",
@@ -1443,7 +1459,7 @@ describe("runInitCommand", () => {
     const messages = stripAnsi(output.messages.join("\n"));
     expect(messages).toContain(`✓ Model ${DEFAULT_AGENT_MODEL_ID} (eve default)`);
     expect(messages).toContain(`✓ Instructions ${join(projectPath, "agent/instructions.md")}`);
-    expect(messages).toContain("pnpm exec eve dev --no-ui");
+    expect(messages).toContain("pnpm --reporter=silent exec eve dev --no-ui");
   });
 
   it("derives the agent dev handoff command from the existing project's own manager", async () => {
@@ -1494,7 +1510,7 @@ describe("runInitCommand", () => {
     expect(deps.spawnPackageManager).toHaveBeenCalledWith(
       "pnpm",
       join(parentDirectory, "my-agent"),
-      ["exec", "eve", "dev", "--onboard"],
+      ["--reporter=silent", "exec", "eve", "dev", "--onboard"],
     );
   });
 

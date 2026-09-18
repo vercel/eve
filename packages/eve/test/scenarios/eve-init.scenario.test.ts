@@ -10,6 +10,7 @@ import { CODING_AGENT_ENV_MARKERS } from "../../src/cli/agent-detection.js";
 import { loadYaml } from "../../src/evals/loaders/yaml.js";
 import { DEFAULT_AGENT_MODEL_ID } from "../../src/shared/default-agent-model.js";
 import { pathExists } from "../../src/setup/path-exists.js";
+import { eveDevArguments } from "../../src/setup/primitives/run-pnpm.js";
 import { ensureScenarioEveTarballPath } from "../../src/internal/testing/scenario-app.js";
 import { useTemporaryDirectories } from "../../src/internal/testing/use-temporary-app-roots.js";
 
@@ -226,11 +227,18 @@ describe("eve init smoke", () => {
 
     // pnpm checks the installed lockfile before exec/run and may reinstall.
     // A one-time install flag must not leave the next command rejecting it.
-    const dev = await runFile("pnpm", ["exec", "eve", "dev", "--help"], {
+    const dev = await runFile("pnpm", [...eveDevArguments("pnpm"), "--help"], {
       cwd: projectDir,
       env,
     });
     expect(dev.stdout).toContain("Usage: eve dev");
+    expect(dev.stdout).not.toMatch(/Lockfile|Already up to date|Done in/u);
+    await expect(
+      runFile("pnpm", [...eveDevArguments("pnpm"), "--unknown-init-test-option"], {
+        cwd: projectDir,
+        env,
+      }),
+    ).rejects.toMatchObject({ stderr: expect.stringContaining("unknown option") });
     await expect(
       runFile("pnpm", ["install", "--frozen-lockfile"], { cwd: projectDir, env }),
     ).resolves.toMatchObject({ stdout: expect.any(String) });
