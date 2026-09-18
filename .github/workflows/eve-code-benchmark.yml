@@ -5,7 +5,6 @@ on:
     paths:
       - ".github/workflows/eve-code-benchmark.yml"
       - "packages/eve-code/**"
-      - "apps/fixtures/eve-code-bench/**"
   workflow_dispatch:
 
 concurrency:
@@ -14,46 +13,41 @@ concurrency:
 
 permissions:
   contents: read
+  actions: read
+  pull-requests: write
 
 jobs:
-  compare:
+  benchmark:
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 360
-    permissions:
-      contents: write
-      pull-requests: write
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
-          fetch-depth: 0
-          persist-credentials: false
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version-file: .nvmrc
-      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
-      - name: Build local eve-code
-        run: |
-          pnpm install --frozen-lockfile
-          pnpm exec turbo run build --filter=eve-code
-      - name: Checkout native benchmark action
+      - name: Checkout pinned eve-bench action
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: vercel-labs/eve-bench
-          ref: 7558228d25344fc7917ad9fe8e7a42cca1629d5d
+          ref: a4a16800fb57dd9c3224ed54049ad97b7ecfe26b
           ssh-key: ${{ secrets.EVE_BENCH_SSH_KEY }}
           path: .eve-bench-runner
           persist-credentials: false
-      - name: Compare full SWE-lean and publish the table
-        uses: ./.eve-bench-runner/comparison
+      - name: Benchmark current eve-code source
+        uses: ./.eve-bench-runner
         with:
-          agent: ${{ github.workspace }}/apps/fixtures/eve-code-bench
-          baseline-ref: ca27ee898e28dc90df5f0bb4ef713a4aad2fa5f3
+          harness: eve-code
+          agent-repository: vercel/eve
+          agent-path: packages/eve-code
+          agent-ref: ${{ github.event.pull_request.head.sha || github.sha }}
           dataset: swe-lean
           model: ${{ vars.EVE_CODE_BENCH_MODEL || 'openai/gpt-5.6-terra' }}
           attempts: "1"
-          concurrency: "1"
-          readme-path: packages/eve-code/README.md
+          concurrency: "4"
+          native-build: "false"
+          baseline-artifact-id: ${{ vars.EVE_BENCH_BASELINE_ARTIFACT_ID }}
+          artifact-name: eve-code-swe-lean
+          runner-revision: a4a16800fb57dd9c3224ed54049ad97b7ecfe26b
           gateway-key: ${{ secrets.AI_GATEWAY_API_KEY }}
+          source-token: ${{ secrets.EVE_BENCH_SOURCE_TOKEN }}
           github-token: ${{ github.token }}
+          vercel-token: ${{ secrets.VERCEL_TOKEN }}
+          vercel-team-id: ${{ secrets.VERCEL_TEAM_ID }}
+          vercel-project-id: ${{ secrets.VERCEL_PROJECT_ID }}

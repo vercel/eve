@@ -77,7 +77,7 @@ The `typescript-compiler` development alias supplies the JavaScript compiler API
 
 ## Benchmarks
 
-Use [eve-bench](https://github.com/vercel-labs/eve-bench#readme) directly. Its native `eve-code` harness accepts an installed source app through `--agent`; `apps/fixtures/eve-code-bench` supplies this workspace's eve and eve-code dependencies after the build above.
+Use [eve-bench](https://github.com/vercel-labs/eve-bench#readme) directly with `agent-path: packages/eve-code` in its GitHub Action or `--agent packages/eve-code` on the CLI. The package is a self-contained benchmark target and resolves its workspace `eve` development dependency after installation.
 
 Dataset selection, execution, comparisons, and report generation belong to eve-bench. This package does not maintain a separate benchmark runner or reporting layer.
 
