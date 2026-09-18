@@ -15,7 +15,7 @@ export interface AgentHeaderInput {
   width: number;
 }
 
-/** Returns the styled rows of the startup card and optional tip. */
+/** Returns the styled rows of the startup card. */
 export function buildAgentHeader(input: AgentHeaderInput): string[] {
   const { theme, info, width } = input;
   const c = theme.colors;
@@ -25,8 +25,9 @@ export function buildAgentHeader(input: AgentHeaderInput): string[] {
   const metadata = [
     ...(agentName === undefined ? [] : [c.dim(agentName)]),
     c.dim("Run /help for commands"),
-  ].join(c.dim(" · "));
-  const title = c.bold("☰eve") + c.dim(` v${version} · `) + metadata;
+  ].join(c.dim(` ${theme.glyph.dot} `));
+  const wordmark = theme.unicode ? "☰eve" : "eve";
+  const title = c.bold(wordmark) + c.dim(` v${version} ${theme.glyph.dot} `) + metadata;
   const lines = [clipVisible(title, available)];
 
   if (info && (info.diagnostics.discoveryErrors > 0 || info.diagnostics.discoveryWarnings > 0)) {

@@ -563,11 +563,6 @@ export class EveTUIRunner {
    */
   readonly #vercelStatus?: VercelStatusTracker;
   readonly #mcpConnectionStatus?: McpConnectionStatusTracker;
-  /**
-   * The header's message-of-the-day, picked once so dev HMR header
-   * refreshes don't re-roll it mid-session. Local sessions only — every
-   * tip references local-only slash commands.
-   */
   #agentInfo?: AgentInfoResult;
   /**
    * approval-id → input-request map populated as `input.requested` events

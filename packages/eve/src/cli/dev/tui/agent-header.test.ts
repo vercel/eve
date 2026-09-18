@@ -43,11 +43,13 @@ describe("buildAgentHeader", () => {
     expect(card).toContain("weather-agent");
   });
 
-  it("dims title metadata", () => {
+  it("uses ASCII separators and wordmark when Unicode is disabled", () => {
     const theme = createTheme({ color: true, unicode: false });
     const lines = buildAgentHeader({ info: INFO, theme, width: 120 });
 
-    expect(stripAnsi(lines[0] ?? "")).toContain("Run /help for commands");
+    expect(stripAnsi(lines[0] ?? "")).toMatch(
+      /^eve v\d+\.\d+\.\d+ - Weather Agent - Run \/help for commands$/u,
+    );
     expect(lines[0]).toContain(theme.colors.dim("Weather Agent"));
     expect(lines[0]).toContain(theme.colors.dim("Run /help for commands"));
   });
