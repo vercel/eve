@@ -2,8 +2,6 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { resolveEveProjectContext } from "#internal/project-context.js";
-import { select } from "#setup/ask.js";
-import { detectPackageManager } from "#setup/package-manager.js";
 import { pathExists, writeTextFile } from "#setup/scaffold/files.js";
 import { WEB_CHANNEL_TEMPLATE } from "#setup/scaffold/create/web-template.js";
 import {
@@ -12,7 +10,7 @@ import {
   type SetupPrepareContext,
 } from "../types.js";
 
-const NEXT_HOSTED_CONFIG = `import type { NextConfig } from "next";
+const LEGACY_NEXT_HOSTED_CONFIG = `import type { NextConfig } from "next";
 import { withEve } from "eve/next";
 
 const nextConfig: NextConfig = {};
@@ -38,7 +36,6 @@ export default await withEve({
 `;
 
 export interface WebSetupDeps {
-  detectPackageManager: typeof detectPackageManager;
   pathExists: typeof pathExists;
   readTextFile(path: string): Promise<string>;
   resolveEveProjectContext: typeof resolveEveProjectContext;
@@ -46,17 +43,13 @@ export interface WebSetupDeps {
 }
 
 const defaultDeps: WebSetupDeps = {
-  detectPackageManager,
   pathExists,
   readTextFile: (path) => readFile(path, "utf8"),
   resolveEveProjectContext,
   writeTextFile,
 };
 
-export interface WebSetupPlan {
-  hosting: "next" | "vercel-services";
-  packageManager: Awaited<ReturnType<typeof detectPackageManager>>["kind"];
-}
+export type WebSetupPlan = Record<string, never>;
 
 export async function prepareWebSetup(
   context: SetupPrepareContext,
@@ -66,30 +59,7 @@ export async function prepareWebSetup(
   if (project.kind === "workspace") {
     throw new Error("Web Chat setup requires a selected workspace agent.");
   }
-  const plural = project.kind === "workspace-member";
-  const hosting = await context.asker.ask(
-    select({
-      key: "web-hosting",
-      message: `How should Web Chat and your ${plural ? "agents" : "agent"} run?`,
-      options: [
-        {
-          id: "vercel-services",
-          label: "Run them as peer Vercel services",
-          hint: `Keep ${plural ? "each agent" : "the agent"} independent from the Web Chat frontend`,
-          value: "vercel-services" as const,
-        },
-        {
-          id: "next",
-          label: `Run the ${plural ? "agents" : "agent"} through Next.js`,
-          hint: `Let the Web Chat application manage the ${plural ? "agents" : "agent"}`,
-          value: "next" as const,
-        },
-      ],
-      recommended: "vercel-services" as const,
-      required: true,
-    }),
-  );
-  return { packageManager: (await deps.detectPackageManager(context.appRoot)).kind, hosting };
+  return {};
 }
 
 async function configurePeerServiceScripts(root: string, deps: WebSetupDeps): Promise<void> {
@@ -123,7 +93,7 @@ async function assertInstallerOwned(path: string, allowed: readonly string[]): P
 }
 
 export async function applyWebSetup(
-  plan: WebSetupPlan,
+  _plan: WebSetupPlan,
   context: SetupApplyContext,
   deps: WebSetupDeps = defaultDeps,
 ) {
@@ -154,24 +124,20 @@ export default withEve(nextConfig);
 `;
   await assertInstallerOwned(nextConfigPath, [
     registryNextConfig,
-    NEXT_HOSTED_CONFIG,
+    LEGACY_NEXT_HOSTED_CONFIG,
     PEER_SERVICE_NEXT_CONFIG,
   ]);
-  if (plan.hosting === "vercel-services") {
-    const vercelTsPath = join(project.environmentRoot, "vercel.ts");
-    const vercelJsonPath = join(project.environmentRoot, "vercel.json");
-    await assertInstallerOwned(vercelTsPath, [PEER_SERVICE_VERCEL_CONFIG]);
-    if (await deps.pathExists(vercelJsonPath)) {
-      throw new Error(
-        `Could not configure peer services because ${vercelJsonPath} already exists. Preserve it and compose eve/vercel manually.`,
-      );
-    }
-    await deps.writeTextFile(nextConfigPath, PEER_SERVICE_NEXT_CONFIG, { force: true });
-    await deps.writeTextFile(vercelTsPath, PEER_SERVICE_VERCEL_CONFIG, { force: true });
-    await configurePeerServiceScripts(project.environmentRoot, deps);
-  } else {
-    await deps.writeTextFile(nextConfigPath, NEXT_HOSTED_CONFIG, { force: true });
+  const vercelTsPath = join(project.environmentRoot, "vercel.ts");
+  const vercelJsonPath = join(project.environmentRoot, "vercel.json");
+  await assertInstallerOwned(vercelTsPath, [PEER_SERVICE_VERCEL_CONFIG]);
+  if (await deps.pathExists(vercelJsonPath)) {
+    throw new Error(
+      `Could not configure peer services because ${vercelJsonPath} already exists. Preserve it and compose eve/vercel manually.`,
+    );
   }
+  await deps.writeTextFile(nextConfigPath, PEER_SERVICE_NEXT_CONFIG, { force: true });
+  await deps.writeTextFile(vercelTsPath, PEER_SERVICE_VERCEL_CONFIG, { force: true });
+  await configurePeerServiceScripts(project.environmentRoot, deps);
   context.presenter.log.success("Configured channel: web");
   return { facts: [], deploymentRequired: true as const };
 }

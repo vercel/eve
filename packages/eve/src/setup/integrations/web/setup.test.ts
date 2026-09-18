@@ -4,14 +4,10 @@ import { createFakePrompter } from "#internal/testing/fake-prompter.js";
 import { headlessAsker } from "#setup/ask.js";
 import { integrationSetupEnvironment } from "../shared/environment.js";
 import { createSetupContexts } from "../shared/ui.js";
-import { applyWebSetup, type WebSetupDeps } from "./setup.js";
+import { applyWebSetup, prepareWebSetup, type WebSetupDeps } from "./setup.js";
 
 function deps(): WebSetupDeps {
   return {
-    detectPackageManager: vi.fn(async () => ({
-      kind: "pnpm" as const,
-      source: "lockfile" as const,
-    })),
     pathExists: vi.fn(async () => false),
     readTextFile: vi.fn(async () => '{"scripts":{"dev":"eve dev"}}\n'),
     resolveEveProjectContext: vi.fn(async (appRoot: string): Promise<EveProjectContext> => ({
@@ -24,6 +20,19 @@ function deps(): WebSetupDeps {
 }
 
 describe("Web setup", () => {
+  it("selects peer services without asking for a hosting topology", async () => {
+    const effects = deps();
+    const ctx = createSetupContexts({
+      appRoot: "/project",
+      asker: headlessAsker(),
+      environment: integrationSetupEnvironment("cli-missing", { kind: "unresolved" }),
+      prompter: createFakePrompter().prompter,
+      resolveVercelProject: async () => ({ orgId: "team", projectId: "project" }),
+    });
+
+    await expect(prepareWebSetup(ctx.prepare, effects)).resolves.toEqual({});
+  });
+
   it("rejects an unselected workspace before writing an agent directory", async () => {
     const effects = deps();
     vi.mocked(effects.resolveEveProjectContext).mockResolvedValue({
@@ -42,9 +51,9 @@ describe("Web setup", () => {
       resolveVercelProject: async () => ({ orgId: "team", projectId: "project" }),
     });
 
-    await expect(
-      applyWebSetup({ hosting: "vercel-services", packageManager: "pnpm" }, ctx.apply, effects),
-    ).rejects.toThrow("Web Chat setup requires a selected workspace agent.");
+    await expect(applyWebSetup({}, ctx.apply, effects)).rejects.toThrow(
+      "Web Chat setup requires a selected workspace agent.",
+    );
 
     expect(effects.writeTextFile).not.toHaveBeenCalled();
   });
@@ -67,7 +76,7 @@ describe("Web setup", () => {
       prompter: createFakePrompter().prompter,
       resolveVercelProject: async () => ({ orgId: "team", projectId: "project" }),
     });
-    await applyWebSetup({ hosting: "vercel-services", packageManager: "pnpm" }, ctx.apply, effects);
+    await applyWebSetup({}, ctx.apply, effects);
 
     expect(effects.writeTextFile).toHaveBeenNthCalledWith(
       1,
@@ -109,7 +118,7 @@ describe("Web setup", () => {
       resolveVercelProject: async () => ({ orgId: "team", projectId: "project" }),
     });
 
-    await applyWebSetup({ hosting: "vercel-services", packageManager: "pnpm" }, ctx.apply, effects);
+    await applyWebSetup({}, ctx.apply, effects);
 
     expect(effects.writeTextFile).toHaveBeenCalledWith(
       "/project/package.json",
@@ -132,7 +141,7 @@ describe("Web setup", () => {
       prompter: createFakePrompter().prompter,
       resolveVercelProject: async () => ({ orgId: "team", projectId: "project" }),
     });
-    await applyWebSetup({ hosting: "vercel-services", packageManager: "pnpm" }, ctx.apply, effects);
+    await applyWebSetup({}, ctx.apply, effects);
     expect(effects.writeTextFile).toHaveBeenCalledWith(
       "/project/agent/channels/eve.ts",
       expect.any(String),
