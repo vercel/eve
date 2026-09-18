@@ -79,9 +79,7 @@ Choose how the frontend and agents run together independently of how many agents
 
 `apps/web/` is an organizational convention, not an eve filesystem slot. Deployment configuration owns peer services; eve discovers only the agents. Both Vercel integrations deploy the services together, not as independent releases.
 
-The generated Web Chat installer does not support agent workspaces. Create the frontend and its agent-selection UI yourself, using the [React chat example](/docs/guides/frontend/overview#basic-chat-react). Develop a peer Next.js frontend with `next dev` separately from the agents. For an authored Vercel service graph, use `vercel dev --local` to run the composition without linking a Vercel project.
-
-For a single `agent/` project, `eve add channel/web` currently generates a root Next.js app using `eve/next`. `eve/vercel` currently requires an `agents/` workspace; it cannot compose a standalone root `agent/`.
+Run `eve add channel/web` from a standalone agent or select a workspace agent with `--agent <name>`. The installer creates a peer Next.js frontend under `apps/web/` and asks whether Next.js or Vercel services should own the local topology. For peer services, `pnpm dev` runs the complete graph with `vercel dev --local`; use `pnpm dev:eve` for one agent and the eve terminal UI, or `pnpm dev:web` for the frontend alone.
 
 ## Add a second root agent
 

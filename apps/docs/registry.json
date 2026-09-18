@@ -1815,7 +1815,8 @@
         "@types/node@26",
         "@types/react@19.2.15",
         "@types/react-dom@19.2.3",
-        "typescript@6.0.3"
+        "typescript@6.0.3",
+        "vercel@>=59.16.0"
       ],
       "files": [
         {

@@ -37,7 +37,7 @@ export function AgentChat({
   const [cancellationError, setCancellationError] = useState<string>();
   const [hasInputText, setHasInputText] = useState(false);
   const agent = useEveAgent({
-    ...(WEB_CHAT_AGENT === undefined ? {} : { agent: WEB_CHAT_AGENT }),
+    agent: WEB_CHAT_AGENT,
     initialSession:
       sessionId === undefined
         ? undefined

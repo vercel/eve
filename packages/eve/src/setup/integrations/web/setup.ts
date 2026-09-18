@@ -40,6 +40,7 @@ export default await withEve({
 export interface WebSetupDeps {
   detectPackageManager: typeof detectPackageManager;
   pathExists: typeof pathExists;
+  readTextFile(path: string): Promise<string>;
   resolveEveProjectContext: typeof resolveEveProjectContext;
   writeTextFile: typeof writeTextFile;
 }
@@ -47,6 +48,7 @@ export interface WebSetupDeps {
 const defaultDeps: WebSetupDeps = {
   detectPackageManager,
   pathExists,
+  readTextFile: (path) => readFile(path, "utf8"),
   resolveEveProjectContext,
   writeTextFile,
 };
@@ -88,6 +90,23 @@ export async function prepareWebSetup(
     }),
   );
   return { packageManager: (await deps.detectPackageManager(context.appRoot)).kind, hosting };
+}
+
+async function configurePeerServiceScripts(root: string, deps: WebSetupDeps): Promise<void> {
+  const path = join(root, "package.json");
+  const document = JSON.parse(await deps.readTextFile(path)) as {
+    scripts?: Record<string, string>;
+    [key: string]: unknown;
+  };
+  const scripts = { ...document.scripts };
+  scripts["dev:eve"] ??= "eve dev";
+  scripts["dev:services"] ??= "vercel dev --local";
+  if (scripts.dev === undefined || scripts.dev === "eve dev") {
+    scripts.dev = "vercel dev --local";
+  }
+  await deps.writeTextFile(path, `${JSON.stringify({ ...document, scripts }, null, 2)}\n`, {
+    force: true,
+  });
 }
 
 async function assertInstallerOwned(path: string, allowed: readonly string[]): Promise<void> {
@@ -149,6 +168,7 @@ export default withEve(nextConfig);
     }
     await deps.writeTextFile(nextConfigPath, PEER_SERVICE_NEXT_CONFIG, { force: true });
     await deps.writeTextFile(vercelTsPath, PEER_SERVICE_VERCEL_CONFIG, { force: true });
+    await configurePeerServiceScripts(project.environmentRoot, deps);
   } else {
     await deps.writeTextFile(nextConfigPath, NEXT_HOSTED_CONFIG, { force: true });
   }

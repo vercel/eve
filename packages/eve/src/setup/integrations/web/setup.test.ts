@@ -13,6 +13,7 @@ function deps(): WebSetupDeps {
       source: "lockfile" as const,
     })),
     pathExists: vi.fn(async () => false),
+    readTextFile: vi.fn(async () => '{"scripts":{"dev":"eve dev"}}\n'),
     resolveEveProjectContext: vi.fn(async (appRoot: string): Promise<EveProjectContext> => ({
       appRoot,
       environmentRoot: appRoot,
@@ -83,6 +84,41 @@ describe("Web setup", () => {
     expect(effects.writeTextFile).toHaveBeenCalledWith(
       "/project/vercel.ts",
       expect.stringContaining('root: "apps/web"'),
+      { force: true },
+    );
+    expect(effects.writeTextFile).toHaveBeenCalledWith(
+      "/project/package.json",
+      expect.stringContaining('"dev": "vercel dev --local"'),
+      { force: true },
+    );
+    expect(effects.writeTextFile).toHaveBeenCalledWith(
+      "/project/package.json",
+      expect.stringContaining('"dev:services": "vercel dev --local"'),
+      { force: true },
+    );
+  });
+
+  it("preserves an authored default development script", async () => {
+    const effects = deps();
+    vi.mocked(effects.readTextFile).mockResolvedValue('{"scripts":{"dev":"custom-dev"}}\n');
+    const ctx = createSetupContexts({
+      appRoot: "/project",
+      asker: headlessAsker(),
+      environment: integrationSetupEnvironment("cli-missing", { kind: "unresolved" }),
+      prompter: createFakePrompter().prompter,
+      resolveVercelProject: async () => ({ orgId: "team", projectId: "project" }),
+    });
+
+    await applyWebSetup({ hosting: "vercel-services", packageManager: "pnpm" }, ctx.apply, effects);
+
+    expect(effects.writeTextFile).toHaveBeenCalledWith(
+      "/project/package.json",
+      expect.stringContaining('"dev": "custom-dev"'),
+      { force: true },
+    );
+    expect(effects.writeTextFile).toHaveBeenCalledWith(
+      "/project/package.json",
+      expect.stringContaining('"dev:services": "vercel dev --local"'),
       { force: true },
     );
   });
