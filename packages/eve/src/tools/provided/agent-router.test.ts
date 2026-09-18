@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { agentRouter } from "#tools/provided/agent-router.js";
+import { agentRouter, auto } from "#tools/provided/agent-router.js";
 import {
   AGENT_ROUTER_INPUT_SCHEMA,
   executeAgentRouterTool,
@@ -9,7 +9,10 @@ import { evaluate } from "#ai/evaluate.js";
 import { serializeInputSchema } from "#tools/schema.js";
 import type { WorkflowToolContext } from "#tools/workflow-definition.js";
 
-vi.mock("#ai/evaluate.js", () => ({ evaluate: vi.fn() }));
+vi.mock("#ai/evaluate.js", async (importOriginal) => ({
+  ...(await importOriginal()),
+  evaluate: vi.fn(),
+}));
 
 describe("agentRouter", () => {
   beforeEach(() => vi.clearAllMocks());
@@ -20,6 +23,58 @@ describe("agentRouter", () => {
     expect(definition.availableInSubagents).toBe(false);
     expect(definition.description).toContain("best available subagent");
     expect(definition.execute).toBe(executeAgentRouterTool);
+  });
+
+  it("transports durable router options without exposing them to the model", async () => {
+    vi.mocked(evaluate).mockResolvedValue({
+      answers: { route: { choice: "operator", type: "choice" } },
+    } as never);
+    const definition = agentRouter({
+      instructions: "Pick the best agent.",
+      model: "custom/evaluator",
+    });
+    const schema = definition.inputSchema as typeof AGENT_ROUTER_INPUT_SCHEMA;
+
+    const input = schema.parse({ message: "Deploy" });
+    expect(input).toEqual({
+      message: "Deploy",
+      routerOptions: {
+        instructions: "Pick the best agent.",
+        model: "custom/evaluator",
+      },
+    });
+    expect(serializeInputSchema(schema)).not.toHaveProperty("properties.routerOptions");
+
+    await executeAgentRouterTool(
+      input,
+      workflowContext({
+        agent: vi.fn().mockResolvedValue("operated"),
+        agents: {
+          operator: { description: "Execute changes." },
+          researcher: { description: "Investigate." },
+        },
+      }),
+    );
+    expect(evaluate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        model: "custom/evaluator",
+        questions: {
+          route: {
+            criteria: { operator: "Execute changes.", researcher: "Investigate." },
+            instructions: "Pick the best agent.",
+            type: "choice",
+          },
+        },
+      }),
+    );
+  });
+
+  it.each([
+    [null, "agentRouter options must be an object."],
+    [{ model: "" }, "agentRouter model must be a non-empty model ID."],
+    [{ instructions: " " }, "agentRouter instructions must be non-empty when provided."],
+  ])("validates router options (%j)", (options, error) => {
+    expect(() => agentRouter(options as never)).toThrow(error);
   });
 
   it("advertises arbitrary output schemas without propertyNames", () => {
@@ -61,6 +116,7 @@ describe("agentRouter", () => {
     );
     expect(evaluate).toHaveBeenCalledWith({
       abortSignal,
+      model: "typesafe-ai/jev",
       state: { message: "Deploy the service" },
       questions: {
         route: {
@@ -74,6 +130,71 @@ describe("agentRouter", () => {
       },
     });
     expect(agent).toHaveBeenCalledWith("operator", { message: "Deploy the service" });
+  });
+
+  it("supports custom evaluator options", async () => {
+    vi.mocked(evaluate).mockResolvedValue({
+      answers: { route: { choice: "operator", type: "choice" } },
+    } as never);
+    const abortSignal = new AbortController().signal;
+
+    await expect(
+      auto({
+        abortSignal,
+        agents: {
+          operator: " Execute operational changes. ",
+          researcher: "Investigate and explain.",
+        },
+        instructions: "Pick the best agent.",
+        message: "Deploy the service",
+        model: "custom/evaluator",
+      }),
+    ).resolves.toBe("operator");
+    expect(evaluate).toHaveBeenCalledWith({
+      abortSignal,
+      model: "custom/evaluator",
+      state: { message: "Deploy the service" },
+      questions: {
+        route: {
+          criteria: {
+            operator: "Execute operational changes.",
+            researcher: "Investigate and explain.",
+          },
+          instructions: "Pick the best agent.",
+          type: "choice",
+        },
+      },
+    });
+  });
+
+  it.each([
+    {
+      error: "agentRouter auto requires a non-empty message.",
+      options: { agents: { researcher: "Research" }, message: "" },
+    },
+    {
+      error: "agentRouter auto requires an agent description map.",
+      options: { agents: null, message: "Research" },
+    },
+    {
+      error: "agentRouter auto requires non-empty instructions when provided.",
+      options: { agents: { researcher: "Research" }, instructions: " ", message: "Research" },
+    },
+    {
+      error: "agentRouter auto requires a non-empty model ID when provided.",
+      options: { agents: { researcher: "Research" }, message: "Research", model: "" },
+    },
+    {
+      error: "agentRouter auto requires a non-empty model ID when provided.",
+      options: { agents: { researcher: "Research" }, message: "Research", model: {} },
+    },
+    {
+      error: 'agentRouter auto requires a string description for agent "researcher".',
+      options: { agents: { researcher: 42 }, message: "Research" },
+    },
+  ])("validates helper input: $error", async ({ error, options }) => {
+    await expect(auto(options as never)).rejects.toThrow(error);
+    expect(evaluate).not.toHaveBeenCalled();
   });
 
   it("ignores agents without descriptions", async () => {

@@ -21,12 +21,16 @@ export default defineAgent({
         }
         return "AGENT-ROUTER-ROOT-COPY-OK";
       }
-      const result = request.toolResults.find((entry) => entry.name === "agent");
+      const exportedAuto = request.userMessages.some((message) =>
+        message.includes("E2E_AGENT_ROUTER_AUTO"),
+      );
+      const toolName = exportedAuto ? "route-one" : "agent";
+      const result = request.toolResults.find((entry) => entry.name === toolName);
       return result === undefined
         ? {
             toolCalls: [
               {
-                name: "agent",
+                name: toolName,
                 input: { message: "Return the root-copy marker." },
               },
             ],

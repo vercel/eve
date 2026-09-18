@@ -10,7 +10,10 @@ export {
 } from "../../src/public/tools/index.ts";
 export {
   agentRouter,
+  auto,
+  type AgentRouterAutoOptions,
   type AgentRouterInput,
+  type AgentRouterOptions,
   type AgentRouterTool,
 } from "../../src/public/tools/agent-router.ts";
 export {
