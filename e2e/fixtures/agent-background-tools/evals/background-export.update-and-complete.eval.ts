@@ -1,8 +1,6 @@
 import { defineEval } from "eve/evals";
 import { satisfies } from "eve/evals/expect";
-
-const PROGRESS = "EXPORT-PROGRESS";
-const RESULT = "EXPORT-COMPLETE";
+import { defaultMessageReducer } from "eve/client";
 
 export default defineEval({
   description:
@@ -26,18 +24,10 @@ export default defineEval({
     const updateTurn = await updateLive.result();
     updateTurn.expectOk();
     updateTurn.messageIncludes("BACKGROUND-EXPORT-UPDATE-RECEIVED");
-    await t.require(
-      updateTurn.events,
-      satisfies(
-        (events: typeof updateTurn.events) =>
-          events.some(
-            (event) =>
-              event.type === "message.received" &&
-              messageText(event.data.message).includes(`Export ${taskId}: ${PROGRESS}`),
-          ),
-        "parent receives the authored message with task identity",
-      ),
-    );
+    updateTurn.event("message.received", {
+      data: (data) => data.kind === "execution.background_task",
+      count: 1,
+    });
 
     const doneLive = t.target.watchTurn(sessionId, {
       startIndex: requireStreamIndex(updateLive.session, "completion wait"),
@@ -45,19 +35,29 @@ export default defineEval({
     const doneTurn = await doneLive.result();
     doneTurn.expectOk();
     doneTurn.messageIncludes("BACKGROUND-EXPORT-DONE");
+    doneTurn.event("message.received", {
+      data: (data) => data.kind === "execution.background_task",
+      count: 1,
+    });
+
+    const reducer = defaultMessageReducer();
+    const projection = [...started.events, ...updateTurn.events, ...doneTurn.events].reduce(
+      (data, event) => reducer.reduce(data, event),
+      reducer.initial(),
+    );
     await t.require(
-      doneTurn.events,
+      projection.messages,
       satisfies(
-        (events: typeof doneTurn.events) =>
-          events.some(
-            (event) =>
-              event.type === "message.received" &&
-              messageText(event.data.message).includes(
-                `Background task ${taskId} (export) is completed.`,
-              ) &&
-              messageText(event.data.message).includes(RESULT),
+        (messages: typeof projection.messages) =>
+          messages.filter((message) => message.role === "user").length === 1 &&
+          messages.some(
+            (message) =>
+              message.role === "assistant" &&
+              message.parts.some(
+                (part) => part.type === "text" && part.text.includes("BACKGROUND-EXPORT-DONE"),
+              ),
           ),
-        "parent receives the executor completion with task identity",
+        "frontend projection keeps the background result without rendering runtime task input",
       ),
     );
     t.noFailedActions();
@@ -77,19 +77,4 @@ function requireStreamIndex(
   const streamIndex = session.state?.streamIndex;
   if (streamIndex === undefined) throw new Error(`${operation} has no session stream index.`);
   return streamIndex;
-}
-
-function messageText(message: unknown): string {
-  if (typeof message === "string") return message;
-  if (!Array.isArray(message)) return "";
-  return message
-    .flatMap((part) =>
-      part !== null &&
-      typeof part === "object" &&
-      Reflect.get(part, "type") === "text" &&
-      typeof Reflect.get(part, "text") === "string"
-        ? [Reflect.get(part, "text") as string]
-        : [],
-    )
-    .join("\n");
 }

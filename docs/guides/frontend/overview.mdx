@@ -156,8 +156,10 @@ retry a failed prewarm on unrelated renders while the option remains `true`; cal
 change the option from `false` to `true` again, reset, or send a message to recover.
 
 The hook keeps consuming one session stream across turns and idle periods. Replies,
-authorization updates, and turns started elsewhere all update the same projection. A turn settling
-does not close the connection. The transport reconnects from its cursor after a disconnect or the
+authorization updates, and turns started elsewhere all update the same projection, including
+background-task results that arrive during another send. Runtime-authored task input remains in the
+event stream with `data.kind: "execution.background_task"`, but the default reducer does not render
+it as a participant message. A turn settling does not close the connection. The transport reconnects from its cursor after a disconnect or the
 server's renewable 60-second lease; lease renewal does not start a turn or clear UI state.
 Unmounting or resetting closes the local stream without cancelling the old durable session.
 

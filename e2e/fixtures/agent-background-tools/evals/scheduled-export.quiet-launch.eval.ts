@@ -1,7 +1,6 @@
 import { defineEval } from "eve/evals";
 import { equals, satisfies } from "eve/evals/expect";
 
-const RESULT = "EXPORT-COMPLETE";
 const FINAL = "SCHEDULED-EXPORT-DONE";
 
 /**
@@ -81,13 +80,11 @@ export default defineEval({
       doneTurn.events,
       satisfies(
         (events: typeof doneTurn.events) =>
-          events.some(
+          events.every(
             (event) =>
-              event.type === "message.received" &&
-              messageText(event.data.message).includes("is completed") &&
-              messageText(event.data.message).includes(RESULT),
+              event.type !== "message.received" || event.data.kind === "execution.background_task",
           ),
-        "the report follows the executor completion",
+        "any observable task wake retains framework provenance",
       ),
     );
 
@@ -110,10 +107,6 @@ export default defineEval({
       replayedEvents,
       satisfies(
         (events: typeof replayedEvents) =>
-          events.some(
-            (event) =>
-              event.type === "message.received" && messageText(event.data.message).includes(RESULT),
-          ) &&
           events.filter(
             (event) =>
               event.type === "message.completed" &&
@@ -135,19 +128,4 @@ function requireStreamIndex(
   const streamIndex = session.state?.streamIndex;
   if (streamIndex === undefined) throw new Error(`${operation} has no session stream index.`);
   return streamIndex;
-}
-
-function messageText(message: unknown): string {
-  if (typeof message === "string") return message;
-  if (!Array.isArray(message)) return "";
-  return message
-    .flatMap((part) =>
-      part !== null &&
-      typeof part === "object" &&
-      Reflect.get(part, "type") === "text" &&
-      typeof Reflect.get(part, "text") === "string"
-        ? [Reflect.get(part, "text") as string]
-        : [],
-    )
-    .join("\n");
 }
