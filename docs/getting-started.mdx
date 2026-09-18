@@ -28,12 +28,6 @@ npx eve@latest init my-agent
 
 The command creates the project, installs dependencies, initializes Git, and opens the terminal UI. eve keeps its output inline with your shell command. A status line shows progress and elapsed time while dependencies install. eve reuses an available model connection or opens login setup. Successful setup leaves an empty chat history, ready for your first message. Channel and integration setup is optional; use `/add` when you need it.
 
-If you use pnpm, suppress its download progress before eve starts with:
-
-```bash
-pnpm --reporter=silent dlx eve@latest init my-agent
-```
-
 In `/add`, search by name or capability, such as `iMessage` or `SMS`. The picker matches item names, addresses, titles, and descriptions. Select an item to install it and complete its required setup.
 
 During startup, the status line shows what eve is waiting for. If you choose a Vercel account, finish signing in in your browser and select a team when prompted. eve checks that team's AI Gateway access and applies the connection before returning to the composer. Changing only the account, team, or key does not rebuild your agent. Once connected, you can send your first message while the agent information refreshes in the background; no restart is required.
