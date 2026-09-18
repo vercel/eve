@@ -1,4 +1,5 @@
 import {
+  ParentSessionKey,
   SessionDynamicSubagentSelectionsKey,
   TurnDynamicSubagentSelectionsKey,
   type DurableDynamicSubagentSelection,
@@ -16,7 +17,7 @@ export function resolveWorkflowAgentMetadata(
   if (bundle === undefined) return {};
   const agents = new Map<string, WorkflowAgentMetadata>();
 
-  if (bundle.nodeId === undefined) {
+  if (bundle.nodeId === undefined && ctx.get(ParentSessionKey) === undefined) {
     agents.set(AGENT_TOOL_NAME, {
       description: bundle.resolvedAgent.config?.description ?? AGENT_TOOL_DESCRIPTION,
     });

@@ -690,6 +690,30 @@ describe("compileAgentManifest source graph", () => {
     });
   });
 
+  it("reserves the agent subagent name for root self-delegation", async () => {
+    const child = createAgentSourceManifest({
+      agentId: "agent",
+      agentRoot: "/virtual/source-test/agent/subagents/agent",
+      appRoot: "/virtual/source-test",
+    });
+    const discovered = manifest();
+    discovered.subagents.push(
+      createLocalSubagentSourceRef({
+        entryPath: child.agentRoot,
+        logicalPath: "subagents/agent",
+        manifest: child,
+        rootPath: child.agentRoot,
+        subagentId: "agent",
+      }),
+    );
+
+    await expect(
+      compileAgentManifest(discovered, { sourceRegistries: [registry([])] }),
+    ).rejects.toThrow(
+      'Subagent "subagents/agent" uses the reserved name "agent". Rename its path; eve reserves "agent" for the built-in root-copy target.',
+    );
+  });
+
   it("projects a local subagent node once", async () => {
     let toolSourceIterations = 0;
     const child = createAgentSourceManifest({

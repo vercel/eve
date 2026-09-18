@@ -8,6 +8,13 @@ export default defineAgent({
     modelId: "agent-router-parent",
     respond(request) {
       if (request.userMessages.some((message) => message.includes("Return the root-copy marker"))) {
+        const inspection = request.toolResults.find((entry) => entry.name === "inspect-agents");
+        if (inspection === undefined) {
+          return { toolCalls: [{ name: "inspect-agents", input: {} }] };
+        }
+        if (Object.hasOwn(inspection.output as object, "agent")) {
+          throw new Error("The delegated root copy exposed recursive agent metadata.");
+        }
         return "AGENT-ROUTER-ROOT-COPY-OK";
       }
       const result = request.toolResults.find((entry) => entry.name === "agent-router");

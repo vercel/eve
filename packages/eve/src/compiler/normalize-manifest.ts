@@ -227,6 +227,11 @@ class AgentGraphCompiler {
 
     for (const projected of subagents) {
       const source = projected.source;
+      if (source.subagentId === "agent") {
+        throw new Error(
+          `Subagent "${source.logicalPath}" uses the reserved name "agent". Rename its path; eve reserves "agent" for the built-in root-copy target.`,
+        );
+      }
       const nodeId = createCompiledSubagentNodeId(input.nodeId, source.sourceId);
       const childInput: NodeCompileInput = {
         extensionScope: projected.extensionScope ?? input.extensionScope,

@@ -49,7 +49,7 @@ export default defineAgent({
 });
 ```
 
-You can also export `disableTool()` from `agent/tools/agent.ts`. An authored root tool at that path takes priority over `tool: false` and the built-in.
+You can also export `disableTool()` from `agent/tools/agent.ts`. Re-exporting the framework definition at that path takes priority over `tool: false`; arbitrary replacements are not supported. Both forms control model visibility only. A workflow in a top-level root session can still invoke the root copy with `ctx.agent("agent", ...)` and read its description from `ctx.agents.agent`.
 
 ## Declared subagents
 
@@ -64,7 +64,7 @@ export default defineAgent({
 });
 ```
 
-`description` is required. The parent reads it to decide whether to delegate, so the compiler rejects any subagent whose `agent.ts` leaves it out. Set `tool: false` to keep the subagent out of the parent model's tools while allowing an authored [workflow tool](/docs/tools/workflows) to call it by name through `ctx.agent()`:
+`description` is required. The parent reads it to decide whether to delegate, so the compiler rejects any subagent whose `agent.ts` leaves it out. The path-derived invocation name `agent` is reserved for the built-in root-copy target; rename a declared subagent at `agent/subagents/agent/`. Namespaced names such as `crm__agent` do not collide and remain valid. Set `tool: false` to keep the subagent out of the parent model's tools while allowing an authored [workflow tool](/docs/tools/workflows) to call it by name through `ctx.agent()`:
 
 ```ts title="agent/subagents/researcher/agent.ts"
 import { defineAgent } from "eve";
@@ -216,7 +216,7 @@ eve lowers every tool-enabled subagent visible to the current agent (the root bu
 
 Declared subagents can call nested subagents defined under their own directories. eve does not apply a separate depth limit; nesting ends where the authored directory tree ends. The built-in `agent` follows the stricter root-only rule above, so `limits.maxSubagentDepth` no longer exists.
 
-Child sessions can still call their own declared or remote subagents, but they do not receive the built-in `agent`. Authored workflow tools use the same subagent availability and authorization checks as direct delegation.
+Child sessions can still call their own declared or remote subagents, but they do not receive the built-in `agent`. Authored workflow tools use the same subagent availability and authorization checks as direct delegation. In a delegated root copy, `ctx.agents` also omits `agent`, so a router cannot select another root copy recursively.
 
 A directly declared subagent's tool name is the bare path-derived name, with no prefix. `agent/subagents/researcher/` registers as the tool `researcher`. A subagent supplied by a mounted extension includes the mount namespace, such as `crm__reviewer`. The model, approvals, logs, and evals reference the resulting name. Its input schema is:
 

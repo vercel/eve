@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { ContextContainer } from "#context/container.js";
 import {
+  ParentSessionKey,
   SessionDynamicSubagentSelectionsKey,
   TurnDynamicSubagentSelectionsKey,
 } from "#context/keys.js";
@@ -42,6 +43,17 @@ describe("resolveWorkflowAgentMetadata", () => {
     });
   });
 
+  it("omits self-delegation from a delegated root copy", () => {
+    const ctx = context({
+      description: "Coordinate specialist work.",
+      nodeId: undefined,
+      parentSession: { rootSessionId: "root", sessionId: "parent", turnId: "turn" },
+      subagentsByName: new Map(),
+    });
+
+    expect(resolveWorkflowAgentMetadata(ctx)).toEqual({});
+  });
+
   it("uses effective dynamic descriptions with turn precedence without adding self-delegation", () => {
     const ctx = context({ nodeId: "subagents/coordinator", subagentsByName: new Map() });
     const prepared = { name: "reviewer" };
@@ -69,6 +81,7 @@ describe("resolveWorkflowAgentMetadata", () => {
 function context(input: {
   readonly description?: string;
   readonly nodeId: string | undefined;
+  readonly parentSession?: unknown;
   readonly subagentsByName: ReadonlyMap<string, unknown>;
 }): ContextContainer {
   const ctx = new ContextContainer();
@@ -77,5 +90,6 @@ function context(input: {
     resolvedAgent: { config: { description: input.description } },
     subagentRegistry: { subagentsByName: input.subagentsByName },
   } as never);
+  if (input.parentSession !== undefined) ctx.set(ParentSessionKey, input.parentSession as never);
   return ctx;
 }

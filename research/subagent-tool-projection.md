@@ -40,7 +40,7 @@ The second form removes the derived `researcher` tool but not the `researcher` c
 - Root `tool: false` removes the built-in `agent` tool unless an authored `agent/tools/agent.ts` overrides that slot.
 - Subagent `tool: false` suppresses only its model-tool projection. Workflow `ctx.agent()` continues to resolve the child from the complete registry.
 - A same-named `disableTool()` suppresses a declared subagent's projection or the root built-in `agent` tool.
-- A same-named authored tool and subagent may coexist only when the subagent's tool projection is disabled. The authored tool owns the model name; `ctx.agent(name, input)` owns the child-agent name.
+- A same-named authored tool and subagent may coexist only when the subagent's tool projection is disabled. The authored tool owns the model name; `ctx.agent(name, input)` owns the child-agent name. The name `agent` is reserved for the built-in root-copy target and cannot identify a declared subagent.
 - Hidden subagents retain their description, execution, authorization, task lifecycle, tracing, limits, output schema, and continuation behavior.
 - A nullish dynamic subagent selection remains unavailable to every caller. `tool: false` is visibility, not availability.
 
@@ -50,7 +50,7 @@ Each compiled agent node records its selected tools and source-composition decis
 
 ## Workflow metadata
 
-A workflow tool receives `ctx.agents`, a replay-stable snapshot of effective callable-agent descriptions keyed by invocation name. On the root agent, the snapshot includes the built-in root-copy `agent` target plus model-visible and hidden local, remote, and active dynamic subagents. A declared subagent context includes only its declared targets because the root-copy target is root-only. The snapshot contains no model definitions, credentials, or callbacks. Workflow invocation remains separate:
+A workflow tool receives `ctx.agents`, a replay-stable snapshot of effective callable-agent descriptions keyed by invocation name. In a top-level root session, the snapshot includes the built-in root-copy `agent` target plus model-visible and hidden local, remote, and active dynamic subagents. Delegated root-copy and declared subagent contexts include only their declared targets because recursive root copying is unavailable. The snapshot contains no model definitions, credentials, or callbacks. Workflow invocation remains separate:
 
 ```ts
 const target = await chooseTarget(task, {

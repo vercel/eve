@@ -122,6 +122,29 @@ describe("compiled agent manifest v49", () => {
     ).toThrow("do not match its bindings");
   });
 
+  it("rejects a compiled subagent named agent", async () => {
+    const { manifest } = await compileFromMemory({ model: "openai/gpt-5.4" });
+    const subagent = {
+      agent: createCompiledAgentNodeManifest(manifest),
+      backing: { kind: "resource" as const, sourcePath: "/virtual/subagents/agent" },
+      description: "Ambiguous agent.",
+      entryPath: "/virtual/subagents/agent",
+      logicalPath: "subagents/agent",
+      name: "agent",
+      nodeId: "agent-node",
+      owner: { kind: "application" as const },
+      parentNodeId: "__root__",
+      rootPath: "/virtual/subagents/agent",
+      sourceId: "agent-source",
+      sourceKind: "module" as const,
+    };
+    const corrupted = compiledAgentManifestSchema.parse({ ...manifest, subagents: [subagent] });
+
+    expect(() => validateCompiledAgentManifest(corrupted)).toThrow(
+      'subagent name "agent" is reserved for the built-in root-copy target',
+    );
+  });
+
   it("rejects a disconnected subagent parent cycle", async () => {
     const { manifest } = await compileFromMemory({ model: "openai/gpt-5.4" });
     const agent = createCompiledAgentNodeManifest(manifest);

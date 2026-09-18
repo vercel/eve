@@ -317,7 +317,7 @@ const result = await ctx.agent("reviewer", {
 });
 ```
 
-The first argument is an available agent target. On the root agent, `"agent"` starts or continues a copy of the root agent. A declared subagent uses its path-derived name and remains callable when hidden with `tool: false` or `disableTool()`. Declared subagent contexts do not expose the root-copy target. eve assigns each call a replay-stable invocation identity, including repeated and parallel calls to the same target. Pass `agentId` to
+The first argument is an available agent target. On the root agent, `"agent"` starts or continues a copy of the root agent. A declared subagent uses its path-derived name and remains callable when hidden with `tool: false` or `disableTool()`. Delegated root copies and declared subagent contexts do not expose the built-in root-copy target. The invocation name `agent` is reserved, so a declared subagent cannot shadow it. eve assigns each call a replay-stable invocation identity, including repeated and parallel calls to the same target. Pass `agentId` to
 continue an existing child. An inline `outputSchema` requires structured output and determines the
 return type, so `result` in the example is typed as `{ findings: string[] }`.
 
@@ -399,7 +399,7 @@ export default defineWorkflowTool({
 
 The evaluation runs in a step so workflow replay records its result instead of making the routing request again. The parent model receives `agent-router`, but not `researcher` or `operator`. JEV returns the typed `"researcher" | "operator"` choice, and the selected subagent's result becomes the `agent-router` tool result.
 
-`ctx.agents` is a replay-stable metadata snapshot taken when the workflow starts. On the root agent, `ctx.agents.agent.description` describes the root-copy target, using the root's authored `description` or the built-in self-delegation description when omitted. The snapshot also includes declared agents hidden from the parent model with `tool: false` or `disableTool()`, but exposes no model definitions, credentials, or callbacks. Invocation still checks each target's availability through `ctx.agent()`.
+`ctx.agents` is a replay-stable metadata snapshot taken when the workflow starts. On the root agent, `ctx.agents.agent.description` describes the root-copy target, using the root's authored `description` or the built-in self-delegation description when omitted. The snapshot also includes declared agents hidden from the parent model with `tool: false` or `disableTool()`, but exposes no model definitions, credentials, or callbacks. A delegated root copy omits `agent`, so `agentRouter()` cannot select another root copy recursively. Invocation still checks each target's availability through `ctx.agent()`.
 
 #### Route across every agent target
 
@@ -411,7 +411,7 @@ import { agentRouter } from "eve/tools/agent-router";
 export default agentRouter();
 ```
 
-Its input is `{ message: string, outputSchema?: object }`. With two or more available targets, `agentRouter()` sends the message and every effective description to JEV, then invokes the selected name through `ctx.agent()`. It invokes a sole target without evaluation and forwards an optional `outputSchema`. On the root agent, the candidates include the root-copy `agent`; declared subagent contexts include only their declared targets.
+Its input is `{ message: string, outputSchema?: object }`. With two or more available targets, `agentRouter()` sends the message and every effective description to JEV, then invokes the selected name through `ctx.agent()`. It invokes a sole target without evaluation and forwards an optional `outputSchema`. In a top-level root session, the candidates include the root-copy `agent`; delegated root copies and declared subagent contexts include only their declared targets.
 
 This pattern controls specialist selection, not whether the parent model delegates at all. Route before the parent model runs if every incoming request must go through JEV.
 

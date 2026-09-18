@@ -241,6 +241,9 @@ export function validateCompiledAgentResources(
 }
 
 function validateSubagentRecord(subagent: CompiledSubagentNode): void {
+  if (subagent.name === "agent") {
+    fail('subagent name "agent" is reserved for the built-in root-copy target');
+  }
   if (subagent.backing.kind !== "resource" || subagent.backing.sourcePath.length === 0) {
     fail(`subagent "${subagent.nodeId}" has no physical resource backing`);
   }
