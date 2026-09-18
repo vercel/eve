@@ -1,5 +1,6 @@
+import { e2eJudgeModel } from "@eve-e2e/config";
 import { defineEvalConfig } from "eve/evals";
 
 export default defineEvalConfig({
-  judge: { model: "openai/gpt-5.6-luna" },
+  judge: { model: e2eJudgeModel() },
 });
