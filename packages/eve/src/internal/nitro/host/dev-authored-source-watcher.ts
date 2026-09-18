@@ -219,7 +219,9 @@ async function resolveAuthoredWatchPaths(
     join(host.appRoot, TS_CONFIG_GLOB_NAME),
   ]);
   const tsconfigPaths = await resolveTsConfigWatchPaths(host.appRoot);
-  const sourceSnapshotWatchPaths = await resolveDevelopmentSourceSnapshotWatchPaths(host.appRoot);
+  const sourceSnapshotWatchPaths =
+    host.generation.sourceWatchPaths ??
+    (await resolveDevelopmentSourceSnapshotWatchPaths(host.appRoot));
 
   for (const extension of host.workspaceExtensions) {
     watchPaths.add(extension.config.sourceRoot);

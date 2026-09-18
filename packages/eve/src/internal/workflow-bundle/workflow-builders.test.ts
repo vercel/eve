@@ -10,10 +10,36 @@ import {
 } from "#internal/application/package.js";
 
 import { applyWorkflowTransform } from "./workflow-builders.js";
-import { transformWorkflowDirectives } from "./workflow-transformer.js";
+import {
+  findWorkflowDirectiveFunctions,
+  transformWorkflowDirectives,
+} from "./workflow-transformer.js";
 import { withWorkflowStepAuthorization } from "#execution/tools/workflow/step-execution.js";
 
 describe("applyWorkflowTransform", () => {
+  it.each([
+    ['"use step"', true],
+    [String.raw`"use\x20step"`, false],
+    [String.raw`"use \u0073tep"`, false],
+    ['"use \\\nstep"', false],
+  ])("preserves parser semantics for directive literals: %s", async (directive, recognized) => {
+    const source = `export async function work() { ${directive}; return 1; }`;
+    expect(await findWorkflowDirectiveFunctions("fixture.ts", source)).toEqual(
+      recognized ? [{ directive: "use step", name: "work" }] : [],
+    );
+    const transformed = await applyWorkflowTransform("fixture.ts", source, "step");
+    expect(transformed.workflowManifest.steps !== undefined).toBe(recognized);
+  });
+
+  it("leaves directive-free modules unchanged", async () => {
+    const source = "export function work() { return 1; }";
+    expect(await findWorkflowDirectiveFunctions("fixture.ts", source)).toEqual([]);
+    expect(await applyWorkflowTransform("fixture.ts", source, "step")).toEqual({
+      code: source,
+      workflowManifest: {},
+    });
+  });
+
   it("preserves native arguments and receivers for Workflow built-in steps", async () => {
     const filename = "src/internal/workflow/builtins.ts";
     const source = readFileSync(resolvePackageSourceFilePath(filename), "utf8");

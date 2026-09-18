@@ -1,4 +1,4 @@
-import { createDevelopmentServer } from "#internal/nitro/host.js";
+import { createDevelopmentServer } from "#internal/nitro/host/start-development-server.js";
 import type { DevelopmentServerOptions } from "#internal/nitro/host/types.js";
 import { getDevelopmentSandboxRunId } from "#execution/sandbox/development-run.js";
 import { reconcileCleanupIntents, recordCleanupIntent } from "#cli/dev/local-server-cleanup.js";

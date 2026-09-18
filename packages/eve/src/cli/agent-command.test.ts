@@ -24,6 +24,22 @@ function workspaceContext(): CliApplicationContext {
 }
 
 describe("agentCommand", () => {
+  it("reuses the initial standalone selection after resolving the app", async () => {
+    const context = workspaceContext();
+    context.resolveAgent = vi.fn(async () => ({
+      kind: "standalone" as const,
+      appRoot: "/repo",
+      environmentRoot: "/repo",
+    }));
+    const action = vi.fn();
+    const program = new Command().exitOverride();
+    agentCommand(program.command("info"), context).action(action);
+    await program.parseAsync(["info"], { from: "user" });
+    expect(context.resolveAgent).toHaveBeenCalledOnce();
+    expect(context.resolve).toHaveBeenCalledOnce();
+    expect(action).toHaveBeenCalledOnce();
+  });
+
   it("resolves an explicit workspace agent before the action", async () => {
     const context = workspaceContext();
     const action = vi.fn(() => expect(context.root).toBe("/repo/agents/support"));

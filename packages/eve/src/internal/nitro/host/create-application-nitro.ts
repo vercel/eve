@@ -389,29 +389,8 @@ function addWorkflowModuleSideEffectsPlugin(nitro: Nitro, workflowBuildDir: stri
 
 function addNitroStepModuleSideEffectsPlugin(
   nitro: Nitro,
-  input: {
-    stepEntrypointPath: string;
-  },
-): () => void {
-  let cachedStepTransformTargets: Set<string> | null = null;
-
-  const getStepTransformTargets = async (): Promise<Set<string>> => {
-    if (cachedStepTransformTargets !== null) {
-      return cachedStepTransformTargets;
-    }
-
-    cachedStepTransformTargets = await collectNitroStepTransformTargets(
-      input.stepEntrypointPath,
-      nitro.options.rootDir,
-    );
-    return cachedStepTransformTargets;
-  };
-
-  const clearCachedStepTransformTargets = () => {
-    cachedStepTransformTargets = null;
-  };
-  nitro.hooks.hook("build:before", clearCachedStepTransformTargets);
-
+  getStepTransformTargets: () => Promise<Set<string>>,
+): void {
   nitro.hooks.hook("rollup:before", (_nitro, config) => {
     if (!Array.isArray(config.plugins)) {
       return;
@@ -438,8 +417,6 @@ function addNitroStepModuleSideEffectsPlugin(
       },
     });
   });
-
-  return clearCachedStepTransformTargets;
 }
 
 /**
@@ -449,29 +426,8 @@ function addNitroStepModuleSideEffectsPlugin(
  */
 function addNitroStepTransformPlugin(
   nitro: Nitro,
-  input: {
-    stepEntrypointPath: string;
-  },
-): () => void {
-  let cachedStepTransformTargets: Set<string> | null = null;
-
-  const getStepTransformTargets = async (): Promise<Set<string>> => {
-    if (cachedStepTransformTargets !== null) {
-      return cachedStepTransformTargets;
-    }
-
-    cachedStepTransformTargets = await collectNitroStepTransformTargets(
-      input.stepEntrypointPath,
-      nitro.options.rootDir,
-    );
-    return cachedStepTransformTargets;
-  };
-
-  const clearCachedStepTransformTargets = () => {
-    cachedStepTransformTargets = null;
-  };
-  nitro.hooks.hook("build:before", clearCachedStepTransformTargets);
-
+  getStepTransformTargets: () => Promise<Set<string>>,
+): void {
   nitro.hooks.hook("rollup:before", (_nitro, config) => {
     if (!Array.isArray(config.plugins)) {
       return;
@@ -503,8 +459,6 @@ function addNitroStepTransformPlugin(
       name: "eve:workflow-step-transform",
     });
   });
-
-  return clearCachedStepTransformTargets;
 }
 
 /**
@@ -639,9 +593,9 @@ function createApplicationNitroBundlerConfiguration(
     extensionScopePlugin,
   ].filter((plugin) => plugin !== null);
   const nitroRolldownConfig = {
-    ...createNitroBundlerConfig(nitroBundlerPlugins),
     tsconfig: resolveAuthoredTsConfigPath(preparedHost.appRoot),
   };
+  // Nitro inherits rollupConfig in its Rolldown builder, concatenating plugin arrays.
   const nitroRollupConfig = createNitroBundlerConfig(nitroBundlerPlugins);
   const tracedAppDependencies = collectHostedTraceDependencies(
     preparedHost,
@@ -697,10 +651,16 @@ function configureSharedApplicationNitro(
 }
 
 function configureNitroStepPlugins(nitro: Nitro, stepEntrypointPath: string): Array<() => void> {
-  return [
-    addNitroStepModuleSideEffectsPlugin(nitro, { stepEntrypointPath }),
-    addNitroStepTransformPlugin(nitro, { stepEntrypointPath }),
-  ];
+  let targets: Promise<Set<string>> | undefined;
+  const getTargets = () =>
+    (targets ??= collectNitroStepTransformTargets(stepEntrypointPath, nitro.options.rootDir));
+  const invalidate = () => {
+    targets = undefined;
+  };
+  nitro.hooks.hook("build:before", invalidate);
+  addNitroStepModuleSideEffectsPlugin(nitro, getTargets);
+  addNitroStepTransformPlugin(nitro, getTargets);
+  return [invalidate];
 }
 
 function externalizeDevelopmentWorkflowBundle(

@@ -150,7 +150,10 @@ export function createNodeEsmCompatBannerPlugin(
   return {
     name: "eve-node-esm-compat-banner",
     renderChunk(code, chunk) {
-      const banner = buildNodeEsmCompatBanner(this.parse(code), options);
+      const program = mayDeclareCompatibilityBinding(code, options)
+        ? this.parse(code)
+        : { body: [] };
+      const banner = buildNodeEsmCompatBanner(program, options);
 
       if (banner === "") {
         return null;
@@ -168,6 +171,27 @@ export function createNodeEsmCompatBannerPlugin(
   };
 }
 
+const DECLARATION_TRIVIA = String.raw`(?:\s|/\*[\s\S]*?\*/|//[^\r\n\u2028\u2029]*[\r\n\u2028\u2029])*`;
+const PATH_BINDING_DECLARATION = new RegExp(
+  String.raw`(?:\b(?:var|let|const)\b|,)${DECLARATION_TRIVIA}(?:__filename|__dirname)\b`,
+);
+const REQUIRE_BINDING_DECLARATION = new RegExp(
+  String.raw`(?:\b(?:var|let|const)\b|,)${DECLARATION_TRIVIA}require\b`,
+);
+
+function mayDeclareCompatibilityBinding(
+  code: string,
+  options: NodeEsmCompatBannerOptions,
+): boolean {
+  // This is only a negative filter: comments/strings can cause extra parsing,
+  // never a missed declaration. Escaped identifiers always use the parser.
+  return (
+    code.includes("\\u") ||
+    PATH_BINDING_DECLARATION.test(code) ||
+    (options.includeRequire === true && REQUIRE_BINDING_DECLARATION.test(code))
+  );
+}
+
 function createPrependedLineSourceMap({
   insertedLineCount,
   source,
@@ -178,43 +202,12 @@ function createPrependedLineSourceMap({
   sourceContent: string;
 }): SourceMap {
   const originalLineCount = sourceContent.split("\n").length;
-  const lineMappings = Array.from({ length: originalLineCount }, (_, index) =>
-    encodeVlqFields(index === 0 ? [0, 0, 0, 0] : [0, 0, 1, 0]),
-  );
 
   return {
     version: 3,
     sources: [source],
     sourcesContent: [sourceContent],
     names: [],
-    mappings: `${";".repeat(insertedLineCount)}${lineMappings.join(";")}`,
+    mappings: `${";".repeat(insertedLineCount)}AAAA${";AACA".repeat(originalLineCount - 1)}`,
   };
-}
-
-const BASE64_VLQ_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-const VLQ_BASE_SHIFT = 5;
-const VLQ_BASE = 1 << VLQ_BASE_SHIFT;
-const VLQ_BASE_MASK = VLQ_BASE - 1;
-const VLQ_CONTINUATION_BIT = VLQ_BASE;
-
-function encodeVlqFields(fields: readonly number[]): string {
-  return fields.map((field) => encodeVlqInteger(field)).join("");
-}
-
-function encodeVlqInteger(value: number): string {
-  let vlq = value < 0 ? (-value << 1) + 1 : value << 1;
-  let encoded = "";
-
-  do {
-    let digit = vlq & VLQ_BASE_MASK;
-    vlq >>>= VLQ_BASE_SHIFT;
-
-    if (vlq > 0) {
-      digit |= VLQ_CONTINUATION_BIT;
-    }
-
-    encoded += BASE64_VLQ_CHARS[digit];
-  } while (vlq > 0);
-
-  return encoded;
 }

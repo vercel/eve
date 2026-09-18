@@ -590,6 +590,28 @@ async function settleAsyncWork(): Promise<void> {
 }
 
 describe("EveTUIRunner agent header", () => {
+  it("opens the prompt after two seconds when startup inspection stalls", async () => {
+    vi.useFakeTimers();
+    const client = stubClient();
+    vi.spyOn(client, "info").mockImplementation(
+      async () => await new Promise<AgentInfoResult>(() => {}),
+    );
+    const renderer = fakeRenderer();
+    const runner = new EveTUIRunner({
+      session: stubSession(),
+      client,
+      renderer,
+      serverUrl: "http://localhost:3000",
+    });
+    const run = runner.run();
+    await vi.advanceTimersByTimeAsync(1999);
+    expect(renderer.readPrompt).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    await run;
+    expect(renderer.readPrompt).toHaveBeenCalled();
+    expect(client.info).toHaveBeenCalledOnce();
+  });
+
   it("reports the paint boundary before rendering the startup header", async () => {
     const order: string[] = [];
     const client = stubClient();
@@ -785,6 +807,7 @@ describe("EveTUIRunner agent header", () => {
 
     const run = runner.run();
     await settleAsyncWork();
+    await vi.advanceTimersByTimeAsync(0);
     expect(headers).toHaveLength(1);
     expect(fetchMock).toHaveBeenCalledTimes(1);
 

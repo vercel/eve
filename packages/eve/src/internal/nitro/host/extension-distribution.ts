@@ -39,23 +39,28 @@ export async function emitExtensionDistribution(input: {
     stagedDistRoot: input.stagedDistRoot,
   });
   const entries = await createDistributionEntries({ ...input, moduleFiles });
-  const emitted = await bundleExtensionDistributionGraph({
-    entries,
-    packageRoot: input.appRoot,
-    runtimeDependencies: input.runtimeDependencies,
-  });
+  const [bundle, declarations] = await Promise.allSettled([
+    bundleExtensionDistributionGraph({
+      entries,
+      packageRoot: input.appRoot,
+      runtimeDependencies: input.runtimeDependencies,
+    }),
+    emitExtensionDeclarations({
+      appRoot: input.appRoot,
+      declarationsRoot: input.declarationsRoot,
+      moduleLogicalPaths: moduleFiles.map((file) => file.logicalPath),
+      sourceRoot: input.sourceRoot,
+    }),
+  ]);
+  if (bundle.status === "rejected") throw bundle.reason;
+  if (declarations.status === "rejected") throw declarations.reason;
+  const emitted = bundle.value;
   for (const [fileName, code] of emitted.files) {
     const outputPath = join(input.stagedOutDir, fileName);
     await mkdir(dirname(outputPath), { recursive: true });
     await writeFile(outputPath, code, "utf8");
   }
 
-  await emitExtensionDeclarations({
-    appRoot: input.appRoot,
-    declarationsRoot: input.declarationsRoot,
-    moduleLogicalPaths: moduleFiles.map((file) => file.logicalPath),
-    sourceRoot: input.sourceRoot,
-  });
   const sourceRelativePath = relative(input.appRoot, input.sourceRoot);
   try {
     await cp(join(input.declarationsRoot, sourceRelativePath), input.stagedDistRoot, {

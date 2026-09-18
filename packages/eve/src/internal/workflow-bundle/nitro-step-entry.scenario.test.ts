@@ -7,6 +7,27 @@ import { describe, expect, it } from "vitest";
 import { writeNitroStepEntrypoint } from "#internal/workflow-bundle/nitro-step-entry.js";
 
 describe("writeNitroStepEntrypoint", () => {
+  it("reuses discovered metadata without rereading step sources for a second output", async () => {
+    const root = await mkdtemp(join(tmpdir(), "eve-step-metadata-"));
+    try {
+      const manifest = { steps: { "step.ts": { work: { stepId: "step//work" } } } };
+      const outfile = join(root, "second", "steps.mjs");
+      const result = await writeNitroStepEntrypoint({
+        discoveredEntries: { discoveredSerdeFiles: [], discoveredSteps: [join(root, "step.ts")] },
+        precomputedManifest: manifest,
+        outfile,
+        preferAbsoluteFileImports: true,
+        projectRoot: root,
+        sideEffectFiles: [],
+        workingDir: root,
+      });
+      expect(result).toBe(manifest);
+      expect(await readFile(outfile, "utf8")).toContain("step.ts");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it("serializes Windows absolute imports as file URLs", async () => {
     const tempRoot = await mkdtemp(join(tmpdir(), "eve-nitro-step-entry-windows-"));
     const outfile = join(tempRoot, "build", "steps.mjs");

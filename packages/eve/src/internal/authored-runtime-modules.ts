@@ -5,6 +5,7 @@ import {
   bundleAuthoredModuleMapForGeneration,
 } from "#internal/authored-module-loader.js";
 import { resolveInstrumentationLayout } from "#internal/instrumentation-layout.js";
+import { mapConcurrent } from "#shared/map-concurrent.js";
 
 interface PreparedAuthoredRuntimeInstrumentation {
   readonly kind: "directory";
@@ -39,10 +40,12 @@ export async function prepareAuthoredRuntimeModules(input: {
   let instrumentation: PreparedAuthoredRuntimeInstrumentation | undefined;
 
   if (layout?.kind === "directory") {
-    const moduleCodeBySlot: Record<string, string> = {};
-    for (const [slot, sourcePath] of Object.entries(layout.modulePathsBySlot)) {
-      moduleCodeBySlot[slot] = await bundleInstrumentationModule(sourcePath);
-    }
+    const moduleCodeBySlot = Object.fromEntries(
+      await mapConcurrent(Object.entries(layout.modulePathsBySlot), async ([slot, sourcePath]) => [
+        slot,
+        await bundleInstrumentationModule(sourcePath),
+      ]),
+    );
     instrumentation = { kind: "directory", moduleCodeBySlot };
   }
 

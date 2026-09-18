@@ -92,8 +92,8 @@ export class Client {
    * shape). Inspection is best-effort: a working connection does not depend on
    * this route, so connection probes treat this distinctly from a failed request.
    */
-  async info(): Promise<AgentInfoResult> {
-    const response = await this.fetch(EVE_INFO_ROUTE_PATH);
+  async info(options: { readonly signal?: AbortSignal } = {}): Promise<AgentInfoResult> {
+    const response = await this.fetch(EVE_INFO_ROUTE_PATH, options);
 
     if (!response.ok) {
       const body = await response.text();

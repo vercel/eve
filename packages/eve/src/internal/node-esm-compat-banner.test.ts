@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   buildNodeEsmCompatBanner,
@@ -121,6 +121,39 @@ describe("buildNodeEsmCompatBanner", () => {
 });
 
 describe("createNodeEsmCompatBannerPlugin", () => {
+  it("does not parse chunks without possible compatibility declarations", () => {
+    const parse = vi.fn(() => EMPTY_PROGRAM);
+    const plugin = createNodeEsmCompatBannerPlugin();
+    const result = plugin.renderChunk.call({ parse }, "export const value = __dirname;");
+    expect(parse).not.toHaveBeenCalled();
+    expect(result?.code).toContain("const __dirname =");
+  });
+
+  it.each([
+    "let /* comment */ __dirname = '/';",
+    "var // comment\n__dirname = '/';",
+    "const first = (() => { return 1; })(), /* next */ __dirname = '/';",
+    String.raw`const __dirn\u0061me = '/';`,
+  ])("parses possible declarations: %s", (code) => {
+    const parse = vi.fn(() => programWithTopLevelBindings("__dirname"));
+    const result = createNodeEsmCompatBannerPlugin().renderChunk.call({ parse }, code);
+    expect(parse).toHaveBeenCalledOnce();
+    expect(result?.code).not.toContain("const __dirname = __eveDirname");
+  });
+
+  it("checks require declarations only when providing a require shim", () => {
+    const parse = vi.fn(() => programWithTopLevelBindings("require"));
+    const code = "const require = customRequire;";
+    createNodeEsmCompatBannerPlugin().renderChunk.call({ parse }, code);
+    expect(parse).not.toHaveBeenCalled();
+    const result = createNodeEsmCompatBannerPlugin({ includeRequire: true }).renderChunk.call(
+      { parse },
+      code,
+    );
+    expect(parse).toHaveBeenCalledOnce();
+    expect(result?.code).not.toContain("__eveCreateRequire");
+  });
+
   it("omits bindings declared later in a top-level variable list", () => {
     const plugin = createNodeEsmCompatBannerPlugin({ includeRequire: true });
     const chunk =

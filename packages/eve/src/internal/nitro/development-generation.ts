@@ -29,13 +29,28 @@ const developmentGenerationPruneStates = new Map<string, DevelopmentGenerationPr
 export async function stageDevelopmentGeneration(
   compileResult: CompileAgentResult,
 ): Promise<DevelopmentGeneration> {
-  const prepared = await prepareAuthoredRuntimeModules({
-    manifest: compileResult.manifest,
-    moduleMapPath: compileResult.paths.moduleMapPath,
-  });
-  const snapshot = await stageDevelopmentRuntimeArtifactsSnapshot(compileResult);
+  // Drain both operations before discarding a failed candidate's snapshot.
+  const [preparation, staging] = await Promise.allSettled([
+    prepareAuthoredRuntimeModules({
+      manifest: compileResult.manifest,
+      moduleMapPath: compileResult.paths.moduleMapPath,
+    }),
+    stageDevelopmentRuntimeArtifactsSnapshot(compileResult),
+  ]);
+  if (staging.status === "rejected") {
+    if (preparation.status === "rejected") {
+      throw new AggregateError(
+        [preparation.reason, staging.reason],
+        "Failed to stage development generation.",
+      );
+    }
+    throw staging.reason;
+  }
+  const snapshot = staging.value;
 
   try {
+    if (preparation.status === "rejected") throw preparation.reason;
+    const prepared = preparation.value;
     const materialized = await writeMaterializedAuthoredModules({
       prepared,
       runtimeAppRoot: snapshot.runtimeAppRoot,

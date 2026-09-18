@@ -576,7 +576,7 @@ async function writeWorkflowBundleAtomically(outfile: string, source: string): P
   await atomicWriteFile(outfile, source);
 }
 
-function mergeWorkflowManifest(target: WorkflowManifest, source: WorkflowManifest): void {
+export function mergeWorkflowManifest(target: WorkflowManifest, source: WorkflowManifest): void {
   target.steps = mergeWorkflowManifestSection(target.steps, source.steps);
   target.workflows = mergeWorkflowManifestSection(target.workflows, source.workflows);
   target.classes = mergeWorkflowManifestSection(target.classes, source.classes);

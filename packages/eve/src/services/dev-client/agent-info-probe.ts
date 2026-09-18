@@ -28,17 +28,41 @@ function sleep(delayMs: number): Promise<void> {
  */
 export async function probeAgentInfo(input: {
   readonly client: Pick<Client, "info">;
+  readonly timeoutMs?: number;
 }): Promise<AgentInfoProbeResult> {
+  const controller = new AbortController();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<AgentInfoProbeResult>((resolve) => {
+    timer = setTimeout(() => {
+      const error = new Error("Agent inspection timed out.");
+      controller.abort(error);
+      resolve({ kind: "unavailable", error });
+    }, input.timeoutMs ?? 5000);
+  });
   try {
-    return { kind: "ready", info: await input.client.info() };
+    // The deadline also bounds user-provided credential callbacks, which may ignore abort.
+    return await Promise.race([readAgentInfo(input.client, controller.signal), deadline]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function readAgentInfo(
+  client: Pick<Client, "info">,
+  signal: AbortSignal,
+): Promise<AgentInfoProbeResult> {
+  try {
+    return { kind: "ready", info: await client.info({ signal }) };
   } catch (error) {
-    if (!isRetryableAgentInfoFailure(error)) return { kind: "unavailable", error };
+    if (signal.aborted || !isRetryableAgentInfoFailure(error))
+      return { kind: "unavailable", error };
   }
 
   await sleep(RETRY_DELAY_MS);
 
   try {
-    return { kind: "ready", info: await input.client.info() };
+    signal.throwIfAborted();
+    return { kind: "ready", info: await client.info({ signal }) };
   } catch (error) {
     return { kind: "unavailable", error };
   }

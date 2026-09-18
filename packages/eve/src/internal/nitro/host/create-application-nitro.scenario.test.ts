@@ -655,7 +655,7 @@ describe("application Nitro creation", () => {
 
     const traceDeps = createNitroMock.mock.calls[0]?.[0].traceDeps;
     expect(traceDeps).toEqual(expect.arrayContaining(["zod*", "sharp", "sharp*"]));
-    const plugins = createNitroMock.mock.calls[0]?.[0].rolldownConfig.plugins;
+    const plugins = createNitroMock.mock.calls[0]?.[0].rollupConfig.plugins;
     const externalPlugin = plugins.find(
       (plugin: { name?: string }) => plugin.name === "eve-extension-external-dependency",
     );
@@ -846,6 +846,18 @@ describe("application Nitro creation", () => {
     const productionHost = await createPreparedHost();
     await createProductionApplicationNitro(productionHost, createProductionOptions(productionHost));
     await createDevelopmentApplicationNitro(await createPreparedHost());
+
+    for (const [options] of createNitroMock.mock.calls) {
+      const plugins = [
+        ...(options.rolldownConfig?.plugins ?? []),
+        ...(options.rollupConfig?.plugins ?? []),
+      ];
+      expect(plugins.filter((plugin) => plugin.name === "eve-node-esm-compat-banner")).toHaveLength(
+        1,
+      );
+      const names = plugins.map((plugin) => plugin.name);
+      expect(new Set(names).size).toBe(names.length);
+    }
 
     const productionConfig = { plugins: [] };
     for (const hook of productionNitroStub.hookHandlers.get("rollup:before") ?? []) {
