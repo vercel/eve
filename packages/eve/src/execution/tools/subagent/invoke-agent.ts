@@ -186,12 +186,4 @@ export function validateAgentInput(input: InternalAgentInput): void {
   if (typeof input.message !== "string" || input.message.trim() === "") {
     throw new TypeError("agent() requires a non-empty `message`.");
   }
-  if (
-    input.outputSchema !== undefined &&
-    (typeof input.outputSchema !== "object" ||
-      input.outputSchema === null ||
-      Array.isArray(input.outputSchema))
-  ) {
-    throw new TypeError("agent() `outputSchema` must be a JSON Schema object.");
-  }
 }
