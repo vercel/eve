@@ -11,6 +11,8 @@ concurrency:
   group: eve-code-swe-lean-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
+# OIDC alternative: add `id-token: write` here and omit `vercel-token` below
+# after configuring a matching Vercel team OIDC policy.
 permissions:
   contents: read
   actions: read
@@ -26,7 +28,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: vercel-labs/eve-bench
-          ref: 1c1fd161bab0681d962d3082d8b94f1b1771a345
+          ref: 350dfccb622491a37a32ffa7558c389b5dee8d69
           ssh-key: ${{ secrets.EVE_BENCH_SSH_KEY }}
           path: .eve-bench-runner
           persist-credentials: false
@@ -44,9 +46,9 @@ jobs:
           native-build: "false"
           baseline-artifact-id: ${{ vars.EVE_BENCH_BASELINE_ARTIFACT_ID }}
           artifact-name: eve-code-swe-lean
-          runner-revision: 1c1fd161bab0681d962d3082d8b94f1b1771a345
+          runner-revision: 350dfccb622491a37a32ffa7558c389b5dee8d69
           gateway-key: ${{ secrets.AI_GATEWAY_API_KEY }}
-          source-token: ${{ secrets.EVE_BENCH_SOURCE_TOKEN }}
+          source-token: ${{ github.token }}
           github-token: ${{ github.token }}
           vercel-token: ${{ secrets.VERCEL_TOKEN }}
           vercel-team-id: ${{ secrets.VERCEL_TEAM_ID }}
