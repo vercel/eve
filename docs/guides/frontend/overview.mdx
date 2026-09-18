@@ -157,7 +157,9 @@ change the option from `false` to `true` again, reset, or send a message to reco
 
 The hook keeps consuming one session stream across turns and idle periods. Replies,
 authorization updates, and turns started elsewhere all update the same projection, including
-background-task results that arrive during another send. Runtime-authored task input remains in the
+background-task results that arrive during another send. Separately delivered participant messages
+remain separate bubbles even when they steer the same active turn; a single event that coalesces
+multiple deliveries remains one bubble. Runtime-authored task input remains in the
 event stream with `data.kind: "execution.background_task"`, but the default reducer does not render
 it as a participant message. A turn settling does not close the connection. The transport reconnects from its cursor after a disconnect or the
 server's renewable 60-second lease; lease renewal does not start a turn or clear UI state.
@@ -322,7 +324,7 @@ const agent = useEveAgent({
 });
 ```
 
-The `optimistic` option (default `true`) projects submitted user messages into `data` before eve confirms them with a `message.received` event. These are reducer-facing projection events only. `events` stays the authoritative eve stream.
+The `optimistic` option (default `true`) projects submitted user messages into `data` before eve confirms them with a `message.received` event. These are reducer-facing projection events only. `events` stays the authoritative eve stream. For an existing session, the hook reconciles each placeholder with the server's delivery ID, so an unrelated or identical message cannot consume it.
 
 ## Custom reducer
 

@@ -5,16 +5,20 @@ import type {
   EveAgentStoreInit,
   EveAgentStoreSnapshot,
   EveAgentStoreStatus,
-  PendingMessageSubmission,
   PrepareSend,
 } from "#client/eve-agent-store-state.js";
-import { consumeMessageResponse, type MessageResponse } from "#client/message-response.js";
+import {
+  consumeMessageResponse,
+  getMessageResponseDeliveryId,
+  type MessageResponse,
+} from "#client/message-response.js";
 import {
   SessionEventStream,
   type SessionEventReader,
   type SessionEventStreamOptions,
 } from "#client/session-event-stream.js";
 import { EveAgentProjection } from "#client/eve-agent-projection.js";
+import { OptimisticMessageSubmissions } from "#client/optimistic-message-submissions.js";
 import type { ClientSession } from "#client/session.js";
 import { createEventDeduper } from "#protocol/event-dedupe.js";
 import { isCurrentTurnBoundaryEvent, type MessageStreamEvent } from "#protocol/message.js";
@@ -23,10 +27,8 @@ import {
   createAbortSignal,
   createActiveTurn,
   followSteeredTurns,
-  createSubmissionId,
   isAbortError,
   isSettledSessionTail,
-  summarizeUserContent,
   toTerminalStreamFailureError,
   waitWithSignal,
 } from "#client/eve-agent-store-helpers.js";
@@ -68,7 +70,7 @@ export class EveAgentStore<TData> {
   #callbacks: EveAgentStoreCallbacks<TData> = {};
   #error: Error | undefined;
   #events: readonly MessageStreamEvent[];
-  #pendingMessageSubmissions: readonly PendingMessageSubmission[] = [];
+  readonly #messageSubmissions: OptimisticMessageSubmissions<TData>;
   #prewarmGeneration = 0;
   #prewarmPromise: Promise<void> | undefined;
   #prewarmController: AbortController | undefined;
@@ -97,6 +99,7 @@ export class EveAgentStore<TData> {
     this.#events = initialEvents;
     this.#projection = new EveAgentProjection(init.reducer, this.#events);
     this.#optimistic = init.optimistic ?? true;
+    this.#messageSubmissions = new OptimisticMessageSubmissions(this.#projection, this.#optimistic);
     this.#session =
       init.session ??
       (init.initialSession === undefined
@@ -218,7 +221,7 @@ export class EveAgentStore<TData> {
         return;
       }
 
-      this.#projectOptimisticMessage(preparedInput);
+      const submissionId = this.#messageSubmissions.submit(preparedInput, this.#events.length);
       this.#projectInputResponses(preparedInput);
       this.#publish();
 
@@ -233,9 +236,21 @@ export class EveAgentStore<TData> {
       if (!this.#isActiveTurn(turn)) return;
       turn.resolveResponse(response);
 
+      if (
+        this.#handleReconciliation(
+          this.#messageSubmissions.correlate(
+            submissionId,
+            getMessageResponseDeliveryId(response),
+            this.#events,
+          ),
+        )
+      ) {
+        this.#publish();
+      }
       for await (const event of consumeMessageResponse(response, reader)) {
         if (!this.#isActiveTurn(turn)) return;
-        if (turn.receivedFollowUpEvents.delete(event)) turn.receivedFollowUps += 1;
+        turn.receivedFollowUps += turn.receivedFollowUpEvents.get(event) ?? 0;
+        turn.receivedFollowUpEvents.delete(event);
       }
 
       if (!this.#isActiveTurn(turn)) {
@@ -252,12 +267,12 @@ export class EveAgentStore<TData> {
 
       if (isAbortError(error)) {
         this.#status = "ready";
-        this.#failPendingMessageSubmission(toError(error));
+        this.#messageSubmissions.fail(toError(error));
       } else {
         const reported = this.#error !== undefined;
         this.#error ??= toError(error);
         this.#status = "error";
-        this.#failPendingMessageSubmission(this.#error);
+        this.#messageSubmissions.fail(this.#error);
         if (!reported) this.#callbacks.onError?.(this.#error);
       }
     } finally {
@@ -316,7 +331,8 @@ export class EveAgentStore<TData> {
         this.#publish();
         for await (const event of reader) {
           if (!this.#isActiveTurn(turn)) return;
-          if (turn.receivedFollowUpEvents.delete(event)) turn.receivedFollowUps += 1;
+          turn.receivedFollowUps += turn.receivedFollowUpEvents.get(event) ?? 0;
+          turn.receivedFollowUpEvents.delete(event);
           if (isCurrentTurnBoundaryEvent(event) && this.#pendingAuthorizations.size === 0) break;
         }
       }
@@ -380,7 +396,7 @@ export class EveAgentStore<TData> {
     if (!this.#externalSession) this.#session = undefined;
     this.#events = [];
     this.#seenEvents = createEventDeduper();
-    this.#pendingMessageSubmissions = [];
+    this.#messageSubmissions.reset();
     this.#projection.reset();
     this.#error = undefined;
     this.#status = "ready";
@@ -411,7 +427,7 @@ export class EveAgentStore<TData> {
     }
     if (!this.#isActiveTurn(turn)) return await this.#submit(preparedInput);
 
-    const submissionId = this.#projectOptimisticMessage(preparedInput);
+    const submissionId = this.#messageSubmissions.submit(preparedInput, this.#events.length);
     if (submissionId !== undefined) turn.followUpSubmissionIds.add(submissionId);
     this.#publish();
     this.#ensureStream({
@@ -428,11 +444,22 @@ export class EveAgentStore<TData> {
           throw new Error("The active eve turn ended before the follow-up could be sent.");
         }
         const { message, ...options } = preparedInput;
-        await this.#session.send(message, { ...options, signal });
+        const response = await this.#session.send(message, { ...options, signal });
         turn.acceptedFollowUps += 1;
+        if (
+          this.#handleReconciliation(
+            this.#messageSubmissions.correlate(
+              submissionId,
+              getMessageResponseDeliveryId(response),
+              this.#events,
+            ),
+          )
+        ) {
+          this.#publish();
+        }
       } catch (error) {
         if (this.#isActiveTurn(turn)) {
-          this.#failPendingMessageSubmission(toError(error), submissionId);
+          this.#messageSubmissions.fail(toError(error), submissionId);
           this.#publish();
         }
         throw error;
@@ -547,30 +574,6 @@ export class EveAgentStore<TData> {
     return this.#activeTurn === turn;
   }
 
-  #projectOptimisticMessage(input: SendTurnPayload): string | undefined {
-    if (input.message === undefined) {
-      return undefined;
-    }
-
-    const id = createSubmissionId();
-    const pending = {
-      createdAt: Date.now(),
-      id,
-      message: summarizeUserContent(input.message),
-    };
-    this.#pendingMessageSubmissions = [...this.#pendingMessageSubmissions, pending];
-    if (this.#optimistic)
-      this.#projection.append({
-        data: {
-          createdAt: pending.createdAt,
-          message: pending.message,
-          submissionId: pending.id,
-        },
-        type: "client.message.submitted",
-      });
-    return id;
-  }
-
   #projectInputResponses(input: SendTurnPayload): void {
     if (input.inputResponses === undefined || input.inputResponses.length === 0) {
       return;
@@ -590,7 +593,7 @@ export class EveAgentStore<TData> {
     const wasStreaming = this.#status === "streaming";
     updatePendingAuthorizations(this.#pendingAuthorizations, event);
     this.#events = [...this.#events, event];
-    this.#applyServerEvent(event);
+    this.#handleReconciliation(this.#messageSubmissions.apply(event));
     this.#callbacks.onEvent?.(event);
     this.#applyTerminalStreamFailure(event);
     const settled = isCurrentTurnBoundaryEvent(event) && this.#pendingAuthorizations.size === 0;
@@ -605,23 +608,23 @@ export class EveAgentStore<TData> {
     }
   }
 
-  #applyServerEvent(event: MessageStreamEvent): void {
-    const pendingSubmission = this.#pendingMessageSubmissions[0];
-    if (event.type === "message.received" && pendingSubmission !== undefined) {
-      const submissionId = pendingSubmission.id;
-      if (this.#activeTurn?.followUpSubmissionIds.delete(submissionId))
-        this.#activeTurn.receivedFollowUpEvents.add(event);
-      this.#pendingMessageSubmissions = this.#pendingMessageSubmissions.slice(1);
-      this.#projection.replace(
-        (candidate) =>
-          candidate.type === "client.message.submitted" &&
-          candidate.data.submissionId === submissionId,
-        event,
-      );
-      return;
+  #handleReconciliation(
+    reconciliation: ReturnType<OptimisticMessageSubmissions<TData>["apply"]>,
+  ): boolean {
+    if (reconciliation === undefined) return false;
+    let followed = 0;
+    for (const id of reconciliation.ids) {
+      if (this.#activeTurn?.followUpSubmissionIds.delete(id)) followed += 1;
     }
-
-    this.#projection.append(event);
+    if (followed > 0 && this.#activeTurn !== undefined) {
+      if (reconciliation.alreadyProjected) {
+        this.#activeTurn.receivedFollowUps += followed;
+      } else {
+        const previous = this.#activeTurn.receivedFollowUpEvents.get(reconciliation.event) ?? 0;
+        this.#activeTurn.receivedFollowUpEvents.set(reconciliation.event, previous + followed);
+      }
+    }
+    return true;
   }
 
   #applyTerminalStreamFailure(event: MessageStreamEvent): void {
@@ -631,39 +634,12 @@ export class EveAgentStore<TData> {
     }
 
     this.#status = "error";
-    this.#failPendingMessageSubmission(error);
+    this.#messageSubmissions.failAll(error);
 
     if (this.#error === undefined) {
       this.#error = error;
       this.#callbacks.onError?.(error);
     }
-  }
-
-  #failPendingMessageSubmission(error: Error, submissionId?: string): void {
-    const pending =
-      submissionId === undefined
-        ? this.#pendingMessageSubmissions[0]
-        : this.#pendingMessageSubmissions.find((candidate) => candidate.id === submissionId);
-    if (pending === undefined) return;
-
-    this.#pendingMessageSubmissions = this.#pendingMessageSubmissions.filter(
-      (candidate) => candidate.id !== pending.id,
-    );
-    this.#projection.replace(
-      (event) =>
-        event.type === "client.message.submitted" && event.data.submissionId === pending.id,
-      {
-        data: {
-          createdAt: pending.createdAt,
-          error: {
-            message: error.message,
-          },
-          message: pending.message,
-          submissionId: pending.id,
-        },
-        type: "client.message.failed",
-      },
-    );
   }
 
   #createSnapshot(): EveAgentStoreSnapshot<TData> {

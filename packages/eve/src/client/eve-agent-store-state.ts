@@ -66,8 +66,11 @@ export interface EveAgentStoreInit<TData> {
 
 export interface PendingMessageSubmission {
   readonly createdAt: number;
+  readonly eventStartIndex: number;
   readonly id: string;
   readonly message: string;
+  readonly requiresDeliveryId: boolean;
+  readonly deliveryId?: string;
 }
 
 export interface ActiveTurn {
@@ -77,7 +80,7 @@ export interface ActiveTurn {
   readonly completion: Promise<void>;
   readonly followUpDispatches: Set<Promise<void>>;
   receivedFollowUps: number;
-  readonly receivedFollowUpEvents: Set<MessageStreamEvent>;
+  readonly receivedFollowUpEvents: Map<MessageStreamEvent, number>;
   readonly followUpSubmissionIds: Set<string>;
   readonly resolveCompletion: () => void;
   readonly response: Promise<MessageResponse | undefined>;

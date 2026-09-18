@@ -26,6 +26,11 @@ export class EveAgentProjection<TData> {
     this.#data = this.#reducer.reduce(this.#data, event);
   }
 
+  remove(predicate: (event: EveAgentReducerEvent) => boolean): void {
+    this.#events = this.#events.filter((event) => !predicate(event));
+    this.#data = this.#reduce();
+  }
+
   replace(
     predicate: (event: EveAgentReducerEvent) => boolean,
     replacement: EveAgentReducerEvent,
