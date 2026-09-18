@@ -1,5 +1,8 @@
 import { parseWithNitroRolldownAst } from "#internal/bundler/nitro-rolldown.js";
-import { readWorkflowDirective } from "#internal/workflow-bundle/workflow-directive-ast.js";
+import {
+  mayContainWorkflowDirective,
+  readWorkflowDirective,
+} from "#internal/workflow-bundle/workflow-directive-ast.js";
 
 const HOISTED_EXECUTE_NAME = "execute";
 
@@ -54,6 +57,9 @@ export async function prepareAuthoredWorkflowDirectives(input: {
   readonly filePath: string;
   readonly source: string;
 }): Promise<AuthoredWorkflowDirectiveSource> {
+  if (!mayContainWorkflowDirective(input.source) && !input.source.includes("eve/workflow")) {
+    return { hasDirectives: false, hasWorkflowDirective: false, source: input.source };
+  }
   const parsePath = /\.[cm]?js$/.test(input.filePath) ? `${input.filePath}.jsx` : input.filePath;
   const program = (await parseWithNitroRolldownAst(parsePath, input.source)) as AstProgram;
   const body = program.body ?? [];

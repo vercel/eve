@@ -43,6 +43,7 @@ export interface DevelopmentRuntimeArtifactsRevision {
 }
 
 export interface DevelopmentRuntimeArtifactsSnapshot {
+  readonly sourceWatchPaths?: readonly string[];
   readonly runtimeAppRoot: string;
   readonly snapshotRoot: string;
   readonly snapshotSourceRoot: string;
@@ -139,6 +140,7 @@ export async function stageDevelopmentRuntimeArtifactsSnapshot(
   }
 
   return {
+    sourceWatchPaths: sourceSnapshotPlan.watchPaths,
     runtimeAppRoot: sourceSnapshotPlan.runtimeAppRoot,
     snapshotRoot,
     snapshotSourceRoot: sourceSnapshotPlan.snapshotSourceRoot,

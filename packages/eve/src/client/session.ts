@@ -221,6 +221,7 @@ export class ClientSession {
       cancelTurn: async (turnId) => await this.cancel({ turnId }),
       createStream: (source) =>
         this.#createEventStream(initialStreamIndex, input, deliveryId, source),
+      deliveryId,
       sessionId: this.#state.sessionId,
     });
   }

@@ -85,7 +85,7 @@ export function createActiveTurn(
     completion: completion.promise,
     followUpDispatches: new Set(),
     receivedFollowUps: 0,
-    receivedFollowUpEvents: new Set(),
+    receivedFollowUpEvents: new Map(),
     followUpSubmissionIds: new Set(),
     resolveCompletion: completion.resolve,
     response: response.promise,
@@ -105,7 +105,8 @@ export async function followSteeredTurns(
   if (turn.receivedFollowUps >= turn.acceptedFollowUps) return;
   for await (const event of events) {
     if (!isActive()) return;
-    if (turn.receivedFollowUpEvents.delete(event)) turn.receivedFollowUps += 1;
+    turn.receivedFollowUps += turn.receivedFollowUpEvents.get(event) ?? 0;
+    turn.receivedFollowUpEvents.delete(event);
     if (isCurrentTurnBoundaryEvent(event)) {
       while (turn.followUpDispatches.size > 0) {
         await Promise.allSettled(turn.followUpDispatches);

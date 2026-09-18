@@ -11,10 +11,12 @@ interface MessageResponseInput {
   readonly createStream: (
     source?: AsyncIterable<MessageStreamEvent>,
   ) => AsyncGenerator<MessageStreamEvent>;
+  readonly deliveryId?: string;
   readonly sessionId: string;
 }
 
 const consumeResponse = Symbol("consumeMessageResponse");
+const acceptedDeliveryId = Symbol("acceptedDeliveryId");
 
 /**
  * The response from {@link ClientSession.send}.
@@ -28,6 +30,7 @@ export class MessageResponse<TOutput = unknown> implements AsyncIterable<Message
    * Session ID assigned by the server.
    */
   readonly sessionId: string;
+  readonly [acceptedDeliveryId]: string | undefined;
 
   readonly #cancelTurn: (turnId: string) => Promise<CancelSessionResult>;
   #cancellation: Promise<CancelSessionResult> | undefined;
@@ -40,6 +43,7 @@ export class MessageResponse<TOutput = unknown> implements AsyncIterable<Message
   constructor(input: MessageResponseInput) {
     this.#cancelTurn = input.cancelTurn;
     this.sessionId = input.sessionId;
+    this[acceptedDeliveryId] = input.deliveryId;
     this.#createStream = input.createStream;
   }
 
@@ -122,6 +126,11 @@ export class MessageResponse<TOutput = unknown> implements AsyncIterable<Message
       this.#turnId.resolve(undefined);
     }
   }
+}
+
+/** @internal Returns the accepted message identity without consuming its response stream. */
+export function getMessageResponseDeliveryId(response: MessageResponse): string | undefined {
+  return response[acceptedDeliveryId];
 }
 
 /** @internal Observe a turn through the frontend's existing session stream. */

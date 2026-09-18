@@ -13,12 +13,14 @@ import {
   createInputRequestedEvent,
   createMessageAppendedEvent,
   createMessageCompletedEvent,
+  createMessageReceivedEvent,
   createReasoningAppendedEvent,
   createReasoningCompletedEvent,
   createResultCompletedEvent,
   createStepStartedEvent,
   createTurnCancelledEvent,
   createTurnFailedEvent,
+  type MessageStreamEvent,
   type UnstampedMessageStreamEvent,
 } from "#protocol/message.js";
 
@@ -1263,6 +1265,72 @@ describe("defaultMessageReducer", () => {
       },
       { type: "step-start" },
     ]);
+  });
+
+  it("preserves separate participant messages received within one turn", () => {
+    const reducer = defaultMessageReducer();
+    const events = stampTestEvents([
+      createMessageReceivedEvent({ message: "test message", sequence: 0, turnId: "turn_1" }),
+      createMessageReceivedEvent({ message: "a", sequence: 1, turnId: "turn_1" }),
+    ]).map((event, index) => ({
+      ...event,
+      meta: { ...event.meta, deliveryIds: [`delivery_${index}`] },
+    }));
+    const reduce = () =>
+      events.reduce((data, event) => reducer.reduce(data, event), reducer.initial());
+
+    const data = reduce();
+    expect(data.messages.map((message) => message.id)).toEqual(
+      events.map((event) => `${event.meta.id}:user`),
+    );
+    expect(data.messages.map((message) => message.parts)).toEqual([
+      [{ state: "done", text: "test message", type: "text" }],
+      [{ state: "done", text: "a", type: "text" }],
+    ]);
+    expect(reduce().messages.map((message) => message.id)).toEqual(
+      data.messages.map((message) => message.id),
+    );
+  });
+
+  it("projects one bubble for one coalesced participant event", () => {
+    const reducer = defaultMessageReducer();
+    const [event] = stampTestEvents([
+      createMessageReceivedEvent({ message: "first\n\nsecond", sequence: 0, turnId: "turn_1" }),
+    ]).map((candidate) => ({
+      ...candidate,
+      meta: { ...candidate.meta, deliveryIds: ["delivery_1", "delivery_2"] },
+    }));
+    const data = reducer.reduce(reducer.initial(), event!);
+
+    expect(data.messages).toHaveLength(1);
+    expect(data.messages[0]?.parts).toEqual([
+      { state: "done", text: "first\n\nsecond", type: "text" },
+    ]);
+  });
+
+  it("uses a stable fallback id for legacy received events", () => {
+    const reducer = defaultMessageReducer();
+    const event = {
+      ...createMessageReceivedEvent({ message: "legacy", sequence: 2, turnId: "turn_1" }),
+      meta: { at: "2026-07-27T18:04:11.912Z" },
+    } as MessageStreamEvent;
+
+    const data = reducer.reduce(reducer.initial(), event);
+    expect(data.messages[0]?.id).toBe("turn_1:2:user");
+  });
+
+  it("does not project framework-authored task input", () => {
+    const reducer = defaultMessageReducer();
+    const [event] = stampTestEvents([
+      createMessageReceivedEvent({
+        kind: "execution.background_task",
+        message: "Task completed",
+        sequence: 1,
+        turnId: "turn_1",
+      }),
+    ]);
+
+    expect(reducer.reduce(reducer.initial(), event!).messages).toEqual([]);
   });
 
   it("projects structured file parts from message.received onto the user message", () => {

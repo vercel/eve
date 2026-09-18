@@ -98,7 +98,7 @@ function completedTurnData(input: {
   return {
     messages: [
       {
-        id: `${input.turnId}:user`,
+        id: expect.stringMatching(/^evt_.+:user$/),
         metadata: {
           status: "complete",
           turnId: input.turnId,

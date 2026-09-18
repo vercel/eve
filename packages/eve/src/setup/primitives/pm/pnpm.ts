@@ -16,6 +16,7 @@ export const PNPM_WORKSPACE_MEMBERSHIP_ARGUMENTS = ["list", "--depth", "-1", "--
 const SHARP_BUILD_POLICY = "  sharp: false";
 
 export const PNPM_WORKSPACE_CONTENT = [
+  "minimumReleaseAge: 0",
   "minimumReleaseAgeStrict: true",
   "allowBuilds:",
   SHARP_BUILD_POLICY,

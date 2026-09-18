@@ -20,6 +20,7 @@ export async function writeNitroStepEntrypoint(input: {
   readonly builtinsPath?: string;
   readonly discoveredEntries: NitroStepEntrypointDiscoveredEntries;
   readonly outfile: string;
+  readonly precomputedManifest?: WorkflowManifest | undefined;
   readonly preferAbsoluteFileImports?: boolean;
   readonly projectRoot: string;
   readonly sideEffectFiles: readonly string[];
@@ -30,12 +31,14 @@ export async function writeNitroStepEntrypoint(input: {
   const serdeOnlyFiles = [...input.discoveredEntries.discoveredSerdeFiles]
     .sort()
     .filter((filePath) => !stepFileSet.has(filePath));
-  const manifest = await collectNitroStepManifest({
-    projectRoot: input.projectRoot,
-    stepFiles,
-    serdeOnlyFiles,
-    workingDir: input.workingDir,
-  });
+  const manifest =
+    input.precomputedManifest ??
+    (await collectNitroStepManifest({
+      projectRoot: input.projectRoot,
+      stepFiles,
+      serdeOnlyFiles,
+      workingDir: input.workingDir,
+    }));
   const outfileDirectory = dirname(input.outfile);
   const builtinsImportSpecifier =
     input.builtinsPath === undefined

@@ -724,7 +724,7 @@ export class EveTUIRunner {
         try {
           const probe = await devBootPhase(
             "connecting to agent",
-            () => probeAgentInfo({ client }),
+            () => probeAgentInfo({ client, timeoutMs: 2000 }),
             this.#onBootProgress,
           );
           if (probe.kind === "ready") info = probe.info;
