@@ -4,6 +4,7 @@ import { mockModel } from "eve/evals";
 
 export default defineAgent({
   ...e2eAgentConfig(),
+  description: "Handle general tasks that do not belong to a specialist.",
   model: mockModel({
     modelId: "agent-router-parent",
     respond(request) {

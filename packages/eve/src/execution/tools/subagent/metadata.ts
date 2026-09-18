@@ -6,7 +6,7 @@ import {
 } from "#context/keys.js";
 import type { ContextReader } from "#context/key.js";
 import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
-import { AGENT_TOOL_DESCRIPTION, AGENT_TOOL_NAME } from "#tools/framework/agent-contract.js";
+import { AGENT_TOOL_NAME } from "#tools/framework/agent-contract.js";
 import type { WorkflowAgentMetadata } from "#tools/workflow-definition.js";
 
 /** Snapshots callable agent metadata for one workflow tool run. */
@@ -19,7 +19,7 @@ export function resolveWorkflowAgentMetadata(
 
   if (bundle.nodeId === undefined && ctx.get(ParentSessionKey) === undefined) {
     agents.set(AGENT_TOOL_NAME, {
-      description: bundle.resolvedAgent.config?.description ?? AGENT_TOOL_DESCRIPTION,
+      description: bundle.resolvedAgent.config?.description ?? "",
     });
   }
 

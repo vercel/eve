@@ -8,7 +8,6 @@ import {
 } from "#context/keys.js";
 import { resolveWorkflowAgentMetadata } from "#execution/tools/subagent/metadata.js";
 import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
-import { AGENT_TOOL_DESCRIPTION } from "#tools/framework/agent-contract.js";
 
 describe("resolveWorkflowAgentMetadata", () => {
   it("includes root self-delegation and hidden static subagents", () => {
@@ -35,11 +34,11 @@ describe("resolveWorkflowAgentMetadata", () => {
     });
   });
 
-  it("uses the built-in self-delegation description when the root has none", () => {
+  it("includes root self-delegation with an empty description when the root has none", () => {
     const ctx = context({ nodeId: undefined, subagentsByName: new Map() });
 
     expect(resolveWorkflowAgentMetadata(ctx)).toEqual({
-      agent: { description: AGENT_TOOL_DESCRIPTION },
+      agent: { description: "" },
     });
   });
 

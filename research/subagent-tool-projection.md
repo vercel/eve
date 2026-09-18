@@ -51,7 +51,7 @@ Each compiled agent node records its selected tools and source-composition decis
 
 ## Workflow metadata
 
-A workflow tool receives `ctx.agents`, a replay-stable snapshot of effective callable-agent descriptions keyed by invocation name. In a top-level root session, the snapshot includes the built-in root-copy `agent` target plus model-visible and hidden local, remote, and active dynamic subagents. Delegated root-copy and declared subagent contexts include only their declared targets because recursive root copying is unavailable. The snapshot contains no model definitions, credentials, or callbacks. Workflow invocation remains separate:
+A workflow tool receives `ctx.agents`, a replay-stable snapshot of effective callable-agent descriptions keyed by invocation name. In a top-level root session, the snapshot includes the built-in root-copy `agent` target plus model-visible and hidden local, remote, and active dynamic subagents. The root-copy entry carries an empty description when the root omits its optional description. Delegated root-copy and declared subagent contexts include only their declared targets because recursive root copying is unavailable. The snapshot contains no model definitions, credentials, or callbacks. Workflow invocation remains separate:
 
 ```ts
 const target = await chooseTarget(task, {
@@ -64,4 +64,4 @@ return ctx.agent(target, { message: task });
 
 The owner snapshots metadata when it starts the workflow run. Older in-flight workflow payloads default to an empty metadata registry. `ctx.agent()` still validates availability at invocation time, so a dynamic agent that becomes unavailable after the snapshot cannot be invoked through stale metadata.
 
-The provided `agentRouter()` workflow tool sends its input message and the complete `ctx.agents` description map to the default evaluation model (`typesafe-ai/jev`), then invokes the selected name. It forwards an optional output schema and rejects an empty target map before evaluation. Authors use `defineWorkflowTool` directly when routing requires a subset, custom instructions, or a non-default evaluator.
+The provided `agentRouter()` workflow tool filters `ctx.agents` to entries with non-empty descriptions, sends its input message and that description map to the default evaluation model (`typesafe-ai/jev`), then invokes the selected name. It forwards an optional output schema and rejects an empty target map before evaluation. Authors use `defineWorkflowTool` directly when routing requires a subset, custom instructions, or a non-default evaluator.
