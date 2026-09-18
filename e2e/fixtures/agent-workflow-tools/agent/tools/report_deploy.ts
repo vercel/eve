@@ -4,8 +4,8 @@ import { z } from "zod";
 import { describePlan, hashPlan } from "../lib/plan.ts";
 
 /**
- * Background workflow tool: the model gets a receipt, yields durable progress,
- * and wakes the agent with its terminal cohort report.
+ * Background workflow tool: the model gets a receipt, intermediate yields are consumed,
+ * and the return value reaches the parent in the terminal cohort report.
  */
 export default defineWorkflowTool({
   description: "Plan a deploy in the background and report when it is ready.",

@@ -32,12 +32,12 @@ export default defineTaskEval({
     await driver.active(parent);
 
     await driver.release(a);
-    // Owner completion includes the awaited wakeTaskParentStep, unlike child stream completion.
+    // Owner completion includes the awaited terminal notification, unlike child stream completion.
     await driver.settled("A");
     await driver.active(parent);
     await driver.release(b);
-    // This owner had exactly one agent invocation. Its second agent-request
-    // forwarding step is settlement, and must precede its successful task wake.
+    // This owner sends three notifications: agent invocation, agent settlement,
+    // and task completion. All must be delivered before its run settles.
     await driver.settled("B", true);
     const child = await t.target.watchTurn(b.sessionId, { startIndex: 0 }).result();
     child.event("session.failed");

@@ -80,7 +80,7 @@ export function lifecycleDriver(t: EveEvalContext, key: string) {
         equals({
           marker,
           status: "completed",
-          deliveries: agent ? ["agent-request", "agent-request", "completed"] : ["completed"],
+          notificationCount: agent ? 3 : 1,
         }),
       );
     },

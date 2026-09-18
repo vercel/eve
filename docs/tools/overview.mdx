@@ -138,8 +138,8 @@ waits for a person, webhook, or timer.
 For background tools, `outputSchema` and `toModelOutput` describe the fixed receipt. The body's
 return value is available through the completed task's output.
 
-The `TaskExec` argument and `task.postMessage` have been removed. Yield values for stream-only
-progress, and return the terminal result. In a workflow body, keep values needed after a wait in local variables; workflow replay
+The `TaskExec` argument and `task.postMessage` have been removed. Return the terminal result;
+background yields are consumed without publishing progress or retaining a task-progress stream. In a workflow body, keep values needed after a wait in local variables; workflow replay
 reconstructs them across durable waits.
 Use [`ctx.ask`](/docs/tools/workflows#ask-a-human-ctxask) when the body needs an answer from the human.
 Background tools are a normal execution mode and need no root-agent flag. Built-in, declared local,
@@ -166,7 +166,7 @@ meaning depends on the tool's execution mode:
 | --------------------------------------------------- | --------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
 | `defineTool`, default execution                     | Earlier values are `action.partial` snapshots; the final yield becomes the tool result. | Last yielded value; a generator `return` value is ignored.                                                        |
 | `defineWorkflowTool`, default execution             | Every yield is an `action.partial` snapshot.                                            | Explicit return value; falls back to the last yield if the return is `null` or `undefined`, then to `null`.       |
-| `defineWorkflowTool` with `execution: "background"` | Stream-only task progress; does not request a parent-agent turn.                        | Explicit return value becomes the task output; no return completes with `null`. The last yield is not a fallback. |
+| `defineWorkflowTool` with `execution: "background"` | Consumed without publishing progress or requesting a parent-agent turn.                 | Explicit return value becomes the task output; no return completes with `null`. The last yield is not a fallback. |
 
 For a background workflow tool, return completes the task and throw fails it. The automatic
 cohort report is separate from the original tool call's receipt.

@@ -121,8 +121,8 @@ suspend independently. A default workflow tool can suspend too, with its origina
 still pending. Declare background work with `defineWorkflowTool`; `defineTool` always executes
 inside its initiating step.
 
-A generator's `yield` reports progress; an awaited workflow operation provides the durable wait.
-For background workflow tools, yields are stream-only. See [background execution](../tools#background-execution) and
+An awaited workflow operation provides the durable wait. A generator's `yield` reports progress
+in default execution; background workflow tools consume yields without publishing progress. See [background execution](../tools#background-execution) and
 [workflow suspension](../tools/workflows#how-suspension-works) for the execution and result rules.
 
 ## Message delivery and steering

@@ -2,15 +2,16 @@ import { createHook } from "#compiled/@workflow/core/index.js";
 
 import { claimHookOwnership, isHookConflictError } from "#execution/hook-ownership.js";
 import {
-  appendTaskProgressStep,
   emitTaskActivityStep,
   deliverTaskInputResponsesStep,
-  wakeTaskAgentRequestParentStep,
-  wakeTaskAuthorizationParentStep,
-  wakeTaskParentStep,
-  wakeTaskUpdateParentStep,
-  wakeWorkflowTaskInputRequestParentStep,
 } from "#execution/tasks/child/steps.js";
+import {
+  notifyTaskAgentRequest,
+  notifyTaskAuthorization,
+  notifyTaskParent,
+  notifyTaskUpdate,
+  notifyTaskInputRequest,
+} from "#execution/tasks/child/notifications.js";
 import type { BackgroundWorkflowToolRunInput } from "#execution/tools/workflow/types.js";
 import { resumeHookStep } from "#execution/tools/workflow/resume-hook-step.js";
 import type {
@@ -73,7 +74,7 @@ export async function createBackgroundWorkflowOwner(
     if (payload.kind === "task-command") {
       if (payload.command.kind === "ready") {
         if (!isTerminalTaskStatus(view.status)) return "start";
-        await wakeTaskParentStep({ token: input.parentContinuationToken, view });
+        await notifyTaskParent({ token: input.parentContinuationToken, view });
         return "stop";
       }
       if (payload.command.kind === "reject-dispatch") {
@@ -92,7 +93,7 @@ export async function createBackgroundWorkflowOwner(
     if (message.kind === "outcome") {
       const transitioned = applyTransition(message);
       if (transitioned || view.status === "cancelled") {
-        await wakeTaskParentStep({ token: input.parentContinuationToken, view });
+        await notifyTaskParent({ token: input.parentContinuationToken, view });
       }
       return;
     }
@@ -110,7 +111,7 @@ export async function createBackgroundWorkflowOwner(
       inputRequests: workflowToolRunInputRequests(request),
     });
     if (!accepted) return;
-    await wakeWorkflowTaskInputRequestParentStep({
+    await notifyTaskInputRequest({
       request,
       taskId: view.taskId,
       token: input.parentContinuationToken,
@@ -119,24 +120,12 @@ export async function createBackgroundWorkflowOwner(
 
   async function handleReport(report: WorkflowToolRunReport): Promise<void> {
     const index = updateIndex++;
-    if (isTerminalTaskStatus(view.status)) return;
-    if (view.metadata.kind === "subagent") {
-      await wakeTaskUpdateParentStep({
-        token: input.parentContinuationToken,
-        report,
-        updateIndex: index,
-        view,
-      });
-      return;
-    }
-    await appendTaskProgressStep({
-      progress: {
-        callId: report.from.callId,
-        kind: "task-progress",
-        taskId: view.taskId,
-        update: typeof report.update === "string" ? report.update : JSON.stringify(report.update),
-        updateIndex: index,
-      },
+    if (view.metadata.kind !== "subagent" || isTerminalTaskStatus(view.status)) return;
+    await notifyTaskUpdate({
+      token: input.parentContinuationToken,
+      report,
+      updateIndex: index,
+      view,
     });
   }
 
@@ -188,14 +177,14 @@ export async function createBackgroundWorkflowOwner(
       return;
     }
     if (request.kind === "authorization-request") {
-      await wakeTaskAuthorizationParentStep({
+      await notifyTaskAuthorization({
         request,
         taskId: view.taskId,
         token: input.parentContinuationToken,
       });
       return;
     }
-    await wakeTaskAgentRequestParentStep({
+    await notifyTaskAgentRequest({
       request: message,
       taskId: view.taskId,
       token: input.parentContinuationToken,
@@ -225,7 +214,7 @@ export async function createBackgroundWorkflowOwner(
         applyTransition({ kind: "answered", requestIds: [requestId] });
       }
 
-      await wakeTaskAuthorizationParentStep({
+      await notifyTaskAuthorization({
         request,
         taskId: view.taskId,
         token: input.parentContinuationToken,

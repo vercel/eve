@@ -1,12 +1,4 @@
-import { formatTaskNotification, formatTaskOutput } from "#tasks/notification.js";
-import { getWritable } from "#compiled/@workflow/core/index.js";
 import type { ActivityObserverConfig, SessionAuthContext, SessionCommand } from "#channel/types.js";
-import type {
-  WorkflowToolAuthorizationRequest,
-  WorkflowToolRunRequestMessage,
-  WorkflowToolRunReport,
-} from "#execution/tools/workflow/messages.js";
-import { workflowToolRunInputRequests } from "#execution/tools/workflow/owner-inbox.js";
 import { submitActivity } from "#execution/submit-activity.js";
 import { isTaskWorkflowTargetGone } from "#execution/tasks/workflow-target.js";
 import { resumeSessionInbox } from "#execution/session-inbox/resume.js";
@@ -14,17 +6,7 @@ import { resumeWorkflowToolRunAnswers } from "#execution/tools/workflow/answer.j
 import type { AnswerHookRoute } from "#harness/proxy-input-requests.js";
 import { createLogger } from "#internal/logging.js";
 import type { ActivityEventV1 } from "#protocol/activity.js";
-import {
-  isTerminalTaskStatus,
-  TASK_PROGRESS_STREAM_NAMESPACE,
-  taskAuthorizationRequestId,
-  type TaskAgentRequestDelivery,
-  type TaskAuthorizationEventDelivery,
-  type TaskInboundAnswerInput,
-  type TaskInputRequestDelivery,
-  type TaskProgress,
-  type TaskView,
-} from "#tasks/types.js";
+import type { TaskInboundAnswerInput, TaskView } from "#tasks/types.js";
 
 const log = createLogger("execution.tasks.run");
 
@@ -73,173 +55,20 @@ export function projectTaskActivity(input: {
   ];
 }
 
-/** Appends task progress without starting a parent turn. */
-export async function appendTaskProgressStep(input: {
-  readonly progress: TaskProgress;
-}): Promise<void> {
-  "use step";
-
-  const writable = getWritable<TaskProgress>({ namespace: TASK_PROGRESS_STREAM_NAMESPACE });
-  const writer = writable.getWriter();
-  try {
-    await writer.write(input.progress);
-  } finally {
-    writer.releaseLock();
-  }
-}
-
-/**
- * Wakes the parent session with a framework task notification.
- *
- * Rides the ordinary session delivery path: a parked parent starts a
- * turn carrying this message, while an active turn observes it at the
- * next safe boundary through the owner's normal delivery routing. A
- * parent whose session already ended is a tolerated no-op.
- */
-export async function wakeTaskParentStep(input: {
+/** All task notifications share delivery, retries, and ended-parent handling. */
+export async function deliverTaskNotificationStep(input: {
   readonly token: string;
-  readonly view: TaskView;
+  readonly command: Extract<SessionCommand, { readonly kind: "send" }>;
 }): Promise<void> {
   "use step";
 
-  const payload: { message: string; task?: { views: readonly TaskView[] } } = {
-    message: formatTaskNotification(input.view),
-  };
-  if (isTerminalTaskStatus(input.view.status)) payload.task = { views: [input.view] };
-  const command: SessionCommand = {
-    kind: "send",
-    payload,
-    taskDeliveryId: `${input.view.taskId}:ready:${input.view.status}`,
-  };
   try {
-    await resumeSessionInbox(input.token, command);
-  } catch (error) {
-    if (isTaskWorkflowTargetGone(error)) {
-      log.warn("task wake target is gone; the parent session already ended", {
-        status: input.view.status,
-        taskId: input.view.taskId,
-      });
-      return;
-    }
-    throw error;
-  }
-}
-
-/** Forwards a running child's intermediate update to its parent session. */
-export async function wakeTaskUpdateParentStep(input: {
-  readonly token: string;
-  readonly report: WorkflowToolRunReport;
-  readonly updateIndex: number;
-  readonly view: TaskView;
-}): Promise<void> {
-  "use step";
-
-  const command: SessionCommand = {
-    kind: "send",
-    payload: {
-      message: `Background task ${input.view.taskId} (${input.view.metadata.name}) update: ${formatTaskOutput(input.report.update)}`,
-    },
-    taskDeliveryId: `${input.view.taskId}:update:${input.view.taskId}:${input.updateIndex}:${input.report.from.callId}`,
-  };
-  try {
-    await resumeSessionInbox(input.token, command);
-  } catch (error) {
-    if (isTaskWorkflowTargetGone(error)) return;
-    throw error;
-  }
-}
-
-/** Forwards one agent spawn or settlement request to the parent session. */
-export async function wakeTaskAgentRequestParentStep(input: {
-  readonly request: WorkflowToolRunRequestMessage;
-  readonly taskId: string;
-  readonly token: string;
-}): Promise<void> {
-  "use step";
-
-  const request = input.request.request;
-  if (request.kind !== "agent-invoke" && request.kind !== "agent-settled") {
-    throw new Error("Cannot forward task input as an agent request.");
-  }
-  const delivery: TaskAgentRequestDelivery = {
-    replyTo: input.request.replyTo,
-    request,
-    taskId: input.taskId,
-  };
-  const invocationId =
-    request.kind === "agent-invoke" ? request.invocationId : `${request.result.callId}:settled`;
-  const command: SessionCommand = {
-    kind: "send",
-    payload: { task: { agentRequests: [delivery] } },
-    taskDeliveryId: `${input.taskId}:agent:${input.request.from.runId}:${invocationId}`,
-  };
-  try {
-    await resumeSessionInbox(input.token, command);
+    await resumeSessionInbox(input.token, input.command);
   } catch (error) {
     if (!isTaskWorkflowTargetGone(error)) throw error;
-  }
-}
-
-/** Re-emits a task child's authorization event through the parent channel. */
-export async function wakeTaskAuthorizationParentStep(input: {
-  readonly request: WorkflowToolAuthorizationRequest;
-  readonly taskId: string;
-  readonly token: string;
-}): Promise<void> {
-  "use step";
-
-  const { event: hookPayload } = input.request;
-  const data = hookPayload.event.data;
-  const payload: {
-    message?: string;
-    task: { authorizationEvents: TaskAuthorizationEventDelivery[] };
-  } = { task: { authorizationEvents: [{ hookPayload, taskId: input.taskId }] } };
-  if (hookPayload.event.type === "authorization.required") {
-    payload.message = `Background task ${input.taskId} needs authorization.`;
-  }
-  const command: SessionCommand = {
-    kind: "send",
-    payload,
-    taskDeliveryId: `${input.taskId}:authorization:${hookPayload.event.type}:${data.turnId}:${data.stepIndex}:${data.sequence}:${taskAuthorizationRequestId(hookPayload.event)}`,
-  };
-  try {
-    await resumeSessionInbox(input.token, command);
-  } catch (error) {
-    if (!isTaskWorkflowTargetGone(error)) throw error;
-  }
-}
-
-/** Sends a workflow-body question to the owning parent's pre-model router. */
-export async function wakeWorkflowTaskInputRequestParentStep(input: {
-  readonly request: WorkflowToolRunRequestMessage;
-  readonly taskId: string;
-  readonly token: string;
-}): Promise<void> {
-  "use step";
-
-  const coordinates = input.request.requestCoordinates ?? input.request.from;
-  const requests = workflowToolRunInputRequests(input.request);
-  const delivery: TaskInputRequestDelivery = {
-    replyTo: input.request.replyTo,
-    requests,
-    sequence: coordinates.sequence,
-    stepIndex: coordinates.stepIndex,
-    taskId: input.taskId,
-    turnId: coordinates.turnId,
-  };
-  const command: SessionCommand = {
-    kind: "send",
-    payload: {
-      task: {
-        inputRequests: [delivery],
-      },
-    },
-    taskDeliveryId: `${input.taskId}:input:${coordinates.turnId}:${coordinates.stepIndex}:${coordinates.sequence}`,
-  };
-  try {
-    await resumeSessionInbox(input.token, command);
-  } catch (error) {
-    if (!isTaskWorkflowTargetGone(error)) throw error;
+    log.warn("task notification target is gone; the parent session already ended", {
+      taskDeliveryId: input.command.taskDeliveryId,
+    });
   }
 }
 

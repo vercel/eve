@@ -3,12 +3,13 @@ import { satisfies } from "eve/evals/expect";
 
 export default defineEval({
   description:
-    "A background workflow tool returns a receipt, reports progress, and wakes the agent with its result.",
+    "A background workflow tool returns a receipt, consumes intermediate yields without progress notifications, and reports its return value.",
   async test(t) {
     const started = await t.send("WORKFLOW-REPORT-START");
     const conversation = started.session;
     started.expectOk();
     started.calledTool("report_deploy");
+    started.notEvent("action.partial");
 
     const receipt = started.requireToolCall("report_deploy");
     const taskId = readTaskId(receipt.output);
@@ -39,6 +40,7 @@ export default defineEval({
       ),
     );
     doneTurn.event("turn.started", { count: 1 });
+    doneTurn.notEvent("action.partial");
     doneTurn.notEvent("message.received", {
       data: (data) => messageText(data.message).includes("PROGRESS"),
     });

@@ -187,16 +187,6 @@ export interface TaskAgentRequestDelivery {
   readonly taskId: string;
 }
 
-export interface TaskProgress {
-  readonly callId: string;
-  readonly kind: "task-progress";
-  readonly taskId: string;
-  readonly update: JsonValue;
-  readonly updateIndex: number;
-}
-
-export const TASK_PROGRESS_STREAM_NAMESPACE = "eve.task.progress";
-
 export function isTerminalTaskStatus(status: TaskStatus): boolean {
   return status === "completed" || status === "failed" || status === "cancelled";
 }

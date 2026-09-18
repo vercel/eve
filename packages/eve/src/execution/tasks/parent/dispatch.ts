@@ -11,7 +11,7 @@ import {
   type TaskWorkflowInvocation,
 } from "#harness/workflow-invocations.js";
 import { sendTaskCommand } from "#execution/tasks/parent/run-parent.js";
-import { wakeTaskParentStep } from "#execution/tasks/child/steps.js";
+import { notifyTaskParent } from "#execution/tasks/child/notifications.js";
 import { sessionCommandHookToken } from "#execution/session-inbox/address.js";
 import {
   cancelTaskOwnedWork,
@@ -97,7 +97,7 @@ export async function cancelOwnedTask(input: {
   if (input.session !== undefined) {
     // Queue settlement even when the child cannot report. The parent records
     // this control result before routing queued notifications; late outcomes lose.
-    await wakeTaskParentStep({
+    await notifyTaskParent({
       token: sessionCommandHookToken(input.session.sessionId),
       view,
     });

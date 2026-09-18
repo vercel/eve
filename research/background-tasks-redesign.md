@@ -22,7 +22,7 @@ The prototype implements three approved scope decisions:
 1. Authored background work uses `defineWorkflowTool({ execution: "background" })`.
    `defineTool` and dynamic tools no longer accept background execution.
 2. The authored `TaskExec` third argument, `TaskMessage`, `task.postMessage`, and deprecated task
-   fields are removed. Workflow yields remain stream-only progress; `ctx.ask`, authorization, and
+   fields are removed. Background workflow yields are consumed without a task-progress stream; `ctx.ask`, authorization, and
    framework-owned workflow requests remain.
 3. Completed, failed, and cancelled outcomes wait for their existing session cohort and become one
    automatic report, including all-failed and all-cancelled cohorts. Lifecycle state still updates
@@ -341,7 +341,10 @@ error.
 The parent session owns durable task outcomes and pending input routes. Children send outcomes,
 input requests, and authorization events through the existing session inbox; they no longer write
 an `eve.task` snapshot stream. The child keeps only execution-local state for admission, abort,
-and answer routing. Progress retains its existing stream and delivery behavior.
+and answer routing. Task notifications share one durable delivery step, preserving their existing
+payloads and deduplication IDs. The unused `eve.task.progress` stream is removed: authored background
+yields are consumed without publishing progress, while subagent update notifications still reach
+the parent.
 
 The first terminal outcome recorded by the parent wins. Duplicate or competing child deliveries
 cannot overwrite it. Terminal notifications deduplicate by task, and their model-facing text uses
@@ -356,10 +359,16 @@ owned-agent cleanup, retains the existing bounded workflow-status wait, and reco
 outcome in the parent. A queued notification ensures cohort reporting also works after forced stop.
 The task-view polling loop and stream read timeout are deleted. Startup and reset waits are unchanged.
 
-Validation for this change: all 8,911 unit tests passed (one skipped), and all 82 tests across seven
+Validation for the parent-owned state change: all 8,911 unit tests passed (one skipped), and all 82 tests across seven
 workflow, cancellation, session, and reset integration suites passed. Typechecking, the production
 build, lint, formatting, invariant guards, and published-doc checks passed. The cancellation eval
 now checks the retained outcome on the next turn without retrying; it remains CI-only.
+
+After notification consolidation and progress-stream removal, all 8,915 unit tests passed (one
+skipped), followed by 33 focused tests including the added agent-settlement delivery ordering test.
+All 46 selected workflow and cancellation integration tests passed. The background-workflow eval
+now asserts that yields emit no progress events; fixture lifecycle audits count the shared delivery
+step and retain their handle-cleanup and accounting checks. E2E remains CI-only.
 
 The wire registry remains version 1: `terminalView` retains its existing shape, and proxy-input
 routes reuse their existing store. Its role is now authoritative parent state rather than an
