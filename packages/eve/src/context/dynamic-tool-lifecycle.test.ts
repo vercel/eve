@@ -1,3 +1,4 @@
+import { z } from "#compiled/zod/index.js";
 import { defineWorkflowTool } from "#tools/workflow-definition.js";
 import { asSchema } from "ai";
 import { describe, expect, it, vi } from "vitest";

@@ -31,6 +31,22 @@ export default defineEval({
       count: 1,
     });
 
+    await t.require(
+      doneTurn.events,
+      satisfies(
+        (events: typeof doneTurn.events) =>
+          events.some(
+            (event) =>
+              event.type === "message.received" &&
+              messageText(event.data.message).includes(
+                `Background task ${taskId} (export) is completed.`,
+              ) &&
+              messageText(event.data.message).includes(RESULT),
+          ),
+        "parent receives the executor completion with task identity",
+      ),
+    );
+
     const reducer = defaultMessageReducer();
     const projection = [...started.events, ...doneTurn.events].reduce(
       (data, event) => reducer.reduce(data, event),
@@ -72,4 +88,19 @@ function requireStreamIndex(
   const streamIndex = session.state?.streamIndex;
   if (streamIndex === undefined) throw new Error(`${operation} has no session stream index.`);
   return streamIndex;
+}
+
+function messageText(message: unknown): string {
+  if (typeof message === "string") return message;
+  if (!Array.isArray(message)) return "";
+  return message
+    .flatMap((part) =>
+      part !== null &&
+      typeof part === "object" &&
+      Reflect.get(part, "type") === "text" &&
+      typeof Reflect.get(part, "text") === "string"
+        ? [Reflect.get(part, "text") as string]
+        : [],
+    )
+    .join("\n");
 }

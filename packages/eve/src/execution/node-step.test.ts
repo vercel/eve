@@ -286,7 +286,7 @@ describe("createNodeHarnessTools", () => {
 
     expect(agentTool?.availableInSubagents).toBeUndefined();
     expect(agentTool?.execution).toBeUndefined();
-    expect(agentTool?.resultKind).toBeUndefined();
+    expect(agentTool).not.toHaveProperty("resultKind");
     expect(agentTool?.rootOnly).toBeUndefined();
     expect(agentTool?.workflowId).toBeUndefined();
   });
