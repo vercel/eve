@@ -323,7 +323,18 @@ return type, so `result` in the example is typed as `{ findings: string[] }`.
 
 ### Route to a hidden subagent with JEV
 
-Use an authored workflow tool when the parent model should decide to delegate, but JEV should choose the specialist. Set `tool: false` on each specialist so the parent model sees only the routing tool. The specialists remain available through `ctx.agents` and callable through `ctx.agent()`:
+Use an authored workflow tool when the parent model should decide to delegate, but JEV should choose the specialist. Set `tool: false` on each specialist so the parent model sees only the routing tool. The specialists remain available through `ctx.agents` and callable through `ctx.agent()`.
+
+If the router may select the root-copy `agent`, author a root `description` that explains which work should stay with a copy of the root. `ctx.agents.agent.description` and `agentRouter()` use this value. Without it, eve falls back to the built-in self-delegation description.
+
+```ts title="agent/agent.ts"
+import { defineAgent } from "eve";
+
+export default defineAgent({
+  description: "Coordinate cross-specialist tasks that need the root agent's complete toolset.",
+  model: "anthropic/claude-opus-4.8",
+});
+```
 
 ```ts title="agent/subagents/researcher/agent.ts"
 import { defineAgent } from "eve";
@@ -390,7 +401,7 @@ The evaluation runs in a step so workflow replay records its result instead of m
 
 `ctx.agents` is a replay-stable metadata snapshot taken when the workflow starts. On the root agent, `ctx.agents.agent.description` describes the root-copy target, using the root's authored `description` or the built-in self-delegation description when omitted. The snapshot also includes declared agents hidden from the parent model with `tool: false` or `disableTool()`, but exposes no model definitions, credentials, or callbacks. Invocation still checks each target's availability through `ctx.agent()`.
 
-#### Route across every subagent
+#### Route across every agent target
 
 Use `agentRouter()` when the router should consider every target in `ctx.agents` with the default JEV routing instructions:
 
