@@ -1,8 +1,8 @@
 import type { RuntimeToolResultActionResult } from "#shared/action-types.js";
-import { z } from "#compiled/zod/index.js";
+import { isNonEmptyString, isObject, isPlainRecord } from "#shared/guards.js";
 import type { SessionStateMap } from "#harness/types.js";
 import { parseActivityWorkIdentityV1, type ActivityWorkIdentityV1 } from "#protocol/activity.js";
-import type { JsonValue } from "#shared/json.js";
+import type { SessionAuthContext } from "#channel/types.js";
 import { sameTaskMetadata, type TaskMetadata, type TaskView } from "#tasks/types.js";
 import type { DurableDynamicSubagentSelection, SessionAuth } from "#context/keys.js";
 
@@ -34,11 +34,6 @@ export type BackgroundWorkflowToolRun = WorkflowToolRunBase & {
 };
 export type WorkflowToolRun = BlockingWorkflowToolRun | BackgroundWorkflowToolRun;
 
-const taskMetadataSchema = z.looseObject({
-  kind: z.string().min(1),
-  name: z.string().min(1),
-}) as z.ZodType<TaskMetadata>;
-
 export interface TaskAgentDispatchContext {
   readonly auth: SessionAuth;
   readonly sessionDynamicSubagentSelections?: Readonly<
@@ -49,120 +44,213 @@ export interface TaskAgentDispatchContext {
   >;
 }
 
-const sessionAuthContextSchema = z.strictObject({
-  attributes: z.record(z.string(), z.union([z.string(), z.array(z.string()).readonly()])),
-  authenticator: z.string(),
-  issuer: z.string().optional(),
-  principalId: z.string(),
-  principalType: z.string(),
-  subject: z.string().optional(),
-});
-const dynamicSubagentSelectionsSchema = z.record(
-  z.string(),
-  z.custom<DurableDynamicSubagentSelection>(),
-);
+interface WorkflowToolRunRegistry {
+  readonly version: typeof WORKFLOW_TOOL_RUNS_VERSION;
+  readonly invocations: readonly WorkflowToolRun[];
+  readonly [key: string]: unknown;
+}
 
-const taskAgentDispatchContextSchema: z.ZodType<TaskAgentDispatchContext> = z.strictObject({
-  auth: z.strictObject({
-    current: sessionAuthContextSchema.nullable(),
-    initiator: sessionAuthContextSchema.nullable(),
-  }),
-  sessionDynamicSubagentSelections: dynamicSubagentSelectionsSchema.optional(),
-  turnDynamicSubagentSelections: dynamicSubagentSelectionsSchema.optional(),
-});
-const taskViewBaseShape = {
-  // Terminal views never carry pending requests; the loose object must say so explicitly.
-  inputRequests: z.never().optional(),
-  metadata: taskMetadataSchema,
-  taskId: z.string().min(1),
-  usage: z
-    .looseObject({
-      cacheReadTokens: z.number().nonnegative(),
-      cacheWriteTokens: z.number().nonnegative(),
-      costUsd: z.number().finite().nonnegative().optional(),
-      inputTokens: z.number().nonnegative(),
-      outputTokens: z.number().nonnegative(),
-    })
-    .optional(),
-};
+// These readers run inside the workflow driver: importing a schema runtime here also
+// embeds it and its source map in every deployed workflow function.
+function isTaskMetadata(value: unknown): value is TaskMetadata {
+  return isObject(value) && isNonEmptyString(value.kind) && isNonEmptyString(value.name);
+}
 
-/** Only the parent records terminal outcomes; input routes live in its proxy state. */
-const taskViewSchema: z.ZodType<TaskView> = z.discriminatedUnion("status", [
-  z.looseObject({
-    ...taskViewBaseShape,
-    lastOutput: z.looseObject({ data: z.custom<JsonValue>(), type: z.literal("result") }),
-    status: z.literal("completed"),
-  }),
-  z.looseObject({
-    ...taskViewBaseShape,
-    lastOutput: z.looseObject({ data: z.custom<JsonValue>(), type: z.literal("error") }),
-    status: z.literal("failed"),
-  }),
-  z.looseObject({
-    ...taskViewBaseShape,
-    lastOutput: z.never().optional(),
-    status: z.literal("cancelled"),
-  }),
-]);
+function isSessionAuthContext(value: unknown): value is SessionAuthContext | null {
+  return (
+    value === null ||
+    (isObject(value) &&
+      Object.keys(value).every((key) =>
+        [
+          "attributes",
+          "authenticator",
+          "issuer",
+          "principalId",
+          "principalType",
+          "subject",
+        ].includes(key),
+      ) &&
+      isPlainRecord(value.attributes) &&
+      Object.values(value.attributes).every(
+        (attribute) =>
+          typeof attribute === "string" ||
+          (Array.isArray(attribute) &&
+            Array.from(attribute).every((item) => typeof item === "string")),
+      ) &&
+      typeof value.authenticator === "string" &&
+      typeof value.principalId === "string" &&
+      typeof value.principalType === "string" &&
+      (value.issuer === undefined || typeof value.issuer === "string") &&
+      (value.subject === undefined || typeof value.subject === "string"))
+  );
+}
 
-const commonShape = {
-  callId: z.string().min(1),
-  toolName: z.string().min(1),
-  origin: z.looseObject({ turnId: z.string().min(1), stepIndex: z.number().int().nonnegative() }),
-  address: z.looseObject({ runId: z.string().min(1), hookToken: z.string().min(1) }),
-};
-const invocationSchema: z.ZodType<WorkflowToolRun> = z.discriminatedUnion("lifetime", [
-  z.looseObject({ ...commonShape, lifetime: z.literal("turn"), task: z.never().optional() }),
-  z.looseObject({
-    ...commonShape,
-    lifetime: z.literal("session"),
-    task: z.looseObject({
-      taskId: z.string().min(1),
-      metadata: taskMetadataSchema,
-      dispatchContext: taskAgentDispatchContextSchema,
-      activityWorkIdentity: z
-        .custom<ActivityWorkIdentityV1>((value) => parseActivityWorkIdentityV1(value) !== undefined)
-        .optional(),
-      cohortId: z.string().min(1).optional(),
-      terminalView: z.unknown().optional(),
-    }),
-  }),
-]);
-const registrySchema = z
-  .looseObject({
-    version: z.literal(WORKFLOW_TOOL_RUNS_VERSION),
-    invocations: z.array(invocationSchema),
-  })
-  .superRefine((registry, ctx) => {
-    const identities = new Set<string>();
-    const tasks = new Set<string>();
-    for (const entry of registry.invocations) {
-      const identity = JSON.stringify([entry.origin.turnId, entry.callId]);
-      if (identities.has(identity))
-        ctx.addIssue({ code: "custom", message: "Invocation identities must be unique." });
-      identities.add(identity);
-      if (entry.lifetime !== "session") continue;
-      const task = entry.task;
-      if (tasks.has(task.taskId))
-        ctx.addIssue({ code: "custom", message: "Task ids must be unique." });
-      tasks.add(task.taskId);
-    }
-  });
+function isTaskAgentDispatchContext(value: unknown): value is TaskAgentDispatchContext {
+  return (
+    isObject(value) &&
+    Object.keys(value).every((key) =>
+      ["auth", "sessionDynamicSubagentSelections", "turnDynamicSubagentSelections"].includes(key),
+    ) &&
+    isObject(value.auth) &&
+    Object.keys(value.auth).every((key) => key === "current" || key === "initiator") &&
+    isSessionAuthContext(value.auth.current) &&
+    isSessionAuthContext(value.auth.initiator) &&
+    (value.sessionDynamicSubagentSelections === undefined ||
+      isPlainRecord(value.sessionDynamicSubagentSelections)) &&
+    (value.turnDynamicSubagentSelections === undefined ||
+      isPlainRecord(value.turnDynamicSubagentSelections))
+  );
+}
+
+function isWorkflowToolRun(value: unknown): value is WorkflowToolRun {
+  if (
+    !isObject(value) ||
+    !isNonEmptyString(value.callId) ||
+    !isNonEmptyString(value.toolName) ||
+    !isObject(value.origin) ||
+    !isNonEmptyString(value.origin.turnId) ||
+    typeof value.origin.stepIndex !== "number" ||
+    !Number.isSafeInteger(value.origin.stepIndex) ||
+    value.origin.stepIndex < 0 ||
+    !isObject(value.address) ||
+    !isNonEmptyString(value.address.runId) ||
+    !isNonEmptyString(value.address.hookToken)
+  )
+    return false;
+  if (value.lifetime === "turn") return value.task === undefined;
+  if (value.lifetime !== "session" || !isObject(value.task)) return false;
+  const task = value.task;
+  return (
+    isNonEmptyString(task.taskId) &&
+    isTaskMetadata(task.metadata) &&
+    isTaskAgentDispatchContext(task.dispatchContext) &&
+    (task.cohortId === undefined || isNonEmptyString(task.cohortId)) &&
+    (task.activityWorkIdentity === undefined ||
+      parseActivityWorkIdentityV1(task.activityWorkIdentity) !== undefined)
+  );
+}
+
+function parseRegistry(value: unknown): WorkflowToolRunRegistry {
+  if (
+    !isObject(value) ||
+    value.version !== WORKFLOW_TOOL_RUNS_VERSION ||
+    !Array.isArray(value.invocations) ||
+    !Array.from(value.invocations).every(isWorkflowToolRun)
+  ) {
+    throw new Error("Corrupt workflow invocation registry: invalid version or invocation.");
+  }
+  const identities = new Set<string>();
+  const tasks = new Set<string>();
+  for (const entry of value.invocations) {
+    const identity = JSON.stringify([entry.origin.turnId, entry.callId]);
+    if (identities.has(identity))
+      throw new Error(
+        "Corrupt workflow invocation registry: Invocation identities must be unique.",
+      );
+    identities.add(identity);
+    if (entry.lifetime !== "session") continue;
+    if (tasks.has(entry.task.taskId))
+      throw new Error("Corrupt workflow invocation registry: Task ids must be unique.");
+    tasks.add(entry.task.taskId);
+  }
+  return {
+    ...value,
+    version: WORKFLOW_TOOL_RUNS_VERSION,
+    invocations: value.invocations.map(copyWorkflowToolRun),
+  };
+}
+
+function copySessionAuthContext(value: SessionAuthContext | null): SessionAuthContext | null {
+  if (value === null) return null;
+  return {
+    ...value,
+    attributes: Object.fromEntries(
+      Object.entries(value.attributes).map(([key, attribute]) => [
+        key,
+        typeof attribute === "string" ? attribute : Object.freeze([...attribute]),
+      ]),
+    ),
+  };
+}
+
+function copyWorkflowToolRun(entry: WorkflowToolRun): WorkflowToolRun {
+  const base = { ...entry, origin: { ...entry.origin }, address: { ...entry.address } };
+  if (entry.lifetime === "turn") return base;
+  const dispatch = entry.task.dispatchContext;
+  const dispatchContext = {
+    ...dispatch,
+    auth: {
+      current: copySessionAuthContext(dispatch.auth.current),
+      initiator: copySessionAuthContext(dispatch.auth.initiator),
+    },
+  };
+  if (dispatch.sessionDynamicSubagentSelections !== undefined)
+    dispatchContext.sessionDynamicSubagentSelections = {
+      ...dispatch.sessionDynamicSubagentSelections,
+    };
+  if (dispatch.turnDynamicSubagentSelections !== undefined)
+    dispatchContext.turnDynamicSubagentSelections = { ...dispatch.turnDynamicSubagentSelections };
+  return {
+    ...base,
+    lifetime: "session",
+    task: { ...entry.task, metadata: { ...entry.task.metadata }, dispatchContext },
+  };
+}
+
+function parseTaskView(value: unknown): TaskView | undefined {
+  if (
+    !isObject(value) ||
+    !isNonEmptyString(value.taskId) ||
+    !isTaskMetadata(value.metadata) ||
+    value.inputRequests !== undefined
+  )
+    return undefined;
+  const usage = value.usage;
+  if (
+    usage !== undefined &&
+    (!isObject(usage) ||
+      ![
+        usage.cacheReadTokens,
+        usage.cacheWriteTokens,
+        usage.inputTokens,
+        usage.outputTokens,
+        ...(usage.costUsd === undefined ? [] : [usage.costUsd]),
+      ].every((count) => typeof count === "number" && Number.isFinite(count) && count >= 0))
+  )
+    return undefined;
+  if (value.status === "cancelled") {
+    if (value.lastOutput !== undefined) return undefined;
+  } else {
+    if (value.status !== "completed" && value.status !== "failed") return undefined;
+    const outputType = value.status === "completed" ? "result" : "error";
+    if (!isObject(value.lastOutput) || value.lastOutput.type !== outputType) return undefined;
+  }
+  // Output data and additive fields are opaque; only the known lifecycle fields are decoded.
+  const view: Record<string, unknown> & Pick<TaskView, "taskId" | "metadata" | "status"> = {
+    ...value,
+    taskId: value.taskId,
+    status: value.status,
+    metadata: { ...value.metadata },
+  };
+  if (usage !== undefined) view.usage = { ...usage };
+  if (isObject(value.lastOutput)) view.lastOutput = { ...value.lastOutput };
+  return view as TaskView;
+}
 
 /** Decode retained output only when it is consumed, independently of ownership reads. */
 export function readWorkflowTaskView(task: WorkflowTaskPayload): TaskView | undefined {
   if (task.terminalView === undefined) return undefined;
-  const result = taskViewSchema.safeParse(task.terminalView);
-  if (!result.success)
-    throw new Error(`Corrupt workflow task result "${task.taskId}": ${result.error.message}`);
-  if (result.data.taskId !== task.taskId || !sameTaskMetadata(result.data.metadata, task.metadata))
+  const view = parseTaskView(task.terminalView);
+  if (view === undefined)
+    throw new Error(`Corrupt workflow task result "${task.taskId}": invalid terminal view.`);
+  if (view.taskId !== task.taskId || !sameTaskMetadata(view.metadata, task.metadata))
     throw new Error(
       `Corrupt workflow task result "${task.taskId}": terminal view does not match its owner.`,
     );
-  return result.data;
+  return view;
 }
 
-function readRegistry(state: SessionStateMap | undefined): z.infer<typeof registrySchema> {
+function readRegistry(state: SessionStateMap | undefined): WorkflowToolRunRegistry {
   if (state?.["eve.tasks"] !== undefined || state?.["eve.runtime.workflowToolRuns"] !== undefined) {
     throw new Error(
       "Unsupported workflow invocation state: start a new session or import its conversation.",
@@ -170,10 +258,7 @@ function readRegistry(state: SessionStateMap | undefined): z.infer<typeof regist
   }
   const raw = state?.[WORKFLOW_TOOL_RUNS_STATE_KEY];
   if (raw === undefined) return { version: WORKFLOW_TOOL_RUNS_VERSION, invocations: [] };
-  const result = registrySchema.safeParse(raw);
-  if (!result.success)
-    throw new Error(`Corrupt workflow invocation registry: ${result.error.message}`);
-  return result.data;
+  return parseRegistry(raw);
 }
 
 export function getWorkflowToolRuns(
@@ -209,7 +294,7 @@ export function findBackgroundWorkflowToolRun(
 
 function writeRegistry(
   state: SessionStateMap | undefined,
-  registry: z.infer<typeof registrySchema>,
+  registry: WorkflowToolRunRegistry,
 ): SessionStateMap | undefined {
   if (registry.invocations.length === 0) {
     const next = { ...state };
@@ -218,7 +303,7 @@ function writeRegistry(
   }
   return {
     ...state,
-    [WORKFLOW_TOOL_RUNS_STATE_KEY]: registrySchema.parse(registry),
+    [WORKFLOW_TOOL_RUNS_STATE_KEY]: parseRegistry(registry),
   };
 }
 
@@ -291,7 +376,8 @@ export function recordWorkflowTaskView(
   state: SessionStateMap | undefined,
   view: TaskView,
 ): SessionStateMap | undefined {
-  const terminal = taskViewSchema.parse(view);
+  const terminal = parseTaskView(view);
+  if (terminal === undefined) throw new Error("Invalid terminal workflow task view.");
   const registry = readRegistry(state);
   const invocations = [...registry.invocations];
   const index = invocations.findIndex(
