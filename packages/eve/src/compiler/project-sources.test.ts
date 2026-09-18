@@ -21,7 +21,7 @@ describe("qualifyExtensionContributionLogicalPath", () => {
     expect(qualifyExtensionContributionLogicalPath(logicalPath, "crm")).toBe(expected);
   });
 
-  it.each(["agent.ts", "instrumentation.ts", "memory.ts", "sandbox.ts", "lib/http.ts"])(
+  it.each(["agent.ts", "instrumentation/otel.ts", "memory.ts", "sandbox.ts", "lib/http.ts"])(
     "rejects unscopable slot %s",
     (logicalPath) => {
       expect(() => qualifyExtensionContributionLogicalPath(logicalPath, "crm")).toThrow(

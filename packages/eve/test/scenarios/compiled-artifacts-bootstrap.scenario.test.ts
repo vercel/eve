@@ -80,11 +80,15 @@ describe("writeCompiledArtifactsFiles", () => {
 
     await writeFile(join(agentRoot, "agent.ts"), 'export default { model: "openai/gpt-5.4" };\n');
     await writeFile(join(agentRoot, "instructions.md"), "You are a precise assistant.\n");
+    await mkdir(join(agentRoot, "instrumentation"), { recursive: true });
     await writeFile(
-      join(agentRoot, "instrumentation.ts"),
-      ['(globalThis as Record<string, unknown>).__eveInstrumentationLoaded = "yes";', ""].join(
-        "\n",
-      ),
+      join(agentRoot, "instrumentation", "audit.ts"),
+      [
+        'import { defineInstrumentation } from "eve/instrumentation";',
+        '(globalThis as Record<string, unknown>).__eveInstrumentationLoaded = "yes";',
+        "export default defineInstrumentation({});",
+        "",
+      ].join("\n"),
     );
 
     const compileResult = await compileAgent({
@@ -108,15 +112,12 @@ describe("writeCompiledArtifactsFiles", () => {
     const instrumentationPluginSource = await readFile(instrumentationPluginPath, "utf8");
 
     expect(instrumentationPluginSource).toContain(
-      join(outDir, "compiled-artifacts-module-map.mjs").replaceAll("\\", "/"),
-    );
-    expect(instrumentationPluginSource).toContain(
-      `moduleMap.nodes["__root__"].modules["instrumentation.ts"]`,
+      join(outDir, "compiled-artifacts-instrumentation-audit.mjs").replaceAll("\\", "/"),
     );
     expect(instrumentationPluginSource).not.toContain(
-      join(agentRoot, "instrumentation.ts").replaceAll("\\", "/"),
+      join(agentRoot, "instrumentation", "audit.ts").replaceAll("\\", "/"),
     );
-    expect(instrumentationPluginSource).toContain("registerInstrumentationConfig");
+    expect(instrumentationPluginSource).toContain("registerInstrumentationProvider");
 
     const instrumentationPluginModule = (await import(
       pathToFileURL(instrumentationPluginPath).href
@@ -128,7 +129,7 @@ describe("writeCompiledArtifactsFiles", () => {
     expect(instrumentationPluginModule.default()).toBeUndefined();
   });
 
-  it("registers one provider per file when the instrumentationProviders flag is on", async () => {
+  it("registers one provider per file", async () => {
     const { agentRoot, appRoot } = await createAppRoot("eve-compiled-artifacts-providers-", {
       packageName: "compiled-artifacts-providers-test-agent",
     });
@@ -139,13 +140,7 @@ describe("writeCompiledArtifactsFiles", () => {
 
     await writeFile(
       join(agentRoot, "agent.ts"),
-      [
-        "export default {",
-        '  model: "openai/gpt-5.4",',
-        "  experimental: { instrumentationProviders: true },",
-        "};",
-        "",
-      ].join("\n"),
+      ["export default {", '  model: "openai/gpt-5.4",', "};", ""].join("\n"),
     );
     await writeFile(join(agentRoot, "instructions.md"), "You are a precise assistant.\n");
     await mkdir(join(agentRoot, "instrumentation"), { recursive: true });
@@ -241,13 +236,7 @@ describe("writeCompiledArtifactsFiles", () => {
     const outDir = join(appRoot, ".workflow-build");
     await writeFile(
       join(agentRoot, "agent.ts"),
-      [
-        "export default {",
-        '  model: "openai/gpt-5.4",',
-        "  experimental: { instrumentationProviders: true },",
-        "};",
-        "",
-      ].join("\n"),
+      ["export default {", '  model: "openai/gpt-5.4",', "};", ""].join("\n"),
     );
     await writeFile(join(agentRoot, "instructions.md"), "You are a precise assistant.\n");
 
@@ -277,8 +266,9 @@ describe("writeCompiledArtifactsFiles", () => {
 
     await writeFile(join(agentRoot, "agent.ts"), 'export default { model: "openai/gpt-5.4" };\n');
     await writeFile(join(agentRoot, "instructions.md"), "You are a precise assistant.\n");
+    await mkdir(join(agentRoot, "instrumentation"), { recursive: true });
     await writeFile(
-      join(agentRoot, "instrumentation.ts"),
+      join(agentRoot, "instrumentation", "broken.ts"),
       'throw new Error("instrumentation boom");\n',
     );
 

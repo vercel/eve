@@ -621,8 +621,7 @@ export function validateProgrammaticLogicalPath(input: string): string {
   const root = segments[0];
   const extensionless = stripLogicalPathExtension(logicalPath);
   const supported =
-    (segments.length === 1 &&
-      ["agent", "memory", "sandbox", "instrumentation"].includes(extensionless)) ||
+    (segments.length === 1 && ["agent", "memory", "sandbox"].includes(extensionless)) ||
     (root === "sandbox" &&
       segments.length === 2 &&
       getSupportedModuleBaseName(fileName) === "sandbox") ||

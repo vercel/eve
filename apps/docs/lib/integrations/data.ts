@@ -2297,7 +2297,7 @@ See Shopify's [agent profile documentation](https://shopify.dev/docs/agents/prof
 
 /**
  * Instrumentation overlay: presentation plus hand-authored setup markdown.
- * Instrumentation providers use hand-authored setup files, so they follow the
+ * Instrumentation entries use hand-authored setup files, so they follow the
  * channel shape (markdown) rather than the generated connection shape.
  */
 type InstrumentationPresentation = ChannelPresentation;
@@ -2313,47 +2313,29 @@ const instrumentationPresentations: Record<string, InstrumentationPresentation> 
 eve add instrumentation/braintrust
 \`\`\``,
 
-    quickStart: `eve installs a hook that traces agent activity and an instrumentation file that initializes the Braintrust logger:
+    quickStart: `eve installs Braintrust instrumentation:
 
 \`\`\`ts
-// agent/hooks/braintrust.ts
-import { braintrustEveHook } from "braintrust";
-import { defineState } from "eve/context";
-import { defineHook } from "eve/hooks";
-
-export default defineHook(
-  braintrustEveHook({
-    defineState,
-    metadata: {
-      app: "my-eve-agent", // Replace with your app name
-    },
-  }) as Parameters<typeof defineHook>[0],
-);
-\`\`\`
-
-\`\`\`ts
-// agent/instrumentation.ts
+// agent/instrumentation/braintrust.ts
 import { braintrustEveInstrumentation, initLogger } from "braintrust";
-import { defineState } from "eve/context";
-import { defineInstrumentation } from "eve/instrumentation";
 
-export default defineInstrumentation(
-  braintrustEveInstrumentation({
-    defineState,
-    setup: ({ agentName }) => {
-      initLogger({
-        projectName: agentName,
-        apiKey: process.env.BRAINTRUST_API_KEY,
-      });
-    },
-  }) as Parameters<typeof defineInstrumentation>[0],
-);
+export default braintrustEveInstrumentation({
+  metadata: {
+    app: "my-eve-agent", // Replace with your app name
+  },
+  setup: ({ agentName }) => {
+    initLogger({
+      projectName: agentName,
+      apiKey: process.env.BRAINTRUST_API_KEY,
+    });
+  },
+});
 \`\`\``,
-    configure: `Create an API key in the Braintrust dashboard and expose it as \`BRAINTRUST_API_KEY\`. Replace the hook's \`app\` metadata with your app name. Spans land in the Braintrust project named after your agent. See the [instrumentation guide](/docs/observability/instrumentation) for the trace hierarchy and the \`recordInputs\`/\`recordOutputs\` controls.`,
+    configure: `Create an API key in the Braintrust dashboard and expose it as \`BRAINTRUST_API_KEY\`. Replace the \`app\` metadata with your app name. Do not wrap the result in \`defineInstrumentation\`, pass \`defineState\`, or add \`braintrustEveHook\`; the instrumentation handles eve lifecycle events directly. See [Instrumentation](/docs/observability/instrumentation) for content policy and event handling.`,
   },
   "posthog-instrumentation": {
     logo: "posthog",
-    docsHref: "/docs/observability/instrumentation",
+    docsHref: "/docs/observability/otel",
     keywords: ["otel", "opentelemetry", "tracing", "observability", "generations", "analytics"],
     install: `Add PostHog AI Observability from eve's registry:
 
@@ -2361,48 +2343,37 @@ export default defineInstrumentation(
 eve add instrumentation/posthog
 \`\`\``,
 
-    quickStart: `eve installs \`agent/instrumentation.ts\` with PostHog's trace exporter. It also links spans to the user who initiated the session when an authenticated principal is available:
+    quickStart: `eve installs \`agent/instrumentation/posthog.ts\` with PostHog's trace exporter. It also links spans to the user who initiated the session when an authenticated principal is available:
 
 \`\`\`ts
-// agent/instrumentation.ts
-import { trace } from "@opentelemetry/api";
+// agent/instrumentation/posthog.ts
 import { SimpleSpanProcessor } from "@opentelemetry/sdk-trace-base";
 import { PostHogTraceExporter } from "@posthog/ai/otel";
-import { registerOTel } from "@vercel/otel";
-import { defineInstrumentation } from "eve/instrumentation";
+import { otelIntegration } from "eve/instrumentation/otel";
 
-export default defineInstrumentation({
-  setup: ({ agentName }) =>
-    registerOTel({
-      serviceName: agentName,
-      spanProcessors: [
-        new SimpleSpanProcessor(
-          new PostHogTraceExporter({
-            projectToken: process.env.POSTHOG_PROJECT_TOKEN!,
-            host: process.env.POSTHOG_HOST,
-          }),
-        ),
-      ],
-    }),
-  events: {
-    "step.started"(input) {
-      const distinctId =
-        input.session.auth.initiator?.principalId ??
-        input.session.auth.current?.principalId;
+export default otelIntegration({
+  spanProcessors: [
+    new SimpleSpanProcessor(
+      new PostHogTraceExporter({
+        projectToken: process.env.POSTHOG_PROJECT_TOKEN!,
+        host: process.env.POSTHOG_HOST,
+      }),
+    ),
+  ],
+  runtimeContext(input) {
+    const distinctId =
+      input.session.auth.initiator?.principalId ??
+      input.session.auth.current?.principalId;
 
-      if (!distinctId) return undefined;
-
-      trace.getActiveSpan()?.setAttribute("posthog.distinct_id", distinctId);
-      return { runtimeContext: { posthog_distinct_id: distinctId } };
-    },
+    return distinctId ? { "posthog.distinct_id": distinctId } : undefined;
   },
 });
 \`\`\``,
-    configure: `Copy your project token and client API host from PostHog's project settings and expose them as \`POSTHOG_PROJECT_TOKEN\` and \`POSTHOG_HOST\`. Remove the \`events\` handler to capture generations anonymously. PostHog groups turns using \`eve.session.id\` and preserves eve's trace hierarchy. See [PostHog's eve installation guide](https://posthog.com/docs/ai-observability/installation/eve) for verification steps and the [instrumentation guide](/docs/observability/instrumentation) for input and output capture controls.`,
+    configure: `Copy your project token and client API host from PostHog's project settings and expose them as \`POSTHOG_PROJECT_TOKEN\` and \`POSTHOG_HOST\`. Remove \`runtimeContext\` to capture generations anonymously. PostHog groups turns using \`eve.session.id\` and preserves eve's trace hierarchy. See [PostHog's eve installation guide](https://posthog.com/docs/ai-observability/installation/eve) for verification steps and the [OpenTelemetry guide](/docs/observability/otel) for content policy.`,
   },
   "sentry-instrumentation": {
     logo: "sentry",
-    docsHref: "/docs/observability/instrumentation",
+    docsHref: "/docs/observability/otel",
     keywords: ["otel", "opentelemetry", "tracing", "observability", "otlp", "errors"],
     install: `Add Sentry instrumentation from eve's registry. Sentry ingests OTLP directly, so no Sentry SDK is required:
 
@@ -2410,61 +2381,53 @@ export default defineInstrumentation({
 eve add instrumentation/sentry
 \`\`\``,
 
-    quickStart: `Create \`agent/instrumentation.ts\` and point the OTLP exporter at your project's Sentry traces endpoint:
+    quickStart: `Create \`agent/instrumentation/sentry.ts\` and point the OTLP exporter at your project's Sentry traces endpoint:
 
 \`\`\`ts
-// agent/instrumentation.ts
-import { defineInstrumentation } from "eve/instrumentation";
-import { OTLPHttpProtoTraceExporter, registerOTel } from "@vercel/otel";
+// agent/instrumentation/sentry.ts
+import { OTLPHttpProtoTraceExporter } from "@vercel/otel";
+import { otelIntegration } from "eve/instrumentation/otel";
 
-export default defineInstrumentation({
-  setup: ({ agentName }) =>
-    registerOTel({
-      serviceName: agentName,
-      traceExporter: new OTLPHttpProtoTraceExporter({
-        url: process.env.SENTRY_OTLP_TRACES_ENDPOINT!,
-        headers: {
-          "x-sentry-auth": \`sentry sentry_key=\${process.env.SENTRY_PUBLIC_KEY}\`,
-        },
-      }),
-    }),
+export default otelIntegration({
+  traceExporter: new OTLPHttpProtoTraceExporter({
+    url: process.env.SENTRY_OTLP_TRACES_ENDPOINT!,
+    headers: {
+      "x-sentry-auth": \`sentry sentry_key=\${process.env.SENTRY_PUBLIC_KEY}\`,
+    },
+  }),
 });
 \`\`\``,
-    configure: `Copy the OTLP traces endpoint and public key from your Sentry project under **Settings → Client Keys (DSN)** and expose them as environment variables. Sentry's OTLP intake accepts traces only, and span events are dropped at ingestion. See the [instrumentation guide](/docs/observability/instrumentation) for the trace hierarchy and the \`recordInputs\`/\`recordOutputs\` controls.`,
+    configure: `Copy the OTLP traces endpoint and public key from your Sentry project under **Settings → Client Keys (DSN)** and expose them as environment variables. Sentry's OTLP intake accepts traces only, and span events are dropped at ingestion. See the [OpenTelemetry guide](/docs/observability/otel) for trace topology and content policy.`,
   },
   "datadog-instrumentation": {
     logo: "datadog",
-    docsHref: "/docs/observability/instrumentation",
+    docsHref: "/docs/observability/otel",
     keywords: ["otel", "opentelemetry", "tracing", "observability", "apm", "otlp"],
     install: `Add Datadog instrumentation from eve's registry:
 
 \`\`\`bash
 eve add instrumentation/datadog
 \`\`\``,
-    quickStart: `Create \`agent/instrumentation.ts\` and point the OTLP exporter at Datadog's intake for your site, authenticated with your API key:
+    quickStart: `Create \`agent/instrumentation/datadog.ts\` and point the OTLP exporter at Datadog's intake for your site, authenticated with your API key:
 
 \`\`\`ts
-// agent/instrumentation.ts
-import { defineInstrumentation } from "eve/instrumentation";
-import { OTLPHttpProtoTraceExporter, registerOTel } from "@vercel/otel";
+// agent/instrumentation/datadog.ts
+import { OTLPHttpProtoTraceExporter } from "@vercel/otel";
+import { otelIntegration } from "eve/instrumentation/otel";
 
-export default defineInstrumentation({
-  setup: ({ agentName }) =>
-    registerOTel({
-      serviceName: agentName,
-      traceExporter: new OTLPHttpProtoTraceExporter({
-        url: process.env.DATADOG_OTLP_TRACES_ENDPOINT!,
-        headers: { "dd-api-key": process.env.DD_API_KEY! },
-      }),
-    }),
+export default otelIntegration({
+  traceExporter: new OTLPHttpProtoTraceExporter({
+    url: process.env.DATADOG_OTLP_TRACES_ENDPOINT!,
+    headers: { "dd-api-key": process.env.DD_API_KEY! },
+  }),
 });
 \`\`\``,
-    configure: `Datadog's direct OTLP trace intake is site-specific (for example \`datadoghq.com\` vs \`datadoghq.eu\`) and currently in Preview; look up the endpoint for your site in Datadog's OTLP intake docs. For production, Datadog recommends routing through an OpenTelemetry Collector with the Datadog exporter instead. See the [instrumentation guide](/docs/observability/instrumentation) for the trace hierarchy and the \`recordInputs\`/\`recordOutputs\` controls.`,
+    configure: `Datadog's direct OTLP trace intake is site-specific (for example \`datadoghq.com\` vs \`datadoghq.eu\`) and currently in Preview; look up the endpoint for your site in Datadog's OTLP intake docs. For production, Datadog recommends routing through an OpenTelemetry Collector with the Datadog exporter instead. See the [OpenTelemetry guide](/docs/observability/otel) for trace topology and content policy.`,
     relatedResources: [incidentResponseGuide],
   },
   "honeycomb-instrumentation": {
     logo: "honeycomb",
-    docsHref: "/docs/observability/instrumentation",
+    docsHref: "/docs/observability/otel",
     keywords: ["otel", "opentelemetry", "tracing", "observability", "queries", "otlp"],
     install: `Add Honeycomb instrumentation from eve's registry. Honeycomb ingests OTLP directly:
 
@@ -2472,29 +2435,25 @@ export default defineInstrumentation({
 eve add instrumentation/honeycomb
 \`\`\``,
 
-    quickStart: `Create \`agent/instrumentation.ts\` and send traces to Honeycomb's OTLP endpoint with your ingest key:
+    quickStart: `Create \`agent/instrumentation/honeycomb.ts\` and send traces to Honeycomb's OTLP endpoint with your ingest key:
 
 \`\`\`ts
-// agent/instrumentation.ts
-import { defineInstrumentation } from "eve/instrumentation";
-import { OTLPHttpProtoTraceExporter, registerOTel } from "@vercel/otel";
+// agent/instrumentation/honeycomb.ts
+import { OTLPHttpProtoTraceExporter } from "@vercel/otel";
+import { otelIntegration } from "eve/instrumentation/otel";
 
-export default defineInstrumentation({
-  setup: ({ agentName }) =>
-    registerOTel({
-      serviceName: agentName,
-      traceExporter: new OTLPHttpProtoTraceExporter({
-        url: "https://api.honeycomb.io/v1/traces",
-        headers: { "x-honeycomb-team": process.env.HONEYCOMB_API_KEY! },
-      }),
-    }),
+export default otelIntegration({
+  traceExporter: new OTLPHttpProtoTraceExporter({
+    url: "https://api.honeycomb.io/v1/traces",
+    headers: { "x-honeycomb-team": process.env.HONEYCOMB_API_KEY! },
+  }),
 });
 \`\`\``,
-    configure: `Create an ingest key under your Honeycomb environment settings and expose it as \`HONEYCOMB_API_KEY\`. Spans arrive in a dataset named after your agent (the OTel service name). EU teams use \`https://api.eu1.honeycomb.io/v1/traces\`. See the [instrumentation guide](/docs/observability/instrumentation) for the trace hierarchy and the \`recordInputs\`/\`recordOutputs\` controls.`,
+    configure: `Create an ingest key under your Honeycomb environment settings and expose it as \`HONEYCOMB_API_KEY\`. Spans arrive in a dataset named after your agent (the OTel service name). EU teams use \`https://api.eu1.honeycomb.io/v1/traces\`. See the [OpenTelemetry guide](/docs/observability/otel) for trace topology and content policy.`,
   },
   arize: {
     logo: "arize",
-    docsHref: "/docs/observability/instrumentation",
+    docsHref: "/docs/observability/otel",
     keywords: ["otel", "opentelemetry", "tracing", "llm observability", "evaluation", "otlp"],
     install: `Add Arize instrumentation from eve's registry. Arize AX ingests OTLP directly:
 
@@ -2502,33 +2461,28 @@ export default defineInstrumentation({
 eve add instrumentation/arize
 \`\`\``,
 
-    quickStart: `Create \`agent/instrumentation.ts\` and send traces to Arize's OTLP endpoint with your space ID and API key:
+    quickStart: `Create \`agent/instrumentation/arize.ts\` and send traces to Arize's OTLP endpoint with your space ID and API key:
 
 \`\`\`ts
-// agent/instrumentation.ts
-import { defineInstrumentation } from "eve/instrumentation";
-import { OTLPHttpProtoTraceExporter, registerOTel } from "@vercel/otel";
+// agent/instrumentation/arize.ts
+import { OTLPHttpProtoTraceExporter } from "@vercel/otel";
+import { otelIntegration } from "eve/instrumentation/otel";
 
-export default defineInstrumentation({
-  setup: ({ agentName }) =>
-    registerOTel({
-      serviceName: agentName,
-      attributes: { "openinference.project.name": agentName },
-      traceExporter: new OTLPHttpProtoTraceExporter({
-        url: "https://otlp.arize.com/v1/traces",
-        headers: {
-          space_id: process.env.ARIZE_SPACE_ID!,
-          api_key: process.env.ARIZE_API_KEY!,
-        },
-      }),
-    }),
+export default otelIntegration({
+  traceExporter: new OTLPHttpProtoTraceExporter({
+    url: "https://otlp.arize.com/v1/traces",
+    headers: {
+      space_id: process.env.ARIZE_SPACE_ID!,
+      api_key: process.env.ARIZE_API_KEY!,
+    },
+  }),
 });
 \`\`\``,
-    configure: `Copy the space ID and API key from your Arize AX space settings and expose them as \`ARIZE_SPACE_ID\` and \`ARIZE_API_KEY\`. The \`openinference.project.name\` resource attribute routes spans to a project named after your agent. See the [instrumentation guide](/docs/observability/instrumentation) for the trace hierarchy and the \`recordInputs\`/\`recordOutputs\` controls.`,
+    configure: `Copy the space ID and API key from your Arize AX space settings and expose them as \`ARIZE_SPACE_ID\` and \`ARIZE_API_KEY\`. See the [OpenTelemetry guide](/docs/observability/otel) for trace topology, resource attributes, and content policy.`,
   },
   raindrop: {
     logo: "raindrop",
-    docsHref: "/docs/observability/instrumentation",
+    docsHref: "/docs/observability/otel",
     keywords: ["otel", "opentelemetry", "tracing", "observability", "ai issues", "otlp"],
     install: `Add Raindrop instrumentation from eve's registry. Raindrop ingests OTLP directly:
 
@@ -2536,52 +2490,44 @@ export default defineInstrumentation({
 eve add instrumentation/raindrop
 \`\`\``,
 
-    quickStart: `Create \`agent/instrumentation.ts\` and send traces to Raindrop's OTLP endpoint with your write key:
+    quickStart: `Create \`agent/instrumentation/raindrop.ts\` and send traces to Raindrop's OTLP endpoint with your write key:
 
 \`\`\`ts
-// agent/instrumentation.ts
-import { defineInstrumentation } from "eve/instrumentation";
-import { OTLPHttpProtoTraceExporter, registerOTel } from "@vercel/otel";
+// agent/instrumentation/raindrop.ts
+import { OTLPHttpProtoTraceExporter } from "@vercel/otel";
+import { otelIntegration } from "eve/instrumentation/otel";
 
-export default defineInstrumentation({
-  setup: ({ agentName }) =>
-    registerOTel({
-      serviceName: agentName,
-      traceExporter: new OTLPHttpProtoTraceExporter({
-        url: "https://api.raindrop.ai/v1/traces",
-        headers: {
-          Authorization: \`Bearer \${process.env.RAINDROP_WRITE_KEY}\`,
-        },
-      }),
-    }),
+export default otelIntegration({
+  traceExporter: new OTLPHttpProtoTraceExporter({
+    url: "https://api.raindrop.ai/v1/traces",
+    headers: {
+      Authorization: \`Bearer \${process.env.RAINDROP_WRITE_KEY}\`,
+    },
+  }),
 });
 \`\`\``,
-    configure: `Create a write key in the Raindrop dashboard and expose it as \`RAINDROP_WRITE_KEY\`. Raindrop's Vercel AI SDK integration picks up the AI SDK spans eve emits on every turn. See the [instrumentation guide](/docs/observability/instrumentation) for the trace hierarchy and the \`recordInputs\`/\`recordOutputs\` controls.`,
+    configure: `Create a write key in the Raindrop dashboard and expose it as \`RAINDROP_WRITE_KEY\`. Raindrop's Vercel AI SDK integration picks up the AI SDK spans eve emits on every turn. See the [OpenTelemetry guide](/docs/observability/otel) for trace topology and content policy.`,
   },
   jaeger: {
     logo: "jaeger",
-    docsHref: "/docs/observability/instrumentation",
+    docsHref: "/docs/observability/otel",
     keywords: ["otel", "opentelemetry", "tracing", "observability", "local", "self-hosted"],
     install: `Add Jaeger instrumentation from eve's registry:
 
 \`\`\`bash
 eve add instrumentation/jaeger
 \`\`\``,
-    quickStart: `Create \`agent/instrumentation.ts\` and point the OTLP exporter at your Jaeger collector:
+    quickStart: `Create \`agent/instrumentation/jaeger.ts\` and point the OTLP exporter at your Jaeger collector:
 
 \`\`\`ts
-// agent/instrumentation.ts
-import { defineInstrumentation } from "eve/instrumentation";
-import { OTLPHttpProtoTraceExporter, registerOTel } from "@vercel/otel";
+// agent/instrumentation/jaeger.ts
+import { OTLPHttpProtoTraceExporter } from "@vercel/otel";
+import { otelIntegration } from "eve/instrumentation/otel";
 
-export default defineInstrumentation({
-  setup: ({ agentName }) =>
-    registerOTel({
-      serviceName: agentName,
-      traceExporter: new OTLPHttpProtoTraceExporter({
-        url: "http://localhost:4318/v1/traces",
-      }),
-    }),
+export default otelIntegration({
+  traceExporter: new OTLPHttpProtoTraceExporter({
+    url: "http://localhost:4318/v1/traces",
+  }),
 });
 \`\`\``,
     configure: `Run Jaeger locally with Docker and open the UI at \`http://localhost:16686\`:
@@ -2590,7 +2536,7 @@ export default defineInstrumentation({
 docker run --rm -p 16686:16686 -p 4318:4318 jaegertracing/jaeger:latest
 \`\`\`
 
-Point the exporter at your collector's OTLP HTTP endpoint when self-hosting. See the [instrumentation guide](/docs/observability/instrumentation) for the trace hierarchy and the \`recordInputs\`/\`recordOutputs\` controls.`,
+Point the exporter at your collector's OTLP HTTP endpoint when self-hosting. See the [OpenTelemetry guide](/docs/observability/otel) for trace topology and content policy.`,
   },
 };
 
@@ -2700,7 +2646,7 @@ function buildInstrumentation(entry: IntegrationEntry): Integration {
   const presentation = instrumentationPresentations[entry.slug];
   if (presentation === undefined) {
     throw new Error(
-      `Instrumentation provider "${entry.slug}" is in the catalog gallery but has no docs presentation.`,
+      `Instrumentation entry "${entry.slug}" is in the catalog gallery but has no docs presentation.`,
     );
   }
   return {

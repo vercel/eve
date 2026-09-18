@@ -270,13 +270,16 @@ describe("application Nitro creation", () => {
     );
   });
 
-  it("preserves authored instrumentation instead of installing local tracing", async () => {
+  it("lets authored instrumentation own default local tracing", async () => {
     const nitroStub = createNitroStub();
     createNitroMock.mockResolvedValueOnce(nitroStub.nitro);
     const { createDevelopmentApplicationNitro } =
       await import("#internal/nitro/host/create-application-nitro.js");
     const preparedHost = await createPreparedHost();
-    preparedHost.compiledArtifacts.instrumentationLayout = { kind: "file" };
+    preparedHost.compiledArtifacts.instrumentationLayout = {
+      kind: "directory",
+      slots: ["audit"],
+    };
     preparedHost.compiledArtifacts.instrumentationPluginPath = "/app/instrumentation.mjs";
 
     await createDevelopmentApplicationNitro(preparedHost);

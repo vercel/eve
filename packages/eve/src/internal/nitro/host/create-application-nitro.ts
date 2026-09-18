@@ -57,6 +57,10 @@ const WORKFLOW_ALIAS_SPECIFIERS = [
   "workflow/internal/private",
   "workflow/runtime",
 ] as const;
+const INSTRUMENTATION_ALIAS_PATHS = {
+  "eve/instrumentation": "src/public/instrumentation/index.ts",
+  "eve/instrumentation/otel": "src/public/instrumentation/otel.ts",
+} as const;
 const WORKFLOW_TRANSFORM_PATCHED = Symbol("eve.workflow-transform-patched");
 const WORKFLOW_CACHE_PATH_FRAGMENT = "/.eve/workflow-cache/";
 
@@ -636,6 +640,9 @@ function configureSharedApplicationNitro(
   const workflowAliases = resolveWorkflowAliases();
   for (const [specifier, resolvedPath] of Object.entries(workflowAliases)) {
     nitro.options.alias[specifier] = resolvedPath;
+  }
+  for (const [specifier, sourcePath] of Object.entries(INSTRUMENTATION_ALIAS_PATHS)) {
+    nitro.options.alias[specifier] = resolvePackageSourceFilePath(sourcePath);
   }
   addWorkflowModuleSideEffectsPlugin(nitro, preparedHost.workflowBuildDir);
   patchWorkflowTransformExcludePath(nitro, preparedHost.workflowBuildDir);

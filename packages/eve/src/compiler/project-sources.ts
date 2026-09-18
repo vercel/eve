@@ -34,7 +34,6 @@ export type ProjectedModuleSource =
         | "extension"
         | "hook"
         | "instructions"
-        | "instrumentation"
         | "memory"
         | "sandbox"
         | "schedule"
@@ -70,7 +69,6 @@ const MODULE_KIND_BY_SLOT_ROOT: Partial<
   extensions: "extension",
   hooks: "hook",
   instructions: "instructions",
-  instrumentation: "instrumentation",
   memory: "memory",
   sandbox: "sandbox",
   schedules: "schedule",
@@ -319,9 +317,6 @@ function projectManifest(input: {
       input.manifest.configModule,
       canonicalSourceSlot(logicalPath) === "agent" ? undefined : "agent.ts",
     );
-  }
-  if (input.manifest.instrumentation !== undefined) {
-    pushModule(input.manifest.instrumentation);
   }
   for (const source of input.manifest.extensions) pushModule(source);
   for (const source of input.manifest.channels) pushModule(source);

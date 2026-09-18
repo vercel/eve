@@ -242,7 +242,6 @@ function createResolvedAgentConfig(
 
   if (manifest.config.experimental !== undefined) {
     config.experimental = {
-      instrumentationProviders: manifest.config.experimental.instrumentationProviders,
       workflow:
         manifest.config.experimental.workflow === undefined
           ? undefined

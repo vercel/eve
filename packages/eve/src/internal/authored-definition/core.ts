@@ -311,15 +311,8 @@ function normalizeAgentExperimentalDefinition(
   message: string,
 ): NonNullable<NormalizedAgentDefinition["experimental"]> {
   const record = expectObjectRecord(value, message);
-  expectOnlyKnownKeys(record, ["instrumentationProviders", "workflow"], message);
+  expectOnlyKnownKeys(record, ["workflow"], message);
   const normalizedDefinition: Mutable<NonNullable<NormalizedAgentDefinition["experimental"]>> = {};
-
-  if (record.instrumentationProviders !== undefined) {
-    if (typeof record.instrumentationProviders !== "boolean") {
-      throw new Error(`${message} "experimental.instrumentationProviders" must be a boolean.`);
-    }
-    normalizedDefinition.instrumentationProviders = record.instrumentationProviders;
-  }
 
   if (record.workflow !== undefined) {
     normalizedDefinition.workflow = normalizeAgentWorkflowDefinition(record.workflow, message);

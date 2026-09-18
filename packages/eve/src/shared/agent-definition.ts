@@ -208,15 +208,6 @@ export interface AgentLimitsDefinition {
  */
 export interface AgentExperimentalDefinition {
   /**
-   * Reads instrumentation from an `instrumentation/` directory of providers
-   * rather than a single `agent/instrumentation.ts` config object.
-   *
-   * The two layouts are mutually exclusive: with this on, an
-   * `agent/instrumentation.ts` is a build error, and with it off, an
-   * `instrumentation/` directory is.
-   */
-  readonly instrumentationProviders?: boolean;
-  /**
    * Runs this agent's delegated subagent calls as durable background tasks.
    * The originating tool call returns a task receipt immediately and the
    * model manages the work through the `task_*` framework tools. Root agents

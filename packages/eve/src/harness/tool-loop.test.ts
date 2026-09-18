@@ -42,10 +42,7 @@ import { decodeSandboxRef, isSandboxRefUrl } from "#internal/attachments/sandbox
 import { attachClientContext } from "#internal/client-context.js";
 import { mockSandbox } from "#internal/testing/mocks/mock-sandbox.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
-import type {
-  InstrumentationEvents,
-  InstrumentationStepStartedEventInput,
-} from "#public/instrumentation/index.js";
+import type { InstrumentationStepStartedEventInput } from "#public/instrumentation/index.js";
 import { defineInstructions } from "#public/definitions/instructions.js";
 import type { ResolvedDynamicInstructionsResolver } from "#runtime/types.js";
 import { createPreparedRuntimeSubagentTool } from "#runtime/subagents/registry.js";
@@ -107,6 +104,7 @@ import {
   type InstrumentationRuntime,
   type SessionInstrumentation,
 } from "#instrumentation/runtime.js";
+import type { RuntimeContextResolver } from "#tracing/otel-declaration.js";
 import {
   CONDITIONAL_DELIVERY_INSTRUCTION,
   EMPTY_DELIVERY_SENTINEL,
@@ -196,7 +194,9 @@ function setConversationContext(
 
 function declareTelemetry(
   config:
-    | (Readonly<Record<string, unknown>> & { readonly events?: InstrumentationEvents })
+    | (Readonly<Record<string, unknown>> & {
+        readonly runtimeContext?: RuntimeContextResolver;
+      })
     | undefined,
   decision?: InstrumentationDecision,
   audience: ChannelAudience = "unknown",
@@ -217,9 +217,10 @@ function declareTelemetry(
             recordOutputs: config.recordOutputs === true,
             traceChannelRequests: config["traceChannelRequests"] === true,
           },
+          runtimeContextResolvers:
+            config.runtimeContext === undefined ? undefined : [config.runtimeContext],
           runInContext: (_operation, execute) => execute(),
           shutdown: async () => undefined,
-          stepStartedRuntimeContextResolver: config.events?.["step.started"] ?? (() => undefined),
         };
   declaredInstrumentation = bindInstrumentationRuntime(
     declaredRuntime,
@@ -247,9 +248,6 @@ function bindHookInstrumentation(
         : undefined,
       runInContext,
       shutdown: async () => undefined,
-      stepStartedRuntimeContextResolver: useDeclaredRuntime
-        ? declaredRuntime?.stepStartedRuntimeContextResolver
-        : undefined,
     },
     createInstrumentationContext(
       useDeclaredRuntime ? declaredDecision : undefined,
@@ -5460,15 +5458,11 @@ describe("createToolLoopHarness", () => {
 
     it("retries with the offending tool dropped and a one-shot system note", async () => {
       const resolveRuntimeContext = vi.fn((input: InstrumentationStepStartedEventInput) => ({
-        runtimeContext: {
-          "test.attempt": typeof input.modelInput.instructions === "string" ? "original" : "retry",
-        },
+        "test.attempt": typeof input.modelInput.instructions === "string" ? "original" : "retry",
       }));
       declareTelemetry(
         {
-          events: {
-            "step.started": resolveRuntimeContext,
-          },
+          runtimeContext: resolveRuntimeContext,
         },
         undefined,
         "public",
@@ -11923,7 +11917,7 @@ describe("createToolLoopHarness", () => {
       }
     });
 
-    it("injects eve.version alongside session context into runtimeContext when telemetry is enabled", async () => {
+    it("injects eve.version alongside session context when runtimeContext is configured", async () => {
       setupMockAgent({
         finishReason: "stop",
         response: { messages: [{ content: "Hello!", role: "assistant" }] },
@@ -11932,7 +11926,7 @@ describe("createToolLoopHarness", () => {
         toolResults: [],
       });
 
-      declareTelemetry({ tracePolicy: () => true });
+      declareTelemetry({ runtimeContext: () => undefined, tracePolicy: () => true });
       const config = createTestConfig("conversation");
       const runStep = createToolLoopHarness(config);
       await runStep(createTestSession(), { message: "hi" });
@@ -12160,7 +12154,7 @@ describe("createToolLoopHarness", () => {
       });
     });
 
-    it("merges step-started runtime context before emitting step.started", async () => {
+    it("merges runtime context before emitting step.started", async () => {
       setupMockAgent({
         finishReason: "stop",
         response: { messages: [{ content: "Hello!", role: "assistant" }] },
@@ -12176,26 +12170,22 @@ describe("createToolLoopHarness", () => {
         events.push(event);
       };
       const resolveRuntimeContext = vi.fn((input: InstrumentationStepStartedEventInput) => {
-        order.push('events["step.started"]');
+        order.push("runtimeContext");
         if (input.channel.kind !== "channel:support") {
           throw new Error("expected support channel metadata");
         }
         return {
-          runtimeContext: {
-            "eve.session.id": "user-override",
-            "slack.user_id":
-              typeof input.channel.metadata["triggeringUserId"] === "string"
-                ? input.channel.metadata["triggeringUserId"]
-                : "",
-            "turn.id": input.turn.id,
-          },
+          "eve.session.id": "user-override",
+          "slack.user_id":
+            typeof input.channel.metadata["triggeringUserId"] === "string"
+              ? input.channel.metadata["triggeringUserId"]
+              : "",
+          "turn.id": input.turn.id,
         };
       });
       declareTelemetry(
         {
-          events: {
-            "step.started": resolveRuntimeContext,
-          },
+          runtimeContext: resolveRuntimeContext,
         },
         undefined,
         "public",
@@ -12253,12 +12243,12 @@ describe("createToolLoopHarness", () => {
       expect(agentCall?.telemetry?.includeRuntimeContext).toEqual(
         Object.fromEntries(Object.keys(agentCall?.runtimeContext ?? {}).map((key) => [key, true])),
       );
-      expect(order.indexOf("turn.started")).toBeLessThan(order.indexOf('events["step.started"]'));
-      expect(order.indexOf("step.started")).toBeLessThan(order.indexOf('events["step.started"]'));
+      expect(order.indexOf("turn.started")).toBeLessThan(order.indexOf("runtimeContext"));
+      expect(order.indexOf("step.started")).toBeLessThan(order.indexOf("runtimeContext"));
       expect(getCompatibilityEventTypes(events)).toContain("step.started");
     });
 
-    it("continues the normal turn flow when step-started runtime context throws", async () => {
+    it("continues the normal turn flow when runtime context throws", async () => {
       setupMockAgent({
         finishReason: "stop",
         response: { messages: [{ content: "Hello!", role: "assistant" }] },
@@ -12268,10 +12258,8 @@ describe("createToolLoopHarness", () => {
       });
 
       declareTelemetry({
-        events: {
-          "step.started": () => {
-            throw new Error("runtime context resolver failed");
-          },
+        runtimeContext: () => {
+          throw new Error("runtime context resolver failed");
         },
       });
 
@@ -12299,16 +12287,12 @@ describe("createToolLoopHarness", () => {
       });
     });
 
-    it("resolves step-started runtime context for each step and turn coordinate", async () => {
+    it("resolves runtime context for each step and turn coordinate", async () => {
       const resolveRuntimeContext = vi.fn((input: InstrumentationStepStartedEventInput) => ({
-        runtimeContext: {
-          "test.step": `${input.turn.id}:${input.step.index}`,
-        },
+        "test.step": `${input.turn.id}:${input.step.index}`,
       }));
       declareTelemetry({
-        events: {
-          "step.started": resolveRuntimeContext,
-        },
+        runtimeContext: resolveRuntimeContext,
       });
 
       const { emit } = createEventCollector();

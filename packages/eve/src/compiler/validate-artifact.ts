@@ -348,7 +348,6 @@ function collectReferencedModuleSources(
   for (const value of node.hooks) add(value);
   for (const value of node.memories) add(value);
   for (const value of node.instructions) if (value.sourceKind === "module") add(value);
-  if (node.instrumentation !== undefined) add(node.instrumentation);
   for (const value of node.skills) if (value.sourceKind === "module") add(value);
   for (const value of node.schedules) if (value.sourceKind === "module") add(value);
   add(node.sandbox);

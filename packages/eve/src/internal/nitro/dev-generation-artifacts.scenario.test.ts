@@ -479,7 +479,16 @@ describe("development generation artifacts", () => {
     const app = await scenarioApp({
       files: {
         "agent/agent.mjs": 'export default { model: "openai/gpt-5.4" };\n',
-        "agent/instrumentation.mjs": 'export default { marker: "one" };\n',
+        "agent/instrumentation/audit.mjs": [
+          'import { defineInstrumentation } from "eve/instrumentation";',
+          'const marker = "one";',
+          "export default defineInstrumentation({",
+          "  setup() {",
+          "    globalThis.__EVE_PROVIDER_FINGERPRINT__ = marker;",
+          "  },",
+          "});",
+          "",
+        ].join("\n"),
         "agent/instructions.md": "Use the configured model.",
         "agent/skills/guide.md": [
           "---",
@@ -501,7 +510,10 @@ describe("development generation artifacts", () => {
         "utf8",
       ),
     ) as { readonly instrumentation?: MaterializedInstrumentation; readonly moduleMap: string };
-    expect(firstIndex.instrumentation).toBeUndefined();
+    expect(firstIndex.instrumentation).toMatchObject({
+      kind: "directory",
+      modulePathsBySlot: { audit: expect.any(String) },
+    });
     const materializedModuleMap = await readFile(
       join(first.runtimeAppRoot, ".eve", "compile", firstIndex.moduleMap),
       "utf8",
@@ -526,16 +538,22 @@ describe("development generation artifacts", () => {
     expect(restoredInstructions.fingerprint).toBe(first.fingerprint);
 
     await writeFile(
-      join(app.appRoot, "agent", "instrumentation.mjs"),
-      'export default { marker: "two" };\n',
+      join(app.appRoot, "agent", "instrumentation", "audit.mjs"),
+      [
+        'import { defineInstrumentation } from "eve/instrumentation";',
+        'const marker = "two";',
+        "export default defineInstrumentation({",
+        "  setup() {",
+        "    globalThis.__EVE_PROVIDER_FINGERPRINT__ = marker;",
+        "  },",
+        "});",
+        "",
+      ].join("\n"),
     );
     const changedCompile = await compileAgent({ startPath: app.appRoot });
     const changed = await stageDevelopmentGeneration(changedCompile);
 
     expect(changed.fingerprint).not.toBe(first.fingerprint);
-    expect(changedCompile.manifest.instrumentation).toMatchObject({
-      logicalPath: "instrumentation.mjs",
-    });
 
     await writeFile(
       join(app.appRoot, "agent", "skills", "guide.md"),

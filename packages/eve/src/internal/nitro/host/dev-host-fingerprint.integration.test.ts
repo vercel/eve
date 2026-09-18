@@ -124,10 +124,10 @@ async function createHost(variant: HostVariant = {}): Promise<PreparedDevelopmen
       ...(instrumentationSourcePath === undefined
         ? {}
         : {
-            instrumentationLayout:
-              variant.instrumentationSlot === undefined
-                ? ({ kind: "file" } as const)
-                : ({ kind: "directory", slots: [variant.instrumentationSlot] } as const),
+            instrumentationLayout: {
+              kind: "directory",
+              slots: [variant.instrumentationSlot ?? "provider"],
+            } as const,
             instrumentationSourcePaths: [instrumentationSourcePath],
           }),
       workflowWorldPluginPath: join(appRoot, "workflow-world.mjs"),

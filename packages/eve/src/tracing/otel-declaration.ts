@@ -65,7 +65,7 @@ export interface OtelOptions {
    * settings can only narrow it. For a trusted remote trace, eve evaluates this
    * policy against the immutable origin audience and intersects it with the
    * parent's effective ceiling, so every hop can only narrow capture. It never
-   * changes what authored instrumentation providers receive. A thrown error rejects trace production without
+   * changes what lifecycle instrumentation receives. A thrown error rejects trace production without
    * silencing lifecycle providers. The policy may be invoked more than once
    * while a new session is being prepared, so it must be deterministic for
    * consistent results.
@@ -102,7 +102,7 @@ export interface ManagedTraceOptions {
 }
 
 /** Where one `otelIntegration()` sends spans and metrics. */
-export interface OtelIntegrationOptions {
+export interface OtelIntegrationOptions extends ManagedTraceOptions {
   /** Merged into the pipeline in declaration order. */
   readonly spanProcessors?: readonly SpanProcessor[];
   /** Wrapped in eve's batching processor and appended after `spanProcessors`. */
@@ -173,16 +173,11 @@ export function otelIntegration(options: OtelIntegrationOptions = {}): OtelInteg
 }
 
 /** @internal Local and Agent Runs destination declaration. */
-export function managedOtelIntegration(
-  options: OtelIntegrationOptions & ManagedTraceOptions = {},
-): OtelIntegration {
-  return createOtelIntegration(options, options.exportPolicy);
+export function managedOtelIntegration(options: OtelIntegrationOptions = {}): OtelIntegration {
+  return createOtelIntegration(options);
 }
 
-function createOtelIntegration(
-  options: OtelIntegrationOptions,
-  exportPolicy?: SpanExportPolicy | readonly SpanExportPolicy[],
-): OtelIntegration {
+function createOtelIntegration(options: OtelIntegrationOptions): OtelIntegration {
   assertNoRemovedContentOptions(options);
   const declared = options.spanProcessors ?? [];
   const spanProcessors =
@@ -196,7 +191,7 @@ function createOtelIntegration(
     metricReaders: options.metricReaders ?? [],
     runtimeContext: options.runtimeContext,
     spanProcessors: spanProcessors.map((processor) =>
-      contentFilteringProcessor(processor, exportPolicy),
+      contentFilteringProcessor(processor, options.exportPolicy),
     ),
   };
 }
@@ -250,8 +245,9 @@ export interface OtelHarnessSettings {
   readonly functionId?: string;
   readonly traceChannelRequests: boolean;
   readonly tracePolicy?: TraceCapturePolicy;
-  /** Legacy `defineInstrumentation()` capture settings. Provider destinations capture fully. */
+  /** Whether AI SDK spans include model and tool inputs. */
   readonly recordInputs: boolean;
+  /** Whether AI SDK spans include model and tool outputs. */
   readonly recordOutputs: boolean;
 }
 

@@ -26,9 +26,8 @@ const log = createLogger("tracing.install-instrumentation-runtime");
 /**
  * Installs the process instrumentation runtime around a collected pipeline.
  *
- * Both layouts land here. `eve dev`'s zero-config default and an authored
- * `agent/instrumentation/` directory differ only in where the declared values
- * came from, so sharing the install keeps them on one runtime path.
+ * `eve dev`'s zero-config default and an authored `agent/instrumentation/`
+ * directory differ only in where the declared values came from.
  *
  * A directory that declared no OpenTelemetry still gets a bus: its providers
  * see every event, they just have no spans to hang them on.
@@ -36,7 +35,6 @@ const log = createLogger("tracing.install-instrumentation-runtime");
 export function installInstrumentationRuntime(input: {
   readonly collected: CollectedOtel;
   readonly frameworkVersion: string;
-  readonly instrumentationProviders?: boolean;
   readonly providers: readonly InstrumentationProviderDefinition[];
   readonly runtimeContextResolvers?: readonly RuntimeContextResolver[];
   readonly serviceName: string;
@@ -94,7 +92,6 @@ export function installInstrumentationRuntime(input: {
       serialBefore,
     }),
     idGenerator: otelRuntime?.idGenerator ?? new AgentSpanIdGenerator(),
-    instrumentationProviders: input.instrumentationProviders,
     memoryOperations: otelRuntime !== undefined || input.providers.some(hasMemoryOperationHandler),
     otelSettings: input.collected.declared ? input.collected.settings : undefined,
     ownsAgentSpans: otelRuntime !== undefined,

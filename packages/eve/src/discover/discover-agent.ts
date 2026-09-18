@@ -184,13 +184,22 @@ export async function discoverAgent(input: DiscoverAgentInput): Promise<Discover
         }),
       );
     }
-    if (instrumentationModuleResult.module !== undefined) {
+    const instrumentationDirectory = rootEntries.find(
+      (entry) => entry.name === "instrumentation" && entry.isDirectory(),
+    );
+    if (
+      instrumentationModuleResult.module !== undefined ||
+      instrumentationDirectory !== undefined
+    ) {
       diagnostics.push(
         createDiscoverErrorDiagnostic({
           code: DISCOVER_EXTENSION_INSTRUMENTATION_UNSUPPORTED,
           message:
-            "An extension may not declare instrumentation — it is a singleton owned by the consuming agent.",
-          sourcePath: join(agentRoot, instrumentationModuleResult.module.logicalPath),
+            "An extension may not declare instrumentation providers — process-wide observability belongs to the consuming agent.",
+          sourcePath:
+            instrumentationModuleResult.module === undefined
+              ? join(agentRoot, instrumentationDirectory!.name)
+              : join(agentRoot, instrumentationModuleResult.module.logicalPath),
         }),
       );
     }
@@ -326,10 +335,6 @@ export async function discoverAgent(input: DiscoverAgentInput): Promise<Discover
   if (role !== "extension" && configModuleResult.module !== undefined) {
     manifestInput.configModule = configModuleResult.module;
   }
-  if (role !== "extension" && instrumentationModuleResult.module !== undefined) {
-    manifestInput.instrumentation = instrumentationModuleResult.module;
-  }
-
   const manifest = createAgentSourceManifest(manifestInput);
 
   return {

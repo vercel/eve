@@ -102,12 +102,14 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
     },
   },
   subagent: {
-    current: 18,
-    supported: [3, 4, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18],
+    current: 19,
+    supported: [3, 4, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 19],
     dropped: {
       1: "Persistent subagent sessions are now the default and the experimental opt-in was removed",
       2: "Persistent subagent sessions are now the default and the experimental opt-in was removed",
       5: "Message and reasoning append events now expose deltas instead of cumulative snapshots.",
+      17: "Removed experimental.instrumentationProviders; instrumentation is now always enabled for root agents.",
+      18: "Removed experimental.instrumentationProviders; instrumentation is now always enabled for root agents.",
     },
   },
   connection: {

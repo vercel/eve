@@ -244,6 +244,27 @@ describe("Client request policy", () => {
     expect(info.tools.static[0]).not.toHaveProperty("outputSchema");
   });
 
+  it("accepts the legacy optional instrumentation field in v4 agent info", async () => {
+    const owner = { kind: "application" as const };
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      Response.json({
+        ...AGENT_INFO,
+        instrumentation: {
+          binding: testBinding("instrumentation.ts", owner),
+          logicalPath: "instrumentation.ts",
+          owner,
+          sourceId: "instrumentation.ts",
+          sourceKind: "module",
+        },
+      }),
+    );
+    const client = new Client({ host: "https://eve.test" });
+
+    const info = await client.info();
+
+    expect(info.instrumentation?.logicalPath).toBe("instrumentation.ts");
+  });
+
   it("rejects unknown fields in the agent info payload", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       Response.json({ ...AGENT_INFO, ignoredByClient: true }),

@@ -90,10 +90,10 @@ describe("agentRunsIntegration", () => {
   });
 });
 
-describe("managed export policy", () => {
+describe("destination export policy", () => {
   it("does not redact content unless the export pipeline requests it", () => {
     let visibleAttributes: Readonly<Record<string, unknown>> | undefined;
-    const integration = managedOtelIntegration({
+    const integration = otelIntegration({
       exportPolicy: {
         span: ({ attributes }) => {
           visibleAttributes = attributes;
@@ -117,7 +117,7 @@ describe("managed export policy", () => {
 
   it("runs export policy arrays in declaration order", () => {
     let visibleAttributes: Readonly<Record<string, unknown>> | undefined;
-    const integration = managedOtelIntegration({
+    const integration = otelIntegration({
       exportPolicy: [
         {
           span: ({ audience }) =>

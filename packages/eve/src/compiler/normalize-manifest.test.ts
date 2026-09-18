@@ -597,7 +597,6 @@ describe("compileAgentManifest source graph", () => {
   it("projects the root node once and finalizes its filesystem bindings after config", async () => {
     let toolSourceIterations = 0;
     const discovered = manifest();
-    discovered.instrumentation = createModuleSourceRef({ logicalPath: "instrumentation.ts" });
     discovered.tools = new Proxy(discovered.tools, {
       get(target, property, receiver) {
         if (property === Symbol.iterator) toolSourceIterations += 1;
@@ -621,14 +620,7 @@ describe("compileAgentManifest source graph", () => {
     });
 
     expect(toolSourceIterations).toBe(1);
-    expect(compiled.bindings["instrumentation.ts"]?.backing).toMatchObject({
-      externalDependencies: ["sharp"],
-      kind: "filesystem",
-    });
-    expect(compiled.bindings["instrumentation.ts"]?.usage).toEqual({
-      compile: false,
-      runtimeEntry: true,
-    });
+    expect(compiled.config.build?.externalDependencies).toEqual(["sharp"]);
   });
 
   it("classifies dynamic and source-backed model configs as runtime entries", async () => {

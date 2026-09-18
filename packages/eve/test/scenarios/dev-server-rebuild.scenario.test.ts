@@ -194,7 +194,7 @@ describe("eve dev server rebuild transactions", () => {
         await expect(fetchText(server.url, "/worker-id")).resolves.toBe(initialWorkerId);
 
         await writeFile(
-          join(app.appRoot, "agent", "instrumentation.ts"),
+          join(app.appRoot, "agent", "instrumentation", "reload.ts"),
           createInstrumentationSource("two"),
         );
         await forceDevelopmentRebuild(server.url);
@@ -227,8 +227,8 @@ describe("eve dev server rebuild transactions", () => {
         await expect(fetchText(server.url, "/instrumentation-marker")).resolves.toBe("one");
 
         await writeFile(
-          join(app.appRoot, "agent", "instrumentation.ts"),
-          'throw new Error("stage 4 rejected candidate");\nexport default {};\n',
+          join(app.appRoot, "agent", "instrumentation", "reload.ts"),
+          'throw new Error("stage 4 rejected candidate");\n',
         );
         await writeFile(
           join(app.appRoot, "agent", "channels", "dev-generation.ts"),
@@ -249,7 +249,7 @@ describe("eve dev server rebuild transactions", () => {
         expect(candidateRoute.status).toBe(404);
 
         await writeFile(
-          join(app.appRoot, "agent", "instrumentation.ts"),
+          join(app.appRoot, "agent", "instrumentation", "reload.ts"),
           createInstrumentationSource("two"),
         );
         await forceDevelopmentRebuild(server.url);
@@ -262,7 +262,7 @@ describe("eve dev server rebuild transactions", () => {
           createTransactionalRouteSource(),
         );
         await writeFile(
-          join(app.appRoot, "agent", "instrumentation.ts"),
+          join(app.appRoot, "agent", "instrumentation", "reload.ts"),
           createInstrumentationSource("one"),
         );
         await forceDevelopmentRebuild(server.url);

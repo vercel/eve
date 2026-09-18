@@ -52,7 +52,10 @@ const INDEX = {
         },
       },
     },
-    { name: "instrumentation/langfuse-tracing", files: [{ target: "agent/instrumentation.ts" }] },
+    {
+      name: "instrumentation/langfuse-tracing",
+      files: [{ target: "agent/instrumentation/langfuse-tracing.ts" }],
+    },
     { name: 42 },
   ],
 };

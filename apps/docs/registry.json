@@ -2512,7 +2512,7 @@
       "type": "registry:item",
       "title": "Braintrust",
       "description": "Trace eve agent sessions in Braintrust, including turns, steps, tool calls, and subagent interactions.",
-      "dependencies": ["braintrust"],
+      "dependencies": ["braintrust@^3.29.0"],
       "envVars": {
         "BRAINTRUST_API_KEY": ""
       },
@@ -2520,12 +2520,7 @@
         {
           "path": "registry/instrumentation/braintrust.ts",
           "type": "registry:file",
-          "target": "agent/instrumentation.ts"
-        },
-        {
-          "path": "registry/instrumentation/braintrust-hook.ts",
-          "type": "registry:file",
-          "target": "agent/hooks/braintrust.ts"
+          "target": "agent/instrumentation/braintrust.ts"
         }
       ]
     },
@@ -2549,7 +2544,7 @@
         {
           "path": "registry/instrumentation/posthog.ts",
           "type": "registry:file",
-          "target": "agent/instrumentation.ts"
+          "target": "agent/instrumentation/posthog.ts"
         }
       ]
     },
@@ -2567,7 +2562,7 @@
         {
           "path": "registry/instrumentation/sentry.ts",
           "type": "registry:file",
-          "target": "agent/instrumentation.ts"
+          "target": "agent/instrumentation/sentry.ts"
         }
       ]
     },
@@ -2585,7 +2580,7 @@
         {
           "path": "registry/instrumentation/datadog.ts",
           "type": "registry:file",
-          "target": "agent/instrumentation.ts"
+          "target": "agent/instrumentation/datadog.ts"
         }
       ]
     },
@@ -2602,7 +2597,7 @@
         {
           "path": "registry/instrumentation/honeycomb.ts",
           "type": "registry:file",
-          "target": "agent/instrumentation.ts"
+          "target": "agent/instrumentation/honeycomb.ts"
         }
       ]
     },
@@ -2620,7 +2615,7 @@
         {
           "path": "registry/instrumentation/arize.ts",
           "type": "registry:file",
-          "target": "agent/instrumentation.ts"
+          "target": "agent/instrumentation/arize.ts"
         }
       ]
     },
@@ -2637,7 +2632,7 @@
         {
           "path": "registry/instrumentation/raindrop.ts",
           "type": "registry:file",
-          "target": "agent/instrumentation.ts"
+          "target": "agent/instrumentation/raindrop.ts"
         }
       ]
     },
@@ -2651,7 +2646,7 @@
         {
           "path": "registry/instrumentation/jaeger.ts",
           "type": "registry:file",
-          "target": "agent/instrumentation.ts"
+          "target": "agent/instrumentation/jaeger.ts"
         }
       ]
     }
