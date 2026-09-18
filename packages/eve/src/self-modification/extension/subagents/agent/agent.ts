@@ -6,7 +6,7 @@ import {
   type AgentStaticModelDefinition,
   type DynamicSentinel,
   type DynamicSubagentDefinition,
-} from "#public/index.js";
+} from "eve";
 
 import { DEFAULT_AGENT_MODEL_ID } from "#shared/default-agent-model.js";
 

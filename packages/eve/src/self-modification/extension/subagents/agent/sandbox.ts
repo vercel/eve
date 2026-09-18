@@ -1,14 +1,14 @@
 import { shellQuote } from "#shared/shell-quote.js";
-import { SANDBOX_BACKEND_PROBES, type DefaultSandboxProbes } from "#sandbox/backends/default.js";
+import { SANDBOX_BACKEND_PROBES, type DefaultSandboxProbes } from "#sandbox/backends/probes.js";
 import {
   defaultBackend,
   defineSandbox,
   type SandboxBackend,
   type SandboxDefinition,
-} from "#public/sandbox/index.js";
-import { justbash } from "#public/sandbox/just-bash.js";
-import { microsandbox } from "#public/sandbox/microsandbox.js";
-import { vercel } from "#public/sandbox/vercel.js";
+} from "eve/sandbox";
+import { justbash } from "eve/sandbox/just-bash";
+import { microsandbox } from "eve/sandbox/microsandbox";
+import { vercel } from "eve/sandbox/vercel";
 
 import { resolveSelfModificationConfig, type SelfModificationConfig } from "../../../config.js";
 import { createGitHubCredentialProvider } from "../../../credentials.js";
