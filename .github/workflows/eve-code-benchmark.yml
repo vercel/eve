@@ -26,7 +26,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: vercel-labs/eve-bench
-          ref: f6140df6ab46bce89de823553abefe7e64074888
+          ref: 1c1fd161bab0681d962d3082d8b94f1b1771a345
           ssh-key: ${{ secrets.EVE_BENCH_SSH_KEY }}
           path: .eve-bench-runner
           persist-credentials: false
@@ -44,7 +44,7 @@ jobs:
           native-build: "false"
           baseline-artifact-id: ${{ vars.EVE_BENCH_BASELINE_ARTIFACT_ID }}
           artifact-name: eve-code-swe-lean
-          runner-revision: f6140df6ab46bce89de823553abefe7e64074888
+          runner-revision: 1c1fd161bab0681d962d3082d8b94f1b1771a345
           gateway-key: ${{ secrets.AI_GATEWAY_API_KEY }}
           source-token: ${{ secrets.EVE_BENCH_SOURCE_TOKEN }}
           github-token: ${{ github.token }}
