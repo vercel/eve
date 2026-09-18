@@ -1,4 +1,4 @@
-enableGlobalVirtualStore: false
+enableGlobalVirtualStore: true
 
 packages:
   - apps/*
@@ -6,6 +6,14 @@ packages:
   - apps/frameworks/*
   - e2e/fixtures/*
   - packages/*
+
+packageExtensions:
+  "@nuxt/kit@4.5.2":
+    dependencies:
+      "@nuxt/schema": "4.5.2" # Published types import schema, but kit only declares it as a dev dependency.
+  "@nuxt/schema@4.5.2":
+    dependencies:
+      c12: "^3.3.4" # DefineNuxtConfig extends c12's DefineConfig in the published types.
 
 allowBuilds:
   "@google/genai": false # No-op preinstall.

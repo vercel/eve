@@ -9,10 +9,11 @@
  * site does (markdown vs MDX by extension) and fails on the first parse error.
  *
  * `@mdx-js/mdx` is a transitive dependency (via fumadocs-mdx) and is not
- * importable by bare specifier from the repo root, so resolve it from the pnpm
- * store by globbing for the installed version.
+ * importable by bare specifier from the repo root, so resolve it from
+ * fumadocs-mdx to use the same compiler as the docs site.
  */
 import { readFileSync, readdirSync, statSync } from "node:fs";
+import { createRequire } from "node:module";
 import { relative, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -20,21 +21,19 @@ const repoRoot = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const docsDir = `${repoRoot}/docs`;
 
 function findMdxPackage() {
-  const store = `${repoRoot}/node_modules/.pnpm`;
-  let match;
   try {
-    match = readdirSync(store).find((d) => d.startsWith("@mdx-js+mdx@"));
+    const requireDocs = createRequire(new URL("../apps/docs/package.json", import.meta.url));
+    const requireFumadocs = createRequire(requireDocs.resolve("fumadocs-mdx/loader-mdx"));
+    return requireFumadocs.resolve("@mdx-js/mdx");
   } catch {
     return null;
   }
-  if (!match) return null;
-  return `${store}/${match}/node_modules/@mdx-js/mdx/index.js`;
 }
 
 const mdxPath = findMdxPackage();
 if (!mdxPath) {
   process.stderr.write(
-    "[docs:mdx] could not resolve @mdx-js/mdx from the pnpm store; run `pnpm install`.\n",
+    "[docs:mdx] could not resolve @mdx-js/mdx through fumadocs-mdx in apps/docs; run `pnpm install`.\n",
   );
   process.exit(1);
 }
