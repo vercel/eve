@@ -24,16 +24,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 360
     steps:
-      - name: Checkout pinned eve-bench action
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: vercel-labs/eve-bench
-          ref: 350dfccb622491a37a32ffa7558c389b5dee8d69
-          ssh-key: ${{ secrets.EVE_BENCH_SSH_KEY }}
-          path: .eve-bench-runner
-          persist-credentials: false
       - name: Benchmark current eve-code source
-        uses: ./.eve-bench-runner
+        uses: vercel-labs/eve-bench@dc3c0e21656c5b9e28ec548bb1e031dd16ff9127
         with:
           harness: eve-code
           agent-repository: vercel/eve
@@ -46,9 +38,7 @@ jobs:
           native-build: "false"
           baseline-artifact-id: ${{ vars.EVE_BENCH_BASELINE_ARTIFACT_ID }}
           artifact-name: eve-code-swe-lean
-          runner-revision: 350dfccb622491a37a32ffa7558c389b5dee8d69
           gateway-key: ${{ secrets.AI_GATEWAY_API_KEY }}
-          source-token: ${{ github.token }}
           github-token: ${{ github.token }}
           vercel-token: ${{ secrets.VERCEL_TOKEN }}
           vercel-team-id: ${{ secrets.VERCEL_TEAM_ID }}
