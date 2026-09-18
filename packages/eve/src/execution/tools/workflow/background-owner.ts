@@ -9,7 +9,6 @@ import {
   notifyTaskAgentRequest,
   notifyTaskAuthorization,
   notifyTaskParent,
-  notifyTaskUpdate,
   notifyTaskInputRequest,
 } from "#execution/tasks/child/notifications.js";
 import type { BackgroundWorkflowToolRunInput } from "#execution/tools/workflow/types.js";
@@ -121,10 +120,9 @@ export async function createBackgroundWorkflowOwner(
   async function handleReport(report: WorkflowToolRunReport): Promise<void> {
     const index = updateIndex++;
     if (view.metadata.kind !== "subagent" || isTerminalTaskStatus(view.status)) return;
-    await notifyTaskUpdate({
+    await notifyTaskParent({
       token: input.parentContinuationToken,
-      report,
-      updateIndex: index,
+      update: { report, index },
       view,
     });
   }

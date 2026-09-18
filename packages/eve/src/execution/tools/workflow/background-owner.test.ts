@@ -23,7 +23,6 @@ const mocks = vi.hoisted(() => ({
   notifyTaskAgentRequest: vi.fn(),
   notifyTaskAuthorization: vi.fn(),
   notifyTaskParent: vi.fn(),
-  notifyTaskUpdate: vi.fn(),
   notifyTaskInputRequest: vi.fn(),
   executeWorkflowBody: vi.fn(),
   sleep: vi.fn(),
@@ -46,7 +45,6 @@ vi.mock("#execution/tasks/child/notifications.js", () => ({
   notifyTaskAgentRequest: mocks.notifyTaskAgentRequest,
   notifyTaskAuthorization: mocks.notifyTaskAuthorization,
   notifyTaskParent: mocks.notifyTaskParent,
-  notifyTaskUpdate: mocks.notifyTaskUpdate,
   notifyTaskInputRequest: mocks.notifyTaskInputRequest,
 }));
 vi.mock("#execution/tools/workflow/owner-channels.js", () => ({
@@ -371,16 +369,18 @@ describe("runWorkflowToolInvocation", () => {
       });
 
       if (kind === "subagent") {
-        expect(mocks.notifyTaskUpdate).toHaveBeenCalledWith({
+        expect(mocks.notifyTaskParent).toHaveBeenNthCalledWith(1, {
           token: "parent-token",
-          report: expect.objectContaining(report),
-          updateIndex: 0,
+          update: { report: expect.objectContaining(report), index: 0 },
           view: expect.objectContaining({ status: "working" }),
         });
-        expect(mocks.notifyTaskUpdate).toHaveBeenCalledBefore(mocks.notifyTaskParent);
+        expect(mocks.notifyTaskParent).toHaveBeenNthCalledWith(2, {
+          token: "parent-token",
+          view: expect.objectContaining({ status: "completed" }),
+        });
         return;
       }
-      expect(mocks.notifyTaskUpdate).not.toHaveBeenCalled();
+      expect(mocks.notifyTaskParent).toHaveBeenCalledTimes(1);
     },
   );
 
@@ -498,7 +498,7 @@ describe("runWorkflowToolInvocation", () => {
       });
     await runWorkflowToolInvocation(workflowInput);
     expect(mocks.raceChannelReads).toHaveBeenCalledTimes(3);
-    expect(mocks.notifyTaskUpdate).not.toHaveBeenCalled();
+    expect(mocks.notifyTaskParent).toHaveBeenCalledTimes(1);
     expect(mocks.notifyTaskParent).toHaveBeenCalledExactlyOnceWith({
       token: "parent-token",
       view: expect.objectContaining({

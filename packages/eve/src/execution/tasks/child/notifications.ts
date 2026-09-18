@@ -27,33 +27,29 @@ import {
 export async function notifyTaskParent(input: {
   readonly token: string;
   readonly view: TaskView;
+  readonly update?: { readonly report: WorkflowToolRunReport; readonly index: number };
 }): Promise<void> {
-  const payload: { message: string; task?: { views: readonly TaskView[] } } = {
-    message: formatTaskNotification(input.view),
-  };
-  if (isTerminalTaskStatus(input.view.status)) payload.task = { views: [input.view] };
-  const command: SessionCommand = {
-    kind: "send",
-    payload,
-    taskDeliveryId: `${input.view.taskId}:ready:${input.view.status}`,
-  };
-  await deliverTaskNotificationStep({ token: input.token, command });
-}
-
-/** Forwards a running child's intermediate update to its parent session. */
-export async function notifyTaskUpdate(input: {
-  readonly token: string;
-  readonly report: WorkflowToolRunReport;
-  readonly updateIndex: number;
-  readonly view: TaskView;
-}): Promise<void> {
-  const command: SessionCommand = {
-    kind: "send",
-    payload: {
-      message: `Background task ${input.view.taskId} (${input.view.metadata.name}) update: ${formatTaskOutput(input.report.update)}`,
-    },
-    taskDeliveryId: `${input.view.taskId}:update:${input.view.taskId}:${input.updateIndex}:${input.report.from.callId}`,
-  };
+  const { view, update } = input;
+  let command: SessionCommand;
+  if (update === undefined) {
+    const payload: { message: string; task?: { views: readonly TaskView[] } } = {
+      message: formatTaskNotification(view),
+    };
+    if (isTerminalTaskStatus(view.status)) payload.task = { views: [view] };
+    command = {
+      kind: "send",
+      payload,
+      taskDeliveryId: `${view.taskId}:ready:${view.status}`,
+    };
+  } else {
+    command = {
+      kind: "send",
+      payload: {
+        message: `Background task ${view.taskId} (${view.metadata.name}) update: ${formatTaskOutput(update.report.update)}`,
+      },
+      taskDeliveryId: `${view.taskId}:update:${view.taskId}:${update.index}:${update.report.from.callId}`,
+    };
+  }
   await deliverTaskNotificationStep({ token: input.token, command });
 }
 
