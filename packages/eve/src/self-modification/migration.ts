@@ -23,6 +23,7 @@ export interface LegacySelfModificationScaffold {
   readonly root: string;
   readonly paths: readonly string[];
   readonly customized: boolean;
+  readonly signature: string;
 }
 
 /** Reads only the bounded legacy scaffold; consumer modules are never imported or executed. */
@@ -36,6 +37,9 @@ export async function detectLegacySelfModificationScaffold(
   if (agent === undefined || !agent.includes("defineSelfModificationAgent")) return undefined;
 
   const expected = new Set(LEGACY_FILES);
+  const signature = JSON.stringify(
+    await Promise.all(paths.map(async (path) => [path, await readText(join(root, path))] as const)),
+  );
   const customized =
     paths.some((path) => !expected.has(path as (typeof LEGACY_FILES)[number])) ||
     (
@@ -54,6 +58,7 @@ export async function detectLegacySelfModificationScaffold(
     root,
     paths: paths.map((path) => join(LEGACY_SELF_MODIFICATION_ROOT, path)),
     customized,
+    signature,
   };
 }
 
@@ -65,7 +70,8 @@ export async function removeLegacySelfModificationScaffold(
   if (
     current === undefined ||
     current.root !== scaffold.root ||
-    current.customized !== scaffold.customized
+    current.customized !== scaffold.customized ||
+    current.signature !== scaffold.signature
   ) {
     throw new Error(
       "The self-modification scaffold changed while setup was waiting for cleanup approval.",
@@ -79,7 +85,7 @@ async function listFiles(root: string): Promise<string[]> {
     const entries = await readdir(root, { recursive: true, withFileTypes: true });
     return entries
       .filter((entry) => entry.isFile())
-      .map((entry) => relative(root, join(entry.parentPath, entry.name)))
+      .map((entry) => relative(root, join(entry.parentPath, entry.name)).replaceAll("\\", "/"))
       .sort();
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
