@@ -15,7 +15,7 @@ import { dirname, join } from "node:path";
 
 import type { EveEvalContext, EveEvalLiveTurn, EveEvalSession, EveEvalTurn } from "eve/evals";
 
-const SELF_MODIFICATION_AGENT = "self-modification";
+const SELF_MODIFICATION_AGENT = "self-modification__agent";
 const CLEANUP_TIMEOUT_MS = 30_000;
 const LOCK_DIRECTORY = ".eve-self-modification-eval.lock";
 // Each eval entry bundles its relative imports separately. Share the lock across those copies.

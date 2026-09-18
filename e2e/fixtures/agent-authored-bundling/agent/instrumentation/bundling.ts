@@ -1,6 +1,6 @@
 import { defineInstrumentation } from "eve/instrumentation";
 
-import marker from "../authored-assets/instrumentation.txt?raw";
+import marker from "../../authored-assets/instrumentation.txt?raw";
 
 const INSTRUMENTATION_MARKER = "authored-instrumentation-asset";
 
@@ -9,5 +9,7 @@ if (marker.trim() !== INSTRUMENTATION_MARKER) {
 }
 
 export default defineInstrumentation({
-  functionId: INSTRUMENTATION_MARKER,
+  setup: () => {
+    void INSTRUMENTATION_MARKER;
+  },
 });

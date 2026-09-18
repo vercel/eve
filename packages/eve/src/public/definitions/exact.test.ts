@@ -291,45 +291,23 @@ function typeOnlyFixtures(): void {
   });
 
   defineInstrumentation({
-    isEnabled: true,
+    // @ts-expect-error Content capture is configured through tracePolicy.
     recordInputs: true,
-  });
-
-  // Unlike the helpers above, `defineInstrumentation` takes a generic union — a
-  // config and a provider overlap on `events` and `setup` — so it cannot use
-  // `ExactDefinition`. Excess keys reach `eve build` instead.
-  const instrumentationWithEnabled = {
-    isEnabled: true,
-    recordInputs: true,
-  };
-  defineInstrumentation(instrumentationWithEnabled);
-
-  defineInstrumentation({
-    events: {
-      "step.started"(input) {
-        const sessionId: string = input.session.id;
-        return { runtimeContext: { "test.session_id": sessionId } };
-      },
-    },
   });
 
   const providerWithCapture: ProviderDefinition = { capture: "content" };
   void providerWithCapture;
 
   defineInstrumentation({
-    // @ts-expect-error Instrumentation event hooks are authored through `events`.
-    runtimeContext: {
-      "step.started"() {
-        return { runtimeContext: {} };
-      },
-    },
+    // @ts-expect-error OpenTelemetry settings are configured with otel().
+    functionId: "support",
   });
 
   defineInstrumentation({
-    // @ts-expect-error Instrumentation event hooks are authored through `events`.
-    metadata: {
-      "step.started"() {
-        return { runtimeContext: { "test.session_id": "test-session" } };
+    events: {
+      "turn.started"(event) {
+        const sessionId: string = event.sessionId;
+        void sessionId;
       },
     },
   });

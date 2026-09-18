@@ -22,7 +22,9 @@ function evaluateGeneratedConfig(source: string, getToken = vi.fn()) {
     source
       .replace('import { getToken } from "@vercel/connect";', "")
       .replace('import { defineSelfModificationConfig } from "eve/self-modification/config";', "")
-      .replace("export default ", ""),
+      .replace('import selfModification from "eve/self-modification";', "")
+      .replace("export default ", "")
+      .replace("selfModification(", "defineSelfModificationConfig("),
     {
       defineSelfModificationConfig,
       getToken,
@@ -33,7 +35,10 @@ function evaluateGeneratedConfig(source: string, getToken = vi.fn()) {
 
 describe("self-modification setup", () => {
   it("recognizes default local configurations", () => {
-    expect(renderSelfModificationConfig()).toContain("local: { enabled: true }");
+    expect(renderSelfModificationConfig()).toContain(
+      'import selfModification from "eve/self-modification";',
+    );
+    expect(renderSelfModificationConfig()).toContain('// model: "provider/model"');
     expect(classifySelfModificationConfig(renderSelfModificationConfig())).toBe("local");
     expect(
       classifySelfModificationConfig(
@@ -55,6 +60,7 @@ describe("self-modification setup", () => {
     expect(source).toContain('directory: "apps/support"');
     expect(source).toContain('target: { branch: "release/production" }');
     expect(source).toContain('import { getToken } from "@vercel/connect"');
+    expect(source).toContain('import selfModification from "eve/self-modification"');
     expect(source).toContain('return await getToken("github/selfmod-acme-agents"');
     expect(source).toContain("async resolve({ capability, repository })");
     expect(source).toContain('case "http"');

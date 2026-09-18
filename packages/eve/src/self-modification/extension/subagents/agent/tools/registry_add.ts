@@ -6,17 +6,17 @@ import {
   resolveSelfModificationConfig,
   type ResolvedDeployedSelfModificationConfig,
   type ResolvedSelfModificationConfig,
-} from "../../config.js";
-import { readPreparedSelfModificationWorkspace } from "../../git-workspace.js";
-import { resolveSelfModificationMode } from "../../mode.js";
-import { withSelfModificationWorkspaceLock } from "../../workspace-lock.js";
-import selfModification from "../extension.js";
-import { classifyCatalogEntry } from "../classify-registry-item.js";
-import { runEveAdd, type SpawnLike } from "../eve-add.js";
+} from "../../../../config.js";
+import { readPreparedSelfModificationWorkspace } from "../../../../git-workspace.js";
+import { resolveSelfModificationMode } from "../../../../mode.js";
+import { withSelfModificationWorkspaceLock } from "../../../../workspace-lock.js";
+import selfModification from "../../../extension.js";
+import { classifyCatalogEntry } from "../../../classify-registry-item.js";
+import { runEveAdd, type SpawnLike } from "../../../eve-add.js";
 import {
   assertOfficialRegistryAddress,
   installProductionRegistryItem,
-} from "../production-registry-add.js";
+} from "../../../production-registry-add.js";
 import {
   loadRegistryIndex,
   officialRegistryIndexUrl,
@@ -233,7 +233,7 @@ export async function addLocalRegistryItem(
   }
 
   // Shares the catalog fetch and its five-minute cache with
-  // `selfmod__search_registry`, rather than reading the registry index twice.
+  // `search_registry`, rather than reading the registry index twice.
   const entries = await loadRegistryIndex({
     nowMs: Date.now(),
     signal: options.signal,

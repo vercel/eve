@@ -225,14 +225,14 @@ describe("initializeSessionInstrumentation", () => {
 
   it("redacts runtime-context model input when the forwarded ceiling denies inputs", async () => {
     const ctx = createContext("public");
-    const runtime = createRuntime({ capturesContent: true, publish: vi.fn() }, () => ({
-      emit: true,
-      recordInputs: true,
-      recordOutputs: true,
-    }));
-    runtime.stepStartedRuntimeContextResolver = (event) => ({
-      runtimeContext: { messageCount: event.modelInput.messages.length },
-    });
+    const runtime: InstrumentationRuntime = {
+      ...createRuntime({ capturesContent: true, publish: vi.fn() }, () => ({
+        emit: true,
+        recordInputs: true,
+        recordOutputs: true,
+      })),
+      runtimeContextResolvers: [(event) => ({ messageCount: event.modelInput.messages.length })],
+    };
     registerInstrumentationRuntime({
       ...runtime,
       idGenerator: new AgentSpanIdGenerator(),
@@ -693,10 +693,10 @@ describe("bindInstrumentationRuntime", () => {
 
   it("isolates concurrent step decisions and audiences", async () => {
     const ctx = createContext("private");
-    const runtime = createRuntime({ capturesContent: true, publish: vi.fn() });
-    runtime.stepStartedRuntimeContextResolver = (event) => ({
-      runtimeContext: { messageCount: event.modelInput.messages.length },
-    });
+    const runtime: InstrumentationRuntime = {
+      ...createRuntime({ capturesContent: true, publish: vi.fn() }),
+      runtimeContextResolvers: [(event) => ({ messageCount: event.modelInput.messages.length })],
+    };
     const instrumentation = bindInstrumentationRuntime(
       runtime,
       ctx,

@@ -350,7 +350,7 @@ During `eve dev`, ordinary dependencies are bundled into each retained runtime g
 | Per-tool approval (HITL)      | `agent/tools/*.ts`, [Tools](./tools)                                             |
 | Inbound auth & network policy | the channel layer, [Auth & route protection](./guides/auth-and-route-protection) |
 | Sandbox / workspace           | `agent/sandbox/`, [Sandbox](./sandbox)                                           |
-| Telemetry & debugging         | `agent/instrumentation.ts`, [Instrumentation](./observability/instrumentation)   |
+| Telemetry & debugging         | `agent/instrumentation/`, [Instrumentation](./observability/instrumentation)     |
 
 ## What to read next
 

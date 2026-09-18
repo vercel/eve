@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join, relative } from "node:path";
 import { promisify } from "node:util";
 
@@ -19,6 +19,7 @@ const runFile = promisify(execFile);
 const GENERATED_MARKER = "// eve-self-modification: generated-v1";
 const LEGACY_LOCAL_CONFIG =
   'import { defineSelfModificationConfig } from "eve/self-modification/config";\n\nexport default defineSelfModificationConfig({});\n';
+const DEFAULT_EXTENSION = `import selfModification from "eve/self-modification";\n\nexport default selfModification({\n  // model: "provider/model",\n  // reasoning: "high",\n});\n`;
 
 export interface SelfModificationSetupValues {
   readonly branch: string;
@@ -59,9 +60,8 @@ export function connectorName(owner: string, repo: string): string {
 }
 
 export function renderSelfModificationConfig(values?: SelfModificationSetupValues): string {
-  if (values === undefined) {
-    return `import { defineSelfModificationConfig } from "eve/self-modification/config";\n\nexport default defineSelfModificationConfig({\n  local: { enabled: true },\n});\n`;
-  }
+  if (values === undefined) return DEFAULT_EXTENSION;
+
   const channelNames = [...new Set(values.channelNames)].filter((name) => name !== "eve").sort();
   const channelCases = (values.vercelBackend ? channelNames : [])
     .map(
@@ -87,9 +87,9 @@ export function renderSelfModificationConfig(values?: SelfModificationSetupValue
   const switchCases = `${httpCase}${channelCases}`;
   const credentialErrorMessage = `Self-modification could not obtain a GitHub credential from Vercel Connect for ${values.connector}. Install and attach the configured GitHub connector to this Vercel project, install the managed GitHub App for the configured repository, then retry.`;
   const body = `import { getToken } from "@vercel/connect";
-import { defineSelfModificationConfig } from "eve/self-modification/config";
+import selfModification from "eve/self-modification";
 
-export default defineSelfModificationConfig({
+export default selfModification({
   deployed: {
     source: {
       git: {
@@ -200,7 +200,10 @@ export function defaultSelfModificationSetupOperations(
         throw error;
       }
     },
-    writeConfig: (source) => writeFile(configPath, source, "utf8"),
+    async writeConfig(source) {
+      await mkdir(join(configPath, ".."), { recursive: true });
+      await writeFile(configPath, source, "utf8");
+    },
     async findOrCreateConnector(name, project) {
       const connectors = await listGitHubConnectors(projectRoot, project, deps.captureVercel);
       const expected = `github/${name}`;

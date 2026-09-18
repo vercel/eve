@@ -127,10 +127,6 @@ export function buildAgentInfoResponse(
         role: definition.role,
       })),
     },
-    instrumentation:
-      manifest.instrumentation === undefined
-        ? undefined
-        : toModuleSource(manifest, manifest.instrumentation),
     kernelEffects: projectPreparedKernelEffects(manifest),
     kind: "eve-agent-info",
     memories: manifest.memories.map((memory) => ({

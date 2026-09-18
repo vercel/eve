@@ -228,7 +228,6 @@ describe("finalizeInstrumentationProviders", () => {
     const runtime = finalizeInstrumentationProviders({ serviceName: "weather-agent" });
     await runtime.hooks.forTrace!(traceContext("unknown")).publish(turnStarted);
 
-    expect(runtime.instrumentationProviders).toBe(true);
     expect(started).toHaveBeenCalledOnce();
     expect(started.mock.calls[0]?.[0]).toMatchObject({ turnId: "turn-1" });
   });

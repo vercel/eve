@@ -17,7 +17,8 @@ describe("formatRegistrySessionResult", () => {
         failures: [
           {
             title: "Slack",
-            message: "Vercel CLI is not authenticated.\nRun /deploy, then try again.",
+            message:
+              "Vercel CLI is not authenticated. Try again with `eve add channel/slack --skip-install`.",
           },
         ],
       }),
@@ -30,7 +31,7 @@ describe("formatRegistrySessionResult", () => {
         "    Configured MCP connection.\n\n" +
         "  ⨯ Slack\n" +
         "    Vercel CLI is not authenticated.\n" +
-        "    Run /deploy, then try again.",
+        "    Try again with `eve add channel/slack --skip-install`.",
     );
   });
 

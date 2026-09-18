@@ -302,8 +302,6 @@ export type AgentHeaderOptions = {
   name: string;
   serverUrl: string;
   info?: AgentInfoResult;
-  /** Message-of-the-day line below the startup card (local sessions only). */
-  tip?: string;
 };
 
 type DisplayModes = {
@@ -414,7 +412,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
   #startupEditor?: LineState;
   #startupConsumer?: (key: TerminalKey) => void;
   #startupStartedAt = 0;
-  #startupHeader?: { readonly name: string; readonly tip: string };
+  #startupHeader?: { readonly name: string };
   #agentHeaderRendered = false;
   /** The last committed header body, to skip re-committing an unchanged banner. */
   #agentHeaderBody?: string;
@@ -695,12 +693,12 @@ export class TerminalRenderer implements AgentTUIRenderer {
     this.#live.flush(this.#renderAgentHeaderRows(), this.#footerRows(this.#width()));
   }
 
-  beginStartupDraft(options: { initialDraft?: string; tip: string; title: string }): void {
+  beginStartupDraft(options: { initialDraft?: string; title: string }): void {
     this.#start({ title: options.title });
     this.#inputActive = true;
     this.#promptPlaceholderActive = true;
     this.#startupPhase = "starting";
-    this.#startupHeader = { name: options.title, tip: options.tip };
+    this.#startupHeader = { name: options.title };
     this.#startupStartedAt = Date.now();
     let editor = lineOf(stripPromptControlCharacters(options.initialDraft ?? ""));
     this.#startupEditor = editor;
@@ -4237,8 +4235,6 @@ export class TerminalRenderer implements AgentTUIRenderer {
       width: this.#width(),
     };
     if (header?.info !== undefined) input.info = header.info;
-    const tip = header?.tip ?? startup?.tip;
-    if (tip !== undefined) input.tip = tip;
     return buildAgentHeader(input);
   }
 

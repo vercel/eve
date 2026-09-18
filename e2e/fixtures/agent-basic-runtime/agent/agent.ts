@@ -75,6 +75,6 @@ export default defineAgent({
       },
     },
   }),
-  experimental: { ...config.experimental, instrumentationProviders: true },
+  experimental: config.experimental,
   reasoning: "high",
 });

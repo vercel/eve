@@ -7,7 +7,7 @@ import searchRegistry, {
   selectIntegrationPage,
   selectIntegrations,
   type CatalogEntry,
-} from "./extension/tools/search_registry.js";
+} from "./extension/subagents/agent/tools/search_registry.js";
 
 const INDEX = {
   items: [
@@ -52,7 +52,10 @@ const INDEX = {
         },
       },
     },
-    { name: "instrumentation/langfuse-tracing", files: [{ target: "agent/instrumentation.ts" }] },
+    {
+      name: "instrumentation/langfuse-tracing",
+      files: [{ target: "agent/instrumentation/langfuse-tracing.ts" }],
+    },
     { name: 42 },
   ],
 };

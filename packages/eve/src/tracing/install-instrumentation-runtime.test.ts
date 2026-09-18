@@ -63,7 +63,6 @@ describe("installInstrumentationRuntime", () => {
     const runtime = installInstrumentationRuntime({
       collected: collectOtelPipeline([otelIntegration()]),
       frameworkVersion: "test",
-      instrumentationProviders: true,
       providers: [{ flush: providerFlush, name: "test", shutdown: providerShutdown }],
       serviceName: "weather",
     });
@@ -74,7 +73,6 @@ describe("installInstrumentationRuntime", () => {
 
     expect(forceFlush).toHaveBeenCalledOnce();
     expect(providerFlush).toHaveBeenCalledOnce();
-    expect(runtime.instrumentationProviders).toBe(true);
     expect(runtime.memoryOperations).toBe(true);
     expect(runtime.ownsAgentSpans).toBe(true);
     expect(runtime.otelSettings).toEqual({

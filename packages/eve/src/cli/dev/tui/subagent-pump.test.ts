@@ -343,7 +343,7 @@ describe("SubagentPump child stream transport", () => {
                     callId: "registry-add",
                     input: { address: "channel/slack" },
                     kind: "tool-call",
-                    toolName: "selfmod__registry_add",
+                    toolName: "registry_add",
                   },
                 ],
                 sequence: 1,
@@ -361,7 +361,7 @@ describe("SubagentPump child stream transport", () => {
                   callId: "registry-add",
                   kind: "tool-result",
                   output: { status: "needs-terminal", address: "channel/slack" },
-                  toolName: "selfmod__registry_add",
+                  toolName: "registry_add",
                 },
                 sequence: 2,
                 status: "completed",
@@ -384,8 +384,10 @@ describe("SubagentPump child stream transport", () => {
     });
     const first = subagentCalled("call-1");
     first.data.childSessionId = "conversation-child";
+    first.data.name = "self-modification__agent";
     const second = subagentCalled("call-2", "turn-2");
     second.data.childSessionId = "conversation-child";
+    second.data.name = "self-modification__agent";
 
     pump.begin(first);
     await vi.waitFor(() =>
@@ -399,7 +401,7 @@ describe("SubagentPump child stream transport", () => {
       "/eve/v1/children/call-2/stream?startIndex=1",
       expect.objectContaining({ signal: expect.any(AbortSignal) }),
     );
-    expect(onToolCompleted).toHaveBeenCalledWith("selfmod__registry_add", {
+    expect(onToolCompleted).toHaveBeenCalledWith("self-modification__agent", "registry_add", {
       status: "needs-terminal",
       address: "channel/slack",
     });

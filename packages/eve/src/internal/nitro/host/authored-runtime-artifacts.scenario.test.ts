@@ -38,11 +38,6 @@ describe("authored runtime artifacts", () => {
           "export default { content: prompt };",
           "",
         ].join("\n"),
-        "agent/instrumentation.ts": [
-          'import marker from "../assets/runtime.txt?raw";',
-          "export default { marker };",
-          "",
-        ].join("\n"),
         "agent/tools/read_assets.ts": [
           'import binary from "../../assets/runtime.bin";',
           'import text from "../../assets/runtime.txt?raw";',
@@ -72,7 +67,6 @@ describe("authored runtime artifacts", () => {
         (entry) => entry.logicalPath === "instructions.ts",
       )!;
       const tool = manifest.tools.find((entry) => entry.name === "read_assets")!;
-      const instrumentationSourceId = manifest.instrumentation!.sourceId;
 
       expect(manifest.bindings[instructions.sourceId]?.usage).toEqual({
         compile: true,
@@ -105,20 +99,6 @@ describe("authored runtime artifacts", () => {
       expect(moduleKeys(productionMap)).toEqual(moduleKeys(developmentMap));
       expect(productionRoot.modules[instructions.sourceId]).toBeUndefined();
       expect(developmentRoot.modules[instructions.sourceId]).toBeUndefined();
-      expect(
-        (
-          productionRoot.modules[instrumentationSourceId] as {
-            readonly default: { readonly marker: string };
-          }
-        ).default.marker,
-      ).toBe("runtime text\n");
-      expect(
-        (
-          developmentRoot.modules[instrumentationSourceId] as {
-            readonly default: { readonly marker: string };
-          }
-        ).default.marker,
-      ).toBe("runtime text\n");
       expect(await executeAssetTool(productionMap, tool.sourceId)).toEqual({
         binary: "data:application/octet-stream;base64,QklOQVJZ",
         text: "runtime text\n",
@@ -144,13 +124,7 @@ describe("authored runtime artifacts", () => {
   it("prepares provider-directory instrumentation identically for development and production", async () => {
     const app = await scenarioApp({
       files: {
-        "agent/agent.ts": [
-          "export default {",
-          '  model: "openai/gpt-5.4",',
-          "  experimental: { instrumentationProviders: true },",
-          "};",
-          "",
-        ].join("\n"),
+        "agent/agent.ts": ["export default {", '  model: "openai/gpt-5.4",', "};", ""].join("\n"),
         "agent/instrumentation/otel.ts": [
           'import marker from "../../assets/provider.txt?raw";',
           "export default { marker };",

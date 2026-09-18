@@ -1,5 +1,6 @@
 import selfModification from "eve/self-modification";
 
-import config from "../config";
-
-export default selfModification(config);
+export default selfModification({
+  // model: "provider/model",
+  // reasoning: "high",
+});

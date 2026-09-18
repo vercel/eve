@@ -514,8 +514,8 @@ importers:
         specifier: 0.5.0
         version: 0.5.0(ai@7.0.105(zod@4.5.4))(chat@4.41.0(ai@7.0.105(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)
       braintrust:
-        specifier: 3.24.0
-        version: 3.24.0(@aws-sdk/credential-provider-web-identity@3.972.49)(supports-color@10.2.2)(zod@4.5.4)
+        specifier: 3.29.0
+        version: 3.29.0(@aws-sdk/credential-provider-web-identity@3.972.49)(supports-color@10.2.2)(zod@4.5.4)
       chat:
         specifier: 4.41.0
         version: 4.41.0(ai@7.0.105(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)
@@ -8891,6 +8891,12 @@ packages:
 
   braintrust@3.24.0:
     resolution: {integrity: sha512-jF2XK1AImY2jI6uPxxU/KNGyYIIsr4PhaUD1IsbdggSNLIBkwzmluKvCzs1OUVy6LbpL4T2ekv8t+83UQ64hEg==}
+    hasBin: true
+    peerDependencies:
+      zod: ^3.25.34 || ^4.0
+
+  braintrust@3.29.0:
+    resolution: {integrity: sha512-VM6HVz5ydoIgIuWO9Nv8TmLA1RIBCe9qxuGHN4l//TG9s3UjeNCl006TU4mg3xZOGx2qqCMUpI2RTgfdBfQiSw==}
     hasBin: true
     peerDependencies:
       zod: ^3.25.34 || ^4.0
@@ -23916,6 +23922,42 @@ snapshots:
     transitivePeerDependencies:
       - '@aws-sdk/credential-provider-web-identity'
       - supports-color
+    optional: true
+
+  braintrust@3.29.0(@aws-sdk/credential-provider-web-identity@3.972.49)(supports-color@10.2.2)(zod@4.5.4):
+    dependencies:
+      '@next/env': 14.2.35
+      '@vercel/functions': 1.6.0(@aws-sdk/credential-provider-web-identity@3.972.49)
+      acorn: 8.18.0
+      acorn-import-attributes: 1.9.5(acorn@8.18.0)
+      ajv: 8.20.0
+      argparse: 2.0.1
+      astring: 1.9.0
+      cjs-module-lexer: 2.2.1
+      cli-progress: 3.12.0
+      cli-table3: 0.6.5
+      cors: 2.8.6
+      dotenv: 16.6.1
+      esbuild: 0.28.1
+      esquery: 1.7.0
+      eventsource-parser: 1.1.2
+      express: 5.2.1(supports-color@10.2.2)
+      http-errors: 2.0.1
+      meriyah: 6.1.4
+      minimatch: 10.2.6
+      module-details-from-path: 1.0.4
+      mustache: 4.2.0
+      pluralize: 8.0.0
+      semifies: 1.0.0
+      source-map: 0.7.6
+      termi-link: 1.1.0
+      unplugin: 2.3.11
+      uuid: 11.1.1
+      zod: 4.5.4
+      zod-to-json-schema: 3.25.2(zod@4.5.4)
+    transitivePeerDependencies:
+      - '@aws-sdk/credential-provider-web-identity'
+      - supports-color
 
   browserslist@4.29.0:
     dependencies:
@@ -24771,7 +24813,8 @@ snapshots:
 
   db0@0.4.1: {}
 
-  dc-browser@1.0.4: {}
+  dc-browser@1.0.4:
+    optional: true
 
   dc-polyfill@0.1.11: {}
 

@@ -22,9 +22,10 @@ interface ExtensionCapabilityContract {
 const EXTENSION_CAPABILITY_CONTRACTS = {
   extension: { current: 1, supported: [1], dropped: {} },
   tool: {
-    current: 51,
+    current: 52,
     supported: [
       1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 28, 29, 30, 31, 32, 34, 35, 44, 45, 46, 49, 50, 51,
+      52,
     ],
     dropped: {
       14: "TaskExec.delegated was removed; migrate to workflow-backed background tools",
@@ -101,12 +102,14 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
     },
   },
   subagent: {
-    current: 18,
-    supported: [3, 4, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18],
+    current: 19,
+    supported: [3, 4, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 19],
     dropped: {
       1: "Persistent subagent sessions are now the default and the experimental opt-in was removed",
       2: "Persistent subagent sessions are now the default and the experimental opt-in was removed",
       5: "Message and reasoning append events now expose deltas instead of cumulative snapshots.",
+      17: "Removed experimental.instrumentationProviders; instrumentation is now always enabled for root agents.",
+      18: "Removed experimental.instrumentationProviders; instrumentation is now always enabled for root agents.",
     },
   },
   connection: {

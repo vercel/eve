@@ -891,15 +891,19 @@ describe("app runtime dependency tracing", () => {
       ["export default {", '  model: "openai/gpt-5.4-mini",', "};", ""].join("\n"),
     );
     await writeFile(join(appRoot, "agent", "instructions.md"), "Verify hosted instrumentation.\n");
+    await mkdir(join(appRoot, "agent", "instrumentation"), { recursive: true });
     await writeFile(
-      join(appRoot, "agent", "instrumentation.ts"),
+      join(appRoot, "agent", "instrumentation", "dependency.ts"),
       [
         'import fixtureInstrumentationDep from "fixture-instrumentation-dep";',
+        'import { defineInstrumentation } from "eve/instrumentation";',
         "",
-        "(globalThis as Record<string, unknown>).__fixtureInstrumentationDep =",
-        "  fixtureInstrumentationDep;",
-        "",
-        "export default fixtureInstrumentationDep;",
+        "export default defineInstrumentation({",
+        "  setup() {",
+        "    (globalThis as Record<string, unknown>).__fixtureInstrumentationDep =",
+        "      fixtureInstrumentationDep;",
+        "  },",
+        "});",
         "",
       ].join("\n"),
     );

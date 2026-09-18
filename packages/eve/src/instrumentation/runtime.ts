@@ -1,7 +1,6 @@
 import type { Telemetry, TelemetryOptions } from "ai";
 import { context as otelContext, trace } from "#compiled/@opentelemetry/api/index.js";
 
-import type { InstrumentationEvents } from "#public/instrumentation/index.js";
 import type { InstrumentationDecision } from "#shared/instrumentation-decision.js";
 import { shouldCaptureInstrumentationContent } from "#shared/instrumentation-content.js";
 import type {
@@ -114,7 +113,7 @@ export interface InstrumentationStepScope<TSession> {
   readonly resolveRuntimeContext: (
     input: Omit<
       BuildTelemetryRuntimeContextInput,
-      "capturesContent" | "context" | "providerResolvers" | "stepStartedResolver"
+      "capturesContent" | "context" | "providerResolvers"
     >,
   ) => Record<string, unknown> | undefined;
   readonly session: TSession;
@@ -145,7 +144,6 @@ export interface InstrumentationRuntime {
   readonly forceFlush: () => Promise<void>;
   readonly hooks: InstrumentationHooks;
   readonly idGenerator?: AgentSpanIdGenerator;
-  readonly instrumentationProviders?: boolean;
   readonly memoryOperations?: boolean;
   readonly ownsAgentSpans?: boolean;
   readonly prepareSessionTrace?: (
@@ -160,7 +158,6 @@ export interface InstrumentationRuntime {
   /** Whether the installed OTel sampler would record a trace with this id. */
   readonly samplesTrace?: (traceId: string, operation?: AgentSamplingOperation) => boolean;
   readonly shutdown: () => Promise<void>;
-  stepStartedRuntimeContextResolver?: InstrumentationEvents["step.started"];
 }
 
 /** Worker-bound instrumentation operations consumed by one session execution. */
@@ -223,7 +220,6 @@ export function bindInstrumentationRuntime(
       ownsAgentSpans,
       otelSettings,
       runtimeContextResolvers: runtime.runtimeContextResolvers,
-      stepStartedRuntimeContextResolver: runtime.stepStartedRuntimeContextResolver,
       tracer: otelSettings === undefined ? undefined : trace.getTracer("eve"),
     };
   };
@@ -458,7 +454,6 @@ export function bindInstrumentationRuntime(
                 capturesContent: capturesRuntimeContextInput,
                 context: runtimeContextSnapshot,
                 providerResolvers: executionRuntime.runtimeContextResolvers,
-                stepStartedResolver: executionRuntime.stepStartedRuntimeContextResolver,
               });
             },
             session,

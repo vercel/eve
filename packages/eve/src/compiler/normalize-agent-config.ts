@@ -187,10 +187,6 @@ function normalizeExperimentalDefinition(
 
   const compiledExperimental: Mutable<NonNullable<CompiledAgentDefinition["experimental"]>> = {};
 
-  if (experimental.instrumentationProviders !== undefined) {
-    compiledExperimental.instrumentationProviders = experimental.instrumentationProviders;
-  }
-
   if (experimental.workflow !== undefined) {
     compiledExperimental.workflow = {
       modelCallsPerStep: experimental.workflow.modelCallsPerStep,

@@ -14,7 +14,7 @@ export function registerInstrumentationRuntime(
 ): InstrumentationRuntime {
   const existing = globalRuntime[INSTRUMENTATION_RUNTIME_KEY];
   if (existing !== undefined) {
-    // A legacy config may reload without taking ownership from the installed runtime.
+    // Keep ownership stable when initialization is attempted more than once.
     existing.otelSettings = runtime.otelSettings;
     return existing;
   }

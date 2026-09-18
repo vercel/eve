@@ -30,6 +30,10 @@ function joinedTitles(titles: readonly string[]): string {
   return `${titles.slice(0, -1).join(", ")}, and ${titles.at(-1)}`;
 }
 
+function formatFailureMessage(message: string): string {
+  return message.replace(" Try again with `", "\nTry again with `");
+}
+
 function resultHeadline(
   outcomes: readonly { kind: "installed" | "failed" | "cancelled" }[],
   installedTitles: readonly string[],
@@ -67,7 +71,11 @@ export function formatRegistrySessionResult(result: RegistrySessionResult): stri
       continue;
     }
     if (outcome.kind === "failed") {
-      lines.push(...outcome.message.split("\n").map((line) => `    ${line}`));
+      lines.push(
+        ...formatFailureMessage(outcome.message)
+          .split("\n")
+          .map((line) => `    ${line}`),
+      );
       continue;
     }
     if (outcome.facts.length === 0 && outcome.output.length === 0) {

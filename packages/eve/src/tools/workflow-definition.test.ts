@@ -6,6 +6,7 @@ import {
   defineWorkflowTool,
   isWorkflowToolDefinition,
   type WorkflowAgentMetadata,
+  type WorkflowStepToolContext,
   type WorkflowToolContext,
 } from "#tools/workflow-definition.js";
 import { normalizeToolDefinition } from "#internal/authored-definition/schema-backed.js";
@@ -50,6 +51,22 @@ describe("defineWorkflowTool", () => {
     });
     expect(isWorkflowToolDefinition(definition)).toBe(true);
     expectTypeOf(definition.execute).parameter(0).toEqualTypeOf<{ service: string }>();
+  });
+
+  it("exposes only step-safe capabilities on WorkflowStepToolContext", () => {
+    const useStepContext = (ctx: WorkflowStepToolContext) => {
+      void ctx.getToken;
+      void ctx.requireAuth;
+      void ctx.abortSignal;
+      // @ts-expect-error Agent metadata is available only in the workflow body.
+      void ctx.agents;
+      // @ts-expect-error Agent invocation is available only in the workflow body.
+      void ctx.agent;
+      // @ts-expect-error Human input is available only in the workflow body.
+      void ctx.ask;
+    };
+
+    expectTypeOf(useStepContext).parameter(0).toEqualTypeOf<WorkflowStepToolContext>();
   });
 
   it("provides task messages and receipt projections for background workflows", () => {

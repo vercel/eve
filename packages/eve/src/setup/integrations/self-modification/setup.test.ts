@@ -38,13 +38,13 @@ function operations(config?: string): SelfModificationSetupOperations & {
 }
 
 function applyDependencies(): SelfModificationApplyDependencies & {
-  ensureConnectionDependencies: ReturnType<typeof vi.fn>;
+  ensurePackageDependencies: ReturnType<typeof vi.fn>;
   installScaffoldDependencies: ReturnType<typeof vi.fn>;
 } {
   return {
-    ensureConnectionDependencies: vi.fn(async () => [
+    ensurePackageDependencies: vi.fn(async () => [
       {
-        dependencies: ["@vercel/connect"],
+        dependencies: ["@vercel/connect", "microsandbox"],
         devDependencies: [],
         path: "/project/package.json",
         scripts: [],
@@ -76,14 +76,17 @@ function contexts(
 describe("self-modification integration setup", () => {
   it("keeps the default setup local without mutation", async () => {
     const effects = operations();
+    const deps = applyDependencies();
     const ctx = contexts({});
 
     const plan = await prepareLocalSelfModificationSetup(ctx.prepare, effects);
-    await expect(applySelfModificationSetup(plan, ctx.apply, effects)).resolves.toEqual({
+    await expect(applySelfModificationSetup(plan, ctx.apply, effects, deps)).resolves.toEqual({
       facts: [],
     });
     expect(effects.findOrCreateConnector).not.toHaveBeenCalled();
     expect(effects.writeConfig).not.toHaveBeenCalled();
+    expect(deps.ensurePackageDependencies).not.toHaveBeenCalled();
+    expect(deps.installScaffoldDependencies).not.toHaveBeenCalled();
   });
 
   it("offers deployed and local modes before collecting deployed settings", async () => {
@@ -146,7 +149,10 @@ describe("self-modification integration setup", () => {
       orgId: "team",
       projectId: "project",
     });
-    expect(deps.ensureConnectionDependencies).toHaveBeenCalledWith({ projectRoot: "/project" });
+    expect(deps.ensurePackageDependencies).toHaveBeenCalledWith({
+      dependencies: { "@vercel/connect": "2.2.0", microsandbox: "0.5.5" },
+      projectRoot: "/project",
+    });
     expect(deps.installScaffoldDependencies).toHaveBeenCalledWith(
       expect.objectContaining({ changed: true, projectPath: "/project" }),
     );

@@ -1,5 +1,5 @@
 {
   "title": "Observability",
   "defaultOpen": false,
-  "pages": ["overview", "providers", "otel"]
+  "pages": ["instrumentation", "otel", "migration"]
 }

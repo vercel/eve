@@ -41,6 +41,23 @@ export async function authorizedDeployWorkflow(input: DeployInput, ctx: Workflow
   return { plan, authenticatedAs };
 }
 
+export async function workflowContextMisuseWorkflow(_input: DeployInput, ctx: WorkflowToolContext) {
+  "use workflow";
+  return await readAgentsStep(ctx);
+}
+
+async function readAgentsStep(ctx: WorkflowToolContext) {
+  "use step";
+  try {
+    return ctx.agents;
+  } catch (error) {
+    if (error instanceof Error) {
+      error.message += ` Attempt ${getStepMetadata().attempt}.`;
+    }
+    throw error;
+  }
+}
+
 export async function stepReferenceWorkflow(input: DeployInput) {
   "use workflow";
   const byArgument = await returnStepReference(planDeployStep);

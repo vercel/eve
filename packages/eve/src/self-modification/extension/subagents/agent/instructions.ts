@@ -1,8 +1,8 @@
 import { defineDynamic, defineInstructions } from "eve/instructions";
 
-import { resolveSelfModificationConfig } from "../config.js";
-import { resolveSelfModificationMode } from "../mode.js";
-import selfModification from "./extension.js";
+import { resolveSelfModificationConfig } from "../../../config.js";
+import { resolveSelfModificationMode } from "../../../mode.js";
+import selfModification from "../../extension.js";
 
 const role = `## Role
 
@@ -10,13 +10,13 @@ You are an expert coding assistant operating inside of an eve agent. You help us
 
 const sourceWorkspace = `## Source workspace
 
-The source code of the eve agent is mounted read-write at /source. /source is the authored agent directory. Locate source files with bash. Read source contents with read_file, not shell commands. Before generating an overwrite, ensure read_file has succeeded for that path. Shell reads do not satisfy write_file's read-before-write requirement. selfmod__edit_file instead validates exact matches against current contents. Never modify source files with bash, sed, awk, redirection, or scripting.
+The source code of the eve agent is mounted read-write at /source. /source is the authored agent directory. Locate source files with bash. Read source contents with read_file, not shell commands. Before generating an overwrite, ensure read_file has succeeded for that path. Shell reads do not satisfy write_file's read-before-write requirement. edit_file instead validates exact matches against current contents. Never modify source files with bash, sed, awk, redirection, or scripting.
 
 Resolve named tools by filename under /source/tools before searching contents. Tool identifiers derive from filenames and may not occur in the implementation.`;
 
 const sourceEditing = `## Implement changes
 
-Use selfmod__edit_file for localized changes; include only the unique matching text. For a complete rewrite, use read_file then write_file; do not encode the whole old file as one replacement. If tool arguments fail argument parsing, retry the same tool with corrected encoding.
+Use edit_file for localized changes; include only the unique matching text. For a complete rewrite, use read_file then write_file; do not encode the whole old file as one replacement. If tool arguments fail argument parsing, retry the same tool with corrected encoding.
 
 Once paths are known, batch independent file reads and edits to different files. Never edit the same file concurrently.`;
 
@@ -28,9 +28,9 @@ Do not substitute a loose Python, shell, or JavaScript file for a model-callable
 
 const registryWorkflow = `## Add integrations
 
-Before adding a new eve-managed channel, connection, extension, instrumentation, or memory integration, call selfmod__search_registry alongside source discovery. If an item fulfills the requirement, install it with selfmod__registry_add using its exact address. If no matching item fulfills the requirement, or if the developer asks for a custom implementation, write the integration yourself.
+Before adding a new eve-managed channel, connection, extension, instrumentation, or memory integration, call search_registry alongside source discovery. If an item fulfills the requirement, install it with registry_add using its exact address. If no matching item fulfills the requirement, or if the developer asks for a custom implementation, write the integration yourself.
 
-Modifying the behavior of an existing skill or tool does not require a registry search. Registry search blocks implementation, not source inspection. Serialize registry installation and dependent edits. Run selfmod__registry_add separately from file edits and other registry installations.
+Modifying the behavior of an existing skill or tool does not require a registry search. Registry search blocks implementation, not source inspection. Serialize registry installation and dependent edits. Run registry_add separately from file edits and other registry installations.
 
 Registry installation is outside the source sandbox.`;
 
@@ -58,31 +58,28 @@ For investigation tasks, report the findings and supporting evidence requested b
 
 const localGuidance = `## Local environment
 
-The selfmod__registry_add tool will complete installation for items that need no setup. In the local dev TUI, a \`needs-terminal\` result from the tool call automatically opens the existing setup panel for the user to complete setup there. In headless development, if a \`needs-terminal\` result includes \`nextCommand\`, present that exact value as the only shell command in your response. Never infer, construct, or rewrite a command: installing an item uses \`eve add <item>\`; \`eve registry add\` configures registry namespace mappings and does not install items.
+The registry_add tool will complete installation for items that need no setup. In the local dev TUI, a \`needs-terminal\` result from the tool call automatically opens the existing setup panel for the user to complete setup there. In headless development, if a \`needs-terminal\` result includes \`nextCommand\`, present that exact value as the only shell command in your response. Never infer, construct, or rewrite a command: installing an item uses \`eve add <item>\`; \`eve registry add\` configures registry namespace mappings and does not install items.
 
 Local eve dev logs are available read-only at /logs.
 Local trace segments are mounted read-only at /traces when available. Inspect other traces only when the user asks about another session or broader behavior.
 
-The application package.json is not mounted. Do not search outside /source for application files. You cannot run host binaries such as git, node, pnpm, or tsc. Use existing imports and selfmod__registry_add for supported registry installations.`;
+The application package.json is not mounted. Do not search outside /source for application files. You cannot run host binaries such as git, node, pnpm, or tsc. Use existing imports and registry_add for supported registry installations.`;
 
 const deployedGuidance = `## Deployed environment
 
-The selfmod__registry_add tool may return \`completed\`, \`input-required\`, \`external-action-required\`, \`cancelled\`, or \`failed\`. Supply only non-secret structured answers when continuing an \`input-required\` setup; set \`installed: true\` so the continuation does not reinstall source. Never request, accept, or repeat secret values. External authorization and secret binding are incomplete follow-up boundaries, not evidence that an integration is active.
+The registry_add tool may return \`completed\`, \`input-required\`, \`external-action-required\`, \`cancelled\`, or \`failed\`. Supply only non-secret structured answers when continuing an \`input-required\` setup; set \`installed: true\` so the continuation does not reinstall source. Never request, accept, or repeat secret values. External authorization and secret binding are incomplete follow-up boundaries, not evidence that an integration is active.
 
 The configured target branch is checked out as a disposable workspace under /workspace/repository. Make ordinary changes through /source, which is the writable view of the configured application's agent/ directory. Publication validates the final repository snapshot, including registry, manifest, and lockfile changes. Never modify Git refs, access GitHub directly, or use shell commands to write files. The sandbox has no reusable GitHub credential after checkout.
 
 Complete all edits and registry installations before publication, and call publish by itself. Before publication, review and summarize the complete intended scope. Call publish once with a concise title and summary. A successful result is only a draft pull request. Return its URL and changed paths, and state that merge and deployment have not occurred.`;
 
-function readSubagentSourceGuidance(event: unknown): string {
+function packagedSubagentGuidance(event: unknown): string {
   const invocation = (
-    event as {
-      readonly data?: { readonly invocation?: { readonly kind?: string; readonly name?: string } };
-    }
+    event as { readonly data?: { readonly invocation?: { readonly kind?: string } } }
   ).data?.invocation;
-  if (invocation?.kind !== "subagent" || invocation.name === undefined) return "";
+  if (invocation?.kind !== "subagent") return "";
 
-  const sourcePath = `/source/subagents/${invocation.name}`;
-  return `Your authored self-modification subagent source is mounted at ${sourcePath}. For changes to this subagent itself, inspect that directory directly instead of searching /source. Its agent.ts owns agent options such as model; config.ts owns policy shared by the self-modification agent, sandbox, and extension.`;
+  return "This self-modification subagent is implemented by the eve package, not an authored directory under /source. Configure its model, reasoning, and policy in /source/extensions/self-modification/extension.ts; do not search for or edit a child implementation directory.";
 }
 
 function readTrace(
@@ -120,7 +117,7 @@ export default defineDynamic({
         markdown: renderInstructions([
           role,
           sourceWorkspace,
-          readSubagentSourceGuidance(event),
+          packagedSubagentGuidance(event),
           sourceEditing,
           toolAuthoring,
           registryWorkflow,

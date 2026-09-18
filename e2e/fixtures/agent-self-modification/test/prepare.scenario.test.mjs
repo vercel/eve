@@ -35,7 +35,7 @@ test("preparation copies the canonical registry targets and removes stale genera
   const registry = JSON.parse(await readFile(join(repoRoot, "apps/docs/registry.json"), "utf8"));
   const item = registry.items.find((item) => item.name === "eve/self-modification");
   await put(fixtureRoot, "agent/tools/keep.ts", "authored tool");
-  await put(fixtureRoot, "agent/subagents/self-modification/instructions.md", "stale override");
+  await put(fixtureRoot, "agent/extensions/self-modification/instructions.md", "stale override");
 
   await prepareSelfModification({ fixtureRoot });
   for (const file of item.files) {
@@ -45,8 +45,8 @@ test("preparation copies the canonical registry targets and removes stale genera
     );
   }
   assert.deepEqual(
-    await files(join(fixtureRoot, "agent/subagents/self-modification")),
-    item.files.map((file) => file.target.replace("agent/subagents/self-modification/", "")).sort(),
+    await files(join(fixtureRoot, "agent/extensions/self-modification")),
+    item.files.map((file) => file.target.replace("agent/extensions/self-modification/", "")).sort(),
   );
   assert.equal(await readFile(join(fixtureRoot, "agent/tools/keep.ts"), "utf8"), "authored tool");
 
@@ -62,7 +62,7 @@ test("invalid registry targets fail before replacing the existing scaffold", asy
   const root = await temporaryFixture(t);
   const fixtureRoot = join(root, "fixture");
   const sourceRepo = join(root, "repo");
-  await put(fixtureRoot, "agent/subagents/self-modification/agent.ts", "existing");
+  await put(fixtureRoot, "agent/extensions/self-modification/agent.ts", "existing");
   await put(sourceRepo, "apps/docs/registry/example.ts", "source");
   await put(
     sourceRepo,
@@ -78,7 +78,7 @@ test("invalid registry targets fail before replacing the existing scaffold", asy
   );
   await assert.rejects(prepareSelfModification({ fixtureRoot, repoRoot: sourceRepo }), /outside/);
   assert.equal(
-    await readFile(join(fixtureRoot, "agent/subagents/self-modification/agent.ts"), "utf8"),
+    await readFile(join(fixtureRoot, "agent/extensions/self-modification/agent.ts"), "utf8"),
     "existing",
   );
 });
@@ -87,7 +87,7 @@ test("missing source files fail before replacing the existing scaffold", async (
   const root = await temporaryFixture(t);
   const fixtureRoot = join(root, "fixture");
   const sourceRepo = join(root, "repo");
-  await put(fixtureRoot, "agent/subagents/self-modification/agent.ts", "existing");
+  await put(fixtureRoot, "agent/extensions/self-modification/agent.ts", "existing");
   await put(
     sourceRepo,
     "apps/docs/registry.json",
@@ -96,7 +96,7 @@ test("missing source files fail before replacing the existing scaffold", async (
         {
           name: "eve/self-modification",
           files: [
-            { path: "registry/missing.ts", target: "agent/subagents/self-modification/agent.ts" },
+            { path: "registry/missing.ts", target: "agent/extensions/self-modification/agent.ts" },
           ],
         },
       ],
@@ -104,7 +104,7 @@ test("missing source files fail before replacing the existing scaffold", async (
   );
   await assert.rejects(prepareSelfModification({ fixtureRoot, repoRoot: sourceRepo }), /ENOENT/);
   assert.equal(
-    await readFile(join(fixtureRoot, "agent/subagents/self-modification/agent.ts"), "utf8"),
+    await readFile(join(fixtureRoot, "agent/extensions/self-modification/agent.ts"), "utf8"),
     "existing",
   );
 });

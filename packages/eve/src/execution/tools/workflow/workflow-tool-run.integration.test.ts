@@ -19,6 +19,7 @@ import {
   reportingDeployWorkflow,
   stepThenRaceWorkflow,
   stepReferenceWorkflow,
+  workflowContextMisuseWorkflow,
 } from "#internal/testing/workflow-tool-fixtures.js";
 import { waitForHook } from "#internal/testing/workflow-test-helpers.js";
 import { getRun, getWorld, start } from "#internal/workflow/runtime.js";
@@ -485,6 +486,36 @@ describe("workflow tools", () => {
 
     expect(output).toContain('"plan":"plan:api"');
     expect(output).toContain('"callId":"call_deploy_service');
+  });
+
+  it("fails workflow-context misuse in a step with actionable guidance", async () => {
+    const runtime = await createWorkflowToolRuntime({
+      agentName: "workflow-step-context-misuse",
+      execute: workflowContextMisuseWorkflow,
+      toolName: "deploy_service",
+    });
+
+    const output = await runtime.run(async () => {
+      const run = await start(workflowEntry, [
+        {
+          kind: "initial",
+          ownerDeploymentId: "dpl_inline",
+          input: { message: 'Run deploy_service with service "api"' },
+          serializedContext: buildSerializedContext({
+            continuationToken: "schedule:workflow-step-context-misuse",
+            mode: "task",
+          }),
+        },
+      ]);
+      const result = await run.returnValue;
+      return String(result.output);
+    });
+
+    expect(output).toContain('ctx.agents is unavailable inside a "use step" function.');
+    expect(output).toContain(
+      "Read ctx.agents in the workflow body and pass the required serializable metadata into the step.",
+    );
+    expect(output).toContain("Attempt 1.");
   });
 
   it("settles the call with an error when the workflow body throws", async () => {

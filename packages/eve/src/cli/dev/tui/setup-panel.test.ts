@@ -67,7 +67,7 @@ describe("renderFlowPanel", () => {
     expect(text).toContain("   › Create a new project");
   });
 
-  it("renders multiline titles as separate terminal rows", () => {
+  it("wraps long titles and renders multiline titles as separate terminal rows", () => {
     const title =
       "You need to link to a project to use linear through Vercel Connect.\n\nSelect your team";
     const rows = renderFlowPanel(
@@ -81,11 +81,12 @@ describe("renderFlowPanel", () => {
         },
       },
       theme,
-      80,
+      48,
     );
 
-    expect(rows.slice(0, 5)).toEqual([
-      "   You need to link to a project to use linear through Vercel Connect.",
+    expect(rows.slice(0, 7)).toEqual([
+      "   You need to link to a project to use linear",
+      "   through Vercel Connect.",
       "",
       "   Select your team",
       "",
@@ -286,6 +287,32 @@ describe("renderSelectQuestion", () => {
     expect(text).toContain("    Link an existing project");
     expect(text).not.toContain("1.");
     expect(text).toContain("esc to cancel");
+  });
+
+  it("wraps a long question instead of clipping it", () => {
+    const options = [
+      { value: "yes", label: "Yes" },
+      { value: "no", label: "No" },
+    ];
+    const rows = renderSelectQuestion(
+      {
+        kind: "single",
+        message:
+          "A legacy self-modification scaffold was found at agent/subagents/self-modification. This scaffold format is no longer supported. Do you want to remove it?",
+        options,
+        select: initialSelectState({ options }),
+      },
+      theme,
+      48,
+    );
+
+    expect(rows.slice(0, 5)).toEqual([
+      "  A legacy self-modification scaffold was",
+      "  found at agent/subagents/self-modification.",
+      "  This scaffold format is no longer supported.",
+      "  Do you want to remove it?",
+      "",
+    ]);
   });
 
   it("drops the numbers for a lone option", () => {

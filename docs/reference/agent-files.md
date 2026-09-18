@@ -13,7 +13,7 @@ In a single-agent project, the agent directory is `agent/`. In an eve agent work
 agent/
 ├── agent.ts
 ├── instructions.md
-├── instrumentation.ts
+├── instrumentation/
 ├── channels/
 ├── connections/
 ├── extensions/
@@ -50,7 +50,7 @@ Paths below are relative to the agent directory. Root agents can use every path;
 | ------------------------------------------------------- | ----------------------------------------- | ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
 | `agent.ts`                                              | Runtime config                            | Yes                    | Model, model options, compaction, build, and experimental settings. See [Agents](/docs/agent-config).                                   |
 | `instructions.md` / `instructions.ts` / `instructions/` | Base system prompt                        | Yes                    | A flat file or directory of `.md` and `.ts` files. Required on the root, optional on subagents. See [Instructions](/docs/instructions). |
-| `instrumentation.ts`                                    | Telemetry config                          | No                     | Auto-discovered and run before agent code. See [Instrumentation](/docs/observability/instrumentation).                                  |
+| `instrumentation/`                                      | Telemetry providers and destinations      | No                     | One path-named provider per file. See [Instrumentation](/docs/observability/instrumentation).                                           |
 | `channels/`                                             | HTTP and messaging entry points           | No                     | See [Channels](/docs/channels/overview).                                                                                                |
 | `connections/`                                          | External MCP and OpenAPI services         | Yes                    | Static files define path-named connections; dynamic sources can resolve caller-specific connections.                                    |
 | `extensions/`                                           | Mounted reusable capabilities             | Yes                    | File or directory mounts. See [Extensions](/docs/extensions).                                                                           |

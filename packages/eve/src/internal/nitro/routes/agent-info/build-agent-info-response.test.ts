@@ -3,7 +3,6 @@ import { describe, expect, it } from "vitest";
 import { compileFromMemory } from "#compiler/compile-from-memory.js";
 import { AgentInfoResultSchema } from "#client/agent-info-schema.js";
 import { buildAgentInfoResponse } from "#internal/nitro/routes/agent-info/build-agent-info-response.js";
-import { defineInstrumentation } from "#public/instrumentation/index.js";
 import { webSearch } from "#tools/provided/web-search.js";
 import { defineMemory } from "#public/memory/index.js";
 
@@ -129,31 +128,6 @@ describe("buildAgentInfoResponse", () => {
         expect.objectContaining({ action: "subagent-call", kind: "dispatch" }),
       ]),
     );
-  });
-
-  it("reports selected instrumentation provenance from the compiled graph", async () => {
-    const { manifest } = await compileFromMemory({
-      model: "openai/gpt-5.4",
-      modules: [
-        {
-          loadNamespace: async () => ({ default: defineInstrumentation({}) }),
-          logicalPath: "instrumentation.ts",
-        },
-      ],
-    });
-    const response = buildAgentInfoResponse(
-      { manifest, schedules: [] },
-      {
-        gatewayCredentials: { apiKey: false, oidc: false },
-        mode: "production",
-      },
-    );
-
-    expect(response.instrumentation).toMatchObject({
-      binding: { backing: { kind: "programmatic" } },
-      logicalPath: "instrumentation.ts",
-      owner: { kind: "application" },
-    });
   });
 
   it("reports an authored webSearch sentinel as a prepared provider effect", async () => {

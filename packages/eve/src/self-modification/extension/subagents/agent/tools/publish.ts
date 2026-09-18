@@ -1,12 +1,12 @@
 import { defineDynamic, defineTool, type ToolContext } from "eve/tools";
 
-import { resolveSelfModificationConfig } from "../../config.js";
-import { createGitHubCredentialProvider } from "../../credentials.js";
-import { readPreparedSelfModificationWorkspace } from "../../git-workspace.js";
-import { publishGitHubDraftPullRequest } from "../../github-publisher.js";
-import { resolveSelfModificationMode } from "../../mode.js";
-import { withSelfModificationWorkspaceLock } from "../../workspace-lock.js";
-import selfModification from "../extension.js";
+import { resolveSelfModificationConfig } from "../../../../config.js";
+import { createGitHubCredentialProvider } from "../../../../credentials.js";
+import { readPreparedSelfModificationWorkspace } from "../../../../git-workspace.js";
+import { publishGitHubDraftPullRequest } from "../../../../github-publisher.js";
+import { resolveSelfModificationMode } from "../../../../mode.js";
+import { withSelfModificationWorkspaceLock } from "../../../../workspace-lock.js";
+import selfModification from "../../../extension.js";
 
 const inputSchema = {
   type: "object",

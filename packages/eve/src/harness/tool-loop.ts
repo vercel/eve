@@ -252,8 +252,8 @@ import {
 /**
  * Builds the `telemetry` value for the AI SDK from authored settings.
  *
- * Custom context (authored `InstrumentationDefinition.events` plus
- * eve-specific identifiers such as `eve.session.id`) is flowed through
+ * Destination runtime context and eve-specific identifiers such as
+ * `eve.session.id` are flowed through.
  * Bound instrumentation supplies custom context because AI SDK v7 surfaces
  * per-call attributes via `runtimeContext`, not a dedicated metadata field on
  * `TelemetryOptions`.

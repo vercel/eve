@@ -283,7 +283,13 @@ export function renderFlowPanel(state: FlowPanelState, theme: Theme, width: numb
     state.content.kind === "question" ? (state.content.title ?? state.title) : state.title;
   if (title.length > 0) {
     for (const line of title.split("\n")) {
-      rows.push(line.length === 0 ? "" : `  ${c.bold(line)}`);
+      if (line.length === 0) {
+        rows.push("");
+        continue;
+      }
+      for (const wrapped of wrapVisibleLine(line, Math.max(1, width - 3))) {
+        rows.push(`  ${c.bold(wrapped)}`);
+      }
     }
     rows.push("");
   }
@@ -438,12 +444,19 @@ function plannerStepRows(
   return [`  ${progress.join("")}`, ""];
 }
 
-function selectMessageRows(message: string, layout: SelectLayout, theme: Theme): string[] {
+function selectMessageRows(
+  message: string,
+  layout: SelectLayout,
+  theme: Theme,
+  width: number,
+): string[] {
   if (message === "") return [];
 
-  const rows = message.split("\n").map((line, index) => {
+  const rows = message.split("\n").flatMap((line, index) => {
     const emphasized = layout === "stacked" || index > 0;
-    return `  ${emphasized ? theme.colors.bold(line) : line}`;
+    return wrapVisibleLine(line, Math.max(1, width - 4)).map(
+      (wrapped) => `  ${emphasized ? theme.colors.bold(wrapped) : wrapped}`,
+    );
   });
   rows.push("");
   return rows;
@@ -814,7 +827,7 @@ export function renderSelectQuestion(
           theme,
         )
       : []),
-    ...selectMessageRows(state.message, presentation.layout, theme),
+    ...selectMessageRows(state.message, presentation.layout, theme, width),
   ];
   if (state.description !== undefined || state.metadata !== undefined) {
     if (rows.at(-1) === "") rows.pop();

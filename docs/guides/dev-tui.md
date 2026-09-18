@@ -102,7 +102,7 @@ By default, the UI shows `stderr` logs. Use `/loglevel <all|stderr|sandbox|none>
 
 Every `eve dev` process writes diagnostic logs to `.eve/logs/`, regardless of the display mode. Read them with [`eve logs`](../reference/cli#eve-logs).
 
-Use `/traces` to inspect traces recorded during local development. See [Instrumentation](../observability/instrumentation#local-traces) for trace capture and retention settings.
+Use `/traces` to inspect traces recorded during local development. See [Local traces](../observability/otel#local-traces) for trace capture and retention settings.
 
 ## Display options
 

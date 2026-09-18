@@ -9,5 +9,5 @@ dist
 .DS_Store
 *.tsbuildinfo
 .env*.local
-/agent/subagents/self-modification/
+/agent/extensions/self-modification/
 /.eve-self-modification-eval.lock/

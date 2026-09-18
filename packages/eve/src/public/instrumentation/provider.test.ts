@@ -11,16 +11,9 @@ import {
   type InstrumentationMemoryOperationStartedEvent,
   type InstrumentationMemoryOperationTerminalEvent,
   type InstrumentationMemoryRecord,
-  type InstrumentationSetupContext,
 } from "#public/instrumentation/index.js";
 
 describe("defineInstrumentation", () => {
-  it("keeps the legacy setup context constructible with only the agent name", () => {
-    const context: InstrumentationSetupContext = { agentName: "weather" };
-
-    expect(context).toEqual({ agentName: "weather" });
-  });
-
   it("brands a provider-shaped declaration", () => {
     const provider = defineInstrumentation({
       events: {
@@ -42,14 +35,6 @@ describe("defineInstrumentation", () => {
     const provider = defineInstrumentation({ tracePolicy });
 
     expect(provider.tracePolicy).toBe(tracePolicy);
-  });
-
-  it("brands a legacy config-shaped declaration", () => {
-    const config = defineInstrumentation({ functionId: "support", recordInputs: false });
-
-    expect(isInstrumentationProvider(config)).toBe(true);
-    expect(config.functionId).toBe("support");
-    expect(config).toMatchObject({ functionId: "support", recordInputs: false });
   });
 
   it("infers terminal handler events from union-typed discriminants", () => {

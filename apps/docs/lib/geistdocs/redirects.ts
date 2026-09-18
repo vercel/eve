@@ -71,9 +71,10 @@ export const docsRedirects: DocsRedirect[] = [
   ...createDocsRedirects("/deployment/self-hosting", "/guides/deployment/self-hosting"),
   ...createDocsRedirects("/self-hosting", "/guides/deployment/self-hosting"),
   ...createDocsRedirects("/guides/instrumentation", "/observability/instrumentation"),
+  ...createDocsRedirects("/guides/instrumentation-providers", "/observability/instrumentation"),
   ...createDocsRedirects(
-    "/guides/instrumentation-providers",
     "/observability/instrumentation-providers",
+    "/observability/instrumentation",
   ),
   ...createDocsRedirects("/guides/instrumentation-otel", "/observability/otel"),
   ...createDocsRedirects("/observability/instrumentation-otel", "/observability/otel"),

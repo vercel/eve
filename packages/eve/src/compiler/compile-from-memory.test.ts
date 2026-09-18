@@ -8,7 +8,6 @@ import {
   ROOT_COMPILED_AGENT_NODE_ID,
 } from "#compiler/manifest.js";
 import { validateCompiledModuleMap } from "#compiler/validate-artifact.js";
-import { defineInstrumentation } from "#public/instrumentation/index.js";
 
 describe("compileFromMemory", () => {
   it("uses the ordinary source compiler for defaults and authored config", async () => {
@@ -105,32 +104,5 @@ describe("compileFromMemory", () => {
     expect(
       compiledAgentManifestSchema.safeParse(JSON.parse(JSON.stringify(manifest))).success,
     ).toBe(true);
-  });
-
-  it("binds instrumentation as an ordinary programmatic module slot", async () => {
-    const instrumentation = defineInstrumentation({ recordInputs: true });
-    const { manifest, moduleMap } = await compileFromMemory({
-      model: "openai/gpt-5.4",
-      modules: [
-        {
-          loadNamespace: async () => ({ default: instrumentation }),
-          logicalPath: "instrumentation.ts",
-        },
-      ],
-    });
-
-    expect(manifest.instrumentation).toMatchObject({
-      logicalPath: "instrumentation.ts",
-      sourceKind: "module",
-    });
-    const sourceId = manifest.instrumentation!.sourceId;
-    expect(manifest.bindings[sourceId]).toMatchObject({
-      backing: { kind: "programmatic", moduleId: "instrumentation.ts" },
-      owner: { kind: "application" },
-      usage: { compile: false, runtimeEntry: true },
-    });
-    expect(moduleMap.nodes[ROOT_COMPILED_AGENT_NODE_ID]?.modules[sourceId]?.default).toBe(
-      instrumentation,
-    );
   });
 });

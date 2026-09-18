@@ -1,5 +1,4 @@
 import type { AgentSourceManifest } from "#discover/manifest.js";
-import type { ModuleSourceRef } from "#shared/source-ref.js";
 import {
   type CompiledAgentDefinition,
   type CompiledAgentManifest,
@@ -31,7 +30,6 @@ import {
   markConfigRuntimeEntries,
   NodeModuleEvaluationContext,
 } from "#compiler/module-lifecycle.js";
-import { assertInstrumentationLayoutConfig } from "#compiler/instrumentation-layout-config.js";
 import { compileAgentConfig } from "#compiler/normalize-agent-config.js";
 import { compileChannelDefinition } from "#compiler/normalize-channel.js";
 import { compileConnectionDefinition } from "#compiler/normalize-connection.js";
@@ -196,7 +194,6 @@ class AgentGraphCompiler {
     }
     const state = finalizeNodeSourceState(phaseOne, externalDependencies);
     markConfigRuntimeEntries(config, state.evaluation);
-    assertInstrumentationLayoutConfig(config, state);
     const resources = await this.compileResources(input, state);
     const children = await this.compileChildren(input, state, externalDependencies);
     const manifest = createCompiledAgentNodeManifest({
@@ -309,7 +306,6 @@ class AgentGraphCompiler {
       } else {
         markConfigRuntimeEntries(config, finalState.evaluation);
       }
-      if (config !== undefined) assertInstrumentationLayoutConfig(config, finalState);
       const resources = await this.compileResources(childInput, finalState);
       const children = await this.compileChildren(childInput, finalState, externalDependencies);
       const base = {
@@ -500,7 +496,6 @@ class AgentGraphCompiler {
     const schedules: CompiledScheduleDefinition[] = [];
     const channels: CompiledChannelDefinition[] = [];
     let sandbox: CompiledSandboxDefinition | undefined;
-    let instrumentation: ModuleSourceRef | undefined;
     const selectedSourceIds = collectSelectedSourceIds(state.composed);
     const loadNamespace = state.evaluation.loadNamespace;
 
@@ -564,10 +559,6 @@ class AgentGraphCompiler {
           }
           break;
         }
-        case "instrumentation":
-          instrumentation = entry.source;
-          state.evaluation.requireRuntimeEntry(candidate.sourceId);
-          break;
         case "memory":
           memories.push(
             await compileMemoryDefinition(entry.source, {
@@ -682,7 +673,6 @@ class AgentGraphCompiler {
       hooks,
       memories,
       instructions,
-      instrumentation,
       sandbox,
       sandboxWorkspaces: input.manifest.sandboxWorkspaces.map((workspace) => ({
         logicalPath: workspace.logicalPath,

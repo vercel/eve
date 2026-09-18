@@ -11,6 +11,7 @@ import type {
   WorkflowStepResult,
 } from "#execution/tools/workflow/step-context.js";
 import type { ToolContext } from "#tools/definition.js";
+import type { WorkflowToolContext } from "#tools/workflow-definition.js";
 import type { AuthorizationDefinition } from "#shared/connection-types.js";
 
 const durable = vi.hoisted(() => ({
@@ -61,8 +62,8 @@ function context(user = "user-1"): WorkflowStepContext {
   };
 }
 
-async function runStep(
-  execute: (ctx: ToolContext) => unknown,
+async function runStep<TContext = ToolContext>(
+  execute: (ctx: TContext) => unknown,
   input = context(),
 ): Promise<WorkflowStepResult> {
   return (await withWorkflowStepAuthorization(execute)({
@@ -79,6 +80,33 @@ describe("workflow step authorization", () => {
     durable.entries.clear();
   });
   afterEach(() => vi.unstubAllEnvs());
+  it.each([
+    {
+      access: (ctx: WorkflowToolContext) => ctx.agents,
+      capability: "ctx.agents",
+      guidance:
+        "Read ctx.agents in the workflow body and pass the required serializable metadata into the step.",
+    },
+    {
+      access: (ctx: WorkflowToolContext) => ctx.agent("researcher", { message: "Investigate" }),
+      capability: "ctx.agent()",
+      guidance: "Call ctx.agent() in the workflow body.",
+    },
+    {
+      access: (ctx: WorkflowToolContext) => ctx.ask({ prompt: "Continue?" }),
+      capability: "ctx.ask()",
+      guidance: "Call ctx.ask() in the workflow body.",
+    },
+  ])(
+    "fails $capability misuse without retrying the step",
+    async ({ access, capability, guidance }) => {
+      await expect(runStep<WorkflowToolContext>((ctx) => access(ctx))).rejects.toMatchObject({
+        fatal: true,
+        message: `${capability} is unavailable inside a "use step" function. ${guidance}`,
+      });
+    },
+  );
+
   it("does not exchange a consumed code again when the rest of the step retries", async () => {
     let exchanged = false;
     const complete = vi.fn(async () => {

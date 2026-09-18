@@ -8,7 +8,7 @@ Routing-only cases remain in [`agent-subagents`](../agent-subagents/evals/self-m
 
 ## Fixture preparation
 
-`pnpm run e2e:prepare` copies the `eve/self-modification` scaffold from this checkout using the source and target paths in `apps/docs/registry.json`. The generated `agent/subagents/self-modification/` directory is gitignored and replaced on each preparation; no registry fetch, dependency installation, or credential setup runs.
+`pnpm run e2e:prepare` copies the `eve/self-modification` scaffold from this checkout using the source and target paths in `apps/docs/registry.json`. The generated `agent/extensions/self-modification/` directory is gitignored and replaced on each preparation; no registry fetch, dependency installation, or credential setup runs.
 
 The fixture's `build`, `dev`, `typecheck`, and `test:e2e` scripts prepare the scaffold before starting eve. The local e2e CI workflow also runs `e2e:prepare` before invoking `eve eval` directly. For a direct CLI invocation, prepare first. Do not prepare while an eval or dev server is running: preparation replaces the generated subtree.
 
