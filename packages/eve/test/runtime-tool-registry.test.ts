@@ -94,40 +94,27 @@ describe("createRuntimeToolRegistry", () => {
     expect(registry.preparedTools[0]).not.toHaveProperty("resultKind");
   });
 
-  it("uses the shared stable workflow for the framework agent tool", async () => {
+  it("keeps an authored workflow named agent separate from self-delegation", async () => {
+    const workflowId = "workflow//./agent/tools/agent//execute";
     const registry = await createRuntimeToolRegistry({
       tools: [
         createResolvedToolDefinition({
           behavior: {
             availability: [],
-            handling: {
-              kind: "workflow-tool",
-              workflowId: "workflow//./agent/tools/agent//execute",
-            },
+            handling: { kind: "workflow-tool", workflowId },
           },
           logicalPath: "tools/agent.ts",
           name: "agent",
-          owner: { feature: "root-defaults", kind: "framework" },
-          sourceId: "eve:root-defaults:tools/agent.ts",
+          sourceId: "tools/agent.ts",
         }),
       ],
     });
 
     const prepared = registry.preparedTools[0];
-    expect(subagentToolExecuteWorkflowReference.workflowId).toMatch(
-      /^workflow\/\/[^/]+\/\/subagentToolExecuteWorkflow$/,
-    );
-    expect(prepared?.task).toEqual({
-      nodeId: "__root__",
-      resultKind: "subagent",
-      workflowId: subagentToolExecuteWorkflowReference.workflowId,
-    });
+    expect(prepared?.task).toEqual({ workflowId });
     expect(prepared?.behavior?.handling).toEqual({
       kind: "dispatch",
-      target: {
-        kind: "workflow-tool-call",
-        workflowId: subagentToolExecuteWorkflowReference.workflowId,
-      },
+      target: { kind: "workflow-tool-call", workflowId },
     });
   });
 

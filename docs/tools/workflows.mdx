@@ -403,9 +403,7 @@ The evaluation runs in a step so workflow replay records its result instead of m
 
 #### Route across every agent target
 
-Use `agentRouter()` when the router should consider every target in `ctx.agents` with the default JEV routing instructions:
-
-To replace the model-facing `agent` tool with the router, export it from the `agent` slot:
+To replace the model-facing `agent` tool with a router across every target in `ctx.agents`, export `agentRouter()` from the `agent` slot:
 
 ```ts title="agent/tools/agent.ts"
 import { agentRouter } from "eve/tools/agent-router";
