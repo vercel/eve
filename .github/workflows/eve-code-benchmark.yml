@@ -25,7 +25,7 @@ jobs:
     timeout-minutes: 360
     steps:
       - name: Benchmark current eve-code source
-        uses: vercel-labs/eve-bench@dc3c0e21656c5b9e28ec548bb1e031dd16ff9127
+        uses: vercel-labs/eve-bench@2895a70f36c61535897c0bac771eb03cd89cda91
         with:
           harness: eve-code
           agent-repository: vercel/eve
