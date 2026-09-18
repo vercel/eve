@@ -206,7 +206,7 @@ async function selfModificationMountPaths(input: {
     `git -C ${quote(input.repositoryPath)} grep -l -z -F -- "eve/self-modification" ${quote(input.tree)} -- ${quote(extensionsRoot)}`,
     false,
   ).catch((error: unknown) => {
-    if (error instanceof Error && error.message.includes("failed with exit 1")) return "";
+    if (error instanceof Error && error.message.includes("failed with exit 1:")) return "";
     throw error;
   });
   return [
