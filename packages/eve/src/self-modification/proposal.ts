@@ -57,12 +57,19 @@ export async function captureSelfModificationProposal(input: {
     );
   }
 
-  const protectedMounts = await selfModificationMountPaths({
+  const baseProtectedMounts = await selfModificationMountPaths({
+    directory: input.workspace.directory,
+    repositoryPath: input.workspace.repositoryPath,
+    sandbox: input.sandbox,
+    tree: input.workspace.baseSha,
+  });
+  const proposedProtectedMounts = await selfModificationMountPaths({
     directory: input.workspace.directory,
     repositoryPath: input.workspace.repositoryPath,
     sandbox: input.sandbox,
     tree: proposedTreeSha,
   });
+  const protectedMounts = [...new Set([...baseProtectedMounts, ...proposedProtectedMounts])];
   const changes: ProposalChange[] = [];
   let changedBytes = 0;
   for (const record of records) {

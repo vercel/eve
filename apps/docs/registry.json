@@ -11,7 +11,7 @@
       "dependencies": ["just-bash"],
       "meta": {
         "eve": {
-          "requires": ">=0.62.0",
+          "requires": ">=0.54.4",
           "install": {
             "pnpm": {
               "buildScripts": [
@@ -50,7 +50,6 @@
       "meta": {
         "eve": {
           "hidden": true,
-          "requires": ">=0.62.0",
           "install": {
             "pnpm": {
               "buildScripts": [

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { publishGitHubDraftPullRequest, selfModificationBranchName } from "./github-publisher.js";
-import { assertAllowedChange, parseRawDiff } from "./proposal.js";
+import { assertAllowedChange, captureSelfModificationProposal, parseRawDiff } from "./proposal.js";
 
 describe("self-modification proposal capture", () => {
   it("parses only complete, safe raw Git diff records", () => {
@@ -48,6 +48,20 @@ describe("self-modification proposal capture", () => {
     ).toThrow("protected path");
   });
 
+  it.each([
+    ["flat", "deletion", "agent/extensions/editor.ts", "D"],
+    ["directory", "deletion", "agent/extensions/editor/extension.ts", "D"],
+    ["flat", "import replacement", "agent/extensions/editor.ts", "M"],
+    ["directory", "import replacement", "agent/extensions/editor/extension.ts", "M"],
+  ] as const)(
+    "protects a non-canonical %s self-modification mount from %s",
+    async (_mount, _change, path, status) => {
+      await expect(captureWithBaseSelfModificationMount(path, status)).rejects.toThrow(
+        `Self-modification proposal changes a protected path: ${JSON.stringify(path)}.`,
+      );
+    },
+  );
+
   it("derives a stable namespaced branch from trusted base and operation identifiers", () => {
     const branch = selfModificationBranchName("a".repeat(40), "parent-session:child-session");
     expect(branch).toMatch(/^eve-self-modification\/aaaaaaaaaaaa\/[a-f0-9]{24}$/u);
@@ -90,6 +104,37 @@ const base = "a".repeat(40);
 const baseTree = "b".repeat(40);
 const proposedTree = "c".repeat(40);
 const blob = "c1b0730e0133447badcfd47fd144e254807b06e1";
+
+function captureWithBaseSelfModificationMount(path: string, status: "D" | "M") {
+  const newMode = status === "D" ? "000000" : "100644";
+  const newObjectId = status === "D" ? "0".repeat(40) : blob;
+  return captureSelfModificationProposal({
+    sandbox: {
+      run: async ({ command }) => {
+        if (command.includes(" add -A")) return result("");
+        if (command.includes("write-tree")) return result(proposedTree);
+        if (command.includes("^{tree}")) return result(baseTree);
+        if (command.includes("diff-tree")) {
+          return result(`:100644 ${newMode} ${base} ${newObjectId} ${status}\0${path}\0`);
+        }
+        if (command.includes(" grep -l ")) {
+          if (command.includes(`'${base}'`)) return result(`${base}:${path}\0`);
+          if (command.includes(`'${proposedTree}'`)) {
+            return { exitCode: 1, stderr: "", stdout: "" };
+          }
+        }
+        throw new Error(`Unexpected Git command: ${command}`);
+      },
+    },
+    workspace: {
+      baseSha: base,
+      directory: ".",
+      repository: { owner: "acme", repo: "agent" },
+      repositoryPath: "/workspace/repository",
+      targetBranch: "main",
+    },
+  });
+}
 
 function publish(fetch: typeof globalThis.fetch) {
   return publishGitHubDraftPullRequest({
