@@ -53,6 +53,16 @@ describe("agent invocation input", () => {
       "agent() requires a non-empty agent name as its first argument.",
     );
   });
+
+  it.each([null, [], "object"])("rejects a non-object output schema (%j)", (outputSchema) => {
+    expect(() =>
+      validateAgentInput({
+        message: "Review",
+        outputSchema: outputSchema as never,
+        target: "reviewer",
+      }),
+    ).toThrow("agent() `outputSchema` must be a JSON Schema object.");
+  });
 });
 
 describe("background agent invocation routing", () => {
