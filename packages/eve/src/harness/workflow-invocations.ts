@@ -14,7 +14,7 @@ export interface WorkflowTaskPayload {
   readonly dispatchContext: TaskAgentDispatchContext;
   readonly activityWorkIdentity?: ActivityWorkIdentityV1;
   readonly cohortId?: string;
-  /** Read through readWorkflowTaskView before consuming retained output. */
+  /** Parent-owned outcome. Read through readWorkflowTaskView before consuming it. */
   readonly terminalView?: unknown;
 }
 
@@ -84,12 +84,7 @@ const taskViewBaseShape = {
     .optional(),
 };
 
-/**
- * Terminal views only, on purpose: the index caches a view solely as
- * the expired-run fallback, and the discriminated arms encode the terminal
- * status/output invariants structurally (explicit fields reject
- * `inputRequests` and mismatched outputs while preserving additive metadata).
- */
+/** Only the parent records terminal outcomes; input routes live in its proxy state. */
 const taskViewSchema: z.ZodType<TaskView> = z.discriminatedUnion("status", [
   z.looseObject({
     ...taskViewBaseShape,
@@ -301,7 +296,7 @@ export function registerWorkflowInvocation<T extends { readonly state?: SessionS
 }
 
 /** Task payloads remain available for the session lifetime, including after report delivery. */
-export function cacheWorkflowTaskView(
+export function recordWorkflowTaskView(
   state: SessionStateMap | undefined,
   view: TaskView,
 ): SessionStateMap | undefined {
@@ -316,20 +311,13 @@ export function cacheWorkflowTaskView(
   if (!sameTaskMetadata(entry.task.metadata, terminal.metadata))
     throw new Error(`Task view metadata does not match invocation "${view.taskId}".`);
   const previous = readWorkflowTaskView(entry.task);
+  // Parent delivery order decides settlement. Replays and late outcomes cannot replace it.
+  if (previous !== undefined) return state;
   invocations[index] = {
     ...entry,
     task: {
       ...entry.task,
-      terminalView: taskViewSchema.parse({
-        ...previous,
-        ...terminal,
-        metadata: { ...previous?.metadata, ...terminal.metadata },
-        lastOutput:
-          terminal.lastOutput === undefined
-            ? undefined
-            : { ...previous?.lastOutput, ...terminal.lastOutput },
-        usage: terminal.usage === undefined ? undefined : { ...previous?.usage, ...terminal.usage },
-      }),
+      terminalView: terminal,
     },
   };
   return writeRegistry(state, { ...registry, invocations });

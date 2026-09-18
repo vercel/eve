@@ -11,7 +11,6 @@ import { startSubagent } from "#execution/tools/subagent/start.js";
 import { prepareOwnerAgentInvocation } from "#execution/tools/subagent/invoke-preparation.js";
 import { readDurableSession } from "#execution/durable-session-store.js";
 import { getAgentHandleStore, setAgentHandleStore } from "#subagents/handles/store.js";
-import { readLatestTaskView } from "#execution/tasks/parent/run-parent.js";
 import { registerWorkflowInvocation } from "#harness/workflow-invocations.js";
 import {
   AuthKey,
@@ -41,7 +40,6 @@ vi.mock("#execution/durable-session-store.js", async (importOriginal) => ({
   ...(await importOriginal()),
   readDurableSession: vi.fn(),
 }));
-vi.mock("#execution/tasks/parent/run-parent.js", () => ({ readLatestTaskView: vi.fn() }));
 const action = {
   callId: "call-1",
   description: "Research",
@@ -267,11 +265,6 @@ describe("owner agent invocation dispatch", () => {
         },
       });
       vi.mocked(readDurableSession).mockReturnValue(indexedSession as never);
-      vi.mocked(readLatestTaskView).mockResolvedValue({
-        metadata: { kind: "subagent", name: "research" },
-        status: "working",
-        taskId: "task-1",
-      });
       vi.mocked(prepareOwnerAgentInvocation).mockResolvedValue({
         ...prepared,
         auth: creatorAuth,
@@ -362,11 +355,6 @@ describe("owner agent invocation dispatch", () => {
       },
     });
     vi.mocked(readDurableSession).mockReturnValue(indexedSession as never);
-    vi.mocked(readLatestTaskView).mockResolvedValue({
-      metadata: { kind: "subagent", name: "research" },
-      status: "working",
-      taskId: "task-1",
-    });
     vi.mocked(prepareOwnerAgentInvocation).mockResolvedValue({
       ...prepared,
       auth: null,
@@ -423,11 +411,6 @@ describe("owner agent invocation dispatch", () => {
         },
       },
     } as never);
-    vi.mocked(readLatestTaskView).mockResolvedValue({
-      metadata: { kind: "subagent", name: "research" },
-      status: "working",
-      taskId: "task-1",
-    });
 
     await expect(
       dispatchTaskAgentInvocationStep({

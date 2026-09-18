@@ -24,6 +24,9 @@ import { cancelAllIndexedSessionTasksStep } from "#execution/cancel-indexed-sess
 beforeEach(() => {
   vi.mocked(routeDeliverToChildren).mockReset();
   vi.mocked(cancelAllIndexedSessionTasksStep).mockReset();
+  vi.mocked(cancelAllIndexedSessionTasksStep).mockImplementation(async ({ sessionState }) => ({
+    sessionState,
+  }));
 });
 
 interface ScriptedRead {
@@ -767,6 +770,40 @@ describe("buffered task completion batching", () => {
     input.inbox = createMockInbox([cancelRead({ taskId: "task_1" })]);
     await expect(nextTurnDelivery(input)).resolves.toMatchObject({ kind: "turn", delivery: first });
   });
+
+  it("waits for a recorded cancellation's notification before reporting its cohort", () => {
+    const queue = new SessionInputQueue();
+    const cohorts = new Map([
+      ["task_0", "cohort"],
+      ["task_1", "cohort"],
+    ]);
+    queue.enqueueDelivery(completion("task_0"));
+    expect(queue.takeNext(cohorts)).toBeUndefined();
+    queue.enqueueDelivery(terminalDelivery("task_1", "cancelled"));
+    expect(queue.takeNext(cohorts)).toMatchObject({ kind: "turn" });
+    expect(queue.pendingCount).toBe(0);
+    expect(queue.enqueueDelivery(completion("task_1"))).toBeUndefined();
+  });
+
+  it.each(["failed", "cancelled"] as const)(
+    "does not admit a second terminal notification with a different %s outcome",
+    (status) => {
+      for (const deliveries of [
+        [completion("task_0"), terminalDelivery("task_0", status)],
+        [terminalDelivery("task_0", status), completion("task_0")],
+      ]) {
+        const queue = new SessionInputQueue();
+        const [first, late] = deliveries;
+        if (first === undefined || late === undefined) throw new Error("Expected two deliveries.");
+        expect(queue.enqueueDelivery(first)).toBeDefined();
+        expect(queue.enqueueDelivery(late)).toBeUndefined();
+        expect(queue.pendingCount).toBe(1);
+        expect(queue.takeNext(new Map())).toBeDefined();
+        expect(queue.enqueueDelivery(late)).toBeUndefined();
+        expect(queue.pendingCount).toBe(0);
+      }
+    },
+  );
 
   it("ignores duplicate notifications while waiting for the last sibling", async () => {
     const input = batchingInput(2);

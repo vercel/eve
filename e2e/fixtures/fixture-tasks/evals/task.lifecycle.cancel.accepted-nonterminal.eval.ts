@@ -5,7 +5,6 @@ import {
   requireTaskView,
   sendAndFollowQueuedTurn,
   waitForTaskInput,
-  waitForTaskStatus,
 } from "./shared.js";
 import { defineTaskEval } from "./task-transition.js";
 
@@ -42,12 +41,12 @@ export default defineTaskEval({
       ),
     );
 
-    const verified = await waitForTaskStatus(
+    // Cancellation is retained by the parent before the control call returns.
+    // The next turn must observe it without retrying a child-state read.
+    const { turn: verified } = await sendAndFollowQueuedTurn(
       t,
-      cancelled.session,
       "TASK-CANCEL-VERIFY",
-      taskId,
-      "cancelled",
+      cancelled.session,
     );
     verified.expectOk();
     verified.messageIncludes("TASK-CANCEL-STATUS");

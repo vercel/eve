@@ -1,16 +1,16 @@
 ---
 issue: https://github.com/vercel/eve/issues/1084
 status: draft
-last_updated: "2026-09-17"
+last_updated: "2026-09-18"
 ---
 
 # Background tasks: one workflow invocation runtime
 
 **Prototype result: background work is a session-owned workflow invocation.** Waiting and
 background tools now enter through one durable workflow kind, use one session invocation registry,
-and share body execution, report drainage, and cancellation finality. The background owner retains admission, human-input state,
-child ownership, accounting, and session delivery; it no longer translates workflow traffic into a
-second executor protocol.
+and share body execution, report drainage, and cancellation cleanup. The parent session retains
+task outcomes, pending input routes, child ownership, and accounting. The background owner handles
+admission and routes child messages through the existing session inbox.
 
 This prototype is based on `32aca9b1485ce8fce0eb9c636d741456c1779f25`. The linked, closed issue
 is provenance only. The branch is an investigation, not a production-ready migration.
@@ -39,8 +39,8 @@ the existing `WorkflowToolRunMessage` outcome only after those reports are consu
 `workflowToolRunWorkflow` is the only durable entry for both modes. One invocation loop reads
 commands, workflow requests and reports, and body completion. It starts background work only after
 `ready`, drains reports before settlement, and bounds cancellation cleanup. Blocking-owner handlers
-deliver messages to the waiting turn; background-owner handlers persist task state and route session
-delivery. Admitted background work remains session-bound and survives the initiating turn. [Foreground adapter][prototype-blocking],
+deliver messages to the waiting turn; background-owner handlers route child messages to the session. The parent records task outcomes
+and pending input routes. Admitted background work remains session-bound and survives the initiating turn. [Foreground adapter][prototype-blocking],
 [background adapter][prototype-background]
 
 | Concern                             | Before                                               | Prototype                                           |
@@ -92,20 +92,20 @@ with the authentication of a later input delivery. `TaskMetadata` describes the 
 `ActivityWorkIdentityV1` links its activity stream, and `TaskView` is its public status/output view.
 `cohortId` groups overlapping work for one combined report.
 
-| State                                                      | Owner and lifetime                                                                                                          |
-| ---------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
-| Common identity, origin, run address                       | Session registry; waiting entries are removed when their call settles or their turn is cancelled                            |
-| Task metadata, creator context, cohort membership          | Typed task payload; retained for the session lifetime                                                                       |
-| Working/input-required status, pending questions, progress | Background run and its existing streams                                                                                     |
-| Final task status and output                               | Run-owned `TaskView`, cached in `task.terminalView`; retained for the session lifetime, including after the combined report |
-| Pending deliveries and report deduplication                | Existing session input queue                                                                                                |
+| State                                             | Owner and lifetime                                                                                       |
+| ------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| Common identity, origin, run address              | Session registry; waiting entries are removed when their call settles or their turn is cancelled         |
+| Task metadata, creator context, cohort membership | Typed task payload; retained for the session lifetime                                                    |
+| Pending questions                                 | Parent session proxy-input state                                                                         |
+| Final task status and output                      | Parent-owned `task.terminalView`; retained for the session lifetime, including after the combined report |
+| Pending deliveries and report deduplication       | Existing session input queue                                                                             |
 
 Registration precedes the `ready` admission command. A waiting outcome is matched against its
 originating turn, call ID, and run ID. Authorization can end the visible turn while its workflow
 call remains pending; cancellation uses the pending coordination batch's originating turn in that
 case. Results without an origin can bind only to an unambiguous recorded call. Replaying
 registration preserves original creator context,
-cohort membership, and any cached terminal view. Reusing a task ID for another turn is rejected.
+cohort membership, and any recorded terminal outcome. Reusing a task ID for another turn is rejected.
 
 **Retention decision:** completed, failed, and cancelled task payloads stay until the session ends.
 Report delivery does not prune them. This avoids a second cleanup protocol for now; retained state
@@ -180,8 +180,9 @@ A **cohort** is overlapping background work owned by one session. Existing membe
 preserved across overlapping turns. The automatic report becomes eligible only when every member
 is terminal, and it contains success, failure, and cancellation payloads. A user message remains a
 normal turn, and workflow input/authorization requests remain serviceable while a cohort is open.
-Explicit cancellation still settles and records the task before task-owned work is stopped; the
-existing cancellation delivery ID provides deduplication. Steering cancellation continues to mark
+Explicit cancellation checks the parent's recorded outcome before cancelling owned work. It records
+cancellation when the control step returns and queues a settlement notification with the existing
+delivery ID. Late child outcomes cannot replace that parent decision. Steering cancellation continues to mark
 superseded task deliveries for suppression.
 
 ## Compatibility and migration
@@ -286,7 +287,7 @@ cancellation escalation. The persisted registry remains version 1 and checkpoint
   still persists ownership before sending `ready`.
 - `settleWorkflowToolRunCancellation` owns polling and forced stop for both lifetimes. Body cleanup
   retains its 30-second limit; callers allow 35 seconds for cleanup and outcome publication. This
-  replaces the task-specific one-second cutoff. Cancellation status is committed before work stops.
+  replaces the task-specific one-second cutoff. The parent records cancellation after the control step finishes.
 - Both child-owner paths use the same cancellation function and attempt every claimed child.
   Turn cancellation starts child cancellation alongside workflow cancellation. Background child
   failures remain retryable; all child requests settle before the helper returns or throws.
@@ -335,13 +336,42 @@ runtime-rebound to the shared subagent workflow. The compiler exemption is limit
 `self-agent` handling marker; authored background tools without a workflow ID fail with a migration
 error.
 
+## Parent-owned task state
+
+The parent session owns durable task outcomes and pending input routes. Children send outcomes,
+input requests, and authorization events through the existing session inbox; they no longer write
+an `eve.task` snapshot stream. The child keeps only execution-local state for admission, abort,
+and answer routing. Progress retains its existing stream and delivery behavior.
+
+The first terminal outcome recorded by the parent wins. Duplicate or competing child deliveries
+cannot overwrite it. Terminal notifications deduplicate by task, and their model-facing text uses
+the parent's recorded outcome. A cohort waits for each terminal notification, including cancellation
+already recorded by a control step, before releasing its report. Settlement clears pending task input routes. Coalesced input and spawn
+requests are ignored when the same delivery also settles their task; agent settlement still runs
+before its ownership lease is released.
+
+`task_cancel` reads the parent's outcome instead of polling a child view. An already recorded
+success or failure is returned unchanged. Otherwise cancellation signals the child, attempts
+owned-agent cleanup, retains the existing bounded workflow-status wait, and records the cancelled
+outcome in the parent. A queued notification ensures cohort reporting also works after forced stop.
+The task-view polling loop and stream read timeout are deleted. Startup and reset waits are unchanged.
+
+Validation for this change: all 8,911 unit tests passed (one skipped), and all 82 tests across seven
+workflow, cancellation, session, and reset integration suites passed. Typechecking, the production
+build, lint, formatting, invariant guards, and published-doc checks passed. The cancellation eval
+now checks the retained outcome on the next turn without retrying; it remains CI-only.
+
+The wire registry remains version 1: `terminalView` retains its existing shape, and proxy-input
+routes reuse their existing store. Its role is now authoritative parent state rather than an
+expired-run cache. No legacy task-stream fallback is added.
+
 ## Recommendation
 
-Retain the shared invocation runtime and the three approved scope reductions as one change. Do not
-replace run-owned `TaskView` or typed task payloads with raw Workflow status: doing so would discard
-`input_required`, final cancellation ownership, child identity/accounting, and replay-stable cohort
-membership. Before production merge, add CI E2E coverage for the combined-path gaps above,
-especially initiating-turn cancellation and active-parent report release.
+Retain the shared invocation runtime and parent-owned task state. A task settles when the parent
+records its outcome; this does not claim that the wrapper workflow has already exited. Workflow
+status remains useful for cancellation cleanup, but it does not replace the parent's task result.
+An infrastructure failure before outcome delivery still needs separate reconciliation; this change
+does not introduce a runtime completion subscription or repair the local runtime cancellation race.
 
 [prototype-invocation]: ../packages/eve/src/execution/tools/workflow/invocation.ts
 [prototype-blocking]: ../packages/eve/src/execution/tools/workflow/blocking-owner.ts

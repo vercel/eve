@@ -2,19 +2,16 @@
  * Session-owned invocation identity, admission acknowledgement, and dispatch rejection.
  * The parent commits its session index before releasing the workflow body.
  */
+import { getRun } from "#internal/workflow/runtime.js";
 import type { HarnessSession } from "#harness/types.js";
 import type {
   TaskWorkflowInvocation,
   TaskAgentDispatchContext,
 } from "#harness/workflow-invocations.js";
-import {
-  readLatestTaskView,
-  sendTaskCommand,
-  sendTaskCommandToOwner,
-} from "#execution/tasks/parent/run-parent.js";
+import { sendTaskCommand, sendTaskCommandToOwner } from "#execution/tasks/parent/run-parent.js";
 import type { JsonValue } from "#shared/json.js";
 import { deriveTaskInboxToken, deriveTaskId } from "#tasks/task-id.js";
-import { isTerminalTaskStatus, type TaskMetadata } from "#tasks/types.js";
+import type { TaskMetadata } from "#tasks/types.js";
 import type { ContextReader } from "#context/key.js";
 import {
   SessionDynamicSubagentSelectionsKey,
@@ -85,8 +82,8 @@ export async function acknowledgeDelegatedTasksStep(input: {
       retryUnreachable: { attempts: 20, delayMs: 250 },
     });
     if (owner !== undefined) continue;
-    const view = await readLatestTaskView({ taskRunId: task.taskRunId });
-    if (view !== undefined && isTerminalTaskStatus(view.status)) continue;
+    const status = await getRun(task.taskRunId).status;
+    if (status === "completed" || status === "cancelled") continue;
     throw new Error(`Task run "${task.taskId}" did not accept its readiness command.`);
   }
 }

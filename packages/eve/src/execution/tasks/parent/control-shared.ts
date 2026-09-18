@@ -1,13 +1,7 @@
 import type { HarnessSession as RuntimeSession } from "#harness/types.js";
-import { readLatestTaskView } from "#execution/tasks/parent/run-parent.js";
-import { isTaskWorkflowTargetGone } from "#execution/tasks/workflow-target.js";
 import type { RuntimeActionResult, RuntimeToolCallActionRequest } from "#shared/action-types.js";
 import { taskViewsToJson } from "#tasks/json.js";
-import {
-  readWorkflowTaskView,
-  findTaskInvocation,
-  type TaskWorkflowInvocation,
-} from "#harness/workflow-invocations.js";
+import { findTaskInvocation, type TaskWorkflowInvocation } from "#harness/workflow-invocations.js";
 import type { TaskView } from "#tasks/types.js";
 
 /**
@@ -34,36 +28,6 @@ export function lookupTaskEntries(
     }
   }
   return unknown.length > 0 ? { kind: "unknown", unknown } : { entries, kind: "found" };
-}
-
-/** Reads the latest view of every entry, defaulting to `working`. */
-export async function readTaskViews(
-  entries: readonly TaskWorkflowInvocation[],
-): Promise<TaskView[]> {
-  return Promise.all(entries.map(readTaskView));
-}
-
-export async function readTaskView(entry: TaskWorkflowInvocation): Promise<TaskView> {
-  try {
-    return (
-      (await readLatestTaskView({ taskRunId: entry.address.runId })) ?? createPendingTaskView(entry)
-    );
-  } catch (error) {
-    if (isTaskWorkflowTargetGone(error)) {
-      const retained = readWorkflowTaskView(entry.task);
-      if (retained !== undefined) return retained;
-    }
-    throw error;
-  }
-}
-
-/** The placeholder view for a run that has not published anything yet. */
-function createPendingTaskView(entry: TaskWorkflowInvocation): TaskView {
-  return {
-    metadata: entry.task.metadata,
-    status: "working",
-    taskId: entry.task.taskId,
-  };
 }
 
 /** One successful task-control result carrying full task views. */

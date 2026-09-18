@@ -61,7 +61,7 @@ import { defineMemory } from "#public/memory/index.js";
 import { stampDurableDynamicCallback } from "#tools/durable-callbacks.js";
 import { dispatchCoordinationStep } from "#execution/coordination-dispatch-step.js";
 import { runProxySubagentEventStep } from "#subagents/event-proxy-step.js";
-import { readLatestTaskView, sendTaskInboundPayload } from "#execution/tasks/parent/run-parent.js";
+import { sendTaskInboundPayload } from "#execution/tasks/parent/run-parent.js";
 import { recordTaskInputRequestStep } from "#execution/tasks/parent/hitl-proxy-steps.js";
 import { emitTerminalSessionFailureStep } from "#execution/terminal-session-failure-step.js";
 import { resolveEffectiveOutputSchema } from "#execution/effective-output-schema.js";
@@ -126,7 +126,6 @@ vi.mock("../durable-session-store.js", async (importOriginal) => {
   };
 });
 vi.mock("../tasks/parent/run-parent.js", () => ({
-  readLatestTaskView: vi.fn(),
   sendTaskInboundPayload: vi.fn(),
 }));
 
@@ -325,7 +324,6 @@ afterEach(() => {
   vi.unstubAllGlobals();
   vi.unstubAllEnvs();
   vi.restoreAllMocks();
-  vi.mocked(readLatestTaskView).mockReset();
   vi.mocked(sendTaskInboundPayload).mockReset();
   vi.mocked(sendTaskInboundPayload).mockResolvedValue("delivered");
   mockIdentityHistoryViewProjector.mockReset();
@@ -726,12 +724,6 @@ describe("recordTaskInputRequestStep", () => {
       },
     });
     installSessionStoreMocks([session]);
-    vi.mocked(readLatestTaskView).mockResolvedValue({
-      metadata: { kind: "tool", name: "research" },
-      inputRequests: [taskRequest.request],
-      status: "input_required",
-      taskId: "task-1",
-    });
 
     const result = await recordTaskInputRequestStep({
       request: taskRequest,
@@ -756,7 +748,6 @@ describe("recordTaskInputRequestStep", () => {
   it("rejects cross-session and stale batches without recording a route", async () => {
     const session = createStubSession();
     installSessionStoreMocks([session, session]);
-    vi.mocked(readLatestTaskView).mockResolvedValue(undefined);
 
     const result = await recordTaskInputRequestStep({
       request: { ...taskRequest, taskId: "foreign-task" },

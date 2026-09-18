@@ -22,7 +22,6 @@ import {
   type DurableSessionState,
 } from "#execution/durable-session-store.js";
 import { projectToDurableSession } from "#execution/session.js";
-import { readLatestTaskView } from "#execution/tasks/parent/run-parent.js";
 import {
   getAgentHandleStore,
   writeHandles,
@@ -40,10 +39,10 @@ import {
   formatAgentBusyMessage,
 } from "#subagents/agent-handle-errors.js";
 import {
+  readWorkflowTaskView,
   findTaskInvocation,
   type TaskAgentDispatchContext,
 } from "#harness/workflow-invocations.js";
-import { isTerminalTaskStatus } from "#tasks/types.js";
 import type { RuntimeSubagentChildResult } from "#shared/action-types.js";
 import {
   clearProxyInputRequestsForChild,
@@ -353,8 +352,8 @@ export async function dispatchTaskAgentInvocationStep(
     const session = readDurableSession(input.sessionState);
     const entry = findTaskInvocation(session.state, input.taskId);
     if (entry === undefined) return { kind: "not-admitted", sessionState: input.sessionState };
-    const view = await readLatestTaskView({ taskRunId: entry.address.runId });
-    if (view === undefined || isTerminalTaskStatus(view.status)) {
+    const view = readWorkflowTaskView(entry.task);
+    if (view !== undefined) {
       return { kind: "not-admitted", sessionState: input.sessionState };
     }
     taskDispatchContext = entry.task.dispatchContext;

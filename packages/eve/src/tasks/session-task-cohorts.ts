@@ -11,14 +11,6 @@ export function getTaskCohortId(task: {
 
 export function getSessionTaskCohorts(
   state: SessionStateMap | undefined,
-): ReadonlyMap<string, { readonly cohortId: string; readonly settled: boolean }> {
-  return new Map(
-    getTaskInvocations(state).map(({ task }) => [
-      task.taskId,
-      {
-        cohortId: getTaskCohortId(task),
-        settled: task.terminalView !== undefined,
-      },
-    ]),
-  );
+): ReadonlyMap<string, string> {
+  return new Map(getTaskInvocations(state).map(({ task }) => [task.taskId, getTaskCohortId(task)]));
 }

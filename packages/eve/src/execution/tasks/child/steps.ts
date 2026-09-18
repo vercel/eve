@@ -1,3 +1,4 @@
+import { formatTaskNotification, formatTaskOutput } from "#tasks/notification.js";
 import { getWritable } from "#compiled/@workflow/core/index.js";
 import type { ActivityObserverConfig, SessionAuthContext, SessionCommand } from "#channel/types.js";
 import type {
@@ -13,11 +14,9 @@ import { resumeWorkflowToolRunAnswers } from "#execution/tools/workflow/answer.j
 import type { AnswerHookRoute } from "#harness/proxy-input-requests.js";
 import { createLogger } from "#internal/logging.js";
 import type { ActivityEventV1 } from "#protocol/activity.js";
-import type { JsonValue } from "#shared/json.js";
 import {
   isTerminalTaskStatus,
   TASK_PROGRESS_STREAM_NAMESPACE,
-  TASK_VIEW_STREAM_NAMESPACE,
   taskAuthorizationRequestId,
   type TaskAgentRequestDelivery,
   type TaskAuthorizationEventDelivery,
@@ -29,24 +28,12 @@ import {
 
 const log = createLogger("execution.tasks.run");
 
-/**
- * Appends one full task view to the owning task run's `eve.task`
- * stream. Only the task run workflow calls this, which is what makes
- * the run the single writer readers can trust without re-validating.
- */
-export async function appendTaskViewStep(input: {
+/** Emits task activity without storing a second task-state record. */
+export async function emitTaskActivityStep(input: {
   readonly activityObserver?: ActivityObserverConfig;
   readonly view: TaskView;
 }): Promise<void> {
   "use step";
-
-  const writable = getWritable<TaskView>({ namespace: TASK_VIEW_STREAM_NAMESPACE });
-  const writer = writable.getWriter();
-  try {
-    await writer.write(input.view);
-  } finally {
-    writer.releaseLock();
-  }
 
   const events = projectTaskActivity({
     activityObserver: input.activityObserver,
@@ -315,22 +302,4 @@ export async function deliverTaskInputResponsesStep(input: {
     }
     throw error;
   }
-}
-
-export function formatTaskNotification(view: TaskView): string {
-  const subject = `Background task ${view.taskId} (${view.metadata.name})`;
-  if (view.status === "input_required") {
-    return `${subject} needs input.`;
-  }
-  if (view.status === "completed") {
-    return `${subject} is completed.\n\nResult:\n${formatTaskOutput(view.lastOutput.data)}`;
-  }
-  if (view.status === "failed") {
-    return `${subject} failed.\n\nError:\n${formatTaskOutput(view.lastOutput.data)}`;
-  }
-  return `${subject} is cancelled.`;
-}
-
-function formatTaskOutput(output: JsonValue): string {
-  return typeof output === "string" ? output : (JSON.stringify(output) ?? "null");
 }

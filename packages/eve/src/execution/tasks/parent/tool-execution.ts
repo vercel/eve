@@ -377,8 +377,7 @@ class BackgroundToolExecutionScope implements BackgroundToolExecutor {
       resultKind: workflow.resultKind ?? "tool",
       task: {
         ...prepared.task,
-        activityWorkIdentity:
-          workflow.resultKind === "subagent" ? taskInput.activityObserver?.workIdentity : undefined,
+        activityWorkIdentity: taskInput.activityObserver?.workIdentity,
       },
     };
     if (

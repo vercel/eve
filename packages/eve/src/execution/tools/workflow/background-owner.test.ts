@@ -10,7 +10,7 @@ import {
 
 const mocks = vi.hoisted(() => ({
   appendTaskProgressStep: vi.fn(),
-  appendTaskViewStep: vi.fn(),
+  emitTaskActivityStep: vi.fn(),
   claimHookOwnership: vi.fn(),
   createChannelReader: vi.fn((channel: string) => ({
     channel,
@@ -41,7 +41,7 @@ vi.mock("#execution/hook-ownership.js", () => ({
 }));
 vi.mock("#execution/tasks/child/steps.js", () => ({
   appendTaskProgressStep: mocks.appendTaskProgressStep,
-  appendTaskViewStep: mocks.appendTaskViewStep,
+  emitTaskActivityStep: mocks.emitTaskActivityStep,
   deliverTaskInputResponsesStep: mocks.deliverTaskInputResponsesStep,
   wakeTaskAgentRequestParentStep: mocks.wakeTaskAgentRequestParentStep,
   wakeTaskAuthorizationParentStep: mocks.wakeTaskAuthorizationParentStep,
@@ -169,7 +169,7 @@ describe("runWorkflowToolInvocation", () => {
     mocks.sleep.mockReturnValue(new Promise(() => {}));
   });
 
-  it("persists auth requests and answers before forwarding and acknowledging each event", async () => {
+  it("forwards auth events before acknowledging them", async () => {
     queueCommand({ kind: "ready" });
     queueOwnerRequest(authorizationRequest("a"));
     queueOwnerRequest(authorizationRequest("b"));
@@ -179,29 +179,13 @@ describe("runWorkflowToolInvocation", () => {
 
     await runWorkflowToolInvocation(workflowInput);
 
-    const views = mocks.appendTaskViewStep.mock.calls.slice(-4).map(([input]) => input.view);
-    expect(views.map((view) => view.status)).toEqual([
-      "input_required",
-      "input_required",
-      "input_required",
-      "working",
-    ]);
-    expect(
-      views
-        .slice(0, 3)
-        .map((view) =>
-          view.inputRequests.map((request: { requestId: string }) => request.requestId),
-        ),
-    ).toEqual([["a"], ["a", "b"], ["b"]]);
     expect(mocks.wakeTaskAuthorizationParentStep).toHaveBeenCalledTimes(4);
     expect(mocks.resumeHookStep).toHaveBeenCalledTimes(4);
     expect(mocks.wakeTaskParentStep).not.toHaveBeenCalled();
     for (let i = 0; i < 4; i++) {
-      const committed = mocks.appendTaskViewStep.mock.invocationCallOrder[i + 1];
       const notified = mocks.wakeTaskAuthorizationParentStep.mock.invocationCallOrder[i];
       const acknowledged = mocks.resumeHookStep.mock.invocationCallOrder[i];
-      assert(committed !== undefined && notified !== undefined && acknowledged !== undefined);
-      expect(committed).toBeLessThan(notified);
+      assert(notified !== undefined && acknowledged !== undefined);
       expect(notified).toBeLessThan(acknowledged);
     }
   });
@@ -222,27 +206,19 @@ describe("runWorkflowToolInvocation", () => {
     });
     expect(mocks.resumeHookStep).not.toHaveBeenCalled();
     expect(
-      mocks.appendTaskViewStep.mock.calls.some(([input]) => input.view.status === "input_required"),
+      mocks.emitTaskActivityStep.mock.calls.some(
+        ([input]) => input.view.status === "input_required",
+      ),
     ).toBe(false);
   });
 
-  it.each(["persistence", "forwarding"])(
-    "does not acknowledge auth after failed %s",
-    async (failure) => {
-      queueCommand({ kind: "ready" });
-      queueOwnerRequest(authorizationRequest("a"));
-      if (failure === "persistence") {
-        mocks.appendTaskViewStep.mockImplementation(async ({ view }) => {
-          if (view.status === "input_required") throw new Error("failed persistence");
-        });
-      } else {
-        mocks.wakeTaskAuthorizationParentStep.mockRejectedValue(new Error("failed forwarding"));
-      }
-
-      await expect(runWorkflowToolInvocation(workflowInput)).rejects.toThrow(`failed ${failure}`);
-      expect(mocks.resumeHookStep).not.toHaveBeenCalled();
-    },
-  );
+  it("does not acknowledge auth after failed forwarding", async () => {
+    queueCommand({ kind: "ready" });
+    queueOwnerRequest(authorizationRequest("a"));
+    mocks.wakeTaskAuthorizationParentStep.mockRejectedValue(new Error("failed forwarding"));
+    await expect(runWorkflowToolInvocation(workflowInput)).rejects.toThrow("failed forwarding");
+    expect(mocks.resumeHookStep).not.toHaveBeenCalled();
+  });
 
   it("forwards admitted agent requests through the task's owner channel", async () => {
     mocks.raceChannelReads
@@ -286,10 +262,11 @@ describe("runWorkflowToolInvocation", () => {
 
       expect(mocks.executeWorkflowBody).not.toHaveBeenCalled();
       expect(mocks.wakeTaskParentStep).toHaveBeenCalledTimes(kind === "ready" ? 1 : 0);
-      expect(mocks.appendTaskViewStep).toHaveBeenLastCalledWith({
-        activityObserver: undefined,
-        view: { ...initialView, status: "cancelled" },
-      });
+      if (kind === "ready")
+        expect(mocks.wakeTaskParentStep).toHaveBeenLastCalledWith({
+          token: "parent-token",
+          view: { ...initialView, status: "cancelled" },
+        });
     },
   );
 
@@ -441,10 +418,10 @@ describe("runWorkflowToolInvocation", () => {
 
     await runWorkflowToolInvocation(workflowInput);
 
-    expect(mocks.appendTaskViewStep.mock.calls.map(([input]) => input.view.status)).toEqual([
-      "working",
-      "cancelled",
-    ]);
+    expect(mocks.wakeTaskParentStep).toHaveBeenCalledWith({
+      token: "parent-token",
+      view: expect.objectContaining({ status: "cancelled" }),
+    });
     expect(mocks.wakeTaskParentStep).toHaveBeenLastCalledWith({
       token: "parent-token",
       view: expect.objectContaining({ status: "cancelled" }),

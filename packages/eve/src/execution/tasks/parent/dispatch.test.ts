@@ -1,3 +1,4 @@
+import { findTaskInvocation, readWorkflowTaskView } from "#harness/workflow-invocations.js";
 import type { HarnessSession } from "#harness/types.js";
 import { WORKFLOW_CANCELLATION_SETTLE_MS } from "#execution/tools/workflow/cancellation-policy.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -7,7 +8,7 @@ import {
   executeTaskControlAction,
   isTaskControlAction,
 } from "#execution/tasks/parent/dispatch.js";
-import { readLatestTaskView, sendTaskCommand } from "#execution/tasks/parent/run-parent.js";
+import { sendTaskCommand } from "#execution/tasks/parent/run-parent.js";
 import { resumeSessionInbox } from "#execution/session-inbox/resume.js";
 
 const { cancelRun, getRun } = vi.hoisted(() => ({
@@ -16,7 +17,6 @@ const { cancelRun, getRun } = vi.hoisted(() => ({
 }));
 
 vi.mock("#execution/tasks/parent/run-parent.js", () => ({
-  readLatestTaskView: vi.fn(),
   sendTaskCommand: vi.fn(),
 }));
 vi.mock("#execution/session-inbox/resume.js", () => ({ resumeSessionInbox: vi.fn() }));
@@ -53,11 +53,6 @@ describe("task cancellation", () => {
   });
 
   it("cancels a live task despite an unrelated malformed retained result", async () => {
-    vi.mocked(readLatestTaskView).mockResolvedValue({
-      metadata: entry.task.metadata,
-      status: "cancelled",
-      taskId: entry.task.taskId,
-    });
     const session: HarnessSession = {
       agent: { modelReference: { id: "test" }, system: "", tools: [] },
       compaction: { recentWindowSize: 4, threshold: 100_000 },
@@ -78,29 +73,27 @@ describe("task cancellation", () => {
         },
       },
     };
-    await expect(
-      executeTaskControlAction({
-        action: {
-          kind: "tool-call",
-          callId: "cancel",
-          toolName: "task_cancel",
-          input: { taskIds: [entry.task.taskId] },
-        },
-        session,
-      }),
-    ).resolves.toMatchObject({ result: { kind: "tool-result" } });
+    const cancelled = await executeTaskControlAction({
+      action: {
+        kind: "tool-call",
+        callId: "cancel",
+        toolName: "task_cancel",
+        input: { taskIds: [entry.task.taskId] },
+      },
+      session,
+    });
+    const recorded = findTaskInvocation(cancelled.session.state, entry.task.taskId);
+    expect(recorded).toBeDefined();
+    expect(recorded === undefined ? undefined : readWorkflowTaskView(recorded.task)).toMatchObject({
+      status: "cancelled",
+    });
     expect(sendTaskCommand).toHaveBeenCalledExactlyOnceWith({
       command: { kind: "cancel" },
       taskInboxToken: entry.address.hookToken,
     });
   });
 
-  it("cancels task-owned work after cancellation commits", async () => {
-    vi.mocked(readLatestTaskView).mockResolvedValue({
-      metadata: entry.task.metadata,
-      status: "cancelled",
-      taskId: entry.task.taskId,
-    });
+  it("signals cancellation before stopping task-owned work", async () => {
     const cancelled = cancelOwnedTask({ entry });
     await vi.runAllTimersAsync();
     await cancelled;
@@ -113,11 +106,6 @@ describe("task cancellation", () => {
   });
 
   it("retries child cancellation after the cancelled task's inbox has closed", async () => {
-    vi.mocked(readLatestTaskView).mockResolvedValue({
-      metadata: entry.task.metadata,
-      status: "cancelled",
-      taskId: entry.task.taskId,
-    });
     const cancelOwnedWork = vi
       .fn()
       .mockRejectedValueOnce(new Error("Child cancellation failed"))
@@ -142,23 +130,26 @@ describe("task cancellation", () => {
   });
 
   it("leaves child work untouched when completion won the cancellation race", async () => {
-    vi.mocked(readLatestTaskView).mockResolvedValue({
-      metadata: entry.task.metadata,
-      lastOutput: { type: "result", data: "Finished" },
-      status: "completed",
-      taskId: entry.task.taskId,
-    });
     const cancelOwnedWork = vi.fn();
-    await cancelOwnedTask({ cancelOwnedWork, entry });
+    await cancelOwnedTask({
+      cancelOwnedWork,
+      entry: {
+        ...entry,
+        task: {
+          ...entry.task,
+          terminalView: {
+            metadata: entry.task.metadata,
+            lastOutput: { type: "result", data: "Finished" },
+            status: "completed",
+            taskId: entry.task.taskId,
+          },
+        },
+      },
+    });
     expect(cancelOwnedWork).not.toHaveBeenCalled();
   });
 
   it("allows cleanup lasting longer than one second without force-stopping or duplicating delivery", async () => {
-    vi.mocked(readLatestTaskView).mockResolvedValue({
-      metadata: entry.task.metadata,
-      status: "cancelled",
-      taskId: entry.task.taskId,
-    });
     getRun.mockReturnValue({ status: Promise.resolve("running") });
     const cancelled = cancelOwnedTask({ entry });
     await vi.advanceTimersByTimeAsync(2_000);
@@ -171,11 +162,6 @@ describe("task cancellation", () => {
   });
 
   it("hard-cancels a task run that does not unwind cooperatively", async () => {
-    vi.mocked(readLatestTaskView).mockResolvedValue({
-      metadata: entry.task.metadata,
-      status: "cancelled",
-      taskId: entry.task.taskId,
-    });
     getRun.mockReturnValue({ status: Promise.resolve("running") });
 
     const cancelled = cancelOwnedTask({ entry });
@@ -193,7 +179,6 @@ describe("task cancellation", () => {
       status: "cancelled",
       taskId: entry.task.taskId,
     } as const;
-    vi.mocked(readLatestTaskView).mockResolvedValue(view);
     getRun.mockReturnValue({ status: Promise.resolve("running") });
     const session = { sessionId: "parent-session" } as Parameters<
       typeof cancelOwnedTask
@@ -226,7 +211,6 @@ describe("task cancellation", () => {
       status: "cancelled",
       taskId: entry.task.taskId,
     } as const;
-    vi.mocked(readLatestTaskView).mockResolvedValue(view);
     getRun.mockReturnValue({ status: Promise.resolve("running") });
     vi.mocked(resumeSessionInbox).mockRejectedValueOnce(new Error("temporary delivery failure"));
     const session = { sessionId: "parent-session" } as Parameters<

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { SessionStateMap } from "#harness/types.js";
 import {
   readWorkflowTaskView,
-  cacheWorkflowTaskView,
+  recordWorkflowTaskView,
   findTurnInvocation,
   getWorkflowInvocations,
   registerWorkflowInvocation,
@@ -41,7 +41,7 @@ describe("shared workflow invocation ownership", () => {
     session = registerWorkflowInvocation(session, task("task-b"));
     session = {
       ...session,
-      state: cacheWorkflowTaskView(session.state, {
+      state: recordWorkflowTaskView(session.state, {
         taskId: "task-a",
         metadata: task("task-a").task.metadata,
         status: "completed",
@@ -63,7 +63,7 @@ describe("shared workflow invocation ownership", () => {
     ).toBe("pending");
     session = {
       ...session,
-      state: cacheWorkflowTaskView(session.state, {
+      state: recordWorkflowTaskView(session.state, {
         taskId: "task-b",
         metadata: task("task-b").task.metadata,
         status: "failed",
@@ -79,10 +79,7 @@ describe("shared workflow invocation ownership", () => {
     expect(report?.phase).toBe("settled");
     expect(report?.context).toContain("first");
     expect(report?.context).toContain("second");
-    expect([...getSessionTaskCohorts(restored).values()]).toEqual([
-      { cohortId: "task-a", settled: true },
-      { cohortId: "task-a", settled: true },
-    ]);
+    expect([...getSessionTaskCohorts(restored).values()]).toEqual(["task-a", "task-a"]);
     expect(JSON.stringify(removeTurnInvocations({ state: restored }, "turn-a").state)).toBe(
       beforeReport,
     );
@@ -98,7 +95,7 @@ describe("shared workflow invocation ownership", () => {
     session = registerWorkflowInvocation(session, task("live"));
     session = {
       ...session,
-      state: cacheWorkflowTaskView(session.state, {
+      state: recordWorkflowTaskView(session.state, {
         taskId: "live",
         metadata: old.task.metadata,
         status: "cancelled",

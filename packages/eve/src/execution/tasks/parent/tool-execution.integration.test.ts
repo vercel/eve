@@ -228,7 +228,7 @@ describe("background subagent steering", () => {
   });
 
   it.each(["subagent", "tool"] as const)(
-    "persists agent-backed activity identity only (%s)",
+    "retains activity identity for parent-owned settlement (%s)",
     async (resultKind) => {
       const activityObserver = {
         sink: { url: "https://parent.example/activity", version: 1 as const },
@@ -248,10 +248,6 @@ describe("background subagent steering", () => {
       );
 
       expect(task).toBeDefined();
-      if (resultKind === "tool") {
-        expect(task?.task.activityWorkIdentity).toBeUndefined();
-        return;
-      }
       expect(task?.task.activityWorkIdentity).toMatchObject({
         callId: "new-call",
         kind: "task",

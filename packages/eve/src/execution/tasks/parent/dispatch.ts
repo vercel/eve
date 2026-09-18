@@ -4,9 +4,12 @@ import {
   createTaskViewsResult,
   createUnknownTasksError,
   lookupTaskEntries,
-  readTaskView,
 } from "#execution/tasks/parent/control-shared.js";
-import type { TaskWorkflowInvocation } from "#harness/workflow-invocations.js";
+import {
+  recordWorkflowTaskView,
+  readWorkflowTaskView,
+  type TaskWorkflowInvocation,
+} from "#harness/workflow-invocations.js";
 import { sendTaskCommand } from "#execution/tasks/parent/run-parent.js";
 import { wakeTaskParentStep } from "#execution/tasks/child/steps.js";
 import { sessionCommandHookToken } from "#execution/session-inbox/address.js";
@@ -15,11 +18,8 @@ import {
   type TaskExecutorCancel,
 } from "#execution/tasks/parent/task-cancel.js";
 import type { RuntimeActionResult, RuntimeToolCallActionRequest } from "#shared/action-types.js";
-import { isTerminalTaskStatus, type TaskView } from "#tasks/types.js";
+import { type TaskView } from "#tasks/types.js";
 import { TASK_CANCEL_TOOL_NAME, TASK_TOOL_NAMES } from "#tools/framework/task-contract.js";
-
-const CANCEL_COMMIT_POLL_ATTEMPTS = 10;
-const CANCEL_COMMIT_POLL_DELAY_MS = 250;
 
 export function isTaskControlAction(action: RuntimeToolCallActionRequest): boolean {
   return action.kind === "tool-call" && TASK_TOOL_NAMES.has(action.toolName);
@@ -34,7 +34,8 @@ export async function executeTaskControlAction(input: {
   readonly result: RuntimeActionResult;
   readonly session: RuntimeSession;
 }> {
-  const { action, session } = input;
+  const { action } = input;
+  let session = input.session;
   const taskIds = readTaskIds(action.input);
   if (taskIds === undefined || taskIds.length === 0) {
     return {
@@ -55,57 +56,47 @@ export async function executeTaskControlAction(input: {
 
   const views: TaskView[] = [];
   for (const entry of lookup.entries) {
-    views.push(
-      await cancelOwnedTask({
-        cancelOwnedWork: input.cancelOwnedWork,
-        entry,
-        serializedContext: input.serializedContext,
-        session,
-      }),
-    );
+    const view = await cancelOwnedTask({
+      cancelOwnedWork: input.cancelOwnedWork,
+      entry,
+      serializedContext: input.serializedContext,
+      session,
+    });
+    session = { ...session, state: recordWorkflowTaskView(session.state, view) };
+    views.push(view);
   }
   return { result: createTaskViewsResult(action, views), session };
 }
 
-/** Commits cancellation, then stops task-owned child work and its lifecycle run. */
+/** Cancels task-owned work; the caller records the outcome in the parent session. */
 export async function cancelOwnedTask(input: {
   readonly cancelOwnedWork?: TaskExecutorCancel;
   readonly entry: TaskWorkflowInvocation;
   readonly serializedContext?: Record<string, unknown>;
   readonly session?: RuntimeSession;
 }): Promise<TaskView> {
-  const delivery = await sendTaskCommand({
+  const previous = readWorkflowTaskView(input.entry.task);
+  if (previous !== undefined && previous.status !== "cancelled") return previous;
+  const view: TaskView = previous ?? {
+    metadata: input.entry.task.metadata,
+    status: "cancelled",
+    taskId: input.entry.task.taskId,
+  };
+  await sendTaskCommand({
     command: { kind: "cancel" },
     taskInboxToken: input.entry.address.hookToken,
   });
-  let view = await readTaskView(input.entry);
-  for (
-    let attempt = 0;
-    attempt < CANCEL_COMMIT_POLL_ATTEMPTS && !isTerminalTaskStatus(view.status);
-    attempt += 1
-  ) {
-    await new Promise((resolve) => setTimeout(resolve, CANCEL_COMMIT_POLL_DELAY_MS));
-    view = await readTaskView(input.entry);
-  }
-  if (!isTerminalTaskStatus(view.status)) {
-    throw new Error(
-      `Task "${input.entry.task.taskId}" did not commit cancellation before timeout.`,
-    );
-  }
-  if (view.status !== "cancelled") return view;
-
   // The task inbox may be closed after an earlier cancellation committed but
   // failed to stop its child. Retrying must still finish that cancellation.
-  const forcedShutdown = await cancelTaskOwnedWork({
+  await cancelTaskOwnedWork({
     cancelOwnedWork: input.cancelOwnedWork,
     entry: input.entry,
     serializedContext: input.serializedContext,
     session: input.session,
   });
-  if ((delivery === "unreachable" || forcedShutdown) && input.session !== undefined) {
-    // Forced shutdown can interrupt the lifecycle between its committed view
-    // and parent wake. Retried cancellation must finish delivery even when the
-    // inbox is gone; the shared delivery id deduplicates a wake already sent.
+  if (input.session !== undefined) {
+    // Queue settlement even when the child cannot report. The parent records
+    // this control result before routing queued notifications; late outcomes lose.
     await wakeTaskParentStep({
       token: sessionCommandHookToken(input.session.sessionId),
       view,

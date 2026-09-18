@@ -44,20 +44,20 @@ export async function cancelWorkflowToolRun(
   }
 }
 
-/** Returns true only when this caller forcibly stopped a still-live run. */
+/** Allows cooperative cleanup, then forcibly stops a still-live run. */
 export async function settleWorkflowToolRunCancellation(
   runId: string,
   reason: string,
   cooperative = true,
-): Promise<boolean> {
+): Promise<void> {
   if (cooperative) {
     const deadline = Date.now() + WORKFLOW_CANCELLATION_SETTLE_MS;
     while (Date.now() < deadline) {
       try {
         const status = await getRun(runId).status;
-        if (status !== "pending" && status !== "running") return false;
+        if (status !== "pending" && status !== "running") return;
       } catch (error) {
-        if (isTaskWorkflowTargetGone(error)) return false;
+        if (isTaskWorkflowTargetGone(error)) return;
         throw error;
       }
       await new Promise((resolve) => setTimeout(resolve, 250));
@@ -65,9 +65,8 @@ export async function settleWorkflowToolRunCancellation(
   }
   try {
     await cancelRun(await getWorld(), runId, { cancelReason: reason });
-    return true;
   } catch (error) {
-    if (isTaskWorkflowTargetGone(error)) return false;
+    if (isTaskWorkflowTargetGone(error)) return;
     throw error;
   }
 }

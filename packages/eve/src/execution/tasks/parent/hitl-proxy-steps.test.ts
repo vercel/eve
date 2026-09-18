@@ -1,3 +1,4 @@
+import { recordWorkflowTaskView } from "#harness/workflow-invocations.js";
 import { createTestSessionState } from "#internal/testing/session-state.js";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ContextContainer } from "#context/container.js";
@@ -7,12 +8,14 @@ import {
   recordTerminalTaskViewsStep,
   recordTaskInputRequestStep,
 } from "#execution/tasks/parent/hitl-proxy-steps.js";
-import { readLatestTaskView } from "#execution/tasks/parent/run-parent.js";
 import { bindSessionInstrumentation } from "#instrumentation/runtime.js";
 import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
 import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
 import { getAgentHandleStore, setAgentHandleStore } from "#subagents/handles/store.js";
-import { getProxyInputRequests } from "#harness/proxy-input-requests.js";
+import {
+  getProxyInputRequests,
+  upsertProxyInputRequestState,
+} from "#harness/proxy-input-requests.js";
 import { getTaskInvocations } from "#harness/workflow-invocations.js";
 
 const flushInstrumentation = vi.hoisted(() => vi.fn());
@@ -22,7 +25,6 @@ vi.mock("#execution/durable-session-store.js", async (importOriginal) => ({
   ...(await importOriginal()),
   readDurableSession: vi.fn(),
 }));
-vi.mock("#execution/tasks/parent/run-parent.js", () => ({ readLatestTaskView: vi.fn() }));
 vi.mock("#instrumentation/runtime.js", () => ({
   bindSessionInstrumentation: vi.fn(),
 }));
@@ -95,14 +97,7 @@ describe("recordTaskInputRequestStep", () => {
     });
   });
 
-  it("records a generic workflow answer route after matching the task view", async () => {
-    vi.mocked(readLatestTaskView).mockResolvedValue({
-      inputRequests: [request.request],
-      metadata: { kind: "tool", name: "export" },
-      status: "input_required",
-      taskId: "task-1",
-    });
-
+  it("records a generic workflow answer route for a parent-owned task", async () => {
     const result = await recordTaskInputRequestStep({ request, sessionState });
 
     expect(result).toMatchObject({
@@ -120,12 +115,16 @@ describe("recordTaskInputRequestStep", () => {
     });
   });
 
-  it("rejects a request that does not match the task's outstanding batch", async () => {
-    vi.mocked(readLatestTaskView).mockResolvedValue({
-      inputRequests: [{ ...request.request, requestId: "other" }],
-      metadata: { kind: "tool", name: "export" },
-      status: "input_required",
-      taskId: "task-1",
+  it("rejects a late input request after parent settlement", async () => {
+    const session = readDurableSession(sessionState);
+    vi.mocked(readDurableSession).mockReturnValue({
+      ...session,
+      state: recordWorkflowTaskView(session.state, {
+        lastOutput: { data: "done", type: "result" },
+        metadata: { kind: "tool", name: "export" },
+        status: "completed",
+        taskId: "task-1",
+      }),
     });
 
     await expect(recordTaskInputRequestStep({ request, sessionState })).resolves.toEqual({
@@ -184,12 +183,6 @@ describe("recordTaskInputRequestStep", () => {
       replyTo: remoteReplyTo,
       request: { ...request.request, requestId: "remote-req" },
     };
-    vi.mocked(readLatestTaskView).mockResolvedValue({
-      inputRequests: [remoteRequest.request],
-      metadata: { kind: "tool", name: "export" },
-      status: "input_required",
-      taskId: "task-1",
-    });
 
     const result = await recordTaskInputRequestStep({ request: remoteRequest, sessionState });
 
@@ -211,7 +204,7 @@ describe("recordTerminalTaskViewsStep", () => {
     } as never);
   });
 
-  it("caches an owned terminal view and releases the task's agent lease", async () => {
+  it("records an owned outcome and releases its agent lease and input routes", async () => {
     vi.mocked(readDurableSession).mockReturnValue({
       agent: { system: "" },
       continuationToken: "parent-token",
@@ -268,6 +261,20 @@ describe("recordTerminalTaskViewsStep", () => {
       taskId: "task-1",
     };
 
+    const current = readDurableSession(sessionState);
+    vi.mocked(readDurableSession).mockReturnValue({
+      ...current,
+      state: upsertProxyInputRequestState({
+        state: current.state,
+        forChildContinuationToken: "question-hook",
+        entries: [
+          [
+            "task-1:question",
+            { childContinuationToken: "question-hook", kind: "question", taskId: "task-1" },
+          ],
+        ],
+      }),
+    });
     const result = await recordTerminalTaskViewsStep({
       serializedContext: {},
       sessionState,
@@ -276,6 +283,8 @@ describe("recordTerminalTaskViewsStep", () => {
     const state = result.sessionState.snapshot.session.state;
 
     expect(getTaskInvocations(state)[0]?.task.terminalView).toEqual(view);
+    expect(getProxyInputRequests(state).size).toBe(0);
+    expect(result.sessionState.hasProxyInputRequests).toBe(false);
     expect(getAgentHandleStore(state)?.handles).toEqual([
       expect.objectContaining({ phase: "available" }),
     ]);

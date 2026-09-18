@@ -2,7 +2,6 @@ import { createHook, getWorkflowMetadata, sleep } from "#compiled/@workflow/core
 
 import { createSessionInbox } from "#execution/session-inbox/inbox.js";
 import { sessionCommandHookToken } from "#execution/session-inbox/address.js";
-import { appendTaskViewStep } from "#execution/tasks/child/steps.js";
 import { cancelOwnedTask } from "#execution/tasks/parent/dispatch.js";
 import { waitForCommandHookOwner } from "#execution/workflow-runtime.js";
 import { getRun, start } from "#internal/workflow/runtime.js";
@@ -10,7 +9,7 @@ import type { HarnessSession } from "#harness/types.js";
 import type { TaskWorkflowInvocation } from "#harness/workflow-invocations.js";
 import type { TaskCommandHookPayload } from "#tasks/types.js";
 
-/** Models a task whose view commits before its executor finishes unwinding. */
+/** Models a task whose executor cannot finish cooperative cleanup. */
 export async function slowCancelledTaskWorkflow(input: {
   readonly taskId: string;
   readonly taskInboxToken: string;
@@ -18,13 +17,10 @@ export async function slowCancelledTaskWorkflow(input: {
   "use workflow";
 
   using commands = createHook<TaskCommandHookPayload>({ token: input.taskInboxToken });
-  const metadata = { kind: "tool", name: "slow-cancel" } as const;
-  await appendTaskViewStep({ view: { metadata, status: "working", taskId: input.taskId } });
   const delivery = await commands;
   if (delivery.kind !== "task-command" || delivery.command.kind !== "cancel") {
     throw new Error("Expected the task cancellation command.");
   }
-  await appendTaskViewStep({ view: { metadata, status: "cancelled", taskId: input.taskId } });
   await sleep("1h");
 }
 

@@ -618,8 +618,12 @@ cancels the turn, which cancels the run, which withdraws its requests. Input res
 Background runs belong to the session. They survive turn completion and cancellation, appear in the
 session's task index, can be cancelled with `task_cancel`, and are cancelled when the session ends.
 
+The parent session records each background task's outcome when it processes the child's notification.
+The first terminal outcome it records is final: a late child result cannot replace a recorded
+cancellation. Task completion does not require the wrapper workflow to have exited.
+
 Errors follow the SDK. A thrown error in a step retries per the step's policy; `FatalError` does
-not. An error that escapes the body fails the run.
+not. An error that escapes the body fails the tool invocation.
 
 Starting a waiting workflow tool can also be retried. If dispatch is interrupted after starting a
 run, its retry starts another run, and both may execute. The parent tracks the run returned by the

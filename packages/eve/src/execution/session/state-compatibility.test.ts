@@ -3,7 +3,7 @@ import { createTestSessionState } from "#internal/testing/session-state.js";
 import { isSessionStateIdleForHandoff } from "#execution/session/handoff-steps.js";
 import {
   readWorkflowTaskView,
-  cacheWorkflowTaskView,
+  recordWorkflowTaskView,
   getTaskInvocations,
   registerWorkflowInvocation,
 } from "#harness/workflow-invocations.js";
@@ -101,7 +101,7 @@ function handle(phase: AgentHandlePhase): AgentHandle {
 }
 
 describe("additive durable state", () => {
-  it("preserves task extensions through parsing, replayed creation and terminal updates", () => {
+  it("preserves task extensions through parsing, replayed creation and duplicate terminal deliveries", () => {
     const state = {
       authored: { opaque: true },
       "eve.runtime.workflowInvocations": { version: 1, invocations: [task], futureIndex: true },
@@ -127,7 +127,7 @@ describe("additive durable state", () => {
         },
       },
     });
-    const saved = cacheWorkflowTaskView(updated.state, {
+    const saved = recordWorkflowTaskView(updated.state, {
       taskId: "task",
       metadata,
       status: "completed",
@@ -149,8 +149,8 @@ describe("additive durable state", () => {
               activityWorkIdentity: activity,
               terminalView: {
                 futureView: true,
-                lastOutput: { data: "updated", futureOutput: true },
-                usage: { inputTokens: 3, futureUsage: true },
+                lastOutput: { data: "done", futureOutput: true },
+                usage: { inputTokens: 1, futureUsage: true },
               },
             },
           },
@@ -159,18 +159,19 @@ describe("additive durable state", () => {
     });
     assert(saved !== undefined);
     expect(isSessionStateIdleForHandoff(checkpoint(restored(saved)))).toBe(true);
-    const cancelled = cacheWorkflowTaskView(saved, {
+    const cancelled = recordWorkflowTaskView(saved, {
       taskId: "task",
       metadata,
       status: "cancelled",
     });
     expect(getTaskInvocations(restored(cancelled))[0]?.task.terminalView).toMatchObject({
       futureView: true,
-      status: "cancelled",
+      status: "completed",
     });
+    expect(cancelled).toBe(saved);
     const [retained] = getTaskInvocations(restored(cancelled));
     assert(retained !== undefined);
-    expect(readWorkflowTaskView(retained.task)?.lastOutput).toBeUndefined();
+    expect(readWorkflowTaskView(retained.task)?.lastOutput?.data).toBe("done");
   });
 });
 

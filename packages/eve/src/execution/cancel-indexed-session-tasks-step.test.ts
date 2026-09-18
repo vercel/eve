@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import { cancelAllIndexedSessionTasksStep } from "#execution/cancel-indexed-session-tasks-step.js";
-import type { TaskWorkflowInvocation } from "#harness/workflow-invocations.js";
+import { getTaskInvocations, type TaskWorkflowInvocation } from "#harness/workflow-invocations.js";
 
 const { cancelOwnedTaskMock, deserializeContextMock, hydrateDurableSessionMock } = vi.hoisted(
   () => ({
@@ -22,7 +22,9 @@ vi.mock("#execution/tasks/parent/dispatch.js", () => ({ cancelOwnedTask: cancelO
 describe("cancelAllIndexedSessionTasksStep", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    cancelOwnedTaskMock.mockResolvedValue(undefined);
+    cancelOwnedTaskMock.mockImplementation(async ({ entry }: { entry: TaskWorkflowInvocation }) =>
+      cancelledView(entry),
+    );
     deserializeContextMock.mockResolvedValue({ require: vi.fn(() => "bundle") });
     hydrateDurableSessionMock.mockReturnValue("runtime-session");
   });
@@ -31,11 +33,17 @@ describe("cancelAllIndexedSessionTasksStep", () => {
     const task1 = indexedTask("task-1");
     const task2 = indexedTask("task-2");
 
-    await cancelAllIndexedSessionTasksStep({
+    const result = await cancelAllIndexedSessionTasksStep({
       serializedContext: { context: "latest" },
       sessionState: makeSessionState([task1, task2]),
     });
 
+    expect(result.sessionState).toBeDefined();
+    expect(
+      getTaskInvocations(result.sessionState?.snapshot.session.state).map(
+        (entry) => entry.task.terminalView,
+      ),
+    ).toEqual([cancelledView(task1), cancelledView(task2)]);
     expect(cancelOwnedTaskMock).toHaveBeenCalledTimes(2);
     expect(cancelOwnedTaskMock).toHaveBeenNthCalledWith(1, {
       cancelOwnedWork: expect.any(Function),
@@ -54,7 +62,7 @@ describe("cancelAllIndexedSessionTasksStep", () => {
   it("does not require runtime context when no tasks are indexed", async () => {
     await expect(
       cancelAllIndexedSessionTasksStep({ sessionState: makeSessionState([]) }),
-    ).resolves.toBeUndefined();
+    ).resolves.toEqual({ sessionState: makeSessionState([]) });
 
     expect(deserializeContextMock).not.toHaveBeenCalled();
     expect(cancelOwnedTaskMock).not.toHaveBeenCalled();
@@ -94,4 +102,8 @@ function makeSessionState(tasks: readonly TaskWorkflowInvocation[]): DurableSess
     },
     version: 1,
   };
+}
+
+function cancelledView(entry: TaskWorkflowInvocation) {
+  return { taskId: entry.task.taskId, metadata: entry.task.metadata, status: "cancelled" as const };
 }

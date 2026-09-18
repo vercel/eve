@@ -70,10 +70,16 @@ export class SessionInputQueue {
   enqueueDelivery(delivery: DeliverHookPayload): DeliveryAdmission | undefined {
     const deliveryId = taskDeliveryId(delivery);
     if (deliveryId !== undefined) {
-      if (this.seenTaskDeliveryIds.has(deliveryId) || this.isCancelledTaskDelivery(deliveryId)) {
+      const terminalId = terminalTaskId(delivery);
+      // Competing outcomes for one task must not produce separate cohort reports.
+      const deduplicationId = terminalId === undefined ? deliveryId : `${terminalId}:ready`;
+      if (
+        this.seenTaskDeliveryIds.has(deduplicationId) ||
+        this.isCancelledTaskDelivery(deliveryId)
+      ) {
         return undefined;
       }
-      this.seenTaskDeliveryIds.add(deliveryId);
+      this.seenTaskDeliveryIds.add(deduplicationId);
     }
     const admission = { delivery, sequence: this.nextSequence++ };
     this.entries.push({ ...admission, kind: "delivery" });
@@ -200,19 +206,12 @@ export class SessionInputQueue {
   }
 
   private nextActionableIndex(cohorts: TaskCohorts, deferDeliveries: boolean): number {
-    const deliveries = this.entries.filter(
-      (entry): entry is QueuedDelivery => entry.kind === "delivery",
-    );
-    const terminal = new Set(
-      deliveries.flatMap(({ delivery }) => {
-        const taskId = terminalTaskId(delivery);
-        return taskId === undefined ? [] : [taskId];
-      }),
-    );
     const pendingCohorts = new Set<string>();
-    for (const [taskId, cohort] of cohorts) {
-      if (!cohort.settled && !terminal.has(taskId) && !this.cancelledTaskIds.has(taskId)) {
-        pendingCohorts.add(cohort.cohortId);
+    for (const [taskId, cohortId] of cohorts) {
+      // A control step can record cancellation before its notification is admitted.
+      // Wait for that notification too, so it cannot trigger a second cohort report.
+      if (!this.seenTaskDeliveryIds.has(`${taskId}:ready`) && !this.cancelledTaskIds.has(taskId)) {
+        pendingCohorts.add(cohortId);
       }
     }
     return this.entries.findIndex((entry) => {
@@ -347,7 +346,7 @@ function isTaskDelivery(
 
 function terminalCohort(delivery: DeliverHookPayload, cohorts: TaskCohorts): string | undefined {
   const taskId = terminalTaskId(delivery);
-  return taskId === undefined ? undefined : cohorts.get(taskId)?.cohortId;
+  return taskId === undefined ? undefined : cohorts.get(taskId);
 }
 
 function terminalTaskId(delivery: DeliverHookPayload): string | undefined {

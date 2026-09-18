@@ -1,8 +1,7 @@
 import { type DurableSessionState, readDurableSession } from "#execution/durable-session-store.js";
-import { readLatestTaskView } from "#execution/tasks/parent/run-parent.js";
 import { getAgentHandleStore } from "#subagents/handles/store.js";
-import { findTaskInvocation } from "#harness/workflow-invocations.js";
-import { isTerminalTaskStatus, type TaskAuthorizationEventDelivery } from "#tasks/types.js";
+import { readWorkflowTaskView, findTaskInvocation } from "#harness/workflow-invocations.js";
+import { type TaskAuthorizationEventDelivery } from "#tasks/types.js";
 
 /** Accepts authorization events from the workflow task itself or an agent it owns. */
 export async function acceptTaskAuthorizationEventStep(input: {
@@ -25,12 +24,9 @@ export async function acceptTaskAuthorizationEventStep(input: {
     entry.task.metadata.name === hookPayload.subagentName &&
     entry.origin.turnId === hookPayload.event.data.turnId
   ) {
-    const view = await readLatestTaskView({ taskRunId: entry.address.runId });
+    const view = readWorkflowTaskView(entry.task);
     // Completion can arrive after the body has returned; its sign-in UI must still close.
-    return (
-      view !== undefined &&
-      (hookPayload.event.type === "authorization.completed" || !isTerminalTaskStatus(view.status))
-    );
+    return hookPayload.event.type === "authorization.completed" || view === undefined;
   }
 
   const handles = getAgentHandleStore(durableSession.state)?.handles ?? [];
@@ -52,6 +48,6 @@ export async function acceptTaskAuthorizationEventStep(input: {
   );
   if (claimed === undefined && reserved.length !== 1) return false;
 
-  const view = await readLatestTaskView({ taskRunId: entry.address.runId });
-  return view !== undefined && !isTerminalTaskStatus(view.status);
+  const view = readWorkflowTaskView(entry.task);
+  return view === undefined;
 }

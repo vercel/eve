@@ -61,7 +61,9 @@ vi.mock("#internal/workflow/runtime.js", () => ({
 describe("terminateChildSessionsStep", () => {
   beforeEach(() => {
     cancelOwnedTaskMock.mockReset();
-    cancelOwnedTaskMock.mockResolvedValue(undefined);
+    cancelOwnedTaskMock.mockImplementation(async ({ entry }: { entry: TaskWorkflowInvocation }) =>
+      cancelledView(entry),
+    );
     cancelRunMock.mockReset();
     cancelRunMock.mockResolvedValue(undefined);
     deserializeContextMock.mockReset();
@@ -248,13 +250,15 @@ describe("terminateChildSessionsStep", () => {
     const secondCancellation = createDeferred();
     const order: string[] = [];
     cancelOwnedTaskMock
-      .mockImplementationOnce(async () => {
+      .mockImplementationOnce(async ({ entry }: { entry: TaskWorkflowInvocation }) => {
         await firstCancellation.promise;
         order.push("task-1-settled");
+        return cancelledView(entry);
       })
-      .mockImplementationOnce(async () => {
+      .mockImplementationOnce(async ({ entry }: { entry: TaskWorkflowInvocation }) => {
         await secondCancellation.promise;
         order.push("task-2-settled");
+        return cancelledView(entry);
       });
     cancelRunMock.mockImplementation(async () => {
       order.push("child-cancelled");
@@ -289,7 +293,9 @@ describe("terminateChildSessionsStep", () => {
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     cancelOwnedTaskMock
       .mockRejectedValueOnce(new Error("task cancellation unavailable"))
-      .mockResolvedValueOnce(undefined);
+      .mockImplementationOnce(async ({ entry }: { entry: TaskWorkflowInvocation }) =>
+        cancelledView(entry),
+      );
 
     try {
       await expect(
@@ -488,4 +494,8 @@ function createDeferred(): { readonly promise: Promise<void>; resolve(): void } 
     resolve = next;
   });
   return { promise, resolve };
+}
+
+function cancelledView(entry: TaskWorkflowInvocation) {
+  return { taskId: entry.task.taskId, metadata: entry.task.metadata, status: "cancelled" as const };
 }

@@ -7,7 +7,7 @@ import { start } from "#internal/workflow/runtime.js";
 
 describe("task cancellation parent notification", () => {
   it(
-    "delivers the committed view from the parent step after forcing a slow lifecycle to stop",
+    "delivers cancellation from the parent without a child task-view stream",
     async () => {
       const runtime = await createTestRuntime({ agent: { name: "task-cancel-notification" } });
       await runtime.run(async () => {

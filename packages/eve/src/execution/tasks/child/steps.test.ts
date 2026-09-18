@@ -1,16 +1,15 @@
+import { formatTaskNotification } from "#tasks/notification.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
-  appendTaskViewStep,
+  emitTaskActivityStep,
   deliverTaskInputResponsesStep,
-  formatTaskNotification,
   projectTaskActivity,
   wakeTaskAgentRequestParentStep,
 } from "#execution/tasks/child/steps.js";
 import { resumeWorkflowToolRunAnswers } from "#execution/tools/workflow/answer.js";
 import type { TaskView } from "#tasks/types.js";
 import { resumeSessionInbox } from "#execution/session-inbox/resume.js";
-import { getWritable } from "#compiled/@workflow/core/index.js";
 import { submitActivity } from "#execution/submit-activity.js";
 
 vi.mock("#compiled/@workflow/core/index.js", async (importOriginal) => ({
@@ -64,25 +63,20 @@ const notificationCases: readonly { readonly expected: string; readonly view: Ta
   },
 ];
 
-describe("appendTaskViewStep", () => {
+describe("emitTaskActivityStep", () => {
   it("waits for best-effort activity submission before the step finishes", async () => {
     const submission = Promise.withResolvers<void>();
     const submitted = Promise.withResolvers<void>();
-    const releaseLock = vi.fn();
-    vi.mocked(getWritable).mockReturnValue({
-      getWriter: () => ({ write: vi.fn().mockResolvedValue(undefined), releaseLock }),
-    } as never);
     vi.mocked(submitActivity).mockImplementation(() => {
       submitted.resolve();
       return submission.promise;
     });
     let finished = false;
-    const appended = appendTaskViewStep({ view: notificationCases[0]!.view }).then(() => {
+    const appended = emitTaskActivityStep({ view: notificationCases[0]!.view }).then(() => {
       finished = true;
     });
     await submitted.promise;
     await Promise.resolve();
-    expect(releaseLock).toHaveBeenCalledOnce();
     expect(finished).toBe(false);
     submission.resolve();
     await appended;
@@ -116,7 +110,7 @@ describe("projectTaskActivity", () => {
     ]);
   });
 
-  it("projects task work when its initial view is written", () => {
+  it("projects task work when execution starts", () => {
     const workIdentity = {
       id: "work:task",
       kind: "task" as const,

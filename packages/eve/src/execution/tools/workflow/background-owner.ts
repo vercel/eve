@@ -3,7 +3,7 @@ import { createHook } from "#compiled/@workflow/core/index.js";
 import { claimHookOwnership, isHookConflictError } from "#execution/hook-ownership.js";
 import {
   appendTaskProgressStep,
-  appendTaskViewStep,
+  emitTaskActivityStep,
   deliverTaskInputResponsesStep,
   wakeTaskAgentRequestParentStep,
   wakeTaskAuthorizationParentStep,
@@ -43,7 +43,7 @@ export interface BackgroundWorkflowOwner {
   handleMessage(message: WorkflowToolRunMessage): Promise<void>;
 }
 
-/** Persists task state and routes session-owned invocation messages. */
+/** Routes child messages; the parent session owns persisted task state. */
 export async function createBackgroundWorkflowOwner(
   input: BackgroundWorkflowToolRunInput,
 ): Promise<BackgroundWorkflowOwner | undefined> {
@@ -58,7 +58,7 @@ export async function createBackgroundWorkflowOwner(
     if (isHookConflictError(error)) return;
     throw error;
   }
-  await appendTaskViewStep({ activityObserver: input.activityObserver, view });
+  await emitTaskActivityStep({ activityObserver: input.activityObserver, view });
   return {
     kind: "session",
     commands: createChannelReader("commands", commands),
@@ -77,7 +77,7 @@ export async function createBackgroundWorkflowOwner(
         return "stop";
       }
       if (payload.command.kind === "reject-dispatch") {
-        await commitTaskTransition(payload.command);
+        applyTransition(payload.command);
         return "stop";
       }
     }
@@ -90,7 +90,7 @@ export async function createBackgroundWorkflowOwner(
       return;
     }
     if (message.kind === "outcome") {
-      const transitioned = await commitTaskTransition(message);
+      const transitioned = applyTransition(message);
       if (transitioned || view.status === "cancelled") {
         await wakeTaskParentStep({ token: input.parentContinuationToken, view });
       }
@@ -105,7 +105,7 @@ export async function createBackgroundWorkflowOwner(
     if (request.requestCoordinates === undefined) {
       answerHooks.set(request.replyTo, { runId: request.from.runId });
     }
-    const accepted = await commitTaskTransition({
+    const accepted = applyTransition({
       kind: "require-input",
       inputRequests: workflowToolRunInputRequests(request),
     });
@@ -158,20 +158,19 @@ export async function createBackgroundWorkflowOwner(
     }
     if (command === undefined) return;
 
-    const accepted = await commitTaskTransition(command);
+    const accepted = applyTransition(command);
     if (!accepted) return;
     if (command.kind === "cancel") {
       bodyController.abort(new Error(`Task ${view.taskId} was cancelled.`));
     }
   }
 
-  async function commitTaskTransition(
+  function applyTransition(
     command: TaskCommand | Extract<WorkflowToolRunMessage, { kind: "outcome" }>,
-  ): Promise<boolean> {
+  ): boolean {
     const result = applyTaskTransition(view, command);
     if (result.action !== "accepted") return false;
     view = result.view;
-    await appendTaskViewStep({ activityObserver: input.activityObserver, view });
     return true;
   }
 
@@ -215,7 +214,7 @@ export async function createBackgroundWorkflowOwner(
       const requestId = "attemptId" in event.data ? event.data.attemptId : undefined;
       if (requestId !== undefined && event.type === "authorization.required") {
         const existingRequests = view.status === "input_required" ? view.inputRequests : [];
-        await commitTaskTransition({
+        applyTransition({
           kind: "require-input",
           inputRequests: [
             ...existingRequests,
@@ -223,7 +222,7 @@ export async function createBackgroundWorkflowOwner(
           ],
         });
       } else if (requestId !== undefined) {
-        await commitTaskTransition({ kind: "answered", requestIds: [requestId] });
+        applyTransition({ kind: "answered", requestIds: [requestId] });
       }
 
       await wakeTaskAuthorizationParentStep({

@@ -10,12 +10,12 @@ export interface TaskExecutorCancelContext {
 
 export type TaskExecutorCancel = (input: TaskExecutorCancelContext) => Promise<void>;
 
-/** Cancels task-owned work and reports whether the lifecycle run was forcibly stopped. */
+/** Cancels task-owned work and waits for the invocation cleanup boundary. */
 export async function cancelTaskOwnedWork(
   input: TaskExecutorCancelContext & { readonly cancelOwnedWork?: TaskExecutorCancel },
-): Promise<boolean> {
+): Promise<void> {
   await input.cancelOwnedWork?.(input);
-  return settleWorkflowToolRunCancellation(
+  await settleWorkflowToolRunCancellation(
     input.entry.address.runId,
     `Task ${input.entry.task.taskId} was cancelled.`,
   );

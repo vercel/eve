@@ -196,7 +196,6 @@ export interface TaskProgress {
 }
 
 export const TASK_PROGRESS_STREAM_NAMESPACE = "eve.task.progress";
-export const TASK_VIEW_STREAM_NAMESPACE = "eve.task";
 
 export function isTerminalTaskStatus(status: TaskStatus): boolean {
   return status === "completed" || status === "failed" || status === "cancelled";

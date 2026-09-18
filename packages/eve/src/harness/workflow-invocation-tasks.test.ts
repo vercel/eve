@@ -2,7 +2,7 @@ import { assert, describe, expect, it } from "vitest";
 import type { HarnessSession } from "#harness/types.js";
 import {
   readWorkflowTaskView,
-  cacheWorkflowTaskView,
+  recordWorkflowTaskView,
   findTaskInvocation,
   getTaskInvocations,
   registerWorkflowInvocation,
@@ -133,7 +133,7 @@ describe("session task index", () => {
     });
     session = {
       ...session,
-      state: cacheWorkflowTaskView(session.state, terminal("task_a", "completed")),
+      state: recordWorkflowTaskView(session.state, terminal("task_a", "completed")),
     };
     session = registerWorkflowInvocation(session, {
       callId: "task_a",
@@ -233,21 +233,21 @@ describe("session task index", () => {
       session = registerWorkflowInvocation(session, task("task_b", "turn-1"));
       session = {
         ...session,
-        state: cacheWorkflowTaskView(session.state, terminal("task_a", status)),
+        state: recordWorkflowTaskView(session.state, terminal("task_a", status)),
       };
       session = registerWorkflowInvocation(session, task("task_c", "turn-2"));
       expect(getTaskInvocations(session.state).map((entry) => getTaskCohortId(entry.task))).toEqual(
         ["task_a", "task_a", "task_a"],
       );
       expect([...getSessionTaskCohorts(session.state).values()]).toEqual([
-        { cohortId: "task_a", settled: true },
-        { cohortId: "task_a", settled: false },
-        { cohortId: "task_a", settled: false },
+        "task_a",
+        "task_a",
+        "task_a",
       ]);
       for (const taskId of ["task_b", "task_c"]) {
         session = {
           ...session,
-          state: cacheWorkflowTaskView(session.state, terminal(taskId, status)),
+          state: recordWorkflowTaskView(session.state, terminal(taskId, status)),
         };
       }
       // Even another creation in the same turn must not reopen a settled cohort.
@@ -264,7 +264,7 @@ describe("session task index", () => {
     for (const taskId of ["task_a", "task_b"]) {
       session = {
         ...session,
-        state: cacheWorkflowTaskView(session.state, terminal(taskId, "completed")),
+        state: recordWorkflowTaskView(session.state, terminal(taskId, "completed")),
       };
     }
     session = registerWorkflowInvocation(session, task("task_c", "turn-3"));
@@ -374,6 +374,21 @@ describe("session task index", () => {
       ).toThrow("Corrupt workflow task result");
     }
   });
+
+  it.each(["completed", "failed", "cancelled"] as const)(
+    "keeps the parent's first %s outcome across duplicates and competing deliveries",
+    (status) => {
+      const session = registerWorkflowInvocation(createSession(), task("task_a", "turn-1"));
+      const first = terminal("task_a", status);
+      const state = recordWorkflowTaskView(session.state, first);
+      for (const late of ["completed", "failed", "cancelled"] as const) {
+        expect(recordWorkflowTaskView(state, terminal("task_a", late))).toBe(state);
+      }
+      const entry = findTaskInvocation(state, "task_a");
+      assert(entry !== undefined);
+      expect(readWorkflowTaskView(entry.task)).toEqual(first);
+    },
+  );
 
   it("throws on a corrupt index instead of treating it as absent", () => {
     expect(() =>
