@@ -1468,7 +1468,8 @@ describe("runInitCommand", () => {
     const messages = stripAnsi(output.messages.join("\n"));
     expect(messages).toContain(`✓ Model ${DEFAULT_AGENT_MODEL_ID} (eve default)`);
     expect(messages).toContain(`✓ Instructions ${join(projectPath, "agent/instructions.md")}`);
-    expect(messages).toContain("pnpm --reporter=silent exec eve dev --no-ui");
+    expect(messages).toContain("pnpm exec eve dev --no-ui");
+    expect(messages).not.toContain("--reporter");
   });
 
   it("derives the agent dev handoff command from the existing project's own manager", async () => {

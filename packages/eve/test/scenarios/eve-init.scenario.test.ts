@@ -228,14 +228,15 @@ describe("eve init smoke", () => {
 
     // pnpm checks the installed lockfile before exec/run and may reinstall.
     // A one-time install flag must not leave the next command rejecting it.
-    const dev = await runFile("pnpm", [...eveDevArguments("pnpm"), "--help"], {
+    const devArguments = ["--reporter=silent", ...eveDevArguments("pnpm")];
+    const dev = await runFile("pnpm", [...devArguments, "--help"], {
       cwd: projectDir,
       env,
     });
     expect(dev.stdout).toContain("Usage: eve dev");
     expect(dev.stdout).not.toMatch(/Lockfile|Already up to date|Done in/u);
     await expect(
-      runFile("pnpm", [...eveDevArguments("pnpm"), "--unknown-init-test-option"], {
+      runFile("pnpm", [...devArguments, "--unknown-init-test-option"], {
         cwd: projectDir,
         env,
       }),

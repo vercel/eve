@@ -57,10 +57,6 @@ Creates a new agent app or adds an agent to an existing app. Always installs dep
 
 Existing packages do not need a target-selection prompt: run `eve init` from the project directory or `eve init path/to/app`. New projects in non-interactive environments need a new directory name, such as `eve init my-agent`.
 
-Interactive init keeps its output inline with your shell command without clearing the screen or adding a blank viewport. eve shows installation progress instead of raw package-manager output. If installation fails, it prints the final diagnostics and recovery instructions. Set `EVE_LOG_LEVEL=debug` to stream package-manager output.
-
-Package runners can print download progress before eve starts. Once running, eve handles installation progress and the transition to the terminal UI automatically; pnpm's handoff dependency checks still run without printing their progress.
-
 After scaffolding in an interactive human terminal, eve opens the TUI directly. Noninteractive and coding-agent invocations return without starting an interactive session. Fresh projects use the parent workspace's package manager when there is one; otherwise they use the manager that launched `eve init`.
 
 | Flag                   | Type   | Default                    | Description                                                                                                              |

@@ -598,7 +598,11 @@ export async function runInitCommand(
   // Strictly the eve binary, never the project's dev script, which in an
   // existing app may start unrelated processes.
   const freshScaffold = result.kind === "created";
-  const devArguments = freshScaffold ? [...baseDevArguments, "--onboard"] : baseDevArguments;
+  const devArguments = [
+    ...(result.packageManager === "pnpm" ? ["--reporter=silent"] : []),
+    ...baseDevArguments,
+    ...(freshScaffold ? ["--onboard"] : []),
+  ];
   logger.log("");
   if (
     !resultSucceeded(

@@ -71,6 +71,61 @@ async function createPostBuildFixture(
 }
 
 describe("post-build scripts", () => {
+  it.each(["present", "released"])(
+    "copies compiled assets without traversing a %s vendor lock",
+    async (lockState) => {
+      const packageRoot = await createPostBuildFixture();
+      await copyScript(packageRoot, "copy-compiled-assets.mjs");
+      const compiledRoot = join(packageRoot, ".generated", "compiled");
+      const moduleRoot = join(compiledRoot, "@eve", "catalog");
+      const lockPath = join(compiledRoot, ".vendor-lock");
+      await mkdir(moduleRoot, { recursive: true });
+      await mkdir(lockPath);
+      await writeFile(join(moduleRoot, "index.js"), "export const catalog = [];\n");
+      await writeFile(join(moduleRoot, "index.d.ts"), "export declare const catalog: [];\n");
+      await writeFile(join(lockPath, "owner.json"), '{"pid":123}\n');
+
+      const runnerPath = join(packageRoot, "copy-assets-test.mjs");
+      await writeFile(
+        runnerPath,
+        [
+          'import fs from "node:fs/promises";',
+          'import { syncBuiltinESMExports } from "node:module";',
+          'import { join } from "node:path";',
+          'const lockPath = join(process.cwd(), ".generated", "compiled", ".vendor-lock");',
+          ...(lockState === "released"
+            ? [
+                "const copy = fs.cp;",
+                "fs.cp = (source, destination, options) => copy(source, destination, {",
+                "  ...options,",
+                "  filter: async (source, destination) => {",
+                // Release the lock after cp has enumerated it, before it stats the entry.
+                "    if (source === lockPath) await fs.rm(lockPath, { recursive: true });",
+                "    return options.filter?.(source, destination) ?? true;",
+                "  },",
+                "});",
+                "syncBuiltinESMExports();",
+              ]
+            : []),
+          'const { copyCompiledAssets } = await import("./scripts/copy-compiled-assets.mjs");',
+          "await copyCompiledAssets();",
+        ].join("\n"),
+      );
+      await runFile(process.execPath, [runnerPath], { cwd: packageRoot });
+
+      const copiedRoot = join(packageRoot, "dist", "src", "compiled");
+      await expect(readFile(join(copiedRoot, "@eve", "catalog", "index.js"), "utf8")).resolves.toBe(
+        "export const catalog = [];\n",
+      );
+      await expect(
+        readFile(join(copiedRoot, "@eve", "catalog", "index.d.ts"), "utf8"),
+      ).resolves.toBe("export declare const catalog: [];\n");
+      await expect(access(join(copiedRoot, ".vendor-lock"))).rejects.toThrow();
+      if (lockState === "released") await expect(access(lockPath)).rejects.toThrow();
+      else await expect(access(join(lockPath, "owner.json"))).resolves.toBeUndefined();
+    },
+  );
+
   it("copies docs without overwriting the package README", async () => {
     const packageReadme = "# Package README\nKeep me as-is.\n";
     const packageRoot = await createPostBuildFixture({ packageReadme });
