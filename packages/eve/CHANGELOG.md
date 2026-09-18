@@ -1,5 +1,13 @@
 # eve
 
+## 0.61.1
+
+### Patch Changes
+
+- 8a21c0c: `agentRouter()` now advertises model-supplied output schemas as permissive objects, avoiding unsupported JSON Schema `propertyNames` warnings on OpenAI models while preserving downstream object validation.
+- cbb2206: Clear stale model setup warnings when the local development server becomes ready, and avoid diagnosing unavailable startup information as missing model credentials.
+- d58065e: Workflow steps now fail immediately with actionable guidance when they access workflow-body-only `ctx.agents`, `ctx.agent()`, or `ctx.ask()` capabilities. Use the new `WorkflowStepToolContext` type for step helpers and pass serializable agent metadata from the workflow body.
+
 ## 0.61.0
 
 ### Minor Changes
