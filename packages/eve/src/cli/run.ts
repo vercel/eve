@@ -119,7 +119,13 @@ export function createCliProgram(
     .exitOverride()
     .hook("preAction", (_program, actionCommand) => {
       const { json } = actionCommand.opts<{ json?: boolean }>();
-      if (["info", "init"].includes(actionCommand.name()) && !json) logger.log(eveCliBanner());
+      if (
+        !json &&
+        (actionCommand.name() === "info" ||
+          (actionCommand.name() === "init" && actionCommand.parent !== program))
+      ) {
+        logger.log(eveCliBanner());
+      }
     })
     .configureOutput({
       writeErr: (message) => {

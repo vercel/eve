@@ -185,9 +185,9 @@ export function registerDevelopmentCommand(input: {
         return;
       }
 
-      const buildProgress = mode === "tui" ? startCliLiveRow(logger) : undefined;
+      const buildProgress = mode === "tui" ? startCliLiveRow(logger, { elapsed: true }) : undefined;
       const onBootProgress = createDevBootProgressReporter(buildProgress);
-      buildProgress?.update("Building your agent");
+      buildProgress?.update("Starting your agent");
 
       let server: DevelopmentServer | undefined;
       let closePromise: Promise<void> | undefined;

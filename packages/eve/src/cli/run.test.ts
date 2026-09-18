@@ -1018,6 +1018,8 @@ describe("eve dev boot progress", () => {
 
     expect(hostReporter).toBeTypeOf("function");
     expect(tuiReporter).toBe(hostReporter);
+    expect(writes.join("")).toContain("Starting your agent");
+    expect(writes.join("")).not.toContain("compiling agent");
     // Replaying every write through a terminal emulator: the boot progress row
     // is erased, leaving a clean screen for the error to print onto.
     const screen = new MockScreen({ columns: 80, rows: 10 });

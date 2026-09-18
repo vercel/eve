@@ -4,7 +4,15 @@ import { join } from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { MockScreen } from "#cli/dev/tui/test/mock-terminal.js";
+import { MockScreen, MockUserInput } from "#cli/dev/tui/test/mock-terminal.js";
+import { TerminalRenderer } from "#cli/dev/tui/terminal-renderer.js";
+import { EveTUIRunner } from "#cli/dev/tui/runner.js";
+import { createDevBootProgressReporter } from "#cli/dev/boot-progress.js";
+import { startCliLiveRow } from "#cli/ui/live-row.js";
+import * as liveRow from "#cli/ui/live-row.js";
+import { Client, MessageResponse } from "#client/index.js";
+import { createTestAgentInfoResult } from "#internal/testing/agent-info-fixture.js";
+import { stampTestEvents } from "#internal/testing/events.js";
 import { stripAnsi } from "#cli/ui/terminal-text.js";
 import { packageInstallResult, packageProcessResult } from "#internal/testing/package-process.js";
 import { DEFAULT_AGENT_MODEL_ID } from "#shared/default-agent-model.js";
@@ -20,6 +28,8 @@ import {
   type ScaffoldBaseProjectOptions,
 } from "#setup/scaffold/index.js";
 import { pathExists } from "#setup/path-exists.js";
+import { WizardCancelledError } from "#setup/step.js";
+import * as freshScreen from "#cli/ui/fresh-screen.js";
 
 import type { GitInitResult } from "./init-git.js";
 import {
@@ -131,6 +141,201 @@ afterEach(() => {
 });
 
 describe("runInitCommand", () => {
+  it.each(["install-failure", "cancelled", "startup-failure"] as const)(
+    "clears progress before ending init on %s",
+    async (outcome) => {
+      vi.stubEnv("CI", "");
+      vi.stubEnv("TERM", "xterm-256color");
+      const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-interrupted-"));
+      const screen = new MockScreen({ columns: 80, rows: 10 });
+      const startRow = startCliLiveRow;
+      vi.spyOn(liveRow, "startCliLiveRow").mockImplementation((log, options) =>
+        startRow(log, { ...options, output: screen }),
+      );
+      const output = logger();
+      const deps = dependencies();
+      deps.runPackageManagerInstall.mockImplementation(async (_kind, _path, options) => {
+        expect(screen.snapshot()).toContain("Installing dependencies");
+        if (outcome === "cancelled") throw new WizardCancelledError();
+        if (outcome === "install-failure") {
+          options?.onOutput?.({ stream: "stderr", text: "npm error registry unavailable" });
+          return packageInstallResult(1);
+        }
+        return packageInstallResult();
+      });
+      deps.spawnPackageManager.mockImplementation(async () => {
+        expect(screen.snapshot()).toBe("");
+        return packageProcessResult(1);
+      });
+      const run = runInitCommand(output, parentDirectory, "agent", {}, deps);
+      if (outcome === "cancelled") await expect(run).resolves.toBeUndefined();
+      else
+        await expect(run).rejects.toThrow(
+          outcome === "install-failure"
+            ? "Failed to install dependencies"
+            : "Development server exited unsuccessfully",
+        );
+      expect(screen.snapshot()).toBe("");
+      if (outcome === "install-failure")
+        expect(output.errors).toContain("npm error registry unavailable");
+      if (outcome !== "startup-failure") expect(deps.spawnPackageManager).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([true, false])(
+    "hands init through model connection to first chat (connected=%s)",
+    async (connected) => {
+      const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-chat-"));
+      const output = logger();
+      const deps = dependencies();
+      const screen = new MockScreen({ columns: 100, rows: 30 });
+      const input = new MockUserInput();
+      const renderer = new TerminalRenderer({
+        input,
+        output: screen,
+        captureForeignOutput: false,
+        unicode: true,
+      });
+      const client = new Client({ host: "http://eve-test.invalid" });
+      const baseInfo = createTestAgentInfoResult();
+      const info = {
+        ...baseInfo,
+        agent: {
+          ...baseInfo.agent,
+          model: {
+            id: "openai/test-model",
+            routing: { kind: "gateway" as const, target: "openai" },
+            endpoint: connected
+              ? {
+                  kind: "gateway" as const,
+                  connected: true as const,
+                  credential: "api-key" as const,
+                }
+              : { kind: "gateway" as const, connected: false as const },
+          },
+        },
+      };
+      vi.spyOn(client, "info").mockResolvedValue(info);
+      const session = client.sessions.attach("session_init");
+      vi.spyOn(session, "stream").mockImplementation(async function* () {});
+      const send = vi.spyOn(session, "send").mockImplementation(
+        async () =>
+          new MessageResponse({
+            sessionId: "session_init",
+            cancelTurn: async () => ({ status: "no_active_turn" }),
+            createStream: async function* () {
+              yield* stampTestEvents([
+                { type: "turn.started", data: { sequence: 1, turnId: "turn_init" } },
+                {
+                  type: "message.completed",
+                  data: {
+                    sequence: 2,
+                    turnId: "turn_init",
+                    stepIndex: 0,
+                    finishReason: "stop",
+                    message: "Hello Alice, your agent is ready.",
+                  },
+                },
+                {
+                  type: "session.waiting",
+                  data: { continuationToken: "session_init", wait: "next-user-message" },
+                },
+              ]);
+            },
+          }),
+      );
+      const handle = vi.fn(async () => {
+        if (!connected) {
+          const provider = await renderer.setupFlow.readSelect({
+            kind: "single",
+            message: "Connect a model",
+            options: [{ label: "Test connection", value: "test" }],
+          });
+          expect(provider).toEqual(["test"]);
+        }
+        return { message: connected ? "Using existing connection." : "Model connected." };
+      });
+      const readPrompt = vi.spyOn(renderer, "readPrompt");
+      deps.spawnPackageManager.mockImplementation(async (_manager, projectPath, args) => {
+        expect(args).toContain("--onboard");
+        const progress = startCliLiveRow(output, { output: screen, elapsed: true });
+        const report = createDevBootProgressReporter(progress);
+        report({ type: "phase-started", phase: "compiling internal artifacts" });
+        const runner = new EveTUIRunner({
+          client,
+          session,
+          renderer,
+          appRoot: projectPath,
+          onboard: true,
+          bootDetections: [],
+          onBootProgress: report,
+          detectProjectIdentity: async () => undefined,
+          getVercelAuthStatus: async () => "authenticated",
+          promptCommandHandler: { handle },
+        });
+        await runner.run();
+        return packageProcessResult();
+      });
+
+      const run = runInitCommand(output, parentDirectory, "agent", {}, deps);
+      void run.catch(() => {});
+      try {
+        if (!connected) {
+          await screen.waitForText("Connect a model");
+          expect(screen.snapshot()).not.toContain("Starting your agent");
+          input.enter();
+        }
+        await vi.waitFor(() => expect(readPrompt).toHaveBeenCalled());
+        input.type("Hello, I'm Alice.");
+        input.enter();
+        await screen.waitForText("Hello Alice, your agent is ready.");
+        await screen.waitForIdlePrompt();
+        input.type("/exit");
+        input.enter();
+        await run;
+        expect(send).toHaveBeenCalledOnce();
+        expect(handle).toHaveBeenCalledOnce();
+        expect(screen.snapshot()).not.toContain("Starting your agent");
+        expect(screen.rawOutput()).not.toContain("compiling internal artifacts");
+        expect(screen.rawOutput()).not.toContain("\u001B[3J");
+        expect(output.messages.join("\n")).not.toContain("$ eve dev");
+      } finally {
+        renderer.requestInterrupt();
+        await run.catch(() => {});
+      }
+    },
+  );
+
+  it.each([
+    { interactive: true, agent: false, fresh: true },
+    { interactive: false, agent: false, fresh: false },
+    { interactive: true, agent: true, fresh: false },
+  ])(
+    "prepares the screen before the banner only for a human terminal (%j)",
+    async ({ interactive, agent, fresh }) => {
+      const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-screen-"));
+      const order: string[] = [];
+      const startScreen = vi.spyOn(freshScreen, "startFreshScreen").mockImplementation(() => {
+        order.push("fresh screen");
+      });
+      const output = logger();
+      const log = output.log;
+      output.log = (message) => {
+        order.push(stripAnsi(message));
+        log(message);
+      };
+      const deps = { ...dependencies(), hasInteractiveTerminal: () => interactive };
+      deps.isCodingAgentLaunch.mockResolvedValue(agent);
+      await runInitCommand(output, parentDirectory, "agent", {}, deps);
+      expect(startScreen).toHaveBeenCalledTimes(fresh ? 1 : 0);
+      expect(order[fresh ? 1 : 0]).toContain("☰eve");
+      expect(order.filter((line) => line.includes("☰eve"))).toHaveLength(1);
+      if (fresh) expect(order[0]).toBe("fresh screen");
+      expect(deps.spawnPackageManager).toHaveBeenCalledTimes(fresh ? 1 : 0);
+      expect(output.messages.join("\n")).not.toContain("$ eve dev");
+    },
+  );
+
   it("returns after scaffolding without opening the TUI in a noninteractive terminal", async () => {
     const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-headless-"));
     const deps = { ...dependencies(), hasInteractiveTerminal: () => false };
@@ -253,9 +458,11 @@ describe("runInitCommand", () => {
     const deps = dependencies();
     deps.now
       .mockReturnValueOnce(0)
+      .mockReturnValueOnce(0)
       .mockReturnValueOnce(467)
       .mockReturnValueOnce(467)
-      .mockReturnValueOnce(13_667);
+      .mockReturnValueOnce(13_667)
+      .mockReturnValueOnce(13_800);
 
     await runInitCommand(output, parentDirectory, "my-agent", {}, deps);
 
@@ -285,18 +492,17 @@ describe("runInitCommand", () => {
       "dev",
       "--onboard",
     ]);
-    // Substring assertions keep the expectations color-agnostic; picocolors
-    // decides at import time whether the strings carry escape codes. The boot
-    // banner is the CLI program's pre-action hook, not the command's output.
-    expect(output.messages).toHaveLength(4);
-    expect(output.messages[0]).toContain("Preparing project...");
-    expect(output.messages[1]).toContain("✓");
-    expect(output.messages[1]).toContain("Created an eve agent in ");
-    expect(output.messages[1]).toContain(projectPath);
-    expect(output.messages[1]).toContain("in 467ms");
-    expect(output.messages[2]).toContain("Installed dependencies");
-    expect(output.messages[2]).toContain("in 13.2s");
-    expect(output.messages[3]).toContain("$ eve dev");
+    const messages = output.messages.map(stripAnsi);
+    expect(messages).toHaveLength(6);
+    expect(messages[0]).toContain("☰eve");
+    expect(messages.slice(1, 4)).toEqual([
+      "Creating agent...",
+      "Installing dependencies...",
+      "Initializing Git...",
+    ]);
+    expect(messages[4]).toBe(`✓ Created an eve agent in ${projectPath} in 13.8s`);
+    expect(messages[5]).toBe("");
+    expect(messages.join("\n")).not.toContain("$ eve dev");
     expect(output.messages.join("\n")).not.toContain("Instructions ");
   });
 
@@ -460,8 +666,7 @@ describe("runInitCommand", () => {
         "dev",
         "--onboard",
       ]);
-      expect(output.messages[1]).toContain("Created an eve agent in ");
-      expect(output.messages[1]).toContain(projectPath);
+      expect(output.messages.join("\n")).toContain(`Created an eve agent in ${projectPath}`);
     },
   );
 
@@ -1400,8 +1605,9 @@ describe("runInitCommand", () => {
       "Failed to install dependencies",
     );
 
-    expect(output.errors).toHaveLength(20);
-    expect(output.errors.at(0)).toBe("npm silly step 5");
+    expect(output.errors).toHaveLength(21);
+    expect(output.errors.at(0)).toContain("Earlier install output omitted");
+    expect(output.errors.at(1)).toBe("npm silly step 5");
     expect(output.errors.at(-1)).toBe("npm silly step 24");
   });
 
@@ -1467,71 +1673,78 @@ describe("runInitCommand", () => {
     }
   });
 
-  it("keeps interactive progress on one physical row", async () => {
-    const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-progress-"));
-    const output = logger();
-    const deps = dependencies();
-    const screen = new MockScreen({ columns: 80, rows: 10 });
-    const snapshots: string[] = [];
-    const isTtyDescriptor = Object.getOwnPropertyDescriptor(process.stdout, "isTTY");
-    const columnsDescriptor = Object.getOwnPropertyDescriptor(process.stdout, "columns");
+  it.each(["npm", "pnpm", "yarn", "bun"] as const)(
+    "keeps %s output behind one native progress row",
+    async (manager) => {
+      vi.stubEnv("CI", "");
+      vi.stubEnv("TERM", "xterm-256color");
+      const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-progress-"));
+      const output = logger();
+      const deps = dependencies();
+      const screen = new MockScreen({ columns: 80, rows: 10 });
+      const snapshots: string[] = [];
+      const isTtyDescriptor = Object.getOwnPropertyDescriptor(process.stdout, "isTTY");
+      const columnsDescriptor = Object.getOwnPropertyDescriptor(process.stdout, "columns");
 
-    Object.defineProperty(process.stdout, "isTTY", { configurable: true, value: true });
-    Object.defineProperty(process.stdout, "columns", { configurable: true, value: screen.columns });
-    vi.spyOn(process.stdout, "write").mockImplementation((chunk: string | Uint8Array) => {
-      screen.write(chunk);
-      snapshots.push(screen.snapshot());
-      return true;
-    });
-    deps.isCodingAgentLaunch.mockResolvedValue(true);
-    deps.detectInvokingPackageManager.mockReturnValue("npm");
-    deps.runPackageManagerInstall.mockImplementation(async (_kind, _projectPath, options) => {
-      options?.onOutput?.({ stream: "stderr", text: "npm silly config load:file:/tmp/.npmrc" });
-      options?.onOutput?.({
-        stream: "stderr",
-        text: "npm silly fetch manifest @vercel/connect@0.2.2",
+      Object.defineProperty(process.stdout, "isTTY", { configurable: true, value: true });
+      Object.defineProperty(process.stdout, "columns", {
+        configurable: true,
+        value: screen.columns,
       });
-      options?.onOutput?.({ stream: "stderr", text: "npm silly fetch manifest zod@4.5.4" });
-      options?.onOutput?.({
-        stream: "stderr",
-        text: "npm http fetch GET https://registry.npmjs.org/@vercel%2fconnect attempt 1 failed with ENOTFOUND",
+      vi.spyOn(process.stdout, "write").mockImplementation((chunk: string | Uint8Array) => {
+        screen.write(chunk);
+        snapshots.push(screen.snapshot());
+        return true;
       });
-      options?.onOutput?.({ stream: "stdout", text: `Downloading ${"package".repeat(20)}` });
-      return packageInstallResult();
-    });
+      deps.detectInvokingPackageManager.mockReturnValue(manager);
+      deps.runPackageManagerInstall.mockImplementation(async (_kind, _projectPath, options) => {
+        options?.onOutput?.({ stream: "stderr", text: "npm silly config load:file:/tmp/.npmrc" });
+        options?.onOutput?.({
+          stream: "stderr",
+          text: "npm silly fetch manifest @vercel/connect@0.2.2",
+        });
+        options?.onOutput?.({ stream: "stderr", text: "npm silly fetch manifest zod@4.5.4" });
+        options?.onOutput?.({
+          stream: "stderr",
+          text: "npm http fetch GET https://registry.npmjs.org/@vercel%2fconnect attempt 1 failed with ENOTFOUND",
+        });
+        options?.onOutput?.({ stream: "stdout", text: `Downloading ${"package".repeat(20)}` });
+        return packageInstallResult();
+      });
 
-    try {
-      await runInitCommand(output, parentDirectory, "my-agent", {}, deps);
-    } finally {
-      if (isTtyDescriptor === undefined) {
-        Reflect.deleteProperty(process.stdout, "isTTY");
-      } else {
-        Object.defineProperty(process.stdout, "isTTY", isTtyDescriptor);
+      try {
+        await runInitCommand(output, parentDirectory, "my-agent", {}, deps);
+      } finally {
+        if (isTtyDescriptor === undefined) {
+          Reflect.deleteProperty(process.stdout, "isTTY");
+        } else {
+          Object.defineProperty(process.stdout, "isTTY", isTtyDescriptor);
+        }
+        if (columnsDescriptor === undefined) {
+          Reflect.deleteProperty(process.stdout, "columns");
+        } else {
+          Object.defineProperty(process.stdout, "columns", columnsDescriptor);
+        }
       }
-      if (columnsDescriptor === undefined) {
-        Reflect.deleteProperty(process.stdout, "columns");
-      } else {
-        Object.defineProperty(process.stdout, "columns", columnsDescriptor);
-      }
-    }
 
-    const rendered = snapshots.join("\n");
-    expect(rendered).toContain("Preparing project");
-    expect(rendered).toContain("Creating agent");
-    expect(rendered).toContain("Installing dependencies");
-    expect(rendered).toContain("npm install");
-    expect(rendered).toContain("Resolving @vercel/connect@0.2.2");
-    expect(rendered).toContain("npm registry · attempt 1 failed: ENOTFOUND");
-    expect(rendered).not.toContain("config load:file");
-    expect(rendered).toContain("Initializing Git repository");
-    expect(deps.runPackageManagerInstall).toHaveBeenCalledWith(
-      "npm",
-      join(parentDirectory, "my-agent"),
-      expect.objectContaining({ progressDetails: true }),
-    );
-    for (const snapshot of snapshots.filter(Boolean)) {
-      expect(snapshot.split("\n")).toHaveLength(1);
-      expect([...snapshot].length).toBeLessThan(screen.columns);
-    }
-  });
+      const rendered = snapshots.join("\n");
+      expect(rendered).toContain("Creating agent");
+      expect(rendered).toContain("Installing dependencies");
+      expect(rendered).toContain(`${manager} · 0s`);
+      expect(rendered).not.toContain("Resolving");
+      expect(rendered).not.toContain("ENOTFOUND");
+      expect(rendered).not.toContain("Downloading");
+      expect(rendered).not.toContain("config load:file");
+      expect(rendered).toContain("Initializing Git");
+      expect(deps.runPackageManagerInstall).toHaveBeenCalledWith(
+        manager,
+        join(parentDirectory, "my-agent"),
+        expect.objectContaining({ progressDetails: false }),
+      );
+      for (const snapshot of snapshots.filter(Boolean)) {
+        expect(snapshot.split("\n")).toHaveLength(1);
+        expect([...snapshot].length).toBeLessThan(screen.columns);
+      }
+    },
+  );
 });
