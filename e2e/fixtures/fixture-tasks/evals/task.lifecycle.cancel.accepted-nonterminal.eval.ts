@@ -45,7 +45,7 @@ export default defineTaskEval({
     // The next turn must observe it without retrying a child-state read.
     const { turn: verified } = await sendAndFollowQueuedTurn(
       t,
-      "TASK-CANCEL-VERIFY",
+      `TASK-CANCEL-VERIFY ${taskId}`,
       cancelled.session,
     );
     verified.expectOk();

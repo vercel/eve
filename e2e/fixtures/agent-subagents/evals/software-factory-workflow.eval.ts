@@ -33,9 +33,9 @@ export default defineEval({
       count: 1,
       output: (observed) => isDeepStrictEqual(observed, expected),
     });
-    t.calledSubagent(TRIAGE, { count: 1, status: "pending" });
-    t.calledSubagent(REVIEW, { count: 1, status: "pending" });
-    t.calledSubagent(REPRODUCE, { count: 1, status: "pending" });
+    t.calledSubagent(TRIAGE, { count: 1, status: "completed" });
+    t.calledSubagent(REVIEW, { count: 1, status: "completed" });
+    t.calledSubagent(REPRODUCE, { count: 1, status: "completed" });
     turn.eventsSatisfy("analysis fans out before reproduction consumes both results", (events) => {
       const called = new Map<string, number>();
       for (const [index, event] of events.entries()) {

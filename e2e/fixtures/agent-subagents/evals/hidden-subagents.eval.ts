@@ -10,8 +10,8 @@ export default defineEval({
     turn.messageIncludes("TOOL-FALSE-SUBAGENT-OK");
     turn.messageIncludes("Internal specialist hidden by its agent definition.");
     turn.calledTool("invoke-hidden", { count: 1 });
-    turn.calledSubagent("tool-hidden", { count: 1, status: "pending" });
-    turn.calledSubagent("disabled-hidden", { count: 0, status: "pending" });
+    turn.calledSubagent("tool-hidden", { count: 1, status: "completed" });
+    turn.calledSubagent("disabled-hidden", { count: 0 });
     t.succeeded();
     t.noFailedActions();
   },
