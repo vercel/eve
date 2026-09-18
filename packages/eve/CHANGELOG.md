@@ -1,5 +1,19 @@
 # eve
 
+## 0.61.0
+
+### Minor Changes
+
+- cbfc425: Root workflow tools now receive the built-in root-copy target at `ctx.agents.agent`, with its authored description or an empty string, and `agent` is reserved from use as a declared subagent name. Tool definitions can set `availableInSubagents: false`; `agentRouter()` sets it automatically, routes only to entries with non-empty descriptions, and can replace the model-facing tool at `agent/tools/agent.ts` without being inherited by the root copy.
+
+### Patch Changes
+
+- 7e95b64: Keep Web Chat attached for background task results without rendering runtime-authored task input as a user message. Task wake-ups now retain explicit provenance in the durable session stream while the default frontend reducer omits them from participant messages.
+- 7259b96: Set `minimumReleaseAge: 0` in newly generated pnpm workspace files so dependencies installed by `eve init` also pass pnpm's checks when starting the dev server or installing again.
+- 260a359: Reconcile frontend optimistic messages with their server delivery identities instead of stream order. Concurrent, coalesced, identical, and structured message submissions now resolve the correct placeholders, and separately delivered messages within one turn remain separate chat bubbles.
+- 5f17320: Reduce development startup and production build time by removing duplicate bundler work, skipping unnecessary parsing, and overlapping independent preparation. Development terminal inspection now has a deadline, and `Client.info()` accepts an abort signal so slow inspection requests do not hold up startup.
+- 6b99f12: Upgrade eve's Workflow runtime dependencies to the latest beta releases, including the Postgres world fix for steering pending generations.
+
 ## 0.60.1
 
 ### Patch Changes
