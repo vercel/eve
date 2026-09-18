@@ -18,7 +18,7 @@ export default defineTaskEval({
     const started = await t.send("TASK-A2-CHILD-FAILURE");
     started.expectOk();
     started.messageIncludes("TASK-A2-CHILD-FAILURE-STARTED");
-    started.event("subagent.admitted", {
+    started.event("subagent.completed", {
       count: 1,
       data: {
         backgroundTask: { status: "working" },

@@ -22,7 +22,7 @@ export default defineTaskEval({
     const started = await t.send("TASK-FANOUT-PARENT-UPDATES");
     started.expectOk();
     started.messageIncludes("TASK-FANOUT-STARTED");
-    started.calledSubagent("fanout-worker", { status: "admitted", count: FANOUT_SIZE });
+    started.calledSubagent("fanout-worker", { status: "pending", count: FANOUT_SIZE });
 
     const taskIds = backgroundTaskIds(started);
     await t.require(
@@ -80,6 +80,8 @@ function collectReleaseRequests(turn: EveEvalTurn, requests: Map<string, InputRe
 
 function backgroundTaskIds(turn: EveEvalTurn): readonly string[] {
   return turn.events.flatMap((event) =>
-    event.type === "subagent.admitted" ? [event.data.backgroundTask.taskId] : [],
+    event.type === "subagent.completed" && event.data.backgroundTask !== undefined
+      ? [event.data.backgroundTask.taskId]
+      : [],
   );
 }

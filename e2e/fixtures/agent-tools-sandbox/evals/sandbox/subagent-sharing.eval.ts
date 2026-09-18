@@ -36,7 +36,7 @@ export default defineEval({
     );
 
     t.succeeded();
-    t.calledSubagent("shared-sandbox", { status: "admitted", count: 1 });
+    t.calledSubagent("shared-sandbox", { status: "pending", count: 1 });
     t.check(parentRead.message, includes(CHILD_TOKEN));
   },
 });

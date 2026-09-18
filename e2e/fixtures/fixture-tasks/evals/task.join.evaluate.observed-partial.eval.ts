@@ -29,7 +29,7 @@ export default defineTaskEval({
   async test(t) {
     const started = (await t.send("TASK-FAN-IN")).expectOk();
     started.messageIncludes("TASK-FAN-IN-STARTED");
-    started.calledSubagent("fanout-worker", { status: "admitted", count: MARKERS.length });
+    started.calledSubagent("fanout-worker", { status: "pending", count: MARKERS.length });
     let session: TaskEvalSessionDriver = started.session;
     const requests = new Map<string, InputRequest>();
     const setupEvents: EveEvalTurn["events"][number][] = [];
@@ -48,9 +48,13 @@ export default defineTaskEval({
         (event) => event.type === "subagent.called" && event.data.callId === callId,
       );
       const receipt = started.events.find(
-        (event) => event.type === "subagent.admitted" && event.data.callId === callId,
+        (event) => event.type === "subagent.completed" && event.data.callId === callId,
       );
-      if (called?.type !== "subagent.called" || receipt?.type !== "subagent.admitted") {
+      if (
+        called?.type !== "subagent.called" ||
+        receipt?.type !== "subagent.completed" ||
+        receipt.data.backgroundTask === undefined
+      ) {
         throw new Error(`No child session and task receipt for ${marker}.`);
       }
       return {
@@ -120,7 +124,7 @@ export default defineTaskEval({
       turn.notEvent("step.started");
     }
     await t.require(reported, equals(true));
-    t.calledSubagent("fanout-worker", { status: "admitted", count: 2 });
+    t.calledSubagent("fanout-worker", { status: "pending", count: 2 });
     t.notCalledTool("task_peek");
     t.noFailedActions();
 

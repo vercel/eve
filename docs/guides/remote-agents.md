@@ -190,7 +190,7 @@ A remote subagent runs as a durable background task in its own deployment:
 2. The call returns `{ status: "working", taskId, agentId }` after the remote accepts the child.
 3. The callback later settles the task and sends a task notification to the parent.
 
-The parent stream carries the same `subagent.called`, `action.result`, and `subagent.admitted` events as local delegation. For a remote call, `subagent.called.data.remote.url` records the target.
+The parent stream carries the same `subagent.called`, `action.result`, and `subagent.completed` events as local delegation. For a remote call, `subagent.called.data.remote.url` records the target.
 
 An admitted task survives cancellation of the turn that started it; background work that has not yet been admitted is rejected with the cancelled step. Use `task_cancel` to stop an admitted task. eve resolves the remote's `headers` and `auth` again for every cancellation attempt, so rotating credentials work the same way as they do for session creation. Cancellation always uses the standard eve cancel path on `url`, even when `path` customizes only the create-session endpoint. The remote child reports `turn.cancelled` → `session.waiting` on its own stream; an older or unreachable remote is logged but cannot turn the parent's cancellation into a failure.
 

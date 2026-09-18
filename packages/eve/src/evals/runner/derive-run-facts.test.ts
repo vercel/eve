@@ -347,9 +347,9 @@ describe("deriveRunFacts", () => {
     expect(facts.reasoningBlockCount).toBe(2);
   });
 
-  it("keeps a working receipt admitted until an actual result arrives", () => {
-    const admitted: UnstampedMessageStreamEvent = {
-      type: "subagent.admitted",
+  it("keeps a working receipt pending until an actual result arrives", () => {
+    const admission: UnstampedMessageStreamEvent = {
+      type: "subagent.completed",
       data: {
         callId: "c1",
         subagentName: "researcher",
@@ -384,9 +384,9 @@ describe("deriveRunFacts", () => {
         },
       },
     };
-    for (const events of [[admitted], [receipt], [admitted, receipt], [receipt, admitted]]) {
+    for (const events of [[admission], [receipt], [admission, receipt], [receipt, admission]]) {
       expect(derive(events).subagentCalls).toEqual([
-        expect.objectContaining({ callId: "c1", status: "admitted" }),
+        expect.objectContaining({ callId: "c1", status: "pending" }),
       ]);
       expect(derive(events).subagentCalls[0]?.output).toBeUndefined();
     }
@@ -394,9 +394,20 @@ describe("deriveRunFacts", () => {
       type: "subagent.completed",
       data: { callId: "c1", subagentName: "researcher", output: "actual result" },
     };
-    expect(derive([admitted, completed, admitted, receipt]).subagentCalls).toEqual([
+    expect(derive([admission, completed, admission, receipt]).subagentCalls).toEqual([
       expect.objectContaining({ callId: "c1", status: "completed", output: "actual result" }),
     ]);
+    for (const status of ["failed", "rejected"] as const) {
+      const failure = subagentResult({
+        callId: "c1",
+        subagentName: "researcher",
+        output: "child failed",
+        status,
+      });
+      expect(derive([admission, failure, admission, receipt]).subagentCalls).toEqual([
+        expect.objectContaining({ callId: "c1", status, output: "child failed" }),
+      ]);
+    }
   });
 
   it("joins subagent.called with subagent.completed by call id", () => {

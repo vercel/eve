@@ -49,7 +49,7 @@ export interface EveEvalToolCall {
 
 /**
  * One subagent delegation extracted from the captured stream
- * (`subagent.called` / `subagent.started`, joined with admission or completion).
+ * (`subagent.called` / `subagent.started`, joined with `subagent.completed`).
  */
 export interface EveEvalSubagentCall {
   /** Runtime-action call id joining this delegation's lifecycle events, when observed. */
@@ -62,8 +62,8 @@ export interface EveEvalSubagentCall {
   readonly remoteUrl?: string;
   /** Output from the matching `subagent.completed` event; `undefined` when the call never completed. */
   readonly output?: JsonValue;
-  /** `admitted` records a background receipt; `completed` records a successful invocation result. */
-  readonly status: EveEvalActionStatus | "admitted";
+  /** Whether the delegation is unresolved, completed, failed, or rejected. */
+  readonly status: EveEvalActionStatus;
   /** Zero-based index of the turn the delegation happened in. */
   readonly turnIndex: number;
   /** Owning session id, when the runner knows it. */

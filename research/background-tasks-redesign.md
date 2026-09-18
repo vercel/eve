@@ -29,15 +29,6 @@ The prototype implements three approved scope decisions:
    when each task settles. User input, human-input requests, and authorization do not wait for the
    cohort.
 
-## Subagent stream boundaries
-
-Background receipts emit `subagent.admitted`; successful blocking invocation results emit
-`subagent.completed`. The latter does not terminate a reusable child session. Evals retain
-`completed` for successful results and use `admitted` for receipt-only delegations. Background
-outcomes remain task notifications, with the existing cohort policy unchanged. Stream version 26
-separates the events, and the existing version decoder translates historical receipt-bearing
-completion events into admission events.
-
 ## Resulting execution model
 
 `workflowToolRunWorkflow` in `workflow.ts` is the durable entry and execution loop for both
@@ -402,6 +393,15 @@ late deliveries after a reusable agent has been claimed by another call. Agent p
 existing node identity for receipts and reservations; this identity is not copied onto workflow runs.
 The registry version changes to 2 and checkpoint version to 6 because older readers require the
 removed discriminator and expect the former result protocol.
+
+## Subagent result observation
+
+Keep `subagent.completed` and its optional `backgroundTask` receipt marker unchanged.
+The marker identifies dispatch admission while the child is still running; evals retain
+`pending` until an actual result is observed. Successful blocking results remain `completed`
+after parent-owned settlement. Neither status implies termination of the reusable child session.
+Background task outcomes continue to arrive through task notifications. No new event or stream
+version is needed for this distinction.
 
 ## Recommendation
 

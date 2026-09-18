@@ -603,7 +603,7 @@ describe("EveAgentStore stream overlap", () => {
   });
 
   it.each(["21", "24"] as const)(
-    "reconstructs a split message across a v%s-to-v26 reconnect",
+    "reconstructs a split message across a v%s-to-v25 reconnect",
     async (legacyVersion) => {
       const current = streamingTurnEvents();
       const received = current[0]!;
@@ -630,7 +630,7 @@ describe("EveAgentStore stream overlap", () => {
         .spyOn(globalThis, "fetch")
         .mockResolvedValueOnce(startedResponse())
         .mockResolvedValueOnce(versionedDisconnectingStreamResponse(legacyVersion, legacyPrefix))
-        .mockResolvedValueOnce(versionedStreamResponse("26", current.slice(3)));
+        .mockResolvedValueOnce(versionedStreamResponse("25", current.slice(3)));
       const store = createStore({ reducer: defaultMessageReducer() });
       const streamingText: string[] = [];
       store.subscribe(() => {

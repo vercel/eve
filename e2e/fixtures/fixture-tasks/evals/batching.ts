@@ -16,7 +16,7 @@ export async function startBlockedFanout(t: EveEvalContext, count: number) {
   started.messageIncludes("TASK-FANOUT-STARTED");
   started.calledSubagent("fanout-worker", { count });
   const receipts = started.events.flatMap((event) =>
-    event.type === "subagent.admitted"
+    event.type === "subagent.completed" && event.data.backgroundTask !== undefined
       ? [{ callId: event.data.callId, taskId: event.data.backgroundTask.taskId }]
       : [],
   );

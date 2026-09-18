@@ -166,7 +166,9 @@ export default cases.map(({ parentActive, steering, description }) =>
         const firstChildTurn = await child.result();
         const receipts = parentTurns.flatMap((turn) =>
           turn.events.flatMap((event) =>
-            event.type === "subagent.admitted" ? [event.data.backgroundTask.taskId] : [],
+            event.type === "subagent.completed" && event.data.backgroundTask !== undefined
+              ? [event.data.backgroundTask.taskId]
+              : [],
           ),
         );
         await t.require(new Set(receipts).size, equals(1));

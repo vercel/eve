@@ -3658,7 +3658,7 @@ describe("EveTUIRunner renderer teardown", () => {
           },
         },
         {
-          type: "subagent.admitted",
+          type: "subagent.completed",
           data: {
             backgroundTask: { status: "working", taskId: "task_123" },
             callId: "call-child",

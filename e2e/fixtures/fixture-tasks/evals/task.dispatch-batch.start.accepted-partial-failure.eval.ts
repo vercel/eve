@@ -52,7 +52,7 @@ export default defineTaskEval({
     const firstTaskId = requireReceiptTaskId(receipts, FIRST_CALL_ID);
     const failedTaskId = requireReceiptTaskId(receipts, FAILED_CALL_ID);
     const thirdTaskId = requireReceiptTaskId(receipts, THIRD_CALL_ID);
-    started.event("subagent.admitted", {
+    started.event("subagent.completed", {
       count: 2,
       data: {
         backgroundTask: { status: "working" },
@@ -92,7 +92,7 @@ interface BackgroundReceipt {
 
 function backgroundReceipts(turn: EveEvalTurn): readonly BackgroundReceipt[] {
   return turn.events.flatMap((event) =>
-    event.type === "subagent.admitted"
+    event.type === "subagent.completed" && event.data.backgroundTask !== undefined
       ? [{ callId: event.data.callId, taskId: event.data.backgroundTask.taskId }]
       : [],
   );

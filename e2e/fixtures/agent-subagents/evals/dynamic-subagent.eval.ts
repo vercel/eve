@@ -6,7 +6,7 @@ export default defineEval({
   async test(t) {
     const selected = await t.send("Call conditional-marker exactly once.");
     selected.expectOk();
-    selected.event("subagent.admitted", {
+    selected.event("subagent.completed", {
       count: 1,
       data: { backgroundTask: { status: "working" }, subagentName: "conditional-marker" },
     });

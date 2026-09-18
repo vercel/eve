@@ -48,8 +48,6 @@ attached.messageIncludes("Sunny");
 
 `t.calledTool` and `t.usedNoTools` are mutually exclusive; assert one or the other, never both in the same run.
 
-For subagents, `status: "completed"` (the default) requires a successful invocation result. Use `status: "admitted"` to assert a background task receipt; admission does not prove that the task finished. Check the task's terminal outcome separately. Neither status implies that the persistent child session has ended.
-
 ## Value assertions with `t.check`
 
 `t.check(value, assertion)` grades an explicit value against a builder from `eve/evals/expect`. The value can be a turn’s `.message`, parsed JSON, or any local you computed:
@@ -86,6 +84,8 @@ Pick the cheapest builder that captures what "correct" means. When exact match i
 ## The matcher mini-language
 
 `t.calledTool` and `t.calledSubagent` take matcher objects. Tools accept `{ input, output, status, count }`; subagents accept `{ callId, childSessionId, remoteUrl, output, status, count }`. Calls match `status: "completed"` by default; use `"pending"`, `"failed"`, or `"rejected"` explicitly for lifecycle checks. A numeric `count` requires an exact number of calls matching every supplied constraint. Use a predicate for ranges or other custom count requirements; it receives the observed number of matching calls.
+
+A background subagent that has only returned a working task receipt remains `pending`; use `t.calledSubagent(name, { status: "pending" })` to assert that delegation. The receipt settles dispatch, not the child's work. A successful blocking call with an actual result is `completed`, even when the child session stays available for another call. Check task notifications for a background task's final outcome.
 
 Matcher values accept a literal (objects partial-deep-match), a RegExp, or a predicate function that returns a boolean:
 

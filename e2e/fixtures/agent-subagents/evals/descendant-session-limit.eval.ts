@@ -80,7 +80,7 @@ export default defineEval({
       `Do not call any tool or subagent. Reply with exactly ${ROOT_RECOVERY_TOKEN} and nothing else.`,
     );
     recovered.expectOk();
-    stopSession.calledSubagent("limited-worker", { status: "admitted", count: 1 });
+    stopSession.calledSubagent("limited-worker", { status: "pending", count: 1 });
     recovered.messageIncludes(ROOT_RECOVERY_TOKEN);
   },
 });

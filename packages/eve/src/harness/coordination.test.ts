@@ -379,7 +379,7 @@ function createSessionWithRunningChild(): HarnessSession {
 }
 
 describe("resolvePendingCoordination", () => {
-  it("emits admission without completion for a working task receipt", async () => {
+  it("marks a working task receipt as backgrounded on subagent.completed", async () => {
     const events: UnstampedMessageStreamEvent[] = [];
     const taskId = "task_0123456789abcdef";
 
@@ -411,10 +411,9 @@ describe("resolvePendingCoordination", () => {
       },
     });
 
-    expect(events.find((event) => event.type === "subagent.admitted")).toMatchObject({
+    expect(events.find((event) => event.type === "subagent.completed")).toMatchObject({
       data: { backgroundTask: { status: "working", taskId } },
     });
-    expect(events.some((event) => event.type === "subagent.completed")).toBe(false);
     expect(getAgentHandleStore(resolved.session.state)).toBeUndefined();
   });
 

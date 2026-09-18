@@ -30,7 +30,7 @@ export default defineTaskEval({
     const started = await t.send("TASK-C7-AUTHORIZATION");
     started.expectOk();
     started.messageIncludes("TASK-C7-STARTED");
-    started.event("subagent.admitted", {
+    started.event("subagent.completed", {
       count: 1,
       data: { backgroundTask: { status: "working" }, subagentName: "approval-worker" },
     });

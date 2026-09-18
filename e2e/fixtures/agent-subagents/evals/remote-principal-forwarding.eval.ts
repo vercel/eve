@@ -87,7 +87,7 @@ export default defineEval({
       },
     });
 
-    t.calledSubagent("remote-loopback", { status: "admitted", count: 3 })
+    t.calledSubagent("remote-loopback", { status: "pending", count: 3 })
       .soft()
       .label("no repeated delegation");
     t.succeeded();

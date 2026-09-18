@@ -17,6 +17,7 @@ import {
   type StepCompletedStreamEvent,
   type MessageStreamEvent,
   type SubagentCalledStreamEvent,
+  type SubagentCompletedStreamEvent,
   Client,
   ClientSession,
 } from "#client/index.js";
@@ -2530,16 +2531,19 @@ async function* eveEventsToTUIStream(
       case "subagent.event":
         // `subagent.started` and `subagent.event` are not emitted by the
         // current harness — the parent stream only sees `called` and
-        // `admitted` or `completed`. All intermediate child content is observed via
+        // `completed`. All intermediate child content is observed via
         // the runner's parallel child-session stream pump.
         break;
 
-      case "subagent.admitted":
-        onSubagentBackgrounded?.(event.data.callId);
+      case "subagent.completed": {
+        const completed = event as SubagentCompletedStreamEvent;
+        if (completed.data.backgroundTask === undefined) {
+          onSubagentCompleted?.(completed.data.callId);
+        } else {
+          onSubagentBackgrounded?.(completed.data.callId);
+        }
         break;
-      case "subagent.completed":
-        onSubagentCompleted?.(event.data.callId);
-        break;
+      }
 
       case "authorization.required":
         onConnectionAuthRequired?.(event as AuthorizationRequiredStreamEvent);
@@ -2689,7 +2693,6 @@ function isPostTurnVisibleEvent(event: MessageStreamEvent): boolean {
     case "step.failed":
     case "step.started":
     case "subagent.called":
-    case "subagent.admitted":
     case "subagent.completed":
     case "subagent.event":
     case "subagent.started":

@@ -54,7 +54,7 @@ export default defineTaskEval({
     });
     raced.calledSubagent("busy-worker", {
       count: 1,
-      status: "admitted",
+      status: "pending",
     });
     raced.calledTool("busy-worker", {
       count: 1,
@@ -69,7 +69,7 @@ export default defineTaskEval({
       held.session,
     );
     later.turn.expectOk();
-    later.turn.calledSubagent("busy-worker", { count: 1, status: "admitted" });
+    later.turn.calledSubagent("busy-worker", { count: 1, status: "pending" });
     const steeredTaskId = requireBackgroundTaskId(later.turn);
     await t.require(steeredTaskId, equals(admittedTaskId));
     // Steering retains the existing request; it does not publish a replacement approval.

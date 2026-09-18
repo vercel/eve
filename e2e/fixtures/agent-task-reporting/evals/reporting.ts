@@ -71,7 +71,7 @@ Once all three assignments are accepted, let Alice know the checks are underway.
   );
 
   const receipts = started.events.flatMap((event) =>
-    event.type === "subagent.admitted"
+    event.type === "subagent.completed" && event.data.backgroundTask !== undefined
       ? [{ callId: event.data.callId, taskId: event.data.backgroundTask.taskId }]
       : [],
   );
@@ -359,7 +359,7 @@ async function releaseCheck(t: EveEvalContext, run: ReportingRun, check: Check):
     ),
     equals([]),
   );
-  // Check the workflow tool result for the completed lookup.
+  // ctx.agent completes through its owning workflow tool, not a subagent.completed event.
   await t.require(
     lookup,
     equals([
@@ -429,7 +429,11 @@ async function post(t: EveEvalContext, run: ReportingRun, suffix: "" | "/compact
 
 function hasPostReceiptAcknowledgement(turn: EveEvalTurn): boolean {
   const receiptIndexes = turn.events.flatMap((event, index) =>
-    event.type === "subagent.admitted" && event.data.subagentName === "agent" ? [index] : [],
+    event.type === "subagent.completed" &&
+    event.data.subagentName === "agent" &&
+    event.data.backgroundTask !== undefined
+      ? [index]
+      : [],
   );
   return (
     receiptIndexes.length === TASK_COUNT &&

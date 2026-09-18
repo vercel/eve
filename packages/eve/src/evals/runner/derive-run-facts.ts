@@ -125,12 +125,10 @@ export function deriveRunFacts(
           call.status = status;
         } else if (result.kind === "subagent-result") {
           const call = ensureSubagentCall(result.callId, result.subagentName);
-          if (result.origin === "child" && result.backgroundTask !== undefined) {
-            if (call.status === "pending") call.status = "admitted";
-          } else {
-            call.output = call.output ?? result.output;
-            call.status = status;
-          }
+          // A working receipt settles dispatch, not the delegated work.
+          if (result.origin === "child" && result.backgroundTask !== undefined) break;
+          call.output = call.output ?? result.output;
+          call.status = status;
         }
         break;
       }
@@ -149,16 +147,11 @@ export function deriveRunFacts(
         break;
       }
 
-      case "subagent.admitted": {
-        const call = ensureSubagentCall(event.data.callId, event.data.subagentName);
-        if (call.status === "pending") call.status = "admitted";
-        break;
-      }
-
       case "subagent.completed": {
         const call = ensureSubagentCall(event.data.callId, event.data.subagentName);
+        if (event.data.backgroundTask !== undefined) break;
         call.output = event.data.output;
-        if (call.status === "pending" || call.status === "admitted") call.status = "completed";
+        if (call.status === "pending") call.status = "completed";
         break;
       }
 

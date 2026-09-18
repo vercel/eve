@@ -1,6 +1,6 @@
 import type { ModelMessage, ToolSet, TypedToolCall } from "ai";
 
-import { createActionResultEvent } from "#protocol/message.js";
+import { createActionResultEvent, type UnstampedMessageStreamEvent } from "#protocol/message.js";
 import { resolveRuntimeActionResultsForCallIds } from "#runtime/actions/results.js";
 import type {
   RuntimeActionRequest,
@@ -207,7 +207,7 @@ function resolveResultsForCoordinationBatch(input: {
  *
  * When all expected runtime action results are present, this appends the
  * stored assistant tool-call messages plus synthesized tool-result messages to
- * history, clears the pending batch, and emits subagent admission or completion plus
+ * history, clears the pending batch, and emits `subagent.completed` and
  * `action.result` events back onto the parent stream.
  */
 export async function resolvePendingCoordination(input: {
@@ -249,11 +249,10 @@ export async function resolvePendingCoordination(input: {
           output: typeof result.output === "string" ? result.output : JSON.stringify(result.output),
           subagentName: result.subagentName,
         };
-        await input.emit(
-          backgroundTask === undefined
-            ? { data, type: "subagent.completed" }
-            : { data: { ...data, backgroundTask }, type: "subagent.admitted" },
-        );
+        await input.emit({
+          data: backgroundTask === undefined ? data : { ...data, backgroundTask },
+          type: "subagent.completed",
+        } satisfies Extract<UnstampedMessageStreamEvent, { type: "subagent.completed" }>);
       }
 
       await input.emit(

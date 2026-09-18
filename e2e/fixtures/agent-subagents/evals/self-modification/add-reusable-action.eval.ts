@@ -10,6 +10,6 @@ export default defineEval({
     started.expectOk();
 
     t.succeeded();
-    t.calledSubagent("self-modification", { status: "admitted" });
+    t.calledSubagent("self-modification", { status: "pending" });
   },
 });

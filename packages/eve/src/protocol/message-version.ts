@@ -6,8 +6,6 @@ import {
   type MessageStreamEventMeta,
   type ReasoningAppendedStreamEvent,
   type UnstampedMessageStreamEvent,
-  type SubagentCompletedStreamEvent,
-  type SubagentAdmittedStreamEvent,
 } from "#protocol/message.js";
 
 interface MessageAppendedStreamEventV24 {
@@ -45,13 +43,6 @@ interface ActionInputAppendedStreamEventV24 {
   type: "action.input.appended";
 }
 
-interface SubagentCompletedStreamEventV25 {
-  type: "subagent.completed";
-  data: SubagentCompletedStreamEvent["data"] & {
-    backgroundTask?: SubagentAdmittedStreamEvent["data"]["backgroundTask"];
-  };
-}
-
 interface MessageStreamAppendEventsByVersion {
   "21": MessageAppendedStreamEventV24 | ReasoningAppendedStreamEventV24;
   "22": MessageAppendedStreamEventV24 | ReasoningAppendedStreamEventV24;
@@ -61,27 +52,19 @@ interface MessageStreamAppendEventsByVersion {
     | MessageAppendedStreamEventV24
     | ReasoningAppendedStreamEventV24;
   "25": ActionInputAppendedStreamEvent | MessageAppendedStreamEvent | ReasoningAppendedStreamEvent;
-  "26": ActionInputAppendedStreamEvent | MessageAppendedStreamEvent | ReasoningAppendedStreamEvent;
 }
 
 export type MessageStreamVersion = keyof MessageStreamAppendEventsByVersion;
-type LegacyMessageStreamVersion = Exclude<MessageStreamVersion, "25" | "26">;
+type LegacyMessageStreamVersion = Exclude<MessageStreamVersion, "25">;
 
 type VersionIndependentMessageStreamEvent = Exclude<
   UnstampedMessageStreamEvent,
-  | ActionInputAppendedStreamEvent
-  | MessageAppendedStreamEvent
-  | ReasoningAppendedStreamEvent
-  | SubagentCompletedStreamEvent
-  | SubagentAdmittedStreamEvent
+  ActionInputAppendedStreamEvent | MessageAppendedStreamEvent | ReasoningAppendedStreamEvent
 >;
 
 type UnstampedMessageStreamEventForVersion<Version extends MessageStreamVersion> =
   | VersionIndependentMessageStreamEvent
-  | MessageStreamAppendEventsByVersion[Version]
-  | (Version extends "26"
-      ? SubagentCompletedStreamEvent | SubagentAdmittedStreamEvent
-      : SubagentCompletedStreamEventV25);
+  | MessageStreamAppendEventsByVersion[Version];
 
 export type MessageStreamEventForVersion<Version extends MessageStreamVersion> =
   UnstampedMessageStreamEventForVersion<Version> & {
@@ -111,26 +94,16 @@ export function normalizeMessageStreamEvent(
         event as MessageStreamEventForVersion<LegacyMessageStreamVersion>,
       );
     case "25":
-      if (event.type === "subagent.completed") return normalizeSubagentCompletion(event);
-      return validateCurrentMessageStreamEvent(
-        event as MessageStreamEventForVersion<"26">,
-        version,
-      );
-    case "26":
-      return validateCurrentMessageStreamEvent(
-        event as MessageStreamEventForVersion<"26">,
-        version,
-      );
+      return validateCurrentMessageStreamEvent(event as MessageStreamEventForVersion<"25">);
     default:
       return assertNever(version);
   }
 }
 
-/** Normalizes a persisted stream that may contain earlier append formats or background admission receipts. */
+/** Normalizes a persisted stream that may contain events written before v25. */
 export function normalizePersistedMessageStreamEvent(
   event: SupportedMessageStreamEvent,
 ): MessageStreamEvent {
-  if (event.type === "subagent.completed") return normalizeSubagentCompletion(event);
   if (
     (event.type === "message.appended" && "messageSoFar" in event.data) ||
     (event.type === "reasoning.appended" && "reasoningSoFar" in event.data) ||
@@ -208,37 +181,23 @@ function normalizeLegacyMessageStreamEvent(
     };
   }
 
-  return event.type === "subagent.completed" ? normalizeSubagentCompletion(event) : event;
-}
-
-/** Older streams reported background admission using the completion event. */
-function normalizeSubagentCompletion(
-  event: SubagentCompletedStreamEventV25 & { readonly meta: MessageStreamEventMeta },
-): MessageStreamEvent {
-  const { backgroundTask, ...data } = event.data;
-  return backgroundTask === undefined
-    ? { ...event, data }
-    : { ...event, type: "subagent.admitted", data: { ...data, backgroundTask } };
+  return event;
 }
 
 function validateCurrentMessageStreamEvent(
-  event: MessageStreamEventForVersion<"26">,
-  version: "25" | "26",
+  event: MessageStreamEventForVersion<"25">,
 ): MessageStreamEvent {
-  if (event.type === "subagent.completed" && "backgroundTask" in event.data) {
-    throw new TypeError("Background admission requires subagent.admitted in stream version 26.");
-  }
   if (event.type === "message.appended") {
-    assertCurrentAppendDelta(event.data.messageDelta, "message", version);
-    assertUnsupportedAppendField(event.data, "messageOffset", "message", version);
-    assertUnsupportedAppendField(event.data, "messageSoFar", "message", version);
+    assertCurrentAppendDelta(event.data.messageDelta, "message");
+    assertUnsupportedAppendField(event.data, "messageOffset", "message");
+    assertUnsupportedAppendField(event.data, "messageSoFar", "message");
   } else if (event.type === "reasoning.appended") {
-    assertCurrentAppendDelta(event.data.reasoningDelta, "reasoning", version);
-    assertUnsupportedAppendField(event.data, "reasoningOffset", "reasoning", version);
-    assertUnsupportedAppendField(event.data, "reasoningSoFar", "reasoning", version);
+    assertCurrentAppendDelta(event.data.reasoningDelta, "reasoning");
+    assertUnsupportedAppendField(event.data, "reasoningOffset", "reasoning");
+    assertUnsupportedAppendField(event.data, "reasoningSoFar", "reasoning");
   } else if (event.type === "action.input.appended") {
-    assertCurrentAppendDelta(event.data.inputTextDelta, "action input", version);
-    assertUnsupportedAppendField(event.data, "inputTextOffset", "action input", version);
+    assertCurrentAppendDelta(event.data.inputTextDelta, "action input");
+    assertUnsupportedAppendField(event.data, "inputTextOffset", "action input");
   }
   return event;
 }
@@ -246,10 +205,9 @@ function validateCurrentMessageStreamEvent(
 function assertCurrentAppendDelta(
   delta: unknown,
   stream: "action input" | "message" | "reasoning",
-  version: "25" | "26",
 ): void {
   if (typeof delta !== "string") {
-    throw new TypeError(`Invalid ${stream} append delta for stream version ${version}.`);
+    throw new TypeError(`Invalid ${stream} append delta for stream version 25.`);
   }
 }
 
@@ -257,10 +215,9 @@ function assertUnsupportedAppendField(
   data: object,
   field: string,
   stream: "action input" | "message" | "reasoning",
-  version: "25" | "26",
 ): void {
   if (field in data) {
-    throw new TypeError(`Invalid ${stream} append shape for stream version ${version}.`);
+    throw new TypeError(`Invalid ${stream} append shape for stream version 25.`);
   }
 }
 
