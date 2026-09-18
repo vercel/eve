@@ -288,6 +288,32 @@ describe("renderSelectQuestion", () => {
     expect(text).toContain("esc to cancel");
   });
 
+  it("wraps a long question instead of clipping it", () => {
+    const options = [
+      { value: "yes", label: "Yes" },
+      { value: "no", label: "No" },
+    ];
+    const rows = renderSelectQuestion(
+      {
+        kind: "single",
+        message:
+          "A legacy self-modification scaffold was found at agent/subagents/self-modification. This scaffold format is no longer supported. Do you want to remove it?",
+        options,
+        select: initialSelectState({ options }),
+      },
+      theme,
+      48,
+    );
+
+    expect(rows.slice(0, 5)).toEqual([
+      "  A legacy self-modification scaffold was",
+      "  found at agent/subagents/self-modification.",
+      "  This scaffold format is no longer supported.",
+      "  Do you want to remove it?",
+      "",
+    ]);
+  });
+
   it("drops the numbers for a lone option", () => {
     const lone = [{ value: "relink", label: "Link to another project" }];
     const text = renderSelectQuestion(
