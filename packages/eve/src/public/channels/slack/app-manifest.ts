@@ -4,19 +4,55 @@ import { parseJsonObject, type JsonObject } from "#shared/json.js";
 
 export const SLACK_APP_MANIFEST_TYPE = "https://docs.slack.dev/reference/app-manifest/";
 
+type SlackManifest = AppsManifestCreateArguments["manifest"];
+type SlackBotScope = NonNullable<
+  NonNullable<NonNullable<SlackManifest["oauth_config"]>["scopes"]>["bot"]
+>[number];
+type SlackBotEvent = NonNullable<
+  NonNullable<NonNullable<SlackManifest["settings"]>["event_subscriptions"]>["bot_events"]
+>[number];
+
+export interface SlackAppManifestOptions {
+  readonly backgroundColor?: string;
+  readonly botEvents?: readonly string[];
+  readonly botScopes?: readonly string[];
+  readonly description?: string;
+  readonly displayName?: string;
+  readonly optionalBotScopes?: readonly string[];
+}
 export interface SlackAppManifestBuildDefinition {
   readonly build: (channelName: string) => JsonObject;
 }
 
-export function defineSlackAppManifest(input: {
-  readonly botName?: string;
-}): SlackAppManifestBuildDefinition {
+export function defineSlackAppManifest(
+  input: SlackAppManifestOptions,
+): SlackAppManifestBuildDefinition {
   return {
     build(channelName) {
-      const name = (input.botName ?? channelName).slice(0, 35);
+      const name = (input.displayName ?? channelName).slice(0, 35);
+      const botScopes = [
+        ...unique(["app_mentions:read", "chat:write"], input.botScopes),
+      ] as SlackBotScope[];
+      const optionalBotScopes = unique([], input.optionalBotScopes).filter(
+        (scope) => !botScopes.includes(scope as SlackBotScope),
+      ) as SlackBotScope[];
+      const oauthScopes: { bot: SlackBotScope[]; bot_optional?: SlackBotScope[] } = {
+        bot: botScopes,
+      };
+      if (optionalBotScopes.length > 0) oauthScopes.bot_optional = optionalBotScopes;
+      const botEvents = [...unique(["app_mention"], input.botEvents)] as SlackBotEvent[];
+      const displayInformation: {
+        background_color?: string;
+        description?: string;
+        name: string;
+      } = { name };
+      if (input.backgroundColor !== undefined) {
+        displayInformation.background_color = input.backgroundColor;
+      }
+      if (input.description !== undefined) displayInformation.description = input.description;
       const manifest = {
         $type: SLACK_APP_MANIFEST_TYPE,
-        display_information: { name },
+        display_information: displayInformation,
         features: {
           app_home: {
             home_tab_enabled: false,
@@ -25,9 +61,9 @@ export function defineSlackAppManifest(input: {
           },
           bot_user: { display_name: name },
         },
-        oauth_config: { scopes: { bot: ["app_mentions:read", "chat:write"] } },
+        oauth_config: { scopes: oauthScopes },
         settings: {
-          event_subscriptions: { bot_events: ["app_mention"] },
+          event_subscriptions: { bot_events: botEvents },
           org_deploy_enabled: false,
           socket_mode_enabled: false,
           token_rotation_enabled: false,
@@ -43,4 +79,11 @@ export function buildSlackAppManifest(value: unknown, channelName: string): Json
   const build = (value as { readonly build?: unknown }).build;
   if (typeof build !== "function") return undefined;
   return parseJsonObject(build(channelName));
+}
+
+function unique(
+  baseline: readonly string[],
+  additional: readonly string[] = [],
+): readonly string[] {
+  return [...new Set([...baseline, ...additional])];
 }

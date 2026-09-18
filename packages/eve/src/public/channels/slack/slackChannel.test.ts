@@ -454,6 +454,50 @@ describe("slackChannel()", () => {
     });
   });
 
+  it("builds its Slack app manifest for compilation", () => {
+    const channel = slackChannel({
+      bot: {
+        backgroundColor: "#000000",
+        description: "Answers support questions.",
+        name: "Support agent",
+      },
+      eventSubscriptions: ["message.channels"],
+      optionalScopes: ["reactions:write"],
+      scopes: ["channels:history"],
+    });
+
+    expect(getChannelBuildMetadata(channel, "support")?.manifest).toEqual({
+      $type: "https://docs.slack.dev/reference/app-manifest/",
+      display_information: {
+        background_color: "#000000",
+        description: "Answers support questions.",
+        name: "Support agent",
+      },
+      features: {
+        app_home: {
+          home_tab_enabled: false,
+          messages_tab_enabled: true,
+          messages_tab_read_only_enabled: false,
+        },
+        bot_user: { display_name: "Support agent" },
+      },
+      oauth_config: {
+        scopes: {
+          bot: ["app_mentions:read", "chat:write", "channels:history"],
+          bot_optional: ["reactions:write"],
+        },
+      },
+      settings: {
+        event_subscriptions: {
+          bot_events: ["app_mention", "message.channels"],
+        },
+        org_deploy_enabled: false,
+        socket_mode_enabled: false,
+        token_rotation_enabled: false,
+      },
+    });
+  });
+
   it("classifies from durable state through the audience hook", () => {
     const adapter = withState(getAdapter(slackChannel()), { audience: "private" });
 

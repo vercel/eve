@@ -28,8 +28,35 @@ describe("Slack app manifests", () => {
     });
   });
 
+  it("emits optional scopes that are not already required", () => {
+    const definition = defineSlackAppManifest({
+      botScopes: ["channels:history"],
+      optionalBotScopes: ["reactions:write", "channels:history", "chat:write", "reactions:write"],
+    });
+
+    expect(buildSlackAppManifest(definition, "support")).toMatchObject({
+      oauth_config: {
+        scopes: {
+          bot: ["app_mentions:read", "chat:write", "channels:history"],
+          bot_optional: ["reactions:write"],
+        },
+      },
+    });
+  });
+
+  it("omits empty optional scopes", () => {
+    const definition = defineSlackAppManifest({ optionalBotScopes: ["chat:write"] });
+
+    expect(buildSlackAppManifest(definition, "support")).toMatchObject({
+      oauth_config: { scopes: { bot: ["app_mentions:read", "chat:write"] } },
+    });
+    expect(
+      (buildSlackAppManifest(definition, "support")?.oauth_config as { scopes: object }).scopes,
+    ).not.toHaveProperty("bot_optional");
+  });
+
   it("uses a configured bot name and enforces Slack's app name limit", () => {
-    const definition = defineSlackAppManifest({ botName: "x".repeat(40) });
+    const definition = defineSlackAppManifest({ displayName: "x".repeat(40) });
 
     expect(buildSlackAppManifest(definition, "support")).toMatchObject({
       display_information: { name: "x".repeat(35) },
