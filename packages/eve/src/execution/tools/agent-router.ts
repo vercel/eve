@@ -13,8 +13,11 @@ export interface AgentRouterInput {
 
 export const AGENT_ROUTER_INPUT_SCHEMA: z.ZodType<AgentRouterInput> = z.strictObject({
   message: z.string().min(1).describe("The complete task to send to the selected agent."),
-  outputSchema: z
-    .record(z.string(), z.json())
-    .describe("Optional JSON Schema the selected agent's output must match.")
-    .optional(),
+  outputSchema: (
+    z
+      .looseObject({})
+      .describe(
+        "Only provide a non-empty JSON Schema when the caller explicitly requests structured output; otherwise omit this field. The selected agent must match a provided schema, and that structured output becomes the tool result.",
+      ) as z.ZodType<JsonObject>
+  ).optional(),
 });
