@@ -103,7 +103,7 @@ describe("Web setup", () => {
     );
     expect(effects.writeTextFile).toHaveBeenCalledWith(
       "/project/package.json",
-      expect.stringContaining('"dev": "vercel dev --local"'),
+      expect.stringContaining('"dev": "eve dev"'),
       { force: true },
     );
     expect(effects.writeTextFile).toHaveBeenCalledWith(
@@ -138,7 +138,7 @@ describe("Web setup", () => {
     );
   });
 
-  it("configures peer services for a standalone agent and prints the local command", async () => {
+  it("configures peer services for a standalone agent and returns the local command", async () => {
     const effects = deps();
     const fake = createFakePrompter();
     const ctx = createSetupContexts({
@@ -149,7 +149,7 @@ describe("Web setup", () => {
       resolveVercelProject: async () => ({ orgId: "team", projectId: "project" }),
     });
     await expect(applyWebSetup({ packageManager: "npm" }, ctx.apply, effects)).resolves.toEqual({
-      facts: [],
+      facts: [{ label: "Start locally", value: "npm run dev:services" }],
     });
     expect(effects.writeTextFile).toHaveBeenCalledWith(
       "/project/agent/channels/eve.ts",
@@ -168,10 +168,6 @@ describe("Web setup", () => {
       expect.stringContaining("export default nextConfig"),
       { force: true },
     );
-    expect(fake.prompter.note).toHaveBeenCalledWith(
-      "Run `npm run dev` from the project root to start Web Chat and your agent services.",
-      "Next steps",
-      { tone: "success" },
-    );
+    expect(fake.prompter.note).not.toHaveBeenCalled();
   });
 });

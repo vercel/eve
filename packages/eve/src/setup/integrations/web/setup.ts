@@ -87,11 +87,9 @@ async function configurePeerServiceScripts(root: string, deps: WebSetupDeps): Pr
     [key: string]: unknown;
   };
   const scripts = { ...document.scripts };
+  scripts.dev ??= "eve dev";
   scripts["dev:eve"] ??= "eve dev";
   scripts["dev:services"] ??= "vercel dev --local";
-  if (scripts.dev === undefined || scripts.dev === "eve dev") {
-    scripts.dev = "vercel dev --local";
-  }
   await deps.writeTextFile(path, `${JSON.stringify({ ...document, scripts }, null, 2)}\n`, {
     force: true,
   });
@@ -157,10 +155,14 @@ export default withEve(nextConfig);
   await deps.writeTextFile(vercelTsPath, PEER_SERVICE_VERCEL_CONFIG, { force: true });
   await configurePeerServiceScripts(project.environmentRoot, deps);
   context.presenter.log.success("Configured channel: web");
-  context.presenter.nextSteps([
-    `Run \`${devCommand(plan.packageManager)}\` from the project root to start Web Chat and your agent services.`,
-  ]);
-  return { facts: [] };
+  return {
+    facts: [
+      {
+        label: "Start locally",
+        value: `${devCommand(plan.packageManager)}:services`,
+      },
+    ],
+  };
 }
 
 export const WEB_SETUP = defineSetupIntegration({
