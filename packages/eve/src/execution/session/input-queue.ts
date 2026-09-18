@@ -127,6 +127,15 @@ export class SessionInputQueue {
     return entry?.delivery;
   }
 
+  /** Task lifecycle effects must be applied even while their cohort report is held. */
+  taskDeliveries(): readonly DeliveryAdmission[] {
+    return this.entries.filter(
+      (entry): entry is QueuedDelivery =>
+        entry.kind === "delivery" &&
+        entry.delivery.payloads.some((payload) => payload.task !== undefined),
+    );
+  }
+
   replaceDelivery(sequence: number, delivery: DeliverHookPayload | undefined): void {
     const index = this.entries.findIndex(
       (entry) => entry.kind === "delivery" && entry.sequence === sequence,

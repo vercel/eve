@@ -60,6 +60,7 @@ export async function applyTaskAgentRequest(
           },
           sessionWritable: ctx.sessionWritable,
           serializedContext,
+          sessionState: settled.sessionState,
         });
         serializedContext = emitted.serializedContext;
       }
@@ -88,6 +89,7 @@ export async function applyTaskAgentRequest(
             event: dispatched.event,
             sessionWritable: ctx.sessionWritable,
             serializedContext: dispatched.serializedContext ?? ctx.serializedContext,
+            sessionState: dispatched.sessionState,
           });
           return {
             serializedContext: emitted.serializedContext,

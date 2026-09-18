@@ -138,6 +138,7 @@ describe("workflow-owned agent requests", () => {
       event,
       sessionWritable: {},
       serializedContext,
+      sessionState,
     });
     expect(applied.serializedContext).toBe(serializedContext);
   });

@@ -482,6 +482,13 @@ function terminalDelivery(taskId: string, status: "failed" | "cancelled"): Deliv
   };
 }
 
+function report(delivery: DeliverHookPayload): DeliverHookPayload {
+  return {
+    ...delivery,
+    payloads: delivery.payloads.map(({ task: _task, ...payload }) => payload),
+  };
+}
+
 function batchingInput(count = 100, crossTurn = false) {
   const input = waitInput(createMockInbox([]));
   const taskSessionState = {
@@ -531,7 +538,7 @@ function batchingInput(count = 100, crossTurn = false) {
   vi.mocked(routeDeliverToChildren).mockImplementation(
     async ({ delivery, sessionState, serializedContext }) => ({
       kind: "continue",
-      remainder: delivery,
+      remainder: report(delivery),
       sessionState,
       serializedContext,
     }),
@@ -566,7 +573,7 @@ describe("buffered task completion batching", () => {
       });
       expect(input.queue.pendingCount).toBe(1);
       await expect(nextTurnDelivery(input)).resolves.toMatchObject({
-        delivery: { payloads: [...routed.payloads, ...last.payloads] },
+        delivery: { payloads: [...routed.payloads, ...report(last).payloads] },
       });
       expect(input.queue.pendingCount).toBe(0);
     },
@@ -582,7 +589,7 @@ describe("buffered task completion batching", () => {
       kind: "turn",
       delivery: {
         taskDeliveryId: "task_0:ready:completed",
-        payloads: deliveries.flatMap((delivery) => delivery.payloads),
+        payloads: deliveries.flatMap((delivery) => report(delivery).payloads),
         deliveryMetadata: deliveries.map((delivery, payloadIndex) => ({
           ...delivery.deliveryMetadata![0],
           payloadIndex,
@@ -590,7 +597,7 @@ describe("buffered task completion batching", () => {
       },
     });
     expect(queue.pendingCount).toBe(0);
-    expect(routeDeliverToChildren).toHaveBeenCalledTimes(1);
+    expect(routeDeliverToChildren).toHaveBeenCalledTimes(101);
   });
 
   it.each([
@@ -620,7 +627,7 @@ describe("buffered task completion batching", () => {
       const later = completion("task_3");
       const queue = queueOf(first, second, boundary, later);
       const next = await nextTurnDelivery({ ...input, queue });
-      expect(next).toMatchObject({ kind: "turn", delivery: boundary });
+      expect(next).toMatchObject({ kind: "turn", delivery: report(boundary) });
       expect(queue.pendingCount).toBe(3);
     },
   );
@@ -644,14 +651,20 @@ describe("buffered task completion batching", () => {
         delivery: { payloads: [{ message: "user question" }] },
       });
       expect(input.queue.pendingCount).toBe(2);
-      expect(routeDeliverToChildren).toHaveBeenCalledTimes(1);
+      expect(routeDeliverToChildren).toHaveBeenCalledTimes(3);
 
       await expect(nextTurnDelivery(input)).resolves.toMatchObject({
         kind: "turn",
-        delivery: { payloads: [...first.payloads, ...second.payloads, ...last.payloads] },
+        delivery: {
+          payloads: [
+            ...report(first).payloads,
+            ...report(second).payloads,
+            ...report(last).payloads,
+          ],
+        },
       });
       expect(input.queue.pendingCount).toBe(0);
-      expect(routeDeliverToChildren).toHaveBeenCalledTimes(2);
+      expect(routeDeliverToChildren).toHaveBeenCalledTimes(5);
     },
   );
 
@@ -663,9 +676,9 @@ describe("buffered task completion batching", () => {
     );
     await expect(nextTurnDelivery(input)).resolves.toMatchObject({
       kind: "turn",
-      delivery: { payloads: deliveries.flatMap((delivery) => delivery.payloads) },
+      delivery: { payloads: deliveries.flatMap((delivery) => report(delivery).payloads) },
     });
-    expect(routeDeliverToChildren).toHaveBeenCalledTimes(1);
+    expect(routeDeliverToChildren).toHaveBeenCalledTimes(4);
   });
 
   it("routes intervening child settlement before releasing the completion cohort", async () => {
@@ -713,7 +726,7 @@ describe("buffered task completion batching", () => {
         kind: "continue",
         remainder: delivery.payloads.some((payload) => payload.task?.agentRequests !== undefined)
           ? undefined
-          : delivery,
+          : report(delivery),
         sessionState,
         serializedContext,
       }),
@@ -721,11 +734,13 @@ describe("buffered task completion batching", () => {
 
     await expect(nextTurnDelivery(input)).resolves.toMatchObject({
       kind: "turn",
-      delivery: { payloads: [...first.payloads, ...last.payloads] },
+      delivery: { payloads: [...report(first).payloads, ...report(last).payloads] },
     });
     expect(vi.mocked(routeDeliverToChildren).mock.calls.map(([call]) => call.delivery)).toEqual([
+      first,
       settlement,
-      expect.objectContaining({ payloads: [...first.payloads, ...last.payloads] }),
+      last,
+      expect.objectContaining({ payloads: [...report(first).payloads, ...report(last).payloads] }),
     ]);
     expect(input.queue.pendingCount).toBe(0);
   });
@@ -738,10 +753,13 @@ describe("buffered task completion batching", () => {
     for (const delivery of [first, other, last]) input.queue.enqueueDelivery(delivery);
     await expect(nextTurnDelivery(input)).resolves.toMatchObject({
       kind: "turn",
-      delivery: { payloads: [...first.payloads, ...last.payloads] },
+      delivery: { payloads: [...report(first).payloads, ...report(last).payloads] },
     });
     expect(input.queue.pendingCount).toBe(1);
-    await expect(nextTurnDelivery(input)).resolves.toMatchObject({ kind: "turn", delivery: other });
+    await expect(nextTurnDelivery(input)).resolves.toMatchObject({
+      kind: "turn",
+      delivery: report(other),
+    });
   });
 
   it.each(["clear", "compact", "reset", "session-timeout"] as const)(
@@ -757,7 +775,7 @@ describe("buffered task completion batching", () => {
         kind: kind === "session-timeout" ? "expired" : kind,
       });
       expect(input.queue.pendingCount).toBe(1);
-      expect(routeDeliverToChildren).not.toHaveBeenCalled();
+      expect(routeDeliverToChildren).toHaveBeenCalledOnce();
     },
   );
 
@@ -766,7 +784,10 @@ describe("buffered task completion batching", () => {
     const first = completion("task_0");
     input.queue.enqueueDelivery(first);
     input.inbox = createMockInbox([cancelRead({ taskId: "task_1" })]);
-    await expect(nextTurnDelivery(input)).resolves.toMatchObject({ kind: "turn", delivery: first });
+    await expect(nextTurnDelivery(input)).resolves.toMatchObject({
+      kind: "turn",
+      delivery: report(first),
+    });
   });
 
   it("waits for a recorded cancellation's notification before reporting its cohort", () => {
@@ -815,7 +836,7 @@ describe("buffered task completion batching", () => {
     );
     await expect(nextTurnDelivery(input)).resolves.toMatchObject({
       kind: "turn",
-      delivery: { payloads: [...first.payloads, ...last.payloads] },
+      delivery: { payloads: [...report(first).payloads, ...report(last).payloads] },
     });
   });
 
@@ -828,7 +849,7 @@ describe("buffered task completion batching", () => {
       for (const delivery of [first, terminal]) input.queue.enqueueDelivery(delivery);
       await expect(nextTurnDelivery(input)).resolves.toMatchObject({
         kind: "turn",
-        delivery: { payloads: [...first.payloads, ...terminal.payloads] },
+        delivery: { payloads: [...report(first).payloads, ...report(terminal).payloads] },
       });
       expect(input.queue.pendingCount).toBe(0);
     },
@@ -843,7 +864,7 @@ describe("buffered task completion batching", () => {
       for (const delivery of [first, last]) input.queue.enqueueDelivery(delivery);
       await expect(nextTurnDelivery(input)).resolves.toMatchObject({
         kind: "turn",
-        delivery: { payloads: [...first.payloads, ...last.payloads] },
+        delivery: { payloads: [...report(first).payloads, ...report(last).payloads] },
       });
       expect(input.queue.pendingCount).toBe(0);
     },
@@ -856,6 +877,6 @@ describe("buffered task completion batching", () => {
     const next = await nextTurnDelivery({ ...input, queue, inbox: createMockInbox([]) });
     expect(next.kind).toBe("authorization-resume");
     expect(queue.pendingCount).toBe(2);
-    expect(routeDeliverToChildren).not.toHaveBeenCalled();
+    expect(routeDeliverToChildren).toHaveBeenCalledTimes(2);
   });
 });

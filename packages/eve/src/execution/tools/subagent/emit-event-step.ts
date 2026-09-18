@@ -1,33 +1,38 @@
-import { buildAdapterContext } from "#channel/adapter-context.js";
-import { callAdapterEventHandler } from "#channel/adapter.js";
+import { contextStorage } from "#context/container.js";
 import { deserializeContext, serializeContext } from "#context/serialize.js";
-import {
-  encodeMessageStreamEvent,
-  stampMessageStreamEvent,
-  type UnstampedMessageStreamEvent,
-} from "#protocol/message.js";
-import { ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
+import { readDurableSession, type DurableSessionState } from "#execution/durable-session-store.js";
+import { resolveEffectiveAgentRuntime } from "#execution/effective-agent-config.js";
+import { createSessionEventSink } from "#execution/session/event-sink.js";
+import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
+import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 
 /** Emits an agent invocation event on the parent stream. */
 export async function emitSubagentEventStep(input: {
   readonly event: UnstampedMessageStreamEvent;
   readonly sessionWritable: WritableStream<Uint8Array>;
   readonly serializedContext: Record<string, unknown>;
+  readonly sessionState: DurableSessionState;
 }): Promise<{ readonly serializedContext: Record<string, unknown> }> {
   "use step";
 
   const ctx = await deserializeContext(input.serializedContext);
-  const adapter = ctx.require(ChannelKey);
-  const emitted = await callAdapterEventHandler(
-    adapter,
-    input.event,
-    buildAdapterContext(adapter, ctx),
-  );
-  const writer = input.sessionWritable.getWriter();
+  const bundle = ctx.require(BundleKey);
+  const session = readDurableSession(input.sessionState);
+  const sink = createSessionEventSink({
+    abortSignal: undefined,
+    adapter: ctx.require(ChannelKey),
+    bundle,
+    ctx,
+    effectiveAgent: resolveEffectiveAgentRuntime(bundle, ctx),
+    instrumentation: undefined,
+    isFirstTurn: input.sessionState.emissionState.sequence === 0,
+    sessionWritable: input.sessionWritable,
+    sessionId: session.sessionId,
+  });
   try {
-    await writer.write(encodeMessageStreamEvent(stampMessageStreamEvent(emitted)));
+    await contextStorage.run(ctx, () => sink.handleEvent(input.event, session.history));
   } finally {
-    writer.releaseLock();
+    sink.release();
   }
   return { serializedContext: serializeContext(ctx) };
 }
