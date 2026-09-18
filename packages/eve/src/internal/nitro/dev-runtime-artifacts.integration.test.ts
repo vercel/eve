@@ -658,7 +658,7 @@ describe("development runtime artifact snapshots", () => {
         paths: { compileDirectoryPath },
         project: { appRoot },
       } as CompileAgentResult),
-    ).rejects.toThrow("outside runtime app root");
+    ).rejects.toThrow("outside snapshot source root");
 
     await expect(readdir(join(appRoot, ".eve", "dev-runtime", "snapshots"))).resolves.toEqual([]);
   });
@@ -995,6 +995,94 @@ describe("development runtime artifact snapshots", () => {
     expect(existsSync(join(snapshot.snapshotSourceRoot, "packages", "acme-extension"))).toBe(false);
     const snapshotMountPath = join(snapshot.runtimeAppRoot, "node_modules", "@acme", "extension");
     await expect(realpath(snapshotMountPath)).resolves.toBe(await realpath(packageRoot));
+  });
+
+  it("rewrites extension roots mounted above an agent workspace member into the snapshot", async () => {
+    // An eve agent workspace: the member has no package.json, the workspace
+    // root owns the install, and a mounted extension contributes subagents whose
+    // roots live under the workspace's node_modules — outside the member app root.
+    const workspaceRoot = await createScratchDirectory("eve-dev-runtime-workspace-member-");
+    const appRoot = join(workspaceRoot, "agents", "support");
+    const agentRoot = join(appRoot, "agent");
+    const packageRoot = join(workspaceRoot, "packages", "acme-extension");
+    const extensionRoot = join(packageRoot, "extension");
+    const mountedPackageRoot = join(workspaceRoot, "node_modules", "@acme", "extension");
+    const mountedSubagentRoot = join(mountedPackageRoot, "extension", "subagents", "reviewer");
+    const compileDirectoryPath = join(appRoot, ".eve", "compile");
+
+    await mkdir(agentRoot, { recursive: true });
+    await mkdir(join(extensionRoot, "subagents", "reviewer"), { recursive: true });
+    await mkdir(join(workspaceRoot, "node_modules", "@acme"), { recursive: true });
+    await mkdir(compileDirectoryPath, { recursive: true });
+    await writeFile(join(workspaceRoot, "pnpm-workspace.yaml"), "packages:\n  - packages/*\n");
+    await writeFile(
+      join(workspaceRoot, "package.json"),
+      JSON.stringify(
+        {
+          dependencies: { "@acme/extension": "workspace:*" },
+          name: "agents",
+          private: true,
+          type: "module",
+        },
+        null,
+        2,
+      ),
+    );
+    await writeFile(
+      join(packageRoot, "package.json"),
+      JSON.stringify(
+        { exports: "./extension/extension.mjs", name: "@acme/extension", type: "module" },
+        null,
+        2,
+      ),
+    );
+    await writeFile(join(extensionRoot, "extension.mjs"), "export default {};\n");
+    await writeFile(
+      join(extensionRoot, "subagents", "reviewer", "agent.mjs"),
+      "export default {};\n",
+    );
+    await symlink(packageRoot, mountedPackageRoot, "junction");
+    await writeFile(join(agentRoot, "agent.ts"), "export const answer = 42;\n");
+    await writeFile(
+      join(compileDirectoryPath, "compiled-agent-manifest.json"),
+      `${JSON.stringify(
+        {
+          agentRoot,
+          appRoot,
+          subagents: [{ agent: { agentRoot: mountedSubagentRoot, appRoot: mountedPackageRoot } }],
+        },
+        null,
+        2,
+      )}\n`,
+    );
+
+    const snapshot = await stageDevelopmentRuntimeArtifactsSnapshot({
+      manifest: {
+        agentRoot,
+        appRoot,
+        extensionMounts: [{ sourceRoot: extensionRoot }],
+      },
+      paths: { compileDirectoryPath },
+      project: { appRoot },
+    } as CompileAgentResult);
+
+    const rewritten = JSON.parse(
+      await readFile(
+        join(snapshot.runtimeAppRoot, ".eve", "compile", "compiled-agent-manifest.json"),
+        "utf8",
+      ),
+    ) as { subagents: Array<{ agent: { agentRoot: string; appRoot: string } }> };
+    const snapshotPackageRoot = join(
+      snapshot.snapshotSourceRoot,
+      "node_modules",
+      "@acme",
+      "extension",
+    );
+    expect(rewritten.subagents[0]?.agent).toEqual({
+      agentRoot: join(snapshotPackageRoot, "extension", "subagents", "reviewer"),
+      appRoot: snapshotPackageRoot,
+    });
+    expect(existsSync(join(snapshotPackageRoot, "extension", "subagents", "reviewer"))).toBe(true);
   });
 
   it("mounts workspace packages nested inside the app root without copying them", async () => {

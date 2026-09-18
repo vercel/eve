@@ -128,7 +128,7 @@ export async function stageDevelopmentRuntimeArtifactsSnapshot(
         "compile",
         "compiled-agent-manifest.json",
       ),
-      runtimeAppRoot: sourceSnapshotPlan.runtimeAppRoot,
+      snapshotSourceRoot: sourceSnapshotPlan.snapshotSourceRoot,
     });
     await writeFile(
       join(snapshotRoot, DEV_RUNTIME_ARTIFACTS_GENERATION_METADATA),
@@ -466,11 +466,22 @@ function rewriteManifestRoots(input: {
   const rewritten: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(input.value)) {
     if (typeof value === "string" && (key === "appRoot" || key === "agentRoot")) {
-      rewritten[key] = rewritePathWithinAppRoot({
-        appRoot: input.appRoot,
-        path: value,
-        runtimeAppRoot: input.runtimeAppRoot,
-      });
+      // An extension mounted from a node_modules directory above the app root
+      // (an agent workspace member resolving the workspace's install) has its
+      // package root and subagent roots outside the app root. The snapshot
+      // mounts that install under its source root, so rewrite against it the
+      // same way `sourceRoot` entries are.
+      rewritten[key] = isPathInsideOrEqual(value, input.appRoot)
+        ? rewritePathWithinAppRoot({
+            appRoot: input.appRoot,
+            path: value,
+            runtimeAppRoot: input.runtimeAppRoot,
+          })
+        : rewritePathWithinSourceRoot({
+            path: value,
+            snapshotSourceRoot: input.snapshotSourceRoot,
+            sourceRoot: input.sourceRoot,
+          });
       continue;
     }
 
@@ -615,18 +626,18 @@ async function restoreDevelopmentRuntimeArtifactsActivation(input: {
 
 async function validateSnapshotCompiledManifestRoots(input: {
   readonly manifestPath: string;
-  readonly runtimeAppRoot: string;
+  readonly snapshotSourceRoot: string;
 }): Promise<void> {
   const manifest = JSON.parse(await readFile(input.manifestPath, "utf8")) as unknown;
   const rootPaths = collectManifestRootPaths(manifest);
 
   for (const path of rootPaths) {
-    if (isPathInsideOrEqual(path, input.runtimeAppRoot)) {
+    if (isPathInsideOrEqual(path, input.snapshotSourceRoot)) {
       continue;
     }
 
     throw new Error(
-      `Development runtime snapshot manifest root "${path}" is outside runtime app root "${input.runtimeAppRoot}".`,
+      `Development runtime snapshot manifest root "${path}" is outside snapshot source root "${input.snapshotSourceRoot}".`,
     );
   }
 }
