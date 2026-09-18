@@ -528,6 +528,7 @@
     "emulate": "0.6.0",
     "env-runner": "0.1.16",
     "eventsource-parser": "3.1.0",
+    "fast-check": "4.10.1",
     "gray-matter": "4.0.3",
     "historical-eve-0-30-8": "npm:eve@0.30.8",
     "jose": "6.2.3",
