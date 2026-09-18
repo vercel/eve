@@ -997,6 +997,100 @@ describe("development runtime artifact snapshots", () => {
     await expect(realpath(snapshotMountPath)).resolves.toBe(await realpath(packageRoot));
   });
 
+  it("rewrites hoisted extension subagent roots into source snapshots", async () => {
+    const workspaceRoot = await createScratchDirectory(
+      "eve-dev-runtime-hoisted-extension-subagent-",
+    );
+    const appRoot = join(workspaceRoot, "agents", "support");
+    const agentRoot = join(appRoot, "agent");
+    const packageRoot = join(workspaceRoot, "node_modules", "@acme", "crm");
+    const extensionRoot = join(packageRoot, "dist", "extension");
+    const reviewerRoot = join(extensionRoot, "subagents", "reviewer");
+    const compileDirectoryPath = join(appRoot, ".eve", "compile");
+    const manifestPath = join(compileDirectoryPath, "compiled-agent-manifest.json");
+
+    await mkdir(agentRoot, { recursive: true });
+    await mkdir(reviewerRoot, { recursive: true });
+    await mkdir(compileDirectoryPath, { recursive: true });
+    await writeFile(join(workspaceRoot, "pnpm-workspace.yaml"), "packages:\n  - agents/*\n");
+    await writeFile(
+      join(workspaceRoot, "package.json"),
+      JSON.stringify({
+        dependencies: { "@acme/crm": "1.0.0" },
+        private: true,
+      }),
+    );
+    await writeFile(
+      join(packageRoot, "package.json"),
+      JSON.stringify({ name: "@acme/crm", version: "1.0.0" }),
+    );
+    await writeFile(join(reviewerRoot, "agent.ts"), "export const review = true;\n");
+    const compiledManifest = {
+      agentRoot,
+      appRoot,
+      extensionMounts: [{ sourceRoot: extensionRoot }],
+      subagents: [
+        {
+          agent: {
+            agentRoot: reviewerRoot,
+            appRoot: extensionRoot,
+            extensionMounts: [{ sourceRoot: extensionRoot }],
+          },
+        },
+      ],
+    };
+    await writeFile(manifestPath, `${JSON.stringify(compiledManifest, null, 2)}\n`);
+
+    const snapshot = await stageDevelopmentRuntimeArtifactsSnapshot({
+      manifest: compiledManifest,
+      paths: { compileDirectoryPath },
+      project: { appRoot },
+    } as CompileAgentResult);
+    const rewrittenManifest = JSON.parse(
+      await readFile(
+        join(snapshot.runtimeAppRoot, ".eve", "compile", "compiled-agent-manifest.json"),
+        "utf8",
+      ),
+    ) as {
+      subagents: Array<{ agent: { agentRoot: string; appRoot: string } }>;
+    };
+
+    expect(rewrittenManifest.subagents[0]?.agent).toEqual({
+      agentRoot: join(
+        snapshot.snapshotSourceRoot,
+        "node_modules",
+        "@acme",
+        "crm",
+        "dist",
+        "extension",
+        "subagents",
+        "reviewer",
+      ),
+      appRoot: join(
+        snapshot.snapshotSourceRoot,
+        "node_modules",
+        "@acme",
+        "crm",
+        "dist",
+        "extension",
+      ),
+    });
+    expect(
+      existsSync(
+        join(
+          snapshot.snapshotSourceRoot,
+          "node_modules",
+          "@acme",
+          "crm",
+          "dist",
+          "extension",
+          "subagents",
+          "reviewer",
+        ),
+      ),
+    ).toBe(true);
+  });
+
   it("mounts workspace packages nested inside the app root without copying them", async () => {
     const appRoot = await createScratchDirectory("eve-dev-runtime-nested-workspace-");
     const agentRoot = join(appRoot, "agent");
