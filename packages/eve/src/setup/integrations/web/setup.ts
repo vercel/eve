@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { resolveEveProjectContext } from "#internal/project-context.js";
+import { detectPackageManager, type PackageManagerKind } from "#setup/package-manager.js";
 import { pathExists, writeTextFile } from "#setup/scaffold/files.js";
 import { WEB_CHANNEL_TEMPLATE } from "#setup/scaffold/create/web-template.js";
 import {
@@ -36,6 +37,7 @@ export default await withEve({
 `;
 
 export interface WebSetupDeps {
+  detectPackageManager: typeof detectPackageManager;
   pathExists: typeof pathExists;
   readTextFile(path: string): Promise<string>;
   resolveEveProjectContext: typeof resolveEveProjectContext;
@@ -43,13 +45,16 @@ export interface WebSetupDeps {
 }
 
 const defaultDeps: WebSetupDeps = {
+  detectPackageManager,
   pathExists,
   readTextFile: (path) => readFile(path, "utf8"),
   resolveEveProjectContext,
   writeTextFile,
 };
 
-export type WebSetupPlan = Record<string, never>;
+export interface WebSetupPlan {
+  packageManager: PackageManagerKind;
+}
 
 export async function prepareWebSetup(
   context: SetupPrepareContext,
@@ -59,7 +64,20 @@ export async function prepareWebSetup(
   if (project.kind === "workspace") {
     throw new Error("Web Chat setup requires a selected workspace agent.");
   }
-  return {};
+  return { packageManager: (await deps.detectPackageManager(project.environmentRoot)).kind };
+}
+
+function devCommand(packageManager: PackageManagerKind): string {
+  switch (packageManager) {
+    case "npm":
+      return "npm run dev";
+    case "pnpm":
+      return "pnpm dev";
+    case "yarn":
+      return "yarn dev";
+    case "bun":
+      return "bun run dev";
+  }
 }
 
 async function configurePeerServiceScripts(root: string, deps: WebSetupDeps): Promise<void> {
@@ -93,7 +111,7 @@ async function assertInstallerOwned(path: string, allowed: readonly string[]): P
 }
 
 export async function applyWebSetup(
-  _plan: WebSetupPlan,
+  plan: WebSetupPlan,
   context: SetupApplyContext,
   deps: WebSetupDeps = defaultDeps,
 ) {
@@ -139,7 +157,10 @@ export default withEve(nextConfig);
   await deps.writeTextFile(vercelTsPath, PEER_SERVICE_VERCEL_CONFIG, { force: true });
   await configurePeerServiceScripts(project.environmentRoot, deps);
   context.presenter.log.success("Configured channel: web");
-  return { facts: [], deploymentRequired: true as const };
+  context.presenter.nextSteps([
+    `Run \`${devCommand(plan.packageManager)}\` from the project root to start Web Chat and your agent services.`,
+  ]);
+  return { facts: [] };
 }
 
 export const WEB_SETUP = defineSetupIntegration({

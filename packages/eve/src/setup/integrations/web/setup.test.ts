@@ -8,6 +8,10 @@ import { applyWebSetup, prepareWebSetup, type WebSetupDeps } from "./setup.js";
 
 function deps(): WebSetupDeps {
   return {
+    detectPackageManager: vi.fn<WebSetupDeps["detectPackageManager"]>(async () => ({
+      kind: "pnpm",
+      source: "lockfile",
+    })),
     pathExists: vi.fn(async () => false),
     readTextFile: vi.fn(async () => '{"scripts":{"dev":"eve dev"}}\n'),
     resolveEveProjectContext: vi.fn(async (appRoot: string): Promise<EveProjectContext> => ({
@@ -30,7 +34,9 @@ describe("Web setup", () => {
       resolveVercelProject: async () => ({ orgId: "team", projectId: "project" }),
     });
 
-    await expect(prepareWebSetup(ctx.prepare, effects)).resolves.toEqual({});
+    await expect(prepareWebSetup(ctx.prepare, effects)).resolves.toEqual({
+      packageManager: "pnpm",
+    });
   });
 
   it("rejects an unselected workspace before writing an agent directory", async () => {
@@ -51,7 +57,7 @@ describe("Web setup", () => {
       resolveVercelProject: async () => ({ orgId: "team", projectId: "project" }),
     });
 
-    await expect(applyWebSetup({}, ctx.apply, effects)).rejects.toThrow(
+    await expect(applyWebSetup({ packageManager: "pnpm" }, ctx.apply, effects)).rejects.toThrow(
       "Web Chat setup requires a selected workspace agent.",
     );
 
@@ -76,7 +82,7 @@ describe("Web setup", () => {
       prompter: createFakePrompter().prompter,
       resolveVercelProject: async () => ({ orgId: "team", projectId: "project" }),
     });
-    await applyWebSetup({}, ctx.apply, effects);
+    await applyWebSetup({ packageManager: "pnpm" }, ctx.apply, effects);
 
     expect(effects.writeTextFile).toHaveBeenNthCalledWith(
       1,
@@ -118,7 +124,7 @@ describe("Web setup", () => {
       resolveVercelProject: async () => ({ orgId: "team", projectId: "project" }),
     });
 
-    await applyWebSetup({}, ctx.apply, effects);
+    await applyWebSetup({ packageManager: "pnpm" }, ctx.apply, effects);
 
     expect(effects.writeTextFile).toHaveBeenCalledWith(
       "/project/package.json",
@@ -132,16 +138,19 @@ describe("Web setup", () => {
     );
   });
 
-  it("configures peer services for a standalone agent", async () => {
+  it("configures peer services for a standalone agent and prints the local command", async () => {
     const effects = deps();
+    const fake = createFakePrompter();
     const ctx = createSetupContexts({
       appRoot: "/project",
       asker: headlessAsker(),
       environment: integrationSetupEnvironment("cli-missing", { kind: "unresolved" }),
-      prompter: createFakePrompter().prompter,
+      prompter: fake.prompter,
       resolveVercelProject: async () => ({ orgId: "team", projectId: "project" }),
     });
-    await applyWebSetup({}, ctx.apply, effects);
+    await expect(applyWebSetup({ packageManager: "npm" }, ctx.apply, effects)).resolves.toEqual({
+      facts: [],
+    });
     expect(effects.writeTextFile).toHaveBeenCalledWith(
       "/project/agent/channels/eve.ts",
       expect.any(String),
@@ -158,6 +167,11 @@ describe("Web setup", () => {
       "/project/apps/web/next.config.ts",
       expect.stringContaining("export default nextConfig"),
       { force: true },
+    );
+    expect(fake.prompter.note).toHaveBeenCalledWith(
+      "Run `npm run dev` from the project root to start Web Chat and your agent services.",
+      "Next steps",
+      { tone: "success" },
     );
   });
 });
