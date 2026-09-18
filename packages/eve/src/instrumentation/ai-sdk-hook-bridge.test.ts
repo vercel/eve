@@ -32,6 +32,8 @@ const traceContext = (audience: "public" | "private" | "unknown" = "unknown") =>
   principalType: "anonymous",
 });
 
+const contentTracePolicy = () => ({ emit: true, recordInputs: true, recordOutputs: true }) as const;
+
 function createInstrumentationHooks(
   ...args: Parameters<typeof createUnboundInstrumentationHooks>
 ): ReturnType<typeof createUnboundInstrumentationHooks> {
@@ -351,7 +353,11 @@ describe("createAiSdkHookBridge", () => {
   it("terminalizes started operations when the attempt errors", async () => {
     const after = vi.fn();
     const hooks = createInstrumentationHooks([
-      { capture: "content", events: { "model.call.failed": after }, name: "after" },
+      {
+        events: { "model.call.failed": after },
+        name: "after",
+        tracePolicy: contentTracePolicy,
+      },
     ]);
     const bridge = createAiSdkHookBridge(scope, hooks);
 
@@ -370,7 +376,11 @@ describe("createAiSdkHookBridge", () => {
   it("terminalizes started operations with the abort reason", async () => {
     const after = vi.fn();
     const hooks = createInstrumentationHooks([
-      { capture: "content", events: { "tool.call.failed": after }, name: "after" },
+      {
+        events: { "tool.call.failed": after },
+        name: "after",
+        tracePolicy: contentTracePolicy,
+      },
     ]);
     const bridge = createAiSdkHookBridge(scope, hooks);
     const toolCall = { input: {}, toolCallId: "tool-1", toolName: "search" };
@@ -434,9 +444,9 @@ describe("createAiSdkHookBridge", () => {
     });
     const hooks = createInstrumentationHooks([
       {
-        capture: "content",
         events: { "model.call.completed": after, "model.call.started": before },
         name: "spy",
+        tracePolicy: contentTracePolicy,
       },
     ]);
     const bridge = createAiSdkHookBridge(scope, hooks);
@@ -558,13 +568,13 @@ describe("createAiSdkHookBridge", () => {
       const actionStarted = vi.fn();
       const hooks = createInstrumentationHooks([
         {
-          capture: "content",
           events: {
             "action.started": actionStarted,
             "tool.call.completed": after,
             "tool.call.started": before,
           },
           name: "spy",
+          tracePolicy: contentTracePolicy,
         },
       ]);
       const bridge = createAiSdkHookBridge(scope, hooks);
@@ -664,9 +674,9 @@ describe("createAiSdkHookBridge", () => {
     const hooks = createInstrumentationHooks([
       { events: { "tool.call.started": metadataOnly }, name: "metadata-only" },
       {
-        capture: "content",
         events: { "tool.call.started": wantsContent },
         name: "wants-content",
+        tracePolicy: contentTracePolicy,
       },
     ]);
     const bridge = createAiSdkHookBridge(scope, hooks);

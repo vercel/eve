@@ -9,8 +9,6 @@ export interface SpanExportContext {
 }
 
 export type SpanExportDecision =
-  /** @deprecated Return `{ emit: boolean }` instead. */
-  | boolean
   | { readonly emit: boolean }
   | {
       readonly redact: true;

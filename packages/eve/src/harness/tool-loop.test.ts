@@ -11697,9 +11697,9 @@ describe("createToolLoopHarness", () => {
       const attemptCompleted = vi.fn();
       const hooks = createInstrumentationHooks([
         {
-          capture: "content",
           events: { "step.attempt.completed": attemptCompleted },
           name: "analytics",
+          tracePolicy: () => ({ emit: true, recordInputs: true, recordOutputs: true }),
         },
       ]);
       const runStep = createToolLoopHarness(
@@ -11739,7 +11739,12 @@ describe("createToolLoopHarness", () => {
         recordOutputs: true,
         tracePolicy: () => ({ emit: true, recordInputs: false, recordOutputs: false }),
       });
-      const hooks = createInstrumentationHooks([{ capture: "content", name: "analytics" }]);
+      const hooks = createInstrumentationHooks([
+        {
+          name: "analytics",
+          tracePolicy: () => ({ emit: true, recordInputs: true, recordOutputs: true }),
+        },
+      ]);
       const runStep = createToolLoopHarness(
         createTestConfig("conversation", undefined, {
           instrumentation: bindHookInstrumentation(hooks, undefined, true),
