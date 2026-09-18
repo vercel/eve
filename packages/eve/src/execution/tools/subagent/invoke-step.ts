@@ -394,19 +394,33 @@ function applyTaskDispatchContext(
 
 /** Applies an owner-scoped child settlement to the parent session's canonical state. */
 export async function settleTaskAgentInvocationStep(input: {
-  readonly accumulateUsage?: boolean;
   readonly ownerId: string;
   readonly result: RuntimeSubagentChildResult;
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
   readonly taskId?: string | undefined;
 }): Promise<{
+  readonly settled: boolean;
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
 }> {
   "use step";
 
   const durable = readDurableSession(input.sessionState);
+  const handles = getAgentHandleStore(durable.state)?.handles ?? [];
+  const handle = handles.find(
+    (candidate) =>
+      candidate.phase === "claimed" &&
+      candidate.ownerId === input.ownerId &&
+      candidate.callId === input.result.callId,
+  );
+  if (handle?.phase !== "claimed") {
+    return {
+      settled: false,
+      serializedContext: input.serializedContext,
+      sessionState: input.sessionState,
+    };
+  }
   const serializedContext = await flushAgentInvocationTraces(
     settleAgentInvocationTrace({
       acceptedAtMs: Date.now(),
@@ -415,17 +429,6 @@ export async function settleTaskAgentInvocationStep(input: {
       sessionId: durable.sessionId,
     }),
   );
-  const handles = getAgentHandleStore(durable.state)?.handles ?? [];
-  const candidates = handles.filter(
-    (candidate) => candidate.phase === "claimed" && candidate.ownerId === input.ownerId,
-  );
-  const handle =
-    candidates.find(
-      (candidate) => candidate.phase === "claimed" && candidate.callId === input.result.callId,
-    ) ?? (candidates.length === 1 ? candidates[0] : undefined);
-  if (handle?.phase !== "claimed") {
-    return { serializedContext, sessionState: input.sessionState };
-  }
 
   const nextHandles =
     input.result.outcome.kind === "terminal"
@@ -458,16 +461,15 @@ export async function settleTaskAgentInvocationStep(input: {
           : session
         : clearProxyInputRequestsForTask(session, input.taskId);
   }
-  if (input.accumulateUsage !== false) {
-    session = setTurnUsageState(
-      session,
-      accumulateSessionUsage({
-        previous: getTurnUsageState(session.state),
-        usage: input.result.outcome.usageDelta,
-      }),
-    );
-  }
+  session = setTurnUsageState(
+    session,
+    accumulateSessionUsage({
+      previous: getTurnUsageState(session.state),
+      usage: input.result.outcome.usageDelta,
+    }),
+  );
   return {
+    settled: true,
     serializedContext,
     sessionState: replaceDurableSessionSnapshot({ session, state: input.sessionState }),
   };

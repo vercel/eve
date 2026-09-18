@@ -494,11 +494,10 @@ function batchingInput(count = 100, crossTurn = false) {
         agent: { system: "" },
         state: {
           "eve.runtime.workflowInvocations": {
-            version: 1,
+            version: 2,
             invocations: Array.from({ length: count }, (_, index) => ({
               callId: `task_${index}`,
               toolName: "worker",
-              resultKind: "tool" as const,
               lifetime: "session" as const,
               origin: { turnId: crossTurn ? `turn-${index + 1}` : "turn-1", stepIndex: 0 },
               address: { runId: `run-${index}`, hookToken: `inbox-${index}` },
@@ -512,7 +511,6 @@ function batchingInput(count = 100, crossTurn = false) {
               {
                 callId: "other-cohort",
                 toolName: "worker",
-                resultKind: "tool" as const,
                 lifetime: "session" as const,
                 origin: { turnId: "turn-2", stepIndex: 0 },
                 address: { runId: "other-run", hookToken: "other-inbox" },

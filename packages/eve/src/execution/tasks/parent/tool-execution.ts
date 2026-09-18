@@ -315,7 +315,7 @@ class BackgroundToolExecutionScope implements BackgroundToolExecutor {
     let workflowInput = parseWorkflowToolInput(input.input.toolInput, input.input.definition.name);
     const parentTurnId = activeTurnId(input.emission);
     let subagentProjection =
-      workflow.resultKind === "subagent"
+      workflow.nodeId !== undefined
         ? projectSubagentTask({
             ctx: input.ctx,
             input: workflowInput,
@@ -374,14 +374,13 @@ class BackgroundToolExecutionScope implements BackgroundToolExecutor {
     const prepared = prepareBackgroundTask(taskInput);
     const task = {
       ...prepared,
-      resultKind: workflow.resultKind ?? "tool",
       task: {
         ...prepared.task,
         activityWorkIdentity: taskInput.activityObserver?.workIdentity,
       },
     };
     if (
-      workflow.resultKind === "subagent" &&
+      workflow.nodeId !== undefined &&
       subagentProjection !== undefined &&
       subagentProjection.identity !== undefined
     ) {
@@ -402,7 +401,7 @@ class BackgroundToolExecutionScope implements BackgroundToolExecutor {
       };
     }
     if (
-      workflow.resultKind === "subagent" &&
+      workflow.nodeId !== undefined &&
       subagentProjection !== undefined &&
       subagentProjection.identity === undefined
     ) {
@@ -461,7 +460,6 @@ class BackgroundToolExecutionScope implements BackgroundToolExecutor {
         callId: taskInput.callId,
         executeInput: workflow.executeInput?.(workflowInput),
         input: workflowInput,
-        resultKind: workflow.resultKind,
         session: callbackSession,
         stepIndex: input.emission.stepIndex,
         toolName: input.input.definition.name,
@@ -474,7 +472,7 @@ class BackgroundToolExecutionScope implements BackgroundToolExecutor {
       address: { ...task.address, runId: owner.runId },
     };
     input.record.task = backgroundTask;
-    if (workflow.resultKind !== "subagent") {
+    if (workflow.nodeId === undefined) {
       return { kind: "started", task: backgroundTask };
     }
 

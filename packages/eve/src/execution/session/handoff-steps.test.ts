@@ -38,12 +38,11 @@ describe("validateSessionCheckpointStep", () => {
     readDurableSessionMock.mockReturnValue({
       state: {
         "eve.runtime.workflowInvocations": {
-          version: 1,
+          version: 2,
           invocations: [
             {
               callId: "task",
               toolName: "research",
-              resultKind: "tool" as const,
               lifetime: "session" as const,
               origin: { turnId: "turn", stepIndex: 0 },
               address: { runId: "run", hookToken: 42 },
@@ -67,17 +66,20 @@ describe("validateSessionCheckpointStep", () => {
     );
   });
 
-  it.each([4, 6])("rejects checkpoint version %s before reading nested state", async (version) => {
-    const checkpoint = createCheckpoint();
-    // Simulate an incompatible checkpoint received over the wire.
-    Object.assign(checkpoint, { version });
+  it.each([4, 5, 7])(
+    "rejects checkpoint version %s before reading nested state",
+    async (version) => {
+      const checkpoint = createCheckpoint();
+      // Simulate an incompatible checkpoint received over the wire.
+      Object.assign(checkpoint, { version });
 
-    await expect(validateSessionCheckpointStep({ checkpoint })).rejects.toThrow(
-      `Unsupported session checkpoint version ${version}`,
-    );
-    expect(deserializeContextMock).not.toHaveBeenCalled();
-    expect(readDurableSessionMock).not.toHaveBeenCalled();
-  });
+      await expect(validateSessionCheckpointStep({ checkpoint })).rejects.toThrow(
+        `Unsupported session checkpoint version ${version}`,
+      );
+      expect(deserializeContextMock).not.toHaveBeenCalled();
+      expect(readDurableSessionMock).not.toHaveBeenCalled();
+    },
+  );
 
   it.each([undefined, -1, NaN, Infinity, "30000", true])(
     "rejects an invalid renewal duration (%s)",
@@ -93,7 +95,7 @@ describe("validateSessionCheckpointStep", () => {
 
 function createCheckpoint(): SessionCheckpoint {
   return {
-    version: 5,
+    version: 6,
     sessionTimeoutMs: false,
     mode: "conversation",
     serializedContext: {},

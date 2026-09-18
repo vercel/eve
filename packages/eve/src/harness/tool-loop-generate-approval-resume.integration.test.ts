@@ -878,7 +878,6 @@ describe("tool loop generate approval resume (real AI SDK)", () => {
         session = registerWorkflowToolRun(session, {
           callId: "analysis",
           toolName: "analysis",
-          resultKind: "tool" as const,
           lifetime: "session" as const,
           origin: { turnId: "turn-1", stepIndex: 0 },
           address: { runId: "task-run", hookToken: "task-token" },

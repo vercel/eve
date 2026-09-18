@@ -52,7 +52,6 @@ describe("background invocation origin", () => {
         {
           callId: "task",
           toolName: { kind: "subagent", name: "research", agentId: "agent" }.name,
-          resultKind: "tool" as const,
           lifetime: "session" as const,
           origin: { turnId: "turn-1", stepIndex: 0 },
           address: { runId: "task-run", hookToken: "task-inbox" },

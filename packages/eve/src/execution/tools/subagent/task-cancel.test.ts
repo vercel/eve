@@ -20,7 +20,6 @@ vi.mock("#internal/logging.js", () => ({ createLogger: vi.fn(() => ({})), logErr
 const entry: BackgroundWorkflowToolRun = {
   callId: "call",
   toolName: "research",
-  resultKind: "tool",
   lifetime: "session",
   origin: { turnId: "turn", stepIndex: 0 },
   address: { runId: "run", hookToken: "hook" },

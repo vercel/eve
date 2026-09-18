@@ -76,7 +76,6 @@ function indexedTask(taskId: string): BackgroundWorkflowToolRun {
   return {
     callId: taskId,
     toolName: "research",
-    resultKind: "tool" as const,
     lifetime: "session" as const,
     origin: { turnId: "turn_0", stepIndex: 0 },
     address: { runId: `${taskId}-run`, hookToken: `${taskId}-inbox` },
@@ -100,7 +99,7 @@ function makeSessionState(tasks: readonly BackgroundWorkflowToolRun[]): DurableS
         continuationToken: "http:test",
         history: [],
         sessionId: "parent-session",
-        state: { "eve.runtime.workflowInvocations": { version: 1, invocations: tasks } },
+        state: { "eve.runtime.workflowInvocations": { version: 2, invocations: tasks } },
       },
     },
     version: 1,

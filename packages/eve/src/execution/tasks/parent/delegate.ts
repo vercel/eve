@@ -52,7 +52,6 @@ export function prepareBackgroundTask(input: {
   return {
     callId: input.callId,
     toolName: input.metadata.name,
-    resultKind: input.metadata.kind === "subagent" ? "subagent" : "tool",
     lifetime: "session",
     origin: { turnId: input.parentTurnId, stepIndex: input.parentStepIndex ?? 0 },
     address: {

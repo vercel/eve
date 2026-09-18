@@ -1518,12 +1518,11 @@ describe("workflowEntry integration", () => {
                     state: {
                       ...session.state,
                       "eve.runtime.workflowInvocations": {
-                        version: 1,
+                        version: 2,
                         invocations: [
                           {
                             callId: "task",
                             toolName: "research",
-                            resultKind: "tool" as const,
                             lifetime: "session" as const,
                             origin: { turnId: "turn", stepIndex: 0 },
                             address: { runId: "run", hookToken: 42 },

@@ -1560,12 +1560,11 @@ describe("createAgentOtelInstrumentation", () => {
         sessionId: scope.sessionId,
         sessionState: {
           "eve.runtime.workflowInvocations": {
-            version: 1,
+            version: 2,
             invocations: [
               {
                 callId: "workflow",
                 toolName: "coordinate",
-                resultKind: "tool" as const,
                 lifetime: "turn" as const,
                 origin: { turnId: "turn-1", stepIndex: 0 },
                 address: { runId: "workflow-run", hookToken: "workflow-hook" },

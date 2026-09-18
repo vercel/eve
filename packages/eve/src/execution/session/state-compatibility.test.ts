@@ -22,7 +22,6 @@ const activity = {
 const task = {
   callId: "task",
   toolName: metadata.name,
-  resultKind: "tool" as const,
   lifetime: "session" as const,
   origin: { turnId: "turn", stepIndex: 0, futureOrigin: true },
   address: { runId: "run", hookToken: "inbox", futureAddress: true },
@@ -104,14 +103,13 @@ describe("additive durable state", () => {
   it("preserves task extensions through parsing, replayed creation and duplicate terminal deliveries", () => {
     const state = {
       authored: { opaque: true },
-      "eve.runtime.workflowInvocations": { version: 1, invocations: [task], futureIndex: true },
+      "eve.runtime.workflowInvocations": { version: 2, invocations: [task], futureIndex: true },
     };
     expect(getBackgroundWorkflowToolRuns(restored(state))).toEqual([task]);
     expect(parseActivityWorkIdentityV1(activity)).toEqual(activity);
     const updated = registerWorkflowToolRun(session(restored(state)), {
       callId: "task",
       toolName: metadata.name,
-      resultKind: "tool" as const,
       lifetime: "session" as const,
       origin: { turnId: "turn", stepIndex: 0 },
       address: { runId: "new-run", hookToken: "inbox" },
@@ -137,7 +135,7 @@ describe("additive durable state", () => {
     expect(restored(saved)).toMatchObject({
       authored: { opaque: true },
       "eve.runtime.workflowInvocations": {
-        version: 1,
+        version: 2,
         futureIndex: true,
         invocations: [
           {
@@ -182,7 +180,7 @@ describe("handoff state inspection", () => {
         checkpoint({
           "eve.agent.handles": { handles: [], futureStore: true },
           authored: { version: "anything", values: [null, false] },
-          "eve.runtime.workflowInvocations": { version: 1, invocations: [task], futureIndex: true },
+          "eve.runtime.workflowInvocations": { version: 2, invocations: [task], futureIndex: true },
         }),
       ),
     ).toBe(true);
@@ -223,7 +221,7 @@ describe("handoff state inspection", () => {
     expect(() =>
       isSessionStateIdleForHandoff(
         checkpoint({
-          "eve.runtime.workflowInvocations": { version: 1, invocations: [incompatible] },
+          "eve.runtime.workflowInvocations": { version: 2, invocations: [incompatible] },
         }),
       ),
     ).toThrow("Corrupt workflow invocation registry");
@@ -234,7 +232,7 @@ describe("handoff state inspection", () => {
         checkpoint({
           "eve.runtime.pendingAuthorization": {},
           "eve.runtime.workflowInvocations": {
-            version: 1,
+            version: 2,
             invocations: [{ ...task, address: { ...task.address, runId: null } }],
           },
         }),
@@ -247,7 +245,7 @@ describe("handoff state inspection", () => {
         checkpoint({
           "eve.runtime.pendingAuthorization": {},
           "eve.runtime.workflowInvocations": {
-            version: 1,
+            version: 2,
             invocations: [
               { ...task, task: { ...task.task, terminalView: { status: "completed" } } },
             ],

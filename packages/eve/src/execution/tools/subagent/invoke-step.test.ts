@@ -253,7 +253,6 @@ describe("owner agent invocation dispatch", () => {
       const indexedSession = registerWorkflowToolRun(session, {
         callId: "task-1",
         toolName: { kind: taskKind, name: "research" }.name,
-        resultKind: "tool" as const,
         lifetime: "session" as const,
         origin: { turnId: "turn-1", stepIndex: 0 },
         address: { runId: "task-run", hookToken: "task-token" },
@@ -342,7 +341,6 @@ describe("owner agent invocation dispatch", () => {
     const indexedSession = registerWorkflowToolRun(session, {
       callId: "task-1",
       toolName: "research",
-      resultKind: "tool" as const,
       lifetime: "session" as const,
       origin: { turnId: "turn-1", stepIndex: 0 },
       address: { runId: "task-run", hookToken: "task-token" },
@@ -393,12 +391,11 @@ describe("owner agent invocation dispatch", () => {
       state: {
         ...session.state,
         "eve.runtime.workflowInvocations": {
-          version: 1,
+          version: 2,
           invocations: [
             {
               callId: "task-1",
               toolName: "research",
-              resultKind: "tool" as const,
               lifetime: "session" as const,
               origin: { turnId: "turn-1", stepIndex: 0 },
               address: { runId: "task-run", hookToken: "task-token" },
@@ -479,6 +476,7 @@ describe("task-owned agent settlement", () => {
   it.each(["parked", "terminal"] as const)("applies a %s child outcome", async (kind) => {
     const claimed = {
       ...availableRecord,
+      callId: "call-1",
       operationId: "operation-1",
       phase: "claimed" as const,
       ownerId: "task-1",
@@ -521,6 +519,7 @@ describe("task-owned agent settlement", () => {
   it("releases every remaining claim for a completed workflow run", async () => {
     const claimed = {
       ...availableRecord,
+      callId: "call-1",
       operationId: "operation-1",
       ownerId: "workflow-run-1",
       phase: "claimed" as const,
@@ -543,6 +542,7 @@ describe("task-owned agent settlement", () => {
   it("parks every remaining claim for a cancelled workflow run", async () => {
     const claimed = {
       ...availableRecord,
+      callId: "call-1",
       operationId: "operation-1",
       ownerId: "workflow-run-1",
       phase: "claimed" as const,
@@ -571,6 +571,7 @@ describe("task-owned agent settlement", () => {
   it("keeps a cancelled parked child resumable after settlement", async () => {
     const claimed = {
       ...availableRecord,
+      callId: "call-1",
       operationId: "operation-1",
       phase: "claimed" as const,
       ownerId: "workflow-run-1",

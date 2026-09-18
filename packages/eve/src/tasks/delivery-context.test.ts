@@ -217,7 +217,6 @@ function taskEntry(
   return {
     callId: taskId,
     toolName: metadata.name,
-    resultKind: "tool" as const,
     lifetime: "session" as const,
     origin: { turnId: createdByTurnId, stepIndex: 0 },
     address: { runId: `run-${taskId}`, hookToken: `inbox-${taskId}` },
@@ -232,6 +231,6 @@ function taskEntry(
 
 function taskState(tasks: readonly ReturnType<typeof taskEntry>[]): SessionStateMap {
   return {
-    "eve.runtime.workflowInvocations": { version: 1, invocations: tasks },
+    "eve.runtime.workflowInvocations": { version: 2, invocations: tasks },
   } as SessionStateMap;
 }

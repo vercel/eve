@@ -7,11 +7,10 @@ describe("workflow task cohort lookup", () => {
   it("projects the same identities as the full task index", () => {
     const state = {
       "eve.runtime.workflowInvocations": {
-        version: 1,
+        version: 2,
         invocations: ["turn-1", "turn-2", "turn-2"].map((createdByTurnId, index) => ({
           callId: `task_${index}`,
           toolName: "worker",
-          resultKind: "tool" as const,
           lifetime: "session" as const,
           origin: { turnId: createdByTurnId, stepIndex: 0 },
           address: { runId: `run-${index}`, hookToken: `inbox-${index}` },

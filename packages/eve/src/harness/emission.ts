@@ -277,7 +277,7 @@ function readSubagentBackgroundTaskReceipt(
   result: RuntimeToolResultActionResult,
   tools: HarnessToolMap | undefined,
 ): { readonly status: "working"; readonly taskId: string } | undefined {
-  if (result.isError === true || tools?.get(result.toolName)?.resultKind !== "subagent") {
+  if (result.isError === true || tools?.get(result.toolName)?.nodeId === undefined) {
     return undefined;
   }
   if (typeof result.output !== "object" || result.output === null || Array.isArray(result.output)) {

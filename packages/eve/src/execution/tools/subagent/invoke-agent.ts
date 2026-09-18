@@ -49,7 +49,10 @@ export type AgentInvocationEvent =
   | SubagentAuthorizationEventHookPayload
   | SubagentInputRequestHookPayload;
 
-export type AgentInvocationReply = AgentInvocationEvent | RuntimeActionResultHookPayload;
+export type AgentInvocationReply =
+  | AgentInvocationEvent
+  | RuntimeActionResultHookPayload
+  | { readonly kind: "agent-settled"; readonly callId: string };
 
 /** Invokes an agent from a workflow tool. */
 export async function agent(
@@ -71,18 +74,8 @@ export async function agent(
 export async function invokeAgent(
   ctx: ToolContext,
   input: InternalAgentInput,
-  options: { readonly invocationId: string; readonly returnResult: true },
-): Promise<JsonValue | RuntimeSubagentResult>;
-export async function invokeAgent(
-  ctx: ToolContext,
-  input: InternalAgentInput,
-  options?: { readonly invocationId?: string; readonly returnResult?: false },
-): Promise<JsonValue>;
-export async function invokeAgent(
-  ctx: ToolContext,
-  input: InternalAgentInput,
-  options: { readonly invocationId?: string; readonly returnResult?: boolean } = {},
-): Promise<JsonValue | RuntimeSubagentResult> {
+  options: { readonly invocationId?: string } = {},
+): Promise<JsonValue> {
   validateAgentInput(input);
   const run = readWorkflowToolRunRef(ctx);
   const owner = readWorkflowToolRunOwner(ctx);
@@ -114,13 +107,24 @@ export async function invokeAgent(
               replyTo: replies.token,
               request: { kind: "agent-settled", result },
             });
+            // The enclosing workflow cannot finish before its owner applies settlement.
+            for (;;) {
+              const acknowledgement = await nextAgentReply(iterator, ctx.abortSignal);
+              if (acknowledgement.done)
+                throw new Error(`Agent "${input.target}" closed before settlement.`);
+              if (
+                acknowledgement.value.kind === "agent-settled" &&
+                acknowledgement.value.callId === invocationId
+              )
+                break;
+            }
           }
-          if (options.returnResult === true && run.execution === "blocking") return result;
           if (result.isError === true) throw result.output;
           return result.output;
         }
         continue;
       }
+      if (reply.kind === "agent-settled") continue;
       if (reply.kind === "subagent-input-request") {
         await resumeHookStep(owner.inbox, {
           kind: "request",

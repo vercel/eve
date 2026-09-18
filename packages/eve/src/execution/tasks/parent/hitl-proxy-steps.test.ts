@@ -78,12 +78,11 @@ describe("recordTaskInputRequestStep", () => {
       sessionId: "parent-session",
       state: {
         "eve.runtime.workflowInvocations": {
-          version: 1,
+          version: 2,
           invocations: [
             {
               callId: "task-1",
               toolName: "export",
-              resultKind: "tool" as const,
               lifetime: "session" as const,
               origin: { turnId: "turn-1", stepIndex: 0 },
               address: { runId: "task-run", hookToken: "task-token" },
@@ -144,12 +143,11 @@ describe("recordTaskInputRequestStep", () => {
       state: setAgentHandleStore(
         {
           "eve.runtime.workflowInvocations": {
-            version: 1,
+            version: 2,
             invocations: [
               {
                 callId: "task-1",
                 toolName: "export",
-                resultKind: "tool" as const,
                 lifetime: "session" as const,
                 origin: { turnId: "turn-1", stepIndex: 0 },
                 address: { runId: "task-run", hookToken: "task-token" },
@@ -215,13 +213,12 @@ describe("recordTerminalTaskViewsStep", () => {
       state: setAgentHandleStore(
         {
           "eve.runtime.workflowInvocations": {
-            version: 1,
+            version: 2,
             invocations: [
               {
                 callId: "task-1",
                 toolName: { agentId: "agent-1", kind: "subagent", mode: "local", name: "research" }
                   .name,
-                resultKind: "tool" as const,
                 lifetime: "session" as const,
                 origin: { turnId: "turn-1", stepIndex: 0 },
                 address: { runId: "task-run", hookToken: "task-token" },
@@ -310,12 +307,11 @@ describe("recordTerminalTaskViewsStep", () => {
       sessionId: "parent-session",
       state: {
         "eve.runtime.workflowInvocations": {
-          version: 1,
+          version: 2,
           invocations: [
             {
               callId: "task-1",
               toolName: "export",
-              resultKind: "tool" as const,
               lifetime: "session" as const,
               origin: { turnId: "turn-1", stepIndex: 0 },
               address: { runId: "task-run", hookToken: "task-token" },

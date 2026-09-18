@@ -44,7 +44,7 @@ async function createTemporaryAppRoot(options?: { sourceGraphHash?: string }): P
       generator: { name: "eve", version: "0.0.0-test" },
       kind: "eve-compile-metadata",
       status: "ready",
-      version: 5,
+      version: 6,
     })}\n`,
   );
   return appRoot;

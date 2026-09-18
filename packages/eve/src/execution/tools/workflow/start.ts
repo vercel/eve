@@ -54,7 +54,6 @@ export async function startWorkflowTask(input: {
       executeInput: task.executeInput,
       input: task.input,
       owner: input.owner,
-      resultKind: task.resultKind,
       session: {
         auth: { current: input.auth, initiator: input.initiatorAuth },
         id: session.sessionId,
@@ -71,7 +70,6 @@ export async function startWorkflowTask(input: {
         lifetime: "turn",
         origin: { turnId: batchEvent.turnId, stepIndex: batchEvent.stepIndex },
         address: started,
-        resultKind: task.resultKind ?? "tool",
         toolName: task.toolName,
       }),
     };

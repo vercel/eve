@@ -36,7 +36,6 @@ export async function startSlowCancelledTaskStep(input: {
   return {
     callId: taskId,
     toolName: { kind: "tool", name: "slow-cancel" }.name,
-    resultKind: "tool" as const,
     lifetime: "session" as const,
     origin: { turnId: "turn_0", stepIndex: 0 },
     address: { runId: run.runId, hookToken: taskInboxToken },

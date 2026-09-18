@@ -227,7 +227,6 @@ function resolveHarnessToolDefinition(input: {
         rootOnly: input.tool.rootOnly,
       }),
       nodeId: input.tool.task.nodeId,
-      resultKind: input.tool.task.resultKind,
       workflowId: input.tool.task.workflowId,
     });
   }

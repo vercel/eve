@@ -17,7 +17,6 @@ const waiting = (turnId: string): BlockingWorkflowToolRun => ({
   lifetime: "turn",
   callId: "same-call",
   toolName: "research",
-  resultKind: "tool",
   origin: { turnId, stepIndex: 0 },
   address: { runId: `run-${turnId}`, hookToken: `hook-${turnId}` },
 });
@@ -93,7 +92,7 @@ describe("shared workflow invocation ownership", () => {
     const old = task("old");
     const retained = { ...old, task: { ...old.task, terminalView: { status: "completed" } } };
     let session: { state?: SessionStateMap } = {
-      state: { "eve.runtime.workflowInvocations": { version: 1, invocations: [retained] } },
+      state: { "eve.runtime.workflowInvocations": { version: 2, invocations: [retained] } },
     };
     session = registerWorkflowToolRun(session, waiting("turn-b"));
     session = registerWorkflowToolRun(session, task("live"));

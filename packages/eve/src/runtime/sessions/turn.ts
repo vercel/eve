@@ -5,18 +5,10 @@ import type { AgentSourceOwner } from "#compiler/source-graph.js";
 import type { PreparedToolBehavior } from "#tools/behavior.js";
 
 /** Grouped durable workflow metadata for one prepared harness tool. */
-export type PreparedRuntimeWorkflowTask =
-  | {
-      readonly nodeId?: never;
-      readonly resultKind?: "tool";
-      readonly workflowId: string;
-    }
-  | {
-      readonly nodeId: string;
-      readonly resultKind: "subagent";
-      readonly workflowId: string;
-    };
-
+export interface PreparedRuntimeWorkflowTask {
+  readonly nodeId?: string;
+  readonly workflowId: string;
+}
 /**
  * Serializable authored tool descriptor prepared by the runtime for one
  * harness turn.

@@ -25,12 +25,11 @@ function fixture(turnId = ""): PreparedLegacySession {
     state: {
       "eve.harness.emission": { sessionStarted: true, turnId, sequence: 4, stepIndex: 2 },
       "eve.runtime.workflowInvocations": {
-        version: 1,
+        version: 2,
         invocations: [
           {
             callId: "call",
             toolName: "tool",
-            resultKind: "tool" as const,
             lifetime: "turn" as const,
             origin: { turnId: "turn-1", stepIndex: 0 },
             address: { runId: "tool-run", hookToken: "tool-hook" },

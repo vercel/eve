@@ -19,7 +19,6 @@ import {
 } from "#harness/proxy-input-requests.js";
 import {
   findBlockingWorkflowToolRun,
-  isInboxSubagentResultFromRecordedWorkflowToolRun,
   removeBlockingWorkflowToolRuns,
 } from "#harness/workflow-tool-runs.js";
 import { normalizeToolModelOutput } from "#harness/tool-model-output.js";
@@ -199,12 +198,7 @@ function resolveResultsForCoordinationBatch(input: {
     pendingCallIds: [...input.batch.runtimeActions, ...input.batch.tasks].map(
       (request) => request.callId,
     ),
-    results: input.results.filter(
-      (result) =>
-        isResultBoundToRunningHandle(input.state, result) ||
-        (result.kind === "subagent-result" &&
-          isInboxSubagentResultFromRecordedWorkflowToolRun(input.state, result)),
-    ),
+    results: input.results.filter((result) => isResultBoundToRunningHandle(input.state, result)),
   });
 }
 
@@ -324,20 +318,6 @@ export async function resolvePendingCoordination(input: {
         nextSession,
         (route) => route.answerHook?.runId === record.address.runId,
       ),
-      batch.event.turnId,
-      record.callId,
-    );
-  }
-  for (const result of readyResults) {
-    if (result.kind !== "subagent-result") continue;
-    const record = findBlockingWorkflowToolRun(
-      nextSession.state,
-      result.callId,
-      batch.event.turnId,
-    );
-    if (record?.resultKind !== "subagent") continue;
-    nextSession = removeBlockingWorkflowToolRuns(
-      clearProxyInputRequestsForChild(nextSession, record.address.hookToken),
       batch.event.turnId,
       record.callId,
     );
@@ -482,7 +462,6 @@ export function createCoordinationRequestFromToolCall(input: {
         executeInput: definition.executeInput?.(inputObject),
         input: inputObject,
         kind: "workflow-task",
-        resultKind: definition.resultKind,
         toolName: input.toolCall.toolName,
         workflowId: definition.workflowId,
       },

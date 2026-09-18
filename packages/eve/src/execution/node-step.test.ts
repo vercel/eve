@@ -333,7 +333,7 @@ describe("createNodeHarnessTools", () => {
       expect(tools.get(name)?.execution).toBe("background");
       expect(tools.get(name)?.execute).toBeDefined();
       expect(tools.get(name)?.runtimeAction).toBeUndefined();
-      expect(tools.get(name)?.resultKind).toBe("subagent");
+      expect(tools.get(name)?.nodeId).toEqual(expect.any(String));
       expect(tools.get(name)?.workflowId).toBe("workflow//eve//subagentToolExecuteWorkflow");
     }
   });

@@ -49,7 +49,6 @@ const handle = {
 const entry = {
   callId: handle.ownerId,
   toolName: { agentId: identity.id, kind: "subagent", name: identity.name }.name,
-  resultKind: "tool" as const,
   lifetime: "session" as const,
   origin: { turnId: "turn-1", stepIndex: 0 },
   address: { runId: "original-task-run", hookToken: "original-task-inbox" },
@@ -99,15 +98,15 @@ async function createScope(
       callId = "steering-call",
       agentId: string | undefined = identity.id,
       name = identity.name,
-      resultKind: "subagent" | "tool" = "subagent",
+      kind: "subagent" | "tool" = "subagent",
+
       label?: (input: unknown) => string,
     ) {
       const definition = {
         execute: vi.fn(),
         label: label === undefined ? undefined : { start: label },
         name,
-        nodeId: identity.nodeId,
-        resultKind,
+        nodeId: kind === "subagent" ? identity.nodeId : undefined,
         workflowId: "research-workflow",
       };
       const toolInput = { agentId, message: "Use the updated instruction" };
@@ -232,7 +231,7 @@ describe("background subagent steering", () => {
 
   it.each(["subagent", "tool"] as const)(
     "retains activity identity for parent-owned settlement (%s)",
-    async (resultKind) => {
+    async (kind) => {
       const activityObserver = {
         sink: { url: "https://parent.example/activity", version: 1 as const },
         workIdentity: {
@@ -244,7 +243,7 @@ describe("background subagent steering", () => {
       };
       const scope = await createScope(createSession(), activityObserver);
 
-      await scope.execute("new-call", "", identity.name, resultKind);
+      await scope.execute("new-call", "", identity.name, kind);
       const committed = await scope.commit();
       const task = getBackgroundWorkflowToolRuns(committed.state).find(
         (candidate) => candidate.task.taskId !== entry.task.taskId,

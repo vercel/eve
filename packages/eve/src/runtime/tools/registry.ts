@@ -114,7 +114,7 @@ async function createPreparedRuntimeTool(
         : isSelfAgent
           ? {
               nodeId: ROOT_RUNTIME_AGENT_NODE_ID,
-              resultKind: "subagent",
+
               workflowId,
             }
           : { workflowId },

@@ -54,7 +54,7 @@ export interface WorkflowToolRunRef {
   readonly callId: string;
   readonly execution: "background" | "blocking";
   readonly input: JsonObject;
-  readonly resultKind?: "subagent" | "tool";
+
   readonly runId: string;
   readonly sequence: number;
   readonly stepIndex: number;

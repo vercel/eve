@@ -160,7 +160,7 @@ describe("session owner starts", () => {
     getRunMock.mockReturnValue({ getWritable: () => sessionWritable });
     startMock.mockResolvedValue({ runId: "owner-2" });
     const checkpoint = {
-      version: 5,
+      version: 6,
       mode: "conversation",
       serializedContext: {},
       sessionState: { continuationToken: "continuation-1", sessionId: "session-1" },

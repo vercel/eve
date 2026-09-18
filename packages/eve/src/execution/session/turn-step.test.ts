@@ -545,12 +545,11 @@ describe("routeProxiedDeliverStep", () => {
             ? undefined
             : {
                 "eve.runtime.workflowInvocations": {
-                  version: 1,
+                  version: 2,
                   invocations: [
                     {
                       callId: "task-1",
                       toolName: "research",
-                      resultKind: "tool" as const,
                       lifetime: "session" as const,
                       origin: { turnId: "turn-parent", stepIndex: 0 },
                       address: { runId: "run-1", hookToken: "task-token" },
@@ -704,12 +703,11 @@ describe("recordTaskInputRequestStep", () => {
     const session = createStubSession({
       state: {
         "eve.runtime.workflowInvocations": {
-          version: 1,
+          version: 2,
           invocations: [
             {
               callId: "task-1",
               toolName: "research",
-              resultKind: "tool" as const,
               lifetime: "session" as const,
               origin: { turnId: "turn-parent", stepIndex: 0 },
               address: { runId: "run-1", hookToken: "task-token" },
@@ -1115,7 +1113,6 @@ describe("turnStep", () => {
     const task = {
       callId: "task_report",
       toolName: "daily_report",
-      resultKind: "tool" as const,
       lifetime: "session" as const,
       origin: { turnId: "turn_0", stepIndex: 0 },
       address: { runId: "task-run", hookToken: "task-token" },
@@ -1134,7 +1131,7 @@ describe("turnStep", () => {
     const pending = createStubSession({
       state: {
         "eve.harness.emission": emissionState,
-        "eve.runtime.workflowInvocations": { version: 1, invocations: [task] },
+        "eve.runtime.workflowInvocations": { version: 2, invocations: [task] },
       },
     });
     const terminalView = {
@@ -1147,7 +1144,7 @@ describe("turnStep", () => {
       state: {
         "eve.harness.emission": { ...emissionState, sequence: 1, turnId: "turn_1" },
         "eve.runtime.workflowInvocations": {
-          version: 1,
+          version: 2,
           invocations: [{ ...task, task: { ...task.task, terminalView: terminalView } }],
         },
       },
@@ -2653,12 +2650,11 @@ describe("turnStep", () => {
     const session = createStubSession({
       state: {
         "eve.runtime.workflowInvocations": {
-          version: 1,
+          version: 2,
           invocations: [
             {
               callId: "task_1",
               toolName: metadata.name,
-              resultKind: "tool" as const,
               lifetime: "session" as const,
               origin: { turnId: "turn-parent", stepIndex: 0 },
               address: { runId: "run_1", hookToken: "task-token" },
@@ -2767,12 +2763,11 @@ describe("turnStep", () => {
           turnId: "turn_0",
         },
         "eve.runtime.workflowInvocations": {
-          version: 1,
+          version: 2,
           invocations: [
             {
               callId: "task_1",
               toolName: "report_probe",
-              resultKind: "tool" as const,
               lifetime: "session" as const,
               origin: { turnId: "turn_0", stepIndex: 0 },
               address: { runId: "run_1", hookToken: "task-token" },

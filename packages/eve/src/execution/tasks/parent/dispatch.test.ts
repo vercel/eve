@@ -32,7 +32,6 @@ vi.mock("#internal/workflow/runtime.js", () => ({
 const entry = {
   callId: "task-1",
   toolName: "export",
-  resultKind: "tool" as const,
   lifetime: "session" as const,
   origin: { turnId: "turn-1", stepIndex: 0 },
   address: { runId: "task-run", hookToken: "task-token" },
@@ -64,7 +63,7 @@ describe("task cancellation", () => {
       sessionId: "parent-session",
       state: {
         "eve.runtime.workflowInvocations": {
-          version: 1,
+          version: 2,
           invocations: [
             {
               ...entry,

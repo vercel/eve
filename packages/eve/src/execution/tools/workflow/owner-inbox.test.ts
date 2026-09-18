@@ -94,10 +94,10 @@ describe("workflow-tool task input", () => {
 });
 
 describe("workflow-tool task outcomes", () => {
-  it("keeps a subagent failure object as task failure data", () => {
+  it("keeps a structured workflow failure as task failure data", () => {
     expect(
       workflowToolRunFailureOutput({
-        from: { ...from, resultKind: "subagent" },
+        from,
         result: {
           error: {
             code: "SUBAGENT_EXECUTION_FAILED",

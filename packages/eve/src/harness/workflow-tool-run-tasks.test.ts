@@ -41,7 +41,6 @@ describe("session task index", () => {
     const session = registerWorkflowToolRun(createSession(), {
       callId: "task_a",
       toolName: metadata.name,
-      resultKind: "tool" as const,
       lifetime: "session" as const,
       origin: { turnId: "turn-1", stepIndex: 0 },
       address: { runId: "run-1", hookToken: "task:token-1" },
@@ -51,7 +50,6 @@ describe("session task index", () => {
     expect(findBackgroundWorkflowToolRun(session.state, "task_a")).toEqual({
       callId: "task_a",
       toolName: metadata.name,
-      resultKind: "tool" as const,
       lifetime: "session" as const,
       origin: { turnId: "turn-1", stepIndex: 0 },
       address: { runId: "run-1", hookToken: "task:token-1" },
@@ -73,7 +71,6 @@ describe("session task index", () => {
     const session = registerWorkflowToolRun(createSession(), {
       callId: "task_a",
       toolName: metadata.name,
-      resultKind: "tool" as const,
       lifetime: "session" as const,
       origin: { turnId: "turn-1", stepIndex: 0 },
       address: { runId: "run-1", hookToken: "task:token-1" },
@@ -97,7 +94,6 @@ describe("session task index", () => {
     const session = registerWorkflowToolRun(createSession(), {
       callId: "task_a",
       toolName: subagentMetadata.name,
-      resultKind: "tool" as const,
       lifetime: "session" as const,
       origin: { turnId: "turn-1", stepIndex: 0 },
       address: { runId: "run-1", hookToken: "task:token-1" },
@@ -113,7 +109,6 @@ describe("session task index", () => {
     let session = registerWorkflowToolRun(createSession(), {
       callId: "task_a",
       toolName: metadata.name,
-      resultKind: "tool" as const,
       lifetime: "session" as const,
       origin: { turnId: "turn-1", stepIndex: 0 },
       address: { runId: "run-1", hookToken: "task:token-1" },
@@ -140,7 +135,6 @@ describe("session task index", () => {
     session = registerWorkflowToolRun(session, {
       callId: "task_a",
       toolName: metadata.name,
-      resultKind: "tool" as const,
       lifetime: "session" as const,
       origin: { turnId: "turn-1", stepIndex: 0 },
       address: { runId: "run-2", hookToken: "task:token-2" },
@@ -173,7 +167,6 @@ describe("session task index", () => {
     let session = registerWorkflowToolRun(createSession(), {
       callId: "task_a",
       toolName: metadata.name,
-      resultKind: "tool" as const,
       lifetime: "session" as const,
       origin: { turnId: "turn-1", stepIndex: 0 },
       address: { runId: "run-1", hookToken: "task:token-1" },
@@ -182,7 +175,6 @@ describe("session task index", () => {
     session = registerWorkflowToolRun(session, {
       callId: "task_a",
       toolName: metadata.name,
-      resultKind: "tool" as const,
       lifetime: "session" as const,
       origin: { turnId: "turn-1", stepIndex: 0 },
       address: { runId: "run-2", hookToken: "task:token-2" },
@@ -198,7 +190,6 @@ describe("session task index", () => {
     return {
       callId: taskId,
       toolName: metadata.name,
-      resultKind: "tool" as const,
       lifetime: "session" as const,
       origin: { turnId: createdByTurnId, stepIndex: 0 },
       address: { runId: `run-${taskId}`, hookToken: `inbox-${taskId}` },
@@ -303,7 +294,7 @@ describe("session task index", () => {
     expect(() =>
       getBackgroundWorkflowToolRuns({
         "eve.runtime.workflowInvocations": {
-          version: 1,
+          version: 2,
           invocations: [
             {
               ...task("task_a", "turn-1"),
@@ -319,7 +310,6 @@ describe("session task index", () => {
     const base = {
       callId: "task_a",
       toolName: metadata.name,
-      resultKind: "tool" as const,
       lifetime: "session" as const,
       origin: { turnId: "turn-1", stepIndex: 0 },
       address: { runId: "run-1", hookToken: "task:token-1" },
@@ -365,7 +355,7 @@ describe("session task index", () => {
     ]) {
       const [entry] = getBackgroundWorkflowToolRuns({
         "eve.runtime.workflowInvocations": {
-          version: 1,
+          version: 2,
           invocations: [{ ...base, task: { ...base.task, terminalView: invalidView } }],
         },
       });
@@ -399,7 +389,7 @@ describe("session task index", () => {
   it("throws on a corrupt index instead of treating it as absent", () => {
     expect(() =>
       getBackgroundWorkflowToolRuns({
-        "eve.runtime.workflowInvocations": { version: 1, invocations: [{ taskId: 42 }] },
+        "eve.runtime.workflowInvocations": { version: 2, invocations: [{ taskId: 42 }] },
       }),
     ).toThrow("Corrupt workflow invocation registry");
   });
@@ -409,7 +399,7 @@ describe("session task index", () => {
     expect(() =>
       getBackgroundWorkflowToolRuns({
         "eve.runtime.workflowInvocations": {
-          version: 1,
+          version: 2,
           invocations: [{ ...entry, task: { ...entry.task, dispatchContext: undefined } }],
         },
       }),
@@ -427,12 +417,11 @@ describe("session task index", () => {
     expect(() =>
       getBackgroundWorkflowToolRuns({
         "eve.runtime.workflowInvocations": {
-          version: 1,
+          version: 2,
           invocations: [
             {
               callId: "task_a",
               toolName: metadata.name,
-              resultKind: "tool" as const,
               lifetime: "session" as const,
               origin: { turnId: "turn-1", stepIndex: 0 },
               address: { runId: "run-1", hookToken: "task:token-1" },

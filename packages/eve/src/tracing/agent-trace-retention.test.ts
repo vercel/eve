@@ -68,7 +68,6 @@ describe("trace retention by live work", () => {
     const task = {
       callId: deriveTaskId({ callId: "call", parentSessionId: "session", parentTurnId: "turn" }),
       toolName: "workflow",
-      resultKind: "tool" as const,
       lifetime: "session" as const,
       origin: { turnId: "turn", stepIndex: 0 },
       address: { runId: "task-run", hookToken: "task-token" },
@@ -79,14 +78,14 @@ describe("trace retention by live work", () => {
       },
     };
     pruneAgentTraceState(context, "session", {
-      "eve.runtime.workflowInvocations": { version: 1, invocations: [task] },
+      "eve.runtime.workflowInvocations": { version: 2, invocations: [task] },
     });
     expect(serializeContext(context)[AGENT_TRACE_CONTEXT_KEY]).toMatchObject({
       actionAnchors: { key: anchor },
     });
     pruneAgentTraceState(context, "session", {
       "eve.runtime.workflowInvocations": {
-        version: 1,
+        version: 2,
         invocations: [
           {
             ...task,

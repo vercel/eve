@@ -60,7 +60,7 @@ the background owner tracks only ordinary input requests for answer routing.
 
 A task is the public handle for an admitted session-owned invocation. Both lifetimes now live in
 `eve.runtime.workflowInvocations`; task lookup and waiting-run lookup are filtered views of that
-registry. The TypeScript naming change preserves this persisted key and its version-1 envelope.
+registry. The persisted key is unchanged; the registry is now version 2.
 Cleanup selects the originating turn and `lifetime: "turn"`, so it cannot discard
 session-owned work. [Registry][prototype-registry]
 
@@ -74,7 +74,6 @@ handle. No additional invocation ID or generic extension system is introduced.
 type WorkflowToolRun = {
   callId: string;
   toolName: string;
-  resultKind: "tool" | "subagent";
   origin: { turnId: string; stepIndex: number };
   address: { runId: string; hookToken: string };
 } & (
@@ -210,13 +209,13 @@ Existing sessions containing either old registry key are rejected by the new run
 import can stop discoverable old runs and retain conversation history, but does not migrate pending
 work. Completed task payloads also require the new format before deployment handoff.
 
-The cross-deployment checkpoint version is now **5**. Version 4 readers also enforce exact
+The cross-deployment checkpoint version is now **6**. Version 4 and 5 readers also enforce exact
 version equality, so both old-to-new and new-to-old handoffs reject the incompatible checkpoint
 before hydrating nested state or claiming session hooks. The original owner recovers its hooks
 and processes the triggering message. This version boundary is necessary even for idle sessions:
 an older reader could otherwise overlook the new registry key and lose retained task outputs.
 
-Within version 5, unknown fields on the registry, invocation, origin, address, task payload, and
+Within version 6, unknown fields on the registry, invocation, origin, address, task payload, and
 terminal output survive parsing, replayed registration, and terminal-cache updates. Authentication
 and dispatch-context schemas remain strict; incompatible changes there require another checkpoint
 version bump. Session turns execute on their owning deployment. Legacy import returns its prepared
@@ -289,7 +288,7 @@ lint, formatting, and invariant guards passed.
 ## Ownership and cancellation consolidation
 
 Ownership reads no longer decode every retained result, and both invocation lifetimes share
-cancellation escalation. The persisted registry remains version 1 and checkpoints remain version 5.
+cancellation escalation. The persisted registry is version 2 and checkpoints are version 6.
 
 - Removed the unused coordination `pendingTasks` acknowledgement list. Real background admission
   still persists ownership before sending `ready`.
@@ -378,9 +377,22 @@ All 46 selected workflow and cancellation integration tests passed. The backgrou
 now asserts that yields emit no progress events; fixture lifecycle audits count the shared delivery
 step and retain their handle-cleanup and accounting checks. E2E remains CI-only.
 
-The wire registry remains version 1: `terminalView` retains its existing shape, and proxy-input
+The wire registry is version 2: `terminalView` retains its existing shape, and proxy-input
 routes reuse their existing store. Its role is now authoritative parent state rather than an
 expired-run cache. No legacy task-stream fallback is added.
+
+## Agent settlement
+
+Workflow runs carry no `resultKind`: every run returns a tool outcome. `agent-settled` owns
+agent handle settlement and usage accounting. The agent helper waits for an acknowledgement on
+its existing reply hook before returning output or throwing the child failure. The parent applies
+settlement before acknowledging; workflow completion does not settle that agent again.
+
+Settlement requires the exact owner and invocation call ID. Duplicate results are no-ops, including
+late deliveries after a reusable agent has been claimed by another call. Agent preparation keeps its
+existing node identity for receipts and reservations; this identity is not copied onto workflow runs.
+The registry version changes to 2 and checkpoint version to 6 because older readers require the
+removed discriminator and expect the former result protocol.
 
 ## Recommendation
 

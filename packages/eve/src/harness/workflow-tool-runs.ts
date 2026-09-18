@@ -6,9 +6,9 @@ import type { JsonValue } from "#shared/json.js";
 import { sameTaskMetadata, type TaskMetadata, type TaskView } from "#tasks/types.js";
 import type { DurableDynamicSubagentSelection, SessionAuth } from "#context/keys.js";
 
-// Keep the persisted key and envelope stable across the terminology change.
+// Keep the persisted key stable; the envelope version identifies incompatible records.
 export const WORKFLOW_TOOL_RUNS_STATE_KEY = "eve.runtime.workflowInvocations";
-const WORKFLOW_TOOL_RUNS_VERSION = 1;
+const WORKFLOW_TOOL_RUNS_VERSION = 2;
 
 export interface WorkflowTaskPayload {
   readonly taskId: string;
@@ -23,7 +23,7 @@ export interface WorkflowTaskPayload {
 interface WorkflowToolRunBase {
   readonly callId: string;
   readonly toolName: string;
-  readonly resultKind: "tool" | "subagent";
+
   readonly origin: { readonly turnId: string; readonly stepIndex: number };
   readonly address: { readonly runId: string; readonly hookToken: string };
 }
@@ -108,7 +108,6 @@ const taskViewSchema: z.ZodType<TaskView> = z.discriminatedUnion("status", [
 const commonShape = {
   callId: z.string().min(1),
   toolName: z.string().min(1),
-  resultKind: z.enum(["tool", "subagent"]),
   origin: z.looseObject({ turnId: z.string().min(1), stepIndex: z.number().int().nonnegative() }),
   address: z.looseObject({ runId: z.string().min(1), hookToken: z.string().min(1) }),
 };
@@ -237,9 +236,7 @@ export function registerWorkflowToolRun<T extends { readonly state?: SessionStat
   const previous = invocations[index];
   if (
     previous !== undefined &&
-    (previous.lifetime !== entry.lifetime ||
-      previous.toolName !== entry.toolName ||
-      previous.resultKind !== entry.resultKind)
+    (previous.lifetime !== entry.lifetime || previous.toolName !== entry.toolName)
   ) {
     throw new Error("Replayed invocation changed its ownership or tool identity.");
   }
@@ -353,16 +350,5 @@ export function isInboxToolResultFromRecordedWorkflowToolRun(
   result: RuntimeToolResultActionResult,
 ): boolean {
   const record = findBlockingWorkflowToolRun(state, result.callId);
-  return (
-    record !== undefined && record.resultKind !== "subagent" && record.toolName === result.toolName
-  );
-}
-
-/** A child result reported through a shared subagent execute run. */
-export function isInboxSubagentResultFromRecordedWorkflowToolRun(
-  state: SessionStateMap | undefined,
-  result: { readonly callId: string; readonly subagentName: string },
-): boolean {
-  const record = findBlockingWorkflowToolRun(state, result.callId);
-  return record?.resultKind === "subagent" && record.toolName === result.subagentName;
+  return record !== undefined && record.toolName === result.toolName;
 }

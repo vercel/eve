@@ -80,7 +80,6 @@ export function buildToolSet(input: {
             executeInput: definition.executeInput,
             name: definition.name,
             nodeId: definition.nodeId,
-            resultKind: definition.resultKind,
             workflowId: requireBackgroundWorkflowId(definition),
           }
         : undefined,

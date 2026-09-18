@@ -7,10 +7,8 @@ import type {
   WorkflowToolRunRequestMessage,
 } from "#execution/tools/workflow/messages.js";
 import type { RuntimeToolResultActionResult } from "#shared/action-types.js";
-import type { RuntimeSubagentResult } from "#shared/action-types.js";
 import type { InputRequest } from "#shared/input.js";
 import type { ToolInputRequest } from "#tools/definition.js";
-import { SUBAGENT_EXECUTION_FAILED } from "#subagents/agent-handle-errors.js";
 import { parseJsonValue, type JsonValue } from "#shared/json.js";
 
 export function workflowToolRunOutcomeToToolResult(
@@ -31,67 +29,23 @@ export function workflowToolRunOutcomeToToolResult(
     kind: "tool-result",
     output:
       result.status === "failed"
-        ? errorMessage(result.error)
+        ? workflowToolRunFailureOutput(message)
         : (result.reason ?? "The workflow tool run was cancelled."),
     toolName: from.toolName,
-  };
-}
-
-/** Reads a blocking agent result returned through an ordinary run outcome. */
-export function workflowToolRunOutcomeToSubagentResult(
-  message: WorkflowToolRunOutcomeMessage,
-): RuntimeSubagentResult {
-  if (message.result.status === "completed" && isRuntimeSubagentResult(message.result.output)) {
-    return message.result.output;
-  }
-  const output =
-    message.result.status === "failed"
-      ? errorMessage(message.result.error)
-      : message.result.status === "cancelled"
-        ? (message.result.reason ?? "The agent invocation was cancelled.")
-        : "The agent invocation returned an invalid result.";
-  return {
-    callId: message.from.callId,
-    isError: true,
-    kind: "subagent-result",
-    origin: "dispatch",
-    output,
-    subagentName: message.from.toolName,
   };
 }
 
 export function workflowToolRunFailureOutput(message: WorkflowToolRunOutcomeMessage): JsonValue {
   if (message.result.status !== "failed")
     throw new TypeError("Expected a failed workflow outcome.");
-  return message.from.resultKind === "subagent"
-    ? subagentFailureOutput(message.result.error)
-    : errorMessage(message.result.error);
-}
-
-function subagentFailureOutput(error: unknown): JsonValue {
-  const parsed = parseJsonValueOrUndefined(error);
-  if (
-    parsed !== undefined &&
+  const parsed = parseJsonValueOrUndefined(message.result.error);
+  return parsed !== undefined &&
     typeof parsed === "object" &&
     parsed !== null &&
     !Array.isArray(parsed) &&
     typeof Reflect.get(parsed, "code") === "string"
-  ) {
-    return parsed;
-  }
-  return {
-    code: SUBAGENT_EXECUTION_FAILED,
-    message: errorMessage(error),
-  };
-}
-
-function isRuntimeSubagentResult(value: unknown): value is RuntimeSubagentResult {
-  if (typeof value !== "object" || value === null) return false;
-  const origin = Reflect.get(value, "origin");
-  return (
-    Reflect.get(value, "kind") === "subagent-result" &&
-    (origin === "child" || origin === "dispatch")
-  );
+    ? parsed
+    : errorMessage(message.result.error);
 }
 
 function errorMessage(error: unknown): string {

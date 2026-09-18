@@ -8,8 +8,8 @@ import {
 } from "#protocol/message.js";
 import { ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 
-/** Emits an already-projected task-owned `subagent.called` event on the parent stream. */
-export async function emitTaskSubagentCalledStep(input: {
+/** Emits an agent invocation event on the parent stream. */
+export async function emitSubagentEventStep(input: {
   readonly event: UnstampedMessageStreamEvent;
   readonly sessionWritable: WritableStream<Uint8Array>;
   readonly serializedContext: Record<string, unknown>;

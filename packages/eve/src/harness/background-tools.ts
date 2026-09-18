@@ -9,7 +9,7 @@ export interface BackgroundExecutableTool {
   readonly executeInput?: (input: unknown) => JsonValue;
   readonly name: string;
   readonly nodeId?: string;
-  readonly resultKind?: "subagent" | "tool";
+
   /** Registered durable workflow body run by the session-owned task. */
   readonly workflowId: string;
 }

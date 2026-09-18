@@ -22,7 +22,7 @@ export interface WorkflowBodyDefinition {
   readonly callId: string;
   readonly executeInput?: JsonValue;
   readonly input: JsonObject;
-  readonly resultKind?: "subagent" | "tool";
+
   readonly session: SessionContext["session"];
   readonly stepIndex: number;
   readonly toolName: string;
@@ -107,7 +107,6 @@ export function createWorkflowBodyRef(
     callId: input.callId,
     execution: input.execution,
     input: input.input,
-    resultKind: input.resultKind,
     runId: input.runId ?? getWorkflowMetadata().workflowRunId,
     sequence: input.session.turn.sequence,
     stepIndex: input.stepIndex,

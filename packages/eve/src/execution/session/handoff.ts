@@ -20,7 +20,7 @@ import type { RunMode } from "#shared/run-mode.js";
  * an incompatible successor rejects the handoff instead of misreading state.
  * Version 5 replaces the task and waiting-run registries with workflowInvocations.
  */
-export const SESSION_CHECKPOINT_VERSION = 5;
+export const SESSION_CHECKPOINT_VERSION = 6;
 
 /** Everything a successor needs to continue an idle session. Hooks are derived from the state. */
 export interface SessionCheckpoint {

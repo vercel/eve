@@ -171,7 +171,6 @@ describe("settleCancelledTurnStep handle store", () => {
     await runtime.run(async () => {
       const session = registerWorkflowToolRun(createCancelledTurnSession([CLAIMED_HANDLE]), {
         callId: "workflow-call",
-        resultKind: "tool",
         toolName: "Workflow",
         lifetime: "turn" as const,
         origin: { turnId: "turn-1", stepIndex: 0 },
@@ -203,7 +202,6 @@ describe("settleCancelledTurnStep handle store", () => {
         const background: BackgroundWorkflowToolRun = {
           callId: "background-call",
           lifetime: "session",
-          resultKind: "tool",
           toolName: "research",
           origin: { turnId: "turn-1", stepIndex: 0 },
           address: { runId: "background-run", hookToken: "background-hook" },
@@ -232,7 +230,6 @@ describe("settleCancelledTurnStep handle store", () => {
         session = registerWorkflowToolRun(session, {
           callId: "waiting-call",
           toolName: "research",
-          resultKind: "tool",
           lifetime: "turn",
           origin: { turnId: "turn-1", stepIndex: 0 },
           address: { runId: "waiting-run", hookToken: "waiting-hook" },

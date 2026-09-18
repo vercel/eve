@@ -440,7 +440,6 @@ function indexedTask(taskId: string): BackgroundWorkflowToolRun {
       kind: "tool",
       name: "research",
     }.name,
-    resultKind: "tool" as const,
     lifetime: "session" as const,
     origin: { turnId: "turn-1", stepIndex: 0 },
     address: { runId: `run-${taskId}`, hookToken: `${taskId}:inbox` },
@@ -480,7 +479,7 @@ function makeSessionState(
             ? { [AGENT_HANDLES_STATE_KEY]: { handles } }
             : {
                 [AGENT_HANDLES_STATE_KEY]: { handles },
-                "eve.runtime.workflowInvocations": { version: 1, invocations: tasks },
+                "eve.runtime.workflowInvocations": { version: 2, invocations: tasks },
               },
       },
     },
