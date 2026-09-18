@@ -7,7 +7,6 @@ export {
   defineTool,
   disableTool,
   isDisabledToolSentinel,
-  type TaskReceipt,
   type ToolLabelDefinition,
   type ToolAuthOptions,
   type ToolAuthProvider,
@@ -38,6 +37,7 @@ export {
 export {
   defineWorkflowTool,
   type WorkflowStepToolContext,
+  type TaskReceipt,
   type WorkflowToolContext,
   type WorkflowToolDefinition,
   type AgentInput,

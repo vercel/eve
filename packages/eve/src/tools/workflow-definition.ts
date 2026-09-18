@@ -11,8 +11,13 @@ import {
   type ToolInputRequest,
   type ToolInputResponse,
 } from "#tools/definition.js";
-import type { TaskReceipt } from "#tools/task.js";
 import type { ToolModelOutput } from "#tools/model-output.js";
+
+/** Fixed acknowledgement returned when a background task is admitted. */
+export interface TaskReceipt {
+  readonly status: "working";
+  readonly taskId: string;
+}
 
 export interface AgentInput {
   readonly agentId?: string;

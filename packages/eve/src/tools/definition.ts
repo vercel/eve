@@ -22,7 +22,6 @@ type ApprovalContextInput<TInput> = unknown extends TInput ? Record<string, unkn
 
 export type { ToolAuthDefinition, ToolAuthOptions, ToolAuthProvider } from "#tools/auth.js";
 export type { ToolModelOutput, ToolModelOutputPart } from "#tools/model-output.js";
-export type { TaskReceipt } from "#tools/task.js";
 
 export type ToolExecuteOptions = Omit<ToolExecutionOptions<unknown>, "context">;
 

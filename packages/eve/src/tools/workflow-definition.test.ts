@@ -7,6 +7,7 @@ import {
   isWorkflowToolDefinition,
   type WorkflowAgentMetadata,
   type WorkflowStepToolContext,
+  type TaskReceipt,
   type WorkflowToolContext,
 } from "#tools/workflow-definition.js";
 import { normalizeToolDefinition } from "#internal/authored-definition/schema-backed.js";
@@ -81,7 +82,7 @@ describe("defineWorkflowTool", () => {
         return { deployed: input.service };
       },
       toModelOutput(receipt) {
-        expectTypeOf(receipt).toEqualTypeOf<import("#tools/task.js").TaskReceipt>();
+        expectTypeOf(receipt).toEqualTypeOf<TaskReceipt>();
         return { type: "text", value: receipt.taskId };
       },
     });
