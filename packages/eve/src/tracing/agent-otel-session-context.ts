@@ -65,6 +65,7 @@ export function createAgentOtelSessionContext(
         agentName: event.agentName,
         channelAudience,
         channelKind: event.channelKind,
+        channelType: event.channelType,
         decision,
         context: initialSessionContext(input, event, decision),
         parentLineage: event.parentLineage,

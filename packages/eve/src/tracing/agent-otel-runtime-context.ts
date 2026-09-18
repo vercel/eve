@@ -2,6 +2,7 @@ import type { AgentSessionTraceState, AgentTurnTraceState } from "#tracing/agent
 import { agentSpanNamingAttributes } from "#tracing/agent-span-naming.js";
 import { agentInvocationSpanName } from "#tracing/agent-span-contract.js";
 import { agentTraceIdentityAttributes } from "#tracing/agent-otel-attributes.js";
+import { normalizeInstrumentationChannelKind } from "#internal/instrumentation.js";
 
 type SpanAttributePrimitive = string | number | boolean;
 type SpanAttributeValue = SpanAttributePrimitive | SpanAttributePrimitive[];
@@ -21,7 +22,12 @@ export function agentActivationAttributes(input: {
   const isSubagent = parentLineage !== undefined;
   const channelKind =
     input.turn.channelDelivery?.channelKind ??
-    (isSubagent ? undefined : input.session?.channelKind);
+    (isSubagent
+      ? undefined
+      : (input.session?.channelKind ??
+        (input.session?.channelType === undefined
+          ? undefined
+          : normalizeInstrumentationChannelKind(input.session.channelType))));
   const scheduleId = isSubagent ? undefined : input.session?.scheduleId;
   const origin =
     isSubagent || channelKind === undefined

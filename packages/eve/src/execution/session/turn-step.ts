@@ -196,6 +196,15 @@ async function runSessionStep(input: TurnStepInput): Promise<DurableStepResult> 
   }
 
   if (rawDelivery !== undefined) {
+    // Prepare only the session boundary here. Turn trace state is owned by the
+    // tool loop: preparing it this early would persist stale principals and a
+    // stale start time for deliveries that never start a turn (the park path).
+    await contextStorage.run(ctx, () =>
+      instrumentation?.preparePreamble({
+        sequence: initialEmissionState.sequence,
+        sessionStarted: initialEmissionState.sessionStarted,
+      }),
+    );
     await contextStorage.run(ctx, () =>
       instrumentation?.instrumentChannelDelivery({
         agentName: bundle.turnAgent.id,

@@ -87,6 +87,19 @@ describe("agentActivationAttributes", () => {
     expect(attributes["agent.session.title"]).toBeUndefined();
   });
 
+  it("normalizes a raw channel type when the normalized kind is absent", () => {
+    const attributes = agentActivationAttributes({
+      agentName: "general",
+      frameworkVersion: "test",
+      session: session({ channelKind: undefined, channelType: "slack" }),
+      sessionId: "root-session",
+      turn: turn(),
+      turnId: "turn_0",
+    });
+
+    expect(attributes["agent.channel.kind"]).toBe("unknown");
+  });
+
   it("keeps actual channel delivery metadata on delegated activations", () => {
     const attributes = agentActivationAttributes({
       agentName: "general",

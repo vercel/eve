@@ -89,6 +89,7 @@ export function App() {
   const conversationStageRef = useRef<HTMLElement | null>(null);
   const reducer = useMemo(() => traceReducer(), []);
   const agent = useEveAgent({
+    prewarm: composerInput.length > 0,
     reducer,
   });
 

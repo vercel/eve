@@ -2,7 +2,7 @@ import type { Experimental_EvaluationModel } from "ai";
 import { defineDynamic } from "eve";
 import { defineState } from "eve/context";
 import { mockModel, type MockModelResponder } from "eve/evals";
-import { autoModel } from "eve/experimental/evaluate";
+import { auto } from "eve/models";
 
 export const routing = defineState("evaluate-fixture.routing", () => ({
   requests: 0,
@@ -56,7 +56,7 @@ export const evaluationModel: Exclude<Experimental_EvaluationModel, string> = {
 
 /** Run the real router with deterministic evaluation and language models. */
 export function fixtureModel(respond: MockModelResponder) {
-  const model = autoModel({
+  const model = auto({
     model: evaluationModel,
     options: {
       "openai/large": {

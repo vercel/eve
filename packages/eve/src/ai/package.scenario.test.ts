@@ -10,7 +10,7 @@ const scenarioApp = useScenarioApp();
 
 it("builds an agent and child with Gateway and provider evaluation models from packed eve", async () => {
   const app = await scenarioApp({
-    name: "experimental-evaluate",
+    name: "ai-models",
     installDependencies: true,
     files: {
       "agent/instructions.md": "Help Alice review the export incident.",
@@ -23,11 +23,11 @@ export const evaluationModel = {
   async doEvaluate() { throw new Error("Build must not evaluate models."); },
 } satisfies Exclude<Experimental_EvaluationModel, string>;`,
       "agent/agent.ts": `import { defineAgent } from "eve";
-import { autoModel } from "eve/experimental/evaluate";
+import { auto } from "eve/models";
 import { anthropic } from "eve/models/anthropic";
-export default defineAgent({ model: autoModel({ options: { "openai/gpt-5.6-sol": "Investigations", my_secret_model: { model: anthropic("sonnet-5"), reasoning: "low", description: "Routine work" } } }) });`,
+export default defineAgent({ model: auto({ options: { "openai/gpt-5.6-sol": "Investigations", my_secret_model: { model: anthropic("sonnet-5"), reasoning: "low", description: "Routine work" } } }) });`,
       "agent/tools/classify.ts": `import { defineTool } from "eve/tools";
-import { evaluate } from "eve/experimental/evaluate";
+import { evaluate } from "eve/ai";
 export default defineTool({
   description: "Classify an incident",
   inputSchema: { type: "object", properties: {}, additionalProperties: false },
@@ -42,10 +42,10 @@ export default defineTool({
 });`,
       "agent/subagents/worker/instructions.md": "Review the assigned evidence.",
       "agent/subagents/worker/agent.ts": `import { defineAgent } from "eve";
-import { autoModel } from "eve/experimental/evaluate";
+import { auto } from "eve/models";
 import { anthropic } from "eve/models/anthropic";
 import { evaluationModel } from "../../evaluation";
-export default defineAgent({ description: "Review evidence", model: autoModel({ model: evaluationModel, options: { reviewer: { model: anthropic("sonnet-5"), reasoning: "low", description: "Investigations" } } }) });`,
+export default defineAgent({ description: "Review evidence", model: auto({ model: evaluationModel, options: { reviewer: { model: anthropic("sonnet-5"), reasoning: "low", description: "Investigations" } } }) });`,
     },
   });
 

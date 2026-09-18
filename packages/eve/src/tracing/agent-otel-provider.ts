@@ -152,8 +152,10 @@ export function createAgentOtelInstrumentation(
     tracer: input.tracer,
   });
   const memory = createAgentMemoryInstrumentation({ ...input, environment });
-  const { ensureSessionContext, prepareSessionTrace, prepareTurnTrace } =
-    createAgentOtelSessionContext({ ...input, environment });
+  const { prepareSessionTrace, prepareTurnTrace } = createAgentOtelSessionContext({
+    ...input,
+    environment,
+  });
 
   const projectEvent = async (event: InstrumentationEvent): Promise<InstrumentationEvent> => {
     const session = await input.stateStore.getSession(sessionIdForEvent(event));
@@ -512,7 +514,6 @@ export function createAgentOtelInstrumentation(
   };
 
   const channelDeliveries = createAgentChannelDeliveryInstrumentation({
-    ensureSessionContext,
     recordInputs,
     stateStore: input.stateStore,
   });
@@ -695,6 +696,4 @@ function contextFromSpanContext(spanContext: SpanContext): Context {
   return trace.setSpan(ROOT_CONTEXT, trace.wrapSpanContext(spanContext));
 }
 
-function errorText(error: unknown): unknown {
-  return error instanceof Error ? error.message : error;
-}
+const errorText = (error: unknown): unknown => (error instanceof Error ? error.message : error);

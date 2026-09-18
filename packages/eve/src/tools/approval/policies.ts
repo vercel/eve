@@ -1,7 +1,7 @@
 import type { Experimental_EvaluationModel as EvaluationModel } from "ai";
 
 import type { ApprovalContext, ApprovalPolicy } from "#approval/definition.js";
-import { evaluate } from "#experimental/evaluate/evaluate.js";
+import { evaluate } from "#ai/evaluate.js";
 import { parseJsonValue, type JsonObject } from "#shared/json.js";
 import { stampDurableDynamicCallback } from "#tools/durable-callbacks.js";
 

@@ -6,7 +6,7 @@ import { deserializeContext, serializeContext } from "#context/serialize.js";
 import type { DynamicResolveContext } from "#dynamic/definition.js";
 import { anthropic } from "#public/models/anthropic/index.js";
 
-import { autoModel } from "./auto-model.js";
+import { auto } from "./auto.js";
 
 const runtime = vi.hoisted(() => ({
   localEvaluationModel: vi.fn(),
@@ -61,14 +61,14 @@ beforeEach(() => {
   runtime.localEvaluationModel.mockReset();
 });
 
-describe("autoModel", () => {
+describe("auto", () => {
   it("defaults to Jev through the AI SDK default provider", async () => {
     const evaluator = evaluationModel();
     const evaluationModelFactory = vi.fn(() => evaluator.model);
     const previous = Reflect.get(globalThis, "AI_SDK_DEFAULT_PROVIDER");
     Reflect.set(globalThis, "AI_SDK_DEFAULT_PROVIDER", { evaluationModel: evaluationModelFactory });
     try {
-      const handler = autoModel({ options }).events["step.started"]!;
+      const handler = auto({ options }).events["step.started"]!;
       await expect(handler(event(), context())).resolves.toBe("openai/small");
       expect(runtime.localEvaluationModel).not.toHaveBeenCalled();
       expect(evaluationModelFactory).toHaveBeenCalledWith("typesafe-ai/jev");
@@ -86,7 +86,7 @@ describe("autoModel", () => {
     const previous = Reflect.get(globalThis, "AI_SDK_DEFAULT_PROVIDER");
     Reflect.set(globalThis, "AI_SDK_DEFAULT_PROVIDER", { evaluationModel: evaluationModelFactory });
     try {
-      const handler = autoModel({ model: "internal-router", options }).events["step.started"]!;
+      const handler = auto({ model: "internal-router", options }).events["step.started"]!;
       await expect(handler(event(), context())).resolves.toBe("openai/small");
       expect(evaluationModelFactory).toHaveBeenCalledWith("internal-router");
       expect(evaluator.doEvaluate).toHaveBeenCalledOnce();
@@ -102,7 +102,7 @@ describe("autoModel", () => {
     const evaluator = evaluationModel();
     runtime.localEvaluationModel.mockReturnValue(evaluator.model);
 
-    const handler = autoModel({ options }).events["step.started"]!;
+    const handler = auto({ options }).events["step.started"]!;
 
     await expect(handler(event(), context())).resolves.toBe("openai/small");
     expect(runtime.localEvaluationModel).toHaveBeenCalledWith("typesafe-ai/jev");
@@ -112,7 +112,7 @@ describe("autoModel", () => {
   it("routes provider language models by alias and preserves reasoning", async () => {
     const languageModel = anthropic("sonnet-5");
     const evaluator = evaluationModel("private");
-    const handler = autoModel({
+    const handler = auto({
       model: evaluator.model,
       options: {
         ...options,
@@ -145,7 +145,7 @@ describe("autoModel", () => {
 
   it("evaluates once per turn and restores the selection from durable context", async () => {
     const evaluator = evaluationModel();
-    const handler = autoModel({ model: evaluator.model, options }).events["step.started"]!;
+    const handler = auto({ model: evaluator.model, options }).events["step.started"]!;
 
     await handler(event(), context());
     runtime.state = await deserializeContext(serializeContext(runtime.state!));
@@ -165,7 +165,7 @@ describe("autoModel", () => {
         throw providerError;
       },
     });
-    const failedHandler = autoModel({ model: failed, options }).events["step.started"]!;
+    const failedHandler = auto({ model: failed, options }).events["step.started"]!;
     await expect(failedHandler(event(), context())).rejects.toBe(providerError);
 
     runtime.state = new ContextContainer();
@@ -176,7 +176,7 @@ describe("autoModel", () => {
           abortSignal?.addEventListener("abort", () => reject(abortSignal.reason), { once: true });
         }),
     });
-    const pendingHandler = autoModel({ model: pendingModel, options }).events["step.started"]!;
+    const pendingHandler = auto({ model: pendingModel, options }).events["step.started"]!;
     const pending = pendingHandler(event(), context("Alice needs help.", controller.signal));
     const reason = new Error("cancelled");
     controller.abort(reason);
@@ -185,11 +185,11 @@ describe("autoModel", () => {
 
   it("rejects invalid configurations and input", async () => {
     const evaluator = evaluationModel().model;
-    expect(() => autoModel({ model: evaluator, options: {} })).toThrow("at least one option");
-    expect(() => autoModel({ model: evaluator, options: { broken: "" } })).toThrow();
-    expect(() => autoModel({ model: "", options })).toThrow("valid evaluation model");
+    expect(() => auto({ model: evaluator, options: {} })).toThrow("at least one option");
+    expect(() => auto({ model: evaluator, options: { broken: "" } })).toThrow();
+    expect(() => auto({ model: "", options })).toThrow("valid evaluation model");
     expect(() =>
-      autoModel({
+      auto({
         model: evaluator,
         options: {
           broken: { model: "openai/large", description: "Difficult", reasoning: "maximum" },
@@ -197,7 +197,7 @@ describe("autoModel", () => {
       } as never),
     ).toThrow();
 
-    const handler = autoModel({ model: evaluator, options }).events["step.started"]!;
+    const handler = auto({ model: evaluator, options }).events["step.started"]!;
     await expect(handler(event(), context(" "))).rejects.toThrow("requires user text");
   });
 });

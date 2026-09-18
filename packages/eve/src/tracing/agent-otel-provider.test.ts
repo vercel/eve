@@ -1072,26 +1072,30 @@ describe("createAgentOtelInstrumentation", () => {
       turnId: "turn_0",
       type: "channel.delivery.completed" as const,
     };
+    const sessionEvent = {
+      agentName: "support",
+      channelAudience: "public" as const,
+      channelKind: "channel:slack",
+      idempotencyKey: sessionIdempotencyKey("session-1"),
+      rootSessionId: "session-1",
+      sessionId: "session-1",
+      type: "session.started" as const,
+    };
+    const turnEvent = {
+      idempotencyKey: turnIdempotencyKey("session-1", "turn_0"),
+      rootSessionId: "session-1",
+      sequence: 0,
+      sessionId: "session-1",
+      turnId: "turn_0",
+      type: "turn.started" as const,
+    };
 
     await contextStorage.run(ctx, async () => {
-      await runtime.hooks.publish({
-        agentName: "support",
-        channelAudience: "public",
-        channelKind: "channel:slack",
-        idempotencyKey: sessionIdempotencyKey("session-1"),
-        rootSessionId: "session-1",
-        sessionId: "session-1",
-        type: "session.started",
-      });
+      await runtime.prepareSessionTrace(sessionEvent);
+      await runtime.prepareTurnTrace(turnEvent);
       await runtime.hooks.publish(started);
-      await runtime.hooks.publish({
-        idempotencyKey: turnIdempotencyKey("session-1", "turn_0"),
-        rootSessionId: "session-1",
-        sequence: 0,
-        sessionId: "session-1",
-        turnId: "turn_0",
-        type: "turn.started",
-      });
+      await runtime.hooks.publish(sessionEvent);
+      await runtime.hooks.publish(turnEvent);
       ctx.set(ActiveChannelDeliveriesKey, [
         {
           agentName: started.agentName,
@@ -1143,6 +1147,24 @@ describe("createAgentOtelInstrumentation", () => {
       channelName: "eve",
       deliveryId: `delivery-remote-${suffix}`,
     }));
+    const sessionEvent = {
+      agentName: "weather",
+      channelKind: "http",
+      idempotencyKey: sessionIdempotencyKey("remote-session"),
+      parentTraceContext,
+      rootSessionId: "parent-session",
+      sessionId: "remote-session",
+      type: "session.started" as const,
+    };
+    const turnEvent = {
+      idempotencyKey: turnIdempotencyKey("remote-session", "turn-remote"),
+      parentTraceContext,
+      rootSessionId: "parent-session",
+      sequence: 0,
+      sessionId: "remote-session",
+      turnId: "turn-remote",
+      type: "turn.started" as const,
+    };
 
     await contextStorage.run(ctx, async () => {
       for (const delivery of deliveries) {
@@ -1157,24 +1179,10 @@ describe("createAgentOtelInstrumentation", () => {
           type: "channel.delivery.started",
         });
       }
-      await runtime.hooks.publish({
-        agentName: "weather",
-        channelKind: "http",
-        idempotencyKey: sessionIdempotencyKey("remote-session"),
-        parentTraceContext,
-        rootSessionId: "parent-session",
-        sessionId: "remote-session",
-        type: "session.started",
-      });
-      await runtime.hooks.publish({
-        idempotencyKey: turnIdempotencyKey("remote-session", "turn-remote"),
-        parentTraceContext,
-        rootSessionId: "parent-session",
-        sequence: 0,
-        sessionId: "remote-session",
-        turnId: "turn-remote",
-        type: "turn.started",
-      });
+      await runtime.prepareSessionTrace(sessionEvent);
+      await runtime.prepareTurnTrace(turnEvent);
+      await runtime.hooks.publish(sessionEvent);
+      await runtime.hooks.publish(turnEvent);
       ctx.set(
         ActiveChannelDeliveriesKey,
         deliveries.map((delivery) => ({
@@ -1204,7 +1212,7 @@ describe("createAgentOtelInstrumentation", () => {
     await runtime.provider.forceFlush();
 
     const spans = runtime.exporter.getFinishedSpans();
-    const turn = byName(spans, "invoke_agent")[0]!;
+    const turn = byName(spans, "invoke_agent weather")[0]!;
     expect(byName(spans, "agent.session")).toHaveLength(0);
     expect(byName(spans, "agent.channel.delivery")).toHaveLength(0);
     expect(turn.parentSpanContext).toBeUndefined();
@@ -1220,7 +1228,125 @@ describe("createAgentOtelInstrumentation", () => {
       "gen_ai.operation.name": "invoke_agent",
     });
     expect(turn.attributes).not.toHaveProperty("agent.channel.delivery.id");
-    expect(turn.attributes).not.toHaveProperty("gen_ai.agent.name");
+  });
+
+  it("uses canonical root session metadata after a delivery arrives first", async () => {
+    const stateStore = new InMemoryAgentTraceStateStore();
+    const runtime = createRuntime(stateStore);
+    const ctx = new ContextContainer();
+    const parentTraceContext = {
+      isRemote: true as const,
+      spanId: "2222222222222222",
+      traceFlags: 1,
+      traceId: "11111111111111111111111111111111",
+    };
+    const sessionId = "session-canonical-metadata";
+    const sessionEvent = {
+      agentName: "weather",
+      channelAudience: "public" as const,
+      channelType: "http",
+      idempotencyKey: sessionIdempotencyKey(sessionId),
+      parentTraceContext,
+      rootSessionId: sessionId,
+      scheduleId: "sched-1",
+      sessionId,
+      title: "Investigate the incident",
+      type: "session.started" as const,
+    };
+    const turnEvent = {
+      idempotencyKey: turnIdempotencyKey(sessionId, "turn_0"),
+      parentTraceContext,
+      rootSessionId: sessionId,
+      sequence: 0,
+      sessionId,
+      turnId: "turn_0",
+      type: "turn.started" as const,
+    };
+
+    await contextStorage.run(ctx, async () => {
+      await runtime.hooks.publish({
+        delivery: {
+          channelAudience: "public",
+          channelKind: "http",
+          channelName: "eve",
+          deliveryId: "delivery-first",
+        },
+        idempotencyKey: "channel-delivery:session-canonical-metadata:delivery-first",
+        parentTraceContext,
+        rootSessionId: sessionId,
+        sequence: 0,
+        sessionId,
+        turnId: "turn_0",
+        type: "channel.delivery.started",
+      });
+      expect(stateStore.getSession(sessionId)).toBeUndefined();
+
+      await runtime.prepareSessionTrace(sessionEvent);
+      await runtime.prepareTurnTrace(turnEvent);
+      expect(stateStore.getSession(sessionId)).toMatchObject({
+        channelType: "http",
+        scheduleId: "sched-1",
+        title: "Investigate the incident",
+      });
+
+      await runtime.hooks.publish(sessionEvent);
+      await runtime.hooks.publish(turnEvent);
+      await completeTurn(runtime.hooks, sessionId, "turn_0");
+    });
+    await runtime.provider.forceFlush();
+
+    const turn = byName(runtime.exporter.getFinishedSpans(), "invoke_agent weather")[0]!;
+    expect(turn.attributes).toMatchObject({
+      "agent.channel.kind": "http",
+      "agent.schedule.id": "sched-1",
+      "agent.session.title": "Investigate the incident",
+    });
+  });
+
+  it("stores canonical parent lineage after a delivery arrives first", async () => {
+    const stateStore = new InMemoryAgentTraceStateStore();
+    const runtime = createRuntime(stateStore);
+    const sessionId = "session-canonical-lineage";
+    const parentLineage = {
+      callId: "call-1",
+      sessionId: "parent-session",
+      subagentName: "reviewer",
+      turnId: "turn_0",
+    };
+    const sessionEvent = {
+      agentName: "reviewer",
+      channelAudience: "public" as const,
+      channelType: "http",
+      idempotencyKey: sessionIdempotencyKey(sessionId),
+      parentLineage,
+      rootSessionId: "parent-session",
+      sessionId,
+      type: "session.started" as const,
+    };
+
+    await runtime.hooks.publish({
+      delivery: {
+        channelAudience: "public",
+        channelKind: "http",
+        channelName: "eve",
+        deliveryId: "delivery-first",
+      },
+      idempotencyKey: "channel-delivery:session-canonical-lineage:delivery-first",
+      rootSessionId: "parent-session",
+      sequence: 0,
+      sessionId,
+      turnId: "turn_0",
+      type: "channel.delivery.started",
+    });
+    expect(stateStore.getSession(sessionId)).toBeUndefined();
+
+    await runtime.prepareSessionTrace(sessionEvent);
+    await runtime.hooks.publish(sessionEvent);
+
+    expect(stateStore.getSession(sessionId)).toMatchObject({
+      channelType: "http",
+      parentLineage,
+    });
   });
 
   it("emits one bounded activation trace rooted at invoke_agent", async () => {

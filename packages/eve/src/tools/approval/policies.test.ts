@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const evaluate = vi.hoisted(() => vi.fn());
-vi.mock("#experimental/evaluate/evaluate.js", () => ({ evaluate }));
+vi.mock("#ai/evaluate.js", () => ({ evaluate }));
 
 import type { ApprovalContext } from "#approval/definition.js";
 import { always, auto, never, once } from "#tools/approval/policies.js";

@@ -24,7 +24,7 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
   tool: {
     current: 49,
     supported: [
-      1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 28, 29, 30, 31, 32, 34, 35, 44, 45, 46, 47, 48, 49,
+      1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 28, 29, 30, 31, 32, 34, 35, 44, 45, 46, 49,
     ],
     dropped: {
       14: "TaskExec.delegated was removed; migrate to workflow-backed background tools",
@@ -50,13 +50,15 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
       41: "workflow no longer accepts agents and its options argument is optional; use workflow() or workflow({ maxSubagents })",
       42: "Legacy session history migration was removed; user-role messages require current provenance kinds.",
       43: "Legacy session history migration was removed; user-role messages require current provenance kinds.",
+      47: "eve/experimental/evaluate was removed; import evaluate from eve/ai",
+      48: "eve/experimental/evaluate was removed; import evaluate from eve/ai",
     },
   },
   dynamicTool: {
-    current: 47,
+    current: 48,
     supported: [
       1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 22, 28, 29, 30, 31, 32,
-      33, 41, 42, 43, 44, 45, 46, 47,
+      33, 41, 48,
     ],
     dropped: {
       21: "Message and reasoning append events now expose deltas instead of cumulative snapshots.",
@@ -72,6 +74,12 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
       38: "workflowMaxSubagents was removed with experimental_workflow; configure generated-program limits with the workflow factory",
       39: "Legacy session history migration was removed; user-role messages require current provenance kinds.",
       40: "Legacy session history migration was removed; user-role messages require current provenance kinds.",
+      42: "autoModel and eve/experimental/evaluate were removed; import auto from eve/models",
+      43: "autoModel and eve/experimental/evaluate were removed; import auto from eve/models",
+      44: "autoModel and eve/experimental/evaluate were removed; import auto from eve/models",
+      45: "autoModel and eve/experimental/evaluate were removed; import auto from eve/models",
+      46: "autoModel and eve/experimental/evaluate were removed; import auto from eve/models",
+      47: "autoModel and eve/experimental/evaluate were removed; import auto from eve/models",
     },
   },
   channel: {

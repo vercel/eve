@@ -20,6 +20,7 @@ describe("ContextAgentTraceStateStore", () => {
       const store = new ContextAgentTraceStateStore();
       store.setSession("session-1", {
         agentName: "weather",
+        channelType: "http",
         context: spanContext("1", "2"),
         rootSessionId: "session-1",
       });
@@ -49,7 +50,10 @@ describe("ContextAgentTraceStateStore", () => {
     const restored = await deserializeContext(serialized);
     await contextStorage.run(restored, () => {
       const store = new ContextAgentTraceStateStore();
-      expect(store.getSession("session-1")?.context).toEqual(spanContext("1", "2"));
+      expect(store.getSession("session-1")).toMatchObject({
+        channelType: "http",
+        context: spanContext("1", "2"),
+      });
       expect(store.getTurn("session-1", "turn-1")?.context).toEqual(spanContext("1", "3"));
       expect(store.getTurn("session-1", "turn-1")).toMatchObject({
         channelDelivery: {

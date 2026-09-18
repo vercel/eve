@@ -1,7 +1,7 @@
 import { Experimental_EvaluationMockModelV4 } from "ai/test";
 import { afterEach, beforeEach, describe, expect, expectTypeOf, it, vi } from "vitest";
 
-import { evaluate } from "#public/experimental/evaluate/index.js";
+import { evaluate } from "#public/ai/index.js";
 
 const localEvaluationModel = vi.hoisted(() => vi.fn());
 vi.mock("#internal/model-auth/transport.js", async (importOriginal) => ({
