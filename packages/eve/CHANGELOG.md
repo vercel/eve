@@ -1,5 +1,21 @@
 # eve
 
+## 0.62.0
+
+### Minor Changes
+
+- 9d394fa: Package self-modification as an extension-owned subagent and retire the legacy scaffolded self-modification capability. Registry installation uses local-only setup, while deployed-aware setup remains available separately.
+- 8e01190: Replace `t.judge.autoevals.*` with `t.judge(...)`, supporting criteria, typed questions, and batches through evaluation models with a default of `typesafe-ai/jev`. Configure provider evaluation model instances instead of language model instances; autoevals is removed while deterministic similarity and Braintrust reporting remain available.
+- fcb3ba2: Make path-named files under `agent/instrumentation/` the supported instrumentation API. Existing `agent/instrumentation.ts` configurations must be split into lifecycle instrumentation, OpenTelemetry destinations, and shared `otel()` settings; extensions that contribute subagents must be rebuilt for the new contract epoch.
+- 804e670: Remove deprecated instrumentation compatibility shapes. Providers now reject the removed `capture` option in favor of `tracePolicy`, destination export policies return object decisions, and flat `instrumentation.ts` modules are no longer discovered.
+
+### Patch Changes
+
+- 9f1d1cf: Polish `eve init` with inline terminal output, timed installation progress, and a quiet transition into chat without automatic login entries in history. Failed installs show bounded diagnostics and recovery instructions; debug logging retains package-manager output.
+- 38ad163: Keep registry installation error traces visible in the dev TUI after an `/add` failure, alongside the per-item recovery guidance.
+- d0d2b5e: Refine the `eve dev` terminal header with a compact `☰eve` mark, clearer metadata separation, and a persistent command hint. `eve dev` no longer shows the startup `/add` tip.
+- 06e17ae: Wrap long setup questions in the `eve dev` terminal UI instead of clipping them at the terminal edge.
+
 ## 0.61.1
 
 ### Patch Changes

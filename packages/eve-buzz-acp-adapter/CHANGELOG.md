@@ -1,5 +1,19 @@
 # @eve/buzz-acp-adapter
 
+## 0.0.33
+
+### Patch Changes
+
+- Updated dependencies [9d394fa]
+- Updated dependencies [8e01190]
+- Updated dependencies [fcb3ba2]
+- Updated dependencies [9f1d1cf]
+- Updated dependencies [804e670]
+- Updated dependencies [38ad163]
+- Updated dependencies [d0d2b5e]
+- Updated dependencies [06e17ae]
+  - eve@0.62.0
+
 ## 0.0.32
 
 ### Patch Changes
