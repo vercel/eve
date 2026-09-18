@@ -67,7 +67,7 @@ describe("renderFlowPanel", () => {
     expect(text).toContain("   › Create a new project");
   });
 
-  it("renders multiline titles as separate terminal rows", () => {
+  it("wraps long titles and renders multiline titles as separate terminal rows", () => {
     const title =
       "You need to link to a project to use linear through Vercel Connect.\n\nSelect your team";
     const rows = renderFlowPanel(
@@ -81,11 +81,12 @@ describe("renderFlowPanel", () => {
         },
       },
       theme,
-      80,
+      48,
     );
 
-    expect(rows.slice(0, 5)).toEqual([
-      "   You need to link to a project to use linear through Vercel Connect.",
+    expect(rows.slice(0, 7)).toEqual([
+      "   You need to link to a project to use linear",
+      "   through Vercel Connect.",
       "",
       "   Select your team",
       "",

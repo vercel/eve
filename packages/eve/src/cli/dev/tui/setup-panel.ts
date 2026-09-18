@@ -283,7 +283,13 @@ export function renderFlowPanel(state: FlowPanelState, theme: Theme, width: numb
     state.content.kind === "question" ? (state.content.title ?? state.title) : state.title;
   if (title.length > 0) {
     for (const line of title.split("\n")) {
-      rows.push(line.length === 0 ? "" : `  ${c.bold(line)}`);
+      if (line.length === 0) {
+        rows.push("");
+        continue;
+      }
+      for (const wrapped of wrapVisibleLine(line, Math.max(1, width - 3))) {
+        rows.push(`  ${c.bold(wrapped)}`);
+      }
     }
     rows.push("");
   }
