@@ -1,6 +1,8 @@
+import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { resolveEveProjectContext } from "#internal/project-context.js";
+import { select } from "#setup/ask.js";
 import { detectPackageManager } from "#setup/package-manager.js";
 import { pathExists, writeTextFile } from "#setup/scaffold/files.js";
 import { WEB_CHANNEL_TEMPLATE } from "#setup/scaffold/create/web-template.js";
@@ -9,6 +11,31 @@ import {
   type SetupApplyContext,
   type SetupPrepareContext,
 } from "../types.js";
+
+const NEXT_HOSTED_CONFIG = `import type { NextConfig } from "next";
+import { withEve } from "eve/next";
+
+const nextConfig: NextConfig = {};
+
+export default withEve(nextConfig, { eveRoot: "../.." });
+`;
+const PEER_SERVICE_NEXT_CONFIG = `import type { NextConfig } from "next";
+
+const nextConfig: NextConfig = {};
+
+export default nextConfig;
+`;
+const PEER_SERVICE_VERCEL_CONFIG = `import { withEve } from "eve/vercel";
+
+export default await withEve({
+  services: {
+    web: { framework: "nextjs", root: "apps/web" },
+  },
+  routes: [
+    { src: "^(.*)$", destination: { type: "service", service: "web" } },
+  ],
+});
+`;
 
 export interface WebSetupDeps {
   detectPackageManager: typeof detectPackageManager;
@@ -25,7 +52,7 @@ const defaultDeps: WebSetupDeps = {
 };
 
 export interface WebSetupPlan {
-  configureVercelServices: boolean;
+  hosting: "next" | "vercel-services";
   packageManager: Awaited<ReturnType<typeof detectPackageManager>>["kind"];
 }
 
@@ -33,14 +60,51 @@ export async function prepareWebSetup(
   context: SetupPrepareContext,
   deps: WebSetupDeps = defaultDeps,
 ): Promise<WebSetupPlan> {
-  return {
-    packageManager: (await deps.detectPackageManager(context.appRoot)).kind,
-    configureVercelServices: context.environment.vercel.kind === "available",
-  };
+  const project = await deps.resolveEveProjectContext(context.appRoot);
+  if (project.kind === "workspace") {
+    throw new Error("Web Chat setup requires a selected workspace agent.");
+  }
+  const plural = project.kind === "workspace-member";
+  const hosting = await context.asker.ask(
+    select({
+      key: "web-hosting",
+      message: `How should Web Chat and your ${plural ? "agents" : "agent"} run?`,
+      options: [
+        {
+          id: "vercel-services",
+          label: "Run them as peer Vercel services",
+          hint: `Keep ${plural ? "each agent" : "the agent"} independent from the Web Chat frontend`,
+          value: "vercel-services" as const,
+        },
+        {
+          id: "next",
+          label: `Run the ${plural ? "agents" : "agent"} through Next.js`,
+          hint: `Let the Web Chat application manage the ${plural ? "agents" : "agent"}`,
+          value: "next" as const,
+        },
+      ],
+      recommended: "vercel-services" as const,
+      required: true,
+    }),
+  );
+  return { packageManager: (await deps.detectPackageManager(context.appRoot)).kind, hosting };
+}
+
+async function assertInstallerOwned(path: string, allowed: readonly string[]): Promise<void> {
+  try {
+    const source = await readFile(path, "utf8");
+    if (allowed.includes(source)) return;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+    throw error;
+  }
+  throw new Error(
+    `Could not configure Web Chat because ${path} contains authored configuration. Preserve it and compose the eve integration manually.`,
+  );
 }
 
 export async function applyWebSetup(
-  _plan: WebSetupPlan,
+  plan: WebSetupPlan,
   context: SetupApplyContext,
   deps: WebSetupDeps = defaultDeps,
 ) {
@@ -59,11 +123,33 @@ export async function applyWebSetup(
     `/** Named workspace agent selected by the Web Chat installer. */\nexport const WEB_CHAT_AGENT: string | undefined = ${agentName === undefined ? "undefined" : JSON.stringify(agentName)};\n`,
     { force: true },
   );
-  await deps.writeTextFile(
-    join(webRoot, "next.config.ts"),
-    'import type { NextConfig } from "next";\nimport { withEve } from "eve/next";\n\nconst nextConfig: NextConfig = {};\n\nexport default withEve(nextConfig, { eveRoot: "../.." });\n',
-    { force: true },
-  );
+  const nextConfigPath = join(webRoot, "next.config.ts");
+  const registryNextConfig = `import type { NextConfig } from "next";
+import { withEve } from "eve/next";
+
+const nextConfig: NextConfig = {};
+
+export default withEve(nextConfig);
+`;
+  await assertInstallerOwned(nextConfigPath, [
+    registryNextConfig,
+    NEXT_HOSTED_CONFIG,
+    PEER_SERVICE_NEXT_CONFIG,
+  ]);
+  if (plan.hosting === "vercel-services") {
+    const vercelTsPath = join(project.environmentRoot, "vercel.ts");
+    const vercelJsonPath = join(project.environmentRoot, "vercel.json");
+    await assertInstallerOwned(vercelTsPath, [PEER_SERVICE_VERCEL_CONFIG]);
+    if (await deps.pathExists(vercelJsonPath)) {
+      throw new Error(
+        `Could not configure peer services because ${vercelJsonPath} already exists. Preserve it and compose eve/vercel manually.`,
+      );
+    }
+    await deps.writeTextFile(nextConfigPath, PEER_SERVICE_NEXT_CONFIG, { force: true });
+    await deps.writeTextFile(vercelTsPath, PEER_SERVICE_VERCEL_CONFIG, { force: true });
+  } else {
+    await deps.writeTextFile(nextConfigPath, NEXT_HOSTED_CONFIG, { force: true });
+  }
   context.presenter.log.success("Configured channel: web");
   return { facts: [], deploymentRequired: true as const };
 }

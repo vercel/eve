@@ -19,7 +19,7 @@ eve add memory/file
 
 If an item is not found, `eve add` searches the available catalogs and prints close matches without installing anything.
 
-Web Chat installs a project-level Next.js application. It cannot be added to an eve agent workspace; eve rejects the installation before writing files. See [Project Structure](./concepts/project-structure) for browser-app placement and [Next.js](./guides/frontend/nextjs) for manual integration.
+Web Chat installs a shared Next.js application at `apps/web` for either a standalone agent or a selected member of an agent workspace. In a workspace, setup asks whether Next.js should host the agents or whether Vercel should run the frontend and agents as peer services; peer services are recommended and used by non-interactive setup. Existing authored Next.js or Vercel configuration is preserved, and eve stops with manual composition guidance instead of overwriting it. See [Project Structure](./concepts/project-structure) for browser-app placement and [Next.js](./guides/frontend/nextjs) for manual integration.
 
 If you do not know an item name yet, run `eve add` without an argument. Its help output shows how to search the registry with `eve registry search <query>`.
 
