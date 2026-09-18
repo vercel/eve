@@ -69,6 +69,10 @@ describe("workflow-owned agent requests", () => {
     const updatedState = { sessionId: "updated" } as never;
     vi.mocked(settleTaskAgentInvocationStep).mockResolvedValue({
       settled: true,
+      completion: {
+        type: "subagent.completed",
+        data: { callId: "nested", subagentName: "research", output: "done" },
+      },
       serializedContext: {},
       sessionState: updatedState,
     });

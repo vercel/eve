@@ -384,7 +384,18 @@ describe("deriveRunFacts", () => {
         },
       },
     };
-    for (const events of [[admission], [receipt], [admission, receipt], [receipt, admission]]) {
+    const toolReceipt = actionResult({
+      callId: "c1",
+      toolName: "researcher",
+      output: { agentId: "agent-1", status: "working", taskId: "task-1" },
+    });
+    for (const events of [
+      [admission],
+      [receipt],
+      [toolReceipt],
+      [admission, receipt],
+      [receipt, admission],
+    ]) {
       expect(derive(events).subagentCalls).toEqual([
         expect.objectContaining({ callId: "c1", status: "pending" }),
       ]);
@@ -394,9 +405,9 @@ describe("deriveRunFacts", () => {
       type: "subagent.completed",
       data: { callId: "c1", subagentName: "researcher", output: "actual result" },
     };
-    expect(derive([admission, completed, admission, receipt]).subagentCalls).toEqual([
-      expect.objectContaining({ callId: "c1", status: "completed", output: "actual result" }),
-    ]);
+    expect(derive([toolReceipt, completed, admission, receipt, toolReceipt]).subagentCalls).toEqual(
+      [expect.objectContaining({ callId: "c1", status: "completed", output: "actual result" })],
+    );
     for (const status of ["failed", "rejected"] as const) {
       const failure = subagentResult({
         callId: "c1",

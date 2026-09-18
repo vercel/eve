@@ -1,3 +1,4 @@
+import { isJsonObjectValue } from "#shared/json.js";
 import type { ModelAccessChange } from "#shared/model-connection.js";
 import { SteeringStream } from "#cli/dev/tui/steering-stream.js";
 import {
@@ -2428,6 +2429,17 @@ async function* eveEventsToTUIStream(
 
       case "action.result": {
         const resultEvent = event as ActionResultStreamEvent;
+        const result = resultEvent.data.result;
+        const output = "output" in result ? result.output : undefined;
+        if (
+          resultEvent.data.status === "completed" &&
+          isJsonObjectValue(output) &&
+          output.status === "working" &&
+          typeof output.taskId === "string" &&
+          typeof output.agentId === "string"
+        ) {
+          onSubagentBackgrounded?.(result.callId);
+        }
         if (resultEvent.data.result.kind !== "tool-result") {
           break;
         }

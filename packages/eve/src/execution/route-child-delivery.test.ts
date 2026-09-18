@@ -106,6 +106,7 @@ describe("task HITL delivery routing", () => {
 
   it("ignores stale requests coalesced with their task's terminal outcome", async () => {
     vi.mocked(recordTerminalTaskViewsStep).mockResolvedValue({
+      subagentCompletions: [],
       views: [],
       serializedContext: {},
       sessionState: state(false),
@@ -156,6 +157,7 @@ describe("task HITL delivery routing", () => {
       status: "cancelled" as const,
     };
     vi.mocked(recordTerminalTaskViewsStep).mockResolvedValue({
+      subagentCompletions: [],
       views: [cancelled],
       serializedContext: {},
       sessionState: state(false),
@@ -194,6 +196,7 @@ describe("task HITL delivery routing", () => {
       taskId: "task-1",
     };
     vi.mocked(recordTerminalTaskViewsStep).mockResolvedValue({
+      subagentCompletions: [],
       views: [view],
       serializedContext: { trace: "settled" },
       sessionState: recordedState,

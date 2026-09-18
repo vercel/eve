@@ -201,6 +201,7 @@ describe("blocking workflow agent continuation", () => {
           sessionState: dispatched.sessionState,
         });
         expect(stale.settled).toBe(false);
+        expect(stale.completion).toBeUndefined();
         expect(stale.sessionState).toBe(dispatched.sessionState);
       }
       const settlement: Parameters<typeof settleTaskAgentInvocationStep>[0] = {
@@ -227,12 +228,17 @@ describe("blocking workflow agent continuation", () => {
       };
       const settled = await settleTaskAgentInvocationStep(settlement);
       expect(settled.settled).toBe(true);
+      expect(settled.completion).toEqual({
+        type: "subagent.completed",
+        data: { callId, subagentName: identity.name, output: message },
+      });
       const restored = JSON.parse(JSON.stringify(settled.sessionState));
       const duplicate = await settleTaskAgentInvocationStep({
         ...settlement,
         sessionState: restored,
       });
       expect(duplicate.settled).toBe(false);
+      expect(duplicate.completion).toBeUndefined();
       expect(duplicate.sessionState).toBe(restored);
       expect(getTurnUsageState(restored.snapshot.session.state)?.session).toMatchObject({
         inputTokens: 2 * (index + 1),

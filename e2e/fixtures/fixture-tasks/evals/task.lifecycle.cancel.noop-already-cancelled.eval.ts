@@ -25,9 +25,11 @@ export default defineTaskEval({
     const started = await t.send("TASK-CANCEL-SETUP");
     started.expectOk();
     started.messageIncludes("TASK-CANCEL-READY");
-    started.event("subagent.completed", {
+    started.event("action.result", {
       count: 1,
-      data: { backgroundTask: { status: "working" }, subagentName: "fanout-worker" },
+      data: {
+        result: { kind: "tool-result", output: { status: "working" }, toolName: "fanout-worker" },
+      },
     });
     const taskId = requireBackgroundTaskId(started);
 

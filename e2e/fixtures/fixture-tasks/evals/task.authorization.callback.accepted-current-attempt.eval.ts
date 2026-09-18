@@ -30,9 +30,11 @@ export default defineTaskEval({
     const started = await t.send("TASK-C7-AUTHORIZATION");
     started.expectOk();
     started.messageIncludes("TASK-C7-STARTED");
-    started.event("subagent.completed", {
+    started.event("action.result", {
       count: 1,
-      data: { backgroundTask: { status: "working" }, subagentName: "approval-worker" },
+      data: {
+        result: { kind: "tool-result", output: { status: "working" }, toolName: "approval-worker" },
+      },
     });
     const taskId = requireBackgroundTaskId(started);
 

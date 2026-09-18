@@ -412,14 +412,14 @@ export interface SubagentChildEventStreamEvent {
 }
 
 /**
- * Stream event emitted when a subagent call returns a result or a background-task receipt.
+ * Stream event emitted after the parent accepts a successful subagent invocation result.
  */
 export interface SubagentCompletedStreamEvent {
   data: {
     /**
-     * Present when the originating call completed with a background-task
-     * receipt while the child itself kept running. Consumers must not treat
-     * this as the child's terminal boundary; the child stream owns that.
+     * Historical admission marker retained for reading existing streams.
+     * A marked event is a working receipt, not a completed invocation.
+     * New receipts are published only as action.result tool outputs.
      */
     backgroundTask?: {
       taskId: string;

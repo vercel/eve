@@ -1,4 +1,9 @@
-import { expect, it } from "vitest";
+import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
+import { emitSubagentEventStep } from "#execution/tools/subagent/emit-event-step.js";
+
+vi.mock("#execution/tools/subagent/emit-event-step.js", () => ({ emitSubagentEventStep: vi.fn() }));
+
+import { expect, it, vi } from "vitest";
 
 import type { DeliverHookPayload } from "#channel/types.js";
 import { replaceDurableSessionSnapshot } from "#execution/durable-session-store.js";
@@ -19,6 +24,7 @@ import type { TaskView } from "#tasks/types.js";
 it.each(["completed", "failed", "cancelled"] as const)(
   "records a parked parent's %s task and removes its question before reporting the cohort",
   async (status) => {
+    vi.mocked(emitSubagentEventStep).mockReset().mockResolvedValue({ serializedContext: {} });
     let state = createTestSessionState();
     let session = state.snapshot.session;
     for (const taskId of ["A", "B"]) {
@@ -30,7 +36,7 @@ it.each(["completed", "failed", "cancelled"] as const)(
         address: { runId: taskId, hookToken: taskId },
         task: {
           taskId,
-          metadata: { kind: "tool", name: "worker" },
+          metadata: { kind: "subagent", name: "worker" },
           dispatchContext: { auth: { current: null, initiator: null } },
         },
       });
@@ -63,7 +69,7 @@ it.each(["completed", "failed", "cancelled"] as const)(
     const queue = new SessionInputQueue();
     const a: TaskView = {
       taskId: "A",
-      metadata: { kind: "tool", name: "worker" },
+      metadata: { kind: "subagent", name: "worker" },
       ...(status === "completed"
         ? { status, lastOutput: { type: "result", data: "done" } }
         : status === "failed"
@@ -94,9 +100,10 @@ it.each(["completed", "failed", "cancelled"] as const)(
           expect(getProxyInputRequests(current.state).size).toBe(0);
           expect(cursor.sessionState.hasProxyInputRequests).toBe(false);
           expect(queue.pendingCount).toBe(1);
+          expect(emitSubagentEventStep).toHaveBeenCalledTimes(status === "completed" ? 1 : 0);
           return notification({
             taskId: "B",
-            metadata: { kind: "tool", name: "worker" },
+            metadata: { kind: "subagent", name: "worker" },
             status: "completed",
             lastOutput: { type: "result", data: "done B" },
           });
@@ -114,5 +121,77 @@ it.each(["completed", "failed", "cancelled"] as const)(
       },
     });
     expect(queue.pendingCount).toBe(0);
+  },
+);
+
+it.each(["completed", "failed", "cancelled"] as const)(
+  "publishes a background subagent result only for a newly recorded success (%s)",
+  async (status) => {
+    vi.mocked(emitSubagentEventStep).mockReset();
+    const initial = createTestSessionState();
+    const metadata = { kind: "subagent", name: "researcher" };
+    let sessionState = replaceDurableSessionSnapshot({
+      state: initial,
+      session: registerWorkflowToolRun(initial.snapshot.session, {
+        callId: "original-call",
+        toolName: "researcher",
+        lifetime: "session",
+        origin: { turnId: "turn", stepIndex: 0 },
+        address: { runId: "run", hookToken: "hook" },
+        task: {
+          taskId: "task",
+          metadata,
+          dispatchContext: { auth: { current: null, initiator: null } },
+        },
+      }),
+    });
+    const view: TaskView = {
+      taskId: "task",
+      metadata,
+      ...(status === "completed"
+        ? { status, lastOutput: { type: "result", data: { answer: 42 } } }
+        : status === "failed"
+          ? { status, lastOutput: { type: "error", data: "failed" } }
+          : { status }),
+    };
+    vi.mocked(emitSubagentEventStep).mockImplementation(async (input) => {
+      expect(
+        findBackgroundWorkflowToolRun(input.sessionState.snapshot.session.state, "task")?.task
+          .terminalView,
+      ).toEqual(view);
+      return { serializedContext: input.serializedContext };
+    });
+    const deliver = async (outcome: TaskView) => {
+      const result = await routeDeliverToChildren({
+        delivery: { kind: "deliver", payloads: [{ task: { views: [outcome] } }] },
+        serializedContext: {},
+        sessionState,
+        sessionWritable: new WritableStream<Uint8Array>(),
+      });
+      sessionState = result.sessionState;
+    };
+    await deliver(view);
+    await deliver(view);
+    // A late success must not replace a failed or cancelled task, nor republish a success.
+    await deliver({
+      taskId: "task",
+      metadata,
+      status: "completed",
+      lastOutput: { type: "result", data: "late" },
+    });
+    expect(emitSubagentEventStep).toHaveBeenCalledTimes(status === "completed" ? 1 : 0);
+    if (status === "completed") {
+      expect(emitSubagentEventStep).toHaveBeenCalledWith(
+        expect.objectContaining({
+          event: {
+            type: "subagent.completed",
+            data: { callId: "original-call", subagentName: "researcher", output: '{"answer":42}' },
+          },
+        }),
+      );
+    }
+    expect(
+      findBackgroundWorkflowToolRun(sessionState.snapshot.session.state, "task")?.task.terminalView,
+    ).toEqual(view);
   },
 );

@@ -1,3 +1,4 @@
+import { isJsonObjectValue } from "#shared/json.js";
 import type { MessageStreamEvent } from "#protocol/message.js";
 import { LOAD_SKILL_TOOL_NAME } from "#runtime/skills/fragment-context.js";
 import type { InputRequest } from "#shared/input.js";
@@ -123,6 +124,16 @@ export function deriveRunFacts(
           const call = ensureToolCall(result.callId, result.toolName, {});
           call.output = result.output;
           call.status = status;
+          const output = result.output;
+          if (
+            status === "completed" &&
+            isJsonObjectValue(output) &&
+            output.status === "working" &&
+            typeof output.taskId === "string" &&
+            typeof output.agentId === "string"
+          ) {
+            ensureSubagentCall(result.callId, result.toolName);
+          }
         } else if (result.kind === "subagent-result") {
           const call = ensureSubagentCall(result.callId, result.subagentName);
           // A working receipt settles dispatch, not the delegated work.

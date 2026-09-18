@@ -1,3 +1,4 @@
+import type { SubagentCompletedStreamEvent } from "#protocol/message.js";
 import { ActivityObserverKey } from "#context/keys.js";
 import { projectTaskActivity } from "#execution/tasks/child/notify.js";
 import { submitActivity } from "#execution/submit-activity.js";
@@ -109,16 +110,33 @@ export async function recordTerminalTaskViewsStep(input: {
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
   readonly views: readonly TaskView[];
+  readonly subagentCompletions: readonly SubagentCompletedStreamEvent[];
 }> {
   "use step";
   const durableSession = readDurableSession(input.sessionState);
   let session = durableSession;
   const acceptedViews: TaskView[] = [];
+  const subagentCompletions: SubagentCompletedStreamEvent[] = [];
   for (const view of input.views) {
     const entry = findBackgroundWorkflowToolRun(session.state, view.taskId);
     if (entry === undefined) continue;
     const state = recordWorkflowTaskView(session.state, view);
-    if (state !== session.state) session = { ...session, state };
+    if (state !== session.state) {
+      session = { ...session, state };
+      if (entry.task.metadata.kind === "subagent" && view.status === "completed") {
+        subagentCompletions.push({
+          type: "subagent.completed",
+          data: {
+            callId: entry.callId,
+            subagentName: entry.toolName,
+            output:
+              typeof view.lastOutput.data === "string"
+                ? view.lastOutput.data
+                : JSON.stringify(view.lastOutput.data),
+          },
+        });
+      }
+    }
     acceptedViews.push(readWorkflowTaskView(entry.task) ?? view);
     session = clearProxyInputRequestsForTask(session, view.taskId);
     session = applyTaskAgentHandleCommand(session, {
@@ -135,7 +153,7 @@ export async function recordTerminalTaskViewsStep(input: {
     session === durableSession
       ? input.sessionState
       : replaceDurableSessionSnapshot({ session, state: input.sessionState });
-  return { serializedContext, sessionState, views: acceptedViews };
+  return { serializedContext, sessionState, views: acceptedViews, subagentCompletions };
 }
 
 async function settleBackgroundTaskActions(input: {

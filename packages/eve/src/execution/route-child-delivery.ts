@@ -1,3 +1,4 @@
+import { emitSubagentEventStep } from "#execution/tools/subagent/emit-event-step.js";
 import { formatTaskNotification } from "#tasks/notification.js";
 import type { TaskView } from "#tasks/types.js";
 import type { DeliverHookPayload, DeliverPayload } from "#channel/types.js";
@@ -106,6 +107,16 @@ export async function routeDeliverToChildren(input: {
     serializedContext = recorded.serializedContext;
     sessionState = recorded.sessionState;
     for (const view of recorded.views) recordedTaskViews.set(view.taskId, view);
+    // Publish after the durable write; replay retains these events, while duplicate deliveries return none.
+    for (const event of recorded.subagentCompletions) {
+      const emitted = await emitSubagentEventStep({
+        event,
+        sessionWritable: input.sessionWritable,
+        serializedContext,
+        sessionState,
+      });
+      serializedContext = emitted.serializedContext;
+    }
   }
 
   const ordinaryPayloads: DeliverPayload[] = [];

@@ -379,7 +379,7 @@ function createSessionWithRunningChild(): HarnessSession {
 }
 
 describe("resolvePendingCoordination", () => {
-  it("marks a working task receipt as backgrounded on subagent.completed", async () => {
+  it("does not emit subagent completion for a working task receipt", async () => {
     const events: UnstampedMessageStreamEvent[] = [];
     const taskId = "task_0123456789abcdef";
 
@@ -411,9 +411,8 @@ describe("resolvePendingCoordination", () => {
       },
     });
 
-    expect(events.find((event) => event.type === "subagent.completed")).toMatchObject({
-      data: { backgroundTask: { status: "working", taskId } },
-    });
+    expect(events.some((event) => event.type === "subagent.completed")).toBe(false);
+    expect(events).toContainEqual(expect.objectContaining({ type: "action.result" }));
     expect(getAgentHandleStore(resolved.session.state)).toBeUndefined();
   });
 
@@ -474,6 +473,29 @@ describe("resolvePendingCoordination", () => {
 
     expect(resolved.outcome).toBe("resolved");
     expect(getAgentHandleStore(resolved.session.state)).toEqual({ handles: [] });
+  });
+
+  it("does not report a cancelled child outcome as successful completion", async () => {
+    const events: UnstampedMessageStreamEvent[] = [];
+    await resolvePendingCoordination({
+      emit: async (event) => {
+        events.push(event);
+      },
+      session: createSessionWithRunningChild(),
+      stepInput: {
+        runtimeActionResults: [
+          {
+            callId: "call-1",
+            kind: "subagent-result",
+            origin: "child",
+            subagentName: "researcher",
+            output: "cancelled",
+            outcome: { kind: "parked", result: { kind: "cancelled" }, usageDelta: ZERO_USAGE },
+          },
+        ],
+      },
+    });
+    expect(events.some((event) => event.type === "subagent.completed")).toBe(false);
   });
 
   it("clears the child's proxy-input entries before settling its handle", async () => {

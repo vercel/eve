@@ -1,3 +1,4 @@
+import { taskReceipts } from "@eve-e2e/config/task-receipts";
 import { e2eModel } from "@eve-e2e/config";
 import type { EveEvalContext, EveEvalSession, EveEvalTurn, InputRequest } from "eve/evals";
 import { equals, satisfies } from "eve/evals/expect";
@@ -51,7 +52,7 @@ export async function startWarehouseLookups(t: EveEvalContext): Promise<Reportin
 
 Once all three assignments are accepted, let Alice know the checks are underway. When all three results are ready, reply directly from the returned items without further tool calls or task-list updates. Bob needs only three checklist entries, with each item listed once and no separate summary.`);
   started.expectOk();
-  started.calledSubagent("agent", { count: TASK_COUNT });
+  started.calledSubagent("agent", { status: "pending", count: TASK_COUNT });
   started.notCalledTool("probe");
   started.notCalledTool("warehouse_lookup");
   assertModel(started, modelId);
@@ -70,11 +71,7 @@ Once all three assignments are accepted, let Alice know the checks are underway.
     ),
   );
 
-  const receipts = started.events.flatMap((event) =>
-    event.type === "subagent.completed" && event.data.backgroundTask !== undefined
-      ? [{ callId: event.data.callId, taskId: event.data.backgroundTask.taskId }]
-      : [],
-  );
+  const receipts = taskReceipts(started.events);
   const actions = started.events.flatMap((event) =>
     event.type === "actions.requested" ? event.data.actions : [],
   );
@@ -359,7 +356,7 @@ async function releaseCheck(t: EveEvalContext, run: ReportingRun, check: Check):
     ),
     equals([]),
   );
-  // ctx.agent completes through its owning workflow tool, not a subagent.completed event.
+  // Check the owning workflow tool result for the completed lookup.
   await t.require(
     lookup,
     equals([
@@ -428,12 +425,13 @@ async function post(t: EveEvalContext, run: ReportingRun, suffix: "" | "/compact
 }
 
 function hasPostReceiptAcknowledgement(turn: EveEvalTurn): boolean {
+  const receiptCallIds = new Set(
+    taskReceipts(turn.events)
+      .filter(({ toolName }) => toolName === "agent")
+      .map(({ callId }) => callId),
+  );
   const receiptIndexes = turn.events.flatMap((event, index) =>
-    event.type === "subagent.completed" &&
-    event.data.subagentName === "agent" &&
-    event.data.backgroundTask !== undefined
-      ? [index]
-      : [],
+    event.type === "action.result" && receiptCallIds.has(event.data.result.callId) ? [index] : [],
   );
   return (
     receiptIndexes.length === TASK_COUNT &&

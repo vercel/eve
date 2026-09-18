@@ -1,3 +1,4 @@
+import { taskReceipts } from "@eve-e2e/config/task-receipts";
 import { type EveEvalContext, type EveEvalTurn, type InputRequest } from "eve/evals";
 import { satisfies } from "eve/evals/expect";
 
@@ -129,11 +130,7 @@ function collectReleaseRequests(turn: EveEvalTurn, requests: Map<string, InputRe
 }
 
 function backgroundTaskIds(turn: EveEvalTurn): readonly string[] {
-  return turn.events.flatMap((event) =>
-    event.type === "subagent.completed" && event.data.backgroundTask !== undefined
-      ? [event.data.backgroundTask.taskId]
-      : [],
-  );
+  return taskReceipts(turn.events).map(({ taskId }) => taskId);
 }
 
 function completedNotificationTaskIds(turn: EveEvalTurn): readonly string[] {

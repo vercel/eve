@@ -25,7 +25,7 @@ export default defineEval({
     completed.messageIncludes(CHILD_TOKEN);
 
     t.succeeded();
-    t.calledSubagent("agent", { status: "pending", count: 1 });
+    t.calledSubagent("agent", { status: "completed", count: 1 });
     t.noFailedActions();
   },
 });

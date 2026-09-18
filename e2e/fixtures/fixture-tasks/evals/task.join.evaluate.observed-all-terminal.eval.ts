@@ -1,3 +1,4 @@
+import { taskReceipts } from "@eve-e2e/config/task-receipts";
 import { type EveEvalContext, type EveEvalTurn, type InputRequest } from "eve/evals";
 import { satisfies } from "eve/evals/expect";
 
@@ -146,11 +147,9 @@ async function waitForTurnMessage(
 
 function backgroundTasksByMarker(turn: EveEvalTurn): ReadonlyMap<FanInMarker, string> {
   const tasksByMarker = new Map<FanInMarker, string>();
-  for (const event of turn.events) {
-    if (event.type !== "subagent.completed" || event.data.backgroundTask === undefined) continue;
-    const fanInCall = FAN_IN_CALLS.find(({ callId }) => callId === event.data.callId);
-    if (fanInCall !== undefined)
-      tasksByMarker.set(fanInCall.marker, event.data.backgroundTask.taskId);
+  for (const receipt of taskReceipts(turn.events)) {
+    const fanInCall = FAN_IN_CALLS.find(({ callId }) => callId === receipt.callId);
+    if (fanInCall !== undefined) tasksByMarker.set(fanInCall.marker, receipt.taskId);
   }
   return tasksByMarker;
 }

@@ -473,7 +473,11 @@ describe("owner agent invocation dispatch", () => {
 });
 
 describe("task-owned agent settlement", () => {
-  it.each(["parked", "terminal"] as const)("applies a %s child outcome", async (kind) => {
+  it.each(
+    (["parked", "terminal"] as const).flatMap((kind) =>
+      ([undefined, "tool", "subagent"] as const).map((taskKind) => ({ kind, taskKind })),
+    ),
+  )("applies a $kind child outcome under $taskKind ownership", async ({ kind, taskKind }) => {
     const claimed = {
       ...availableRecord,
       callId: "call-1",
@@ -481,9 +485,24 @@ describe("task-owned agent settlement", () => {
       phase: "claimed" as const,
       ownerId: "task-1",
     };
+    const owner =
+      taskKind === undefined
+        ? session
+        : registerWorkflowToolRun(session, {
+            callId: "call-1",
+            toolName: "research",
+            lifetime: "session",
+            origin: { turnId: "turn", stepIndex: 0 },
+            address: { runId: "run", hookToken: "hook" },
+            task: {
+              taskId: "task-1",
+              metadata: { kind: taskKind, name: "research" },
+              dispatchContext: { auth: { current: null, initiator: null } },
+            },
+          });
     vi.mocked(readDurableSession).mockReturnValue({
-      ...session,
-      state: setAgentHandleStore(undefined, { handles: [claimed] }),
+      ...owner,
+      state: setAgentHandleStore(owner.state, { handles: [claimed] }),
     } as never);
 
     const settled = await settleTaskAgentInvocationStep({
@@ -507,9 +526,17 @@ describe("task-owned agent settlement", () => {
       },
       ownerId: "task-1",
       sessionState: {} as never,
-      taskId: "task-1",
+      taskId: taskKind === undefined ? undefined : "task-1",
     });
 
+    expect(settled.completion).toEqual(
+      taskKind === "subagent"
+        ? undefined
+        : {
+            type: "subagent.completed",
+            data: { callId: "call-1", subagentName: "research", output: "done" },
+          },
+    );
     const handles = getAgentHandleStore(settled.sessionState.snapshot.session.state)?.handles ?? [];
     expect(handles).toEqual(
       kind === "parked" ? [expect.objectContaining({ phase: "available" })] : [],
@@ -604,6 +631,7 @@ describe("task-owned agent settlement", () => {
       sessionState: {} as never,
     });
 
+    expect(settled.completion).toBeUndefined();
     expect(getAgentHandleStore(settled.sessionState.snapshot.session.state)?.handles).toEqual([
       {
         address: availableRecord.address,

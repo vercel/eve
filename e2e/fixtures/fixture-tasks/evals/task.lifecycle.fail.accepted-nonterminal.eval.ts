@@ -18,12 +18,15 @@ export default defineTaskEval({
     const started = await t.send("TASK-A2-CHILD-FAILURE");
     started.expectOk();
     started.messageIncludes("TASK-A2-CHILD-FAILURE-STARTED");
-    started.event("subagent.completed", {
+    started.event("action.result", {
       count: 1,
       data: {
-        backgroundTask: { status: "working" },
-        callId: CALL_ID,
-        subagentName: "busy-worker",
+        result: {
+          kind: "tool-result",
+          output: { status: "working" },
+          callId: CALL_ID,
+          toolName: "busy-worker",
+        },
       },
     });
     const taskId = requireBackgroundTaskId(started);

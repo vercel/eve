@@ -212,6 +212,16 @@ describe("SubagentPump.settleCancelledTurn", () => {
 });
 
 describe("SubagentPump background receipts", () => {
+  it("retains a receipt that arrives before child dispatch", () => {
+    const view = fakeView();
+    const pump = new SubagentPump({ view, formatActionResultError: () => "failed" });
+    pump.background("call-1");
+    pump.begin(subagentCalled("call-1"));
+    pump.settleCancelledTurn("turn-1");
+    expect(view.background).toHaveBeenCalledWith({ callId: "call-1" });
+    expect(view.complete).not.toHaveBeenCalled();
+  });
+
   it("keeps the section open until the child stream reaches its own boundary", async () => {
     const child = pushableChildStream();
     const client = new Client({ host: "http://localhost:3000" });

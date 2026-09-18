@@ -45,19 +45,9 @@ export async function applyTaskAgentRequest(
         taskId: delivery.taskId,
       });
       let serializedContext = settled.serializedContext;
-      if (settled.settled && request.result.isError !== true && delivery.taskId === undefined) {
+      if (settled.completion !== undefined) {
         const emitted = await emitSubagentEventStep({
-          event: {
-            type: "subagent.completed",
-            data: {
-              callId: request.result.callId,
-              subagentName: request.result.subagentName,
-              output:
-                typeof request.result.output === "string"
-                  ? request.result.output
-                  : JSON.stringify(request.result.output),
-            },
-          },
+          event: settled.completion,
           sessionWritable: ctx.sessionWritable,
           serializedContext,
           sessionState: settled.sessionState,

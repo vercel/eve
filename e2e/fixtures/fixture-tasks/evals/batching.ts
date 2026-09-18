@@ -1,3 +1,4 @@
+import { taskReceipts } from "@eve-e2e/config/task-receipts";
 import { type EveEvalContext, type EveEvalTurn, type InputRequest } from "eve/evals";
 import { equals } from "eve/evals/expect";
 
@@ -14,12 +15,8 @@ export async function startBlockedFanout(t: EveEvalContext, count: number) {
   started.expectOk();
   started.noFailedActions();
   started.messageIncludes("TASK-FANOUT-STARTED");
-  started.calledSubagent("fanout-worker", { count });
-  const receipts = started.events.flatMap((event) =>
-    event.type === "subagent.completed" && event.data.backgroundTask !== undefined
-      ? [{ callId: event.data.callId, taskId: event.data.backgroundTask.taskId }]
-      : [],
-  );
+  started.calledSubagent("fanout-worker", { status: "pending", count });
+  const receipts = taskReceipts(started.events);
   const taskIds = receipts.map(({ taskId }) => taskId);
   await t.require(
     { receipts: taskIds.length, distinct: new Set(taskIds).size },

@@ -240,32 +240,6 @@ export async function resolvePendingCoordination(input: {
     };
   }
 
-  if (input.emit !== undefined) {
-    for (const result of readyResults) {
-      if (result.kind === "subagent-result" && result.isError !== true) {
-        const backgroundTask = readBackgroundTaskReceipt(result);
-        const data = {
-          callId: result.callId,
-          output: typeof result.output === "string" ? result.output : JSON.stringify(result.output),
-          subagentName: result.subagentName,
-        };
-        await input.emit({
-          data: backgroundTask === undefined ? data : { ...data, backgroundTask },
-          type: "subagent.completed",
-        } satisfies Extract<UnstampedMessageStreamEvent, { type: "subagent.completed" }>);
-      }
-
-      await input.emit(
-        createActionResultEvent({
-          result,
-          sequence: batch.event.sequence,
-          stepIndex: batch.event.stepIndex,
-          turnId: batch.event.turnId,
-        }),
-      );
-    }
-  }
-
   // Settle each bound child result against its running handle from the
   // outcome the child engine reported: `parked` keeps the handle (the child
   // is idle and resumable), `terminal` deletes it. Before a terminal
@@ -352,6 +326,36 @@ export async function resolvePendingCoordination(input: {
         usage: outcome.usageDelta,
       }),
     );
+  }
+
+  if (input.emit !== undefined) {
+    for (const result of readyResults) {
+      if (
+        result.kind === "subagent-result" &&
+        result.origin === "child" &&
+        result.outcome.result.kind === "succeeded" &&
+        readBackgroundTaskReceipt(result) === undefined
+      ) {
+        const data = {
+          callId: result.callId,
+          output: typeof result.output === "string" ? result.output : JSON.stringify(result.output),
+          subagentName: result.subagentName,
+        };
+        await input.emit({
+          data,
+          type: "subagent.completed",
+        } satisfies Extract<UnstampedMessageStreamEvent, { type: "subagent.completed" }>);
+      }
+
+      await input.emit(
+        createActionResultEvent({
+          result,
+          sequence: batch.event.sequence,
+          stepIndex: batch.event.stepIndex,
+          turnId: batch.event.turnId,
+        }),
+      );
+    }
   }
 
   const toolResults: ToolResultPart[] = [];

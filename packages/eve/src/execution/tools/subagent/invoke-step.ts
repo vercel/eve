@@ -10,7 +10,11 @@ import type { AgentInvocationRequest } from "#execution/tools/subagent/invoke-ag
 import type { RuntimeSubagentResult } from "#shared/action-types.js";
 import type { HandleEventFn } from "#harness/types.js";
 import type { ActivityWorkIdentityV1 } from "#protocol/activity.js";
-import { createSubagentCalledEvent, type SubagentCalledStreamEvent } from "#protocol/message.js";
+import {
+  createSubagentCalledEvent,
+  type SubagentCalledStreamEvent,
+  type SubagentCompletedStreamEvent,
+} from "#protocol/message.js";
 import { workflowEntryReference } from "#execution/workflow-runtime.js";
 import { getWorkflowMetadata } from "#compiled/@workflow/core/index.js";
 import { resolveWorkflowCallbackBaseUrl } from "#execution/workflow-callback-url.js";
@@ -401,6 +405,7 @@ export async function settleTaskAgentInvocationStep(input: {
   readonly taskId?: string | undefined;
 }): Promise<{
   readonly settled: boolean;
+  readonly completion?: SubagentCompletedStreamEvent;
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
 }> {
@@ -468,8 +473,31 @@ export async function settleTaskAgentInvocationStep(input: {
       usage: input.result.outcome.usageDelta,
     }),
   );
+  const task =
+    input.taskId === undefined
+      ? undefined
+      : findBackgroundWorkflowToolRun(session.state, input.taskId);
+  // A generated subagent task completes when the parent records its task outcome.
+  // Nested agents inside authored background workflows settle independently of that task.
+  const isTaskAgent =
+    task?.task.metadata.kind === "subagent" && task.callId === input.result.callId;
+  const completion: SubagentCompletedStreamEvent | undefined =
+    input.result.outcome.result.kind !== "succeeded" || isTaskAgent
+      ? undefined
+      : {
+          type: "subagent.completed",
+          data: {
+            callId: input.result.callId,
+            subagentName: input.result.subagentName,
+            output:
+              typeof input.result.output === "string"
+                ? input.result.output
+                : JSON.stringify(input.result.output),
+          },
+        };
   return {
     settled: true,
+    completion,
     serializedContext,
     sessionState: replaceDurableSessionSnapshot({ session, state: input.sessionState }),
   };

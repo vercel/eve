@@ -30,11 +30,8 @@ export default defineEval({
     // both the event stream and the channel.
     const launch = await t.target.attachSession(sessionId);
     launch.succeeded();
-    launch.calledTool("remote-loopback");
-    launch.event("subagent.completed", {
-      data: (data) => data.subagentName === "remote-loopback" && data.backgroundTask !== undefined,
-      count: 1,
-    });
+    launch.calledTool("remote-loopback", { output: { status: "working" }, count: 1 });
+    launch.notEvent("subagent.completed");
     launch.event("message.completed", {
       data: (data) => data.finishReason !== "tool-calls" && data.message === null,
       count: 1,
@@ -58,6 +55,10 @@ export default defineEval({
     const completed = await completedLive.result();
     completed.expectOk();
     completed.messageIncludes(FINAL);
+    completed.event("subagent.completed", {
+      data: { subagentName: "remote-loopback" },
+      count: 1,
+    });
     await t.require(
       completed.events,
       satisfies(

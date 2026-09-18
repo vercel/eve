@@ -396,12 +396,21 @@ removed discriminator and expect the former result protocol.
 
 ## Subagent result observation
 
-Keep `subagent.completed` and its optional `backgroundTask` receipt marker unchanged.
-The marker identifies dispatch admission while the child is still running; evals retain
-`pending` until an actual result is observed. Successful blocking results remain `completed`
-after parent-owned settlement. Neither status implies termination of the reusable child session.
-Background task outcomes continue to arrive through task notifications. No new event or stream
-version is needed for this distinction.
+Both execution modes use `subagent.called` for dispatch and `subagent.completed` for a
+successful parent-recorded invocation result. The completion carries actual output and the
+original `callId`; it does not imply termination of the reusable child session.
+
+A background receipt is an `action.result` tool output with `status: "working"`. It does not
+emit `subagent.completed`. For a generated subagent task, completion follows the parent's
+first recorded successful task outcome. Replayed notifications and late success after failure
+or cancellation cannot publish another completion. An agent invoked inside an authored
+background workflow settles independently of its enclosing task, as in a blocking workflow.
+
+Completion events do not wait for sibling tasks; the existing combined report still does.
+Failure and cancellation retain their distinct task outcomes and do not emit successful
+completion. Evals use `pending` until they observe a successful result, then `completed`.
+The task itself uses `working` or `input_required` while active. No new event or stream
+version is added; existing receipt-marked events remain readable as admission.
 
 ## Recommendation
 

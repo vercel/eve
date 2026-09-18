@@ -338,6 +338,7 @@ describe("recordTerminalTaskViewsStep", () => {
       views: [view],
     });
 
+    expect(result.subagentCompletions).toEqual([]);
     expect(bindSessionInstrumentation).toHaveBeenCalledWith({
       agentName: "parent-agent",
       ctx: expect.any(ContextContainer),

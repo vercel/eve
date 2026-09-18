@@ -26,7 +26,16 @@ export default defineEval({
     parked.calledSubagent("collision-child", { count: 1, status: "pending" });
     parked.eventOrder([
       { type: "actions.requested" },
-      { type: "subagent.completed" },
+      {
+        type: "action.result",
+        data: {
+          result: {
+            kind: "tool-result",
+            toolName: "collision-child",
+            output: { status: "working" },
+          },
+        },
+      },
       { type: "input.requested" },
       { type: "session.waiting" },
     ]);
@@ -42,7 +51,7 @@ export default defineEval({
     t.succeeded();
     t.noFailedActions();
     t.calledTool("collision-gate", { count: 1, status: "completed" });
-    t.calledSubagent("collision-child", { count: 1, status: "pending" });
+    t.calledSubagent("collision-child", { count: 1, status: "completed" });
   },
 });
 

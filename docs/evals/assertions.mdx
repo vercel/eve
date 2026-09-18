@@ -85,7 +85,7 @@ Pick the cheapest builder that captures what "correct" means. When exact match i
 
 `t.calledTool` and `t.calledSubagent` take matcher objects. Tools accept `{ input, output, status, count }`; subagents accept `{ callId, childSessionId, remoteUrl, output, status, count }`. Calls match `status: "completed"` by default; use `"pending"`, `"failed"`, or `"rejected"` explicitly for lifecycle checks. A numeric `count` requires an exact number of calls matching every supplied constraint. Use a predicate for ranges or other custom count requirements; it receives the observed number of matching calls.
 
-A background subagent that has only returned a working task receipt remains `pending`; use `t.calledSubagent(name, { status: "pending" })` to assert that delegation. The receipt settles dispatch, not the child's work. A successful blocking call with an actual result is `completed`, even when the child session stays available for another call. Check task notifications for a background task's final outcome.
+A background subagent that has only returned a working task receipt remains `pending`; use `t.calledSubagent(name, { status: "pending" })` to assert that delegation. The receipt settles dispatch, not the child's work. Both blocking and background calls become `completed` when their actual successful result is observed through `subagent.completed`, even when the child session stays available for another call. This eval status describes the captured events: an unresolved delegation is `pending`, while the underlying admitted task is `working` or `input_required`. Check task notifications for failure and cancellation.
 
 Matcher values accept a literal (objects partial-deep-match), a RegExp, or a predicate function that returns a boolean:
 
