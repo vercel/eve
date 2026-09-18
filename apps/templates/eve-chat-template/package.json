@@ -62,5 +62,5 @@
     "microsandbox": "^0.5.10",
     "typescript": "7.0.2"
   },
-  "packageManager": "pnpm@11.25.0"
+  "packageManager": "pnpm@12.4.2"
 }

@@ -1,3 +1,5 @@
+enableGlobalVirtualStore: false
+
 minimumReleaseAgeExclude:
   - "@ai-sdk/*"
   - "@vercel/*"

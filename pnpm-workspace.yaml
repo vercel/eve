@@ -1,3 +1,5 @@
+enableGlobalVirtualStore: false
+
 packages:
   - apps/*
   - apps/fixtures/*
