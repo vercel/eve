@@ -1,6 +1,8 @@
 import type { AgentDefinition, AgentStaticModelDefinition } from "eve";
 import { mockModel, type MockModelResponder } from "eve/evals";
 
+export { e2eJudgeModel } from "./judge.js";
+
 /**
  * Sentinel value for `EVE_E2E_MODEL` that makes fixtures author a
  * deterministic `mockModel()` instead of a real gateway model. The world
@@ -90,11 +92,6 @@ export function e2eSubagentConfig(options?: E2EModelOptions): E2ESubagentConfig 
   }
 
   return { model, modelContextWindowTokens: MOCK_MODEL_CONTEXT_WINDOW_TOKENS };
-}
-
-/** Shared fixture judge, independent of the agent matrix, until CI has access to Jev. */
-export function e2eJudgeModel(): string {
-  return "openai/gpt-5.6-luna";
 }
 
 const defaultMockResponder: MockModelResponder = ({ lastUserMessage }) =>

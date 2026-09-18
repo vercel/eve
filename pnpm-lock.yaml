@@ -1448,6 +1448,9 @@ importers:
 
   e2e/fixtures/e2e-config:
     dependencies:
+      '@ai-sdk/openai':
+        specifier: 'catalog:'
+        version: 4.0.69(zod@4.5.4)
       '@opentelemetry/sdk-trace-base':
         specifier: 'catalog:'
         version: 2.6.1(@opentelemetry/api@1.9.1)
