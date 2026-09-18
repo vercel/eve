@@ -7,7 +7,7 @@ export default defineEval({
 
     turn.expectOk();
     turn.messageIncludes("AGENT-ROUTER-ROOT-COPY-OK");
-    turn.calledTool("agent-router", { count: 1 });
+    turn.calledTool("agent", { count: 1 });
     turn.calledSubagent("agent", { count: 1, status: "pending" });
     t.succeeded();
     t.noFailedActions();

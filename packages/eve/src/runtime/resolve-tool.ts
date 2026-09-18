@@ -30,6 +30,7 @@ export async function resolveToolDefinition(
 ): Promise<ResolvedToolDefinition> {
   if (!definition.hasExecute) {
     return {
+      availableInSubagents: definition.availableInSubagents,
       behavior: definition.behavior,
       description: definition.description,
       inputSchema: toInputSchema(definition.inputSchema),
@@ -82,6 +83,7 @@ export async function resolveToolDefinition(
         : (input: unknown) => createWorkflowProgramExecuteInput(workflowProgram, input);
 
     return {
+      availableInSubagents: definition.availableInSubagents,
       behavior: definition.behavior,
       description: definition.description,
       execute,

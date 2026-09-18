@@ -23,7 +23,6 @@ export function assertFrameworkToolPolicy(
     );
   }
   const closedDispatchSlots = {
-    "tools/agent": "self-agent",
     "tools/task_cancel": "task-cancel",
   } as const;
   const expectedAction = closedDispatchSlots[slot as keyof typeof closedDispatchSlots];

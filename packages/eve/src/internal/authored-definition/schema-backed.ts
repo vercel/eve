@@ -3,6 +3,7 @@ import { readWorkflowFunctionId } from "#internal/workflow/reference.js";
 import { isDisabledToolSentinel } from "#tools/definition.js";
 import { isWebSearchToolDefinition } from "#tools/provided/web-search.js";
 import {
+  expectBoolean,
   expectFunction,
   expectObjectRecord,
   expectOnlyKnownKeys,
@@ -109,6 +110,7 @@ export function normalizeToolDefinition(value: unknown, message: string): Normal
   expectOnlyKnownKeys(
     record,
     [
+      "availableInSubagents",
       "label",
       "auth",
       "description",
@@ -138,6 +140,10 @@ export function normalizeToolDefinition(value: unknown, message: string): Normal
     expectFunction(record.execute, message);
   }
   const definition: MutableNormalizedAuthoredTool = {
+    availableInSubagents:
+      record.availableInSubagents === undefined
+        ? undefined
+        : expectBoolean(record.availableInSubagents, message),
     description: expectString(record.description, message),
     hasApproval: record.approval !== undefined,
     hasExecute,

@@ -32,6 +32,23 @@ A tool definition needs:
 
 When a tool returns structured data, add an optional `outputSchema`. With Zod or Standard Schema it also types the `execute` return.
 
+### Hide a tool from delegated agents
+
+Set `availableInSubagents: false` when a tool should be callable only in a top-level root session:
+
+```ts title="agent/tools/coordinator.ts"
+export default defineTool({
+  availableInSubagents: false,
+  description: "Coordinate work that only the top-level root agent should start.",
+  inputSchema: z.object({ task: z.string() }),
+  execute({ task }) {
+    return coordinate(task);
+  },
+});
+```
+
+The option defaults to `true` and works with `defineTool` and `defineWorkflowTool`. A root copy does not receive a tool with this option, and a tool authored inside a declared subagent is unavailable because that agent runs in a delegated session. This controls tool availability only; it does not add or remove entries from a workflow's `ctx.agents` registry.
+
 Compiled tools preserve Zod schema composition, including input and output schemas imported from helper modules. Durable replay metadata stays separate from the original schema, so adding it does not mutate shared schema objects.
 
 ### Label tool activity

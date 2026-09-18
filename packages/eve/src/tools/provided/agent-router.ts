@@ -17,6 +17,7 @@ export type AgentRouterTool = BlockingWorkflowToolDefinition<AgentRouterInput, J
 /** Defines a workflow tool that uses JEV to route a task across all available agent targets. */
 export function agentRouter(): AgentRouterTool {
   return defineWorkflowTool({
+    availableInSubagents: false,
     description: AGENT_ROUTER_TOOL_DESCRIPTION,
     execute: executeAgentRouterTool,
     inputSchema: AGENT_ROUTER_INPUT_SCHEMA,

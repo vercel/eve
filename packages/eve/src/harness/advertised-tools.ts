@@ -99,6 +99,7 @@ function shouldHideTool(
   const delegated = session.rootSessionId !== undefined;
   if (
     definition.rootOnly === true ||
+    definition.availableInSubagents === false ||
     definition.behavior?.availability.includes("root-session") === true
   ) {
     return delegated;

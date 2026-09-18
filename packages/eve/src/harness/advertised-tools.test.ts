@@ -70,6 +70,17 @@ describe("getAdvertisedTools for definition arrays", () => {
     expect(advertisedTools.map((tool) => tool.name)).toEqual(["add", "delegate"]);
   });
 
+  it("hides tools marked unavailable in subagents from delegated sessions", () => {
+    const tools = new Map([
+      ["root_only", { ...createTool("root_only"), availableInSubagents: false }],
+    ]) satisfies HarnessToolMap;
+
+    expect([...getAdvertisedTools({ session: {}, tools }).keys()]).toEqual(["root_only"]);
+    expect([
+      ...getAdvertisedTools({ session: { rootSessionId: "root-session" }, tools }).keys(),
+    ]).toEqual([]);
+  });
+
   it("keeps root-session tools in the root session", () => {
     const tools = new Map([
       ["add", createTool("add")],

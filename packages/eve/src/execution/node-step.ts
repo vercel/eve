@@ -277,6 +277,7 @@ function createRegisteredHarnessToolDefinition(input: {
     def.owner.kind === "framework" && def.name === ASK_QUESTION_TOOL_NAME;
 
   const definition: HarnessToolDefinition = {
+    availableInSubagents: def.availableInSubagents,
     label:
       def.label ??
       (def.owner.kind === "framework" && def.name === WEB_SEARCH_TOOL_NAME

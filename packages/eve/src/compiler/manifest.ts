@@ -55,7 +55,7 @@ export const ROOT_COMPILED_AGENT_NODE_ID = "__root__";
 /**
  * Current compiled manifest schema version.
  */
-export const COMPILED_AGENT_MANIFEST_VERSION = 49;
+export const COMPILED_AGENT_MANIFEST_VERSION = 50;
 
 /**
  * Compiled channel entry preserved in the compiled manifest.
@@ -857,6 +857,7 @@ const compiledToolBehaviorSchema: z.ZodType<CompiledToolBehavior> = z
 
 const compiledToolDefinitionSchema = z
   .object({
+    availableInSubagents: z.boolean().optional(),
     behavior: compiledToolBehaviorSchema.optional(),
     description: z.string(),
     execution: z.literal("background").optional(),

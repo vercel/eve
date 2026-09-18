@@ -13,6 +13,7 @@ describe("agentRouter", () => {
   it("defines a workflow tool", () => {
     const definition = agentRouter();
 
+    expect(definition.availableInSubagents).toBe(false);
     expect(definition.description).toContain("best available subagent");
     expect(definition.execute).toBe(executeAgentRouterTool);
   });

@@ -325,6 +325,7 @@ function createMetadata(input: {
   readonly resolver: ResolvedDynamicToolResolver;
 }): CurrentDynamicToolMetadata {
   return {
+    availableInSubagents: input.entry.availableInSubagents,
     callbacks: validateDurableDynamicToolCallbacks(input.name, input.entry, {
       sessionId: input.sessionId,
       scope: input.scope,

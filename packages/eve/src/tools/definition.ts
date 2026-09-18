@@ -36,6 +36,8 @@ export type ToolExecuteFn<TInput = unknown, TOutput = unknown> = (
 export type ToolExecution = "background";
 
 interface ToolDefinitionBase {
+  /** Whether delegated agent sessions receive this tool. Defaults to `true`. */
+  readonly availableInSubagents?: boolean;
   readonly description: string;
   readonly execution?: ToolExecution;
 }

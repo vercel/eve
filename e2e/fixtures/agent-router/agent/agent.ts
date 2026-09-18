@@ -8,6 +8,9 @@ export default defineAgent({
     modelId: "agent-router-parent",
     respond(request) {
       if (request.userMessages.some((message) => message.includes("Return the root-copy marker"))) {
+        if (request.tools.some((tool) => tool.name === "agent")) {
+          throw new Error("The delegated root copy exposed the root-only agent router tool.");
+        }
         const inspection = request.toolResults.find((entry) => entry.name === "inspect-agents");
         if (inspection === undefined) {
           return { toolCalls: [{ name: "inspect-agents", input: {} }] };
@@ -17,12 +20,12 @@ export default defineAgent({
         }
         return "AGENT-ROUTER-ROOT-COPY-OK";
       }
-      const result = request.toolResults.find((entry) => entry.name === "agent-router");
+      const result = request.toolResults.find((entry) => entry.name === "agent");
       return result === undefined
         ? {
             toolCalls: [
               {
-                name: "agent-router",
+                name: "agent",
                 input: { message: "Return the root-copy marker." },
               },
             ],

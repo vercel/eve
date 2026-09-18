@@ -23,6 +23,7 @@ import type { ToolModelOutput } from "#tools/model-output.js";
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export interface DynamicToolEntry<TInput = Record<string, unknown>, TOutput = any> {
+  readonly availableInSubagents?: boolean;
   readonly label?: ToolLabelDefinition<TInput, TOutput>;
   readonly description: string;
   readonly inputSchema: PublicToolInputSchema<TInput>;

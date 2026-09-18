@@ -291,7 +291,7 @@ eve add tool/agent
 export { default } from "eve/tools/agent";
 ```
 
-The framework behavior cannot be overridden. Re-export the definition above to restore it, or disable it:
+An authored tool at `agent/tools/agent.ts` replaces the framework behavior. Re-export the definition above to restore direct root-copy delegation, export another tool such as `agentRouter()` to change the model-facing behavior, or disable the slot:
 
 ```ts title="agent/tools/agent.ts"
 import { disableTool } from "eve/tools";

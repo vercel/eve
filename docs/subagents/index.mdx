@@ -49,7 +49,7 @@ export default defineAgent({
 });
 ```
 
-You can also export `disableTool()` from `agent/tools/agent.ts`. Re-exporting the framework definition at that path takes priority over `tool: false`; arbitrary replacements are not supported. Both forms control model visibility only. A workflow in a top-level root session can still invoke the root copy with `ctx.agent("agent", ...)` and read its description from `ctx.agents.agent`.
+You can also export `disableTool()` from `agent/tools/agent.ts`. Any authored tool at that path replaces the model-facing framework tool and takes priority over `tool: false`; re-export `eve/tools/agent` to keep direct root-copy delegation. Tool composition does not change the callable-agent registry: a workflow in a top-level root session can still invoke the root copy with `ctx.agent("agent", ...)` and read its description from `ctx.agents.agent`.
 
 ## Declared subagents
 

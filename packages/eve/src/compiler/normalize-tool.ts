@@ -109,6 +109,7 @@ export async function compileToolEntry(
   return {
     kind: "tool",
     definition: {
+      availableInSubagents: entry.definition.availableInSubagents,
       behavior:
         workflowId === undefined
           ? entry.definition.behavior === undefined

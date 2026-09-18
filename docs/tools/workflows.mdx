@@ -405,11 +405,15 @@ The evaluation runs in a step so workflow replay records its result instead of m
 
 Use `agentRouter()` when the router should consider every target in `ctx.agents` with the default JEV routing instructions:
 
-```ts title="agent/tools/agent-router.ts"
+To replace the model-facing `agent` tool with the router, export it from the `agent` slot:
+
+```ts title="agent/tools/agent.ts"
 import { agentRouter } from "eve/tools/agent-router";
 
 export default agentRouter();
 ```
+
+`agentRouter()` sets `availableInSubagents: false`, so a delegated root copy does not inherit the router tool. Tool authors can set the same option on any `defineTool` or `defineWorkflowTool` definition that should be available only in a top-level root session.
 
 Its input is `{ message: string, outputSchema?: object }`. With two or more available targets, `agentRouter()` sends the message and every effective description to JEV, then invokes the selected name through `ctx.agent()`. It invokes a sole target without evaluation and forwards an optional `outputSchema`. In a top-level root session, the candidates include the root-copy `agent`; delegated root copies and declared subagent contexts include only their declared targets.
 

@@ -37,10 +37,11 @@ The second form removes the derived `researcher` tool but not the `researcher` c
 ## Semantics
 
 - `tool` defaults to `true` for root, local, remote, workspace, and dynamically selected agents.
-- Root `tool: false` removes the built-in `agent` tool unless an authored `agent/tools/agent.ts` overrides that slot.
+- Root `tool: false` removes the built-in `agent` tool unless an authored `agent/tools/agent.ts` overrides that slot. The authored slot may contain any tool definition; tool identity does not grant root-copy invocation authority.
 - Subagent `tool: false` suppresses only its model-tool projection. Workflow `ctx.agent()` continues to resolve the child from the complete registry.
 - A same-named `disableTool()` suppresses a declared subagent's projection or the root built-in `agent` tool.
 - A same-named authored tool and subagent may coexist only when the subagent's tool projection is disabled. The authored tool owns the model name; `ctx.agent(name, input)` owns the child-agent name. The name `agent` is reserved for the built-in root-copy target and cannot identify a declared subagent.
+- `availableInSubagents: false` compiles a tool as top-level-root-only. `agentRouter()` sets it automatically, so it can own the model-facing `agent` slot without being inherited by a delegated root copy.
 - Hidden subagents retain their description, execution, authorization, task lifecycle, tracing, limits, output schema, and continuation behavior.
 - A nullish dynamic subagent selection remains unavailable to every caller. `tool: false` is visibility, not availability.
 

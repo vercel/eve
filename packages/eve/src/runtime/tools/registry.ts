@@ -83,17 +83,20 @@ async function createPreparedRuntimeTool(
   definition: ResolvedToolDefinition,
   nodeId: string | undefined,
 ): Promise<PreparedRuntimeAuthoredTool> {
-  const isFrameworkAgent = definition.name === AGENT_TOOL_NAME;
-  const workflowId = isFrameworkAgent
+  const isSelfAgent =
+    definition.behavior?.handling?.kind === "dispatch" &&
+    definition.behavior.handling.action === "self-agent";
+  const workflowId = isSelfAgent
     ? subagentToolExecuteWorkflowReference.workflowId
     : definition.behavior?.handling?.kind === "workflow-tool"
       ? definition.behavior.handling.workflowId
       : undefined;
   return {
+    availableInSubagents: definition.availableInSubagents,
     behavior: prepareToolBehavior(
       definition.behavior,
       nodeId,
-      isFrameworkAgent ? subagentToolExecuteWorkflowReference.workflowId : undefined,
+      isSelfAgent ? subagentToolExecuteWorkflowReference.workflowId : undefined,
     ),
     description: definition.description,
     execution: definition.execution,
@@ -103,12 +106,12 @@ async function createPreparedRuntimeTool(
     name: definition.name,
     owner: definition.owner,
     outputSchema: serializeOutputSchema(definition.outputSchema),
-    rootOnly: isFrameworkAgent || undefined,
+    rootOnly: isSelfAgent || undefined,
     sourceId: definition.sourceId,
     task:
       workflowId === undefined
         ? undefined
-        : isFrameworkAgent
+        : isSelfAgent
           ? {
               nodeId: ROOT_RUNTIME_AGENT_NODE_ID,
               resultKind: "subagent",

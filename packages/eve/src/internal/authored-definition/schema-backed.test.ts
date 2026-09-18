@@ -30,6 +30,21 @@ describe("normalizeToolDefinition", () => {
     expect(typeof entry.definition.execute).toBe("function");
   });
 
+  it("preserves subagent visibility", () => {
+    const tool = defineTool({
+      availableInSubagents: false,
+      description: "Runs only in a root session.",
+      inputSchema: z.object({}),
+      execute: () => null,
+    });
+
+    const entry = normalizeToolDefinition(tool, FAILURE_MESSAGE);
+
+    expect(entry.kind).toBe("tool");
+    if (entry.kind !== "tool") throw new Error("expected tool kind");
+    expect(entry.definition.availableInSubagents).toBe(false);
+  });
+
   it("preserves the background execution discriminator", () => {
     const tool = defineTool({
       description: "Starts an export.",

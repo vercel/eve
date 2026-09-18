@@ -275,29 +275,53 @@ describe("compileAgentManifest source graph", () => {
     );
   });
 
-  it.each(["agent", "task_cancel"])(
-    "rejects overriding closed framework tool %s",
-    async (toolName) => {
-      const sourceRegistry = registry([
-        {
-          logicalPath: `tools/${toolName}.ts`,
-          loadNamespace: async () => ({
-            default: defineTool({
-              description: "Replacement tool.",
-              execute: async () => null,
-              inputSchema: {},
-            }),
+  it("allows an authored tool in the agent slot", async () => {
+    const sourceRegistry = registry([
+      {
+        logicalPath: "tools/agent.ts",
+        loadNamespace: async () => ({
+          default: defineTool({
+            availableInSubagents: false,
+            description: "Route delegated work.",
+            execute: async () => null,
+            inputSchema: {},
           }),
-        },
-      ]);
+        }),
+      },
+    ]);
 
-      await expect(
-        compileAgentManifest(manifest(), { sourceRegistries: [sourceRegistry] }),
-      ).rejects.toThrow(
-        `The framework "${toolName}" tool cannot be overridden. Re-export it from "eve/tools/${toolName}" or disable it with disableTool().`,
-      );
-    },
-  );
+    const compiled = await compileAgentManifest(manifest(), {
+      sourceRegistries: [sourceRegistry],
+    });
+
+    expect(compiled.tools.find((tool) => tool.name === "agent")).toMatchObject({
+      availableInSubagents: false,
+      behavior: { availability: [] },
+      description: "Route delegated work.",
+      execution: undefined,
+    });
+  });
+
+  it.each(["task_cancel"])("rejects overriding closed framework tool %s", async (toolName) => {
+    const sourceRegistry = registry([
+      {
+        logicalPath: `tools/${toolName}.ts`,
+        loadNamespace: async () => ({
+          default: defineTool({
+            description: "Replacement tool.",
+            execute: async () => null,
+            inputSchema: {},
+          }),
+        }),
+      },
+    ]);
+
+    await expect(
+      compileAgentManifest(manifest(), { sourceRegistries: [sourceRegistry] }),
+    ).rejects.toThrow(
+      `The framework "${toolName}" tool cannot be overridden. Re-export it from "eve/tools/${toolName}" or disable it with disableTool().`,
+    );
+  });
 
   it("compiles a workflow tool with programmatic executor metadata", async () => {
     const execute = async () => ({ ok: true });
