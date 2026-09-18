@@ -671,7 +671,7 @@ describe("ensureChannel", () => {
     const projectRoot = await createTempDir();
     const pnpmWorkspacePath = join(projectRoot, "pnpm-workspace.yaml");
     const existingPolicy =
-      '"minimumReleaseAgeStrict": &strict false # Keep this comment\notherPolicy: *strict\nallowBuilds:\n  sharp: true\n';
+      'minimumReleaseAge: 2880\n"minimumReleaseAgeStrict": &strict false # Keep this comment\notherPolicy: *strict\nallowBuilds:\n  sharp: true\n';
     await writeFile(
       join(projectRoot, "package.json"),
       `${JSON.stringify({ name: "demo", type: "module" }, null, 2)}\n`,
@@ -1156,6 +1156,9 @@ describe("scaffoldBaseProject", () => {
       );
       if (packageManager === "pnpm") {
         await expect(readFile(join(projectRoot, "pnpm-workspace.yaml"), "utf8")).resolves.toContain(
+          "minimumReleaseAge: 0",
+        );
+        await expect(readFile(join(projectRoot, "pnpm-workspace.yaml"), "utf8")).resolves.toContain(
           "minimumReleaseAgeStrict: true",
         );
       }
@@ -1178,7 +1181,7 @@ describe("scaffoldBaseProject", () => {
     );
     await writeFile(
       join(workspaceRoot, "pnpm-workspace.yaml"),
-      "minimumReleaseAgeStrict: false\npackages:\n  - apps/*\n",
+      "minimumReleaseAge: 2880\nminimumReleaseAgeStrict: false\npackages:\n  - apps/*\n",
       "utf8",
     );
 
@@ -1195,7 +1198,7 @@ describe("scaffoldBaseProject", () => {
 
     await expect(pathExists(join(projectRoot, "pnpm-workspace.yaml"))).resolves.toBe(false);
     await expect(readFile(join(workspaceRoot, "pnpm-workspace.yaml"), "utf8")).resolves.toBe(
-      "minimumReleaseAgeStrict: false\npackages:\n  - apps/*\n\nallowBuilds:\n  sharp: false\n",
+      "minimumReleaseAge: 2880\nminimumReleaseAgeStrict: false\npackages:\n  - apps/*\n\nallowBuilds:\n  sharp: false\n",
     );
     const projectPackageJson = JSON.parse(
       await readFile(join(projectRoot, "package.json"), "utf8"),
