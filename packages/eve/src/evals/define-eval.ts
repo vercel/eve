@@ -4,12 +4,12 @@ import type { EveEvalDefinition, EveEvalInput } from "#evals/types.js";
  * Defines one eve eval. Each eval file is exactly one case: an imperative
  * `test(t)` function that drives the agent (`t.session`, `t.send`, …) and
  * asserts on what it produced (`t.succeeded()`, `t.check(...)`,
- * `t.judge.autoevals.*`). Organize related evals with directory nesting under
+ * `t.judge(...)`). Organize related evals with directory nesting under
  * `evals/`, or default-export an array of evals to fan one file out over a
  * dataset.
  *
- * A `judge` is optional: `t.judge.*` assertions fall back to the `judge`
- * declared in `evals.config.ts` unless this eval overrides it. The judge model
+ * A `judge` is optional: `t.judge(...)` assertions fall back to the `judge`
+ * declared in `evals.config.ts`, then the shared evaluation default. The judge model
  * is used solely for scoring, never for the agent under test. Eval identity is
  * derived from the `evals/<path>.eval.ts` file path by the discovery layer, so
  * authoring `id` or `name` throws.
@@ -54,7 +54,7 @@ function validateEvalInput(input: EveEvalInput): void {
   rejectLegacyKey(
     input,
     "scores",
-    "Use soft assertions inside `test`: `t.check(...).atLeast(n)` or `t.judge.autoevals.*`.",
+    "Use soft assertions inside `test`: `t.check(...).atLeast(n)` or `t.judge(...)`.",
   );
   rejectLegacyKey(
     input,

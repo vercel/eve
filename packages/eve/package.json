@@ -525,7 +525,6 @@
     "@workflow/world-local": "5.0.0-beta.45",
     "@workflow/world-vercel": "5.0.0-beta.48",
     "ai": "catalog:",
-    "autoevals": "0.0.132",
     "chat": "4.34.0",
     "chokidar": "5.0.0",
     "commander": "14.0.3",
