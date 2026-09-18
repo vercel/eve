@@ -5,6 +5,7 @@ import {
 } from "#context/keys.js";
 import type { ContextReader } from "#context/key.js";
 import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
+import { AGENT_TOOL_DESCRIPTION, AGENT_TOOL_NAME } from "#tools/framework/agent-contract.js";
 import type { WorkflowAgentMetadata } from "#tools/workflow-definition.js";
 
 /** Snapshots callable agent metadata for one workflow tool run. */
@@ -14,6 +15,12 @@ export function resolveWorkflowAgentMetadata(
   const bundle = ctx.get(BundleKey);
   if (bundle === undefined) return {};
   const agents = new Map<string, WorkflowAgentMetadata>();
+
+  if (bundle.nodeId === undefined) {
+    agents.set(AGENT_TOOL_NAME, {
+      description: bundle.resolvedAgent.config?.description ?? AGENT_TOOL_DESCRIPTION,
+    });
+  }
 
   for (const [name, registered] of bundle.subagentRegistry.subagentsByName ?? []) {
     const description = registered.definition.description;

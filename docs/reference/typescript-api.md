@@ -108,7 +108,7 @@ import template from "../../prompts/template.txt?raw";
 | `ctx.getToken(provider)`    | Resolve a bearer token for an inline auth provider such as `connect("...")`  |
 | `ctx.requireAuth(provider)` | Evict and re-authorize an inline provider, commonly after a downstream `401` |
 
-Authored workflow tools also receive `ctx.agents`, a replay-stable map of effective declared-subagent descriptions, and `ctx.agent(name, input)` for invocation. See [Workflows as tools](../tools/workflows#delegate-work-ctxagent) for the workflow-only context.
+Authored workflow tools also receive `ctx.agents`, a replay-stable map of effective callable-agent descriptions, and `ctx.agent(name, input)` for invocation. See [Workflows as tools](../tools/workflows#delegate-work-ctxagent) for the workflow-only context.
 
 ## Imports at a glance
 

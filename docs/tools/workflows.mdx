@@ -15,7 +15,7 @@ suspend in either execution mode; running in the background does not require a s
 
 Workflow tools use the [Workflow SDK](https://workflow-sdk.dev): `"use workflow"`, `"use step"`, `createHook`,
 `createWebhook`, `sleep`, retries, and replay. eve provides `ctx.ask` for questions answered through
-the session's channel, `ctx.agents` for effective subagent descriptions, and `ctx.agent` for durable subagent delegation. Use `yield` to report
+the session's channel, `ctx.agents` for effective callable-agent descriptions, and `ctx.agent` for durable agent delegation. Use `yield` to report
 progress and `await` on a workflow operation to wait durably. Values needed after a durable wait
 stay in local variables in the workflow body.
 
@@ -317,7 +317,7 @@ const result = await ctx.agent("reviewer", {
 });
 ```
 
-The first argument is the subagent's path-derived name. It can identify a model-visible subagent or one hidden with `tool: false` or `disableTool()`. eve assigns each call a replay-stable invocation identity, including repeated and parallel calls to the same subagent. Pass `agentId` to
+The first argument is an available agent target. On the root agent, `"agent"` starts or continues a copy of the root agent. A declared subagent uses its path-derived name and remains callable when hidden with `tool: false` or `disableTool()`. Declared subagent contexts do not expose the root-copy target. eve assigns each call a replay-stable invocation identity, including repeated and parallel calls to the same target. Pass `agentId` to
 continue an existing child. An inline `outputSchema` requires structured output and determines the
 return type, so `result` in the example is typed as `{ findings: string[] }`.
 
@@ -388,11 +388,11 @@ export default defineWorkflowTool({
 
 The evaluation runs in a step so workflow replay records its result instead of making the routing request again. The parent model receives `agent-router`, but not `researcher` or `operator`. JEV returns the typed `"researcher" | "operator"` choice, and the selected subagent's result becomes the `agent-router` tool result.
 
-`ctx.agents` is a replay-stable metadata snapshot taken when the workflow starts. It includes agents hidden from the parent model with `tool: false` or `disableTool()`, but exposes no model definitions, credentials, or callbacks. Invocation still checks the subagent's availability through `ctx.agent()`.
+`ctx.agents` is a replay-stable metadata snapshot taken when the workflow starts. On the root agent, `ctx.agents.agent.description` describes the root-copy target, using the root's authored `description` or the built-in self-delegation description when omitted. The snapshot also includes declared agents hidden from the parent model with `tool: false` or `disableTool()`, but exposes no model definitions, credentials, or callbacks. Invocation still checks each target's availability through `ctx.agent()`.
 
 #### Route across every subagent
 
-Use `agentRouter()` when the router should consider every available declared subagent with the default JEV routing instructions:
+Use `agentRouter()` when the router should consider every target in `ctx.agents` with the default JEV routing instructions:
 
 ```ts title="agent/tools/agent-router.ts"
 import { agentRouter } from "eve/tools/agent-router";
@@ -400,7 +400,7 @@ import { agentRouter } from "eve/tools/agent-router";
 export default agentRouter();
 ```
 
-Its input is `{ message: string, outputSchema?: object }`. With two or more available subagents, `agentRouter()` sends the message and every effective description to JEV, then invokes the selected path-derived name through `ctx.agent()`. It invokes a sole available subagent without evaluation and forwards an optional `outputSchema`. The built-in root-copy `agent` target is not included.
+Its input is `{ message: string, outputSchema?: object }`. With two or more available targets, `agentRouter()` sends the message and every effective description to JEV, then invokes the selected name through `ctx.agent()`. It invokes a sole target without evaluation and forwards an optional `outputSchema`. On the root agent, the candidates include the root-copy `agent`; declared subagent contexts include only their declared targets.
 
 This pattern controls specialist selection, not whether the parent model delegates at all. Route before the parent model runs if every incoming request must go through JEV.
 

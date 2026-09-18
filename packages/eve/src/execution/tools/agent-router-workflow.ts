@@ -28,7 +28,7 @@ async function chooseTarget(
 
   const names = Object.keys(criteria);
   if (names.length === 0) {
-    throw new Error("agentRouter requires at least one available declared subagent.");
+    throw new Error("agentRouter requires at least one available agent target.");
   }
   if (names.length === 1) return names[0]!;
 

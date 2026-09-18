@@ -4,6 +4,7 @@ import { mockModel } from "eve/evals";
 
 export default defineAgent({
   ...e2eAgentConfig(),
+  description: "Coordinate specialist work and delegate focused subtasks.",
   model: mockModel({
     modelId: "root-agent-tool-disabled",
     respond(request) {

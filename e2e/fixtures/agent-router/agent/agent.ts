@@ -7,8 +7,8 @@ export default defineAgent({
   model: mockModel({
     modelId: "agent-router-parent",
     respond(request) {
-      if (request.tools.some((tool) => tool.name === "worker")) {
-        throw new Error("The hidden worker was exposed to the parent model.");
+      if (request.userMessages.some((message) => message.includes("Return the root-copy marker"))) {
+        return "AGENT-ROUTER-ROOT-COPY-OK";
       }
       const result = request.toolResults.find((entry) => entry.name === "agent-router");
       return result === undefined
@@ -16,7 +16,7 @@ export default defineAgent({
             toolCalls: [
               {
                 name: "agent-router",
-                input: { message: "Return the agent-router marker." },
+                input: { message: "Return the root-copy marker." },
               },
             ],
           }

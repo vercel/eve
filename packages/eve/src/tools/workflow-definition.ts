@@ -84,7 +84,7 @@ export type WorkflowToolContext = Pick<
   ToolContext,
   "abortSignal" | "callId" | "session" | "toolName" | "getToken" | "requireAuth"
 > & {
-  /** Invoke an agent by its path-derived name. */
+  /** Invoke an agent by its invocation name. */
   agent: WorkflowAgent;
   /** Metadata for agents callable by this workflow, including hidden agents. */
   agents: Readonly<Record<string, WorkflowAgentMetadata>>;

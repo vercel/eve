@@ -94,7 +94,7 @@ describe("agentRouter", () => {
     const ctx = { agents: {} } as WorkflowToolContext;
 
     await expect(executeAgentRouterTool({ message: "Route me" }, ctx)).rejects.toThrow(
-      "agentRouter requires at least one available declared subagent.",
+      "agentRouter requires at least one available agent target.",
     );
     expect(evaluate).not.toHaveBeenCalled();
   });

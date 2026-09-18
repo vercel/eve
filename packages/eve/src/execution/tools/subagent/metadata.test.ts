@@ -7,10 +7,12 @@ import {
 } from "#context/keys.js";
 import { resolveWorkflowAgentMetadata } from "#execution/tools/subagent/metadata.js";
 import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
+import { AGENT_TOOL_DESCRIPTION } from "#tools/framework/agent-contract.js";
 
 describe("resolveWorkflowAgentMetadata", () => {
-  it("includes hidden static subagents without adding self-delegation", () => {
+  it("includes root self-delegation and hidden static subagents", () => {
     const ctx = context({
+      description: "Coordinate specialist work.",
       nodeId: undefined,
       subagentsByName: new Map([
         [
@@ -27,11 +29,20 @@ describe("resolveWorkflowAgentMetadata", () => {
     });
 
     expect(resolveWorkflowAgentMetadata(ctx)).toEqual({
+      agent: { description: "Coordinate specialist work." },
       researcher: { description: "Investigate difficult questions." },
     });
   });
 
-  it("uses effective dynamic descriptions with turn precedence", () => {
+  it("uses the built-in self-delegation description when the root has none", () => {
+    const ctx = context({ nodeId: undefined, subagentsByName: new Map() });
+
+    expect(resolveWorkflowAgentMetadata(ctx)).toEqual({
+      agent: { description: AGENT_TOOL_DESCRIPTION },
+    });
+  });
+
+  it("uses effective dynamic descriptions with turn precedence without adding self-delegation", () => {
     const ctx = context({ nodeId: "subagents/coordinator", subagentsByName: new Map() });
     const prepared = { name: "reviewer" };
     ctx.set(SessionDynamicSubagentSelectionsKey, {
@@ -56,12 +67,14 @@ describe("resolveWorkflowAgentMetadata", () => {
 });
 
 function context(input: {
+  readonly description?: string;
   readonly nodeId: string | undefined;
   readonly subagentsByName: ReadonlyMap<string, unknown>;
 }): ContextContainer {
   const ctx = new ContextContainer();
   ctx.set(BundleKey, {
     nodeId: input.nodeId,
+    resolvedAgent: { config: { description: input.description } },
     subagentRegistry: { subagentsByName: input.subagentsByName },
   } as never);
   return ctx;
