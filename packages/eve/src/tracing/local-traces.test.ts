@@ -1,8 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { defaultEveAudience } from "#eve-channel/audience.js";
-import { createLocalTracesProcessor, resolveLocalTracesContent } from "#tracing/local-traces.js";
+import { contentFilteringProcessor } from "#tracing/content-span-processor.js";
 import { localTracePolicy } from "#tracing/local-instrumentation-runtime.js";
+import {
+  createLocalTracesProcessor,
+  resolveLocalTracesExportPolicy,
+} from "#tracing/local-traces.js";
 import { resolveTracePolicy } from "#tracing/sampled-trace.js";
 import { localTraces } from "#public/instrumentation/otel.js";
 
@@ -76,37 +80,47 @@ describe("createLocalTracesProcessor", () => {
   });
 });
 
-describe("resolveLocalTracesContent", () => {
-  it("retains content by default", () => {
-    expect(resolveLocalTracesContent()).toEqual({
-      recordInputs: true,
-      recordOutputs: true,
-    });
+describe("resolveLocalTracesExportPolicy", () => {
+  it("preserves the authored policy by default", () => {
+    const exportPolicy = { span: () => ({ emit: true }) } as const;
+
+    expect(resolveLocalTracesExportPolicy(exportPolicy)).toBe(exportPolicy);
   });
 
-  it("preserves explicit legacy redaction", () => {
-    expect(resolveLocalTracesContent({ recordInputs: false })).toEqual({
-      recordInputs: false,
-      recordOutputs: true,
-    });
-  });
-
-  it("keeps EVE_TRACES_CONTENT=on compatible with the new default", () => {
+  it("preserves the authored policy when EVE_TRACES_CONTENT=on", () => {
     vi.stubEnv("EVE_TRACES_CONTENT", "on");
+    const exportPolicy = { span: () => ({ emit: true }) } as const;
 
-    expect(resolveLocalTracesContent()).toEqual({
-      recordInputs: true,
-      recordOutputs: true,
-    });
+    expect(resolveLocalTracesExportPolicy(exportPolicy)).toBe(exportPolicy);
   });
 
-  it("maps EVE_TRACES_CONTENT=off to full local redaction", () => {
+  it("prepends full redaction when EVE_TRACES_CONTENT=off", () => {
     vi.stubEnv("EVE_TRACES_CONTENT", "off");
-
-    expect(resolveLocalTracesContent({ recordInputs: true, recordOutputs: true })).toEqual({
-      recordInputs: false,
-      recordOutputs: false,
+    let visibleAttributes: Readonly<Record<string, unknown>> | undefined;
+    const exportPolicy = resolveLocalTracesExportPolicy({
+      span: ({ attributes }) => {
+        visibleAttributes = attributes;
+        return { emit: true };
+      },
     });
+
+    contentFilteringProcessor(
+      {
+        forceFlush: async () => undefined,
+        onEnd: () => undefined,
+        onStart: () => undefined,
+        shutdown: async () => undefined,
+      },
+      exportPolicy,
+    ).onEnd({
+      attributes: {
+        "ai.response.text": "private output",
+        "gen_ai.input.messages": "private input",
+      },
+      spanContext: () => ({ spanId: "span", traceId: "trace" }),
+    } as never);
+
+    expect(visibleAttributes).toEqual({});
   });
 });
 

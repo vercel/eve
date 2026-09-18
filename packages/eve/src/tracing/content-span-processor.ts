@@ -8,9 +8,9 @@ import { hasConversationRelease, type LocalTracesProcessor } from "#tracing/loca
 import { normalizeChannelAudience } from "#shared/channel-audience.js";
 import type { ChannelAudience } from "#shared/channel-audience.js";
 import {
-  contentRedactionForSpan,
-  spanExportPolicyStages,
+  normalizeSpanExportPolicies,
   type SpanExportContext,
+  type SpanExportDecision,
   type SpanExportPolicy,
 } from "#tracing/span-export-policy.js";
 import { channelAudienceFromContext } from "#tracing/channel-audience-context.js";
@@ -33,12 +33,13 @@ import { channelAudienceFromContext } from "#tracing/channel-audience-context.js
  */
 export function contentFilteringProcessor(
   downstream: SpanProcessor,
-  exportPolicy?: SpanExportPolicy,
+  exportPolicy?: SpanExportPolicy | readonly SpanExportPolicy[],
 ): SpanProcessor {
-  if (exportPolicy === undefined) return downstream;
+  const policies = normalizeSpanExportPolicies(exportPolicy);
+  if (policies.length === 0) return downstream;
 
   let processor = downstream;
-  for (const policy of spanExportPolicyStages(exportPolicy).toReversed()) {
+  for (const policy of policies.toReversed()) {
     processor = policyFilteringProcessor(processor, policy);
   }
   return processor;
@@ -114,7 +115,11 @@ function facadeFor(
   if (existing !== undefined) return existing;
 
   const context = spanExportContext(span, inheritedAudience);
-  const effectiveContent = contentForSpan(context, exportPolicy);
+  const decision = spanExportDecision(context, exportPolicy);
+  const effectiveContent = {
+    recordInputs: !decision.redactInputs,
+    recordOutputs: !decision.redactOutputs,
+  };
   const attributes: Record<string, unknown> = {};
   const events: unknown[] = [];
   const status: Record<string, unknown> = {};
@@ -174,21 +179,13 @@ function facadeFor(
   });
   const facade = {
     context,
-    exported: shouldExport(context, exportPolicy),
+    exported: decision.exported,
     refresh,
     value,
   };
   facade.refresh();
   facades.set(span, facade);
   return facade;
-}
-
-function contentForSpan(span: SpanExportContext, policy: SpanExportPolicy): ResolvedContentOptions {
-  const redaction = contentRedactionForSpan(policy, span);
-  return {
-    recordInputs: !redaction.redactInputs,
-    recordOutputs: !redaction.redactOutputs,
-  };
 }
 
 function refreshAttributes(
@@ -207,8 +204,13 @@ function refreshAttributes(
   const visible = kept ?? (source as Record<string, unknown>);
   for (const [key, value] of Object.entries(visible)) {
     const decision = attributeDecision(policy, { key, span: context, value });
-    if (decision.action === "keep") destination[key] = value;
-    else if (decision.action === "replace") destination[key] = decision.value;
+    if (typeof decision !== "object" || decision === null) continue;
+    if ("emit" in decision && "replace" in decision) continue;
+    if ("replace" in decision && decision.replace === true) {
+      if (decision.value !== undefined) destination[key] = decision.value;
+    } else if ("emit" in decision && decision.emit === true) {
+      destination[key] = value;
+    }
   }
 }
 
@@ -247,24 +249,60 @@ function spanExportContext(
   };
 }
 
-function shouldExport(context: SpanExportContext, policy: SpanExportPolicy | undefined): boolean {
-  if (policy === undefined) return true;
+function spanExportDecision(
+  context: SpanExportContext,
+  policy: SpanExportPolicy,
+): {
+  readonly exported: boolean;
+  readonly redactInputs: boolean;
+  readonly redactOutputs: boolean;
+} {
+  let decision: SpanExportDecision;
   try {
-    return policy.span?.(context) !== false;
+    decision = policy.span?.(context) ?? { emit: true };
   } catch {
-    return false;
+    return { exported: false, redactInputs: false, redactOutputs: false };
   }
+  if (typeof decision === "boolean") {
+    return { exported: decision, redactInputs: false, redactOutputs: false };
+  }
+  if (typeof decision !== "object" || decision === null) {
+    return { exported: false, redactInputs: false, redactOutputs: false };
+  }
+  if ("emit" in decision) {
+    if ("redact" in decision) {
+      return { exported: false, redactInputs: false, redactOutputs: false };
+    }
+    return {
+      exported: typeof decision.emit === "boolean" && decision.emit,
+      redactInputs: false,
+      redactOutputs: false,
+    };
+  }
+  if (decision.redact !== true) {
+    return { exported: false, redactInputs: false, redactOutputs: false };
+  }
+  const redactInputs = decision.inputs === true;
+  const redactOutputs = decision.outputs === true;
+  if (!redactInputs && !redactOutputs) {
+    return { exported: false, redactInputs: false, redactOutputs: false };
+  }
+  return {
+    exported: true,
+    redactInputs,
+    redactOutputs,
+  };
 }
 
 function attributeDecision(
   policy: SpanExportPolicy | undefined,
   input: Parameters<NonNullable<SpanExportPolicy["attribute"]>>[0],
 ) {
-  if (policy?.attribute === undefined) return { action: "keep" } as const;
+  if (policy?.attribute === undefined) return { emit: true } as const;
   try {
     return policy.attribute(input);
   } catch {
-    return { action: "drop" } as const;
+    return { emit: false } as const;
   }
 }
 

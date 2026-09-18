@@ -170,7 +170,7 @@ describe("seedInstrumentationProviders", () => {
 
   it("lets an authored reserved slot reconfigure or disable its default", async () => {
     seedInstrumentationProviders();
-    const authored = localTraces({ exportPolicy: { span: () => false } });
+    const authored = localTraces({ exportPolicy: { span: () => ({ emit: false }) } });
     await register("local", authored);
     expect(getInstrumentationProviders()).toEqual([{ provider: authored, slot: "local" }]);
 
@@ -182,7 +182,7 @@ describe("seedInstrumentationProviders", () => {
     vi.stubEnv(DEVELOPMENT_WORKER_APP_ROOT_ENV, undefined);
     vi.stubEnv("VERCEL_ENV", "production");
     seedInstrumentationProviders();
-    const authored = agentRuns({ exportPolicy: { span: () => false } });
+    const authored = agentRuns({ exportPolicy: { span: () => ({ emit: false }) } });
 
     await register("agent-runs", authored);
 
@@ -194,7 +194,7 @@ describe("seedInstrumentationProviders", () => {
     seedInstrumentationProviders();
     await register("zeta", defineInstrumentation({}));
     await register("audit", defineInstrumentation({}));
-    await register("local", localTraces({ exportPolicy: { span: () => false } }));
+    await register("local", localTraces({ exportPolicy: { span: () => ({ emit: false }) } }));
 
     expect(getInstrumentationProviders().map(({ slot }) => slot)).toEqual([
       "agent-runs",

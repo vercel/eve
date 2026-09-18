@@ -6,6 +6,7 @@ import {
   requestLocalTraceStorePrune,
   resolveLocalTraceRetentionSettings,
 } from "#tracing/local-trace-retention.js";
+import { normalizeSpanExportPolicies, type SpanExportPolicy } from "#tracing/span-export-policy.js";
 
 /**
  * The local spool, as a span processor.
@@ -93,20 +94,15 @@ export function createLocalTracesProcessor(
   };
 }
 
-/** Maps legacy local content configuration onto destination redaction. @internal */
-export function resolveLocalTracesContent(
-  options: {
-    readonly recordInputs?: boolean;
-    readonly recordOutputs?: boolean;
-  } = {},
-): { readonly recordInputs: boolean; readonly recordOutputs: boolean } {
-  if (process.env.EVE_TRACES_CONTENT === "off") {
-    return { recordInputs: false, recordOutputs: false };
-  }
-  return {
-    recordInputs: options.recordInputs !== false,
-    recordOutputs: options.recordOutputs !== false,
-  };
+/** Applies the local content environment override before authored policies. @internal */
+export function resolveLocalTracesExportPolicy(
+  exportPolicy?: SpanExportPolicy | readonly SpanExportPolicy[],
+): SpanExportPolicy | readonly SpanExportPolicy[] | undefined {
+  if (process.env.EVE_TRACES_CONTENT !== "off") return exportPolicy;
+  return [
+    { span: () => ({ redact: true, inputs: true, outputs: true }) },
+    ...normalizeSpanExportPolicies(exportPolicy),
+  ];
 }
 
 /** A production-authored `localTraces()` has no local development store. */

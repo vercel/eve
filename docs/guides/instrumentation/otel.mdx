@@ -100,52 +100,56 @@ export default disableInstrumentation();
 
 ## Filter a managed destination
 
-`localTraces()` and `agentRuns()` accept an `exportPolicy`. It filters spans
-and attributes before that destination's processors receive them:
+`localTraces()` and `agentRuns()` accept one `exportPolicy` object or an array
+applied in order. Each policy filters spans and attributes before that
+destination's processors receive them:
 
 ```ts title="agent/instrumentation/agent-runs.ts"
 import { agentRuns } from "eve/instrumentation/otel";
 
 export default agentRuns({
   exportPolicy: {
-    span: ({ name }) => name !== "internal.cache.refresh",
-    attribute: ({ key }) => (key === "customer.id" ? { action: "drop" } : { action: "keep" }),
+    span: ({ name }) => ({ emit: name !== "internal.cache.refresh" }),
+    attribute: ({ key }) => (key === "customer.id" ? { emit: false } : { emit: true }),
   },
 });
 ```
 
-Return `false` from `span` to omit that span from this destination. Return
-`{ action: "keep" }`, `{ action: "drop" }`, or
-`{ action: "replace", value }` from `attribute` to retain, remove, or change
+Return `{ emit: true }` from `span` to retain a span unchanged, or
+`{ emit: false }` to omit it from this destination. To retain the span while
+redacting content, return `{ redact: true }` with `inputs: true`,
+`outputs: true`, or both. A redaction decision implies emission and requires
+at least one direction. For example, return
+`{ redact: true, inputs: true, outputs: true }` to redact both directions.
+A throwing `span` callback drops the span from this destination. Return
+`{ emit: true }`, `{ emit: false }`, or
+`{ replace: true, value }` from `attribute` to retain, remove, or change
 one attribute.
 
 ### Further narrow a built-in destination
 
-Use the content redactors to further narrow what a built-in destination
+Return a redaction decision to further narrow what a built-in destination
 receives after the process-wide `otel({ tracePolicy })` has admitted a trace.
 For example, keep the spans in Agent Runs while redacting their inputs and
 outputs unless the session is public:
 
 ```ts title="agent/instrumentation/agent-runs.ts"
-import {
-  agentRuns,
-  composeSpanExportPolicies,
-  redactSpanInputs,
-  redactSpanOutputs,
-} from "eve/instrumentation/otel";
+import { agentRuns } from "eve/instrumentation/otel";
 
 export default agentRuns({
-  exportPolicy: composeSpanExportPolicies(
-    redactSpanInputs(({ audience }) => audience !== "public"),
-    redactSpanOutputs(({ audience }) => audience !== "public"),
-  ),
+  exportPolicy: {
+    span: ({ audience }) =>
+      audience === "public" ? { emit: true } : { redact: true, inputs: true, outputs: true },
+  },
 });
 ```
 
-`redactSpanInputs()` removes eve's known prompt, instruction, document, and
-tool-argument attributes. `redactSpanOutputs()` removes response, reasoning,
-tool-result, exception, and status attributes. They narrow only this
-destination; they do not mutate spans sent to another destination.
+Input redaction removes eve's known prompt, instruction, document, and
+tool-argument attributes. Output redaction removes response, reasoning,
+tool-result, exception, and status attributes. Redaction narrows only this
+destination; it does not mutate spans sent to another destination. Policies run
+in array order, and each policy receives the facade produced by the policies
+before it.
 
 ## What to read next
 

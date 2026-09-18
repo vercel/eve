@@ -51,11 +51,6 @@ import type { ChannelAudience } from "#shared/channel-audience.js";
 import { channelAudienceFromContext } from "#tracing/channel-audience-context.js";
 import { contentFilteringProcessor } from "#tracing/content-span-processor.js";
 import { parseLocalTraceSegment } from "#tracing/local-trace-reader.js";
-import {
-  composeSpanExportPolicies,
-  redactSpanInputs,
-  redactSpanOutputs,
-} from "#tracing/span-export-policy.js";
 import { CONTENT_ATTRIBUTE_LIMIT } from "#tracing/agent-otel-content.js";
 import type { TraceCapturePolicy } from "#tracing/otel-declaration.js";
 import type { TraceCaptureContext } from "#shared/trace-policy.js";
@@ -412,10 +407,9 @@ describe("createAgentOtelInstrumentation", () => {
     async (channelAudience) => {
       const metadata = new InMemorySpanExporter();
       const runtime = createRuntime(undefined, undefined, [
-        contentFilteringProcessor(
-          new SimpleSpanProcessor(metadata),
-          composeSpanExportPolicies(redactSpanInputs(), redactSpanOutputs()),
-        ),
+        contentFilteringProcessor(new SimpleSpanProcessor(metadata), {
+          span: () => ({ redact: true, inputs: true, outputs: true }),
+        }),
       ]);
       for (const sequence of [0, 1]) {
         await emitAttempt({
@@ -461,10 +455,9 @@ describe("createAgentOtelInstrumentation", () => {
     async (outcome) => {
       const metadata = new InMemorySpanExporter();
       const runtime = createRuntime(undefined, undefined, [
-        contentFilteringProcessor(
-          new SimpleSpanProcessor(metadata),
-          composeSpanExportPolicies(redactSpanInputs(), redactSpanOutputs()),
-        ),
+        contentFilteringProcessor(new SimpleSpanProcessor(metadata), {
+          span: () => ({ redact: true, inputs: true, outputs: true }),
+        }),
       ]);
       await publishTurnStarted({
         hooks: runtime.hooks,

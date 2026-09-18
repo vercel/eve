@@ -1,7 +1,7 @@
 ---
 issue: https://github.com/vercel/eve/issues/2331
 status: implemented
-last_updated: "2026-09-15"
+last_updated: "2026-09-17"
 ---
 
 # Audience-aware trace content policy
@@ -99,19 +99,26 @@ interface SpanExportContext {
   readonly traceId: string;
 }
 
-type SpanExportPredicate = (span: SpanExportContext) => boolean;
+type SpanExportDecision =
+  /** @deprecated Return `{ emit: boolean }` instead. */
+  | boolean
+  | { readonly emit: boolean }
+  | {
+      readonly redact: true;
+      readonly inputs?: boolean;
+      readonly outputs?: boolean;
+    };
 
 type SpanAttributeDecision =
-  | { readonly action: "keep" }
-  | { readonly action: "drop" }
+  | { readonly emit: boolean }
   | {
-      readonly action: "replace";
+      readonly replace: true;
       readonly value:
         string | number | boolean | readonly string[] | readonly number[] | readonly boolean[];
     };
 
 interface SpanExportPolicy {
-  readonly span?: SpanExportPredicate;
+  readonly span?: (span: SpanExportContext) => SpanExportDecision;
   readonly attribute?: (input: {
     readonly key: string;
     readonly span: SpanExportContext;
@@ -119,27 +126,17 @@ interface SpanExportPolicy {
   }) => SpanAttributeDecision;
 }
 
-declare function redactSpanInputs(when?: SpanExportPredicate): SpanExportPolicy;
-declare function redactSpanOutputs(when?: SpanExportPredicate): SpanExportPolicy;
-declare function composeSpanExportPolicies(
-  ...policies: readonly SpanExportPolicy[]
-): SpanExportPolicy;
-
 interface ManagedTraceOptions {
-  readonly exportPolicy?: SpanExportPolicy;
-  /** @deprecated Use redactSpanInputs() in exportPolicy. */
-  readonly recordInputs?: boolean;
-  /** @deprecated Use redactSpanOutputs() in exportPolicy. */
-  readonly recordOutputs?: boolean;
+  readonly exportPolicy?: SpanExportPolicy | readonly SpanExportPolicy[];
 }
 
 declare function agentRuns(options?: ManagedTraceOptions): OtelIntegration;
 declare function localTraces(options?: ManagedTraceOptions): OtelIntegration;
 ```
 
-`redactSpanInputs()` removes known prompt, instruction, document, and tool-argument attributes from matching spans. `redactSpanOutputs()` removes known response, reasoning, embedding, ranking, and tool-result attributes, plus exception details, event attributes, and status messages. Neither mutates the shared OpenTelemetry span; each destination receives a filtered facade.
+A span callback can return `{ redact: true, inputs: true }`, `{ redact: true, outputs: true }`, or both directions together. The direction fields accept booleans, but at least one must resolve to `true`; otherwise the span is dropped. Input redaction removes known prompt, instruction, document, and tool-argument attributes. Output redaction removes known response, reasoning, embedding, ranking, and tool-result attributes, plus exception details, event attributes, and status messages. A redaction decision implies emission and does not mutate the shared OpenTelemetry span; each destination receives a filtered facade.
 
-`composeSpanExportPolicies()` applies policies in declaration order. A later span or attribute policy sees the facade produced by earlier redactors. A span predicate returning `false` removes that span from one destination without suppressing the rest of its trace. Attribute policies run once for each attribute still visible at their stage.
+`exportPolicy` accepts one policy or an array applied in declaration order. A later span or attribute policy sees the facade produced by earlier redactors. A span callback returning `{ emit: false }` removes that span from one destination without suppressing the rest of its trace. Attribute policies run once for each attribute still visible at their stage.
 
 For example, this retains every conversation while capturing content only for public audiences:
 
@@ -155,11 +152,17 @@ export default otel({
 
 // agent/instrumentation/agent-runs.ts
 export default agentRuns({
-  exportPolicy: composeSpanExportPolicies({
-    span: ({ name }) => name !== "internal.cache.refresh",
-    attribute: ({ key }) =>
-      key === "user.email" ? { action: "replace", value: "[redacted]" } : { action: "keep" },
-  }),
+  exportPolicy: [
+    {
+      span: ({ name }) => ({ emit: name !== "internal.cache.refresh" }),
+      attribute: ({ key }) =>
+        key === "user.email" ? { replace: true, value: "[redacted]" } : { emit: true },
+    },
+    {
+      span: ({ audience }) =>
+        audience === "public" ? { emit: true } : { redact: true, inputs: true, outputs: true },
+    },
+  ],
 });
 ```
 
@@ -199,26 +202,22 @@ The runtime order is:
 1. Build and persist the conversation context, deriving and normalizing the channel audience once.
 2. Evaluate the process-wide `tracePolicy` before creating `agent.session`.
 3. For accepted traces, capture complete eve and AI SDK spans.
-4. Run each managed destination's composed export policies in declaration order. Custom integrations run their declared span processors.
+4. Run each managed destination's export policy pipeline in declaration order. Custom integrations run their declared span processors.
 5. Hand the resulting facade to that destination's processors or exporter.
 
 The lifecycle bus separately evaluates each instrumentation provider's policy
 against the same agent and channel context, skips rejected providers, and applies
 directional content projection before invoking accepted handlers.
 
-There is no implicit content redaction after a custom trace policy admits an audience. Redaction occurs only when the export pipeline includes `redactSpanInputs()` or `redactSpanOutputs()` (or when a retained compatibility option explicitly requests the equivalent redaction).
+There is no implicit content redaction after a custom trace policy admits an audience. Redaction occurs only when an export policy returns a redaction decision.
 
-Policies fail closed at their boundary: a throwing trace policy rejects the trace, a throwing span policy drops the span, a throwing attribute policy drops the attribute, and a throwing content-redaction predicate redacts that content direction. Missing, malformed, or conflicting audience evidence normalizes to `unknown`.
+Policies fail closed at their boundary: a throwing trace policy rejects the trace, a throwing span policy drops the span, a malformed or directionless redaction decision drops the span, and a throwing or malformed attribute policy drops the attribute. Missing, malformed, or conflicting audience evidence normalizes to `unknown`.
 
 ## Compatibility
 
 Instrumentation providers deprecate the experimental `capture` field in favor
 of `tracePolicy`; `"content"` and `"metadata"` are mapped to equivalent fixed
-policies while integrations migrate. The existing OTel destination
-`recordInputs` and `recordOutputs` options remain accepted as deprecated
-source-compatible aliases. An explicit `false` prepends the corresponding
-redaction policy; these options no longer prevent accepted spans from capturing
-content upstream. `EVE_TRACES_CONTENT=off` similarly prepends both redactors for
-local traces.
+policies while integrations migrate. `EVE_TRACES_CONTENT=off` prepends a
+full-content redaction policy for local traces.
 
 Filtering remains a span-processor responsibility because local trace persistence and authored processors are processors rather than uniform exporters. Keeping the filtering boundary immediately above each destination prevents one destination's policy from mutating what another destination receives.

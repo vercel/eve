@@ -213,6 +213,8 @@ function declareTelemetry(
           hooks: createInstrumentationHooks([]),
           otelSettings: {
             ...config,
+            recordInputs: config.recordInputs === true,
+            recordOutputs: config.recordOutputs === true,
             traceChannelRequests: config["traceChannelRequests"] === true,
           },
           runInContext: (_operation, execute) => execute(),

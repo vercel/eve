@@ -50,11 +50,6 @@ import {
 import { summarizeLocalTrace } from "#cli/commands/trace-detail.js";
 import { buildConversationItems } from "#cli/dev/tui/traces/trace-conversation.js";
 import { contentFilteringProcessor } from "#tracing/content-span-processor.js";
-import {
-  composeSpanExportPolicies,
-  redactSpanInputs,
-  redactSpanOutputs,
-} from "#tracing/span-export-policy.js";
 import { ConversationContextKey } from "#shared/conversation-context.js";
 
 const traceContext = (agentName: string, audience: "public" | "private") => ({
@@ -74,10 +69,9 @@ function createRuntime() {
     idGenerator,
     spanProcessors: [
       new SimpleSpanProcessor(exporter),
-      contentFilteringProcessor(
-        new SimpleSpanProcessor(metadata),
-        composeSpanExportPolicies(redactSpanInputs(), redactSpanOutputs()),
-      ),
+      contentFilteringProcessor(new SimpleSpanProcessor(metadata), {
+        span: () => ({ redact: true, inputs: true, outputs: true }),
+      }),
     ],
   });
   const agent = createAgentOtelInstrumentation({

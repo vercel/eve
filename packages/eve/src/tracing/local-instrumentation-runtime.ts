@@ -3,7 +3,10 @@ import {
   type InstrumentationRuntime,
 } from "#instrumentation/runtime.js";
 import { installInstrumentationRuntime } from "#tracing/install-instrumentation-runtime.js";
-import { createLocalTracesProcessor, resolveLocalTracesContent } from "#tracing/local-traces.js";
+import {
+  createLocalTracesProcessor,
+  resolveLocalTracesExportPolicy,
+} from "#tracing/local-traces.js";
 import {
   collectOtelPipeline,
   managedOtelIntegration,
@@ -28,7 +31,7 @@ export function installLocalInstrumentationRuntime(input: {
     collected: collectOtelPipeline([
       otel({ tracePolicy: localTracePolicy }),
       managedOtelIntegration({
-        ...resolveLocalTracesContent(),
+        exportPolicy: resolveLocalTracesExportPolicy(),
         spanProcessors: [spool],
       }),
     ]),
