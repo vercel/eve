@@ -129,7 +129,7 @@ alias env (local matrix, plain `eve eval --strict`) the eval skips.
 
 Most fixture agents resolve `EVE_E2E_MODEL`
 through `@eve-e2e/config`, defaulting to `openai/gpt-5.6-sol` for local runs.
-Judge assertions use the default `evaluate` model independently of the agent matrix. Deterministic judge coverage in `agent-evaluate` passes a fixture evaluation model explicitly.
+Fixtures with live judge assertions explicitly configure `openai/gpt-5.6-luna`, independently of the agent matrix. Deterministic judge coverage in `agent-evaluate` passes a fixture evaluation model explicitly.
 
 `agent-workflow-stress` uses eve's `mockModel` fixture helper so its 100-turn
 runs stay fast and deterministic. Its concurrent and sequential evals cover

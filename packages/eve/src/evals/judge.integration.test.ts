@@ -90,6 +90,41 @@ describe("evaluation-backed judge runner", () => {
     expect(outcome.assertions.map((item) => item.score)).toEqual([0.8, 1, 1]);
   });
 
+  it.each([
+    { criteria: [], batch: false },
+    { criteria: ["Only level"], batch: false },
+    { criteria: [], batch: true },
+    { criteria: ["Only level"], batch: true },
+  ])("rejects an undersized score rubric before provider I/O: %j", async ({ criteria, batch }) => {
+    const evaluator = model();
+    const outcome = await run(
+      (t) => {
+        const question = { type: "score" as const, instructions: "Grade clarity.", criteria };
+        if (batch) {
+          const handles = t.judge({
+            questions: {
+              clarity: question,
+              accurate: { type: "boolean", instructions: "Is the response accurate?" },
+            },
+          });
+          handles.clarity.atLeast(0);
+        } else {
+          t.judge(question).atLeast(0);
+        }
+      },
+      { model: evaluator },
+    );
+    expect(evaluator.doEvaluate).not.toHaveBeenCalled();
+    expect(outcome.assertions).toHaveLength(batch ? 2 : 1);
+    for (const assertion of outcome.assertions) {
+      expect(assertion).toMatchObject({ score: 0, severity: "gate", passed: false });
+      expect(assertion.message).toContain(
+        "score criteria must contain at least two ordered levels",
+      );
+    }
+    expect(computeEvalVerdict(outcome)).toBe("failed");
+  });
+
   it.each(["missing", "invalid", "provider", "unsupported"])(
     "fails the whole batch for %s answers or capability",
     async (failure) => {
