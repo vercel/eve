@@ -10,7 +10,7 @@ describe("assertion failure diagnostics", () => {
   it("shows the score against its threshold and bounds verbose details", () => {
     const assertion: AssertionResult = {
       message: [`prompt: ${"x".repeat(300)}`, "one", "two", "three", "four", "five"].join("\n"),
-      name: "judge.autoevals.closedQA [citation]",
+      name: "judge.boolean [citation]",
       passed: false,
       score: 0.42,
       severity: "soft",
@@ -18,7 +18,7 @@ describe("assertion failure diagnostics", () => {
     };
 
     expect(formatAssertionFailureHeadline(assertion)).toMatch(
-      /^judge\.autoevals\.closedQA \[citation\] \(42% < 80%\): prompt: .+…$/u,
+      /^judge\.boolean \[citation\] \(42% < 80%\): prompt: .+…$/u,
     );
     expect(formatAssertionFailureDetailLines(assertion)).toEqual([
       "one",

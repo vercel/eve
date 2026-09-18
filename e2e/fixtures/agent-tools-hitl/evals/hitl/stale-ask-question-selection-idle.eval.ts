@@ -50,12 +50,10 @@ export default defineEval({
     // The stale selection reaches the model as context it may act on or
     // disregard; judge that the reply engages with it instead of demanding
     // a literal echo the model can rightly decline.
-    t.judge.autoevals
-      .closedQA(
-        "The reply treats the message as a late response to an EARLIER question — either applying that earlier selection, or explaining that the earlier question was already answered or is no longer relevant (stale). Answer yes unless the reply ignores the message entirely or is unrelated to it.",
-        { on: staleSelection.message },
-      )
-      .atLeast(0.5);
+    t.judge(
+      "The reply treats the message as a late response to an EARLIER question — either applying that earlier selection, or explaining that the earlier question was already answered or is no longer relevant (stale). Answer yes unless the reply ignores the message entirely or is unrelated to it.",
+      { on: staleSelection.message },
+    ).atLeast(0.5);
 
     t.succeeded();
   },

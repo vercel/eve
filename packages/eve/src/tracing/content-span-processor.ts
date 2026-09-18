@@ -263,9 +263,6 @@ function spanExportDecision(
   } catch {
     return { exported: false, redactInputs: false, redactOutputs: false };
   }
-  if (typeof decision === "boolean") {
-    return { exported: decision, redactInputs: false, redactOutputs: false };
-  }
   if (typeof decision !== "object" || decision === null) {
     return { exported: false, redactInputs: false, redactOutputs: false };
   }

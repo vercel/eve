@@ -32,6 +32,7 @@ export function createEvalContext(deps: {
     getReply: () => deps.manager.lastTurnSession()?.lastTurn?.message ?? null,
     getInput: () => deps.manager.lastTurnSession()?.lastInput ?? "",
     judge: deps.judge,
+    signal: deps.signal,
   });
 
   const context: EveEvalContext = {

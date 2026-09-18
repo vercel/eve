@@ -295,7 +295,10 @@ function typeOnlyFixtures(): void {
     recordInputs: true,
   });
 
-  const providerWithCapture: ProviderDefinition = { capture: "content" };
+  const providerWithCapture: ProviderDefinition = {
+    // @ts-expect-error Content capture is configured through tracePolicy.
+    capture: "content",
+  };
   void providerWithCapture;
 
   defineInstrumentation({

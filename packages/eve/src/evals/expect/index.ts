@@ -1,4 +1,4 @@
-import { Levenshtein as AutoevalsLevenshtein } from "autoevals";
+import { levenshteinSimilarity } from "#evals/expect/levenshtein.js";
 
 import type { StandardSchemaV1 } from "#compiled/@standard-schema/spec/index.js";
 import { formatDiagnosticValue, toDiagnosticMetadataValue } from "#evals/diagnostics.js";
@@ -148,9 +148,8 @@ export function similarity(expected: string): Assertion {
     severity: "soft",
     evaluate: async (value) => {
       const actual = String(value ?? "");
-      const result = await AutoevalsLevenshtein({ output: actual, expected });
       return {
-        score: result.score ?? 0,
+        score: levenshteinSimilarity(actual, expected),
         message: `expected similarity to ${formatDiagnosticValue(expected)}; received ${formatDiagnosticValue(actual)}`,
         metadata: { actual, expected },
       };

@@ -151,6 +151,10 @@ You can also call `evaluate` outside a tool; it does not require an active eve
 session. Each call performs its own evaluation. `auto` uses this function
 and adds the per-turn routing behavior described below.
 
+## Judge eval results
+
+Eval authors can use `t.judge(...)` to turn evaluation answers into scored assertions, including batches of questions sharing one state. It uses this same `evaluate` implementation and default model. See [Judge](../evals/judge) for criteria, rubrics, and thresholds.
+
 ## Evaluate tool approvals
 
 Use `auto({ model? })` when an evaluation model should decide whether a

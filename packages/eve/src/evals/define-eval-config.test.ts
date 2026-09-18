@@ -29,8 +29,8 @@ describe("defineEvalConfig", () => {
     expect(config.judge).toBeUndefined();
   });
 
-  it("requires a model when a judge is provided", () => {
-    expect(() => defineInvalidConfig({ judge: {} as never })).toThrow("`judge` requires a `model`");
+  it("allows judge settings to use the default evaluation model", () => {
+    expect(defineEvalConfig({ judge: {} }).judge).toEqual({});
   });
 
   it("rejects a non-positive maxConcurrency", () => {

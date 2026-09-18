@@ -9,9 +9,11 @@
     "./instrumentation-otel": "./src/instrumentation-otel.ts"
   },
   "scripts": {
+    "test:integration": "node --test test/*.integration.test.mjs",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@ai-sdk/openai": "catalog:",
     "@opentelemetry/sdk-trace-base": "catalog:",
     "@vercel/otel": "catalog:",
     "eve": "workspace:*"

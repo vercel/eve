@@ -162,7 +162,7 @@ Every assertion returns a chainable handle. Severity rides on the assertion, so 
 - `.atLeast(threshold)` is soft with a bar (equivalent to `.soft(threshold)`).
 - `.label(name)` adds a stable name when an eval records several assertions from the same family.
 
-The defaults are chosen so you rarely set severity. Run-level methods and `includes`/`equals`/`matches` are gates; `similarity` and every `t.judge.*` assertion are soft. Annotate only when you deviate:
+The defaults are chosen so you rarely set severity. Run-level methods and `includes`/`equals`/`matches` are gates; `similarity` and every `t.judge(...)` assertion are soft. Annotate only when you deviate:
 
 ```ts
 t.calledTool("get_weather").soft(); // record the tool call as a metric, don't gate

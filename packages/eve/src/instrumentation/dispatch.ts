@@ -13,7 +13,7 @@ import {
   withoutInstrumentationContent,
 } from "#instrumentation/content.js";
 import { createLogger, formatError } from "#internal/logging.js";
-import { legacyCaptureTracePolicy, resolveTracePolicy } from "#shared/trace-policy.js";
+import { resolveTracePolicy } from "#shared/trace-policy.js";
 import type { TraceCaptureContext } from "#shared/trace-policy.js";
 
 import type {
@@ -48,18 +48,14 @@ export function createInstrumentationDispatcher(
     const decisions = new Map(
       providers.map((provider) => [
         provider,
-        resolveTracePolicy(
-          provider.tracePolicy ?? legacyCaptureTracePolicy(provider.capture),
-          trace,
-          (error) => {
-            if (warnedPolicyFailures.has(provider)) return;
-            warnedPolicyFailures.add(provider);
-            log.warn("instrumentation provider trace policy failed", {
-              error: formatError(error),
-              provider: provider.name,
-            });
-          },
-        ),
+        resolveTracePolicy(provider.tracePolicy, trace, (error) => {
+          if (warnedPolicyFailures.has(provider)) return;
+          warnedPolicyFailures.add(provider);
+          log.warn("instrumentation provider trace policy failed", {
+            error: formatError(error),
+            provider: provider.name,
+          });
+        }),
       ]),
     );
     const capturesInputs = [...decisions.values()].some(

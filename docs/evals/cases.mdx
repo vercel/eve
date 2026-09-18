@@ -70,7 +70,7 @@ export default defineEval({
   async test(t) {
     const draft = await t.send("Draft the follow-up email.");
     t.check(draft.message, includes("Best regards"));
-    t.judge.autoevals.closedQA("professional tone", { on: draft.message }).atLeast(0.6);
+    t.judge("professional tone", { on: draft.message }).atLeast(0.6);
 
     await draft.session.send("Now send it.");
     t.calledTool("send_email");
@@ -94,11 +94,9 @@ export default defineEval({
     t.succeeded();
     second.messageIncludes("marigold");
 
-    t.judge.autoevals
-      .closedQA("The assistant remembers the user's favorite word across turns", {
-        on: first.session.transcript,
-      })
-      .atLeast(0.8);
+    t.judge("The assistant remembers the user's favorite word across turns", {
+      on: first.session.transcript,
+    }).atLeast(0.8);
   },
 });
 ```

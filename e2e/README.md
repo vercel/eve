@@ -30,7 +30,6 @@ Fixture agents author their harness-owned configuration through the private
   without root-only settings.
 - `e2eModel({ mock? })` — a bare model handle for nested slots such as
   compaction models and dynamic selections.
-- `e2eJudgeModel()` — the judge model for `evals.config.ts`.
 
 When `EVE_E2E_MODEL=mock`, all of these return a deterministic `mockModel()`
 instead of a gateway model id. The default responder echoes the last user
@@ -128,8 +127,10 @@ must run against the alias — the `e2e-vercel` workflow sets
 evals as a second `eve eval` invocation after the main suite. Without the
 alias env (local matrix, plain `eve eval --strict`) the eval skips.
 
-Most fixture agents and their configured judges resolve `EVE_E2E_MODEL`
+Most fixture agents resolve `EVE_E2E_MODEL`
 through `@eve-e2e/config`, defaulting to `openai/gpt-5.6-sol` for local runs.
+Fixture eval configs use the shared `e2eJudgeModel()` helper, which returns an OpenAI evaluation-model instance for `openai/gpt-5.6-luna` until CI has access to Jev. The adapter uses Gateway's Responses endpoint and `AI_GATEWAY_API_KEY`, independently of the agent matrix. A bare Luna string targets Gateway's native evaluation API and is not supported. Deterministic judge coverage in `agent-evaluate` passes a fixture evaluation model explicitly.
+
 `agent-workflow-stress` uses eve's `mockModel` fixture helper so its 100-turn
 runs stay fast and deterministic. Its concurrent and sequential evals cover
 high-volume session execution and repeated session resumption respectively.

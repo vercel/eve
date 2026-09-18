@@ -1043,18 +1043,6 @@ describe("trace policies", () => {
       ]).capturesContent,
     ).toBe(false);
     expect(
-      createUnboundInstrumentationHooks([{ capture: "content", name: "legacy" }]).capturesContent,
-    ).toBe(false);
-    expect(
-      createUnboundInstrumentationHooks([
-        {
-          capture: "content",
-          name: "explicit-policy",
-          tracePolicy: () => ({ emit: true, recordInputs: false, recordOutputs: false }),
-        },
-      ]).capturesContent,
-    ).toBe(false);
-    expect(
       createInstrumentationHooks([{ name: "quiet" }]).forTrace!(traceContext("weather", "private"))
         .capturesContent,
     ).toBe(false);

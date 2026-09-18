@@ -131,6 +131,15 @@ describe("registerInstrumentationProvider", () => {
       /The default export of "instrumentation\/otel" is not an instrumentation provider/,
     );
   });
+
+  it("rejects the removed capture option", async () => {
+    const provider = defineInstrumentation({ capture: "metadata" } as never);
+
+    await expect(register("audit", provider)).rejects.toThrow(
+      /instrumentation\/audit.*no longer supports `capture`.*Use `tracePolicy`/u,
+    );
+    expect(getInstrumentationProviders()).toEqual([]);
+  });
 });
 
 describe("seedInstrumentationProviders", () => {
@@ -230,34 +239,6 @@ describe("finalizeInstrumentationProviders", () => {
 
     expect(started).toHaveBeenCalledOnce();
     expect(started.mock.calls[0]?.[0]).toMatchObject({ turnId: "turn-1" });
-  });
-
-  it.each([
-    ["content", true],
-    ["metadata", false],
-  ] as const)(
-    "maps the deprecated %s capture setting to provider policy",
-    async (capture, expected) => {
-      await register("legacy", defineInstrumentation({ capture }));
-
-      const runtime = finalizeInstrumentationProviders({ serviceName: "weather-agent" });
-
-      expect(runtime.hooks.forTrace?.(traceContext("private")).capturesContent).toBe(expected);
-    },
-  );
-
-  it("prefers provider tracePolicy over deprecated capture", async () => {
-    await register(
-      "provider",
-      defineInstrumentation({
-        capture: "metadata",
-        tracePolicy: () => ({ emit: true, recordInputs: true, recordOutputs: true }),
-      }),
-    );
-
-    const runtime = finalizeInstrumentationProviders({ serviceName: "weather-agent" });
-
-    expect(runtime.hooks.forTrace?.(traceContext("private")).capturesContent).toBe(true);
   });
 
   it("still runs execution when no destination was declared", async () => {

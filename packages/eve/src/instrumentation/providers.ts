@@ -86,6 +86,12 @@ export async function registerInstrumentationProvider(input: {
     );
   }
 
+  if (Object.hasOwn(input.value, "capture")) {
+    throw new Error(
+      `The instrumentation provider "instrumentation/${input.slot}" no longer supports \`capture\`. Use \`tracePolicy\` to configure content capture.`,
+    );
+  }
+
   providerRegistry().set(input.slot, input.value);
   await input.value.setup?.(createInstrumentationSetupContext(input.agentName));
 }
@@ -146,7 +152,6 @@ function toProviderDefinition(
   entry: RegisteredInstrumentationProvider,
 ): InstrumentationProviderDefinition {
   return {
-    capture: entry.provider.capture,
     events: entry.provider.events as InstrumentationProviderDefinition["events"],
     flush: entry.provider.flush,
     // The file the provider came from, which is the only name an author can

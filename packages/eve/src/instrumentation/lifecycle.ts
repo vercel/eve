@@ -4,11 +4,7 @@ import type { InstrumentationStateSlot } from "#instrumentation/state.js";
 import type { RuntimeTraceContext } from "#protocol/message.js";
 import type { ChannelAudience } from "#shared/channel-audience.js";
 import type { InstrumentationDecision } from "#shared/instrumentation-decision.js";
-import type {
-  InstrumentationCapture,
-  TraceCaptureContext,
-  TraceCapturePolicy,
-} from "#shared/trace-policy.js";
+import type { TraceCaptureContext, TraceCapturePolicy } from "#shared/trace-policy.js";
 
 /**
  * Stable eve identity for one model attempt. Retries share `stepIndex` and
@@ -555,11 +551,9 @@ export type InstrumentationEventHandler<TEvent> = (
   ctx: InstrumentationHandlerContext,
 ) => void | PromiseLike<void>;
 
-/** Internal provider shape mirrored by the future public hook contract. */
+/** Internal normalized provider shape consumed by the instrumentation bus. */
 export interface InstrumentationProviderDefinition {
   readonly name: string;
-  /** @deprecated Use `tracePolicy` to select directional content. */
-  readonly capture?: InstrumentationCapture;
   /** Durable state identity, separate from the human-readable log name. */
   readonly stateNamespace?: string;
   /** Internal provider-specific projection applied after capture filtering. */
