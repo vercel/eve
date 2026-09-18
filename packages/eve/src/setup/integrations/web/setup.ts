@@ -108,13 +108,15 @@ export async function applyWebSetup(
   context: SetupApplyContext,
   deps: WebSetupDeps = defaultDeps,
 ) {
-  const channelPath = join(context.appRoot, "agent", "channels", "eve.ts");
-  if (context.force || !(await deps.pathExists(channelPath))) {
-    await deps.writeTextFile(channelPath, WEB_CHANNEL_TEMPLATE, { force: context.force });
-  }
   const project = await deps.resolveEveProjectContext(context.appRoot);
   if (project.kind === "workspace") {
     throw new Error("Web Chat setup requires a selected workspace agent.");
+  }
+  const agentAppRoot =
+    project.kind === "workspace-member" ? project.member.appRoot : project.appRoot;
+  const channelPath = join(agentAppRoot, "agent", "channels", "eve.ts");
+  if (context.force || !(await deps.pathExists(channelPath))) {
+    await deps.writeTextFile(channelPath, WEB_CHANNEL_TEMPLATE, { force: context.force });
   }
   const agentName = project.kind === "workspace-member" ? project.member.name : undefined;
   const webRoot = join(project.environmentRoot, "apps", "web");

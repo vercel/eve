@@ -23,6 +23,31 @@ function deps(): WebSetupDeps {
 }
 
 describe("Web setup", () => {
+  it("rejects an unselected workspace before writing an agent directory", async () => {
+    const effects = deps();
+    vi.mocked(effects.resolveEveProjectContext).mockResolvedValue({
+      environmentRoot: "/project",
+      kind: "workspace",
+      workspace: {
+        root: "/project",
+        members: [{ appRoot: "/project/agents/support", name: "support" }],
+      },
+    });
+    const ctx = createSetupContexts({
+      appRoot: "/project",
+      asker: headlessAsker(),
+      environment: integrationSetupEnvironment("cli-missing", { kind: "unresolved" }),
+      prompter: createFakePrompter().prompter,
+      resolveVercelProject: async () => ({ orgId: "team", projectId: "project" }),
+    });
+
+    await expect(
+      applyWebSetup({ hosting: "vercel-services", packageManager: "pnpm" }, ctx.apply, effects),
+    ).rejects.toThrow("Web Chat setup requires a selected workspace agent.");
+
+    expect(effects.writeTextFile).not.toHaveBeenCalled();
+  });
+
   it("writes the selected member channel and configures the workspace Web Chat target", async () => {
     const effects = deps();
     vi.mocked(effects.resolveEveProjectContext).mockResolvedValue({

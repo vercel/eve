@@ -87,7 +87,11 @@ function parseRegistryMapping(argument: string): { namespace: string; url: strin
 
 /** Resolves and prepares the root package that owns Web Chat. */
 export async function prepareWebChatProjectRoot(appRoot: string): Promise<string> {
-  const root = (await resolveEveProjectContext(appRoot)).environmentRoot;
+  const project = await resolveEveProjectContext(appRoot);
+  if (project.kind === "workspace") {
+    throw new Error("Web Chat setup requires a selected workspace agent.");
+  }
+  const root = project.environmentRoot;
   const packageJsonPath = join(root, "package.json");
   const source = await readFile(packageJsonPath, "utf8");
   const document = JSON.parse(source) as {
