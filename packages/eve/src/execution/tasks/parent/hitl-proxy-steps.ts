@@ -26,8 +26,8 @@ import { createEveTaskInputRoutePath } from "#protocol/routes.js";
 import {
   recordWorkflowTaskView,
   readWorkflowTaskView,
-  findTaskInvocation,
-} from "#harness/workflow-invocations.js";
+  findBackgroundWorkflowToolRun,
+} from "#harness/workflow-tool-runs.js";
 import type { TaskInputRequestDelivery, TaskView } from "#tasks/types.js";
 
 const log = createLogger("execution.tasks.parent");
@@ -47,7 +47,7 @@ export async function recordTaskInputRequestStep(input: {
   "use step";
 
   const durableSession = readDurableSession(input.sessionState);
-  const entry = findTaskInvocation(durableSession.state, input.request.taskId);
+  const entry = findBackgroundWorkflowToolRun(durableSession.state, input.request.taskId);
   const requests = input.request.requests ?? [input.request.request];
   if (entry === undefined || requests.length === 0 || !requests.every(isInputRequest)) {
     return { accepted: false, sessionState: input.sessionState };
@@ -115,7 +115,7 @@ export async function recordTerminalTaskViewsStep(input: {
   let session = durableSession;
   const acceptedViews: TaskView[] = [];
   for (const view of input.views) {
-    const entry = findTaskInvocation(session.state, view.taskId);
+    const entry = findBackgroundWorkflowToolRun(session.state, view.taskId);
     if (entry === undefined) continue;
     const state = recordWorkflowTaskView(session.state, view);
     if (state !== session.state) session = { ...session, state };
@@ -149,7 +149,7 @@ async function settleBackgroundTaskActions(input: {
     const observer = ctx.get(ActivityObserverKey);
     const settledAt = new Date().toISOString();
     const events = input.views.flatMap((view) => {
-      const entry = findTaskInvocation(input.session.state, view.taskId);
+      const entry = findBackgroundWorkflowToolRun(input.session.state, view.taskId);
       return projectTaskActivity({
         activityObserver:
           observer === undefined

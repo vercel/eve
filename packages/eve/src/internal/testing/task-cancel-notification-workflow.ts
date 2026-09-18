@@ -6,7 +6,7 @@ import { cancelOwnedTask } from "#execution/tasks/parent/dispatch.js";
 import { waitForCommandHookOwner } from "#execution/workflow-runtime.js";
 import { getRun, start } from "#internal/workflow/runtime.js";
 import type { HarnessSession } from "#harness/types.js";
-import type { TaskWorkflowInvocation } from "#harness/workflow-invocations.js";
+import type { BackgroundWorkflowToolRun } from "#harness/workflow-tool-runs.js";
 import type { TaskCommandHookPayload } from "#tasks/types.js";
 
 /** Models a task whose executor cannot finish cooperative cleanup. */
@@ -26,7 +26,7 @@ export async function slowCancelledTaskWorkflow(input: {
 
 export async function startSlowCancelledTaskStep(input: {
   readonly sessionId: string;
-}): Promise<TaskWorkflowInvocation> {
+}): Promise<BackgroundWorkflowToolRun> {
   "use step";
 
   const taskId = `${input.sessionId}-task`;
@@ -49,7 +49,7 @@ export async function startSlowCancelledTaskStep(input: {
 }
 
 export async function cancelSlowTaskFromParentStep(input: {
-  readonly entry: TaskWorkflowInvocation;
+  readonly entry: BackgroundWorkflowToolRun;
   readonly sessionId: string;
 }) {
   "use step";

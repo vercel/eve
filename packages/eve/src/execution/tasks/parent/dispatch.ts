@@ -8,8 +8,8 @@ import {
 import {
   recordWorkflowTaskView,
   readWorkflowTaskView,
-  type TaskWorkflowInvocation,
-} from "#harness/workflow-invocations.js";
+  type BackgroundWorkflowToolRun,
+} from "#harness/workflow-tool-runs.js";
 import { sendTaskCommand } from "#execution/tasks/parent/run-parent.js";
 import { notifyTaskParent } from "#execution/tasks/child/notify.js";
 import { sessionCommandHookToken } from "#execution/session-inbox/address.js";
@@ -71,7 +71,7 @@ export async function executeTaskControlAction(input: {
 /** Cancels task-owned work; the caller records the outcome in the parent session. */
 export async function cancelOwnedTask(input: {
   readonly cancelOwnedWork?: TaskExecutorCancel;
-  readonly entry: TaskWorkflowInvocation;
+  readonly entry: BackgroundWorkflowToolRun;
   readonly serializedContext?: Record<string, unknown>;
   readonly session?: RuntimeSession;
 }): Promise<TaskView> {

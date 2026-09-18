@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { getTaskInvocations } from "#harness/workflow-invocations.js";
+import { getBackgroundWorkflowToolRuns } from "#harness/workflow-tool-runs.js";
 import { getTaskCohortId, getSessionTaskCohorts } from "#tasks/session-task-cohorts.js";
 
 describe("workflow task cohort lookup", () => {
@@ -25,7 +25,10 @@ describe("workflow task cohort lookup", () => {
       },
     };
     expect([...getSessionTaskCohorts(state)]).toEqual(
-      getTaskInvocations(state).map((task) => [task.task.taskId, getTaskCohortId(task.task)]),
+      getBackgroundWorkflowToolRuns(state).map((task) => [
+        task.task.taskId,
+        getTaskCohortId(task.task),
+      ]),
     );
   });
 

@@ -38,7 +38,7 @@ import {
 import type { SubagentStartTarget } from "#execution/tools/subagent/start.js";
 import type { SubagentInputSource } from "#subagents/tool.js";
 import { createLogger } from "#internal/logging.js";
-import { findTaskInvocation } from "#harness/workflow-invocations.js";
+import { findBackgroundWorkflowToolRun } from "#harness/workflow-tool-runs.js";
 
 const log = createLogger("execution.agent-invocation");
 
@@ -65,7 +65,9 @@ export async function prepareOwnerAgentInvocation(input: {
   const ctx = await deserializeContext(input.serializedContext);
   const event = getHarnessEmissionState(durableSession.state);
   const task =
-    input.taskId === undefined ? undefined : findTaskInvocation(durableSession.state, input.taskId);
+    input.taskId === undefined
+      ? undefined
+      : findBackgroundWorkflowToolRun(durableSession.state, input.taskId);
   const action = resolveAgentInvocationAction({
     ctx,
     input: input.invocation,

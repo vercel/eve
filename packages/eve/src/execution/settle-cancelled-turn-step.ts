@@ -32,7 +32,10 @@ import {
   abandonRunningAgentTurns,
 } from "#subagents/handles/transitions.js";
 import { clearPendingCoordinationBatch } from "#harness/coordination.js";
-import { clearWorkflowToolRuns, getWorkflowToolRuns } from "#harness/workflow-tool-runs.js";
+import {
+  removeBlockingWorkflowToolRuns,
+  getBlockingWorkflowToolRuns,
+} from "#harness/workflow-tool-runs.js";
 import { bindSessionInstrumentation } from "#instrumentation/runtime.js";
 import { getTurnUsageState, toUsage } from "#harness/turn-tag-state.js";
 import {
@@ -146,7 +149,7 @@ export async function settleCancelledTurnStep(input: {
   const owningTurnId =
     getPendingCoordinationBatch(session.state)?.event.turnId ??
     input.sessionState.emissionState.turnId;
-  const workflowToolRuns = getWorkflowToolRuns(session.state, owningTurnId);
+  const workflowToolRuns = getBlockingWorkflowToolRuns(session.state, owningTurnId);
   session = abandonAgentInvocationOwners(
     session,
     new Set(workflowToolRuns.map((run) => run.address.runId)),
@@ -157,7 +160,7 @@ export async function settleCancelledTurnStep(input: {
       clearPendingSessionLimitPrompt(
         clearAllProxyInputRequests(
           clearPendingCoordinationBatch(
-            clearWorkflowToolRuns(
+            removeBlockingWorkflowToolRuns(
               abandonRunningAgentTurns({ ...session, outputSchema: undefined }),
               owningTurnId,
             ),

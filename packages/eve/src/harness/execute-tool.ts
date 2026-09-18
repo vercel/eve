@@ -43,7 +43,7 @@ export interface HarnessToolDefinition {
    * exists because the value must survive past the tool map. `buildToolSet`,
    * `createCoordinationRequestFromToolCall`, and the workflow sandbox host
    * tool copy it into the `RuntimeWorkflowTaskRequest`, which `startWorkflowTask`
-   * persists on the `TurnWorkflowInvocation` in session state and the run echoes
+   * persists on the `BlockingWorkflowToolRun` in session state and the run echoes
    * back on every `WorkflowToolRunRef` inbox message. The owner turn then routes
    * outcomes, counts the workflow subagent budget, and decides whether child
    * usage accrues without access to a `HarnessToolMap`. Harness-side readers
@@ -51,8 +51,8 @@ export interface HarnessToolDefinition {
    * expose only delegation tools inside workflow sandboxes, emit task receipts,
    * and reserve/claim agent handles for subagent starts.
    *
-   * The persisted copy is dropped by `removeWorkflowToolRun` when the run
-   * settles, or `clearWorkflowToolRuns` at turn end.
+   * The persisted copy is dropped by `removeBlockingWorkflowToolRuns` when the run
+   * settles or its turn ends.
    *
    * TODO: once subagent starts no longer need harness-specific handling,
    * derive this from `behavior.handling.target.kind` at the projection points

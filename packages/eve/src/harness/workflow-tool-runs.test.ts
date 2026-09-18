@@ -1,12 +1,12 @@
-import { registerWorkflowInvocation } from "#harness/workflow-invocations.js";
-import { describe, expect, it } from "vitest";
 import {
-  clearWorkflowToolRuns,
-  findWorkflowToolRun,
-  getWorkflowToolRuns,
+  registerWorkflowToolRun,
+  removeBlockingWorkflowToolRuns,
+  findBlockingWorkflowToolRun,
+  getBlockingWorkflowToolRuns,
   isInboxToolResultFromRecordedWorkflowToolRun,
-  removeWorkflowToolRun,
 } from "#harness/workflow-tool-runs.js";
+import { describe, expect, it } from "vitest";
+
 import type { HarnessSession } from "#harness/types.js";
 
 const RECORD = {
@@ -24,32 +24,32 @@ function session(state?: HarnessSession["state"]): HarnessSession {
 
 describe("workflow tool run records", () => {
   it("records, finds, and removes runs by call id", () => {
-    const recorded = registerWorkflowInvocation(session({ other: true }), RECORD);
-    expect(getWorkflowToolRuns(recorded.state)).toEqual([RECORD]);
-    expect(findWorkflowToolRun(recorded.state, "call_1", "turn-1")).toEqual(RECORD);
+    const recorded = registerWorkflowToolRun(session({ other: true }), RECORD);
+    expect(getBlockingWorkflowToolRuns(recorded.state)).toEqual([RECORD]);
+    expect(findBlockingWorkflowToolRun(recorded.state, "call_1", "turn-1")).toEqual(RECORD);
 
-    const replaced = registerWorkflowInvocation(recorded, {
+    const replaced = registerWorkflowToolRun(recorded, {
       ...RECORD,
       address: { ...RECORD.address, runId: "wrun_2" },
     });
-    expect(getWorkflowToolRuns(replaced.state)).toEqual([
+    expect(getBlockingWorkflowToolRuns(replaced.state)).toEqual([
       { ...RECORD, address: { ...RECORD.address, runId: "wrun_2" } },
     ]);
 
-    const removed = removeWorkflowToolRun(replaced, "call_1", "turn-1");
-    expect(getWorkflowToolRuns(removed.state)).toEqual([]);
+    const removed = removeBlockingWorkflowToolRuns(replaced, "turn-1", "call_1");
+    expect(getBlockingWorkflowToolRuns(removed.state)).toEqual([]);
     expect(removed.state).toEqual({ other: true });
-    expect(removeWorkflowToolRun(removed, "call_1", "turn-1")).toBe(removed);
+    expect(removeBlockingWorkflowToolRuns(removed, "turn-1", "call_1")).toBe(removed);
   });
 
   it("drops the state map entirely when nothing else is recorded", () => {
-    const recorded = registerWorkflowInvocation(session(), RECORD);
-    expect(clearWorkflowToolRuns(recorded, "turn-1").state).toBeUndefined();
-    expect(clearWorkflowToolRuns(session(), "turn-1")).toEqual(session());
+    const recorded = registerWorkflowToolRun(session(), RECORD);
+    expect(removeBlockingWorkflowToolRuns(recorded, "turn-1").state).toBeUndefined();
+    expect(removeBlockingWorkflowToolRuns(session(), "turn-1")).toEqual(session());
   });
 
   it("binds inbox tool results to the recorded run by call id and tool name", () => {
-    const state = registerWorkflowInvocation(
+    const state = registerWorkflowToolRun(
       session({
         "eve.harness.emission": {
           turnId: "turn-1",
@@ -78,19 +78,19 @@ describe("workflow tool run records", () => {
   });
 
   it("finds a paused call after authorization has ended the visible turn", () => {
-    const recorded = registerWorkflowInvocation(session(), RECORD);
-    expect(findWorkflowToolRun(recorded.state, RECORD.callId)).toEqual(RECORD);
-    const overlapping = registerWorkflowInvocation(recorded, {
+    const recorded = registerWorkflowToolRun(session(), RECORD);
+    expect(findBlockingWorkflowToolRun(recorded.state, RECORD.callId)).toEqual(RECORD);
+    const overlapping = registerWorkflowToolRun(recorded, {
       ...RECORD,
       origin: { turnId: "another-turn", stepIndex: 0 },
     });
-    expect(findWorkflowToolRun(overlapping.state, RECORD.callId)).toBeUndefined();
-    expect(findWorkflowToolRun(overlapping.state, RECORD.callId, "turn-1")).toEqual(RECORD);
+    expect(findBlockingWorkflowToolRun(overlapping.state, RECORD.callId)).toBeUndefined();
+    expect(findBlockingWorkflowToolRun(overlapping.state, RECORD.callId, "turn-1")).toEqual(RECORD);
   });
 
   it("rejects malformed state", () => {
     expect(() =>
-      getWorkflowToolRuns({
+      getBlockingWorkflowToolRuns({
         "eve.runtime.workflowInvocations": { version: 1, invocations: { not: "an array" } },
       }),
     ).toThrow("Corrupt workflow invocation registry");

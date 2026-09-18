@@ -1,3 +1,4 @@
+import { deliverWorkflowAuthorization } from "#execution/tools/workflow/owner.js";
 import { emitWorkflowToolRunReportStep } from "#execution/tools/workflow/emit-workflow-tool-run-report-step.js";
 import type {
   WorkflowToolRunMessage,
@@ -16,7 +17,7 @@ import {
   workflowToolRunRequestToInputRequestPayload,
 } from "#execution/tools/workflow/owner-inbox.js";
 import {
-  findWorkflowToolRun,
+  findBlockingWorkflowToolRun,
   isInboxSubagentResultFromRecordedWorkflowToolRun,
   isInboxToolResultFromRecordedWorkflowToolRun,
 } from "#harness/workflow-tool-runs.js";
@@ -62,7 +63,7 @@ async function handleWorkflowToolRunOutcome(
   input: HandlerInput<WorkflowToolRunOutcomeMessage>,
 ): Promise<RuntimeActionResult | undefined> {
   const { cursor, message } = input;
-  const recorded = findWorkflowToolRun(
+  const recorded = findBlockingWorkflowToolRun(
     cursor.sessionState.snapshot.session.state,
     message.from.callId,
     message.from.turnId,
@@ -126,7 +127,7 @@ async function handleWorkflowToolRunRequest(
 ): Promise<void> {
   const { cursor, message } = input;
   if (message.request.kind === "agent-invoke" || message.request.kind === "agent-settled") {
-    const recorded = findWorkflowToolRun(
+    const recorded = findBlockingWorkflowToolRun(
       cursor.sessionState.snapshot.session.state,
       message.from.callId,
       message.from.turnId,
@@ -166,16 +167,17 @@ async function handleWorkflowToolRunRequest(
     return;
   }
   if (message.request.kind === "authorization-request") {
-    await cursor.apply(
-      await runProxySubagentEventStep({
-        hookPayload: message.request.event,
-        sessionWritable: cursor.sessionWritable,
-        serializedContext: cursor.serializedContext,
-        sessionState: cursor.sessionState,
-      }),
-    );
-    if (message.request.event.childSessionId === message.from.runId)
-      await resumeHookStep(message.replyTo, null, { ifPresent: true });
+    const request = message.request;
+    await deliverWorkflowAuthorization({ ...message, request }, async () => {
+      await cursor.apply(
+        await runProxySubagentEventStep({
+          hookPayload: request.event,
+          sessionWritable: cursor.sessionWritable,
+          serializedContext: cursor.serializedContext,
+          sessionState: cursor.sessionState,
+        }),
+      );
+    });
     return;
   }
   await cursor.apply(

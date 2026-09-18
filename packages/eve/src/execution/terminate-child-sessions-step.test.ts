@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AGENT_HANDLES_STATE_KEY, type AgentHandle } from "#subagents/handles/store.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import { terminateChildSessionsStep } from "#execution/terminate-child-sessions-step.js";
-import type { TaskWorkflowInvocation } from "#harness/workflow-invocations.js";
+import type { BackgroundWorkflowToolRun } from "#harness/workflow-tool-runs.js";
 
 const COMPILED_BUNDLE = {
   subagentRegistry: { subagentsByNodeId: new Map() },
@@ -61,8 +61,8 @@ vi.mock("#internal/workflow/runtime.js", () => ({
 describe("terminateChildSessionsStep", () => {
   beforeEach(() => {
     cancelOwnedTaskMock.mockReset();
-    cancelOwnedTaskMock.mockImplementation(async ({ entry }: { entry: TaskWorkflowInvocation }) =>
-      cancelledView(entry),
+    cancelOwnedTaskMock.mockImplementation(
+      async ({ entry }: { entry: BackgroundWorkflowToolRun }) => cancelledView(entry),
     );
     cancelRunMock.mockReset();
     cancelRunMock.mockResolvedValue(undefined);
@@ -250,12 +250,12 @@ describe("terminateChildSessionsStep", () => {
     const secondCancellation = createDeferred();
     const order: string[] = [];
     cancelOwnedTaskMock
-      .mockImplementationOnce(async ({ entry }: { entry: TaskWorkflowInvocation }) => {
+      .mockImplementationOnce(async ({ entry }: { entry: BackgroundWorkflowToolRun }) => {
         await firstCancellation.promise;
         order.push("task-1-settled");
         return cancelledView(entry);
       })
-      .mockImplementationOnce(async ({ entry }: { entry: TaskWorkflowInvocation }) => {
+      .mockImplementationOnce(async ({ entry }: { entry: BackgroundWorkflowToolRun }) => {
         await secondCancellation.promise;
         order.push("task-2-settled");
         return cancelledView(entry);
@@ -293,7 +293,7 @@ describe("terminateChildSessionsStep", () => {
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     cancelOwnedTaskMock
       .mockRejectedValueOnce(new Error("task cancellation unavailable"))
-      .mockImplementationOnce(async ({ entry }: { entry: TaskWorkflowInvocation }) =>
+      .mockImplementationOnce(async ({ entry }: { entry: BackgroundWorkflowToolRun }) =>
         cancelledView(entry),
       );
 
@@ -433,7 +433,7 @@ function startingHandle(input: {
   };
 }
 
-function indexedTask(taskId: string): TaskWorkflowInvocation {
+function indexedTask(taskId: string): BackgroundWorkflowToolRun {
   return {
     callId: taskId,
     toolName: {
@@ -457,7 +457,7 @@ function indexedTask(taskId: string): TaskWorkflowInvocation {
 
 function makeSessionState(
   handles: readonly AgentHandle[],
-  tasks: readonly TaskWorkflowInvocation[] = [],
+  tasks: readonly BackgroundWorkflowToolRun[] = [],
 ): DurableSessionState {
   return {
     continuationToken: "parent-token",
@@ -496,6 +496,6 @@ function createDeferred(): { readonly promise: Promise<void>; resolve(): void } 
   return { promise, resolve };
 }
 
-function cancelledView(entry: TaskWorkflowInvocation) {
+function cancelledView(entry: BackgroundWorkflowToolRun) {
   return { taskId: entry.task.taskId, metadata: entry.task.metadata, status: "cancelled" as const };
 }

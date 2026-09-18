@@ -1,9 +1,9 @@
 import type { HarnessSession } from "#harness/types.js";
 import { settleWorkflowToolRunCancellation } from "#execution/tools/workflow/cancel.js";
-import type { TaskWorkflowInvocation } from "#harness/workflow-invocations.js";
+import type { BackgroundWorkflowToolRun } from "#harness/workflow-tool-runs.js";
 
 export interface TaskExecutorCancelContext {
-  readonly entry: TaskWorkflowInvocation;
+  readonly entry: BackgroundWorkflowToolRun;
   readonly serializedContext?: Record<string, unknown>;
   readonly session?: Pick<HarnessSession, "state">;
 }

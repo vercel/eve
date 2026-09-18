@@ -1,6 +1,9 @@
 import { type DurableSessionState, readDurableSession } from "#execution/durable-session-store.js";
 import { getAgentHandleStore } from "#subagents/handles/store.js";
-import { readWorkflowTaskView, findTaskInvocation } from "#harness/workflow-invocations.js";
+import {
+  readWorkflowTaskView,
+  findBackgroundWorkflowToolRun,
+} from "#harness/workflow-tool-runs.js";
 import { type TaskAuthorizationEventDelivery } from "#tasks/types.js";
 
 /** Accepts authorization events from the workflow task itself or an agent it owns. */
@@ -12,7 +15,7 @@ export async function acceptTaskAuthorizationEventStep(input: {
 
   const { hookPayload, taskId } = input.delivery;
   const durableSession = readDurableSession(input.sessionState);
-  const entry = findTaskInvocation(durableSession.state, taskId);
+  const entry = findBackgroundWorkflowToolRun(durableSession.state, taskId);
   if (entry === undefined) return false;
 
   // A workflow tool can request authorization without invoking a child agent.

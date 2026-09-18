@@ -2,7 +2,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import { cancelAllIndexedSessionTasksStep } from "#execution/cancel-indexed-session-tasks-step.js";
-import { getTaskInvocations, type TaskWorkflowInvocation } from "#harness/workflow-invocations.js";
+import {
+  getBackgroundWorkflowToolRuns,
+  type BackgroundWorkflowToolRun,
+} from "#harness/workflow-tool-runs.js";
 
 const { cancelOwnedTaskMock, deserializeContextMock, hydrateDurableSessionMock } = vi.hoisted(
   () => ({
@@ -22,8 +25,8 @@ vi.mock("#execution/tasks/parent/dispatch.js", () => ({ cancelOwnedTask: cancelO
 describe("cancelAllIndexedSessionTasksStep", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    cancelOwnedTaskMock.mockImplementation(async ({ entry }: { entry: TaskWorkflowInvocation }) =>
-      cancelledView(entry),
+    cancelOwnedTaskMock.mockImplementation(
+      async ({ entry }: { entry: BackgroundWorkflowToolRun }) => cancelledView(entry),
     );
     deserializeContextMock.mockResolvedValue({ require: vi.fn(() => "bundle") });
     hydrateDurableSessionMock.mockReturnValue("runtime-session");
@@ -40,7 +43,7 @@ describe("cancelAllIndexedSessionTasksStep", () => {
 
     expect(result.sessionState).toBeDefined();
     expect(
-      getTaskInvocations(result.sessionState?.snapshot.session.state).map(
+      getBackgroundWorkflowToolRuns(result.sessionState?.snapshot.session.state).map(
         (entry) => entry.task.terminalView,
       ),
     ).toEqual([cancelledView(task1), cancelledView(task2)]);
@@ -69,7 +72,7 @@ describe("cancelAllIndexedSessionTasksStep", () => {
   });
 });
 
-function indexedTask(taskId: string): TaskWorkflowInvocation {
+function indexedTask(taskId: string): BackgroundWorkflowToolRun {
   return {
     callId: taskId,
     toolName: "research",
@@ -85,7 +88,7 @@ function indexedTask(taskId: string): TaskWorkflowInvocation {
   };
 }
 
-function makeSessionState(tasks: readonly TaskWorkflowInvocation[]): DurableSessionState {
+function makeSessionState(tasks: readonly BackgroundWorkflowToolRun[]): DurableSessionState {
   return {
     continuationToken: "http:test",
     emissionState: { sequence: 0, sessionStarted: false, stepIndex: 0, turnId: "" },
@@ -104,6 +107,6 @@ function makeSessionState(tasks: readonly TaskWorkflowInvocation[]): DurableSess
   };
 }
 
-function cancelledView(entry: TaskWorkflowInvocation) {
+function cancelledView(entry: BackgroundWorkflowToolRun) {
   return { taskId: entry.task.taskId, metadata: entry.task.metadata, status: "cancelled" as const };
 }

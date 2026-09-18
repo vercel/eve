@@ -21,7 +21,10 @@ import { setHarnessEmissionState } from "#harness/emission-state.js";
 import { TurnCancelledError } from "#harness/turn-cancellation.js";
 import type { HarnessSession } from "#harness/types.js";
 import { getAgentHandleStore, setAgentHandleStore } from "#subagents/handles/store.js";
-import { getTaskInvocations, registerWorkflowInvocation } from "#harness/workflow-invocations.js";
+import {
+  getBackgroundWorkflowToolRuns,
+  registerWorkflowToolRun,
+} from "#harness/workflow-tool-runs.js";
 vi.mock("#execution/tools/subagent/steer.js", () => ({ steerBackgroundAgent: vi.fn() }));
 vi.mock("#execution/tasks/parent/run-parent.js", () => ({
   sendTaskCommand: vi.fn(async () => "delivered"),
@@ -69,7 +72,7 @@ function createSession(owned = true): HarnessSession {
     },
     { sessionStarted: true, sequence: 2, stepIndex: 0, turnId: "turn-2" },
   );
-  return owned ? registerWorkflowInvocation(session, entry) : session;
+  return owned ? registerWorkflowToolRun(session, entry) : session;
 }
 
 async function createScope(
@@ -146,7 +149,7 @@ describe("background subagent steering", () => {
     expect(receipt).toEqual({ agentId: identity.id, status: "working", taskId: entry.task.taskId });
     const session = await scope.commit();
     expect(getAgentHandleStore(session.state)?.handles).toEqual([handle]);
-    expect(getTaskInvocations(session.state)).toEqual([entry]);
+    expect(getBackgroundWorkflowToolRuns(session.state)).toEqual([entry]);
     expect(startTaskRun).not.toHaveBeenCalled();
     expect(waitForTaskCommandOwner).not.toHaveBeenCalled();
     expect(sendTaskCommand).not.toHaveBeenCalled();
@@ -176,7 +179,7 @@ describe("background subagent steering", () => {
 
     await scope.execute("new-call", "");
     const committed = await scope.commit();
-    const task = getTaskInvocations(committed.state).find(
+    const task = getBackgroundWorkflowToolRuns(committed.state).find(
       (candidate) => candidate.task.taskId !== entry.task.taskId,
     );
 
@@ -184,7 +187,7 @@ describe("background subagent steering", () => {
       auth: { current: creatorCurrent, initiator: creatorInitiator },
     });
     if (task === undefined) throw new Error("Expected created task");
-    const replayed = registerWorkflowInvocation(committed, {
+    const replayed = registerWorkflowToolRun(committed, {
       ...task,
       task: {
         ...task.task,
@@ -197,7 +200,7 @@ describe("background subagent steering", () => {
       },
     });
     expect(
-      getTaskInvocations(replayed.state).find(
+      getBackgroundWorkflowToolRuns(replayed.state).find(
         (candidate) => candidate.task.taskId === task.task.taskId,
       )?.task.dispatchContext,
     ).toEqual({ auth: { current: creatorCurrent, initiator: creatorInitiator } });
@@ -218,7 +221,7 @@ describe("background subagent steering", () => {
 
     await scope.execute("new-call", "");
     const committed = await scope.commit();
-    const task = getTaskInvocations(committed.state).find(
+    const task = getBackgroundWorkflowToolRuns(committed.state).find(
       (candidate) => candidate.task.taskId !== entry.task.taskId,
     );
 
@@ -243,7 +246,7 @@ describe("background subagent steering", () => {
 
       await scope.execute("new-call", "", identity.name, resultKind);
       const committed = await scope.commit();
-      const task = getTaskInvocations(committed.state).find(
+      const task = getBackgroundWorkflowToolRuns(committed.state).find(
         (candidate) => candidate.task.taskId !== entry.task.taskId,
       );
 
@@ -283,7 +286,7 @@ describe("background subagent steering", () => {
       }),
     );
     const committed = await scope.commit();
-    const task = getTaskInvocations(committed.state).find(
+    const task = getBackgroundWorkflowToolRuns(committed.state).find(
       (candidate) => candidate.task.taskId !== entry.task.taskId,
     );
 
@@ -303,7 +306,7 @@ describe("background subagent steering", () => {
 
   it("does not steer a task associated with another child", async () => {
     const scope = await createScope(
-      registerWorkflowInvocation(createSession(), {
+      registerWorkflowToolRun(createSession(), {
         ...entry,
         task: { ...entry.task, metadata: { ...entry.task.metadata, agentId: "another-child" } },
       }),

@@ -1,8 +1,8 @@
 import {
-  type TaskWorkflowInvocation,
-  findTaskInvocation,
-  registerWorkflowInvocation,
-} from "#harness/workflow-invocations.js";
+  type BackgroundWorkflowToolRun,
+  findBackgroundWorkflowToolRun,
+  registerWorkflowToolRun,
+} from "#harness/workflow-tool-runs.js";
 import type { ContextContainer } from "#context/container.js";
 import { loadContext } from "#context/container.js";
 import { ActivityObserverKey } from "#context/keys.js";
@@ -56,7 +56,7 @@ interface BackgroundToolExecutionRecord {
     readonly operationId: string;
   };
   settled: boolean;
-  task?: TaskWorkflowInvocation;
+  task?: BackgroundWorkflowToolRun;
 }
 
 interface BackgroundToolStepResult {
@@ -233,7 +233,7 @@ class BackgroundToolExecutionScope implements BackgroundToolExecutor {
     let next = session;
     for (const record of this.records) {
       if (!record.settled || record.task === undefined) continue;
-      next = registerWorkflowInvocation(next, record.task);
+      next = registerWorkflowToolRun(next, record.task);
     }
     if (this.agentHandlesChanged) {
       next = writeHandles(next, getAgentHandleStore(this.agentHandleSession.state)?.handles ?? []);
@@ -300,7 +300,7 @@ class BackgroundToolExecutionScope implements BackgroundToolExecutor {
     | {
         readonly kind: "started";
         readonly receipt?: { readonly agentId: string };
-        readonly task: TaskWorkflowInvocation;
+        readonly task: BackgroundWorkflowToolRun;
       }
     | {
         readonly kind: "steered";
@@ -422,7 +422,7 @@ class BackgroundToolExecutionScope implements BackgroundToolExecutor {
       });
       if (claim.kind === "busy" && claim.handle.phase === "claimed") {
         const handle = claim.handle;
-        const entry = findTaskInvocation(this.agentHandleSession.state, handle.ownerId);
+        const entry = findBackgroundWorkflowToolRun(this.agentHandleSession.state, handle.ownerId);
         if (
           entry?.task.metadata.kind === "subagent" &&
           entry.task.metadata.agentId === handle.identity.id &&

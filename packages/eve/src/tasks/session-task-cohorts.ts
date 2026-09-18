@@ -1,5 +1,5 @@
 import type { SessionStateMap } from "#harness/types.js";
-import { getTaskInvocations } from "#harness/workflow-invocations.js";
+import { getBackgroundWorkflowToolRuns } from "#harness/workflow-tool-runs.js";
 
 /** An entry without a join target starts its own cohort. */
 export function getTaskCohortId(task: {
@@ -12,5 +12,7 @@ export function getTaskCohortId(task: {
 export function getSessionTaskCohorts(
   state: SessionStateMap | undefined,
 ): ReadonlyMap<string, string> {
-  return new Map(getTaskInvocations(state).map(({ task }) => [task.taskId, getTaskCohortId(task)]));
+  return new Map(
+    getBackgroundWorkflowToolRuns(state).map(({ task }) => [task.taskId, getTaskCohortId(task)]),
+  );
 }

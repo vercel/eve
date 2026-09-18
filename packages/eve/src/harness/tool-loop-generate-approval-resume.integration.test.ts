@@ -28,7 +28,7 @@ import { getPendingInputBatches } from "#harness/pending-input-batches.js";
 import { createToolLoopHarness } from "#harness/tool-loop.js";
 import { setTurnUsageState } from "#harness/turn-tag-state.js";
 import type { HarnessSession, ToolLoopHarnessConfig } from "#harness/types.js";
-import { registerWorkflowInvocation } from "#harness/workflow-invocations.js";
+import { registerWorkflowToolRun } from "#harness/workflow-tool-runs.js";
 import { once } from "#tools/approval/policies.js";
 import { defineTool } from "#tools/definition.js";
 import {
@@ -875,7 +875,7 @@ describe("tool loop generate approval resume (real AI SDK)", () => {
           : "Available skills\n- policy: Tenant policy";
       if (historyKey === "taskState") {
         ctx.set(TurnTaskDeliveryKey, "initiating");
-        session = registerWorkflowInvocation(session, {
+        session = registerWorkflowToolRun(session, {
           callId: "analysis",
           toolName: "analysis",
           resultKind: "tool" as const,

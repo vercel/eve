@@ -1,4 +1,4 @@
-import { recordWorkflowTaskView } from "#harness/workflow-invocations.js";
+import { recordWorkflowTaskView } from "#harness/workflow-tool-runs.js";
 import { createTestSessionState } from "#internal/testing/session-state.js";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 

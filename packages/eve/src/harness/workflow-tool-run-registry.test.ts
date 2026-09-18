@@ -3,17 +3,17 @@ import type { SessionStateMap } from "#harness/types.js";
 import {
   readWorkflowTaskView,
   recordWorkflowTaskView,
-  findTurnInvocation,
-  getWorkflowInvocations,
-  registerWorkflowInvocation,
-  removeTurnInvocations,
-  type TaskWorkflowInvocation,
-  type TurnWorkflowInvocation,
-} from "./workflow-invocations.js";
+  findBlockingWorkflowToolRun,
+  getWorkflowToolRuns,
+  registerWorkflowToolRun,
+  removeBlockingWorkflowToolRuns,
+  type BackgroundWorkflowToolRun,
+  type BlockingWorkflowToolRun,
+} from "./workflow-tool-runs.js";
 import { getSessionTaskCohorts } from "#tasks/session-task-cohorts.js";
 import { resolveTaskDeliveryContext } from "#tasks/delivery-context.js";
 
-const waiting = (turnId: string): TurnWorkflowInvocation => ({
+const waiting = (turnId: string): BlockingWorkflowToolRun => ({
   lifetime: "turn",
   callId: "same-call",
   toolName: "research",
@@ -21,7 +21,7 @@ const waiting = (turnId: string): TurnWorkflowInvocation => ({
   origin: { turnId, stepIndex: 0 },
   address: { runId: `run-${turnId}`, hookToken: `hook-${turnId}` },
 });
-const task = (taskId: string): TaskWorkflowInvocation => ({
+const task = (taskId: string): BackgroundWorkflowToolRun => ({
   ...waiting("turn-a"),
   callId: taskId,
   lifetime: "session",
@@ -35,10 +35,10 @@ const task = (taskId: string): TaskWorkflowInvocation => ({
 
 describe("shared workflow invocation ownership", () => {
   it("clears only one turn while retaining another turn, live tasks and completed payloads", () => {
-    let session: { state?: SessionStateMap } = registerWorkflowInvocation({}, waiting("turn-a"));
-    session = registerWorkflowInvocation(session, waiting("turn-b"));
-    session = registerWorkflowInvocation(session, task("task-a"));
-    session = registerWorkflowInvocation(session, task("task-b"));
+    let session: { state?: SessionStateMap } = registerWorkflowToolRun({}, waiting("turn-a"));
+    session = registerWorkflowToolRun(session, waiting("turn-b"));
+    session = registerWorkflowToolRun(session, task("task-a"));
+    session = registerWorkflowToolRun(session, task("task-b"));
     session = {
       ...session,
       state: recordWorkflowTaskView(session.state, {
@@ -48,15 +48,17 @@ describe("shared workflow invocation ownership", () => {
         lastOutput: { type: "result", data: "first" },
       }),
     };
-    session = removeTurnInvocations(session, "turn-a");
-    const entries = getWorkflowInvocations(session.state);
+    session = removeBlockingWorkflowToolRuns(session, "turn-a");
+    const entries = getWorkflowToolRuns(session.state);
     expect(entries.map((entry) => [entry.lifetime, entry.callId])).toEqual([
       ["turn", "same-call"],
       ["session", "task-a"],
       ["session", "task-b"],
     ]);
-    expect(findTurnInvocation(session.state, "turn-a", "same-call")).toBeUndefined();
-    expect(findTurnInvocation(session.state, "turn-b", "same-call")).toEqual(waiting("turn-b"));
+    expect(findBlockingWorkflowToolRun(session.state, "same-call", "turn-a")).toBeUndefined();
+    expect(findBlockingWorkflowToolRun(session.state, "same-call", "turn-b")).toEqual(
+      waiting("turn-b"),
+    );
     expect(
       resolveTaskDeliveryContext({ state: session.state, taskDeliveryId: "task-a:ready:completed" })
         ?.phase,
@@ -70,7 +72,9 @@ describe("shared workflow invocation ownership", () => {
         lastOutput: { type: "error", data: "second" },
       }),
     };
-    const restored = JSON.parse(JSON.stringify(removeTurnInvocations(session, "turn-b").state));
+    const restored = JSON.parse(
+      JSON.stringify(removeBlockingWorkflowToolRuns(session, "turn-b").state),
+    );
     const beforeReport = JSON.stringify(restored);
     const report = resolveTaskDeliveryContext({
       state: restored,
@@ -80,9 +84,9 @@ describe("shared workflow invocation ownership", () => {
     expect(report?.context).toContain("first");
     expect(report?.context).toContain("second");
     expect([...getSessionTaskCohorts(restored).values()]).toEqual(["task-a", "task-a"]);
-    expect(JSON.stringify(removeTurnInvocations({ state: restored }, "turn-a").state)).toBe(
-      beforeReport,
-    );
+    expect(
+      JSON.stringify(removeBlockingWorkflowToolRuns({ state: restored }, "turn-a").state),
+    ).toBe(beforeReport);
   });
 
   it("preserves malformed historical results during unrelated ownership mutations", () => {
@@ -91,8 +95,8 @@ describe("shared workflow invocation ownership", () => {
     let session: { state?: SessionStateMap } = {
       state: { "eve.runtime.workflowInvocations": { version: 1, invocations: [retained] } },
     };
-    session = registerWorkflowInvocation(session, waiting("turn-b"));
-    session = registerWorkflowInvocation(session, task("live"));
+    session = registerWorkflowToolRun(session, waiting("turn-b"));
+    session = registerWorkflowToolRun(session, task("live"));
     session = {
       ...session,
       state: recordWorkflowTaskView(session.state, {
@@ -101,22 +105,22 @@ describe("shared workflow invocation ownership", () => {
         status: "cancelled",
       }),
     };
-    session = removeTurnInvocations(session, "turn-b");
-    const entries = getWorkflowInvocations(session.state);
+    session = removeBlockingWorkflowToolRuns(session, "turn-b");
+    const entries = getWorkflowToolRuns(session.state);
     expect(entries[0]).toEqual(retained);
     expect(() => readWorkflowTaskView(retained.task)).toThrow("Corrupt workflow task result");
     expect(entries).toHaveLength(2);
   });
 
   it("does not change lifetime on replay", () => {
-    const session = registerWorkflowInvocation({}, waiting("turn-a"));
+    const session = registerWorkflowToolRun({}, waiting("turn-a"));
     expect(() =>
-      registerWorkflowInvocation(session, { ...task("task-a"), callId: "same-call" }),
+      registerWorkflowToolRun(session, { ...task("task-a"), callId: "same-call" }),
     ).toThrow("Replayed invocation changed its ownership");
   });
 
   it.each(["eve.tasks", "eve.runtime.workflowToolRuns"])("rejects old state under %s", (key) => {
-    expect(() => getWorkflowInvocations({ [key]: [] })).toThrow(
+    expect(() => getWorkflowToolRuns({ [key]: [] })).toThrow(
       "Unsupported workflow invocation state",
     );
   });

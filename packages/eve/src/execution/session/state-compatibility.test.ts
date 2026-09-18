@@ -4,9 +4,9 @@ import { isSessionStateIdleForHandoff } from "#execution/session/handoff-steps.j
 import {
   readWorkflowTaskView,
   recordWorkflowTaskView,
-  getTaskInvocations,
-  registerWorkflowInvocation,
-} from "#harness/workflow-invocations.js";
+  getBackgroundWorkflowToolRuns,
+  registerWorkflowToolRun,
+} from "#harness/workflow-tool-runs.js";
 import { parseActivityWorkIdentityV1 } from "#protocol/activity.js";
 import type { HarnessSession } from "#harness/types.js";
 import type { AgentHandle, AgentHandlePhase } from "#subagents/handles/store.js";
@@ -106,9 +106,9 @@ describe("additive durable state", () => {
       authored: { opaque: true },
       "eve.runtime.workflowInvocations": { version: 1, invocations: [task], futureIndex: true },
     };
-    expect(getTaskInvocations(restored(state))).toEqual([task]);
+    expect(getBackgroundWorkflowToolRuns(restored(state))).toEqual([task]);
     expect(parseActivityWorkIdentityV1(activity)).toEqual(activity);
-    const updated = registerWorkflowInvocation(session(restored(state)), {
+    const updated = registerWorkflowToolRun(session(restored(state)), {
       callId: "task",
       toolName: metadata.name,
       resultKind: "tool" as const,
@@ -164,12 +164,12 @@ describe("additive durable state", () => {
       metadata,
       status: "cancelled",
     });
-    expect(getTaskInvocations(restored(cancelled))[0]?.task.terminalView).toMatchObject({
+    expect(getBackgroundWorkflowToolRuns(restored(cancelled))[0]?.task.terminalView).toMatchObject({
       futureView: true,
       status: "completed",
     });
     expect(cancelled).toBe(saved);
-    const [retained] = getTaskInvocations(restored(cancelled));
+    const [retained] = getBackgroundWorkflowToolRuns(restored(cancelled));
     assert(retained !== undefined);
     expect(readWorkflowTaskView(retained.task)?.lastOutput?.data).toBe("done");
   });

@@ -5,7 +5,7 @@ import { prepareActionDispatch } from "#execution/coordination-dispatch-shared.j
 import { createDurableSessionState } from "#execution/durable-session-store.js";
 import { setHarnessEmissionState } from "#harness/emission-state.js";
 import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
-import { registerWorkflowInvocation } from "#harness/workflow-invocations.js";
+import { registerWorkflowToolRun } from "#harness/workflow-tool-runs.js";
 import { prepareOwnerAgentInvocation } from "./invoke-preparation.js";
 
 vi.mock("#context/serialize.js", () => ({ deserializeContext: vi.fn() }));
@@ -38,7 +38,7 @@ describe("background invocation origin", () => {
   it.each([true, false])(
     "uses the task's creating turn after the parent advances: task=%s",
     async (background) => {
-      const session = registerWorkflowInvocation(
+      const session = registerWorkflowToolRun(
         setHarnessEmissionState(
           {
             agent: { dynamicModel: true, system: "", tools: [] },

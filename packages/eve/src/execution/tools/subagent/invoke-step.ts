@@ -40,9 +40,9 @@ import {
 } from "#subagents/agent-handle-errors.js";
 import {
   readWorkflowTaskView,
-  findTaskInvocation,
+  findBackgroundWorkflowToolRun,
   type TaskAgentDispatchContext,
-} from "#harness/workflow-invocations.js";
+} from "#harness/workflow-tool-runs.js";
 import type { RuntimeSubagentChildResult } from "#shared/action-types.js";
 import {
   clearProxyInputRequestsForChild,
@@ -350,7 +350,7 @@ export async function dispatchTaskAgentInvocationStep(
   let taskDispatchContext: TaskAgentDispatchContext | undefined;
   if (input.taskId !== undefined) {
     const session = readDurableSession(input.sessionState);
-    const entry = findTaskInvocation(session.state, input.taskId);
+    const entry = findBackgroundWorkflowToolRun(session.state, input.taskId);
     if (entry === undefined) return { kind: "not-admitted", sessionState: input.sessionState };
     const view = readWorkflowTaskView(entry.task);
     if (view !== undefined) {

@@ -5,9 +5,9 @@
 import { getRun } from "#internal/workflow/runtime.js";
 import type { HarnessSession } from "#harness/types.js";
 import type {
-  TaskWorkflowInvocation,
+  BackgroundWorkflowToolRun,
   TaskAgentDispatchContext,
-} from "#harness/workflow-invocations.js";
+} from "#harness/workflow-tool-runs.js";
 import { sendTaskCommand, sendTaskCommandToOwner } from "#execution/tasks/parent/run-parent.js";
 import type { JsonValue } from "#shared/json.js";
 import { deriveTaskInboxToken, deriveTaskId } from "#tasks/task-id.js";
@@ -30,7 +30,7 @@ export function createTaskAgentDispatchContext(
   };
 }
 
-export type BackgroundTaskDraft = Omit<TaskWorkflowInvocation, "address"> & {
+export type BackgroundTaskDraft = Omit<BackgroundWorkflowToolRun, "address"> & {
   readonly address: { readonly hookToken: string };
 };
 
@@ -91,7 +91,7 @@ export async function acknowledgeDelegatedTasksStep(input: {
 /** Silently terminates a task whose child dispatch failed before parent indexing. */
 export async function rejectDelegatedDispatch(input: {
   readonly error: JsonValue;
-  readonly task: TaskWorkflowInvocation;
+  readonly task: BackgroundWorkflowToolRun;
 }): Promise<void> {
   await sendTaskCommand({
     command: { data: input.error, kind: "reject-dispatch" },

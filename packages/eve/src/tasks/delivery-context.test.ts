@@ -11,7 +11,7 @@ import {
   TASK_DELIVERY_INITIATING_INSTRUCTION,
   TASK_DELIVERY_SETTLED_INSTRUCTION,
 } from "#tasks/delivery-context.js";
-import type { TaskWorkflowInvocation } from "#harness/workflow-invocations.js";
+import type { BackgroundWorkflowToolRun } from "#harness/workflow-tool-runs.js";
 import type { TaskView } from "#tasks/types.js";
 
 const metadata = { kind: "report-probe", name: "report_probe" } as const;
@@ -213,7 +213,7 @@ function taskEntry(
   taskId: string,
   createdByTurnId: string,
   terminalView?: TaskView,
-): TaskWorkflowInvocation {
+): BackgroundWorkflowToolRun {
   return {
     callId: taskId,
     toolName: metadata.name,

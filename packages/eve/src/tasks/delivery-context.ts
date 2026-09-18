@@ -4,9 +4,9 @@ import type { SessionStateMap, StepInput } from "#harness/types.js";
 import { EMPTY_DELIVERY_SENTINEL } from "#shared/empty-delivery.js";
 import {
   readWorkflowTaskView,
-  getTaskInvocations,
-  type TaskWorkflowInvocation,
-} from "#harness/workflow-invocations.js";
+  getBackgroundWorkflowToolRuns,
+  type BackgroundWorkflowToolRun,
+} from "#harness/workflow-tool-runs.js";
 import { getTaskCohortId } from "#tasks/session-task-cohorts.js";
 
 export const TASK_DELIVERY_CONTEXT_LABEL = "[Task state]";
@@ -49,7 +49,7 @@ export function resolveTaskDeliveryContext(input: {
       readonly rootTurnId: string;
     }
   | undefined {
-  const entries = getTaskInvocations(input.state);
+  const entries = getBackgroundWorkflowToolRuns(input.state);
   const delivered = entries.find((entry) =>
     input.taskDeliveryId.startsWith(`${entry.task.taskId}:`),
   );
@@ -66,7 +66,7 @@ export function resolveInitiatingTaskContext(input: {
   readonly state: SessionStateMap | undefined;
   readonly turnId: string;
 }): { readonly context: string; readonly phase: "initiating" } | undefined {
-  const cohort = getTaskInvocations(input.state).filter(
+  const cohort = getBackgroundWorkflowToolRuns(input.state).filter(
     (entry) => entry.origin.turnId === input.turnId,
   );
   if (!cohort.some((entry) => entry.task.terminalView === undefined)) {
@@ -75,7 +75,7 @@ export function resolveInitiatingTaskContext(input: {
   return { ...projectTaskCohort(cohort), phase: "initiating" };
 }
 
-function projectTaskCohort(cohort: readonly TaskWorkflowInvocation[]): {
+function projectTaskCohort(cohort: readonly BackgroundWorkflowToolRun[]): {
   readonly context: string;
   readonly phase: "pending" | "settled";
 } {

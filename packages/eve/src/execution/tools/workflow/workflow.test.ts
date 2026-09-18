@@ -1,9 +1,9 @@
 import { beforeEach, expect, it, vi } from "vitest";
 
 import type { TaskRunInboundPayload } from "#tasks/types.js";
-import { createBackgroundWorkflowOwner } from "#execution/tools/workflow/background-owner.js";
+import { createBackgroundWorkflowOwner } from "#execution/tools/workflow/workflow-owner-background.js";
 import type { WorkflowToolRunMessage } from "#execution/tools/workflow/messages.js";
-import { runWorkflowToolInvocation } from "#execution/tools/workflow/invocation.js";
+import { workflowToolRunWorkflow } from "#execution/tools/workflow/workflow.js";
 
 const mocks = vi.hoisted(() => ({
   sleep: vi.fn(),
@@ -13,13 +13,13 @@ const mocks = vi.hoisted(() => ({
   openWorkflowToolRunOwnerInbox: vi.fn(),
 }));
 
-vi.mock("#execution/tools/workflow/background-owner.js", () => ({
+vi.mock("#execution/tools/workflow/workflow-owner-background.js", () => ({
   createBackgroundWorkflowOwner: vi.fn(),
 }));
 
 vi.mock("#compiled/@workflow/core/index.js", () => ({ sleep: mocks.sleep }));
 
-vi.mock("#execution/tools/workflow/blocking-owner.js", () => ({
+vi.mock("#execution/tools/workflow/workflow-owner-blocking.js", () => ({
   createBlockingWorkflow: mocks.control,
 }));
 vi.mock("#execution/tools/workflow/resume-hook-step.js", () => ({ resumeHookStep: mocks.deliver }));
@@ -102,7 +102,7 @@ it("emits every persisted report before the terminal outcome", async () => {
     ),
   });
 
-  await runWorkflowToolInvocation(input);
+  await workflowToolRunWorkflow(input);
   expect(mocks.deliver).toHaveBeenNthCalledWith(1, "parent", report, { ifPresent: false });
   expect(mocks.deliver).toHaveBeenNthCalledWith(
     2,
@@ -154,7 +154,7 @@ for (const execution of ["blocking", "background"] as const) {
         };
       });
       setControl(controller);
-      const completion = runWorkflowToolInvocation({ ...input, execution });
+      const completion = workflowToolRunWorkflow({ ...input, execution });
       await started.promise;
       controller.abort(new Error("stop"));
       if (status !== "blocked") release.resolve();
@@ -175,7 +175,7 @@ it("does not start a body cancelled before its first read", async () => {
   const controller = new AbortController();
   controller.abort(new Error("never admitted"));
   setControl(controller);
-  await runWorkflowToolInvocation(input);
+  await workflowToolRunWorkflow(input);
   expect(mocks.deliver).toHaveBeenCalledWith(
     "parent",
     expect.objectContaining({
@@ -212,7 +212,7 @@ it("preserves the pending inbox read across cancellation and drains the report b
     reader: createChannelReader("workflow", { [Symbol.asyncIterator]: () => ({ next }) }),
   });
   setControl(controller);
-  const completion = runWorkflowToolInvocation(input);
+  const completion = workflowToolRunWorkflow(input);
   await vi.waitFor(() => expect(next).toHaveBeenCalledOnce());
   controller.abort(new Error("stop"));
   await vi.waitFor(() => expect(mocks.sleep).toHaveBeenCalledOnce());
@@ -310,7 +310,7 @@ it("applies cancellation buffered during the last report delivery before publish
       })(),
     ),
   });
-  await runWorkflowToolInvocation({
+  await workflowToolRunWorkflow({
     workflow: input,
     initialView: { status: "working", taskId: "task", metadata: { kind: "tool", name: "worker" } },
     taskInboxToken: "commands",
@@ -347,7 +347,7 @@ it("keeps waiting for the body after the control hook closes", async () => {
       }),
     }),
   });
-  await runWorkflowToolInvocation(input);
+  await workflowToolRunWorkflow(input);
   expect(mocks.deliver).toHaveBeenCalledExactlyOnceWith(
     expect.objectContaining({
       kind: "outcome",
@@ -370,6 +370,6 @@ it("propagates terminal delivery failure instead of replacing the invocation out
     }),
   });
   mocks.deliver.mockRejectedValue(new Error("delivery failed"));
-  await expect(runWorkflowToolInvocation(input)).rejects.toThrow("delivery failed");
+  await expect(workflowToolRunWorkflow(input)).rejects.toThrow("delivery failed");
   expect(mocks.deliver).toHaveBeenCalledOnce();
 });

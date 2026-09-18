@@ -4,9 +4,9 @@ status: draft
 last_updated: "2026-09-18"
 ---
 
-# Background tasks: one workflow invocation runtime
+# Background tasks: one workflow runtime
 
-**Prototype result: background work is a session-owned workflow invocation.** Waiting and
+**Prototype result: background work is a session-owned workflow tool run.** Waiting and
 background tools now enter through one durable workflow kind, use one session invocation registry,
 and share body execution, report drainage, and cancellation cleanup. The parent session retains
 task outcomes, pending input routes, child ownership, and accounting. The background owner handles
@@ -31,17 +31,23 @@ The prototype implements three approved scope decisions:
 
 ## Resulting execution model
 
-`runWorkflowToolInvocation` is the sole workflow-body execution owner. It starts
-`executeWorkflowBody`, owns the internal workflow inbox, drains every persisted report, and emits
-the existing `WorkflowToolRunMessage` outcome only after those reports are consumed.
-[Shared invocation][prototype-invocation]
+`workflowToolRunWorkflow` in `workflow.ts` is the durable entry and execution loop for both
+modes. It starts `executeWorkflowBody`, owns the internal workflow inbox, reads commands and
+requests, and drains every persisted report before emitting the outcome. Background work starts
+only after `ready`; cancellation cleanup is bounded. [Shared workflow][prototype-invocation]
 
-`workflowToolRunWorkflow` is the only durable entry for both modes. One invocation loop reads
-commands, workflow requests and reports, and body completion. It starts background work only after
-`ready`, drains reports before settlement, and bounds cancellation cleanup. Blocking-owner handlers
-deliver messages to the waiting turn; background-owner handlers route child messages to the session. The parent records task outcomes
-and pending input routes. Admitted background work remains session-bound and survives the initiating turn. [Foreground adapter][prototype-blocking],
-[background adapter][prototype-background]
+`workflow-owner-blocking.ts` routes messages to the waiting turn. `workflow-owner-background.ts`
+handles task admission and routes messages through the parent session inbox. The parent records
+task outcomes and pending input routes. Admitted background work survives the initiating turn.
+[Blocking owner][prototype-blocking], [background owner][prototype-background]
+
+Both paths use `deliverWorkflowAuthorization` to deliver or deliberately discard an authorization
+event before acknowledging it. Only step-owned events receive that acknowledgement; forwarded
+agent events retain their invocation reply channel. Blocking delivery completes after parent event
+processing; background delivery completes when the parent inbox accepts the notification.
+The background owner filters events after cancellation, allowing workflow authorization completion
+to close a displayed prompt. Pending authorization attempts remain in the shared workflow step;
+the background owner tracks only ordinary input requests for answer routing.
 
 | Concern                             | Before                                               | Prototype                                           |
 | ----------------------------------- | ---------------------------------------------------- | --------------------------------------------------- |
@@ -54,7 +60,8 @@ and pending input routes. Admitted background work remains session-bound and sur
 
 A task is the public handle for an admitted session-owned invocation. Both lifetimes now live in
 `eve.runtime.workflowInvocations`; task lookup and waiting-run lookup are filtered views of that
-registry. Cleanup selects the originating turn and `lifetime: "turn"`, so it cannot discard
+registry. The TypeScript naming change preserves this persisted key and its version-1 envelope.
+Cleanup selects the originating turn and `lifetime: "turn"`, so it cannot discard
 session-owned work. [Registry][prototype-registry]
 
 ## Shared state and retention
@@ -64,7 +71,7 @@ The identity is `(origin.turnId, callId)` within the owning session. `taskId` re
 handle. No additional invocation ID or generic extension system is introduced.
 
 ```ts
-type Invocation = {
+type WorkflowToolRun = {
   callId: string;
   toolName: string;
   resultKind: "tool" | "subagent";
@@ -86,7 +93,8 @@ type Invocation = {
 );
 ```
 
-The code names are `WorkflowInvocation` and `WorkflowTaskPayload`. `TaskAgentDispatchContext`
+`WorkflowToolRun` has `BlockingWorkflowToolRun` and `BackgroundWorkflowToolRun` variants;
+`WorkflowTaskPayload` holds the background task fields. `TaskAgentDispatchContext`
 captures the creator's authentication and dynamic subagent selections; it must not be replaced
 with the authentication of a later input delivery. `TaskMetadata` describes the public task,
 `ActivityWorkIdentityV1` links its activity stream, and `TaskView` is its public status/output view.
@@ -382,7 +390,7 @@ status remains useful for cancellation cleanup, but it does not replace the pare
 An infrastructure failure before outcome delivery still needs separate reconciliation; this change
 does not introduce a runtime completion subscription or repair the local runtime cancellation race.
 
-[prototype-invocation]: ../packages/eve/src/execution/tools/workflow/invocation.ts
-[prototype-blocking]: ../packages/eve/src/execution/tools/workflow/blocking-owner.ts
-[prototype-background]: ../packages/eve/src/execution/tools/workflow/background-owner.ts
-[prototype-registry]: ../packages/eve/src/harness/workflow-invocations.ts
+[prototype-invocation]: ../packages/eve/src/execution/tools/workflow/workflow.ts
+[prototype-blocking]: ../packages/eve/src/execution/tools/workflow/workflow-owner-blocking.ts
+[prototype-background]: ../packages/eve/src/execution/tools/workflow/workflow-owner-background.ts
+[prototype-registry]: ../packages/eve/src/harness/workflow-tool-runs.ts

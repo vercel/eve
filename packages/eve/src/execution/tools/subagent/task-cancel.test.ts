@@ -6,7 +6,7 @@ import { createTestSessionState } from "#internal/testing/session-state.js";
 import { deserializeContext } from "#context/serialize.js";
 import { cancelRemoteAgentTurn, resolveRemoteAgentForAction } from "#subagents/remote-dispatch.js";
 import { setAgentHandleStore, type AgentHandle } from "#subagents/handles/store.js";
-import type { TaskWorkflowInvocation } from "#harness/workflow-invocations.js";
+import type { BackgroundWorkflowToolRun } from "#harness/workflow-tool-runs.js";
 
 vi.mock("#execution/workflow-runtime.js", () => ({ requestWorkflowTurnCancellation: vi.fn() }));
 vi.mock("#context/serialize.js", () => ({ deserializeContext: vi.fn() }));
@@ -17,7 +17,7 @@ vi.mock("#subagents/remote-dispatch.js", () => ({
 }));
 vi.mock("#internal/logging.js", () => ({ createLogger: vi.fn(() => ({})), logError: vi.fn() }));
 
-const entry: TaskWorkflowInvocation = {
+const entry: BackgroundWorkflowToolRun = {
   callId: "call",
   toolName: "research",
   resultKind: "tool",

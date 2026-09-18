@@ -7,10 +7,10 @@ import { settleCancelledTurnStep } from "#execution/settle-cancelled-turn-step.j
 import { setHarnessEmissionState } from "#harness/emission.js";
 import { setPendingCoordinationBatch } from "#harness/coordination.js";
 import {
-  getWorkflowInvocations,
-  registerWorkflowInvocation,
-  type TaskWorkflowInvocation,
-} from "#harness/workflow-invocations.js";
+  getWorkflowToolRuns,
+  registerWorkflowToolRun,
+  type BackgroundWorkflowToolRun,
+} from "#harness/workflow-tool-runs.js";
 import { deriveAgentOperationId } from "#subagents/handles/operation-id.js";
 import {
   AGENT_HANDLES_STATE_KEY,
@@ -169,7 +169,7 @@ describe("settleCancelledTurnStep handle store", () => {
     const runtime = await createTestRuntime({ agent: { name: "settle-cancel-claim" } });
 
     await runtime.run(async () => {
-      const session = registerWorkflowInvocation(createCancelledTurnSession([CLAIMED_HANDLE]), {
+      const session = registerWorkflowToolRun(createCancelledTurnSession([CLAIMED_HANDLE]), {
         callId: "workflow-call",
         resultKind: "tool",
         toolName: "Workflow",
@@ -200,7 +200,7 @@ describe("settleCancelledTurnStep handle store", () => {
     async (paused) => {
       const runtime = await createTestRuntime({ agent: { name: "settle-mixed-invocations" } });
       await runtime.run(async () => {
-        const background: TaskWorkflowInvocation = {
+        const background: BackgroundWorkflowToolRun = {
           callId: "background-call",
           lifetime: "session",
           resultKind: "tool",
@@ -213,8 +213,8 @@ describe("settleCancelledTurnStep handle store", () => {
             dispatchContext: { auth: { current: null, initiator: null } },
           },
         };
-        let session = registerWorkflowInvocation(createCancelledTurnSession([]), background);
-        session = registerWorkflowInvocation(session, {
+        let session = registerWorkflowToolRun(createCancelledTurnSession([]), background);
+        session = registerWorkflowToolRun(session, {
           ...background,
           callId: "completed-call",
           task: {
@@ -228,8 +228,8 @@ describe("settleCancelledTurnStep handle store", () => {
             },
           },
         });
-        const tasks = getWorkflowInvocations(session.state);
-        session = registerWorkflowInvocation(session, {
+        const tasks = getWorkflowToolRuns(session.state);
+        session = registerWorkflowToolRun(session, {
           callId: "waiting-call",
           toolName: "research",
           resultKind: "tool",
@@ -255,7 +255,7 @@ describe("settleCancelledTurnStep handle store", () => {
           serializedContext: buildSerializedContext(),
           sessionState: createDurableSessionState({ session }),
         });
-        expect(getWorkflowInvocations(result.sessionState.snapshot.session.state)).toEqual(tasks);
+        expect(getWorkflowToolRuns(result.sessionState.snapshot.session.state)).toEqual(tasks);
       });
     },
   );

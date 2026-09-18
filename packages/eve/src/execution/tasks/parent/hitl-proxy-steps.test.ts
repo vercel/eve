@@ -1,4 +1,7 @@
-import { recordWorkflowTaskView } from "#harness/workflow-invocations.js";
+import {
+  recordWorkflowTaskView,
+  getBackgroundWorkflowToolRuns,
+} from "#harness/workflow-tool-runs.js";
 import { createTestSessionState } from "#internal/testing/session-state.js";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ContextContainer } from "#context/container.js";
@@ -16,7 +19,6 @@ import {
   getProxyInputRequests,
   upsertProxyInputRequestState,
 } from "#harness/proxy-input-requests.js";
-import { getTaskInvocations } from "#harness/workflow-invocations.js";
 
 const flushInstrumentation = vi.hoisted(() => vi.fn());
 const publishBackgroundTaskSettlements = vi.hoisted(() => vi.fn());
@@ -282,7 +284,7 @@ describe("recordTerminalTaskViewsStep", () => {
     });
     const state = result.sessionState.snapshot.session.state;
 
-    expect(getTaskInvocations(state)[0]?.task.terminalView).toEqual(view);
+    expect(getBackgroundWorkflowToolRuns(state)[0]?.task.terminalView).toEqual(view);
     expect(getProxyInputRequests(state).size).toBe(0);
     expect(result.sessionState.hasProxyInputRequests).toBe(false);
     expect(getAgentHandleStore(state)?.handles).toEqual([

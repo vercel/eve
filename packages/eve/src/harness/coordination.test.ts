@@ -16,8 +16,11 @@ import { deriveAgentOperationId } from "#subagents/handles/operation-id.js";
 import { deriveAgentId, getAgentHandleStore } from "#subagents/handles/store.js";
 import { confirmAgentStarted, prepareAgentStart } from "#subagents/handles/transitions.js";
 import { getProxyInputRequests, upsertProxyInputRequests } from "#harness/proxy-input-requests.js";
-import { getWorkflowToolRuns } from "#harness/workflow-tool-runs.js";
-import { registerWorkflowInvocation } from "#harness/workflow-invocations.js";
+import {
+  getBlockingWorkflowToolRuns,
+  registerWorkflowToolRun,
+} from "#harness/workflow-tool-runs.js";
+
 import { toolOutput } from "#tools/model-output.js";
 import { getSessionTokenUsage, setTurnUsageState } from "#harness/turn-tag-state.js";
 import type { HarnessSession } from "#harness/types.js";
@@ -526,7 +529,7 @@ describe("resolvePendingCoordination", () => {
         },
       ],
     });
-    const withRun = registerWorkflowInvocation(parked, {
+    const withRun = registerWorkflowToolRun(parked, {
       callId: "call-1",
       toolName: "deploy",
       resultKind: "tool" as const,
@@ -566,7 +569,7 @@ describe("resolvePendingCoordination", () => {
     });
 
     expect(resolved.outcome).toBe("resolved");
-    expect(getWorkflowToolRuns(resolved.session.state)).toEqual([]);
+    expect(getBlockingWorkflowToolRuns(resolved.session.state)).toEqual([]);
     expect([...getProxyInputRequests(resolved.session.state).keys()]).toEqual(["other-request"]);
   });
 

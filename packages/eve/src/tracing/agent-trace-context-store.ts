@@ -15,8 +15,11 @@ import type {
 import { actionIdempotencyKey } from "#instrumentation/lifecycle.js";
 import { deriveTaskId } from "#tasks/task-id.js";
 import type { SessionStateMap } from "#harness/types.js";
-import { getWorkflowToolRuns } from "#harness/workflow-tool-runs.js";
-import { getTaskInvocations } from "#harness/workflow-invocations.js";
+import {
+  getBlockingWorkflowToolRuns,
+  getBackgroundWorkflowToolRuns,
+} from "#harness/workflow-tool-runs.js";
+
 import { createLogger } from "#internal/logging.js";
 import type { InstrumentationDecision } from "#shared/instrumentation-decision.js";
 import {
@@ -61,9 +64,9 @@ function pruneTraceOwnership(
 ): void {
   const state = context.get(AgentTraceContextKey);
   if (state === undefined) return;
-  const calls = new Set(getWorkflowToolRuns(sessionState).map((run) => run.callId));
+  const calls = new Set(getBlockingWorkflowToolRuns(sessionState).map((run) => run.callId));
   const tasks = new Set(
-    getTaskInvocations(sessionState)
+    getBackgroundWorkflowToolRuns(sessionState)
       .filter((task) => task.task.terminalView === undefined)
       .map((task) => task.task.taskId),
   );

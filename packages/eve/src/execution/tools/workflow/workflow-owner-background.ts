@@ -7,9 +7,8 @@ import {
   notifyTaskParent,
 } from "#execution/tasks/child/notify.js";
 import type { BackgroundWorkflowToolRunInput } from "#execution/tools/workflow/types.js";
-import { resumeHookStep } from "#execution/tools/workflow/resume-hook-step.js";
+import { deliverWorkflowAuthorization } from "#execution/tools/workflow/owner.js";
 import type {
-  WorkflowToolAuthorizationRequest,
   WorkflowToolRunRequestMessage,
   WorkflowToolRunReport,
   WorkflowToolRunMessage,
@@ -158,56 +157,28 @@ export async function createBackgroundWorkflowOwner(
 
   // Owner traffic must wait until the parent has acknowledged task dispatch.
   async function handleOwnerRequest(message: WorkflowToolRunRequestMessage): Promise<void> {
-    const { request, replyTo } = message;
-    if (
-      request.kind === "authorization-request" &&
-      request.event.childSessionId === message.from.runId
-    ) {
-      await handleStepAuthorization(request, replyTo);
+    const { request } = message;
+    if (request.kind === "authorization-request") {
+      await deliverWorkflowAuthorization({ ...message, request }, async () => {
+        // A cancelled workflow may still need to close its own displayed prompt.
+        const closesPrompt =
+          request.event.childSessionId === message.from.runId &&
+          request.event.event.type === "authorization.completed";
+        if (isTerminalTaskStatus(view.status) && !closesPrompt) return;
+        await notifyTaskParent({
+          request: message,
+          taskId: view.taskId,
+          token: input.parentContinuationToken,
+        });
+      });
       return;
     }
-    if (isTerminalTaskStatus(view.status)) {
-      return;
-    }
+    if (isTerminalTaskStatus(view.status)) return;
     await notifyTaskParent({
       request: message,
       taskId: view.taskId,
       token: input.parentContinuationToken,
     });
-  }
-
-  async function handleStepAuthorization(
-    request: WorkflowToolAuthorizationRequest,
-    replyTo: string,
-  ): Promise<void> {
-    const event = request.event.event;
-    const closesDisplayedPrompt = event.type === "authorization.completed";
-    const canForward = !isTerminalTaskStatus(view.status) || closesDisplayedPrompt;
-
-    if (canForward) {
-      const requestId = "attemptId" in event.data ? event.data.attemptId : undefined;
-      if (requestId !== undefined && event.type === "authorization.required") {
-        const existingRequests = view.status === "input_required" ? view.inputRequests : [];
-        applyTransition({
-          kind: "require-input",
-          inputRequests: [
-            ...existingRequests,
-            { kind: "authorization", requestId, name: event.data.name },
-          ],
-        });
-      } else if (requestId !== undefined) {
-        applyTransition({ kind: "answered", requestIds: [requestId] });
-      }
-
-      await notifyTaskParent({
-        request,
-        taskId: view.taskId,
-        token: input.parentContinuationToken,
-      });
-    }
-
-    // Discarded events are acknowledged too; persistence and delivery failures are not.
-    await resumeHookStep(replyTo, null, { ifPresent: true });
   }
 }
 

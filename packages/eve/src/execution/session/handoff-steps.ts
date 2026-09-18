@@ -1,4 +1,4 @@
-import { getWorkflowInvocations, readWorkflowTaskView } from "#harness/workflow-invocations.js";
+import { getWorkflowToolRuns, readWorkflowTaskView } from "#harness/workflow-tool-runs.js";
 import { deserializeContext } from "#context/serialize.js";
 import { readDurableSession, type DurableSessionState } from "#execution/durable-session-store.js";
 import {
@@ -15,7 +15,7 @@ import { getAgentHandleStore } from "#subagents/handles/store.js";
 export function isSessionStateIdleForHandoff(sessionState: DurableSessionState): boolean {
   const { state } = readDurableSession(sessionState);
   // Parse all entries, including terminal tasks, before any busy-work shortcut.
-  const invocations = getWorkflowInvocations(state);
+  const invocations = getWorkflowToolRuns(state);
   for (const entry of invocations) {
     if (entry.lifetime === "session") readWorkflowTaskView(entry.task);
   }

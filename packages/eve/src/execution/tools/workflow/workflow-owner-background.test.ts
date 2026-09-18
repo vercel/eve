@@ -1,7 +1,7 @@
 import { assert, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { WorkflowToolRunMessage } from "#execution/tools/workflow/messages.js";
-import { runWorkflowToolInvocation } from "#execution/tools/workflow/invocation.js";
+import { workflowToolRunWorkflow } from "#execution/tools/workflow/workflow.js";
 import type { TaskCommand, TaskView } from "#tasks/types.js";
 import {
   createAuthorizationRequiredEvent,
@@ -50,7 +50,8 @@ vi.mock("#execution/tools/workflow/body.js", () => ({
   executeWorkflowBody: mocks.executeWorkflowBody,
   createWorkflowBodyRef: () => bufferedAgentRequest.from,
 }));
-vi.mock("#execution/tools/workflow/owner.js", () => ({
+vi.mock("#execution/tools/workflow/owner.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("#execution/tools/workflow/owner.js")>()),
   openWorkflowToolRunOwnerInbox: () => ({
     owner: { inbox: "owner" },
     reader: { channel: "workflow" },
@@ -151,7 +152,7 @@ const workflowInput = {
   },
 };
 
-describe("runWorkflowToolInvocation", () => {
+describe("workflowToolRunWorkflow", () => {
   beforeEach(() => {
     vi.resetAllMocks();
     mocks.createHook.mockReturnValue({ token: "task-token" });
@@ -167,7 +168,7 @@ describe("runWorkflowToolInvocation", () => {
     queueOwnerRequest(authorizationRequest("b", true));
     mocks.raceChannelReads.mockResolvedValueOnce({ channel: "commands", next: { done: true } });
 
-    await runWorkflowToolInvocation(workflowInput);
+    await workflowToolRunWorkflow(workflowInput);
 
     expect(mocks.notifyTaskParent).toHaveBeenCalledTimes(4);
     expect(mocks.resumeHookStep).toHaveBeenCalledTimes(4);
@@ -179,6 +180,60 @@ describe("runWorkflowToolInvocation", () => {
     }
   });
 
+  it("keeps ordinary input answerable when authorization completes with the same request id", async () => {
+    const requestId = "request-1";
+    const answer = {
+      kind: "input-response" as const,
+      childContinuationToken: "answer-hook",
+      taskId: initialView.taskId,
+      inputResponses: [{ requestId, optionId: "approve" }],
+    };
+    queueCommand({ kind: "ready" });
+    queueOwnerRequest({
+      ...bufferedAgentRequest,
+      replyTo: "answer-hook",
+      request: {
+        kind: "tool-approval",
+        requestId,
+        prompt: "Approve deployment?",
+        action: { kind: "tool-call", callId: "deploy", toolName: "deploy", input: {} },
+      },
+    });
+    queueOwnerRequest(authorizationRequest(requestId));
+    queueOwnerRequest(authorizationRequest(requestId, true));
+    mocks.deliverTaskInputResponsesStep.mockResolvedValue("delivered");
+    mocks.raceChannelReads.mockResolvedValueOnce({
+      channel: "commands",
+      next: { done: false, value: answer },
+    });
+    mocks.raceChannelReads.mockResolvedValueOnce({ channel: "commands", next: { done: true } });
+
+    await workflowToolRunWorkflow(workflowInput);
+
+    expect(mocks.deliverTaskInputResponsesStep).toHaveBeenCalledExactlyOnceWith({
+      answer,
+      answerHook: { runId: "run-1" },
+      requestIds: [requestId],
+    });
+  });
+
+  it("acknowledges discarded authorization prompts after cancellation", async () => {
+    queueCommand({ kind: "ready" });
+    queueCommand({ kind: "cancel" });
+    queueOwnerRequest(authorizationRequest("late"));
+    mocks.raceChannelReads.mockResolvedValueOnce({ channel: "commands", next: { done: true } });
+
+    await workflowToolRunWorkflow(workflowInput);
+
+    expect(mocks.notifyTaskParent).toHaveBeenCalledExactlyOnceWith({
+      token: "parent-token",
+      view: { ...initialView, status: "cancelled" },
+    });
+    expect(mocks.resumeHookStep).toHaveBeenCalledExactlyOnceWith("ack-late", null, {
+      ifPresent: true,
+    });
+  });
+
   it("forwards child-agent auth without treating it as the workflow's own request", async () => {
     const message = authorizationRequest("child");
     message.request.event.childSessionId = "child-session";
@@ -186,7 +241,7 @@ describe("runWorkflowToolInvocation", () => {
     queueOwnerRequest(message);
     mocks.raceChannelReads.mockResolvedValueOnce({ channel: "commands", next: { done: true } });
 
-    await runWorkflowToolInvocation(workflowInput);
+    await workflowToolRunWorkflow(workflowInput);
 
     expect(mocks.notifyTaskParent).toHaveBeenCalledExactlyOnceWith({
       request: message,
@@ -205,7 +260,7 @@ describe("runWorkflowToolInvocation", () => {
     queueCommand({ kind: "ready" });
     queueOwnerRequest(authorizationRequest("a"));
     mocks.notifyTaskParent.mockRejectedValue(new Error("failed forwarding"));
-    await expect(runWorkflowToolInvocation(workflowInput)).rejects.toThrow("failed forwarding");
+    await expect(workflowToolRunWorkflow(workflowInput)).rejects.toThrow("failed forwarding");
     expect(mocks.resumeHookStep).not.toHaveBeenCalled();
   });
 
@@ -221,7 +276,7 @@ describe("runWorkflowToolInvocation", () => {
       })
       .mockResolvedValueOnce({ channel: "commands", next: { done: true, value: undefined } });
 
-    await runWorkflowToolInvocation(workflowInput);
+    await workflowToolRunWorkflow(workflowInput);
 
     expect(mocks.notifyTaskParent).toHaveBeenCalledWith({
       request: workflowAgentRequest,
@@ -267,7 +322,7 @@ describe("runWorkflowToolInvocation", () => {
       from: bufferedAgentRequest.from,
       result: { status: "completed", output: "done" },
     });
-    const execution = runWorkflowToolInvocation(workflowInput);
+    const execution = workflowToolRunWorkflow(workflowInput);
     await delivering.promise;
     expect(mocks.notifyTaskParent).toHaveBeenCalledTimes(1);
     delivery.resolve();
@@ -289,7 +344,7 @@ describe("runWorkflowToolInvocation", () => {
       next: { done: true, value: undefined },
     });
 
-    await runWorkflowToolInvocation(workflowInput);
+    await workflowToolRunWorkflow(workflowInput);
 
     expect(mocks.executeWorkflowBody).not.toHaveBeenCalled();
   });
@@ -300,7 +355,7 @@ describe("runWorkflowToolInvocation", () => {
       queueCommand({ kind: "cancel" });
       queueCommand(kind === "ready" ? { kind } : { kind, data: "step failed" });
 
-      await runWorkflowToolInvocation(workflowInput);
+      await workflowToolRunWorkflow(workflowInput);
 
       expect(mocks.executeWorkflowBody).not.toHaveBeenCalled();
       expect(mocks.notifyTaskParent).toHaveBeenCalledTimes(kind === "ready" ? 1 : 0);
@@ -320,7 +375,7 @@ describe("runWorkflowToolInvocation", () => {
       })
       .mockResolvedValueOnce({ channel: "commands", next: { done: true, value: undefined } });
 
-    await runWorkflowToolInvocation(workflowInput);
+    await workflowToolRunWorkflow(workflowInput);
 
     expect(mocks.executeWorkflowBody).toHaveBeenCalledOnce();
     expect(mocks.executeWorkflowBody).toHaveBeenCalledWith(
@@ -356,7 +411,7 @@ describe("runWorkflowToolInvocation", () => {
           },
         });
 
-      await runWorkflowToolInvocation({
+      await workflowToolRunWorkflow({
         ...workflowInput,
         initialView: { ...initialView, metadata: { ...initialView.metadata, kind } },
       });
@@ -398,7 +453,7 @@ describe("runWorkflowToolInvocation", () => {
         },
       });
 
-    await runWorkflowToolInvocation(workflowInput);
+    await workflowToolRunWorkflow(workflowInput);
 
     expect(mocks.notifyTaskParent).toHaveBeenCalledWith({
       token: "parent-token",
@@ -418,7 +473,7 @@ describe("runWorkflowToolInvocation", () => {
       result: { status: "cancelled", reason: "stop" },
     });
 
-    await runWorkflowToolInvocation(workflowInput);
+    await workflowToolRunWorkflow(workflowInput);
 
     expect(mocks.raceChannelReads).toHaveBeenCalledTimes(6);
     expect(mocks.executeWorkflowBody).toHaveBeenCalledOnce();
@@ -453,7 +508,7 @@ describe("runWorkflowToolInvocation", () => {
         },
       });
 
-    await runWorkflowToolInvocation(workflowInput);
+    await workflowToolRunWorkflow(workflowInput);
 
     expect(mocks.notifyTaskParent).toHaveBeenCalledWith({
       token: "parent-token",
@@ -492,7 +547,7 @@ describe("runWorkflowToolInvocation", () => {
           },
         },
       });
-    await runWorkflowToolInvocation(workflowInput);
+    await workflowToolRunWorkflow(workflowInput);
     expect(mocks.raceChannelReads).toHaveBeenCalledTimes(3);
     expect(mocks.notifyTaskParent).toHaveBeenCalledTimes(1);
     expect(mocks.notifyTaskParent).toHaveBeenCalledExactlyOnceWith({

@@ -1,4 +1,7 @@
-import { findTaskInvocation, readWorkflowTaskView } from "#harness/workflow-invocations.js";
+import {
+  findBackgroundWorkflowToolRun,
+  readWorkflowTaskView,
+} from "#harness/workflow-tool-runs.js";
 import type { HarnessSession } from "#harness/types.js";
 import { WORKFLOW_CANCELLATION_SETTLE_MS } from "#execution/tools/workflow/cancellation-policy.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -82,7 +85,7 @@ describe("task cancellation", () => {
       },
       session,
     });
-    const recorded = findTaskInvocation(cancelled.session.state, entry.task.taskId);
+    const recorded = findBackgroundWorkflowToolRun(cancelled.session.state, entry.task.taskId);
     expect(recorded).toBeDefined();
     expect(recorded === undefined ? undefined : readWorkflowTaskView(recorded.task)).toMatchObject({
       status: "cancelled",

@@ -18,9 +18,9 @@ import {
   clearProxyInputRequestsWhere,
 } from "#harness/proxy-input-requests.js";
 import {
-  findWorkflowToolRun,
+  findBlockingWorkflowToolRun,
   isInboxSubagentResultFromRecordedWorkflowToolRun,
-  removeWorkflowToolRun,
+  removeBlockingWorkflowToolRuns,
 } from "#harness/workflow-tool-runs.js";
 import { normalizeToolModelOutput } from "#harness/tool-model-output.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
@@ -313,25 +313,33 @@ export async function resolvePendingCoordination(input: {
   // Drop a finished run's unanswered requests so a late click cannot reach it.
   for (const result of readyResults) {
     if (result.kind !== "tool-result") continue;
-    const record = findWorkflowToolRun(nextSession.state, result.callId, batch.event.turnId);
+    const record = findBlockingWorkflowToolRun(
+      nextSession.state,
+      result.callId,
+      batch.event.turnId,
+    );
     if (record === undefined) continue;
-    nextSession = removeWorkflowToolRun(
+    nextSession = removeBlockingWorkflowToolRuns(
       clearProxyInputRequestsWhere(
         nextSession,
         (route) => route.answerHook?.runId === record.address.runId,
       ),
-      record.callId,
       batch.event.turnId,
+      record.callId,
     );
   }
   for (const result of readyResults) {
     if (result.kind !== "subagent-result") continue;
-    const record = findWorkflowToolRun(nextSession.state, result.callId, batch.event.turnId);
-    if (record?.resultKind !== "subagent") continue;
-    nextSession = removeWorkflowToolRun(
-      clearProxyInputRequestsForChild(nextSession, record.address.hookToken),
-      record.callId,
+    const record = findBlockingWorkflowToolRun(
+      nextSession.state,
+      result.callId,
       batch.event.turnId,
+    );
+    if (record?.resultKind !== "subagent") continue;
+    nextSession = removeBlockingWorkflowToolRuns(
+      clearProxyInputRequestsForChild(nextSession, record.address.hookToken),
+      batch.event.turnId,
+      record.callId,
     );
   }
 

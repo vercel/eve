@@ -33,7 +33,7 @@ type TaskParentNotification =
     }
   | {
       readonly taskId: string;
-      readonly request: WorkflowToolRunRequestMessage | WorkflowToolAuthorizationRequest;
+      readonly request: WorkflowToolRunRequestMessage;
     };
 
 /** Delivers task outcomes, updates, and requests through the parent's session inbox. */
@@ -79,7 +79,6 @@ function taskNotificationCommand(
   }
 
   const { taskId, request: message } = input;
-  if ("event" in message) return taskAuthorizationCommand(message, taskId);
   const { request } = message;
   if (request.kind === "authorization-request") return taskAuthorizationCommand(request, taskId);
   if (request.kind === "agent-invoke" || request.kind === "agent-settled") {
