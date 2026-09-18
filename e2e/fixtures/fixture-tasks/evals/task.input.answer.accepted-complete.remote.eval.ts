@@ -29,7 +29,7 @@ export default defineTaskEval({
     const started = await t.send("TASK-C8-REMOTE-HITL");
     started.expectOk();
     started.messageIncludes("TASK-C8-STARTED");
-    started.event("subagent.completed", {
+    started.event("subagent.admitted", {
       count: 1,
       data: {
         backgroundTask: { status: "working" },

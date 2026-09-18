@@ -96,10 +96,10 @@ export async function waitForTaskInput(
   throw new Error(`Task did not surface input for tool "${toolName}" after five turns.`);
 }
 
-/** Reads the task receipt attached to a background `subagent.completed` event. */
+/** Reads the task receipt attached to a background `subagent.admitted` event. */
 export function requireBackgroundTaskId(turn: EveEvalTurn): string {
   for (const event of turn.events) {
-    if (event.type === "subagent.completed" && event.data.backgroundTask !== undefined) {
+    if (event.type === "subagent.admitted") {
       return event.data.backgroundTask.taskId;
     }
   }

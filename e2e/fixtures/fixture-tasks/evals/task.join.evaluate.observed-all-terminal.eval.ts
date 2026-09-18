@@ -31,7 +31,7 @@ export default defineTaskEval({
     const started = await t.send("TASK-FAN-IN");
     started.expectOk();
     started.messageIncludes("TASK-FAN-IN-STARTED");
-    started.calledSubagent("fanout-worker", { count: FAN_IN_SIZE });
+    started.calledSubagent("fanout-worker", { status: "admitted", count: FAN_IN_SIZE });
 
     const tasksByMarker = backgroundTasksByMarker(started);
     const taskIds = [...tasksByMarker.values()];
@@ -147,7 +147,7 @@ async function waitForTurnMessage(
 function backgroundTasksByMarker(turn: EveEvalTurn): ReadonlyMap<FanInMarker, string> {
   const tasksByMarker = new Map<FanInMarker, string>();
   for (const event of turn.events) {
-    if (event.type !== "subagent.completed" || event.data.backgroundTask === undefined) continue;
+    if (event.type !== "subagent.admitted") continue;
     const fanInCall = FAN_IN_CALLS.find(({ callId }) => callId === event.data.callId);
     if (fanInCall !== undefined)
       tasksByMarker.set(fanInCall.marker, event.data.backgroundTask.taskId);

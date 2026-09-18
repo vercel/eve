@@ -61,9 +61,9 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
     },
   },
   dynamicTool: {
-    current: 51,
+    current: 52,
     supported: [
-      1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 22, 31, 32, 33, 51,
+      1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 22, 31, 32, 33, 52,
     ],
     dropped: {
       21: "Message and reasoning append events now expose deltas instead of cumulative snapshots.",
@@ -92,11 +92,12 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
       48: "Background dynamic tools were removed; use a static defineWorkflowTool for durable background work.",
       49: "Background dynamic tools were removed; use a static defineWorkflowTool for durable background work.",
       50: "Background dynamic tools were removed; use a static defineWorkflowTool for durable background work.",
+      51: "Background subagent admission now emits subagent.admitted; subagent.completed carries only successful invocation results.",
     },
   },
   channel: {
-    current: 27,
-    supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 14, 15, 16, 17, 18, 27],
+    current: 28,
+    supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 14, 15, 16, 17, 18, 28],
     dropped: {
       12: "Message and reasoning append events now expose deltas instead of cumulative snapshots.",
       19: "Continuation rekey was removed; channel extensions must use additive continuation.alias instead.",
@@ -107,37 +108,41 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
       24: "Task views no longer expose executor bindings; background work is owned by workflow runs.",
       25: "Task views no longer expose executor bindings; background work is owned by workflow runs.",
       26: "Task views no longer expose executor bindings; background work is owned by workflow runs.",
+      27: "Background subagent admission now emits subagent.admitted; subagent.completed carries only successful invocation results.",
     },
   },
   schedule: {
-    current: 14,
-    supported: [1, 2, 3, 4, 6, 7, 8, 9, 10, 11, 12, 13, 14],
+    current: 15,
+    supported: [1, 2, 3, 4, 6, 7, 8, 9, 10, 11, 12, 13, 15],
     dropped: {
       5: "Message and reasoning append events now expose deltas instead of cumulative snapshots.",
+      14: "Background subagent admission now emits subagent.admitted; subagent.completed carries only successful invocation results.",
     },
   },
   subagent: {
-    current: 19,
-    supported: [3, 4, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 19],
+    current: 20,
+    supported: [3, 4, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 20],
     dropped: {
       1: "Persistent subagent sessions are now the default and the experimental opt-in was removed",
       2: "Persistent subagent sessions are now the default and the experimental opt-in was removed",
       5: "Message and reasoning append events now expose deltas instead of cumulative snapshots.",
       17: "Removed experimental.instrumentationProviders; instrumentation is now always enabled for root agents.",
       18: "Removed experimental.instrumentationProviders; instrumentation is now always enabled for root agents.",
+      19: "Background subagent admission now emits subagent.admitted; subagent.completed carries only successful invocation results.",
     },
   },
   connection: {
-    current: 23,
-    supported: [1, 2, 3, 4, 5, 6, 7, 8, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23],
+    current: 24,
+    supported: [1, 2, 3, 4, 5, 6, 7, 8, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 24],
     dropped: {
       9: "Dynamic connection resolvers no longer receive conversation or channel continuation data",
       10: "Message and reasoning append events now expose deltas instead of cumulative snapshots.",
+      23: "Background subagent admission now emits subagent.admitted; subagent.completed carries only successful invocation results.",
     },
   },
   hook: {
-    current: 24,
-    supported: [10, 11, 12, 13, 14, 15, 17, 18, 19, 20, 21, 22, 23, 24],
+    current: 25,
+    supported: [10, 11, 12, 13, 14, 15, 17, 18, 19, 20, 21, 22, 23, 25],
     dropped: {
       1: "Model identity moved from session.started runtime metadata to step.started call attribution.",
       2: "Model identity moved from session.started runtime metadata to step.started call attribution.",
@@ -149,22 +154,25 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
       8: "Model identity moved from session.started runtime metadata to step.started call attribution.",
       9: "Model identity moved from session.started runtime metadata to step.started call attribution.",
       16: "Message and reasoning append events now expose deltas instead of cumulative snapshots.",
+      24: "Background subagent admission now emits subagent.admitted; subagent.completed carries only successful invocation results.",
     },
   },
   skill: { current: 1, supported: [1], dropped: {} },
   dynamicSkill: {
-    current: 21,
-    supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 14, 15, 16, 17, 18, 19, 20, 21],
+    current: 22,
+    supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 14, 15, 16, 17, 18, 19, 20, 22],
     dropped: {
       13: "Message and reasoning append events now expose deltas instead of cumulative snapshots.",
+      21: "Background subagent admission now emits subagent.admitted; subagent.completed carries only successful invocation results.",
     },
   },
   instructions: { current: 2, supported: [1, 2], dropped: {} },
   dynamicInstructions: {
-    current: 22,
-    supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 15, 16, 17, 18, 19, 20, 21, 22],
+    current: 23,
+    supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 15, 16, 17, 18, 19, 20, 21, 23],
     dropped: {
       14: "Message and reasoning append events now expose deltas instead of cumulative snapshots.",
+      22: "Background subagent admission now emits subagent.admitted; subagent.completed carries only successful invocation results.",
     },
   },
   config: { current: 1, supported: [1], dropped: {} },

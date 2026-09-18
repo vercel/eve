@@ -24,7 +24,7 @@ export default defineEval({
     const started = await t.send(
       `Call the stock-price subagent exactly once with message 'Call the get_stock_price tool exactly once with ticker "GOOG". After it returns, do not call any tool again; return the result.'. After that single subagent call finishes, do not call any subagent or tool again; include the exact stock price in your final reply.`,
     );
-    started.event("subagent.completed", {
+    started.event("subagent.admitted", {
       count: 1,
       data: {
         backgroundTask: { status: "working" },
@@ -44,9 +44,7 @@ export default defineEval({
     completed.messageIncludes(GOOG_PRICE);
 
     t.succeeded();
-    t.calledSubagent("stock-price", {
-      count: 1,
-    });
+    t.calledSubagent("stock-price", { status: "admitted", count: 1 });
     t.noFailedActions();
   },
 });

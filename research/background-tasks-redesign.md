@@ -29,6 +29,15 @@ The prototype implements three approved scope decisions:
    when each task settles. User input, human-input requests, and authorization do not wait for the
    cohort.
 
+## Subagent stream boundaries
+
+Background receipts emit `subagent.admitted`; successful blocking invocation results emit
+`subagent.completed`. The latter does not terminate a reusable child session. Evals retain
+`completed` for successful results and use `admitted` for receipt-only delegations. Background
+outcomes remain task notifications, with the existing cohort policy unchanged. Stream version 26
+separates the events, and the existing version decoder translates historical receipt-bearing
+completion events into admission events.
+
 ## Resulting execution model
 
 `workflowToolRunWorkflow` in `workflow.ts` is the durable entry and execution loop for both

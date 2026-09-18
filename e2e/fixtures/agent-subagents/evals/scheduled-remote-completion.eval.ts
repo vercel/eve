@@ -31,7 +31,7 @@ export default defineEval({
     const launch = await t.target.attachSession(sessionId);
     launch.succeeded();
     launch.calledTool("remote-loopback");
-    launch.event("subagent.completed", {
+    launch.event("subagent.admitted", {
       data: (data) => data.subagentName === "remote-loopback" && data.backgroundTask !== undefined,
       count: 1,
     });

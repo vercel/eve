@@ -718,7 +718,7 @@ describe("emitStreamContent action requests", () => {
     ]);
   });
 
-  it("marks a background subagent receipt on subagent.completed", async () => {
+  it("marks a background subagent receipt on subagent.admitted", async () => {
     const emit = createEmitStub();
     const tools = new Map<string, HarnessToolDefinition>([
       [
@@ -758,7 +758,7 @@ describe("emitStreamContent action requests", () => {
     const events = vi.mocked(emit).mock.calls.map(([event]) => event);
     expect(events.map((event) => event.type)).toEqual([
       "actions.requested",
-      "subagent.completed",
+      "subagent.admitted",
       "action.result",
     ]);
     expect(events[1]).toMatchObject({
@@ -767,60 +767,7 @@ describe("emitStreamContent action requests", () => {
         callId: "call-delegate",
         subagentName: "delegate",
       },
-      type: "subagent.completed",
-    });
-  });
-
-  it("marks a background subagent receipt on subagent.completed", async () => {
-    const emit = createEmitStub();
-    const tools = new Map<string, HarnessToolDefinition>([
-      [
-        "delegate",
-        {
-          description: "Delegate work to a subagent.",
-          execution: "background",
-          inputSchema: jsonSchema({ type: "object" }),
-          name: "delegate",
-          nodeId: "subagents/researcher",
-          workflowId: "workflow//./agent/subagents/researcher//execute",
-        },
-      ],
-    ]);
-
-    await emitStreamContent(
-      emit,
-      EMISSION_STATE,
-      streamOf([
-        {
-          input: { message: "research the release" },
-          toolCallId: "call-delegate",
-          toolName: "delegate",
-          type: "tool-call",
-        },
-        {
-          output: { status: "working", taskId: "task-1" },
-          toolCallId: "call-delegate",
-          toolName: "delegate",
-          type: "tool-result",
-        },
-        { finishReason: "tool-calls", type: "finish-step" },
-      ] as TextStreamPart<ToolSet>[]),
-      { excludedActionToolNames: new Set(), tools },
-    );
-
-    const events = vi.mocked(emit).mock.calls.map(([event]) => event);
-    expect(events.map((event) => event.type)).toEqual([
-      "actions.requested",
-      "subagent.completed",
-      "action.result",
-    ]);
-    expect(events[1]).toMatchObject({
-      data: {
-        backgroundTask: { status: "working", taskId: "task-1" },
-        callId: "call-delegate",
-        subagentName: "delegate",
-      },
-      type: "subagent.completed",
+      type: "subagent.admitted",
     });
   });
 

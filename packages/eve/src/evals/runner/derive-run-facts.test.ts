@@ -347,6 +347,58 @@ describe("deriveRunFacts", () => {
     expect(facts.reasoningBlockCount).toBe(2);
   });
 
+  it("keeps a working receipt admitted until an actual result arrives", () => {
+    const admitted: UnstampedMessageStreamEvent = {
+      type: "subagent.admitted",
+      data: {
+        callId: "c1",
+        subagentName: "researcher",
+        output: "working",
+        backgroundTask: { status: "working", taskId: "task-1" },
+      },
+    };
+    const receipt: UnstampedMessageStreamEvent = {
+      type: "action.result",
+      data: {
+        sequence: 1,
+        stepIndex: 0,
+        turnId: "t1",
+        status: "completed",
+        result: {
+          kind: "subagent-result",
+          origin: "child",
+          callId: "c1",
+          subagentName: "researcher",
+          backgroundTask: { status: "working", taskId: "task-1" },
+          output: { status: "working", taskId: "task-1" },
+          outcome: {
+            kind: "parked",
+            result: { kind: "succeeded", output: "working" },
+            usageDelta: {
+              inputTokens: 0,
+              outputTokens: 0,
+              cacheReadTokens: 0,
+              cacheWriteTokens: 0,
+            },
+          },
+        },
+      },
+    };
+    for (const events of [[admitted], [receipt], [admitted, receipt], [receipt, admitted]]) {
+      expect(derive(events).subagentCalls).toEqual([
+        expect.objectContaining({ callId: "c1", status: "admitted" }),
+      ]);
+      expect(derive(events).subagentCalls[0]?.output).toBeUndefined();
+    }
+    const completed: UnstampedMessageStreamEvent = {
+      type: "subagent.completed",
+      data: { callId: "c1", subagentName: "researcher", output: "actual result" },
+    };
+    expect(derive([admitted, completed, admitted, receipt]).subagentCalls).toEqual([
+      expect.objectContaining({ callId: "c1", status: "completed", output: "actual result" }),
+    ]);
+  });
+
   it("joins subagent.called with subagent.completed by call id", () => {
     const events: UnstampedMessageStreamEvent[] = [
       turnStarted("t1", 0),

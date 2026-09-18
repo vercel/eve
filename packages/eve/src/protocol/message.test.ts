@@ -32,7 +32,43 @@ import { createEveConnectionCallbackRoutePath } from "#protocol/routes.js";
 
 describe("message stream protocol", () => {
   it("pins the stream version for timed session events", () => {
-    expect(EVE_MESSAGE_STREAM_VERSION).toBe("25");
+    expect(EVE_MESSAGE_STREAM_VERSION).toBe("26");
+  });
+
+  it.each(["21", "22", "23", "24", "25"] as const)(
+    "decodes v%s background receipts as admission without changing call identity",
+    (version) => {
+      const receipt: MessageStreamEventForVersion<typeof version> = {
+        type: "subagent.completed",
+        data: {
+          callId: "call-1",
+          subagentName: "researcher",
+          output: '{"status":"working","taskId":"task-1"}',
+          backgroundTask: { status: "working", taskId: "task-1" },
+        },
+        meta: { id: "evt-1", at: "2026-09-18T00:00:00Z" },
+      };
+      const expected = { ...receipt, type: "subagent.admitted" };
+      expect(normalizeMessageStreamEvent(version, receipt)).toEqual(expected);
+      expect(normalizePersistedMessageStreamEvent(receipt)).toEqual(expected);
+      const { backgroundTask: _, ...data } = receipt.data;
+      const completed = { ...receipt, data };
+      expect(normalizeMessageStreamEvent(version, completed)).toEqual(completed);
+    },
+  );
+
+  it("rejects a receipt disguised as completion on the current wire", () => {
+    const receipt = {
+      type: "subagent.completed",
+      data: {
+        callId: "call-1",
+        subagentName: "researcher",
+        output: "working",
+        backgroundTask: { status: "working", taskId: "task-1" },
+      },
+      meta: { id: "evt-1", at: "2026-09-18T00:00:00Z" },
+    } as MessageStreamEventForVersion<"26">;
+    expect(() => normalizeMessageStreamEvent("26", receipt)).toThrow(/subagent.admitted/);
   });
 
   it.each(["21", "22", "23", "24"] as const)(

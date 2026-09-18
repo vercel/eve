@@ -23,10 +23,10 @@ export default defineEval({
     const session = parked.session;
 
     parked.calledTool("collision-gate", { count: 1, status: "pending" });
-    parked.calledSubagent("collision-child", { count: 1, status: "completed" });
+    parked.calledSubagent("collision-child", { count: 1, status: "admitted" });
     parked.eventOrder([
       { type: "actions.requested" },
-      { type: "subagent.completed" },
+      { type: "subagent.admitted" },
       { type: "input.requested" },
       { type: "session.waiting" },
     ]);
@@ -42,7 +42,7 @@ export default defineEval({
     t.succeeded();
     t.noFailedActions();
     t.calledTool("collision-gate", { count: 1, status: "completed" });
-    t.calledSubagent("collision-child", { count: 1, status: "completed" });
+    t.calledSubagent("collision-child", { count: 1, status: "admitted" });
   },
 });
 

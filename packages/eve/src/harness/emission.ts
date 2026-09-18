@@ -448,7 +448,7 @@ async function consumeStreamContent(
           output: typeof result.output === "string" ? result.output : JSON.stringify(result.output),
           subagentName: result.toolName,
         },
-        type: "subagent.completed",
+        type: "subagent.admitted",
       });
     }
     const resultPresentation =

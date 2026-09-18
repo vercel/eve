@@ -27,7 +27,7 @@ export const EVE_STREAM_TAIL_INDEX_HEADER = "x-eve-stream-tail-index";
 export const EVE_STREAM_VERSION_HEADER = "x-eve-stream-version";
 export const EVE_MESSAGE_STREAM_CONTENT_TYPE = "application/x-ndjson; charset=utf-8";
 export const EVE_MESSAGE_STREAM_FORMAT = "ndjson";
-export const EVE_MESSAGE_STREAM_VERSION = "25";
+export const EVE_MESSAGE_STREAM_VERSION = "26";
 
 /** Version of transport control records understood by this eve release. */
 export const EVE_STREAM_CONTROL_VERSION = "1";
@@ -412,19 +412,25 @@ export interface SubagentChildEventStreamEvent {
 }
 
 /**
- * Stream event emitted when an inline subagent completes.
+ * A background subagent was admitted and returned a working task receipt.
  */
-export interface SubagentCompletedStreamEvent {
+export interface SubagentAdmittedStreamEvent {
   data: {
-    /**
-     * Present when the originating call completed with a background-task
-     * receipt while the child itself kept running. Consumers must not treat
-     * this as the child's terminal boundary; the child stream owns that.
-     */
-    backgroundTask?: {
+    /** Admission receipt; the background work has not settled. */
+    backgroundTask: {
       taskId: string;
       status: "working";
     };
+    callId: string;
+    output: string;
+    subagentName: string;
+  };
+  type: "subagent.admitted";
+}
+
+/** A successful invocation result, independent of whether its child session remains reusable. */
+export interface SubagentCompletedStreamEvent {
+  data: {
     callId: string;
     output: string;
     subagentName: string;
@@ -772,6 +778,7 @@ export type UnstampedMessageStreamEvent =
   | ResultCompletedStreamEvent
   | SubagentCalledStreamEvent
   | SubagentChildEventStreamEvent
+  | SubagentAdmittedStreamEvent
   | SubagentCompletedStreamEvent
   | SubagentStartedStreamEvent
   | ActionsRequestedStreamEvent

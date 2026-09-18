@@ -15,7 +15,7 @@ export default defineTaskEval({
   async test(t) {
     const started = await t.send("TASK-HITL-ROUTING");
     started.expectOk();
-    started.event("subagent.completed", {
+    started.event("subagent.admitted", {
       count: 1,
       data: { backgroundTask: { status: "working" }, subagentName: "approval-worker" },
     });

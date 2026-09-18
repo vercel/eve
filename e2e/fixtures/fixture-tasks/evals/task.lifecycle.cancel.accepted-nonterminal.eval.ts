@@ -20,7 +20,7 @@ export default defineTaskEval({
     const started = await t.send("TASK-CANCEL-SETUP");
     started.expectOk();
     started.messageIncludes("TASK-CANCEL-READY");
-    started.event("subagent.completed", {
+    started.event("subagent.admitted", {
       count: 1,
       data: { backgroundTask: { status: "working" }, subagentName: "fanout-worker" },
     });
