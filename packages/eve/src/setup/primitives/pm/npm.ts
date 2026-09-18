@@ -8,6 +8,8 @@ export const npmPackageManager = {
   devArguments: () => ["exec", "--", "eve", "dev"],
   installArguments: (options) => [
     "install",
+    ...(options.autoApprove === true ? ["--yes"] : []),
+    ...(options.bypassMinimumReleaseAge === true ? ["--min-release-age=0"] : []),
     ...(options.progressDetails === true ? ["--loglevel=silly"] : []),
   ],
   prepareArguments: (_projectRoot, args) => args,

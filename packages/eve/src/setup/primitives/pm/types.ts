@@ -26,10 +26,10 @@ export interface PackageManagerConfigurationOptions {
 export interface PackageManagerInstallOptions {
   /** Automatically accepts package-manager prompts during setup-owned installs. */
   readonly autoApprove?: boolean;
+  /** Disables inherited minimum package release-age policies for this install. */
+  readonly bypassMinimumReleaseAge?: boolean;
   /** Resolves the project standalone even when an ancestor workspace exists. */
   readonly ignoreWorkspace?: boolean;
-  /** Overrides pnpm's minimum package release age for this install, in minutes. */
-  readonly minimumReleaseAgeMinutes?: number;
   /** Requests verbose package-manager output for a live progress display. */
   readonly progressDetails?: boolean;
 }

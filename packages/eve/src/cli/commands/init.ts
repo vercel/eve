@@ -402,7 +402,7 @@ async function runInitSteps(input: {
       project.projectPath,
       {
         autoApprove: true,
-        minimumReleaseAgeMinutes: 0,
+        bypassMinimumReleaseAge: true,
         progressDetails: process.stdout.isTTY === true && !debug,
         onOutput: (line) => {
           if (line.text.trim() !== "") {

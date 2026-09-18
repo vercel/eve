@@ -81,7 +81,7 @@ describe("runPnpmInstall", () => {
       packageManagerInstallSucceeded(
         await runPnpmInstall("/tmp/eve-agent", {
           autoApprove: true,
-          minimumReleaseAgeMinutes: 0,
+          bypassMinimumReleaseAge: true,
         }),
       ),
     ).toBe(true);
@@ -116,7 +116,7 @@ describe("runPnpmInstall", () => {
       packageManagerInstallSucceeded(
         await runPnpmInstall("/tmp/eve-agent", {
           autoApprove: true,
-          minimumReleaseAgeMinutes: 0,
+          bypassMinimumReleaseAge: true,
           onOutput,
         }),
       ),
@@ -236,6 +236,40 @@ describe("runPnpmInstall", () => {
 });
 
 describe("runPackageManagerInstall", () => {
+  test("automatically approves npm prompts and bypasses inherited release-age policies", async () => {
+    expect(
+      packageManagerInstallSucceeded(
+        await runPackageManagerInstall("npm", "/tmp/app", {
+          autoApprove: true,
+          bypassMinimumReleaseAge: true,
+        }),
+      ),
+    ).toBe(true);
+
+    expect(mockedSpawn).toHaveBeenCalledWith(
+      "npm",
+      ["install", "--yes", "--min-release-age=0"],
+      expect.objectContaining({ cwd: "/tmp/app" }),
+    );
+  });
+
+  test("bypasses inherited Bun release-age policies without passing an unsupported yes flag", async () => {
+    expect(
+      packageManagerInstallSucceeded(
+        await runPackageManagerInstall("bun", "/tmp/app", {
+          autoApprove: true,
+          bypassMinimumReleaseAge: true,
+        }),
+      ),
+    ).toBe(true);
+
+    expect(mockedSpawn).toHaveBeenCalledWith(
+      "bun",
+      ["install", "--minimum-release-age=0"],
+      expect.objectContaining({ cwd: "/tmp/app" }),
+    );
+  });
+
   test("requests npm output before registry operations complete", async () => {
     expect(
       packageManagerInstallSucceeded(

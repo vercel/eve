@@ -2,4 +2,4 @@
 "eve": patch
 ---
 
-Run the pnpm dependency install during `eve init` non-interactively and bypass inherited minimum-release-age policies for that initial scaffold install.
+Run dependency installation during `eve init` non-interactively where supported and bypass inherited minimum-release-age policies for the initial scaffold install.
