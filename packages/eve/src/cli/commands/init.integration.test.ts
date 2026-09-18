@@ -285,6 +285,9 @@ describe("runInitCommand", () => {
           input.enter();
         }
         await vi.waitFor(() => expect(readPrompt).toHaveBeenCalled());
+        expect(screen.snapshot()).not.toContain("/login");
+        expect(screen.rawOutput()).not.toContain("Using existing connection.");
+        expect(screen.rawOutput()).not.toContain("Model connected.");
         input.type("Hello, I'm Alice.");
         input.enter();
         await screen.waitForText("Hello Alice, your agent is ready.");

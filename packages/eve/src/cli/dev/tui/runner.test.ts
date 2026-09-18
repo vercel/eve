@@ -2099,11 +2099,17 @@ describe("EveTUIRunner initial input", () => {
       };
       const handle = vi.fn(async () => {
         await login.promise;
-        return result === "cancelled" ? { cancelled: true as const } : { tone: "error" as const };
+        return result === "cancelled"
+          ? { cancelled: true as const, message: "Connect a model with /login when you’re ready." }
+          : { tone: "error" as const, message: "Could not connect. Retry with /login." };
       });
       const session = stubSession();
       vi.spyOn(session, "send");
-      const renderer = fakeRenderer({ setupFlow: createFakeSetupFlowRenderer() });
+      const renderer = fakeRenderer({
+        setupFlow: createFakeSetupFlowRenderer(),
+        renderCommandInvocation: vi.fn(),
+        renderCommandResult: vi.fn(),
+      });
       const runner = new EveTUIRunner({
         session,
         renderer,
@@ -2122,6 +2128,13 @@ describe("EveTUIRunner initial input", () => {
       expect(session.send).not.toHaveBeenCalled();
       expect(renderer.readPrompt).toHaveBeenCalledWith(
         expect.objectContaining({ initialDraft: "Hello Alice\n\nstill editing" }),
+      );
+      expect(renderer.renderCommandInvocation).not.toHaveBeenCalled();
+      expect(renderer.renderCommandResult).toHaveBeenCalledWith(
+        result === "cancelled"
+          ? "Connect a model with /login when you’re ready."
+          : "Could not connect. Retry with /login.",
+        result === "error" ? "error" : undefined,
       );
     },
   );
@@ -4174,7 +4187,7 @@ describe("EveTUIRunner boot setup detection", () => {
     const run = runner.run();
     await vi.waitFor(() => expect(readPrompt).toHaveBeenCalledOnce());
     expect(client.info).toHaveBeenCalledTimes(2);
-    expect(renderCommandResult).toHaveBeenCalledOnce();
+    expect(renderCommandResult).not.toHaveBeenCalled();
     expect(renderSetupWarning).not.toHaveBeenCalled();
     expect(setStartupPhase).toHaveBeenLastCalledWith(undefined);
     await run;
@@ -4322,7 +4335,7 @@ describe("EveTUIRunner boot setup detection", () => {
     await runner.run();
     await vi.waitFor(() => expect(clearSetupWarning).toHaveBeenCalled());
 
-    expect(renderCommandResult).toHaveBeenCalledWith("AI Gateway via API key selected.", undefined);
+    expect(renderCommandResult).not.toHaveBeenCalled();
     expect(client.info).toHaveBeenCalledTimes(2);
     expect(detect).not.toHaveBeenCalled();
     expect(headers.at(-1)?.info?.agent.model.endpoint).toMatchObject({
@@ -4817,7 +4830,7 @@ describe("EveTUIRunner command shutdown", () => {
   });
 });
 
-it("starts onboarding with only login and preserves the input draft", async () => {
+it("starts onboarding without login history and preserves the input draft", async () => {
   const order: string[] = [];
   const handle = vi.fn(async (command: { name: string }) => {
     order.push(command.name);
@@ -4825,6 +4838,8 @@ it("starts onboarding with only login and preserves the input draft", async () =
   });
   const renderer = fakeRenderer({
     setupFlow: createFakeSetupFlowRenderer(),
+    renderCommandInvocation: vi.fn(),
+    renderCommandResult: vi.fn(),
     readPrompt: vi.fn(async (options?: AgentTUISessionOptions) => {
       order.push("prompt");
       expect(options?.initialDraft).toBe("Hello Alice");
@@ -4843,4 +4858,29 @@ it("starts onboarding with only login and preserves the input draft", async () =
   });
   await runner.run();
   expect(order).toEqual(["login", "prompt"]);
+  expect(renderer.renderCommandInvocation).not.toHaveBeenCalled();
+  expect(renderer.renderCommandResult).not.toHaveBeenCalled();
+});
+
+it("keeps the result of an explicit login command after onboarding", async () => {
+  const prompts = ["/login", undefined];
+  const handle = vi.fn(async () => ({ message: "Connected." }));
+  const renderer = fakeRenderer({
+    setupFlow: createFakeSetupFlowRenderer(),
+    renderCommandResult: vi.fn(),
+    readPrompt: vi.fn(async () => prompts.shift()),
+  });
+  const runner = new EveTUIRunner({
+    session: sessionYielding([]),
+    renderer,
+    appRoot: "/tmp/agent",
+    onboard: true,
+    bootDetections: [],
+    promptCommandHandler: { handle },
+  });
+
+  await runner.run();
+
+  expect(handle).toHaveBeenCalledTimes(2);
+  expect(renderer.renderCommandResult).toHaveBeenCalledExactlyOnceWith("Connected.", undefined);
 });

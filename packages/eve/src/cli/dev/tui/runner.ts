@@ -838,14 +838,9 @@ export class EveTUIRunner {
     this.#replaceAgentInfo(this.#agentInfo);
     this.#paintSetupAttention();
     this.#renderer.setStartupPhase?.(undefined);
-    if (initialAgentOnboarding) {
-      this.#renderStartupCommandInvocation(
-        { type: "extension", name: "login", argument: "" },
-        "startup",
-        startupOutcome?.tone,
-      );
+    if (!initialAgentOnboarding || startupOutcome?.cancelled || startupOutcome?.tone === "error") {
+      this.#renderCommandOutcome(startupOutcome?.message, startupOutcome?.tone);
     }
-    this.#renderCommandOutcome(startupOutcome?.message, startupOutcome?.tone);
 
     while (true) {
       if (this.#lifecycle?.signal.aborted === true || this.#renderer.exitRequested?.() === true) {
@@ -1797,20 +1792,6 @@ export class EveTUIRunner {
         ? { ...baseContext, disabledConnectionReasons }
         : baseContext;
     return await handler.handle(command, context);
-  }
-
-  #renderStartupCommandInvocation(
-    command: Extract<PromptCommand, { type: "extension" }>,
-    trigger: "startup" | "command",
-    tone?: "success" | "error",
-  ): void {
-    if (trigger !== "startup") return;
-
-    const state = this.#remoteConnection?.current().connection.state;
-    const status =
-      tone === "error" || state === "auth-failed" || state === "unavailable" ? "failed" : undefined;
-    const argument = command.argument.length === 0 ? "" : ` ${command.argument}`;
-    this.#renderer.renderCommandInvocation?.(`/${command.name}${argument}`, status);
   }
 
   async #applyCommandEffect(effect: PromptCommandOutcome["effect"]): Promise<void> {

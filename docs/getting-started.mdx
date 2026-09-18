@@ -26,7 +26,13 @@ Run `eve init` with a project name:
 npx eve@latest init my-agent
 ```
 
-The command creates the project, installs dependencies, initializes Git, and opens the terminal UI. eve keeps its output inline with your shell command. A status line shows progress and elapsed time while dependencies install. eve reuses an available model connection or opens `/login`. Once connected, type your first message. Channel and integration setup is optional; use `/add` when you need it.
+The command creates the project, installs dependencies, initializes Git, and opens the terminal UI. eve keeps its output inline with your shell command. A status line shows progress and elapsed time while dependencies install. eve reuses an available model connection or opens login setup. Successful setup leaves an empty chat history, ready for your first message. Channel and integration setup is optional; use `/add` when you need it.
+
+If you use pnpm, suppress its download progress before eve starts with:
+
+```bash
+pnpm --reporter=silent dlx eve@latest init my-agent
+```
 
 In `/add`, search by name or capability, such as `iMessage` or `SMS`. The picker matches item names, addresses, titles, and descriptions. Select an item to install it and complete its required setup.
 
