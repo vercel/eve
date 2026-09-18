@@ -27,7 +27,10 @@ const resources: readonly ExternalResource[] = [
     },
     kind: "channel",
     logicalPath: "channels/slack.ts",
-    manifest: { display_information: { name: "Support" } },
+    manifest: {
+      $type: "https://docs.slack.dev/reference/app-manifest/",
+      display_information: { name: "Support" },
+    },
     name: "slack",
     route: { path: "/eve/v1/slack" },
   },
