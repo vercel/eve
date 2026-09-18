@@ -149,25 +149,17 @@ const modelProvider: BootDetection = {
     // Dynamic selectors can return any provider; their credentials cannot be
     // diagnosed until a model is selected at runtime.
     if (access.kind === "external" || access.kind === "dynamic") return [];
-    if (access.kind === "gateway") {
-      if (access.runtime.status === "connected") return [];
-      if (access.runtime.status === "disconnected") {
-        const linked = await pathExists(join(appRoot, ".vercel", "project.json"));
-        return [
-          {
-            kind: "attention",
-            label: linked ? "AI Gateway credentials missing" : "connect a model",
-            command: "/login",
-          },
-        ];
-      }
-    }
+    if (access.kind !== "gateway" || access.runtime.status === "unknown") return [];
+    if (access.runtime.status === "connected") return [];
 
     const linked = await pathExists(join(appRoot, ".vercel", "project.json"));
-    if (linked) {
-      return [{ kind: "attention", label: "AI Gateway credentials missing", command: "/login" }];
-    }
-    return [{ kind: "attention", label: "connect a model", command: "/login" }];
+    return [
+      {
+        kind: "attention",
+        label: linked ? "AI Gateway credentials missing" : "connect a model",
+        command: "/login",
+      },
+    ];
   },
 };
 

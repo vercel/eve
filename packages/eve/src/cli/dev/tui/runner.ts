@@ -1334,6 +1334,7 @@ export class EveTUIRunner {
     let stopped = false;
     let refreshing = false;
     let inFlightRefresh: Promise<void> | undefined;
+    let agentInfoRefreshPending = false;
     let lastChatGptAuthRefresh = 0;
     const refresh = async () => {
       if (stopped || refreshing) {
@@ -1345,6 +1346,16 @@ export class EveTUIRunner {
         await runtimeArtifacts.refreshIdle({
           onRuntimeArtifactsChanged: () => this.#handleRuntimeArtifactsChanged(),
         });
+        if (
+          this.#appRoot !== undefined &&
+          this.#agentInfo === undefined &&
+          !agentInfoRefreshPending
+        ) {
+          agentInfoRefreshPending = true;
+          void this.#refreshAgentInfo().finally(() => {
+            agentInfoRefreshPending = false;
+          });
+        }
         const endpoint = this.#agentInfo?.agent.model.endpoint;
         const shouldRefreshChatGptAuth =
           endpoint?.kind === "chatgpt" &&

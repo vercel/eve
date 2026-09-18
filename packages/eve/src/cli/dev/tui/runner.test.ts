@@ -39,7 +39,7 @@ import { interruptedError } from "./errors.js";
 import type { RemoteAuthFlow } from "./remote-auth.js";
 import type { RemoteAuthCompletedMutation } from "./remote-auth-result.js";
 import type { RemoteConnectionControllerOptions } from "./remote-connection.js";
-import type { BootDetection, SetupIssue } from "./setup-issues.js";
+import type { BootDetection, BootDetectionContext, SetupIssue } from "./setup-issues.js";
 import type { SetupFlowRenderer } from "./setup-flow.js";
 import { createFakeSetupFlowRenderer } from "./test/fake-setup-flow-renderer.js";
 import type { VercelStatusSnapshot } from "./vercel-status.js";
@@ -4043,6 +4043,65 @@ describe("EveTUIRunner boot setup detection", () => {
     await runner.run();
 
     expect(warnings).toEqual(["1 setup issue: AI Gateway credentials · /model"]);
+  });
+
+  it("clears a startup warning when a later agent-info probe reports connected OAuth", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => Response.json({ revision: "snapshot-a" })),
+    );
+    const connectedGatewayInfo: AgentInfoResult = {
+      ...AGENT_INFO,
+      agent: {
+        ...AGENT_INFO.agent,
+        model: {
+          id: "gpt-5",
+          routing: { kind: "gateway", target: "openai" },
+          endpoint: {
+            kind: "gateway",
+            connected: true,
+            credential: "oauth",
+            team: "alice",
+          },
+        },
+      },
+    };
+    const client = stubClient();
+    vi.spyOn(client, "info")
+      .mockRejectedValueOnce(new Error("server not ready"))
+      .mockResolvedValue(connectedGatewayInfo);
+    const warningCleared = createDeferred<void>();
+    const renderSetupWarning = vi.fn();
+    const clearSetupWarning = vi.fn(() => warningCleared.resolve());
+    const detect = vi.fn(({ info }: BootDetectionContext) =>
+      info === undefined
+        ? [{ kind: "attention" as const, label: "connect a model", command: "/login" }]
+        : [],
+    );
+    const runner = new EveTUIRunner({
+      session: stubSession(),
+      client,
+      renderer: fakeRenderer({
+        renderSetupWarning,
+        clearSetupWarning,
+        readPrompt: vi.fn(async () => {
+          await warningCleared.promise;
+          return undefined;
+        }),
+      }),
+      serverUrl: "http://localhost:3000",
+      name: "Weather Agent",
+      appRoot: "/tmp/weather-agent",
+      bootDetections: [{ id: "test", detect }],
+      detectProjectIdentity: vi.fn(async () => undefined),
+    });
+
+    await runner.run();
+
+    expect(renderSetupWarning).toHaveBeenCalledWith("1 setup issue: connect a model · /login");
+    expect(clearSetupWarning).toHaveBeenCalled();
+    expect(client.info).toHaveBeenCalledTimes(2);
+    expect(detect.mock.calls.at(-1)?.[0].info).toBe(connectedGatewayInfo);
   });
 
   it("does not auto-open /model outside the prefilled onboarding launch", async () => {

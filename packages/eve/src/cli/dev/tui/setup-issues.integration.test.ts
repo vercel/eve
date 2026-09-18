@@ -51,12 +51,9 @@ describe("BOOT_DETECTIONS against a real directory", () => {
     expect(issues).toEqual([]);
   });
 
-  it("diagnoses missing credentials (not the link) when the directory is linked", async () => {
+  it("defers model diagnosis when runtime info is unavailable", async () => {
     const appRoot = await linkedAppRoot();
-    const issues = await detectSetupIssues({ appRoot, env: {} });
-    expect(issues).toEqual([
-      { kind: "attention", label: "AI Gateway credentials missing", command: "/login" },
-    ]);
+    expect(await detectSetupIssues({ appRoot, env: {} })).toEqual([]);
   });
 
   it("diagnoses a linked project with disconnected model access", async () => {
