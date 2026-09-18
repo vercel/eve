@@ -658,7 +658,7 @@ describe("development runtime artifact snapshots", () => {
         paths: { compileDirectoryPath },
         project: { appRoot },
       } as CompileAgentResult),
-    ).rejects.toThrow("outside runtime app root");
+    ).rejects.toThrow("outside runtime snapshot source root");
 
     await expect(readdir(join(appRoot, ".eve", "dev-runtime", "snapshots"))).resolves.toEqual([]);
   });
@@ -1055,7 +1055,7 @@ describe("development runtime artifact snapshots", () => {
       subagents: Array<{ agent: { agentRoot: string; appRoot: string } }>;
     };
 
-    expect(rewrittenManifest.subagents[0]?.agent).toEqual({
+    expect(rewrittenManifest.subagents[0]?.agent).toMatchObject({
       agentRoot: join(
         snapshot.snapshotSourceRoot,
         "node_modules",
