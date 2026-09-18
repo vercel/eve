@@ -329,11 +329,14 @@ describe("runInitCommand", () => {
     };
     const deps = { ...dependencies(), hasInteractiveTerminal: () => interactive };
     deps.isCodingAgentLaunch.mockResolvedValue(agent);
-    screen.write("$ pnpm dlx eve init agent\n");
+    const shellOutput = "$ pnpm dlx eve init agent\nProgress: resolved 47, added 33, done\n";
+    screen.write(shellOutput);
     try {
       await runInitCommand(output, parentDirectory, "agent", {}, deps);
       const transcript = stripAnsi(screen.snapshot());
-      expect(transcript).toMatch(/^\$ pnpm dlx eve init agent\n☰eve/u);
+      expect(transcript.startsWith(`${shellOutput}${interactive && !agent ? "\n" : ""}☰eve`)).toBe(
+        true,
+      );
       expect(transcript).not.toContain("\n\n\n");
       expect(screen.rawOutput()).not.toContain("\u001B[H");
       expect(screen.rawOutput()).not.toContain("\u001B[2J");
@@ -508,15 +511,16 @@ describe("runInitCommand", () => {
       "--onboard",
     ]);
     const messages = output.messages.map(stripAnsi);
-    expect(messages).toHaveLength(6);
-    expect(messages[0]).toContain("☰eve");
-    expect(messages.slice(1, 4)).toEqual([
+    expect(messages).toHaveLength(7);
+    expect(messages[0]).toBe("");
+    expect(messages[1]).toContain("☰eve");
+    expect(messages.slice(2, 5)).toEqual([
       "Creating agent...",
       "Installing dependencies...",
       "Initializing Git...",
     ]);
-    expect(messages[4]).toBe(`✓ Created an eve agent in ${projectPath} in 13.8s`);
-    expect(messages[5]).toBe("");
+    expect(messages[5]).toBe(`✓ Created an eve agent in ${projectPath} in 13.8s`);
+    expect(messages[6]).toBe("");
     expect(messages.join("\n")).not.toContain("$ eve dev");
     expect(output.messages.join("\n")).not.toContain("Instructions ");
   });

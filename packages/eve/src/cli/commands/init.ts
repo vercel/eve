@@ -499,6 +499,7 @@ export async function runInitCommand(
 ): Promise<void> {
   const agentLaunched = await dependencies.isCodingAgentLaunch();
   const interactive = dependencies.hasInteractiveTerminal();
+  if (interactive && !agentLaunched) logger.log("");
   logger.log(eveCliBanner());
 
   trackStep?.("resolve_target");
