@@ -686,7 +686,9 @@ describe("runInitCommand", () => {
         "dev",
         "--onboard",
       ]);
-      expect(output.messages.join("\n")).toContain(`Created an eve agent in ${projectPath}`);
+      expect(output.messages.map(stripAnsi).join("\n")).toContain(
+        `Created an eve agent in ${projectPath}`,
+      );
     },
   );
 

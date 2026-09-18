@@ -7,6 +7,7 @@ import { promisify } from "node:util";
 import { describe, expect, it } from "vitest";
 
 import { CODING_AGENT_ENV_MARKERS } from "../../src/cli/agent-detection.js";
+import { stripAnsi } from "../../src/cli/ui/terminal-text.js";
 import { loadYaml } from "../../src/evals/loaders/yaml.js";
 import { DEFAULT_AGENT_MODEL_ID } from "../../src/shared/default-agent-model.js";
 import { pathExists } from "../../src/setup/path-exists.js";
@@ -305,10 +306,12 @@ describe("eve init smoke", () => {
         cwd: canonicalProjectDir,
       },
     ]);
-    expect(result.stdout).toContain("Created an eve agent in ");
-    expect(result.stdout).toContain("Preparing project...");
-    expect(result.stdout).toContain("Installed dependencies");
-    expect(result.stdout).not.toContain("Progress: resolved");
+    const output = stripAnsi(result.stdout);
+    expect(output).toContain(`Created an eve agent in ${canonicalProjectDir} in `);
+    expect(output).toContain("Creating agent...");
+    expect(output).toContain("Installing dependencies...");
+    expect(output).toContain("Initializing Git...");
+    expect(output).not.toContain("Progress: resolved");
     await expect(pathExists(join(projectDir, ".git"))).resolves.toBe(true);
     await expect(
       runFile("git", ["log", "-1", "--pretty=%s"], { cwd: projectDir }),
