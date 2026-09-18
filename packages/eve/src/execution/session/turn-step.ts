@@ -1,3 +1,8 @@
+import {
+  captureTurnStepState,
+  createTurnStepDelta,
+  type DurableStepDelta,
+} from "./turn-step-delta.js";
 import { deriveSessionTitle } from "#execution/eve-workflow-attributes.js";
 import { setEveAttributes } from "#runtime/attributes/emit.js";
 import { defaultDeliverResult } from "#channel/adapter.js";
@@ -50,7 +55,12 @@ import {
 } from "#harness/messages.js";
 import { consumeDeferredStepInput } from "#harness/pending-input-batches.js";
 import type { HarnessSession, StepInput, StepResult } from "#harness/types.js";
-import type { DurableStepResult, TurnStepInput } from "#execution/session/turn-step-types.js";
+import type {
+  DurableStepResult,
+  TurnStepInput,
+  TurnStepState,
+  TurnStepExecution,
+} from "#execution/session/turn-step-types.js";
 import { resolveSessionStepResult } from "#execution/session/turn-step-result.js";
 import { createSessionEventSink } from "#execution/session/event-sink.js";
 import { derivePendingState } from "#execution/session/pending-turn-state.js";
@@ -104,10 +114,16 @@ function channelDeliveryErrorCode(error: unknown): string {
 export type { TurnStepInput };
 
 /** Runs a bounded batch of harness model steps inside one durable `"use step"` boundary. */
-export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResult> {
+export async function turnStep(
+  state: TurnStepState,
+  execution: TurnStepExecution,
+): Promise<DurableStepDelta> {
   "use step";
-  return runSessionStep(rawInput);
+  const before = captureTurnStepState(state);
+  return createTurnStepDelta(before, await runSessionStep({ ...state, ...execution }));
 }
+
+// Once Workflow supports replay-derived inputs: turnStep.replayInputs = [0].
 
 async function runSessionStep(input: TurnStepInput): Promise<DurableStepResult> {
   // The delivery as accepted, before authorization callbacks are matched out of it.

@@ -1,3 +1,4 @@
+import { applyTurnStepDelta } from "./turn-step-delta.js";
 import { getWorkflowMetadata } from "#compiled/@workflow/core/index.js";
 
 import type { DeliverHookPayload, SessionCapabilities } from "#channel/types.js";
@@ -85,8 +86,15 @@ export class SessionExecution {
     while (true) {
       const { cursor } = this.input;
       const beforeStepContext = cursor.serializedContext;
-      const result: DurableStepResult = await turnStep(
-        cursor.createStepInput(nextStepInput, {
+      const state = {
+        serializedContext: cursor.serializedContext,
+        sessionState: cursor.sessionState,
+      };
+      const result: DurableStepResult = applyTurnStepDelta(
+        state,
+        await turnStep(state, {
+          input: nextStepInput,
+          sessionWritable: cursor.sessionWritable,
           abortSignal: turn.signal,
           steeringSignal: turn.steeringSignal,
         }),

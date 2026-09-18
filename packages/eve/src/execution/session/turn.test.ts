@@ -7,7 +7,16 @@ import { SessionExecution } from "#execution/session/turn.js";
 import { SessionStateCursor } from "#execution/session/state-cursor.js";
 import { cancelDescendantTurnsStep } from "#execution/cancel-descendant-turns-step.js";
 import { acknowledgeDelegatedTasksStep } from "#execution/tasks/parent/delegate.js";
-import { turnStep } from "#execution/session/turn-step.js";
+import type {
+  DurableStepResult,
+  TurnStepInput,
+  TurnStepState,
+  TurnStepExecution,
+} from "./turn-step-types.js";
+import { captureTurnStepState, createTurnStepDelta } from "./turn-step-delta.js";
+const { turnStep } = vi.hoisted(() => ({
+  turnStep: vi.fn<(input: TurnStepInput) => Promise<DurableStepResult>>(),
+}));
 import type { DeliverHookPayload } from "#channel/types.js";
 import { dispatchCoordinationStep } from "#execution/coordination-dispatch-step.js";
 import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
@@ -19,7 +28,10 @@ vi.mock("#compiled/@workflow/core/index.js", async (importOriginal) => ({
 vi.mock("#execution/coordination-dispatch-step.js", () => ({ dispatchCoordinationStep: vi.fn() }));
 
 vi.mock("#execution/session/turn-step.js", () => ({
-  turnStep: vi.fn(),
+  turnStep: async (state: TurnStepState, execution: TurnStepExecution) => {
+    const before = captureTurnStepState(state);
+    return createTurnStepDelta(before, await turnStep({ ...state, ...execution }));
+  },
 }));
 vi.mock("#execution/tasks/parent/delegate.js", () => ({
   acknowledgeDelegatedTasksStep: vi.fn(),
@@ -583,7 +595,7 @@ describe("SessionExecution background task checkpoints", () => {
         kind: "park",
         settled: { output: "Done." },
       });
-      expect(execution.cursor.sessionState).toBe(completedState);
+      expect(execution.cursor.sessionState).toEqual(completedState);
       expect(cancelDescendantTurnsStep).not.toHaveBeenCalled();
       expect(queue.pendingCount).toBe(1);
     },
@@ -686,7 +698,7 @@ describe("SessionExecution background task checkpoints", () => {
       const apply = vi.spyOn(SessionStateCursor.prototype, "apply");
       vi.mocked(acknowledgeDelegatedTasksStep).mockImplementation(async () => {
         expect(execution.cursor.serializedContext).toEqual(backgroundContext);
-        expect(execution.cursor.sessionState).toBe(backgroundState);
+        expect(execution.cursor.sessionState).toEqual(backgroundState);
       });
       vi.mocked(turnStep).mockImplementationOnce(async (input) => {
         // The pump pushes the accepted cancel while this step is still running.

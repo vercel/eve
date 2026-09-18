@@ -43,6 +43,15 @@ export default defineEval({
     third.notEvent("session.failed");
     third.messageIncludes(/marigold/i);
 
+    const reconnected = await t.target.attachSession(first.sessionId);
+    const fourth = await reconnected.send(
+      "Alice reopened the project chat. What favorite word did she ask you to remember at the beginning? Reply with just the word.",
+    );
+    fourth.expectOk();
+    fourth.notEvent("session.started");
+    fourth.event("turn.started", { count: 1, data: { sequence: 3 } });
+    fourth.messageIncludes(/marigold/i);
+
     t.succeeded();
     t.messageIncludes(/marigold/i);
     t.check(session.transcript, includes("User:\nMy favorite word is marigold. Remember it."));

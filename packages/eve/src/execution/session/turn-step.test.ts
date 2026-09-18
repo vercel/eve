@@ -1,3 +1,4 @@
+import { applyTurnStepDelta } from "./turn-step-delta.js";
 import { createTestSessionState } from "#internal/testing/session-state.js";
 import type { ModelMessage } from "ai";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -76,7 +77,9 @@ type LegacyStepPayload =
   | { readonly kind: "runtime-action-result"; readonly results: readonly RuntimeActionResult[] };
 
 /** Adapts the older single-kind payload shape these fixtures were written against. */
-function turnStep(input: Omit<TurnStepInput, "input"> & { readonly input?: LegacyStepPayload }) {
+async function turnStep(
+  input: Omit<TurnStepInput, "input"> & { readonly input?: LegacyStepPayload },
+) {
   let payload: TurnStepPayload | undefined;
   if (input.input !== undefined) {
     payload =
@@ -86,7 +89,9 @@ function turnStep(input: Omit<TurnStepInput, "input"> & { readonly input?: Legac
           ? { runtimeResults: { results: input.input.results } }
           : { control: input.input.kind };
   }
-  return runTurnStep({ ...input, input: payload });
+  const state = { serializedContext: input.serializedContext, sessionState: input.sessionState };
+  const before = structuredClone(state);
+  return applyTurnStepDelta(before, await runTurnStep(state, { ...input, input: payload }));
 }
 import { routeProxiedDeliverStep } from "#execution/proxied-deliver-step.js";
 

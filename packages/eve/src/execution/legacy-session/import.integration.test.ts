@@ -2,9 +2,11 @@ import { describe, expect, it, vi } from "vitest";
 import { createTestRuntime } from "#internal/testing/app-harness.js";
 import { legacySessionDriverWorkflow } from "#internal/testing/legacy-session-driver-workflow.js";
 import { waitForHook } from "#internal/testing/workflow-test-helpers.js";
-import { waitForParkedTurnStep } from "#internal/testing/session-test-helpers.js";
+import {
+  waitForParkedTurnStep,
+  readTurnStepResult,
+} from "#internal/testing/session-test-helpers.js";
 import { captureTurnEvents, filterEventsByType } from "#internal/testing/events.js";
-import { hydrateStepReturnValue } from "#compiled/@workflow/core/serialization.js";
 import type { DurableStepResult } from "#execution/session/turn-step-types.js";
 import { getWorld, getHookByToken, start } from "#internal/workflow/runtime.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
@@ -87,9 +89,7 @@ describe("legacy session import", () => {
                 const checkpoints: DurableStepResult[] = [];
                 for (const step of steps.data) {
                   if (step.stepName.endsWith("//turnStep") && step.output !== undefined) {
-                    checkpoints.push(
-                      await hydrateStepReturnValue(step.output, owner.runId, undefined),
-                    );
+                    checkpoints.push(await readTurnStepResult(step, owner.runId));
                   }
                 }
                 const saved = checkpoints.find((result) =>

@@ -1,7 +1,6 @@
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import { sessionHookTokens } from "#execution/session/hook-tokens.js";
 import type { SessionInboxOwnership } from "#execution/session-inbox/inbox.js";
-import type { TurnStepInput, TurnStepPayload } from "#execution/session/turn-step-types.js";
 
 /** A durable-state transition; absent fields keep the cursor's current value. */
 export interface SessionStateTransition {
@@ -49,18 +48,5 @@ export class SessionStateCursor {
     await this.inbox.claimSessionHooks(sessionHookTokens({ serializedContext, sessionState }));
     this.currentSerializedContext = serializedContext;
     this.currentSessionState = sessionState;
-  }
-
-  createStepInput(
-    input: TurnStepPayload | undefined,
-    signals: Pick<TurnStepInput, "abortSignal" | "steeringSignal">,
-  ): TurnStepInput {
-    return {
-      ...signals,
-      input,
-      sessionWritable: this.sessionWritable,
-      serializedContext: this.currentSerializedContext,
-      sessionState: this.currentSessionState,
-    };
   }
 }

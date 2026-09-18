@@ -22,14 +22,19 @@ export interface TurnStepPayload {
 }
 
 /** Input for one atomic, session-owner-executed turn step. */
-export interface TurnStepInput {
+export interface TurnStepExecution {
   readonly abortSignal?: AbortSignal;
   readonly steeringSignal?: AbortSignal;
   readonly input: TurnStepPayload | undefined;
   readonly sessionWritable: WritableStream<Uint8Array>;
+}
+
+export interface TurnStepState {
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
 }
+
+export interface TurnStepInput extends TurnStepState, TurnStepExecution {}
 
 interface DurableStepResultFields {
   /** Pre-step context plus the observability state owned by committed background tasks. */

@@ -1,3 +1,5 @@
+import { defineState } from "#public/definitions/state.js";
+import type { DurableStepDelta } from "./turn-step-delta.js";
 import type { RunCreatedEventRequest } from "@workflow/world";
 import { DEFAULT_SESSION_TIMEOUT_MS } from "#execution/session/timeout.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -12,7 +14,10 @@ import { createChannelAddress } from "#channel/channel-address.js";
 import { captureTurnEvents, filterEventsByType } from "#internal/testing/events.js";
 import { createTestRuntime } from "#internal/testing/app-harness.js";
 import { waitForHook } from "#internal/testing/workflow-test-helpers.js";
-import { waitForParkedTurnStep } from "#internal/testing/session-test-helpers.js";
+import {
+  waitForParkedTurnStep,
+  readTurnStepResult,
+} from "#internal/testing/session-test-helpers.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { workflowEntry } from "#execution/session/entry.js";
 import { sessionInboxHookToken } from "#execution/session-inbox/address.js";
@@ -219,6 +224,91 @@ function expectSingleTurn(events: readonly MessageStreamEvent[], turnId: string)
 }
 
 describe("workflowEntry integration", () => {
+  it.each([
+    ["node", "0"],
+    ["node", "1"],
+  ])(
+    "replays delta state across parked turns with %s and retained VM %s",
+    async (engine, retained) => {
+      vi.stubEnv("WORKFLOW_VM", engine);
+      vi.stubEnv("WORKFLOW_RETAINED_VM", retained);
+      const stateName = `delta-state-${engine}-${retained}`;
+      const log = defineState(stateName, () => ({ entries: [] as string[] }));
+      const observed: number[] = [];
+      const runtime = await createTestRuntime({
+        agent: { name: stateName },
+        modules: [
+          {
+            logicalPath: "hooks/record-turn.ts",
+            loadNamespace: async () => ({
+              default: defineHook({
+                events: {
+                  "turn.started"() {
+                    const state = log.get();
+                    observed.push(state.entries.length);
+                    // Authored mutation must not also mutate the delta's captured baseline.
+                    state.entries.push(`state-turn-${state.entries.length}`);
+                  },
+                },
+              }),
+            }),
+          },
+        ],
+      });
+      await runtime.run(async () => {
+        const run = await start(workflowEntry, [
+          {
+            kind: "initial",
+            ownerDeploymentId: "dpl_inline",
+            input: { message: "Alice records the first project note." },
+            serializedContext: buildSerializedContext({
+              channelKind: "http",
+              mode: "conversation",
+            }),
+          },
+        ]);
+        const stream = captureTurnEvents(run);
+        try {
+          for (let index = 0; index < 3; index++) {
+            if (index > 0)
+              await resumeHook(sessionInboxHookToken(sessionCommandHookToken(run.runId)), {
+                kind: "send",
+                payload: { message: `Bob records project note ${index}.` },
+              });
+            expect((await stream.nextTurn()).at(-1)?.type).toBe("session.waiting");
+            await waitForParkedTurnStep(run.runId, index + 1);
+          }
+          expect(observed).toEqual([0, 1, 2]);
+          const steps = await (
+            await getWorld()
+          ).steps.list({ runId: run.runId, resolveData: "all" });
+          const turns = steps.data.filter((step) => step.stepName.endsWith("//turnStep"));
+          expect(turns).toHaveLength(3);
+          const saved = [];
+          for (const step of turns) {
+            const output = (await hydrateStepReturnValue(
+              step.output,
+              run.runId,
+              undefined,
+            )) as DurableStepDelta;
+            expect(output).not.toHaveProperty("sessionState");
+            expect(output.delta.kind).toBe("object");
+            const result = await readTurnStepResult(step, run.runId);
+            const entries = (result.serializedContext[stateName] as { entries: string[] }).entries;
+            if (entries.length > 1) {
+              expect(JSON.stringify(output)).not.toContain("state-turn-0");
+              expect(JSON.stringify(output)).not.toContain("Alice records the first project note.");
+            }
+            saved.push(entries.length);
+          }
+          expect(saved.sort()).toEqual([1, 2, 3]);
+        } finally {
+          stream.dispose();
+          await run.cancel();
+        }
+      });
+    },
+  );
   it("parks before initialization and initializes with the first message identity and title", async () => {
     let initializedSessions = 0;
     let initializedAuth: unknown;
@@ -1590,7 +1680,7 @@ describe("workflowEntry integration", () => {
           expect(turns).toHaveLength(2);
           const histories = await Promise.all(
             turns.map(async (step) => {
-              const output = await hydrateStepReturnValue(step.output, anchor.runId, undefined);
+              const output = await readTurnStepResult(step, anchor.runId);
               return output.sessionState.snapshot.session.history as Array<{
                 role: string;
                 content: unknown;
@@ -1702,7 +1792,7 @@ describe("workflowEntry integration", () => {
               });
               for (const step of steps.data) {
                 if (!step.stepName.endsWith("//turnStep") || step.output === undefined) continue;
-                const result = await hydrateStepReturnValue(step.output, owner.runId, undefined);
+                const result = await readTurnStepResult(step, owner.runId);
                 const history = JSON.stringify(result.sessionState.snapshot.session.history);
                 if (history.includes("Bob sends a later sentinel.")) saved = history;
               }
