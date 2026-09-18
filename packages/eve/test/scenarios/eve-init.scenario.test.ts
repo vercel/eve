@@ -1,5 +1,5 @@
 import { execFile, spawn } from "node:child_process";
-import { readFile, realpath, writeFile } from "node:fs/promises";
+import { mkdir, readFile, realpath, writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
@@ -15,7 +15,7 @@ import { useTemporaryDirectories } from "../../src/internal/testing/use-temporar
 
 const EVE_BIN_PATH = fileURLToPath(new URL("../../bin/eve.js", import.meta.url));
 const runFile = promisify(execFile);
-const RELEASE_AGE_MINUTES = "2880";
+const RELEASE_AGE_MINUTES = 100_000_000;
 const PNPM_INIT_INSTALL_ARGUMENTS = [
   "install",
   "--no-frozen-lockfile",
@@ -185,7 +185,7 @@ async function createFakeNpmEnvironment(scratch: string): Promise<{
 }
 
 describe("eve init smoke", () => {
-  it("resolves a standalone pnpm scaffold under the release-age policy", async () => {
+  it("installs and runs a standalone pnpm scaffold under an inherited release-age policy", async () => {
     const scratch = await createScratchDirectory("eve-init-release-age-");
     const eveTarball = `file:${await ensureScenarioEveTarballPath()}`;
     const pnpmfile = join(scratch, "scaffold-pnpmfile.cjs");
@@ -198,22 +198,19 @@ describe("eve init smoke", () => {
         "} } };\n",
       ].join("\n"),
     );
-    const workspacePolicy = (await loadYaml(
-      fileURLToPath(new URL("../../../../pnpm-workspace.yaml", import.meta.url)),
-    )) as { minimumReleaseAgeExclude: string[] };
+    const configHome = join(scratch, "config");
+    await mkdir(join(configHome, "pnpm"), { recursive: true });
+    await writeFile(
+      join(configHome, "pnpm", "config.yaml"),
+      `minimumReleaseAge: ${RELEASE_AGE_MINUTES}\nverifyDepsBeforeRun: install\n`,
+    );
     const env = {
       ...withoutCodingAgentMarkers(process.env),
-      // The agent path skips the interactive dev handoff, which cannot run
-      // against the real pnpm install this scenario performs.
+      // Exercise the package-manager dev handoff separately without opening a TUI.
       AI_AGENT: "claude",
       CI: "true",
       PNPM_CONFIG_GLOBAL_PNPMFILE: pnpmfile,
-      PNPM_CONFIG_MINIMUM_RELEASE_AGE: RELEASE_AGE_MINUTES,
-      // Use the repository's reviewed dependency exceptions for the current
-      // release without adding bypasses to scaffolded projects.
-      PNPM_CONFIG_MINIMUM_RELEASE_AGE_EXCLUDE: JSON.stringify(
-        workspacePolicy.minimumReleaseAgeExclude,
-      ),
+      XDG_CONFIG_HOME: configHome,
     };
 
     const result = await runEveBin(scratch, ["init", "policy-agent"], env);
@@ -226,6 +223,17 @@ describe("eve init smoke", () => {
     await expect(readFile(join(projectDir, "pnpm-workspace.yaml"), "utf8")).resolves.toContain(
       "minimumReleaseAgeStrict: true",
     );
+
+    // pnpm checks the installed lockfile before exec/run and may reinstall.
+    // A one-time install flag must not leave the next command rejecting it.
+    const dev = await runFile("pnpm", ["exec", "eve", "dev", "--help"], {
+      cwd: projectDir,
+      env,
+    });
+    expect(dev.stdout).toContain("Usage: eve dev");
+    await expect(
+      runFile("pnpm", ["install", "--frozen-lockfile"], { cwd: projectDir, env }),
+    ).resolves.toMatchObject({ stdout: expect.any(String) });
 
     // Exercise the unpublished eve override independently of the initial
     // scaffold install's release-age bypass.
