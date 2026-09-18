@@ -1,5 +1,4 @@
 import { HookNotFoundError, RunExpiredError } from "#compiled/@workflow/errors/index.js";
-import { notifyTaskAgentRequest } from "#execution/tasks/child/notifications.js";
 import { formatTaskNotification } from "#tasks/notification.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -7,8 +6,8 @@ import {
   emitTaskActivityStep,
   deliverTaskInputResponsesStep,
   projectTaskActivity,
-  deliverTaskNotificationStep,
-} from "#execution/tasks/child/steps.js";
+  notifyTaskParent,
+} from "#execution/tasks/child/notify.js";
 import { resumeWorkflowToolRunAnswers } from "#execution/tools/workflow/answer.js";
 import type { TaskView } from "#tasks/types.js";
 import { resumeSessionInbox } from "#execution/session-inbox/resume.js";
@@ -261,7 +260,7 @@ describe("deliverTaskInputResponsesStep", () => {
   });
 });
 
-describe("notifyTaskAgentRequest", () => {
+describe("notifyTaskParent", () => {
   it("forwards an agent invocation through the typed task envelope", async () => {
     const request = {
       from: {
@@ -282,7 +281,7 @@ describe("notifyTaskAgentRequest", () => {
       },
     };
 
-    await notifyTaskAgentRequest({ request, taskId: "task-1", token: "parent-token" });
+    await notifyTaskParent({ request, taskId: "task-1", token: "parent-token" });
 
     expect(resumeSessionInbox).toHaveBeenCalledWith("parent-token", {
       kind: "send",
@@ -306,22 +305,27 @@ describe("notifyTaskAgentRequest", () => {
   });
 });
 
-describe("deliverTaskNotificationStep", () => {
+describe("notifyTaskParent", () => {
   const notification = {
     token: "parent-token",
-    command: {
-      kind: "send" as const,
-      payload: { message: "Task completed." },
-      taskDeliveryId: "task-1:ready:completed",
+    view: {
+      taskId: "task-1",
+      metadata,
+      status: "completed" as const,
+      lastOutput: { type: "result" as const, data: "done" },
     },
   };
 
   it("preserves the payload and deduplication identity", async () => {
-    await deliverTaskNotificationStep(notification);
-    expect(resumeSessionInbox).toHaveBeenCalledExactlyOnceWith(
-      notification.token,
-      notification.command,
-    );
+    await notifyTaskParent(notification);
+    expect(resumeSessionInbox).toHaveBeenCalledExactlyOnceWith(notification.token, {
+      kind: "send",
+      payload: {
+        message: "Background task task-1 (reviewer) is completed.\n\nResult:\ndone",
+        task: { views: [notification.view] },
+      },
+      taskDeliveryId: "task-1:ready:completed",
+    });
   });
 
   it.each([
@@ -329,12 +333,12 @@ describe("deliverTaskNotificationStep", () => {
     new Error("delivery failed", { cause: new RunExpiredError("parent ended") }),
   ])("tolerates an ended parent", async (error) => {
     vi.mocked(resumeSessionInbox).mockRejectedValueOnce(error);
-    await expect(deliverTaskNotificationStep(notification)).resolves.toBeUndefined();
+    await expect(notifyTaskParent(notification)).resolves.toBeUndefined();
   });
 
   it("propagates transient delivery failures so the durable step can retry", async () => {
     const error = new Error("storage unavailable");
     vi.mocked(resumeSessionInbox).mockRejectedValueOnce(error);
-    await expect(deliverTaskNotificationStep(notification)).rejects.toBe(error);
+    await expect(notifyTaskParent(notification)).rejects.toBe(error);
   });
 });

@@ -20,10 +20,7 @@ const mocks = vi.hoisted(() => ({
   deliverTaskInputResponsesStep: vi.fn(),
   raceChannelReads: vi.fn(),
   resumeHookStep: vi.fn(),
-  notifyTaskAgentRequest: vi.fn(),
-  notifyTaskAuthorization: vi.fn(),
   notifyTaskParent: vi.fn(),
-  notifyTaskInputRequest: vi.fn(),
   executeWorkflowBody: vi.fn(),
   sleep: vi.fn(),
 }));
@@ -37,15 +34,10 @@ vi.mock("#execution/hook-ownership.js", () => ({
   claimHookOwnership: mocks.claimHookOwnership,
   isHookConflictError: () => false,
 }));
-vi.mock("#execution/tasks/child/steps.js", () => ({
+vi.mock("#execution/tasks/child/notify.js", () => ({
   emitTaskActivityStep: mocks.emitTaskActivityStep,
   deliverTaskInputResponsesStep: mocks.deliverTaskInputResponsesStep,
-}));
-vi.mock("#execution/tasks/child/notifications.js", () => ({
-  notifyTaskAgentRequest: mocks.notifyTaskAgentRequest,
-  notifyTaskAuthorization: mocks.notifyTaskAuthorization,
   notifyTaskParent: mocks.notifyTaskParent,
-  notifyTaskInputRequest: mocks.notifyTaskInputRequest,
 }));
 vi.mock("#execution/tools/workflow/owner-channels.js", () => ({
   createChannelReader: mocks.createChannelReader,
@@ -177,11 +169,10 @@ describe("runWorkflowToolInvocation", () => {
 
     await runWorkflowToolInvocation(workflowInput);
 
-    expect(mocks.notifyTaskAuthorization).toHaveBeenCalledTimes(4);
+    expect(mocks.notifyTaskParent).toHaveBeenCalledTimes(4);
     expect(mocks.resumeHookStep).toHaveBeenCalledTimes(4);
-    expect(mocks.notifyTaskParent).not.toHaveBeenCalled();
     for (let i = 0; i < 4; i++) {
-      const notified = mocks.notifyTaskAuthorization.mock.invocationCallOrder[i];
+      const notified = mocks.notifyTaskParent.mock.invocationCallOrder[i];
       const acknowledged = mocks.resumeHookStep.mock.invocationCallOrder[i];
       assert(notified !== undefined && acknowledged !== undefined);
       expect(notified).toBeLessThan(acknowledged);
@@ -197,8 +188,8 @@ describe("runWorkflowToolInvocation", () => {
 
     await runWorkflowToolInvocation(workflowInput);
 
-    expect(mocks.notifyTaskAuthorization).toHaveBeenCalledExactlyOnceWith({
-      request: message.request,
+    expect(mocks.notifyTaskParent).toHaveBeenCalledExactlyOnceWith({
+      request: message,
       taskId: initialView.taskId,
       token: workflowInput.parentContinuationToken,
     });
@@ -213,7 +204,7 @@ describe("runWorkflowToolInvocation", () => {
   it("does not acknowledge auth after failed forwarding", async () => {
     queueCommand({ kind: "ready" });
     queueOwnerRequest(authorizationRequest("a"));
-    mocks.notifyTaskAuthorization.mockRejectedValue(new Error("failed forwarding"));
+    mocks.notifyTaskParent.mockRejectedValue(new Error("failed forwarding"));
     await expect(runWorkflowToolInvocation(workflowInput)).rejects.toThrow("failed forwarding");
     expect(mocks.resumeHookStep).not.toHaveBeenCalled();
   });
@@ -232,7 +223,7 @@ describe("runWorkflowToolInvocation", () => {
 
     await runWorkflowToolInvocation(workflowInput);
 
-    expect(mocks.notifyTaskAgentRequest).toHaveBeenCalledWith({
+    expect(mocks.notifyTaskParent).toHaveBeenCalledWith({
       request: workflowAgentRequest,
       taskId: "task-1",
       token: "parent-token",
@@ -242,7 +233,7 @@ describe("runWorkflowToolInvocation", () => {
   it("waits for agent settlement delivery before publishing task completion", async () => {
     const delivery = Promise.withResolvers<void>();
     const delivering = Promise.withResolvers<void>();
-    mocks.notifyTaskAgentRequest.mockImplementationOnce(() => {
+    mocks.notifyTaskParent.mockImplementationOnce(() => {
       delivering.resolve();
       return delivery.promise;
     });
@@ -278,16 +269,18 @@ describe("runWorkflowToolInvocation", () => {
     });
     const execution = runWorkflowToolInvocation(workflowInput);
     await delivering.promise;
-    expect(mocks.notifyTaskParent).not.toHaveBeenCalled();
+    expect(mocks.notifyTaskParent).toHaveBeenCalledTimes(1);
     delivery.resolve();
     await execution;
-    expect(mocks.notifyTaskAgentRequest).toHaveBeenCalledExactlyOnceWith({
+    expect(mocks.notifyTaskParent).toHaveBeenNthCalledWith(1, {
       request: settlement,
       taskId: "task-1",
       token: "parent-token",
     });
-    expect(mocks.notifyTaskAgentRequest).toHaveBeenCalledBefore(mocks.notifyTaskParent);
-    expect(mocks.notifyTaskParent).toHaveBeenCalledOnce();
+    expect(mocks.notifyTaskParent).toHaveBeenNthCalledWith(2, {
+      token: "parent-token",
+      view: expect.objectContaining({ status: "completed" }),
+    });
   });
 
   it("does not execute a workflow body before task admission", async () => {
@@ -432,8 +425,11 @@ describe("runWorkflowToolInvocation", () => {
     expect(mocks.resumeHookStep).toHaveBeenCalledExactlyOnceWith("ack-cleanup", null, {
       ifPresent: true,
     });
-    expect(mocks.notifyTaskParent).toHaveBeenCalledOnce();
-    expect(mocks.resumeHookStep).toHaveBeenCalledBefore(mocks.notifyTaskParent);
+    expect(mocks.notifyTaskParent).toHaveBeenCalledTimes(2);
+    const acknowledged = mocks.resumeHookStep.mock.invocationCallOrder[0];
+    const completed = mocks.notifyTaskParent.mock.invocationCallOrder[1];
+    assert(acknowledged !== undefined && completed !== undefined);
+    expect(acknowledged).toBeLessThan(completed);
   });
 
   it("keeps explicit cancellation final when the invocation completes late", async () => {

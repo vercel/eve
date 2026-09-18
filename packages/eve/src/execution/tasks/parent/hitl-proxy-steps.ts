@@ -1,5 +1,5 @@
 import { ActivityObserverKey } from "#context/keys.js";
-import { projectTaskActivity } from "#execution/tasks/child/steps.js";
+import { projectTaskActivity } from "#execution/tasks/child/notify.js";
 import { submitActivity } from "#execution/submit-activity.js";
 import { contextStorage } from "#context/container.js";
 import { deserializeContext, serializeContext } from "#context/serialize.js";

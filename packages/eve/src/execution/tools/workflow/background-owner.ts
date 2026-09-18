@@ -4,13 +4,8 @@ import { claimHookOwnership, isHookConflictError } from "#execution/hook-ownersh
 import {
   emitTaskActivityStep,
   deliverTaskInputResponsesStep,
-} from "#execution/tasks/child/steps.js";
-import {
-  notifyTaskAgentRequest,
-  notifyTaskAuthorization,
   notifyTaskParent,
-  notifyTaskInputRequest,
-} from "#execution/tasks/child/notifications.js";
+} from "#execution/tasks/child/notify.js";
 import type { BackgroundWorkflowToolRunInput } from "#execution/tools/workflow/types.js";
 import { resumeHookStep } from "#execution/tools/workflow/resume-hook-step.js";
 import type {
@@ -110,7 +105,7 @@ export async function createBackgroundWorkflowOwner(
       inputRequests: workflowToolRunInputRequests(request),
     });
     if (!accepted) return;
-    await notifyTaskInputRequest({
+    await notifyTaskParent({
       request,
       taskId: view.taskId,
       token: input.parentContinuationToken,
@@ -174,15 +169,7 @@ export async function createBackgroundWorkflowOwner(
     if (isTerminalTaskStatus(view.status)) {
       return;
     }
-    if (request.kind === "authorization-request") {
-      await notifyTaskAuthorization({
-        request,
-        taskId: view.taskId,
-        token: input.parentContinuationToken,
-      });
-      return;
-    }
-    await notifyTaskAgentRequest({
+    await notifyTaskParent({
       request: message,
       taskId: view.taskId,
       token: input.parentContinuationToken,
@@ -212,7 +199,7 @@ export async function createBackgroundWorkflowOwner(
         applyTransition({ kind: "answered", requestIds: [requestId] });
       }
 
-      await notifyTaskAuthorization({
+      await notifyTaskParent({
         request,
         taskId: view.taskId,
         token: input.parentContinuationToken,

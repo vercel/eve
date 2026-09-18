@@ -107,7 +107,7 @@ async function ownerNotificationCount(runId: string) {
   if (steps.hasMore || events.hasMore) throw new Error("Lifecycle owner audit exceeded its bound.");
   const notificationSteps = new Set(
     steps.data
-      .filter((step) => step.stepName.endsWith("//deliverTaskNotificationStep"))
+      .filter((step) => step.stepName.endsWith("//notifyTaskParent"))
       .map((step) => step.stepId),
   );
   return events.data.filter(

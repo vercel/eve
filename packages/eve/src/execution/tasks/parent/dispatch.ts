@@ -11,7 +11,7 @@ import {
   type TaskWorkflowInvocation,
 } from "#harness/workflow-invocations.js";
 import { sendTaskCommand } from "#execution/tasks/parent/run-parent.js";
-import { notifyTaskParent } from "#execution/tasks/child/notifications.js";
+import { notifyTaskParent } from "#execution/tasks/child/notify.js";
 import { sessionCommandHookToken } from "#execution/session-inbox/address.js";
 import {
   cancelTaskOwnedWork,
