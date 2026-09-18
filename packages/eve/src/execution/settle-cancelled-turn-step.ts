@@ -42,6 +42,7 @@ import {
 import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 import { resolveEffectiveAgentRuntime } from "#execution/effective-agent-config.js";
 import type { TokenUsage } from "#shared/token-usage.js";
+import { writeSessionWorkflowSummary } from "#execution/session/workflow-summary.js";
 
 export interface CancelledTurnSettleResult {
   readonly serializedContext: Record<string, unknown>;
@@ -168,5 +169,13 @@ export async function settleCancelledTurnStep(input: {
     serializedContext: serializeContext(ctx),
     sessionState: createDurableSessionState({ session: cancelledSession }),
   };
+  try {
+    await writeSessionWorkflowSummary({
+      sessionId: cancelledSession.sessionId,
+      sessionState: base.sessionState,
+    });
+  } catch {
+    // Workflow attributes are best-effort and must not block cancellation.
+  }
   return totals === undefined ? base : { ...base, usage: toUsage(totals) };
 }

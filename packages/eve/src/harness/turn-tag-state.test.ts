@@ -38,6 +38,28 @@ function makeSession(state?: HarnessSession["state"]): HarnessSession {
 }
 
 describe("accumulateTurnUsage", () => {
+  it("preserves the latest model within a turn and resets it for a new turn", () => {
+    const first = accumulateTurnUsage({
+      model: "anthropic/claude-sonnet-4.5",
+      previous: undefined,
+      turnId: "turn_0",
+      usage: { inputTokens: 10 },
+    });
+    const sameTurn = accumulateTurnUsage({
+      previous: first,
+      turnId: "turn_0",
+      usage: { outputTokens: 3 },
+    });
+    const nextTurn = accumulateTurnUsage({
+      previous: sameTurn,
+      turnId: "turn_1",
+      usage: { inputTokens: 4 },
+    });
+
+    expect(sameTurn.model).toBe("anthropic/claude-sonnet-4.5");
+    expect(nextTurn.model).toBeUndefined();
+  });
+
   it("starts from zero when no previous state exists", () => {
     const next = accumulateTurnUsage({
       previous: undefined,

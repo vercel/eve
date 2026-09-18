@@ -11,6 +11,7 @@ import { turnStep } from "#execution/session/turn-step.js";
 import type { DeliverHookPayload } from "#channel/types.js";
 import { dispatchCoordinationStep } from "#execution/coordination-dispatch-step.js";
 import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
+import { writeSessionWorkflowSummaryStep } from "#execution/session/workflow-summary.js";
 
 vi.mock("#compiled/@workflow/core/index.js", async (importOriginal) => ({
   ...(await importOriginal()),
@@ -30,8 +31,12 @@ vi.mock("#execution/cancel-descendant-turns-step.js", () => ({
 vi.mock("#execution/route-child-delivery.js", () => ({
   routeDeliverToChildren: vi.fn(),
 }));
+vi.mock("#execution/session/workflow-summary.js", () => ({
+  writeSessionWorkflowSummaryStep: vi.fn(),
+}));
 
 beforeEach(() => {
+  vi.mocked(writeSessionWorkflowSummaryStep).mockReset().mockResolvedValue(undefined);
   vi.mocked(routeDeliverToChildren)
     .mockReset()
     .mockImplementation(async ({ delivery, serializedContext, sessionState }) => ({
@@ -43,7 +48,37 @@ beforeEach(() => {
 });
 afterEach(() => vi.restoreAllMocks());
 
+function createIdleInbox(): SessionInbox {
+  return {
+    claimedTokens: [],
+    claimSessionHook: vi.fn(),
+    claimSessionHooks: vi.fn(),
+    drain: () => [],
+    hasPending: () => false,
+    next: vi.fn(),
+    restore: vi.fn(),
+    onDelivery: () => () => {},
+    onInterrupt: () => () => {},
+  };
+}
+
 describe("SessionExecution background task checkpoints", () => {
+  it("writes the anchored session summary when a turn settles", async () => {
+    const sessionState = state("");
+    vi.mocked(turnStep).mockReset().mockResolvedValue({
+      action: "done",
+      serializedContext: {},
+      sessionState,
+    });
+
+    await createExecution({ inbox: createIdleInbox(), sessionState }).runTurn(undefined);
+
+    expect(writeSessionWorkflowSummaryStep).toHaveBeenCalledWith({
+      sessionId: "session-1",
+      sessionState,
+    });
+  });
+
   it("retains the durable steering signal across steps until a correction uses it", async () => {
     const inbox: SessionInbox = {
       claimedTokens: [],

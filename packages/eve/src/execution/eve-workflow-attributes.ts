@@ -31,6 +31,8 @@
  * - `$eve.trace_id` — sampled trace seed available in the serialized context when
  *   tagging the run. This is a trace link, not a session-wide trace identity or
  *   confirmation that a destination retained the trace.
+ * - `$eve.turn_count` — completed turns owned by a single-workflow session
+ * - `$eve.session_*` — cumulative token and cost usage for that session subtree
  */
 
 import { CHANNEL_CONTEXT_KEY_NAME } from "#context/key-names.js";
@@ -282,6 +284,7 @@ export function buildSessionAttributes(input: {
     "$eve.is_otel_trace_enabled": isOtelTraceEnabled,
     "$eve.is_trace_content_visible": isTraceContentVisible,
     "$eve.trace_id": readSessionTraceId(input.serializedContext),
+    "$eve.turn_count": 0,
     "$eve.type": "session",
     "$eve.trigger": readChannelKind(input.serializedContext),
     "$eve.title": readSessionTitle(input.serializedContext),
@@ -310,6 +313,7 @@ export function buildSubagentRootAttributes(input: {
     "$eve.is_otel_trace_enabled": isWorkflowOtelTraceEnabled(input.serializedContext),
     "$eve.is_trace_content_visible": isWorkflowTraceContentVisible(input.serializedContext),
     "$eve.trace_id": readSessionTraceId(input.serializedContext),
+    "$eve.turn_count": 0,
     "$eve.type": "subagent",
     "$eve.parent": input.parentSessionId,
     "$eve.parent_call": input.parentCallId,

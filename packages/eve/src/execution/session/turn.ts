@@ -5,6 +5,7 @@ import { cancelDescendantTurnsStep } from "#execution/cancel-descendant-turns-st
 import { dispatchCoordinationStep } from "#execution/coordination-dispatch-step.js";
 import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
 import { routeSelectedDelivery } from "#execution/session/route-selected-delivery.js";
+import { writeSessionWorkflowSummaryStep } from "#execution/session/workflow-summary.js";
 import { isSteeringDelivery, type SessionInputQueue } from "#execution/session/input-queue.js";
 import {
   sessionCommandHookToken,
@@ -122,6 +123,10 @@ export class SessionExecution {
         return await this.finishCancelledTurn();
       }
 
+      if (result.action === "done" || settled) {
+        await this.writeSessionSummary();
+      }
+
       if (result.action === "done") {
         return {
           isError: result.isError,
@@ -195,6 +200,20 @@ export class SessionExecution {
       sessionState: cursor.sessionState,
     });
     return { cancelled: true, kind: "park" };
+  }
+
+  private async writeSessionSummary(): Promise<void> {
+    try {
+      await writeSessionWorkflowSummaryStep({
+        sessionId: this.input.sessionId,
+        sessionState: this.input.cursor.sessionState,
+      });
+    } catch (error) {
+      console.warn("[eve] failed to update session workflow summary attributes", {
+        error: error instanceof Error ? error.message : String(error),
+        sessionId: this.input.sessionId,
+      });
+    }
   }
 
   private async waitForRuntimeActionResults(input: {

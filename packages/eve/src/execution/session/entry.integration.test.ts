@@ -2147,6 +2147,14 @@ describe("workflowEntry integration", () => {
         expect(attrs["$eve.is_trace_content_visible"]).toBe("true");
         expect(attrs["$eve.trigger"]).toBe("http");
         expect(attrs["$eve.title"]).toContain("session tag round-trip");
+        await expect
+          .poll(async () => {
+            const updated = await world.runs.get(run.runId);
+            return (updated as { attributes?: Record<string, string> }).attributes?.[
+              "$eve.turn_count"
+            ];
+          })
+          .toBe("1");
         // Top-level sessions have no parent or subagent name on the root run.
         expect(attrs["$eve.parent"]).toBeUndefined();
         expect(attrs["$eve.subagent"]).toBeUndefined();

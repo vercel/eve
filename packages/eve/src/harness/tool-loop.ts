@@ -1972,16 +1972,6 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     //
     // Best-effort: `setEveAttributes` swallows runtime failures so a
     // broken tag emit can never break the agent loop.
-    const nextTurnUsage = accumulateTurnUsage({
-      previous: getTurnUsageState(session.state),
-      turnId: emissionState.turnId,
-      usage: extractTokenUsageDelta({
-        costUsd: extractGatewayCostUsd(result.providerMetadata),
-        usage: result.usage,
-      }),
-    });
-    session = setTurnUsageState(session, nextTurnUsage);
-    interruptedUsage = undefined;
     // `formatLanguageModelGatewayId` requires `model.provider` to be a string;
     // mock models in tests omit it, so guard the lookup so a missing field
     // becomes `undefined` and is dropped by `setEveAttributes` instead of
@@ -1992,8 +1982,19 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     } catch {
       modelTag = undefined;
     }
+    const nextTurnUsage = accumulateTurnUsage({
+      model: modelTag,
+      previous: getTurnUsageState(session.state),
+      turnId: emissionState.turnId,
+      usage: extractTokenUsageDelta({
+        costUsd: extractGatewayCostUsd(result.providerMetadata),
+        usage: result.usage,
+      }),
+    });
+    session = setTurnUsageState(session, nextTurnUsage);
+    interruptedUsage = undefined;
     await setEveAttributes({
-      "$eve.model": modelTag,
+      "$eve.model": nextTurnUsage.model,
       "$eve.input_tokens": nextTurnUsage.inputTokens,
       "$eve.output_tokens": nextTurnUsage.outputTokens,
       "$eve.cache_read_tokens": nextTurnUsage.cacheReadTokens,

@@ -56,6 +56,7 @@ export type TokenUsageDelta = Partial<TokenUsageTotals>;
  * `session` totals do not reset.
  */
 export interface TurnUsageState extends TokenUsageTotals {
+  readonly model?: string;
   readonly session: TokenUsageTotals;
   readonly turnId: string;
 }
@@ -225,22 +226,30 @@ export function setTurnUsageState<T extends { readonly state?: SessionStateMap }
  * zero without an explicit reset path.
  */
 export function accumulateTurnUsage(input: {
+  readonly model?: string;
   readonly previous: TurnUsageState | undefined;
   readonly turnId: string;
   readonly usage: TokenUsageDelta | undefined;
 }): TurnUsageState {
   const delta = toTokenUsageDelta(input.usage);
   const previousSession = input.previous?.session ?? ZERO_TOKEN_USAGE;
-  const turnBase =
+  const previousTurn =
     input.previous !== undefined && input.previous.turnId === input.turnId
       ? input.previous
-      : ZERO_TOKEN_USAGE;
+      : undefined;
+  const model = input.model ?? previousTurn?.model;
 
-  return {
-    ...addTokenUsage(turnBase, delta),
+  const next: TokenUsageTotals & {
+    model?: string;
+    session: TokenUsageTotals;
+    turnId: string;
+  } = {
+    ...addTokenUsage(previousTurn ?? ZERO_TOKEN_USAGE, delta),
     turnId: input.turnId,
     session: addTokenUsage(previousSession, delta),
   };
+  if (model !== undefined) next.model = model;
+  return next;
 }
 
 /**

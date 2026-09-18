@@ -171,6 +171,12 @@ tags power the **Agent Runs** tab in Vercel's **Observability** view. See
 [Deploy to Vercel](../guides/deployment/vercel#inspect-agent-runs) for
 enablement.
 
+Sessions that execute turns in their owning workflow publish
+`$eve.turn_count`, the latest `$eve.model`, and cumulative usage in
+`$eve.session_input_tokens`, `$eve.session_output_tokens`,
+`$eve.session_cache_read_tokens`, `$eve.session_cache_write_tokens`, and
+`$eve.session_cost_usd` on the session or subagent row.
+
 ## Debug discovery
 
 Run `eve info` to see the instrumentation eve discovered and any diagnostics.
