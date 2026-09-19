@@ -2,7 +2,10 @@ import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 
-import { loadDevelopmentEnvironmentFiles } from "#cli/dev/environment.js";
+import {
+  loadDevelopmentEnvironmentFiles,
+  overrideDevelopmentEnvironment,
+} from "#cli/dev/environment.js";
 import { shutdownActiveSandboxHandles } from "#execution/sandbox/active-handles.js";
 import {
   EVE_EVALUATION_ENV_FLAG,
@@ -130,8 +133,15 @@ export async function runEvalCommand(
   let devServer: DevelopmentServer | undefined;
   let target: EveEvalTargetHandle;
   let client: Awaited<ReturnType<typeof createEvalClient>>;
+  let setupContext: unknown;
 
   try {
+    const setupResult = await config.setup?.();
+    setupContext = setupResult?.context;
+    if (setupResult?.env) {
+      overrideDevelopmentEnvironment(appRoot, setupResult.env);
+    }
+
     if (options.url) {
       client = await createEvalClient(
         { kind: "remote", url: options.url },
@@ -167,6 +177,7 @@ export async function runEvalCommand(
     const summary = await runEvals({
       evaluations,
       config,
+      setupContext,
       target,
       client,
       appRoot,
@@ -193,11 +204,19 @@ export async function runEvalCommand(
       process.exitCode = 1;
     }
   } finally {
-    if (devServer) {
-      await devServer.close();
-      await shutdownActiveSandboxHandles({
-        log: (message) => logger.error(message),
-      });
+    for (const cleanup of [
+      () => devServer?.close(),
+      () => devServer && shutdownActiveSandboxHandles({ log: (message) => logger.error(message) }),
+      () => config.teardown?.(setupContext),
+    ]) {
+      try {
+        await cleanup();
+      } catch (error) {
+        logger.error(
+          `Eval cleanup failed: ${error instanceof Error ? error.message : String(error)}`,
+        );
+        process.exitCode = 1;
+      }
     }
   }
 

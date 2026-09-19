@@ -1,6 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, expectTypeOf, it } from "vitest";
 
 import { defineEvalConfig } from "#evals/define-eval-config.js";
+import { defineEval } from "#evals/define-eval.js";
 import type { EveEvalConfigInput } from "#evals/types.js";
 
 const TEST_MODEL = "openai/gpt-5.4-mini";
@@ -10,6 +11,59 @@ function defineInvalidConfig(input: Partial<EveEvalConfigInput> & Record<string,
 }
 
 describe("defineEvalConfig", () => {
+  it("infers setup context for teardown and evals", () => {
+    class Database {
+      query() {
+        return 42;
+      }
+    }
+    const config = defineEvalConfig({
+      async setup() {
+        return { context: { database: new Database() } };
+      },
+      teardown(context) {
+        expectTypeOf(context).toEqualTypeOf<{ database: Database } | undefined>();
+      },
+    });
+    const evaluation = defineEval<typeof config>({
+      test(t) {
+        expectTypeOf(t.context).toEqualTypeOf<{ database: Database }>();
+        expectTypeOf(t.context.database.query()).toEqualTypeOf<number>();
+      },
+    });
+    expect(evaluation._tag).toBe("EveEval");
+  });
+
+  it("infers undefined when setup returns only environment values", () => {
+    const config = defineEvalConfig({
+      setup() {
+        return { env: { DATABASE_URL: "test" } };
+      },
+      teardown(context) {
+        expectTypeOf(context).toEqualTypeOf<undefined>();
+      },
+    });
+    defineEval<typeof config>({
+      test(t) {
+        expectTypeOf(t.context).toEqualTypeOf<undefined>();
+      },
+    });
+  });
+
+  it("preserves optional context when setup may return nothing", () => {
+    const config = defineEvalConfig({
+      setup(): { context: Map<string, number> } | void {},
+      teardown(context) {
+        expectTypeOf(context).toEqualTypeOf<Map<string, number> | undefined>();
+      },
+    });
+    defineEval<typeof config>({
+      test(t) {
+        expectTypeOf(t.context).toEqualTypeOf<Map<string, number> | undefined>();
+      },
+    });
+  });
+
   it("returns a tagged config from valid input", () => {
     const config = defineEvalConfig({
       judge: { model: TEST_MODEL },
@@ -55,5 +109,15 @@ describe("defineEvalConfig", () => {
     expect(() => defineInvalidConfig({ reporters: {} as never })).toThrow(
       "`reporters` must be an array",
     );
+  });
+
+  it("rejects a non-function teardown", () => {
+    expect(() => defineInvalidConfig({ teardown: {} as never })).toThrow(
+      "`teardown` must be a function",
+    );
+  });
+
+  it("rejects a non-function setup", () => {
+    expect(() => defineInvalidConfig({ setup: {} as never })).toThrow("`setup` must be a function");
   });
 });
