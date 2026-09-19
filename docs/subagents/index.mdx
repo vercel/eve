@@ -9,16 +9,30 @@ eve supports two ways to delegate work: the root-only built-in `agent` tool, whi
 
 Overlapping background work owned by a session forms a cohort. Tasks launched in
 later user turns join the open cohort while earlier work is still pending or its
-terminal results await delivery. eve holds completion, failure, and cancellation
-notifications until every task in that cohort is terminal, then delivers all outcomes
-together in one parent turn. This includes cohorts where every task failed or was
-cancelled. Partial settlements do not invoke the parent model. Work started after the
-cohort settles forms a new cohort. No configuration or debounce timer is required.
+terminal results await delivery. With `taskDeliveryPolicy: "cohort"`, eve holds
+completion, failure, and cancellation notifications
+until every task in that cohort has completed, failed, or been cancelled, then
+delivers all outcomes together in one parent turn. Partial settlements
+do not invoke the parent model. Work started after the cohort settles forms a new
+cohort.
 
-User messages, input requests, and authorization events are handled without waiting
-for the cohort. Failure and cancellation update task lifecycle state immediately;
-their automatic conversational report waits for the cohort. Child lifecycle events
-are processed before terminal delivery so usage accounting and handle cleanup stay ordered.
+New channel sessions default to `"auto"`; schedules default to `"cohort"`.
+Pass `taskDeliveryPolicy` to `send(...)` to select or update the session policy. See
+[Background task results](/docs/channels/overview#background-task-results).
+
+With `"auto"`, a terminal outcome can start a parent turn while other tasks are
+still running. The parent reports independently useful results and stays silent
+when a useful answer depends on unfinished tasks. Ready results may share a turn.
+The reporting context includes the whole cohort and every available output,
+including previously withheld results, for a later combined report.
+
+The setting applies to background tools and built-in, declared, and remote
+subagents owned by the session. Internal subagent sessions use `"cohort"` for
+background work they start.
+
+User messages, input requests, authorization events, failures, and cancellation
+are handled without waiting for the cohort. Child lifecycle events are processed
+before completion delivery so usage accounting and handle cleanup stay ordered.
 To follow work in progress, subscribe to the child session streams.
 
 ## The built-in `agent` tool

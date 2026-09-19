@@ -76,6 +76,30 @@ function makeChannel(name: string): {
 }
 
 describe("createCrossChannelToFn", () => {
+  it("carries a cross-channel send policy through the receiver's local send", async () => {
+    const runtime = makeRuntime();
+    vi.mocked(runtime.dispatchContinuation).mockResolvedValue({
+      sessionId: "sess_1",
+      status: "accepted",
+    });
+    const channel = makeChannel("reports");
+    channel.receive.mockImplementation((input, { from }) =>
+      from("alice").send(input.message, { auth: input.auth }),
+    );
+    await createCrossChannelToFn(runtime, [channel.target])(channel.definition, {}).send(
+      "Prepare reports",
+      {
+        auth: null,
+        taskDeliveryPolicy: "cohort",
+      },
+    );
+    expect(runtime.dispatchContinuation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        command: expect.objectContaining({ taskDeliveryPolicy: "cohort" }),
+      }),
+    );
+  });
+
   it("accepts a Slack channel whose receive target is a closed interface", () => {
     const typeOnlyCalls = (to: CrossChannelToFn, slack: SlackChannel) => {
       const target: SlackReceiveTarget = { channelId: "C1" };

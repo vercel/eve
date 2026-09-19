@@ -2640,6 +2640,74 @@ describe("turnStep", () => {
     });
   });
 
+  it.each([
+    [undefined, undefined, "auto"],
+    ["cohort", undefined, "cohort"],
+    ["auto", undefined, "auto"],
+    [undefined, "cohort", "cohort"],
+    ["auto", "cohort", "cohort"],
+    ["cohort", "cohort", "cohort"],
+    [undefined, "auto", "auto"],
+    ["auto", "auto", "auto"],
+    ["cohort", "auto", "auto"],
+  ] as const)(
+    "updates stored policy %s from explicit send policy %s to %s",
+    async (storedPolicy, sendPolicy, expected) => {
+      const metadata = { kind: "report-probe", name: "report_probe" };
+      const session = createStubSession({
+        state: {
+          "eve.workflowTool": {
+            version: 3,
+            runs: ["A", "B"].map((taskId) => ({
+              callId: taskId,
+              toolName: metadata.name,
+              lifetime: "session",
+              origin: { turnId: "turn-parent", stepIndex: 0 },
+              address: { runId: `run-${taskId}`, hookToken: `inbox-${taskId}` },
+              task: {
+                taskId,
+                cohortId: "A",
+                dispatchContext: { auth: { current: null, initiator: null } },
+                metadata,
+                ...(taskId === "A"
+                  ? {
+                      outcome: {
+                        status: "completed",
+                        lastOutput: { type: "result", data: "Report A" },
+                      },
+                    }
+                  : {}),
+              },
+            })),
+          },
+        },
+      });
+      installSessionStoreMocks([session]);
+      const phases: unknown[] = [];
+      vi.mocked(createExecutionNodeStep).mockImplementation(() => async (session) => {
+        phases.push(contextStorage.getStore()?.get(TurnTaskDeliveryKey));
+        return { next: { done: true, output: "ok" }, session };
+      });
+      const serializedContext = createSerializedContext();
+      if (storedPolicy !== undefined) {
+        serializedContext["eve.runtime.taskDeliveryPolicy"] = storedPolicy;
+      }
+      const result = await turnStep({
+        input: {
+          kind: "deliver",
+          taskDeliveryPolicy: sendPolicy,
+          taskDeliveryId: "A:ready:completed",
+          payloads: [{ message: "A completed." }],
+        },
+        sessionWritable: createTestWritable(),
+        serializedContext,
+        sessionState: createStubSessionState(),
+      });
+      expect(result.serializedContext["eve.runtime.taskDeliveryPolicy"]).toBe(expected);
+      expect(phases).toEqual(["pending"]);
+    },
+  );
+
   it("marks task-owned deliveries even when task state is unavailable", async () => {
     const observedInputs: unknown[] = [];
     const observedTaskDeliveries: unknown[] = [];

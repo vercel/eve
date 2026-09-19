@@ -9,7 +9,7 @@ import type {
 import { defaultDeliverResult } from "#channel/adapter.js";
 import type { Session, SessionHandle } from "#channel/session.js";
 import { setChannelActivityRenderers } from "#channel/compiled-channel.js";
-import type { SessionAuthContext, TurnPolicy } from "#channel/types.js";
+import type { SessionAuthContext, TurnPolicy, TaskDeliveryPolicy } from "#channel/types.js";
 import type { CardElement } from "#compiled/chat/index.js";
 import type { SessionContext } from "#public/definitions/callback-context.js";
 import type { ChannelContinuationOps } from "#public/definitions/channel.js";
@@ -336,6 +336,8 @@ export interface SlackInitialMessage {
  * Options for one turn requested by a generic Slack event handler.
  */
 export interface SlackEventSendOptions {
+  /** Updates the session policy; omission preserves it. */
+  readonly taskDeliveryPolicy?: TaskDeliveryPolicy;
   readonly auth: SessionAuthContext | null;
   readonly target: SlackReceiveTarget;
   /** Overrides the workflow run title without changing the message sent to the model. */
@@ -1062,6 +1064,7 @@ async function receiveOnSlack(
     readonly message: string | UserContent;
     readonly target: SlackReceiveTarget;
     readonly title?: string;
+    readonly taskDeliveryPolicy?: TaskDeliveryPolicy;
   },
   deps: {
     readonly from: ChannelFrom<SlackChannelState>;
@@ -1140,6 +1143,7 @@ async function receiveOnSlack(
     auth: input.auth,
     state,
     title: input.title,
+    taskDeliveryPolicy: input.taskDeliveryPolicy,
   });
 }
 
@@ -1465,9 +1469,9 @@ async function dispatchSlackEvent(input: {
       input.resolveSession(slackContinuationToken(target.channelId, target.threadTs)),
     respond: (inputResponses, { auth, target }) =>
       sourceFor(target).respond(inputResponses, { auth }),
-    send: (message, { auth, target, title }) =>
+    send: (message, { auth, target, title, taskDeliveryPolicy }) =>
       receiveOnSlack(
-        { auth, message, target, title },
+        { auth, message, target, title, taskDeliveryPolicy },
         {
           from: input.from,
           credentials: input.credentials,

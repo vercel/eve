@@ -226,7 +226,12 @@ describe("chatSdkChannel", () => {
     });
 
     bridge.bot.onNewMention(async (thread: Thread, message: Message) => {
-      await bridge.send(message.text, { auth: AUTH, thread, title: "mention" });
+      await bridge.send(message.text, {
+        auth: AUTH,
+        thread,
+        title: "mention",
+        taskDeliveryPolicy: "cohort",
+      });
     });
 
     const { cancel, response, send } = await firePost(bridge.channel, "/eve/v1/test", {
@@ -249,6 +254,7 @@ describe("chatSdkChannel", () => {
         },
       },
       title: "mention",
+      taskDeliveryPolicy: "cohort",
     });
   });
 

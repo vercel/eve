@@ -17,7 +17,7 @@ export default defineTaskEval({
     dimensions: { transport: "local", parentPhase: "active" },
   },
   async test(t) {
-    const started = await t.send("TASK-CANCEL-SETUP");
+    const started = await t.send("TASK-CANCEL-SETUP", { taskDeliveryPolicy: "cohort" });
     started.expectOk();
     started.messageIncludes("TASK-CANCEL-READY");
     started.event("action.result", {
