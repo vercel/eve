@@ -16,7 +16,10 @@ import { hydrateDurableSession } from "#execution/session.js";
 import { reconcileSessionContinuationToken } from "#execution/reconcile-session-continuation-token.js";
 import { activeTurnId } from "#harness/active-turn-id.js";
 import { emitCancelledTurn } from "#harness/cancelled-turn-emission.js";
-import { clearPendingSessionLimitPrompt } from "#harness/input-requests.js";
+import {
+  getPendingInputBatches,
+  removePendingInputBatches,
+} from "#harness/pending-input-batches.js";
 import {
   getHarnessEmissionState,
   isHarnessBetweenTurns,
@@ -38,6 +41,7 @@ import {
 } from "#harness/workflow-tool-runs.js";
 import { bindSessionInstrumentation } from "#instrumentation/runtime.js";
 import { getTurnUsageState, toUsage } from "#harness/turn-tag-state.js";
+import type { HarnessSession } from "#harness/types.js";
 import {
   encodeMessageStreamEvent,
   type UnstampedMessageStreamEvent,
@@ -135,12 +139,9 @@ export async function settleCancelledTurnStep(input: {
     }
   }
 
-  // `clearPendingSessionLimitPrompt`: cancellation settles with the step's
-  // input snapshot, which can resurrect an already-answered session-limit
-  // prompt (the decline that cancelled this turn consumed the answer in the
-  // discarded turn state). The pre-model gate re-raises the prompt while the
-  // violation holds, so the next delivery gets a fresh prompt instead of
-  // queueing forever behind a stale one.
+  // Cancellation retires the turn's delivery routes. Its pending input batches
+  // must be dropped with them, or the next turn will wait for an answer that
+  // can no longer reach this session.
   //
   // Descendant cancellation already ran and the cancelled turn's inbox is
   // gone, so a child settlement can never reach this store again. This is the
@@ -157,7 +158,7 @@ export async function settleCancelledTurnStep(input: {
   const cancelledSession = reconcileSessionContinuationToken(
     ctx,
     setHarnessEmissionState(
-      clearPendingSessionLimitPrompt(
+      clearPendingInputBatches(
         clearAllProxyInputRequests(
           clearPendingCoordinationBatch(
             removeBlockingWorkflowToolRuns(
@@ -177,4 +178,9 @@ export async function settleCancelledTurnStep(input: {
     sessionState: createDurableSessionState({ session: cancelledSession }),
   };
   return totals === undefined ? base : { ...base, usage: toUsage(totals) };
+}
+
+function clearPendingInputBatches(session: HarnessSession): HarnessSession {
+  const batches = getPendingInputBatches(session.state);
+  return batches.length === 0 ? session : removePendingInputBatches(session, batches);
 }
