@@ -521,6 +521,10 @@ function resolveResultMetadata(
     eveSubagentCalls: result.result.derived.subagentCalls.map((call) => call.name),
     eveParked: result.result.derived.parked,
   });
+  const runtimeTraceLinks = resolveRuntimeTraceLinks(result.result.traceContexts);
+  if (runtimeTraceLinks.length > 0) {
+    metadata.experimentRuntimeTraceLinks = runtimeTraceLinks;
+  }
   if (recordAssertionDetails) {
     const failedAssertions = result.assertions
       .filter((assertion) => !assertion.passed)
@@ -533,6 +537,35 @@ function resolveResultMetadata(
     metadata.eveFailureCode = result.result.derived.failureCode;
   }
   return metadata;
+}
+
+function resolveRuntimeTraceLinks(traceContexts: EveEvalResult["result"]["traceContexts"]) {
+  const links = new Map<
+    string,
+    {
+      relation: "experiment_runtime";
+      traceId: string;
+      spanId: string;
+      sessionId: string;
+      primary: boolean;
+    }
+  >();
+
+  for (const traceContext of traceContexts) {
+    const key = `${traceContext.traceId}:${traceContext.spanId}`;
+    const existing = links.get(key);
+    if (existing?.primary || (existing && !traceContext.primary)) continue;
+
+    links.set(key, {
+      relation: "experiment_runtime",
+      traceId: traceContext.traceId,
+      spanId: traceContext.spanId,
+      sessionId: traceContext.sessionId,
+      primary: traceContext.primary,
+    });
+  }
+
+  return [...links.values()];
 }
 
 function resolveEvaluationMetrics(
@@ -590,7 +623,11 @@ function elapsedMs(startedAt: string, completedAt: string): number | undefined {
   const start = Date.parse(startedAt);
   const completed = Date.parse(completedAt);
   if (!Number.isFinite(start) || !Number.isFinite(completed)) return undefined;
-  return Math.max(0, completed - start);
+
+  // ISO timestamps have millisecond precision, so fast failures can start and
+  // finish in the same millisecond. Datadog Experiment spans require a
+  // positive duration; use the smallest representable duration in these units.
+  return Math.max(1, completed - start);
 }
 
 function toOptionalDatadogJsonValue(value: unknown): DatadogJsonValue | undefined {
