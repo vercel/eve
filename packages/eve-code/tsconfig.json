@@ -1,0 +1,18 @@
+{
+  "compilerOptions": {
+    "target": "ES2023",
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "paths": {
+      "eve-code": ["./extension/extension.ts"]
+    },
+    "allowImportingTsExtensions": true,
+    "rewriteRelativeImportExtensions": true,
+    "types": ["node"],
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "noEmit": true
+  },
+  "include": ["agent/**/*.ts", "extension/**/*.ts", "test/**/*.ts"]
+}

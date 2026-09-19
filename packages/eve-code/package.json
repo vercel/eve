@@ -1,0 +1,59 @@
+{
+  "name": "eve-code",
+  "version": "0.0.0",
+  "private": true,
+  "description": "eve extension for CLI-based coding work with credential brokering, safe patches, coding skills, and a read-only worker subagent.",
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.mjs"
+    },
+    "./tools": {
+      "types": "./dist/tools/index.d.ts",
+      "default": "./dist/tools/index.mjs"
+    },
+    "./sandbox": {
+      "types": "./dist/extension/lib/sandbox.d.ts",
+      "default": "./dist/extension/lib/sandbox.mjs"
+    },
+    "./prwatch": {
+      "types": "./dist/extension/lib/prwatch.d.ts",
+      "default": "./dist/extension/lib/prwatch.mjs"
+    }
+  },
+  "scripts": {
+    "build": "eve extension build",
+    "prepack": "pnpm run build",
+    "test": "pnpm run test:unit && pnpm run test:integration",
+    "test:unit": "node --test \"test/unit/*.test.ts\"",
+    "test:integration": "node --test \"test/integration/*.test.ts\"",
+    "test:scenario": "node --test \"test/scenario/*.test.ts\"",
+    "typecheck": "tsc"
+  },
+  "dependencies": {
+    "@vercel/connect": "catalog:",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "eve": "workspace:*",
+    "typescript": "catalog:",
+    "typescript-compiler": "npm:typescript@6.0.3"
+  },
+  "peerDependencies": {
+    "eve": "*"
+  },
+  "engines": {
+    "node": ">=24"
+  },
+  "eve": {
+    "extension": {
+      "source": "./extension",
+      "dist": "./dist/extension"
+    }
+  }
+}

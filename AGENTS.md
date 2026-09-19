@@ -18,6 +18,7 @@ docs, prompts, comments, and headings.
 
 - `packages/eve` — the framework and `eve` CLI (the main package)
 - `packages/eve-catalog` — internal, unpublished library
+- `packages/eve-code` — private coding extension, staged for extraction from internal-agents
 - `apps/fixtures` — shared agent fixtures used by e2e, TUI smoke tests, and local dev
 - `apps/frameworks`, `apps/templates`, `apps/docs` — framework integrations, templates, docs site
 - `docs` — published documentation content

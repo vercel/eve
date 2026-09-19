@@ -92,8 +92,8 @@ jobs:
       - name: Run unit tests
         run: pnpm test:unit
 
-      - name: Test e2e fixture discovery
-        run: node --test .github/scripts/discover-e2e-fixtures.test.mjs
+      - name: Test workflow helpers
+        run: node --test .github/scripts/*.test.mjs
 
   test-integration:
     name: test-integration (${{ matrix.os }})
