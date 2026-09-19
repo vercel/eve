@@ -614,6 +614,20 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       if (session.history.length > 0) {
         try {
           const ctx = contextStorage.getStore();
+          if (ctx !== undefined && config.dispatchDynamicModelEvent !== undefined) {
+            await config.dispatchDynamicModelEvent({
+              ctx,
+              event: {
+                data: {
+                  sequence: emissionState.sequence,
+                  stepIndex: emissionState.stepIndex,
+                  turnId: emissionState.turnId,
+                },
+                type: "step.started",
+              } as UnstampedMessageStreamEvent,
+              messages: projectHistory([...session.history], session.state),
+            });
+          }
           const resolvedModel = await resolveEffectiveRuntimeModel({ config, ctx, session });
           session = resolvedModel.session;
 

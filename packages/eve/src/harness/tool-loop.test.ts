@@ -10111,6 +10111,61 @@ describe("createToolLoopHarness", () => {
     ]);
   });
 
+  it("resolves a step-scoped dynamic model before manual compaction", async () => {
+    const compactedHistory: HarnessModelMessage[] = [
+      createFrameworkUserMessage("context.compaction", "Summary of our conversation so far:"),
+      { content: "summary", role: "assistant" },
+    ];
+    vi.mocked(compactMessages).mockResolvedValue(compactedHistory);
+
+    const selectedModel = new MockLanguageModelV3({
+      modelId: "gpt-5",
+      provider: "openai.chat",
+    });
+    const dispatchDynamicModelEvent: NonNullable<
+      ToolLoopHarnessConfig["dispatchDynamicModelEvent"]
+    > = vi.fn(async ({ ctx, event }) => {
+      expect(event.type).toBe("step.started");
+      ctx.setVirtualContext(LiveStepDynamicModelSelectionKey, {
+        model: selectedModel,
+        reference: {
+          contextWindowTokens: 200_000,
+          id: "openai/gpt-5",
+        },
+      });
+    });
+    const { emit, events } = createEventCollector();
+    const runStep = createToolLoopHarness(
+      createTestConfig("conversation", emit, {
+        compactOnly: true,
+        dispatchDynamicModelEvent,
+      }),
+    );
+    const session = createTestSession({
+      agent: {
+        dynamicModel: true,
+        system: "You are a test assistant.",
+        tools: [{ description: "Adds numbers", name: "add", inputSchema: { type: "object" } }],
+      },
+      history: [
+        { content: "old message", kind: "user" as const, role: "user" },
+        { content: "old reply", role: "assistant" },
+      ],
+    });
+    const ctx = new ContextContainer();
+
+    const result = await contextStorage.run(ctx, () => runStep(session));
+
+    expect(result.next).toBeNull();
+    expect(result.session.history).toEqual(compactedHistory);
+    expect(dispatchDynamicModelEvent).toHaveBeenCalledOnce();
+    expect(getCompatibilityEventTypes(events)).toEqual([
+      "compaction.requested",
+      "compaction.completed",
+      "session.waiting",
+    ]);
+  });
+
   it("returns an empty session to its waiting boundary after manual compaction", async () => {
     const { emit, events } = createEventCollector();
     const runStep = createToolLoopHarness(
