@@ -45,13 +45,17 @@ export default defineEval({
     resumed.expectOk();
     const completed = resumed.message?.includes(COLLISION_MARKER)
       ? resumed
-      : await waitForMessage(t, parked.session, COLLISION_MARKER);
+      : await waitForMessage(t, resumed.session, COLLISION_MARKER);
     completed.messageIncludes(COLLISION_MARKER);
 
     t.succeeded();
     t.noFailedActions();
     t.calledTool("collision-gate", { count: 1, status: "completed" });
     t.calledSubagent("collision-child", { count: 1, status: "completed" });
+    t.event("subagent.completed", {
+      count: 1,
+      data: { callId: "collision-child-call", subagentName: "collision-child" },
+    });
   },
 });
 
