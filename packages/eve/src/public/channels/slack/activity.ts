@@ -488,7 +488,7 @@ function renderWorkTree(
     });
   };
   for (const root of byParent.get(undefined) ?? []) visit(root, "", "");
-  return `\`\`\`\n${lines.join("\n")}\n\`\`\``;
+  return lines.join("\n");
 }
 
 function phaseIcon(phase: ActivityWorkStateV1["phase"] | ActivityActionStateV1["phase"]): string {
