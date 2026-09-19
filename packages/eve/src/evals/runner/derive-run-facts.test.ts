@@ -347,7 +347,7 @@ describe("deriveRunFacts", () => {
     expect(facts.reasoningBlockCount).toBe(2);
   });
 
-  it("keeps a working receipt pending until an actual result arrives", () => {
+  it("keeps a working receipt working until an actual result arrives", () => {
     const admission: UnstampedMessageStreamEvent = {
       type: "subagent.completed",
       data: {
@@ -397,7 +397,7 @@ describe("deriveRunFacts", () => {
       [receipt, admission],
     ]) {
       expect(derive(events).subagentCalls).toEqual([
-        expect.objectContaining({ callId: "c1", status: "pending" }),
+        expect.objectContaining({ callId: "c1", status: "working" }),
       ]);
       expect(derive(events).subagentCalls[0]?.output).toBeUndefined();
     }
@@ -416,7 +416,7 @@ describe("deriveRunFacts", () => {
         status,
       });
       expect(derive([admission, failure, admission, receipt]).subagentCalls).toEqual([
-        expect.objectContaining({ callId: "c1", status, output: "child failed" }),
+        expect.objectContaining({ callId: "c1", status: "failed", output: "child failed" }),
       ]);
     }
   });
@@ -493,6 +493,47 @@ describe("deriveRunFacts", () => {
     ];
     const facts = derive(events);
     expect(facts.subagentCalls.map((call) => call.name)).toEqual(["inline-agent"]);
+    expect(facts.subagentCalls[0]?.status).toBe("working");
+  });
+
+  it("preserves explicit cancellation even when the action reports failure or a late completion", () => {
+    const cancelled: UnstampedMessageStreamEvent = {
+      type: "action.result",
+      data: {
+        sequence: 1,
+        stepIndex: 0,
+        turnId: "t1",
+        status: "failed",
+        result: {
+          callId: "c1",
+          kind: "subagent-result",
+          origin: "child",
+          subagentName: "researcher",
+          isError: true,
+          output: "The agent invocation was cancelled.",
+          outcome: {
+            kind: "parked",
+            result: { kind: "cancelled" },
+            usageDelta: {
+              inputTokens: 0,
+              outputTokens: 0,
+              cacheReadTokens: 0,
+              cacheWriteTokens: 0,
+            },
+          },
+        },
+      },
+    };
+    const lateCompletion: UnstampedMessageStreamEvent = {
+      type: "subagent.completed",
+      data: { callId: "c1", subagentName: "researcher", output: "late result" },
+    };
+    for (const events of [[cancelled], [cancelled, lateCompletion]]) {
+      expect(derive(events).subagentCalls[0]).toMatchObject({
+        status: "cancelled",
+        output: "The agent invocation was cancelled.",
+      });
+    }
   });
 
   it("records every subagent invocation separately", () => {

@@ -23,7 +23,7 @@ export default defineEval({
     const session = parked.session;
 
     parked.calledTool("collision-gate", { count: 1, status: "pending" });
-    parked.calledSubagent("collision-child", { count: 1, status: "pending" });
+    parked.calledSubagent("collision-child", { count: 1, status: "working" });
     parked.eventOrder([
       { type: "actions.requested" },
       {

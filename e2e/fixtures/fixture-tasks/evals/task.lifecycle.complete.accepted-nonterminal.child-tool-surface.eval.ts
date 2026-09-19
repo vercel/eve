@@ -16,7 +16,7 @@ export default defineTaskEval({
       "Alice asks Bob to summarize the available tools for a background task.",
     );
     started.expectOk();
-    started.calledSubagent("tool-surface-worker", { status: "pending", count: 1 });
+    started.calledSubagent("tool-surface-worker", { status: "working", count: 1 });
     started.event("action.result", {
       count: 1,
       data: {

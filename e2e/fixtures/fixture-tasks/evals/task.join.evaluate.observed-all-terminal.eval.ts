@@ -32,7 +32,7 @@ export default defineTaskEval({
     const started = await t.send("TASK-FAN-IN");
     started.expectOk();
     started.messageIncludes("TASK-FAN-IN-STARTED");
-    started.calledSubagent("fanout-worker", { status: "pending", count: FAN_IN_SIZE });
+    started.calledSubagent("fanout-worker", { status: "working", count: FAN_IN_SIZE });
 
     const tasksByMarker = backgroundTasksByMarker(started);
     const taskIds = [...tasksByMarker.values()];

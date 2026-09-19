@@ -15,6 +15,7 @@ import type {
 } from "#client/types.js";
 import type { InputRequest, InputResponse } from "#shared/input.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
+import type { TaskStatus } from "#tasks/types.js";
 import type { AgentModelOptionsDefinition } from "#shared/agent-definition.js";
 import type { EvalReporter } from "#evals/runner/reporters/types.js";
 import type {
@@ -25,7 +26,7 @@ import type {
   EveEvalToolCallMatchOptions,
 } from "#evals/match.js";
 
-/** Lifecycle outcome of an eval-observed tool or subagent action. */
+/** Lifecycle outcome of an eval-observed tool action. */
 export type EveEvalActionStatus = "pending" | "completed" | "failed" | "rejected";
 
 /**
@@ -62,8 +63,8 @@ export interface EveEvalSubagentCall {
   readonly remoteUrl?: string;
   /** Output from the matching `subagent.completed` event; `undefined` when the call never completed. */
   readonly output?: JsonValue;
-  /** Whether the delegation is unresolved, completed, failed, or rejected. */
-  readonly status: EveEvalActionStatus;
+  /** Task lifecycle status inferred from the captured delegation events. */
+  readonly status: TaskStatus;
   /** Zero-based index of the turn the delegation happened in. */
   readonly turnIndex: number;
   /** Owning session id, when the runner knows it. */

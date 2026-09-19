@@ -52,7 +52,7 @@ export async function startWarehouseLookups(t: EveEvalContext): Promise<Reportin
 
 Once all three assignments are accepted, let Alice know the checks are underway. When all three results are ready, reply directly from the returned items without further tool calls or task-list updates. Bob needs only three checklist entries, with each item listed once and no separate summary.`);
   started.expectOk();
-  started.calledSubagent("agent", { status: "pending", count: TASK_COUNT });
+  started.calledSubagent("agent", { status: "working", count: TASK_COUNT });
   started.notCalledTool("probe");
   started.notCalledTool("warehouse_lookup");
   assertModel(started, modelId);

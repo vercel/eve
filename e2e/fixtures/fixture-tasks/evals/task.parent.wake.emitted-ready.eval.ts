@@ -26,7 +26,7 @@ export default defineTaskEval({
     const started = await t.send("TASK-PARENT-WAKE-UPDATES");
     started.expectOk();
     started.messageIncludes("TASK-FANOUT-STARTED");
-    started.calledSubagent("fanout-worker", { status: "pending", count: FANOUT_SIZE });
+    started.calledSubagent("fanout-worker", { status: "working", count: FANOUT_SIZE });
 
     const taskIds = backgroundTaskIds(started);
     await t.require(

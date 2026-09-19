@@ -42,7 +42,7 @@ export default ["first", "later"].map((launchTurn) =>
 
 function expectFiveReviewers(started: EveEvalTurn) {
   expectHealthyTurn(started);
-  started.calledSubagent("reviewer", { status: "pending", count: 5 });
+  started.calledSubagent("reviewer", { status: "working", count: 5 });
   const launchSteps = started.events
     .filter((event) => event.type === "actions.requested")
     .flatMap(({ data }) =>

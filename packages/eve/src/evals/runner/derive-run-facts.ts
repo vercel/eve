@@ -91,7 +91,7 @@ export function deriveRunFacts(
     const call: MutableSubagentCall = {
       callId,
       name,
-      status: "pending",
+      status: "working",
       turnIndex: Math.max(turnIndex, 0),
       sessionId,
     };
@@ -139,7 +139,11 @@ export function deriveRunFacts(
           // A working receipt settles dispatch, not the delegated work.
           if (result.origin === "child" && result.backgroundTask !== undefined) break;
           call.output = call.output ?? result.output;
-          call.status = status;
+          if (result.origin === "child" && result.outcome.result.kind === "cancelled") {
+            call.status = "cancelled";
+          } else {
+            call.status = status === "rejected" ? "failed" : status;
+          }
         }
         break;
       }
@@ -160,9 +164,9 @@ export function deriveRunFacts(
 
       case "subagent.completed": {
         const call = ensureSubagentCall(event.data.callId, event.data.subagentName);
-        if (event.data.backgroundTask !== undefined) break;
+        if (event.data.backgroundTask !== undefined || call.status !== "working") break;
         call.output = event.data.output;
-        if (call.status === "pending") call.status = "completed";
+        call.status = "completed";
         break;
       }
 
