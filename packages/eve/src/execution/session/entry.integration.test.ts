@@ -1517,7 +1517,7 @@ describe("workflowEntry integration", () => {
                   Object.assign(session, {
                     state: {
                       ...session.state,
-                      "eve.tasks": {
+                      "eve.workflowTool": {
                         version: 3,
                         runs: [
                           {

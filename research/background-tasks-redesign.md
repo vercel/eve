@@ -59,7 +59,7 @@ the background owner tracks only ordinary input requests for answer routing.
 | Terminal report classifier          | Successful `:ready:completed` delivery ID suffix     | Stable terminal delivery ID, retained after routing |
 
 A task is the public handle for an admitted session-owned invocation. Both lifetimes now live in
-`eve.tasks` as `{ version: 3, runs: WorkflowToolRun[] }`; task lookup and blocking-run lookup
+`eve.workflowTool` as `{ version: 3, runs: WorkflowToolRun[] }`; task lookup and blocking-run lookup
 are filtered views of that registry. Version 3 replaces the version-2 task-only index on main.
 Cleanup selects the originating turn and `lifetime: "turn"`, so it cannot discard
 session-owned work. [Registry][prototype-registry]
@@ -137,7 +137,7 @@ The prototype deletes these responsibilities rather than renaming them:
   workflow messages directly; only session delivery and public view projection adapt their shape.
 - Pre-admission progress buffering: the workflow body cannot emit before `ready` starts it.
 - The separate `eve.runtime.workflowToolRuns` store and independent task-index write path;
-  `eve.tasks` now holds both lifetimes without duplicate creation provenance or run addresses.
+  `eve.workflowTool` now holds both lifetimes without duplicate creation provenance or run addresses.
 
 These responsibilities were retained or relocated:
 

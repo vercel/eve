@@ -7,7 +7,7 @@ import { sameTaskMetadata, type TaskMetadata, type TaskView } from "#tasks/types
 import type { DurableDynamicSubagentSelection, SessionAuth } from "#context/keys.js";
 
 // Version 3 replaces the task-only index with the shared workflow tool run registry.
-export const WORKFLOW_TOOL_RUNS_STATE_KEY = "eve.tasks";
+export const WORKFLOW_TOOL_RUNS_STATE_KEY = "eve.workflowTool";
 const WORKFLOW_TOOL_RUNS_VERSION = 3;
 
 export interface WorkflowTaskPayload {
@@ -259,7 +259,7 @@ export function readWorkflowTaskView(task: WorkflowTaskPayload): TaskView | unde
 }
 
 function readRegistry(state: SessionStateMap | undefined): WorkflowToolRunRegistry {
-  if (state?.["eve.runtime.workflowToolRuns"] !== undefined) {
+  if (state?.["eve.tasks"] !== undefined || state?.["eve.runtime.workflowToolRuns"] !== undefined) {
     throw new Error(
       "Unsupported workflow tool run state: start a new session or import its conversation.",
     );

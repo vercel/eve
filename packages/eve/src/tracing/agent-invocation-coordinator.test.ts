@@ -21,7 +21,7 @@ const conversation: ConversationContext = {
 };
 
 const sessionState = {
-  "eve.tasks": {
+  "eve.workflowTool": {
     version: 3,
     runs: [
       {

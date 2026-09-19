@@ -6,7 +6,7 @@ import { getTaskCohortId, getSessionTaskCohorts } from "#tasks/session-task-coho
 describe("workflow task cohort lookup", () => {
   it("projects the same identities as the full task index", () => {
     const state = {
-      "eve.tasks": {
+      "eve.workflowTool": {
         version: 3,
         runs: ["turn-1", "turn-2", "turn-2"].map((createdByTurnId, index) => ({
           callId: `task_${index}`,
@@ -42,7 +42,7 @@ describe("workflow task cohort lookup", () => {
     { version: 1, runs: null },
     { version: 1, runs: [null] },
   ])("rejects invalid registry state: %j", (raw) => {
-    expect(() => getSessionTaskCohorts({ "eve.tasks": raw })).toThrow(
+    expect(() => getSessionTaskCohorts({ "eve.workflowTool": raw })).toThrow(
       "Corrupt workflow tool run registry",
     );
   });

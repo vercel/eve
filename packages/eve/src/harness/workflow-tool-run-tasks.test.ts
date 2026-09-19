@@ -293,7 +293,7 @@ describe("session task index", () => {
   it.each(["", null, 42])("rejects an invalid additive cohort identity: %j", (cohortId) => {
     expect(() =>
       getBackgroundWorkflowToolRuns({
-        "eve.tasks": {
+        "eve.workflowTool": {
           version: 3,
           runs: [
             {
@@ -354,7 +354,7 @@ describe("session task index", () => {
       { ...terminalView, taskId: "task_other" },
     ]) {
       const [entry] = getBackgroundWorkflowToolRuns({
-        "eve.tasks": {
+        "eve.workflowTool": {
           version: 3,
           runs: [{ ...base, task: { ...base.task, terminalView: invalidView } }],
         },
@@ -389,7 +389,7 @@ describe("session task index", () => {
   it("throws on a corrupt index instead of treating it as absent", () => {
     expect(() =>
       getBackgroundWorkflowToolRuns({
-        "eve.tasks": { version: 3, runs: [{ taskId: 42 }] },
+        "eve.workflowTool": { version: 3, runs: [{ taskId: 42 }] },
       }),
     ).toThrow("Corrupt workflow tool run registry");
   });
@@ -398,7 +398,7 @@ describe("session task index", () => {
     const entry = task("task_a", "turn-1");
     expect(() =>
       getBackgroundWorkflowToolRuns({
-        "eve.tasks": {
+        "eve.workflowTool": {
           version: 3,
           runs: [{ ...entry, task: { ...entry.task, dispatchContext: undefined } }],
         },
@@ -416,7 +416,7 @@ describe("session task index", () => {
   it("rejects unrecognized task dispatch context fields", () => {
     expect(() =>
       getBackgroundWorkflowToolRuns({
-        "eve.tasks": {
+        "eve.workflowTool": {
           version: 3,
           runs: [
             {
@@ -443,7 +443,7 @@ describe("session task index", () => {
   it("rejects an unsupported registry version", () => {
     expect(() =>
       getBackgroundWorkflowToolRuns({
-        "eve.tasks": { version: 99, runs: [] },
+        "eve.workflowTool": { version: 99, runs: [] },
       }),
     ).toThrow("Corrupt workflow tool run registry");
   });

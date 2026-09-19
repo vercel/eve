@@ -62,7 +62,7 @@ describe("task cancellation", () => {
       continuationToken: "parent",
       sessionId: "parent-session",
       state: {
-        "eve.tasks": {
+        "eve.workflowTool": {
           version: 3,
           runs: [
             {

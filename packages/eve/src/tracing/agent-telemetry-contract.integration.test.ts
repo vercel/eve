@@ -359,7 +359,7 @@ describe("exported agent telemetry contract", () => {
           sessionId: "parent",
           turnId: "turn_0",
           sessionState: {
-            "eve.tasks": {
+            "eve.workflowTool": {
               version: 3,
               runs: [
                 {

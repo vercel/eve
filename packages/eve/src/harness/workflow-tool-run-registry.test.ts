@@ -34,13 +34,13 @@ const task = (taskId: string): BackgroundWorkflowToolRun => ({
 });
 
 describe("shared workflow invocation ownership", () => {
-  it("stores blocking and background runs together under eve.tasks", () => {
+  it("stores blocking and background runs together under eve.workflowTool", () => {
     const blocking = waiting("turn-a");
     const background = task("task-a");
     const initial: { state?: SessionStateMap } = {};
     const session = registerWorkflowToolRun(registerWorkflowToolRun(initial, blocking), background);
     expect(session.state).toEqual({
-      "eve.tasks": { version: 3, runs: [blocking, background] },
+      "eve.workflowTool": { version: 3, runs: [blocking, background] },
     });
   });
 
@@ -103,7 +103,7 @@ describe("shared workflow invocation ownership", () => {
     const old = task("old");
     const retained = { ...old, task: { ...old.task, terminalView: { status: "completed" } } };
     let session: { state?: SessionStateMap } = {
-      state: { "eve.tasks": { version: 3, runs: [retained] } },
+      state: { "eve.workflowTool": { version: 3, runs: [retained] } },
     };
     session = registerWorkflowToolRun(session, waiting("turn-b"));
     session = registerWorkflowToolRun(session, task("live"));
@@ -142,7 +142,7 @@ describe("shared workflow invocation ownership", () => {
       },
     };
     const [parsed] = getWorkflowToolRuns({
-      "eve.tasks": { version: 3, runs: [retained] },
+      "eve.workflowTool": { version: 3, runs: [retained] },
     });
     expect(parsed).toEqual(retained);
     expect(parsed?.lifetime).toBe("session");
@@ -158,7 +158,7 @@ describe("shared workflow invocation ownership", () => {
   it("reads creator auth and dynamic selections restored in the workflow VM", () => {
     const entry = task("task-a");
     const state = {
-      "eve.tasks": {
+      "eve.workflowTool": {
         version: 3,
         runs: [
           {
@@ -185,7 +185,7 @@ describe("shared workflow invocation ownership", () => {
     };
     const restored = runInNewContext("JSON.parse(input)", { input: JSON.stringify(state) });
     expect(Object.getPrototypeOf(restored)).not.toBe(Object.prototype);
-    expect(getWorkflowToolRuns(restored)).toEqual(state["eve.tasks"].runs);
+    expect(getWorkflowToolRuns(restored)).toEqual(state["eve.workflowTool"].runs);
     expect(() => registerWorkflowToolRun({ state: restored }, waiting("turn-b"))).not.toThrow();
   });
 
@@ -231,7 +231,7 @@ describe("shared workflow invocation ownership", () => {
     const entry = task("task-a");
     expect(() =>
       getWorkflowToolRuns({
-        "eve.tasks": {
+        "eve.workflowTool": {
           version: 3,
           runs: [{ ...entry, task: { ...entry.task, dispatchContext } }],
         },
@@ -242,7 +242,7 @@ describe("shared workflow invocation ownership", () => {
   it("rejects duplicate originating call identities even without task payloads", () => {
     expect(() =>
       getWorkflowToolRuns({
-        "eve.tasks": {
+        "eve.workflowTool": {
           version: 3,
           runs: [waiting("turn-a"), waiting("turn-a")],
         },
@@ -281,7 +281,7 @@ describe("shared workflow invocation ownership", () => {
 
   it("rejects the task-only index from main", () => {
     expect(() => getWorkflowToolRuns({ "eve.tasks": { version: 2, tasks: [] } })).toThrow(
-      "Corrupt workflow tool run registry",
+      "Unsupported workflow tool run state",
     );
   });
 

@@ -544,7 +544,7 @@ describe("routeProxiedDeliverStep", () => {
           options?.owned === false
             ? undefined
             : {
-                "eve.tasks": {
+                "eve.workflowTool": {
                   version: 3,
                   runs: [
                     {
@@ -702,7 +702,7 @@ describe("recordTaskInputRequestStep", () => {
   it("records an exact route only for a current task owned by this parent", async () => {
     const session = createStubSession({
       state: {
-        "eve.tasks": {
+        "eve.workflowTool": {
           version: 3,
           runs: [
             {
@@ -1131,7 +1131,7 @@ describe("turnStep", () => {
     const pending = createStubSession({
       state: {
         "eve.harness.emission": emissionState,
-        "eve.tasks": { version: 3, runs: [task] },
+        "eve.workflowTool": { version: 3, runs: [task] },
       },
     });
     const terminalView = {
@@ -1143,7 +1143,7 @@ describe("turnStep", () => {
     const settled = createStubSession({
       state: {
         "eve.harness.emission": { ...emissionState, sequence: 1, turnId: "turn_1" },
-        "eve.tasks": {
+        "eve.workflowTool": {
           version: 3,
           runs: [{ ...task, task: { ...task.task, terminalView: terminalView } }],
         },
@@ -2649,7 +2649,7 @@ describe("turnStep", () => {
     const metadata = { kind: "report-probe", name: "report_probe" } as const;
     const session = createStubSession({
       state: {
-        "eve.tasks": {
+        "eve.workflowTool": {
           version: 3,
           runs: [
             {
@@ -2762,7 +2762,7 @@ describe("turnStep", () => {
           stepIndex: 1,
           turnId: "turn_0",
         },
-        "eve.tasks": {
+        "eve.workflowTool": {
           version: 3,
           runs: [
             {

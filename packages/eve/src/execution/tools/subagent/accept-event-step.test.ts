@@ -35,7 +35,7 @@ const hookPayload = {
   subagentName: "research",
 };
 const taskIndex = {
-  "eve.tasks": {
+  "eve.workflowTool": {
     version: 3,
     runs: [
       {

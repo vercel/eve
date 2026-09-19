@@ -390,7 +390,7 @@ describe("owner agent invocation dispatch", () => {
       ...session,
       state: {
         ...session.state,
-        "eve.tasks": {
+        "eve.workflowTool": {
           version: 3,
           runs: [
             {

@@ -99,7 +99,7 @@ function makeSessionState(tasks: readonly BackgroundWorkflowToolRun[]): DurableS
         continuationToken: "http:test",
         history: [],
         sessionId: "parent-session",
-        state: { "eve.tasks": { version: 3, runs: tasks } },
+        state: { "eve.workflowTool": { version: 3, runs: tasks } },
       },
     },
     version: 1,

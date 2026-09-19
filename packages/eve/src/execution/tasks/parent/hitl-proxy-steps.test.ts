@@ -77,7 +77,7 @@ describe("recordTaskInputRequestStep", () => {
       history: [],
       sessionId: "parent-session",
       state: {
-        "eve.tasks": {
+        "eve.workflowTool": {
           version: 3,
           runs: [
             {
@@ -142,7 +142,7 @@ describe("recordTaskInputRequestStep", () => {
       sessionId: "parent-session",
       state: setAgentHandleStore(
         {
-          "eve.tasks": {
+          "eve.workflowTool": {
             version: 3,
             runs: [
               {
@@ -212,7 +212,7 @@ describe("recordTerminalTaskViewsStep", () => {
       sessionId: "parent-session",
       state: setAgentHandleStore(
         {
-          "eve.tasks": {
+          "eve.workflowTool": {
             version: 3,
             runs: [
               {
@@ -306,7 +306,7 @@ describe("recordTerminalTaskViewsStep", () => {
       history: [],
       sessionId: "parent-session",
       state: {
-        "eve.tasks": {
+        "eve.workflowTool": {
           version: 3,
           runs: [
             {

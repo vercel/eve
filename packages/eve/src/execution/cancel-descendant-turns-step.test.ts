@@ -134,7 +134,7 @@ describe("cancelDescendantTurnsStep", () => {
             sequence: 0,
             sessionStarted: true,
           },
-          "eve.tasks": {
+          "eve.workflowTool": {
             version: 3,
             runs: [
               {

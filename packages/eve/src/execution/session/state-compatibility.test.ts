@@ -103,7 +103,7 @@ describe("additive durable state", () => {
   it("preserves task extensions through parsing, replayed creation and duplicate terminal deliveries", () => {
     const state = {
       authored: { opaque: true },
-      "eve.tasks": { version: 3, runs: [task], futureIndex: true },
+      "eve.workflowTool": { version: 3, runs: [task], futureIndex: true },
     };
     expect(getBackgroundWorkflowToolRuns(restored(state))).toEqual([task]);
     expect(parseActivityWorkIdentityV1(activity)).toEqual(activity);
@@ -134,7 +134,7 @@ describe("additive durable state", () => {
     });
     expect(restored(saved)).toMatchObject({
       authored: { opaque: true },
-      "eve.tasks": {
+      "eve.workflowTool": {
         version: 3,
         futureIndex: true,
         runs: [
@@ -180,7 +180,7 @@ describe("handoff state inspection", () => {
         checkpoint({
           "eve.agent.handles": { handles: [], futureStore: true },
           authored: { version: "anything", values: [null, false] },
-          "eve.tasks": { version: 3, runs: [task], futureIndex: true },
+          "eve.workflowTool": { version: 3, runs: [task], futureIndex: true },
         }),
       ),
     ).toBe(true);
@@ -221,7 +221,7 @@ describe("handoff state inspection", () => {
     expect(() =>
       isSessionStateIdleForHandoff(
         checkpoint({
-          "eve.tasks": { version: 3, runs: [incompatible] },
+          "eve.workflowTool": { version: 3, runs: [incompatible] },
         }),
       ),
     ).toThrow("Corrupt workflow tool run registry");
@@ -231,7 +231,7 @@ describe("handoff state inspection", () => {
       isSessionStateIdleForHandoff(
         checkpoint({
           "eve.runtime.pendingAuthorization": {},
-          "eve.tasks": {
+          "eve.workflowTool": {
             version: 3,
             runs: [{ ...task, address: { ...task.address, runId: null } }],
           },
@@ -244,7 +244,7 @@ describe("handoff state inspection", () => {
       isSessionStateIdleForHandoff(
         checkpoint({
           "eve.runtime.pendingAuthorization": {},
-          "eve.tasks": {
+          "eve.workflowTool": {
             version: 3,
             runs: [{ ...task, task: { ...task.task, terminalView: { status: "completed" } } }],
           },

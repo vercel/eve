@@ -1559,7 +1559,7 @@ describe("createAgentOtelInstrumentation", () => {
         serializedContext: serializeContext(context),
         sessionId: scope.sessionId,
         sessionState: {
-          "eve.tasks": {
+          "eve.workflowTool": {
             version: 3,
             runs: [
               {

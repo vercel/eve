@@ -37,7 +37,7 @@ describe("validateSessionCheckpointStep", () => {
     deserializeContextMock.mockResolvedValue({ require: vi.fn() });
     readDurableSessionMock.mockReturnValue({
       state: {
-        "eve.tasks": {
+        "eve.workflowTool": {
           version: 3,
           runs: [
             {
