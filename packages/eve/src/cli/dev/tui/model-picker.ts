@@ -1,4 +1,4 @@
-import type { ReasoningLevel } from "#setup/boxes/model-capabilities.js";
+import { ALL_REASONING_LEVELS, type ReasoningLevel } from "#setup/boxes/model-capabilities.js";
 import {
   filterOptions,
   initialSelectState,
@@ -49,14 +49,18 @@ const SPEED_OPTIONS: readonly SelectOption<ModelPickerDraft["speed"]>[] = [
   { value: "priority", label: "Fast", hint: "Priority processing, higher cost" },
 ];
 
+const REASONING_COPY: Record<ReasoningLevel, { label: string; hint: string }> = {
+  none: { label: "None", hint: "No reasoning" },
+  minimal: { label: "Minimal", hint: "The least thinking" },
+  low: { label: "Low", hint: "Less thinking, quicker answers" },
+  medium: { label: "Medium", hint: "Balance thinking and response time" },
+  high: { label: "High", hint: "More thinking for harder tasks" },
+  xhigh: { label: "Extra high", hint: "The most thinking, slower answers" },
+};
+
 const REASONING_OPTIONS: readonly SelectOption<ModelPickerDraft["reasoning"]>[] = [
   { value: "default", label: "Provider default", hint: "Use the model's default reasoning" },
-  { value: "none", label: "None", hint: "No reasoning" },
-  { value: "minimal", label: "Minimal", hint: "The least thinking" },
-  { value: "low", label: "Low", hint: "Less thinking, quicker answers" },
-  { value: "medium", label: "Medium", hint: "Balance thinking and response time" },
-  { value: "high", label: "High", hint: "More thinking for harder tasks" },
-  { value: "xhigh", label: "Extra high", hint: "The most thinking, slower answers" },
+  ...ALL_REASONING_LEVELS.map((value) => ({ value, ...REASONING_COPY[value] })),
 ];
 
 function modelOptions(request: ModelSettingsRequest): readonly SelectOption<string>[] {
@@ -152,11 +156,11 @@ function selectionDraft(
       if (request.model.kind === "fixed") return draft;
       draft.model = value;
       const capabilities = request.capabilitiesFor(value);
-      if (capabilities !== undefined || value !== request.model.current) {
-        if (!capabilities?.fastMode) draft.speed = "standard";
+      if (capabilities !== undefined) {
+        if (!capabilities.fastMode) draft.speed = "standard";
         if (
           draft.reasoning !== "default" &&
-          (!capabilities?.reasoning || !capabilities.reasoningLevels.includes(draft.reasoning))
+          (!capabilities.reasoning || !capabilities.reasoningLevels.includes(draft.reasoning))
         ) {
           draft.reasoning = "default";
         }
