@@ -98,6 +98,34 @@ describe("withEve", () => {
     }
   });
 
+  it("discovers a subdirectory project from Vercel's compiled config process", async () => {
+    const repositoryRoot = await mkdtemp(join(tmpdir(), "eve-vercel-config-repository-"));
+    const root = join(repositoryRoot, "apps", "factory");
+    await mkdir(root, { recursive: true });
+    await writeFile(
+      join(root, "package.json"),
+      JSON.stringify({ dependencies: { eve: "*" }, packageManager: "pnpm@10.0.0", private: true }),
+    );
+    await mkdir(join(root, "agents", "support", "agent"), { recursive: true });
+    const configDirectory = join(root, ".vercel");
+    await mkdir(configDirectory);
+    const originalCwd = process.cwd();
+    const originalArgv = [...process.argv];
+    process.chdir(repositoryRoot);
+    process.argv = [
+      process.execPath,
+      join(configDirectory, "vercel-loader.mjs"),
+      join(configDirectory, "vercel-temp.mjs"),
+    ];
+    try {
+      const config = await withEve({});
+      expect(config.services["eve-support"]).toBeDefined();
+    } finally {
+      process.argv = originalArgv;
+      process.chdir(originalCwd);
+    }
+  });
+
   it("does not modify the root Build Output", async () => {
     const root = await createWorkspace();
     const marker = join(root, ".vercel", "output", "services", "web", "config.json");

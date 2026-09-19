@@ -1,5 +1,5 @@
 import { mkdir } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 
 import { resolveEveProjectContext } from "#internal/project-context.js";
 import { assembleEveVercelServices } from "#internal/vercel/assemble-eve-services.js";
@@ -58,6 +58,22 @@ function toInternalConfig(config: EveVercelConfig): VercelServicesConfig {
   return config as VercelServicesConfig;
 }
 
+function resolveDefaultProjectRoot(): string {
+  const loaderPath = process.argv[1];
+  const compiledConfigPath = process.argv[2];
+  if (
+    loaderPath !== undefined &&
+    compiledConfigPath !== undefined &&
+    basename(loaderPath) === "vercel-loader.mjs" &&
+    basename(compiledConfigPath) === "vercel-temp.mjs" &&
+    dirname(loaderPath) === dirname(compiledConfigPath) &&
+    basename(dirname(compiledConfigPath)) === ".vercel"
+  ) {
+    return dirname(dirname(compiledConfigPath));
+  }
+  return process.cwd();
+}
+
 function assertComposableConfig(
   config: EveVercelConfig,
   agentNames: readonly (string | undefined)[],
@@ -112,7 +128,7 @@ export async function withEve<TConfig extends EveVercelConfig>(
     readonly services: Readonly<Record<string, EveVercelServiceConfig>>;
   }
 > {
-  const requestedRoot = resolve(options.root ?? process.cwd());
+  const requestedRoot = resolve(options.root ?? resolveDefaultProjectRoot());
   const context = await resolveEveProjectContext(requestedRoot);
   if (
     context.kind === "workspace-member" ||

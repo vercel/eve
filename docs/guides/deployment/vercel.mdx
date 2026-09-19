@@ -112,7 +112,7 @@ export default await withEve({
 });
 ```
 
-A Vercel project can use only one configuration source, so remove `vercel.json` when adopting `vercel.ts`. Keep `eve` in the root package dependencies so Vercel can import `eve/vercel` while evaluating the configuration. `withEve` discovers the workspace containing its evaluation directory, including Vercel's temporary `.vercel` configuration directory. Pass `{ root: "/absolute/workspace/path" }` as the second argument only when you need to select a specific workspace root.
+A Vercel project can use only one configuration source, so remove `vercel.json` when adopting `vercel.ts`. Keep `eve` in the project dependencies so Vercel can import `eve/vercel` while evaluating the configuration. `withEve` discovers the project containing `vercel.ts`, including when a monorepo config is compiled into that project's temporary `.vercel` directory and evaluated from the repository root. Pass `{ root: "/absolute/workspace/path" }` as the second argument only when you need to select a different eve project root.
 
 An authored eve service routed at `/eve/v1` already uses the protocol path; callbacks remain at `/eve/v1/callback/*`. A named mount such as `/eve/support` adds that mount before the protocol path, giving `/eve/support/v1/callback/*`.
 
