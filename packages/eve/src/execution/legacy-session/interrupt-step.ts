@@ -39,13 +39,6 @@ export async function interruptLegacySessionStep(prepared: PreparedLegacySession
   const state = prepared.originalSession.state;
   const runIds = new Set<string>();
   // Import cancels discoverable work even when the old registry cannot pass current validation.
-  const invocations = state?.["eve.runtime.workflowInvocations"];
-  if (isObject(invocations) && Array.isArray(invocations.invocations)) {
-    for (const entry of invocations.invocations) {
-      if (isObject(entry) && isObject(entry.address) && typeof entry.address.runId === "string")
-        runIds.add(entry.address.runId);
-    }
-  }
   const waitingRuns = state?.["eve.runtime.workflowToolRuns"];
   if (Array.isArray(waitingRuns)) {
     for (const entry of waitingRuns) {

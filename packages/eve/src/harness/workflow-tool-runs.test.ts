@@ -25,9 +25,9 @@ describe("workflow tool run records", () => {
   it("rejects the previous registry format before using its run records", () => {
     expect(() =>
       getBlockingWorkflowToolRuns({
-        "eve.runtime.workflowInvocations": { version: 1, invocations: [RECORD] },
+        "eve.tasks": { version: 1, runs: [RECORD] },
       }),
-    ).toThrow("Corrupt workflow invocation registry");
+    ).toThrow("Corrupt workflow tool run registry");
   });
 
   it("records, finds, and removes runs by call id", () => {
@@ -98,8 +98,8 @@ describe("workflow tool run records", () => {
   it("rejects malformed state", () => {
     expect(() =>
       getBlockingWorkflowToolRuns({
-        "eve.runtime.workflowInvocations": { version: 2, invocations: { not: "an array" } },
+        "eve.tasks": { version: 3, runs: { not: "an array" } },
       }),
-    ).toThrow("Corrupt workflow invocation registry");
+    ).toThrow("Corrupt workflow tool run registry");
   });
 });

@@ -77,9 +77,9 @@ describe("recordTaskInputRequestStep", () => {
       history: [],
       sessionId: "parent-session",
       state: {
-        "eve.runtime.workflowInvocations": {
-          version: 2,
-          invocations: [
+        "eve.tasks": {
+          version: 3,
+          runs: [
             {
               callId: "task-1",
               toolName: "export",
@@ -142,9 +142,9 @@ describe("recordTaskInputRequestStep", () => {
       sessionId: "parent-session",
       state: setAgentHandleStore(
         {
-          "eve.runtime.workflowInvocations": {
-            version: 2,
-            invocations: [
+          "eve.tasks": {
+            version: 3,
+            runs: [
               {
                 callId: "task-1",
                 toolName: "export",
@@ -212,9 +212,9 @@ describe("recordTerminalTaskViewsStep", () => {
       sessionId: "parent-session",
       state: setAgentHandleStore(
         {
-          "eve.runtime.workflowInvocations": {
-            version: 2,
-            invocations: [
+          "eve.tasks": {
+            version: 3,
+            runs: [
               {
                 callId: "task-1",
                 toolName: { agentId: "agent-1", kind: "subagent", mode: "local", name: "research" }
@@ -306,9 +306,9 @@ describe("recordTerminalTaskViewsStep", () => {
       history: [],
       sessionId: "parent-session",
       state: {
-        "eve.runtime.workflowInvocations": {
-          version: 2,
-          invocations: [
+        "eve.tasks": {
+          version: 3,
+          runs: [
             {
               callId: "task-1",
               toolName: "export",

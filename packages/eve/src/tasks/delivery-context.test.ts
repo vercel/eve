@@ -231,6 +231,6 @@ function taskEntry(
 
 function taskState(tasks: readonly ReturnType<typeof taskEntry>[]): SessionStateMap {
   return {
-    "eve.runtime.workflowInvocations": { version: 2, invocations: tasks },
+    "eve.tasks": { version: 3, runs: tasks },
   } as SessionStateMap;
 }

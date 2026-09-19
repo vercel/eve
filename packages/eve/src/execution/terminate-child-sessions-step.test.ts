@@ -479,7 +479,7 @@ function makeSessionState(
             ? { [AGENT_HANDLES_STATE_KEY]: { handles } }
             : {
                 [AGENT_HANDLES_STATE_KEY]: { handles },
-                "eve.runtime.workflowInvocations": { version: 2, invocations: tasks },
+                "eve.tasks": { version: 3, runs: tasks },
               },
       },
     },

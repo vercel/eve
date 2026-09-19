@@ -1559,9 +1559,9 @@ describe("createAgentOtelInstrumentation", () => {
         serializedContext: serializeContext(context),
         sessionId: scope.sessionId,
         sessionState: {
-          "eve.runtime.workflowInvocations": {
-            version: 2,
-            invocations: [
+          "eve.tasks": {
+            version: 3,
+            runs: [
               {
                 callId: "workflow",
                 toolName: "coordinate",

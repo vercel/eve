@@ -59,8 +59,8 @@ the background owner tracks only ordinary input requests for answer routing.
 | Terminal report classifier          | Successful `:ready:completed` delivery ID suffix     | Stable terminal delivery ID, retained after routing |
 
 A task is the public handle for an admitted session-owned invocation. Both lifetimes now live in
-`eve.runtime.workflowInvocations`; task lookup and waiting-run lookup are filtered views of that
-registry. The persisted key is unchanged; the registry is now version 2.
+`eve.tasks` as `{ version: 3, runs: WorkflowToolRun[] }`; task lookup and blocking-run lookup
+are filtered views of that registry. Version 3 replaces the version-2 task-only index on main.
 Cleanup selects the originating turn and `lifetime: "turn"`, so it cannot discard
 session-owned work. [Registry][prototype-registry]
 
@@ -136,8 +136,8 @@ The prototype deletes these responsibilities rather than renaming them:
 - Workflow-to-task outcome, progress, and question wrappers. The background owner consumes
   workflow messages directly; only session delivery and public view projection adapt their shape.
 - Pre-admission progress buffering: the workflow body cannot emit before `ready` starts it.
-- The separate `eve.tasks` and `eve.runtime.workflowToolRuns` stores, their independent write
-  paths, and task-specific copies of creation provenance and run address.
+- The separate `eve.runtime.workflowToolRuns` store and independent task-index write path;
+  `eve.tasks` now holds both lifetimes without duplicate creation provenance or run addresses.
 
 These responsibilities were retained or relocated:
 
@@ -274,7 +274,7 @@ before admission returns without starting the body. The regression test first fa
 only three of six messages, then passed with cleanup acknowledged before terminal delivery.
 
 The review also removed seven registry/type aliases and the task-index facade. Callers now use the
-workflow invocation registry directly. Mutations reuse their parsed registry rather than reading it
+workflow tool run registry directly. Mutations reuse their parsed registry rather than reading it
 again during the write, and replay registration merges common fields once. Persisted formats and
 task-payload retention are unchanged by these corrections.
 

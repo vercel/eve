@@ -359,9 +359,9 @@ describe("exported agent telemetry contract", () => {
           sessionId: "parent",
           turnId: "turn_0",
           sessionState: {
-            "eve.runtime.workflowInvocations": {
-              version: 2,
-              invocations: [
+            "eve.tasks": {
+              version: 3,
+              runs: [
                 {
                   callId: "workflow",
                   toolName: "coordinate",

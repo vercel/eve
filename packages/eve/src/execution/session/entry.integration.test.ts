@@ -1517,9 +1517,9 @@ describe("workflowEntry integration", () => {
                   Object.assign(session, {
                     state: {
                       ...session.state,
-                      "eve.runtime.workflowInvocations": {
-                        version: 2,
-                        invocations: [
+                      "eve.tasks": {
+                        version: 3,
+                        runs: [
                           {
                             callId: "task",
                             toolName: "research",

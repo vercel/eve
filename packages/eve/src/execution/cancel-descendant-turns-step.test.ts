@@ -134,9 +134,9 @@ describe("cancelDescendantTurnsStep", () => {
             sequence: 0,
             sessionStarted: true,
           },
-          "eve.runtime.workflowInvocations": {
-            version: 2,
-            invocations: [
+          "eve.tasks": {
+            version: 3,
+            runs: [
               {
                 lifetime: "turn",
                 callId: "call",

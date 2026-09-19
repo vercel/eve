@@ -390,9 +390,9 @@ describe("owner agent invocation dispatch", () => {
       ...session,
       state: {
         ...session.state,
-        "eve.runtime.workflowInvocations": {
-          version: 2,
-          invocations: [
+        "eve.tasks": {
+          version: 3,
+          runs: [
             {
               callId: "task-1",
               toolName: "research",
@@ -422,7 +422,7 @@ describe("owner agent invocation dispatch", () => {
         sessionState: { sessionId: "parent" } as never,
         taskId: "task-1",
       }),
-    ).rejects.toThrow("Corrupt workflow invocation registry");
+    ).rejects.toThrow("Corrupt workflow tool run registry");
     expect(prepareOwnerAgentInvocation).not.toHaveBeenCalled();
   });
 

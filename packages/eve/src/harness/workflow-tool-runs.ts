@@ -6,9 +6,9 @@ import type { SessionAuthContext } from "#channel/types.js";
 import { sameTaskMetadata, type TaskMetadata, type TaskView } from "#tasks/types.js";
 import type { DurableDynamicSubagentSelection, SessionAuth } from "#context/keys.js";
 
-// Keep the persisted key stable; the envelope version identifies incompatible records.
-export const WORKFLOW_TOOL_RUNS_STATE_KEY = "eve.runtime.workflowInvocations";
-const WORKFLOW_TOOL_RUNS_VERSION = 2;
+// Version 3 replaces the task-only index with the shared workflow tool run registry.
+export const WORKFLOW_TOOL_RUNS_STATE_KEY = "eve.tasks";
+const WORKFLOW_TOOL_RUNS_VERSION = 3;
 
 export interface WorkflowTaskPayload {
   readonly taskId: string;
@@ -46,7 +46,7 @@ export interface TaskAgentDispatchContext {
 
 interface WorkflowToolRunRegistry {
   readonly version: typeof WORKFLOW_TOOL_RUNS_VERSION;
-  readonly invocations: readonly WorkflowToolRun[];
+  readonly runs: readonly WorkflowToolRun[];
   readonly [key: string]: unknown;
 }
 
@@ -144,29 +144,27 @@ function parseRegistry(value: unknown): WorkflowToolRunRegistry {
   if (
     !isObject(value) ||
     value.version !== WORKFLOW_TOOL_RUNS_VERSION ||
-    !Array.isArray(value.invocations) ||
-    !Array.from(value.invocations).every(isWorkflowToolRun)
+    !Array.isArray(value.runs) ||
+    !Array.from(value.runs).every(isWorkflowToolRun)
   ) {
-    throw new Error("Corrupt workflow invocation registry: invalid version or invocation.");
+    throw new Error("Corrupt workflow tool run registry: invalid version or run.");
   }
   const identities = new Set<string>();
   const tasks = new Set<string>();
-  for (const entry of value.invocations) {
+  for (const entry of value.runs) {
     const identity = JSON.stringify([entry.origin.turnId, entry.callId]);
     if (identities.has(identity))
-      throw new Error(
-        "Corrupt workflow invocation registry: Invocation identities must be unique.",
-      );
+      throw new Error("Corrupt workflow tool run registry: Run identities must be unique.");
     identities.add(identity);
     if (entry.lifetime !== "session") continue;
     if (tasks.has(entry.task.taskId))
-      throw new Error("Corrupt workflow invocation registry: Task ids must be unique.");
+      throw new Error("Corrupt workflow tool run registry: Task ids must be unique.");
     tasks.add(entry.task.taskId);
   }
   return {
     ...value,
     version: WORKFLOW_TOOL_RUNS_VERSION,
-    invocations: value.invocations.map(copyWorkflowToolRun),
+    runs: value.runs.map(copyWorkflowToolRun),
   };
 }
 
@@ -261,20 +259,20 @@ export function readWorkflowTaskView(task: WorkflowTaskPayload): TaskView | unde
 }
 
 function readRegistry(state: SessionStateMap | undefined): WorkflowToolRunRegistry {
-  if (state?.["eve.tasks"] !== undefined || state?.["eve.runtime.workflowToolRuns"] !== undefined) {
+  if (state?.["eve.runtime.workflowToolRuns"] !== undefined) {
     throw new Error(
-      "Unsupported workflow invocation state: start a new session or import its conversation.",
+      "Unsupported workflow tool run state: start a new session or import its conversation.",
     );
   }
   const raw = state?.[WORKFLOW_TOOL_RUNS_STATE_KEY];
-  if (raw === undefined) return { version: WORKFLOW_TOOL_RUNS_VERSION, invocations: [] };
+  if (raw === undefined) return { version: WORKFLOW_TOOL_RUNS_VERSION, runs: [] };
   return parseRegistry(raw);
 }
 
 export function getWorkflowToolRuns(
   state: SessionStateMap | undefined,
 ): readonly WorkflowToolRun[] {
-  return readRegistry(state).invocations;
+  return readRegistry(state).runs;
 }
 
 export function getBackgroundWorkflowToolRuns(
@@ -306,7 +304,7 @@ function writeRegistry(
   state: SessionStateMap | undefined,
   registry: WorkflowToolRunRegistry,
 ): SessionStateMap | undefined {
-  if (registry.invocations.length === 0) {
+  if (registry.runs.length === 0) {
     const next = { ...state };
     delete next[WORKFLOW_TOOL_RUNS_STATE_KEY];
     return Object.keys(next).length === 0 ? undefined : next;
@@ -323,12 +321,12 @@ export function registerWorkflowToolRun<T extends { readonly state?: SessionStat
   entry: WorkflowToolRun,
 ): T {
   const registry = readRegistry(session.state);
-  const invocations = [...registry.invocations];
-  const index = invocations.findIndex(
+  const runs = [...registry.runs];
+  const index = runs.findIndex(
     (candidate) =>
       candidate.origin.turnId === entry.origin.turnId && candidate.callId === entry.callId,
   );
-  const previous = invocations[index];
+  const previous = runs[index];
   if (
     previous !== undefined &&
     (previous.lifetime !== entry.lifetime || previous.toolName !== entry.toolName)
@@ -355,7 +353,7 @@ export function registerWorkflowToolRun<T extends { readonly state?: SessionStat
         },
       };
     } else {
-      const pending = invocations.find(
+      const pending = runs.find(
         (candidate): candidate is BackgroundWorkflowToolRun =>
           candidate.lifetime === "session" && candidate.task.terminalView === undefined,
       );
@@ -370,15 +368,15 @@ export function registerWorkflowToolRun<T extends { readonly state?: SessionStat
     }
   }
   if (entry.lifetime === "session") readWorkflowTaskView(entry.task);
-  if (previous === undefined) invocations.push(entry);
+  if (previous === undefined) runs.push(entry);
   else
-    invocations[index] = {
+    runs[index] = {
       ...previous,
       ...entry,
       origin: previous.origin,
       address: { ...previous.address, ...entry.address },
     };
-  return { ...session, state: writeRegistry(session.state, { ...registry, invocations }) };
+  return { ...session, state: writeRegistry(session.state, { ...registry, runs }) };
 }
 
 /** Task payloads remain available for the session lifetime, including after report delivery. */
@@ -389,25 +387,25 @@ export function recordWorkflowTaskView(
   const terminal = parseTaskView(view);
   if (terminal === undefined) throw new Error("Invalid terminal workflow task view.");
   const registry = readRegistry(state);
-  const invocations = [...registry.invocations];
-  const index = invocations.findIndex(
+  const runs = [...registry.runs];
+  const index = runs.findIndex(
     (entry) => entry.lifetime === "session" && entry.task.taskId === terminal.taskId,
   );
-  const entry = invocations[index];
+  const entry = runs[index];
   if (entry === undefined || entry.lifetime !== "session") return state;
   if (!sameTaskMetadata(entry.task.metadata, terminal.metadata))
     throw new Error(`Task view metadata does not match invocation "${view.taskId}".`);
   const previous = readWorkflowTaskView(entry.task);
   // Parent delivery order decides settlement. Replays and late outcomes cannot replace it.
   if (previous !== undefined) return state;
-  invocations[index] = {
+  runs[index] = {
     ...entry,
     task: {
       ...entry.task,
       terminalView: terminal,
     },
   };
-  return writeRegistry(state, { ...registry, invocations });
+  return writeRegistry(state, { ...registry, runs });
 }
 
 /** Removes only this turn's waiting calls. Session-owned task payloads are never pruned here. */
@@ -417,7 +415,7 @@ export function removeBlockingWorkflowToolRuns<T extends { readonly state?: Sess
   callId?: string,
 ): T {
   const registry = readRegistry(session.state);
-  const entries = registry.invocations;
+  const entries = registry.runs;
   const remaining = entries.filter(
     (entry) =>
       entry.lifetime !== "turn" ||
@@ -426,7 +424,7 @@ export function removeBlockingWorkflowToolRuns<T extends { readonly state?: Sess
   );
   return remaining.length === entries.length
     ? session
-    : { ...session, state: writeRegistry(session.state, { ...registry, invocations: remaining }) };
+    : { ...session, state: writeRegistry(session.state, { ...registry, runs: remaining }) };
 }
 
 /** Results without an originating turn may bind only when exactly one recorded turn owns the call. */

@@ -500,9 +500,9 @@ function batchingInput(count = 100, crossTurn = false) {
         history: [],
         agent: { system: "" },
         state: {
-          "eve.runtime.workflowInvocations": {
-            version: 2,
-            invocations: Array.from({ length: count }, (_, index) => ({
+          "eve.tasks": {
+            version: 3,
+            runs: Array.from({ length: count }, (_, index) => ({
               callId: `task_${index}`,
               toolName: "worker",
               lifetime: "session" as const,

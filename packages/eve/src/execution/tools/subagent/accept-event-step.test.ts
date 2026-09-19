@@ -35,9 +35,9 @@ const hookPayload = {
   subagentName: "research",
 };
 const taskIndex = {
-  "eve.runtime.workflowInvocations": {
-    version: 2,
-    invocations: [
+  "eve.tasks": {
+    version: 3,
+    runs: [
       {
         callId: "task-1",
         toolName: "export",

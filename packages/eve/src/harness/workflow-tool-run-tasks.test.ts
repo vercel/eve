@@ -293,9 +293,9 @@ describe("session task index", () => {
   it.each(["", null, 42])("rejects an invalid additive cohort identity: %j", (cohortId) => {
     expect(() =>
       getBackgroundWorkflowToolRuns({
-        "eve.runtime.workflowInvocations": {
-          version: 2,
-          invocations: [
+        "eve.tasks": {
+          version: 3,
+          runs: [
             {
               ...task("task_a", "turn-1"),
               task: { ...task("task_a", "turn-1").task, cohortId: cohortId },
@@ -303,7 +303,7 @@ describe("session task index", () => {
           ],
         },
       }),
-    ).toThrow(/Corrupt workflow invocation registry/u);
+    ).toThrow(/Corrupt workflow tool run registry/u);
   });
 
   it("retains only terminal views as expired-run fallbacks", () => {
@@ -354,9 +354,9 @@ describe("session task index", () => {
       { ...terminalView, taskId: "task_other" },
     ]) {
       const [entry] = getBackgroundWorkflowToolRuns({
-        "eve.runtime.workflowInvocations": {
-          version: 2,
-          invocations: [{ ...base, task: { ...base.task, terminalView: invalidView } }],
+        "eve.tasks": {
+          version: 3,
+          runs: [{ ...base, task: { ...base.task, terminalView: invalidView } }],
         },
       });
       expect(entry?.address).toEqual(base.address);
@@ -389,21 +389,21 @@ describe("session task index", () => {
   it("throws on a corrupt index instead of treating it as absent", () => {
     expect(() =>
       getBackgroundWorkflowToolRuns({
-        "eve.runtime.workflowInvocations": { version: 2, invocations: [{ taskId: 42 }] },
+        "eve.tasks": { version: 3, runs: [{ taskId: 42 }] },
       }),
-    ).toThrow("Corrupt workflow invocation registry");
+    ).toThrow("Corrupt workflow tool run registry");
   });
 
   it("rejects missing creator context", () => {
     const entry = task("task_a", "turn-1");
     expect(() =>
       getBackgroundWorkflowToolRuns({
-        "eve.runtime.workflowInvocations": {
-          version: 2,
-          invocations: [{ ...entry, task: { ...entry.task, dispatchContext: undefined } }],
+        "eve.tasks": {
+          version: 3,
+          runs: [{ ...entry, task: { ...entry.task, dispatchContext: undefined } }],
         },
       }),
-    ).toThrow("Corrupt workflow invocation registry");
+    ).toThrow("Corrupt workflow tool run registry");
   });
 
   it("rejects reassigning a task id to another originating turn", () => {
@@ -416,9 +416,9 @@ describe("session task index", () => {
   it("rejects unrecognized task dispatch context fields", () => {
     expect(() =>
       getBackgroundWorkflowToolRuns({
-        "eve.runtime.workflowInvocations": {
-          version: 2,
-          invocations: [
+        "eve.tasks": {
+          version: 3,
+          runs: [
             {
               callId: "task_a",
               toolName: metadata.name,
@@ -437,15 +437,15 @@ describe("session task index", () => {
           ],
         },
       }),
-    ).toThrow("Corrupt workflow invocation registry");
+    ).toThrow("Corrupt workflow tool run registry");
   });
 
   it("rejects an unsupported registry version", () => {
     expect(() =>
       getBackgroundWorkflowToolRuns({
-        "eve.runtime.workflowInvocations": { version: 99, invocations: [] },
+        "eve.tasks": { version: 99, runs: [] },
       }),
-    ).toThrow("Corrupt workflow invocation registry");
+    ).toThrow("Corrupt workflow tool run registry");
   });
 });
 

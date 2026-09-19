@@ -33,7 +33,7 @@ describe("trace retention by live work", () => {
     const before = serializeContext(context);
     expect(() =>
       pruneAgentTraceState(context, "session", {
-        "eve.runtime.workflowInvocations": { version: 99, invocations: [] },
+        "eve.tasks": { version: 99, runs: [] },
       }),
     ).not.toThrow();
     expect(serializeContext(context)).toEqual(before);
@@ -78,15 +78,15 @@ describe("trace retention by live work", () => {
       },
     };
     pruneAgentTraceState(context, "session", {
-      "eve.runtime.workflowInvocations": { version: 2, invocations: [task] },
+      "eve.tasks": { version: 3, runs: [task] },
     });
     expect(serializeContext(context)[AGENT_TRACE_CONTEXT_KEY]).toMatchObject({
       actionAnchors: { key: anchor },
     });
     pruneAgentTraceState(context, "session", {
-      "eve.runtime.workflowInvocations": {
-        version: 2,
-        invocations: [
+      "eve.tasks": {
+        version: 3,
+        runs: [
           {
             ...task,
             task: {

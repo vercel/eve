@@ -544,9 +544,9 @@ describe("routeProxiedDeliverStep", () => {
           options?.owned === false
             ? undefined
             : {
-                "eve.runtime.workflowInvocations": {
-                  version: 2,
-                  invocations: [
+                "eve.tasks": {
+                  version: 3,
+                  runs: [
                     {
                       callId: "task-1",
                       toolName: "research",
@@ -702,9 +702,9 @@ describe("recordTaskInputRequestStep", () => {
   it("records an exact route only for a current task owned by this parent", async () => {
     const session = createStubSession({
       state: {
-        "eve.runtime.workflowInvocations": {
-          version: 2,
-          invocations: [
+        "eve.tasks": {
+          version: 3,
+          runs: [
             {
               callId: "task-1",
               toolName: "research",
@@ -1131,7 +1131,7 @@ describe("turnStep", () => {
     const pending = createStubSession({
       state: {
         "eve.harness.emission": emissionState,
-        "eve.runtime.workflowInvocations": { version: 2, invocations: [task] },
+        "eve.tasks": { version: 3, runs: [task] },
       },
     });
     const terminalView = {
@@ -1143,9 +1143,9 @@ describe("turnStep", () => {
     const settled = createStubSession({
       state: {
         "eve.harness.emission": { ...emissionState, sequence: 1, turnId: "turn_1" },
-        "eve.runtime.workflowInvocations": {
-          version: 2,
-          invocations: [{ ...task, task: { ...task.task, terminalView: terminalView } }],
+        "eve.tasks": {
+          version: 3,
+          runs: [{ ...task, task: { ...task.task, terminalView: terminalView } }],
         },
       },
     });
@@ -2649,9 +2649,9 @@ describe("turnStep", () => {
     const metadata = { kind: "report-probe", name: "report_probe" } as const;
     const session = createStubSession({
       state: {
-        "eve.runtime.workflowInvocations": {
-          version: 2,
-          invocations: [
+        "eve.tasks": {
+          version: 3,
+          runs: [
             {
               callId: "task_1",
               toolName: metadata.name,
@@ -2762,9 +2762,9 @@ describe("turnStep", () => {
           stepIndex: 1,
           turnId: "turn_0",
         },
-        "eve.runtime.workflowInvocations": {
-          version: 2,
-          invocations: [
+        "eve.tasks": {
+          version: 3,
+          runs: [
             {
               callId: "task_1",
               toolName: "report_probe",

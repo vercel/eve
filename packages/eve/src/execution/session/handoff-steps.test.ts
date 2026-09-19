@@ -37,9 +37,9 @@ describe("validateSessionCheckpointStep", () => {
     deserializeContextMock.mockResolvedValue({ require: vi.fn() });
     readDurableSessionMock.mockReturnValue({
       state: {
-        "eve.runtime.workflowInvocations": {
-          version: 2,
-          invocations: [
+        "eve.tasks": {
+          version: 3,
+          runs: [
             {
               callId: "task",
               toolName: "research",
@@ -62,7 +62,7 @@ describe("validateSessionCheckpointStep", () => {
       },
     });
     await expect(validateSessionCheckpointStep({ checkpoint: createCheckpoint() })).rejects.toThrow(
-      "Corrupt workflow invocation registry",
+      "Corrupt workflow tool run registry",
     );
   });
 
