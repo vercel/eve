@@ -40,7 +40,6 @@ import {
   renderFlowPanel,
   flowMessageRows,
   renderAcknowledgeQuestion,
-  renderModelEditorQuestion,
   renderSelectQuestion,
   renderTextQuestion,
   type FlowPanelContent,
@@ -51,10 +50,12 @@ import {
   type SetupSelectPanelState,
 } from "./setup-panel.js";
 import {
-  initialModelEditorState,
-  transitionModelEditor,
-  type ModelEditorEvent,
-} from "./model-editor.js";
+  initialModelPickerState,
+  transitionModelPicker,
+  renderModelPicker,
+  modelPickerTitle,
+  type ModelPickerEvent,
+} from "./model-picker.js";
 import type {
   SetupEditableSelectResult,
   SetupFlowIndicator,
@@ -606,7 +607,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
     readSelect: (options) => this.#readSetupSelect(options),
     readEditableSelect: (options) => this.#readSetupEditableSelect(options),
     readProviderPicker: (options) => this.#readProviderPicker(options),
-    readModelEditor: (options) => this.#readModelEditor(options),
+    readModelPicker: (options) => this.#readModelPicker(options),
     readText: (options) => this.#readSetupText(options),
     readAcknowledge: (options) => this.#readSetupAcknowledge(options),
     readChoice: (options) => this.#readSetupChoice(options),
@@ -2436,28 +2437,20 @@ export class TerminalRenderer implements AgentTUIRenderer {
     return await question.promise;
   }
 
-  /**
-   * The composite Change-model screen: the searchable catalog, the reasoning
-   * slider, and the service-tier toggle on one panel, driven by the pure
-   * model-editor reducer. Resolves the drafted changes on Done, or `undefined`
-   * on Esc/Ctrl-C.
-   */
-  async #readModelEditor(opts: ModelSettingsRequest): Promise<ModelSettingsResult | undefined> {
-    const flow = this.#beginSetupQuestion("Select the model");
-    let interaction = initialModelEditorState(opts);
-
-    flow.question = (width) =>
-      renderModelEditorQuestion({ request: opts, state: interaction }, this.#theme, width, "");
+  async #readModelPicker(opts: ModelSettingsRequest): Promise<ModelSettingsResult | undefined> {
+    let interaction = initialModelPickerState(opts);
+    const flow = this.#beginSetupQuestion(modelPickerTitle(interaction));
+    flow.question = (width) => renderModelPicker(opts, interaction, this.#theme, width);
     this.#paint();
 
     const question = this.#captureSetupQuestion<ModelSettingsResult | undefined>((key, settle) => {
-      const dispatch = (event: ModelEditorEvent): void => {
-        const transition = transitionModelEditor(interaction, event, opts);
+      const dispatch = (event: ModelPickerEvent): void => {
+        const transition = transitionModelPicker(interaction, event, opts);
         switch (transition.kind) {
-          case "ignore":
-            return;
           case "render":
+            if (interaction === transition.state) return;
             interaction = transition.state;
+            flow.questionTitle = modelPickerTitle(interaction);
             this.#paint();
             return;
           case "cancel":
@@ -2469,13 +2462,18 @@ export class TerminalRenderer implements AgentTUIRenderer {
         }
       };
 
+      if (key.type === "ctrl-c") {
+        dispatch({ type: "cancel" });
+        return;
+      }
+      if (key.type === "escape" || key.type === "left") {
+        dispatch({ type: "back" });
+        return;
+      }
       const intent = setupSelectionIntent(key);
       switch (intent?.kind) {
-        case "cancel":
-          dispatch({ type: "cancel" });
-          return;
         case "move":
-          dispatch({ type: "move", direction: intent.direction });
+          dispatch({ type: intent.direction });
           return;
         case "submit":
           dispatch({ type: "submit" });
@@ -2483,21 +2481,6 @@ export class TerminalRenderer implements AgentTUIRenderer {
         case "repaint":
           this.#paint();
           return;
-        case undefined:
-          break;
-      }
-
-      // Left/right adjust the inline value under the menu cursor, and Tab
-      // mimics right. The shared intent grammar deliberately drops the
-      // horizontal arrows (line editors own them elsewhere), so this surface
-      // consumes them locally.
-      if (key.type === "left" || key.type === "right") {
-        dispatch({ type: "adjust", direction: key.type });
-        return;
-      }
-      if (key.type === "tab") {
-        dispatch({ type: "adjust", direction: "right" });
-        return;
       }
       if (key.type === "backspace") {
         dispatch({ type: "backspace" });

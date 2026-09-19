@@ -128,8 +128,9 @@ describe("promptCommandsFor", () => {
     expect(names).not.toContain("vc:auth");
   });
 
-  it("exposes the Vercel CLI commands for remote sessions", () => {
+  it("leads remote sessions with help and hides local setup commands", () => {
     const names = promptCommandsFor("remote").map((command) => command.name);
+    expect(names[0]).toBe("help");
     expect(names).not.toContain("vc:install");
     expect(names).not.toContain("vc:login");
     expect(names).not.toContain("vc:auth");
@@ -189,8 +190,8 @@ describe("PROMPT_COMMANDS registry", () => {
     }
   });
 
-  it("leads with /help so a bare slash defaults to the safest command", () => {
-    expect(PROMPT_COMMANDS[0]?.name).toBe("help");
+  it("leads with /model so a bare slash opens model selection", () => {
+    expect(PROMPT_COMMANDS[0]?.name).toBe("model");
   });
 });
 

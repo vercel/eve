@@ -4483,85 +4483,6 @@ describe("TerminalRenderer setup panel", () => {
     renderer.shutdown();
   });
 
-  it("walks the model editor from pick to slider to toggle to Done", async () => {
-    const { screen, input, renderer } = makeRenderer(100, 40);
-    renderer.setupFlow.begin("Configure the agent model");
-    const answer = renderer.setupFlow.readModelEditor({
-      model: {
-        kind: "pick",
-        options: [
-          {
-            value: "anthropic/claude-sonnet-5",
-            label: "anthropic/claude-sonnet-5",
-            featured: true,
-          },
-          { value: "xai/grok-4.5", label: "xai/grok-4.5" },
-        ],
-        current: "anthropic/claude-sonnet-5",
-      },
-      reasoning: null,
-      serviceTier: { kind: "standard" },
-      settingsEditable: true,
-      externalRouting: false,
-      capabilitiesFor: () => ({
-        reasoning: true,
-        reasoningLevels: ["low", "high"],
-        fastMode: true,
-      }),
-    });
-
-    // The value menu opens on the Model row.
-    expect(screen.snapshot()).toContain("› Model");
-    input.enter();
-    expect(screen.snapshot()).toContain("Select the model");
-    input.type("grok");
-    expect(screen.snapshot()).toContain("xai/grok-4.5");
-    input.enter();
-    await expect(answer).resolves.toEqual({ model: "xai/grok-4.5" });
-    renderer.setupFlow.end({ preserveDiagnostics: false });
-    renderer.shutdown();
-  });
-
-  it("unwinds Esc through filter, sub-screen, and menu before cancelling", async () => {
-    const { screen, input, renderer } = makeRenderer(100, 40);
-    renderer.setupFlow.begin("Configure the agent model");
-    const answer = renderer.setupFlow.readModelEditor({
-      model: {
-        kind: "pick",
-        options: [{ value: "anthropic/claude-sonnet-5", label: "Claude Sonnet 5" }],
-        current: "anthropic/claude-sonnet-5",
-      },
-      reasoning: null,
-      serviceTier: { kind: "standard" },
-      settingsEditable: true,
-      externalRouting: false,
-      capabilitiesFor: () => undefined,
-    });
-    let settled = false;
-    void answer.finally(() => {
-      settled = true;
-    });
-
-    input.enter();
-    input.type("sonnet");
-    input.send("\x1b");
-    await new Promise((resolve) => setTimeout(resolve, 50));
-    expect(settled).toBe(false);
-    // The first Esc only cleared the filter; the list is still open.
-    expect(screen.snapshot()).toContain("type to search");
-
-    input.send("\x1b");
-    await new Promise((resolve) => setTimeout(resolve, 50));
-    expect(settled).toBe(false);
-    // Back on the menu.
-    expect(screen.snapshot()).toContain("› Model");
-
-    input.send("\x1b");
-    await expect(answer).resolves.toBeUndefined();
-    renderer.setupFlow.end({ preserveDiagnostics: false });
-    renderer.shutdown();
-  });
-
   it("drives the ephemeral flow status through the footer", () => {
     const { screen, renderer } = makeRenderer();
 
@@ -5290,14 +5211,14 @@ describe("TerminalRenderer command typeahead", () => {
     const snapshot = screen.snapshot();
     expect(snapshot).toContain("/help");
     expect(snapshot).toContain("Show available commands");
-    expect(snapshot).toContain("Choose a model and its settings");
+    expect(snapshot).toContain("Choose a model, speed, and reasoning");
     const promptLine = snapshot.split("\n").find((line) => line.includes("❯ /"));
     expect(promptLine?.startsWith("❯ /")).toBe(true);
 
     input.enter();
-    // The highlighted default — /help leads the registry — is what a bare
+    // The highlighted default — /model leads the registry — is what a bare
     // slash submits.
-    expect(await prompt).toBe("/help");
+    expect(await prompt).toBe("/model");
     renderer.shutdown();
   });
 
@@ -5312,7 +5233,7 @@ describe("TerminalRenderer command typeahead", () => {
     expect(snapshot).toContain("/model");
     expect(snapshot).toContain("[provider/model]");
     // ...and the dropdown (with its description column) is gone.
-    expect(snapshot).not.toContain("Choose a model and its settings");
+    expect(snapshot).not.toContain("Choose a model, speed, and reasoning");
 
     input.enter();
     expect(await prompt).toBe("/model");
@@ -5369,9 +5290,9 @@ describe("TerminalRenderer command typeahead", () => {
     input.type("/");
     input.down();
     input.enter();
-    // Down moved /help → /info; history recall would have submitted the
+    // Down moved /model → /reset; history recall would have submitted the
     // earlier prompt instead.
-    expect(await second).toBe("/info");
+    expect(await second).toBe("/reset");
     renderer.shutdown();
   });
 
@@ -5389,7 +5310,7 @@ describe("TerminalRenderer command typeahead", () => {
     });
 
     input.type("m");
-    expect(screen.snapshot()).toContain("Choose a model and its settings");
+    expect(screen.snapshot()).toContain("Choose a model, speed, and reasoning");
     input.enter();
     expect(await prompt).toBe("/model");
     renderer.shutdown();
@@ -5425,7 +5346,7 @@ describe("TerminalRenderer command typeahead", () => {
     input.type("/");
     const snapshot = screen.snapshot();
     expect(snapshot).not.toContain("Authenticate with Vercel");
-    expect(snapshot).not.toContain("Choose a model and its settings");
+    expect(snapshot).not.toContain("Choose a model, speed, and reasoning");
     input.enter();
     await prompt;
     renderer.shutdown();
