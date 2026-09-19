@@ -28,8 +28,12 @@ const authenticateLaterParentCaller: AuthFn<Request> = (request) =>
     ? principal("later-parent-caller")
     : null;
 
+// The loopback parent dispatches with a callback, so it must authenticate as a
+// service and be named by `trustedForwarders` below.
 const authenticateRemoteChild: AuthFn<Request> = (request) =>
-  request.headers.get("authorization") === REMOTE_CHILD ? principal("remote-http-child") : null;
+  request.headers.get("authorization") === REMOTE_CHILD
+    ? { ...principal("remote-http-child"), principalType: "service" }
+    : null;
 
 const authenticateEvalDriver: AuthFn<Request> = () => principal("eval-driver");
 
@@ -40,6 +44,8 @@ export default eveChannel({
     authenticateRemoteChild,
     authenticateEvalDriver,
   ],
+  trustedForwarders: (forwarder) =>
+    forwarder.principalType === "service" && forwarder.principalId === "remote-http-child",
   onMessage({ eve }) {
     return {
       auth: eve.request.headers.get(ANONYMOUS_TASK_CREATOR_HEADER) === "1" ? null : eve.caller,

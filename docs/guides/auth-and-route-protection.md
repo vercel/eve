@@ -237,11 +237,11 @@ export default eveChannel({
 });
 ```
 
-`trustedForwarders` authorizes the verified forwarder to supply eve delegation context: principal identity, parent session lineage, and, with principal forwarding, trace-content constraints. Match it precisely: `() => true` grants this authority to every caller that passes route auth, including preview deployments accepted by `vercelOidc()`. The framework default channel rejects forwarded principals and ignores the other context.
+`trustedForwarders` authorizes the verified forwarder to supply eve delegation context: principal identity, parent session lineage, a `callback` or `activityObserver` destination for this deployment's own credentials (see [Callback authentication](./remote-agents#callback-authentication)), and, with principal forwarding, trace-content constraints. Match it precisely: `() => true` grants this authority to every caller that passes route auth, including preview deployments accepted by `vercelOidc()`. The framework default channel rejects forwarded principals and ignores the other context.
 
 When the predicate accepts a create request, `ctx.session.auth.current` and `.initiator` carry the forwarded user exactly as if they had called your deployment directly. On continuation, only `auth.current` is replaced; `auth.initiator` remains the session creator. User-scoped connections, local subagents, and further `forwardPrincipal` hops therefore see the active turn's caller.
 
-The forwarder is recorded on accepted contexts as the `eve:forwarded-by` attribute (always overwritten by the receiver, so a forwarder cannot falsify it). Forwarded identity rejections fail loud: a forwarded body without `trustedForwarders` configured or with a forwarder the predicate refuses is a `403`, and a malformed payload is a `400`. Only principal metadata is ever accepted — tokens and credentials never cross the hop.
+The forwarder is recorded on accepted contexts as the `eve:forwarded-by` attribute (always overwritten by the receiver, so a forwarder cannot falsify it). Forwarded identity rejections fail loud: a forwarded body or a callback-bearing body without `trustedForwarders` configured or with a forwarder the predicate refuses is a `403`, and a malformed payload is a `400`. Only principal metadata is ever accepted — tokens and credentials never cross the hop.
 
 Trusted parent session lineage populates `ctx.session.parent` and preserves the root session across the delegation chain. Untrusted lineage is ignored, and accepted lineage does not remove the normal root-session token cap.
 

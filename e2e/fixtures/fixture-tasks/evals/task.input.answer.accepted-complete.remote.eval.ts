@@ -9,7 +9,7 @@ import {
 } from "./shared.js";
 import { defineTaskEval } from "./task-transition.js";
 
-const REMOTE_PRINCIPAL_MARKER = "C8-REMOTE-PRINCIPAL:user:remote-http-child";
+const REMOTE_PRINCIPAL_MARKER = "C8-REMOTE-PRINCIPAL:service:remote-http-child";
 
 /**
  * Also covers the /eve/v1 callback-prefix regression (#3047): vercel.json

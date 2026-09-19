@@ -1,15 +1,23 @@
 import { createLogger } from "#internal/logging.js";
+import type { OutboundAuthFn } from "#public/agents/auth.js";
 import { isObject } from "#shared/guards.js";
 
 const log = createLogger("execution.session-callback");
 const SESSION_CALLBACK_TIMEOUT_MS = 30_000;
 const VERCEL_TRUSTED_OIDC_IDP_TOKEN_HEADER = "x-vercel-trusted-oidc-idp-token";
-const VERCEL_CALLBACK_HOST_ENVS = [
-  "VERCEL_URL",
-  "VERCEL_BRANCH_URL",
-  "VERCEL_PROJECT_PRODUCTION_URL",
-] as const;
 const VERCEL_REQUEST_CONTEXT = Symbol.for("@vercel/request-context");
+const SESSION_CALLBACK_AUTH = Symbol.for("eve.session-callback-auth");
+
+// The global symbol makes the registration visible to both Nitro-inlined and
+// disk-imported eve modules, which otherwise hold separate module instances.
+const callbackAuthRegistry = globalThis as typeof globalThis & {
+  [SESSION_CALLBACK_AUTH]?: OutboundAuthFn;
+};
+
+/** Registers the outbound auth used for callbacks this deployment sends to remote parents. */
+export function setSessionCallbackAuth(fn: OutboundAuthFn | undefined): void {
+  callbackAuthRegistry[SESSION_CALLBACK_AUTH] = fn;
+}
 
 /** Posts one framework callback payload with the shared callback transport policy. */
 export async function postSessionCallbackRequest(input: {
@@ -83,23 +91,31 @@ function callbackLogFields(input: { readonly body: unknown; readonly url: string
 
 async function resolveSessionCallbackHeaders(urlValue: string): Promise<Record<string, string>> {
   const headers: Record<string, string> = { "content-type": "application/json" };
-  if (process.env.VERCEL !== "1") return headers;
-
-  let url: URL;
+  // Credentials never travel over plaintext.
+  if (URL.parse(urlValue)?.protocol !== "https:") return headers;
+  // The URL was nominated by a caller that passed the channel's
+  // `trustedForwarders` policy (see `authorizeRemoteCallback`), so this
+  // deployment's credentials only go to an explicitly trusted parent.
+  const auth = callbackAuthRegistry[SESSION_CALLBACK_AUTH] ?? defaultSessionCallbackAuth;
   try {
-    url = new URL(urlValue);
+    return { ...(await auth()).headers, ...headers };
   } catch {
+    log.error("callback auth failed; sending without credentials", {
+      error: new Error("Callback auth function threw."),
+    });
     return headers;
   }
-  const currentHost = VERCEL_CALLBACK_HOST_ENVS.some(
-    (name) => process.env[name]?.trim().toLowerCase() === url.hostname.toLowerCase(),
-  );
-  if (url.protocol !== "https:" || !currentHost) return headers;
-
-  const token = readAmbientVercelOidcToken();
-  if (token !== undefined) headers[VERCEL_TRUSTED_OIDC_IDP_TOKEN_HEADER] = token;
-  return headers;
 }
+
+const defaultSessionCallbackAuth: OutboundAuthFn = async () => {
+  const token = process.env.VERCEL === "1" ? readAmbientVercelOidcToken() : undefined;
+  const headers: Record<string, string> = {};
+  if (token !== undefined) {
+    headers.authorization = `Bearer ${token}`;
+    headers[VERCEL_TRUSTED_OIDC_IDP_TOKEN_HEADER] = token;
+  }
+  return { headers };
+};
 
 function readAmbientVercelOidcToken(): string | undefined {
   const requestContext = (
