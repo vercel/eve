@@ -1,10 +1,10 @@
-import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { readRegistryConfig } from "./registry-project.js";
+import { prepareWebRegistryProject, readRegistryConfig } from "./registry-project.js";
 
 describe("readRegistryConfig", () => {
   it("reads registry mappings from an agent workspace package", async () => {
@@ -22,5 +22,18 @@ describe("readRegistryConfig", () => {
     await expect(readRegistryConfig(agentRoot)).resolves.toEqual({
       registries: { "@acme": "https://example.com/r/{name}.json" },
     });
+  });
+});
+
+describe("prepareWebRegistryProject", () => {
+  it("creates the Web Chat tsconfig for a fresh app", async () => {
+    const workspaceRoot = await mkdtemp(join(tmpdir(), "eve-registry-web-project-"));
+
+    await prepareWebRegistryProject(workspaceRoot);
+
+    const tsconfig = JSON.parse(
+      await readFile(join(workspaceRoot, "apps", "web", "tsconfig.json"), "utf8"),
+    ) as { compilerOptions?: { paths?: Record<string, string[]> } };
+    expect(tsconfig.compilerOptions?.paths?.["@/*"]).toEqual(["./*"]);
   });
 });

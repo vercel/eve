@@ -16,7 +16,7 @@ import {
   type WebPackageVersions,
 } from "./index.js";
 import { PNPM_WORKSPACE_CONTENT } from "../primitives/pm/pnpm.js";
-import { WEB_APP_TEMPLATE_FILES } from "./create/web-template.js";
+import { WEB_CHANNEL_TEMPLATE } from "./create/web-template.js";
 import { pathExists } from "../path-exists.js";
 
 async function createTempDir(): Promise<string> {
@@ -1467,7 +1467,7 @@ describe("scaffoldBaseProject", () => {
     const channelPath = join(projectRoot, "agent/channels/eve.ts");
     const channelSource = await readFile(channelPath, "utf8");
 
-    expect(channelSource).toBe(WEB_APP_TEMPLATE_FILES["agent/channels/eve.ts"]);
+    expect(channelSource).toBe(WEB_CHANNEL_TEMPLATE);
   });
 
   test("overwrites existing in-place scaffold files only when explicitly allowed", async () => {
