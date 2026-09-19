@@ -167,7 +167,6 @@ import {
   formatAssistantResponseStats,
   formatTokenFlow,
   formatTurnDuration,
-  typewriterText,
   isIncompleteOsc,
   isIncompletePaste,
   nextKey,
@@ -315,9 +314,42 @@ type RenderTurnState = {
   text: Map<string, string>;
   reasoning: Map<string, string>;
   tools: Map<string, NativeToolState>;
+  modelActivity: "Thinking" | "Generating";
+  runningTools: Set<string>;
   cancelled: boolean;
   restoreCancelledPrompt: boolean;
 };
+
+function turnActivityLabel(state: RenderTurnState | undefined): string {
+  if (state === undefined) return "Thinking";
+  return state.runningTools.size > 0 ? "Running" : state.modelActivity;
+}
+
+function updateTurnActivity(state: RenderTurnState, event: AgentTUIStreamEvent): void {
+  switch (event.type) {
+    case "turn-start":
+    case "step-start":
+    case "reasoning-delta":
+      state.modelActivity = "Thinking";
+      break;
+    case "assistant-delta":
+    case "tool-call-preparing":
+      state.modelActivity = "Generating";
+      break;
+    case "assistant-complete":
+      if (event.text?.trim()) state.modelActivity = "Generating";
+      break;
+    case "tool-call":
+      state.runningTools.add(event.toolCallId);
+      state.modelActivity = "Thinking";
+      break;
+    case "tool-result":
+    case "tool-error":
+    case "tool-rejected":
+      state.runningTools.delete(event.toolCallId);
+      break;
+  }
+}
 
 type NativeToolState = {
   toolCallId: string;
@@ -348,7 +380,7 @@ const devBuildProgressDelayMs = 250;
 const devBuildLoadedStatusMs = 4_000;
 
 const STATUS = {
-  processing: "Working…",
+  processing: "Thinking",
   connectionAuth: "Waiting for connection authorization…",
 } as const;
 
@@ -359,9 +391,6 @@ const STATUS = {
  */
 const turnStatsMinDurationMs = 10_000;
 const turnStatsMinInputTokens = 20_000;
-
-/** One typed character of the turn bar's label per this many milliseconds. */
-const turnBarTypewriterMs = 80;
 
 export class TerminalRenderer implements AgentTUIRenderer {
   readonly #input: TerminalInput;
@@ -457,6 +486,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
   #hasUserMessage = false;
   /** Armed by a chat submit; the end-of-turn stats line consumes it. */
   readonly #turnClock = new TurnClock();
+  #activeTurnState?: RenderTurnState;
   /**
    * Draft typed while a turn streams. The prompt row stays in place with
    * Enter inert (no mid-turn submits yet); the draft seeds the next prompt.
@@ -1003,6 +1033,16 @@ export class TerminalRenderer implements AgentTUIRenderer {
     this.#assistantOutputTokens = undefined;
     this.#assistantTokensPerSecond = undefined;
     this.#streamStartedAt = Date.now();
+    const turnState: RenderTurnState = {
+      text: new Map(),
+      reasoning: new Map(),
+      tools: new Map(),
+      modelActivity: "Thinking",
+      runningTools: new Set(),
+      cancelled: false,
+      restoreCancelledPrompt: true,
+    };
+    this.#activeTurnState = turnState;
     const displayModes: DisplayModes = {
       tools: options?.tools ?? this.#tools,
       reasoning: options?.reasoning ?? this.#reasoning,
@@ -1017,14 +1057,6 @@ export class TerminalRenderer implements AgentTUIRenderer {
     });
     this.#consumeKey = (key) => this.#handleStreamingKey(key);
     this.#attachInput();
-    const turnState: RenderTurnState = {
-      text: new Map(),
-      reasoning: new Map(),
-      tools: new Map(),
-      cancelled: false,
-      restoreCancelledPrompt: true,
-    };
-
     try {
       for await (const event of takeUntil(iterateTUIStream(result.events), streamInterrupted)) {
         if (this.#interrupted) break;
@@ -1050,6 +1082,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
       this.#sendSteering = undefined;
       this.#detachInput();
       this.#streamDraftActive = false;
+      this.#activeTurnState = undefined;
       if (this.#turnIndicator.kind === "waiting") {
         this.#turnIndicator = { kind: "idle" };
       }
@@ -1095,6 +1128,8 @@ export class TerminalRenderer implements AgentTUIRenderer {
       text: new Map(),
       reasoning: new Map(),
       tools: new Map(),
+      modelActivity: "Thinking",
+      runningTools: new Set(),
       cancelled: false,
       restoreCancelledPrompt: false,
     };
@@ -3618,6 +3653,8 @@ export class TerminalRenderer implements AgentTUIRenderer {
     displayModes: DisplayModes,
     turnState: RenderTurnState,
   ): void {
+    const previousActivity = turnActivityLabel(turnState);
+    updateTurnActivity(turnState, event);
     switch (event.type) {
       case "turn-start":
         if (event.turnId !== this.#modelTurnId) {
@@ -3805,6 +3842,10 @@ export class TerminalRenderer implements AgentTUIRenderer {
         this.#applyUsage(event.usage);
         this.#paint();
         break;
+    }
+    // Activity is independent of transcript visibility and idle/background streams.
+    if (turnState === this.#activeTurnState && turnActivityLabel(turnState) !== previousActivity) {
+      this.#paint();
     }
   }
 
@@ -4464,17 +4505,8 @@ export class TerminalRenderer implements AgentTUIRenderer {
     return rows;
   }
 
-  /**
-   * The live turn bar: `▪ Working for 3min 24s ── ↑ 32.4K ↓ 682`. Duration and
-   * token flow tick live on the shared paint beat; the `└`-cornered coda
-   * is this bar's settled form.
-   */
   #streamingTurnBar(width: number): string {
     const c = this.#theme.colors;
-    const pulse = this.#progressPulseGlyph(
-      this.#activityPulseStartedAtMs,
-      this.#theme.unicode ? PROGRESS_PULSE_GLYPH : PROGRESS_PULSE_ASCII_GLYPH,
-    );
     // A waiting state without an armed turn clock (a /command flash, an
     // isolated approval) still gets a ticking duration from its own start.
     const turnIndicator = this.#turnIndicator;
@@ -4482,21 +4514,22 @@ export class TerminalRenderer implements AgentTUIRenderer {
       this.#turnClock.startedAtMs ??
       this.#streamStartedAt ??
       (turnIndicator.kind === "waiting" ? turnIndicator.startedAtMs : Date.now());
-    const elapsedMs = Date.now() - startedAtMs;
-    // Anchored to the turn clock, the label's reveal plays once per turn —
-    // a question answer's continuation pass resumes fully typed.
-    const label = typewriterText("Working for", elapsedMs, turnBarTypewriterMs);
-    const body = `${label} ${this.#turnStatsBody(elapsedMs)}`;
-    // Column 0: the bar shares the gutter with the conversation markers and
-    // its own settled `└` coda.
-    return clip(`${c.yellow(pulse)} ${c.dim(body)}`, width);
+    const elapsedMs = Math.max(0, Date.now() - startedAtMs);
+    const marker = elapsedMs % 1000 < 500 ? (this.#theme.unicode ? "•" : "*") : " ";
+    const elapsed =
+      elapsedMs < 1000 ? "0s" : formatTurnDuration(Math.floor(elapsedMs / 1000) * 1000);
+    const label = `${turnActivityLabel(this.#activeTurnState)} (${elapsed})`;
+    const { inputTokens, outputTokens } = this.#turnClock.usage;
+    const tokens =
+      inputTokens > 0 || outputTokens > 0
+        ? c.dim(` (${formatTokenFlow({ inputTokens, outputTokens }, this.#theme.glyph)})`)
+        : "";
+    return clip(`${marker} ${label}${tokens}`, width);
   }
 
   /**
-   * The shared body of the live turn bar and the settled coda:
-   * `3min 24s ── ↑ 32.4K ↓ 682` (token flow only once the turn has moved a
-   * token). `MockScreen.waitForIdlePrompt` recognizes the live bar by its
-   * typewriter `Working` label followed by this duration.
+   * The settled coda: `3min 24s ── ↑ 32.4K ↓ 682`, with token flow only once
+   * the turn has moved a token.
    */
   #turnStatsBody(elapsedMs: number): string {
     return `${formatTurnDuration(elapsedMs)}${this.#turnFlowSuffix()}`;

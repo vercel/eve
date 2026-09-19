@@ -612,7 +612,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
     );
 
     await Promise.resolve();
-    expect(screen.snapshot()).toContain("W 1s");
+    expect(screen.snapshot()).toContain("Thinking (0s)");
     expect(screen.snapshot()).not.toContain("Ctrl+C to interrupt");
 
     streamController?.close();
@@ -637,7 +637,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
 
     await Promise.resolve();
     // The bar renders; connection state lives in its own section.
-    expect(screen.snapshot()).toContain("W 1s");
+    expect(screen.snapshot()).toContain("Thinking (0s)");
 
     streamController?.close();
     await rendering;
@@ -667,8 +667,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
 
       await Promise.resolve();
       let lines = screen.snapshot().split("\n");
-      // The label types itself out: one character at t=0.
-      let barRow = lines.findIndex((line) => line === "▪ W 1s");
+      let barRow = lines.findIndex((line) => line === "• Thinking (0s)");
       expect(barRow).toBeGreaterThan(-1);
       // The pending prompt row wears the same default-color `❯` as the idle one
       // beneath the bar; the status line follows it.
@@ -676,11 +675,10 @@ describe("TerminalRenderer (inline scrollback)", () => {
       expect(lines[barRow + 2]).toContain("❯");
       expect(lines[barRow + 4]).toContain("gpt-5");
 
-      // The duration ticks live while the pulse blinks on the shared beat.
-      await vi.advanceTimersByTimeAsync(2_000);
+      // Advance past the second boundary so the shared paint ticker catches it.
+      await vi.advanceTimersByTimeAsync(2_100);
       lines = screen.snapshot().split("\n");
-      // Fully revealed once the reveal window has passed.
-      barRow = lines.findIndex((line) => line.includes("Working for 2s"));
+      barRow = lines.findIndex((line) => line.includes("Thinking (2s)"));
       expect(barRow).toBeGreaterThan(-1);
       expect(lines[barRow + 2]).toContain("❯");
       expect(lines[barRow + 4]).toContain("gpt-5");
@@ -708,7 +706,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
     input.enter();
 
     expect(await prompt).toBe("hello");
-    expect(screen.snapshot()).toContain("* W 1s");
+    expect(screen.snapshot()).toContain("* Thinking (0s)");
     expect(screen.snapshot()).not.toContain("⊙");
     renderer.shutdown();
   });
@@ -1880,7 +1878,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
     expect(screen.snapshot()).toContain("❯ hello");
     expect(screen.snapshot()).not.toContain("Send a message…");
     input.enter();
-    expect(screen.snapshot()).toContain("W 1s");
+    expect(screen.snapshot()).toContain("Thinking (0s)");
     expect(await prompt).toBe("hello");
     renderer.shutdown();
   });
@@ -1895,11 +1893,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
       input.enter();
 
       expect(await prompt).toBe("hello");
-      expect(screen.snapshot()).toContain("▪ W 1s");
-
-      // The typewriter label advances while the submit wait ticks.
-      vi.advanceTimersByTime(450);
-      expect(screen.snapshot()).toContain("Workin");
+      expect(screen.snapshot()).toContain("• Thinking (0s)");
 
       let streamController: ReadableStreamDefaultController<AgentTUIStreamEvent> | undefined;
       const rendering = renderer.renderStream(
@@ -1915,7 +1909,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
       await Promise.resolve();
       // The stream keeps the same bar — one working indicator end to end.
       expect(screen.snapshot()).not.toContain("⊙");
-      expect(screen.snapshot()).toContain(" 1s");
+      expect(screen.snapshot()).toContain("Thinking (0s)");
 
       streamController?.close();
       await rendering;
@@ -2034,7 +2028,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
     );
 
     await vi.waitFor(() => {
-      expect(screen.snapshot()).toContain(" 1s");
+      expect(screen.snapshot()).toContain("Thinking (0s)");
     });
     streamController?.enqueue({
       type: "reasoning-delta",
@@ -2044,7 +2038,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
     await Promise.resolve();
     // The trace never reaches the screen; the bar carries the turn.
     const lines = screen.snapshot().split("\n");
-    const barRow = lines.findIndex((line) => line.includes(" 1s"));
+    const barRow = lines.findIndex((line) => line.includes("Thinking (0s)"));
     expect(barRow).toBeGreaterThan(-1);
     expect(screen.snapshot()).not.toContain("the plan is to check the forecast");
     // The pending prompt row holds its place below, then the status line.
@@ -2402,7 +2396,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
       { submittedPrompt: "another task", continueSession: true },
     );
     await vi.waitFor(() => {
-      expect(screen.snapshot()).toContain("Working for");
+      expect(screen.snapshot()).toContain("Thinking (");
     });
     input.type("go south");
     input.enter();
@@ -2800,7 +2794,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
     input.type("no");
     input.enter();
     await answer;
-    expect(screen.snapshot()).toContain("W 1s");
+    expect(screen.snapshot()).toContain("Thinking (0s)");
     renderer.shutdown();
   });
 
@@ -3975,7 +3969,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
     });
     input.type("n");
     expect(await approval).toEqual({ approved: false, reason: "Denied by user." });
-    expect(screen.snapshot()).toContain("W 1s");
+    expect(screen.snapshot()).toContain("Thinking (0s)");
     renderer.shutdown();
 
     const snapshot = screen.snapshot();

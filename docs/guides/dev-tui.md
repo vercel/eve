@@ -92,6 +92,8 @@ Required authorization or deployment setup still runs for the selected item. Pre
 
 Type a message and press `Enter` to send it. When the agent asks a question or requests tool approval, respond in the prompt shown by the UI. Connection authorization can open a browser; keep local `eve dev` running until the browser returns to it.
 
+The activity line shows **Thinking** while the model reasons or waits to respond, **Generating** while it writes a response or tool input, and **Running** while tools execute. A blinking dot and elapsed time indicate progress, with token counts shown when available. The activity line disappears when the turn finishes or needs your input.
+
 While a turn is running, `Enter` sends your message immediately as steering. Before assistant output begins, the runtime interrupts pending model generation and continues the same turn with your correction. Executing tools finish safely. After output begins, steering applies at the next workflow boundary and preserves streamed text.
 
 Slash commands wait until the turn ends, except `/cancel`, which cancels directly. If the session does not support steering, messages queue for the next turn. Press `Esc` or `Ctrl+C` to cancel a turn with no queued messages. With queued messages, these keys select the oldest message for steering, or for the next turn if steering is unavailable. If a direct cancellation requested with `/cancel` or `Ctrl+C` does not settle, press `Ctrl+C` to stop waiting. The UI then returns to the prompt and asks you to press `Ctrl+C` again to exit. At an idle prompt, press `Ctrl+C` twice to exit.
