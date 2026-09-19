@@ -80,9 +80,9 @@ or days later, the run resumes, deploys, and returns. The model sees one tool re
   the SDK; for types, new projects list `eve/workflow-modules` in the tsconfig `types`.
 - In the body, `ctx` has `session`, `callId`, `toolName`, `abortSignal`, `agent`, `agents`, and `ask`.
   A `"use step"` helper that receives `ctx` directly gets a restricted `WorkflowStepToolContext` with
-  `session`, `callId`, `toolName`, `abortSignal`, `getToken`, and `requireAuth`. Read `ctx.agents`, call
+  `session`, `callId`, `toolName`, `abortSignal`, `getSandbox`, `getToken`, and `requireAuth`. Read `ctx.agents`, call
   `ctx.agent()`, and call `ctx.ask()` in the workflow body; pass only the serializable values the step needs.
-  `getSandbox` and `getSkill` remain unavailable.
+  `getSandbox` opens the session sandbox on demand and runs only inside steps. `getSkill` remains unavailable.
 - The tool's input must be a JSON object. Workflow bodies are for static tools under `agent/tools/`,
   not tools returned from `defineDynamic` resolvers.
 
@@ -100,6 +100,41 @@ Workflow imports resolve `paths` aliases from your application's `tsconfig.json`
 workflow and step modules reachable from the agent's runtime modules. Unrelated workflows
 in the host application stay outside the agent bundle. An unresolved workflow import fails
 the build with the missing import in the error.
+
+### Access the session sandbox from a step
+
+Call `ctx.getSandbox()` in an authored step to open or reconnect the session sandbox. Both
+blocking and background tools support this accessor without configuration. Workflows that
+never call it do not open a sandbox. Regular tools and workflow steps use the same session
+sandbox. Each step reconstructs access from the session's saved state, so files remain available
+across tools and later steps.
+
+```ts title="agent/tools/read_report.ts"
+import { defineWorkflowTool, type WorkflowStepToolContext } from "eve/tools";
+import { z } from "zod";
+
+export default defineWorkflowTool({
+  description: "Read a report from the session sandbox.",
+  inputSchema: z.object({ path: z.string() }),
+  async execute({ path }, ctx) {
+    "use workflow";
+    return await readReport(ctx, path);
+  },
+});
+
+async function readReport(ctx: WorkflowStepToolContext, path: string) {
+  "use step";
+  const sandbox = await ctx.getSandbox();
+  return await sandbox.readTextFile({ path });
+}
+```
+
+Pass `ctx` directly as a step argument. Keep sandbox handles, process handles, and streams inside
+the step; return serializable results. Consume and wait for or kill spawned processes before the
+step returns. `ctx.getSandbox()` throws in the workflow body.
+Steps cannot call `sandbox.stop()` or `sandbox.delete()` because the owning session controls the
+sandbox lifecycle. Static tools under `agent/tools/` support this option; dynamic and extension
+workflow tools remain unsupported.
 
 ### Add a runtime-generated workflow tool
 

@@ -62,8 +62,14 @@ function respond(request: MockModelRequest): MockModelResponse | string {
     return "WORKFLOW-MIXED-AGENTS-INITIAL-RESULT";
   }
 
+  if (message.includes("is completed") && message.includes("sandbox_background")) {
+    return message;
+  }
+
   for (const [directive, tool] of [
     ["WORKFLOW-DEPLOY-START", "deploy_service"],
+    ["WORKFLOW-SANDBOX-BLOCKING-START", "sandbox_blocking"],
+    ["WORKFLOW-SANDBOX-BACKGROUND-START", "sandbox_background"],
     ["WORKFLOW-CONFIRM-START", "confirm_deploy"],
     ["WORKFLOW-REPORT-START", "report_deploy"],
     ["WORKFLOW-ESCALATE-START", "escalate_deploy"],

@@ -92,7 +92,12 @@ export async function createBackgroundWorkflowOwner(
     }
     const request = message;
     const kind = request.request.kind;
-    if (kind === "agent-invoke" || kind === "agent-settled" || kind === "authorization-request") {
+    if (
+      kind === "sandbox-request" ||
+      kind === "agent-invoke" ||
+      kind === "agent-settled" ||
+      kind === "authorization-request"
+    ) {
       await handleOwnerRequest(request);
       return;
     }

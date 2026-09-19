@@ -148,7 +148,7 @@ function createWorkflowBodyContext(
     ask: (request) => ask(ctx, request),
     abortSignal: signal,
     callId: input.callId,
-    getSandbox: () => unavailable("getSandbox()", "the session sandbox belongs to the turn"),
+    getSandbox: () => unavailable("getSandbox()", 'pass ctx directly to a "use step" helper'),
     getSkill: () => unavailable("getSkill()", "skills are read through the session sandbox"),
     getToken: () =>
       unavailable("getToken()", 'pass ctx directly to a "use step" helper to resolve credentials'),

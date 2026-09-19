@@ -1,3 +1,7 @@
+import {
+  prepareWorkflowSandboxStep,
+  respondWorkflowSandboxStep,
+} from "#execution/sandbox/workflow-owner-step.js";
 import { emitSubagentEventStep } from "#execution/tools/subagent/emit-event-step.js";
 import { formatTaskNotification } from "#tasks/notification.js";
 import type { TaskView } from "#tasks/types.js";
@@ -59,6 +63,18 @@ export async function routeDeliverToChildren(input: {
     });
     serializedContext = emitted.serializedContext;
     sessionState = emitted.sessionState;
+  }
+
+  for (const delivery of payload.task?.sandboxRequests ?? []) {
+    const prepared = await prepareWorkflowSandboxStep({
+      ...delivery,
+      serializedContext,
+      sessionState,
+    });
+    sessionState = prepared.sessionState;
+    if (prepared.response !== undefined) {
+      await respondWorkflowSandboxStep({ message: delivery.message, response: prepared.response });
+    }
   }
 
   for (const request of payload.task?.agentRequests ?? []) {

@@ -340,3 +340,6 @@ The `"*": []` catch-all keeps general egress open while the `transform` applies 
 - [Tools](./tools): authored tools run in the app runtime (full `process.env`); only sandbox tools run in the sandbox.
 - [Security model](./concepts/security-model): the app-runtime/sandbox trust boundary in full.
 - [Vercel Sandbox](https://vercel.com/docs/sandbox): platform docs, including credential brokering and persistence limits.
+
+Workflow tools can access the session sandbox on demand with `ctx.getSandbox()` in authored steps.
+See [Workflow sandbox access](/docs/tools/workflows#access-the-session-sandbox-from-a-step).

@@ -80,6 +80,13 @@ function taskNotificationCommand(
 
   const { taskId, request: message } = input;
   const { request } = message;
+  if (request.kind === "sandbox-request") {
+    return {
+      kind: "send",
+      payload: { task: { sandboxRequests: [{ taskId, message }] } },
+      taskDeliveryId: `${taskId}:sandbox:${message.from.runId}:${message.replyTo}`,
+    };
+  }
   if (request.kind === "authorization-request") return taskAuthorizationCommand(request, taskId);
   if (request.kind === "agent-invoke" || request.kind === "agent-settled") {
     const delivery: TaskAgentRequestDelivery = { replyTo: message.replyTo, request, taskId };

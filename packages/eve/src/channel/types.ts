@@ -187,6 +187,10 @@ export interface DeliverPayload {
     readonly inputRequests?: readonly TaskInputRequestDelivery[];
     /** Agent spawn/settlement requests a task-owned workflow run needs the parent to apply. */
     readonly agentRequests?: readonly TaskAgentRequestDelivery[];
+    readonly sandboxRequests?: readonly {
+      readonly taskId: string;
+      readonly message: import("#execution/tools/workflow/messages.js").WorkflowToolRunRequestMessage;
+    }[];
     /** Task child authorization events re-emitted through the parent channel. */
     readonly authorizationEvents?: readonly TaskAuthorizationEventDelivery[];
     /** Terminal views cached before task-run retention expires. */

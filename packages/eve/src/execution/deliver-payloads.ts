@@ -19,6 +19,7 @@ export function coalesceDeliverPayloads(payloads: readonly DeliverPayload[]): De
 
   const merged: Record<string, unknown> = {};
   const inputRequests: NonNullable<TaskEnvelope["inputRequests"]>[number][] = [];
+  const sandboxRequests: NonNullable<TaskEnvelope["sandboxRequests"]>[number][] = [];
   const agentRequests: NonNullable<TaskEnvelope["agentRequests"]>[number][] = [];
   const authorizationEvents: NonNullable<TaskEnvelope["authorizationEvents"]>[number][] = [];
   const views: NonNullable<TaskEnvelope["views"]>[number][] = [];
@@ -26,6 +27,7 @@ export function coalesceDeliverPayloads(payloads: readonly DeliverPayload[]): De
 
   for (const payload of payloads) {
     inputRequests.push(...(payload.task?.inputRequests ?? []));
+    sandboxRequests.push(...(payload.task?.sandboxRequests ?? []));
     agentRequests.push(...(payload.task?.agentRequests ?? []));
     authorizationEvents.push(...(payload.task?.authorizationEvents ?? []));
     views.push(...(payload.task?.views ?? []));
@@ -43,6 +45,7 @@ export function coalesceDeliverPayloads(payloads: readonly DeliverPayload[]): De
 
   const task: Record<string, unknown> = {};
   if (inputRequests.length > 0) task.inputRequests = inputRequests;
+  if (sandboxRequests.length > 0) task.sandboxRequests = sandboxRequests;
   if (agentRequests.length > 0) task.agentRequests = agentRequests;
   if (authorizationEvents.length > 0) task.authorizationEvents = authorizationEvents;
   if (views.length > 0) task.views = views;

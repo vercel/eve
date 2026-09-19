@@ -1,3 +1,4 @@
+import type { WorkflowToolRunContext } from "#execution/tools/workflow/ask.js";
 import type { SessionContext } from "#context/session-context.js";
 import type { AuthorizationResult, AuthorizationSignal } from "#harness/authorization.js";
 
@@ -8,6 +9,7 @@ export type WorkflowStepAuthorizationResult = AuthorizationResult & {
 
 export interface WorkflowStepContext {
   readonly callId: string;
+  readonly run?: WorkflowToolRunContext;
   readonly toolName: string;
   readonly session: SessionContext["session"];
   readonly abortSignal: AbortSignal;

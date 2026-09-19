@@ -75,7 +75,7 @@ export interface WorkflowAgentMetadata {
 /** Context capabilities available inside an authored `"use step"` helper. */
 export type WorkflowStepToolContext = Pick<
   ToolContext,
-  "abortSignal" | "callId" | "session" | "toolName" | "getToken" | "requireAuth"
+  "abortSignal" | "callId" | "getSandbox" | "session" | "toolName" | "getToken" | "requireAuth"
 >;
 
 interface WorkflowAgent {
@@ -92,7 +92,7 @@ interface WorkflowAgent {
  */
 export type WorkflowToolContext = Pick<
   ToolContext,
-  "abortSignal" | "callId" | "session" | "toolName" | "getToken" | "requireAuth"
+  "abortSignal" | "callId" | "getSandbox" | "session" | "toolName" | "getToken" | "requireAuth"
 > & {
   /** Invoke an agent by its invocation name. */
   agent: WorkflowAgent;

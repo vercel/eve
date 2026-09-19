@@ -35,10 +35,9 @@ describe("defineWorkflowTool", () => {
         expectTypeOf(review).toEqualTypeOf<Promise<{ findings: string[]; score?: number }>>();
         // @ts-expect-error The subagent name is the first argument, not part of the input.
         void ctx.agent({ message: "Review the deployment.", target: "researcher" });
-        // Token capabilities are available when this context is passed into a step.
-        void ctx.getToken;
-        // @ts-expect-error Workflow bodies do not have a session sandbox.
+        // Runtime capabilities are available when this context is passed into a step.
         void ctx.getSandbox;
+        void ctx.getToken;
         return { deployed: input.service };
       },
       approvalKey(input) {
@@ -56,6 +55,7 @@ describe("defineWorkflowTool", () => {
 
   it("exposes only step-safe capabilities on WorkflowStepToolContext", () => {
     const useStepContext = (ctx: WorkflowStepToolContext) => {
+      void ctx.getSandbox;
       void ctx.getToken;
       void ctx.requireAuth;
       void ctx.abortSignal;
