@@ -68,7 +68,7 @@ describe("task cancellation", () => {
             {
               ...entry,
               callId: "old",
-              task: { ...entry.task, taskId: "old", terminalView: { status: "completed" } },
+              task: { ...entry.task, taskId: "old", outcome: { status: "completed" } },
             },
             entry,
           ],
@@ -139,11 +139,9 @@ describe("task cancellation", () => {
         ...entry,
         task: {
           ...entry.task,
-          terminalView: {
-            metadata: entry.task.metadata,
+          outcome: {
             lastOutput: { type: "result", data: "Finished" },
             status: "completed",
-            taskId: entry.task.taskId,
           },
         },
       },

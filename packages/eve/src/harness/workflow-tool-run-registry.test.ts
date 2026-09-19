@@ -101,7 +101,7 @@ describe("shared workflow invocation ownership", () => {
 
   it("preserves malformed historical results during unrelated ownership mutations", () => {
     const old = task("old");
-    const retained = { ...old, task: { ...old.task, terminalView: { status: "completed" } } };
+    const retained = { ...old, task: { ...old.task, outcome: { status: "completed" } } };
     let session: { state?: SessionStateMap } = {
       state: { "eve.workflowTool": { version: 3, runs: [retained] } },
     };
@@ -255,9 +255,7 @@ describe("shared workflow invocation ownership", () => {
     expect(() =>
       readWorkflowTaskView({
         ...entry.task,
-        terminalView: {
-          taskId: "task-a",
-          metadata: entry.task.metadata,
+        outcome: {
           status: "completed",
           lastOutput: { type: "result", data: "done" },
           usage: {

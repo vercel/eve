@@ -218,9 +218,7 @@ describe("settleCancelledTurnStep handle store", () => {
           task: {
             ...background.task,
             taskId: "completed-task",
-            terminalView: {
-              taskId: "completed-task",
-              metadata: background.task.metadata,
+            outcome: {
               status: "completed",
               lastOutput: { type: "result", data: "retained output" },
             },

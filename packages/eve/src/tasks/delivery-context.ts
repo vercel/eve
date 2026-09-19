@@ -69,7 +69,7 @@ export function resolveInitiatingTaskContext(input: {
   const cohort = getBackgroundWorkflowToolRuns(input.state).filter(
     (entry) => entry.origin.turnId === input.turnId,
   );
-  if (!cohort.some((entry) => entry.task.terminalView === undefined)) {
+  if (!cohort.some((entry) => entry.task.outcome === undefined)) {
     return undefined;
   }
   return { ...projectTaskCohort(cohort), phase: "initiating" };
@@ -79,7 +79,7 @@ function projectTaskCohort(cohort: readonly BackgroundWorkflowToolRun[]): {
   readonly context: string;
   readonly phase: "pending" | "settled";
 } {
-  const settled = cohort.every((entry) => entry.task.terminalView !== undefined);
+  const settled = cohort.every((entry) => entry.task.outcome !== undefined);
   const tasks = cohort.map((entry) => {
     const view = readWorkflowTaskView(entry.task);
     return {

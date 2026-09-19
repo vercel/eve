@@ -158,7 +158,7 @@ describe("session task index", () => {
     expect(findBackgroundWorkflowToolRun(session.state, "task_a")).toMatchObject({
       task: {
         activityWorkIdentity: { label: "Second label" },
-        terminalView: terminal("task_a", "completed"),
+        outcome: { status: "completed", lastOutput: { type: "result", data: "done" } },
       },
     });
   });
@@ -276,7 +276,7 @@ describe("session task index", () => {
         cohortId: getTaskCohortId(entry.task),
         turnId: entry.origin.turnId,
         stepIndex: entry.origin.stepIndex,
-        settled: entry.task.terminalView !== undefined,
+        settled: entry.task.outcome !== undefined,
       })),
     ).toEqual([
       { taskId: "task_a", cohortId: "task_a", turnId: "turn-1", stepIndex: 0, settled: true },
@@ -306,7 +306,7 @@ describe("session task index", () => {
     ).toThrow(/Corrupt workflow tool run registry/u);
   });
 
-  it("retains only terminal views as expired-run fallbacks", () => {
+  it("validates retained outcomes when they are consumed", () => {
     const base = {
       callId: "task_a",
       toolName: metadata.name,
@@ -315,48 +315,37 @@ describe("session task index", () => {
       address: { runId: "run-1", hookToken: "task:token-1" },
       task: { dispatchContext, metadata, taskId: "task_a" },
     };
-    const terminalView = {
+    const outcome = {
       lastOutput: { data: "done", type: "result" as const },
-      metadata,
       status: "completed" as const,
-      taskId: "task_a",
     };
 
     const session = registerWorkflowToolRun(createSession(), {
       ...base,
-      task: { ...base.task, terminalView: terminalView },
+      task: { ...base.task, outcome },
     });
-    expect(findBackgroundWorkflowToolRun(session.state, "task_a")?.task.terminalView).toEqual(
-      terminalView,
-    );
-    for (const invalidView of [
-      { metadata, status: "working", taskId: "task_a" },
-      { metadata, status: "completed", taskId: "task_a" },
+    expect(findBackgroundWorkflowToolRun(session.state, "task_a")?.task.outcome).toEqual(outcome);
+    for (const invalidOutcome of [
+      { status: "working" },
+      { status: "completed" },
       {
         lastOutput: { data: "wrong", type: "result" },
-        metadata,
         status: "failed",
-        taskId: "task_a",
       },
       {
         lastOutput: { data: "wrong", type: "result" },
-        metadata,
         status: "cancelled",
-        taskId: "task_a",
       },
       {
         inputRequests: [{ requestId: "stale" }],
         lastOutput: { data: "done", type: "result" },
-        metadata,
         status: "completed",
-        taskId: "task_a",
       },
-      { ...terminalView, taskId: "task_other" },
     ]) {
       const [entry] = getBackgroundWorkflowToolRuns({
         "eve.workflowTool": {
           version: 3,
-          runs: [{ ...base, task: { ...base.task, terminalView: invalidView } }],
+          runs: [{ ...base, task: { ...base.task, outcome: invalidOutcome } }],
         },
       });
       expect(entry?.address).toEqual(base.address);
@@ -365,7 +354,7 @@ describe("session task index", () => {
       expect(() =>
         registerWorkflowToolRun(createSession(), {
           ...base,
-          task: { ...base.task, terminalView: invalidView },
+          task: { ...base.task, outcome: invalidOutcome },
         }),
       ).toThrow("Corrupt workflow task result");
     }
@@ -375,16 +364,32 @@ describe("session task index", () => {
     "keeps the parent's first %s outcome across duplicates and competing deliveries",
     (status) => {
       const session = registerWorkflowToolRun(createSession(), task("task_a", "turn-1"));
-      const first = terminal("task_a", status);
+      const usage = { inputTokens: 3, outputTokens: 5, cacheReadTokens: 0, cacheWriteTokens: 0 };
+      const first = { ...terminal("task_a", status), usage };
       const state = recordWorkflowTaskView(session.state, first);
       for (const late of ["completed", "failed", "cancelled"] as const) {
         expect(recordWorkflowTaskView(state, terminal("task_a", late))).toBe(state);
       }
       const entry = findBackgroundWorkflowToolRun(state, "task_a");
       assert(entry !== undefined);
+      expect(entry.task.outcome).toEqual(
+        status === "cancelled"
+          ? { status, usage }
+          : { status, usage, lastOutput: first.lastOutput },
+      );
       expect(readWorkflowTaskView(entry.task)).toEqual(first);
     },
   );
+
+  it("rejects an incoming result with metadata belonging to a different task", () => {
+    const session = registerWorkflowToolRun(createSession(), task("task_a", "turn-1"));
+    expect(() =>
+      recordWorkflowTaskView(session.state, {
+        ...terminal("task_a", "cancelled"),
+        metadata: { kind: "tool", name: "other" },
+      }),
+    ).toThrow("Task view metadata does not match");
+  });
 
   it("throws on a corrupt index instead of treating it as absent", () => {
     expect(() =>

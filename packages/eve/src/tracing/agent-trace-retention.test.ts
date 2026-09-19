@@ -91,9 +91,7 @@ describe("trace retention by live work", () => {
             ...task,
             task: {
               ...task.task,
-              terminalView: {
-                taskId: task.task.taskId,
-                metadata: task.task.metadata,
+              outcome: {
                 status: "completed",
                 lastOutput: { type: "result", data: "done" },
               },

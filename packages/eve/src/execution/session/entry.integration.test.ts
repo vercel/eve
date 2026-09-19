@@ -1529,9 +1529,7 @@ describe("workflowEntry integration", () => {
                             task: {
                               taskId: "task",
                               metadata: { kind: "tool", name: "research" },
-                              terminalView: {
-                                taskId: "task",
-                                metadata: { kind: "tool", name: "research" },
+                              outcome: {
                                 status: "cancelled",
                               },
                               dispatchContext: { auth: { current: null, initiator: null } },

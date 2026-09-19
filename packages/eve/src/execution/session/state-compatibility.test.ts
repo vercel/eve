@@ -31,9 +31,7 @@ const task = {
     metadata,
     activityWorkIdentity: activity,
     futureTask: { revision: 2 },
-    terminalView: {
-      taskId: "task",
-      metadata,
+    outcome: {
       status: "completed" as const,
       lastOutput: { type: "result" as const, data: "done", futureOutput: true },
       usage: {
@@ -145,7 +143,7 @@ describe("additive durable state", () => {
             task: {
               futureTask: { revision: 2 },
               activityWorkIdentity: activity,
-              terminalView: {
+              outcome: {
                 futureView: true,
                 lastOutput: { data: "done", futureOutput: true },
                 usage: { inputTokens: 1, futureUsage: true },
@@ -162,7 +160,7 @@ describe("additive durable state", () => {
       metadata,
       status: "cancelled",
     });
-    expect(getBackgroundWorkflowToolRuns(restored(cancelled))[0]?.task.terminalView).toMatchObject({
+    expect(getBackgroundWorkflowToolRuns(restored(cancelled))[0]?.task.outcome).toMatchObject({
       futureView: true,
       status: "completed",
     });
@@ -246,7 +244,7 @@ describe("handoff state inspection", () => {
           "eve.runtime.pendingAuthorization": {},
           "eve.workflowTool": {
             version: 3,
-            runs: [{ ...task, task: { ...task.task, terminalView: { status: "completed" } } }],
+            runs: [{ ...task, task: { ...task.task, outcome: { status: "completed" } } }],
           },
         }),
       ),

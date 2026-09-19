@@ -86,7 +86,7 @@ type WorkflowToolRun = {
         dispatchContext: TaskAgentDispatchContext;
         activityWorkIdentity?: ActivityWorkIdentityV1;
         cohortId?: string;
-        terminalView?: TaskView;
+        outcome?: TaskOutcome;
       };
     }
 );
@@ -99,13 +99,13 @@ with the authentication of a later input delivery. `TaskMetadata` describes the 
 `ActivityWorkIdentityV1` links its activity stream, and `TaskView` is its public status/output view.
 `cohortId` groups overlapping work for one combined report.
 
-| State                                             | Owner and lifetime                                                                                       |
-| ------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
-| Common identity, origin, run address              | Session registry; waiting entries are removed when their call settles or their turn is cancelled         |
-| Task metadata, creator context, cohort membership | Typed task payload; retained for the session lifetime                                                    |
-| Pending questions                                 | Parent session proxy-input state                                                                         |
-| Final task status and output                      | Parent-owned `task.terminalView`; retained for the session lifetime, including after the combined report |
-| Pending deliveries and report deduplication       | Existing session input queue                                                                             |
+| State                                             | Owner and lifetime                                                                                  |
+| ------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| Common identity, origin, run address              | Session registry; waiting entries are removed when their call settles or their turn is cancelled    |
+| Task metadata, creator context, cohort membership | Typed task payload; retained for the session lifetime                                               |
+| Pending questions                                 | Parent session proxy-input state                                                                    |
+| Final task status and output                      | Parent-owned `task.outcome`; retained for the session lifetime, including after the combined report |
+| Pending deliveries and report deduplication       | Existing session input queue                                                                        |
 
 Registration precedes the `ready` admission command. A waiting outcome is matched against its
 originating turn, call ID, and run ID. Authorization can end the visible turn while its workflow
@@ -377,9 +377,9 @@ All 46 selected workflow and cancellation integration tests passed. The backgrou
 now asserts that yields emit no progress events; fixture lifecycle audits count the shared delivery
 step and retain their handle-cleanup and accounting checks. E2E remains CI-only.
 
-The wire registry is version 2: `terminalView` retains its existing shape, and proxy-input
-routes reuse their existing store. Its role is now authoritative parent state rather than an
-expired-run cache. No legacy task-stream fallback is added.
+The wire registry is version 3. Each task stores its identity and metadata once; `outcome`
+contains only terminal status, output, and optional usage. Readers combine them into a `TaskView`.
+Proxy-input routes reuse their existing store. No legacy task-stream fallback is added.
 
 ## Agent settlement
 

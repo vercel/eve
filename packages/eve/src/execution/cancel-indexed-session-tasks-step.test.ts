@@ -4,6 +4,7 @@ import type { DurableSessionState } from "#execution/durable-session-store.js";
 import { cancelAllIndexedSessionTasksStep } from "#execution/cancel-indexed-session-tasks-step.js";
 import {
   getBackgroundWorkflowToolRuns,
+  readWorkflowTaskView,
   type BackgroundWorkflowToolRun,
 } from "#harness/workflow-tool-runs.js";
 
@@ -43,8 +44,8 @@ describe("cancelAllIndexedSessionTasksStep", () => {
 
     expect(result.sessionState).toBeDefined();
     expect(
-      getBackgroundWorkflowToolRuns(result.sessionState?.snapshot.session.state).map(
-        (entry) => entry.task.terminalView,
+      getBackgroundWorkflowToolRuns(result.sessionState?.snapshot.session.state).map((entry) =>
+        readWorkflowTaskView(entry.task),
       ),
     ).toEqual([cancelledView(task1), cancelledView(task2)]);
     expect(cancelOwnedTaskMock).toHaveBeenCalledTimes(2);

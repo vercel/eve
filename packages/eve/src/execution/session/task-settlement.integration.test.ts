@@ -96,7 +96,11 @@ it.each(["completed", "failed", "cancelled"] as const)(
           // The owner is about to wait for B; A must already be settled without a model turn.
           reads++;
           const current = cursor.sessionState.snapshot.session;
-          expect(findBackgroundWorkflowToolRun(current.state, "A")?.task.terminalView).toEqual(a);
+          expect(findBackgroundWorkflowToolRun(current.state, "A")?.task.outcome).toEqual({
+            status: a.status,
+            lastOutput: a.lastOutput,
+            usage: a.usage,
+          });
           expect(getProxyInputRequests(current.state).size).toBe(0);
           expect(cursor.sessionState.hasProxyInputRequests).toBe(false);
           expect(queue.pendingCount).toBe(1);
@@ -157,8 +161,8 @@ it.each(["completed", "failed", "cancelled"] as const)(
     vi.mocked(emitSubagentEventStep).mockImplementation(async (input) => {
       expect(
         findBackgroundWorkflowToolRun(input.sessionState.snapshot.session.state, "task")?.task
-          .terminalView,
-      ).toEqual(view);
+          .outcome,
+      ).toEqual({ status: view.status, lastOutput: view.lastOutput, usage: view.usage });
       return { serializedContext: input.serializedContext };
     });
     const deliver = async (outcome: TaskView) => {
@@ -191,7 +195,7 @@ it.each(["completed", "failed", "cancelled"] as const)(
       );
     }
     expect(
-      findBackgroundWorkflowToolRun(sessionState.snapshot.session.state, "task")?.task.terminalView,
-    ).toEqual(view);
+      findBackgroundWorkflowToolRun(sessionState.snapshot.session.state, "task")?.task.outcome,
+    ).toEqual({ status: view.status, lastOutput: view.lastOutput, usage: view.usage });
   },
 );

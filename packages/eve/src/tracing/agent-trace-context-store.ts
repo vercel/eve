@@ -67,7 +67,7 @@ function pruneTraceOwnership(
   const calls = new Set(getBlockingWorkflowToolRuns(sessionState).map((run) => run.callId));
   const tasks = new Set(
     getBackgroundWorkflowToolRuns(sessionState)
-      .filter((task) => task.task.terminalView === undefined)
+      .filter((task) => task.task.outcome === undefined)
       .map((task) => task.task.taskId),
   );
   const actionAnchors = Object.fromEntries(

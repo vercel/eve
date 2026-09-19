@@ -212,7 +212,7 @@ describe("resolveTaskDeliveryContext", () => {
 function taskEntry(
   taskId: string,
   createdByTurnId: string,
-  terminalView?: TaskView,
+  outcome?: TaskView,
 ): BackgroundWorkflowToolRun {
   return {
     callId: taskId,
@@ -224,7 +224,14 @@ function taskEntry(
       dispatchContext: { auth: { current: null, initiator: null } },
       metadata,
       taskId,
-      terminalView,
+      outcome:
+        outcome === undefined
+          ? undefined
+          : {
+              status: outcome.status,
+              lastOutput: outcome.lastOutput,
+              usage: outcome.usage,
+            },
     },
   };
 }

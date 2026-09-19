@@ -1134,18 +1134,16 @@ describe("turnStep", () => {
         "eve.workflowTool": { version: 3, runs: [task] },
       },
     });
-    const terminalView = {
+    const outcome = {
       lastOutput: { data: "report complete", type: "result" as const },
-      metadata: task.task.metadata,
       status: "completed" as const,
-      taskId: task.task.taskId,
     };
     const settled = createStubSession({
       state: {
         "eve.harness.emission": { ...emissionState, sequence: 1, turnId: "turn_1" },
         "eve.workflowTool": {
           version: 3,
-          runs: [{ ...task, task: { ...task.task, terminalView: terminalView } }],
+          runs: [{ ...task, task: { ...task.task, outcome } }],
         },
       },
     });
@@ -2662,11 +2660,9 @@ describe("turnStep", () => {
                 dispatchContext: { auth: { current: null, initiator: null } },
                 metadata,
                 taskId: "task_1",
-                terminalView: {
+                outcome: {
                   lastOutput: { data: { result: "done" }, type: "result" },
-                  metadata,
                   status: "completed",
-                  taskId: "task_1",
                 },
               },
             },

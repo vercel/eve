@@ -3,7 +3,13 @@ import { isNonEmptyString, isObject } from "#shared/guards.js";
 import type { SessionStateMap } from "#harness/types.js";
 import { parseActivityWorkIdentityV1, type ActivityWorkIdentityV1 } from "#protocol/activity.js";
 import type { SessionAuthContext } from "#channel/types.js";
-import { sameTaskMetadata, type TaskMetadata, type TaskView } from "#tasks/types.js";
+import {
+  sameTaskMetadata,
+  type TaskMetadata,
+  type TaskOutput,
+  type TaskUsage,
+  type TaskView,
+} from "#tasks/types.js";
 import type { DurableDynamicSubagentSelection, SessionAuth } from "#context/keys.js";
 
 // Version 3 replaces the task-only index with the shared workflow tool run registry.
@@ -17,8 +23,17 @@ export interface WorkflowTaskPayload {
   readonly activityWorkIdentity?: ActivityWorkIdentityV1;
   readonly cohortId?: string;
   /** Parent-owned outcome. Read through readWorkflowTaskView before consuming it. */
-  readonly terminalView?: unknown;
+  readonly outcome?: unknown;
 }
+
+/** Settled task data; identity and metadata belong to the owning task. */
+type TaskOutcome = {
+  readonly usage?: TaskUsage;
+} & (
+  | { readonly status: "completed"; readonly lastOutput: Extract<TaskOutput, { type: "result" }> }
+  | { readonly status: "failed"; readonly lastOutput: Extract<TaskOutput, { type: "error" }> }
+  | { readonly status: "cancelled"; readonly lastOutput?: never }
+);
 
 interface WorkflowToolRunBase {
   readonly callId: string;
@@ -205,14 +220,8 @@ function copyWorkflowToolRun(entry: WorkflowToolRun): WorkflowToolRun {
   };
 }
 
-function parseTaskView(value: unknown): TaskView | undefined {
-  if (
-    !isObject(value) ||
-    !isNonEmptyString(value.taskId) ||
-    !isTaskMetadata(value.metadata) ||
-    value.inputRequests !== undefined
-  )
-    return undefined;
+function parseTaskOutcome(value: unknown): TaskOutcome | undefined {
+  if (!isObject(value) || value.inputRequests !== undefined) return undefined;
   const usage = value.usage;
   if (
     usage !== undefined &&
@@ -234,28 +243,19 @@ function parseTaskView(value: unknown): TaskView | undefined {
     if (!isObject(value.lastOutput) || value.lastOutput.type !== outputType) return undefined;
   }
   // Output data and additive fields are opaque; only the known lifecycle fields are decoded.
-  const view: Record<string, unknown> & Pick<TaskView, "taskId" | "metadata" | "status"> = {
-    ...value,
-    taskId: value.taskId,
-    status: value.status,
-    metadata: { ...value.metadata },
-  };
-  if (usage !== undefined) view.usage = { ...usage };
-  if (isObject(value.lastOutput)) view.lastOutput = { ...value.lastOutput };
-  return view as TaskView;
+  const outcome = { ...value };
+  if (usage !== undefined) outcome.usage = { ...usage };
+  if (isObject(value.lastOutput)) outcome.lastOutput = { ...value.lastOutput };
+  return outcome as TaskOutcome;
 }
 
 /** Decode retained output only when it is consumed, independently of ownership reads. */
 export function readWorkflowTaskView(task: WorkflowTaskPayload): TaskView | undefined {
-  if (task.terminalView === undefined) return undefined;
-  const view = parseTaskView(task.terminalView);
-  if (view === undefined)
-    throw new Error(`Corrupt workflow task result "${task.taskId}": invalid terminal view.`);
-  if (view.taskId !== task.taskId || !sameTaskMetadata(view.metadata, task.metadata))
-    throw new Error(
-      `Corrupt workflow task result "${task.taskId}": terminal view does not match its owner.`,
-    );
-  return view;
+  if (task.outcome === undefined) return undefined;
+  const outcome = parseTaskOutcome(task.outcome);
+  if (outcome === undefined)
+    throw new Error(`Corrupt workflow task result "${task.taskId}": invalid outcome.`);
+  return { ...outcome, taskId: task.taskId, metadata: { ...task.metadata } };
 }
 
 function readRegistry(state: SessionStateMap | undefined): WorkflowToolRunRegistry {
@@ -349,13 +349,13 @@ export function registerWorkflowToolRun<T extends { readonly state?: SessionStat
               : { ...previous.task.activityWorkIdentity, ...entry.task.activityWorkIdentity },
           cohortId: previous.task.cohortId,
           dispatchContext: previous.task.dispatchContext,
-          terminalView: previous.task.terminalView ?? entry.task.terminalView,
+          outcome: previous.task.outcome ?? entry.task.outcome,
         },
       };
     } else {
       const pending = runs.find(
         (candidate): candidate is BackgroundWorkflowToolRun =>
-          candidate.lifetime === "session" && candidate.task.terminalView === undefined,
+          candidate.lifetime === "session" && candidate.task.outcome === undefined,
       );
       entry = {
         ...entry,
@@ -384,16 +384,18 @@ export function recordWorkflowTaskView(
   state: SessionStateMap | undefined,
   view: TaskView,
 ): SessionStateMap | undefined {
-  const terminal = parseTaskView(view);
-  if (terminal === undefined) throw new Error("Invalid terminal workflow task view.");
+  const { taskId, metadata, ...result } = view;
+  const outcome = parseTaskOutcome(result);
+  if (!isNonEmptyString(taskId) || !isTaskMetadata(metadata) || outcome === undefined)
+    throw new Error("Invalid terminal workflow task view.");
   const registry = readRegistry(state);
   const runs = [...registry.runs];
   const index = runs.findIndex(
-    (entry) => entry.lifetime === "session" && entry.task.taskId === terminal.taskId,
+    (entry) => entry.lifetime === "session" && entry.task.taskId === taskId,
   );
   const entry = runs[index];
   if (entry === undefined || entry.lifetime !== "session") return state;
-  if (!sameTaskMetadata(entry.task.metadata, terminal.metadata))
+  if (!sameTaskMetadata(entry.task.metadata, metadata))
     throw new Error(`Task view metadata does not match invocation "${view.taskId}".`);
   const previous = readWorkflowTaskView(entry.task);
   // Parent delivery order decides settlement. Replays and late outcomes cannot replace it.
@@ -402,7 +404,7 @@ export function recordWorkflowTaskView(
     ...entry,
     task: {
       ...entry.task,
-      terminalView: terminal,
+      outcome,
     },
   };
   return writeRegistry(state, { ...registry, runs });

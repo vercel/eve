@@ -281,7 +281,10 @@ describe("recordTerminalTaskViewsStep", () => {
     });
     const state = result.sessionState.snapshot.session.state;
 
-    expect(getBackgroundWorkflowToolRuns(state)[0]?.task.terminalView).toEqual(view);
+    expect(getBackgroundWorkflowToolRuns(state)[0]?.task.outcome).toEqual({
+      status: view.status,
+      lastOutput: view.lastOutput,
+    });
     expect(getProxyInputRequests(state).size).toBe(0);
     expect(result.sessionState.hasProxyInputRequests).toBe(false);
     expect(getAgentHandleStore(state)?.handles).toEqual([

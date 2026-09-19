@@ -426,7 +426,7 @@ class BackgroundToolExecutionScope implements BackgroundToolExecutor {
           entry?.task.metadata.kind === "subagent" &&
           entry.task.metadata.agentId === handle.identity.id &&
           entry.task.metadata.name === handle.identity.name &&
-          entry.task.terminalView === undefined
+          entry.task.outcome === undefined
         ) {
           await steerBackgroundAgent({
             ctx: input.ctx,
