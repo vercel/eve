@@ -227,17 +227,24 @@ export function advanceStep(state: HarnessEmissionState): HarnessEmissionState {
 /**
  * Emits `turn.completed` and either `session.waiting` or `session.completed`.
  * Returns updated emission state with an incremented sequence.
+ *
+ * `messages` is the settled history of the turn. Memory providers capture a
+ * completed turn from it, so the paths that settle a turn pass
+ * `session.history`; boundary paths that end a turn without a model response
+ * (limits, proxied subagent input) omit it and no capture runs.
  */
 export async function emitTurnEpilogue(
   emitFn: HarnessEmitFn,
   state: HarnessEmissionState,
   mode: RunMode,
+  messages?: readonly import("ai").ModelMessage[],
 ): Promise<HarnessEmissionState> {
   await emitFn(
     createTurnCompletedEvent({
       sequence: state.sequence,
       turnId: state.turnId,
     }),
+    messages,
   );
 
   if (mode === "conversation") {
