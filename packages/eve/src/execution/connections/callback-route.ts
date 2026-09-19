@@ -11,9 +11,9 @@ import { resumeAuthorizationCallback } from "#execution/legacy-session/authoriza
  *
  * 1. Parses the inbound request into a JSON-serializable
  *    {@link AuthorizationCallback} (params only — never request headers).
- * 2. Calls `resumeHook(token, payload)` to wake the suspended workflow.
- * 3. Renders the standard "Authorization complete" landing page so the
- *    user sees a friendly UI instead of an empty `202 Accepted`.
+ * 2. Calls `resumeAuthorizationCallback(token, payload)` to wake the suspended session.
+ * 3. Redirects to the standard "Authorization complete" landing page at a
+ *    clean URL so callback parameters do not remain in the address bar.
  *
  * Owning this route in the framework - instead of routing the IdP at the
  * workflow runtime's raw `/.well-known/workflow/v1/webhook/:token` -
@@ -26,6 +26,13 @@ import { resumeAuthorizationCallback } from "#execution/legacy-session/authoriza
 import type { RouteContext } from "#public/definitions/channel.js";
 import { buildAuthorizationCompletePage } from "#runtime/connections/authorization-complete-page.js";
 import type { AuthorizationCallback } from "#shared/connection-types.js";
+
+const VERCEL_PROTECTION_BYPASS_QUERY = "x-vercel-protection-bypass";
+
+/** Renders the completion page at a stable URL without OAuth callback parameters. */
+export async function handleAuthorizationCompleteRequest(): Promise<Response> {
+  return buildAuthorizationCompletePage();
+}
 
 /** Resumes the exact authorization attempt through the session inbox. */
 export async function handleConnectionCallbackRequest(
@@ -60,7 +67,16 @@ export async function handleConnectionCallbackRequest(
     return Response.json({ error: "Connection callback not pending.", ok: false }, { status: 404 });
   }
 
-  return buildAuthorizationCompletePage();
+  const requestPath = new URL(request.url).pathname;
+  const connectionsIndex = requestPath.lastIndexOf("/connections/");
+  const completionPath = `${requestPath.slice(0, connectionsIndex)}/connections/authorization-complete`;
+  return new Response(null, {
+    headers: {
+      "cache-control": "no-store",
+      location: completionPath,
+    },
+    status: 303,
+  });
 }
 
 /**
@@ -68,7 +84,8 @@ export async function handleConnectionCallbackRequest(
  * {@link AuthorizationCallback} handed to `completeAuthorization`.
  *
  * Only the IdP-returned params (query string, plus a form-encoded body
- * for `form_post` response modes) and the method are captured. Request
+ * for `form_post` response modes) and the method are captured. Vercel's
+ * deployment-protection bypass parameter is explicitly excluded. Request
  * headers — including any inbound `Cookie`/`Authorization` — are
  * deliberately dropped so they never cross a step boundary; no shipped
  * strategy reads them.
@@ -76,7 +93,9 @@ export async function handleConnectionCallbackRequest(
 async function projectAuthorizationCallback(request: Request): Promise<AuthorizationCallback> {
   const params: Record<string, string> = {};
   for (const [key, value] of new URL(request.url).searchParams) {
-    params[key] = value;
+    if (key !== VERCEL_PROTECTION_BYPASS_QUERY) {
+      params[key] = value;
+    }
   }
 
   let body: string | undefined;
@@ -89,7 +108,9 @@ async function projectAuthorizationCallback(request: Request): Promise<Authoriza
     const contentType = request.headers.get("content-type") ?? "";
     if (body && contentType.includes("application/x-www-form-urlencoded")) {
       for (const [key, value] of new URLSearchParams(body)) {
-        params[key] = value;
+        if (key !== VERCEL_PROTECTION_BYPASS_QUERY) {
+          params[key] = value;
+        }
       }
     }
   }
