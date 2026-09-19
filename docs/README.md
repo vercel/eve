@@ -29,6 +29,7 @@ Important naming note:
 | Carry state across turns, or shape what the model sees   | [State](./concepts/state.md), [Context Control](./concepts/context-control.md)                                               |
 | Run commands or untrusted code in isolation              | [Sandboxes](./sandbox.mdx)                                                                                                   |
 | Delegate work to a specialist child agent                | [Subagents](./subagents/index.mdx)                                                                                           |
+| Route requests between specialist agents                 | [Build an Agent Router](./guides/routing-agents.md)                                                                          |
 | Run work on a recurring schedule                         | [Schedules](./schedules.mdx)                                                                                                 |
 | Install an existing integration instead of writing one   | [Add Integrations](./install-integrations.mdx)                                                                               |
 | Link a Vercel project and deploy to production           | [Deploy to Vercel](./guides/deployment/vercel.mdx)                                                                           |

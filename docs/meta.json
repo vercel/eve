@@ -13,6 +13,7 @@
     "skills",
     "sandbox",
     "subagents",
+    "guides/routing-agents",
     "evals",
     "guides/session-context",
     "schedules",
