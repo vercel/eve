@@ -165,10 +165,11 @@ export function createWorkflowRuntime(config: {
       const retention = bundle.resolvedAgent.config?.experimental?.workflow?.retention;
       let collectorRunId: string | undefined;
       let activityObserver = input.activityObserver;
+      const activityPresentation = getChannelActivityPresentation(input.adapter);
       if (
         input.parent === undefined &&
         activityObserver === undefined &&
-        (getChannelActivityPresentation(input.adapter)?.renderers.length ?? 0) > 0
+        (activityPresentation?.renderers.length ?? 0) > 0
       ) {
         const collectorContext = serializeContext(ctx);
         const token = randomBytes(32).toString("base64url");
@@ -179,6 +180,7 @@ export function createWorkflowRuntime(config: {
                 ? sessionTimeoutMs
                 : DEFAULT_ACTIVITY_COLLECTOR_RETENTION_MS),
           ).toISOString(),
+          periodicRefreshIntervalMs: activityPresentation?.periodicRefreshIntervalMs,
           serializedContext: collectorContext,
           token,
         };

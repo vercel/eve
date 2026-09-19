@@ -20,6 +20,7 @@ export interface ChannelActivityPresentation {
   readonly destination: (
     state: Record<string, unknown> | undefined,
   ) => Readonly<Record<string, unknown>>;
+  readonly periodicRefreshIntervalMs?: number;
   readonly renderers: readonly ChannelActivityRenderer[];
 }
 

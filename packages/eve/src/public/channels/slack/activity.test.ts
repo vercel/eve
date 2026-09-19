@@ -130,6 +130,31 @@ describe("Slack status activity", () => {
     ).toThrow("reserved by eve");
   });
 
+  it.each([0, 999, 1.5, 86_400_001, Number.NaN])(
+    "rejects invalid periodic refresh interval %s",
+    (periodicRefreshIntervalMs) => {
+      expect(() =>
+        slackChannel({
+          activity: {
+            periodicRefreshIntervalMs,
+            renderers: [experimental_slackActivityStatus()],
+          },
+        }),
+      ).toThrow("periodicRefreshIntervalMs must be an integer between 1,000 and 86,400,000");
+    },
+  );
+
+  it("installs a periodic refresh interval", () => {
+    const channel = slackChannel({
+      activity: {
+        periodicRefreshIntervalMs: 5_000,
+        renderers: [experimental_slackActivityStatus()],
+      },
+    });
+    if (!isCompiledChannel(channel)) throw new Error("Expected compiled channel");
+    expect(getChannelActivityPresentation(channel.adapter)?.periodicRefreshIntervalMs).toBe(5_000);
+  });
+
   it("rejects duplicate renderer configuration", () => {
     expect(() =>
       slackChannel({
