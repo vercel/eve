@@ -151,7 +151,7 @@ controls observability content capture, not access to the channel. See
 
 Message hooks return `{ auth }` to dispatch, `null` to drop, or `{ auth, context }` to inject background into history. Public conversations use the returned `title`, or the triggering message text when `title` is omitted. DMs and private channels always use `Private message` so the run title does not expose message details.
 
-- `onMessage(ctx, message)` handles Slack `message` events. eve drops messages authored by the installed app before this hook runs, preventing self-reply loops. Messages from other bots remain visible; check `message.author?.isBot` when those should also be ignored. `ctx.isBotMentioned()` and `ctx.isSubscribed()` support mention and active-thread policies.
+- `onMessage(ctx, message)` handles Slack `message` events. eve drops messages authored by the installed app before this hook runs, preventing self-reply loops. With `excludeOutsiders` disabled, messages from other bots remain visible; check `message.author?.isBot` when those should also be ignored. `ctx.isBotMentioned()` and `ctx.isSubscribed()` support mention and active-thread policies.
 - `onAppMention(ctx, message)` handles only `app_mention` and takes precedence over `onMessage`. Its default derives workspace-scoped auth and posts `Thinking…`.
 - `onDirectMessage(ctx, message)` handles only DMs and takes precedence over `onMessage`. Bot-authored messages and edits are filtered first; Slack requires `message.im` and `im:history`.
 
@@ -189,9 +189,36 @@ The model-visible `<slack_message>` includes `sender_id`, `bot_user_id` when ava
 
 When a Slack message shares another Slack message, eve extracts the forwarded message body from Slack's message-unfurl attachment and includes it in `<content>`. The original top-level comment, when present, remains alongside the forwarded content.
 
+#### Exclude guests and external Slack Connect members
+
+Set `excludeOutsiders: true` to accept inbound requests only from full members of the bot's workspace. Outsiders include both single-channel and multi-channel guest accounts, and external Slack Connect members.
+
+```ts title="agent/channels/slack.ts"
+import { connectSlackCredentials } from "@vercel/connect/eve";
+import { slackChannel } from "eve/channels/slack";
+
+export default slackChannel({
+  credentials: connectSlackCredentials("slack/my-agent"),
+  excludeOutsiders: true,
+});
+```
+
+`excludeOutsiders` defaults to `false`. Leaving it disabled adds no API calls or required scopes and preserves the existing inbound behavior. To enable it, add the `users:read` bot scope to your Slack app or Vercel Connect connector and reinstall the app so the scope takes effect.
+
+After signature verification, the guard checks signed inbound Events API callbacks and all interactivity before any authored handler or model work runs. This includes eve-owned HITL buttons, opening and submitting HITL modals, custom actions, slash commands, and message and global shortcuts. Authored handlers cannot bypass the guard; accepted requests still pass through your handlers and their authorization policies.
+
+For each request, eve selects the bot token using the app installation workspace (`installationTeamId`, passed as `teamId` to a function-form token provider). It calls `auth.test` to establish the bot's workspace from `team_id`, then `users.info` with that token to check the actor. The actor must meet both conditions:
+
+- `user.team_id` matches the bot's workspace, or `user.enterprise_user.teams` contains that workspace. Membership elsewhere in the same enterprise is not enough.
+- `user.is_restricted` and `user.is_ultra_restricted` are both explicitly `false`, excluding both guest account types.
+
+The guard rejects actors marked external or stranger, deleted users, and bots. It fails closed when the actor or required workspace or user metadata is missing, or either API call fails, including a missing `users:read` scope. Events API callbacks must carry a string `event.user`; callbacks without one do not reach `onEvent` while the guard is enabled. These checks are not cached. The guard does not change the default Slack auth attributes.
+
+This is an inbound invocation guard, not a content or visibility filter. It does not remove outsider messages from fetched thread history, prevent outsiders from reading replies in shared channels, or guard proactive sends. Use conversations limited to the intended audience for sensitive replies, and keep authorization checks inside sensitive tools.
+
 #### Restrict who can invoke the agent
 
-A valid Slack signature proves that Slack sent the event. It does not decide which channel or person your agent should trust. Fail closed in the inbound handler before returning auth, especially when the app is installed in a shared Slack Connect channel:
+A valid Slack signature proves that Slack sent the event. It does not decide which channel or person your agent should trust. Use `excludeOutsiders` for the workspace-membership policy above. For a specific user or conversation allowlist, fail closed in the inbound handler before returning auth, especially when the app is installed in a shared Slack Connect channel:
 
 ```ts title="agent/channels/slack.ts"
 import { connectSlackCredentials } from "@vercel/connect/eve";
@@ -228,13 +255,13 @@ export default slackChannel({
 });
 ```
 
-Override every enabled inbound handler; leaving `onDirectMessage` out would retain eve's default DM behavior. Apply the same policy in `onInputResponse` so someone who cannot start a turn cannot resume one through an eve-owned HITL control. Slack Connect can deliver events from external users, so authorize the explicit user and current conversation IDs your policy expects. If access depends on organization membership, resolve it from Slack's shared-channel and user data instead of inferring it from the request signature.
+Override every enabled inbound handler; leaving `onDirectMessage` out would retain eve's default DM behavior. Apply the same policy in `onInputResponse` so someone who cannot start a turn cannot resume one through an eve-owned HITL control. Slack Connect can deliver events from external users, so authorize the explicit user and current conversation IDs your policy expects. For membership policies beyond `excludeOutsiders`, resolve membership from Slack's shared-channel and user data instead of inferring it from the request signature.
 
 Keep authorization checks inside sensitive tools too. The inbound allowlist controls who can start a turn; tool-level checks control what that authenticated Slack principal may read or change.
 
 `onInputResponse` runs after eve decodes a built-in HITL answer but before the parked session resumes. Return `{ auth }` to accept the answer. Returning `null` or throwing rejects it, leaves the request pending, and keeps the Slack controls active. `ctx.defaultAuth` identifies the Slack user who submitted the signed interaction; it does not authorize that user by itself.
 
-If you omit `onInputResponse`, Slack accepts HITL answers with the submitting user's auth, regardless of which message or event handlers you define. Define `onInputResponse` when those handlers enforce an invocation policy that must also apply to HITL answers. Put sensitive prompts in conversations limited to the intended approvers, and re-check `ctx.session.auth.current` inside a sensitive tool before performing its side effect.
+If you omit `onInputResponse`, Slack accepts HITL answers with the submitting user's auth after the `excludeOutsiders` check, when enabled, regardless of which message or event handlers you define. Define `onInputResponse` when those handlers enforce an invocation policy that must also apply to HITL answers. Put sensitive prompts in conversations limited to the intended approvers, and re-check `ctx.session.auth.current` inside a sensitive tool before performing its side effect.
 
 #### Continue conversations without repeated mentions
 
