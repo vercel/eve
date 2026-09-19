@@ -1,5 +1,10 @@
 enableGlobalVirtualStore: false
 
+# Backport https://github.com/vercel/workflow/pull/4219 until its next Postgres release.
+# The per-run queue lock holds steering wakes behind the inline step they must interrupt.
+patchedDependencies:
+  "@workflow/world-postgres@5.0.0-beta.44": patches/workflow-world-postgres-5.0.0-beta.44.patch
+
 packages:
   - apps/*
   - apps/fixtures/*
