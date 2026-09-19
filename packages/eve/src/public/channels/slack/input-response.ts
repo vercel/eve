@@ -45,6 +45,7 @@ export async function authorizeInputResponse(input: {
     userName: input.submission.user.username ?? input.submission.user.name,
   });
   const { thread, slack } = buildSlackBinding({
+    api: input.deps.config.api,
     botToken: input.deps.config.credentials?.botToken,
     channelId: input.channelId,
     threadTs: input.threadTs,

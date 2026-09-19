@@ -515,6 +515,36 @@ Start a session without an inbound message through `ctx.to(slack, target).send(m
 
 To post without invoking the model, use `ctx.thread.post(...)` in an inbound Slack handler or `channel.thread.post(...)` in an `events` handler. Use `callSlackApi(...)` where no Slack channel context exists. For application-managed retries and deduplication, see [Durable cross-channel notifications](../patterns/durable-cross-channel-notifications).
 
+### Pointing the channel at a different Slack API base (testing)
+
+Every outbound Slack Web API call the channel makes goes through one base URL. Set `api.url` to redirect it at a Slack simulator, a proxy, or a recorded fixture server:
+
+```ts
+import { slackChannel } from "eve/channels/slack";
+
+export default slackChannel({
+  api: { url: "http://localhost:3000/api/slack" },
+  credentials: { botToken: process.env.SLACK_BOT_TOKEN },
+});
+```
+
+When `api.url` is omitted, eve reads `SLACK_API_URL`, and otherwise uses `https://slack.com/api/`. The value must be an absolute URL, and its path is normalized to a trailing slash, so `https://sim.example/api` and `https://sim.example/api/` both resolve `chat.postMessage` to `https://sim.example/api/chat.postMessage`. A base URL carrying a query string or fragment is rejected with an error: Slack method names are appended as a path segment, so anything after the path would be dropped along with the path itself.
+
+`api.fetch` supplies the fetch implementation used for those calls, for a test double or an instrumented client:
+
+```ts
+export default slackChannel({
+  api: { url: process.env.SLACK_API_URL, fetch: myInstrumentedFetch },
+});
+```
+
+Two other behaviors follow the configured base:
+
+- Inbound `url_private` attachment downloads accept URLs on the configured origin in addition to Slack's own file hosts, so a simulator can serve its own files.
+- `callSlackApi` accepts the same override per call as `apiUrl` and `fetch`, for code that runs outside a Slack channel context.
+
+Inbound webhook verification is unaffected — it still uses `credentials.signingSecret` / `SLACK_SIGNING_SECRET` or `credentials.webhookVerifier`. This option is for testing; leave it unset in production.
+
 ### Attachments
 
 Inbound files behind authenticated Slack URLs are staged with `fetchFile`. See [File uploads](./custom#file-uploads) for the `fetchFile` contract.

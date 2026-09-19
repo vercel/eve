@@ -14,9 +14,9 @@ import { createLogger } from "#internal/logging.js";
 import {
   buildSlackBinding,
   buildSlackWorkspaceHandle,
-  resolveSlackBotToken,
   slackContinuationToken,
 } from "#public/channels/slack/api.js";
+import { postSlackApiJson, resolveSlackBotToken } from "#public/channels/slack/api-transport.js";
 import { buildSlackAuthContext } from "#public/channels/slack/auth.js";
 import {
   buildFreeformModalView,
@@ -330,6 +330,7 @@ export async function handleInteractionPost(
     if (customActions.length > 0) {
       const actionUser = customActions[0]!.user;
       const { thread, slack } = buildSlackBinding({
+        api: deps.config.api,
         botToken: deps.config.credentials?.botToken,
         channelId: interaction.channelId,
         threadTs: interaction.threadTs,
@@ -456,6 +457,7 @@ function buildShortcutContext(input: {
 }): SlackShortcutContext {
   return {
     slack: buildSlackWorkspaceHandle({
+      api: input.config.api,
       botToken: input.config.credentials?.botToken,
       installationTeamId: input.installationTeamId,
       teamId: input.teamId,
@@ -570,13 +572,11 @@ async function openFreeformModal(input: {
     teamId: input.interaction.installationTeamId,
   });
 
-  const response = await fetch("https://slack.com/api/views.open", {
-    method: "POST",
-    headers: {
-      authorization: `Bearer ${token}`,
-      "content-type": "application/json; charset=utf-8",
-    },
-    body: JSON.stringify({ trigger_id: triggerId, view }),
+  const response = await postSlackApiJson({
+    api: input.deps.config.api,
+    body: { trigger_id: triggerId, view },
+    method: "views.open",
+    token,
   });
   if (!response.ok) {
     log.error("Slack views.open returned non-2xx", { status: response.status });

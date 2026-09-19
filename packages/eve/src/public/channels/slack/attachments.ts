@@ -3,11 +3,13 @@ import type { FilePart, TextPart, UserContent } from "ai";
 import type { FetchFileContext, FetchFileResult } from "#channel/adapter.js";
 import { EveAttachmentError } from "#internal/attachments/errors.js";
 import { createLogger } from "#internal/logging.js";
+import { type SlackThread } from "#public/channels/slack/api.js";
 import {
+  resolveSlackApiUrl,
   resolveSlackBotToken,
+  type SlackApiConfig,
   type SlackBotToken,
-  type SlackThread,
-} from "#public/channels/slack/api.js";
+} from "#public/channels/slack/api-transport.js";
 import type { SlackAttachment, SlackMessage } from "#public/channels/slack/inbound.js";
 import {
   evaluateFilePart,
@@ -168,16 +170,17 @@ export function buildSlackTurnMessage(
  */
 export function createSlackFetchFile(input: {
   readonly botToken?: SlackBotToken;
+  readonly api?: SlackApiConfig;
 }): (url: string, context?: FetchFileContext) => Promise<FetchFileResult | null> {
   return async (url, context) => {
-    if (!isSlackFileUrl(url)) {
+    if (!isSlackFileUrl(url, input.api)) {
       return null;
     }
     const installationTeamId = context?.state.installationTeamId;
     const token = await resolveSlackBotToken(input.botToken, {
       teamId: typeof installationTeamId === "string" ? installationTeamId : undefined,
     });
-    const response = await fetch(url, {
+    const response = await (input.api?.fetch ?? fetch)(url, {
       headers: { authorization: `Bearer ${token}` },
     });
     if (!response.ok) {
@@ -204,9 +207,23 @@ export function createSlackFetchFile(input: {
   };
 }
 
-function isSlackFileUrl(url: string): boolean {
+/**
+ * Whether an attachment URL is one eve downloads with the bot token.
+ *
+ * Slack's own file hosts are always accepted. A configured
+ * {@link SlackApiConfig.url} additionally allows that origin, so a Slack
+ * simulator can serve its own `url_private` files — including over
+ * `http:` on localhost, which the Slack hosts never get.
+ */
+function isSlackFileUrl(url: string, api?: SlackApiConfig): boolean {
   const parsed = URL.parse(url);
-  if (parsed?.protocol !== "https:") {
+  if (parsed === null) {
+    return false;
+  }
+  if (matchesConfiguredSlackApiOrigin(parsed, api)) {
+    return true;
+  }
+  if (parsed.protocol !== "https:") {
     return false;
   }
   if (parsed.hostname === "files.slack.com") {
@@ -217,4 +234,13 @@ function isSlackFileUrl(url: string): boolean {
       parsed.hostname.endsWith(".enterprise.slack.com")) &&
     parsed.pathname.startsWith("/files/")
   );
+}
+
+function matchesConfiguredSlackApiOrigin(parsed: URL, api?: SlackApiConfig): boolean {
+  // Only an explicit override widens the allowlist; the Slack default is
+  // already covered by the file hosts above.
+  if ((api?.url ?? process.env.SLACK_API_URL) === undefined) return false;
+  const configured = URL.parse(resolveSlackApiUrl(api));
+  if (configured === null || configured.origin === "null") return false;
+  return parsed.origin === configured.origin;
 }

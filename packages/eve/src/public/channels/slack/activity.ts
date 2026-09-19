@@ -5,7 +5,11 @@ import type {
   ActivitySnapshotV1,
   ActivityWorkStateV1,
 } from "#protocol/activity.js";
-import { callSlackApi, type SlackBotToken } from "#public/channels/slack/api.js";
+import {
+  callSlackApi,
+  type SlackApiConfig,
+  type SlackBotToken,
+} from "#public/channels/slack/api-transport.js";
 import {
   createSlackPlanRenderer,
   SLACK_ACTIVITY_PLAN_RENDERER_ID,
@@ -106,6 +110,7 @@ export function hasSlackActivityStatus(
 export function buildSlackActivityRenderers(input: {
   readonly botToken: SlackBotToken | undefined;
   readonly renderers: readonly SlackActivityRenderer[];
+  readonly api?: SlackApiConfig;
 }): readonly ChannelActivityRenderer[] {
   const ids = new Set<string>();
   return input.renderers.map((renderer) => {
@@ -116,13 +121,13 @@ export function buildSlackActivityRenderers(input: {
       throw new TypeError(`Duplicate Slack activity renderer "${renderer.id}".`);
     ids.add(renderer.id);
     if (renderer.id === SLACK_ACTIVITY_MESSAGE_RENDERER_ID) {
-      return createSlackActivityRenderer(input.botToken);
+      return createSlackActivityRenderer(input.botToken, input.api);
     }
     if (renderer.id === SLACK_ACTIVITY_PLAN_RENDERER_ID) {
-      return createSlackPlanRenderer(input.botToken);
+      return createSlackPlanRenderer(input.botToken, input.api);
     }
     if (renderer.id === SLACK_ACTIVITY_STATUS_RENDERER_ID) {
-      return createSlackStatusRenderer(input.botToken);
+      return createSlackStatusRenderer(input.botToken, input.api);
     }
     assertCustomSlackActivityRenderer(renderer);
     return createCustomSlackActivityRenderer(renderer);
@@ -203,7 +208,10 @@ function experimentalSlackActivityDestination(
   };
 }
 
-function createSlackStatusRenderer(botToken: SlackBotToken | undefined): ChannelActivityRenderer {
+function createSlackStatusRenderer(
+  botToken: SlackBotToken | undefined,
+  api: SlackApiConfig | undefined,
+): ChannelActivityRenderer {
   return {
     id: SLACK_ACTIVITY_STATUS_RENDERER_ID,
     async dispose({ destination, state }) {
@@ -219,6 +227,8 @@ function createSlackStatusRenderer(botToken: SlackBotToken | undefined): Channel
           teamId: typeof installationTeamId === "string" ? installationTeamId : undefined,
         },
         operation: "assistant.threads.setStatus",
+        apiUrl: api?.url,
+        fetch: api?.fetch,
       });
       if (response.ok !== true)
         throw new Error(`Slack status disposal failed: ${response.error ?? "unknown_error"}`);
@@ -240,6 +250,8 @@ function createSlackStatusRenderer(botToken: SlackBotToken | undefined): Channel
           teamId: typeof installationTeamId === "string" ? installationTeamId : undefined,
         },
         operation: "assistant.threads.setStatus",
+        apiUrl: api?.url,
+        fetch: api?.fetch,
       });
       if (response.ok !== true) {
         throw new Error(
@@ -251,7 +263,10 @@ function createSlackStatusRenderer(botToken: SlackBotToken | undefined): Channel
   };
 }
 
-function createSlackActivityRenderer(botToken: SlackBotToken | undefined): ChannelActivityRenderer {
+function createSlackActivityRenderer(
+  botToken: SlackBotToken | undefined,
+  api: SlackApiConfig | undefined,
+): ChannelActivityRenderer {
   return {
     id: SLACK_ACTIVITY_MESSAGE_RENDERER_ID,
     async dispose() {},
@@ -272,6 +287,7 @@ function createSlackActivityRenderer(botToken: SlackBotToken | undefined): Chann
         const current =
           previous[rootTurnId] ??
           (await recoverActivityMessage({
+            api,
             botToken,
             channelId,
             installationTeamId,
@@ -283,6 +299,7 @@ function createSlackActivityRenderer(botToken: SlackBotToken | undefined): Chann
           continue;
         }
         let response = await writeActivityMessage({
+          api,
           botToken,
           channelId,
           current,
@@ -297,6 +314,7 @@ function createSlackActivityRenderer(botToken: SlackBotToken | undefined): Chann
           response.error === "message_not_found"
         ) {
           response = await writeActivityMessage({
+            api,
             botToken,
             channelId,
             installationTeamId,
@@ -320,6 +338,7 @@ function createSlackActivityRenderer(botToken: SlackBotToken | undefined): Chann
 }
 
 async function writeActivityMessage(input: {
+  readonly api: SlackApiConfig | undefined;
   readonly botToken: SlackBotToken | undefined;
   readonly channelId: string;
   readonly current?: { readonly ts: string };
@@ -346,10 +365,13 @@ async function writeActivityMessage(input: {
       teamId: typeof input.installationTeamId === "string" ? input.installationTeamId : undefined,
     },
     operation: input.current === undefined ? "chat.postMessage" : "chat.update",
+    apiUrl: input.api?.url,
+    fetch: input.api?.fetch,
   });
 }
 
 async function recoverActivityMessage(input: {
+  readonly api: SlackApiConfig | undefined;
   readonly botToken: SlackBotToken | undefined;
   readonly channelId: string;
   readonly installationTeamId: unknown;
@@ -373,6 +395,8 @@ async function recoverActivityMessage(input: {
         teamId: typeof input.installationTeamId === "string" ? input.installationTeamId : undefined,
       },
       operation: "conversations.replies",
+      apiUrl: input.api?.url,
+      fetch: input.api?.fetch,
     });
     if (response.ok !== true || !Array.isArray(response.messages)) return undefined;
     for (const message of response.messages) {

@@ -4473,3 +4473,166 @@ describe("constrainAuthorizationRequired", () => {
     expect(handler.mock.calls[0]?.[2]).toBe(sessionCtx);
   });
 });
+
+describe("slackChannel() Slack API base URL", () => {
+  const ORIGINAL_SIGNING_SECRET = process.env.SLACK_SIGNING_SECRET;
+  const ORIGINAL_SLACK_API_URL = process.env.SLACK_API_URL;
+  let fetchMock: ReturnType<typeof vi.fn>;
+  let apiFetch: ReturnType<typeof vi.fn<typeof globalThis.fetch>>;
+
+  beforeEach(() => {
+    process.env.SLACK_SIGNING_SECRET = SIGNING_SECRET;
+    delete process.env.SLACK_API_URL;
+    const ok = () =>
+      new Response(JSON.stringify({ ok: true, ts: "1700000001.000001" }), {
+        headers: { "content-type": "application/json" },
+      });
+    fetchMock = vi.fn(async () => ok());
+    apiFetch = vi.fn<typeof globalThis.fetch>(async () => ok());
+    vi.stubGlobal("fetch", fetchMock);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    if (ORIGINAL_SLACK_API_URL === undefined) delete process.env.SLACK_API_URL;
+    else process.env.SLACK_API_URL = ORIGINAL_SLACK_API_URL;
+  });
+
+  afterAll(() => {
+    if (ORIGINAL_SIGNING_SECRET === undefined) delete process.env.SLACK_SIGNING_SECRET;
+    else process.env.SLACK_SIGNING_SECRET = ORIGINAL_SIGNING_SECRET;
+  });
+
+  function urlsOf(mock: { readonly mock: { readonly calls: readonly unknown[][] } }): string[] {
+    return mock.mock.calls.map(([url]) => String(url));
+  }
+
+  function buildFreeformClickRequest(): Request {
+    return buildSignedInteractionRequest({
+      type: "block_actions",
+      trigger_id: "trigger-123",
+      team: { id: "T01" },
+      user: { id: "U01", username: "ada", team_id: "T01" },
+      channel: { id: "C01" },
+      message: {
+        ts: "1700000000.000010",
+        thread_ts: "1700000000.000001",
+        blocks: [{ type: "section", text: { type: "mrkdwn", text: "Explain" } }],
+      },
+      actions: [
+        {
+          action_id: `${HITL_FREEFORM_ACTION_PREFIX}route:C01:1700000000.000001:call_abc123`,
+          text: { type: "plain_text", text: "Type your answer" },
+          value: "call_abc123",
+        },
+      ],
+    });
+  }
+
+  function buildFreeformSubmissionRequest(): Request {
+    return buildSignedInteractionRequest({
+      type: "view_submission",
+      team: { id: "T01" },
+      user: { id: "U_SUBMITTER", username: "grace", name: "grace", team_id: "T01" },
+      view: {
+        callback_id: HITL_FREEFORM_MODAL_CALLBACK_ID,
+        private_metadata: JSON.stringify({
+          channelId: "C01",
+          continuationToken: "C01:1700000000.000001",
+          messageChannelId: "D_REVIEW",
+          messageTs: "1700000000.000010",
+          requestId: "call_abc123",
+          threadTs: "1700000000.000001",
+        }),
+        state: {
+          values: {
+            [HITL_FREEFORM_MODAL_BLOCK_ID]: {
+              [HITL_FREEFORM_MODAL_ACTION_ID]: { value: "approved with context" },
+            },
+          },
+        },
+      },
+    });
+  }
+
+  it("keeps views.open on Slack's host by default and moves it to a configured base", async () => {
+    await firePost(
+      slackChannel({ credentials: { botToken: "xoxb-test" } }),
+      buildFreeformClickRequest(),
+    );
+    expect(urlsOf(fetchMock)).toContain("https://slack.com/api/views.open");
+
+    fetchMock.mockClear();
+    await firePost(
+      slackChannel({
+        api: { url: "https://sim.example/api", fetch: apiFetch },
+        credentials: { botToken: "xoxb-test" },
+      }),
+      buildFreeformClickRequest(),
+    );
+
+    expect(urlsOf(apiFetch)).toContain("https://sim.example/api/views.open");
+    expect(urlsOf(fetchMock)).not.toContain("https://slack.com/api/views.open");
+  });
+
+  it("opens views against SLACK_API_URL when no api.url is configured", async () => {
+    process.env.SLACK_API_URL = "http://localhost:3000/api/slack";
+
+    await firePost(
+      slackChannel({ credentials: { botToken: "xoxb-test" } }),
+      buildFreeformClickRequest(),
+    );
+
+    expect(urlsOf(fetchMock)).toContain("http://localhost:3000/api/slack/views.open");
+  });
+
+  it("marks the answered freeform card through the configured base", async () => {
+    await firePost(
+      slackChannel({ credentials: { botToken: "xoxb-test" } }),
+      buildFreeformSubmissionRequest(),
+    );
+    expect(urlsOf(fetchMock)).toContain("https://slack.com/api/chat.update");
+
+    fetchMock.mockClear();
+    await firePost(
+      slackChannel({
+        api: { url: "https://sim.example/api", fetch: apiFetch },
+        credentials: { botToken: "xoxb-test" },
+      }),
+      buildFreeformSubmissionRequest(),
+    );
+
+    expect(urlsOf(apiFetch)).toContain("https://sim.example/api/chat.update");
+    expect(urlsOf(fetchMock)).not.toContain("https://slack.com/api/chat.update");
+  });
+
+  it("marks the answered freeform card against SLACK_API_URL", async () => {
+    process.env.SLACK_API_URL = "http://localhost:3000/api/slack/";
+
+    await firePost(
+      slackChannel({ credentials: { botToken: "xoxb-test" } }),
+      buildFreeformSubmissionRequest(),
+    );
+
+    expect(urlsOf(fetchMock)).toContain("http://localhost:3000/api/slack/chat.update");
+  });
+
+  it("routes the inbound mention pipeline's own Slack calls through the configured base", async () => {
+    const channel = slackChannel({
+      api: { url: "https://sim.example/api", fetch: apiFetch },
+      credentials: { botToken: "xoxb-test" },
+      onAppMention: async (ctx) => {
+        await ctx.thread.startTyping("Thinking...");
+        await ctx.slack.request("users.info", { user: "U01" });
+        return { auth: null };
+      },
+    });
+
+    await firePost(channel, buildSignedRequest({ body: buildMentionBody().body }));
+
+    expect(urlsOf(apiFetch)).toContain("https://sim.example/api/assistant.threads.setStatus");
+    expect(urlsOf(apiFetch)).toContain("https://sim.example/api/users.info");
+    expect(urlsOf(apiFetch).every((url) => url.startsWith("https://sim.example/api/"))).toBe(true);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+});

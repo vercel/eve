@@ -1,4 +1,4 @@
-import type { SlackApiResponse } from "#public/channels/slack/api.js";
+import type { SlackApiResponse } from "#public/channels/slack/api-transport.js";
 
 export type SlackConversationPrivacy = "private" | "public" | "unknown";
 

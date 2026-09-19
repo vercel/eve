@@ -1,4 +1,4 @@
-import { resolveSlackBotToken } from "#public/channels/slack/api.js";
+import { postSlackApiJson, resolveSlackBotToken } from "#public/channels/slack/api-transport.js";
 import { buildAnsweredBlocks, isHitlAction } from "#public/channels/slack/hitl.js";
 import {
   SLACK_CARD_SUBTEXT_MAX_LENGTH,
@@ -186,18 +186,16 @@ async function updateAnsweredCard(input: {
   const token = await resolveSlackBotToken(input.deps.config.credentials?.botToken, {
     teamId: input.installationTeamId,
   });
-  const response = await fetch("https://slack.com/api/chat.update", {
-    method: "POST",
-    headers: {
-      authorization: `Bearer ${token}`,
-      "content-type": "application/json; charset=utf-8",
-    },
-    body: JSON.stringify({
+  const response = await postSlackApiJson({
+    api: input.deps.config.api,
+    body: {
       channel: input.channelId,
       ts: input.messageTs,
       blocks: input.blocks,
       text: `Answered: ${input.answerLabel}`,
-    }),
+    },
+    method: "chat.update",
+    token,
   });
   if (!response.ok) throw new Error(`Slack chat.update returned HTTP ${response.status}`);
 }

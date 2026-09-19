@@ -31,6 +31,7 @@ export function dispatchSlashCommand(
 
   const commandCtx: SlackSlashCommandContext = {
     slack: buildSlackWorkspaceHandle({
+      api: config.api,
       botToken: config.credentials?.botToken,
       installationTeamId: command.teamId,
       teamId: command.teamId,

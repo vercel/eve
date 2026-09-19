@@ -65,16 +65,20 @@ export type {
 } from "#public/channels/slack/inbound.js";
 
 export {
-  callSlackApi,
-  resolveSlackBotToken,
   slackContinuationToken,
   type SlackPostInput,
   type SlackPostedMessage,
-  type SlackBotTokenContext,
   type SlackThreadMessage,
   type SlackUploadFilesOptions,
   type SlackUploadFilesResult,
 } from "#public/channels/slack/api.js";
+
+export {
+  callSlackApi,
+  resolveSlackBotToken,
+  type SlackApiConfig,
+  type SlackBotTokenContext,
+} from "#public/channels/slack/api-transport.js";
 
 export { defaultSlackAuth } from "#public/channels/slack/defaults.js";
 

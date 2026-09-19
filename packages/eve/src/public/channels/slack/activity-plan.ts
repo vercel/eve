@@ -1,6 +1,10 @@
 import type { ChannelActivityRenderer } from "#channel/activity-renderer.js";
 import type { ActivitySnapshotV1, ActivityWorkStateV1 } from "#protocol/activity.js";
-import { callSlackApi, type SlackBotToken } from "#public/channels/slack/api.js";
+import {
+  callSlackApi,
+  type SlackApiConfig,
+  type SlackBotToken,
+} from "#public/channels/slack/api-transport.js";
 
 export const SLACK_ACTIVITY_PLAN_RENDERER_ID = "slack.experimental.plan.v1";
 type Phase = "running" | "completed" | "failed" | "rejected" | "cancelled" | "blocked";
@@ -19,6 +23,7 @@ interface PlanState {
 
 export function createSlackPlanRenderer(
   botToken: SlackBotToken | undefined,
+  apiConfig?: SlackApiConfig,
 ): ChannelActivityRenderer {
   return {
     id: SLACK_ACTIVITY_PLAN_RENDERER_ID,
@@ -63,6 +68,7 @@ export function createSlackPlanRenderer(
             },
             botToken,
             installation,
+            apiConfig,
           );
           if (!response.ok || typeof response.ts !== "string")
             throw new Error(`Slack activity plan failed: ${response.error ?? "missing ts"}`);
@@ -83,13 +89,20 @@ export function createSlackPlanRenderer(
             { channel, ts: current.ts, chunks: updates },
             botToken,
             installation,
+            apiConfig,
           );
         const seen = Object.fromEntries([
           ...view.parents.map((parent) => [parent.id, parent.phase]),
           ...view.entities.map((entity) => [entity.id, entityVersion(entity)]),
         ]);
         if (view.settled) {
-          await checked("chat.stopStream", { channel, ts: current.ts }, botToken, installation);
+          await checked(
+            "chat.stopStream",
+            { channel, ts: current.ts },
+            botToken,
+            installation,
+            apiConfig,
+          );
           const blocks = [
             {
               type: "plan",
@@ -107,6 +120,7 @@ export function createSlackPlanRenderer(
             { channel, ts: current.ts, text: view.parents.map((p) => p.name).join(", "), blocks },
             botToken,
             installation,
+            apiConfig,
           );
           streams[rootTurnId] = { ts: current.ts, seen, stopped: true };
         } else streams[rootTurnId] = { ts: current.ts, seen, stopped: false };
@@ -232,12 +246,15 @@ async function api(
   body: unknown,
   botToken: SlackBotToken | undefined,
   installation: unknown,
+  apiConfig: SlackApiConfig | undefined,
 ) {
   return callSlackApi({
     operation,
     body,
     botToken,
     context: { teamId: typeof installation === "string" ? installation : undefined },
+    apiUrl: apiConfig?.url,
+    fetch: apiConfig?.fetch,
   });
 }
 async function checked(
@@ -245,8 +262,9 @@ async function checked(
   body: unknown,
   token: SlackBotToken | undefined,
   installation: unknown,
+  apiConfig: SlackApiConfig | undefined,
 ) {
-  const response = await api(operation, body, token, installation);
+  const response = await api(operation, body, token, installation, apiConfig);
   if (!response.ok)
     throw new Error(`Slack ${operation} failed: ${response.error ?? "unknown_error"}`);
 }
