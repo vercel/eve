@@ -26,7 +26,7 @@ export default defineTaskEval({
     dimensions: { transport: "remote" },
   },
   async test(t) {
-    const started = await t.send("TASK-C8-REMOTE-HITL");
+    const started = await t.send("TASK-C8-REMOTE-HITL", { taskDeliveryPolicy: "cohort" });
     started.expectOk();
     started.messageIncludes("TASK-C8-STARTED");
     started.event("action.result", {

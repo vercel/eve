@@ -25,7 +25,7 @@ export default defineTaskEval({
     dimensions: { transport: "local", parentPhase: "active" },
   },
   async test(t) {
-    const setup = await t.send("CHILD-TASK-EXCLUSIVITY-SETUP");
+    const setup = await t.send("CHILD-TASK-EXCLUSIVITY-SETUP", { taskDeliveryPolicy: "cohort" });
     setup.expectOk();
     setup.messageIncludes("CHILD-TASK-EXCLUSIVITY-READY");
     const initialTaskId = requireBackgroundTaskId(setup);

@@ -29,7 +29,7 @@ export default defineTaskEval({
     dimensions: { transport: "local", parentPhase: "active" },
   },
   async test(t) {
-    const started = await t.send("TASK-FAN-IN");
+    const started = await t.send("TASK-FAN-IN", { taskDeliveryPolicy: "cohort" });
     started.expectOk();
     started.messageIncludes("TASK-FAN-IN-STARTED");
     started.calledSubagent("fanout-worker", { status: "working", count: FAN_IN_SIZE });

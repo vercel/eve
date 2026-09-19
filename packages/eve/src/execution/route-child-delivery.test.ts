@@ -187,6 +187,45 @@ describe("task HITL delivery routing", () => {
     });
   });
 
+  it("retains every task notification identity after consuming terminal views", async () => {
+    const taskDeliveryIds = ["task-1:ready:completed", "task-2:ready:completed"];
+    const views = ["task-1", "task-2"].map((taskId) => ({
+      taskId,
+      status: "completed" as const,
+      metadata: { kind: "tool", name: "report" },
+      lastOutput: { type: "result" as const, data: taskId },
+    }));
+    vi.mocked(recordTerminalTaskViewsStep).mockResolvedValue({
+      subagentCompletions: [],
+      views,
+      serializedContext: {},
+      sessionState: state(false),
+    });
+    const result = await routeDeliverToChildren({
+      delivery: {
+        kind: "deliver",
+        taskDeliveryId: taskDeliveryIds[0],
+        taskDeliveryIds,
+        payloads: views.map((view) => ({ message: view.taskId, task: { views: [view] } })),
+      },
+      sessionWritable: new WritableStream<Uint8Array>(),
+      serializedContext: {},
+      sessionState: state(false),
+    });
+    expect(result).toMatchObject({
+      kind: "continue",
+      remainder: {
+        taskDeliveryId: taskDeliveryIds[0],
+        taskDeliveryIds,
+        payloads: [
+          { message: "Background task task-1 (report) is completed.\n\nResult:\ntask-1" },
+          { message: "Background task task-2 (report) is completed.\n\nResult:\ntask-2" },
+        ],
+      },
+    });
+    expect(recordTerminalTaskViewsStep).toHaveBeenCalledWith(expect.objectContaining({ views }));
+  });
+
   it("adopts instrumentation context returned with terminal task views", async () => {
     const recordedState = state(false);
     const view = {

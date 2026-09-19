@@ -13,7 +13,7 @@ export default defineTaskEval({
     dimensions: { transport: "local" },
   },
   async test(t) {
-    const started = await t.send("TASK-HITL-ROUTING");
+    const started = await t.send("TASK-HITL-ROUTING", { taskDeliveryPolicy: "cohort" });
     started.expectOk();
     started.event("action.result", {
       count: 1,

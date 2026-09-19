@@ -13,9 +13,9 @@ import {
  *
  * Three transforms apply during the copy:
  *
- * 1. The sibling `jsx-runtime-<hash>.d.ts` chunk is co-copied so chat's
- *    relative import resolves locally. The chunk's filename has a content
- *    hash, so we discover it dynamically.
+ * 1. Sibling declaration chunks are copied with the entrypoint so relative
+ *    imports resolve locally. Chunk filenames have content hashes, so we
+ *    discover them dynamically and apply the same import rewrites.
  * 2. `from '@workflow/serde'` is rewritten to a local stub that declares
  *    just the unique symbols chat references.
  * 3. `from 'mdast'` is rewritten to a local stub that aliases the names
@@ -37,7 +37,9 @@ export default {
         build: buildOpaqueTypesStub,
       },
     },
-    discoverExtraFiles: (distEntries) =>
-      distEntries.filter((name) => /^jsx-runtime-[^./]+\.d\.ts$/.test(name)),
+    files: ({ distEntries }) =>
+      distEntries
+        .filter((name) => name.endsWith(".d.ts"))
+        .map((name) => ({ source: name, output: name })),
   }),
 };

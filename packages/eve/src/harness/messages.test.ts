@@ -31,6 +31,23 @@ function textFilePart(overrides: {
 }
 
 describe("coalesceDeliveries", () => {
+  it("keeps the last explicit task policy when batching authored sends", () => {
+    const result = coalesceDeliveries([
+      {
+        kind: "deliver" as const,
+        payloads: [{ message: "First" }],
+        taskDeliveryPolicy: "cohort" as const,
+      },
+      {
+        kind: "deliver" as const,
+        payloads: [{ message: "Second" }],
+        taskDeliveryPolicy: "auto" as const,
+      },
+      { kind: "deliver" as const, payloads: [{ message: "Third" }] },
+    ]);
+    expect(result.taskDeliveryPolicy).toBe("auto");
+  });
+
   const caller = {
     callId: "call-1",
     replyTo: { kind: "hook" as const, token: "turn-caller" },

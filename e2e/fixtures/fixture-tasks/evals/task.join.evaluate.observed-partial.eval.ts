@@ -28,7 +28,7 @@ export default defineTaskEval({
     dimensions: { transport: "local", parentPhase: "parked" },
   },
   async test(t) {
-    const started = (await t.send("TASK-FAN-IN")).expectOk();
+    const started = (await t.send("TASK-FAN-IN", { taskDeliveryPolicy: "cohort" })).expectOk();
     started.messageIncludes("TASK-FAN-IN-STARTED");
     started.calledSubagent("fanout-worker", { status: "working", count: MARKERS.length });
     let session: TaskEvalSessionDriver = started.session;

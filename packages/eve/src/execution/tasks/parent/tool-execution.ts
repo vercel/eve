@@ -1,6 +1,7 @@
 import {
   type BackgroundWorkflowToolRun,
   findBackgroundWorkflowToolRun,
+  getBackgroundWorkflowToolRuns,
   registerWorkflowToolRun,
 } from "#harness/workflow-tool-runs.js";
 import type { ContextContainer } from "#context/container.js";
@@ -187,7 +188,11 @@ class BackgroundToolExecutionScope implements BackgroundToolExecutor {
   }
 
   hasPendingTasks(): boolean {
-    return this.records.some((record) => record.settled && record.task !== undefined);
+    return (
+      getBackgroundWorkflowToolRuns(this.initialSession.state).some(
+        (entry) => entry.task.outcome === undefined,
+      ) || this.records.some((record) => record.settled && record.task !== undefined)
+    );
   }
 
   async commit(session: HarnessSession): Promise<HarnessSession> {

@@ -149,12 +149,20 @@ After the initiating turn accepts background tasks, eve supplies runtime-authore
 cohort and instructs the model to acknowledge that the work started without waiting for results.
 [Schedule](/docs/schedules)-initiated turns are the exception: no user prompted them, so their
 launches keep conditional delivery and send no acknowledgement.
-Later task-triggered parent turns receive fresh state for the same cohort. Once every related
-task is terminal, one automatic parent turn receives the cohort's completed, failed, and cancelled
-outcomes so the model can combine the useful results.
-eve does not instruct the model to stay silent while sibling tasks are pending; a new user
-question can receive an answer while background work continues. [Completion batching](/docs/subagents#completion-batching)
-combines terminal results already queued for the parent.
+Channel sessions default to `taskDeliveryPolicy: "auto"`: ready results can invoke
+the parent while other tasks continue. The parent reports independently useful
+results and can stay silent until related work settles. Each reporting context
+includes the whole cohort and available outputs, including previously withheld
+results. Ready results may share a turn.
+Schedules default to `"cohort"`: terminal outcomes wait for overlapping tasks
+to settle, then arrive together. Pass `taskDeliveryPolicy` to `send(...)` to select
+or update the session policy. See
+[Background task results](/docs/channels/overview#background-task-results) and
+[Schedules](/docs/schedules#background-task-results).
+User questions, input requests, and explicit task messages do not wait for the
+cohort under either policy. Failure and cancellation update lifecycle state
+immediately; their automatic reports follow the selected policy.
+See [Completion batching](/docs/subagents#completion-batching).
 
 ### Yield and return
 
