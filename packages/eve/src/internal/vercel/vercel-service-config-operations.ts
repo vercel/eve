@@ -115,33 +115,47 @@ export function insertEveServiceRequestPathRoute(
   ];
 }
 
-function isEveServiceRoute(
-  route: VercelRouteConfig,
-  serviceName: string,
-  routeSrc: string,
-): boolean {
-  const destination = route.destination;
-  return (
-    route.src === routeSrc &&
-    typeof destination === "object" &&
-    destination.type === "service" &&
-    destination.service === serviceName
-  );
-}
-
 export function insertEveServiceRoutes(
   routes: readonly VercelRouteConfig[],
-  eveRoutes: readonly { readonly routeSrc: string; readonly serviceName: string }[],
+  eveRoutes: readonly {
+    readonly requestPath?: string;
+    readonly routeSrc: string;
+    readonly serviceName: string;
+  }[],
 ): readonly VercelRouteConfig[] {
-  const retained = routes.filter(
-    (route) =>
-      !eveRoutes.some(({ routeSrc, serviceName }) =>
-        isEveServiceRoute(route, serviceName, routeSrc),
-      ),
-  );
-  const generated = eveRoutes.map(({ routeSrc, serviceName }) =>
+  const serviceNamesByRouteSource = new Map<string, Set<string>>();
+  for (const eveRoute of eveRoutes) {
+    const serviceNames = serviceNamesByRouteSource.get(eveRoute.routeSrc) ?? new Set<string>();
+    serviceNames.add(eveRoute.serviceName);
+    serviceNamesByRouteSource.set(eveRoute.routeSrc, serviceNames);
+  }
+
+  const retained = routes.filter((route) => {
+    if (route.src === undefined) return true;
+
+    const serviceNames = serviceNamesByRouteSource.get(route.src);
+    if (serviceNames === undefined) return true;
+
+    const destination = route.destination;
+    const isGeneratedServiceRoute =
+      typeof destination === "object" &&
+      typeof destination.service === "string" &&
+      destination.type === "service" &&
+      serviceNames.has(destination.service);
+
+    return route.transforms === undefined && !isGeneratedServiceRoute;
+  });
+  const generated = eveRoutes.flatMap(({ requestPath, routeSrc, serviceName }) => [
+    ...(requestPath === undefined
+      ? []
+      : [
+          {
+            src: routeSrc,
+            transforms: [{ args: requestPath, op: "set" as const, type: "request.path" as const }],
+          },
+        ]),
     createEvePublicRoute(serviceName, routeSrc),
-  );
+  ]);
   const filesystemIndex = retained.findIndex((route) => route.handle === "filesystem");
   return filesystemIndex < 0
     ? [...generated, ...retained]

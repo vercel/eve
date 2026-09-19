@@ -31,7 +31,13 @@ export interface EveVercelAgentTarget {
   readonly devCommand?: string;
   readonly name?: string;
   readonly publicRoutePrefix: string;
+  readonly publicRoutes?: readonly EveVercelPublicRoute[];
   readonly workspaceMember?: boolean;
+}
+
+export interface EveVercelPublicRoute {
+  readonly requestPath?: string;
+  readonly routeSrc: string;
 }
 
 export interface EveVercelBuildTarget {
@@ -79,9 +85,16 @@ export function createEveServiceRouteSrc(publicRoutePrefix: string): string {
 }
 
 export function createEveRequestPathRoute(routeSrc: string): VercelRouteConfig {
+  return createEveRequestPathTransformRoute(routeSrc, `${EVE_ROUTE_PREFIX}/$1`);
+}
+
+export function createEveRequestPathTransformRoute(
+  routeSrc: string,
+  requestPath: string,
+): VercelRouteConfig {
   return {
     src: routeSrc,
-    transforms: [{ args: `${EVE_ROUTE_PREFIX}/$1`, op: "set", type: "request.path" }],
+    transforms: [{ args: requestPath, op: "set", type: "request.path" }],
   };
 }
 
@@ -176,6 +189,11 @@ export function compileEveVercelService(input: {
       routes: [
         ...(homeRoute === undefined ? [] : [homeRoute]),
         createEveRequestPathRoute(routeSrc),
+        ...(input.agent.publicRoutes ?? []).flatMap((route) =>
+          route.requestPath === undefined
+            ? []
+            : [createEveRequestPathTransformRoute(route.routeSrc, route.requestPath)],
+        ),
       ],
       ...(input.agent.publicRoutePrefix.length > 0
         ? { routePrefix: input.agent.publicRoutePrefix }

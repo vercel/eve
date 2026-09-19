@@ -112,6 +112,21 @@ export default defineChannel({
 });
 ```
 
+When a Next.js app hosts this agent with `withEve()`, register the profile path in `next.config.ts`:
+
+```ts title="next.config.ts"
+import type { NextConfig } from "next";
+import { withEve } from "eve/next";
+
+const nextConfig: NextConfig = {};
+
+export default withEve(nextConfig, {
+  publicRoutes: ["/.well-known/ucp"],
+});
+```
+
+Register any commerce channel paths the same way. See the [Next.js integration guide](../guides/frontend/nextjs) for named-agent routing and deployment details.
+
 - **Caching**: The spec requires `public` and a `max-age` of at least 60 seconds, and forbids `private`, `no-store`, and `no-cache`. See [Profile Requirements](https://ucp.dev/2026-04-08/specification/overview#hosting).
 - **CORS**: `cors: true` suits public discovery metadata. Pass a `cors` options object to narrow origins. See [CORS](../channels/custom#cors).
 - **HTTPS, no redirects**: The spec requires HTTPS and forbids 3xx responses on the profile endpoint.
