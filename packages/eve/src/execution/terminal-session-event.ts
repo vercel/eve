@@ -1,7 +1,9 @@
 import { buildAdapterContext } from "#channel/adapter-context.js";
 import { callAdapterEventHandler } from "#channel/adapter.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
-import { ParentSessionKey } from "#context/keys.js";
+import { dispatchStreamEventHooks } from "#context/hook-lifecycle.js";
+import { AuthKey, ParentSessionKey, SessionKey } from "#context/keys.js";
+import { createSessionContext } from "#context/providers/session.js";
 import { deserializeContext } from "#context/serialize.js";
 import { bindSessionInstrumentation } from "#instrumentation/runtime.js";
 import type { HandleEventFn } from "#harness/types.js";
@@ -41,6 +43,18 @@ export async function emitTerminalSessionEvent(input: {
     });
   }
 
+  if (ctx !== undefined) {
+    ctx.setVirtualContext(
+      SessionKey,
+      createSessionContext({
+        auth: ctx.get(AuthKey) ?? null,
+        ctx,
+        sessionId,
+        turnId: input.turnId,
+      }),
+    );
+  }
+
   const handleEvent: HandleEventFn = async (event) => {
     if (ctx !== undefined) {
       const adapter = ctx.get(ChannelKey);
@@ -60,7 +74,16 @@ export async function emitTerminalSessionEvent(input: {
     try {
       const writer = input.sessionWritable.getWriter();
       try {
-        await writer.write(encodeMessageStreamEvent(stampMessageStreamEvent(event)));
+        const stamped = stampMessageStreamEvent(event);
+        await writer.write(encodeMessageStreamEvent(stamped));
+        const bundle = ctx?.get(BundleKey);
+        if (ctx !== undefined && bundle !== undefined) {
+          await dispatchStreamEventHooks({
+            ctx,
+            event: stamped,
+            registry: bundle.hookRegistry,
+          });
+        }
       } finally {
         writer.releaseLock();
       }
