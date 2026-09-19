@@ -13,7 +13,7 @@ export default defineEval({
     await t.require(dispatched.sessionIds.length, equals(1));
     const launch = t.target.watchTurn(dispatched.sessionIds[0]!);
     const started = (await launch.result()).expectOk();
-    started.calledSubagent("agent", { count: 3 });
+    started.calledSubagent("agent", { status: "working", count: 3 });
     let streamIndex = launch.session.state!.streamIndex;
     const requests = new Map<string, InputRequest>();
     const turns: EveEvalTurn[] = [started];
