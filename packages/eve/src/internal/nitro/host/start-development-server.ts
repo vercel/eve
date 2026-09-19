@@ -1,5 +1,6 @@
 import { handleDevelopmentModelCredentialRequest } from "#internal/model-auth/development-broker-server.js";
 import { EVE_DEV_ENV_FLAG } from "#internal/application/optional-package-install.js";
+import { defaultDevelopmentExtensions } from "#compiler/development-extensions.js";
 
 import type { Nitro } from "nitro/types";
 
@@ -391,13 +392,17 @@ async function startNitroDevelopmentServer(
   // optional sandbox engine packages) can gate on it.
   process.env[EVE_DEV_ENV_FLAG] ??= "1";
 
+  const developmentExtensions = options.developmentExtensions ?? defaultDevelopmentExtensions();
   const project = await resolveDiscoveryProject(rootDir);
   await loadDevelopmentEnvironmentFiles(project.appRoot);
 
   const environmentPort = readEnvironmentPort();
   const requestedPort = options.port ?? environmentPort;
-  const hasExplicitEndpoint =
-    options.host !== undefined || options.port !== undefined || environmentPort !== undefined;
+  const hasExplicitServerConfiguration =
+    options.developmentExtensions !== undefined ||
+    options.host !== undefined ||
+    options.port !== undefined ||
+    environmentPort !== undefined;
   const state = new DevelopmentServerState(project);
   const existingServerUrl = await state.read();
 
@@ -406,7 +411,7 @@ async function startNitroDevelopmentServer(
     isLoopbackServerUrl(existingServerUrl) &&
     (await isDevelopmentServerReady(existingServerUrl))
   ) {
-    if (options.existing === "attach-if-unconfigured" && !hasExplicitEndpoint) {
+    if (options.existing === "attach-if-unconfigured" && !hasExplicitServerConfiguration) {
       return {
         handle: { kind: "existing", appRoot: project.appRoot, url: existingServerUrl },
         close: undefined,
@@ -432,7 +437,7 @@ async function startNitroDevelopmentServer(
   try {
     const preparedHost = await devBootPhase(
       "compiling agent",
-      () => prepareDevelopmentApplicationHost(project.appRoot),
+      () => prepareDevelopmentApplicationHost(project.appRoot, { developmentExtensions }),
       options.onBootProgress,
     );
     preparedDevelopmentHost = preparedHost;
@@ -529,6 +534,7 @@ async function startNitroDevelopmentServer(
     });
 
     const rebuildCoordinator = await createDevelopmentAuthoredRebuildCoordinator({
+      developmentExtensions,
       devServer: activeDevServer,
       initialHost: preparedHost,
     });

@@ -8,6 +8,7 @@ import { buildDevelopmentHostCandidate } from "#internal/nitro/host/dev-host-can
 import { computeDevelopmentHostFingerprint } from "#internal/nitro/host/dev-host-fingerprint.js";
 import { removeDevelopmentHostWorkspace } from "#internal/nitro/host/dev-host-workspace.js";
 import { prepareDevelopmentApplicationHost } from "#internal/nitro/host/prepare-application-host.js";
+import type { DevelopmentExtensionSelection } from "#compiler/development-extensions.js";
 import { DrainedNitroDevServer } from "#internal/nitro/host/drained-nitro-dev-server.js";
 import { usesParentDevelopmentWorkflowWorld } from "#internal/workflow/development-world-protocol.js";
 import type { PreparedDevelopmentApplicationHost } from "#internal/nitro/host/types.js";
@@ -58,11 +59,13 @@ export interface DevelopmentAuthoredRebuildCoordinator {
 }
 
 export async function createDevelopmentAuthoredRebuildCoordinator(input: {
+  readonly developmentExtensions?: DevelopmentExtensionSelection;
   readonly devServer: DrainedNitroDevServer;
   readonly initialHost: PreparedDevelopmentApplicationHost;
 }): Promise<DevelopmentAuthoredRebuildCoordinator> {
   return new TransactionalDevelopmentAuthoredRebuildCoordinator({
     currentHostFingerprint: await computeDevelopmentHostFingerprint(input.initialHost),
+    developmentExtensions: input.developmentExtensions,
     currentRuntimeFingerprint: input.initialHost.generation.fingerprint,
     devServer: input.devServer,
     initialHost: input.initialHost,
@@ -83,17 +86,20 @@ class TransactionalDevelopmentAuthoredRebuildCoordinator implements DevelopmentA
   #currentHost: PreparedDevelopmentApplicationHost;
   #currentHostFingerprint: string;
   #currentRuntimeFingerprint: string;
+  readonly #developmentExtensions: DevelopmentExtensionSelection | undefined;
   readonly #devServer: DrainedNitroDevServer;
   readonly #usesParentWorkflowWorld: boolean;
 
   constructor(input: {
     readonly currentHostFingerprint: string;
     readonly currentRuntimeFingerprint: string;
+    readonly developmentExtensions: DevelopmentExtensionSelection | undefined;
     readonly devServer: DrainedNitroDevServer;
     readonly initialHost: PreparedDevelopmentApplicationHost;
   }) {
     this.#currentHost = input.initialHost;
     this.#currentHostFingerprint = input.currentHostFingerprint;
+    this.#developmentExtensions = input.developmentExtensions;
     this.#currentRuntimeFingerprint = input.currentRuntimeFingerprint;
     this.#devServer = input.devServer;
     this.#usesParentWorkflowWorld = usesParentDevelopmentWorkflowWorld(
@@ -115,6 +121,7 @@ class TransactionalDevelopmentAuthoredRebuildCoordinator implements DevelopmentA
     try {
       nextHost = await prepareDevelopmentApplicationHost(previousHost.appRoot, {
         changedPaths: input.changedPaths,
+        developmentExtensions: this.#developmentExtensions,
         previousExtensions: previousHost.workspaceExtensions,
       });
       if (
