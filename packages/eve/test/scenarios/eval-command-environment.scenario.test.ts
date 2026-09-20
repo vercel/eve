@@ -7,7 +7,6 @@ import { defineEvalConfig } from "../../src/evals/define-eval-config.js";
 import { defineEval } from "../../src/evals/define-eval.js";
 
 import { runCli } from "../../src/cli/run.js";
-import { loadDevelopmentEnvironmentFiles } from "../../src/cli/dev/environment.js";
 import {
   clearActiveSandboxHandlesForTest,
   trackActiveSandboxHandle,
@@ -51,7 +50,6 @@ const DEVELOPMENT_ENV_KEYS = [
   "EVE_DEV_SHELL_ONLY",
   "EVE_EVALUATION",
   "EVE_EVALUATION_RUN_ID",
-  "EVE_EVAL_SETUP_NEW",
 ] as const;
 
 async function createEnvironmentFixture(): Promise<string> {
@@ -131,22 +129,21 @@ describe("eve eval environment loading", () => {
       }
     }
     const database = new Database();
-    const shared = { database };
     const config = defineEvalConfig({
       async setup() {
-        const result = await fixture.setup();
-        return { ...result, context: shared };
+        await fixture.setup();
+        return database;
       },
       teardown(context) {
-        expect(context).toBe(shared);
+        expect(context).toBe(database);
         expect(database.query()).toBe(3);
-        context?.database.close();
+        context?.close();
       },
     });
     const evaluation = defineEval<typeof config>({
       test(t) {
-        expect(t.context).toBe(shared);
-        expect(t.context.database.query()).toBeGreaterThan(0);
+        expect(t.context).toBe(database);
+        expect(t.context.query()).toBeGreaterThan(0);
       },
     });
     mockedEvalDependencies.discoverEvalConfig.mockResolvedValue(config);
@@ -184,8 +181,6 @@ describe("eve eval environment loading", () => {
       fixture.teardown.mock.invocationCallOrder[0]!,
     );
     expect(fixture.exit).toHaveBeenCalledWith(0);
-    await loadDevelopmentEnvironmentFiles(fixture.appRoot);
-    expectSetupEnvironment();
   });
 
   it("runs setup and teardown locally for a remote target", async () => {
@@ -242,7 +237,7 @@ describe("eve eval environment loading", () => {
     expect(fixture.exit).toHaveBeenCalledWith(1);
   });
 
-  it("reports teardown failure without dropping environment overrides", async () => {
+  it("fails the command when teardown fails", async () => {
     const fixture = await createEvalSetupFixture();
     fixture.teardown.mockRejectedValueOnce(new Error("fixture teardown failed"));
 
@@ -253,7 +248,6 @@ describe("eve eval environment loading", () => {
       "Eval cleanup failed: fixture teardown failed",
     );
     expect(fixture.exit).toHaveBeenCalledWith(1);
-    expectSetupEnvironment();
   });
 
   it("runs teardown without starting a target when setup fails", async () => {
@@ -470,30 +464,10 @@ async function createEvalSetupFixture() {
   const appRoot = await realpath(await createEnvironmentFixture());
   const logger = { error: vi.fn(), log: vi.fn() };
   const exit = vi.spyOn(process, "exit").mockImplementation(() => undefined as never);
-  const teardown = vi.fn(async () => {
-    expectSetupEnvironment();
-  });
-  const setup = vi.fn(async () => {
-    expect(process.env.EVE_DEV_SHARED).toBe("from-local");
-    return {
-      env: {
-        EVE_DEV_SHARED: "from-setup",
-        EVE_DEV_SHELL_ONLY: undefined,
-        EVE_DEV_DEFAULT_ONLY: undefined,
-        EVE_EVAL_SETUP_NEW: "new",
-      },
-    };
-  });
-  const start = vi.fn(async () => {
-    expectSetupEnvironment();
-    // The host reloads env files before it copies the environment into its worker.
-    await loadDevelopmentEnvironmentFiles(appRoot);
-    expectSetupEnvironment();
-    return { url: "http://127.0.0.1:43123" };
-  });
-  const close = vi.fn(async () => {
-    expectSetupEnvironment();
-  });
+  const teardown = vi.fn(async () => {});
+  const setup = vi.fn(async () => {});
+  const start = vi.fn(async () => ({ url: "http://127.0.0.1:43123" }));
+  const close = vi.fn(async () => {});
   process.env.EVE_DEV_SHELL_ONLY = "from-shell";
   mockedEvalDependencies.discoverAndImportEvals.mockResolvedValue(
     [makeEvaluation("first"), makeEvaluation("second")].map((evaluation) => ({
@@ -508,7 +482,6 @@ async function createEvalSetupFixture() {
     url: "http://127.0.0.1:43123",
   });
   mockedEvalDependencies.executeEval.mockImplementation(async ({ evaluation }) => {
-    expectSetupEnvironment();
     return makeEvalResult(evaluation.id);
   });
 
@@ -530,13 +503,6 @@ async function createEvalSetupFixture() {
       }
     },
   };
-}
-
-function expectSetupEnvironment(): void {
-  expect(process.env.EVE_DEV_SHARED).toBe("from-setup");
-  expect(process.env.EVE_DEV_SHELL_ONLY).toBeUndefined();
-  expect(process.env.EVE_DEV_DEFAULT_ONLY).toBeUndefined();
-  expect(process.env.EVE_EVAL_SETUP_NEW).toBe("new");
 }
 
 function makeEvaluation(id: string) {

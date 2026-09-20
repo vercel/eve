@@ -27,7 +27,6 @@ interface DevelopmentEnvironmentLoader {
   readonly environmentRoot: string;
   reload(): void;
   stageReload(): DevelopmentEnvironmentReload;
-  override(values: Readonly<Record<string, string | undefined>>): void;
 }
 
 export interface DevelopmentEnvironmentReload {
@@ -63,14 +62,6 @@ export async function loadDevelopmentEnvironmentFiles(appRoot: string): Promise<
 
 export function stageDevelopmentEnvironmentFiles(appRoot: string): DevelopmentEnvironmentReload {
   return getDevelopmentEnvironmentLoader(appRoot).stageReload();
-}
-
-/** Pins eval environment overrides across reloads for the lifetime of the process. */
-export function overrideDevelopmentEnvironment(
-  appRoot: string,
-  values: Readonly<Record<string, string | undefined>>,
-): void {
-  getDevelopmentEnvironmentLoader(appRoot).override(values);
 }
 
 export function readDevelopmentEnvironmentHostValues(
@@ -111,7 +102,6 @@ function createDevelopmentEnvironmentLoader(
 ): DevelopmentEnvironmentLoader {
   const protectedKeys = new Set(Object.keys(process.env));
   const managedValues = new Map<string, string>();
-  let overrides: Readonly<Record<string, string | undefined>> = {};
 
   const stageReload = (): DevelopmentEnvironmentReload => {
     const previousManagedValues = new Map(managedValues);
@@ -120,7 +110,6 @@ function createDevelopmentEnvironmentLoader(
     const affectedKeys = new Set([
       ...managedValues.keys(),
       ...nextValues.keys(),
-      ...Object.keys(overrides),
       MODEL_CONNECTION_ENV,
       "EVE_MODEL_TEAM",
       "EVE_MODEL_TEAM_NAME",
@@ -148,7 +137,6 @@ function createDevelopmentEnvironmentLoader(
       nextValues,
       protectedKeys,
     });
-    applyEnvironmentOverrides(overrides);
 
     return {
       commit() {
@@ -180,18 +168,7 @@ function createDevelopmentEnvironmentLoader(
       stageReload().commit();
     },
     stageReload,
-    override(values) {
-      overrides = { ...overrides, ...values };
-      applyEnvironmentOverrides(values);
-    },
   };
-}
-
-function applyEnvironmentOverrides(values: Readonly<Record<string, string | undefined>>): void {
-  for (const [key, value] of Object.entries(values)) {
-    if (value === undefined) delete process.env[key];
-    else process.env[key] = value;
-  }
 }
 
 function applyDevelopmentEnvironmentValues(input: {

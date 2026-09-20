@@ -19,7 +19,7 @@ describe("defineEvalConfig", () => {
     }
     const config = defineEvalConfig({
       async setup() {
-        return { context: { database: new Database() } };
+        return { database: new Database() };
       },
       teardown(context) {
         expectTypeOf(context).toEqualTypeOf<{ database: Database } | undefined>();
@@ -34,11 +34,8 @@ describe("defineEvalConfig", () => {
     expect(evaluation._tag).toBe("EveEval");
   });
 
-  it("infers undefined when setup returns only environment values", () => {
+  it("infers undefined without setup", () => {
     const config = defineEvalConfig({
-      setup() {
-        return { env: { DATABASE_URL: "test" } };
-      },
       teardown(context) {
         expectTypeOf(context).toEqualTypeOf<undefined>();
       },
@@ -52,7 +49,9 @@ describe("defineEvalConfig", () => {
 
   it("preserves optional context when setup may return nothing", () => {
     const config = defineEvalConfig({
-      setup(): { context: Map<string, number> } | void {},
+      setup(): Map<string, number> | undefined {
+        return undefined;
+      },
       teardown(context) {
         expectTypeOf(context).toEqualTypeOf<Map<string, number> | undefined>();
       },

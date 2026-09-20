@@ -1,4 +1,4 @@
-import type { EveEvalConfig, EveEvalConfigInput, EveEvalSetupResult } from "#evals/types.js";
+import type { EveEvalConfig, EveEvalConfigInput } from "#evals/types.js";
 
 /**
  * Defines the run-wide configuration shared by every eval, authored as the
@@ -14,9 +14,9 @@ import type { EveEvalConfig, EveEvalConfigInput, EveEvalSetupResult } from "#eva
  * a negative or non-finite `timeoutMs`, non-array `reporters`, or a
  * non-function `setup` or `teardown`.
  */
-export function defineEvalConfig<TResult extends void | EveEvalSetupResult = void>(
-  input: EveEvalConfigInput<TResult>,
-): EveEvalConfig<TResult> {
+export function defineEvalConfig<TContext = undefined>(
+  input: EveEvalConfigInput<TContext>,
+): EveEvalConfig<TContext> {
   validateEvalConfigInput(input);
 
   return {

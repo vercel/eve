@@ -625,35 +625,25 @@ export interface EveEvalRunSummary {
 // Eval run configuration
 // ---------------------------------------------------------------------------
 
-/** Environment overrides and shared resources returned by run-wide eval setup. */
-export interface EveEvalSetupResult<TContext = unknown> {
-  /** Shared with evals and teardown in the runner process, without serialization. */
-  readonly context?: TContext;
-  /** Overrides shell and env-file values for the run. `undefined` unsets a key. */
-  readonly env?: Readonly<Record<string, string | undefined>>;
-}
-
 /**
  * Run-wide eval configuration authored in `evals.config.ts`.
  *
  * Exactly one `evals.config.ts` is required at the root of the `evals/`
  * directory; it supplies the defaults every eval in the run shares.
  */
-export interface EveEvalConfigInput<
-  TResult extends void | EveEvalSetupResult = void | EveEvalSetupResult,
-> {
+export interface EveEvalConfigInput<TContext = unknown> {
   /**
    * Runs once before target startup, except for `--list` or an empty selection.
-   * With `--url`, setup runs locally; env overrides do not change the remote server.
+   * The return value is shared with evals and teardown by reference in the runner process.
    */
-  readonly setup?: () => TResult | Promise<TResult>;
+  readonly setup?: () => TContext | Promise<TContext>;
   /**
    * Runs once after server and sandbox shutdown, even if setup or eval execution fails.
    * Receives undefined if setup returns no context or throws before returning.
-   * Can be used without setup. Environment overrides remain active during cleanup.
+   * Can be used without setup.
    * Does not run for `--list` or an empty selection.
    */
-  teardown?(context: EveEvalSetupContext<TResult> | undefined): void | Promise<void>;
+  teardown?(context: TContext | undefined): void | Promise<void>;
   /**
    * Default judge model for `t.judge(...)` assertions across every eval.
    * Optional: omission uses the shared evaluation default. Individual evals
@@ -682,17 +672,11 @@ export interface EveEvalConfigInput<
  * Validated eval run configuration returned by `defineEvalConfig()`. The
  * `_tag` literal brands the value so discovery can recognize it.
  */
-export type EveEvalConfig<TResult extends void | EveEvalSetupResult = void | EveEvalSetupResult> =
-  EveEvalConfigInput<TResult> & {
-    readonly _tag: "EveEvalConfig";
-  };
-
-/** Infers the context from each possible setup result, including omitted context. */
-export type EveEvalSetupContext<TResult> = TResult extends { readonly context?: unknown }
-  ? TResult["context"]
-  : undefined;
+export type EveEvalConfig<TContext = unknown> = EveEvalConfigInput<TContext> & {
+  readonly _tag: "EveEvalConfig";
+};
 
 /** Setup context type associated with an authored eval config. */
-export type EveEvalConfigContext<TConfig extends EveEvalConfig> = EveEvalSetupContext<
-  Awaited<ReturnType<NonNullable<TConfig["setup"]>>>
+export type EveEvalConfigContext<TConfig extends EveEvalConfig> = Awaited<
+  ReturnType<NonNullable<TConfig["setup"]>>
 >;

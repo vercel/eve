@@ -18,10 +18,7 @@ export class SetupResource {
 export default defineEvalConfig({
   judge: { model: e2eJudgeModel() },
   setup() {
-    return {
-      env: { EVE_E2E_SETUP_READY: "1" },
-      context: { resource: new SetupResource() },
-    };
+    return { resource: new SetupResource() };
   },
   teardown(context) {
     context?.resource.close();

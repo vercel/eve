@@ -2,10 +2,7 @@ import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 
-import {
-  loadDevelopmentEnvironmentFiles,
-  overrideDevelopmentEnvironment,
-} from "#cli/dev/environment.js";
+import { loadDevelopmentEnvironmentFiles } from "#cli/dev/environment.js";
 import { shutdownActiveSandboxHandles } from "#execution/sandbox/active-handles.js";
 import {
   EVE_EVALUATION_ENV_FLAG,
@@ -136,11 +133,7 @@ export async function runEvalCommand(
   let setupContext: unknown;
 
   try {
-    const setupResult = await config.setup?.();
-    setupContext = setupResult?.context;
-    if (setupResult?.env) {
-      overrideDevelopmentEnvironment(appRoot, setupResult.env);
-    }
+    setupContext = await config.setup?.();
 
     if (options.url) {
       client = await createEvalClient(

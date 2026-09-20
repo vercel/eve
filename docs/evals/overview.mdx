@@ -60,7 +60,7 @@ Everything is optional. `judge` sets the default model for [LLM-as-judge](./judg
 
 ### Run setup and teardown
 
-Use `setup` to start shared resources or run migrations before eve starts the local agent server. Return environment overrides and shared context from `setup`, then release resources in `teardown`:
+Use `setup` to start shared resources or run migrations before eve starts the local agent server. Return shared context directly from `setup`, then release resources in `teardown`:
 
 ```ts title="evals/evals.config.ts"
 import { defineEvalConfig } from "eve/evals";
@@ -69,13 +69,7 @@ import { startTestDatabase } from "./database.js";
 export default defineEvalConfig({
   async setup() {
     const database = await startTestDatabase();
-    return {
-      env: {
-        POSTGRES_URL: database.url,
-        AURORA_PGHOST: undefined,
-      },
-      context: { database },
-    };
+    return { database };
   },
   async teardown(context) {
     await context?.database.close();
@@ -100,11 +94,10 @@ export default defineEval<typeof config>({
 
 Setup, eval bodies, and teardown share the same context object in the runner process. Class instances and functions keep their identity; context is neither serialized nor sent to the agent server. Concurrent evals share these resources, so isolate any database records they modify.
 
-`setup` can omit `context`, return only `env`, or return nothing.
+`setup` can also return nothing.
 
 - Setup runs once per `eve eval` invocation, after discovery and config loading, before target startup.
-- Returned `env` values override shell variables and `.env` files for the runner and local agent, including subsequent env-file reloads. `undefined` removes a variable for the run.
-- Teardown runs after the local server and its sandbox handles shut down, including after setup, startup, or eval failures. Overrides remain active until the CLI process exits. Cleanup failures fail the command.
+- Teardown runs after the local server and its sandbox handles shut down, including after setup, startup, or eval failures. Cleanup failures fail the command.
 
 `teardown` receives `undefined` when setup returns no context or throws before returning. In that case, setup must clean up resources that only it can access. Teardown can also be used without setup. The per-eval `timeoutMs` does not apply to setup or teardown.
 
