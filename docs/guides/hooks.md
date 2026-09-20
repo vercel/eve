@@ -64,10 +64,6 @@ interface HookContext extends SessionContext {
 }
 ```
 
-For `subagent.called` and `subagent.completed`, `ctx.session.id` identifies the
-parent session. Typed handlers and `*` handlers receive this context even when
-the subagent event arrives between parent turns.
-
 That means a hook can access the current sandbox and release its backing
 compute at an application-defined boundary:
 
@@ -89,6 +85,10 @@ durable session and filesystem for the next callback. On Vercel, the current
 handle can also automatically resume on later I/O. A hook failure, including a
 failed stop, follows the normal
 [hook failure behavior](#what-happens-when-a-hook-throws).
+
+For `subagent.called` and `subagent.completed`, `ctx.session.id` identifies the
+parent session. Typed handlers and `*` handlers receive this context even when
+the subagent event arrives between parent turns.
 
 ### Narrowing tool results
 
