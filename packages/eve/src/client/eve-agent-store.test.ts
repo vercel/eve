@@ -765,6 +765,59 @@ describe("EveAgentStore stream overlap", () => {
 });
 
 describe("EveAgentStore session resume", () => {
+  it("resumes a saved session when Symbol.dispose is unavailable", async () => {
+    const originalSymbol = globalThis.Symbol;
+    const missingDisposeSymbol = new Proxy(
+      function (description?: string) {
+        return originalSymbol(description);
+      },
+      {
+        get(_target, property) {
+          if (property === "dispose") return undefined;
+          return Reflect.get(originalSymbol, property);
+        },
+      },
+    ) as typeof Symbol;
+    Object.defineProperty(globalThis, "Symbol", {
+      configurable: true,
+      value: missingDisposeSymbol,
+      writable: true,
+    });
+    vi.resetModules();
+
+    try {
+      const [{ EveAgentStore: FreshEveAgentStore }, { detachEveAgentStore: detachFreshStore }] =
+        await Promise.all([
+          import("#client/index.js"),
+          import("#client/eve-agent-store.js"),
+        ]);
+      const events = turnEvents();
+      vi.spyOn(globalThis, "fetch")
+        .mockResolvedValueOnce(boundedStreamResponse(events))
+        .mockResolvedValueOnce(boundedStreamResponse([], events.length - 1));
+      const store = new FreshEveAgentStore({
+        initialSession: { sessionId: "session_1", streamIndex: 0 },
+        reducer: defaultMessageReducer(),
+      });
+
+      try {
+        await store.resume();
+      } finally {
+        detachFreshStore(store);
+      }
+
+      expect(store.snapshot.events).toEqual(events);
+      expect(store.snapshot.status).toBe("ready");
+    } finally {
+      Object.defineProperty(globalThis, "Symbol", {
+        configurable: true,
+        value: originalSymbol,
+        writable: true,
+      });
+      vi.resetModules();
+    }
+  });
+
   it("resumes an unused prewarmed session and sends its first message on the same stream", async () => {
     const live = controlledStreamResponse();
     live.response.headers.set("x-eve-stream-tail-index", "-1");
