@@ -72,7 +72,9 @@ export default defineEvalConfig({
     return { database };
   },
   async teardown(context) {
-    await context?.database.close();
+    if (!context) return;
+    const { database } = context;
+    await database.close();
   },
 });
 ```
