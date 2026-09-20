@@ -1,5 +1,4 @@
 import { defineEval } from "eve/evals";
-import { satisfies } from "eve/evals/expect";
 import type { SubagentHookObservation } from "../subagent-hook-audit";
 
 export default (["direct", "waiting", "background"] as const).map((mode) =>
@@ -12,8 +11,8 @@ export default (["direct", "waiting", "background"] as const).map((mode) =>
       initial.expectOk();
       const marker =
         mode === "direct"
-          ? "WORKFLOW-CHILD:Alice's hook audit"
-          : `WORKFLOW-CHILD:hook-audit:${mode === "waiting" ? "blocking" : "background"}`;
+          ? "Alice's hook audit"
+          : `hook-audit:${mode === "waiting" ? "blocking" : "background"}`;
       const completed =
         mode === "waiting"
           ? initial
@@ -31,15 +30,20 @@ export default (["direct", "waiting", "background"] as const).map((mode) =>
       const observations = audit.toolCalls.find(
         (call) => call.name === "read_subagent_hooks",
       )?.output;
-      await t.require(
-        observations,
-        satisfies((value: unknown) => {
-          if (!Array.isArray(value) || value.length !== 4) return false;
-          const records = value as SubagentHookObservation[];
-          const callIds = new Set(records.map((record) => record.callId));
+      t.eventsSatisfy(
+        "both hook subscriptions receive the parent's exact child result once",
+        (events) => {
+          if (!Array.isArray(observations) || observations.length !== 4) return false;
+          const completion = events.find((event) => event.type === "subagent.completed");
+          if (completion?.type !== "subagent.completed") return false;
+          if (!completion.data.output.startsWith("WORKFLOW-CHILD:")) return false;
+          if (!completed.message?.includes(completion.data.output)) return false;
+          const records = observations as SubagentHookObservation[];
           return (
-            callIds.size === 1 &&
-            records.every((record) => record.sessionId === initial.sessionId) &&
+            records.every(
+              (record) =>
+                record.sessionId === initial.sessionId && record.callId === completion.data.callId,
+            ) &&
             (["typed", "wildcard"] as const).every(
               (subscriber) =>
                 records.filter(
@@ -49,11 +53,11 @@ export default (["direct", "waiting", "background"] as const).map((mode) =>
                   (record) =>
                     record.subscriber === subscriber &&
                     record.type === "subagent.completed" &&
-                    record.output?.includes(marker),
+                    record.output === completion.data.output,
                 ).length === 1,
             )
           );
-        }, "both hook subscriptions receive each event once with the parent id and child output"),
+        },
       );
       t.event("subagent.called", { data: { name: "workflow-marker" }, count: 1 });
       t.event("subagent.completed", { data: { subagentName: "workflow-marker" }, count: 1 });

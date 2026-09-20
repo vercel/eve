@@ -37,7 +37,10 @@ function respond(request: MockModelRequest): MockModelResponse | string {
       .reverse()
       .find((entry) => entry.startsWith("[Task state]\n") || entry.startsWith("Background task "));
     const result = request.toolResults.find((entry) => entry.name === tool);
-    return delivery ?? JSON.stringify(result?.output);
+    return (
+      delivery ??
+      (typeof result?.output === "string" ? result.output : JSON.stringify(result?.output))
+    );
   }
 
   const message =
