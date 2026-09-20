@@ -787,10 +787,7 @@ describe("EveAgentStore session resume", () => {
 
     try {
       const [{ EveAgentStore: FreshEveAgentStore }, { detachEveAgentStore: detachFreshStore }] =
-        await Promise.all([
-          import("#client/index.js"),
-          import("#client/eve-agent-store.js"),
-        ]);
+        await Promise.all([import("#client/index.js"), import("#client/eve-agent-store.js")]);
       const events = turnEvents();
       vi.spyOn(globalThis, "fetch")
         .mockResolvedValueOnce(boundedStreamResponse(events))
