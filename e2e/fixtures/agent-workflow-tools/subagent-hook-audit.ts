@@ -30,7 +30,7 @@ export function recordSubagentHook(
       type: event.type,
       callId: event.data.callId,
       sessionId: ctx.session.id,
-      ...(event.type === "subagent.completed" ? { output: event.data.output } : {}),
+      output: event.type === "subagent.completed" ? event.data.output : undefined,
     },
   ]);
 }

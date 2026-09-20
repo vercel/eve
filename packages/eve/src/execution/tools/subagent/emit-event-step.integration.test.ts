@@ -5,8 +5,8 @@ import { AuthKey, SessionIdKey, SessionKey, SessionTitleKey } from "#context/key
 import { deserializeContext, serializeContext } from "#context/serialize.js";
 import { emitSubagentEventStep } from "#execution/tools/subagent/emit-event-step.js";
 import { createTestSessionState } from "#internal/testing/session-state.js";
-import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
-import type { HookContext, HookEvent } from "#public/definitions/hook.js";
+import type { MessageStreamEvent, UnstampedMessageStreamEvent } from "#protocol/message.js";
+import type { HookContext, HookEvent, StreamEventHook } from "#public/definitions/hook.js";
 import { createRuntimeHookRegistry } from "#runtime/hooks/registry.js";
 import {
   BundleKey,
@@ -14,8 +14,7 @@ import {
   type CompiledBundle,
 } from "#runtime/sessions/runtime-context-keys.js";
 
-vi.mock("#context/serialize.js", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("#context/serialize.js")>()),
+vi.mock("#context/serialize.js", () => ({
   deserializeContext: vi.fn(),
   serializeContext: vi.fn(),
 }));
@@ -76,10 +75,9 @@ it.each(
       if (fails) throw new Error("subagent subscriber failed");
       ctx.set(SessionTitleKey, "Research event received");
     };
-    const handlers = {
-      ...(subscription === "wildcard" ? {} : { [event.type]: handler("typed") }),
-      ...(subscription === "typed" ? {} : { "*": handler("wildcard") }),
-    };
+    const handlers: Record<string, StreamEventHook<MessageStreamEvent>> = {};
+    if (subscription !== "wildcard") handlers[event.type] = handler("typed");
+    if (subscription !== "typed") handlers["*"] = handler("wildcard");
     const hookRegistry = createRuntimeHookRegistry([
       {
         slug: "subagent-events",
@@ -93,10 +91,10 @@ it.each(
     ctx.set(BundleKey, {
       graph: { root: {} },
       resolvedAgent: { config: {} },
-      turnAgent: { id: "parent", tools: [] },
+      turnAgent: { id: "parent" },
       subagentRegistry: {},
       hookRegistry,
-    } as unknown as CompiledBundle);
+    } as CompiledBundle);
     vi.mocked(deserializeContext).mockResolvedValue(ctx);
     vi.mocked(serializeContext).mockImplementation((context) =>
       Object.fromEntries([...context.entries()].map(([key, value]) => [key.name, value])),
