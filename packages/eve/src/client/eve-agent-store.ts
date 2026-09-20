@@ -314,13 +314,14 @@ export class EveAgentStore<TData> {
     this.#status = "resuming";
     this.#publish();
 
+    let reader: SessionEventReader | undefined;
     try {
       const stream = this.#ensureStream({
         catchUp: true,
         startIndex:
           this.#events.length === session.state.streamIndex ? session.state.streamIndex : 0,
       });
-      using reader = stream.subscribe(turn.abortController.signal);
+      reader = stream.subscribe(turn.abortController.signal);
       await stream.caughtUp;
       if (!this.#isActiveTurn(turn)) return;
       reader.discard();
@@ -348,6 +349,7 @@ export class EveAgentStore<TData> {
         this.#callbacks.onError?.(this.#error);
       }
     } finally {
+      reader?.[Symbol.dispose]();
       this.#finishTurn(turn);
     }
   }
