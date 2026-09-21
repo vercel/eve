@@ -1,0 +1,5 @@
+{
+  "title": "Dynamic Configuration",
+  "defaultOpen": false,
+  "pages": ["../guides/dynamic-capabilities", "../guides/evaluate"]
+}
