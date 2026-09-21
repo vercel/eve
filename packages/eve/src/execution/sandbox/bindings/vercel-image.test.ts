@@ -82,6 +82,7 @@ function prepareContext(hasDockerfile = true): SandboxProviderPrepareContext {
     },
     host: context().host,
     resources: { source: { kind: "none" } },
+    sourceRevision: "test-source-revision",
     storagePath: "/tmp/eve-sandbox",
   };
 }
