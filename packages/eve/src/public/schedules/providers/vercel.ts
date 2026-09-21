@@ -18,6 +18,8 @@ export interface VercelScheduleProviderOptions {
   readonly baseUrl?: string;
   readonly fetch?: typeof fetch;
   readonly token?: string;
+  /** Uses the production Vercel Schedules control plane under `eve dev`. */
+  readonly useInDevelopment?: boolean;
 }
 
 interface VercelSchedule {
@@ -43,14 +45,15 @@ interface VercelSchedule {
 export function vercelScheduleProvider(
   options: VercelScheduleProviderOptions = {},
 ): ScheduleProvider {
-  if (isEveDevEnvironment()) return DEVELOPMENT_PROVIDER;
+  const useVercelInDevelopment = options.useInDevelopment === true;
+  if (isEveDevEnvironment() && !useVercelInDevelopment) return DEVELOPMENT_PROVIDER;
 
   const baseUrl = new URL(
     options.baseUrl ?? process.env.VERCEL_SCHEDULE_BASE_URL ?? DEFAULT_BASE_URL,
   );
   const fetchImpl = options.fetch ?? fetch;
   const request = async <T>(method: string, path: string, body?: unknown): Promise<T> => {
-    assertSupportedVercelEnvironment();
+    assertSupportedVercelEnvironment(useVercelInDevelopment);
     const token = options.token?.trim() || (await getVercelOidcToken());
     const headers = new Headers({ Authorization: `Bearer ${token}` });
     if (body !== undefined) headers.set("Content-Type", "application/json");
@@ -194,7 +197,8 @@ function schedulePath(name: string, namespace: string, suffix = ""): string {
   return `/v1/schedules/${encodeURIComponent(name)}${suffix}?${search.toString()}`;
 }
 
-function assertSupportedVercelEnvironment(): void {
+function assertSupportedVercelEnvironment(useVercelInDevelopment: boolean): void {
+  if (useVercelInDevelopment && isEveDevEnvironment()) return;
   if (!process.env.VERCEL?.trim()) {
     throw new Error("vercelScheduleProvider() requires a Vercel production deployment or eve dev.");
   }

@@ -75,7 +75,21 @@ describe("vercelScheduleProvider", () => {
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
-  it("uses the shared in-memory provider under eve dev", async () => {
+  it("can explicitly use the Vercel control plane under eve dev", async () => {
+    vi.stubEnv("EVE_DEV", "1");
+    const fetchImpl = vi.fn<typeof fetch>(async () => Response.json({ data: [], cursor: null }));
+    const provider = vercelScheduleProvider({
+      fetch: fetchImpl,
+      token: "local-oidc-token",
+      useInDevelopment: true,
+    });
+
+    expect(provider.kind).toBe("vercel");
+    await provider.list(context, {});
+    expect(fetchImpl).toHaveBeenCalledOnce();
+  });
+
+  it("uses the shared in-memory provider under eve dev by default", async () => {
     vi.stubEnv("EVE_DEV", "1");
     const provider = vercelScheduleProvider();
     expect(provider.kind).toBe("in-memory");
