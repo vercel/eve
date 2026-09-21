@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { EveProjectContext } from "#internal/project-context.js";
 import { createFakePrompter } from "#internal/testing/fake-prompter.js";
-import { headlessAsker, withAnswers } from "#setup/ask.js";
+import { headlessAsker, interactiveAsker, withAnswers } from "#setup/ask.js";
 import { integrationSetupEnvironment } from "../shared/environment.js";
 import { createSetupContexts } from "../shared/ui.js";
 import { applyWebSetup, prepareWebSetup, type WebSetupDeps } from "./setup.js";
@@ -25,6 +25,43 @@ function deps(): WebSetupDeps {
 }
 
 describe("Web setup", () => {
+  it("presents the hosting topology with stacked guidance", async () => {
+    const effects = deps();
+    const fake = createFakePrompter({ single: () => "vercel" });
+    const select = vi.spyOn(fake.prompter, "select");
+    const ctx = createSetupContexts({
+      appRoot: "/project",
+      asker: interactiveAsker(fake.prompter),
+      environment: integrationSetupEnvironment("cli-missing", { kind: "unresolved" }),
+      prompter: fake.prompter,
+      resolveVercelProject: async () => ({ orgId: "team", projectId: "project" }),
+    });
+
+    await prepareWebSetup(ctx.prepare, effects);
+
+    expect(select).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: "How should Web Chat and agent routes be served?",
+        hintLayout: "stacked",
+        initialValue: "vercel",
+        options: [
+          {
+            value: "vercel",
+            label: "Peer services",
+            hint: expect.stringContaining("Recommended for Vercel."),
+            featured: undefined,
+          },
+          {
+            value: "next",
+            label: "Next.js in front",
+            hint: expect.stringContaining("single Next.js app"),
+            featured: undefined,
+          },
+        ],
+      }),
+    );
+  });
+
   it("requires a linked project when Vercel is selected", async () => {
     const effects = deps();
     const resolveVercelProject = vi.fn(async () => ({ orgId: "team", projectId: "project" }));
