@@ -12,12 +12,13 @@ export default defineEval({
       `Run the bash command \`${command}\` and reply with the command output verbatim.`,
     );
     const resources = await t.send(
-      "Run the bash command `cat /workspace/workspace-marker.txt $HOME/.agents/skills/mounted-skill/SKILL.md` and reply with the command output verbatim.",
+      "Run the bash command `cat /workspace/workspace-marker.txt $HOME/.agents/skills/mounted-skill/SKILL.md /workspace/.eve/provider` and reply with the command output verbatim.",
     );
     t.succeeded();
     t.check(first.message, includes("1"));
     t.check(second.message, includes("1"));
     t.check(resources.message, includes("vercel-image-workspace-ok-W5K"));
     t.check(resources.message, includes("vercel-image-skill-ok-S6K"));
+    if (process.env.EVE_E2E_MODEL === "mock") t.check(resources.message, includes("vercel-image"));
   },
 });
