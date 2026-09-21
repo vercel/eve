@@ -1,5 +1,5 @@
 import { defineScheduleCollection } from "eve/schedules";
-import { inMemoryScheduleProvider } from "eve/schedules/testing";
+import { vercelScheduleProvider } from "eve/schedules/vercel";
 import { z } from "zod";
 
 export default defineScheduleCollection({
@@ -7,7 +7,7 @@ export default defineScheduleCollection({
   inputSchema: z.object({
     message: z.string().min(1).max(2_000),
   }),
-  provider: inMemoryScheduleProvider(),
+  provider: vercelScheduleProvider(),
   scope: "fixture",
   tools: true,
   run({ input }) {

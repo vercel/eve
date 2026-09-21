@@ -393,6 +393,12 @@
       "import": "./dist/src/public/schedules/testing.js",
       "default": "./dist/src/public/schedules/testing.js"
     },
+    "./schedules/vercel": {
+      "eve-source": "./src/public/schedules/vercel.ts",
+      "types": "./dist/src/public/schedules/vercel.d.ts",
+      "import": "./dist/src/public/schedules/vercel.js",
+      "default": "./dist/src/public/schedules/vercel.js"
+    },
     "./channels": {
       "types": "./dist/src/public/channels/index.d.ts",
       "import": "./dist/src/public/channels/index.js",
