@@ -10,7 +10,7 @@ export default defineEval({
   async test(t) {
     if (process.env.EVE_E2E_MODEL !== "mock") t.skip("Requires the Vercel reused-image provider.");
     const write = await t.send(
-      `Run the bash command \`printf %s ${MARKER} > ${PATH}\` and reply with the command output verbatim.`,
+      `Run the bash command \`printf %s ${MARKER} > ${PATH} && echo wrote\` and reply with the command output verbatim.`,
     );
     write.expectOk();
     const read = await t.send(
