@@ -17,8 +17,10 @@ const DEVELOPMENT_PROVIDER = inMemoryScheduleProvider();
 export interface VercelScheduleProviderOptions {
   readonly baseUrl?: string;
   readonly fetch?: typeof fetch;
-  /** Explicit Vercel OIDC token. Supplying one opts local development into the remote control plane. */
-  readonly token?: string;
+  /** Local-development workaround for production control-plane testing. Prefer ambient OIDC on Vercel. */
+  readonly developmentBearerToken?: string;
+  /** Project ID required with `developmentBearerToken`. */
+  readonly developmentProjectId?: string;
 }
 
 interface VercelSchedule {
@@ -44,20 +46,36 @@ interface VercelSchedule {
 export function vercelScheduleProvider(
   options: VercelScheduleProviderOptions = {},
 ): ScheduleProvider {
-  const explicitToken = options.token?.trim();
-  const useRemoteControlPlane = explicitToken !== undefined && explicitToken.length > 0;
-  if (isEveDevEnvironment() && !useRemoteControlPlane) return DEVELOPMENT_PROVIDER;
+  const developmentBearerToken = options.developmentBearerToken?.trim();
+  const developmentProjectId = options.developmentProjectId?.trim();
+  const useDevelopmentBearer =
+    developmentBearerToken !== undefined && developmentBearerToken.length > 0;
+  if (useDevelopmentBearer && !isEveDevEnvironment()) {
+    throw new Error(
+      "vercelScheduleProvider() developmentBearerToken is available only under eve dev. Vercel deployments use ambient OIDC.",
+    );
+  }
+  if (useDevelopmentBearer && !developmentProjectId) {
+    throw new Error(
+      "vercelScheduleProvider() developmentBearerToken requires developmentProjectId.",
+    );
+  }
+  if (isEveDevEnvironment() && !useDevelopmentBearer) return DEVELOPMENT_PROVIDER;
 
   const baseUrl = new URL(
     options.baseUrl ?? process.env.VERCEL_SCHEDULE_BASE_URL ?? DEFAULT_BASE_URL,
   );
   const fetchImpl = options.fetch ?? fetch;
   const request = async <T>(method: string, path: string, body?: unknown): Promise<T> => {
-    assertSupportedVercelEnvironment(useRemoteControlPlane);
-    const token = explicitToken || (await getVercelOidcToken());
+    assertSupportedVercelEnvironment(useDevelopmentBearer);
+    const token = developmentBearerToken || (await getVercelOidcToken());
     const headers = new Headers({ Authorization: `Bearer ${token}` });
     if (body !== undefined) headers.set("Content-Type", "application/json");
-    const response = await fetchImpl(new URL(path, baseUrl), {
+    const url = new URL(path, baseUrl);
+    if (useDevelopmentBearer) {
+      url.searchParams.set("projectId", developmentProjectId!);
+    }
+    const response = await fetchImpl(url, {
       body: body === undefined ? undefined : JSON.stringify(body),
       headers,
       method,
@@ -198,8 +216,8 @@ function schedulePath(name: string, namespace: string, suffix = ""): string {
   return `/v1/schedules/${encodeURIComponent(name)}${suffix}?${search.toString()}`;
 }
 
-function assertSupportedVercelEnvironment(useRemoteControlPlane: boolean): void {
-  if (useRemoteControlPlane && isEveDevEnvironment()) return;
+function assertSupportedVercelEnvironment(useDevelopmentBearer: boolean): void {
+  if (useDevelopmentBearer && isEveDevEnvironment()) return;
   if (!process.env.VERCEL?.trim()) {
     throw new Error("vercelScheduleProvider() requires a Vercel production deployment or eve dev.");
   }

@@ -66,15 +66,20 @@ describe("vercelScheduleProvider", () => {
   });
 
   it("omits a blank first-page cursor", async () => {
+    vi.stubEnv("EVE_DEV", "1");
     vi.stubEnv("VERCEL", "1");
     vi.stubEnv("VERCEL_ENV", "production");
     const fetchImpl = vi.fn<typeof fetch>(async () => Response.json({ data: [], cursor: null }));
-    const provider = vercelScheduleProvider({ fetch: fetchImpl, token: "oidc" });
+    const provider = vercelScheduleProvider({
+      fetch: fetchImpl,
+      developmentBearerToken: "personal-token",
+      developmentProjectId: "prj_123",
+    });
 
     await provider.list(context, { cursor: "", limit: 20 });
 
     expect(String(fetchImpl.mock.calls[0]![0])).toBe(
-      "https://vss-server.vercel.sh/v1/schedules?namespace=eve-namespace&limit=20",
+      "https://vss-server.vercel.sh/v1/schedules?namespace=eve-namespace&limit=20&projectId=prj_123",
     );
   });
 
@@ -93,7 +98,8 @@ describe("vercelScheduleProvider", () => {
     const fetchImpl = vi.fn<typeof fetch>(async () => Response.json({ data: [], cursor: null }));
     const provider = vercelScheduleProvider({
       fetch: fetchImpl,
-      token: "local-oidc-token",
+      developmentBearerToken: "personal-token",
+      developmentProjectId: "prj_123",
     });
 
     expect(provider.kind).toBe("vercel");

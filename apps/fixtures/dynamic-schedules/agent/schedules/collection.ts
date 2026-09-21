@@ -8,7 +8,8 @@ export default defineScheduleCollection({
     message: z.string().min(1).max(2_000),
   }),
   provider: vercelScheduleProvider({
-    token: process.env.EVE_TEST_ONLY_DYNAMIC_SCHEDULES_VERCEL_OIDC_TOKEN,
+    developmentBearerToken: process.env.EVE_TEST_ONLY_DYNAMIC_SCHEDULES_VERCEL_TOKEN,
+    developmentProjectId: process.env.EVE_TEST_ONLY_DYNAMIC_SCHEDULES_VERCEL_PROJECT_ID,
   }),
   scope: "fixture",
   tools: true,
