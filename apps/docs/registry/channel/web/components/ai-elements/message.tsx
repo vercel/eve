@@ -35,7 +35,7 @@ export const MessageContent = ({ children, className, ...props }: MessageContent
   <div
     className={cn(
       "is-user:dark flex w-fit min-w-0 max-w-full flex-col gap-2 overflow-hidden text-sm",
-      "group-[.is-user]:ml-auto group-[.is-user]:rounded-2xl group-[.is-user]:bg-primary group-[.is-user]:px-4 group-[.is-user]:py-2.5 group-[.is-user]:text-primary-foreground",
+      "group-[.is-user]:ml-auto group-[.is-user]:rounded-[14px] group-[.is-user]:bg-primary group-[.is-user]:px-3 group-[.is-user]:py-1.5 group-[.is-user]:text-primary-foreground",
       "group-[.is-assistant]:w-full group-[.is-assistant]:text-foreground",
       "group-data-[optimistic=true]:opacity-70",
       className,
@@ -272,12 +272,20 @@ export const MessageBranchPage = ({ className, ...props }: MessageBranchPageProp
 export type MessageResponseProps = ComponentProps<typeof Streamdown>;
 
 const streamdownPlugins = { cjk, code, math, mermaid };
+const streamdownControls = { code: { copy: true, download: false } };
 
 export const MessageResponse = memo(
   ({ className, ...props }: MessageResponseProps) => (
     <Streamdown
-      className={cn("size-full [&>*:first-child]:mt-0 [&>*:last-child]:mb-0", className)}
+      className={cn(
+        "message-markdown size-full [&>*:first-child]:mt-0 [&>*:last-child]:mb-0",
+        "[&_[data-streamdown=link]]:text-link group-[.is-user]:[&_[data-streamdown=link]]:text-primary-link",
+        "[&_[data-streamdown=inline-code]]:text-inherit group-[.is-user]:[&_[data-streamdown=inline-code]]:bg-primary-foreground/10",
+        className,
+      )}
       plugins={streamdownPlugins}
+      controls={streamdownControls}
+      lineNumbers={false}
       {...props}
     />
   ),

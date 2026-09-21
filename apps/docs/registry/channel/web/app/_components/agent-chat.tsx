@@ -3,7 +3,7 @@
 import type { UserContent } from "ai";
 import { useEveAgent } from "eve/react";
 import { AlertCircleIcon, BrainIcon, PlusIcon, SquareIcon } from "lucide-react";
-import { useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import {
   Conversation,
   ConversationContent,
@@ -33,6 +33,8 @@ export function AgentChat({
   readonly sessionId?: string;
   readonly sessionless?: boolean;
 }) {
+  const sectionRef = useRef<HTMLElement>(null);
+  const composerRef = useRef<HTMLDivElement>(null);
   const [cancellationError, setCancellationError] = useState<string>();
   const [hasInputText, setHasInputText] = useState(false);
   const agent = useEveAgent({
@@ -73,6 +75,19 @@ export function AgentChat({
   const showConversationLayout = isResuming || hasConversationContent;
   const activeSessionId = sessionId ?? agent.session?.sessionId;
 
+  useLayoutEffect(() => {
+    const composer = composerRef.current;
+    const section = sectionRef.current;
+    if (!showConversationLayout || !composer || !section) return;
+    const updateHeight = () => {
+      section.style.setProperty("--composer-height", `${composer.offsetHeight}px`);
+    };
+    updateHeight();
+    const observer = new ResizeObserver(updateHeight);
+    observer.observe(composer);
+    return () => observer.disconnect();
+  }, [showConversationLayout]);
+
   const requestCancellation = () => {
     setCancellationError(undefined);
     void agent.cancel().catch((error: unknown) => {
@@ -110,9 +125,14 @@ export function AgentChat({
   };
 
   const composer = (
-    <PromptInput onSubmit={handleSubmit}>
+    <PromptInput
+      className="rounded-3xl border-border/60 bg-card shadow-none"
+      onSubmit={handleSubmit}
+    >
       <PromptInputTextarea
         disabled={isResuming}
+        rows={1}
+        className="min-h-6 px-4 py-3"
         onChange={(event) => setHasInputText(event.currentTarget.value.trim().length > 0)}
         placeholder="Send a message…"
       />
@@ -126,7 +146,10 @@ export function AgentChat({
   );
 
   return (
-    <main className="flex h-dvh flex-col overflow-hidden bg-background text-foreground">
+    <main
+      ref={sectionRef}
+      className="relative flex h-dvh flex-col overflow-hidden bg-background text-foreground [--composer-height:100px]"
+    >
       {showConversationLayout ? (
         <ChatHeader canStartNewChat={activeSessionId !== undefined} />
       ) : null}
@@ -143,7 +166,7 @@ export function AgentChat({
           }
         >
           <ConversationTopFade className="top-14" />
-          <ConversationContent className="mx-auto w-full max-w-3xl gap-6 px-4 pt-20 pb-36 sm:px-6">
+          <ConversationContent className="mx-auto w-full max-w-3xl gap-6 px-4 pt-20 pb-[calc(var(--composer-height)+4px)] sm:px-6">
             {agent.data.messages.map((message, index) =>
               showPendingThinking &&
               isPendingAssistantShell &&
@@ -165,15 +188,16 @@ export function AgentChat({
             {showPendingThinking ? <PendingThinking /> : null}
             {errorMessage ? <ErrorMessage message={errorMessage} /> : null}
           </ConversationContent>
-          <ConversationScrollButton />
+          <ConversationScrollButton className="bottom-[calc(var(--composer-height)+8px)]" />
         </Conversation>
       ) : null}
 
       <div
+        ref={composerRef}
         className={cn(
           "mx-auto w-full px-4 sm:px-6",
           showConversationLayout
-            ? "fixed bottom-0 left-1/2 z-20 max-w-3xl -translate-x-1/2 bg-gradient-to-t from-background via-background to-transparent pt-4 pb-6"
+            ? "absolute bottom-0 left-1/2 z-20 max-w-3xl -translate-x-1/2 bg-gradient-to-t from-background via-background to-transparent pt-4 pb-6"
             : "flex max-w-xl flex-1 flex-col items-center justify-center gap-8 pb-[10vh]",
         )}
       >

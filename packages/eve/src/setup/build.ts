@@ -96,6 +96,9 @@ async function discoverSourceFiles(sourceRoot: string, relativeDirectory = ""): 
 }
 
 function quoteSourceFile(content: string): string {
+  const singles = content.split("'").length - 1;
+  const doubles = content.split('"').length - 1;
+  if (doubles <= singles) return JSON.stringify(content);
   return `'${content
     .replaceAll("\\", "\\\\")
     .replaceAll("'", "\\'")
