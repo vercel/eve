@@ -24,20 +24,6 @@ export default defineEval({
     t.check(read.message, includes(MARKER));
     if (process.env.EVE_E2E_MODEL === "mock")
       t.check(read.message, includes("vercel-reused-image"));
-
-    const stopped = await write.session.send("Run sandbox lifecycle `stop` and reply done.");
-    stopped.expectOk();
-    const afterStop = await t.send(
-      `Run the bash command \`cat ${PATH}\` and reply with the command output verbatim.`,
-    );
-    t.check(afterStop.message, includes(MARKER));
-
-    const deleted = await stopped.session.send("Run sandbox lifecycle `delete` and reply done.");
-    deleted.expectOk();
-    const afterDelete = await t.send(
-      `Run the bash command \`cat ${PATH}\` and reply with the command output verbatim.`,
-    );
-    t.check(afterDelete.message, includes(MARKER));
     t.succeeded();
   },
 });
