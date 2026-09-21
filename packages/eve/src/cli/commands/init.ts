@@ -590,7 +590,7 @@ export async function runInitCommand(
     return;
   }
 
-  if (!interactive) {
+  if (options.scaffoldOnly || !interactive) {
     logger.log(agentHandoff);
     return;
   }

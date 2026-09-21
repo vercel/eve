@@ -360,6 +360,17 @@ describe("runInitCommand", () => {
     expect(deps.runPackageManagerInstall).toHaveBeenCalled();
   });
 
+  it("scaffolds without starting development when requested", async () => {
+    const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-scaffold-only-"));
+    const output = logger();
+    const deps = dependencies();
+
+    await runInitCommand(output, parentDirectory, "agent", { scaffoldOnly: true }, deps);
+
+    expect(deps.spawnPackageManager).not.toHaveBeenCalled();
+    expect(output.messages.join("\n")).toContain("pnpm exec eve dev --no-ui");
+  });
+
   it("creates an agent workspace from comma-separated names", async () => {
     const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-agents-"));
     const output = logger();

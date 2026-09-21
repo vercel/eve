@@ -22,6 +22,8 @@ export interface InitCommandOptions {
   channelWebNextjs?: boolean;
   model?: string;
   reasoning?: AgentReasoningDefinition;
+  /** Do not start development after initialization. */
+  scaffoldOnly?: boolean;
 }
 
 export interface InitCliLogger {

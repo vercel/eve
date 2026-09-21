@@ -196,6 +196,7 @@ export function createCliProgram(
       parseAgentNamesOption,
     )
     .option("--model <model>", "Set the agent model (provider/model-id)")
+    .option("--scaffold-only", "Scaffold the agent without starting development")
     .option(
       "--reasoning <effort>",
       "Set reasoning (provider-default|none|minimal|low|medium|high|xhigh)",
@@ -210,6 +211,7 @@ export function createCliProgram(
           channelWebNextjs?: boolean;
           model?: string;
           reasoning?: AgentReasoningDefinition;
+          scaffoldOnly?: boolean;
           yes?: boolean;
         },
       ) => {
@@ -227,6 +229,7 @@ export function createCliProgram(
             channelWebNextjs: options.channelWebNextjs,
             model: options.model,
             reasoning: options.reasoning,
+            scaffoldOnly: options.scaffoldOnly,
           },
           undefined,
           (step) => {
