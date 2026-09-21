@@ -7,6 +7,7 @@ export const environment = process.env.VERCEL
 
 export default defineSandbox(async () => {
   const sandbox = await environment.open();
+  await sandbox.writeTextFile({ content: environment.provider, path: ".eve/provider" });
   const path = ".eve/initialization-count";
   const current = await sandbox.readTextFile({ path });
   await sandbox.writeTextFile({ content: String(Number(current ?? "0") + 1), path });
