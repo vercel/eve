@@ -26,14 +26,12 @@ describe("readRegistryConfig", () => {
 });
 
 describe("prepareWebRegistryProject", () => {
-  it("creates the Web Chat tsconfig for a fresh app", async () => {
+  it("leaves a fresh app for the registry transaction to create", async () => {
     const workspaceRoot = await mkdtemp(join(tmpdir(), "eve-registry-web-project-"));
+    const tsconfigPath = join(workspaceRoot, "apps", "web", "tsconfig.json");
 
     await prepareWebRegistryProject(workspaceRoot);
 
-    const tsconfig = JSON.parse(
-      await readFile(join(workspaceRoot, "apps", "web", "tsconfig.json"), "utf8"),
-    ) as { compilerOptions?: { paths?: Record<string, string[]> } };
-    expect(tsconfig.compilerOptions?.paths?.["@/*"]).toEqual(["./*"]);
+    await expect(readFile(tsconfigPath, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
   });
 });
