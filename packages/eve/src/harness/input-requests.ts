@@ -77,12 +77,13 @@ export function hasRunnableDeferredStepInput(session: HarnessSession): boolean {
       return route.batch.requests.every((request) =>
         responses.some((response) => response.requestId === request.requestId),
       );
-    case "approval":
+    case "with-approvals":
+      // An unanswered approval must not prevent an answered question from running.
       return (
         findAnsweredApprovalBatches(route.approvalBatches, responses).length > 0 ||
         findAnsweredQuestionBatches(route.questionBatches, responses).length > 0
       );
-    case "question":
+    case "questions-only":
       return findAnsweredQuestionBatches(batches, responses).length > 0;
   }
 }
@@ -149,7 +150,7 @@ export function resolvePendingInput(input: {
   }
 
   if (
-    route.kind === "approval" &&
+    route.kind === "with-approvals" &&
     input.deferMessagesWhileApprovalsPending === true &&
     resolvedStepInput?.message !== undefined &&
     findAnsweredApprovalBatches(route.approvalBatches, responses).length === 0
@@ -184,14 +185,14 @@ export function resolvePendingInput(input: {
   switch (route.kind) {
     case "session-limit":
       return resolveSessionLimitInput({ ...resolverInput, pendingBatch: route.batch });
-    case "approval":
+    case "with-approvals":
       return resolveApprovalInputBatches({
         ...resolverInput,
         approvalBatches: route.approvalBatches,
         questionBatches: route.questionBatches,
         resolveApprovalKey: input.resolveApprovalKey,
       });
-    case "question":
+    case "questions-only":
       return resolveQuestionOnlyInputBatches(resolverInput);
   }
 }
@@ -210,7 +211,7 @@ function canContinuePastHistoricalInput(input: {
   if (input.activeTurnId === undefined || input.route.kind === "session-limit") return false;
   if (
     input.responses.length > 0 &&
-    (input.route.kind !== "approval" ||
+    (input.route.kind !== "with-approvals" ||
       findAnsweredApprovalBatches(input.route.approvalBatches, input.responses).length > 0 ||
       findAnsweredQuestionBatches(input.route.questionBatches, input.responses).length > 0)
   ) {
@@ -225,10 +226,10 @@ type PendingInputRoute =
   | { readonly batch: PendingInputBatch; readonly kind: "session-limit" }
   | {
       readonly approvalBatches: readonly PendingInputBatch[];
-      readonly kind: "approval";
+      readonly kind: "with-approvals";
       readonly questionBatches: readonly PendingInputBatch[];
     }
-  | { readonly kind: "question" };
+  | { readonly kind: "questions-only" };
 
 type PendingInputBatchDomain = "approval" | "question" | "session-limit";
 
@@ -244,12 +245,12 @@ function routePendingInput(batches: readonly PendingInputBatch[]): PendingInputR
     const approvalSet = new Set(approvalBatches);
     return {
       approvalBatches,
-      kind: "approval",
+      kind: "with-approvals",
       questionBatches: batches.filter((batch) => !approvalSet.has(batch)),
     };
   }
 
-  return { kind: "question" };
+  return { kind: "questions-only" };
 }
 
 function classifyPendingInputBatch(batch: PendingInputBatch): PendingInputBatchDomain {
