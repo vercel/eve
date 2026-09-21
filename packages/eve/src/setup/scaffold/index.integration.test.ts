@@ -957,6 +957,18 @@ describe("resolveVercelHostFrameworkPreset", () => {
     await expect(resolveVercelHostFrameworkPreset(projectRoot)).resolves.toBe(preset);
   });
 
+  test("prefers a Vercel services config over root framework dependencies", async () => {
+    const projectRoot = await createTempDir();
+    await writeFile(
+      join(projectRoot, "package.json"),
+      JSON.stringify({ name: "demo", dependencies: { next: "16.2.6" } }),
+      "utf8",
+    );
+    await writeFile(join(projectRoot, "vercel.ts"), "export default { services: {} };\n", "utf8");
+
+    await expect(resolveVercelHostFrameworkPreset(projectRoot)).resolves.toBe("services");
+  });
+
   test("returns undefined for a standalone eve project", async () => {
     const projectRoot = await createTempDir();
     await writeFile(

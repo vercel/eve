@@ -180,6 +180,8 @@ const VERCEL_HOST_FRAMEWORK_PRESETS: Readonly<Record<string, string>> = {
 export async function resolveVercelHostFrameworkPreset(
   projectRoot: string,
 ): Promise<string | undefined> {
+  if (await pathExists(join(projectRoot, "vercel.ts"))) return "services";
+
   const parsed = await readPackageJsonObject(join(projectRoot, "package.json"));
   if (parsed === undefined) return undefined;
 

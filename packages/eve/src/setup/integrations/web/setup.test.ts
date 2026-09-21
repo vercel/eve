@@ -19,25 +19,48 @@ function deps(): WebSetupDeps {
       environmentRoot: appRoot,
       kind: "standalone",
     })),
+    syncHostFrameworkPreset: vi.fn(async () => {}),
     writeTextFile: vi.fn(async () => {}),
   };
 }
 
 describe("Web setup", () => {
-  it("asks for the hosting target with Vercel recommended", async () => {
+  it("requires a linked project when Vercel is selected", async () => {
     const effects = deps();
+    const resolveVercelProject = vi.fn(async () => ({ orgId: "team", projectId: "project" }));
     const ctx = createSetupContexts({
       appRoot: "/project",
       asker: withAnswers({ "web-hosting": "vercel" })(headlessAsker()),
       environment: integrationSetupEnvironment("cli-missing", { kind: "unresolved" }),
       prompter: createFakePrompter().prompter,
-      resolveVercelProject: async () => ({ orgId: "team", projectId: "project" }),
+      resolveVercelProject,
     });
 
     await expect(prepareWebSetup(ctx.prepare, effects)).resolves.toEqual({
       hosting: "vercel",
       packageManager: "pnpm",
     });
+    expect(resolveVercelProject).toHaveBeenCalledWith("Web Chat");
+  });
+
+  it("does not require a Vercel project for other hosts", async () => {
+    const effects = deps();
+    const resolveVercelProject = vi.fn(async () => {
+      throw new Error("eve link");
+    });
+    const ctx = createSetupContexts({
+      appRoot: "/project",
+      asker: withAnswers({ "web-hosting": "next" })(headlessAsker()),
+      environment: integrationSetupEnvironment("cli-missing", { kind: "unresolved" }),
+      prompter: createFakePrompter().prompter,
+      resolveVercelProject,
+    });
+
+    await expect(prepareWebSetup(ctx.prepare, effects)).resolves.toEqual({
+      hosting: "next",
+      packageManager: "pnpm",
+    });
+    expect(resolveVercelProject).not.toHaveBeenCalled();
   });
 
   it("rejects an unselected workspace before writing an agent directory", async () => {
@@ -111,6 +134,12 @@ describe("Web setup", () => {
       "/project/package.json",
       expect.stringContaining('"dev:services": "vercel dev"'),
       { force: true },
+    );
+    expect(effects.syncHostFrameworkPreset).toHaveBeenCalledWith(
+      ctx.apply.presenter,
+      "/project",
+      expect.any(Function),
+      { signal: undefined },
     );
   });
 
