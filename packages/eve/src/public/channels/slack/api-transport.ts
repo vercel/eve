@@ -15,6 +15,8 @@ import {
   type SlackApiResponse as SlackPrimitiveApiResponse,
 } from "#compiled/@chat-adapter/slack/api.js";
 
+import { withSlackRateLimitRetry } from "#public/channels/slack/rate-limit.js";
+
 export { SlackApiError };
 
 /** Slack app installation workspace available when eve resolves a bot token. */
@@ -47,7 +49,10 @@ export interface SlackApiConfig {
   readonly url?: string;
   /**
    * Fetch implementation used for Slack Web API calls and authenticated
-   * `url_private` file downloads. Defaults to the global `fetch`.
+   * `url_private` file downloads. Defaults to the global `fetch`. eve
+   * wraps whichever is used so a Slack 429 is retried after the delay
+   * `Retry-After` asks for; a call that is rate limited is therefore
+   * seen more than once here.
    */
   readonly fetch?: typeof globalThis.fetch;
 }
@@ -160,12 +165,21 @@ export function createSlackApiOptions(
   context: SlackBotTokenContext = {},
   api?: SlackApiConfig,
 ): SlackApiOptions {
-  const options: SlackApiOptions = {
+  return {
     apiUrl: resolveSlackApiUrl(api),
+    fetch: resolveSlackFetch(api),
     token: () => resolveSlackBotToken(botToken, context),
   };
-  if (api?.fetch !== undefined) options.fetch = api.fetch;
-  return options;
+}
+
+/**
+ * The fetch every outbound Slack call goes through: the configured one,
+ * or the global, wrapped so a 429 is retried after the delay Slack asks
+ * for instead of aborting the turn. Also used for the file downloads that
+ * bypass the Web API primitive.
+ */
+export function resolveSlackFetch(api?: SlackApiConfig): typeof globalThis.fetch {
+  return withSlackRateLimitRetry(api?.fetch);
 }
 
 /**

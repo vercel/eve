@@ -238,17 +238,33 @@ describe("createSlackFetchFile", () => {
     await expect(result).rejects.not.toThrow("PRIVATE");
   });
 
-  // The file download has no retry logic, so a rate-limited attachment
-  // fails the turn even though Slack said how long to wait.
-  it("throws on a rate-limited download and ignores Retry-After", async () => {
+  it("waits out a rate-limited download rather than failing the attachment", async () => {
     const fetchSpy = vi
       .spyOn(globalThis, "fetch")
-      .mockResolvedValue(new Response("", { status: 429, headers: { "retry-after": "30" } }));
+      .mockResolvedValueOnce(new Response("", { status: 429, headers: { "retry-after": "0" } }))
+      .mockResolvedValueOnce(
+        new Response(new Uint8Array([7]), {
+          status: 200,
+          headers: { "content-type": "image/png" },
+        }),
+      );
+
+    const fetchFile = createSlackFetchFile({ botToken: "xoxb-test-token" });
+    const result = await fetchFile("https://files.slack.com/a/b/cat.png");
+
+    expect(result?.bytes.equals(Buffer.from([7]))).toBe(true);
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it("throws on a rate-limited download once the retries are spent", async () => {
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(new Response("", { status: 429, headers: { "retry-after": "0" } }));
 
     const fetchFile = createSlackFetchFile({ botToken: "xoxb-test-token" });
 
     await expect(fetchFile("https://files.slack.com/a/b/cat.png")).rejects.toThrow("HTTP 429");
-    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(fetchSpy).toHaveBeenCalledTimes(3);
   });
 
   it("rejects HTML returned for a private Slack file", async () => {

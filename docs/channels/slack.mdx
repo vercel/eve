@@ -530,7 +530,7 @@ export default slackChannel({
 
 When `api.url` is omitted, eve reads `SLACK_API_URL`, and otherwise uses `https://slack.com/api/`. The value must be an absolute URL, and its path is normalized to a trailing slash, so `https://sim.example/api` and `https://sim.example/api/` both resolve `chat.postMessage` to `https://sim.example/api/chat.postMessage`. A base URL carrying a query string or fragment is rejected with an error: Slack method names are appended as a path segment, so anything after the path would be dropped along with the path itself.
 
-`api.fetch` supplies the fetch implementation used for those calls, for a test double or an instrumented client:
+`api.fetch` supplies the fetch implementation used for those calls, for a test double or an instrumented client. eve wraps whichever implementation is in play with its rate-limit retry, so a throttled call reaches your fetch more than once:
 
 ```ts
 export default slackChannel({
@@ -544,6 +544,14 @@ Two other behaviors follow the configured base:
 - `callSlackApi` accepts the same override per call as `apiUrl` and `fetch`, for code that runs outside a Slack channel context.
 
 Inbound webhook verification is unaffected — it still uses `credentials.signingSecret` / `SLACK_SIGNING_SECRET` or `credentials.webhookVerifier`. This option is for testing; leave it unset in production.
+
+### Rate limits
+
+Slack throttles its Web API per method. When a call is throttled, Slack answers HTTP 429 with a `Retry-After` header and does not process the request.
+
+eve retries such a call after the delay Slack asks for, up to three attempts in total, so a throttled `chat.update` mid-stream or a `conversations.replies` page does not abort the turn. Retries are bounded in both directions: after three attempts, or when Slack asks for a delay longer than 30 seconds, the call fails with a `SlackApiError` carrying `status: 429`.
+
+Only 429 is retried. A 5xx is surfaced immediately, because Slack may have applied the call before the response was lost and a replay would post the message twice. Slack-level failures — an HTTP 200 carrying `{ ok: false, error }` — are returned to the caller unchanged.
 
 ### Attachments
 

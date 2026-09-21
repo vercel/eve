@@ -719,10 +719,8 @@ describe("slackChannel() default event handlers", () => {
     },
   );
 
-  it("message.completed throws on an HTTP 429 rather than waiting out Retry-After", async () => {
-    // Documents what eve does today: the vendored Slack primitive has no
-    // retry logic, so a rate-limited reply fails the turn.
-    slack.failNextHttp("chat.postMessage", { status: 429, retryAfter: 30 });
+  it("message.completed waits out an HTTP 429 instead of failing the turn", async () => {
+    slack.failNextHttp("chat.postMessage", { status: 429, retryAfter: 0 });
     const adapter = withState(
       getAdapter(
         slackChannel({ api: { fetch: slack.fetch }, credentials: { botToken: "xoxb-test" } }),
@@ -743,8 +741,12 @@ describe("slackChannel() default event handlers", () => {
         }),
         ctx,
       ),
-    ).rejects.toThrow("HTTP 429");
-    expect(slack.callsTo("chat.postMessage")).toHaveLength(1);
+    ).resolves.not.toThrow();
+    // The replay carries the reply Slack refused to process the first time.
+    expect(slack.callsTo("chat.postMessage")).toHaveLength(2);
+    expect(slack.bodyOf("chat.postMessage", 1)).toMatchObject({
+      markdown_text: "Hello from the agent",
+    });
   });
 
   it("activity-owned message.completed uses the same oversized reply snippet", async () => {

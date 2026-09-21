@@ -7,6 +7,7 @@ import { type SlackThread } from "#public/channels/slack/api.js";
 import {
   resolveSlackApiUrl,
   resolveSlackBotToken,
+  resolveSlackFetch,
   type SlackApiConfig,
   type SlackBotToken,
 } from "#public/channels/slack/api-transport.js";
@@ -180,7 +181,7 @@ export function createSlackFetchFile(input: {
     const token = await resolveSlackBotToken(input.botToken, {
       teamId: typeof installationTeamId === "string" ? installationTeamId : undefined,
     });
-    const response = await (input.api?.fetch ?? fetch)(url, {
+    const response = await resolveSlackFetch(input.api)(url, {
       headers: { authorization: `Bearer ${token}` },
     });
     if (!response.ok) {

@@ -167,7 +167,9 @@ describe("mockSlack responses", () => {
     });
 
     const transport = mockSlack();
-    transport.allow("chat.postMessage").andFailHttp({ status: 429, retryAfter: 30 });
+    // `retryAfter: 0` because the transport waits out a 429 before giving
+    // up; the distinction under test is the failure path, not the wait.
+    transport.allow("chat.postMessage").andFailHttp({ status: 429, retryAfter: 0 });
     // ...whereas an HTTP failure throws before any envelope exists.
     await expect(call(transport, "chat.postMessage", { channel: "C01" })).rejects.toThrow(
       /HTTP 429/,

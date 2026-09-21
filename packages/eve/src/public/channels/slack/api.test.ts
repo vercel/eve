@@ -201,9 +201,30 @@ describe("SlackHandle.uploadFiles", () => {
     expect(slack.callsTo("files.completeUploadExternal")).toEqual([]);
   });
 
-  it("propagates an HTTP rate limit as a SlackApiError carrying the status", async () => {
+  it("waits out a rate limit and completes the upload", async () => {
     allowUpload(slack);
-    slack.failNextHttp("files.getUploadURLExternal", { status: 429, retryAfter: 30 });
+    slack.failNextHttp("files.getUploadURLExternal", { status: 429, retryAfter: 0 });
+    const binding = buildSlackBinding({
+      api: { fetch: slack.fetch },
+      botToken: "xoxb-test",
+      channelId: "C01",
+      threadTs: "1.0",
+      teamId: undefined,
+    });
+
+    await binding.slack.uploadFiles([{ data: Buffer.from([1]), filename: "x.bin" }]);
+
+    // The replay is what got the upload URL, and the bytes went up once.
+    expect(slack.callsTo("files.getUploadURLExternal")).toHaveLength(2);
+    expect(slack.uploadedBytes()).toEqual([new Uint8Array([1])]);
+    expect(slack.callsTo("files.completeUploadExternal")).toHaveLength(1);
+  });
+
+  it("propagates an HTTP rate limit as a SlackApiError once the retries are spent", async () => {
+    allowUpload(slack);
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      slack.failNextHttp("files.getUploadURLExternal", { status: 429, retryAfter: 0 });
+    }
     const binding = buildSlackBinding({
       api: { fetch: slack.fetch },
       botToken: "xoxb-test",
@@ -219,6 +240,7 @@ describe("SlackHandle.uploadFiles", () => {
       method: "files.getUploadURLExternal",
       status: 429,
     });
+    expect(slack.callsTo("files.getUploadURLExternal")).toHaveLength(3);
   });
 });
 
@@ -438,13 +460,28 @@ describe("Slack API failure surfaces", () => {
     });
   }
 
-  // The vendored Slack primitive has no retry logic, so a 429 fails
-  // the call outright even though Slack said how long to wait.
-  it("throws on HTTP 429 without honoring Retry-After", async () => {
+  it("waits out an HTTP 429 and posts the reply", async () => {
     slack.allow("chat.postMessage").andReturn({ ok: true, channel: "C01", ts: "1700.1" });
     slack.failNextHttp("chat.postMessage", {
       status: 429,
-      retryAfter: 30,
+      retryAfter: 0,
+      body: { ok: false, error: "rate_limited" },
+    });
+    const { thread } = bind();
+
+    await thread.post("anything");
+
+    // Two attempts carrying the same text: Slack rejected the throttled
+    // call without processing it, so the replay is what posted.
+    expect(slack.callsTo("chat.postMessage")).toHaveLength(2);
+    expect(slack.bodyOf("chat.postMessage", 1)).toMatchObject({ markdown_text: "anything" });
+  });
+
+  it("throws on an HTTP 429 whose Retry-After exceeds the wait budget", async () => {
+    slack.allow("chat.postMessage").andReturn({ ok: true, channel: "C01", ts: "1700.1" });
+    slack.failNextHttp("chat.postMessage", {
+      status: 429,
+      retryAfter: 600,
       body: { ok: false, error: "rate_limited" },
     });
     const { thread } = bind();
@@ -453,7 +490,8 @@ describe("Slack API failure surfaces", () => {
     await expect(rejection).rejects.toThrow(SlackApiError);
     await expect(rejection).rejects.toMatchObject({ method: "chat.postMessage", status: 429 });
 
-    // One attempt: no back-off, no second try.
+    // One attempt: Slack asked for longer than the wait budget, so the
+    // retry is skipped rather than slept through.
     expect(slack.callsTo("chat.postMessage")).toHaveLength(1);
   });
 
