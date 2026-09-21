@@ -101,9 +101,11 @@ describe("nextKey", () => {
     expect(nextKey("\x1bO")).toEqual({ consumed: 0, incomplete: true });
   });
 
-  it("decodes Alt+B/F and Alt+Backspace as complete readline chords", () => {
+  it("decodes Alt+B/F/Y and Alt+Backspace as complete readline chords", () => {
     expect(nextKey("\x1bb")).toEqual({ key: { type: "alt-b" }, consumed: 2 });
     expect(nextKey("\x1bF")).toEqual({ key: { type: "alt-f" }, consumed: 2 });
+    expect(nextKey("\x1by")).toEqual({ key: { type: "alt-y" }, consumed: 2 });
+    expect(nextKey("\x1bY")).toEqual({ key: { type: "alt-y" }, consumed: 2 });
     expect(nextKey("\x1b\x7f")).toEqual({ key: { type: "alt-backspace" }, consumed: 2 });
     expect(nextKey("\x1b\b")).toEqual({ key: { type: "alt-backspace" }, consumed: 2 });
   });
@@ -201,11 +203,12 @@ describe("parseKey", () => {
     expect(parseKey(Buffer.from("\r"))).toEqual({ type: "enter" });
   });
 
-  it("decodes ctrl-b/f/n/p for emacs-style navigation", () => {
+  it("decodes ctrl-b/f/n/p/y for emacs-style editing", () => {
     expect(parseKey(Buffer.from("\u0002"))).toEqual({ type: "ctrl-b" });
     expect(parseKey(Buffer.from("\u0006"))).toEqual({ type: "ctrl-f" });
     expect(parseKey(Buffer.from("\u000e"))).toEqual({ type: "ctrl-n" });
     expect(parseKey(Buffer.from("\u0010"))).toEqual({ type: "ctrl-p" });
+    expect(parseKey(Buffer.from("\u0019"))).toEqual({ type: "ctrl-y" });
   });
 
   it("decodes common modified-arrow word-movement sequences", () => {

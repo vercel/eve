@@ -810,6 +810,23 @@ describe("TerminalRenderer (inline scrollback)", () => {
     renderer.shutdown();
   });
 
+  it("does not yank-pop after a controller-owned repaint key", async () => {
+    const { input, renderer } = makeRenderer();
+
+    const prompt = renderer.readPrompt();
+    input.type("one");
+    input.send("\u0015"); // Ctrl+U
+    input.type("two");
+    input.send("\u0015"); // Ctrl+U
+    input.send("\u0019"); // Ctrl+Y inserts "two"
+    input.send("\u0012"); // Ctrl+R interrupts yank-pop
+    input.send("\x1by"); // Alt+Y must not replace it with "one"
+    input.enter();
+
+    expect(await prompt).toBe("two");
+    renderer.shutdown();
+  });
+
   it("windows a line longer than the terminal around the caret", async () => {
     const { screen, input, renderer } = makeRenderer(20); // narrow terminal
 

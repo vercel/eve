@@ -186,7 +186,7 @@ function logicalLineEnd(text: string, cursor: number): number {
 }
 
 /** Options for {@link applyLineEditorKey}. */
-interface LineEditorOptions {
+export interface LineEditorOptions {
   /** Single-line inputs flatten pasted newlines and ignore Shift+Enter. */
   readonly multiline?: boolean;
 }
@@ -237,6 +237,92 @@ export function applyLineEditorKey(
       return deleteWord(state);
     default:
       return undefined;
+  }
+}
+
+interface YankState {
+  readonly state: LineState;
+  readonly start: number;
+  readonly replacementEnd: number;
+  readonly ringIndex: number;
+}
+
+/** Session-local killed text shared by the TUI's line editors. */
+export class KillRing {
+  readonly #entries: string[] = [];
+  readonly #capacity: number;
+  #yank?: YankState;
+
+  constructor(capacity = 20) {
+    this.#capacity = capacity;
+  }
+
+  clear(): void {
+    this.#entries.length = 0;
+    this.#yank = undefined;
+  }
+
+  interruptYank(key: TerminalKey): void {
+    if (key.type !== "ctrl-y" && key.type !== "alt-y") this.#yank = undefined;
+  }
+
+  apply(state: LineState, key: TerminalKey, options?: LineEditorOptions): LineState | undefined {
+    if (key.type === "ctrl-y") return this.#yankLatest(state);
+    if (key.type === "alt-y") return this.#yankPrevious(state);
+
+    this.#yank = undefined;
+    const next = applyLineEditorKey(state, key, options);
+    if (next !== undefined) this.#record(killedText(state, next, key));
+    return next;
+  }
+
+  #record(text: string): void {
+    if (text.length === 0 || this.#capacity <= 0) return;
+    this.#entries.unshift(text);
+    if (this.#entries.length > this.#capacity) this.#entries.length = this.#capacity;
+  }
+
+  #yankLatest(state: LineState): LineState {
+    const text = this.#entries[0];
+    if (text === undefined) {
+      this.#yank = undefined;
+      return state;
+    }
+    const next = insert(state, text);
+    this.#yank = {
+      state: next,
+      start: state.cursor,
+      replacementEnd: state.cursor + text.length,
+      ringIndex: 0,
+    };
+    return next;
+  }
+
+  #yankPrevious(state: LineState): LineState {
+    const yank = this.#yank;
+    if (yank === undefined || this.#entries.length < 2 || state !== yank.state) return state;
+    const ringIndex = (yank.ringIndex + 1) % this.#entries.length;
+    const text = this.#entries[ringIndex]!;
+    const replacementEnd = yank.start + text.length;
+    const nextText = state.text.slice(0, yank.start) + text + state.text.slice(yank.replacementEnd);
+    const next = {
+      text: nextText,
+      cursor: graphemeBoundaryAtOrAfter(nextText, replacementEnd),
+    };
+    this.#yank = { state: next, start: yank.start, replacementEnd, ringIndex };
+    return next;
+  }
+}
+
+function killedText(before: LineState, after: LineState, key: TerminalKey): string {
+  switch (key.type) {
+    case "ctrl-k":
+      return before.text.slice(before.cursor, logicalLineEnd(before.text, before.cursor));
+    case "ctrl-u":
+    case "ctrl-w":
+      return before.text.slice(after.cursor, before.cursor);
+    default:
+      return "";
   }
 }
 

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  KillRing,
   PromptHistory,
   applyLineEditorKey,
   backspace,
@@ -159,6 +160,99 @@ describe("line editing", () => {
     expect(deleteWord({ text: "one\ntwo", cursor: 4 })).toEqual({ text: "one\ntwo", cursor: 4 });
   });
 
+  it("stores kills and yanks them across editors", () => {
+    const ring = new KillRing();
+    expect(ring.apply({ text: "hello world", cursor: 5 }, { type: "ctrl-k" })).toEqual({
+      text: "hello",
+      cursor: 5,
+    });
+    expect(ring.apply(lineOf("say: "), { type: "ctrl-y" })).toEqual({
+      text: "say:  world",
+      cursor: 11,
+    });
+  });
+
+  it("cycles older kills with Alt+Y immediately after a yank", () => {
+    const ring = new KillRing();
+    ring.apply(lineOf("one"), { type: "ctrl-u" });
+    ring.apply(lineOf("two"), { type: "ctrl-u" });
+    const yanked = ring.apply(lineOf(""), { type: "ctrl-y" })!;
+    expect(yanked).toEqual({ text: "two", cursor: 3 });
+    const previous = ring.apply(yanked, { type: "alt-y" })!;
+    expect(previous).toEqual({ text: "one", cursor: 3 });
+    expect(ring.apply(previous, { type: "alt-y" })).toEqual({ text: "two", cursor: 3 });
+  });
+
+  it("preserves suffixes joined to yanked text when cycling", () => {
+    const ring = new KillRing();
+    ring.apply(lineOf("x"), { type: "ctrl-u" });
+    ring.apply(lineOf("👨‍"), { type: "ctrl-u" });
+    const yanked = ring.apply({ text: "👩", cursor: 0 }, { type: "ctrl-y" })!;
+    expect(yanked).toEqual({ text: "👨‍👩", cursor: "👨‍👩".length });
+    expect(ring.apply(yanked, { type: "alt-y" })).toEqual({ text: "x👩", cursor: 1 });
+  });
+
+  it("preserves suffixes combined with yanked text when cycling", () => {
+    const ring = new KillRing();
+    ring.apply(lineOf("x"), { type: "ctrl-u" });
+    ring.apply(lineOf("e"), { type: "ctrl-u" });
+    const yanked = ring.apply({ text: "\u0301lan", cursor: 0 }, { type: "ctrl-y" })!;
+    expect(yanked).toEqual({ text: "e\u0301lan", cursor: 2 });
+    expect(ring.apply(yanked, { type: "alt-y" })).toEqual({ text: "x\u0301lan", cursor: 2 });
+  });
+
+  it("only yank-pops immediately after a yank", () => {
+    const ring = new KillRing();
+    ring.apply(lineOf("one"), { type: "ctrl-u" });
+    ring.apply(lineOf("two"), { type: "ctrl-u" });
+    const yanked = ring.apply(lineOf(""), { type: "ctrl-y" })!;
+    const moved = ring.apply(yanked, { type: "left" })!;
+    expect(ring.apply(moved, { type: "alt-y" })).toBe(moved);
+  });
+
+  it("interrupts yank-pop for controller-owned keys", () => {
+    const ring = new KillRing();
+    ring.apply(lineOf("one"), { type: "ctrl-u" });
+    ring.apply(lineOf("two"), { type: "ctrl-u" });
+    const yanked = ring.apply(lineOf(""), { type: "ctrl-y" })!;
+    ring.interruptYank({ type: "ctrl-r" });
+    expect(ring.apply(yanked, { type: "alt-y" })).toBe(yanked);
+  });
+
+  it("ignores empty kills and caps the ring", () => {
+    const ring = new KillRing(1);
+    expect(ring.apply(lineOf(""), { type: "ctrl-k" })).toEqual(lineOf(""));
+    ring.apply(lineOf("one"), { type: "ctrl-u" });
+    ring.apply(lineOf("two"), { type: "ctrl-u" });
+    expect(ring.apply(lineOf(""), { type: "ctrl-y" })).toEqual({ text: "two", cursor: 3 });
+  });
+
+  it("yanks at the caret and preserves grapheme boundaries", () => {
+    const ring = new KillRing();
+    ring.apply(lineOf("👨‍👩‍👧‍👦"), { type: "ctrl-u" });
+
+    expect(ring.apply({ text: "A👩B", cursor: 1 }, { type: "ctrl-y" })).toEqual({
+      text: "A👨‍👩‍👧‍👦👩B",
+      cursor: 1 + "👨‍👩‍👧‍👦".length,
+    });
+  });
+
+  it("leaves yank keys untouched when no kill is available", () => {
+    const ring = new KillRing();
+    const line = { text: "abc", cursor: 1 };
+
+    expect(ring.apply(line, { type: "ctrl-y" })).toBe(line);
+    expect(ring.apply(line, { type: "alt-y" })).toBe(line);
+  });
+
+  it("clears killed text at credential boundaries", () => {
+    const ring = new KillRing();
+    ring.apply(lineOf("secret"), { type: "ctrl-u" });
+    ring.clear();
+    const line = lineOf("");
+    expect(ring.apply(line, { type: "ctrl-y" })).toBe(line);
+  });
+
   it("routes editing keys while leaving controller keys unhandled", () => {
     const line = { text: "abc", cursor: 1 };
 
@@ -192,6 +286,8 @@ describe("line editing", () => {
     });
     expect(applyLineEditorKey(line, { type: "enter" })).toBeUndefined();
     expect(applyLineEditorKey(line, { type: "escape" })).toBeUndefined();
+    expect(applyLineEditorKey(line, { type: "ctrl-y" })).toBeUndefined();
+    expect(applyLineEditorKey(line, { type: "alt-y" })).toBeUndefined();
   });
 });
 

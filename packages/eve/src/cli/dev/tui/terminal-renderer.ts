@@ -108,6 +108,7 @@ import { buildAgentHeader } from "./agent-header.js";
 import { detectMarkdownRendering } from "./markdown.js";
 import {
   EMPTY_LINE,
+  KillRing,
   PromptHistory,
   applyLineEditorKey,
   deleteForward,
@@ -469,6 +470,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
   #inputText = "";
   #inputCursor = 0;
   readonly #promptHistory = new PromptHistory();
+  readonly #killRing = new KillRing();
   #inputActive = false;
   /**
    * Command suggestions for the prompt draft. Only `readPrompt` sets this —
@@ -755,7 +757,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
         this.#flowInterrupt("ctrl-c");
         return;
       }
-      const edited = applyLineEditorKey(editor, key, { multiline: true });
+      const edited = this.#killRing.apply(editor, key, { multiline: true });
       if (edited !== undefined) {
         apply(edited);
         return;
@@ -863,7 +865,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
         }
         // Chat keeps pasted newlines and honors Shift+Enter. Setup-panel inputs
         // stay single-line; freeform questions opt in separately below.
-        const edited = applyLineEditorKey(editor, key, { multiline: true });
+        const edited = this.#killRing.apply(editor, key, { multiline: true });
         if (edited !== undefined) {
           apply(edited);
           return;
@@ -1428,7 +1430,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
               break;
             default: {
               if (isOnFreeformRow()) {
-                const edited = applyLineEditorKey(editor, key);
+                const edited = this.#killRing.apply(editor, key);
                 if (edited !== undefined) {
                   editor = edited;
                   this.#showCaret();
@@ -1454,7 +1456,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
           return;
         }
 
-        const edited = applyLineEditorKey(editor, key, { multiline: true });
+        const edited = this.#killRing.apply(editor, key, { multiline: true });
         if (edited !== undefined) {
           editor = edited;
           this.#showCaret();
@@ -2327,7 +2329,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
         }
 
         if (!onEditableRow()) return;
-        const edited = applyLineEditorKey(editor, key);
+        const edited = this.#killRing.apply(editor, key);
         if (edited !== undefined) applyEditor(edited);
       },
       () => this.#stopCaretBlink(),
@@ -2338,6 +2340,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
   async #readProviderPicker(
     opts: ProviderPickerRequest,
   ): Promise<ProviderPickerChoice | undefined> {
+    this.#killRing.clear();
     const flow = this.#beginSetupQuestion(opts.message);
     let interaction = initialProviderPickerState(opts.options, opts.initialValue);
     let validation: AbortController | undefined;
@@ -2457,6 +2460,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
         }
 
         if (interaction.phase.kind !== "editing" && interaction.phase.kind !== "invalid") return;
+        // Provider credentials must never enter the session kill ring.
         const edited = applyLineEditorKey(interaction.phase.editor, key);
         if (edited !== undefined) {
           this.#showCaret();
@@ -2548,6 +2552,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
     validate?: (value: string) => string | undefined;
     notices?: readonly SelectNotice[];
   }): Promise<string | undefined> {
+    if (opts.mask === true) this.#killRing.clear();
     const flow = this.#beginSetupQuestion(opts.message);
 
     let editor: LineState = lineOf("");
@@ -2577,7 +2582,9 @@ export class TerminalRenderer implements AgentTUIRenderer {
           this.#paint();
         };
 
-        const edited = applyLineEditorKey(editor, key);
+        const edited = opts.mask
+          ? applyLineEditorKey(editor, key)
+          : this.#killRing.apply(editor, key);
         if (edited !== undefined) {
           apply(edited);
           return;
@@ -3214,7 +3221,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
       this.#keyFlushTimer = setTimeout(() => {
         if (this.#keyBuffer !== "\x1b") return;
         this.#keyBuffer = "";
-        this.#consumeKey?.({ type: "escape" });
+        this.#dispatchKey({ type: "escape" });
       }, escFlushMs);
       this.#keyFlushTimer.unref?.();
       return;
@@ -3229,7 +3236,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
         const value = sanitizePastedText(stripPasteStart(stuck));
         this.#keyBuffer = "";
         if (value.length > 0) {
-          this.#consumeKey?.({ type: "text", value, framing: "bracketed-paste" });
+          this.#dispatchKey({ type: "text", value, framing: "bracketed-paste" });
         }
       }, incompletePasteFlushMs);
       this.#keyFlushTimer.unref?.();
@@ -3247,6 +3254,11 @@ export class TerminalRenderer implements AgentTUIRenderer {
     }
   }
 
+  #dispatchKey(key: TerminalKey): void {
+    this.#killRing.interruptYank(key);
+    this.#consumeKey?.(key);
+  }
+
   #drainKeys() {
     while (this.#keyBuffer.length > 0) {
       const token = nextKey(this.#keyBuffer);
@@ -3259,7 +3271,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
         this.#handleOscReply(token.key.value);
         continue;
       }
-      this.#consumeKey?.(token.key);
+      this.#dispatchKey(token.key);
     }
   }
 
@@ -3343,7 +3355,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
         break;
       }
       default: {
-        const edited = applyLineEditorKey(this.#streamDraft, key, { multiline: true });
+        const edited = this.#killRing.apply(this.#streamDraft, key, { multiline: true });
         if (edited !== undefined) {
           this.#streamDraft = edited;
           this.#paint();

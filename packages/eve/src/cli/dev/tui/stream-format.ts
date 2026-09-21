@@ -42,11 +42,13 @@ export type TerminalKey =
   | { type: "alt-b" }
   | { type: "alt-f" }
   | { type: "alt-backspace" }
+  | { type: "alt-y" }
   | { type: "ctrl-k" }
   | { type: "ctrl-n" }
   | { type: "ctrl-p" }
   | { type: "ctrl-u" }
   | { type: "ctrl-w" }
+  | { type: "ctrl-y" }
   | { type: "ctrl-l" }
   | { type: "ctrl-r" }
   | { type: "ctrl-c" }
@@ -195,6 +197,9 @@ export function nextKey(buffer: string): KeyToken {
     if (second === "f" || second === "F") {
       return { key: { type: "alt-f" }, consumed: 2 };
     }
+    if (second === "y" || second === "Y") {
+      return { key: { type: "alt-y" }, consumed: 2 };
+    }
     if (second === "\x7f" || second === "\b") {
       return { key: { type: "alt-backspace" }, consumed: 2 };
     }
@@ -262,6 +267,8 @@ export function parseKey(chunk: Buffer): TerminalKey {
       return { type: "ctrl-u" };
     case "\u0017":
       return { type: "ctrl-w" };
+    case "\u0019":
+      return { type: "ctrl-y" };
     case "\u0003":
       return { type: "ctrl-c" };
     case "\r":
