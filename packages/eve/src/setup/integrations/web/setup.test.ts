@@ -41,20 +41,20 @@ describe("Web setup", () => {
 
     expect(select).toHaveBeenCalledWith(
       expect.objectContaining({
-        message: "How should Web Chat and agent routes be served?",
+        message: "How should Web Chat and agents be served?",
         hintLayout: "stacked",
         initialValue: "vercel",
         options: [
           {
             value: "vercel",
-            label: "Peer services",
-            hint: expect.stringContaining("Recommended for Vercel."),
+            label: "Peer services (Recommended for Vercel)",
+            hint: "Separate services in one Vercel project.",
             featured: undefined,
           },
           {
             value: "next",
             label: "Next.js in front",
-            hint: expect.stringContaining("single Next.js app"),
+            hint: "One Next.js app serves Web Chat and all agent routes.",
             featured: undefined,
           },
         ],
