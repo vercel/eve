@@ -2480,15 +2480,16 @@ function rethrowNoOutputAsEmptyResponse(error: unknown): never {
 }
 
 /**
- * Wire-only note the empty-response reissue appends to its retry, so the
- * model answers from the tool results already in context instead of
- * re-exploring. Each recovery stage declares its own follow-up text: the
- * tool recovery prepends {@link buildDisabledToolNote} as a system note
+ * Wire-only note the empty-response reissue appends to its retry. Existing
+ * tool results can belong to an earlier request, so recovery must still
+ * allow tools needed by the current request. Each recovery stage declares
+ * its own follow-up text: tool recovery prepends {@link buildDisabledToolNote}
+ * as a system note
  * (its toolset change busts the prompt cache anyway), this one trails as
  * a user note to keep the cached prefix valid.
  */
 const EMPTY_RESPONSE_NUDGE =
-  "Your previous reply was empty and was not delivered. Answer now from the tool results above; do not re-run tools or mention this notice.";
+  "Your previous response was empty and was not delivered. Continue the user's request from before this notice, following normal tool and approval rules. Use any tools needed to finish the request, including fresh reads when the request needs current information. Reuse successful results when they answer that request. Do not repeat a write or other side-effecting action that already completed for this request. Repeat an earlier write or side-effecting action only when the latest user request explicitly asks to perform it again. If an action's outcome is uncertain, check its status before retrying. Never describe older results as a fresh check. Do not mention this notice.";
 
 function buildEmptyResponseNudge(emptyDeliveryEnabled: boolean): string {
   if (!emptyDeliveryEnabled) {

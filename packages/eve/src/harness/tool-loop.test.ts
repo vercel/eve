@@ -5625,6 +5625,9 @@ describe("createToolLoopHarness", () => {
   });
 
   describe("empty model response recovery", () => {
+    const expectedEmptyResponseNudge =
+      "Your previous response was empty and was not delivered. Continue the user's request from before this notice, following normal tool and approval rules. Use any tools needed to finish the request, including fresh reads when the request needs current information. Reuse successful results when they answer that request. Do not repeat a write or other side-effecting action that already completed for this request. Repeat an earlier write or side-effecting action only when the latest user request explicitly asks to perform it again. If an action's outcome is uncertain, check its status before retrying. Never describe older results as a fresh check. Do not mention this notice.";
+
     const emptyResult: Record<string, unknown> = {
       content: [],
       finishReason: "other",
@@ -5751,6 +5754,240 @@ describe("createToolLoopHarness", () => {
               typeof message.content === "string" && message.content.includes("was not delivered"),
           ),
         ).toBe(false);
+      } finally {
+        warnSpy.mockRestore();
+      }
+    });
+
+    it("preserves a refresh request and stale tool context while allowing a fresh read", async () => {
+      const staleReadCall = {
+        input: { resource: "report" },
+        toolCallId: "stale-read-1",
+        toolName: "read_report",
+        type: "tool-call" as const,
+      };
+      const staleReadResult = {
+        ...staleReadCall,
+        output: { type: "json" as const, value: { status: "ready", value: "old" } },
+        type: "tool-result" as const,
+      };
+      const tools = new Map([
+        [
+          "read_report",
+          {
+            description: "Read the report.",
+            execute: vi.fn().mockResolvedValue({ status: "ready", value: "new" }),
+            inputSchema: jsonSchema({ type: "object" }),
+            name: "read_report",
+          },
+        ],
+        [
+          "write_report",
+          {
+            description: "Write the report.",
+            execute: vi.fn().mockResolvedValue({ status: "saved" }),
+            inputSchema: jsonSchema({ type: "object" }),
+            name: "write_report",
+          },
+        ],
+      ]);
+      const session = createTestSession({
+        agent: {
+          modelReference: { id: "test-model" },
+          system: "You are a test assistant.",
+          tools: [
+            {
+              description: "Read the report.",
+              name: "read_report",
+              inputSchema: { type: "object" },
+            },
+            {
+              description: "Write the report.",
+              name: "write_report",
+              inputSchema: { type: "object" },
+            },
+          ],
+        },
+        history: [
+          { content: "Check the report.", kind: "user", role: "user" },
+          { content: [staleReadCall], role: "assistant" },
+          { content: [staleReadResult], role: "tool" },
+        ],
+      });
+      const refreshRequest = "How many rows does the report have now?";
+
+      setupFirstThenAgent(emptyResult, successResult);
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const { emit } = createEventCollector();
+      const runStep = createToolLoopHarness(createTestConfig("conversation", emit, { tools }));
+
+      try {
+        const result = await runStep(session, { message: refreshRequest });
+        const firstCall = vi.mocked(ToolLoopAgent).mock.calls[0]?.[0];
+        const retryCall = vi.mocked(ToolLoopAgent).mock.calls[1]?.[0];
+        const firstAgent = vi.mocked(ToolLoopAgent).mock.results[0]?.value as {
+          stream: ReturnType<typeof vi.fn>;
+        };
+        const retryAgent = vi.mocked(ToolLoopAgent).mock.results[1]?.value as {
+          stream: ReturnType<typeof vi.fn>;
+        };
+        const firstMessages = firstAgent.stream.mock.calls[0]?.[0]?.messages;
+        const retryMessages = retryAgent.stream.mock.calls[0]?.[0]?.messages as Array<{
+          content: unknown;
+          role: string;
+        }>;
+        const firstToolNames = Object.keys(firstCall?.tools ?? {});
+        const retryToolNames = Object.keys(retryCall?.tools ?? {});
+
+        expect(result.next).toBeNull();
+        expect(retryCall?.instructions).toBe(firstCall?.instructions);
+        expect(firstToolNames).toEqual(expect.arrayContaining(["read_report", "write_report"]));
+        expect(retryToolNames).toEqual(firstToolNames);
+        expect(firstCall?.tools).toMatchObject({ read_report: expect.anything() });
+        expect(retryCall?.tools).toMatchObject({ read_report: expect.anything() });
+        expect(retryMessages.slice(0, -1)).toEqual(firstMessages);
+        expect(retryMessages.slice(0, -1)).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({ content: refreshRequest, role: "user" }),
+            expect.objectContaining({
+              content: expect.arrayContaining([
+                expect.objectContaining({
+                  input: staleReadCall.input,
+                  toolCallId: staleReadCall.toolCallId,
+                  toolName: staleReadCall.toolName,
+                  type: "tool-call",
+                }),
+              ]),
+              role: "assistant",
+            }),
+            expect.objectContaining({
+              content: expect.arrayContaining([
+                expect.objectContaining({
+                  output: staleReadResult.output,
+                  toolCallId: staleReadCall.toolCallId,
+                  toolName: staleReadCall.toolName,
+                  type: "tool-result",
+                }),
+              ]),
+              role: "tool",
+            }),
+          ]),
+        );
+        expect(retryMessages.at(-1)).toMatchObject({
+          content: expectedEmptyResponseNudge,
+          kind: "execution.retry",
+          role: "user",
+        });
+        expect(retryMessages.at(-1)?.content).not.toContain("do not re-run tools");
+        expect(result.session.history).toContainEqual({
+          content: refreshRequest,
+          kind: "user",
+          role: "user",
+        });
+        expect(
+          result.session.history.some(
+            (message) =>
+              typeof message.content === "string" && message.content === expectedEmptyResponseNudge,
+          ),
+        ).toBe(false);
+      } finally {
+        warnSpy.mockRestore();
+      }
+    });
+
+    it("warns against repeating a completed write and checks uncertain outcomes", async () => {
+      const writeCall = {
+        input: { report: "updated" },
+        toolCallId: "write-1",
+        toolName: "write_report",
+        type: "tool-call" as const,
+      };
+      const writeResult = {
+        ...writeCall,
+        output: { type: "json" as const, value: { status: "saved" } },
+        type: "tool-result" as const,
+      };
+      const completedWrite = {
+        finishReason: "tool-calls",
+        response: {
+          messages: [
+            { content: [writeCall], role: "assistant" },
+            { content: [writeResult], role: "tool" },
+          ],
+        },
+        text: "",
+        toolCalls: [writeCall],
+        toolResults: [writeResult],
+      };
+      const tools = new Map([
+        [
+          "write_report",
+          {
+            description: "Write the report.",
+            execute: vi.fn().mockResolvedValue({ status: "saved" }),
+            inputSchema: jsonSchema({ type: "object" }),
+            name: "write_report",
+          },
+        ],
+      ]);
+
+      setupMockAgentSequence([completedWrite, emptyResult, successResult]);
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const { emit } = createEventCollector();
+      const runStep = createToolLoopHarness(createTestConfig("conversation", emit, { tools }));
+
+      try {
+        const first = await runStep(createTestSession(), { message: "Update the report." });
+        expect(typeof first.next).toBe("function");
+        if (typeof first.next !== "function") throw new Error("Expected a tool continuation.");
+
+        const result = await first.next(first.session);
+        const retryAgent = vi.mocked(ToolLoopAgent).mock.results[2]?.value as {
+          stream: ReturnType<typeof vi.fn>;
+        };
+        const retryMessages = retryAgent.stream.mock.calls[0]?.[0]?.messages as Array<{
+          content: unknown;
+          role: string;
+        }>;
+
+        expect(result.next).toBeNull();
+        expect(retryMessages.slice(0, -1)).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({
+              content: expect.arrayContaining([
+                expect.objectContaining({
+                  input: writeCall.input,
+                  toolCallId: writeCall.toolCallId,
+                  toolName: writeCall.toolName,
+                  type: "tool-call",
+                }),
+              ]),
+              role: "assistant",
+            }),
+            expect.objectContaining({
+              content: expect.arrayContaining([
+                expect.objectContaining({
+                  output: writeResult.output,
+                  toolCallId: writeResult.toolCallId,
+                  toolName: writeResult.toolName,
+                  type: "tool-result",
+                }),
+              ]),
+              role: "tool",
+            }),
+          ]),
+        );
+        expect(retryMessages.at(-1)).toMatchObject({
+          content: expectedEmptyResponseNudge,
+          kind: "execution.retry",
+          role: "user",
+        });
+        expect(retryMessages.at(-1)?.content).toContain(
+          "Do not repeat a write or other side-effecting action that already completed for this request.",
+        );
+        expect(retryMessages.at(-1)?.content).toContain(
+          "Repeat an earlier write or side-effecting action only when the latest user request explicitly asks to perform it again.",
+        );
       } finally {
         warnSpy.mockRestore();
       }
