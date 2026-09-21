@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { z } from "zod";
 
-import gh from "../../extension/tools/gh.ts";
+import { githubShellInputSchema } from "../../extension/lib/github-shell-schema.ts";
 
 const permission = {
   provider: "github",
@@ -16,8 +16,7 @@ const input = {
 };
 
 test("gh permission schemas use homogeneous array items for provider compatibility", () => {
-  assert.ok(gh.inputSchema instanceof z.ZodObject);
-  const schema = z.toJSONSchema(gh.inputSchema, { target: "draft-7" });
+  const schema = z.toJSONSchema(githubShellInputSchema, { target: "draft-7" });
   const permissions = schema.properties?.permissions;
   assert.ok(permissions && typeof permissions === "object");
   assert.equal(permissions.type, "array");
@@ -28,8 +27,7 @@ test("gh permission schemas use homogeneous array items for provider compatibili
 });
 
 test("gh still requires exactly one permission and one repository", () => {
-  assert.ok(gh.inputSchema instanceof z.ZodObject);
-  assert.deepEqual(gh.inputSchema.parse(input), input);
+  assert.deepEqual(githubShellInputSchema.parse(input), input);
   for (const permissions of [
     [],
     [permission, permission],
@@ -39,6 +37,6 @@ test("gh still requires exactly one permission and one repository", () => {
     [{ ...permission, provider: "other" }],
     [{ ...permission, access: "read" }],
   ]) {
-    assert.equal(gh.inputSchema.safeParse({ ...input, permissions }).success, false);
+    assert.equal(githubShellInputSchema.safeParse({ ...input, permissions }).success, false);
   }
 });
