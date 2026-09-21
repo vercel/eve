@@ -2,6 +2,8 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import type { ReactNode } from "react";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { ServerStatusProvider } from "./_components/server-status";
+import { disposablePolyfillScript } from "@/lib/disposable-polyfill";
 import { cn } from "@/lib/utils";
 import "./globals.css";
 
@@ -28,8 +30,13 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { readonly children: ReactNode }) {
   return (
     <html className={cn(sans.variable, mono.variable)} lang="en">
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: disposablePolyfillScript }} />
+      </head>
       <body>
-        <TooltipProvider>{children}</TooltipProvider>
+        <TooltipProvider>
+          <ServerStatusProvider>{children}</ServerStatusProvider>
+        </TooltipProvider>
       </body>
     </html>
   );

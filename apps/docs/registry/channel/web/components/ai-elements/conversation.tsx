@@ -5,115 +5,20 @@ import { cn } from "@/lib/utils";
 import type { UIMessage } from "ai";
 import { ArrowDownIcon, DownloadIcon } from "lucide-react";
 import type { ComponentProps } from "react";
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { StickToBottom, useStickToBottomContext } from "use-stick-to-bottom";
 
-export type ConversationProps = ComponentProps<typeof StickToBottom> & {
-  scrollRestorationKey?: string;
-};
+export type ConversationProps = ComponentProps<typeof StickToBottom>;
 
-export const Conversation = ({
-  children,
-  className,
-  initial,
-  scrollRestorationKey,
-  ...props
-}: ConversationProps) => (
+export const Conversation = ({ className, ...props }: ConversationProps) => (
   <StickToBottom
     className={cn("relative flex-1 overflow-y-hidden", className)}
-    initial={initial ?? (scrollRestorationKey === undefined ? "smooth" : false)}
+    initial="smooth"
     resize="smooth"
     role="log"
     {...props}
-  >
-    {typeof children === "function" ? (
-      (context) => (
-        <>
-          {children(context)}
-          {scrollRestorationKey === undefined ? null : (
-            <ConversationScrollRestoration storageKey={scrollRestorationKey} />
-          )}
-        </>
-      )
-    ) : (
-      <>
-        {children}
-        {scrollRestorationKey === undefined ? null : (
-          <ConversationScrollRestoration storageKey={scrollRestorationKey} />
-        )}
-      </>
-    )}
-  </StickToBottom>
+  />
 );
-
-function ConversationScrollRestoration({ storageKey }: { readonly storageKey: string }) {
-  const { scrollRef, scrollToBottom, state } = useStickToBottomContext();
-  const restoredKeyRef = useRef<string | undefined>(undefined);
-
-  useLayoutEffect(() => {
-    const scrollElement = scrollRef.current;
-    if (scrollElement === null) return;
-
-    if (restoredKeyRef.current !== storageKey) {
-      const saved = readScrollPosition(sessionStorage.getItem(storageKey));
-      if (saved?.atBottom === false) {
-        scrollElement.scrollTop = saved.scrollTop;
-        requestAnimationFrame(() => {
-          scrollElement.scrollTop = saved.scrollTop;
-        });
-      } else {
-        scrollElement.scrollTop = scrollElement.scrollHeight;
-        scrollToBottom({ animation: "instant", ignoreEscapes: true });
-      }
-      restoredKeyRef.current = storageKey;
-    }
-
-    const saveNow = () => {
-      sessionStorage.setItem(
-        storageKey,
-        JSON.stringify({
-          atBottom: state.isAtBottom || state.isNearBottom,
-          scrollTop: scrollElement.scrollTop,
-        }),
-      );
-    };
-    let frame: number | undefined;
-    const scheduleSave = () => {
-      if (frame !== undefined) return;
-      frame = requestAnimationFrame(() => {
-        frame = undefined;
-        saveNow();
-      });
-    };
-    scrollElement.addEventListener("scroll", scheduleSave, { passive: true });
-    window.addEventListener("pagehide", saveNow);
-    return () => {
-      scrollElement.removeEventListener("scroll", scheduleSave);
-      window.removeEventListener("pagehide", saveNow);
-      if (frame !== undefined) cancelAnimationFrame(frame);
-      saveNow();
-    };
-  }, [scrollRef, scrollToBottom, state, storageKey]);
-
-  return null;
-}
-
-function readScrollPosition(value: string | null):
-  | {
-      readonly atBottom: boolean;
-      readonly scrollTop: number;
-    }
-  | undefined {
-  if (value === null) return undefined;
-  try {
-    const parsed = JSON.parse(value) as { atBottom?: unknown; scrollTop?: unknown };
-    return typeof parsed.atBottom === "boolean" && typeof parsed.scrollTop === "number"
-      ? { atBottom: parsed.atBottom, scrollTop: parsed.scrollTop }
-      : undefined;
-  } catch {
-    return undefined;
-  }
-}
 
 export type ConversationContentProps = ComponentProps<typeof StickToBottom.Content>;
 

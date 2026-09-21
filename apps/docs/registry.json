@@ -2032,9 +2032,34 @@
           "target": "postcss.config.mjs"
         },
         {
+          "path": "registry/channel/web/lib/chat-message-reducer.ts",
+          "type": "registry:file",
+          "target": "lib/chat-message-reducer.ts"
+        },
+        {
+          "path": "registry/channel/web/lib/chat-turn-state.ts",
+          "type": "registry:file",
+          "target": "lib/chat-turn-state.ts"
+        },
+        {
+          "path": "registry/channel/web/lib/disposable-polyfill.ts",
+          "type": "registry:file",
+          "target": "lib/disposable-polyfill.ts"
+        },
+        {
           "path": "registry/channel/web/lib/format-elapsed.ts",
           "type": "registry:file",
           "target": "lib/format-elapsed.ts"
+        },
+        {
+          "path": "registry/channel/web/lib/server-status.ts",
+          "type": "registry:file",
+          "target": "lib/server-status.ts"
+        },
+        {
+          "path": "registry/channel/web/app/_components/server-status.tsx",
+          "type": "registry:file",
+          "target": "app/_components/server-status.tsx"
         }
       ]
     },

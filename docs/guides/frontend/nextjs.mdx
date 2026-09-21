@@ -137,7 +137,7 @@ Configure authorization for every exposed agent before accepting production brow
 
 After the first message is accepted, Web Chat replaces the browser URL with `/s/{sessionId}` without remounting the active stream. Reloading that URL passes the session to `useEveAgent` with `resume: true`, so completed history is replayed and an unfinished response continues streaming. **New chat** navigates to the sessionless `/s` route; it does not reset or delete the prior session, which remains available at its URL.
 
-The generated UI keeps transcript scroll position in browser `sessionStorage`. This is presentation state only and is not written to the eve session.
+Opening a conversation scrolls to its latest message. Sending a message returns to the live end of the conversation.
 
 For a custom Next.js chat route, pass the route session ID explicitly:
 
@@ -184,6 +184,8 @@ See [Resumable sessions](./overview#resumable-sessions) for persistence and repl
 Generated Web Chat renders links and inline code with distinct colors, removes code-block headers, and keeps the composer visible while you scroll.
 
 Generated Web Chat includes copy buttons for tool commands, command output, parameters, results, and errors. Reasoning panels stay open or closed while responses stream, and the thinking animation pauses between sweeps.
+
+Repeated user messages stay separate. The conversation scrolls to a newly submitted message and shows Stop only while the active chat turn is running. Input is disabled while the server is unavailable and recovers on reconnection.
 
 ## What to read next
 

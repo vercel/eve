@@ -6,6 +6,7 @@ patchedDependencies:
   "@workflow/world-postgres@5.0.0-beta.44": patches/workflow-world-postgres-5.0.0-beta.44.patch
 
 packages:
+  - apps/docs/registry/channel/web
   - apps/*
   - apps/fixtures/*
   - apps/frameworks/*

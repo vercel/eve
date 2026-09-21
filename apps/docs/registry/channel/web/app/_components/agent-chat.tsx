@@ -1,5 +1,9 @@
 "use client";
 
+import type { StickToBottomContext } from "use-stick-to-bottom";
+import { chatMessageReducer, type ChatMessageData } from "@/lib/chat-message-reducer";
+import { getActiveChatTurn } from "@/lib/chat-turn-state";
+import { useServerStatus, ServerStatusDot } from "./server-status";
 import type { UserContent } from "ai";
 import { useEveAgent } from "eve/react";
 import { AlertCircleIcon, PlusIcon, SquareIcon } from "lucide-react";
@@ -33,11 +37,15 @@ export function AgentChat({
   readonly sessionId?: string;
   readonly sessionless?: boolean;
 }) {
+  const isDisconnected = useServerStatus() === "unavailable";
+  const conversationRef = useRef<StickToBottomContext>(null);
+  const [reducer] = useState(chatMessageReducer);
   const sectionRef = useRef<HTMLElement>(null);
   const composerRef = useRef<HTMLDivElement>(null);
   const [cancellationError, setCancellationError] = useState<string>();
   const [hasInputText, setHasInputText] = useState(false);
-  const agent = useEveAgent({
+  const agent = useEveAgent<ChatMessageData>({
+    reducer,
     initialSession:
       sessionId === undefined
         ? undefined
@@ -59,7 +67,9 @@ export function AgentChat({
     },
   });
 
-  const isBusy = agent.status === "submitted" || agent.status === "streaming";
+  const activeTurnId = getActiveChatTurn(agent.events);
+  const isBusy =
+    agent.status === "submitted" || (agent.status === "streaming" && activeTurnId !== undefined);
   const isResuming = agent.status === "resuming";
   const isEmpty = agent.data.messages.length === 0;
   const lastMessage = agent.data.messages.at(-1);
@@ -97,11 +107,19 @@ export function AgentChat({
 
   const handleSubmit = async (message: PromptInputMessage) => {
     const text = message.text.trim();
-    if ((text.length === 0 && message.files.length === 0) || isResuming) return;
+    if ((text.length === 0 && message.files.length === 0) || isResuming || isDisconnected) return;
 
+    void conversationRef.current?.scrollToBottom({
+      animation: window.matchMedia("(prefers-reduced-motion: reduce)").matches
+        ? "instant"
+        : "smooth",
+    });
     setHasInputText(false);
     setCancellationError(undefined);
-    const options = isBusy ? { turnPolicy: "steer" as const } : undefined;
+    const options =
+      agent.status === "submitted" || agent.status === "streaming"
+        ? { turnPolicy: "steer" as const }
+        : undefined;
 
     if (message.files.length === 0) {
       await agent.send(text, options);
@@ -130,16 +148,16 @@ export function AgentChat({
       onSubmit={handleSubmit}
     >
       <PromptInputTextarea
-        disabled={isResuming}
+        disabled={isResuming || isDisconnected}
         rows={1}
         className="min-h-6 px-4 py-3"
         onChange={(event) => setHasInputText(event.currentTarget.value.trim().length > 0)}
-        placeholder="Send a message…"
+        placeholder={isDisconnected ? "Server unavailable" : "Send a message…"}
       />
       <ComposerAction
         hasInputText={hasInputText}
         isBusy={isBusy}
-        isResuming={isResuming}
+        isResuming={isResuming || isDisconnected}
         onCancel={requestCancellation}
       />
     </PromptInput>
@@ -157,13 +175,9 @@ export function AgentChat({
       {showConversationLayout ? (
         <Conversation
           className="min-h-0 flex-1"
-          initial={sessionId === undefined ? undefined : false}
+          contextRef={conversationRef}
+          initial="instant"
           resize={activeSessionId === undefined ? "smooth" : "instant"}
-          scrollRestorationKey={
-            isEmpty || activeSessionId === undefined
-              ? undefined
-              : `eve:web-chat-scroll:${activeSessionId}`
-          }
         >
           <ConversationTopFade className="top-14" />
           <ConversationContent className="mx-auto w-full max-w-3xl gap-6 px-4 pt-20 pb-[calc(var(--composer-height)+4px)] sm:px-6">
@@ -174,7 +188,9 @@ export function AgentChat({
                 <AgentMessage
                   canRespond={!isBusy && !isResuming}
                   isStreaming={
-                    agent.status === "streaming" && index === agent.data.messages.length - 1
+                    isBusy &&
+                    message.metadata?.turnId === activeTurnId &&
+                    index === agent.data.messages.length - 1
                   }
                   key={message.id}
                   message={message}
@@ -265,7 +281,10 @@ function ChatHeader({ canStartNewChat }: { readonly canStartNewChat: boolean }) 
   return (
     <header className="pointer-events-none fixed top-0 right-0 left-0 z-20 h-14">
       <div className="relative mx-auto flex h-full w-full max-w-3xl items-center justify-center bg-background px-24">
-        <span className="truncate text-muted-foreground text-sm">{AGENT_NAME}</span>
+        <span className="flex items-center gap-2 truncate text-muted-foreground text-sm">
+          <ServerStatusDot />
+          {AGENT_NAME}
+        </span>
         {canStartNewChat ? (
           <Button
             aria-label="Start a new chat"

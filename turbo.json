@@ -135,6 +135,10 @@
         "!node_modules/**"
       ],
       "outputs": []
+    },
+    "@eve-internal/web-chat#test:unit": {
+      "dependsOn": ["eve#build"],
+      "cache": false
     }
   }
 }
