@@ -69,7 +69,7 @@ describe("Codex model", () => {
       { role: "user", content: [{ type: "input_text", text: "hello" }] },
       {
         role: "assistant",
-        content: [{ type: "output_text", text: "previous answer" }],
+        content: "previous answer",
         phase: "final_answer",
       },
     ]);
@@ -178,6 +178,7 @@ describe("Codex model", () => {
 
 function fakeBroker(): CodexTokenBroker {
   return {
+    credentialOwner: () => undefined,
     getToken: async () => ({ token: "access-token" }),
     refreshState: async () => ({ kind: "ready" }),
     state: () => ({ kind: "ready" }),

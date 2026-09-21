@@ -1,10 +1,7 @@
 import { getStepMetadata } from "#compiled/@workflow/core/index.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { AuthKey, InitiatorAuthKey, SessionIdKey, SessionKey } from "#context/keys.js";
-import {
-  ConnectionAuthorizationFailedError,
-  isConnectionAuthorizationFailedError,
-} from "#connections/errors.js";
+import { isConnectionAuthorizationFailedError } from "#connections/errors.js";
 import {
   isAuthorizationSignal,
   PendingAuthorizationResultKey,
@@ -42,21 +39,23 @@ export function withWorkflowStepAuthorization(execute: (...args: never[]) => unk
         scope: input.toolName,
         completeAuthorization: completeWorkflowStepAuthorization,
       });
-      const unavailable = (): never => {
-        throw new ConnectionAuthorizationFailedError(input.toolName, {
-          message: `Background workflow tool "${input.toolName}" cannot use ctx.getToken or ctx.requireAuth in this session because its driver predates workflow-task authorization. Start a new session and try again.`,
-          reason: "workflow_task_authorization_unsupported",
-          retryable: false,
-        });
-      };
       const ctx = {
         ...buildBaseToolContext({
           toolName: input.toolName,
           options: { abortSignal: input.abortSignal, toolCallId: input.callId },
         }),
-        getToken: input.authorizationSupported ? auth.getToken : unavailable,
-        requireAuth: input.authorizationSupported ? auth.requireAuth : unavailable,
+        agent: () => unavailableInStep("ctx.agent()", "Call ctx.agent() in the workflow body."),
+        ask: () => unavailableInStep("ctx.ask()", "Call ctx.ask() in the workflow body."),
+        getToken: auth.getToken,
+        requireAuth: auth.requireAuth,
       };
+      Object.defineProperty(ctx, "agents", {
+        get: () =>
+          unavailableInStep(
+            "ctx.agents",
+            "Read ctx.agents in the workflow body and pass the required serializable metadata into the step.",
+          ),
+      });
       let output: unknown;
       try {
         output = await auth.run(() =>
@@ -85,4 +84,11 @@ export function withWorkflowStepAuthorization(execute: (...args: never[]) => unk
   // The SDK reads retry policy from the registered function at execution time.
   Object.defineProperty(wrapped, "maxRetries", { get: () => Reflect.get(execute, "maxRetries") });
   return wrapped;
+}
+
+function unavailableInStep(capability: string, guidance: string): never {
+  throw Object.assign(
+    new Error(`${capability} is unavailable inside a "use step" function. ${guidance}`),
+    { fatal: true },
+  );
 }

@@ -7,7 +7,7 @@ import type { GitHubRepository } from "./config.js";
 import { gitOutput, runGitCommand, withBrokeredGitHubCredential } from "./git.js";
 import { assertFullSha, assertGitRef } from "./identifiers.js";
 
-export const SELF_MODIFICATION_CONFIG_PATH = "agent/subagents/self-modification/config.ts";
+export const SELF_MODIFICATION_CONFIG_PATH = "agent/extensions/self-modification/extension.ts";
 export const WORKSPACE_PATH = "/workspace";
 export const REPOSITORY_PATH = `${WORKSPACE_PATH}/repository`;
 export const BASE_REF = "refs/eve-self-modification/base";

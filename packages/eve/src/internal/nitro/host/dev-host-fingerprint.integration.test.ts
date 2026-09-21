@@ -8,6 +8,9 @@ import { computeDevelopmentHostFingerprint } from "#internal/nitro/host/dev-host
 import type { PreparedDevelopmentApplicationHost } from "#internal/nitro/host/types.js";
 import { defineChannel, GET } from "#public/definitions/channel.js";
 import { defineSchedule } from "#public/definitions/schedule.js";
+import { defineTool } from "#tools/definition.js";
+import { defineWorkflowTool } from "#tools/workflow-definition.js";
+import { attachWorkflowProgramOptions } from "#tools/workflow-program-input.js";
 
 const temporaryDirectories: string[] = [];
 
@@ -25,6 +28,7 @@ interface HostVariant {
   readonly instrumentationSlot?: string;
   readonly instrumentationSource?: string;
   readonly schedule?: { readonly cron: string; readonly markdown: string };
+  readonly tool?: "ordinary" | "workflow" | "workflow-program";
   readonly workflowSourceFingerprint?: string;
   readonly workflowWorld?: "local" | "vercel";
 }
@@ -64,6 +68,40 @@ async function createHost(variant: HostVariant = {}): Promise<PreparedDevelopmen
             }),
           },
         ]),
+    ...(variant.tool === undefined
+      ? []
+      : [
+          {
+            logicalPath: "tools/run.ts",
+            loadNamespace: async () => {
+              if (variant.tool === "ordinary") {
+                return {
+                  default: defineTool({
+                    description: "Run a tool.",
+                    execute: async () => null,
+                    inputSchema: {},
+                  }),
+                };
+              }
+              const execute = Object.assign(async () => null, {
+                workflowId: "workflow//agent/tools/run//execute",
+              });
+              const definition = defineWorkflowTool({
+                description: "Run a workflow.",
+                execute,
+                inputSchema: {},
+              });
+              return {
+                default:
+                  variant.tool === "workflow-program"
+                    ? attachWorkflowProgramOptions(definition, {
+                        maxSubagents: 4,
+                      })
+                    : definition,
+              };
+            },
+          },
+        ]),
   ];
   const { manifest } = await compileFromMemory({
     agentRoot,
@@ -86,10 +124,10 @@ async function createHost(variant: HostVariant = {}): Promise<PreparedDevelopmen
       ...(instrumentationSourcePath === undefined
         ? {}
         : {
-            instrumentationLayout:
-              variant.instrumentationSlot === undefined
-                ? ({ kind: "file" } as const)
-                : ({ kind: "directory", slots: [variant.instrumentationSlot] } as const),
+            instrumentationLayout: {
+              kind: "directory",
+              slots: [variant.instrumentationSlot ?? "provider"],
+            } as const,
             instrumentationSourcePaths: [instrumentationSourcePath],
           }),
       workflowWorldPluginPath: join(appRoot, "workflow-world.mjs"),
@@ -180,6 +218,23 @@ describe("computeDevelopmentHostFingerprint", () => {
 
     expect(withWorkflows).not.toBe(base);
     expect(edited).not.toBe(withWorkflows);
+  });
+
+  it("treats only generated-program tool availability as structural", async () => {
+    const base = await computeDevelopmentHostFingerprint(await createHost());
+    const ordinary = await computeDevelopmentHostFingerprint(
+      await createHost({ tool: "ordinary" }),
+    );
+    const workflow = await computeDevelopmentHostFingerprint(
+      await createHost({ tool: "workflow" }),
+    );
+    const workflowProgram = await computeDevelopmentHostFingerprint(
+      await createHost({ tool: "workflow-program" }),
+    );
+
+    expect(ordinary).toBe(base);
+    expect(workflow).toBe(base);
+    expect(workflowProgram).not.toBe(base);
   });
 
   it("leaves schedule definitions runtime-only", async () => {

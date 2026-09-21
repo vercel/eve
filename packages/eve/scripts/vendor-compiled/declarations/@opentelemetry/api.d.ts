@@ -5,6 +5,8 @@ export interface TraceState {
   unset(key: string): TraceState;
 }
 
+export declare function createTraceState(rawTraceState?: string): TraceState;
+
 export interface SpanContext {
   isRemote?: boolean;
   spanId: string;

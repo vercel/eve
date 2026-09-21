@@ -5,17 +5,16 @@ import type {
   SubagentAuthorizationEventHookPayload,
   SubagentInputRequestHookPayload,
 } from "#channel/types.js";
-import {
-  readWorkflowToolRunAdmission,
-  readWorkflowToolRunOwner,
-  readWorkflowToolRunRef,
-} from "#execution/tools/workflow/ask.js";
+import { readWorkflowToolRunOwner, readWorkflowToolRunRef } from "#execution/tools/workflow/ask.js";
 import { resumeHookStep } from "#execution/tools/workflow/resume-hook-step.js";
 import type { RuntimeSubagentChildResult, RuntimeSubagentResult } from "#shared/action-types.js";
 import type { JsonValue } from "#shared/json.js";
 import type { JsonObject } from "#shared/json.js";
 import { disposeHook } from "#execution/hook-ownership.js";
-import { sessionCommandHookToken } from "#execution/session-command-token.js";
+import {
+  sessionCommandHookToken,
+  sessionInboxHookToken,
+} from "#execution/session-inbox/address.js";
 import type { AgentInput } from "#tools/workflow-definition.js";
 import type { ToolContext } from "#tools/definition.js";
 
@@ -28,7 +27,7 @@ export type InternalAgentInput = {
 
 /**
  * Asks the owning session to spawn an agent for a workflow tool run. Spawning
- * needs owner-held material (auth, capabilities, admission, the agent handle
+ * needs owner-held material (auth, capabilities, the agent handle
  * store) that a workflow tool body never has.
  */
 export interface AgentInvocationRequest {
@@ -50,7 +49,10 @@ export type AgentInvocationEvent =
   | SubagentAuthorizationEventHookPayload
   | SubagentInputRequestHookPayload;
 
-export type AgentInvocationReply = AgentInvocationEvent | RuntimeActionResultHookPayload;
+export type AgentInvocationReply =
+  | AgentInvocationEvent
+  | RuntimeActionResultHookPayload
+  | { readonly kind: "agent-settled"; readonly callId: string };
 
 /** Invokes an agent from a workflow tool. */
 export async function agent(
@@ -72,26 +74,11 @@ export async function agent(
 export async function invokeAgent(
   ctx: ToolContext,
   input: InternalAgentInput,
-  options: { readonly invocationId: string; readonly returnResult: true },
-): Promise<JsonValue | RuntimeSubagentResult>;
-export async function invokeAgent(
-  ctx: ToolContext,
-  input: InternalAgentInput,
-  options?: { readonly invocationId?: string; readonly returnResult?: false },
-): Promise<JsonValue>;
-export async function invokeAgent(
-  ctx: ToolContext,
-  input: InternalAgentInput,
-  options: { readonly invocationId?: string; readonly returnResult?: boolean } = {},
-): Promise<JsonValue | RuntimeSubagentResult> {
+  options: { readonly invocationId?: string } = {},
+): Promise<JsonValue> {
   validateAgentInput(input);
   const run = readWorkflowToolRunRef(ctx);
   const owner = readWorkflowToolRunOwner(ctx);
-  const admission = readWorkflowToolRunAdmission(ctx);
-  if (admission !== undefined) {
-    const admitted = await admission;
-    if (admitted.status === "rejected") throw new Error(admitted.reason);
-  }
   const replies = createHook<AgentInvocationReply>();
   const invocationId = options.invocationId ?? `${ctx.callId}:${replies.token}`;
   try {
@@ -120,20 +107,33 @@ export async function invokeAgent(
               replyTo: replies.token,
               request: { kind: "agent-settled", result },
             });
+            // The enclosing workflow cannot finish before its owner applies settlement.
+            for (;;) {
+              const acknowledgement = await nextAgentReply(iterator, ctx.abortSignal);
+              if (acknowledgement.done)
+                throw new Error(`Agent "${input.target}" closed before settlement.`);
+              if (
+                acknowledgement.value.kind === "agent-settled" &&
+                acknowledgement.value.callId === invocationId
+              )
+                break;
+            }
           }
-          if (options.returnResult === true && run.execution === "blocking") return result;
           if (result.isError === true) throw result.output;
           return result.output;
         }
         continue;
       }
+      if (reply.kind === "agent-settled") continue;
       if (reply.kind === "subagent-input-request") {
         await resumeHookStep(owner.inbox, {
           kind: "request",
           from: run,
+          // Current session inboxes use their physical token. A remote child's
+          // create-once operation hook is already a narrowed reply capability.
           replyTo:
             reply.childSessionInbox?.sessionId === reply.childSessionId
-              ? sessionCommandHookToken(reply.childSessionInbox.sessionId)
+              ? sessionInboxHookToken(sessionCommandHookToken(reply.childSessionInbox.sessionId))
               : reply.childContinuationToken,
           request: {
             kind: "input-batch",
@@ -189,5 +189,13 @@ export function validateAgentInput(input: InternalAgentInput): void {
   }
   if (typeof input.message !== "string" || input.message.trim() === "") {
     throw new TypeError("agent() requires a non-empty `message`.");
+  }
+  if (
+    input.outputSchema !== undefined &&
+    (typeof input.outputSchema !== "object" ||
+      input.outputSchema === null ||
+      Array.isArray(input.outputSchema))
+  ) {
+    throw new TypeError("agent() `outputSchema` must be a JSON Schema object.");
   }
 }

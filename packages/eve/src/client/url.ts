@@ -1,3 +1,5 @@
+import { joinEveRoutePath } from "#shared/eve-route-path.js";
+
 /**
  * Builds a fetchable URL from a caller-provided host and an eve route path.
  *
@@ -23,7 +25,7 @@ export function createClientUrl(
   if (isAbsoluteUrl(host)) {
     const url = new URL(host);
     const basePath = trimTrailingSlash(url.pathname);
-    url.pathname = `${basePath}${normalizedRoute}`;
+    url.pathname = joinEveRoutePath(basePath, normalizedRoute);
     mergeEmbeddedQuery(url.searchParams, embeddedQuery);
     mergeSearchParams(url.searchParams, searchParams);
     url.hash = "";
@@ -34,7 +36,7 @@ export function createClientUrl(
   const basePath = trimTrailingSlash(url.pathname);
   mergeEmbeddedQuery(url.searchParams, embeddedQuery);
   mergeSearchParams(url.searchParams, searchParams);
-  return `${basePath}${normalizedRoute}${formatSearch(url.searchParams)}`;
+  return `${joinEveRoutePath(basePath, normalizedRoute)}${formatSearch(url.searchParams)}`;
 }
 
 function mergeEmbeddedQuery(target: URLSearchParams, embeddedQuery: string): void {

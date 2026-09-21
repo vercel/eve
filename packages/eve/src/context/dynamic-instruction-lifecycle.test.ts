@@ -17,6 +17,7 @@ const {
 
 import { ContextContainer } from "#context/container.js";
 import {
+  StaticModelReferenceKey,
   SessionDynamicInstructionsKey,
   TurnDynamicInstructionsKey,
   SessionIdKey,
@@ -46,6 +47,7 @@ function createResolver(
 
 function createCtx(): ContextContainer {
   const ctx = new ContextContainer();
+  ctx.set(StaticModelReferenceKey, { id: "openai/gpt-5.5" });
   ctx.set(SessionIdKey, "test-session");
   return ctx;
 }

@@ -9,10 +9,11 @@ export default defineEval({
     const first = await t.send(
       '[model: catalog] Reply with exactly the text "catalog one" and nothing else.',
     );
+    const session = first.session;
     first.expectOk();
     first.messageIncludes("catalog one");
 
-    const second = await t.send(
+    const second = await session.send(
       '[model: catalog] Reply with exactly the text "catalog two" and nothing else.',
     );
     second.expectOk();

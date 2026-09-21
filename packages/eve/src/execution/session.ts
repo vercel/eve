@@ -75,7 +75,6 @@ export interface CreateSessionInput {
   readonly limits?: AuthoredSessionLimits;
   readonly outputSchema?: HarnessSession["outputSchema"];
   readonly taskId?: string;
-  readonly workflowMaxSubagents?: number;
 }
 
 /** Creates a fresh {@link HarnessSession} from the current `turnAgent`. */
@@ -105,9 +104,6 @@ export function createSession(input: CreateSessionInput): HarnessSession {
   }
   if (input.taskId !== undefined) {
     session.taskId = input.taskId;
-  }
-  if (input.workflowMaxSubagents !== undefined) {
-    session.workflowMaxSubagents = input.workflowMaxSubagents;
   }
 
   return session;
@@ -204,7 +200,6 @@ export function projectToDurableSession(session: HarnessSession): DurableSession
     sessionId: string;
     state?: HarnessSession["state"];
     taskId?: string;
-    workflowMaxSubagents?: number;
   } = {
     agent:
       session.agent.harnessId === undefined
@@ -241,9 +236,6 @@ export function projectToDurableSession(session: HarnessSession): DurableSession
   }
   if (session.taskId !== undefined) {
     durable.taskId = session.taskId;
-  }
-  if (session.workflowMaxSubagents !== undefined) {
-    durable.workflowMaxSubagents = session.workflowMaxSubagents;
   }
   return durable;
 }
@@ -299,9 +291,6 @@ export function hydrateDurableSession(input: {
   if (durable.taskId !== undefined) {
     session.taskId = durable.taskId;
   }
-  if (durable.workflowMaxSubagents !== undefined) {
-    session.workflowMaxSubagents = durable.workflowMaxSubagents;
-  }
   return session;
 }
 
@@ -314,17 +303,12 @@ function createSessionToolDefinitions(turnAgent: RuntimeTurnAgent): SessionToolD
   }));
 }
 
-function resolveSessionLimits(input: {
-  readonly limits?: AuthoredSessionLimits;
-  readonly rootSessionId?: string;
-}): SessionLimits {
-  const isSubagent = input.rootSessionId !== undefined;
-
+function resolveSessionLimits(input: { readonly limits?: AuthoredSessionLimits }): SessionLimits {
   const maxInputTokensPerSession = resolveSessionTokenLimit({
     authored: input.limits?.maxInputTokensPerSession,
-    // Subagents have no fixed default: uncapped parents delegate uncapped
-    // children, capped parents delegate their remaining quota (inherited).
-    fallback: isSubagent ? undefined : DEFAULT_ROOT_MAX_INPUT_TOKENS_PER_SESSION,
+    // Local children carry an explicit inherited value, including `false` for
+    // an uncapped parent. Remote lineage alone must not remove this default.
+    fallback: DEFAULT_ROOT_MAX_INPUT_TOKENS_PER_SESSION,
   });
   const maxOutputTokensPerSession = resolveSessionTokenLimit({
     authored: input.limits?.maxOutputTokensPerSession,

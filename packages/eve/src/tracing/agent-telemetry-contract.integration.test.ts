@@ -50,11 +50,16 @@ import {
 import { summarizeLocalTrace } from "#cli/commands/trace-detail.js";
 import { buildConversationItems } from "#cli/dev/tui/traces/trace-conversation.js";
 import { contentFilteringProcessor } from "#tracing/content-span-processor.js";
-import {
-  composeSpanExportPolicies,
-  redactSpanInputs,
-  redactSpanOutputs,
-} from "#tracing/span-export-policy.js";
+import { ConversationContextKey } from "#shared/conversation-context.js";
+
+const traceContext = (agentName: string, audience: "public" | "private") => ({
+  agentName,
+  audience,
+  channel: { kind: "http" as const },
+  environment: "production" as const,
+  mode: "conversation" as const,
+  principalType: "anonymous",
+});
 
 function createRuntime() {
   const exporter = new InMemorySpanExporter();
@@ -64,10 +69,9 @@ function createRuntime() {
     idGenerator,
     spanProcessors: [
       new SimpleSpanProcessor(exporter),
-      contentFilteringProcessor(
-        new SimpleSpanProcessor(metadata),
-        composeSpanExportPolicies(redactSpanInputs(), redactSpanOutputs()),
-      ),
+      contentFilteringProcessor(new SimpleSpanProcessor(metadata), {
+        span: () => ({ redact: true, inputs: true, outputs: true }),
+      }),
     ],
   });
   const agent = createAgentOtelInstrumentation({
@@ -101,7 +105,8 @@ function createRuntime() {
 
 function contextFor(audience: "public" | "private") {
   const ctx = new ContextContainer();
-  ctx.set(ChannelInstrumentationKey, { kind: "http", metadata: { audience } });
+  ctx.set(ChannelInstrumentationKey, { kind: "http", metadata: {} });
+  ctx.set(ConversationContextKey, traceContext("parent", audience));
   ctx.set(AuthKey, {
     principalId: "current-user",
     principalType: "service",
@@ -221,7 +226,7 @@ describe("exported agent telemetry contract", () => {
     async (type) => {
       const runtime = createRuntime();
       const ctx = contextFor("public");
-      const hooks = runtime.hooks.forTrace!({ agentName: "parent", audience: "public" });
+      const hooks = runtime.hooks.forTrace!(traceContext("parent", "public"));
       await contextStorage.run(ctx, async () => {
         const store = new ContextAgentTraceStateStore();
         store.setInvocation(actionIdempotencyKey("parent", "turn_0", "nested"), {
@@ -264,7 +269,7 @@ describe("exported agent telemetry contract", () => {
       let parent = contextFor(audience);
       parent.set(ConversationIdKey, "original-conversation");
       const scope = scopeFor("parent", audience);
-      const hooks = runtime.hooks.forTrace!({ agentName: "parent", audience });
+      const hooks = runtime.hooks.forTrace!(traceContext("parent", audience));
       const actionKey = actionIdempotencyKey("parent", "turn_0", "workflow");
       const operation = { modelId: "test", operationId: "ai.streamText", provider: "test" };
       const binding = bindInstrumentationRuntime(runtime, parent, {
@@ -274,6 +279,7 @@ describe("exported agent telemetry contract", () => {
       })!;
       let dispatch: ReturnType<typeof prepareAgentInvocationTrace>;
       await contextStorage.run(parent, async () => {
+        await binding.preparePreamble({ sequence: 0, sessionStarted: false });
         await binding.instrumentChannelDelivery({
           ctx: parent,
           agentName: "parent",
@@ -299,6 +305,7 @@ describe("exported agent telemetry contract", () => {
             ],
           },
         });
+        // The tool loop prepares turn trace state after the delivery is instrumented.
         await binding.preparePreamble({ sequence: 0, sessionStarted: false, turnId: "turn_0" });
         await hooks.publish({
           idempotencyKey: attemptIdempotencyKey(scope),
@@ -344,7 +351,7 @@ describe("exported agent telemetry contract", () => {
           type: "input.resolved",
         });
         dispatch = prepareAgentInvocationTrace({
-          channelMetadata: parent.get(ChannelInstrumentationKey),
+          conversation: parent.get(ConversationContextKey),
           invocation: { callId: "nested", kind: "subagent-call", name: "child" },
           ownerId: "workflow-run",
           startTimeMs: Date.now(),
@@ -352,14 +359,18 @@ describe("exported agent telemetry contract", () => {
           sessionId: "parent",
           turnId: "turn_0",
           sessionState: {
-            "eve.runtime.workflowToolRuns": [
-              {
-                callId: "workflow",
-                hookToken: "hook",
-                runId: "workflow-run",
-                toolName: "coordinate",
-              },
-            ],
+            "eve.workflowTool": {
+              version: 3,
+              runs: [
+                {
+                  callId: "workflow",
+                  toolName: "coordinate",
+                  lifetime: "turn" as const,
+                  origin: { turnId: "turn-1", stepIndex: 0 },
+                  address: { runId: "workflow-run", hookToken: "hook" },
+                },
+              ],
+            },
           },
         });
       });
@@ -381,7 +392,7 @@ describe("exported agent telemetry contract", () => {
         });
       }
       const childScope = scopeFor("child", audience);
-      const childHooks = runtime.hooks.forTrace!({ agentName: "child", audience });
+      const childHooks = runtime.hooks.forTrace!(traceContext("child", audience));
       await contextStorage.run(child, async () => {
         const childBinding = bindInstrumentationRuntime(runtime, child, {
           agentName: "child",
@@ -589,12 +600,7 @@ describe("exported agent telemetry contract", () => {
         expect(span.attributes["operation.name"]).toBe(
           span.attributes["gen_ai.operation.name"] ?? span.name,
         );
-        for (const legacy of [
-          "agent.parent_call.id",
-          "agent.parent_run.id",
-          "agent.root_run.id",
-          "agent.session.id",
-        ]) {
+        for (const legacy of ["agent.root_run.id", "agent.session.id"]) {
           expect(span.attributes).not.toHaveProperty(legacy);
         }
         expect(span.attributes).not.toHaveProperty("vercel.session_id");
@@ -626,6 +632,9 @@ describe("exported agent telemetry contract", () => {
         "agent.channel.name": "web",
       });
       expect(activation.attributes).toMatchObject({
+        "agent.parent_call.id": "nested",
+        "agent.parent_run.id": "parent",
+        "agent.run.id": "child",
         "gen_ai.usage.input_tokens": 10,
         "gen_ai.usage.output_tokens": 5,
         "agent.usage.input_tokens": 10,
@@ -680,7 +689,7 @@ describe("exported agent telemetry contract", () => {
   it("exports new current principals but the same initiator on resumed activations", async () => {
     const runtime = createRuntime();
     const ctx = contextFor("public");
-    const hooks = runtime.hooks.forTrace!({ agentName: "parent", audience: "public" });
+    const hooks = runtime.hooks.forTrace!(traceContext("parent", "public"));
     const binding = bindInstrumentationRuntime(runtime, ctx, {
       agentName: "parent",
       rootSessionId: "parent",
@@ -743,7 +752,7 @@ describe("exported agent telemetry contract", () => {
     "bounds public-channel principal IDs by origin %s and input/output ceiling %s/%s",
     async (originAudience, recordInputs, recordOutputs) => {
       const runtime = createRuntime();
-      const hooks = runtime.hooks.forTrace!({ agentName: "child", audience: "public" });
+      const hooks = runtime.hooks.forTrace!(traceContext("child", "public"));
       const registered = vi
         .spyOn(instrumentation, "getInstrumentationRuntime")
         .mockReturnValue(runtime);
@@ -828,7 +837,7 @@ describe("exported agent telemetry contract", () => {
     async (outcome) => {
       const runtime = createRuntime();
       const ctx = contextFor("private");
-      const hooks = runtime.hooks.forTrace!({ agentName: "parent", audience: "private" });
+      const hooks = runtime.hooks.forTrace!(traceContext("parent", "private"));
       const binding = bindInstrumentationRuntime(runtime, ctx, {
         agentName: "parent",
         rootSessionId: "parent",
@@ -922,7 +931,7 @@ function normalizeTraceForest(
     const deliveryId = root.attributes["agent.channel.delivery.id"];
     lines.push(
       `trace ${alias} outcome=${String(root.attributes["agent.turn.outcome"] ?? "unknown")}${
-        channelKind === undefined
+        deliveryId === undefined
           ? ""
           : ` channel=${String(channelKind)}:${String(channelName)} delivery=${String(deliveryId)}`
       }`,

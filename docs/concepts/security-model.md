@@ -42,7 +42,10 @@ eve sends data where your agent configuration and runtime choices send it:
 - Model inputs and outputs flow to the model or routing path selected in `agent.ts`, such as a Vercel AI Gateway model id or a provider-authored `LanguageModel`.
 - Tool and connection calls flow to the external services, MCP servers, OpenAPI endpoints, and channels you configure.
 - Sandbox commands can reach network destinations allowed by the sandbox network policy.
-- Telemetry and eval data flows to the exporters and providers you configure in `instrumentation.ts` or eval settings.
+- Telemetry flows to destinations configured under `agent/instrumentation/`.
+  eve also records local traces during `eve dev` and exports to Vercel Agent
+  Runs in preview and production by default. Eval data flows to the reporters
+  configured in eval settings.
 
 eve stores durable session and workflow state needed to resume conversations, stream events, replay completed steps, and show run observability. You are responsible for deciding whether the selected channels, model providers, connected services, sandbox egress destinations, telemetry exporters, retention settings, and deletion controls are appropriate for your data and use case.
 

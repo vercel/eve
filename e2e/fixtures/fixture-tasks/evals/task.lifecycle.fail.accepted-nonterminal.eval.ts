@@ -18,17 +18,26 @@ export default defineTaskEval({
     const started = await t.send("TASK-A2-CHILD-FAILURE");
     started.expectOk();
     started.messageIncludes("TASK-A2-CHILD-FAILURE-STARTED");
-    started.event("subagent.completed", {
+    started.event("action.result", {
       count: 1,
       data: {
-        backgroundTask: { status: "working" },
-        callId: CALL_ID,
-        subagentName: "busy-worker",
+        result: {
+          kind: "tool-result",
+          output: { status: "working" },
+          callId: CALL_ID,
+          toolName: "busy-worker",
+        },
       },
     });
     const taskId = requireBackgroundTaskId(started);
 
-    const failed = await waitForTaskStatus(t, t, "TASK-A2-CHILD-FAILURE-VERIFY", taskId, "failed");
+    const failed = await waitForTaskStatus(
+      t,
+      started.session,
+      "TASK-A2-CHILD-FAILURE-VERIFY",
+      taskId,
+      "failed",
+    );
     failed.expectOk();
     failed.messageIncludes("TASK-A2-FAILED");
     const inspected = failed.requireToolCall("task_cancel", { input: { taskIds: [taskId] } });

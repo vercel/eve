@@ -101,7 +101,7 @@ export async function durableSessionReadStep(input: {
 }> {
   "use step";
 
-  const durable = await readDurableSession(input.sessionState);
+  const durable = readDurableSession(input.sessionState);
 
   return {
     historyDepth: durable.history.length,

@@ -1,5 +1,265 @@
 # eve
 
+## 0.63.0
+
+### Minor Changes
+
+- d2c92df: Require durable background tools to use `defineWorkflowTool`. Remove background execution from `defineTool` and dynamic tools, including the `TaskExec` and `postMessage` authoring APIs, and deliver each background cohort's completed, failed, and cancelled outcomes in one automatic report.
+  
+  Background invocations share workflow execution and cancellation cleanup. Agent settlement records usage once before its enclosing workflow returns a tool result. Parent sessions retain task outcomes, and late results cannot overwrite a recorded cancellation; channel task views no longer include executor bindings. Background workflow yields are consumed without publishing progress or retaining a task-progress stream.
+  
+  Align `subagent.completed` for blocking and background agents: emit the actual output only after the parent records success. Background receipts remain `action.result` tool outputs; completion events no longer announce admission or wait for cohort reporting.
+  
+  Use task lifecycle values in subagent eval assertions: replace `status: "pending"` with `"working"` and `"rejected"` with `"failed"`. Explicit cancelled child outcomes now retain `"cancelled"` instead of appearing as failures.
+
+### Patch Changes
+
+- a042a9a: Choose a model, speed, and reasoning through separate steps in the terminal UI, with clear defaults and changes applied together after the final choice. The slash menu now puts model selection and session controls first, and a steady Thinking, Generating, or Running label with a blinking dot replaces the animated Working label during turns.
+- f240baa: Fix local development snapshots for extension subagents mounted from hoisted workspace dependencies.
+
+## 0.62.0
+
+### Minor Changes
+
+- 9d394fa: Package self-modification as an extension-owned subagent and retire the legacy scaffolded self-modification capability. Registry installation uses local-only setup, while deployed-aware setup remains available separately.
+- 8e01190: Replace `t.judge.autoevals.*` with `t.judge(...)`, supporting criteria, typed questions, and batches through evaluation models with a default of `typesafe-ai/jev`. Configure provider evaluation model instances instead of language model instances; autoevals is removed while deterministic similarity and Braintrust reporting remain available.
+- fcb3ba2: Make path-named files under `agent/instrumentation/` the supported instrumentation API. Existing `agent/instrumentation.ts` configurations must be split into lifecycle instrumentation, OpenTelemetry destinations, and shared `otel()` settings; extensions that contribute subagents must be rebuilt for the new contract epoch.
+- 804e670: Remove deprecated instrumentation compatibility shapes. Providers now reject the removed `capture` option in favor of `tracePolicy`, destination export policies return object decisions, and flat `instrumentation.ts` modules are no longer discovered.
+
+### Patch Changes
+
+- 9f1d1cf: Polish `eve init` with inline terminal output, timed installation progress, and a quiet transition into chat without automatic login entries in history. Failed installs show bounded diagnostics and recovery instructions; debug logging retains package-manager output.
+- 38ad163: Keep registry installation error traces visible in the dev TUI after an `/add` failure, alongside the per-item recovery guidance.
+- d0d2b5e: Refine the `eve dev` terminal header with a compact `☰eve` mark, clearer metadata separation, and a persistent command hint. `eve dev` no longer shows the startup `/add` tip.
+- 06e17ae: Wrap long setup questions in the `eve dev` terminal UI instead of clipping them at the terminal edge.
+
+## 0.61.1
+
+### Patch Changes
+
+- 8a21c0c: `agentRouter()` now advertises model-supplied output schemas as permissive objects, avoiding unsupported JSON Schema `propertyNames` warnings on OpenAI models while preserving downstream object validation.
+- cbb2206: Clear stale model setup warnings when the local development server becomes ready, and avoid diagnosing unavailable startup information as missing model credentials.
+- d58065e: Workflow steps now fail immediately with actionable guidance when they access workflow-body-only `ctx.agents`, `ctx.agent()`, or `ctx.ask()` capabilities. Use the new `WorkflowStepToolContext` type for step helpers and pass serializable agent metadata from the workflow body.
+
+## 0.61.0
+
+### Minor Changes
+
+- cbfc425: Root workflow tools now receive the built-in root-copy target at `ctx.agents.agent`, with its authored description or an empty string, and `agent` is reserved from use as a declared subagent name. Tool definitions can set `availableInSubagents: false`; `agentRouter()` sets it automatically, routes only to entries with non-empty descriptions, and can replace the model-facing tool at `agent/tools/agent.ts` without being inherited by the root copy.
+
+### Patch Changes
+
+- 7e95b64: Keep Web Chat attached for background task results without rendering runtime-authored task input as a user message. Task wake-ups now retain explicit provenance in the durable session stream while the default frontend reducer omits them from participant messages.
+- 7259b96: Set `minimumReleaseAge: 0` in newly generated pnpm workspace files so dependencies installed by `eve init` also pass pnpm's checks when starting the dev server or installing again.
+- 260a359: Reconcile frontend optimistic messages with their server delivery identities instead of stream order. Concurrent, coalesced, identical, and structured message submissions now resolve the correct placeholders, and separately delivered messages within one turn remain separate chat bubbles.
+- 5f17320: Reduce development startup and production build time by removing duplicate bundler work, skipping unnecessary parsing, and overlapping independent preparation. Development terminal inspection now has a deadline, and `Client.info()` accepts an abort signal so slow inspection requests do not hold up startup.
+- 6b99f12: Upgrade eve's Workflow runtime dependencies to the latest beta releases, including the Postgres world fix for steering pending generations.
+
+## 0.60.1
+
+### Patch Changes
+
+- 76d4dd8: Workflow tools can read effective declared-subagent descriptions from `ctx.agents`, including subagents hidden from the parent model. Export `agentRouter()` from `eve/tools/agent-router` to route each task across that complete map with JEV and invoke the selected agent.
+
+## 0.60.0
+
+### Minor Changes
+
+- da82a95: Make managed destination `exportPolicy` accept one policy or an ordered policy array, with explicit span `emit` and redaction decisions. Attribute policies now return `emit` or `replace` decisions; and the deprecated `redactSpanInputs()`, `redactSpanOutputs()`, destination `recordInputs`, destination `recordOutputs`, `content`, and `composeSpanExportPolicies()` APIs are removed.
+  
+  Use these replacements:
+  
+  | Before                            | After                                                                           |
+  | --------------------------------- | ------------------------------------------------------------------------------- |
+  | `span: () => false`               | `span: () => ({ emit: false })`                                                 |
+  | `redactSpanInputs(when)`          | `span: (span) => when(span) ? { redact: true, inputs: true } : { emit: true }`  |
+  | `redactSpanOutputs(when)`         | `span: (span) => when(span) ? { redact: true, outputs: true } : { emit: true }` |
+  | `recordInputs: false`             | `exportPolicy: { span: () => ({ redact: true, inputs: true }) }`                |
+  | `recordOutputs: false`            | `exportPolicy: { span: () => ({ redact: true, outputs: true }) }`               |
+  | `{ action: "keep" }`              | `{ emit: true }`                                                                |
+  | `{ action: "drop" }`              | `{ emit: false }`                                                               |
+  | `{ action: "replace", value }`    | `{ replace: true, value }`                                                      |
+  | `composeSpanExportPolicies(a, b)` | `exportPolicy: [a, b]`                                                          |
+  
+  Passing the removed destination `recordInputs` or `recordOutputs` options now
+  throws during declaration instead of silently exporting content.
+  
+  Returning a boolean from `span` still works but is deprecated; return
+  `{ emit: boolean }`.
+- f3cd55a: Move automatic model selection to `auto` from `eve/models` and standalone evaluation to `evaluate` from `eve/ai`. The former `autoModel` and `eve/experimental/evaluate` imports are no longer available.
+
+### Patch Changes
+
+- ed88ff4: Preserve canonical OpenTelemetry session metadata when channel delivery instrumentation runs before the session lifecycle event.
+- 190a49a: Run dependency installation during `eve init` non-interactively where supported and bypass inherited minimum-release-age policies for the initial scaffold install.
+- 649180b: Preserve schema composition when compiling tools that reuse another tool's Zod input or output schema. Built agents no longer fail route initialization with `Cannot read properties of undefined (reading 'def')` for these nested schemas.
+- a87ad46: Allow React `useEveAgent` to observe `prewarm` across renders so interfaces can prepare a session when the user starts composing. Reset uses the latest rendered value, while disabling prewarming does not discard a session already starting or created.
+
+## 0.59.1
+
+### Patch Changes
+
+- 7ef42fd: Add `auto({ model?, instructions?, criteria? })` for evaluation-model tool approvals, defaulting to TypeSafe Jev and failing closed to user approval. Approval policies now receive the active turn's cancellation signal.
+- 1e872e3: Set `tool: false` on an agent or export a same-named `disableTool()` to hide its derived agent tool. Hidden subagents remain callable from authored workflow tools through `ctx.agent()`.
+
+## 0.59.0
+
+### Minor Changes
+
+- 6ddfa9b: Eval session ownership is now explicit: `t.session()` creates an empty session, and every `t.send()` creates a fresh session and returns a turn with `.session` for follow-ups. Replace `t.newSession()` with `await t.session()`, move conversation state and operations from `t` to the session handle, and read replies from `turn.message`.
+- 7973fa2: Preserve dynamic tool validation through durable schema factories that replay the original captured values, including Zod refinements and transformations. Rebuild extensions with the current eve compiler; provider packages must wrap live dynamic schemas with `defineDurableSchema`, and resolver-local schema objects must be constructed inline or moved to module scope.
+- 9bff372: Use stable `@vercel/sandbox` v3.3 for Drive support instead of the obsolete beta alias. Vercel sandbox mount types now follow the stable SDK, including `snapshot` mounts.
+
+### Patch Changes
+
+- e301818: Account for effective instructions and tool schemas before each model call so dynamic capability growth triggers context compaction. Preserve provider-reported usage without counting unchanged schemas twice, and reserve room for the final request while compacting history.
+- 3121ca1: Show the model selected by a dynamic resolver beside `dynamic model` in the TUI footer. Update it as each model step starts and clear the previous selection when starting a new turn or resetting the session.
+- 6ddfa9b: Eval judges now retain the latest prompt across approval responses and stream reads, and include the text sent with file attachments.
+- 5b45f9b: Allow idle sessions with resumable subagents to move to a newer deployment. Parked and available child handles now remain usable after the parent session handoff instead of pinning the parent to its previous deployment.
+- 7e48f0e: Keep the dev TUI’s activity indicator animating while a background subagent is still running after its parent turn completes.
+- db5cee3: Add standalone `evaluate` to `eve/experimental/evaluate` for typed evaluations in tools and application code. It shares model authentication with `autoModel`, including the Gateway connection selected during `eve dev`.
+- 6ddfa9b: Fix frontend session resume so unused prewarmed sessions accept their first message and steering messages during resumed turns settle without leaving the composer busy.
+- 6ddfa9b: Create conversation sessions before their first turn through the eve HTTP channel, TypeScript client, eval drivers, and frontend bindings so applications can move durable session startup off the first-message path.
+  
+  Frontend bindings support opt-in `prewarm: true`, keep consuming the session stream across turns, and retry a starting inbox without waiting for stream events. Session initialization runs with the first message's identity and context.
+
+## 0.58.1
+
+### Patch Changes
+
+- 40f0c45: Fix `autoModel` to use `typesafe-ai/jev` and the `/login` Gateway connection during `eve dev`, while preserving custom AI SDK default providers.
+  Show `dynamic model` in the TUI footer instead of a missing-connection warning for dynamic selectors.
+
+## 0.58.0
+
+### Minor Changes
+
+- 9f301b6: Named workspace agent routes now use `/eve/<name>/v1/*` across `eve/next`, `eve/vercel`, and agent-only workspace builds. Update existing named-agent URLs to the new route; root single-agent routes remain at `/eve/v1/*`, and `eve/vercel` can now compose them.
+- bfc899d: Replace the Vercel-specific deployed self-modification credential configuration with an application-supplied GitHub credential provider. Generated Vercel setup now writes an inline `@vercel/connect` adapter, while the self-hosted PAT configuration remains available through `{ pat: true }`.
+
+### Patch Changes
+
+- 29af29d: Add experimental `autoModel` routing at `eve/experimental/evaluate`. It defaults to TypeSafe Jev through AI Gateway, accepts any AI SDK evaluation model, and chooses a Gateway model ID or provider model instance from the incoming task with per-option reasoning and per-turn retention.
+- 910bb45: Fix `turn.started` dynamic model, tool, skill, and subagent resolvers receiving an empty message snapshot. `ctx.messages` now includes visible conversation history and incoming input, including deferred session-limit turns and authorization resumes, with history projection preserved after memory recall.
+- ab5b8e9: Install integrations selected through the development TUI's `/add` command into the active workspace agent while keeping shared environment, Vercel, dependency, and deployment effects at the workspace root.
+- 987c3a0: Add development commands to generated hostless workspace services so `vercel dev --local` can start every agent. Default `defineWorkspaceAgent` transports route through the local Vercel service graph without deployment credentials.
+- 0fa8916: Add guided Microsoft Teams setup through `eve add channel/teams`. The flow delegates app creation, installation, and Activity routing to the Vercel Connect CLI, then scaffolds the Connect-backed channel.
+- fd9a007: Reorganize the `eve dev` command implementation without changing its behavior.
+- 16e11f9: Prevent multiline setup prompts, including the Vercel project-link question shown by `/add`, from being duplicated into TUI scrollback during repaints.
+
+## 0.57.0
+
+### Minor Changes
+
+- 61d4097: Run every conversational turn directly inside the session's owning workflow instead of dispatching a child turn run per message. An idle session hands its settled state to the exact deployment that accepted a new delivery, whether the delivery arrives through the session ID or any channel continuation address, keeping the original session ID and event stream and renewing the session's configured timeout. Deliveries that land while a handoff is in progress wait for the successor instead of starting a replacement session.
+  
+  Steering a running turn applies at the next committed step boundary without cancelling in-flight model or tool work and preserves the turn's identity and usage; input that arrives after the model has answered starts the next turn. `continuation.rekey()` is replaced by `continuation.alias()`: every claimed address stays active, and the most recently selected alias is exposed as `continuation.token`.
+  
+  Sessions from the former driver/turn execution model are imported on their next turn, preserving identity, history, and the original stream while interrupting pending work; drivers started before eve 0.45 are reported inactive and their channel starts a fresh session. Retain the original deployment until imported sessions end, and retire sessions before rolling back across this boundary.
+
+### Patch Changes
+
+- 32aca9b: Restored `agent` tools now dispatch through the shared subagent workflow when framework defaults are disabled.
+- 7b17b27: Simplify the TUI footer by removing the local port and separating the model and connection with dots. Vercel account connections show the resolved team slug instead of a team ID.
+- f21e63f: Declare `.vercel/output` for generated eve services so Vercel consumes the Build Output API directory that their build commands produce instead of looking for the framework preset's `.output` default.
+- 7b17b27: Model login shares resolved credentials with the running agent, avoids rebuilds for account, team, and key changes, and refreshes agent information without delaying chat. Clear status messages show when to finish browser sign-in and what eve is waiting for, without flashing indicators for quick steps.
+- e1ae8eb: Flush the final activity snapshot when an activity stream closes during the render debounce window.
+- f21e63f: Make `withEve` discover a containing workspace when Vercel evaluates `vercel.ts` from its temporary `.vercel` directory.
+- fe6451c: Keep automatic prompt caching enabled when local model authentication resolves an AI Gateway model to a provider object. Anthropic models retain cache reuse after signing in through `eve dev`.
+- 032860c: Bound negotiated session stream responses with renewable leases so abandoned serverless invocations release their durable stream readers. The eve client renews these responses from its cursor without exposing transport heartbeats or lease records as session events; tail-relative reads and streams with reconnection disabled remain unleased.
+- 7b17b27: Fix a local workflow health-check failure after model or source changes. Capability probes no longer look up a run before it exists, avoiding a spurious queue error and startup delay.
+- 7b17b27: Allow switching Vercel teams through `/login` by always showing the team picker when multiple teams are available. The current team is highlighted rather than silently selected; automatic startup still reuses the saved connection.
+- 7b17b27: Match the Vercel label's color to the surrounding model and team text in the TUI footer.
+- ba0b866: When a self-modified tool or capability later fails or behaves incorrectly, the agent now offers to delegate a repair. It waits for your confirmation before sending the observed and expected behavior back to self-modification.
+- 7b17b27: Use the same full-size arrow for empty and populated TUI prompts, with the empty arrow in the terminal's default foreground color for better visibility.
+- 7b17b27: Open the TUI directly after init, connect models through `/login` without requiring a Vercel project, and store local credentials securely. Add direct OpenAI and Anthropic model helpers, apply model selections immediately, and simplify menus and `/add` to get to chat sooner. Vercel CLI installation and login now run during deployment instead of separate `/vc:install` and `/vc:login` commands.
+- 8bb62e2: Recognize AI Gateway credit-balance and project-budget refusals in semantic error summaries.
+- 7b17b27: Restore guided Trusted Sources setup when Deployment Protection blocks `eve dev --url`. eve reuses the existing Vercel CLI session, asks before changing project access, and verifies the connection before returning to chat.
+- 7b17b27: Use the base release version for default sandbox images when running commit or git-ref tarballs. Build metadata such as `+git.<sha>` no longer produces invalid image tags for Docker, microsandbox, or Vercel Sandbox.
+- 7b17b27: Search `/add` by capabilities such as iMessage or SMS, as well as item names and addresses. The picker now searches catalog titles and descriptions without adding extra text to menu rows.
+- a08e4bb: Prompt for and resolve the target Vercel project before configuring production self-modification, and scope GitHub connector creation and attachment to that project's owner.
+- 7b17b27: Keep the composer available while startup connects your model and prepares chat, with animated progress and prompts only when input is needed. Preserve drafts and queued messages through setup, and announce readiness only after the runtime refresh succeeds.
+- 61d4097: Batch closely spaced stream events on Vercel within a 10 ms window to reduce network writes. Explicit Workflow stream-flush overrides remain supported.
+- 53fad6c: Emits canonical GenAI cache-write tokens, reports the provider-confirmed response model, and adds the executing agent name to tool spans.
+- 7b17b27: Replace rotating TUI prompt suggestions with a stable “Send a message…” placeholder that does not assume agent capabilities.
+- fe6451c: Apply steering in the core runtime before a pending model request produces an answer, continuing the same turn with the correction across clients and channels. Preserve executing tools and their results, prevent duplicate in-process model execution on background wakeups, and keep boundary steering after assistant output begins.
+- 7b17b27: Pressing Enter during a TUI response now steers the active agent immediately instead of queuing the message until the turn finishes. Startup messages and sessions without steering support continue to queue.
+- 7b17b27: Distinguish steered TUI messages with a yellow left gutter instead of an extra arrow row. Queued messages also render without an arrow row.
+- 1e6437b: Announce when dynamic skills are withdrawn completely so agents do not retain stale skill lists.
+
+## 0.56.0
+
+### Minor Changes
+
+- 8bc931f: Add the `workflow` factory from `eve/tools/workflow` for running model-supplied JavaScript through durable `ctx.agent` calls. Remove the experimental uppercase `Workflow` tool and `experimental_workflow`; migrate its tool file to the new lowercase factory.
+- 6ce61cd: Remove aggregate registry packages and their component-selection flow. Install Linear integrations separately with `eve add channel/linear` and `eve add connection/linear`.
+
+### Patch Changes
+
+- 57d6be5: Add queryable metadata to activation spans, including run type, title when input capture permits, provenance, audience, schedule, and directional trace-content policy.
+- a63fb18: Keep background subagents bound to the authentication context of the turn that created their task, even when another caller starts a later turn first.
+- 51998ab: Automatically ignore the self-modification integration's known optional compression packages instead of prompting for its recommended pnpm build policy.
+- 56cde32: Include conversations classified as private in local `eve dev` traces, including sessions authenticated with the developer's Vercel OIDC token.
+- 7ea3b7a: Classify anonymous eve channel sessions as `unknown` by default, so their content is not recorded in preview or production traces unless you mark the audience public explicitly. Also add `credentialOwner` for raw getToken-only auth and `caller` for audience callbacks while preserving existing `principalType` APIs, and fix token cache keys so user identifiers containing separators or percent sequences cannot collide.
+- 23e2e7c: Allow submitting the initial TUI message while eve is still building the agent. The message is queued and sent automatically as soon as the agent is ready.
+- bca1b4a: Self-modification registry setup now asks whether to enable deployed draft pull requests or keep source editing local before collecting deployment configuration.
+- a7f2387: Improve development TUI Markdown with clearer headings, block spacing, clickable links, responsive bordered tables, and code panels. Set `EVE_TUI_RENDER_MARKDOWN=0` to show assistant and subagent responses without Markdown parsing or styling.
+
+## 0.55.0
+
+### Minor Changes
+
+- 0e0f3cc: - Adds `audience(input)` to `defineChannel` and a durable conversation context for trace policies.
+  - `eveChannel` now defaults anonymous callers to public and authenticated callers to private. Trace content is public-or-development by default.
+  - `metadata().audience` is deprecated. Channel epoch 19 extensions keep working through a warned fallback; move classification to `audience(input)`.
+
+### Patch Changes
+
+- c500167: Pass `defaultDeliver()` to custom Slack input handlers so they can delegate selected requests to eve's standard thread or private DM delivery.
+- 520f498: Keep local subagent workflow visibility metadata aligned with the inherited trace decision so Agent Runs does not hide content that was exported for the child.
+- d63d6b7: Attribute local and remote background agent tool activity to its task, including when continuing or steering an existing agent. Each task keeps one progress item, and new work no longer reports against the previous task.
+- bf1175d: Ignore generated module and declaration source maps when discovering skills, so they are not reported as unrecognized skill files.
+- 15c7a2e: Allow `eve init` to add an agent to an existing package without requiring a literal `.` target. You can now initialize the current package or pass the path to an existing package directly.
+- 7a63a68: Keep completed foreground turns in native terminal scrollback while a background subagent continues streaming, rather than hiding them behind the live viewport.
+- bef74fe: Add `protocolVersionDiscovery` to MCP client connections. Set it to `false` to use the initialization handshake for servers that reject modern discovery, while keeping discovery enabled by default.
+- dafa558: Scheduled runs that start background work now stay open and silent until the result is available, then deliver the final response once.
+- 7ad2740: Allow the self-modification agent arguments to set the reasoning effort used by its subagent.
+- 0f79075: Make `withEve()` discover project-level `agents/` workspace members, mounting each named agent through a Next.js app without repeating the agent map in `next.config.ts`. Workspace peers declared with `defineWorkspaceAgent()` route through the named Next.js mount automatically.
+- 09425a0: Move the self-modification registry item to `eve/self-modification`, remove its experimental label and separate production address, and run its production setup flow when added directly.
+- 638aed5: Background task activity now uses a tool's per-call label when one is provided, while retaining the tool or subagent name for execution identity.
+
+## 0.54.5
+
+### Patch Changes
+
+- c112e13: Self-modifying agents now relay the exact `eve add` command required to finish an interactive registry installation instead of substituting a registry configuration command.
+- 4652b5d: Slack channels can route each input request, including tool approvals and `ctx.ask()` questions, to the shared thread or the triggering user's direct messages with the `approvalChannel` callback. Direct-message requests include a preview of the Slack message that triggered the turn, while the original thread names the reviewer without exposing the request.
+- 7ba0c77: Preserve the text of replies to Telegram approval prompts so typed approval responses resume the pending tool.
+- 956205d: Teach root agents with self-modification to treat named product installation questions as requests to add capabilities, so they delegate registry discovery instead of denying device access or asking what kind of installation the user means.
+- eef5381: Teach self-modification to implement reusable, model-callable actions as authored eve tools instead of standalone scripts, including when the request describes a capability without calling it a tool.
+
+## 0.54.4
+
+### Patch Changes
+
+- da8f4fd: Use an installed Codex CLI's app-server for ChatGPT subscription credentials, while retaining eve's direct sign-in and owned credential store as a fallback only when the `codex` binary is not found. Codex login output remains inside the model setup panel instead of writing directly over the TUI.
+- 3576e0a: Classify known `eve init` target and workspace-input failures into bounded telemetry categories. Telemetry continues to exclude target paths, directory contents, and error messages.
+- 7829116: Add `withEve` from `eve/vercel` for composing native workspace agents with authored services in `vercel.ts`. Vercel resolves the generated agent services and transport routes before independently building each service.
+- 2d0bad9: Expose the effective model ID to model, subagent, tool, skill, and instruction resolvers through `ctx.model?.id`.
+- 7fa514b: Add a self-modification option to the interactive `eve init` flow. Selecting it scaffolds the self-modification subagent and continues to `eve dev` without offering an external coding-agent handoff.
+- a34ecf0: Preserve remote subagent caller spans across platform HTTP ingress so schema v4 `agent.dispatch` links target the dispatching `agent.action` rather than the request span. Remote dispatch now records the prior eve parent in W3C `tracestate` while retaining standard `traceparent` transport correlation.
+- 871332a: Keep Vercel Agent Runs spans indexed under the root session while recording each activation's run ID and immediate parent lineage separately. Remote-created sessions retain that root when the receiver trusts the authenticated forwarder.
+- 4567151: Update workflow SDK dependencies to their latest beta releases.
+
+## 0.54.3
+
+### Patch Changes
+
+- 6cb22a4: Store ChatGPT refresh credentials in the OS credential store using vendored just-secrets, with access tokens kept in memory. Existing users must sign in once through eve; a successful save removes the old plaintext session file. ChatGPT sign-in now remains inside the model setup panel while browser authentication is in progress.
+- c5bb66f: fix(eve): align internal AI SDK step lifecycle hooks with the current `onStepStart` and `onStepEnd` callback names
+- fb6750f: Resume sessions whose history predates user-message provenance instead of failing with a missing-kind error. Existing unclassified messages retain their content and are marked `legacy.unknown`, without treating unknown framework input as a new human request after compaction.
+- eaf8895: Add `defineWorkspaceAgent()` for delegating to a workspace peer by name. It selects Vercel routing and OIDC automatically on Vercel, accepts explicit transport overrides elsewhere, and uses the peer agent's description by default.
+
 ## 0.54.2
 
 ### Patch Changes

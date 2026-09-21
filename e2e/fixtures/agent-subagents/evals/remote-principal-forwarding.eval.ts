@@ -38,7 +38,7 @@ export default defineEval({
   async test(t) {
     // Alice creates the child and reads her workspace label.
     const aliceTurn = await t.send(CREATE_CHILD_MESSAGE);
-    const aliceParent = await waitForRemoteChild(t, t, aliceTurn);
+    const aliceParent = await waitForRemoteChild(t, aliceTurn.session, aliceTurn);
     const childSessionId = aliceParent.childSessionId;
     const aliceChild = await t.target.watchTurn(childSessionId).result();
     await expectWorkspaceReads(t, aliceChild, ALICE_WORKSPACE_LABEL);
@@ -87,7 +87,9 @@ export default defineEval({
       },
     });
 
-    t.calledSubagent("remote-loopback", { count: 3 }).soft().label("no repeated delegation");
+    t.event("subagent.called", { data: { name: "remote-loopback" }, count: 3 })
+      .soft()
+      .label("no repeated delegation");
     t.succeeded();
   },
 });

@@ -107,9 +107,6 @@ export function createEveDevDispatchSchedulePath(scheduleId: string): string {
  */
 export const EVE_CONNECTION_CALLBACK_ROUTE_PATTERN = `${EVE_ROUTE_PREFIX}/connections/:name/callback/:attemptId/:token`;
 
-/** Callback shape minted by deployments before authorization attempt IDs. */
-export const EVE_LEGACY_CONNECTION_CALLBACK_ROUTE_PATTERN = `${EVE_ROUTE_PREFIX}/connections/:name/callback/:token`;
-
 /**
  * Stable framework-owned route pattern for terminal session callbacks.
  *

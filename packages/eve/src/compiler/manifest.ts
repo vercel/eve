@@ -56,7 +56,7 @@ export const ROOT_COMPILED_AGENT_NODE_ID = "__root__";
 /**
  * Current compiled manifest schema version.
  */
-export const COMPILED_AGENT_MANIFEST_VERSION = 49;
+export const COMPILED_AGENT_MANIFEST_VERSION = 51;
 
 /**
  * Compiled channel entry preserved in the compiled manifest.
@@ -249,14 +249,10 @@ export type CompiledToolDefinition = InternalToolDefinition &
     readonly hasExecute: boolean;
     readonly hasModelOutputProjection: boolean;
     readonly requiresApproval: boolean;
+    readonly workflowProgram?: {
+      readonly maxSubagents: number;
+    };
   };
-
-/**
- * Serializable configuration for the experimental framework `Workflow` tool.
- */
-export interface CompiledWorkflowToolDefinition extends ModuleSourceRef {
-  readonly maxSubagents?: number;
-}
 
 /**
  * Compiled dynamic tool resolver entry. The resolver function lives in the
@@ -607,16 +603,6 @@ const compiledAgentLimitsDefinitionSchema = z
   })
   .strict();
 
-const compiledWorkflowToolDefinitionSchema: z.ZodType<CompiledWorkflowToolDefinition> = z
-  .object({
-    exportName: z.string().optional(),
-    logicalPath: z.string(),
-    maxSubagents: z.number().int().positive().optional(),
-    sourceId: z.string(),
-    sourceKind: z.literal("module"),
-  })
-  .strict();
-
 const compiledAgentConfigBaseFields = {
   build: compiledAgentBuildDefinitionSchema.optional(),
   compaction: compiledAgentCompactionDefinitionSchema.optional(),
@@ -624,7 +610,6 @@ const compiledAgentConfigBaseFields = {
   description: z.string().optional(),
   experimental: z
     .object({
-      instrumentationProviders: z.boolean().optional(),
       workflow: compiledAgentWorkflowDefinitionSchema.optional(),
     })
     .strict()
@@ -635,6 +620,7 @@ const compiledAgentConfigBaseFields = {
     .enum(["provider-default", "none", "minimal", "low", "medium", "high", "xhigh"])
     .optional(),
   source: moduleSourceRefSchema,
+  tool: z.boolean().optional(),
   limits: compiledAgentLimitsDefinitionSchema.optional(),
 };
 
@@ -892,6 +878,7 @@ const compiledToolBehaviorSchema: z.ZodType<CompiledToolBehavior> = z
 
 const compiledToolDefinitionSchema = z
   .object({
+    availableInSubagents: z.boolean().optional(),
     behavior: compiledToolBehaviorSchema.optional(),
     description: z.string(),
     execution: z.literal("background").optional(),
@@ -905,6 +892,12 @@ const compiledToolDefinitionSchema = z
     requiresApproval: z.boolean(),
     sourceId: z.string(),
     sourceKind: z.literal("module"),
+    workflowProgram: z
+      .object({
+        maxSubagents: z.number().int().positive(),
+      })
+      .strict()
+      .optional(),
   })
   .strict();
 
@@ -992,7 +985,6 @@ const compiledAgentResourceFields = {
   dynamicConnections: z.array(compiledDynamicConnectionDefinitionSchema).default([]),
   diagnosticsSummary: discoverDiagnosticsSummarySchema,
   sourceComposition: agentSourceCompositionSchema,
-  workflowTool: compiledWorkflowToolDefinitionSchema.optional(),
   dynamicInstructions: z.array(compiledDynamicInstructionsDefinitionSchema).default([]),
   dynamicSkills: z.array(compiledDynamicSkillDefinitionSchema).default([]),
   dynamicTools: z.array(compiledDynamicToolDefinitionSchema).default([]),
@@ -1005,7 +997,6 @@ const compiledAgentResourceFields = {
   remoteAgents: z.array(compiledRemoteAgentNodeSchema),
   skills: z.array(compiledSkillSourceSchema).readonly(),
   instructions: z.array(compiledInstructionsSchema).readonly().default([]),
-  instrumentation: moduleSourceRefSchema.optional(),
   tools: z.array(compiledToolDefinitionSchema),
   workspaceResourceRoot: compiledWorkspaceResourceRootSchema,
 };
@@ -1101,7 +1092,6 @@ export const compiledAgentManifestSchema = z
     dynamicConnections: z.array(compiledDynamicConnectionDefinitionSchema).default([]),
     diagnosticsSummary: discoverDiagnosticsSummarySchema,
     sourceComposition: agentSourceCompositionSchema,
-    workflowTool: compiledWorkflowToolDefinitionSchema.optional(),
     dynamicInstructions: z.array(compiledDynamicInstructionsDefinitionSchema).default([]),
     dynamicSkills: z.array(compiledDynamicSkillDefinitionSchema).default([]),
     dynamicTools: z.array(compiledDynamicToolDefinitionSchema).default([]),
@@ -1115,7 +1105,6 @@ export const compiledAgentManifestSchema = z
     skills: z.array(compiledSkillSourceSchema).readonly(),
     subagents: z.array(compiledSubagentNodeSchema),
     instructions: z.array(compiledInstructionsSchema).readonly().default([]),
-    instrumentation: moduleSourceRefSchema.optional(),
     tools: z.array(compiledToolDefinitionSchema),
     version: z.literal(COMPILED_AGENT_MANIFEST_VERSION),
     workspaceResourceRoot: compiledWorkspaceResourceRootSchema,
@@ -1131,7 +1120,6 @@ export interface CreateCompiledAgentResourcesInput {
   readonly dynamicConnections?: readonly CompiledDynamicConnectionDefinition[];
   readonly diagnosticsSummary?: DiscoverDiagnosticsSummary;
   readonly sourceComposition: AgentSourceComposition;
-  readonly workflowTool?: CompiledWorkflowToolDefinition;
   readonly dynamicInstructions?: readonly CompiledDynamicInstructionsDefinition[];
   readonly dynamicSkills?: readonly CompiledDynamicSkillDefinition[];
   readonly dynamicTools?: readonly CompiledDynamicToolDefinition[];
@@ -1144,7 +1132,6 @@ export interface CreateCompiledAgentResourcesInput {
   readonly schedules?: readonly CompiledScheduleDefinition[];
   readonly skills?: readonly CompiledSkillDefinition[];
   readonly instructions?: readonly CompiledInstructionsDefinition[];
-  readonly instrumentation?: ModuleSourceRef;
   readonly tools?: readonly CompiledToolDefinition[];
   readonly workspaceResourceRoot?: CompiledWorkspaceResourceRoot;
 }
@@ -1171,7 +1158,6 @@ export function createCompiledAgentResources(
     sourceComposition: {
       entries: [...input.sourceComposition.entries],
     },
-    workflowTool: input.workflowTool === undefined ? undefined : { ...input.workflowTool },
     dynamicInstructions: [...(input.dynamicInstructions ?? [])],
     dynamicSkills: [...(input.dynamicSkills ?? [])],
     dynamicTools: [...(input.dynamicTools ?? [])],
@@ -1179,7 +1165,6 @@ export function createCompiledAgentResources(
     hooks: [...(input.hooks ?? [])],
     memories: [...(input.memories ?? [])],
     instructions: [...(input.instructions ?? [])],
-    instrumentation: input.instrumentation === undefined ? undefined : { ...input.instrumentation },
     remoteAgents: [...(input.remoteAgents ?? [])],
     sandbox: input.sandbox,
     sandboxWorkspaces: [...(input.sandboxWorkspaces ?? [])],
@@ -1234,7 +1219,6 @@ function cloneCompiledAgentDefinition(config: CompiledAgentDefinition): Compiled
       config.experimental === undefined
         ? undefined
         : {
-            instrumentationProviders: config.experimental.instrumentationProviders,
             workflow:
               config.experimental.workflow === undefined
                 ? undefined
@@ -1257,6 +1241,7 @@ function cloneCompiledAgentDefinition(config: CompiledAgentDefinition): Compiled
             sessionTimeoutMs: config.limits.sessionTimeoutMs,
           },
     source: { ...config.source },
+    tool: config.tool,
   };
 
   if (config.dynamicModel !== undefined) {
@@ -1330,7 +1315,6 @@ export function createCompiledAgentManifest(input: {
   readonly dynamicConnections?: readonly CompiledDynamicConnectionDefinition[];
   readonly diagnosticsSummary?: DiscoverDiagnosticsSummary;
   readonly sourceComposition: AgentSourceComposition;
-  readonly workflowTool?: CompiledWorkflowToolDefinition;
   readonly dynamicInstructions?: readonly CompiledDynamicInstructionsDefinition[];
   readonly dynamicSkills?: readonly CompiledDynamicSkillDefinition[];
   readonly dynamicTools?: readonly CompiledDynamicToolDefinition[];
@@ -1342,7 +1326,6 @@ export function createCompiledAgentManifest(input: {
   readonly skills?: readonly CompiledSkillDefinition[];
   readonly subagents?: readonly CompiledSubagentNode[];
   readonly instructions?: readonly CompiledInstructionsDefinition[];
-  readonly instrumentation?: ModuleSourceRef;
   readonly tools?: readonly CompiledToolDefinition[];
   readonly extensionMounts?: readonly CompiledExtensionMount[];
   readonly workspaceResourceRoot?: CompiledWorkspaceResourceRoot;

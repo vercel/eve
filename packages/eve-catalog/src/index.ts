@@ -277,6 +277,13 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     surfaces: { scaffoldable: false, registry: true, gallery: true },
   },
   {
+    slug: "chat-sdk-gmail",
+    name: "Gmail",
+    kind: "channel",
+    tagline: "Turn labelled Gmail threads into agent conversations via the Chat SDK.",
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
+  },
+  {
     slug: "agent-browser",
     name: "agent-browser",
     kind: "extension",

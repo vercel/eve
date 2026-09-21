@@ -12,11 +12,14 @@ export default defineEval({
     const parked = await t.send(
       'Call the auth-probe tool exactly once with marker "nonblocking". Include its result.',
     );
+    const session = parked.session;
     parked.event("authorization.required", { count: 1 });
     parked.notEvent("authorization.completed");
     parked.event("session.waiting", { count: 1 });
 
-    const message = await t.send("Do not call any tools. Reply with exactly AUTH-OPEN-MESSAGE-OK.");
+    const message = await session.send(
+      "Do not call any tools. Reply with exactly AUTH-OPEN-MESSAGE-OK.",
+    );
     message.expectOk();
     if (message.sessionId !== parked.sessionId) {
       throw new Error("Message while authorization was open changed session identity.");

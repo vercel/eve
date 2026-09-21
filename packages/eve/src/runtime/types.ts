@@ -21,7 +21,7 @@ import type {
 import type { OpenAPISpecSource } from "#public/definitions/connections/openapi.js";
 import type { CompiledWorkspaceResourceRoot } from "#compiler/manifest.js";
 import type { WorkspaceRuntimeSpec } from "#runtime/workspace/types.js";
-import type { JsonObject } from "#shared/json.js";
+import type { JsonObject, JsonValue } from "#shared/json.js";
 import type { Optional } from "#shared/optional.js";
 import type { Node } from "#shared/node.js";
 import type {
@@ -102,6 +102,7 @@ export type ResolvedScheduleDefinition = Readonly<
  * server that requires no authentication (e.g. localhost) may omit both.
  */
 export interface ResolvedConnectionDefinition extends ResolvedModuleSourceRef {
+  readonly protocolVersionDiscovery?: boolean;
   readonly approval?: Approval;
   readonly authorization?: Readonly<AuthorizationDefinition> | ConnectionAuthResolver;
   readonly connectionName: string;
@@ -173,6 +174,8 @@ export type ResolvedToolDefinition = Readonly<
      * rehydrated before entering this runtime-owned definition.
      */
     readonly inputSchema: ToolSchema | null;
+    /** Framework-owned input projected before a workflow tool executor starts. */
+    readonly executeInput?: (input: unknown) => JsonValue;
     /** Presentation projected from tool lifecycle values. */
     readonly label?: import("#tools/definition.js").InternalToolLabelDefinition;
     /**
@@ -285,6 +288,7 @@ export type ResolvedRuntimeSubagentNode = Readonly<
     Node & {
       kind: "subagent";
       name: string;
+      tool?: boolean;
     } & (
       | {
           description: string;
@@ -312,6 +316,7 @@ export type ResolvedRuntimeRemoteAgentNode = Readonly<
       name: string;
       outputSchema?: JsonObject;
       path: string;
+      tool?: boolean;
       url: string;
     }
 >;
@@ -446,14 +451,6 @@ export interface ResolvedAgent {
   readonly config?: ResolvedAgentDefinition;
   readonly connections: readonly ResolvedConnectionDefinition[];
   readonly dynamicConnectionResolvers?: readonly ResolvedDynamicConnectionResolver[];
-  /**
-   * Configuration for the experimental framework `Workflow` orchestration
-   * tool. Present when an authored tool module exports
-   * `experimental_workflow(...)`.
-   */
-  readonly workflowTool?: {
-    readonly maxSubagents?: number;
-  };
   /** AI Gateway provider selected for the framework `web_search` tool. */
   readonly dynamicInstructionsResolvers: readonly ResolvedDynamicInstructionsResolver[];
   readonly dynamicSkillResolvers: readonly ResolvedDynamicSkillResolver[];

@@ -1,3 +1,4 @@
+import { taskReceipts } from "@eve-e2e/config/task-receipts";
 import { type EveEvalContext, type EveEvalTurn, type InputRequest } from "eve/evals";
 import { equals } from "eve/evals/expect";
 
@@ -9,17 +10,13 @@ import {
 
 /** Release children independently of parent wakes, retaining the entire parent stream suffix. */
 export async function startBlockedFanout(t: EveEvalContext, count: number) {
-  let session: TaskEvalSessionDriver = t;
   const started = await t.send("TASK-BATCHING-BENCHMARK");
+  let session: TaskEvalSessionDriver = started.session;
   started.expectOk();
   started.noFailedActions();
   started.messageIncludes("TASK-FANOUT-STARTED");
-  started.calledSubagent("fanout-worker", { count });
-  const receipts = started.events.flatMap((event) =>
-    event.type === "subagent.completed" && event.data.backgroundTask !== undefined
-      ? [{ callId: event.data.callId, taskId: event.data.backgroundTask.taskId }]
-      : [],
-  );
+  started.calledSubagent("fanout-worker", { status: "working", count });
+  const receipts = taskReceipts(started.events);
   const taskIds = receipts.map(({ taskId }) => taskId);
   await t.require(
     { receipts: taskIds.length, distinct: new Set(taskIds).size },
@@ -29,7 +26,7 @@ export async function startBlockedFanout(t: EveEvalContext, count: number) {
   const setupEvents: EveEvalTurn["events"][number][] = [];
   const requests = new Map<string, InputRequest>();
   collectRequests(started);
-  for (let attempt = 0; requests.size < count && attempt < count; attempt += 1) {
+  while (requests.size < count) {
     collectRequests(await nextTurn());
   }
 

@@ -27,6 +27,8 @@ export type EveCliSetupStep =
   | "install_dependencies"
   | "initialize_git"
   | "handoff"
+  | "connection_ready"
+  | "first_response"
   | "model_provider"
   | "model_settings"
   | "registry_channels"
@@ -38,6 +40,10 @@ export type EveCliSetupTerminalResult = "completed" | "cancelled" | "error";
 /** A bounded, non-sensitive reason for a failed setup terminal event. */
 export type EveCliSetupFailureCode =
   | "target_resolution"
+  | "target_conflict"
+  | "target_invalid"
+  | "target_filesystem"
+  | "workspace_input"
   | "scaffolding"
   | "package_manager_not_found"
   | "package_manager_start_failed"
@@ -96,6 +102,8 @@ function setupFailureCode(step: EveCliSetupStep): EveCliSetupFailureCode {
       return "git_initialization";
     case "handoff":
       return "handoff";
+    case "connection_ready":
+    case "first_response":
     case "model_provider":
     case "model_settings":
     case "registry_channels":

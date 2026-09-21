@@ -11,6 +11,7 @@ export interface ActivityWorkIdentityV1 {
   readonly callId?: string;
   readonly id: string;
   readonly kind: ActivityWorkKind;
+  readonly label?: string;
   readonly name?: string;
   readonly parentId?: string;
   readonly rootSessionId: string;
@@ -126,21 +127,7 @@ export interface ActivitySnapshotV1 {
 }
 
 export function parseActivityWorkIdentityV1(value: unknown): ActivityWorkIdentityV1 | undefined {
-  if (
-    !isRecord(value) ||
-    !hasOnlyKeys(value, [
-      "callId",
-      "id",
-      "kind",
-      "name",
-      "parentId",
-      "rootSessionId",
-      "rootTurnId",
-      "sessionId",
-      "turnId",
-    ])
-  )
-    return undefined;
+  if (!isRecord(value)) return undefined;
   const kind = value.kind;
   if (
     !isOneOf(kind, ["root-turn", "subagent", "remote-agent", "task"] as const) ||
@@ -148,6 +135,7 @@ export function parseActivityWorkIdentityV1(value: unknown): ActivityWorkIdentit
     !isIdentity(value.rootSessionId) ||
     !isIdentity(value.rootTurnId) ||
     !isOptionalIdentity(value.callId) ||
+    !isOptionalBoundedString(value.label) ||
     !isOptionalBoundedString(value.name) ||
     !isOptionalIdentity(value.parentId) ||
     !isOptionalIdentity(value.sessionId) ||
@@ -155,9 +143,11 @@ export function parseActivityWorkIdentityV1(value: unknown): ActivityWorkIdentit
   )
     return undefined;
   return {
+    ...value,
     callId: value.callId,
     id: value.id,
     kind,
+    label: value.label,
     name: value.name,
     parentId: value.parentId,
     rootSessionId: value.rootSessionId,

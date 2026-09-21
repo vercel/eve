@@ -31,6 +31,7 @@ export type CompiledRemoteAgentNode = Readonly<
       outputSchema?: JsonObject;
       path: string;
       rootPath: string;
+      tool?: boolean;
       // Absent when the definition's `url` is a function the runtime resolves.
       url?: string;
     }
@@ -98,6 +99,7 @@ export const compiledRemoteAgentNodeSchema: z.ZodType<CompiledRemoteAgentNode> =
     outputSchema: jsonObjectSchema.optional(),
     path: z.string(),
     rootPath: z.string(),
+    tool: z.boolean().optional(),
     sourceId: z.string(),
     sourceKind: z.literal("module"),
     url: z.string().optional(),

@@ -1,3 +1,4 @@
+import { taskReceipts } from "@eve-e2e/config/task-receipts";
 import { e2eModel } from "@eve-e2e/config";
 import type { EveEvalContext, EveEvalSession, EveEvalTurn, InputRequest } from "eve/evals";
 import { equals, satisfies } from "eve/evals/expect";
@@ -6,7 +7,9 @@ import {
   CHECKS,
   childActivations,
   checkForTask,
+  completedTaskIds,
   eventsForSession,
+  modelStepCount,
   requireOriginalTasksHealthy,
   toolEvidence,
   type Check,
@@ -17,7 +20,6 @@ export const QUESTION =
   "Alice is packing seven boxes with eight jars in each. How many jars is that? Reply with just the number.";
 
 const RESULTS = { first: "oranges", second: "pears", third: "apples" } as const;
-const COMPLETION = /Background task (task_[a-z0-9]+) \([^)]+\) is completed\./giu;
 
 interface Child {
   readonly check: Check;
@@ -35,7 +37,7 @@ export interface ReportingRun {
   readonly probeSessions: Map<Check, string>;
   readonly parentTurns: EveEvalTurn[];
   readonly modelId: string;
-  session: EveEvalSession | EveEvalContext;
+  session: EveEvalSession;
 }
 
 export async function startWarehouseLookups(t: EveEvalContext): Promise<ReportingRun> {
@@ -50,7 +52,7 @@ export async function startWarehouseLookups(t: EveEvalContext): Promise<Reportin
 
 Once all three assignments are accepted, let Alice know the checks are underway. When all three results are ready, reply directly from the returned items without further tool calls or task-list updates. Bob needs only three checklist entries, with each item listed once and no separate summary.`);
   started.expectOk();
-  started.calledSubagent("agent", { count: TASK_COUNT });
+  started.calledSubagent("agent", { status: "working", count: TASK_COUNT });
   started.notCalledTool("probe");
   started.notCalledTool("warehouse_lookup");
   assertModel(started, modelId);
@@ -69,11 +71,7 @@ Once all three assignments are accepted, let Alice know the checks are underway.
     ),
   );
 
-  const receipts = started.events.flatMap((event) =>
-    event.type === "subagent.completed" && event.data.backgroundTask !== undefined
-      ? [{ callId: event.data.callId, taskId: event.data.backgroundTask.taskId }]
-      : [],
-  );
+  const receipts = taskReceipts(started.events);
   const actions = started.events.flatMap((event) =>
     event.type === "actions.requested" ? event.data.actions : [],
   );
@@ -83,7 +81,7 @@ Once all three assignments are accepted, let Alice know the checks are underway.
   const taskIds = receipts.map((receipt) => receipt.taskId);
   const requests = new Map<Check, InputRequest>();
   const run: ReportingRun = {
-    session: t,
+    session: started.session,
     sessionId: started.sessionId,
     taskIds,
     children,
@@ -297,8 +295,7 @@ export function completeReport() {
 }
 
 export function modelSteps(turns: readonly EveEvalTurn[]): number {
-  return turns.flatMap((turn) => turn.events).filter((event) => event.type === "step.started")
-    .length;
+  return modelStepCount(turns);
 }
 
 export function completedAt(turn: EveEvalTurn): number {
@@ -307,7 +304,7 @@ export function completedAt(turn: EveEvalTurn): number {
   return Date.parse(event.meta.at);
 }
 
-export function requireStreamIndex(session: EveEvalSession | EveEvalContext): number {
+export function requireStreamIndex(session: EveEvalSession): number {
   if (session.state === undefined) throw new Error("Task reporting session has no stream index.");
   return session.state.streamIndex;
 }
@@ -359,7 +356,7 @@ async function releaseCheck(t: EveEvalContext, run: ReportingRun, check: Check):
     ),
     equals([]),
   );
-  // ctx.agent completes through its owning workflow tool, not a subagent.completed event.
+  // Check the owning workflow tool result for the completed lookup.
   await t.require(
     lookup,
     equals([
@@ -413,14 +410,6 @@ function assertModel(turn: EveEvalTurn, modelId: string) {
   );
 }
 
-function completedTaskIds(turn: EveEvalTurn): string[] {
-  return turn.events.flatMap((event) =>
-    event.type === "message.received"
-      ? [...event.data.message.matchAll(COMPLETION)].map((match) => match[1]!)
-      : [],
-  );
-}
-
 async function post(t: EveEvalContext, run: ReportingRun, suffix: "" | "/compact", body: unknown) {
   const response = await t.target.fetch(
     `/eve/v1/session/${encodeURIComponent(run.sessionId)}${suffix}`,
@@ -436,12 +425,13 @@ async function post(t: EveEvalContext, run: ReportingRun, suffix: "" | "/compact
 }
 
 function hasPostReceiptAcknowledgement(turn: EveEvalTurn): boolean {
+  const receiptCallIds = new Set(
+    taskReceipts(turn.events)
+      .filter(({ toolName }) => toolName === "agent")
+      .map(({ callId }) => callId),
+  );
   const receiptIndexes = turn.events.flatMap((event, index) =>
-    event.type === "subagent.completed" &&
-    event.data.subagentName === "agent" &&
-    event.data.backgroundTask !== undefined
-      ? [index]
-      : [],
+    event.type === "action.result" && receiptCallIds.has(event.data.result.callId) ? [index] : [],
   );
   return (
     receiptIndexes.length === TASK_COUNT &&

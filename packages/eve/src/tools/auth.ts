@@ -1,22 +1,18 @@
 import type {
-  AuthorizationDefinition,
   ConnectionAuthorizationContext,
-  NonInteractiveAuthorizationDefinition,
+  ConnectionAuthProvider,
 } from "#shared/connection-types.js";
 
 /**
  * Authorization provider passed to the tool context's `getToken` or
  * `requireAuth` method. Accepts the same shapes as a connection's `auth`:
  * - a `getToken`-only object (static API keys, pre-provisioned JWTs);
- *   `principalType` may be omitted and defaults to `"app"`.
+ *   `credentialOwner` may be omitted and defaults to `"app"`.
  * - a full interactive OAuth definition (e.g. `connect("okta/myagent")` from
- *   `@vercel/connect/eve`, or `defineInteractiveAuthorization`).
+ *   `@vercel/connect/eve`, or `defineInteractiveAuthorization`), which keeps
+ *   `principalType: "user"`.
  */
-export type ToolAuthDefinition =
-  | (Omit<NonInteractiveAuthorizationDefinition, "principalType"> & {
-      readonly principalType?: NonInteractiveAuthorizationDefinition["principalType"];
-    })
-  | AuthorizationDefinition;
+export type ToolAuthDefinition = ConnectionAuthProvider;
 
 export type ToolAuthProvider = ToolAuthDefinition;
 

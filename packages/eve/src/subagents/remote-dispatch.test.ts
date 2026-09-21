@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { SessionAuthContext } from "#channel/types.js";
+import { readForwardedParentSessionBaggage } from "#protocol/baggage.js";
 import {
   cancelRemoteAgentTurn,
   continueRemoteAgentSession,
@@ -232,6 +233,7 @@ describe("startRemoteAgentSession", () => {
           ...createRemoteAgent(),
           headers: {
             Traceparent: "operator-context",
+            Tracestate: `eve=${"a".repeat(16)},vendor=opaque`,
             baggage: "eve.conversation.id=operator-id,vendor=value",
           },
         },
@@ -251,6 +253,9 @@ describe("startRemoteAgentSession", () => {
       const headers = new Headers(fetchMock.mock.calls[0]?.[1]?.headers);
       expect(headers.get("traceparent")).toBe(
         hasContext ? `00-${"1".repeat(32)}-${"2".repeat(16)}-01` : "operator-context",
+      );
+      expect(headers.get("tracestate")).toBe(
+        hasContext ? `eve=${"2".repeat(16)},vendor=opaque` : "vendor=opaque",
       );
       expect(headers.get("baggage")).toBe(
         hasContext
@@ -296,6 +301,12 @@ describe("startRemoteAgentSession", () => {
         state: {},
       },
       parent: {
+        lineage: {
+          callId: "call-remote",
+          rootSessionId: "root-session",
+          sessionId: "parent-session",
+          turn: { id: "parent-turn", sequence: 0 },
+        },
         traceContext: {
           spanId: "2".repeat(16),
           traceFlags: 1,
@@ -309,7 +320,9 @@ describe("startRemoteAgentSession", () => {
       body: expect.any(String),
       headers: {
         authorization: "Bearer remote-token",
+        baggage: expect.any(String),
         "content-type": "application/json",
+        tracestate: `eve=${"2".repeat(16)}`,
         traceparent: `00-${"1".repeat(32)}-${"2".repeat(16)}-01`,
         "x-static": "yes",
       },
@@ -333,6 +346,16 @@ describe("startRemoteAgentSession", () => {
       ].join("\n"),
       capabilities: {},
       mode: "conversation",
+    });
+    expect(
+      readForwardedParentSessionBaggage(
+        new Headers(fetchMock.mock.calls[0]?.[1]?.headers).get("baggage"),
+      ),
+    ).toEqual({
+      callId: "call-remote",
+      rootSessionId: "root-session",
+      sessionId: "parent-session",
+      turn: { id: "parent-turn", sequence: 0 },
     });
   });
 
@@ -445,7 +468,7 @@ describe("startRemoteAgentSession", () => {
       callbackBaseUrl: "https://caller.example.com",
       remote: {
         ...createRemoteAgent(),
-        url: "https://remote.example.com/eve/agents/researcher",
+        url: "https://remote.example.com/eve/researcher",
       },
       session: {
         agent: { modelReference: { id: "mock/test" }, system: "", tools: [] },
@@ -457,7 +480,7 @@ describe("startRemoteAgentSession", () => {
     });
 
     expect(fetchMock).toHaveBeenCalledWith(
-      "https://remote.example.com/eve/agents/researcher/eve/v1/session",
+      "https://remote.example.com/eve/researcher/v1/session",
       expect.objectContaining({ method: "POST" }),
     );
   });
@@ -1166,14 +1189,14 @@ describe("cancelRemoteAgentTurn", () => {
       cancelRemoteAgentTurn({
         remote: {
           ...createRemoteAgent(),
-          url: "https://remote.example.com/eve/agents/researcher/",
+          url: "https://remote.example.com/eve/researcher/",
         },
         sessionId: "remote/session id",
       }),
     ).resolves.toEqual({ sessionId: "remote/session id", status: "accepted" });
 
     expect(fetchMock).toHaveBeenCalledWith(
-      "https://remote.example.com/eve/agents/researcher/eve/v1/session/remote%2Fsession%20id/cancel",
+      "https://remote.example.com/eve/researcher/v1/session/remote%2Fsession%20id/cancel",
       expect.objectContaining({ method: "POST" }),
     );
   });
@@ -1242,7 +1265,7 @@ describe("resetRemoteAgentSession", () => {
       resetRemoteAgentSession({
         remote: {
           ...createRemoteAgent(),
-          url: "https://remote.example.com/eve/agents/researcher/",
+          url: "https://remote.example.com/eve/researcher/",
         },
         sessionId: "remote/session id",
       }),
@@ -1252,7 +1275,7 @@ describe("resetRemoteAgentSession", () => {
       status: "reset",
     });
     expect(fetchMock).toHaveBeenCalledWith(
-      "https://remote.example.com/eve/agents/researcher/eve/v1/session/remote%2Fsession%20id/reset",
+      "https://remote.example.com/eve/researcher/v1/session/remote%2Fsession%20id/reset",
       {
         body: JSON.stringify({ reason: "Parent session ended" }),
         headers: {

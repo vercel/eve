@@ -1,3 +1,5 @@
+import { z } from "#compiled/zod/index.js";
+import { isToolSchema } from "#tools/schema.js";
 import { describe, expect, it } from "vitest";
 
 import { buildDynamicTools } from "#context/build-dynamic-tools.js";
@@ -6,7 +8,13 @@ import {
   dispatchDynamicToolEvent,
   rebindMissingCompiledDynamicToolCallbacks,
 } from "#context/dynamic-tool-lifecycle.js";
-import { AuthKey, SessionIdKey, SessionKey, TurnMemoryLocksKey } from "#context/keys.js";
+import {
+  AuthKey,
+  SessionIdKey,
+  SessionKey,
+  StaticModelReferenceKey,
+  TurnMemoryLocksKey,
+} from "#context/keys.js";
 import { createMemoryToolDynamicDefinition } from "#context/memory-tools.js";
 import { resolveApprovalPolicy } from "#approval/definition.js";
 import { defineTool } from "#tools/definition.js";
@@ -27,6 +35,7 @@ function createContext(scope: string) {
     principalType: "user",
   };
   const ctx = new ContextContainer();
+  ctx.set(StaticModelReferenceKey, null);
   ctx.set(AuthKey, auth);
   ctx.set(SessionIdKey, "session_1");
   ctx.set(SessionKey, {
@@ -56,7 +65,9 @@ function resolver(version: () => number): ResolvedDynamicToolResolver {
           approval: always(),
           description: "Save a field.",
           execute: async () => `${version()}:${String(context.memory.scope.value)}`,
-          inputSchema: {},
+          inputSchema: z.object({
+            scope: z.string().refine((value) => value === context.memory.scope.value),
+          }),
         }),
       }),
     },
@@ -127,6 +138,13 @@ describe("memory provider tools", () => {
       async () => await replayed.execute!({}, { messages: [], toolCallId: "call_1" }),
     );
     expect(output).toBe("2:user_1");
+    if (!isToolSchema(replayed.inputSchema)) throw new Error("Expected live schema");
+    expect(await replayed.inputSchema["~standard"].validate({ scope: "user_2" })).toHaveProperty(
+      "issues",
+    );
+    expect(await replayed.inputSchema["~standard"].validate({ scope: "user_1" })).toEqual({
+      value: { scope: "user_1" },
+    });
   });
 
   it("omits tools when the provider has no tool factory", async () => {
@@ -143,6 +161,7 @@ describe("memory provider tools", () => {
       async () =>
         await dynamic.events["turn.started"]?.(event, {
           channel: {},
+          model: null,
           messages: [],
           session: { auth: { current: null, initiator: null }, id: "session_1" },
         }),

@@ -5,6 +5,9 @@ import { defineTool } from "#tools/definition.js";
 import {
   defineWorkflowTool,
   isWorkflowToolDefinition,
+  type WorkflowAgentMetadata,
+  type WorkflowStepToolContext,
+  type TaskReceipt,
   type WorkflowToolContext,
 } from "#tools/workflow-definition.js";
 import { normalizeToolDefinition } from "#internal/authored-definition/schema-backed.js";
@@ -17,6 +20,7 @@ describe("defineWorkflowTool", () => {
       async execute(input, ctx) {
         expectTypeOf(input).toEqualTypeOf<{ service: string }>();
         expectTypeOf(ctx).toEqualTypeOf<WorkflowToolContext>();
+        expectTypeOf(ctx.agents.researcher).toEqualTypeOf<WorkflowAgentMetadata | undefined>();
         const review = ctx.agent("researcher", {
           message: "Review the deployment.",
           outputSchema: {
@@ -50,21 +54,35 @@ describe("defineWorkflowTool", () => {
     expectTypeOf(definition.execute).parameter(0).toEqualTypeOf<{ service: string }>();
   });
 
-  it("provides task messages and receipt projections for background workflows", () => {
+  it("exposes only step-safe capabilities on WorkflowStepToolContext", () => {
+    const useStepContext = (ctx: WorkflowStepToolContext) => {
+      void ctx.getToken;
+      void ctx.requireAuth;
+      void ctx.abortSignal;
+      // @ts-expect-error Agent metadata is available only in the workflow body.
+      void ctx.agents;
+      // @ts-expect-error Agent invocation is available only in the workflow body.
+      void ctx.agent;
+      // @ts-expect-error Human input is available only in the workflow body.
+      void ctx.ask;
+    };
+
+    expectTypeOf(useStepContext).parameter(0).toEqualTypeOf<WorkflowStepToolContext>();
+  });
+
+  it("provides progress yields and receipt projections for background workflows", () => {
     const definition = defineWorkflowTool({
       description: "Report a deployment",
       execution: "background",
       inputSchema: z.object({ service: z.string() }),
-      async *execute(input, ctx, task) {
+      async *execute(input, ctx) {
         expectTypeOf(input).toEqualTypeOf<{ service: string }>();
         expectTypeOf(ctx).toEqualTypeOf<WorkflowToolContext>();
-        expectTypeOf(task.taskId).toEqualTypeOf<string>();
         yield { status: "planning" };
-        yield task.postMessage(input.service);
         return { deployed: input.service };
       },
       toModelOutput(receipt) {
-        expectTypeOf(receipt).toEqualTypeOf<import("#tools/task.js").TaskReceipt>();
+        expectTypeOf(receipt).toEqualTypeOf<TaskReceipt>();
         return { type: "text", value: receipt.taskId };
       },
     });
@@ -78,6 +96,8 @@ describe("defineWorkflowTool", () => {
       async execute(_input, ctx) {
         // @ts-expect-error agent is available only on WorkflowToolContext.
         void ctx.agent;
+        // @ts-expect-error agents is available only on WorkflowToolContext.
+        void ctx.agents;
         // @ts-expect-error ask is available only on WorkflowToolContext.
         void ctx.ask;
         return 1;

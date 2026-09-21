@@ -1,17 +1,20 @@
 import { isWorkflowToolDefinition } from "#tools/workflow-definition.js";
 import { readWorkflowFunctionId } from "#internal/workflow/reference.js";
 import { isDisabledToolSentinel } from "#tools/definition.js";
-import { isExperimentalWorkflowToolDefinition } from "#tools/workflow.js";
 import { isWebSearchToolDefinition } from "#tools/provided/web-search.js";
 import {
+  expectBoolean,
   expectFunction,
   expectObjectRecord,
   expectOnlyKnownKeys,
-  expectPositiveInteger,
   expectString,
 } from "#internal/authored-module.js";
 import type { InternalToolDefinition, ToolExecuteFn } from "#tools/definition.js";
 import { readToolBehavior, type CompiledToolBehavior } from "#tools/behavior.js";
+import {
+  readWorkflowProgramOptions,
+  type WorkflowProgramOptions,
+} from "#tools/workflow-program-input.js";
 import {
   serializeInputSchema,
   serializeOutputSchema,
@@ -38,6 +41,7 @@ type NormalizedAuthoredTool = Readonly<
     readonly hasApproval: boolean;
     readonly hasExecute: boolean;
     readonly hasModelOutputProjection: boolean;
+    readonly workflowProgram?: WorkflowProgramOptions;
   }
 >;
 type MutableNormalizedAuthoredTool = {
@@ -54,7 +58,6 @@ type MutableNormalizedAuthoredTool = {
 type NormalizedToolEntry =
   | { readonly kind: "tool"; readonly definition: NormalizedAuthoredTool }
   | { readonly kind: "disabled" }
-  | { readonly kind: "workflow-tool"; readonly maxSubagents?: number }
   | { readonly kind: "web-search-tool"; readonly provider: "exa" | "parallel" }
   | {
       readonly kind: "dynamic-tool";
@@ -65,7 +68,7 @@ type NormalizedToolEntry =
 /**
  * Normalizes one authored tool default export. Recognizes real tool
  * definitions (`defineTool(...)`), disable sentinels (`disableTool()`), and the
- * experimental `Workflow` tool definition.
+ * provider-managed web-search definitions.
  *
  * Authored `name` fields are rejected — tool identity is path-derived.
  */
@@ -80,17 +83,6 @@ export function normalizeToolDefinition(value: unknown, message: string): Normal
   }
   if (isDisabledToolSentinel(value)) {
     return { kind: "disabled" };
-  }
-  if (isExperimentalWorkflowToolDefinition(value)) {
-    const record = expectObjectRecord(value, message);
-    expectOnlyKnownKeys(record, ["kind", "maxSubagents"], message);
-    return {
-      kind: "workflow-tool",
-      maxSubagents:
-        record.maxSubagents === undefined
-          ? undefined
-          : expectPositiveInteger(record.maxSubagents, message),
-    };
   }
   if (isWebSearchToolDefinition(value)) {
     const record = expectObjectRecord(value, message);
@@ -118,6 +110,7 @@ export function normalizeToolDefinition(value: unknown, message: string): Normal
   expectOnlyKnownKeys(
     record,
     [
+      "availableInSubagents",
       "label",
       "auth",
       "description",
@@ -137,6 +130,7 @@ export function normalizeToolDefinition(value: unknown, message: string): Normal
       : serializeInputSchema(record.inputSchema as ToolSchemaSource);
   const outputSchema = serializeOutputSchema(record.outputSchema as ToolSchemaSource | undefined);
   const behavior = readToolBehavior(value);
+  const workflowProgram = readWorkflowProgramOptions(value);
   const hasExecute = record.execute !== undefined;
   if (
     !hasExecute &&
@@ -146,6 +140,10 @@ export function normalizeToolDefinition(value: unknown, message: string): Normal
     expectFunction(record.execute, message);
   }
   const definition: MutableNormalizedAuthoredTool = {
+    availableInSubagents:
+      record.availableInSubagents === undefined
+        ? undefined
+        : expectBoolean(record.availableInSubagents, message),
     description: expectString(record.description, message),
     hasApproval: record.approval !== undefined,
     hasExecute,
@@ -154,6 +152,9 @@ export function normalizeToolDefinition(value: unknown, message: string): Normal
   };
   if (behavior !== undefined) {
     definition.behavior = behavior;
+  }
+  if (workflowProgram !== undefined) {
+    definition.workflowProgram = workflowProgram;
   }
   if (hasExecute) {
     definition.execute = expectFunction(record.execute, message) as ToolExecuteFn;

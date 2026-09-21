@@ -12,7 +12,7 @@ export default defineEval({
   tags: ["real-model"],
   description: "Static tools smoke: toModelOutput content parts deliver an image to the model.",
   async test(t) {
-    await t.send(
+    const { session } = await t.send(
       `Call \`${TOOL_NAME}\` exactly once, look at the rendered image, and reply with only ` +
         "the stripe colors left to right, comma-separated.",
     );
@@ -27,7 +27,7 @@ export default defineEval({
 
     // The content part is baked into persisted history, so a follow-up turn
     // must answer from replay without re-running the tool.
-    await t.send(
+    await session.send(
       "Without calling any tool, repeat the stripe colors left to right, comma-separated.",
     );
 

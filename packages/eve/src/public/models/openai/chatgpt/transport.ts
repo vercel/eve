@@ -1,3 +1,4 @@
+import { readDevelopmentModelCredential } from "#internal/model-auth/development-broker-client.js";
 import { isObject } from "#shared/guards.js";
 import { getDefaultCodexTokenBroker, type CodexTokenBroker } from "./token-broker.js";
 
@@ -14,22 +15,31 @@ export interface CodexTransportOptions {
 
 /**
  * Routes OpenAI Responses requests through the Codex backend. Authentication is
- * resolved and refreshed from eve's local ChatGPT session.
+ * resolved through Codex app-server when available, with eve-owned credentials
+ * used only when the Codex binary is not installed.
  */
 export function createCodexFetch(options: CodexTransportOptions = {}): Fetch {
   const httpFetch = options.fetch ?? fetch;
-  const broker = options.broker ?? getDefaultCodexTokenBroker();
+  const resolveToken = async (rejectedToken?: string, signal?: AbortSignal | null) => {
+    const reason = rejectedToken === undefined ? "request" : "rejected";
+    if (options.broker) return options.broker.getToken({ reason });
+    return (
+      (await readDevelopmentModelCredential("chatgpt", rejectedToken, signal)) ??
+      (await getDefaultCodexTokenBroker().getToken({ reason }))
+    );
+  };
   const codexApiEndpoint = options.codexApiEndpoint ?? CODEX_API_ENDPOINT;
 
   return async (input: FetchInput, init?: RequestInit): Promise<Response> => {
     const url = rewriteCodexEndpoint(requestUrl(input), codexApiEndpoint);
     const requestInit = stripInputItemIds(init);
-    const token = await broker.getToken({ reason: "request" });
+    const signal = init?.signal ?? (input instanceof Request ? input.signal : undefined);
+    const token = await resolveToken(undefined, signal);
     const first = await httpFetch(url, authenticatedInit(input, requestInit, token));
     if (first.status !== 401 || !isReplayable(input, init)) return first;
 
     await first.body?.cancel();
-    const refreshed = await broker.getToken({ reason: "rejected" });
+    const refreshed = await resolveToken(token.token, signal);
     return httpFetch(url, authenticatedInit(input, requestInit, refreshed));
   };
 }

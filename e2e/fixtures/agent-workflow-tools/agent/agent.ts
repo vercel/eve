@@ -83,9 +83,6 @@ function respond(request: MockModelRequest): MockModelResponse | string {
     }`;
   }
 
-  if (message.includes("WORKFLOW-REPORT-PROGRESS")) {
-    return "WORKFLOW-REPORT-UPDATE-RECEIVED";
-  }
   if (message.includes("is completed") && message.includes("WORKFLOW-REPORT-COMPLETE")) {
     return "WORKFLOW-REPORT-DONE";
   }

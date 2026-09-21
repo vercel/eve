@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AGENT_HANDLES_STATE_KEY, type AgentHandle } from "#subagents/handles/store.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import { terminateChildSessionsStep } from "#execution/terminate-child-sessions-step.js";
-import { SESSION_TASKS_STATE_KEY, type SessionTaskIndexEntry } from "#tasks/session-index.js";
+import type { BackgroundWorkflowToolRun } from "#harness/workflow-tool-runs.js";
 
 const COMPILED_BUNDLE = {
   subagentRegistry: { subagentsByNodeId: new Map() },
@@ -61,7 +61,9 @@ vi.mock("#internal/workflow/runtime.js", () => ({
 describe("terminateChildSessionsStep", () => {
   beforeEach(() => {
     cancelOwnedTaskMock.mockReset();
-    cancelOwnedTaskMock.mockResolvedValue(undefined);
+    cancelOwnedTaskMock.mockImplementation(
+      async ({ entry }: { entry: BackgroundWorkflowToolRun }) => cancelledView(entry),
+    );
     cancelRunMock.mockReset();
     cancelRunMock.mockResolvedValue(undefined);
     deserializeContextMock.mockReset();
@@ -248,13 +250,15 @@ describe("terminateChildSessionsStep", () => {
     const secondCancellation = createDeferred();
     const order: string[] = [];
     cancelOwnedTaskMock
-      .mockImplementationOnce(async () => {
+      .mockImplementationOnce(async ({ entry }: { entry: BackgroundWorkflowToolRun }) => {
         await firstCancellation.promise;
         order.push("task-1-settled");
+        return cancelledView(entry);
       })
-      .mockImplementationOnce(async () => {
+      .mockImplementationOnce(async ({ entry }: { entry: BackgroundWorkflowToolRun }) => {
         await secondCancellation.promise;
         order.push("task-2-settled");
+        return cancelledView(entry);
       });
     cancelRunMock.mockImplementation(async () => {
       order.push("child-cancelled");
@@ -289,7 +293,9 @@ describe("terminateChildSessionsStep", () => {
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     cancelOwnedTaskMock
       .mockRejectedValueOnce(new Error("task cancellation unavailable"))
-      .mockResolvedValueOnce(undefined);
+      .mockImplementationOnce(async ({ entry }: { entry: BackgroundWorkflowToolRun }) =>
+        cancelledView(entry),
+      );
 
     try {
       await expect(
@@ -427,22 +433,30 @@ function startingHandle(input: {
   };
 }
 
-function indexedTask(taskId: string): SessionTaskIndexEntry {
+function indexedTask(taskId: string): BackgroundWorkflowToolRun {
   return {
-    taskInboxToken: `${taskId}:inbox`,
-    createdByTurnId: "turn-1",
-    metadata: {
+    callId: taskId,
+    toolName: {
       kind: "tool",
       name: "research",
+    }.name,
+    lifetime: "session" as const,
+    origin: { turnId: "turn-1", stepIndex: 0 },
+    address: { runId: `run-${taskId}`, hookToken: `${taskId}:inbox` },
+    task: {
+      dispatchContext: { auth: { current: null, initiator: null } },
+      metadata: {
+        kind: "tool",
+        name: "research",
+      },
+      taskId,
     },
-    taskId,
-    taskRunId: `run-${taskId}`,
   };
 }
 
 function makeSessionState(
   handles: readonly AgentHandle[],
-  tasks: readonly SessionTaskIndexEntry[] = [],
+  tasks: readonly BackgroundWorkflowToolRun[] = [],
 ): DurableSessionState {
   return {
     continuationToken: "parent-token",
@@ -465,10 +479,9 @@ function makeSessionState(
             ? { [AGENT_HANDLES_STATE_KEY]: { handles } }
             : {
                 [AGENT_HANDLES_STATE_KEY]: { handles },
-                [SESSION_TASKS_STATE_KEY]: { tasks, version: 2 },
+                "eve.workflowTool": { version: 3, runs: tasks },
               },
       },
-      version: 1,
     },
     version: 1,
   };
@@ -480,4 +493,8 @@ function createDeferred(): { readonly promise: Promise<void>; resolve(): void } 
     resolve = next;
   });
   return { promise, resolve };
+}
+
+function cancelledView(entry: BackgroundWorkflowToolRun) {
+  return { taskId: entry.task.taskId, metadata: entry.task.metadata, status: "cancelled" as const };
 }

@@ -4,38 +4,14 @@
   "homepage": "https://eve.dev",
   "items": [
     {
-      "name": "linear",
+      "name": "eve/self-modification",
       "type": "registry:item",
-      "title": "Linear",
-      "description": "Receive delegated Linear work and give your agent tools for issues, projects, and comments.",
+      "title": "Self-modification",
+      "description": "Add a source editing subagent with local edits and official registry installation.",
+      "dependencies": ["just-bash"],
       "meta": {
         "eve": {
-          "requires": ">=0.30.6",
-          "components": [
-            {
-              "item": "channel/linear-agent",
-              "label": "Linear Channel",
-              "description": "Interact with your eve agent natively in Linear",
-              "default": true
-            },
-            {
-              "item": "connection/linear",
-              "label": "Linear MCP",
-              "description": "Use the Linear MCP",
-              "default": true
-            }
-          ]
-        }
-      }
-    },
-    {
-      "name": "experimental/self-modification",
-      "type": "registry:item",
-      "title": "Self-modification (Experimental)",
-      "description": "Add an experimental source editing subagent with local edits and official registry installation.",
-      "dependencies": ["just-bash", "@vercel/connect"],
-      "meta": {
-        "eve": {
+          "requires": ">=0.62.0",
           "install": {
             "pnpm": {
               "buildScripts": [
@@ -59,33 +35,18 @@
       },
       "files": [
         {
-          "path": "registry/experimental/self-modification/config.ts",
+          "path": "registry/eve/self-modification/extension.ts",
           "type": "registry:file",
-          "target": "agent/subagents/self-modification/config.ts"
-        },
-        {
-          "path": "registry/experimental/self-modification/agent.ts",
-          "type": "registry:file",
-          "target": "agent/subagents/self-modification/agent.ts"
-        },
-        {
-          "path": "registry/experimental/self-modification/sandbox.ts",
-          "type": "registry:file",
-          "target": "agent/subagents/self-modification/sandbox.ts"
-        },
-        {
-          "path": "registry/experimental/self-modification/extension.ts",
-          "type": "registry:file",
-          "target": "agent/subagents/self-modification/extensions/selfmod.ts"
+          "target": "agent/extensions/self-modification/extension.ts"
         }
       ]
     },
     {
-      "name": "experimental/self-modification/prod",
+      "name": "experimental/self-modification",
       "type": "registry:item",
-      "title": "Self-modification production (Experimental)",
-      "description": "Add experimental self-modification with local editing and deployed draft pull requests.",
-      "dependencies": ["just-bash", "@vercel/connect"],
+      "title": "Self-modification (Experimental)",
+      "description": "Add an experimental source editing subagent with local edits and official registry installation.",
+      "dependencies": ["just-bash"],
       "meta": {
         "eve": {
           "hidden": true,
@@ -105,31 +66,17 @@
             {
               "package": "eve",
               "bin": "eve",
-              "args": ["integration", "setup", "self-modification-production"]
+              "args": ["integration", "setup", "self-modification"]
             }
-          ]
+          ],
+          "requires": ">=0.62.0"
         }
       },
       "files": [
         {
-          "path": "registry/experimental/self-modification/config.ts",
+          "path": "registry/eve/self-modification/extension.ts",
           "type": "registry:file",
-          "target": "agent/subagents/self-modification/config.ts"
-        },
-        {
-          "path": "registry/experimental/self-modification/agent.ts",
-          "type": "registry:file",
-          "target": "agent/subagents/self-modification/agent.ts"
-        },
-        {
-          "path": "registry/experimental/self-modification/sandbox.ts",
-          "type": "registry:file",
-          "target": "agent/subagents/self-modification/sandbox.ts"
-        },
-        {
-          "path": "registry/experimental/self-modification/extension.ts",
-          "type": "registry:file",
-          "target": "agent/subagents/self-modification/extensions/selfmod.ts"
+          "target": "agent/extensions/self-modification/extension.ts"
         }
       ]
     },
@@ -1704,24 +1651,22 @@
       "name": "channel/teams",
       "type": "registry:item",
       "title": "Microsoft Teams",
-      "description": "Bring your agent into Teams chats and channels.",
-      "envVars": {
-        "TEAMS_APP_ID": "",
-        "TEAMS_APP_PASSWORD": ""
-      },
-      "files": [
-        {
-          "path": "registry/channels/teams.ts",
-          "type": "registry:file",
-          "target": "agent/channels/teams.ts"
-        }
-      ],
+      "description": "Run an eve agent as a managed Microsoft Teams bot, with guided Vercel Connect setup.",
       "meta": {
         "eve": {
+          "setup": {
+            "command": "eve",
+            "package": "eve",
+            "bin": "eve",
+            "args": ["integration", "setup", "teams"]
+          },
+          "requires": ">=0.53.0",
           "docs": "/docs/channels/teams",
           "implementation": "native"
         }
-      }
+      },
+      "dependencies": ["@vercel/connect@>=2.1.0"],
+      "devDependencies": ["vercel@>=58.5.1"]
     },
     {
       "name": "channel/telegram",
@@ -1814,7 +1759,7 @@
       "devDependencies": ["vercel@>=58.5.1"]
     },
     {
-      "name": "channel/linear-agent",
+      "name": "channel/linear",
       "type": "registry:item",
       "title": "Linear Agent",
       "description": "Delegate Linear issues and comments through Agent Sessions, with guided Vercel Connect setup.",
@@ -2497,11 +2442,48 @@
       }
     },
     {
+      "name": "channel/chat-sdk-gmail",
+      "type": "registry:item",
+      "title": "Gmail",
+      "description": "Turn labelled Gmail threads into agent conversations via the Chat SDK.",
+      "dependencies": ["chat", "@chat-adapter/gmail", "@chat-adapter/state-redis"],
+      "envVars": {
+        "REDIS_URL": "",
+        "GMAIL_MAILBOX": "",
+        "GMAIL_LABEL_ID": "",
+        "GMAIL_CLIENT_ID": "",
+        "GMAIL_CLIENT_SECRET": "",
+        "GMAIL_REFRESH_TOKEN": "",
+        "GMAIL_PUBSUB_AUDIENCE": "",
+        "GMAIL_PUBSUB_SERVICE_ACCOUNT_EMAIL": "",
+        "GMAIL_SUBSCRIPTION": "",
+        "GMAIL_TOPIC_NAME": ""
+      },
+      "files": [
+        {
+          "path": "registry/channels/gmail.ts",
+          "type": "registry:file",
+          "target": "agent/channels/gmail.ts"
+        },
+        {
+          "path": "registry/schedules/gmail-maintenance.ts",
+          "type": "registry:file",
+          "target": "agent/schedules/gmail-maintenance.ts"
+        }
+      ],
+      "meta": {
+        "eve": {
+          "docs": "/integrations/chat-sdk-gmail#configure",
+          "implementation": "chat-sdk"
+        }
+      }
+    },
+    {
       "name": "instrumentation/braintrust",
       "type": "registry:item",
       "title": "Braintrust",
       "description": "Trace eve agent sessions in Braintrust, including turns, steps, tool calls, and subagent interactions.",
-      "dependencies": ["braintrust"],
+      "dependencies": ["braintrust@^3.29.0"],
       "envVars": {
         "BRAINTRUST_API_KEY": ""
       },
@@ -2509,12 +2491,7 @@
         {
           "path": "registry/instrumentation/braintrust.ts",
           "type": "registry:file",
-          "target": "agent/instrumentation.ts"
-        },
-        {
-          "path": "registry/instrumentation/braintrust-hook.ts",
-          "type": "registry:file",
-          "target": "agent/hooks/braintrust.ts"
+          "target": "agent/instrumentation/braintrust.ts"
         }
       ]
     },
@@ -2538,7 +2515,7 @@
         {
           "path": "registry/instrumentation/posthog.ts",
           "type": "registry:file",
-          "target": "agent/instrumentation.ts"
+          "target": "agent/instrumentation/posthog.ts"
         }
       ]
     },
@@ -2556,7 +2533,7 @@
         {
           "path": "registry/instrumentation/sentry.ts",
           "type": "registry:file",
-          "target": "agent/instrumentation.ts"
+          "target": "agent/instrumentation/sentry.ts"
         }
       ]
     },
@@ -2574,7 +2551,7 @@
         {
           "path": "registry/instrumentation/datadog.ts",
           "type": "registry:file",
-          "target": "agent/instrumentation.ts"
+          "target": "agent/instrumentation/datadog.ts"
         }
       ]
     },
@@ -2591,7 +2568,7 @@
         {
           "path": "registry/instrumentation/honeycomb.ts",
           "type": "registry:file",
-          "target": "agent/instrumentation.ts"
+          "target": "agent/instrumentation/honeycomb.ts"
         }
       ]
     },
@@ -2609,7 +2586,7 @@
         {
           "path": "registry/instrumentation/arize.ts",
           "type": "registry:file",
-          "target": "agent/instrumentation.ts"
+          "target": "agent/instrumentation/arize.ts"
         }
       ]
     },
@@ -2626,7 +2603,7 @@
         {
           "path": "registry/instrumentation/raindrop.ts",
           "type": "registry:file",
-          "target": "agent/instrumentation.ts"
+          "target": "agent/instrumentation/raindrop.ts"
         }
       ]
     },
@@ -2640,7 +2617,7 @@
         {
           "path": "registry/instrumentation/jaeger.ts",
           "type": "registry:file",
-          "target": "agent/instrumentation.ts"
+          "target": "agent/instrumentation/jaeger.ts"
         }
       ]
     }

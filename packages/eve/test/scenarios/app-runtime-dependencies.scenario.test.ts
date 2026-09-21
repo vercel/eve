@@ -294,13 +294,15 @@ describe("app runtime dependency tracing", () => {
     await import(pathToFileURL(bundledDependencyModule.modulePath).href);
   }, 30_000);
 
-  it("bundles Workflow sandbox worker assets only when an agent enables Workflow", async () => {
-    async function createWorkflowAssetsApp(label: string, workflow: boolean): Promise<string> {
+  it("bundles the generated JavaScript sandbox only for the workflow factory", async () => {
+    async function createWorkflowAssetsApp(
+      label: string,
+      tool: "sleep" | "workflow",
+    ): Promise<string> {
       const appRoot = await createScratchDirectory(`eve-app-workflow-assets-${label}-build-`);
 
-      await mkdir(join(appRoot, "agent", "subagents", "researcher"), {
-        recursive: true,
-      });
+      await mkdir(join(appRoot, "agent", "subagents", "researcher"), { recursive: true });
+      await mkdir(join(appRoot, "agent", "tools"), { recursive: true });
 
       await writeFile(
         join(appRoot, "package.json"),
@@ -327,47 +329,51 @@ describe("app runtime dependency tracing", () => {
         join(appRoot, "agent", "subagents", "researcher", "instructions.md"),
         "Research the request.\n",
       );
-      if (workflow) {
-        await mkdir(join(appRoot, "agent", "tools"), { recursive: true });
-        await writeFile(
-          join(appRoot, "agent", "tools", "workflow.ts"),
-          'export default { kind: "eve:enable-workflow-tool", maxSubagents: 6 };\n',
-        );
-      }
+      await writeFile(
+        join(appRoot, "agent", "tools", `${tool}.ts`),
+        tool === "workflow"
+          ? [
+              'import { workflow } from "eve/tools/workflow";',
+              "",
+              'export default workflow({ agents: ["researcher"], maxSubagents: 6 });',
+              "",
+            ].join("\n")
+          : 'import { sleep } from "eve/tools/sleep";\n\nexport default sleep();\n',
+      );
 
       return appRoot;
     }
 
-    const disabledOutputDir = await buildApplication(
-      await createWorkflowAssetsApp("disabled", false),
+    const sleepOutputDir = await buildApplication(
+      await createWorkflowAssetsApp("sleep", "sleep"),
       DEPLOYABLE_BUILD_OPTIONS,
     );
-    const disabledTracedPackageJson = await readTracedServerPackageJson(disabledOutputDir);
-    const disabledServerSource = await readJavaScriptModulesRecursively(
-      join(disabledOutputDir, "server"),
+    const sleepTracedPackageJson = await readTracedServerPackageJson(sleepOutputDir);
+    const sleepServerSource = await readJavaScriptModulesRecursively(
+      join(sleepOutputDir, "server"),
     );
 
-    expect(disabledServerSource).not.toContain("[Unprintable QuickJS value]");
+    expect(sleepServerSource).not.toContain("[Unprintable QuickJS value]");
 
-    const enabledOutputDir = await buildApplication(
-      await createWorkflowAssetsApp("enabled", true),
+    const workflowOutputDir = await buildApplication(
+      await createWorkflowAssetsApp("workflow", "workflow"),
       DEPLOYABLE_BUILD_OPTIONS,
     );
-    const tracedServerPackageJson = await readTracedServerPackageJson(enabledOutputDir);
-    const enabledServerSource = await readJavaScriptModulesRecursively(
-      join(enabledOutputDir, "server"),
+    const workflowTracedPackageJson = await readTracedServerPackageJson(workflowOutputDir);
+    const workflowServerSource = await readJavaScriptModulesRecursively(
+      join(workflowOutputDir, "server"),
     );
 
-    expect(enabledServerSource).toContain("[Unprintable QuickJS value]");
-    // The Workflow sandbox runtime ships bundled inline, never traced — and
+    expect(workflowServerSource).toContain("[Unprintable QuickJS value]");
+    // The generated JavaScript sandbox runtime ships bundled inline, never traced — and
     // these apps do not declare the optional just-bash engine, so its
     // quickjs dependency must not sneak into the trace either.
-    expect(disabledTracedPackageJson.dependencies).not.toHaveProperty("@ai-sdk/code-mode");
-    expect(tracedServerPackageJson.dependencies).not.toHaveProperty("@ai-sdk/code-mode");
-    expect(disabledTracedPackageJson.dependencies).not.toHaveProperty("run");
-    expect(tracedServerPackageJson.dependencies).not.toHaveProperty("run");
-    expect(disabledTracedPackageJson.dependencies).not.toHaveProperty("quickjs-emscripten");
-    expect(tracedServerPackageJson.dependencies).not.toHaveProperty("quickjs-emscripten");
+    expect(sleepTracedPackageJson.dependencies).not.toHaveProperty("@ai-sdk/code-mode");
+    expect(workflowTracedPackageJson.dependencies).not.toHaveProperty("@ai-sdk/code-mode");
+    expect(sleepTracedPackageJson.dependencies).not.toHaveProperty("run");
+    expect(workflowTracedPackageJson.dependencies).not.toHaveProperty("run");
+    expect(sleepTracedPackageJson.dependencies).not.toHaveProperty("quickjs-emscripten");
+    expect(workflowTracedPackageJson.dependencies).not.toHaveProperty("quickjs-emscripten");
   }, 60_000);
 
   it("includes the optional just-bash engine in hosted output only when the sandbox config selects it", async () => {
@@ -885,15 +891,19 @@ describe("app runtime dependency tracing", () => {
       ["export default {", '  model: "openai/gpt-5.4-mini",', "};", ""].join("\n"),
     );
     await writeFile(join(appRoot, "agent", "instructions.md"), "Verify hosted instrumentation.\n");
+    await mkdir(join(appRoot, "agent", "instrumentation"), { recursive: true });
     await writeFile(
-      join(appRoot, "agent", "instrumentation.ts"),
+      join(appRoot, "agent", "instrumentation", "dependency.ts"),
       [
         'import fixtureInstrumentationDep from "fixture-instrumentation-dep";',
+        'import { defineInstrumentation } from "eve/instrumentation";',
         "",
-        "(globalThis as Record<string, unknown>).__fixtureInstrumentationDep =",
-        "  fixtureInstrumentationDep;",
-        "",
-        "export default fixtureInstrumentationDep;",
+        "export default defineInstrumentation({",
+        "  setup() {",
+        "    (globalThis as Record<string, unknown>).__fixtureInstrumentationDep =",
+        "      fixtureInstrumentationDep;",
+        "  },",
+        "});",
         "",
       ].join("\n"),
     );

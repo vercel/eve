@@ -21,7 +21,9 @@ type CallbackPhase =
   | "approvalRequest"
   | "approvalResponse"
   | "execute"
-  | "toModelOutput";
+  | "toModelOutput"
+  | "inputSchema"
+  | "outputSchema";
 type CallbackPropertyName =
   | "approvalKey"
   | "label"
@@ -32,7 +34,9 @@ type CallbackPropertyName =
   | "response"
   | "complete"
   | "delta"
-  | "toModelOutput";
+  | "toModelOutput"
+  | "inputSchema"
+  | "outputSchema";
 
 interface CallbackInfo {
   readonly body: string;
@@ -70,7 +74,11 @@ export async function transformDynamicToolExecute(
   if (defineToolAliases.size === 0) return null;
 
   const callbacks: CallbackInfo[] = [];
-  walkForCallbacks(source, ast, callbacks, [], { defineToolAliases, workflowFunctions });
+  walkForCallbacks(source, ast, callbacks, [], {
+    defineToolAliases,
+    workflowFunctions,
+    durableSchemaAliases: findDefineToolAliases(ast, ["defineDurableSchema"]),
+  });
   return callbacks.length === 0 ? null : applyTransform(source, callbacks);
 }
 
@@ -78,6 +86,7 @@ const NO_WORKFLOW_FUNCTIONS: ReadonlySet<string> = new Set();
 
 interface WalkContext {
   readonly defineToolAliases: ReadonlySet<string>;
+  readonly durableSchemaAliases: ReadonlySet<string>;
   /**
    * Top-level `"use workflow"` functions the directive transform already
    * hoisted and stubbed. A tool whose `execute` is one never runs as a
@@ -89,7 +98,10 @@ interface WalkContext {
 // Keep the old export name for backward compatibility with the plugin.
 export { transformDynamicToolExecute as transformDynamicToolAwait };
 
-function findDefineToolAliases(ast: AstNode): ReadonlySet<string> {
+function findDefineToolAliases(
+  ast: AstNode,
+  names: readonly string[] = ["defineTool", "defineWorkflowTool"],
+): ReadonlySet<string> {
   const aliases = new Set<string>();
   walkNode(ast, (node) => {
     if (node.type !== "ImportDeclaration") return true;
@@ -99,13 +111,11 @@ function findDefineToolAliases(ast: AstNode): ReadonlySet<string> {
     }
     for (const specifier of node.specifiers ?? []) {
       if (specifier.type === "ImportNamespaceSpecifier" && specifier.local?.name) {
-        aliases.add(`${specifier.local.name}.defineWorkflowTool`);
+        for (const name of names) aliases.add(`${specifier.local.name}.${name}`);
       }
       if (
         specifier.type === "ImportSpecifier" &&
-        ["defineTool", "defineWorkflowTool"].includes(
-          String(specifier.imported?.name ?? specifier.imported?.value),
-        ) &&
+        names.includes(String(specifier.imported?.name ?? specifier.imported?.value)) &&
         specifier.local?.name
       ) {
         aliases.add(specifier.local.name);
@@ -234,6 +244,39 @@ function collectToolCallbacks(
     nestedScopes,
   );
 
+  for (const propertyName of ["inputSchema", "outputSchema"] as const) {
+    const property = findProperty(tool, propertyName);
+    const value = property?.value as AstNode | undefined;
+    if (
+      property?.start === undefined ||
+      property.end === undefined ||
+      value?.start === undefined ||
+      value.end === undefined
+    )
+      continue;
+    // JSON Schema literals are already durable data and need no factory.
+    if (value.type === "ObjectExpression" && !findProperty(value, "~standard")) continue;
+    if (
+      value.type === "CallExpression" &&
+      (value.callee?.name === "__eveDefineDurableSchema" ||
+        context.durableSchemaAliases.has(readDefinerName(value.callee) ?? ""))
+    )
+      continue;
+    results.push({
+      body: `{ return ${source.slice(value.start, value.end)}; }`,
+      bodyNode: value,
+      isAsync: false,
+      isGenerator: false,
+      isReference: false,
+      nestedScopes,
+      params: "",
+      phase: propertyName,
+      propertyName,
+      propEnd: property.end,
+      propStart: property.start,
+    });
+  }
+
   const approval = findProperty(tool, "approval");
   const approvalValue = approval?.value as AstNode | undefined;
   if (approvalValue?.type === "ObjectExpression") {
@@ -342,7 +385,10 @@ function applyTransform(source: string, callbacks: readonly CallbackInfo[]): { c
     );
 
     const wrapper = createLiveWrapper(callback, hoistedName, closure);
-    const stamped = `__eveStampDynamicCallback(${wrapper}, ${hoistedName}, ${closure})`;
+    const stamped =
+      callback.phase === "inputSchema" || callback.phase === "outputSchema"
+        ? `__eveDefineDurableSchema({ schema: ${hoistedName}, closure: ${closure} })`
+        : `__eveStampDynamicCallback(${wrapper}, ${hoistedName}, ${closure})`;
     replacements.push({
       end: callback.propEnd,
       start: callback.propStart,
@@ -356,6 +402,11 @@ function applyTransform(source: string, callbacks: readonly CallbackInfo[]): { c
   }
 
   const registrySetup = [
+    ...(callbacks.some(
+      (callback) => callback.phase === "inputSchema" || callback.phase === "outputSchema",
+    )
+      ? ['import { defineDurableSchema as __eveDefineDurableSchema } from "eve/tools";']
+      : []),
     `var __eveDurableCallbackSym = Symbol.for("eve:durable-dynamic-callback");`,
     `function __eveStampDynamicCallback(callback, impl, closure) {`,
     `  Object.defineProperty(callback, __eveDurableCallbackSym, { configurable: true, value: { callback: impl, closure } });`,

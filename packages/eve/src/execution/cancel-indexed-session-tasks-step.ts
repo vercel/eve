@@ -1,3 +1,6 @@
+import { recordTerminalTaskViewsStep } from "#execution/tasks/parent/hitl-proxy-steps.js";
+import type { SessionStateTransition } from "#execution/session/state-cursor.js";
+import type { TaskView } from "#tasks/types.js";
 import { deserializeContext } from "#context/serialize.js";
 import { readDurableSession, type DurableSessionState } from "#execution/durable-session-store.js";
 import { resolveEffectiveAgentRuntime } from "#execution/effective-agent-config.js";
@@ -6,7 +9,7 @@ import { cancelOwnedTask } from "#execution/tasks/parent/dispatch.js";
 import { cancelBackgroundAgentTask } from "#execution/tools/subagent/task-cancel.js";
 import { createLogger, logError } from "#internal/logging.js";
 import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
-import { getSessionTaskIndex } from "#tasks/session-index.js";
+import { getBackgroundWorkflowToolRuns } from "#harness/workflow-tool-runs.js";
 
 const log = createLogger("execution.cancel-indexed-session-tasks");
 
@@ -14,29 +17,29 @@ const log = createLogger("execution.cancel-indexed-session-tasks");
 export async function cancelAllIndexedSessionTasksStep(input: {
   readonly serializedContext?: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
-}): Promise<void> {
+}): Promise<SessionStateTransition> {
   "use step";
 
   let durable;
   try {
-    durable = await readDurableSession(input.sessionState);
+    durable = readDurableSession(input.sessionState);
   } catch (error) {
     logError(log, "failed to read the session for indexed task cancellation", error, {
       parentSessionId: input.sessionState.sessionId,
     });
-    return;
+    return { sessionState: input.sessionState };
   }
 
   let entries;
   try {
-    entries = getSessionTaskIndex(durable.state);
+    entries = getBackgroundWorkflowToolRuns(durable.state);
   } catch (error) {
     logError(log, "failed to read the task index", error, {
       parentSessionId: durable.sessionId,
     });
-    return;
+    return { sessionState: input.sessionState };
   }
-  if (entries.length === 0) return;
+  if (entries.length === 0) return { sessionState: input.sessionState };
   if (input.serializedContext === undefined) {
     throw new Error("Indexed task cancellation requires serialized runtime context.");
   }
@@ -49,19 +52,28 @@ export async function cancelAllIndexedSessionTasksStep(input: {
     turnAgent: effectiveAgent.turnAgent,
   });
 
+  const views: TaskView[] = [];
   for (const entry of entries) {
     try {
-      await cancelOwnedTask({
+      const view = await cancelOwnedTask({
         cancelOwnedWork: cancelBackgroundAgentTask,
         entry,
         serializedContext: input.serializedContext,
         session,
       });
+      views.push(view);
     } catch (error) {
       logError(log, "failed to cancel indexed task", error, {
         parentSessionId: durable.sessionId,
-        taskId: entry.taskId,
+        taskId: entry.task.taskId,
       });
     }
   }
+  // Session finalization closes the inbox before cancellation, so it cannot
+  // rely on child notifications to record outcomes or settle activity.
+  return await recordTerminalTaskViewsStep({
+    serializedContext: input.serializedContext,
+    sessionState: input.sessionState,
+    views,
+  });
 }

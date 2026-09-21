@@ -67,7 +67,7 @@ export async function runInteractiveDevelopmentUi(input: {
           serverUrl: input.server.serverUrl,
         }))
       ) {
-        throw new Error("Could not pause the development server for integration setup.");
+        throw new Error("Could not pause the development server for setup.");
       }
       let outcome:
         | { readonly error: unknown; readonly ok: false }
@@ -88,7 +88,7 @@ export async function runInteractiveDevelopmentUi(input: {
         (await resumeDevelopmentRuntimeArtifacts(release)) === undefined
       ) {
         throw new Error(
-          "Could not resume the eve development server after integration setup. Restart eve dev before making further source changes.",
+          "Could not resume the eve development server after setup. Restart eve dev before making further source changes.",
           outcome.ok ? undefined : { cause: outcome.error },
         );
       }

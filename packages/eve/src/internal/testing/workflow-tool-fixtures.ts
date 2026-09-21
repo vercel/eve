@@ -1,7 +1,7 @@
 /**
  * Authored workflow tool bodies for integration tests. Each exported
  * `"use workflow"` function stands in for a tool's `execute`: the test tier's
- * bundler registers them in the driver, and the harness sees the stubs the
+ * bundler registers them in the workflow owner, and the harness sees the stubs the
  * client transform leaves behind, exactly as it would for an application's
  * `agent/tools/*.ts`.
  */
@@ -13,8 +13,6 @@ import {
 } from "#compiled/@workflow/core/index.js";
 
 import type { WorkflowToolContext } from "#tools/workflow-definition.js";
-import { executeWorkflowBody, type WorkflowBodyInput } from "#execution/tools/workflow/body.js";
-import type { TaskExec, TaskMessage } from "#tools/task.js";
 import {
   ConnectionAuthorizationFailedError,
   ConnectionAuthorizationRequiredError,
@@ -40,6 +38,23 @@ export async function authorizedDeployWorkflow(input: DeployInput, ctx: Workflow
   const plan = await planDeployStep(input.service);
   const authenticatedAs = await authorizedDeployStep(input.service, ctx);
   return { plan, authenticatedAs };
+}
+
+export async function workflowContextMisuseWorkflow(_input: DeployInput, ctx: WorkflowToolContext) {
+  "use workflow";
+  return await readAgentsStep(ctx);
+}
+
+async function readAgentsStep(ctx: WorkflowToolContext) {
+  "use step";
+  try {
+    return ctx.agents;
+  } catch (error) {
+    if (error instanceof Error) {
+      error.message += ` Attempt ${getStepMetadata().attempt}.`;
+    }
+    throw error;
+  }
 }
 
 export async function stepReferenceWorkflow(input: DeployInput) {
@@ -167,13 +182,12 @@ export async function* reportingDeployWorkflow(
 export async function* backgroundDeployWorkflow(
   input: DeployInput,
   _ctx: WorkflowToolContext,
-  task: TaskExec,
-): AsyncGenerator<string | TaskMessage, { readonly plan: string }> {
+): AsyncGenerator<string, { readonly plan: string }> {
   "use workflow";
 
   const plan = await planDeployStep(input.service);
   yield `planned ${input.service}`;
-  yield task.postMessage(`Review ${plan}`);
+  yield `review ${plan}`;
   return { plan };
 }
 
@@ -248,13 +262,4 @@ export async function askThenRaceWorkflow(
   });
   const answer = await Promise.race([pending, workflowSleep("50ms")]);
   return { decided: answer === undefined ? "timed out" : "answered", service: input.service };
-}
-
-/** Runs the actual workflow body with the capability passed by its launching turn. */
-export async function workflowAuthorizationCapabilityProbe(
-  input: WorkflowBodyInput & { execution: "background" | "blocking" },
-) {
-  "use workflow";
-
-  return executeWorkflowBody(input, new AbortController().signal);
 }

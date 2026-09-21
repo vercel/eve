@@ -49,7 +49,9 @@ export interface CreateInstrumentationHandleEventInput {
   readonly parentLineage?: InstrumentationParentLineage;
   readonly parentTraceContext?: InstrumentationTraceContext;
   readonly rootSessionId?: string;
+  readonly scheduleId?: string;
   readonly sessionId: string;
+  readonly title?: string;
   readonly turnId?: string;
 }
 
@@ -399,7 +401,9 @@ function toLifecycleEvent(
         parentLineage: input.parentLineage,
         parentTraceContext: input.parentTraceContext,
         rootSessionId: input.rootSessionId ?? input.sessionId,
+        scheduleId: input.scheduleId,
         sessionId: input.sessionId,
+        title: input.title,
         type: "session.started",
       };
     case "session.completed":

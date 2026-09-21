@@ -7,6 +7,7 @@ import {
   type MockModelToolResult,
 } from "eve/evals";
 
+import { AUTH_SNAPSHOT_MARKER } from "./lib/lifecycle-control.js";
 import { lifecycleModel } from "./lib/lifecycle-model.js";
 
 const TASK_ID_PATTERN = /task_[a-z0-9]+/iu;
@@ -26,12 +27,41 @@ function respond(request: MockModelRequest): MockModelResponse | string {
 
   // Framework announcements are model context, not scenario turns.
   const message = [...request.userMessages].reverse().find(isScenarioMessage) ?? "";
+  if (message === "TUI-HANG-IN-PROCESS") {
+    return startHangLabTool(request, "hold-in-process", "hold_in_process", { durationMs: 45_000 });
+  }
+  if (message === "TUI-HANG-WORKFLOW") {
+    return startHangLabTool(request, "hold-workflow", "hold_workflow", { duration: "45s" });
+  }
+  if (message === "TUI-HANG-COMMAND") {
+    return startHangLabTool(request, "hold-command", "hold_command", { durationSeconds: 45 });
+  }
+  if (message === "TUI-HANG-SUBAGENT") {
+    return startHangLabTool(request, "hold-subagent", "hang-worker", {
+      message: "Hold for 45 seconds.",
+    });
+  }
   if (message.includes("TASK-FANOUT-INTERACTIVE-CHECK")) return "TASK-FANOUT-INTERACTIVE-OK";
   if (message.includes("TASK-CANCEL-NOW")) return cancelWorkerTask(request);
   if (message.includes("CHILD-TASK-EXCLUSIVITY-RACE")) return raceBusyWorker(request);
   if (message.startsWith("CHILD-TASK-EXCLUSIVITY-LATER ")) {
     return laterBusyWorker(request, message);
   }
+  if (message === "TASK-AUTH-SNAPSHOT-ROOT") {
+    return reportAuthSnapshotTurn(
+      request,
+      "task-auth-snapshot-root",
+      "TASK-AUTH-SNAPSHOT-ROOT-ACK",
+    );
+  }
+  if (message === "TASK-AUTH-SNAPSHOT-LATER") {
+    return reportAuthSnapshotTurn(
+      request,
+      "task-auth-snapshot-later",
+      "TASK-AUTH-SNAPSHOT-LATER-ACK",
+    );
+  }
+  if (message.startsWith("TASK-AUTH-SNAPSHOT ")) return startAuthSnapshotTask(request, message);
   if (message.startsWith("TASK-A2-CHILD-FAILURE-VERIFY ")) {
     return inspectTerminalTask(
       request,
@@ -143,6 +173,14 @@ function respond(request: MockModelRequest): MockModelResponse | string {
   if (message === "TASK-HITL-ROUTING") {
     return startApprovalWorker(request, "task-hitl-worker", "TASK-HITL-STARTED");
   }
+  if (message === "TUI-IDLE-WORK-REPRO") {
+    return startApprovalWorker(
+      request,
+      `tui-idle-work-repro-${scenarioUserMessageCount(request)}`,
+      "TUI-IDLE-WORK-STARTED",
+      { delayed: true },
+    );
+  }
   if (message === "TASK-C7-AUTHORIZATION") {
     return startApprovalWorker(request, "task-c7-authorization-worker", "TASK-C7-STARTED");
   }
@@ -166,6 +204,56 @@ function respond(request: MockModelRequest): MockModelResponse | string {
   if (message === "TASK-D6-PARTIAL-FANOUT-FAILURE") return partialFailureFanout(request);
 
   return `Mock reply: ${message}`;
+}
+
+function startHangLabTool(
+  request: MockModelRequest,
+  callIdPrefix: string,
+  name: string,
+  input: unknown,
+): MockModelResponse | string {
+  const callId = `${callIdPrefix}-${scenarioUserMessageCount(request)}`;
+  if (resultById(request, callId) === undefined) {
+    return { toolCalls: [{ id: callId, input, name }] };
+  }
+  return `TUI-HANG-LAB-COMPLETE:${callIdPrefix}`;
+}
+
+function startAuthSnapshotTask(
+  request: MockModelRequest,
+  message: string,
+): MockModelResponse | string {
+  const authCallId = "task-auth-snapshot-creator";
+  if (resultById(request, authCallId) === undefined) {
+    return authSnapshotToolCall(authCallId);
+  }
+  const callId = "task-auth-snapshot";
+  if (resultById(request, callId) !== undefined) return "TASK-AUTH-SNAPSHOT-STARTED";
+  const key = message.split(" ").at(-1);
+  if (key === undefined) throw new Error("Auth snapshot scenario has no lifecycle key.");
+  return {
+    toolCalls: [
+      {
+        id: callId,
+        input: { child: false, delayedAuthChild: true, key, marker: AUTH_SNAPSHOT_MARKER },
+        name: "lifecycle_task",
+      },
+    ],
+  };
+}
+
+function reportAuthSnapshotTurn(
+  request: MockModelRequest,
+  callId: string,
+  acknowledgement: string,
+): MockModelResponse | string {
+  return resultById(request, callId) === undefined ? authSnapshotToolCall(callId) : acknowledgement;
+}
+
+function authSnapshotToolCall(callId: string): MockModelResponse {
+  return {
+    toolCalls: [{ id: callId, input: {}, name: "snapshot_whoami" }],
+  };
 }
 
 function childToolSurfaceReport(request: MockModelRequest): MockModelResponse | string {
@@ -312,6 +400,7 @@ function startApprovalWorker(
   request: MockModelRequest,
   callId: string,
   completedText: string,
+  options?: { delayed?: boolean },
 ): MockModelResponse | string {
   if (resultById(request, callId) === undefined) {
     return {
@@ -322,9 +411,11 @@ function startApprovalWorker(
             message:
               callId === "task-c7-authorization-worker"
                 ? "Run the C7 authorization mode, then return C7-AUTHORIZATION-COMPLETE."
-                : callId === "task-hitl-worker"
-                  ? "Run three approval gates in order, then return CHILD-GATES-COMPLETE."
-                  : "Run both approval gates in order, then return CHILD-GATES-COMPLETE.",
+                : options?.delayed === true
+                  ? "Wait twenty seconds before the approval gates, then run three approval gates in order and return CHILD-GATES-COMPLETE."
+                  : callId === "task-hitl-worker"
+                    ? "Run three approval gates in order, then return CHILD-GATES-COMPLETE."
+                    : "Run both approval gates in order, then return CHILD-GATES-COMPLETE.",
           },
           name: "approval-worker",
         },

@@ -5,7 +5,7 @@ import type { AgentInfoResult } from "#client/types.js";
 import { createEveDevDispatchSchedulePath } from "#protocol/routes.js";
 import { toErrorMessage } from "#shared/errors.js";
 import { stripNpmPackageScope } from "#shared/package-name.js";
-import { EvalSessionManager } from "#evals/session.js";
+import { EvalSessionManager } from "#evals/session-manager.js";
 import type {
   EveEvalScheduleDispatchResult,
   EveEvalSession,

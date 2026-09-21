@@ -1,4 +1,4 @@
-import type { LanguageModel } from "ai";
+import type { Experimental_EvaluationModel as EvaluationModel } from "ai";
 
 import type { StandardSchemaV1 } from "#compiled/@standard-schema/spec/index.js";
 import type {
@@ -9,11 +9,13 @@ import type {
 import type {
   CancelSessionResult,
   ClientSessionState,
+  CreateSessionOptions,
   SendTurnInput,
   SendTurnOptions,
 } from "#client/types.js";
 import type { InputRequest, InputResponse } from "#shared/input.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
+import type { TaskStatus } from "#tasks/types.js";
 import type { AgentModelOptionsDefinition } from "#shared/agent-definition.js";
 import type { EvalReporter } from "#evals/runner/reporters/types.js";
 import type {
@@ -24,7 +26,7 @@ import type {
   EveEvalToolCallMatchOptions,
 } from "#evals/match.js";
 
-/** Lifecycle outcome of an eval-observed tool or subagent action. */
+/** Lifecycle outcome of an eval-observed tool action. */
 export type EveEvalActionStatus = "pending" | "completed" | "failed" | "rejected";
 
 /**
@@ -61,8 +63,8 @@ export interface EveEvalSubagentCall {
   readonly remoteUrl?: string;
   /** Output from the matching `subagent.completed` event; `undefined` when the call never completed. */
   readonly output?: JsonValue;
-  /** Whether the delegation is unresolved, completed, failed, or rejected. */
-  readonly status: EveEvalActionStatus;
+  /** Task lifecycle status inferred from the captured delegation events. */
+  readonly status: TaskStatus;
   /** Zero-based index of the turn the delegation happened in. */
   readonly turnIndex: number;
   /** Owning session id, when the runner knows it. */
@@ -287,7 +289,7 @@ export interface EveEvalLiveTurn {
   ): Promise<EveEvalStreamEvent<TType>>;
 }
 
-/** Operations and state shared by the primary eval context and independent sessions. */
+/** Operations and state belonging to one accepted session. */
 export interface EveEvalSessionDriver {
   /** All events observed on this session so far. */
   readonly events: readonly MessageStreamEvent[];
@@ -299,9 +301,9 @@ export interface EveEvalSessionDriver {
   /** Input requests left pending by the last parked turn. */
   readonly pendingInputRequests: readonly InputRequest[];
   /** Serializable cursor for resuming this session. */
-  readonly state: ClientSessionState | undefined;
-  /** eve session id after the first successful send. */
-  readonly sessionId: string | undefined;
+  readonly state: ClientSessionState;
+  /** Durable session id, available when the session is returned. */
+  readonly sessionId: string;
   /** Request cooperative cancellation of this session's active turn. */
   cancel(): Promise<CancelSessionResult>;
   /** Require exactly one pending input request matching `filter`, or abort dependent control flow. */
@@ -323,7 +325,7 @@ export interface EveEvalSessionDriver {
   sendFile(text: string, filePath: string, mediaType?: string): Promise<EveEvalTurn>;
 }
 
-/** Driver for one independent session, exposed by `t.newSession()` and target attachment helpers. */
+/** One accepted session, exposed by `t.session()`, turns, and target attachment helpers. */
 export interface EveEvalSession
   extends EveEvalSessionDriver, EveEvalAssertions, EveEvalOutputAssertions {}
 
@@ -335,6 +337,8 @@ export interface EveEvalTurn extends EveEvalAssertions, EveEvalOutputAssertions 
   readonly events: readonly MessageStreamEvent[];
   readonly inputRequests: readonly InputRequest[];
   readonly message: string | undefined;
+  /** Session that owns this turn; use it for follow-up messages. */
+  readonly session: EveEvalSession;
   readonly sessionId: string;
   readonly status: "completed" | "failed" | "waiting";
   readonly toolCalls: readonly EveEvalToolCall[];
@@ -350,70 +354,93 @@ export interface EveEvalTurn extends EveEvalAssertions, EveEvalOutputAssertions 
 // Judge (LLM-as-judge)
 // ---------------------------------------------------------------------------
 
-/**
- * The judge model used by `t.judge.*` assertions, configured per-eval or as
- * the run-wide default in `evals.config.ts`. Only ever used for scoring; it
- * never changes the agent under test. String model ids route through the
- * Vercel AI Gateway; provider model instances run directly.
- */
+/** Evaluation settings used only for scoring, independently of the agent under test. */
 export interface EveEvalJudgeConfig {
-  readonly model: LanguageModel;
+  /** Evaluation model ID or instance. Defaults to the model used by `eve/ai` evaluate. */
+  readonly model?: EvaluationModel;
   readonly modelOptions?: AgentModelOptionsDefinition;
 }
 
-/**
- * Per-call options for `t.judge.autoevals.*` assertions.
- */
-export interface JudgeOpts {
-  /** Value to grade. Defaults to the final assistant message (`t.reply`). */
-  readonly on?: unknown;
-  /** Judge model for this call only; overrides the eval/config judge model. */
-  readonly model?: LanguageModel;
-  readonly modelOptions?: AgentModelOptionsDefinition;
+/** JSON content accepted as evaluation state, instructions, or rubric descriptions. */
+export type JudgeInput = string | JsonObject | readonly JsonValue[];
+
+/** A boolean judgment, ordered rubric, or categorical judgment with an expected option. */
+export type JudgeQuestion =
+  | {
+      readonly type: "boolean";
+      readonly instructions: JudgeInput;
+      readonly criteria?: { readonly true?: JudgeInput | null; readonly false?: JudgeInput | null };
+    }
+  | {
+      readonly type: "score";
+      readonly instructions: JudgeInput;
+      readonly criteria: readonly (JudgeInput | null)[];
+    }
+  | {
+      readonly type: "choice";
+      readonly instructions: JudgeInput;
+      readonly criteria: Readonly<Record<string, JudgeInput | null>>;
+      readonly expected: string;
+    };
+
+/** Restricts a choice expectation to one of its authored option keys. */
+export type JudgeQuestionConstraint<Q extends JudgeQuestion> = Q extends { type: "choice" }
+  ? { readonly expected: NoInfer<Extract<keyof Q["criteria"], string>> }
+  : unknown;
+
+/** Named judgments evaluated together against one shared state. */
+export interface JudgeBatch<Questions extends Record<string, JudgeQuestion>> {
+  /** Replaces the default `{ input, output }` state when supplied. */
+  readonly state?: JudgeInput;
+  readonly questions: Questions & {
+    readonly [Key in keyof Questions]: JudgeQuestionConstraint<Questions[Key]>;
+  };
 }
 
-/**
- * Braintrust autoevals graders, bound to the resolved judge model. The grader
- * family is named so its semantics are explicit: `factuality`'s consistency
- * buckets and `closedQA`'s yes/no grading are autoevals' behavior, not eve's.
- * These are eve-owned wrappers, not the raw library.
- */
-export interface AutoevalsJudges {
-  factuality(expected: string, opts?: JudgeOpts): AssertionHandle;
-  summarizes(expected: string, opts?: JudgeOpts): AssertionHandle;
-  closedQA(criteria: string, opts?: JudgeOpts): AssertionHandle;
-  sql(expected: string, opts?: JudgeOpts): AssertionHandle;
+/** Per-call settings override the resolved eval/project judge settings. */
+export interface JudgeOpts extends EveEvalJudgeConfig {
+  /** JSON value to grade instead of the latest settled turn's assistant message. */
+  readonly on?: JsonValue;
 }
 
-/**
- * Model-backed assertion namespaces on `t.judge`. A future non-autoevals
- * engine would slot in as a sibling of `autoevals`.
- */
+/** Model-backed assertions. Calls start immediately and return non-awaitable handles. */
 export interface JudgeContext {
-  readonly autoevals: AutoevalsJudges;
+  (criteria: string, opts?: JudgeOpts): AssertionHandle;
+  <const Q extends JudgeQuestion>(
+    question: Q & JudgeQuestionConstraint<Q>,
+    opts?: JudgeOpts,
+  ): AssertionHandle;
+  <const Questions extends Record<string, JudgeQuestion>>(
+    batch: JudgeBatch<Questions>,
+    opts?: EveEvalJudgeConfig,
+  ): { readonly [Key in keyof Questions]: AssertionHandle };
 }
 
 /**
- * The single context passed to an eval's `test(t)` function. It drives the
- * primary session, carries the run-level
- * and value-level assertion vocabulary, and exposes `judge` for LLM-as-judge.
+ * The context passed to `test(t)`. Creates independent sessions and carries
+ * run-level assertions, value-level assertions, and model-backed judges.
  *
  * Scoped assertions (`succeeded`, `calledTool`, …) record an entry evaluated
  * after the test body; `check`, `require`, and `judge` evaluate explicit values.
  */
-export interface EveEvalContext extends EveEvalSessionDriver, EveEvalAssertions {
+export interface EveEvalContext<TContext = unknown> extends EveEvalAssertions {
+  /** Run-wide setup context, shared by reference across evals and teardown. */
+  readonly context: TContext;
   /** Eval timeout signal. */
   readonly signal: AbortSignal;
   /** Current target under test. */
   readonly target: EveEvalTargetHandle;
-  /** The primary session's last assistant message, or null. */
-  readonly reply: string | null;
   /** Structured eval log hook. */
   log(message: string): void;
   /** Pause the eval task, defaulting to 1 second, while respecting the eval timeout signal. */
   sleep(ms?: number): Promise<void>;
-  /** Create an additional independent session against the same target. */
-  newSession(): EveEvalSession;
+  /**
+   * Create a new session without starting a turn or reading events. Resolves on
+   * acceptance with a definite session id and cursor. Every call creates a session.
+   */
+  session(options?: CreateSessionOptions): Promise<EveEvalSession>;
+  /** Create a new session with its first message and wait for the turn to settle. */
+  send(message: SendTurnInput["message"], options?: SendTurnOptions): Promise<EveEvalTurn>;
 
   /** Apply a value-level assertion (from `eve/evals/expect`) to a value. */
   check(value: unknown, assertion: Assertion): AssertionHandle;
@@ -490,10 +517,10 @@ export interface EveEvalTargetHandle extends EveEvalTarget {
 interface EveEvalBase {
   readonly description?: string;
   /**
-   * Judge model for this eval's `t.judge.*` assertions. Optional: when
+   * Judge model for this eval's `t.judge(...)` assertions. Optional: when
    * omitted, judge assertions fall back to the `judge` declared in
-   * `evals.config.ts`. Only used for scoring; never changes the agent
-   * under test.
+   * `evals.config.ts`, then the shared evaluation default. Only used for
+   * scoring; never changes the agent under test.
    */
   readonly judge?: EveEvalJudgeConfig;
   readonly timeoutMs?: number;
@@ -518,9 +545,9 @@ export interface EveEvalInputFields extends EveEvalBase {
  * drives the agent and asserts on what it produced. Eval identity is derived
  * from the file path, so authors do not specify an `id` or `name`.
  */
-export interface EveEvalInput extends EveEvalBase {
+export interface EveEvalInput<TContext = unknown> extends EveEvalBase {
   /** Imperative interaction-and-assertion script. */
-  test(t: EveEvalContext): void | Promise<void>;
+  test(t: EveEvalContext<TContext>): void | Promise<void>;
 }
 
 /**
@@ -529,7 +556,7 @@ export interface EveEvalInput extends EveEvalBase {
  * `_tag` literal (`"EveEval"`) brands the value so discovery and the runner
  * can recognize a defined eval.
  */
-export type EveEvalDefinition = EveEvalInput & {
+export type EveEvalDefinition<TContext = unknown> = EveEvalInput<TContext> & {
   readonly _tag: "EveEval";
 };
 
@@ -604,10 +631,22 @@ export interface EveEvalRunSummary {
  * Exactly one `evals.config.ts` is required at the root of the `evals/`
  * directory; it supplies the defaults every eval in the run shares.
  */
-export interface EveEvalConfigInput {
+export interface EveEvalConfigInput<TContext = unknown> {
   /**
-   * Default judge model for `t.judge.*` assertions across every eval.
-   * Optional: evals that use no judge need not set it, and individual evals
+   * Runs once before target startup, except for `--list` or an empty selection.
+   * The return value is shared with evals and teardown by reference in the runner process.
+   */
+  readonly setup?: () => TContext | Promise<TContext>;
+  /**
+   * Runs once after server and sandbox shutdown, even if setup or eval execution fails.
+   * Receives undefined if setup returns no context or throws before returning.
+   * Can be used without setup.
+   * Does not run for `--list` or an empty selection.
+   */
+  teardown?(context: TContext | undefined): void | Promise<void>;
+  /**
+   * Default judge model for `t.judge(...)` assertions across every eval.
+   * Optional: omission uses the shared evaluation default. Individual evals
    * may override it with their own `judge`. Only ever used for scoring.
    */
   readonly judge?: EveEvalJudgeConfig;
@@ -633,6 +672,11 @@ export interface EveEvalConfigInput {
  * Validated eval run configuration returned by `defineEvalConfig()`. The
  * `_tag` literal brands the value so discovery can recognize it.
  */
-export type EveEvalConfig = EveEvalConfigInput & {
+export type EveEvalConfig<TContext = unknown> = EveEvalConfigInput<TContext> & {
   readonly _tag: "EveEvalConfig";
 };
+
+/** Setup context type associated with an authored eval config. */
+export type EveEvalConfigContext<TConfig extends EveEvalConfig> = Awaited<
+  ReturnType<NonNullable<TConfig["setup"]>>
+>;

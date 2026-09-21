@@ -14,6 +14,7 @@ import {
   ParentSessionKey,
   SandboxKey,
 } from "#context/keys.js";
+import { ConversationContextKey } from "#shared/conversation-context.js";
 import { ContextContainer } from "#context/container.js";
 import { withContextScope } from "#context/run-step.js";
 import {
@@ -48,6 +49,8 @@ import { buildSubagentRunInput } from "#subagents/tool.js";
 import { resolveEffectiveAgentRuntime } from "#execution/effective-agent-config.js";
 import { isTaskControlAction } from "#execution/tasks/parent/dispatch.js";
 import type { WorkflowToolRunOwner } from "#execution/tools/workflow/messages.js";
+import { resolveWorkflowAgentMetadata } from "#execution/tools/subagent/metadata.js";
+import type { WorkflowAgentMetadata } from "#tools/workflow-definition.js";
 
 export type DispatchPlanEntry =
   | { readonly kind: "task-control"; readonly action: RuntimeToolCallActionRequest }
@@ -57,20 +60,15 @@ export type DispatchPlanEntry =
 export interface CoordinationDispatchInput {
   readonly callbackBaseUrl?: string;
   readonly workflowToolRunOwner: WorkflowToolRunOwner;
-  readonly parentWritable: WritableStream<Uint8Array>;
+  readonly sessionWritable: WritableStream<Uint8Array>;
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
 }
 
-/** Owner-side results plus any task-control work that still needs acknowledgement. */
+/** Owner-side results and the updated session. */
 export interface CoordinationDispatchResult {
   readonly results: readonly RuntimeActionResult[];
   readonly sessionState: DurableSessionState;
-  readonly pendingTasks: readonly {
-    readonly taskInboxToken: string;
-    readonly taskId: string;
-    readonly taskRunId: string;
-  }[];
 }
 
 /** Everything preflight produces before either step's dispatch loop runs. */
@@ -82,6 +80,9 @@ export interface PreparedCoordinationDispatch<PlanEntry = DispatchPlanEntry> {
   readonly bundle: CompiledBundle;
   readonly capabilities: Parameters<typeof buildSubagentRunInput>[0]["capabilities"];
   readonly channelMetadata: Parameters<typeof buildSubagentRunInput>[0]["channelMetadata"];
+  readonly inheritedConversation: Parameters<
+    typeof buildSubagentRunInput
+  >[0]["inheritedConversation"];
   /** Number of local children sharing the parent's remaining token quota. */
   readonly fanoutSize: number;
   readonly initiatorAuth: Parameters<typeof buildSubagentRunInput>[0]["initiatorAuth"];
@@ -96,6 +97,7 @@ export interface PreparedCoordinationDispatch<PlanEntry = DispatchPlanEntry> {
   readonly plan: readonly PlanEntry[];
   readonly session: RuntimeSession;
   readonly sessionState: DurableSessionState;
+  readonly workflowAgents: Readonly<Record<string, WorkflowAgentMetadata>>;
 }
 
 /**
@@ -109,7 +111,7 @@ export async function prepareCoordinationDispatch(input: {
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
 }): Promise<PreparedCoordinationDispatch | undefined> {
-  const durableSession = await readDurableSession(input.sessionState);
+  const durableSession = readDurableSession(input.sessionState);
   const pending = getPendingCoordinationBatch(durableSession.state);
 
   if (pending === undefined) return undefined;
@@ -220,6 +222,7 @@ export async function prepareActionDispatch<PlanEntry>(input: {
     bundle,
     capabilities: ctx.get(CapabilitiesKey),
     channelMetadata: ctx.get(ChannelInstrumentationKey),
+    inheritedConversation: ctx.get(ConversationContextKey),
     fanoutSize: input.fanoutSize ?? batch.localFanoutSize ?? 0,
     initiatorAuth: ctx.get(InitiatorAuthKey) ?? null,
     localDevRequest: ctx.get(LocalDevRequestKey),
@@ -233,6 +236,7 @@ export async function prepareActionDispatch<PlanEntry>(input: {
     sandboxSessionId,
     serializedContext: input.serializedContext,
     session,
+    workflowAgents: resolveWorkflowAgentMetadata(ctx),
   };
 }
 

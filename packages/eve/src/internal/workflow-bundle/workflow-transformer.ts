@@ -1,19 +1,15 @@
 import { WORKFLOW_REGISTRY_GLOBAL } from "#execution/workflow-registry.js";
 import {
   readWorkflowDirective,
+  mayContainWorkflowDirective,
   type WorkflowDirective,
 } from "#internal/workflow-bundle/workflow-directive-ast.js";
 import { parseWithNitroRolldownAst } from "#internal/bundler/nitro-rolldown.js";
 
 import type { WorkflowManifest } from "./workflow-builders.js";
 
-// Step names whose `stepId` must be emitted as the bare function name,
-// not `step//<idBase>//<name>`. The workflow-body shim's
-// `setAttributes` (and Workflow's compiled equivalent)
-// dispatches builtins via `useStep("<name>")` with the unqualified
-// identifier — if the registry stored these under their version-stamped
-// `step//...//name` ids, the lookup would miss and the runtime would
-// raise `Step "__builtin_*" is not registered in the current deployment`.
+// Workflow dispatches builtins using bare names; version-stamped step ids
+// would break registry lookups for these functions.
 const BUILTIN_STEP_NAMES = new Set([
   "__builtin_response_array_buffer",
   "__builtin_response_json",
@@ -84,6 +80,7 @@ export async function findWorkflowDirectiveFunctions(
   filename: string,
   source: string,
 ): Promise<readonly { readonly directive: WorkflowDirective; readonly name: string }[]> {
+  if (!mayContainWorkflowDirective(source)) return [];
   const ast = await parseWorkflowSource(filename, source);
   return findDirectiveFunctions(ast).map((fn) => ({ directive: fn.directive, name: fn.name }));
 }
@@ -114,7 +111,7 @@ export async function transformWorkflowDirectives(input: {
   code: string;
   workflowManifest: WorkflowManifest;
 }> {
-  if (input.mode === false) {
+  if (input.mode === false || !mayContainWorkflowDirective(input.source)) {
     return { code: input.source, workflowManifest: {} };
   }
 

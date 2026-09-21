@@ -8,7 +8,7 @@ export default defineEval({
     initial.expectOk();
     initial.calledTool("blocking_agent", { count: 1, status: "completed" });
     initial.calledTool("background_agent", { count: 1, status: "completed" });
-    initial.event("subagent.called", { data: { name: "workflow-marker" }, count: 1 });
+    initial.event("subagent.called", { data: { name: "workflow-marker" } });
     initial.messageIncludes("WORKFLOW-MIXED-AGENTS-INITIAL-RESULT");
     initial.notEvent("message.received", {
       data: { message: /WORKFLOW-CHILD:api:background/u },
@@ -16,7 +16,7 @@ export default defineEval({
 
     const sessionId = initial.sessionId;
     if (sessionId === undefined) throw new Error("Mixed workflow turn has no session id.");
-    let session: Pick<EveEvalSession, "state"> = t;
+    let session: Pick<EveEvalSession, "state"> = initial.session;
     let completed: EveEvalTurn | undefined;
     for (let attempt = 0; attempt < 5; attempt += 1) {
       const live = t.target.watchTurn(sessionId, { startIndex: requireStreamIndex(session) });

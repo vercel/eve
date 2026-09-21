@@ -12,10 +12,11 @@ export default defineEval({
   description: "HITL smoke: an approved once() grant persists for the session.",
   async test(t) {
     const parked = await t.send('Call the guarded-echo tool with note "first-call".');
-    t.requireInputRequest({ toolName: "guarded-echo" });
+    const session = parked.session;
+    session.requireInputRequest({ toolName: "guarded-echo" });
     parked.calledTool("guarded-echo", { status: "pending", count: 1 });
 
-    const approved = await t.respondAll("approve");
+    const approved = await session.respondAll("approve");
     approved.expectOk();
     approved.event("action.result", {
       data: {
@@ -31,7 +32,7 @@ export default defineEval({
 
     // A successful turn in an open session ends "waiting"; a re-park
     // would surface as pending input requests.
-    const second = await t.send('Call the guarded-echo tool again with note "second-call".');
+    const second = await session.send('Call the guarded-echo tool again with note "second-call".');
     second.succeeded();
 
     t.succeeded();

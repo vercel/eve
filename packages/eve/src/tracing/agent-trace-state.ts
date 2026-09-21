@@ -17,10 +17,13 @@ export interface AgentSessionTraceState {
   readonly channelAudience?: ChannelAudience;
   readonly agentName?: string;
   readonly channelKind?: string;
+  readonly channelType?: string;
   readonly context: SpanContext;
   readonly decision?: InstrumentationDecision;
   readonly parentLineage?: InstrumentationParentLineage;
   readonly rootSessionId: string;
+  readonly scheduleId?: string;
+  readonly title?: string;
 }
 
 export interface AgentTurnTraceState {

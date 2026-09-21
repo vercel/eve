@@ -1,3 +1,4 @@
+import { isAgentReasoningDefinition } from "#internal/runtime-model.js";
 import type {
   AgentDefinition,
   AgentBuildDefinition,
@@ -64,6 +65,7 @@ export function normalizeAgentDefinition(
       "modelOptions",
       "outputSchema",
       "reasoning",
+      "tool",
     ],
     message,
   );
@@ -138,6 +140,10 @@ export function normalizeAgentDefinition(
     definition.reasoning = normalizeAgentReasoningDefinition(record.reasoning, message);
   }
 
+  if (record.tool !== undefined) {
+    definition.tool = expectBoolean(record.tool, message);
+  }
+
   if (record.limits !== undefined) {
     definition.limits = normalizeAgentLimitsDefinition(record.limits, message);
   }
@@ -149,20 +155,8 @@ function normalizeAgentReasoningDefinition(
   value: unknown,
   message: string,
 ): NonNullable<NormalizedAgentDefinition["reasoning"]> {
-  const reasoning = expectString(value, message);
-
-  switch (reasoning) {
-    case "provider-default":
-    case "none":
-    case "minimal":
-    case "low":
-    case "medium":
-    case "high":
-    case "xhigh":
-      return reasoning;
-    default:
-      throw new Error(message);
-  }
+  if (!isAgentReasoningDefinition(value)) throw new Error(message);
+  return value;
 }
 
 function normalizeAgentModelDefinition(
@@ -355,15 +349,8 @@ function normalizeAgentExperimentalDefinition(
   message: string,
 ): NonNullable<NormalizedAgentDefinition["experimental"]> {
   const record = expectObjectRecord(value, message);
-  expectOnlyKnownKeys(record, ["instrumentationProviders", "workflow"], message);
+  expectOnlyKnownKeys(record, ["workflow"], message);
   const normalizedDefinition: Mutable<NonNullable<NormalizedAgentDefinition["experimental"]>> = {};
-
-  if (record.instrumentationProviders !== undefined) {
-    if (typeof record.instrumentationProviders !== "boolean") {
-      throw new Error(`${message} "experimental.instrumentationProviders" must be a boolean.`);
-    }
-    normalizedDefinition.instrumentationProviders = record.instrumentationProviders;
-  }
 
   if (record.workflow !== undefined) {
     normalizedDefinition.workflow = normalizeAgentWorkflowDefinition(record.workflow, message);

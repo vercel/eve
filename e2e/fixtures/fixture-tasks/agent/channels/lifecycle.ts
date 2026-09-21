@@ -1,13 +1,17 @@
 import { defineChannel, POST } from "eve/channels";
 import { getHookByToken, getRun, getWorld, resumeHook } from "workflow/api";
 import { z } from "zod";
-import { lifecycleNamespace, type LifecycleControlEvent } from "../lib/lifecycle-control.js";
+import {
+  AUTH_SNAPSHOT_MARKER,
+  lifecycleNamespace,
+  type LifecycleControlEvent,
+} from "../lib/lifecycle-control.js";
 
 const bodySchema = z.object({
   key: z.string().uuid(),
   index: z.number().int().min(0).max(20).optional(),
   token: z.string().min(1).max(512).optional(),
-  marker: z.enum(["A", "B"]).optional(),
+  marker: z.enum(["A", "B", AUTH_SNAPSHOT_MARKER]).optional(),
 });
 
 // Fixture-only capability routes: a per-eval random key addresses only its own
@@ -81,7 +85,7 @@ export default defineChannel({
           return Response.json({
             marker: event.marker,
             status: await run.status,
-            deliveries: await ownerDeliveries(event.runId),
+            notificationCount: await ownerNotificationCount(event.runId),
           });
         }
       }
@@ -90,7 +94,7 @@ export default defineChannel({
   ],
 });
 
-async function ownerDeliveries(runId: string) {
+async function ownerNotificationCount(runId: string) {
   const world = await getWorld();
   const [steps, events] = await Promise.all([
     world.steps.list({ runId, pagination: { limit: 100 }, resolveData: "none" }),
@@ -101,16 +105,14 @@ async function ownerDeliveries(runId: string) {
     }),
   ]);
   if (steps.hasMore || events.hasMore) throw new Error("Lifecycle owner audit exceeded its bound.");
-  const names = new Map(steps.data.map((step) => [step.stepId, step.stepName.split("//").at(-1)]));
-  return events.data.flatMap((event) => {
-    if (event.eventType !== "step_completed") return [];
-    const name = names.get(event.correlationId);
-    return name === "wakeTaskAgentRequestParentStep"
-      ? ["agent-request"]
-      : name === "wakeTaskParentStep"
-        ? ["completed"]
-        : [];
-  });
+  const notificationSteps = new Set(
+    steps.data
+      .filter((step) => step.stepName.endsWith("//notifyTaskParent"))
+      .map((step) => step.stepId),
+  );
+  return events.data.filter(
+    (event) => event.eventType === "step_completed" && notificationSteps.has(event.correlationId),
+  ).length;
 }
 
 async function boundedBody(request: Request) {

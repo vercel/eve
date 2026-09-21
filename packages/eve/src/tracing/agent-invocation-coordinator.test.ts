@@ -9,18 +9,30 @@ import { deriveAgentActionSpanId } from "#tracing/agent-span-id-generator.js";
 import { ContextAgentTraceStateStore } from "#tracing/agent-trace-context-store.js";
 import { deriveTaskId } from "#tasks/task-id.js";
 import { actionIdempotencyKey } from "#instrumentation/lifecycle.js";
+import type { ConversationContext } from "#shared/conversation-context.js";
 
 const outerKey = actionIdempotencyKey("session-1", "turn-1", "workflow");
+const conversation: ConversationContext = {
+  audience: "private",
+  channel: { kind: "http" },
+  environment: "production",
+  mode: "conversation",
+  principalType: "anonymous",
+};
 
 const sessionState = {
-  "eve.runtime.workflowToolRuns": [
-    {
-      callId: "workflow",
-      hookToken: "workflow-hook",
-      runId: "workflow-run",
-      toolName: "coordinate",
-    },
-  ],
+  "eve.workflowTool": {
+    version: 3,
+    runs: [
+      {
+        callId: "workflow",
+        toolName: "coordinate",
+        lifetime: "turn" as const,
+        origin: { turnId: "turn-1", stepIndex: 0 },
+        address: { runId: "workflow-run", hookToken: "workflow-hook" },
+      },
+    ],
+  },
 };
 
 describe("agent invocation trace coordinator", () => {
@@ -120,7 +132,7 @@ describe("agent invocation trace coordinator", () => {
     const serializedContext = await serializeContext(context);
 
     const prepared = prepareAgentInvocationTrace({
-      channelMetadata: { kind: "http", metadata: { audience: "private" } },
+      conversation,
       invocation: {
         callId: "workflow",
         kind,
@@ -261,7 +273,7 @@ describe("agent invocation trace coordinator", () => {
 
 function prepare(serializedContext: Record<string, unknown>, callId: string) {
   return prepareAgentInvocationTrace({
-    channelMetadata: { kind: "http", metadata: { audience: "private" } },
+    conversation,
     invocation: {
       callId,
       kind: "subagent-call",

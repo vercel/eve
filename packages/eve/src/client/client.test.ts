@@ -39,6 +39,18 @@ afterEach(() => {
 });
 
 describe("Client request policy", () => {
+  it("forwards inspection cancellation without changing authentication", async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(Response.json(AGENT_INFO));
+    const controller = new AbortController();
+    const client = new Client({ host: "https://eve.test", auth: { bearer: "test-token" } });
+    await client.info({ signal: controller.signal });
+    const init = fetchMock.mock.calls[0]?.[1];
+    expect(init?.signal).toBe(controller.signal);
+    expect(new Headers(init?.headers).get("authorization")).toBe("Bearer test-token");
+  });
+
   it("rejects malformed health payloads", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
       Response.json({ ok: true, status: "ready", workflowId: "wf", extra: true }),
@@ -230,6 +242,27 @@ describe("Client request policy", () => {
       name: "web_search",
     });
     expect(info.tools.static[0]).not.toHaveProperty("outputSchema");
+  });
+
+  it("accepts the legacy optional instrumentation field in v5 agent info", async () => {
+    const owner = { kind: "application" as const };
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      Response.json({
+        ...AGENT_INFO,
+        instrumentation: {
+          binding: testBinding("instrumentation.ts", owner),
+          logicalPath: "instrumentation.ts",
+          owner,
+          sourceId: "instrumentation.ts",
+          sourceKind: "module",
+        },
+      }),
+    );
+    const client = new Client({ host: "https://eve.test" });
+
+    const info = await client.info();
+
+    expect(info.instrumentation?.logicalPath).toBe("instrumentation.ts");
   });
 
   it("rejects unknown fields in the agent info payload", async () => {

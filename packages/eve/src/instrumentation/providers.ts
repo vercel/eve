@@ -19,10 +19,9 @@ import {
  * Process-global registry of the providers authored under
  * `agent/instrumentation/`.
  *
- * Rooted on `globalThis` for the same reason the single-config store is: the
- * generated Nitro plugin stays external by `file://` URL while the harness
- * chunk is inlined, so the two resolve to distinct ESM module instances and
- * need one shared source of truth.
+ * Rooted on `globalThis` because the generated Nitro plugin stays external by
+ * `file://` URL while the harness chunk is inlined, so the two resolve to
+ * distinct ESM module instances and need one shared source of truth.
  */
 const INSTRUMENTATION_PROVIDERS_GLOBAL_KEY = Symbol.for("eve.harness-instrumentation-providers");
 
@@ -87,6 +86,12 @@ export async function registerInstrumentationProvider(input: {
     );
   }
 
+  if (Object.hasOwn(input.value, "capture")) {
+    throw new Error(
+      `The instrumentation provider "instrumentation/${input.slot}" no longer supports \`capture\`. Use \`tracePolicy\` to configure content capture.`,
+    );
+  }
+
   providerRegistry().set(input.slot, input.value);
   await input.value.setup?.(createInstrumentationSetupContext(input.agentName));
 }
@@ -122,7 +127,6 @@ export function finalizeInstrumentationProviders(input: {
   return installInstrumentationRuntime({
     collected,
     frameworkVersion: resolveInstalledPackageInfo().version,
-    instrumentationProviders: true,
     providers: providerDefinitions,
     runtimeContextResolvers: collected.runtimeContextResolvers,
     serviceName: input.serviceName,
@@ -148,7 +152,6 @@ function toProviderDefinition(
   entry: RegisteredInstrumentationProvider,
 ): InstrumentationProviderDefinition {
   return {
-    capture: entry.provider.capture,
     events: entry.provider.events as InstrumentationProviderDefinition["events"],
     flush: entry.provider.flush,
     // The file the provider came from, which is the only name an author can

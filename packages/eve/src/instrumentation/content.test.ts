@@ -4,6 +4,7 @@ import { withInstrumentationDecision } from "#instrumentation/content.js";
 import type {
   InstrumentationInputRequestedEvent,
   InstrumentationInputResolvedEvent,
+  InstrumentationSessionStartedEvent,
 } from "#instrumentation/lifecycle.js";
 
 const scope = {
@@ -15,6 +16,27 @@ const scope = {
 };
 
 describe("withInstrumentationDecision", () => {
+  it("treats the session title as input content", () => {
+    const event = {
+      agentName: "general",
+      channelAudience: "public",
+      idempotencyKey: "session:session-1",
+      rootSessionId: "session-1",
+      scheduleId: "daily-report",
+      sessionId: "session-1",
+      title: "Private title",
+      type: "session.started",
+    } satisfies InstrumentationSessionStartedEvent;
+
+    expect(
+      withInstrumentationDecision(event, {
+        action: "record",
+        recordInputs: false,
+        recordOutputs: true,
+      }),
+    ).toEqual(expect.objectContaining({ scheduleId: "daily-report", title: undefined }));
+  });
+
   it("treats input requests as outputs and user responses as inputs", () => {
     const requested = withInstrumentationDecision(
       {

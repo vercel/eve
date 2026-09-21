@@ -1,18 +1,15 @@
+import type { ModelAccessChange } from "#shared/model-connection.js";
+import { runModelLogin } from "#setup/flows/model-login.js";
 import { HumanActionRequiredError } from "#setup/human-action.js";
 import { runDeployFlow } from "#setup/flows/deploy.js";
 import {
   runInstallVercelCliFlow,
   type InstallVercelCliResult,
 } from "#setup/flows/install-vercel-cli.js";
-import { runLoginFlow, type LoginFlowResult } from "#setup/flows/login.js";
+
 import { runModelFlow } from "#setup/flows/model.js";
 import type { ProviderSelection } from "#setup/provider-settings.js";
-import { runProviderFlow, type ProviderPicker } from "#setup/flows/provider.js";
-import {
-  RegistryFlowFailedError,
-  runRegistryFlow,
-  type RegistryPlannerContext,
-} from "#setup/flows/registry.js";
+import { RegistryFlowFailedError, runRegistryFlow } from "#setup/flows/registry.js";
 import type { Prompter } from "#setup/prompter.js";
 import { WizardCancelledError } from "#setup/step.js";
 
@@ -34,8 +31,7 @@ export type TuiSetupCommand = PromptCommandExtensionName;
  * move past their opening question.
  */
 export const SETUP_FLOW_CONFIG = {
-  "vc:install": { title: "Install the Vercel CLI", indicator: "pulse" },
-  "vc:login": { title: "Log in to Vercel", indicator: "pulse" },
+  login: { title: "Connecting your model", indicator: "pulse" },
   model: { title: "Configure the agent model", indicator: "pulse" },
   add: { title: "Add to your agent", indicator: "pulse" },
   deploy: { title: "Deploy to Vercel", indicator: "spinner" },
@@ -44,11 +40,11 @@ export const SETUP_FLOW_CONFIG = {
 export type TuiSetupCommandRenderer = TuiPrompterRenderer &
   Pick<
     SetupFlowRenderer,
-    "readProviderPicker" | "readModelEditor" | "setNavigation" | "waitForInterrupt"
+    "readProviderPicker" | "readModelPicker" | "setNavigation" | "waitForInterrupt"
   >;
 
 type MuteableSetupRenderer = TuiPrompterRenderer &
-  Pick<SetupFlowRenderer, "readProviderPicker" | "readModelEditor" | "setNavigation">;
+  Pick<SetupFlowRenderer, "readProviderPicker" | "readModelPicker" | "setNavigation">;
 
 export type OnboardingScreenEvent = {
   screen:
@@ -74,11 +70,10 @@ export interface TuiSetupCommandInput {
   /** Registry address supplied by `/add <item>`, confirmed and installed directly. */
   initialRegistryAddress?: string;
   /** Presentation and navigation supplied by an enclosing setup journey. */
-  registryPlannerContext?: RegistryPlannerContext;
   onOnboardingScreen?: (input: OnboardingScreenEvent) => void;
   /** Live ChatGPT identity shown only inside model configuration UI. */
   chatGptAccountLabel?: string;
-  /** Suspends development runtime artifacts while registry installation and setup mutate them. */
+  /** Groups setup writes under one runtime update. */
   withExclusiveTerminal?<T>(task: () => Promise<T>): Promise<T>;
   createPrompter?: (renderer: TuiPrompterRenderer) => Prompter;
   /** Test seam; defaults to the real setup flows. */
@@ -86,8 +81,8 @@ export interface TuiSetupCommandInput {
 }
 
 export interface TuiSetupFlows {
+  runModelLogin?: typeof runModelLogin;
   runInstallVercelCliFlow: typeof runInstallVercelCliFlow;
-  runLoginFlow: typeof runLoginFlow;
   runModelFlow: typeof runModelFlow;
   runRegistryFlow: typeof runRegistryFlow;
   runDeployFlow: typeof runDeployFlow;
@@ -104,7 +99,7 @@ export interface TuiSetupCommandResult {
   /** Keep warning/error lines after the bordered panel closes. */
   preserveFlowDiagnostics: boolean;
   /** Status refresh required after the command settles. */
-  effect?: VercelStatusEffect | { kind: "model-access-changed" };
+  effect?: VercelStatusEffect | ModelAccessChange;
 }
 
 /**
@@ -124,8 +119,8 @@ function muteableRenderer(
       isMuted() ? Promise.resolve(undefined) : renderer.readEditableSelect(options),
     readProviderPicker: (options) =>
       isMuted() ? Promise.resolve(undefined) : renderer.readProviderPicker(options),
-    readModelEditor: (options) =>
-      isMuted() ? Promise.resolve(undefined) : renderer.readModelEditor(options),
+    readModelPicker: (options) =>
+      isMuted() ? Promise.resolve(undefined) : renderer.readModelPicker(options),
     readText: (options) => (isMuted() ? Promise.resolve(undefined) : renderer.readText(options)),
     readAcknowledge: (options) =>
       isMuted() ? Promise.resolve() : renderer.readAcknowledge(options),
@@ -155,6 +150,10 @@ function muteableRenderer(
     // pauses runtime artifacts without handing the terminal to the child.
     withExclusiveTerminal: (task) => withSuspendedRuntime?.(task) ?? task(),
   };
+}
+
+function cancelledSetupResult(): TuiSetupCommandResult {
+  return { message: "", cancelled: true, preserveFlowDiagnostics: false };
 }
 
 /**
@@ -220,9 +219,8 @@ export async function runTuiSetupCommand(
             ? outcome
             : {
                 ...outcome,
-                message: `/${command} interrupted.`,
-                tone: "error",
-                preserveFlowDiagnostics: true,
+                ...cancelledSetupResult(),
+                tone: undefined,
               };
         }
       } finally {
@@ -247,7 +245,6 @@ async function executeSetupCommand(
   const { command, appRoot } = input;
   const flows: TuiSetupFlows = {
     runInstallVercelCliFlow,
-    runLoginFlow,
     runModelFlow,
     runRegistryFlow,
     runDeployFlow,
@@ -256,16 +253,32 @@ async function executeSetupCommand(
 
   try {
     switch (command) {
-      case "vc:install": {
-        return installVercelCliResultMessage(
-          await flows.runInstallVercelCliFlow({ appRoot, prompter, signal }),
-        );
-      }
-      case "vc:login": {
-        return loginResultMessage(await flows.runLoginFlow({ appRoot, prompter, signal }));
+      case "login": {
+        const result = await (flows.runModelLogin ?? runModelLogin)({
+          appRoot,
+          agentRoot: input.agentRoot,
+          prompter,
+          signal,
+          automatic: input.initialModelStep === "provider",
+          withConnectionUpdate: input.withExclusiveTerminal,
+        });
+        return result.kind === "cancelled"
+          ? {
+              message: "Connect a model with /login when you’re ready.",
+              cancelled: true,
+              preserveFlowDiagnostics: false,
+            }
+          : {
+              message: "Connected. Start chatting · /add to extend your agent",
+              effect: {
+                kind: "model-access-changed",
+                reload: result.reload,
+                ...(result.model && { model: result.model }),
+              },
+              preserveFlowDiagnostics: false,
+            };
       }
       case "model": {
-        const pickProvider: ProviderPicker = (request) => renderer.readProviderPicker(request);
         const modelInput: Parameters<TuiSetupFlows["runModelFlow"]>[0] = {
           appRoot: input.agentRoot ?? appRoot,
           environmentRoot: appRoot,
@@ -273,18 +286,7 @@ async function executeSetupCommand(
           signal,
           chatGptAccountLabel: input.chatGptAccountLabel,
           deps: {
-            pickModelSettings: (request) => renderer.readModelEditor(request),
-            runProviderFlow: (providerInput) =>
-              runProviderFlow({
-                ...providerInput,
-                picker: pickProvider,
-                recoverHumanAction: (error) =>
-                  recoverVercelHumanAction(error, flows, {
-                    appRoot,
-                    prompter,
-                    signal,
-                  }),
-              }),
+            pickModelSettings: (request) => renderer.readModelPicker(request),
           },
         };
         if (input.initialModelStep !== undefined) {
@@ -295,14 +297,7 @@ async function executeSetupCommand(
         }
         const result = await flows.runModelFlow(modelInput);
         if (result.kind === "cancelled") {
-          return {
-            message:
-              result.discardedDraft === true
-                ? "/model dismissed. Drafted changes were discarded; Done commits them."
-                : "/model dismissed.",
-            cancelled: true,
-            preserveFlowDiagnostics: false,
-          };
+          return cancelledSetupResult();
         }
         // One line per completed menu action: the apply line (it already
         // distinguishes success from a rejected slug), then the provider
@@ -319,23 +314,23 @@ async function executeSetupCommand(
         // A model edit can also move routing between AI Gateway and ChatGPT.
         // The runner rebuilds authored artifacts before refreshing model access.
         if (result.accessChanged) {
-          outcome.effect = { kind: "model-access-changed" };
+          outcome.effect = { kind: "model-access-changed", reload: true };
         }
         return outcome;
       }
       case "add": {
         const flow = await flows.runRegistryFlow({
           appRoot,
+          installRoot: input.agentRoot,
           prompter,
           signal,
           initialAddress: input.initialRegistryAddress,
-          plannerContext: input.registryPlannerContext,
           onScreen: input.onOnboardingScreen,
           onItemStart: registryItemProgress(renderer),
           runItem: runRegistryItem,
         });
         if (flow.kind === "cancelled") {
-          return { message: "/add dismissed.", cancelled: true, preserveFlowDiagnostics: true };
+          return cancelledSetupResult();
         }
         const result = flow.result;
         const tone = registryResultTone(result);
@@ -357,11 +352,12 @@ async function executeSetupCommand(
       case "deploy": {
         const result = await flows.runDeployFlow({ appRoot, prompter, interactive: true, signal });
         if (result.kind === "cancelled") {
-          return { message: "/deploy dismissed.", preserveFlowDiagnostics: true };
+          return cancelledSetupResult();
         }
         if (result.kind === "needs-link") {
           return {
-            message: "Not linked to a Vercel project — run /model to connect one first.",
+            message:
+              "Not linked to a Vercel project. Run eve deploy in an interactive terminal to link it.",
             preserveFlowDiagnostics: true,
           };
         }
@@ -382,11 +378,7 @@ async function executeSetupCommand(
     }
   } catch (error) {
     if (error instanceof WizardCancelledError) {
-      return {
-        message: `/${command} dismissed.`,
-        cancelled: true,
-        preserveFlowDiagnostics: command !== "model",
-      };
+      return cancelledSetupResult();
     }
     const actionableError = error instanceof RegistryFlowFailedError ? error.cause : error;
     const upgrade = await vercelCliUpgradeOutcome(actionableError, command, flows, {
@@ -414,81 +406,6 @@ async function executeSetupCommand(
       preserveFlowDiagnostics: true,
     };
   }
-}
-
-async function recoverVercelHumanAction(
-  error: HumanActionRequiredError,
-  flows: TuiSetupFlows,
-  input: { appRoot: string; prompter: Prompter; signal: AbortSignal },
-): Promise<"retry" | "cancel"> {
-  const action = error.action.kind;
-  if (
-    action !== "vercel-cli-missing" &&
-    action !== "vercel-cli-upgrade" &&
-    action !== "vercel-login" &&
-    action !== "vercel-forbidden"
-  ) {
-    throw error;
-  }
-
-  const repair =
-    action === "vercel-cli-missing"
-      ? { label: "Install Vercel CLI", message: "The Vercel CLI is required. Install it now?" }
-      : action === "vercel-cli-upgrade"
-        ? {
-            label: "Upgrade Vercel CLI",
-            message: "Your Vercel CLI needs an update. Upgrade it now?",
-          }
-        : {
-            label:
-              action === "vercel-forbidden" ? "Re-authenticate with Vercel" : "Log in to Vercel",
-            message:
-              action === "vercel-forbidden"
-                ? "Vercel denied access to that team. Re-authenticate and continue?"
-                : "You need to log in to Vercel to continue.",
-          };
-
-  let choice: "repair" | "cancel";
-  try {
-    choice = await input.prompter.select({
-      message: repair.message,
-      options: [
-        { value: "repair", label: `${repair.label} and continue` },
-        { value: "cancel", label: "Choose another option" },
-      ],
-      initialValue: "repair",
-    });
-  } catch {
-    return "cancel";
-  }
-  if (choice === "cancel") return "cancel";
-
-  if (action === "vercel-cli-missing" || action === "vercel-cli-upgrade") {
-    const result = await flows.runInstallVercelCliFlow({
-      appRoot: input.appRoot,
-      prompter: input.prompter,
-      signal: input.signal,
-      upgrade: action === "vercel-cli-upgrade",
-    });
-    if (result.kind === "installed" || result.kind === "already") return "retry";
-    input.prompter.log.warning(
-      result.kind === "failed" && result.reason !== undefined
-        ? `Couldn't ${action === "vercel-cli-upgrade" ? "upgrade" : "install"} the Vercel CLI: ${result.reason}`
-        : `Couldn't ${action === "vercel-cli-upgrade" ? "upgrade" : "install"} the Vercel CLI.`,
-    );
-    return "cancel";
-  }
-
-  const login = await flows.runLoginFlow({
-    appRoot: input.appRoot,
-    prompter: input.prompter,
-    signal: input.signal,
-    force: action === "vercel-forbidden",
-  });
-  // Device-login output belongs only to the login attempt. Clear it before
-  // either linking or the provider picker resumes.
-  input.prompter.replaceContent?.();
-  return login.kind === "logged-in" || login.kind === "already" ? "retry" : "cancel";
 }
 
 function withRegistryResults(
@@ -620,72 +537,15 @@ function vercelActionOutcome(error: unknown, command: string): TuiSetupCommandRe
 function vercelActionMessage(kind: string, command: string): string | undefined {
   switch (kind) {
     case "vercel-login":
-      return `You're not logged in to Vercel — run /vc:login, then retry /${command}.`;
+      return `You're not logged in to Vercel — run /deploy to connect your Vercel account, then retry /${command}.`;
     case "vercel-forbidden":
-      return `Vercel denied access to that team — run /vc:login to re-authenticate (for example to complete SSO), or pick a team you can access, then retry /${command}.`;
+      return `Vercel denied access to that team — check your team access and SSO, then retry /${command}.`;
     case "vercel-cli-missing":
-      return `The Vercel CLI isn't installed — run /vc:install to install it, then retry /${command}.`;
+      return `The Vercel CLI isn't installed — run /deploy to install it, then retry /${command}.`;
     case "vercel-cli-upgrade":
       return `The Vercel CLI needs an update — run \`vercel upgrade\`, then retry /${command}.`;
     default:
       return undefined;
-  }
-}
-
-/** Folds an {@link InstallVercelCliResult} into the command's one-line outcome. */
-function installVercelCliResultMessage(result: InstallVercelCliResult): TuiSetupCommandResult {
-  switch (result.kind) {
-    case "cancelled":
-      return { message: "/vc:install dismissed.", preserveFlowDiagnostics: false };
-    case "already":
-      return { message: "The Vercel CLI is already installed.", preserveFlowDiagnostics: false };
-    case "failed":
-      return {
-        message:
-          "Couldn't install the Vercel CLI — install it manually with `npm i -g vercel@latest`.",
-        preserveFlowDiagnostics: true,
-      };
-    case "installed":
-      return {
-        message: "Installed the Vercel CLI. Run /vc:login next.",
-        preserveFlowDiagnostics: false,
-        // The CLI now resolves, so the status line's identity probe can run.
-        effect: { kind: "refresh-identity" },
-      };
-  }
-}
-
-/** Folds a {@link LoginFlowResult} into the command's one-line outcome. */
-function loginResultMessage(result: LoginFlowResult): TuiSetupCommandResult {
-  switch (result.kind) {
-    case "cancelled":
-      return { message: "/vc:login dismissed.", preserveFlowDiagnostics: false };
-    case "already":
-      return { message: "You're already logged in to Vercel.", preserveFlowDiagnostics: false };
-    case "cli-missing":
-      return {
-        message:
-          "The Vercel CLI isn't installed — run /vc:install to install it, then retry /vc:login.",
-        preserveFlowDiagnostics: true,
-      };
-    case "failed":
-      return {
-        message: "Vercel login didn't complete — run /vc:login to try again.",
-        preserveFlowDiagnostics: true,
-      };
-    case "logged-in":
-      return {
-        message: "Logged in to Vercel.",
-        preserveFlowDiagnostics: false,
-        // A now-valid `whoami` lets a previously-linked directory resolve its
-        // project identity for the status line.
-        effect: { kind: "refresh-identity" },
-      };
-    case "unavailable":
-      return {
-        message: "Couldn't reach Vercel — check your connection, then retry /vc:login.",
-        preserveFlowDiagnostics: true,
-      };
   }
 }
 

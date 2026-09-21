@@ -57,6 +57,11 @@ export interface RemoteAgentDefinition {
    */
   readonly path: string;
   /**
+   * Whether eve exposes this remote agent to the parent model as a tool.
+   * Defaults to `true`; `false` keeps it callable from workflow tools.
+   */
+  readonly tool?: boolean;
+  /**
    * Base URL of the remote eve deployment to call. Accepts a static string
    * (baked at compile time) or a function resolved at runtime — use the
    * function form to read a URL from `process.env`.

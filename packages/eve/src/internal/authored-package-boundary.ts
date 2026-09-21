@@ -397,6 +397,8 @@ export function isPathImport(source: string): boolean {
 }
 
 function isFrameworkRuntimeImport(source: string, importer: string | undefined): boolean {
+  // The packaged extension is authored code: its mount and child must share a scoped handle.
+  if (source === "eve/self-modification") return false;
   if (source === "eve" || source.startsWith("eve/")) {
     return true;
   }

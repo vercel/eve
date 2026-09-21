@@ -18,9 +18,8 @@ import {
   clearProxyInputRequestsWhere,
 } from "#harness/proxy-input-requests.js";
 import {
-  findWorkflowToolRun,
-  isInboxSubagentResultFromRecordedWorkflowToolRun,
-  removeWorkflowToolRun,
+  findBlockingWorkflowToolRun,
+  removeBlockingWorkflowToolRuns,
 } from "#harness/workflow-tool-runs.js";
 import { normalizeToolModelOutput } from "#harness/tool-model-output.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
@@ -199,12 +198,7 @@ function resolveResultsForCoordinationBatch(input: {
     pendingCallIds: [...input.batch.runtimeActions, ...input.batch.tasks].map(
       (request) => request.callId,
     ),
-    results: input.results.filter(
-      (result) =>
-        isResultBoundToRunningHandle(input.state, result) ||
-        (result.kind === "subagent-result" &&
-          isInboxSubagentResultFromRecordedWorkflowToolRun(input.state, result)),
-    ),
+    results: input.results.filter((result) => isResultBoundToRunningHandle(input.state, result)),
   });
 }
 
@@ -244,32 +238,6 @@ export async function resolvePendingCoordination(input: {
       outcome: "unresolved",
       session: input.session,
     };
-  }
-
-  if (input.emit !== undefined) {
-    for (const result of readyResults) {
-      if (result.kind === "subagent-result" && result.isError !== true) {
-        const backgroundTask = readBackgroundTaskReceipt(result);
-        const data = {
-          callId: result.callId,
-          output: typeof result.output === "string" ? result.output : JSON.stringify(result.output),
-          subagentName: result.subagentName,
-        };
-        await input.emit({
-          data: backgroundTask === undefined ? data : { ...data, backgroundTask },
-          type: "subagent.completed",
-        } satisfies Extract<UnstampedMessageStreamEvent, { type: "subagent.completed" }>);
-      }
-
-      await input.emit(
-        createActionResultEvent({
-          result,
-          sequence: batch.event.sequence,
-          stepIndex: batch.event.stepIndex,
-          turnId: batch.event.turnId,
-        }),
-      );
-    }
   }
 
   // Settle each bound child result against its running handle from the
@@ -313,22 +281,18 @@ export async function resolvePendingCoordination(input: {
   // Drop a finished run's unanswered requests so a late click cannot reach it.
   for (const result of readyResults) {
     if (result.kind !== "tool-result") continue;
-    const record = findWorkflowToolRun(nextSession.state, result.callId);
+    const record = findBlockingWorkflowToolRun(
+      nextSession.state,
+      result.callId,
+      batch.event.turnId,
+    );
     if (record === undefined) continue;
-    nextSession = removeWorkflowToolRun(
+    nextSession = removeBlockingWorkflowToolRuns(
       clearProxyInputRequestsWhere(
         nextSession,
-        (route) => route.answerHook?.runId === record.runId,
+        (route) => route.answerHook?.runId === record.address.runId,
       ),
-      record.callId,
-    );
-  }
-  for (const result of readyResults) {
-    if (result.kind !== "subagent-result") continue;
-    const record = findWorkflowToolRun(nextSession.state, result.callId);
-    if (record?.resultKind !== "subagent") continue;
-    nextSession = removeWorkflowToolRun(
-      clearProxyInputRequestsForChild(nextSession, record.hookToken),
+      batch.event.turnId,
       record.callId,
     );
   }
@@ -362,6 +326,36 @@ export async function resolvePendingCoordination(input: {
         usage: outcome.usageDelta,
       }),
     );
+  }
+
+  if (input.emit !== undefined) {
+    for (const result of readyResults) {
+      if (
+        result.kind === "subagent-result" &&
+        result.origin === "child" &&
+        result.outcome.result.kind === "succeeded" &&
+        readBackgroundTaskReceipt(result) === undefined
+      ) {
+        const data = {
+          callId: result.callId,
+          output: typeof result.output === "string" ? result.output : JSON.stringify(result.output),
+          subagentName: result.subagentName,
+        };
+        await input.emit({
+          data,
+          type: "subagent.completed",
+        } satisfies Extract<UnstampedMessageStreamEvent, { type: "subagent.completed" }>);
+      }
+
+      await input.emit(
+        createActionResultEvent({
+          result,
+          sequence: batch.event.sequence,
+          stepIndex: batch.event.stepIndex,
+          turnId: batch.event.turnId,
+        }),
+      );
+    }
   }
 
   const toolResults: ToolResultPart[] = [];
@@ -472,7 +466,6 @@ export function createCoordinationRequestFromToolCall(input: {
         executeInput: definition.executeInput?.(inputObject),
         input: inputObject,
         kind: "workflow-task",
-        resultKind: definition.resultKind,
         toolName: input.toolCall.toolName,
         workflowId: definition.workflowId,
       },

@@ -21,6 +21,8 @@ export async function copyCompiledAssets() {
   });
   await cp(sourcePath, destinationPath, {
     recursive: true,
+    // Parallel vendor runs can release this coordination lock while we copy.
+    filter: (source) => source !== join(sourcePath, ".vendor-lock"),
   });
 }
 

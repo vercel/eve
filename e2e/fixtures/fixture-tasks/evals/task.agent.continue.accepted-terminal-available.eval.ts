@@ -23,7 +23,7 @@ export default defineTaskEval({
     setup.expectOk();
     const firstTaskId = requireBackgroundTaskId(setup);
 
-    const first = await waitForTaskInput(t, t, "first_gate");
+    const first = await waitForTaskInput(t, setup.session, "first_gate");
     t.log("answering first task gate one");
     const firstAnswered = await first.session.respond([
       {

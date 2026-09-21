@@ -32,7 +32,9 @@ describe("trace retention by live work", () => {
     );
     const before = serializeContext(context);
     expect(() =>
-      pruneAgentTraceState(context, "session", { "eve.tasks": { version: 1, tasks: [] } }),
+      pruneAgentTraceState(context, "session", {
+        "eve.workflowTool": { version: 99, runs: [] },
+      }),
     ).not.toThrow();
     expect(serializeContext(context)).toEqual(before);
     expect(warn).toHaveBeenCalledWith(
@@ -64,27 +66,35 @@ describe("trace retention by live work", () => {
       new ContextAgentTraceStateStore().setActionAnchor("key", anchor),
     );
     const task = {
-      taskId: deriveTaskId({ callId: "call", parentSessionId: "session", parentTurnId: "turn" }),
-      taskRunId: "task-run",
-      taskInboxToken: "task-token",
-      createdByTurnId: "turn",
-      metadata: { kind: "tool", name: "workflow" },
+      callId: deriveTaskId({ callId: "call", parentSessionId: "session", parentTurnId: "turn" }),
+      toolName: "workflow",
+      lifetime: "session" as const,
+      origin: { turnId: "turn", stepIndex: 0 },
+      address: { runId: "task-run", hookToken: "task-token" },
+      task: {
+        dispatchContext: { auth: { current: null, initiator: null } },
+        taskId: deriveTaskId({ callId: "call", parentSessionId: "session", parentTurnId: "turn" }),
+        metadata: { kind: "tool", name: "workflow" },
+      },
     };
-    pruneAgentTraceState(context, "session", { "eve.tasks": { version: 2, tasks: [task] } });
+    pruneAgentTraceState(context, "session", {
+      "eve.workflowTool": { version: 3, runs: [task] },
+    });
     expect(serializeContext(context)[AGENT_TRACE_CONTEXT_KEY]).toMatchObject({
       actionAnchors: { key: anchor },
     });
     pruneAgentTraceState(context, "session", {
-      "eve.tasks": {
-        version: 2,
-        tasks: [
+      "eve.workflowTool": {
+        version: 3,
+        runs: [
           {
             ...task,
-            terminalView: {
-              taskId: task.taskId,
-              metadata: task.metadata,
-              status: "completed",
-              lastOutput: { type: "result", data: "done" },
+            task: {
+              ...task.task,
+              outcome: {
+                status: "completed",
+                lastOutput: { type: "result", data: "done" },
+              },
             },
           },
         ],

@@ -13,9 +13,9 @@ import type { EveEvalContext } from "eve/evals";
 // each redeploy repoints the alias, so the runner's client — and the durable
 // session it drives — lands on the new deployment without any URL swap.
 //
-// Each inbound request stamps the exact deployment that accepted it. The
-// parked driver dispatches that request's turn to the stamped deployment, so
-// repointing the alias adopts new code without resolving a "latest" sentinel.
+// Each inbound request stamps the exact deployment that accepted it. An idle
+// parked session hands ownership to that deployment before executing the turn,
+// so repointing the alias adopts new code without a "latest" lookup.
 //
 // Timeline under test:
 //   t0  session A writes a file into its sandbox workspace
@@ -88,6 +88,7 @@ export default defineEval({
         `Run the bash command \`printf %s ${FILE_TOKEN} > ${FILE_PATH}\`. ` +
           "Reply with the single word: done.",
       );
+      const session = write.session;
       write.expectOk();
       write.calledTool("bash");
 
@@ -100,7 +101,7 @@ export default defineEval({
       await waitForAliasToServe(t, INSTRUCTIONS_MARKER);
 
       // t2: the same session reattaches to the same sandbox.
-      const persist = await t.send(
+      const persist = await session.send(
         `Run the bash command \`cat ${FILE_PATH}\` and reply with the file contents verbatim.`,
       );
       persist.expectOk();
@@ -115,7 +116,7 @@ export default defineEval({
 
       // t3: the next request is accepted by the new deployment. Its changed
       // sandbox resources rotate the versioned key, so the old file is absent.
-      const probe = await t.send(
+      const probe = await session.send(
         `Run the bash command \`test -f ${FILE_PATH} && echo present || echo absent\` ` +
           "and reply with the command output verbatim.",
       );
@@ -125,7 +126,7 @@ export default defineEval({
 
       // t4: a fresh session adopts the new deployment — the added skill is
       // advertised and usable.
-      const adopted = t.newSession();
+      const adopted = await t.session();
       const skill = await adopted.send(
         `Load the \`${SKILL_NAME}\` skill and follow its instructions exactly.`,
       );

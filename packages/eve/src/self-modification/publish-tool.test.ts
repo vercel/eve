@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { publicationOperationId } from "./extension/tools/publish.js";
+import { publicationOperationId } from "./extension/subagents/agent/tools/publish.js";
 
 describe("production publish tool", () => {
   it("derives operation identity from trusted parent lineage", () => {

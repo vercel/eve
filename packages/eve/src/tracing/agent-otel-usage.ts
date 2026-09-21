@@ -35,7 +35,7 @@ export function setGenAiUsage(span: Span, usage: InstrumentationUsage): void {
     span.setAttribute("gen_ai.usage.cache_read.input_tokens", details.cacheReadTokens);
   }
   if (details?.cacheWriteTokens !== undefined) {
-    span.setAttribute("gen_ai.usage.cache_creation.input_tokens", details.cacheWriteTokens);
+    span.setAttribute("gen_ai.usage.cache_write.input_tokens", details.cacheWriteTokens);
   }
 }
 

@@ -30,7 +30,6 @@ Fixture agents author their harness-owned configuration through the private
   without root-only settings.
 - `e2eModel({ mock? })` — a bare model handle for nested slots such as
   compaction models and dynamic selections.
-- `e2eJudgeModel()` — the judge model for `evals.config.ts`.
 
 When `EVE_E2E_MODEL=mock`, all of these return a deterministic `mockModel()`
 instead of a gateway model id. The default responder echoes the last user
@@ -113,23 +112,11 @@ identically at build and runtime, and Vercel has no team variable at runtime.
 ### Redeploy suite
 
 `agent-tools-sandbox/evals/sandbox/redeploy.eval.ts` proves sandbox semantics
-across deployment updates as they behave on preview targets: a parked session
-keeps working (with its `/workspace` state intact) when messages route through
-a new deployment, its turns stay pinned to the deployment that created it
-(branch-less CLI preview deploys cannot resolve a "latest" deployment; see
-`shouldRouteToLatestDeployment` in `execution/workflow-runtime.ts`), and new
-sessions adopt the new deployment — a skill added by the redeploy loads there.
-The pinned-turn assertion is a deliberate tripwire: it must be flipped when
-turn dispatch gains preview latest-routing
-(https://github.com/vercel/eve/issues/582).
-
-`agent-channels/evals/custom-channels/cross-version-session-inbox.eval.ts`
-deploys the fixture with the published `eve@0.30.8`, holds a turn active in
-that old consumer, then redeploys the current checkout and sends a replacement
-message through the same durable session. It verifies both sides of the codec:
-the current producer must choose the old consumer's wire version, and the real
-old consumer must decode and buffer it. The eval then cancels the deliberately
-blocked turn and verifies that the old session runs the buffered follow-up.
+across deployment updates as they behave on preview targets. A delivery to an
+idle parked session hands ownership to the exact deployment that accepted the
+request while preserving the public session stream. The eval verifies that an
+instruction-only redeploy preserves the sandbox workspace, a resource-changing
+redeploy rotates it, and a new session loads the new deployment's skill.
 
 The eval redeploys from inside its test body: it mutates the agent source,
 runs `eve build` + `vc deploy`, and repoints a run-scoped Vercel alias at
@@ -140,13 +127,21 @@ must run against the alias — the `e2e-vercel` workflow sets
 evals as a second `eve eval` invocation after the main suite. Without the
 alias env (local matrix, plain `eve eval --strict`) the eval skips.
 
-Most fixture agents and their configured judges resolve `EVE_E2E_MODEL`
+Most fixture agents resolve `EVE_E2E_MODEL`
 through `@eve-e2e/config`, defaulting to `openai/gpt-5.6-sol` for local runs.
+Fixture eval configs use the shared `e2eJudgeModel()` helper, which returns an OpenAI evaluation-model instance for `openai/gpt-5.6-luna` until CI has access to Jev. The adapter uses Gateway's Responses endpoint and `AI_GATEWAY_API_KEY`, independently of the agent matrix. A bare Luna string targets Gateway's native evaluation API and is not supported. Deterministic judge coverage in `agent-evaluate` passes a fixture evaluation model explicitly.
+
 `agent-workflow-stress` uses eve's `mockModel` fixture helper so its 100-turn
 runs stay fast and deterministic. Its concurrent and sequential evals cover
 high-volume session execution and repeated session resumption respectively.
 
 ## Fixtures
+
+The [`agent-self-modification`](./fixtures/agent-self-modification/README.md)
+fixture contains source-generation and repair examples using `eve eval`. It
+checks generated tools through real calls in fresh sessions and restores source
+after retiring the parent and child sessions. Routing-only self-modification
+coverage stays in `agent-subagents`.
 
 E2E fixtures live under `e2e/fixtures/*`. Fixture discovery also accepts
 `apps/fixtures/*` apps with an `evals/` directory, but shared development apps
@@ -176,7 +171,9 @@ matrices from the registry:
   `e2e.optionalModels` can name selected model legs that should still run and
   report failures without blocking the aggregate check.
 - `world_matrix_<world>` — one leg per fixture for that world's suite
-  workflow. A registered world's `package` reaches the job as
+  workflow. A fixture can set `e2e.worlds` to a subset of registered world
+  names, or to `[]` when its evals require local dev behavior; omitting it
+  selects every world. A registered world's `package` reaches the job as
   `EVE_E2E_WORKFLOW_WORLD` (worlds without one, like `vercel`, use the
   deploy target's default).
 
@@ -195,8 +192,13 @@ once per leg, then runs one fixture directory with the leg's real model:
 ```sh
 pnpm --filter eve run build
 cd "$FIXTURE_DIR"
+pnpm run --if-present e2e:prepare
 EVE_E2E_MODEL="$MODEL" pnpm exec eve eval --strict --junit "$JUNIT_PATH"
 ```
+
+Fixtures with generated source can define an `e2e:prepare` script. The local
+model suite runs it before starting the eval server; the self-modification
+fixture uses it to copy the checkout's standard registry scaffold.
 
 Always build with the full `build` script (not `build:js`); only the full
 build stamps the package version into `dist`.

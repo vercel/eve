@@ -29,6 +29,7 @@ export default defineRemoteAgent({
 | `headers`          | `HeadersValue`                                | No       | none              | Static or lazily resolved request headers.                                                                                                               |
 | `path`             | `string`                                      | No       | `/eve/v1/session` | Route appended to `url` for the create-session request.                                                                                                  |
 | `outputSchema`     | `StandardSchema \| JSON Schema`               | No       | none              | Structured return type for the first turn of each fresh remote session. A continuation may provide its own per-call schema.                              |
+| `tool`             | `boolean`                                     | No       | `true`            | Expose the remote agent as a tool to the parent model. Set `false` to allow only `ctx.agent()` calls from authored workflow tools.                       |
 
 ## Dynamic remote agents
 
@@ -80,7 +81,7 @@ The function may be async and must return a non-empty string. `auth` and `header
 
 ## Calling a remote agent
 
-To the model, a remote agent is another subagent tool. You call it the same way you call a local subagent, with a `message` and an optional `outputSchema`. The message must carry the full task, including any context the remote agent needs, because it never receives the parent's conversation history.
+By default, a remote agent is another subagent tool to the model. The model calls it the same way it calls a local subagent, with a `message` and an optional `outputSchema`. Set `tool: false` when an authored workflow tool should be the only model-facing routing surface; the workflow can still call the remote agent by its path-derived name through `ctx.agent()`. The message must carry the full task, including any context the remote agent needs, because it never receives the parent's conversation history.
 
 To require structured output, set an `outputSchema` on the agent definition for fresh delegations or on an individual call for that turn. The structured value arrives in the task's completion notification, and the remote child remains available for follow-up messages. See [Subagents](../subagents) for continuation behavior.
 
@@ -137,28 +138,28 @@ This makes caller authority turn-scoped even when the remote child session is pe
 
 Identity forwarding does not make a persistent session private to one caller. Conversation history, tool outputs, and other child-session state still persist. If those values must not be visible across users, give each user a distinct child session or enforce that ownership at the application boundary.
 
-Forwarding is explicit on both sides. The receiver names which forwarders it trusts with `eveChannel({ trustedForwarders })` (see [Auth & route protection](./auth-and-route-protection#accepting-forwarded-identity-from-another-deployment)); a receiver that refuses the forwarder — or has no `trustedForwarders` at all — rejects with a 403 and the dispatch fails.
+Forwarding identity is explicit on both sides. The receiver names which deployments it trusts with `eveChannel({ trustedForwarders })` (see [Auth & route protection](./auth-and-route-protection#accepting-forwarded-identity-from-another-deployment)); refusing the forwarder rejects a forwarded principal with a 403. The same trust decision covers parent session lineage and, with principal forwarding, trace-content constraints.
 
-Remote tracing uses ordinary `traceparent` propagation. Trace context is not an authorization grant: it cannot assert eve parent lineage, change `rootSessionId`, or remove the normal root-session token cap.
+## Trace propagation
 
-eve also carries the original `gen_ai.conversation.id` in `eve.conversation.id` baggage so you can find related traces across local and remote agents. This observability identifier does not require principal forwarding or shared execution lineage; it grants no session access and does not change trace-content policy. Session execution establishes this ID even without an instrumentation runtime. Only session-create requests with a callback may supply this baggage; top-level requests ignore it and establish their own conversation ID. Callback metadata is caller-supplied correlation, not verified identity.
+Each remote turn starts a new trace. eve links the child trace to the
+dispatching turn and carries `gen_ai.conversation.id` so you can find the
+traces for one conversation. Trace context is observability metadata, not an
+authorization grant. See [OpenTelemetry](../observability/otel#trace-topology)
+for the trace topology.
 
-eve replaces configured `traceparent` and conversation baggage only when it has a framework value to send. Incoming baggage has an 8 KiB limit; the audience and conversation readers share whitespace, percent-decoding, and duplicate-key validation. Conversation IDs are limited to 1 KiB and exclude control characters and line separators. If adding an audience assertion or conversation ID would exceed 8 KiB, eve rejects the dispatch before sending a request instead of dropping the member. Reduce `remote.headers.baggage` to leave room for these framework values.
-
-In the [provider trace contract](./instrumentation#agent-trace-contract), each
-child activation starts a separate trace. The first activation uses the incoming
-`traceparent` as an `agent.dispatch` span link rather than adopting the caller's
-trace ID.
-
-> ⚠️ **Upgrade both deployments before resuming persistent remote sessions.** A sender with continuation forwarding includes `forwardedPrincipal` on each authenticated follow-up. A receiver that supports forwarding only on session creation rejects that continuation with HTTP 400. eve does not retry without the field because that would run the follow-up as the transport service principal and silently change caller authority. The parent retains the child handle after this failure, so you can retry the same session after upgrading the receiver.
-
-A receiver on an eve version that predates all principal forwarding may instead drop the unknown field and run the session as your app's service identity; per-user connections there fail with `principal_required`. On remote requests where the dispatching turn has no auth, the field is omitted and the call proceeds on transport trust alone.
+eve carries parent session lineage separately. The receiver accepts it only
+when `trustedForwarders` approves the authenticated caller; otherwise, trace
+correlation continues without it.
 
 ## Preserving trace content
 
-With `forwardPrincipal: true`, a sampled trace carries its original audience and the maximum content the next hop may record. For example, `eve.audience=private;ceiling=i0o1` allows outputs but not inputs. eve sends this as [W3C Baggage](https://www.w3.org/TR/baggage/).
+With `forwardPrincipal: true`, a sampled remote dispatch forwards its original
+audience and the maximum input and output content the next hop may record. eve
+sends this policy as [W3C Baggage](https://www.w3.org/TR/baggage/).
 
-The receiver uses it only after `trustedForwarders` accepts the authenticated calling deployment:
+The receiving deployment uses the policy only after it trusts the calling
+deployment:
 
 ```ts title="agent/channels/eve.ts"
 import { eveChannel } from "eve/channels/eve";
@@ -171,13 +172,15 @@ export default eveChannel({
 });
 ```
 
-The request must also include a callback and a valid sampled `traceparent`. Those fields identify a remote call, but they do not establish trust. `trustedForwarders` is the authorization boundary.
+The request must include a callback and a valid sampled `traceparent`.
+`trustedForwarders` is the authorization boundary. When the assertion is
+accepted, the receiver uses the forwarded audience instead of reclassifying
+the child session with its local channel.
 
-The receiver combines the incoming ceiling with its own trace policy. Each hop may narrow the result, but it cannot restore inputs or outputs removed earlier. The original audience stays the same across remote and local subagent hops. Public origins may include content by default; private and unknown origins stay metadata-only unless both deployments explicitly allow them.
-
-The live delivery audience still matters. An unknown callback delivery, or one matching the origin, uses the session decision. A different explicit audience applies its own hard ceiling, so a private delivery stays redacted even when the trace began in public.
-
-Missing, malformed, duplicate, unsampled, untrusted, and mixed-version assertions fall back to metadata-only tracing. Dropped traces use only the unsampled trace flag. The decision is fixed when the remote session starts and reused by continuations. Agent Runs shows Workflow content only when both inputs and outputs are allowed.
+The receiver combines the forwarded ceiling with its own trace policy. Each
+hop may narrow content capture, but cannot restore inputs or outputs removed by
+an earlier hop. Missing, malformed, unsampled, or untrusted assertions do not
+widen capture and use metadata-only tracing.
 
 ## How remote dispatch and callbacks work
 

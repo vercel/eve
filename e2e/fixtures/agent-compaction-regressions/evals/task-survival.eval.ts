@@ -12,7 +12,7 @@ export default defineEval({
         "Alice is updating the library's reading-list application. Please review the repository and confirm these requirements for Bob's handoff.",
         // Sized to a narrow window: long enough that a 280-char summarizer
         // input cap would destroy the tail sentinel, but short enough that
-        // the task alone cannot cross the fixture's ~640-token threshold —
+        // the task alone cannot cross the fixture's ~640-token history budget —
         // otherwise compaction fires before the first model call and the
         // mock never generates pressure.
         [

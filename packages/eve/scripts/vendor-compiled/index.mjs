@@ -29,7 +29,6 @@ import vercelDetectAgent from "./@vercel/detect-agent.mjs";
 import vercelOidc from "./@vercel/oidc.mjs";
 import vercelOtel from "./@vercel/otel.mjs";
 import vercelSandbox from "./@vercel/sandbox.mjs";
-import vercelSandboxDrives from "./@vercel/sandbox-drives.mjs";
 import workflowBuilders from "./@workflow/builders.mjs";
 import workflowCore from "./@workflow/core.mjs";
 import workflowErrors from "./@workflow/errors.mjs";
@@ -98,7 +97,6 @@ export const MODULES = [
   vercelOidc,
   vercelOtel,
   vercelSandbox,
-  vercelSandboxDrives,
   workflowBuilders,
   workflowCore,
   workflowErrors,

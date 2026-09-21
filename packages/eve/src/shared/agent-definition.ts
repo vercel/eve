@@ -68,6 +68,8 @@ export type AgentModelResolveContext = DynamicResolveContext;
 
 export interface PublicAgentModelSelectionDefinition {
   readonly model: PublicAgentStaticModelDefinition;
+  /** Override the agent reasoning effort for this selection; omitted values inherit it. */
+  readonly reasoning?: AgentReasoningDefinition;
   /** Context window of the selected model, in tokens. */
   readonly modelContextWindowTokens?: number;
   /** Provider options for the selected model. */
@@ -151,10 +153,11 @@ export interface PublicAgentCompactionDefinition {
  */
 export interface AgentLimitsDefinition {
   /**
-   * Maximum lifetime of one durable session, in milliseconds.
+   * Session lifetime from creation or the latest ownership handoff, in milliseconds.
    *
-   * The deadline starts when the session is created and survives process
-   * restarts and redeployments. If it elapses during an active turn, eve lets
+   * A successful deployment handoff or legacy-session import restarts the
+   * original configured duration. Process restarts and failed or skipped
+   * handoffs preserve the deadline. If it elapses during an active turn, eve lets
    * that turn settle before completing the session normally.
    *
    * `false` disables the timeout.
@@ -210,15 +213,6 @@ export interface AgentLimitsDefinition {
  * These options are unstable and may change or be removed in any release.
  */
 export interface AgentExperimentalDefinition {
-  /**
-   * Reads instrumentation from an `instrumentation/` directory of providers
-   * rather than a single `agent/instrumentation.ts` config object.
-   *
-   * The two layouts are mutually exclusive: with this on, an
-   * `agent/instrumentation.ts` is a build error, and with it off, an
-   * `instrumentation/` directory is.
-   */
-  readonly instrumentationProviders?: boolean;
   /**
    * Runs this agent's delegated subagent calls as durable background tasks.
    * The originating tool call returns a task receipt immediately and the
@@ -293,7 +287,8 @@ export interface AgentWorkflowDefinition {
   readonly modelCallsPerStep?: number;
   /**
    * How long the agent's run data is kept after the run finishes.
-   * Applied to both the session run and every turn run.
+   * Applied to every run that owns the session, including successors created
+   * by deployment handoff.
    *
    * - `"default"`: same as omission. The Workflow SDK World decides.
    *   On Vercel this follows your team's plan.
@@ -332,6 +327,7 @@ type InternalAgentDefinitionBase = {
   outputSchema?: JsonObject;
   reasoning?: AgentReasoningDefinition;
   source?: ModuleSourceRef;
+  tool?: boolean;
   limits?: AgentLimitsDefinition;
 };
 
@@ -383,6 +379,14 @@ type PublicAgentDefinitionBase = {
    * Framework-owned runtime limits for this agent's runs.
    */
   readonly limits?: AgentLimitsDefinition;
+  /**
+   * Whether eve exposes this agent to its parent model as a tool. On the root
+   * agent, this controls the built-in `agent` tool. Defaults to `true`.
+   *
+   * A subagent with this set to `false` remains callable through `ctx.agent()`
+   * in workflow tools.
+   */
+  readonly tool?: boolean;
   /**
    * Optional structured return type used when this agent runs in task mode
    * (for example as a subagent, schedule, or remote job). Interactive

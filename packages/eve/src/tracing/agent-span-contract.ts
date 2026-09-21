@@ -22,6 +22,10 @@ export function workflowInvocationSpanName(workflowName: string): string {
   return `invoke_workflow ${workflowName}`;
 }
 
+export function modelSpanName(modelId: string): string {
+  return `chat ${modelId}`;
+}
+
 export interface AgentSamplingOperation {
   readonly name: string;
   readonly attributes?: Readonly<Record<string, string | number | boolean | undefined>>;

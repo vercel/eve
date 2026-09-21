@@ -8,6 +8,8 @@ import {
   ChatGptInvalidStoredSessionError,
   createChatGptCredentialStore,
 } from "./credential-store.js";
+import { ChatGptSignInRequiredError } from "./oauth.js";
+import { ChatGptSignedOutError } from "./token.js";
 
 const roots: string[] = [];
 afterEach(async () => {
@@ -290,5 +292,130 @@ describe("ChatGPT credential storage", () => {
     }
     await expect(follower.promise).resolves.toBe(credentials.refreshToken);
     expect(JSON.parse(native.current()!).refreshToken).toBe("refresh-rotated");
+  });
+
+  it("resolves a cold-start refresh session and caches its access token", async () => {
+    const path = await credentialPath();
+    const native = memorySecrets(JSON.stringify({ sessionId: "session-1", ...refreshCredentials }));
+    const store = createChatGptCredentialStore(path, native);
+    const fetch = vi.fn<typeof globalThis.fetch>(async () =>
+      Response.json({ access_token: "new-access", refresh_token: "new-refresh", expires_in: 3600 }),
+    );
+
+    await expect(
+      store.resolveToken({ forceRefresh: false, fetch, now: () => 1_800_000_000_000 }),
+    ).resolves.toMatchObject({
+      token: "new-access",
+      accountId: credentials.accountId,
+      accountLabel: credentials.accountLabel,
+    });
+    await expect(
+      store.resolveToken({ forceRefresh: false, fetch, now: () => 1_800_000_000_000 }),
+    ).resolves.toMatchObject({ token: "new-access" });
+    expect(fetch).toHaveBeenCalledOnce();
+    expect(JSON.parse(native.current()!)).toMatchObject({ refreshToken: "new-refresh" });
+    expect(native.current()).not.toContain("new-access");
+  });
+
+  it("refreshes an expiring owned token inside the credential lock", async () => {
+    const path = await credentialPath();
+    const native = memorySecrets();
+    const store = createChatGptCredentialStore(path, native);
+    await store.update(async () => ({ ...credentials, expiresAt: 1_800_000_100_000 }));
+    const fetch = vi.fn<typeof globalThis.fetch>(async () =>
+      Response.json({ access_token: "new-access", refresh_token: "new-refresh", expires_in: 3600 }),
+    );
+
+    await expect(
+      store.resolveToken({ forceRefresh: false, fetch, now: () => 1_800_000_000_000 }),
+    ).resolves.toMatchObject({ token: "new-access" });
+    expect(fetch).toHaveBeenCalledOnce();
+    expect(JSON.parse(native.current()!).refreshToken).toBe("new-refresh");
+  });
+
+  it("uses the latest refresh token after waiting for the credential lock", async () => {
+    const path = await credentialPath();
+    const native = memorySecrets();
+    const first = createChatGptCredentialStore(path, native);
+    const second = createChatGptCredentialStore(path, native);
+    await first.update(async () => credentials);
+    const entered = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    const rotation = first.update(async () => {
+      entered.resolve();
+      await release.promise;
+      return { ...credentials, refreshToken: "rotated-by-first" };
+    });
+    await entered.promise;
+    const fetch = vi.fn<typeof globalThis.fetch>(async () =>
+      Response.json({ access_token: "new-access", refresh_token: "new-refresh", expires_in: 3600 }),
+    );
+    const resolution = second.resolveToken({
+      forceRefresh: true,
+      fetch,
+      now: () => 1_800_000_000_000,
+    });
+
+    release.resolve();
+    await rotation;
+    await expect(resolution).resolves.toMatchObject({ token: "new-access" });
+    const body = fetch.mock.calls[0]?.[1]?.body as URLSearchParams;
+    expect(body.get("refresh_token")).toBe("rotated-by-first");
+  });
+
+  it("preserves owned credentials when refresh is revoked", async () => {
+    const path = await credentialPath();
+    const native = memorySecrets();
+    const store = createChatGptCredentialStore(path, native);
+    await store.update(async () => ({ ...credentials, expiresAt: 1 }));
+    const saved = native.current();
+
+    await expect(
+      store.resolveToken({
+        forceRefresh: true,
+        fetch: async () => new Response("secret", { status: 401 }),
+        now: Date.now,
+      }),
+    ).rejects.toBeInstanceOf(ChatGptSignInRequiredError);
+    expect(native.current()).toBe(saved);
+  });
+
+  it("preserves owned credentials across a temporary refresh failure and retry", async () => {
+    const path = await credentialPath();
+    const native = memorySecrets();
+    const store = createChatGptCredentialStore(path, native);
+    await store.update(async () => ({ ...credentials, expiresAt: 1 }));
+    const saved = native.current();
+    const fetch = vi
+      .fn<typeof globalThis.fetch>()
+      .mockResolvedValueOnce(new Response("secret", { status: 503 }))
+      .mockResolvedValueOnce(
+        Response.json({
+          access_token: "recovered-access",
+          refresh_token: "recovered-refresh",
+          expires_in: 3600,
+        }),
+      );
+
+    await expect(store.resolveToken({ forceRefresh: false, fetch, now: Date.now })).rejects.toThrow(
+      "HTTP 503",
+    );
+    expect(native.current()).toBe(saved);
+    await expect(
+      store.resolveToken({ forceRefresh: false, fetch, now: Date.now }),
+    ).resolves.toMatchObject({ token: "recovered-access" });
+    expect(JSON.parse(native.current()!).refreshToken).toBe("recovered-refresh");
+  });
+
+  it("distinguishes missing owned credentials by request reason", async () => {
+    const path = await credentialPath();
+    const store = createChatGptCredentialStore(path, memorySecrets());
+
+    await expect(store.resolveToken({ forceRefresh: false, now: Date.now })).rejects.toBeInstanceOf(
+      ChatGptSignedOutError,
+    );
+    await expect(store.resolveToken({ forceRefresh: true, now: Date.now })).rejects.toBeInstanceOf(
+      ChatGptSignInRequiredError,
+    );
   });
 });

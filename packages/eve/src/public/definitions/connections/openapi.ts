@@ -65,7 +65,7 @@ export interface OpenAPIConnectionDefinition {
    * `Authorization: Bearer <token>`.
    *
    * - `getToken`-only: covers static API keys, pre-provisioned tokens,
-   *   and out-of-band OAuth. Defaults to `principalType: "app"` when
+   *   and out-of-band OAuth. Defaults to `credentialOwner: "app"` when
    *   omitted.
    * - Three-method form: provide `startAuthorization` and
    *   `completeAuthorization` together to opt into interactive OAuth.
@@ -90,6 +90,7 @@ export interface OpenAPIConnectionDefinition {
    * - `never()`: allow all tool calls without approval
    * - `once()`: require approval only the first time per session
    * - `always()`: require approval for every tool call
+   * - `auto()`: use an evaluation model to ask about dangerous or unclear effects
    */
   approval?: Approval;
   /**

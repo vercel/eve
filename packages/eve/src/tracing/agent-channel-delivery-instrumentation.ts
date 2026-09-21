@@ -5,14 +5,12 @@ import type {
   InstrumentationChannelDeliveryTerminalEvent,
   InstrumentationHandlerContext,
   InstrumentationProviderDefinition,
-  InstrumentationSessionStartedEvent,
 } from "#instrumentation/lifecycle.js";
 import { contextStorage } from "#context/container.js";
 import { ActiveChannelDeliveriesKey } from "#context/keys.js";
-import { sessionIdempotencyKey } from "#instrumentation/lifecycle.js";
 import type { JsonValue } from "#shared/json.js";
 import { contentAttribute } from "#tracing/agent-otel-content.js";
-import type { AgentSessionTraceState, AgentTraceStateStore } from "#tracing/agent-trace-state.js";
+import type { AgentTraceStateStore } from "#tracing/agent-trace-state.js";
 import { isSampledTrace } from "#tracing/sampled-trace.js";
 
 interface ChannelDeliveryState {
@@ -22,9 +20,6 @@ interface ChannelDeliveryState {
 
 /** Captures one-to-one channel delivery metadata on the activation that consumes it. */
 export function createAgentChannelDeliveryInstrumentation(input: {
-  readonly ensureSessionContext: (
-    event: InstrumentationSessionStartedEvent,
-  ) => Promise<AgentSessionTraceState>;
   readonly recordInputs: boolean;
   readonly stateStore: AgentTraceStateStore;
 }): Pick<
@@ -38,22 +33,13 @@ export function createAgentChannelDeliveryInstrumentation(input: {
     event: InstrumentationChannelDeliveryStartedEvent,
     ctx: InstrumentationHandlerContext,
   ): Promise<void> => {
-    const session = await input.ensureSessionContext({
-      agentName: event.agentName,
-      channelAudience: event.delivery.channelAudience,
-      channelKind: event.delivery.channelKind,
-      idempotencyKey: sessionIdempotencyKey(event.sessionId),
-      parentTraceContext: event.parentTraceContext,
-      rootSessionId: event.rootSessionId,
-      sessionId: event.sessionId,
-      traceSeed: event.traceSeed,
-      type: "session.started",
-    });
+    const session = await input.stateStore.getSession(event.sessionId);
     const turn =
       event.turnId === undefined || event.sequence === undefined
         ? undefined
         : await input.stateStore.getTurn(event.sessionId, event.turnId);
-    if (!isSampledTrace(turn?.context ?? session.context)) return;
+    const traceContext = turn?.context ?? session?.context;
+    if (traceContext === undefined || !isSampledTrace(traceContext)) return;
     const inputAttribute = input.recordInputs ? contentAttribute(event.input) : undefined;
     const state: Record<string, JsonValue> = {};
     if (inputAttribute !== undefined) state.inputAttribute = inputAttribute;

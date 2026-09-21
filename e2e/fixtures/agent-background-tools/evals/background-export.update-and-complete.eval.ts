@@ -1,14 +1,15 @@
 import { defineEval } from "eve/evals";
 import { satisfies } from "eve/evals/expect";
+import { defaultMessageReducer } from "eve/client";
 
-const PROGRESS = "EXPORT-PROGRESS";
 const RESULT = "EXPORT-COMPLETE";
 
 export default defineEval({
   description:
-    "An authored background defineTool yields state and progress, explicitly posts a message, then completes; the parent sees both.",
+    "A background workflow streams progress and delivers one terminal report to the parent.",
   async test(t) {
     const started = await t.send("BACKGROUND-EXPORT-START");
+    const conversation = started.session;
     started.expectOk();
     started.calledTool("export");
 
@@ -16,34 +17,20 @@ export default defineEval({
     const taskId = readTaskId(receipt.output);
     if (taskId === undefined) throw new Error("export receipt is missing taskId.");
 
-    const sessionId = t.sessionId;
+    const sessionId = conversation.sessionId;
     if (sessionId === undefined) throw new Error("Eval has no parent session id.");
 
-    const updateLive = t.target.watchTurn(sessionId, {
-      startIndex: requireStreamIndex(t, "update wait"),
-    });
-    const updateTurn = await updateLive.result();
-    updateTurn.expectOk();
-    updateTurn.messageIncludes("BACKGROUND-EXPORT-UPDATE-RECEIVED");
-    await t.require(
-      updateTurn.events,
-      satisfies(
-        (events: typeof updateTurn.events) =>
-          events.some(
-            (event) =>
-              event.type === "message.received" &&
-              messageText(event.data.message).includes(`Export ${taskId}: ${PROGRESS}`),
-          ),
-        "parent receives the authored message with task identity",
-      ),
-    );
-
     const doneLive = t.target.watchTurn(sessionId, {
-      startIndex: requireStreamIndex(updateLive.session, "completion wait"),
+      startIndex: requireStreamIndex(started.session, "completion wait"),
     });
     const doneTurn = await doneLive.result();
     doneTurn.expectOk();
     doneTurn.messageIncludes("BACKGROUND-EXPORT-DONE");
+    doneTurn.event("message.received", {
+      data: (data) => data.kind === "execution.background_task",
+      count: 1,
+    });
+
     await t.require(
       doneTurn.events,
       satisfies(
@@ -59,6 +46,31 @@ export default defineEval({
         "parent receives the executor completion with task identity",
       ),
     );
+
+    const reducer = defaultMessageReducer();
+    const projection = [...started.events, ...doneTurn.events].reduce(
+      (data, event) => reducer.reduce(data, event),
+      reducer.initial(),
+    );
+    await t.require(
+      projection.messages,
+      satisfies(
+        (messages: typeof projection.messages) =>
+          messages.filter((message) => message.role === "user").length === 1 &&
+          messages.some(
+            (message) =>
+              message.role === "assistant" &&
+              message.parts.some(
+                (part) => part.type === "text" && part.text.includes("BACKGROUND-EXPORT-DONE"),
+              ),
+          ),
+        "frontend projection keeps the background result without rendering runtime task input",
+      ),
+    );
+    doneTurn.event("turn.started", { count: 1 });
+    doneTurn.notEvent("message.received", {
+      data: (data) => messageText(data.message).includes("PROGRESS"),
+    });
     t.noFailedActions();
   },
 });

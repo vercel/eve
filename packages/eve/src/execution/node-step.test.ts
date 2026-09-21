@@ -211,19 +211,31 @@ async function createNodeWithSourceOwnedTools(input: {
     | { readonly feature: string; readonly kind: "framework" };
   readonly turnTools?: StaticRuntimeTurnAgent["tools"];
 }): Promise<ResolvedRuntimeAgentNode> {
-  const toolRegistry = await createRuntimeToolRegistry({
-    tools: input.names.map((name) => ({
-      description: name === AGENT_TOOL_NAME ? AGENT_TOOL_DESCRIPTION : `${name} programmatic tool.`,
-      execute: async () => `${name}-sentinel`,
-      execution: name === AGENT_TOOL_NAME ? "background" : undefined,
-      inputSchema: name === AGENT_TOOL_NAME ? SUBAGENT_TOOL_INPUT_SCHEMA : null,
-      logicalPath: `tools/${name}.ts`,
-      name,
-      owner: input.owner ?? { feature: "test", kind: "framework" },
-      sourceId: `framework:tools/${name}.ts`,
-      sourceKind: "module",
-    })),
-  });
+  const toolRegistry = await createRuntimeToolRegistry(
+    {
+      tools: input.names.map((name) => {
+        const frameworkAgent = name === AGENT_TOOL_NAME && input.owner?.kind !== "application";
+        return {
+          behavior: frameworkAgent
+            ? {
+                availability: ["root-session"] as const,
+                handling: { action: "self-agent" as const, kind: "dispatch" as const },
+              }
+            : undefined,
+          description: frameworkAgent ? AGENT_TOOL_DESCRIPTION : `${name} programmatic tool.`,
+          execute: async () => `${name}-sentinel`,
+          execution: frameworkAgent ? "background" : undefined,
+          inputSchema: frameworkAgent ? SUBAGENT_TOOL_INPUT_SCHEMA : null,
+          logicalPath: `tools/${name}.ts`,
+          name,
+          owner: input.owner ?? { feature: "test", kind: "framework" },
+          sourceId: `framework:tools/${name}.ts`,
+          sourceKind: "module",
+        };
+      }),
+    },
+    { nodeId: ROOT_RUNTIME_AGENT_NODE_ID },
+  );
   const node = createTestNode(
     createTestTurnAgent({
       tools: [...toolRegistry.preparedTools, ...(input.turnTools ?? [])],
@@ -297,6 +309,20 @@ describe("createNodeHarnessTools", () => {
     expect(agentTool?.execute).toBeDefined();
   });
 
+  it("keeps an authored agent tool separate from self-delegation", async () => {
+    const node = await createNodeWithSourceOwnedTools({
+      names: ["agent"],
+      owner: { kind: "application" },
+    });
+    const agentTool = createNodeHarnessTools({ node }).get("agent");
+
+    expect(agentTool?.availableInSubagents).toBeUndefined();
+    expect(agentTool?.execution).toBeUndefined();
+    expect(agentTool).not.toHaveProperty("resultKind");
+    expect(agentTool?.rootOnly).toBeUndefined();
+    expect(agentTool?.workflowId).toBeUndefined();
+  });
+
   it("lowers task_cancel from its framework definition", async () => {
     const node = await createNodeWithSourceOwnedTools({ names: ["task_cancel"] });
     const tools = createNodeHarnessTools({ node });
@@ -339,7 +365,7 @@ describe("createNodeHarnessTools", () => {
       expect(tools.get(name)?.execution).toBe("background");
       expect(tools.get(name)?.execute).toBeDefined();
       expect(tools.get(name)?.runtimeAction).toBeUndefined();
-      expect(tools.get(name)?.resultKind).toBe("subagent");
+      expect(tools.get(name)?.nodeId).toEqual(expect.any(String));
       expect(tools.get(name)?.workflowId).toBe("workflow//eve//subagentToolExecuteWorkflow");
     }
   });

@@ -6,9 +6,9 @@ describe("createRemoteAgentRouteUrl", () => {
   it("preserves a mounted remote agent base path", () => {
     expect(
       createRemoteAgentRouteUrl(
-        "https://remote.example/eve/agents/researcher",
+        "https://remote.example/eve/researcher",
         "/eve/v1/task-input/capability",
       ),
-    ).toBe("https://remote.example/eve/agents/researcher/eve/v1/task-input/capability");
+    ).toBe("https://remote.example/eve/researcher/v1/task-input/capability");
   });
 });

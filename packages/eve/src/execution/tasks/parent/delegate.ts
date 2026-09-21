@@ -1,39 +1,43 @@
 /**
- * Generic task creation, readiness acknowledgement, and dispatch rejection.
- * Task-run transport (start/command/view) lives in `run-parent.ts`, which
- * Callers compose these primitives around their own executor policy.
+ * Session-owned invocation identity, admission acknowledgement, and dispatch rejection.
+ * The parent commits its session index before releasing the workflow body.
  */
-import type { ActivityObserverConfig } from "#channel/types.js";
+import { getRun } from "#internal/workflow/runtime.js";
 import type { HarnessSession } from "#harness/types.js";
-import {
-  readLatestTaskView,
-  sendTaskCommand,
-  sendTaskCommandToOwner,
-  startTaskRun,
-  waitForTaskCommandOwner,
-} from "#execution/tasks/parent/run-parent.js";
-import { sessionCommandHookToken } from "#execution/session-command-token.js";
+import type {
+  BackgroundWorkflowToolRun,
+  TaskAgentDispatchContext,
+} from "#harness/workflow-tool-runs.js";
+import { sendTaskCommand, sendTaskCommandToOwner } from "#execution/tasks/parent/run-parent.js";
 import type { JsonValue } from "#shared/json.js";
-import type { TaskExecutorBinding } from "#tools/task.js";
 import { deriveTaskInboxToken, deriveTaskId } from "#tasks/task-id.js";
-import { isTerminalTaskStatus, type TaskMetadata } from "#tasks/types.js";
+import type { TaskMetadata } from "#tasks/types.js";
+import type { ContextReader } from "#context/key.js";
+import {
+  SessionDynamicSubagentSelectionsKey,
+  TurnDynamicSubagentSelectionsKey,
+  type SessionAuth,
+} from "#context/keys.js";
 
-/** A prepared background task: identity plus its started durable run. */
-export interface BackgroundTask {
-  readonly taskInboxToken: string;
-  readonly createdByStepIndex?: number;
-  readonly createdByTurnId: string;
-  readonly executor?: TaskExecutorBinding;
-  readonly metadata: TaskMetadata;
-  readonly taskId: string;
-  readonly taskRunId: string;
+export function createTaskAgentDispatchContext(
+  ctx: ContextReader,
+  auth: SessionAuth,
+): TaskAgentDispatchContext {
+  return {
+    auth,
+    sessionDynamicSubagentSelections: ctx.get(SessionDynamicSubagentSelectionsKey),
+    turnDynamicSubagentSelections: ctx.get(TurnDynamicSubagentSelectionsKey),
+  };
 }
 
-type BackgroundTaskDraft = Omit<BackgroundTask, "taskRunId">;
+export type BackgroundTaskDraft = Omit<BackgroundWorkflowToolRun, "address"> & {
+  readonly address: { readonly hookToken: string };
+};
 
 /** Derives the replay-stable task identity before its owning run is started. */
 export function prepareBackgroundTask(input: {
   readonly callId: string;
+  readonly dispatchContext: TaskAgentDispatchContext;
   readonly metadata: TaskMetadata;
   readonly parentSessionId: string;
   readonly parentStepIndex?: number;
@@ -46,36 +50,18 @@ export function prepareBackgroundTask(input: {
     parentTurnId: input.parentTurnId,
   });
   return {
-    taskInboxToken: deriveTaskInboxToken({
-      parentContinuationToken: input.session.continuationToken,
-      taskId,
-    }),
-    createdByStepIndex: input.parentStepIndex ?? 0,
-    createdByTurnId: input.parentTurnId,
-    metadata: input.metadata,
-    taskId,
+    callId: input.callId,
+    toolName: input.metadata.name,
+    lifetime: "session",
+    origin: { turnId: input.parentTurnId, stepIndex: input.parentStepIndex ?? 0 },
+    address: {
+      hookToken: deriveTaskInboxToken({
+        parentContinuationToken: input.session.continuationToken,
+        taskId,
+      }),
+    },
+    task: { dispatchContext: input.dispatchContext, metadata: input.metadata, taskId },
   };
-}
-
-/** Starts a lifecycle-only task run for a non-workflow external executor. */
-export async function beginBackgroundTask(input: {
-  readonly activityObserver?: ActivityObserverConfig;
-  readonly callId: string;
-  readonly metadata: TaskMetadata;
-  readonly parentSessionId: string;
-  readonly parentStepIndex?: number;
-  readonly parentTurnId: string;
-  readonly session: HarnessSession;
-}): Promise<BackgroundTask> {
-  const task = prepareBackgroundTask(input);
-  await startTaskRun({
-    activityObserver: input.activityObserver,
-    taskInboxToken: task.taskInboxToken,
-    initialView: { metadata: task.metadata, status: "working", taskId: task.taskId },
-    parentContinuationToken: sessionCommandHookToken(input.session.sessionId),
-  });
-  const owner = await waitForTaskCommandOwner({ taskInboxToken: task.taskInboxToken });
-  return { ...task, taskRunId: owner.runId };
 }
 
 /** Releases task events only after the parent session index committed. */
@@ -95,8 +81,8 @@ export async function acknowledgeDelegatedTasksStep(input: {
       retryUnreachable: { attempts: 20, delayMs: 250 },
     });
     if (owner !== undefined) continue;
-    const view = await readLatestTaskView({ taskRunId: task.taskRunId });
-    if (view !== undefined && isTerminalTaskStatus(view.status)) continue;
+    const status = await getRun(task.taskRunId).status;
+    if (status === "completed" || status === "cancelled") continue;
     throw new Error(`Task run "${task.taskId}" did not accept its readiness command.`);
   }
 }
@@ -104,11 +90,11 @@ export async function acknowledgeDelegatedTasksStep(input: {
 /** Silently terminates a task whose child dispatch failed before parent indexing. */
 export async function rejectDelegatedDispatch(input: {
   readonly error: JsonValue;
-  readonly task: BackgroundTask;
+  readonly task: BackgroundWorkflowToolRun;
 }): Promise<void> {
   await sendTaskCommand({
     command: { data: input.error, kind: "reject-dispatch" },
-    taskInboxToken: input.task.taskInboxToken,
+    taskInboxToken: input.task.address.hookToken,
     retryUnreachable: { attempts: 20, delayMs: 250 },
   });
 }

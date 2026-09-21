@@ -1,3 +1,4 @@
+import { handleDevelopmentModelCredentialRequest } from "#internal/model-auth/development-broker-server.js";
 import { EVE_DEV_ENV_FLAG } from "#internal/application/optional-package-install.js";
 
 import type { Nitro } from "nitro/types";
@@ -209,8 +210,14 @@ function addDevelopmentControlHandler(input: {
   readonly devServer: DrainedNitroDevServer;
   readonly getWatcher: () => AuthoredSourceWatcherHandle | undefined;
   readonly workflowWorld: ParentDevelopmentWorkflowWorld | undefined;
+  readonly transportSecret: string;
 }): void {
   input.devServer.setControlHandler(async (request) => {
+    const credentialResponse = await handleDevelopmentModelCredentialRequest(request, {
+      appRoot: input.appRoot,
+      secret: input.transportSecret,
+    });
+    if (credentialResponse !== undefined) return credentialResponse;
     const worldResponse = await input.workflowWorld?.handleRequest(request);
     if (worldResponse !== undefined) {
       return worldResponse;
@@ -463,6 +470,7 @@ async function startNitroDevelopmentServer(
       devServer: activeDevServer,
       getWatcher: () => authoredSourceWatcher,
       workflowWorld,
+      transportSecret: workflowTransportSecret,
     });
     const hostname =
       options.host ?? activeNitro.options.devServer.hostname ?? DEFAULT_DEVELOPMENT_SERVER_HOST;

@@ -1,35 +1,28 @@
-import type { TaskRunWorkflowInput } from "#execution/tasks/child/workflow.js";
+import type { BackgroundWorkflowToolRunInput } from "#execution/tools/workflow/types.js";
 import { isTaskWorkflowTargetGone } from "#execution/tasks/workflow-target.js";
 import {
   startWorkflowOnCurrentDeployment,
-  taskRunWorkflowReference,
+  workflowToolRunWorkflowReference,
   waitForCommandHookOwner,
 } from "#execution/workflow-runtime.js";
-import { getRun, resumeHook } from "#internal/workflow/runtime.js";
+import { resumeHook } from "#internal/workflow/runtime.js";
 import {
-  TASK_VIEW_STREAM_NAMESPACE,
   type TaskCommand,
   type TaskCommandHookPayload,
   type TaskRunInboundPayload,
-  type TaskView,
 } from "#tasks/types.js";
 
-const TASK_VIEW_READ_TIMEOUT_MS = 10_000;
-
 /**
- * Node-side controls for durable task runs — the generic transport layer.
- * This module only speaks `TaskCommand`/`TaskView`; it knows nothing about
- * executor implementations, receipts, or the session index. Caller-specific
- * policy composes these primitives.
+ * Node-side admission and cancellation for session-owned workflow invocations.
  *
  * Every export must be called from inside a `"use step"` body; none of
  * these are steps themselves so dispatch and tool steps can compose them
  * inside one durable boundary.
  */
 
-/** Starts the durable run owning one task's lifecycle. */
-export async function startTaskRun(input: TaskRunWorkflowInput): Promise<void> {
-  await startWorkflowOnCurrentDeployment(taskRunWorkflowReference, [input]);
+/** Starts a session-owned invocation through the common workflow entry. */
+export async function startTaskRun(input: BackgroundWorkflowToolRunInput): Promise<void> {
+  await startWorkflowOnCurrentDeployment(workflowToolRunWorkflowReference, [input]);
 }
 
 /** Resolves the task run that won ownership of one replay-stable command token. */
@@ -109,60 +102,5 @@ export async function sendTaskInboundPayload(input: {
       throw error;
     }
     return "unreachable";
-  }
-}
-
-/**
- * Reads the latest view a task run has published, or `undefined`
- * when the run has not committed its first view yet (the caller
- * already holds the creation receipt, which is `working`).
- *
- * Views are trusted without re-validation: the task run is the
- * single writer and every write passed the transition function.
- */
-export async function readLatestTaskView(input: {
-  readonly taskRunId: string;
-}): Promise<TaskView | undefined> {
-  const stream = getRun<unknown>(input.taskRunId).getReadable<TaskView>({
-    namespace: TASK_VIEW_STREAM_NAMESPACE,
-    startIndex: -1,
-  });
-  const tailIndex = await stream.getTailIndex();
-  const reader = stream.getReader();
-  try {
-    if (tailIndex < 0) {
-      return undefined;
-    }
-    const result = await readWithTimeout(reader, "latest task view");
-    return result;
-  } finally {
-    await reader.cancel("eve task view read complete").catch(() => {});
-    reader.releaseLock();
-  }
-}
-
-async function readWithTimeout(
-  reader: ReadableStreamDefaultReader<TaskView>,
-  what: string,
-): Promise<TaskView | undefined> {
-  let timeout: ReturnType<typeof setTimeout> | undefined;
-  try {
-    const result = await Promise.race([
-      reader.read().then((read) => ({ kind: "read" as const, read })),
-      new Promise<{ readonly kind: "timeout" }>((resolve) => {
-        timeout = setTimeout(() => resolve({ kind: "timeout" }), TASK_VIEW_READ_TIMEOUT_MS);
-      }),
-    ]);
-    if (result.kind === "timeout") {
-      throw new Error(`Timed out reading ${what} after ${TASK_VIEW_READ_TIMEOUT_MS}ms.`);
-    }
-    if (result.read.done) {
-      return undefined;
-    }
-    return result.read.value;
-  } finally {
-    if (timeout !== undefined) {
-      clearTimeout(timeout);
-    }
   }
 }

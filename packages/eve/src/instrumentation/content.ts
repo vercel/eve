@@ -22,6 +22,8 @@ export function withInstrumentationDecision(
   decision: Extract<InstrumentationDecision, { action: "record" }>,
 ): InstrumentationEvent {
   switch (event.type) {
+    case "session.started":
+      return decision.recordInputs ? event : Object.freeze({ ...event, title: undefined });
     case "channel.delivery.started":
       return decision.recordInputs ? event : Object.freeze({ ...event, input: undefined });
     case "action.started":

@@ -488,6 +488,54 @@ describe("eve dev --input", () => {
     ).rejects.toThrow("--input requires the interactive UI");
   });
 
+  it.each([false, true])(
+    "starts the composer before the host is ready (onboard: %s)",
+    async (onboard) => {
+      let release!: () => void;
+      const ready = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const startup = {
+        renderer: {},
+        finish: vi.fn(() => ({ draft: "", queuedPrompt: undefined })),
+        shutdown: vi.fn(async () => {}),
+      };
+      const startDevelopmentTuiStartup = vi.fn(async () => startup);
+      const runDevelopmentTui = vi.fn(async () => {});
+      vi.doMock("#cli/dev/tui/tui.js", () => ({ startDevelopmentTuiStartup, runDevelopmentTui }));
+      const startHost = vi.fn(() => ({
+        start: async () => {
+          await ready;
+          return {
+            kind: "started" as const,
+            appRoot: "/canonical/app",
+            url: "http://127.0.0.1:4321/",
+          };
+        },
+        close: async () => {},
+      }));
+      try {
+        await withInteractiveTerminal(async () => {
+          const run = runCli(
+            onboard ? ["dev", "--onboard"] : ["dev"],
+            { error: () => {}, log: () => {} },
+            { startHost },
+          );
+          try {
+            await vi.waitFor(() => expect(startDevelopmentTuiStartup).toHaveBeenCalledOnce());
+            expect(runDevelopmentTui).not.toHaveBeenCalled();
+          } finally {
+            release();
+            await run;
+          }
+        });
+        expect(runDevelopmentTui).toHaveBeenCalledWith(expect.objectContaining({ startup }));
+      } finally {
+        vi.doUnmock("#cli/dev/tui/tui.js");
+      }
+    },
+  );
+
   it("forwards the internal init onboarding handoff to the local TUI", async () => {
     const startHost = vi.fn(() => ({
       start: async () => ({
@@ -970,6 +1018,8 @@ describe("eve dev boot progress", () => {
 
     expect(hostReporter).toBeTypeOf("function");
     expect(tuiReporter).toBe(hostReporter);
+    expect(writes.join("")).toContain("Starting your agent");
+    expect(writes.join("")).not.toContain("compiling agent");
     // Replaying every write through a terminal emulator: the boot progress row
     // is erased, leaving a clean screen for the error to print onto.
     const screen = new MockScreen({ columns: 80, rows: 10 });

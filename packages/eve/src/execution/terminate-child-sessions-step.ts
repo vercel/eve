@@ -33,7 +33,7 @@ export async function terminateChildSessionsStep(input: {
 
   let session;
   try {
-    session = await readDurableSession(input.sessionState);
+    session = readDurableSession(input.sessionState);
   } catch (error) {
     logError(log, "failed to read child sessions for termination", error, {
       parentSessionId: input.sessionState.sessionId,
@@ -51,8 +51,7 @@ export async function terminateChildSessionsStep(input: {
         readonly ctx: ContextContainer;
       }
     | undefined;
-  // Cooperatively cancel live tasks first: their runs are the single writers
-  // for task state, so child termination cannot race completion into an ended parent.
+  // Record cancellation in the parent before terminating its child sessions.
   await cancelAllIndexedSessionTasksStep({
     serializedContext: input.serializedContext,
     sessionState: input.sessionState,

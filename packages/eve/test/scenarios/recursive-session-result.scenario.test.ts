@@ -12,8 +12,7 @@ describe("eve client inside an authored tool", () => {
       name: "recursive-session-result",
       installDependencies: true,
       files: {
-        "agent/agent.ts":
-          'export default { model: "openai/gpt-5.4-mini", experimental: { instrumentationProviders: true } };\n',
+        "agent/agent.ts": 'export default { model: "openai/gpt-5.4-mini" };\n',
         "agent/instrumentation/otel.ts":
           'import { otel } from "eve/instrumentation/otel";\nexport default otel({ instrumentations: ["fetch"] });\n',
         "agent/instructions.md": "Call the requested tool, or answer directly.\n",

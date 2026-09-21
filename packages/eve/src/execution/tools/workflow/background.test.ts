@@ -4,7 +4,7 @@ import { jsonSchema } from "ai";
 import { createWorkflowToolHarnessDefinition, parseWorkflowToolInput } from "./background.js";
 
 describe("createWorkflowToolHarnessDefinition", () => {
-  it("preserves subagent resultKind on workflow-backed tools", () => {
+  it("preserves agent identity on workflow-backed tools", () => {
     expect(
       createWorkflowToolHarnessDefinition({
         definition: {
@@ -14,10 +14,10 @@ describe("createWorkflowToolHarnessDefinition", () => {
           inputSchema: jsonSchema({ type: "object" }),
           name: "research",
         },
-        resultKind: "subagent",
+        nodeId: "subagents/research",
         workflowId: "workflow//eve//subagentToolExecuteWorkflow",
       }),
-    ).toMatchObject({ resultKind: "subagent" });
+    ).toMatchObject({ nodeId: "subagents/research" });
   });
 });
 

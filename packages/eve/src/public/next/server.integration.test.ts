@@ -51,6 +51,21 @@ describe("resolveEveDestinationPrefix", () => {
     );
   });
 
+  it("reports a missing local production build instead of proxying to an unstarted port", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    const appRoot = await createTempAppRoot();
+
+    await expect(
+      resolveEveDestinationPrefix({
+        appRoot,
+        phase: "phase-production-server",
+        productionDestinationPrefix: "http://127.0.0.1:4274",
+        productionServerOrigin: "http://127.0.0.1:4274",
+      }),
+    ).rejects.toThrow(`Run eve build from ${appRoot} before starting Next.js.`);
+    expect(spawnMock).not.toHaveBeenCalled();
+  });
+
   it("ignores non-server URLs in dev server output while waiting for the listening URL", async () => {
     vi.stubEnv("NODE_ENV", "development");
     const appRoot = await createTempAppRoot();

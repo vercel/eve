@@ -8,6 +8,7 @@ import {
   type RemoteAgentUrl,
 } from "#public/definitions/remote-agent.js";
 import type { JsonObject } from "#shared/json.js";
+import { normalizePublicRoutePrefix } from "#shared/public-route-prefix.js";
 
 const WORKSPACE_AGENT_NAME = Symbol.for("eve.workspace-agent.name");
 
@@ -30,6 +31,11 @@ export interface WorkspaceAgentDefinition {
   readonly outputSchema?: StandardJSONSchemaV1<unknown, unknown> | JsonObject;
   /** Name of the peer workspace member, such as `research`. */
   readonly name: string;
+  /**
+   * Whether eve exposes this workspace peer to the parent model as a tool.
+   * Defaults to `true`; `false` keeps it callable from workflow tools.
+   */
+  readonly tool?: boolean;
   /** Overrides environment-aware workspace routing and service authentication. */
   readonly transport?: WorkspaceAgentTransport;
 }
@@ -43,6 +49,7 @@ export function defineWorkspaceAgent(definition: WorkspaceAgentDefinition): Remo
     forwardPrincipal: definition.forwardPrincipal,
     headers: transport.headers,
     outputSchema: definition.outputSchema,
+    tool: definition.tool,
     url: transport.url,
   }) as BrandedWorkspaceSubagent;
   Object.defineProperty(remote, WORKSPACE_AGENT_NAME, { value: definition.name });
@@ -57,15 +64,24 @@ function isBrandedWorkspaceSubagent(value: unknown): value is BrandedWorkspaceSu
   return typeof value === "object" && value !== null && Reflect.has(value, WORKSPACE_AGENT_NAME);
 }
 
+function workspaceAgentRoutePrefix(name: string): string {
+  const callerRoutePrefix = normalizePublicRoutePrefix(process.env.EVE_PUBLIC_ROUTE_PREFIX);
+  const namespace =
+    callerRoutePrefix?.slice(0, callerRoutePrefix.lastIndexOf("/")) ??
+    (process.env.VERCEL_ENV === "development" ? "" : "/eve");
+  return `${namespace}/${name}`;
+}
+
 function defaultWorkspaceAgentTransport(name: string): WorkspaceAgentTransport {
   const auth = vercelOidc();
   return {
     auth: async () => {
       requireVercelWorkspaceEnvironment();
-      return auth();
+      return process.env.VERCEL_ENV === "development" ? { headers: {} } : auth();
     },
     url: () => {
       requireVercelWorkspaceEnvironment();
+      const development = process.env.VERCEL_ENV === "development";
       const host =
         process.env.VERCEL_ENV === "production"
           ? process.env.VERCEL_PROJECT_PRODUCTION_URL
@@ -75,7 +91,7 @@ function defaultWorkspaceAgentTransport(name: string): WorkspaceAgentTransport {
           "The default workspace-agent transport requires VERCEL_URL, or VERCEL_PROJECT_PRODUCTION_URL in production.",
         );
       }
-      return `https://${host}/${name}`;
+      return `${development ? "http" : "https"}://${host}${workspaceAgentRoutePrefix(name)}`;
     },
   };
 }

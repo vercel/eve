@@ -226,7 +226,7 @@ describe("startAuthoredSourceWatcher", () => {
     }
   });
 
-  it("watches root config, provider selection, env, workspace lockfiles, and tsconfig extends", async () => {
+  it("watches authored config and environment files but excludes connection metadata", async () => {
     const workspaceRoot = await mkdtemp(join(tmpdir(), "eve-dev-watch-root-"));
     const appRoot = join(workspaceRoot, "apps", "watch-agent");
     temporaryDirectories.push(workspaceRoot);
@@ -248,7 +248,10 @@ describe("startAuthoredSourceWatcher", () => {
       const paths = getInitialWatchPaths();
       expect(paths).toContain(join(appRoot, "package.json"));
       expect(paths).toContain(join(appRoot, ".env.local"));
-      expect(paths).toContain(join(appRoot, ".eve", "provider.json"));
+      expect(paths).not.toContain(join(appRoot, ".eve", "provider.json"));
+      expect(
+        mockedWatcher.watch.mock.calls[0]?.[1]?.ignored?.(join(appRoot, ".eve", "provider.json")),
+      ).toBe(true);
       expect(paths).toContain(join(workspaceRoot, "pnpm-lock.yaml"));
       expect(paths).toContain(join(workspaceRoot, "tsconfig.base.json"));
     } finally {

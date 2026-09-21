@@ -61,6 +61,15 @@ describe("normalizeAgentDefinition", () => {
     ).toThrow(FAILURE_MESSAGE);
   });
 
+  it("normalizes agent tool visibility", () => {
+    expect(
+      normalizeAgentDefinition({ model: "openai/gpt-5.5", tool: false }, FAILURE_MESSAGE).tool,
+    ).toBe(false);
+    expect(() =>
+      normalizeAgentDefinition({ model: "openai/gpt-5.5", tool: "no" }, FAILURE_MESSAGE),
+    ).toThrow(FAILURE_MESSAGE);
+  });
+
   it("accepts provider-agnostic reasoning effort", () => {
     const definition = normalizeAgentDefinition(
       {

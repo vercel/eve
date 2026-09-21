@@ -14,6 +14,7 @@ import {
   getTurnClientContextState,
   setTurnClientContextState,
 } from "#harness/turn-client-context.js";
+import { markFrameworkStepInput } from "#harness/messages.js";
 import type { HarnessEmitFn, HarnessSession } from "#harness/types.js";
 import { EMPTY_DELIVERY_SENTINEL } from "#shared/empty-delivery.js";
 
@@ -151,6 +152,45 @@ describe("setHarnessEmissionState", () => {
 });
 
 describe("emitTurnPreamble", () => {
+  it("marks framework-authored task input as non-participant stream activity", async () => {
+    const events: Array<Parameters<HarnessEmitFn>[0]> = [];
+
+    await emitTurnPreamble(
+      async (event) => {
+        events.push(event);
+      },
+      markFrameworkStepInput(
+        { message: "Framework-authored task state" },
+        "execution.background_task",
+      ),
+      { sequence: 1, sessionStarted: true, stepIndex: 0, turnId: "" },
+      [],
+    );
+
+    expect(events).toEqual([
+      expect.objectContaining({ type: "turn.started" }),
+      expect.objectContaining({
+        data: expect.objectContaining({ kind: "execution.background_task" }),
+        type: "message.received",
+      }),
+    ]);
+  });
+
+  it("keeps participant messages visible", async () => {
+    const events: Array<Parameters<HarnessEmitFn>[0]> = [];
+
+    await emitTurnPreamble(
+      async (event) => {
+        events.push(event);
+      },
+      { message: "Start background work" },
+      { sequence: 0, sessionStarted: true, stepIndex: 0, turnId: "" },
+      [],
+    );
+
+    expect(events.map((event) => event.type)).toEqual(["turn.started", "message.received"]);
+  });
+
   it("attaches one trace context to the session and turn start events", async () => {
     const events: Array<Parameters<HarnessEmitFn>[0]> = [];
     const trace = {
@@ -165,6 +205,7 @@ describe("emitTurnPreamble", () => {
       },
       { message: "hello" },
       { sequence: 0, sessionStarted: false, stepIndex: 0, turnId: "" },
+      [{ role: "user", content: "hello" }],
       undefined,
       trace,
     );
@@ -538,7 +579,7 @@ describe("emitStreamContent action requests", () => {
           description: "Delegate work to a subagent.",
           inputSchema: jsonSchema({ type: "object" }),
           name: "delegate",
-          resultKind: "subagent",
+          nodeId: "subagents/researcher",
           workflowId: "workflow//./agent/subagents/researcher//execute",
         },
       ],
@@ -677,7 +718,7 @@ describe("emitStreamContent action requests", () => {
     ]);
   });
 
-  it("marks a background subagent receipt on subagent.completed", async () => {
+  it("returns a background receipt without announcing subagent completion", async () => {
     const emit = createEmitStub();
     const tools = new Map<string, HarnessToolDefinition>([
       [
@@ -687,7 +728,7 @@ describe("emitStreamContent action requests", () => {
           execution: "background",
           inputSchema: jsonSchema({ type: "object" }),
           name: "delegate",
-          resultKind: "subagent",
+          nodeId: "subagents/researcher",
           workflowId: "workflow//./agent/subagents/researcher//execute",
         },
       ],
@@ -715,71 +756,12 @@ describe("emitStreamContent action requests", () => {
     );
 
     const events = vi.mocked(emit).mock.calls.map(([event]) => event);
-    expect(events.map((event) => event.type)).toEqual([
-      "actions.requested",
-      "subagent.completed",
-      "action.result",
-    ]);
+    expect(events.map((event) => event.type)).toEqual(["actions.requested", "action.result"]);
     expect(events[1]).toMatchObject({
       data: {
-        backgroundTask: { status: "working", taskId: "task-1" },
-        callId: "call-delegate",
-        subagentName: "delegate",
+        result: { callId: "call-delegate", output: { status: "working", taskId: "task-1" } },
       },
-      type: "subagent.completed",
-    });
-  });
-
-  it("marks a background subagent receipt on subagent.completed", async () => {
-    const emit = createEmitStub();
-    const tools = new Map<string, HarnessToolDefinition>([
-      [
-        "delegate",
-        {
-          description: "Delegate work to a subagent.",
-          execution: "background",
-          inputSchema: jsonSchema({ type: "object" }),
-          name: "delegate",
-          resultKind: "subagent",
-          workflowId: "workflow//./agent/subagents/researcher//execute",
-        },
-      ],
-    ]);
-
-    await emitStreamContent(
-      emit,
-      EMISSION_STATE,
-      streamOf([
-        {
-          input: { message: "research the release" },
-          toolCallId: "call-delegate",
-          toolName: "delegate",
-          type: "tool-call",
-        },
-        {
-          output: { status: "working", taskId: "task-1" },
-          toolCallId: "call-delegate",
-          toolName: "delegate",
-          type: "tool-result",
-        },
-        { finishReason: "tool-calls", type: "finish-step" },
-      ] as TextStreamPart<ToolSet>[]),
-      { excludedActionToolNames: new Set(), tools },
-    );
-
-    const events = vi.mocked(emit).mock.calls.map(([event]) => event);
-    expect(events.map((event) => event.type)).toEqual([
-      "actions.requested",
-      "subagent.completed",
-      "action.result",
-    ]);
-    expect(events[1]).toMatchObject({
-      data: {
-        backgroundTask: { status: "working", taskId: "task-1" },
-        callId: "call-delegate",
-        subagentName: "delegate",
-      },
-      type: "subagent.completed",
+      type: "action.result",
     });
   });
 

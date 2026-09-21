@@ -1,5 +1,4 @@
 import type { AgentSourceManifest } from "#discover/manifest.js";
-import type { ModuleSourceRef } from "#shared/source-ref.js";
 import {
   type CompiledAgentDefinition,
   type CompiledAgentManifest,
@@ -20,7 +19,6 @@ import {
   type CompiledSandboxDefinition,
   type CompiledSubagentNode,
   type CompiledToolDefinition,
-  type CompiledWorkflowToolDefinition,
   createCompiledAgentManifest,
   createCompiledAgentNodeManifest,
   createCompiledAgentResources,
@@ -32,13 +30,14 @@ import {
   markConfigRuntimeEntries,
   NodeModuleEvaluationContext,
 } from "#compiler/module-lifecycle.js";
-import { assertInstrumentationLayoutConfig } from "#compiler/instrumentation-layout-config.js";
 import { compileAgentConfig } from "#compiler/normalize-agent-config.js";
 import { compileChannelDefinition } from "#compiler/normalize-channel.js";
 import { compileConnectionDefinition } from "#compiler/normalize-connection.js";
 import {
+  applyAgentToolPolicy,
   applyDefaultToolPolicy,
   assertFrameworkToolPolicy,
+  canDisableToolWithoutSelectedSource,
 } from "#compiler/default-tool-policy.js";
 import {
   loadModuleBackedDefinition,
@@ -69,7 +68,6 @@ import {
   assertApplicationOverlayCanApplyToAllNodes,
   assertNonExtensionSpecialTool,
   assertRootOnlyConfig,
-  assertRootOwnedSpecialTool,
   assertUniqueBy,
   assertUniqueRegistryIds,
   compileExtensionMounts,
@@ -180,6 +178,7 @@ class AgentGraphCompiler {
       source: phaseOne.selectedConfig.source,
     });
     assertRootOnlyConfig(config, input.isRoot, input.manifest.agentId);
+    applyAgentToolPolicy(phaseOne, config);
     applyDefaultToolPolicy(phaseOne, config);
 
     const externalDependencies = mergeExternalDependencies(
@@ -195,7 +194,6 @@ class AgentGraphCompiler {
     }
     const state = finalizeNodeSourceState(phaseOne, externalDependencies);
     markConfigRuntimeEntries(config, state.evaluation);
-    assertInstrumentationLayoutConfig(config, state);
     const resources = await this.compileResources(input, state);
     const children = await this.compileChildren(input, state, externalDependencies);
     const manifest = createCompiledAgentNodeManifest({
@@ -288,6 +286,7 @@ class AgentGraphCompiler {
           source: phaseOne.selectedConfig.source,
         });
         assertRootOnlyConfig(config, false, source.manifest.agentId);
+        applyAgentToolPolicy(phaseOne, config);
         applyDefaultToolPolicy(phaseOne, config);
       } else {
         dynamicBuildDependencies = normalized.build?.externalDependencies;
@@ -307,7 +306,6 @@ class AgentGraphCompiler {
       } else {
         markConfigRuntimeEntries(config, finalState.evaluation);
       }
-      if (config !== undefined) assertInstrumentationLayoutConfig(config, finalState);
       const resources = await this.compileResources(childInput, finalState);
       const children = await this.compileChildren(childInput, finalState, externalDependencies);
       const base = {
@@ -498,8 +496,6 @@ class AgentGraphCompiler {
     const schedules: CompiledScheduleDefinition[] = [];
     const channels: CompiledChannelDefinition[] = [];
     let sandbox: CompiledSandboxDefinition | undefined;
-    let instrumentation: ModuleSourceRef | undefined;
-    let workflowTool: CompiledWorkflowToolDefinition | undefined;
     const selectedSourceIds = collectSelectedSourceIds(state.composed);
     const loadNamespace = state.evaluation.loadNamespace;
 
@@ -563,10 +559,6 @@ class AgentGraphCompiler {
           }
           break;
         }
-        case "instrumentation":
-          instrumentation = entry.source;
-          state.evaluation.requireRuntimeEntry(candidate.sourceId);
-          break;
         case "memory":
           memories.push(
             await compileMemoryDefinition(entry.source, {
@@ -613,7 +605,11 @@ class AgentGraphCompiler {
           });
           assertFrameworkToolPolicy(candidate, result);
           if (result.kind === "disabled") {
-            state.composed = disableComposedCandidate({ candidate, composed: state.composed });
+            state.composed = disableComposedCandidate({
+              allowUnmatched: canDisableToolWithoutSelectedSource(state, result.name),
+              candidate,
+              composed: state.composed,
+            });
             delete state.bindings[candidate.sourceId];
             selectedSourceIds.delete(candidate.sourceId);
           } else if (result.kind === "tool") {
@@ -624,9 +620,6 @@ class AgentGraphCompiler {
           } else if (result.kind === "dynamic-tool") {
             dynamicTools.push(withExtensionNamespace(result.definition, candidate.owner));
             state.evaluation.requireRuntimeEntry(candidate.sourceId);
-          } else if (result.kind === "workflow-tool") {
-            assertRootOwnedSpecialTool(candidate as AgentModuleCandidate, "Workflow");
-            workflowTool = { ...entry.source, maxSubagents: result.maxSubagents };
           } else {
             assertNonExtensionSpecialTool(candidate as AgentModuleCandidate, "Web search");
             tools.push(result.definition);
@@ -680,7 +673,6 @@ class AgentGraphCompiler {
       hooks,
       memories,
       instructions,
-      instrumentation,
       sandbox,
       sandboxWorkspaces: input.manifest.sandboxWorkspaces.map((workspace) => ({
         logicalPath: workspace.logicalPath,
@@ -692,7 +684,6 @@ class AgentGraphCompiler {
       skills,
       sourceComposition: state.composed.composition,
       tools,
-      workflowTool,
     });
   }
 }

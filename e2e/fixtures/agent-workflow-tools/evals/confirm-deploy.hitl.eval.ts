@@ -5,7 +5,8 @@ export default defineEval({
     "A workflow tool reports progress around a human question, then settles the call in order.",
   async test(t) {
     const parked = await t.send("WORKFLOW-CONFIRM-START");
-    t.requireInputRequest({
+    const session = parked.session;
+    session.requireInputRequest({
       display: "confirmation",
       optionIds: ["approve", "cancel"],
       toolName: "confirm_deploy",
@@ -16,7 +17,7 @@ export default defineEval({
     });
     parked.calledTool("confirm_deploy", { status: "pending", count: 1 });
 
-    const approved = await t.respondAll("approve");
+    const approved = await session.respondAll("approve");
     approved.expectOk();
     approved.event("action.result", {
       count: 1,

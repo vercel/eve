@@ -1,0 +1,220 @@
+---
+title: "OpenTelemetry"
+description: "Configure OpenTelemetry destinations, content capture, and managed exports."
+url: "/observability/otel"
+---
+
+eve configures its built-in OpenTelemetry destinations automatically.
+`eve dev` records local traces, and preview and production deployments export
+to Vercel Agent Runs by default. You do not need `otel()` or
+`otelIntegration()` to use these defaults.
+
+## Configure OpenTelemetry
+
+`otel()` and `otelIntegration()` are optional:
+
+- Use `otel()` only when you need process-wide settings such as the resource,
+  sampler, propagators, or trace capture policy. Declare it at most once.
+- Use `otelIntegration()` only when adding a third-party OpenTelemetry
+  destination. Declare one file per exporter or processor chain.
+
+Add `agent/instrumentation/otel.ts` when you need process-wide settings or
+want to control the content eve writes to OpenTelemetry spans:
+
+```ts title="agent/instrumentation/otel.ts"
+import { otel } from "eve/instrumentation/otel";
+
+export default otel({
+  resource: { "deployment.environment": process.env.VERCEL_ENV ?? "development" },
+  tracePolicy: ({ audience, environment }) => ({
+    emit: true,
+    recordInputs: audience === "public" || environment === "development",
+    recordOutputs: audience === "public" || environment === "development",
+  }),
+});
+```
+
+The OpenTelemetry `tracePolicy` is a capture ceiling shared by every OTel
+destination. A destination cannot restore content excluded by this policy. It
+does not affect lifecycle instrumentation created with `defineInstrumentation()`.
+See [Audience](../channels/overview#audience) for how channels classify the
+conversation passed to this policy.
+
+## Add an OpenTelemetry destination
+
+Use this section when sending traces to a third-party destination. Install
+`@vercel/otel` before using its exporters:
+
+```bash
+pnpm add @vercel/otel
+```
+
+```ts title="agent/instrumentation/honeycomb.ts"
+import { OTLPHttpProtoTraceExporter } from "@vercel/otel";
+import { otelIntegration } from "eve/instrumentation/otel";
+
+export default otelIntegration({
+  exportPolicy: {
+    span: () => ({ redact: true, inputs: true, outputs: true }),
+  },
+  traceExporter: new OTLPHttpProtoTraceExporter({
+    url: "https://api.honeycomb.io/v1/traces",
+    headers: {
+      "x-honeycomb-team": process.env.HONEYCOMB_API_KEY!,
+    },
+  }),
+});
+```
+
+Pass `spanProcessors` to `otelIntegration()` when a custom destination needs
+filtering or transformation. The example's `exportPolicy` preserves span
+metadata while removing inputs and outputs from this destination.
+
+## Add runtime context
+
+Use `runtimeContext` to add JSON values to AI SDK spans for each model attempt.
+For typed channel metadata, import the channel definition and narrow with
+`isChannel`:
+
+```ts title="agent/instrumentation/support.ts"
+import { isChannel } from "eve/instrumentation";
+import { otelIntegration } from "eve/instrumentation/otel";
+
+import supportChannel from "../channels/support";
+
+export default otelIntegration({
+  runtimeContext(input) {
+    if (!isChannel(input.channel, supportChannel)) return undefined;
+
+    return {
+      "support.channel_id": input.channel.metadata.channelId ?? "",
+      "support.user_id": input.channel.metadata.triggeringUserId ?? "",
+    };
+  },
+});
+```
+
+The resolver receives the channel, session, final model input, step, and turn.
+Keys beginning with `eve.` are reserved. Content excluded by
+`otel({ tracePolicy })` is not available to the resolver.
+
+## Trace topology
+
+OpenTelemetry destinations receive the following trace topology for an ordinary
+agent turn:
+
+```text
+invoke_agent <agent>
+  └── agent.step
+        ├── chat <model>
+        └── agent.action
+              └── execute_tool <tool>
+```
+
+Each turn starts a new trace. The first subagent trace links to its caller with
+`eve.link.type=agent.dispatch`; the link is not an authorization grant. For a
+remote agent, `trustedForwarders` lets the receiver accept the sender's session
+lineage and trace-content policy. See [Remote agents](../guides/remote-agents#preserving-trace-content).
+Use `gen_ai.conversation.id` to find the traces for one conversation in your
+destination's span-search surface.
+
+## Manage built-in destinations
+
+Instrumentation has two environment-specific defaults.
+
+### Local traces
+
+`eve dev` records local traces by default. Omitting
+`agent/instrumentation/local.ts` preserves that default. Export
+`localTraces(...)` from that file to reconfigure it, or disable it explicitly:
+
+```ts title="agent/instrumentation/local.ts"
+import { disableInstrumentation } from "eve/instrumentation";
+
+export default disableInstrumentation();
+```
+
+### Vercel Agent Runs
+
+Preview and production deployments export to Vercel Agent Runs by default.
+Omitting `agent/instrumentation/agent-runs.ts` preserves that default. Export
+`agentRuns(...)` from that file to reconfigure it, or export
+`disableInstrumentation()` to disable it.
+
+## Enable tracing on Vercel
+
+A deployed eve project needs at least one
+[sampling rule with a rate above 0%](https://vercel.com/docs/tracing/always-on-tracing#enable-always-on-tracing)
+before Vercel collects traces. We recommend setting the rate to **100%** for
+eve projects so every matching request is traced.
+
+Select your team and project, then open
+[**Settings → Tracing**](https://vercel.com/d?to=%2F%5Bteam%5D%2F%5Bproject%5D%2Fsettings%2Ftracing&title=Go+to+Tracing+settings):
+
+1. Select **Add Sampling Rule**.
+2. Choose **All Environments**, **Production**, or **Preview**.
+3. Set **Rate** to `100%`.
+4. Select **Save**.
+
+Tracing starts as soon as you save the rule. You can also manage sampling
+rules with [`vercel traces config`](https://vercel.com/docs/cli/traces#manage-trace-sampling-rules).
+The CLI accepts rates from 1 to 100%; add a 0% rule from the dashboard.
+
+## Filter a destination
+
+`otelIntegration()`, `localTraces()`, and `agentRuns()` accept one
+`exportPolicy` object or an array applied in order. Each policy filters spans
+and attributes before that destination's processors receive them:
+
+```ts title="agent/instrumentation/agent-runs.ts"
+import { agentRuns } from "eve/instrumentation/otel";
+
+export default agentRuns({
+  exportPolicy: {
+    span: ({ name }) => ({ emit: name !== "internal.cache.refresh" }),
+    attribute: ({ key }) => (key === "customer.id" ? { emit: false } : { emit: true }),
+  },
+});
+```
+
+Return `{ emit: true }` from `span` to retain a span unchanged, or
+`{ emit: false }` to omit it from this destination. To retain the span while
+redacting content, return `{ redact: true }` with `inputs: true`,
+`outputs: true`, or both. A redaction decision implies emission and requires
+at least one direction. For example, return
+`{ redact: true, inputs: true, outputs: true }` to redact both directions.
+A throwing `span` callback drops the span from this destination. Return
+`{ emit: true }`, `{ emit: false }`, or
+`{ replace: true, value }` from `attribute` to retain, remove, or change
+one attribute.
+
+### Further narrow a built-in destination
+
+Return a redaction decision to further narrow what a built-in destination
+receives after the process-wide `otel({ tracePolicy })` has admitted a trace.
+For example, keep the spans in Agent Runs while redacting their inputs and
+outputs unless the session is public:
+
+```ts title="agent/instrumentation/agent-runs.ts"
+import { agentRuns } from "eve/instrumentation/otel";
+
+export default agentRuns({
+  exportPolicy: {
+    span: ({ audience }) =>
+      audience === "public" ? { emit: true } : { redact: true, inputs: true, outputs: true },
+  },
+});
+```
+
+Input redaction removes eve's known prompt, instruction, document, and
+tool-argument attributes. Output redaction removes response, reasoning,
+tool-result, exception, and status attributes. Redaction narrows only this
+destination; it does not mutate spans sent to another destination. Policies run
+in array order, and each policy receives the facade produced by the policies
+before it.
+
+## What to read next
+
+- [Instrumentation](/docs/observability/instrumentation): handle eve lifecycle events.
+- [Migrate instrumentation](/docs/observability/instrumentation-migration): replace `agent/instrumentation.ts`.
+- [Local development](../guides/dev-tui): inspect local traces in the TUI.

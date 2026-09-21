@@ -30,8 +30,8 @@ import { defineWorkflowTool } from "#tools/workflow-definition.js";
 import { defineTool, disableTool } from "#tools/definition.js";
 import { defineMemory } from "#public/memory/index.js";
 import { defineDynamic } from "#dynamic/definition.js";
-import { experimental_workflow } from "#tools/workflow.js";
 import { webSearch } from "#tools/provided/web-search.js";
+import { agent as agentTool } from "#tools/framework/agent.js";
 
 function manifest() {
   return createAgentSourceManifest({
@@ -136,6 +136,45 @@ describe("compileAgentManifest source graph", () => {
     expect(() => validateCompiledModuleMap(compiled, moduleMap)).not.toThrow();
   });
 
+  it("omits the built-in agent tool when the root sets tool false", async () => {
+    const sourceRegistry = registry([
+      {
+        logicalPath: "agent.ts",
+        loadNamespace: async () => ({
+          default: defineAgent({ model: "openai/gpt-5.4", tool: false }),
+        }),
+      },
+    ]);
+
+    const compiled = await compileAgentManifest(manifest(), {
+      sourceRegistries: [sourceRegistry],
+    });
+
+    expect(compiled.config.tool).toBe(false);
+    expect(compiled.tools.map((tool) => tool.name)).not.toContain("agent");
+  });
+
+  it("lets an authored agent tool override root tool false", async () => {
+    const sourceRegistry = registry([
+      {
+        logicalPath: "agent.ts",
+        loadNamespace: async () => ({
+          default: defineAgent({ model: "openai/gpt-5.4", tool: false }),
+        }),
+      },
+      {
+        logicalPath: "tools/agent.ts",
+        loadNamespace: async () => ({ default: agentTool }),
+      },
+    ]);
+
+    const compiled = await compileAgentManifest(manifest(), {
+      sourceRegistries: [sourceRegistry],
+    });
+
+    expect(compiled.tools.map((tool) => tool.name)).toContain("agent");
+  });
+
   it("omits default tools while preserving authored tools and same-slug overrides", async () => {
     const sourceRegistry = registry([
       {
@@ -205,6 +244,27 @@ describe("compileAgentManifest source graph", () => {
     );
   });
 
+  it("allows disableTool for the root agent tool", async () => {
+    const sourceRegistry = registry([
+      {
+        logicalPath: "tools/agent.ts",
+        loadNamespace: async () => ({ default: disableTool() }),
+      },
+    ]);
+
+    const compiled = await compileAgentManifest(manifest(), {
+      sourceRegistries: [sourceRegistry],
+    });
+
+    expect(compiled.tools.map((tool) => tool.name)).not.toContain("agent");
+    expect(compiled.sourceComposition.entries).toContainEqual(
+      expect.objectContaining({
+        kind: "disabled",
+        source: expect.objectContaining({ logicalPath: "tools/agent.ts" }),
+      }),
+    );
+  });
+
   it("does not install task_update from the framework registry", async () => {
     const compiled = await compileAgentManifest(manifest());
 
@@ -215,29 +275,53 @@ describe("compileAgentManifest source graph", () => {
     );
   });
 
-  it.each(["agent", "task_cancel"])(
-    "rejects overriding closed framework tool %s",
-    async (toolName) => {
-      const sourceRegistry = registry([
-        {
-          logicalPath: `tools/${toolName}.ts`,
-          loadNamespace: async () => ({
-            default: defineTool({
-              description: "Replacement tool.",
-              execute: async () => null,
-              inputSchema: {},
-            }),
+  it("allows an authored tool in the agent slot", async () => {
+    const sourceRegistry = registry([
+      {
+        logicalPath: "tools/agent.ts",
+        loadNamespace: async () => ({
+          default: defineTool({
+            availableInSubagents: false,
+            description: "Route delegated work.",
+            execute: async () => null,
+            inputSchema: {},
           }),
-        },
-      ]);
+        }),
+      },
+    ]);
 
-      await expect(
-        compileAgentManifest(manifest(), { sourceRegistries: [sourceRegistry] }),
-      ).rejects.toThrow(
-        `The framework "${toolName}" tool cannot be overridden. Re-export it from "eve/tools/${toolName}" or disable it with disableTool().`,
-      );
-    },
-  );
+    const compiled = await compileAgentManifest(manifest(), {
+      sourceRegistries: [sourceRegistry],
+    });
+
+    expect(compiled.tools.find((tool) => tool.name === "agent")).toMatchObject({
+      availableInSubagents: false,
+      behavior: { availability: [] },
+      description: "Route delegated work.",
+      execution: undefined,
+    });
+  });
+
+  it.each(["task_cancel"])("rejects overriding closed framework tool %s", async (toolName) => {
+    const sourceRegistry = registry([
+      {
+        logicalPath: `tools/${toolName}.ts`,
+        loadNamespace: async () => ({
+          default: defineTool({
+            description: "Replacement tool.",
+            execute: async () => null,
+            inputSchema: {},
+          }),
+        }),
+      },
+    ]);
+
+    await expect(
+      compileAgentManifest(manifest(), { sourceRegistries: [sourceRegistry] }),
+    ).rejects.toThrow(
+      `The framework "${toolName}" tool cannot be overridden. Re-export it from "eve/tools/${toolName}" or disable it with disableTool().`,
+    );
+  });
 
   it("compiles a workflow tool with programmatic executor metadata", async () => {
     const execute = async () => ({ ok: true });
@@ -307,7 +391,6 @@ describe("compileAgentManifest source graph", () => {
       rootOnly: true,
       task: {
         nodeId: "__root__",
-        resultKind: "subagent",
         workflowId: expect.stringContaining("subagentToolExecuteWorkflow"),
       },
     });
@@ -414,10 +497,6 @@ describe("compileAgentManifest source graph", () => {
         }),
       },
       {
-        logicalPath: "tools/workflow.ts",
-        loadNamespace: async () => ({ default: experimental_workflow() }),
-      },
-      {
         logicalPath: "tools/web_search.ts",
         loadNamespace: async () => ({ default: webSearch({ provider: "parallel" }) }),
       },
@@ -480,7 +559,6 @@ describe("compileAgentManifest source graph", () => {
       "tools/dynamic.ts": { compile: true, runtimeEntry: true },
       "tools/executable.ts": { compile: true, runtimeEntry: true },
       "tools/web_search.ts": { compile: true, runtimeEntry: false },
-      "tools/workflow.ts": { compile: true, runtimeEntry: false },
     });
   });
 
@@ -518,7 +596,6 @@ describe("compileAgentManifest source graph", () => {
   it("projects the root node once and finalizes its filesystem bindings after config", async () => {
     let toolSourceIterations = 0;
     const discovered = manifest();
-    discovered.instrumentation = createModuleSourceRef({ logicalPath: "instrumentation.ts" });
     discovered.tools = new Proxy(discovered.tools, {
       get(target, property, receiver) {
         if (property === Symbol.iterator) toolSourceIterations += 1;
@@ -542,14 +619,7 @@ describe("compileAgentManifest source graph", () => {
     });
 
     expect(toolSourceIterations).toBe(1);
-    expect(compiled.bindings["instrumentation.ts"]?.backing).toMatchObject({
-      externalDependencies: ["sharp"],
-      kind: "filesystem",
-    });
-    expect(compiled.bindings["instrumentation.ts"]?.usage).toEqual({
-      compile: false,
-      runtimeEntry: true,
-    });
+    expect(compiled.config.build?.externalDependencies).toEqual(["sharp"]);
   });
 
   it("classifies dynamic and source-backed model configs as runtime entries", async () => {
@@ -633,6 +703,30 @@ describe("compileAgentManifest source graph", () => {
       compile: false,
       runtimeEntry: true,
     });
+  });
+
+  it("reserves the agent subagent name for root self-delegation", async () => {
+    const child = createAgentSourceManifest({
+      agentId: "agent",
+      agentRoot: "/virtual/source-test/agent/subagents/agent",
+      appRoot: "/virtual/source-test",
+    });
+    const discovered = manifest();
+    discovered.subagents.push(
+      createLocalSubagentSourceRef({
+        entryPath: child.agentRoot,
+        logicalPath: "subagents/agent",
+        manifest: child,
+        rootPath: child.agentRoot,
+        subagentId: "agent",
+      }),
+    );
+
+    await expect(
+      compileAgentManifest(discovered, { sourceRegistries: [registry([])] }),
+    ).rejects.toThrow(
+      'Subagent "subagents/agent" uses the reserved name "agent". Rename its path; eve reserves "agent" for the built-in root-copy target.',
+    );
   });
 
   it("projects a local subagent node once", async () => {

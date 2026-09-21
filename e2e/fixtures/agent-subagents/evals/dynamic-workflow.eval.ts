@@ -15,41 +15,52 @@ function isFanOutProgram(input: unknown): boolean {
   );
 }
 
-/** Dynamic Workflow smoke: sandboxed JavaScript fans out durable children. */
+/** Generated workflow-program smoke: sandboxed JavaScript fans out durable children. */
 export default defineEval({
   tags: ["real-model"],
   description:
-    "Dynamic Workflow smoke: model-authored JavaScript fans out two local subagent calls and combines their results.",
+    "Generated workflow-program smoke: model-authored JavaScript fans out two local subagent calls and combines their results.",
   async test(t) {
-    const turn = await t.send(
-      "Use the Workflow tool exactly once to fan out two independent echo-marker subagent calls. In its JavaScript, create the messages 'workflow alpha' and 'workflow beta', map them through echo-marker inside Promise.all, and return the resulting two-element array. Do not call echo-marker outside Workflow. Then reply with the returned array verbatim as JSON.",
+    const session = await t.session();
+    const parent = await session.start(
+      "Use the workflow tool exactly once to fan out two independent echo-marker subagent calls. In its JavaScript, create the messages 'workflow alpha' and 'workflow beta', map them through ctx.agent calls to echo-marker inside Promise.all, and return the resulting two-element array. Do not call echo-marker outside workflow. Then reply with the returned array verbatim as JSON.",
     );
+    const firstCalled = await parent.waitForEvent("subagent.called", {
+      data: { name: "echo-marker" },
+    });
+    const firstChild = t.target.watchTurn(firstCalled.data.childSessionId).result();
+    const secondCalled = await parent.waitForEvent("subagent.called", {
+      data: {
+        callId: (callId) => callId !== firstCalled.data.callId,
+        name: "echo-marker",
+      },
+    });
+    if (secondCalled.data.childSessionId === firstCalled.data.childSessionId) {
+      throw new Error("Parallel workflow calls reused one child session.");
+    }
+    const secondChild = t.target.watchTurn(secondCalled.data.childSessionId).result();
+    const [turn, firstChildTurn, secondChildTurn] = await Promise.all([
+      parent.result(),
+      firstChild,
+      secondChild,
+    ]);
+    const latestCallAt = [firstCalled.meta.at, secondCalled.meta.at].sort().at(-1)!;
 
     t.succeeded();
-    t.calledTool("Workflow", { input: isFanOutProgram, count: 1 });
-    // Workflow delivery can replay either event; count logical calls, not deliveries.
-    turn.eventsSatisfy("both distinct children start before either completes", (events) => {
-      const called = new Map<string, number>();
-      const completed = new Map<string, number>();
-      for (const [index, event] of events.entries()) {
-        if (event.type === "subagent.called" && event.data.name === "echo-marker") {
-          if (!called.has(event.data.callId)) called.set(event.data.callId, index);
-        }
-        if (event.type === "subagent.completed" && event.data.subagentName === "echo-marker") {
-          if (!completed.has(event.data.callId)) completed.set(event.data.callId, index);
-        }
-      }
-      return (
-        called.size === 2 &&
-        completed.size === 2 &&
-        [...completed.keys()].every((callId) => called.has(callId)) &&
-        Math.max(...called.values()) < Math.min(...completed.values())
-      );
-    });
-    t.calledSubagent("echo-marker", {
-      output: /SUBAGENT_TOKEN=echo-marker-9F2X/,
-      count: 2,
-    });
+    t.calledTool("workflow", { input: isFanOutProgram, count: 1 });
+    turn.calledSubagent("echo-marker", { count: 2, status: "completed" });
+    firstChildTurn.eventsSatisfy(
+      "first child does not complete before both children start",
+      (events) =>
+        events.some((event) => event.type === "turn.completed" && event.meta.at > latestCallAt),
+    );
+    secondChildTurn.eventsSatisfy(
+      "second child does not complete before both children start",
+      (events) =>
+        events.some((event) => event.type === "turn.completed" && event.meta.at > latestCallAt),
+    );
+    firstChildTurn.messageIncludes(SUBAGENT_TOKEN);
+    secondChildTurn.messageIncludes(SUBAGENT_TOKEN);
     t.messageIncludes(DOUBLE_SUBAGENT_TOKEN);
     t.noFailedActions();
   },

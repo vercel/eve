@@ -23,7 +23,7 @@ export default defineEval({
     started.expectOk();
 
     const firstCompletion = t.target.watchTurn(started.sessionId, {
-      startIndex: requireStreamIndex(t),
+      startIndex: requireStreamIndex(started.session),
     });
     const firstCompletedTurn = await firstCompletion.result();
     firstCompletedTurn.expectOk();

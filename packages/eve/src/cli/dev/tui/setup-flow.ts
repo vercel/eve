@@ -93,8 +93,8 @@ export interface SetupFlowRenderer {
   }): Promise<SetupEditableSelectResult | undefined>;
   /** Provider-only picker with masked async validation. Not part of Prompter. */
   readProviderPicker(options: ProviderPickerRequest): Promise<ProviderPickerChoice | undefined>;
-  /** Composite Change-model screen: catalog list, reasoning slider, tier toggle. Not part of Prompter. */
-  readModelEditor(options: ModelSettingsRequest): Promise<ModelSettingsResult | undefined>;
+  /** Model, speed, and reasoning picker. Not part of Prompter. */
+  readModelPicker(options: ModelSettingsRequest): Promise<ModelSettingsResult | undefined>;
   readText(options: {
     message: string;
     placeholder?: string;

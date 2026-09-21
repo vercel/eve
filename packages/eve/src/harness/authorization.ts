@@ -1,3 +1,7 @@
+import {
+  sessionCommandHookToken,
+  sessionInboxHookToken,
+} from "#execution/session-inbox/address.js";
 /**
  * Authorization request/result API for tool execution.
  *
@@ -187,9 +191,9 @@ export function consumeAuthorizationResult(
  * Builds a callback URL for external systems. `name` and `attemptId` identify
  * the exact challenge in the URL path.
  *
- * By default the URL embeds the session's authorization hook token (`${sessionId}:auth`).
+ * By default the URL embeds the session's stable inbox token.
  * A runtime with its own continuation supplies that hook through AuthorizationHookKey.
- * It is independent of the continuation token, so channel re-keying mid-turn
+ * It is independent of the continuation token, so channel aliasing mid-turn
  * does not invalidate the callback URL.
  *
  * Returns `undefined` if no callback address is available.
@@ -269,12 +273,12 @@ export function isPendingAuthorizationToolOutput(value: unknown): boolean {
 }
 
 /**
- * Deterministic hook token for all authorization callbacks in a
- * session. Both {@link getHookUrl} (inside tool execution) and the
- * workflow body (which creates the hook upfront) use this token.
+ * Physical hook token embedded in a session's authorization callback URLs.
+ * The callback route resumes exactly this hook, so it is the stable inbox's
+ * physical address rather than its logical session token.
  */
 export function authHookToken(sessionId: string): string {
-  return `${sessionId}:auth`;
+  return sessionInboxHookToken(sessionCommandHookToken(sessionId));
 }
 
 // ---------------------------------------------------------------------------

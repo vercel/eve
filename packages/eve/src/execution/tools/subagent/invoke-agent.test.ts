@@ -53,6 +53,16 @@ describe("agent invocation input", () => {
       "agent() requires a non-empty agent name as its first argument.",
     );
   });
+
+  it.each([null, [], "object"])("rejects a non-object output schema (%j)", (outputSchema) => {
+    expect(() =>
+      validateAgentInput({
+        message: "Review",
+        outputSchema: outputSchema as never,
+        target: "reviewer",
+      }),
+    ).toThrow("agent() `outputSchema` must be a JSON Schema object.");
+  });
 });
 
 describe("background agent invocation routing", () => {
@@ -64,7 +74,6 @@ describe("background agent invocation routing", () => {
     });
     const ctx = { abortSignal: controller.signal, callId: "call-1" } as ToolContext;
     attachWorkflowToolRunContext(ctx, {
-      admission: Promise.resolve({ status: "accepted" }),
       from: {
         callId: "call-1",
         execution: "background",
@@ -106,7 +115,10 @@ describe("background agent invocation routing", () => {
       output: { findings: ["available"] },
       subagentName: "research",
     };
-    const replies: AgentInvocationReply[] = [{ kind: "runtime-action-result", results: [result] }];
+    const replies: AgentInvocationReply[] = [
+      { kind: "runtime-action-result", results: [result] },
+      { kind: "agent-settled", callId: result.callId },
+    ];
     mocks.createHook.mockReturnValue({
       [Symbol.asyncIterator]: () => ({
         next: async () =>
@@ -129,7 +141,6 @@ describe("background agent invocation routing", () => {
     };
     const ctx = { callId: "call-1" } as ToolContext;
     attachWorkflowToolRunContext(ctx, {
-      admission: Promise.resolve({ status: "accepted" }),
       from,
       owner: {
         inbox: "owner-inbox",
@@ -172,6 +183,7 @@ describe("background agent invocation routing", () => {
             } as never,
           ],
         },
+        { kind: "agent-settled", callId: `call-1:${token}` },
       ];
       mocks.createHook.mockReturnValueOnce({
         [Symbol.asyncIterator]: () => ({
@@ -215,59 +227,6 @@ describe("background agent invocation routing", () => {
     ]);
   });
 
-  it("does not send the invocation before the owning task is admitted", async () => {
-    const admission = Promise.withResolvers<{ readonly status: "accepted" }>();
-    const replies: AgentInvocationReply[] = [
-      {
-        kind: "runtime-action-result",
-        results: [
-          {
-            callId: "call-1:agent-reply",
-            kind: "subagent-result",
-            origin: "child",
-            output: "done",
-            subagentName: "research",
-          } as never,
-        ],
-      },
-    ];
-    mocks.createHook.mockReturnValue({
-      [Symbol.asyncIterator]: () => ({
-        next: async () =>
-          replies.length > 0
-            ? { done: false as const, value: replies.shift()! }
-            : { done: true as const, value: undefined },
-      }),
-      token: "agent-reply",
-    });
-    const ctx = { callId: "call-1" } as ToolContext;
-    attachWorkflowToolRunContext(ctx, {
-      admission: admission.promise,
-      from: {
-        callId: "call-1",
-        execution: "background",
-        input: { message: "Find it" },
-        runId: "run-1",
-        sequence: 0,
-        stepIndex: 0,
-        toolName: "research",
-        turnId: "turn-1",
-      },
-      owner: {
-        inbox: "owner-inbox",
-      },
-    });
-
-    const result = agent(ctx, "research", { message: "Find it" });
-    await Promise.resolve();
-    expect(mocks.createHook).not.toHaveBeenCalled();
-    expect(mocks.resumeHook).not.toHaveBeenCalled();
-
-    admission.resolve({ status: "accepted" });
-    await expect(result).resolves.toBe("done");
-    expect(mocks.resumeHook).toHaveBeenCalledTimes(2);
-  });
-
   it("waits for agent calls inside a blocking workflow tool", async () => {
     const result = {
       callId: "call-1:agent-reply",
@@ -293,6 +252,10 @@ describe("background agent invocation routing", () => {
           .mockResolvedValueOnce({
             done: false,
             value: { kind: "runtime-action-result", results: [result] },
+          })
+          .mockResolvedValueOnce({
+            done: false,
+            value: { kind: "agent-settled", callId: "call-1:agent-reply" },
           })
           .mockResolvedValue({ done: true }),
       }),
@@ -329,6 +292,66 @@ describe("background agent invocation routing", () => {
     });
   });
 
+  it.each([false, true])(
+    "waits for settlement acknowledgement before returning a child result (error=%s)",
+    async (isError) => {
+      const acknowledgement = Promise.withResolvers<IteratorResult<AgentInvocationReply>>();
+      const childResult = {
+        callId: "call-1:agent-reply",
+        kind: "subagent-result",
+        origin: "child",
+        isError,
+        output: isError ? "failed" : "done",
+        subagentName: "research",
+      };
+      const next = vi
+        .fn()
+        .mockResolvedValueOnce({
+          done: false,
+          value: { kind: "runtime-action-result", results: [childResult] },
+        })
+        .mockImplementationOnce(() => acknowledgement.promise);
+      mocks.createHook.mockReturnValue({
+        token: "agent-reply",
+        [Symbol.asyncIterator]: () => ({ next }),
+      });
+      const ctx = { callId: "call-1" } as ToolContext;
+      attachWorkflowToolRunContext(ctx, {
+        from: {
+          callId: "call-1",
+          execution: "blocking",
+          input: {},
+          runId: "run-1",
+          sequence: 0,
+          stepIndex: 0,
+          toolName: "research",
+          turnId: "turn-1",
+        },
+        owner: { inbox: "owner" },
+      });
+      const returned = vi.fn();
+      const output = agent(ctx, "research", { message: "Find it" }).then(
+        (value) => {
+          returned();
+          return value;
+        },
+        (error) => {
+          returned();
+          return error;
+        },
+      );
+      await vi.waitFor(() => expect(next).toHaveBeenCalledTimes(2));
+      expect(returned).not.toHaveBeenCalled();
+      expect(mocks.disposeHook).not.toHaveBeenCalled();
+      acknowledgement.resolve({
+        done: false,
+        value: { kind: "agent-settled", callId: childResult.callId },
+      });
+      expect(await output).toBe(childResult.output);
+      expect(mocks.disposeHook).toHaveBeenCalledOnce();
+    },
+  );
+
   it("rejects dispatch failures without reporting a child settlement", async () => {
     const failure = {
       callId: "call-1:agent-reply",
@@ -348,6 +371,10 @@ describe("background agent invocation routing", () => {
           .mockResolvedValueOnce({
             done: false,
             value: { kind: "runtime-action-result", results: [failure] },
+          })
+          .mockResolvedValueOnce({
+            done: false,
+            value: { kind: "agent-settled", callId: "call-1:agent-reply" },
           })
           .mockResolvedValue({ done: true }),
       }),
@@ -388,7 +415,7 @@ describe("background agent invocation routing", () => {
         callId: "call-1",
         childContinuationToken: "child-continuation",
         childSessionId: "child-1",
-        childSessionInbox: advertiseInbox ? { sessionId: "child-1", version: 1 } : undefined,
+        childSessionInbox: advertiseInbox ? { sessionId: "child-1" } : undefined,
         event: {
           requests: [
             {
@@ -425,6 +452,7 @@ describe("background agent invocation routing", () => {
             } as never,
           ],
         },
+        { kind: "agent-settled", callId: "call-1:agent-reply" },
       ];
       mocks.createHook.mockReturnValue({
         [Symbol.asyncIterator]: () => ({
@@ -448,7 +476,6 @@ describe("background agent invocation routing", () => {
       };
       const ctx = { callId: "call-1" } as ToolContext;
       attachWorkflowToolRunContext(ctx, {
-        admission: Promise.resolve({ status: "accepted" }),
         from,
         owner: {
           inbox: "owner-inbox",
@@ -460,7 +487,7 @@ describe("background agent invocation routing", () => {
       expect(mocks.resumeHook).toHaveBeenNthCalledWith(2, "owner-inbox", {
         kind: "request",
         from,
-        replyTo: advertiseInbox ? "eve:session:child-1:inbox" : "child-continuation",
+        replyTo: advertiseInbox ? "eve:inbox:v1:eve:session:child-1:inbox" : "child-continuation",
         request: {
           kind: "input-batch",
           requests: [expect.objectContaining({ requestId: "approval-1" })],
@@ -470,7 +497,7 @@ describe("background agent invocation routing", () => {
       expect(mocks.resumeHook).toHaveBeenNthCalledWith(3, "owner-inbox", {
         kind: "request",
         from,
-        replyTo: advertiseInbox ? "eve:session:child-1:inbox" : "child-continuation",
+        replyTo: advertiseInbox ? "eve:inbox:v1:eve:session:child-1:inbox" : "child-continuation",
         request: {
           kind: "input-batch",
           requests: [expect.objectContaining({ requestId: "approval-2" })],
@@ -510,6 +537,7 @@ describe("background agent invocation routing", () => {
           } as never,
         ],
       },
+      { kind: "agent-settled", callId: "call-1:agent-reply" },
     ];
     mocks.createHook.mockReturnValue({
       [Symbol.asyncIterator]: () => ({
@@ -533,7 +561,6 @@ describe("background agent invocation routing", () => {
     };
     const ctx = { callId: "call-1" } as ToolContext;
     attachWorkflowToolRunContext(ctx, {
-      admission: Promise.resolve({ status: "accepted" }),
       from,
       owner: {
         inbox: "owner-inbox",

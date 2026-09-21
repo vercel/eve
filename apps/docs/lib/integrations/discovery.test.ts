@@ -291,13 +291,15 @@ describe("integration discovery", () => {
     expect(markdown).not.toContain("### MCP ·");
   });
 
-  it("renders instrumentation providers with registry installation", () => {
+  it("renders instrumentation integrations with registry installation", () => {
     const braintrust = getIntegration("braintrust");
     expect(braintrust).toBeDefined();
 
     const markdown = integrationMarkdown(braintrust!);
     expect(markdown).toContain("eve add instrumentation/braintrust");
-    expect(markdown).toContain("agent/instrumentation.ts");
+    expect(markdown).toContain("agent/instrumentation/braintrust.ts");
+    expect(markdown).toContain("braintrustEveInstrumentation");
+    expect(markdown).not.toContain("// agent/hooks/braintrust.ts");
     expect(markdown).toContain("BRAINTRUST_API_KEY");
 
     const posthog = getIntegration("posthog-instrumentation");

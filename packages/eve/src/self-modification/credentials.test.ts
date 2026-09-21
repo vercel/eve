@@ -1,44 +1,48 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-const getToken = vi.fn();
-vi.mock("@vercel/connect", () => ({ getToken }));
-
-import { createVercelConnectCredentialProvider } from "./credentials.js";
+import {
+  createGitHubCredentialProvider,
+  SELF_MODIFICATION_GITHUB_TOKEN_ENV,
+} from "./credentials.js";
 
 afterEach(() => {
-  getToken.mockReset();
-  delete process.env.EVE_SELF_MODIFICATION_GITHUB_TOKEN;
+  delete process.env[SELF_MODIFICATION_GITHUB_TOKEN_ENV];
 });
 
-describe("Vercel Connect GitHub credentials", () => {
-  it("requests a repository-bound checkout token", async () => {
-    getToken.mockResolvedValue("checkout-token");
-    await expect(
-      createVercelConnectCredentialProvider("github/selfmod-acme-agents").resolve({
-        capability: "checkout",
-        repository: { owner: "acme", repo: "agents" },
-      }),
-    ).resolves.toBe("checkout-token");
-    expect(getToken).toHaveBeenCalledWith("github/selfmod-acme-agents", {
-      authorizationDetails: [{ repositories: ["acme/agents"], type: "github_app_installation" }],
-      scopes: ["contents:read", "metadata:read"],
-      subject: { type: "app" },
+const request = {
+  capability: "checkout",
+  repository: { owner: "acme", repo: "agents" },
+} as const;
+
+describe("self-modification GitHub credentials", () => {
+  it("forwards requests to an application-supplied provider", async () => {
+    const resolve = vi.fn().mockResolvedValue(" provider-token ");
+    const provider = createGitHubCredentialProvider({
+      kind: "provider",
+      provider: { resolve },
     });
+
+    await expect(provider.resolve(request)).resolves.toBe("provider-token");
+    expect(resolve).toHaveBeenCalledWith(request);
   });
 
-  it("requests publication scopes without falling back to a PAT", async () => {
-    process.env.EVE_SELF_MODIFICATION_GITHUB_TOKEN = "pat-that-must-not-be-read";
-    getToken.mockRejectedValue(new Error("not attached"));
-    await expect(
-      createVercelConnectCredentialProvider("github/selfmod-acme-agents").resolve({
-        capability: "publish",
-        repository: { owner: "acme", repo: "agents" },
-      }),
-    ).rejects.toThrow("Vercel Connect");
-    expect(getToken).toHaveBeenCalledWith("github/selfmod-acme-agents", {
-      authorizationDetails: [{ repositories: ["acme/agents"], type: "github_app_installation" }],
-      scopes: ["contents:write", "pull_requests:write", "metadata:read"],
-      subject: { type: "app" },
+  it("does not fall back to the PAT when a provider fails", async () => {
+    process.env[SELF_MODIFICATION_GITHUB_TOKEN_ENV] = "pat-that-must-not-be-read";
+    const failure = new Error("provider failed");
+    const provider = createGitHubCredentialProvider({
+      kind: "provider",
+      provider: { resolve: vi.fn().mockRejectedValue(failure) },
     });
+
+    await expect(provider.resolve(request)).rejects.toBe(failure);
+  });
+
+  it("rejects an empty provider token", async () => {
+    const provider = createGitHubCredentialProvider({
+      kind: "provider",
+      provider: { resolve: vi.fn().mockResolvedValue("  ") },
+    });
+
+    await expect(provider.resolve(request)).rejects.toThrow("returned an empty GitHub token");
   });
 });

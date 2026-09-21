@@ -52,11 +52,20 @@ function callEvent(
   return contextStorage.run(stubAlsContext, () => callAdapterEventHandler(adapter, event, ctx));
 }
 
-describe("discordChannel() audience metadata", () => {
-  it.each(["private", "unknown"] as const)("projects the %s audience", (audience) => {
+describe("discordChannel() audience classification", () => {
+  it.each(["private", "unknown"] as const)("classifies the %s audience", (audience) => {
     const adapter = withState(getAdapter(discordChannel()), { audience });
 
-    expect(adapter.instrumentation?.metadata?.(adapter.state)).toMatchObject({ audience });
+    expect(
+      adapter.instrumentation?.audience?.({
+        auth: null,
+        caller: { type: "anonymous" },
+        channel: { kind: "channel:discord" },
+        environment: "production",
+        mode: "conversation",
+        state: adapter.state,
+      }),
+    ).toBe(audience);
   });
 });
 
@@ -481,7 +490,7 @@ describe("discordChannel() default event handlers", () => {
     );
   });
 
-  it("edits the original response and rekeys the session on the first post", async () => {
+  it("edits the original response and aliases the session on the first post", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({ channel_id: "C01", id: "M01" }), {
         headers: { "content-type": "application/json" },
@@ -552,7 +561,6 @@ describe("discordChannel() default event handlers", () => {
       auth: null,
       message: "start",
       state: {
-        audience: "unknown",
         applicationId: null,
         channelId: "C01",
         conversationId: null,

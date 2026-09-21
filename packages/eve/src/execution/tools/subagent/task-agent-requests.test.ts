@@ -1,3 +1,4 @@
+import { resumeHookStep } from "#execution/tools/workflow/resume-hook-step.js";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { applyTaskAgentRequest } from "#execution/tools/subagent/task-agent-requests.js";
@@ -5,15 +6,15 @@ import {
   dispatchTaskAgentInvocationStep,
   settleTaskAgentInvocationStep,
 } from "#execution/tools/subagent/invoke-step.js";
-import { emitTaskSubagentCalledStep } from "#execution/tools/subagent/emit-called-step.js";
+import { emitSubagentEventStep } from "#execution/tools/subagent/emit-event-step.js";
 import type { RuntimeSubagentChildResult } from "#shared/action-types.js";
 
 vi.mock("#execution/tools/subagent/invoke-step.js", () => ({
   dispatchTaskAgentInvocationStep: vi.fn(),
   settleTaskAgentInvocationStep: vi.fn(),
 }));
-vi.mock("#execution/tools/subagent/emit-called-step.js", () => ({
-  emitTaskSubagentCalledStep: vi.fn(),
+vi.mock("#execution/tools/subagent/emit-event-step.js", () => ({
+  emitSubagentEventStep: vi.fn(),
 }));
 vi.mock("#execution/tools/workflow/resume-hook-step.js", () => ({
   resumeHookStep: vi.fn(),
@@ -40,6 +41,7 @@ describe("workflow-owned agent requests", () => {
     const serializedContext = { "eve.test": "before" };
     const flushedContext = { "eve.test": "after" };
     vi.mocked(settleTaskAgentInvocationStep).mockResolvedValue({
+      settled: false,
       serializedContext: flushedContext,
       sessionState,
     });
@@ -48,11 +50,10 @@ describe("workflow-owned agent requests", () => {
       replyTo: "reply",
       request: { kind: "agent-settled" as const, result },
     };
-    const context = { parentWritable: {} as never, serializedContext, sessionState };
+    const context = { sessionWritable: {} as never, serializedContext, sessionState };
     const settled = await applyTaskAgentRequest(delivery, context);
 
     expect(settleTaskAgentInvocationStep).toHaveBeenCalledWith({
-      accumulateUsage: undefined,
       ownerId: "workflow-run",
       result,
       serializedContext,
@@ -64,8 +65,57 @@ describe("workflow-owned agent requests", () => {
     expect(replay).toEqual(settled);
   });
 
+  it("emits completion and acknowledges only after settlement", async () => {
+    const updatedState = { sessionId: "updated" } as never;
+    vi.mocked(settleTaskAgentInvocationStep).mockResolvedValue({
+      settled: true,
+      completion: {
+        type: "subagent.completed",
+        data: { callId: "nested", subagentName: "research", output: "done" },
+      },
+      serializedContext: {},
+      sessionState: updatedState,
+    });
+    const publication = Promise.withResolvers<{ serializedContext: Record<string, unknown> }>();
+    vi.mocked(emitSubagentEventStep).mockReturnValue(publication.promise);
+    const applying = applyTaskAgentRequest(
+      { ownerId: "workflow-run", replyTo: "reply", request: { kind: "agent-settled", result } },
+      { sessionWritable: {} as never, serializedContext: {}, sessionState },
+    );
+    await vi.waitFor(() => expect(emitSubagentEventStep).toHaveBeenCalledOnce());
+    expect(resumeHookStep).not.toHaveBeenCalled();
+    publication.resolve({ serializedContext: {} });
+    expect((await applying).sessionState).toBe(updatedState);
+    expect(resumeHookStep).toHaveBeenCalledExactlyOnceWith(
+      "reply",
+      { kind: "agent-settled", callId: "nested" },
+      { ifPresent: true },
+    );
+  });
+
+  it("does not acknowledge a failed settlement", async () => {
+    vi.mocked(settleTaskAgentInvocationStep).mockRejectedValue(new Error("write failed"));
+    await expect(
+      applyTaskAgentRequest(
+        { ownerId: "workflow-run", replyTo: "reply", request: { kind: "agent-settled", result } },
+        { sessionWritable: {} as never, serializedContext: {}, sessionState },
+      ),
+    ).rejects.toThrow("write failed");
+    expect(resumeHookStep).not.toHaveBeenCalled();
+  });
+
   it("retains existing context when replaying a dispatch result without tracing state", async () => {
-    const serializedContext = { "eve.test": "preserved" };
+    const receiver = {
+      attributes: {},
+      authenticator: "test-idp",
+      principalId: "receiver",
+      principalType: "user",
+    };
+    const serializedContext = {
+      "eve.auth": receiver,
+      "eve.initiatorAuth": receiver,
+      "eve.test": "preserved",
+    };
     const event = { type: "subagent.called" } as never;
     vi.mocked(dispatchTaskAgentInvocationStep).mockResolvedValue({
       agentId: "child",
@@ -73,7 +123,7 @@ describe("workflow-owned agent requests", () => {
       kind: "dispatched",
       sessionState,
     });
-    vi.mocked(emitTaskSubagentCalledStep).mockResolvedValue({ serializedContext });
+    vi.mocked(emitSubagentEventStep).mockResolvedValue({ serializedContext });
 
     const applied = await applyTaskAgentRequest(
       {
@@ -85,13 +135,14 @@ describe("workflow-owned agent requests", () => {
           kind: "agent-invoke",
         },
       },
-      { parentWritable: {} as never, serializedContext, sessionState },
+      { sessionWritable: {} as never, serializedContext, sessionState },
     );
 
-    expect(emitTaskSubagentCalledStep).toHaveBeenCalledWith({
+    expect(emitSubagentEventStep).toHaveBeenCalledWith({
       event,
-      parentWritable: {},
+      sessionWritable: {},
       serializedContext,
+      sessionState,
     });
     expect(applied.serializedContext).toBe(serializedContext);
   });

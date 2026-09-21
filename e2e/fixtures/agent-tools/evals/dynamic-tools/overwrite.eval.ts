@@ -8,9 +8,10 @@ export default defineEval({
   description: "Dynamic tools smoke: turn-scoped resolver tools win merges over session-scoped.",
   async test(t) {
     const first = await t.send("Call the `shared` tool and report the source and turn values.");
+    const session = first.session;
     first.expectOk();
 
-    await t.send("Call the `session_only` tool and report the source value.");
+    await session.send("Call the `session_only` tool and report the source value.");
 
     t.succeeded();
     t.calledTool("shared", {

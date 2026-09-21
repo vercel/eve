@@ -2,10 +2,10 @@ import { hydrateWorkflowReturnValue } from "@workflow/core/serialization";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { handleConnectionCallbackRequest } from "#execution/connections/callback-route.js";
-import { sessionCommandHookToken } from "#execution/session-command-token.js";
+import { sessionCommandHookToken } from "#execution/session-inbox/address.js";
 import { executeSleepTool, SLEEP_INPUT_SCHEMA } from "#execution/tools/sleep.js";
-import { resumeSessionInbox } from "#execution/wire/session-inbox-resume.js";
-import { workflowEntry } from "#execution/workflow-entry.js";
+import { resumeSessionInbox } from "#execution/session-inbox/resume.js";
+import { workflowEntry } from "#execution/session/entry.js";
 import { createTestRuntime, type TestRuntime } from "#internal/testing/app-harness.js";
 import { captureTurnEvents, filterEventsByType } from "#internal/testing/events.js";
 import {
@@ -19,7 +19,7 @@ import {
   reportingDeployWorkflow,
   stepThenRaceWorkflow,
   stepReferenceWorkflow,
-  workflowAuthorizationCapabilityProbe,
+  workflowContextMisuseWorkflow,
 } from "#internal/testing/workflow-tool-fixtures.js";
 import { waitForHook } from "#internal/testing/workflow-test-helpers.js";
 import { getRun, getWorld, start } from "#internal/workflow/runtime.js";
@@ -143,59 +143,6 @@ function eventsText(events: readonly { readonly data?: unknown }[]): string {
 }
 
 describe("workflow step authorization", () => {
-  it.each(["blocking", "background"] as const)(
-    "runs %s auth with no advertised driver support",
-    async (execution) => {
-      const runtime = await createWorkflowToolRuntime({
-        agentName: "workflow-step-old-driver",
-        execute: authorizedDeployWorkflow,
-        toolName: "deploy_service",
-      });
-      await runtime.run(async () => {
-        const workflowId = Reflect.get(authorizedDeployWorkflow, "workflowId");
-        if (typeof workflowId !== "string") throw new Error("Missing fixture workflow id");
-        const auth = {
-          attributes: {},
-          authenticator: "test-idp",
-          issuer: "test-idp",
-          principalId: "user-1",
-          principalType: "user" as const,
-        };
-        const run = await start(workflowAuthorizationCapabilityProbe, [
-          {
-            callId: "auth-call",
-            execution,
-            input: { service: "preauthorized" },
-            owner: { inbox: "unused-owner-inbox" },
-            session: {
-              auth: { current: auth, initiator: auth },
-              id: "old-session",
-              turn: { id: "new-turn", sequence: 1 },
-            },
-            stepIndex: 0,
-            taskId: "auth-task",
-            toolName: "deploy_service",
-            workflowId,
-          },
-        ]);
-        const result = await run.returnValue;
-        if (execution === "background") {
-          expect(result.outcome).toMatchObject({
-            status: "failed",
-            error: { message: expect.stringContaining("Start a new session") },
-          });
-        } else {
-          expect(result.outcome).toMatchObject({
-            status: "completed",
-            output: { authenticatedAs: "user-1" },
-          });
-        }
-        expect(JSON.stringify(result)).not.toContain("secret:");
-      });
-    },
-    60_000,
-  );
-
   it.each([false, true])(
     "resolves a user token inside a step (background=%s)",
     async (background) => {
@@ -208,6 +155,8 @@ describe("workflow step authorization", () => {
       await runtime.run(async () => {
         const run = await start(workflowEntry, [
           {
+            kind: "initial",
+            ownerDeploymentId: "dpl_inline",
             input: { message: 'Run deploy_service with service "preauthorized"' },
             serializedContext: {
               ...buildSerializedContext({
@@ -260,6 +209,8 @@ describe("workflow step authorization", () => {
       await runtime.run(async () => {
         const run = await start(workflowEntry, [
           {
+            kind: "initial",
+            ownerDeploymentId: "dpl_inline",
             input: { message: `Run deploy_service with service "${service}"` },
             serializedContext: {
               ...buildSerializedContext({
@@ -378,6 +329,8 @@ describe("workflow step authorization", () => {
       await runtime.run(async () => {
         const run = await start(workflowEntry, [
           {
+            kind: "initial",
+            ownerDeploymentId: "dpl_inline",
             input: { message: `Run deploy_service with service "${disposition}"` },
             serializedContext: {
               ...buildSerializedContext({
@@ -467,6 +420,8 @@ describe("workflow tools", () => {
     const output = await runtime.run(async () => {
       const run = await start(workflowEntry, [
         {
+          kind: "initial",
+          ownerDeploymentId: "dpl_inline",
           input: { message: 'Run deploy_service with service "api"' },
           serializedContext: buildSerializedContext({
             continuationToken: "schedule:step-reference",
@@ -490,6 +445,8 @@ describe("workflow tools", () => {
     const output = await runtime.run(async () => {
       const run = await start(workflowEntry, [
         {
+          kind: "initial",
+          ownerDeploymentId: "dpl_inline",
           input: { message: "Run sleep" },
           serializedContext: buildSerializedContext({
             continuationToken: "schedule:workflow-tool-sleep",
@@ -514,6 +471,8 @@ describe("workflow tools", () => {
     const output = await runtime.run(async () => {
       const run = await start(workflowEntry, [
         {
+          kind: "initial",
+          ownerDeploymentId: "dpl_inline",
           input: { message: 'Run deploy_service with service "api"' },
           serializedContext: buildSerializedContext({
             continuationToken: "schedule:workflow-tool-wait",
@@ -529,6 +488,36 @@ describe("workflow tools", () => {
     expect(output).toContain('"callId":"call_deploy_service');
   });
 
+  it("fails workflow-context misuse in a step with actionable guidance", async () => {
+    const runtime = await createWorkflowToolRuntime({
+      agentName: "workflow-step-context-misuse",
+      execute: workflowContextMisuseWorkflow,
+      toolName: "deploy_service",
+    });
+
+    const output = await runtime.run(async () => {
+      const run = await start(workflowEntry, [
+        {
+          kind: "initial",
+          ownerDeploymentId: "dpl_inline",
+          input: { message: 'Run deploy_service with service "api"' },
+          serializedContext: buildSerializedContext({
+            continuationToken: "schedule:workflow-step-context-misuse",
+            mode: "task",
+          }),
+        },
+      ]);
+      const result = await run.returnValue;
+      return String(result.output);
+    });
+
+    expect(output).toContain('ctx.agents is unavailable inside a "use step" function.');
+    expect(output).toContain(
+      "Read ctx.agents in the workflow body and pass the required serializable metadata into the step.",
+    );
+    expect(output).toContain("Attempt 1.");
+  });
+
   it("settles the call with an error when the workflow body throws", async () => {
     const runtime = await createWorkflowToolRuntime({
       agentName: "workflow-tool-fail",
@@ -539,6 +528,8 @@ describe("workflow tools", () => {
     const output = await runtime.run(async () => {
       const run = await start(workflowEntry, [
         {
+          kind: "initial",
+          ownerDeploymentId: "dpl_inline",
           input: { message: 'Run deploy_service with service "api"' },
           serializedContext: buildSerializedContext({
             continuationToken: "schedule:workflow-tool-fail",
@@ -553,84 +544,76 @@ describe("workflow tools", () => {
     expect(output).toContain("deploy of api exploded");
   });
 
-  it.each(["inline", "child"] as const)(
-    "routes workflow reports, human input, and outcome on the %s owner",
-    async (owner) => {
-      vi.stubEnv("VERCEL_DEPLOYMENT_ID", "dpl_inline");
-      const runtime = await createWorkflowToolRuntime({
-        agentName: "workflow-tool-hitl",
-        execute: confirmDeployWorkflow,
-        toolName: "confirm_deploy",
-      });
+  it("routes workflow reports, human input, and outcome through the session owner", async () => {
+    vi.stubEnv("VERCEL_DEPLOYMENT_ID", "dpl_inline");
+    const runtime = await createWorkflowToolRuntime({
+      agentName: "workflow-tool-hitl",
+      execute: confirmDeployWorkflow,
+      toolName: "confirm_deploy",
+    });
 
-      await runtime.run(async () => {
-        const run = await start(workflowEntry, [
-          {
-            input: { message: 'Run confirm_deploy with service "api"' },
-            serializedContext: buildSerializedContext({
-              acceptedDeploymentId: owner === "inline" ? "dpl_inline" : undefined,
-              continuationToken: "http:workflow-tool-hitl",
-              mode: "conversation",
-              requestInput: true,
-            }),
-          },
-        ]);
-        const stream = captureTurnEvents(run);
+    await runtime.run(async () => {
+      const run = await start(workflowEntry, [
+        {
+          kind: "initial",
+          ownerDeploymentId: "dpl_inline",
+          input: { message: 'Run confirm_deploy with service "api"' },
+          serializedContext: buildSerializedContext({
+            acceptedDeploymentId: "dpl_inline",
+            continuationToken: "http:workflow-tool-hitl",
+            mode: "conversation",
+            requestInput: true,
+          }),
+        },
+      ]);
+      const stream = captureTurnEvents(run);
 
-        try {
-          const asked = await stream.nextTurn();
-          const world = await getWorld();
-          const parentHooks = (await world.hooks.list({ runId: run.runId })).data;
-          expect(
-            parentHooks.some((hook) => hook.token === `${run.runId}:turn-control:0:inbox`),
-          ).toBe(owner === "inline");
-          expect(
-            filterEventsByType(asked, "action.partial").map((event) => event.data.result.output),
-          ).toEqual(["awaiting approval"]);
-          const requested = filterEventsByType(asked, "input.requested");
-          expect(requested).toHaveLength(1);
-          const request = (requested[0] as InputRequestedStreamEvent).data.requests[0]!;
-          expect(request).toMatchObject({
-            action: { input: { service: "api" }, kind: "tool-call", toolName: "confirm_deploy" },
-            display: "confirmation",
-            kind: "question",
-            prompt: "Apply plan:api?",
-          });
-          expect(request.options?.map((option) => option.id)).toEqual(["approve", "cancel"]);
+      try {
+        const asked = await stream.nextTurn();
+        expect(
+          filterEventsByType(asked, "action.partial").map((event) => event.data.result.output),
+        ).toEqual(["awaiting approval"]);
+        const requested = filterEventsByType(asked, "input.requested");
+        expect(requested).toHaveLength(1);
+        const request = (requested[0] as InputRequestedStreamEvent).data.requests[0]!;
+        expect(request).toMatchObject({
+          action: { input: { service: "api" }, kind: "tool-call", toolName: "confirm_deploy" },
+          display: "confirmation",
+          kind: "question",
+          prompt: "Apply plan:api?",
+        });
+        expect(request.options?.map((option) => option.id)).toEqual(["approve", "cancel"]);
 
-          const commandToken = sessionCommandHookToken(run.runId);
-          await waitForHook(run, { token: commandToken });
-          await resumeSessionInbox(commandToken, {
-            kind: "send",
-            payload: { inputResponses: [{ optionId: "approve", requestId: request.requestId }] },
-          });
+        const commandToken = sessionCommandHookToken(run.runId);
+        await resumeSessionInbox(commandToken, {
+          kind: "send",
+          payload: { inputResponses: [{ optionId: "approve", requestId: request.requestId }] },
+        });
 
-          const answered = await stream.nextTurn();
-          const progress = answered.findIndex(
-            (event) =>
-              event.type === "action.partial" && event.data.result.output === "approval received",
-          );
-          const resultIndex = answered.findIndex(
-            (event) =>
-              event.type === "action.result" &&
-              event.data.result.kind === "tool-result" &&
-              event.data.result.toolName === "confirm_deploy",
-          );
-          expect(progress).toBeGreaterThanOrEqual(0);
-          expect(resultIndex).toBeGreaterThan(progress);
-          const results = filterEventsByType(answered, "action.result");
-          expect(results.map((event) => JSON.stringify(event.data.result.output))).toContainEqual(
-            JSON.stringify({ approved: true, service: "api" }),
-          );
-          expect(filterEventsByType(answered, "turn.failed")).toHaveLength(0);
-        } finally {
-          stream.dispose();
-          await run.cancel();
-        }
-      });
-    },
-    60_000,
-  );
+        const answered = await stream.nextTurn();
+        const progress = answered.findIndex(
+          (event) =>
+            event.type === "action.partial" && event.data.result.output === "approval received",
+        );
+        const resultIndex = answered.findIndex(
+          (event) =>
+            event.type === "action.result" &&
+            event.data.result.kind === "tool-result" &&
+            event.data.result.toolName === "confirm_deploy",
+        );
+        expect(progress, JSON.stringify(answered)).toBeGreaterThanOrEqual(0);
+        expect(resultIndex).toBeGreaterThan(progress);
+        const results = filterEventsByType(answered, "action.result");
+        expect(results.map((event) => JSON.stringify(event.data.result.output))).toContainEqual(
+          JSON.stringify({ approved: true, service: "api" }),
+        );
+        expect(filterEventsByType(answered, "turn.failed")).toHaveLength(0);
+      } finally {
+        stream.dispose();
+        await run.cancel();
+      }
+    });
+  }, 60_000);
 
   it("times out a hook raced against a sleep when it is not resumed", async () => {
     const runtime = await createWorkflowToolRuntime({
@@ -642,6 +625,8 @@ describe("workflow tools", () => {
     await runtime.run(async () => {
       const run = await start(workflowEntry, [
         {
+          kind: "initial",
+          ownerDeploymentId: "dpl_inline",
           input: { message: "Run deploy_service" },
           serializedContext: buildSerializedContext({
             continuationToken: "http:workflow-tool-deadline",
@@ -674,6 +659,8 @@ describe("workflow tools", () => {
     await runtime.run(async () => {
       const run = await start(workflowEntry, [
         {
+          kind: "initial",
+          ownerDeploymentId: "dpl_inline",
           input: { message: 'Run confirm_deploy with service "api"' },
           serializedContext: buildSerializedContext({
             continuationToken: "http:workflow-tool-ask-deadline",
@@ -708,115 +695,110 @@ describe("workflow tools", () => {
     });
   }, 30_000);
 
-  it.each(["inline", "child"] as const)(
-    "cancels the run when the waiting turn is cancelled and lets the body clean up (%s)",
-    async (owner) => {
-      vi.stubEnv("VERCEL_DEPLOYMENT_ID", "dpl_inline");
-      const runtime = await createWorkflowToolRuntime({
-        agentName: "workflow-tool-cancel",
-        execute: holdUntilAbortedWorkflow,
-        toolName: "deploy_service",
-      });
+  it("cancels the run when the waiting turn is cancelled and lets the body clean up", async () => {
+    vi.stubEnv("VERCEL_DEPLOYMENT_ID", "dpl_inline");
+    const runtime = await createWorkflowToolRuntime({
+      agentName: "workflow-tool-cancel",
+      execute: holdUntilAbortedWorkflow,
+      toolName: "deploy_service",
+    });
 
-      await runtime.run(async () => {
-        const before = await listWorkflowToolRunIds();
-        const run = await start(workflowEntry, [
-          {
-            input: { message: 'Run deploy_service with service "api"' },
-            serializedContext: buildSerializedContext({
-              acceptedDeploymentId: owner === "inline" ? "dpl_inline" : undefined,
-              continuationToken: "http:workflow-tool-cancel",
-              mode: "conversation",
-            }),
-          },
-        ]);
-        const stream = captureTurnEvents(run);
+    await runtime.run(async () => {
+      const before = await listWorkflowToolRunIds();
+      const run = await start(workflowEntry, [
+        {
+          kind: "initial",
+          ownerDeploymentId: "dpl_inline",
+          input: { message: 'Run deploy_service with service "api"' },
+          serializedContext: buildSerializedContext({
+            acceptedDeploymentId: "dpl_inline",
+            continuationToken: "http:workflow-tool-cancel",
+            mode: "conversation",
+          }),
+        },
+      ]);
+      const stream = captureTurnEvents(run);
 
-        try {
-          const workflowToolRunId = await waitForNewWorkflowToolRun(before);
-          await waitForHook({ runId: workflowToolRunId });
-          const commandToken = sessionCommandHookToken(run.runId);
-          await waitForHook(run, { token: commandToken });
-          await resumeSessionInbox(commandToken, { kind: "cancel", turnId: "turn_0" });
+      try {
+        const workflowToolRunId = await waitForNewWorkflowToolRun(before);
+        await waitForHook({ runId: workflowToolRunId });
+        const commandToken = sessionCommandHookToken(run.runId);
+        await resumeSessionInbox(commandToken, { kind: "cancel", turnId: "turn_0" });
 
-          // The body is holding in a step that received ctx.abortSignal, so the
-          // run ends well inside its grace period once the step rejects and
-          // `finally` runs; a run that ignored the signal would still be running.
-          expect(await waitForWorkflowToolRunTerminal(workflowToolRunId)).toBe("completed");
+        // The body is holding in a step that received ctx.abortSignal, so the
+        // run ends well inside its grace period once the step rejects and
+        // `finally` runs; a run that ignored the signal would still be running.
+        expect(await waitForWorkflowToolRunTerminal(workflowToolRunId)).toBe("completed");
 
-          await resumeSessionInbox(commandToken, {
-            kind: "send",
-            payload: { message: "Thanks, no deploy today." },
-          });
-          const next = await stream.nextTurn();
-          expect(filterEventsByType(next, "turn.started")).toHaveLength(1);
-          expect(filterEventsByType(next, "turn.failed")).toHaveLength(0);
-          expect(next.at(-1)?.type).toBe("session.waiting");
-        } finally {
-          stream.dispose();
-          await run.cancel();
+        await resumeSessionInbox(commandToken, {
+          kind: "send",
+          payload: { message: "Thanks, no deploy today." },
+        });
+        const next = await stream.nextTurn();
+        expect(filterEventsByType(next, "turn.started")).toHaveLength(1);
+        expect(filterEventsByType(next, "turn.failed")).toHaveLength(0);
+        expect(next.at(-1)?.type).toBe("session.waiting");
+      } finally {
+        stream.dispose();
+        await run.cancel();
+      }
+    });
+  }, 60_000);
+
+  it("runs a session-owned background workflow invocation", async () => {
+    vi.stubEnv("VERCEL_DEPLOYMENT_ID", "dpl_inline");
+    const runtime = await createWorkflowToolRuntime({
+      agentName: "workflow-tool-background",
+      execute: backgroundDeployWorkflow,
+      toolName: "report_deploy",
+    });
+
+    await runtime.run(async () => {
+      enableBackgroundTool(runtime, "report_deploy");
+
+      const run = await start(workflowEntry, [
+        {
+          kind: "initial",
+          ownerDeploymentId: "dpl_inline",
+          input: { message: 'Run report_deploy with service "api"' },
+          serializedContext: buildSerializedContext({
+            acceptedDeploymentId: "dpl_inline",
+            continuationToken: "http:workflow-tool-background",
+            mode: "conversation",
+          }),
+        },
+      ]);
+      const stream = captureTurnEvents(run);
+
+      try {
+        const receiptTurn = await stream.nextTurn();
+        const receipt = filterEventsByType(receiptTurn, "action.result").find(
+          (event) => event.data.result.kind === "tool-result",
+        );
+        expect(receipt?.data.result.output).toMatchObject({ status: "working" });
+        expect(filterEventsByType(receiptTurn, "turn.failed")).toHaveLength(0);
+
+        const notifications: string[] = [];
+        for (
+          let turn = 0;
+          turn < 3 && !notifications.some((text) => text.includes("is completed"));
+          turn += 1
+        ) {
+          const woken = await stream.nextTurn();
+          expect(filterEventsByType(woken, "turn.failed")).toHaveLength(0);
+          notifications.push(eventsText(filterEventsByType(woken, "message.received")));
         }
-      });
-    },
-    60_000,
-  );
-
-  it.each(["inline", "child"] as const)(
-    "runs a background workflow tool as its task's executor (%s)",
-    async (owner) => {
-      vi.stubEnv("VERCEL_DEPLOYMENT_ID", "dpl_inline");
-      const runtime = await createWorkflowToolRuntime({
-        agentName: "workflow-tool-background",
-        execute: backgroundDeployWorkflow,
-        toolName: "report_deploy",
-      });
-
-      await runtime.run(async () => {
-        enableBackgroundTool(runtime, "report_deploy");
-
-        const run = await start(workflowEntry, [
-          {
-            input: { message: 'Run report_deploy with service "api"' },
-            serializedContext: buildSerializedContext({
-              acceptedDeploymentId: owner === "inline" ? "dpl_inline" : undefined,
-              continuationToken: "http:workflow-tool-background",
-              mode: "conversation",
-            }),
-          },
-        ]);
-        const stream = captureTurnEvents(run);
-
-        try {
-          const receiptTurn = await stream.nextTurn();
-          const receipt = filterEventsByType(receiptTurn, "action.result").find(
-            (event) => event.data.result.kind === "tool-result",
-          );
-          expect(receipt?.data.result.output).toMatchObject({ status: "working" });
-          expect(filterEventsByType(receiptTurn, "turn.failed")).toHaveLength(0);
-
-          const notifications: string[] = [];
-          for (
-            let turn = 0;
-            turn < 3 && !notifications.some((text) => text.includes("is completed"));
-            turn += 1
-          ) {
-            const woken = await stream.nextTurn();
-            expect(filterEventsByType(woken, "turn.failed")).toHaveLength(0);
-            notifications.push(eventsText(filterEventsByType(woken, "message.received")));
-          }
-          const text = notifications.join("\n");
-          expect(text).toContain("Review plan:api");
-          expect(text).not.toContain("update: planned api");
-          expect(text).toContain("is completed");
-          expect(text).toContain("plan:api");
-        } finally {
-          stream.dispose();
-          await run.cancel();
-        }
-      });
-    },
-    90_000,
-  );
+        const text = notifications.join("\n");
+        expect(text).not.toContain("Review plan:api");
+        expect(text).not.toContain("update: planned api");
+        expect(text).toContain("is completed");
+        expect(text).toContain("plan:api");
+      } finally {
+        stream.dispose();
+        await run.cancel();
+      }
+    });
+  }, 90_000);
 
   it("streams a waiting tool's yields as action.partial and settles with its return", async () => {
     const runtime = await createWorkflowToolRuntime({
@@ -828,6 +810,8 @@ describe("workflow tools", () => {
     await runtime.run(async () => {
       const run = await start(workflowEntry, [
         {
+          kind: "initial",
+          ownerDeploymentId: "dpl_inline",
           input: { message: 'Run deploy_service with service "api"' },
           serializedContext: buildSerializedContext({
             continuationToken: "http:workflow-tool-progress",
@@ -866,6 +850,8 @@ describe("workflow tools", () => {
 
       const run = await start(workflowEntry, [
         {
+          kind: "initial",
+          ownerDeploymentId: "dpl_inline",
           input: { message: 'Run deploy_service with service "api"' },
           serializedContext: buildSerializedContext({
             continuationToken: "http:workflow-tool-background-fail",
@@ -911,6 +897,8 @@ describe("workflow tools", () => {
 
       const run = await start(workflowEntry, [
         {
+          kind: "initial",
+          ownerDeploymentId: "dpl_inline",
           input: { message: 'Run confirm_deploy with service "api"' },
           serializedContext: buildSerializedContext({
             continuationToken: "http:workflow-tool-background-hitl",

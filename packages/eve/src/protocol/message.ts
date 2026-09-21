@@ -29,6 +29,15 @@ export const EVE_MESSAGE_STREAM_CONTENT_TYPE = "application/x-ndjson; charset=ut
 export const EVE_MESSAGE_STREAM_FORMAT = "ndjson";
 export const EVE_MESSAGE_STREAM_VERSION = "25";
 
+/** Version of transport control records understood by this eve release. */
+export const EVE_STREAM_CONTROL_VERSION = "1";
+export const EVE_STREAM_CONTROL_VERSION_QUERY = "streamControlVersion";
+/** Internal record emitted when a leased HTTP response should be renewed. */
+export const EVE_STREAM_LEASE_ENDED_CONTROL = {
+  $eve: "stream.lease-ended",
+  version: 1,
+} as const;
+
 /**
  * eve-owned finish reason for one completed assistant step.
  *
@@ -193,6 +202,8 @@ export interface TurnStartedStreamEvent {
  */
 export interface MessageReceivedStreamEvent {
   data: {
+    /** Present when eve, rather than a channel participant, authored the input. */
+    kind?: "execution.background_task";
     message: string;
     parts?: readonly MessageReceivedPart[];
     sequence: number;
@@ -401,14 +412,14 @@ export interface SubagentChildEventStreamEvent {
 }
 
 /**
- * Stream event emitted when an inline subagent completes.
+ * Stream event emitted after the parent accepts a successful subagent invocation result.
  */
 export interface SubagentCompletedStreamEvent {
   data: {
     /**
-     * Present when the originating call completed with a background-task
-     * receipt while the child itself kept running. Consumers must not treat
-     * this as the child's terminal boundary; the child stream owns that.
+     * Historical admission marker retained for reading existing streams.
+     * A marked event is a working receipt, not a completed invocation.
+     * New receipts are published only as action.result tool outputs.
      */
     backgroundTask?: {
       taskId: string;
@@ -894,12 +905,15 @@ export function createTurnStartedEvent(input: {
  * consumers while preserving the authored turn content upstream.
  */
 export function createMessageReceivedEvent(input: {
+  /** Present when eve, rather than a channel participant, authored the input. */
+  readonly kind?: "execution.background_task";
   readonly message: string | UserContent;
   readonly sequence: number;
   readonly turnId: string;
 }): MessageReceivedStreamEvent {
   return {
     data: {
+      kind: input.kind,
       message: summarizeUserContent(input.message),
       parts: projectUserContentParts(input.message),
       sequence: input.sequence,

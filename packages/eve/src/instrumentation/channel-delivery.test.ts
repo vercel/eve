@@ -10,6 +10,22 @@ import {
   bindInstrumentationRuntime,
   type InstrumentationRuntime,
 } from "#instrumentation/runtime.js";
+import { ConversationContextKey, type ConversationContext } from "#shared/conversation-context.js";
+
+function setConversation(
+  ctx: ContextContainer,
+  audience: "public" | "private",
+  kind: ConversationContext["channel"]["kind"] = "channel:slack",
+): void {
+  ctx.set(ChannelInstrumentationKey, { kind, metadata: {} });
+  ctx.set(ConversationContextKey, {
+    audience,
+    channel: { kind, name: "slack" },
+    environment: "production",
+    mode: "conversation",
+    principalType: "anonymous",
+  });
+}
 
 function bindHooks(
   hooks: InstrumentationRuntime["hooks"],
@@ -60,10 +76,7 @@ describe("channel delivery instrumentation", () => {
       traceFlags: 1,
       traceId: "11111111111111111111111111111111",
     };
-    ctx.set(ChannelInstrumentationKey, {
-      kind: "channel:slack",
-      metadata: { audience: "public" },
-    });
+    setConversation(ctx, "public");
     ctx.set(ParentTraceContextKey, parentTraceContext);
     const instrumentation = bindHooks(hooks, ctx);
 
@@ -115,10 +128,7 @@ describe("channel delivery instrumentation", () => {
       },
     ]);
     const ctx = new ContextContainer();
-    ctx.set(ChannelInstrumentationKey, {
-      kind: "channel:slack",
-      metadata: { audience: "private" },
-    });
+    setConversation(ctx, "private");
     const instrumentation = bindHooks(hooks, ctx);
     await contextStorage.run(ctx, () =>
       instrumentation?.instrumentChannelDelivery({
@@ -156,11 +166,7 @@ describe("channel delivery instrumentation", () => {
       },
     ]);
     const ctx = new ContextContainer();
-    ctx.set(ChannelInstrumentationKey, {
-      channelType: "slack",
-      kind: "channel:slack",
-      metadata: { audience: "public" },
-    });
+    setConversation(ctx, "public");
     const instrumentation = bindHooks(hooks, ctx, "Weather Display Name");
 
     await contextStorage.run(ctx, async () => {
@@ -184,11 +190,7 @@ describe("channel delivery instrumentation", () => {
         sessionId: "session-1",
         turnId: "turn_0",
       });
-      ctx.set(ChannelInstrumentationKey, {
-        channelType: "slack",
-        kind: "channel:slack",
-        metadata: { audience: "private" },
-      });
+      setConversation(ctx, "private");
       await instrumentation?.instrumentChannelDelivery({
         ctx,
         includeTurn: true,
@@ -201,7 +203,69 @@ describe("channel delivery instrumentation", () => {
     expect(tracePolicy.mock.calls[0]?.[0]).toEqual({
       agentName: "Weather Display Name",
       audience: "public",
-      channelType: "slack",
+      channel: { kind: "channel:slack", name: "slack" },
+      environment: "production",
+      mode: "conversation",
+      principalType: "anonymous",
     });
+  });
+
+  it("terminates every distinct delivery admitted before the turn completes", async () => {
+    const started = vi.fn();
+    const completed = vi.fn();
+    const hooks = createInstrumentationHooks([
+      {
+        events: {
+          "channel.delivery.completed": completed,
+          "channel.delivery.started": started,
+        },
+        name: "delivery-lifecycle",
+        tracePolicy: () => true,
+      },
+    ]);
+    const ctx = new ContextContainer();
+    setConversation(ctx, "private");
+    const instrumentation = bindHooks(hooks, ctx);
+    const delivery = (deliveryId: string, message: string) => ({
+      deliveryMetadata: [
+        {
+          channelKind: "channel:slack" as const,
+          channelName: "slack",
+          deliveryId,
+          payloadIndex: 0,
+        },
+      ],
+      kind: "deliver" as const,
+      payloads: [{ message }],
+    });
+
+    await contextStorage.run(ctx, async () => {
+      for (const value of [
+        delivery("delivery-original", "Read Alice's report."),
+        delivery("delivery-steering", "Actually, use the 2025 report."),
+        delivery("delivery-steering", "Actually, use the 2025 report."),
+      ]) {
+        await instrumentation?.instrumentChannelDelivery({
+          ctx,
+          delivery: value,
+          rootSessionId: "session-1",
+          sequence: 0,
+          sessionId: "session-1",
+          turnId: "turn_0",
+        });
+      }
+      await instrumentation?.instrumentChannelDelivery({
+        ctx,
+        includeTurn: true,
+        outcome: "completed",
+      });
+    });
+
+    expect(started).toHaveBeenCalledTimes(2);
+    expect(completed).toHaveBeenCalledTimes(2);
+    expect(completed.mock.calls.map(([event]) => event.delivery.deliveryId).sort()).toEqual([
+      "delivery-original",
+      "delivery-steering",
+    ]);
   });
 });

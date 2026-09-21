@@ -45,6 +45,12 @@ export type {
 } from "#client/message-reducer-types.js";
 
 type EveAssistantMessage = EveMessage & { readonly role: "assistant" };
+type MessageReceivedEvent = Extract<EveAgentReducerEvent, { readonly type: "message.received" }>;
+
+function receivedMessageEventId(event: MessageReceivedEvent): string {
+  const eventId: string | undefined = event.meta.id;
+  return eventId ?? `${event.data.turnId}:${event.data.sequence}`;
+}
 
 /**
  * Creates a UIMessage-compatible eve reducer for chat and agent UIs.
@@ -106,8 +112,9 @@ function reduceMessageData(data: EveMessageData, event: EveAgentReducerEvent): E
     }
 
     case "message.received":
+      if (event.data.kind === "execution.background_task") return data;
       return upsertMessage(data, {
-        id: `${event.data.turnId}:user`,
+        id: `${receivedMessageEventId(event)}:user`,
         metadata: {
           status: "complete",
           turnId: event.data.turnId,

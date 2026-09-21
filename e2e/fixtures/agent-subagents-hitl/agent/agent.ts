@@ -26,6 +26,17 @@ function respond(request: MockModelRequest): MockModelResponse | string {
   if (prompt.includes("Background task reporting") && prompt.includes(STOCK_PRICE)) {
     return `The stock price is ${STOCK_PRICE}.`;
   }
+  if (
+    request.messages.some(
+      (entry) =>
+        entry.role === "user" &&
+        entry.text.startsWith("Background task ") &&
+        entry.text.includes("(collision-child) is completed.\n\nResult:\n") &&
+        entry.text.includes(COLLISION_MARKER),
+    )
+  ) {
+    return COLLISION_MARKER;
+  }
   if (request.lastUserMessage?.includes(COLLISION_MARKER) !== true) {
     return `Mock reply: ${message}`;
   }
@@ -51,7 +62,8 @@ function respond(request: MockModelRequest): MockModelResponse | string {
   }
 
   if (gateResults.length === 1 && subagentResults.length === 1) {
-    return COLLISION_MARKER;
+    // The subagent tool result is a working receipt; its result arrives in a later turn.
+    return "The gate was approved; the child is still working.";
   }
 
   throw new Error("Mixed runtime-action step resumed before both tool results were available.");

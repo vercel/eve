@@ -9,6 +9,7 @@ import { runCli } from "../../src/cli/run.js";
 import { resolveInstalledPackageInfo } from "../../src/internal/application/package.js";
 import { useScenarioApp } from "../../src/internal/testing/scenario-app.js";
 import { WEATHER_AGENT_DESCRIPTOR } from "../../src/internal/testing/scenario-apps/weather-agent.js";
+import { COMPOSED_TOOL_SCHEMAS_DESCRIPTOR } from "../../src/internal/testing/scenario-apps/composed-tool-schemas.js";
 import { resolveLocalWorkflowWorldDataDirectory } from "../../src/internal/workflow/local-world-data-directory.js";
 import {
   EVE_HEALTH_ROUTE_PATH,
@@ -428,6 +429,28 @@ describe("runCli", () => {
       process.chdir(previousCwd);
     }
   });
+
+  it("preserves imported tool schema composition in the built server", async () => {
+    const { buildApplication } = await import("../../src/internal/nitro/host.js");
+    const { appRoot } = await scenarioApp(COMPOSED_TOOL_SCHEMAS_DESCRIPTOR);
+    await buildApplication(appRoot, { skipVercelSandboxPrewarm: true });
+    const server = await startPackagedEveStart(appRoot);
+
+    try {
+      const response = await fetch(new URL("/schema-composition", server.url), {
+        signal: AbortSignal.timeout(10_000),
+      });
+      const body = await response.text();
+      expect(response.status, `${body}\n${server.stderr()}`).toBe(200);
+      expect(JSON.parse(body)).toEqual({
+        parsed: { action: "echo", input: { value: "hello" } },
+        invalidAccepted: false,
+        output: { result: { value: "hello" } },
+      });
+    } finally {
+      await server.stop();
+    }
+  }, 120_000);
 
   it("starts an existing built app with local Workflow data under .eve", async () => {
     const { buildApplication } = await import("../../src/internal/nitro/host.js");

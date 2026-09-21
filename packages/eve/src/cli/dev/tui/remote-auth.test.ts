@@ -214,24 +214,16 @@ describe("runRemoteAuthFlow", () => {
     });
   });
 
-  it("re-authenticates and resolves again when access is initially forbidden", async () => {
+  it("does not open another login when remote access is forbidden", async () => {
     const harness = createHarness({
-      logins: [{ kind: "already" }, { kind: "logged-in" }],
-      deployments: [{ kind: "forbidden" }, { kind: "resolved", target: TARGET }],
+      logins: [{ kind: "already" }],
+      deployments: [{ kind: "forbidden" }],
     });
-
-    await expect(harness.run()).resolves.toMatchObject({
-      kind: "prepared",
-      completedMutations: [{ kind: "vercel-login" }],
-    });
-    expect(harness.operations).toEqual(["login", "deployment", "login", "deployment", "token"]);
-    expect(harness.deps.resolveVercelDeployment).toHaveBeenCalledTimes(2);
-    expect(harness.deps.runLoginFlow).toHaveBeenNthCalledWith(2, {
-      appRoot: WORKSPACE_ROOT,
-      force: true,
-      prompter: harness.prompter,
-      signal: undefined,
-    });
+    await expect(harness.run()).resolves.toMatchObject({ kind: "failed" });
+    expect(harness.operations).toEqual(["login", "deployment"]);
+    expect(harness.deps.runLoginFlow).toHaveBeenCalledWith(
+      expect.objectContaining({ allowLogin: false }),
+    );
   });
 
   it("gets Trusted Sources consent, applies it, then requests the session token", async () => {
@@ -317,7 +309,7 @@ describe("runRemoteAuthFlow", () => {
         logins: [{ kind: "already" }, { kind: "already" }],
         deployments: [{ kind: "forbidden" }, { kind: "forbidden" }],
       },
-      message: "Re-authenticate",
+      message: "Check your team access",
     },
     {
       name: "deployment verification",
@@ -374,7 +366,7 @@ describe("formatRemoteAuthChallengeMessage", () => {
     const message = formatRemoteAuthChallengeMessage("https://example.vercel.app");
 
     expect(message).toContain("https://example.vercel.app");
-    expect(message).toContain("/vc:login");
+    expect(message).toContain("existing Vercel CLI session");
     expect(message).toContain("VERCEL_AUTOMATION_BYPASS_SECRET");
     expect(message).toContain("Disable Deployment Protection");
     expect(message).toContain("https://vercel.com/docs/deployment-protection");

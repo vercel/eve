@@ -10,7 +10,6 @@ import {
   otel,
   otelIntegration,
 } from "#tracing/otel-declaration.js";
-import { composeSpanExportPolicies, redactSpanInputs } from "#tracing/span-export-policy.js";
 
 /** Collection only ever moves processors, so a fresh no-op is identity enough. */
 function processor(): SpanProcessor {
@@ -69,12 +68,16 @@ describe("otelIntegration", () => {
     expect(integration.spanProcessors[0]).toBe(first);
   });
 
-  it("maps deprecated capture switches to destination redaction", () => {
-    const first = processor();
-    const integration = otelIntegration({ recordInputs: false, spanProcessors: [first] });
-
-    expect(integration.content).toEqual({ recordInputs: false, recordOutputs: true });
-    expect(integration.spanProcessors[0]).not.toBe(first);
+  it("rejects removed destination content options", () => {
+    expect(() => otelIntegration({ recordInputs: false } as never)).toThrow(
+      /no longer support `recordInputs` or `recordOutputs`/u,
+    );
+    expect(() => managedOtelIntegration({ recordOutputs: false } as never)).toThrow(
+      /use an `exportPolicy` span decision/iu,
+    );
+    expect(() => agentRunsIntegration({ recordInputs: false } as never)).toThrow(
+      /use an `exportPolicy` span decision/iu,
+    );
   });
 });
 
@@ -87,14 +90,14 @@ describe("agentRunsIntegration", () => {
   });
 });
 
-describe("managed export policy", () => {
+describe("destination export policy", () => {
   it("does not redact content unless the export pipeline requests it", () => {
     let visibleAttributes: Readonly<Record<string, unknown>> | undefined;
-    const integration = managedOtelIntegration({
+    const integration = otelIntegration({
       exportPolicy: {
         span: ({ attributes }) => {
           visibleAttributes = attributes;
-          return true;
+          return { emit: true };
         },
       },
       spanProcessors: [processor()],
@@ -112,18 +115,21 @@ describe("managed export policy", () => {
     expect(visibleAttributes).toHaveProperty("gen_ai.input.messages", "private input");
   });
 
-  it("runs composed export policies in declaration order", () => {
+  it("runs export policy arrays in declaration order", () => {
     let visibleAttributes: Readonly<Record<string, unknown>> | undefined;
-    const integration = managedOtelIntegration({
-      exportPolicy: composeSpanExportPolicies(
-        redactSpanInputs(({ audience }) => audience !== "public"),
+    const integration = otelIntegration({
+      exportPolicy: [
+        {
+          span: ({ audience }) =>
+            audience === "public" ? { emit: true } : { redact: true, inputs: true },
+        },
         {
           span: ({ attributes }) => {
             visibleAttributes = attributes;
-            return true;
+            return { emit: true };
           },
         },
-      ),
+      ],
       spanProcessors: [processor()],
     });
 
@@ -137,26 +143,6 @@ describe("managed export policy", () => {
     );
 
     expect(visibleAttributes).toEqual({ "agent.channel.audience": "private" });
-  });
-
-  it("applies deprecated content switches before the configured export policy", () => {
-    let visibleAttributes: Readonly<Record<string, unknown>> | undefined;
-    const integration = managedOtelIntegration({
-      exportPolicy: {
-        span: ({ attributes }) => {
-          visibleAttributes = attributes;
-          return true;
-        },
-      },
-      recordInputs: false,
-      spanProcessors: [processor()],
-    });
-
-    const spanProcessor = integration.spanProcessors[0];
-    if (spanProcessor === undefined || spanProcessor === "auto") throw new Error("Expected policy");
-    spanProcessor.onEnd(testSpan({ "gen_ai.input.messages": "private input" }));
-
-    expect(visibleAttributes).toEqual({});
   });
 });
 

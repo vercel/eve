@@ -38,6 +38,7 @@ import {
 import type { SubagentStartTarget } from "#execution/tools/subagent/start.js";
 import type { SubagentInputSource } from "#subagents/tool.js";
 import { createLogger } from "#internal/logging.js";
+import { findBackgroundWorkflowToolRun } from "#harness/workflow-tool-runs.js";
 
 const log = createLogger("execution.agent-invocation");
 
@@ -58,10 +59,15 @@ export async function prepareOwnerAgentInvocation(input: {
   readonly knownAgentIds?: readonly string[];
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
+  readonly taskId?: string;
 }): Promise<Omit<PreparedCoordinationDispatch<OwnerAgentDispatchPlanEntry>, "sessionState">> {
-  const durableSession = await readDurableSession(input.sessionState);
+  const durableSession = readDurableSession(input.sessionState);
   const ctx = await deserializeContext(input.serializedContext);
   const event = getHarnessEmissionState(durableSession.state);
+  const task =
+    input.taskId === undefined
+      ? undefined
+      : findBackgroundWorkflowToolRun(durableSession.state, input.taskId);
   const action = resolveAgentInvocationAction({
     ctx,
     input: input.invocation,
@@ -70,7 +76,11 @@ export async function prepareOwnerAgentInvocation(input: {
   return await prepareActionDispatch({
     batch: {
       requests: [action],
-      event: { ...event, turnId: activeTurnId(event) },
+      event: {
+        ...event,
+        stepIndex: task?.origin.stepIndex ?? event.stepIndex,
+        turnId: task?.origin.turnId ?? activeTurnId(event),
+      },
     },
     ctx,
     durableSession,
@@ -228,8 +238,8 @@ function isRecursiveAgentAction(
   );
 }
 
-function resolveAgentInvocationAction(input: {
-  readonly ctx: Awaited<ReturnType<typeof deserializeContext>>;
+export function resolveAgentInvocationAction(input: {
+  readonly ctx: ContextReader;
   readonly input: AgentInvocationRequest["input"];
   readonly invocationId: string;
 }): RuntimeAgentDispatchRequest {

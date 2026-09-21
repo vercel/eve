@@ -51,12 +51,9 @@ describe("BOOT_DETECTIONS against a real directory", () => {
     expect(issues).toEqual([]);
   });
 
-  it("diagnoses missing credentials (not the link) when the directory is linked", async () => {
+  it("defers model diagnosis when runtime info is unavailable", async () => {
     const appRoot = await linkedAppRoot();
-    const issues = await detectSetupIssues({ appRoot, env: {} });
-    expect(issues).toEqual([
-      { kind: "attention", label: "AI Gateway credentials missing", command: "/model" },
-    ]);
+    expect(await detectSetupIssues({ appRoot, env: {} })).toEqual([]);
   });
 
   it("diagnoses a linked project with disconnected model access", async () => {
@@ -71,12 +68,12 @@ describe("BOOT_DETECTIONS against a real directory", () => {
       {
         kind: "attention",
         label: "AI Gateway credentials missing",
-        command: "/model",
+        command: "/login",
       },
     ]);
   });
 
-  it("opens model setup from the prefilled onboarding prompt when inspection is unavailable", async () => {
+  it("opens only login during onboarding when inspection is unavailable", async () => {
     const appRoot = await linkedAppRoot();
     const client = new Client({ host: "http://localhost:3000" });
     vi.spyOn(client, "info").mockRejectedValue(new Error("inspection unavailable"));
@@ -112,45 +109,11 @@ describe("BOOT_DETECTIONS against a real directory", () => {
 
     await runner.run();
 
-    expect(handle).toHaveBeenNthCalledWith(
-      1,
-      { type: "extension", name: "model", argument: "" },
-      expect.objectContaining({
-        renderer,
-        title: "eve",
-        initialModelStep: "provider",
-        keepSetupFlowOpen: true,
-        setupFlowTitle: "Set up eve",
-        setupFlowNavigation: {
-          kind: "planner",
-          activeStep: 0,
-          firstNavigableStep: 1,
-          steps: [
-            { label: "Model", complete: false },
-            { label: "Channels" },
-            { label: "Integrations" },
-            { label: "Review" },
-          ],
-        },
-      }),
-    );
-    expect(handle).toHaveBeenNthCalledWith(
-      2,
-      { type: "extension", name: "add", argument: "" },
-      expect.objectContaining({
-        renderer,
-        title: "eve",
-        keepSetupFlowOpen: true,
-        setupFlowTitle: "Set up eve",
-        registryPlannerContext: {
-          prefixSteps: [{ label: "Model", complete: true }],
-          reviewMessage: "Review your agent",
-          primaryActionLabel: "Install and finish setup",
-          emptyActionLabel: "Finish setup",
-        },
-      }),
+    expect(handle).toHaveBeenCalledExactlyOnceWith(
+      { type: "extension", name: "login", argument: "" },
+      expect.objectContaining({ renderer, title: "eve", initialModelStep: "provider" }),
     );
     expect(readPrompt).toHaveBeenCalledOnce();
-    expect(order).toEqual(["model", "add", "prompt"]);
+    expect(order).toEqual(["login", "prompt"]);
   });
 });

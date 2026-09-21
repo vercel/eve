@@ -25,13 +25,8 @@ import {
 import { defineSandbox } from "#public/definitions/sandbox.js";
 import { defineSchedule } from "#public/definitions/schedule.js";
 import { defineSkill } from "#public/definitions/skill.js";
-import {
-  defineTool,
-  type TaskExec,
-  type TaskReceipt,
-  type ToolDefinition,
-} from "#public/tools/index.js";
-import { experimental_workflow } from "#public/tools/workflow.js";
+import { defineTool, type TaskReceipt, type ToolDefinition } from "#public/tools/index.js";
+import { defineWorkflowTool } from "#public/tools/index.js";
 
 describe("definition helper exact inputs", () => {
   it("preserves literal inference for valid definitions", () => {
@@ -58,13 +53,13 @@ describe("definition helper exact inputs", () => {
     });
 
     expect(agent.description).toBe("type-test");
+    expect(defineAgent({ model: "openai/gpt-5.5", tool: false }).tool).toBe(false);
     expect(agent.experimental.workflow.modelCallsPerStep).toBe(4);
     expect(agent.experimental.workflow.retention).toBe(0);
     expect(agent.limits.maxInputTokensPerSession).toBe(200_000);
     expect(agent.limits.maxOutputTokensPerSession).toBe(20_000);
     expect(agent.limits.maxTokenCostUsdPerSession).toBe(1.5);
     expect(agent.limits.sessionTimeoutMs).toBe(86_400_000);
-    expect(experimental_workflow({ maxSubagents: 6 }).maxSubagents).toBe(6);
     expect(schedule.cron).toBe("0 9 * * *");
   });
 
@@ -112,15 +107,12 @@ describe("definition helper exact inputs", () => {
     >();
   });
 
-  it("types background tools in terms of the durable task capability", () => {
-    const backgroundTool = defineTool({
+  it("types background workflow tools in terms of their receipt", () => {
+    const backgroundTool = defineWorkflowTool({
       description: "Start a durable export.",
       execution: "background",
       inputSchema: z.object({ jobId: z.string() }),
-      async *execute(input, _ctx, task) {
-        expectTypeOf(task).toEqualTypeOf<TaskExec>();
-        expectTypeOf(task.taskId).toEqualTypeOf<string>();
-        expectTypeOf(task).not.toHaveProperty("delegated");
+      async *execute(input) {
         yield { jobId: input.jobId };
         return { jobId: input.jobId };
       },
@@ -131,6 +123,16 @@ describe("definition helper exact inputs", () => {
       Parameters<NonNullable<typeof backgroundTool.toModelOutput>>[0]
     >().toEqualTypeOf<TaskReceipt>();
     expect(backgroundTool.execution).toBe("background");
+  });
+
+  it("rejects background execution on ordinary tools", () => {
+    const definition = {
+      description: "Start a durable export.",
+      execution: "background",
+      inputSchema: z.object({ jobId: z.string() }),
+      execute: async () => null,
+    };
+    expect(() => defineTool(definition)).toThrow("Use defineWorkflowTool for background work");
   });
 
   it("infers tool input from Zod 3 schemas", () => {
@@ -240,15 +242,10 @@ function typeOnlyFixtures(): void {
 
   defineAgent({
     limits: {
-      // @ts-expect-error Workflow fan-out is configured by experimental_workflow.
+      // @ts-expect-error Generated-program fan-out is configured by the workflow factory.
       maxSubagents: 6,
     },
     model: "anthropic/claude-sonnet-5",
-  });
-
-  experimental_workflow({
-    // @ts-expect-error Workflow maxSubagents must be a number.
-    maxSubagents: "6",
   });
 
   const agentWithName = {
@@ -297,45 +294,26 @@ function typeOnlyFixtures(): void {
   });
 
   defineInstrumentation({
-    isEnabled: true,
+    // @ts-expect-error Content capture is configured through tracePolicy.
     recordInputs: true,
   });
 
-  // Unlike the helpers above, `defineInstrumentation` takes a generic union — a
-  // config and a provider overlap on `events` and `setup` — so it cannot use
-  // `ExactDefinition`. Excess keys reach `eve build` instead.
-  const instrumentationWithEnabled = {
-    isEnabled: true,
-    recordInputs: true,
+  const providerWithCapture: ProviderDefinition = {
+    // @ts-expect-error Content capture is configured through tracePolicy.
+    capture: "content",
   };
-  defineInstrumentation(instrumentationWithEnabled);
-
-  defineInstrumentation({
-    events: {
-      "step.started"(input) {
-        const sessionId: string = input.session.id;
-        return { runtimeContext: { "test.session_id": sessionId } };
-      },
-    },
-  });
-
-  const providerWithCapture: ProviderDefinition = { capture: "content" };
   void providerWithCapture;
 
   defineInstrumentation({
-    // @ts-expect-error Instrumentation event hooks are authored through `events`.
-    runtimeContext: {
-      "step.started"() {
-        return { runtimeContext: {} };
-      },
-    },
+    // @ts-expect-error OpenTelemetry settings are configured with otel().
+    functionId: "support",
   });
 
   defineInstrumentation({
-    // @ts-expect-error Instrumentation event hooks are authored through `events`.
-    metadata: {
-      "step.started"() {
-        return { runtimeContext: { "test.session_id": "test-session" } };
+    events: {
+      "turn.started"(event) {
+        const sessionId: string = event.sessionId;
+        void sessionId;
       },
     },
   });

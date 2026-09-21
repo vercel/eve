@@ -1,3 +1,4 @@
+import { getTurnUsageState } from "#harness/turn-tag-state.js";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createDurableSessionState, readDurableSession } from "#execution/durable-session-store.js";
@@ -30,7 +31,7 @@ describe("blocking workflow agent continuation", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(prepareOwnerAgentInvocation).mockImplementation(async (input) => {
-      const session = await readDurableSession(input.sessionState);
+      const session = readDurableSession(input.sessionState);
       return {
         adapter: {},
         adapterCtx: {},
@@ -159,7 +160,7 @@ describe("blocking workflow agent continuation", () => {
     expect(startSubagent).toHaveBeenCalledWith(expect.objectContaining({ activityObserver }));
   });
 
-  it("reuses one handle for two calls from the same workflow run", async () => {
+  it("settles each invocation once and ignores an old result after the handle is reused", async () => {
     const session = {
       agent: { dynamicModel: true as const, system: "", tools: [] },
       compaction: { recentWindowSize: 5, threshold: 10_000 },
@@ -171,6 +172,7 @@ describe("blocking workflow agent continuation", () => {
       }),
     };
     let sessionState = createDurableSessionState({ session });
+    let previousSettlement: Parameters<typeof settleTaskAgentInvocationStep>[0] | undefined;
 
     for (const [index, message] of ["first", "second"].entries()) {
       const callId = `workflow-call:${String(index)}`;
@@ -188,12 +190,21 @@ describe("blocking workflow agent continuation", () => {
       });
       expect(dispatched).toMatchObject({ agentId: identity.id, kind: "dispatched" });
       if (dispatched.kind !== "dispatched") throw new Error("Expected dispatch.");
-      const claimed = getAgentHandleStore(dispatched.sessionState.snapshot?.session.state)?.handles;
+      const claimed = getAgentHandleStore(dispatched.sessionState.snapshot.session.state)?.handles;
       expect(claimed).toEqual([
         expect.objectContaining({ identity, ownerId: "workflow-run-1", phase: "claimed" }),
       ]);
 
-      const settled = await settleTaskAgentInvocationStep({
+      if (previousSettlement !== undefined) {
+        const stale = await settleTaskAgentInvocationStep({
+          ...previousSettlement,
+          sessionState: dispatched.sessionState,
+        });
+        expect(stale.settled).toBe(false);
+        expect(stale.completion).toBeUndefined();
+        expect(stale.sessionState).toBe(dispatched.sessionState);
+      }
+      const settlement: Parameters<typeof settleTaskAgentInvocationStep>[0] = {
         serializedContext: dispatched.serializedContext ?? {},
         ownerId: "workflow-run-1",
         result: {
@@ -206,17 +217,36 @@ describe("blocking workflow agent continuation", () => {
             usageDelta: {
               cacheReadTokens: 0,
               cacheWriteTokens: 0,
-              inputTokens: 0,
-              outputTokens: 0,
+              inputTokens: 2,
+              outputTokens: 3,
             },
           },
           output: message,
           subagentName: identity.name,
         },
         sessionState: dispatched.sessionState,
+      };
+      const settled = await settleTaskAgentInvocationStep(settlement);
+      expect(settled.settled).toBe(true);
+      expect(settled.completion).toEqual({
+        type: "subagent.completed",
+        data: { callId, subagentName: identity.name, output: message },
       });
+      const restored = JSON.parse(JSON.stringify(settled.sessionState));
+      const duplicate = await settleTaskAgentInvocationStep({
+        ...settlement,
+        sessionState: restored,
+      });
+      expect(duplicate.settled).toBe(false);
+      expect(duplicate.completion).toBeUndefined();
+      expect(duplicate.sessionState).toBe(restored);
+      expect(getTurnUsageState(restored.snapshot.session.state)?.session).toMatchObject({
+        inputTokens: 2 * (index + 1),
+        outputTokens: 3 * (index + 1),
+      });
+      previousSettlement = settlement;
       sessionState = settled.sessionState;
-      expect(getAgentHandleStore(sessionState.snapshot?.session.state)?.handles).toEqual([
+      expect(getAgentHandleStore(sessionState.snapshot.session.state)?.handles).toEqual([
         { address, identity, phase: "available" },
       ]);
     }

@@ -1,7 +1,8 @@
-import type { AgentTurnTraceState } from "#tracing/agent-trace-state.js";
+import type { AgentSessionTraceState, AgentTurnTraceState } from "#tracing/agent-trace-state.js";
 import { agentSpanNamingAttributes } from "#tracing/agent-span-naming.js";
 import { agentInvocationSpanName } from "#tracing/agent-span-contract.js";
 import { agentTraceIdentityAttributes } from "#tracing/agent-otel-attributes.js";
+import { normalizeInstrumentationChannelKind } from "#internal/instrumentation.js";
 
 type SpanAttributePrimitive = string | number | boolean;
 type SpanAttributeValue = SpanAttributePrimitive | SpanAttributePrimitive[];
@@ -9,21 +10,51 @@ type SpanAttributeValue = SpanAttributePrimitive | SpanAttributePrimitive[];
 export function agentActivationAttributes(input: {
   readonly agentName?: string;
   readonly frameworkVersion: string;
+  readonly session?: AgentSessionTraceState;
   readonly sessionId: string;
   readonly turnId: string;
   readonly turn: AgentTurnTraceState;
 }): Record<string, string | number | boolean | undefined> {
+  const recordsTrace = input.session?.decision?.action === "record";
+  const recordsInputs = recordsTrace && input.session?.decision?.recordInputs === true;
+  const recordsOutputs = recordsTrace && input.session?.decision?.recordOutputs === true;
+  const parentLineage = input.turn.parentLineage ?? input.session?.parentLineage;
+  const isSubagent = parentLineage !== undefined;
+  const channelKind =
+    input.turn.channelDelivery?.channelKind ??
+    (isSubagent
+      ? undefined
+      : (input.session?.channelKind ??
+        (input.session?.channelType === undefined
+          ? undefined
+          : normalizeInstrumentationChannelKind(input.session.channelType))));
+  const scheduleId = isSubagent ? undefined : input.session?.scheduleId;
+  const origin =
+    isSubagent || channelKind === undefined
+      ? undefined
+      : scheduleId !== undefined
+        ? "schedule"
+        : "channel";
   return {
     "agent.framework.name": "eve",
     "agent.framework.version": input.frameworkVersion,
     "agent.name": input.agentName,
+    "agent.channel.audience": input.session?.channelAudience,
     ...agentPrincipalAttributes(input.turn),
     "agent.channel.delivery.id": input.turn.channelDelivery?.deliveryId,
     "agent.channel.delivery.input": input.turn.channelDelivery?.inputAttribute,
-    "agent.channel.kind": input.turn.channelDelivery?.channelKind,
+    "agent.channel.kind": channelKind,
     "agent.channel.name": input.turn.channelDelivery?.channelName,
     "agent.channel.request.id": input.turn.channelDelivery?.requestId,
+    "agent.parent_call.id": parentLineage?.callId,
+    "agent.parent_run.id": parentLineage?.sessionId,
+    "agent.run.type": isSubagent ? "subagent" : "session",
+    "agent.schedule.id": scheduleId,
+    "agent.session.origin": origin,
+    "agent.session.title": !isSubagent && recordsInputs ? input.session?.title : undefined,
     "agent.subagent.name": input.turn.subagentName,
+    "agent.trace.content.input": recordsInputs,
+    "agent.trace.content.output": recordsOutputs,
     "agent.turn.id": input.turnId,
     "agent.turn.sequence": input.turn.sequence,
     "gen_ai.agent.name": input.agentName,

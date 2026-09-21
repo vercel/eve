@@ -21,7 +21,7 @@ function createMultiAgentSummary(workspace: AgentWorkspace): VercelEveMultiAgent
   return {
     agents: workspace.members.map((member) => ({
       name: member.name,
-      routePrefix: `/${member.name}`,
+      routePrefix: `/eve/${member.name}`,
       summaryPath: relative(
         workspace.root,
         join(member.appRoot, VERCEL_EVE_AGENT_SUMMARY_OUTPUT_PATH),
@@ -42,7 +42,7 @@ export async function buildAgentWorkspace(workspace: AgentWorkspace): Promise<st
     config.experimentalServicesV2 !== undefined
   ) {
     throw new Error(
-      "This project defines its Vercel service graph in vercel.json. Run `vercel build` to build the complete project, or run `eve build` from an individual agent directory.",
+      "This project defines its Vercel service graph in vercel.json. Compose generated workspace agents from a programmatic vercel.ts with `withEve` from `eve/vercel`, manually define every service and run `vercel build`, or run `eve build` from an individual agent directory.",
     );
   }
 
@@ -52,8 +52,11 @@ export async function buildAgentWorkspace(workspace: AgentWorkspace): Promise<st
       buildCommand: `node ${quoteVercelShellArgument(
         toVercelRelativePath(member.appRoot, resolveEveBinaryPath(member.appRoot)),
       )} build`,
+      devCommand: `node ${quoteVercelShellArgument(
+        toVercelRelativePath(member.appRoot, resolveEveBinaryPath(member.appRoot)),
+      )} dev --no-ui`,
       name: member.name,
-      publicRoutePrefix: `/${member.name}`,
+      publicRoutePrefix: `/eve/${member.name}`,
       workspaceMember: true,
     },
     target: {

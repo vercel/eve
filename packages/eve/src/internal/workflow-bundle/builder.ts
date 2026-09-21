@@ -1,5 +1,6 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
+import { mapConcurrent } from "#shared/map-concurrent.js";
 
 import {
   resolvePackageSourceDirectoryPath,
@@ -17,6 +18,7 @@ import {
   bundleFinalWorkflowOutput,
   collectWorkflowInputFiles,
   composeWorkflowDriverCode,
+  mergeWorkflowManifest,
   convertClassesManifest,
   convertStepsManifest,
   convertWorkflowsManifest,
@@ -116,11 +118,12 @@ export class WorkflowBundleBuilder {
     const workflowsOutfile = join(this.#outDir, "workflows.mjs");
     const nitroStepOutfile = options.nitroStepOutfile;
     const nitroWorkflowOutfile = options.nitroWorkflowOutfile;
-    const writeStepEntry = (outfile: string) =>
+    const writeStepEntry = (outfile: string, precomputedManifest?: WorkflowManifest) =>
       writeNitroStepEntrypoint({
         builtinsPath: resolveWorkflowModulePath("workflow/internal/builtins"),
         discoveredEntries: stepEntries,
         outfile,
+        precomputedManifest,
         preferAbsoluteFileImports: true,
         projectRoot: this.config.projectRoot ?? this.config.workingDir,
         sideEffectFiles: [this.#compiledArtifactsBootstrapPath],
@@ -128,7 +131,7 @@ export class WorkflowBundleBuilder {
       });
     const stepsManifest = await writeStepEntry(stepsOutfile);
     if (nitroStepOutfile !== undefined && nitroStepOutfile !== stepsOutfile) {
-      await writeStepEntry(nitroStepOutfile);
+      await writeStepEntry(nitroStepOutfile, stepsManifest);
     }
     const { manifest: workflowsManifest } = await this.createWorkflowsBundle({
       additionalOutputs:
@@ -215,10 +218,13 @@ export class WorkflowBundleBuilder {
       discoveredWorkflows: [],
     };
 
-    for (const filePath of inputs) {
+    const entries = await mapConcurrent(inputs, async (filePath) => {
       const source = await readFile(filePath, "utf8");
       const patterns = await findWorkflowPatterns(filePath, source);
+      return { filePath, patterns };
+    });
 
+    for (const { filePath, patterns } of entries) {
       if (patterns.hasUseStep) discovered.discoveredSteps.push(filePath);
       if (patterns.hasUseWorkflow) discovered.discoveredWorkflows.push(filePath);
       if (patterns.hasSerde) discovered.discoveredSerdeFiles.push(filePath);
@@ -237,21 +243,27 @@ export class WorkflowBundleBuilder {
     tsconfigPath,
   }: WorkflowBundleCreateWorkflowsBundleOptions): Promise<WorkflowBundleCreateWorkflowsBundleResult> {
     const manifest: WorkflowManifest = {};
-    const frameworkChunk = await this.#buildDriverChunk({
-      label: "framework",
-      manifest,
-      serdeFiles: frameworkSerdeFiles,
-      tsconfigPath,
-      workflowFiles: frameworkWorkflowFiles,
-    });
-    const appChunk = await this.#buildDriverChunk({
-      label: "app",
-      manifest,
-      serdeFiles: [],
-      tsconfigPath,
-      workflowFiles: appWorkflowFiles,
-    });
-    const workflowCode = composeWorkflowDriverCode([frameworkChunk, appChunk]);
+    const chunks = await mapConcurrent(
+      [
+        {
+          label: "framework",
+          serdeFiles: frameworkSerdeFiles,
+          workflowFiles: frameworkWorkflowFiles,
+        },
+        { label: "app", serdeFiles: [], workflowFiles: appWorkflowFiles },
+      ],
+      async (layer) => {
+        const layerManifest: WorkflowManifest = {};
+        const code = await this.#buildDriverChunk({
+          ...layer,
+          manifest: layerManifest,
+          tsconfigPath,
+        });
+        return { code, manifest: layerManifest };
+      },
+    );
+    for (const chunk of chunks) mergeWorkflowManifest(manifest, chunk.manifest);
+    const workflowCode = composeWorkflowDriverCode(chunks.map((chunk) => chunk.code));
 
     await Promise.all(
       [{ outfile, stepRegistrationsPath }, ...additionalOutputs].map((output) =>

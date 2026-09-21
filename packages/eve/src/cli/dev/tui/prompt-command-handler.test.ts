@@ -2,7 +2,6 @@ import pc from "picocolors";
 import { describe, expect, it, vi } from "vitest";
 
 import { createPromptCommandHandler } from "./prompt-command-handler.js";
-import type { RemoteAuthCompletion, RemoteConnectionController } from "./remote-connection.js";
 import type { AgentTUIRenderer, PromptCommandHandlerContext } from "./runner.js";
 import type { SetupFlowRenderer } from "./setup-flow.js";
 
@@ -30,6 +29,13 @@ const REMOTE_TARGET = {
   serverUrl: "https://example.com/",
   workspaceRoot: APP_ROOT,
 } as const;
+const WORKSPACE_AGENT_ROOT = "/tmp/weather-workspace/agents/support";
+const WORKSPACE_TARGET = {
+  kind: "local",
+  serverUrl: "http://localhost:3000",
+  workspaceRoot: "/tmp/weather-workspace",
+  agentRoot: WORKSPACE_AGENT_ROOT,
+} as const;
 
 function context(renderer: Partial<AgentTUIRenderer> = {}): PromptCommandHandlerContext {
   return {
@@ -48,7 +54,7 @@ function setupFlowRenderer() {
     readSelect: vi.fn(async () => undefined),
     readEditableSelect: vi.fn(async () => undefined),
     readProviderPicker: vi.fn(async () => undefined),
-    readModelEditor: vi.fn(async () => undefined),
+    readModelPicker: vi.fn(async () => undefined),
     readText: vi.fn(async () => undefined),
     readAcknowledge: vi.fn(async () => {}),
     readChoice: vi.fn(() => ({ choice: Promise.resolve(undefined), close: vi.fn() })),
@@ -144,7 +150,7 @@ describe("createPromptCommandHandler", () => {
     const runTuiSetupCommand = vi.fn(async () => ({
       message: "AI Gateway via API key selected.",
       preserveFlowDiagnostics: false,
-      effect: { kind: "model-access-changed" } as const,
+      effect: { kind: "model-access-changed", reload: true } as const,
     }));
     vi.doMock("./setup-commands.js", () => ({
       SETUP_FLOW_CONFIG: {
@@ -164,7 +170,7 @@ describe("createPromptCommandHandler", () => {
         ),
       ).resolves.toEqual({
         message: "AI Gateway via API key selected.",
-        effect: { kind: "model-access-changed" },
+        effect: { kind: "model-access-changed", reload: true },
       });
       expect(runTuiSetupCommand).toHaveBeenCalledWith(
         expect.objectContaining({ initialModelStep: "provider" }),
@@ -214,125 +220,80 @@ describe("createPromptCommandHandler", () => {
     }
   });
 
-  it("keeps the setup panel open for an immediate onboarding handoff", async () => {
+  it("installs /add items into the selected workspace agent", async () => {
     const runTuiSetupCommand = vi.fn(async () => ({
-      message: "Vercel CLI installed.",
-      preserveFlowDiagnostics: false,
+      message: "Added Slack",
+      preserveFlowDiagnostics: true,
     }));
     vi.doMock("./setup-commands.js", () => ({
-      SETUP_FLOW_CONFIG: {
-        "vc:install": { title: "Install the Vercel CLI", indicator: "pulse" },
-      },
+      SETUP_FLOW_CONFIG: { add: { title: "Add to your agent", indicator: "pulse" } },
       runTuiSetupCommand,
     }));
 
     try {
-      const setupFlow = setupFlowRenderer();
-      const handler = createPromptCommandHandler({ target: LOCAL_TARGET });
-      const handoffContext = Object.assign(context({ setupFlow }), {
-        keepSetupFlowOpen: true,
-      });
+      const handler = createPromptCommandHandler({ target: WORKSPACE_TARGET });
+      await handler.handle(
+        { type: "extension", name: "add", argument: "channel/slack" },
+        context({ setupFlow: setupFlowRenderer() }),
+      );
 
-      await handler.handle({ type: "extension", name: "vc:install", argument: "" }, handoffContext);
-
-      expect(setupFlow.begin).toHaveBeenCalledWith("Install the Vercel CLI", "pulse");
-      expect(setupFlow.end).not.toHaveBeenCalled();
+      expect(runTuiSetupCommand).toHaveBeenCalledWith(
+        expect.objectContaining({
+          agentRoot: WORKSPACE_AGENT_ROOT,
+          appRoot: WORKSPACE_TARGET.workspaceRoot,
+          command: "add",
+        }),
+      );
     } finally {
       vi.doUnmock("./setup-commands.js");
       vi.resetModules();
     }
   });
 
-  it("reports a login that completed before remote authentication was cancelled", async () => {
-    const setupFlow = setupFlowRenderer();
-    const runLoginFlow = vi.fn(async () => ({ kind: "cancelled" as const }));
-    const remoteConnection: RemoteConnectionController = {
-      current: () => ({
-        target: REMOTE_TARGET,
-        connection: {
-          state: "auth-required",
-          challenge: { kind: "eve-oidc" },
-        },
+  it.each([false, true])("holds login open through runtime refresh (failure: %s)", async (fail) => {
+    vi.doMock("./setup-commands.js", () => ({
+      SETUP_FLOW_CONFIG: { login: { title: "Connect a model", indicator: "pulse" } },
+      runTuiSetupCommand: async () => ({
+        message: "Connected.",
+        effect: { kind: "model-access-changed", reload: true },
+        preserveFlowDiagnostics: false,
       }),
-      check: async () => ({
-        state: "auth-required",
-        challenge: { kind: "eve-oidc" },
-      }),
-      authenticate: async () => ({
-        kind: "cancelled",
-        completedMutations: [{ kind: "vercel-login" }],
-      }),
-      reportFailure: () => ({ state: "checking" }),
-      dispose() {},
-    };
-    const handler = createPromptCommandHandler({
-      target: REMOTE_TARGET,
-      flows: { runLoginFlow },
-    });
-
-    await expect(
-      handler.handle(
-        { type: "extension", name: "vc:login", argument: "" },
-        {
-          ...context({ setupFlow }),
-          remoteConnection,
-        },
-      ),
-    ).resolves.toEqual({
-      message: "/vc:login dismissed after logging in to Vercel.",
-    });
-    expect(runLoginFlow).not.toHaveBeenCalled();
-    expect(setupFlow.begin).toHaveBeenCalledWith("Authenticate via Vercel OIDC", "pulse");
-    expect(setupFlow.end).toHaveBeenCalledWith({ preserveDiagnostics: true });
-  });
-
-  it("reports mutations that completed before remote /vc:login was interrupted", async () => {
-    const setupFlow = {
-      ...setupFlowRenderer(),
-      waitForInterrupt: () => ({ promise: Promise.resolve("ctrl-c" as const), dispose: vi.fn() }),
-    } satisfies SetupFlowRenderer;
-    const runLoginFlow = vi.fn(async () => ({ kind: "cancelled" as const }));
-    const remoteConnection: RemoteConnectionController = {
-      current: () => ({
-        target: REMOTE_TARGET,
-        connection: { state: "auth-required", challenge: { kind: "eve-oidc" } },
-      }),
-      check: async () => ({
-        state: "auth-required",
-        challenge: { kind: "eve-oidc" },
-      }),
-      authenticate: async (_attempt, signal) =>
-        await new Promise<RemoteAuthCompletion>((resolve) => {
-          signal?.addEventListener(
-            "abort",
-            () =>
-              resolve({
-                kind: "cancelled" as const,
-                completedMutations: [
-                  { kind: "trusted-sources-updated", targetProjectName: "remote-agent" },
-                ],
-              }),
-            { once: true },
-          );
-        }),
-      reportFailure: () => ({ state: "checking" }),
-      dispose() {},
-    };
-    const handler = createPromptCommandHandler({
-      target: REMOTE_TARGET,
-      flows: { runLoginFlow },
-    });
-
-    await expect(
-      handler.handle(
-        { type: "extension", name: "vc:login", argument: "" },
-        { ...context({ setupFlow }), remoteConnection },
-      ),
-    ).resolves.toEqual({
-      message:
-        "/vc:login interrupted. Completed before interruption: updated Trusted Sources for remote-agent.",
-    });
-    expect(runLoginFlow).not.toHaveBeenCalled();
+    }));
+    try {
+      const setupFlow = setupFlowRenderer();
+      let release!: () => void;
+      const pending = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const settleOutcome = vi.fn(async () => {
+        await pending;
+        return fail
+          ? { tone: "error" as const, message: "The agent could not reload." }
+          : { message: "Connected." };
+      });
+      const handler = createPromptCommandHandler({ target: LOCAL_TARGET });
+      const result = handler.handle(
+        { type: "extension", name: "login", argument: "" },
+        { ...context({ setupFlow }), settleOutcome },
+      );
+      await vi.waitFor(() => expect(settleOutcome).toHaveBeenCalledOnce());
+      expect(setupFlow.end).not.toHaveBeenCalled();
+      release();
+      const outcome = await result;
+      if (outcome === undefined) throw new Error("Expected a login outcome");
+      expect(setupFlow.end).toHaveBeenCalledOnce();
+      expect(outcome.effect).toBeUndefined();
+      if (fail) {
+        expect(outcome.tone).toBe("error");
+        expect(outcome.message).toContain("could not reload");
+        expect(outcome.message).not.toContain("private runtime failure");
+      } else {
+        expect(outcome.message).toBe("Connected.");
+      }
+    } finally {
+      vi.doUnmock("./setup-commands.js");
+      vi.resetModules();
+    }
   });
 
   it("folds setup-module load failures at the command adapter boundary", async () => {

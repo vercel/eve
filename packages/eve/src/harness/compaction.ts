@@ -9,11 +9,7 @@ import {
   stubContentOutputFileParts,
   TRANSCRIPT_PAYLOAD_LIMIT,
 } from "#harness/compaction-prompt.js";
-import {
-  createFrameworkUserMessage,
-  isFrameworkUserMessage,
-  isUserModelMessage,
-} from "#harness/messages.js";
+import { createFrameworkUserMessage, isFrameworkUserMessage } from "#harness/messages.js";
 import { estimateTokens } from "#harness/token-estimate.js";
 import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
 import type { CompactionConfig, ToolLoopHarnessConfig } from "#harness/types.js";
@@ -41,6 +37,8 @@ const COMPACTION_PROMPT_OVERHEAD_TOKENS = estimateTokens([
 export function getInputTokenCount(
   messages: readonly ModelMessage[],
   config: CompactionConfig,
+  requestEnvelopeTokens = 0,
+  previousEnvelopeTokens = 0,
 ): number {
   const prior = config.lastKnownInputTokens;
   const priorCount = config.lastKnownPromptMessageCount;
@@ -52,10 +50,14 @@ export function getInputTokenCount(
     priorCount < 0 ||
     priorCount > messages.length
   ) {
-    return estimateTokens(messages);
+    return estimateTokens(messages) + requestEnvelopeTokens;
   }
 
-  return prior + estimateTokens(messages.slice(priorCount));
+  return (
+    prior +
+    estimateTokens(messages.slice(priorCount)) +
+    Math.max(0, requestEnvelopeTokens - previousEnvelopeTokens)
+  );
 }
 
 /**
@@ -65,10 +67,14 @@ export function getInputTokenCount(
 export function shouldCompact(
   messages: readonly ModelMessage[],
   config: CompactionConfig,
+  requestEnvelopeTokens = 0,
+  previousEnvelopeTokens = 0,
 ): boolean {
   return (
     messages.length > 0 &&
-    getInputTokenCount(messages, config) + COMPACTION_PROMPT_OVERHEAD_TOKENS > config.threshold
+    getInputTokenCount(messages, config, requestEnvelopeTokens, previousEnvelopeTokens) +
+      COMPACTION_PROMPT_OVERHEAD_TOKENS >
+      config.threshold
   );
 }
 
@@ -198,6 +204,7 @@ export async function compactMessages(
   headers?: Record<string, string>,
   abortSignal?: AbortSignal,
   forceSummary = false,
+  historyInputTokenCount?: number,
 ): Promise<ModelMessage[]> {
   const { conversation, previousCheckpoint } = extractPreviousCheckpoint(messages);
   const recentConfig = forceSummary ? { ...config, recentWindowSize: 1 } : config;
@@ -214,7 +221,7 @@ export async function compactMessages(
     // A new summary replaces that prompt, so it uses its own estimate below.
     const tokenEstimateAdjustment = Math.max(
       0,
-      getInputTokenCount(messages, config) - estimateTokens(messages),
+      (historyInputTokenCount ?? getInputTokenCount(messages, config)) - estimateTokens(messages),
     );
     for (const heuristic of COMPACTION_HEURISTICS) {
       const outcome = heuristic({
@@ -387,10 +394,7 @@ function findLastRealUserMessage(conversation: readonly ModelMessage[]): ModelMe
     if (message?.role !== "user" || typeof message.content !== "string") {
       continue;
     }
-    if (
-      isFrameworkUserMessage(message) ||
-      (isUserModelMessage(message) && message.kind === "legacy.unknown")
-    ) {
+    if (isFrameworkUserMessage(message)) {
       continue;
     }
     return message;

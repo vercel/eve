@@ -35,6 +35,8 @@ export interface PromptColors {
 export interface PromptOption<T extends PromptValue> {
   value: T;
   label: string;
+  /** Additional searchable text that is never rendered in the menu. */
+  keywords?: readonly string[];
   /** Completion action kept after searchable results instead of being filtered. */
   trailingAction?: boolean;
   /** Supporting copy; stacked prompts render newline-separated text on separate rows. */
@@ -378,7 +380,7 @@ export function renderSubmitRow(
   const content = isCursor
     ? `${UNICODE_ROW_GLYPHS.selectedPointer} ${bold}`
     : `  ${colors.dim(bold)}`;
-  const suffixSeparator = isCursor ? "" : " ";
+  const suffixSeparator = " ";
   return `${renderCursorRow(content, isCursor, colors)}${suffixSeparator}${colors.green(UNICODE_ROW_GLYPHS.success)}`;
 }
 

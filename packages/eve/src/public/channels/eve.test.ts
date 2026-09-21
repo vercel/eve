@@ -693,6 +693,22 @@ describe("eveChannel — onMessage", () => {
     expect(options.title).toBe("HTTP run");
   });
 
+  it("passes first-message auth, context, and title to a prewarmed session", async () => {
+    const handler = createEveContinueHandler({
+      auth: () => ACCEPTED_AUTH,
+      onMessage: () => ({ auth: OVERRIDE_AUTH, context: ["first context"], title: "First chat" }),
+    });
+    expect((await handler.fetch(createJsonMessageRequest({ message: "Hello" }))).status).toBe(202);
+    expect(handler.send).toHaveBeenCalledWith(
+      "Hello",
+      expect.objectContaining({
+        auth: OVERRIDE_AUTH,
+        context: ["first context"],
+        title: "First chat",
+      }),
+    );
+  });
+
   it("uses auth returned from onMessage for create requests", async () => {
     const handler = createEveCreateHandler({
       auth: () => ACCEPTED_AUTH,
@@ -707,6 +723,20 @@ describe("eveChannel — onMessage", () => {
     expect(payload).toEqual({ message: "hi", context: ["override context"] });
     const options = handler.send.mock.calls[0]?.[1] as MockSendOptions;
     expect(options.auth).toEqual(OVERRIDE_AUTH);
+  });
+
+  it("keeps route authentication separate from onMessage session auth", async () => {
+    const handler = createEveCreateHandler({
+      auth: () => ACCEPTED_AUTH,
+      onMessage: () => ({ auth: null, context: ["anonymous session projection"] }),
+    });
+
+    const response = await handler.fetch(createJsonMessageRequest({ message: "hi" }));
+
+    expect(response.status).toBe(202);
+    const runInput = handler.createSession.mock.calls[0]?.[0] as RunInput;
+    expect(runInput.auth).toBeNull();
+    expect(runInput.audienceAuth).toEqual(ACCEPTED_AUTH);
   });
 
   it("does not run onMessage when auth rejects", async () => {
@@ -869,6 +899,18 @@ describe("eveChannel — onMessage", () => {
 
     expect(response.status).toBe(400);
     expect(handler.send).not.toHaveBeenCalled();
+  });
+
+  it("exposes a retryable code while the session inbox is starting", async () => {
+    const handler = createEveContinueHandler({ auth: none() });
+    handler.send.mockResolvedValueOnce({ status: "session_not_active", retryable: true });
+    const response = await handler.fetch(createJsonMessageRequest({ message: "Hello" }));
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({
+      code: "session_not_ready",
+      error: "The session is not ready to accept messages yet.",
+      ok: false,
+    });
   });
 
   it("returns session_not_active instead of starting a replacement session", async () => {
@@ -1075,7 +1117,7 @@ describe("eveChannel — create session (text)", () => {
           callId: "call-1",
           subagentName: "research",
           token: "tok123",
-          url: "https://caller.example.com/eve/agents/support/eve/v1/callback/tok123",
+          url: "https://caller.example.com/eve/support/v1/callback/tok123",
         },
         message: "hi",
         mode: "task",

@@ -7,6 +7,7 @@ import {
   EVE_INTERNAL_HOST_BUILD_OUTPUT_DIRECTORY_ENV,
 } from "#internal/application/build-output-environment.js";
 import { EVE_ROUTE_PREFIX } from "#protocol/routes.js";
+import { joinEveRoutePath } from "#shared/eve-route-path.js";
 import {
   EVE_PUBLIC_ROUTE_PREFIX_ENV,
   normalizePublicRoutePrefix,
@@ -27,6 +28,7 @@ const EVE_VERCEL_SERVICES_DIRECTORY = ".eve/vercel-services";
 export interface EveVercelAgentTarget {
   readonly appRoot: string;
   readonly buildCommand: string;
+  readonly devCommand?: string;
   readonly name?: string;
   readonly publicRoutePrefix: string;
   readonly workspaceMember?: boolean;
@@ -73,7 +75,7 @@ function escapeVercelRouteLiteral(value: string): string {
 export function createEveServiceRouteSrc(publicRoutePrefix: string): string {
   if (publicRoutePrefix.length === 0) return `^${EVE_ROUTE_PREFIX}/(.*)$`;
   const prefix = publicRoutePrefix.startsWith("/") ? publicRoutePrefix : `/${publicRoutePrefix}`;
-  return `^${escapeVercelRouteLiteral(prefix)}${EVE_ROUTE_PREFIX}/(.*)$`;
+  return `^${escapeVercelRouteLiteral(joinEveRoutePath(prefix, EVE_ROUTE_PREFIX))}/(.*)$`;
 }
 
 export function createEveRequestPathRoute(routeSrc: string): VercelRouteConfig {
@@ -101,12 +103,17 @@ export function createEvePublicRoute(serviceName: string, routeSrc: string): Ver
   return { destination: { service: serviceName, type: "service" }, src: routeSrc };
 }
 
-function createIsolatedBuild(input: {
+function createIsolatedService(input: {
   readonly agent: EveVercelAgentTarget;
   readonly hostOutputDirectory: string;
   readonly projectRoot: string;
   readonly serviceName: string;
-}): { readonly buildCommand: string; readonly root: string; readonly rootDirectory: string } {
+}): {
+  readonly buildCommand: string;
+  readonly devCommand?: string;
+  readonly root: string;
+  readonly rootDirectory: string;
+} {
   const rootDirectory = join(input.projectRoot, EVE_VERCEL_SERVICES_DIRECTORY, input.serviceName);
   const outputDirectory = join(rootDirectory, ".vercel", "output");
   const prefix = normalizePublicRoutePrefix(input.agent.publicRoutePrefix);
@@ -119,8 +126,16 @@ function createIsolatedBuild(input: {
       ? ` && export ${EVE_INTERNAL_AGENT_WORKSPACE_MEMBER_ENV}=1`
       : "";
 
+  const appRoot = quoteVercelShellArgument(
+    toVercelRelativePath(rootDirectory, input.agent.appRoot),
+  );
   return {
-    buildCommand: `cd ${quoteVercelShellArgument(toVercelRelativePath(rootDirectory, input.agent.appRoot))} && export ${EVE_INTERNAL_BUILD_OUTPUT_DIRECTORY_ENV}=${quoteVercelShellArgument(toVercelRelativePath(input.agent.appRoot, outputDirectory))} && export ${EVE_INTERNAL_HOST_BUILD_OUTPUT_DIRECTORY_ENV}=${quoteVercelShellArgument(toVercelRelativePath(input.agent.appRoot, input.hostOutputDirectory))}${prefixExport}${workspaceMemberExport} && ${input.agent.buildCommand}`,
+    buildCommand: `cd ${appRoot} && export ${EVE_INTERNAL_BUILD_OUTPUT_DIRECTORY_ENV}=${quoteVercelShellArgument(toVercelRelativePath(input.agent.appRoot, outputDirectory))} && export ${EVE_INTERNAL_HOST_BUILD_OUTPUT_DIRECTORY_ENV}=${quoteVercelShellArgument(toVercelRelativePath(input.agent.appRoot, input.hostOutputDirectory))}${prefixExport}${workspaceMemberExport} && ${input.agent.buildCommand}`,
+    ...(input.agent.devCommand === undefined
+      ? {}
+      : {
+          devCommand: `cd ${appRoot}${prefixExport}${workspaceMemberExport} && ${input.agent.devCommand}`,
+        }),
     root: toVercelRelativePath(input.projectRoot, rootDirectory),
     rootDirectory,
   };
@@ -141,7 +156,7 @@ export function compileEveVercelService(input: {
     input.agent.workspaceMember === true
       ? createEveHomePathRoute(input.agent.publicRoutePrefix)
       : undefined;
-  const build = createIsolatedBuild({
+  const isolated = createIsolatedService({
     agent: input.agent,
     hostOutputDirectory: input.target.hostOutputDirectory,
     projectRoot: input.target.projectRoot,
@@ -150,12 +165,14 @@ export function compileEveVercelService(input: {
 
   return {
     homeRouteSrc,
-    rootDirectory: build.rootDirectory,
+    rootDirectory: isolated.rootDirectory,
     routeSrc,
     service: {
-      buildCommand: build.buildCommand,
+      buildCommand: isolated.buildCommand,
+      devCommand: isolated.devCommand,
       framework: "eve",
-      root: build.root,
+      outputDirectory: ".vercel/output",
+      root: isolated.root,
       routes: [
         ...(homeRoute === undefined ? [] : [homeRoute]),
         createEveRequestPathRoute(routeSrc),

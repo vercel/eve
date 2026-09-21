@@ -16,19 +16,29 @@ export default defineTaskEval({
       "Alice asks Bob to summarize the available tools for a background task.",
     );
     started.expectOk();
-    started.calledSubagent("tool-surface-worker", { count: 1 });
-    started.event("subagent.completed", {
+    started.calledSubagent("tool-surface-worker", { status: "working", count: 1 });
+    started.event("action.result", {
       count: 1,
       data: {
-        backgroundTask: { status: "working" },
-        callId: "task-child-tool-surface",
-        subagentName: "tool-surface-worker",
+        result: {
+          kind: "tool-result",
+          output: { status: "working" },
+          callId: "task-child-tool-surface",
+          toolName: "tool-surface-worker",
+        },
       },
     });
     const taskId = requireBackgroundTaskId(started);
 
-    const completed = await waitForTaskNotification(t, t, taskId, "completed", [started]);
+    const completed = await waitForTaskNotification(t, started.session, taskId, "completed", [
+      started,
+    ]);
     completed.turn.expectOk();
+    t.event("subagent.completed", {
+      count: 1,
+      data: { callId: "task-child-tool-surface", subagentName: "tool-surface-worker" },
+    });
+    t.calledSubagent("tool-surface-worker", { status: "completed", count: 1 });
     const report = completed.turn.message;
     if (report === undefined) throw new Error("Parent did not return the child's tool report.");
     await t.require(

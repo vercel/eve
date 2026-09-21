@@ -34,6 +34,8 @@ export type PrompterValue = string | number | boolean;
 export interface SelectOption<T extends PrompterValue> {
   value: T;
   label: string;
+  /** Additional searchable text that is never rendered in the menu. */
+  keywords?: readonly string[];
   /** Completion action kept after searchable results instead of being filtered. */
   trailingAction?: boolean;
   hint?: string;
@@ -128,7 +130,7 @@ export interface SelectCommonOptions<T extends PrompterValue> {
   options: SelectOption<T>[];
   /**
    * Add a type-ahead filter line. The filter is a case-insensitive substring
-   * match against each option's label, value, and hint.
+   * match against each option's label, value, hints, and keywords.
    */
   search?: boolean;
   /** Placeholder shown in the filter line while it is empty (with `search`). */

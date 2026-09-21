@@ -29,6 +29,11 @@ export default defineEval({
 
 Sessions attached this way are full `EveEvalSession`s: you can keep driving them and assert directly on that session (`session.succeeded()`, `session.calledTool(...)`). Aggregate assertions on `t` continue to read the whole run, including every attached session.
 
+For session creation and message delivery, use the [drive API](./cases#the-drive-api).
+`t.session()` creates a session without a first message; call `session.send()` or `session.start()`
+on the returned handle to use it. `t.send()` creates a new session with its first message.
+These helpers handle the session protocol, retries, and event collection for the eval.
+
 ## Authentication
 
 Local targets send no auth: `eve eval` owns the dev server it boots. For a remote `--url`, eve gets the expected Vercel owner and project from `VERCEL_ORG_ID` and `VERCEL_PROJECT_ID` when both are set. Otherwise it reads `.vercel/project.json`. Eve then asks Vercel to resolve the exact HTTPS origin and sends ambient credentials only when the project IDs match. An arbitrary URL remains anonymous.

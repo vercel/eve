@@ -8,10 +8,14 @@ export default defineEval({
   description: "A rejected responder leaves the approval open for an authorized retry.",
   async test(t) {
     const parked = await t.send(`Call the \`${TOOL_NAME}\` tool with marker "${MARKER}".`);
-    const approval = t.requireInputRequest({ display: "confirmation", toolName: TOOL_NAME });
+    const conversation = parked.session;
+    const approval = conversation.requireInputRequest({
+      display: "confirmation",
+      toolName: TOOL_NAME,
+    });
     parked.calledTool(TOOL_NAME, { status: "pending", count: 1 });
 
-    const rejectedTurn = await t.startRespond(
+    const rejectedTurn = await conversation.startRespond(
       [{ optionId: "approve", requestId: approval.requestId }],
       { headers: { "x-eve-fixture-user": "unauthorized-responder" } },
     );

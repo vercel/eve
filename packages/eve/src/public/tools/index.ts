@@ -3,13 +3,10 @@
  */
 
 export {
-  type BackgroundToolDefinition,
   type DisabledToolSentinel,
   defineTool,
   disableTool,
   isDisabledToolSentinel,
-  type TaskExec,
-  type TaskReceipt,
   type ToolLabelDefinition,
   type ToolAuthOptions,
   type ToolAuthProvider,
@@ -19,6 +16,7 @@ export {
   type ToolModelOutputPart,
 } from "#tools/definition.js";
 export { defineDynamic } from "#dynamic/definition.js";
+export { defineDurableSchema } from "#tools/durable-schema.js";
 export { defineDurableCallback } from "#tools/durable-callbacks.js";
 export { toolOutput, toolOutputPart } from "#tools/model-output.js";
 export type { DynamicEvents, DynamicResolveContext, DynamicSentinel } from "#dynamic/definition.js";
@@ -38,8 +36,11 @@ export {
 
 export {
   defineWorkflowTool,
+  type WorkflowStepToolContext,
+  type TaskReceipt,
   type WorkflowToolContext,
   type WorkflowToolDefinition,
   type AgentInput,
+  type WorkflowAgentMetadata,
 } from "#tools/workflow-definition.js";
 export type { ToolInputRequest, ToolInputResponse } from "#tools/definition.js";

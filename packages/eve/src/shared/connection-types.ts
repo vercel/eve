@@ -167,19 +167,36 @@ export type AuthorizationDefinition<Resume extends JsonValue = JsonValue> =
   | NonInteractiveAuthorizationDefinition
   | InteractiveAuthorizationDefinition<Resume>;
 
+/** Declares whether a connection credential belongs to the agent or end user. */
+export type CredentialOwner = "app" | "user";
+
+type NonInteractiveCredentialOwner =
+  | {
+      readonly credentialOwner?: CredentialOwner;
+      readonly principalType?: never;
+    }
+  | {
+      readonly credentialOwner?: never;
+      /**
+       * @deprecated Use `credentialOwner` for connection credential ownership.
+       * Session auth continues to use `principalType`.
+       */
+      readonly principalType?: CredentialOwner;
+    };
+
 /**
  * Auth provider returned directly from or resolved by a connection's `auth`
  * field.
  *
  * Identical to {@link AuthorizationDefinition} except the
- * non-interactive form may omit `principalType`; normalization
- * defaults it to `"app"`. The resolved token is sent as
+ * non-interactive form may omit `credentialOwner`; normalization
+ * defaults it to `"app"`. Its legacy `principalType` remains supported
+ * and deprecated for compatibility. Interactive definitions continue to
+ * use `principalType: "user"`. The resolved token is sent as
  * `Authorization: Bearer <token>`.
  */
 export type ConnectionAuthProvider =
-  | (Omit<NonInteractiveAuthorizationDefinition, "principalType"> & {
-      readonly principalType?: NonInteractiveAuthorizationDefinition["principalType"];
-    })
+  | (Omit<NonInteractiveAuthorizationDefinition, "principalType"> & NonInteractiveCredentialOwner)
   | AuthorizationDefinition;
 
 /**
@@ -217,8 +234,8 @@ interface AuthorizationDefinitionBase {
    * - `"user"`: the framework projects the active session's user
    *   principal into `{ type: "user", id, issuer, ... }` and fails
    *   fast with `reason: "principal_required"` when the session has
-   *   no authenticated user. The token cache keys on
-   *   `user:${issuer}:${id}` so concurrent users never share tokens.
+   *   no authenticated user. The token cache keys on a JSON tuple of
+   *   the issuer and id so concurrent users never share tokens.
    */
   readonly principalType: "app" | "user";
 

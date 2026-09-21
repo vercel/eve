@@ -12,7 +12,7 @@ describe("resolveEveAgentHost", () => {
   });
 
   it("maps a named agent to the same-origin named route prefix", () => {
-    expect(resolveEveAgentHost({ agent: "support" })).toBe("/eve/agents/support");
+    expect(resolveEveAgentHost({ agent: "support" })).toBe("/eve/support");
   });
 
   it("rejects host and agent together", () => {

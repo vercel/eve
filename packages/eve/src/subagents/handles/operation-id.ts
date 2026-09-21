@@ -6,7 +6,7 @@ import { createHash } from "node:crypto";
  * the same call produces the same operation.
  *
  * Lives apart from the handle store because it needs `node:crypto`: the
- * store module is bundled into the workflow driver body (which rejects
+ * store module is bundled into the session owner body (which rejects
  * Node.js builtins), while operation ids are only ever minted inside
  * dispatch steps.
  */

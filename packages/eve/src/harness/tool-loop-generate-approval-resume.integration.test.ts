@@ -2,7 +2,6 @@ import { setTurnClientContextState } from "#harness/turn-client-context.js";
 import { jsonSchema, type LanguageModel, type ModelMessage, simulateReadableStream } from "ai";
 import { MockLanguageModelV4 } from "ai/test";
 import { describe, expect, it, vi } from "vitest";
-
 import { ContextContainer, contextStorage } from "#context/container.js";
 import {
   dispatchDynamicToolEvent,
@@ -29,7 +28,7 @@ import { getPendingInputBatches } from "#harness/pending-input-batches.js";
 import { createToolLoopHarness } from "#harness/tool-loop.js";
 import { setTurnUsageState } from "#harness/turn-tag-state.js";
 import type { HarnessSession, ToolLoopHarnessConfig } from "#harness/types.js";
-import { recordSessionTask } from "#tasks/session-index.js";
+import { registerWorkflowToolRun } from "#harness/workflow-tool-runs.js";
 import { once } from "#tools/approval/policies.js";
 import { defineTool } from "#tools/definition.js";
 import {
@@ -876,13 +875,17 @@ describe("tool loop generate approval resume (real AI SDK)", () => {
           : "Available skills\n- policy: Tenant policy";
       if (historyKey === "taskState") {
         ctx.set(TurnTaskDeliveryKey, "initiating");
-        session = recordSessionTask(session, {
-          createdByTurnId: "turn-1",
-          executor: { data: {}, kind: "workflow-tool" },
-          metadata: { kind: "report-probe", name: "analysis" },
-          taskId: "analysis",
-          taskInboxToken: "task-token",
-          taskRunId: "task-run",
+        session = registerWorkflowToolRun(session, {
+          callId: "analysis",
+          toolName: "analysis",
+          lifetime: "session" as const,
+          origin: { turnId: "turn-1", stepIndex: 0 },
+          address: { runId: "task-run", hookToken: "task-token" },
+          task: {
+            dispatchContext: { auth: { current: null, initiator: null } },
+            metadata: { kind: "report-probe", name: "analysis" },
+            taskId: "analysis",
+          },
         });
       } else {
         ctx.set(PendingSkillAnnouncementKey, runtimeContextAnnouncement);

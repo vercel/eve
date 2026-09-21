@@ -1,7 +1,5 @@
 import { z } from "#compiled/zod/index.js";
 
-import { RegistryPackageComponentSchema } from "./registry-package.js";
-
 const RegistrySetupSchema = z.object({
   package: z.string().min(1),
   bin: z.string().min(1),
@@ -33,7 +31,6 @@ const EveRegistryMetadataSchema = z.object({
     .union([RegistrySetupSchema, z.array(RegistrySetupSchema).min(1)])
     .transform((setup) => (Array.isArray(setup) ? setup : [setup]))
     .optional(),
-  components: z.array(RegistryPackageComponentSchema).min(1).optional(),
 });
 
 const EveRegistryItemMetadataSchema = z.object({

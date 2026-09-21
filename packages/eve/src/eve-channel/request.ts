@@ -19,7 +19,10 @@ import {
   EVE_MESSAGE_STREAM_FORMAT,
   EVE_MESSAGE_STREAM_VERSION,
   EVE_SESSION_ID_HEADER,
+  EVE_STREAM_CONTROL_VERSION,
+  EVE_STREAM_CONTROL_VERSION_QUERY,
   EVE_STREAM_FORMAT_HEADER,
+  EVE_STREAM_LEASE_ENDED_CONTROL,
   EVE_STREAM_TAIL_INDEX_HEADER,
   EVE_STREAM_VERSION_HEADER,
 } from "#protocol/message.js";
@@ -31,17 +34,10 @@ import {
 import { isInputResponse, type ValidatedInputResponse } from "#shared/input.js";
 import { parseJsonObject, type JsonObject } from "#shared/json.js";
 import type { RunMode } from "#shared/run-mode.js";
+import { type ParsedCreateBody, validateMessageFreeCreate } from "#eve-channel/create-request.js";
 
-interface ParsedCreateBody {
-  activityObserver?: ActivityObserverConfig;
-  callback?: SessionCallback;
-  capabilities?: SessionCapabilities;
-  message: string | UserContent;
-  mode?: RunMode;
-  context?: readonly string[];
-  operationId?: string;
-  outputSchema?: JsonObject;
-}
+const SESSION_STREAM_HEARTBEAT_MS = 10_000;
+const SESSION_STREAM_LEASE_MS = 60_000;
 
 /** Replay-stable identity for one authenticated create operation. */
 export async function deriveOperationContinuationToken(input: {
@@ -95,12 +91,16 @@ export function parseCreateBody(payload: Record<string, unknown>): ParsedCreateB
   const outputSchema = parseOutputSchemaField(payload.outputSchema);
   if (outputSchema instanceof Response) return outputSchema;
 
-  if (message === undefined) {
-    return Response.json(
-      { error: "Missing or empty 'message' field.", ok: false },
-      { status: 400 },
-    );
-  }
+  const messageFreeRejection = validateMessageFreeCreate({
+    activityObserver,
+    callback,
+    hasClientContext: payload.clientContext !== undefined,
+    hasMessageField: "message" in payload,
+    message,
+    mode,
+    outputSchema,
+  });
+  if (messageFreeRejection !== undefined) return messageFreeRejection;
 
   const rawOperationId = payload.operationId;
   if (rawOperationId !== undefined && (typeof rawOperationId !== "string" || !rawOperationId)) {
@@ -114,11 +114,11 @@ export function parseCreateBody(payload: Record<string, unknown>): ParsedCreateB
     activityObserver,
     callback,
     capabilities,
-    message,
     mode,
     context,
     outputSchema,
   };
+  if (message !== undefined) result.message = message;
   if (typeof rawOperationId === "string") result.operationId = rawOperationId;
   return result;
 }
@@ -264,7 +264,9 @@ export async function parseSessionControlBody(
   return rejectSessionContinuationToken(payload) ?? payload;
 }
 
-async function parseOptionalJsonRequest(req: Request): Promise<Record<string, unknown> | Response> {
+export async function parseOptionalJsonRequest(
+  req: Request,
+): Promise<Record<string, unknown> | Response> {
   let text: string;
   try {
     text = await req.text();
@@ -310,6 +312,11 @@ export async function createSessionStreamResponse(
   try {
     const tailIndex = includeTailIndex ? await session.getStreamTailIndex() : undefined;
     const events = await session.getEventStream({ startIndex });
+    const controlVersion =
+      new URL(request.url).searchParams.get(EVE_STREAM_CONTROL_VERSION_QUERY) ===
+      EVE_STREAM_CONTROL_VERSION
+        ? EVE_STREAM_CONTROL_VERSION
+        : undefined;
     const headers = new Headers({
       "cache-control": "no-store, no-transform",
       "content-type": EVE_MESSAGE_STREAM_CONTENT_TYPE,
@@ -322,7 +329,12 @@ export async function createSessionStreamResponse(
       headers.set(EVE_STREAM_TAIL_INDEX_HEADER, String(tailIndex));
     }
     return new Response(
-      serializeAsNdjson(events, request.signal, streamEventLimit(startIndex, tailIndex)),
+      serializeAsNdjson(
+        events,
+        request.signal,
+        streamEventLimit(startIndex, tailIndex),
+        controlVersion !== undefined,
+      ),
       { headers },
     );
   } catch {
@@ -615,20 +627,69 @@ function serializeAsNdjson(
   events: ReadableStream<unknown>,
   signal: AbortSignal,
   eventLimit?: number,
+  leased = false,
 ): ReadableStream<Uint8Array> {
   const encoder = new TextEncoder();
   let eventCount = 0;
+  let heartbeat: ReturnType<typeof setTimeout> | undefined;
+  let lease: ReturnType<typeof setTimeout> | undefined;
+
+  const clearTimers = () => {
+    clearTimeout(heartbeat);
+    clearTimeout(lease);
+    heartbeat = undefined;
+    lease = undefined;
+  };
+  const scheduleHeartbeat = (controller: TransformStreamDefaultController<Uint8Array>) => {
+    clearTimeout(heartbeat);
+    heartbeat = setTimeout(() => {
+      try {
+        controller.enqueue(encoder.encode("\n"));
+        scheduleHeartbeat(controller);
+      } catch {
+        clearTimers();
+      }
+    }, SESSION_STREAM_HEARTBEAT_MS);
+  };
+  const startLease = (controller: TransformStreamDefaultController<Uint8Array>) => {
+    scheduleHeartbeat(controller);
+    lease = setTimeout(() => {
+      clearTimers();
+      try {
+        controller.enqueue(encoder.encode(`${JSON.stringify(EVE_STREAM_LEASE_ENDED_CONTROL)}\n`));
+        controller.terminate();
+      } catch {
+        // The response was cancelled while the lease callback was already queued.
+      }
+    }, SESSION_STREAM_LEASE_MS);
+  };
+
   const transform = new TransformStream<unknown, Uint8Array>({
     start(controller) {
       controller.enqueue(encoder.encode("\n"));
-      if (eventLimit === 0) controller.terminate();
+      if (eventLimit === 0) {
+        controller.terminate();
+      } else if (leased) {
+        startLease(controller);
+      }
     },
     transform(event, controller) {
       controller.enqueue(encoder.encode(`${JSON.stringify(event)}\n`));
       eventCount += 1;
-      if (eventCount === eventLimit) controller.terminate();
+      if (eventCount === eventLimit) {
+        clearTimers();
+        controller.terminate();
+      } else if (leased) {
+        scheduleHeartbeat(controller);
+      }
+    },
+    flush() {
+      clearTimers();
     },
   });
-  void events.pipeTo(transform.writable, { signal }).catch(() => {});
+  void events
+    .pipeTo(transform.writable, { signal })
+    .catch(() => {})
+    .finally(clearTimers);
   return transform.readable;
 }

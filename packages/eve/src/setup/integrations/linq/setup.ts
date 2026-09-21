@@ -176,7 +176,7 @@ export async function applyLinqSetup(plan: LinqSetupPlan, context: SetupApplyCon
     const connectorInput: Parameters<typeof provisionLinqConnector>[0] = {
       log: context.presenter.log,
       project: plan.project!,
-      projectRoot: context.appRoot,
+      projectRoot: context.projectRoot,
       slug: plan.connectorSlug!,
       signal: context.signal,
     };
@@ -190,7 +190,7 @@ export async function applyLinqSetup(plan: LinqSetupPlan, context: SetupApplyCon
       context.presenter.note(phoneNumber, "Text your agent", { tone: "success" });
     }
   } else {
-    await appendEnv(join(context.appRoot, ".env.local"), {
+    await appendEnv(join(context.projectRoot, ".env.local"), {
       LINQ_API_KEY: plan.apiKey!,
       LINQ_WEBHOOK_SECRET: plan.signingSecret!,
     });

@@ -1,3 +1,4 @@
+import type { StandardSchemaV1 } from "#compiled/@standard-schema/spec/index.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import type { HarnessToolMap } from "#harness/types.js";
 import type { ContextReader } from "#context/key.js";
@@ -27,7 +28,13 @@ import {
   type DurableDynamicCallbackReference,
   type DynamicToolCallbackOwner,
 } from "#tools/durable-callbacks.js";
-import { toInputSchema, toOutputSchema } from "#tools/schema.js";
+import { hasSchemaValidator } from "#tools/durable-schema.js";
+import {
+  toInputSchema,
+  toOutputSchema,
+  type ToolSchema,
+  type ToolSchemaSource,
+} from "#tools/schema.js";
 
 const log = createLogger("dynamic-tools");
 
@@ -96,6 +103,12 @@ export function replayDynamicTools(
   if (metadata.length > 0 && scope.sessionId.length === 0) {
     throw new Error("Dynamic tool replay requires a session id.");
   }
+  const background = metadata.find((entry) => entry.execution === "background");
+  if (background !== undefined) {
+    throw new Error(
+      `Dynamic tool "${background.name}" used removed background execution. Move durable background work to a static defineWorkflowTool().`,
+    );
+  }
   return metadata.map((entry) => {
     const owner = { ...entry, ...scope };
     const approvalKeyReference = entry.callbacks.approvalKey;
@@ -133,40 +146,18 @@ export function replayDynamicTools(
     const replayed: {
       -readonly [K in keyof HarnessToolDefinition]: HarnessToolDefinition[K];
     } = {
+      availableInSubagents: entry.availableInSubagents,
       description: entry.description,
-      execute:
-        entry.execution === "background"
-          ? createToolExecuteWithAuth({
-              execution: "background",
-              scope: entry.name,
-              execute: (input, context, task) => {
-                if (execute === undefined) {
-                  throw missingCallbackError(entry, "execute");
-                }
-                return callDurableDynamicCallback(
-                  execute,
-                  executeReference.closure,
-                  input,
-                  context,
-                  task,
-                );
-              },
-            })
-          : createToolExecuteWithAuth({
-              scope: entry.name,
-              execute: (input, context) => {
-                if (execute === undefined) {
-                  throw missingCallbackError(entry, "execute");
-                }
-                return callDurableDynamicCallback(
-                  execute,
-                  executeReference.closure,
-                  input,
-                  context,
-                );
-              },
-            }),
-      inputSchema: toInputSchema(entry.inputSchema),
+      execute: createToolExecuteWithAuth({
+        scope: entry.name,
+        execute: (input, context) => {
+          if (execute === undefined) {
+            throw missingCallbackError(entry, "execute");
+          }
+          return callDurableDynamicCallback(execute, executeReference.closure, input, context);
+        },
+      }),
+      inputSchema: replayDynamicToolSchema(entry, owner, "inputSchema")!,
       name: entry.name,
       execution: entry.execution,
       approval: buildReplayedApproval(entry, owner),
@@ -190,7 +181,7 @@ export function replayDynamicTools(
               return key;
             },
           }),
-      outputSchema: toOutputSchema(entry.outputSchema),
+      outputSchema: replayDynamicToolSchema(entry, owner, "outputSchema"),
     };
     if (labelComplete !== undefined || labelDelta !== undefined || labelStart !== undefined) {
       replayed.label = {
@@ -202,6 +193,48 @@ export function replayDynamicTools(
     if (toModelOutput !== undefined) replayed.toModelOutput = toModelOutput;
     return replayed;
   });
+}
+
+function replayDynamicToolSchema(
+  entry: CurrentDynamicToolMetadata,
+  owner: DynamicToolCallbackOwner,
+  phase: "inputSchema" | "outputSchema",
+): ToolSchema | undefined {
+  const jsonSchema = entry[phase];
+  if (jsonSchema === undefined) return undefined;
+  const reference = entry.callbacks[phase];
+  if (reference === undefined) {
+    return phase === "inputSchema" ? toInputSchema(jsonSchema) : toOutputSchema(jsonSchema);
+  }
+  const factory = lookupDurableDynamicCallback(owner, phase);
+  let validator: Promise<StandardSchemaV1> | undefined;
+  return {
+    "~standard": {
+      version: 1,
+      vendor: "eve",
+      jsonSchema: {
+        input: () => structuredClone(jsonSchema),
+        output: () => structuredClone(jsonSchema),
+      },
+      validate: async (value) => {
+        if (factory === undefined) throw missingCallbackError(entry, phase);
+        validator ??= Promise.resolve(callDurableDynamicCallback(factory, reference.closure)).then(
+          (source) => {
+            if (hasSchemaValidator(source)) return source;
+            if (typeof source !== "object" || source === null) {
+              throw new Error(
+                `Dynamic tool "${entry.name}" ${phase} factory did not return a schema.`,
+              );
+            }
+            return phase === "inputSchema"
+              ? toInputSchema(source as ToolSchemaSource)
+              : toOutputSchema(source as ToolSchemaSource);
+          },
+        );
+        return (await validator)["~standard"].validate(value);
+      },
+    },
+  };
 }
 
 function bindDynamicCallback(

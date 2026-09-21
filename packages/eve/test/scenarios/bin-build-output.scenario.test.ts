@@ -110,10 +110,60 @@ async function readDirectorySources(root: string): Promise<string> {
 }
 
 function decodeEmbeddedWorkflowCode(source: string): string {
-  const chunks = [...source.matchAll(/Buffer\.from\((\[[\s\S]*?\])\.join\(""\), "base64"\)/gu)].map(
-    (match) => JSON.parse(match[1]!) as string[],
-  );
-  return chunks.map((chunk) => Buffer.from(chunk.join(""), "base64").toString("utf8")).join("\n");
+  const prefix = "Buffer.from(";
+  const suffix = '.join(""), "base64")';
+  const decoded: string[] = [];
+  let offset = 0;
+
+  while (true) {
+    const expressionStart = source.indexOf(prefix, offset);
+    if (expressionStart === -1) break;
+
+    const arrayStart = expressionStart + prefix.length;
+    const arrayEnd = findJsonArrayEnd(source, arrayStart);
+    if (arrayEnd !== undefined && source.startsWith(suffix, arrayEnd + 1)) {
+      const chunks = JSON.parse(source.slice(arrayStart, arrayEnd + 1)) as string[];
+      decoded.push(Buffer.from(chunks.join(""), "base64").toString("utf8"));
+      offset = arrayEnd + suffix.length + 1;
+      continue;
+    }
+
+    offset = arrayStart;
+  }
+
+  return decoded.join("\n");
+}
+
+function findJsonArrayEnd(source: string, start: number): number | undefined {
+  if (source[start] !== "[") return undefined;
+
+  let depth = 0;
+  let escaped = false;
+  let inString = false;
+
+  for (let index = start; index < source.length; index++) {
+    const character = source[index];
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (character === "\\") {
+        escaped = true;
+      } else if (character === '"') {
+        inString = false;
+      }
+      continue;
+    }
+
+    if (character === '"') {
+      inString = true;
+    } else if (character === "[") {
+      depth++;
+    } else if (character === "]" && --depth === 0) {
+      return index;
+    }
+  }
+
+  return undefined;
 }
 
 async function runEveBuild(appRoot: string): Promise<ProcessResult> {

@@ -65,13 +65,13 @@ function streamingTurnEvents(): MessageStreamEvent[] {
   ] as UnstampedMessageStreamEvent[]);
 }
 
-function startedResponse(): Response {
+function startedResponse(deliveryId = "delivery_1"): Response {
   return new Response(
     JSON.stringify({
       ok: true,
       sessionId: "session_1",
       status: "accepted",
-      deliveryId: "delivery_1",
+      deliveryId,
     }),
     {
       headers: { "content-type": "application/json", [EVE_SESSION_ID_HEADER]: "session_1" },
@@ -185,9 +185,387 @@ function preV20MessageCompletedEvent(): MessageStreamEvent {
   } as MessageStreamEvent;
 }
 
+const cleanupStores: Array<() => void> = [];
+function createStore<TData>(
+  init: ConstructorParameters<typeof EveAgentStore<TData>>[0],
+): EveAgentStore<TData> {
+  const store = new EveAgentStore<TData>(init);
+  cleanupStores.push(() => detachEveAgentStore(store));
+  return store;
+}
+
 afterEach(() => {
+  for (const cleanup of cleanupStores.splice(0)) cleanup();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
+});
+
+describe("EveAgentStore prewarming", () => {
+  it("settles a send aborted during preparation without creating a session", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch");
+    const store = createStore({ reducer: defaultMessageReducer() });
+    const preparation = Promise.withResolvers<never>();
+    store.setCallbacks({ prepareSend: () => preparation.promise });
+    const controller = new AbortController();
+    const send = store.send({ message: "Hello", signal: controller.signal });
+    controller.abort();
+    await send;
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(store.snapshot.status).toBe("ready");
+  });
+
+  it("aborts a send waiting for prewarm without cancelling shared session creation", async () => {
+    const accepted = Promise.withResolvers<Response>();
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockReturnValueOnce(accepted.promise)
+      .mockResolvedValueOnce(controlledStreamResponse().response);
+    const store = createStore({ reducer: defaultMessageReducer() });
+    const prewarm = store.prewarm();
+    const controller = new AbortController();
+    const send = store.send({ message: "Hello", signal: controller.signal });
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
+    controller.abort();
+    await send;
+    expect(store.snapshot.status).toBe("ready");
+    expect(fetchMock.mock.calls[0]![1]!.signal!.aborted).toBe(false);
+    accepted.resolve(startedResponse());
+    await prewarm;
+    expect(store.snapshot.session?.sessionId).toBe("session_1");
+    expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
+  });
+
+  it.each(["reset", "detach"] as const)("aborts prewarm transport on %s", async (action) => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(
+      (_request, init) =>
+        new Promise((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () => reject(init.signal?.reason), {
+            once: true,
+          });
+        }),
+    );
+    const store = createStore({ reducer: defaultMessageReducer() });
+    const prewarm = expect(store.prewarm()).rejects.toMatchObject({ name: "AbortError" });
+    const send = store.send({ message: "Hello" });
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
+    if (action === "reset") store.reset();
+    else detachEveAgentStore(store);
+    await Promise.all([prewarm, send]);
+    expect(store.snapshot.status).toBe("ready");
+    expect(store.snapshot.error).toBeUndefined();
+    expect(store.snapshot.session).toBeUndefined();
+  });
+
+  it("reports a standalone creation failure and allows another prewarm", async () => {
+    const error = new Error("create failed");
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockRejectedValueOnce(error)
+      .mockResolvedValueOnce(startedResponse())
+      .mockResolvedValueOnce(streamResponse(stampTestEvents([createSessionWaitingEvent()])));
+    const onError = vi.fn();
+    const store = createStore({ reducer: defaultMessageReducer() });
+    store.setCallbacks({ onError });
+
+    await expect(store.prewarm()).rejects.toBe(error);
+    expect(store.snapshot.status).toBe("error");
+    expect(store.snapshot.error).toBe(error);
+    expect(onError).toHaveBeenCalledExactlyOnceWith(error);
+
+    await store.prewarm();
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+    expect(store.snapshot.session?.sessionId).toBe("session_1");
+    expect(store.snapshot.status).toBe("ready");
+    expect(store.snapshot.error).toBeUndefined();
+  });
+
+  it("rejects prewarm when the first send it joined fails to create a session", async () => {
+    const accepted = Promise.withResolvers<Response>();
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockReturnValueOnce(accepted.promise);
+    const onError = vi.fn();
+    const store = createStore({ reducer: defaultMessageReducer() });
+    store.setCallbacks({ onError });
+    const error = new Error("create failed");
+
+    const send = store.send({ message: "Hello" });
+    const prewarm = expect(store.prewarm()).rejects.toBe(error);
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
+    accepted.reject(error);
+    await Promise.all([send, prewarm]);
+
+    expect(store.snapshot.session).toBeUndefined();
+    expect(store.snapshot.status).toBe("error");
+    expect(onError).toHaveBeenCalledExactlyOnceWith(error);
+  });
+
+  it.each([false, true])(
+    "retries a waiting send after prewarm fails (send fails: %s)",
+    async (sendFails) => {
+      const accepted = Promise.withResolvers<Response>();
+      const fetchMock = vi.spyOn(globalThis, "fetch").mockReturnValueOnce(accepted.promise);
+      const sendError = new Error("send failed");
+      if (sendFails) fetchMock.mockRejectedValueOnce(sendError);
+      else
+        fetchMock
+          .mockResolvedValueOnce(startedResponse())
+          .mockResolvedValueOnce(streamResponse(turnEvents()));
+      const onError = vi.fn();
+      const store = createStore({ reducer: defaultMessageReducer() });
+      store.setCallbacks({ onError });
+      const prewarmError = new Error("prewarm failed");
+
+      const prewarm = expect(store.prewarm()).rejects.toBe(prewarmError);
+      const send = store.send({ message: "Hello" });
+      await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
+      accepted.reject(prewarmError);
+      await Promise.all([prewarm, send]);
+
+      expect(fetchMock.mock.calls[1]![0]).toBe("/eve/v1/session");
+      expect(JSON.parse(String(fetchMock.mock.calls[1]![1]?.body))).toMatchObject({
+        message: "Hello",
+      });
+      if (sendFails) {
+        expect(fetchMock).toHaveBeenCalledTimes(2);
+        expect(onError).toHaveBeenCalledExactlyOnceWith(sendError);
+        expect(store.snapshot.error).toBe(sendError);
+        expect(store.snapshot.status).toBe("error");
+      } else {
+        expect(fetchMock).toHaveBeenCalledTimes(3);
+        expect(onError).not.toHaveBeenCalled();
+        expect(store.snapshot.error).toBeUndefined();
+        expect(store.snapshot.status).toBe("ready");
+        expect(store.snapshot.session?.sessionId).toBe("session_1");
+      }
+    },
+  );
+
+  it.each(["reset", "detach"] as const)(
+    "does not retry a waiting send after %s",
+    async (action) => {
+      const accepted = Promise.withResolvers<Response>();
+      const fetchMock = vi.spyOn(globalThis, "fetch").mockReturnValueOnce(accepted.promise);
+      const onError = vi.fn();
+      const store = createStore({ reducer: defaultMessageReducer() });
+      store.setCallbacks({ onError });
+      const error = new Error("prewarm failed");
+
+      const prewarm = expect(store.prewarm()).rejects.toBe(error);
+      const send = store.send({ message: "Hello" });
+      await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
+      if (action === "reset") store.reset();
+      else detachEveAgentStore(store);
+      accepted.reject(error);
+      await Promise.all([prewarm, send]);
+
+      expect(fetchMock).toHaveBeenCalledOnce();
+      expect(onError).not.toHaveBeenCalled();
+      expect(store.snapshot.session).toBeUndefined();
+      expect(store.snapshot.status).toBe("ready");
+    },
+  );
+
+  it("shares one creation request without starting a turn", async () => {
+    const accepted = Promise.withResolvers<Response>();
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockReturnValueOnce(accepted.promise)
+      .mockResolvedValueOnce(streamResponse(stampTestEvents([createSessionWaitingEvent()])));
+    const onFinish = vi.fn();
+    const onSessionChange = vi.fn();
+    const prepareSend = vi.fn();
+    const store = createStore({ reducer: defaultMessageReducer() });
+    store.setCallbacks({ onFinish, onSessionChange, prepareSend });
+
+    const first = store.prewarm();
+    const second = store.prewarm();
+    expect(first).toBe(second);
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
+
+    accepted.resolve(
+      Response.json({ ok: true, sessionId: "session_1", status: "accepted" }, { status: 202 }),
+    );
+    await first;
+
+    expect(fetchMock.mock.calls[0]![1]!.body).toBeUndefined();
+    expect(store.snapshot.session?.sessionId).toBe("session_1");
+    expect(store.snapshot.status).toBe("ready");
+    expect(onSessionChange).toHaveBeenCalledWith({ sessionId: "session_1", streamIndex: 0 });
+    expect(prepareSend).not.toHaveBeenCalled();
+    expect(onFinish).not.toHaveBeenCalled();
+  });
+
+  it("discards a creation result after reset", async () => {
+    const accepted = Promise.withResolvers<Response>();
+    vi.spyOn(globalThis, "fetch").mockReturnValue(accepted.promise);
+    const store = createStore({ reducer: defaultMessageReducer() });
+
+    const prewarm = store.prewarm();
+    store.reset();
+    accepted.resolve(
+      Response.json({ ok: true, sessionId: "stale_session", status: "accepted" }, { status: 202 }),
+    );
+    await prewarm;
+
+    expect(store.snapshot.session).toBeUndefined();
+  });
+
+  it("sends before any stream event and keeps one stream across turns", async () => {
+    const live = controlledStreamResponse();
+    const accepted = Promise.withResolvers<Response>();
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockReturnValueOnce(accepted.promise)
+      .mockResolvedValueOnce(live.response)
+      .mockImplementation(async () => startedResponse());
+    const store = createStore({ reducer: defaultMessageReducer() });
+    const events = turnEvents().map((event) => ({
+      ...event,
+      meta: { ...event.meta, deliveryIds: ["delivery_1"] },
+    }));
+
+    const prewarm = store.prewarm();
+    const firstSend = store.send({ message: "Hello" });
+    accepted.resolve(startedResponse());
+    await prewarm;
+    expect(store.snapshot.events).toEqual([]);
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+    for (const event of events) live.emit(event);
+    await firstSend;
+    expect(store.snapshot.status).toBe("ready");
+
+    const secondSend = store.send({ message: "Hello again" });
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(4));
+    for (const event of events)
+      live.emit({ ...event, meta: { ...event.meta, id: `second-${event.meta.id}` } });
+    await secondSend;
+    expect(store.snapshot.status).toBe("ready");
+    expect(fetchMock.mock.calls.filter(([, init]) => init?.method !== "POST")).toHaveLength(1);
+    expect(store.snapshot.session?.streamIndex).toBe(6);
+  });
+
+  it("projects a background turn that arrives while another message is being accepted", async () => {
+    const live = controlledStreamResponse();
+    const accepted = Promise.withResolvers<Response>();
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(live.response)
+      .mockReturnValueOnce(accepted.promise);
+    const store = createStore({
+      initialSession: { sessionId: "session_1", streamIndex: 0 },
+      reducer: defaultMessageReducer(),
+    });
+    const sending = store.send({ message: "Next question" });
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+
+    const background = stampTestEvents([
+      createTurnStartedEvent({ sequence: 0, turnId: "turn_background" }),
+      createMessageCompletedEvent({
+        finishReason: "stop",
+        message: "Background result",
+        sequence: 1,
+        stepIndex: 0,
+        turnId: "turn_background",
+      }),
+      createSessionWaitingEvent(),
+    ]).map((event) => ({
+      ...event,
+      meta: { ...event.meta, deliveryIds: ["background-delivery"] },
+    }));
+    for (const event of background) live.emit(event);
+    await vi.waitFor(() => expect(store.snapshot.events).toHaveLength(3));
+    expect(store.snapshot.data.messages.some((message) => message.metadata?.optimistic)).toBe(true);
+
+    accepted.resolve(startedResponse("message-delivery"));
+    const messageTurn = turnEvents().map((event) => ({
+      ...event,
+      meta: {
+        ...event.meta,
+        deliveryIds: ["message-delivery"],
+        id: `message-${event.meta.id}`,
+      },
+    }));
+    for (const event of messageTurn) live.emit(event);
+    await vi.waitFor(() => expect(store.snapshot.events).toHaveLength(6));
+    await sending;
+
+    expect(store.snapshot.events).toEqual([...background, ...messageTurn]);
+    expect(store.snapshot.data.messages.some((message) => message.metadata?.optimistic)).toBe(
+      false,
+    );
+    expect(store.snapshot.data.messages).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ role: "user" }),
+        expect.objectContaining({ role: "assistant" }),
+      ]),
+    );
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("honors a send's disabled reconnect policy on an existing prewarmed stream", async () => {
+    const live = controlledStreamResponse();
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(startedResponse())
+      .mockResolvedValueOnce(live.response)
+      .mockResolvedValueOnce(startedResponse());
+    const store = createStore({ reducer: defaultMessageReducer() });
+    await store.prewarm();
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    const send = store.send({ message: "Hello", streamReconnectPolicy: { reconnect: false } });
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+    live.close();
+    await send;
+    expect(store.snapshot.status).toBe("error");
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
+  it("uses the latest turn headers when the continuous stream reconnects", async () => {
+    const live = controlledStreamResponse();
+    const reconnected = controlledStreamResponse();
+    const streamAuthorizations: Array<string | null> = [];
+    let delivery = 0;
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (_request, init) => {
+      if (init?.method === "POST") return startedResponse(`delivery_${(delivery += 1)}`);
+      streamAuthorizations.push(new Headers(init?.headers).get("authorization"));
+      return streamAuthorizations.length === 1 ? live.response : reconnected.response;
+    });
+    const store = createStore({
+      initialSession: { sessionId: "session_1", streamIndex: 0 },
+      reducer: defaultMessageReducer(),
+    });
+    const events = turnEvents();
+    const emitTurn = (deliveryId: string, idPrefix: string) => {
+      for (const event of events) {
+        live.emit({
+          ...event,
+          meta: { ...event.meta, deliveryIds: [deliveryId], id: `${idPrefix}-${event.meta.id}` },
+        });
+      }
+    };
+
+    const first = store.send({
+      headers: { authorization: "Bearer old" },
+      message: "Hello",
+      streamReconnectPolicy: {
+        streamIdleReconnectPolicy: { baseDelayMs: 1, maxAttempts: 5, maxDelayMs: 1 },
+      },
+    });
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    emitTurn("delivery_1", "first");
+    await first;
+
+    const second = store.send({
+      headers: { authorization: "Bearer fresh" },
+      message: "Hello again",
+    });
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+    emitTurn("delivery_2", "second");
+    await second;
+
+    live.close();
+    await vi.waitFor(() => expect(streamAuthorizations).toHaveLength(2));
+    expect(streamAuthorizations).toEqual(["Bearer old", "Bearer fresh"]);
+  });
 });
 
 describe("EveAgentStore stream overlap", () => {
@@ -198,7 +576,7 @@ describe("EveAgentStore stream overlap", () => {
       .mockResolvedValueOnce(startedResponse())
       .mockResolvedValueOnce(disconnectingStreamResponse(events.slice(0, 3)))
       .mockResolvedValueOnce(streamResponse(events.slice(3)));
-    const store = new EveAgentStore({ reducer: defaultMessageReducer() });
+    const store = createStore({ reducer: defaultMessageReducer() });
     const streamingText: string[] = [];
     store.subscribe(() => {
       const part = store.snapshot.data.messages.at(-1)?.parts.at(-1);
@@ -253,7 +631,7 @@ describe("EveAgentStore stream overlap", () => {
         .mockResolvedValueOnce(startedResponse())
         .mockResolvedValueOnce(versionedDisconnectingStreamResponse(legacyVersion, legacyPrefix))
         .mockResolvedValueOnce(versionedStreamResponse("25", current.slice(3)));
-      const store = new EveAgentStore({ reducer: defaultMessageReducer() });
+      const store = createStore({ reducer: defaultMessageReducer() });
       const streamingText: string[] = [];
       store.subscribe(() => {
         const part = store.snapshot.data.messages.at(-1)?.parts.at(-1);
@@ -282,7 +660,7 @@ describe("EveAgentStore stream overlap", () => {
 
   it("rejects a prepared turn containing both a message and input responses", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch");
-    const store = new EveAgentStore({ reducer: defaultMessageReducer() });
+    const store = createStore({ reducer: defaultMessageReducer() });
     store.setCallbacks({
       prepareSend: () =>
         ({
@@ -314,7 +692,7 @@ describe("EveAgentStore stream overlap", () => {
       // The server-rendered prefix is replayed ahead of the live tail.
       .mockResolvedValueOnce(streamResponse(events));
 
-    const store = new EveAgentStore({
+    const store = createStore({
       initialEvents: events.slice(0, 2),
       reducer: defaultMessageReducer(),
     });
@@ -347,7 +725,7 @@ describe("EveAgentStore stream overlap", () => {
       .mockResolvedValueOnce(startedResponse())
       .mockResolvedValueOnce(streamResponse([legacy, boundary]));
 
-    const store = new EveAgentStore({ reducer: defaultMessageReducer() });
+    const store = createStore({ reducer: defaultMessageReducer() });
     const seen: MessageStreamEvent[] = [];
     store.setCallbacks({ onEvent: (event) => seen.push(event) });
 
@@ -364,7 +742,7 @@ describe("EveAgentStore stream overlap", () => {
 
   it("re-admits events after reset clears the window", async () => {
     const events = turnEvents();
-    const store = new EveAgentStore({
+    const store = createStore({
       initialEvents: events,
       reducer: defaultMessageReducer(),
     });
@@ -387,6 +765,136 @@ describe("EveAgentStore stream overlap", () => {
 });
 
 describe("EveAgentStore session resume", () => {
+  it("resumes a saved session when Symbol.dispose is unavailable", async () => {
+    const originalSymbol = globalThis.Symbol;
+    const missingDisposeSymbol = new Proxy(
+      function (description?: string) {
+        return originalSymbol(description);
+      },
+      {
+        get(_target, property) {
+          if (property === "dispose") return undefined;
+          return Reflect.get(originalSymbol, property);
+        },
+      },
+    ) as typeof Symbol;
+    Object.defineProperty(globalThis, "Symbol", {
+      configurable: true,
+      value: missingDisposeSymbol,
+      writable: true,
+    });
+    vi.resetModules();
+
+    try {
+      const [{ EveAgentStore: FreshEveAgentStore }, { detachEveAgentStore: detachFreshStore }] =
+        await Promise.all([import("#client/index.js"), import("#client/eve-agent-store.js")]);
+      const events = turnEvents();
+      vi.spyOn(globalThis, "fetch")
+        .mockResolvedValueOnce(boundedStreamResponse(events))
+        .mockResolvedValueOnce(boundedStreamResponse([], events.length - 1));
+      const store = new FreshEveAgentStore({
+        initialSession: { sessionId: "session_1", streamIndex: 0 },
+        reducer: defaultMessageReducer(),
+      });
+
+      try {
+        await store.resume();
+      } finally {
+        detachFreshStore(store);
+      }
+
+      expect(store.snapshot.events).toEqual(events);
+      expect(store.snapshot.status).toBe("ready");
+    } finally {
+      Object.defineProperty(globalThis, "Symbol", {
+        configurable: true,
+        value: originalSymbol,
+        writable: true,
+      });
+      vi.resetModules();
+    }
+  });
+
+  it("resumes an unused prewarmed session and sends its first message on the same stream", async () => {
+    const live = controlledStreamResponse();
+    live.response.headers.set("x-eve-stream-tail-index", "-1");
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(live.response)
+      .mockResolvedValueOnce(startedResponse());
+    const store = createStore({
+      initialSession: { sessionId: "session_1", streamIndex: 0 },
+      reducer: defaultMessageReducer(),
+    });
+    const resuming = store.resume();
+
+    await vi.waitFor(() => expect(store.snapshot.status).toBe("ready"));
+    await resuming;
+    expect(store.snapshot.events).toEqual([]);
+
+    const sending = store.send({ message: "Hello" });
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    for (const event of turnEvents()) {
+      live.emit({ ...event, meta: { ...event.meta, deliveryIds: ["delivery_1"] } });
+    }
+    await sending;
+
+    expect(store.snapshot.status).toBe("ready");
+    expect(store.snapshot.data.messages.map((message) => message.role)).toEqual([
+      "user",
+      "assistant",
+    ]);
+    expect(fetchMock.mock.calls[1]![0]).toBe("/eve/v1/session/session_1");
+    expect(fetchMock.mock.calls.filter(([, init]) => init?.method !== "POST")).toHaveLength(1);
+  });
+
+  it.each([true, false])(
+    "settles steering received while following a resumed turn (optimistic=%s)",
+    async (optimistic) => {
+      const events = stampTestEvents([
+        createMessageReceivedEvent({ message: "First", sequence: 0, turnId: "turn_0" }),
+        createTurnStartedEvent({ sequence: 1, turnId: "turn_0" }),
+        createMessageReceivedEvent({ message: "Instead", sequence: 2, turnId: "turn_0" }),
+        createMessageCompletedEvent({
+          finishReason: "stop",
+          message: "Updated reply.",
+          sequence: 3,
+          stepIndex: 0,
+          turnId: "turn_0",
+        }),
+        createSessionWaitingEvent(),
+      ]).map((event, index) =>
+        index < 2 ? event : { ...event, meta: { ...event.meta, deliveryIds: ["delivery_1"] } },
+      );
+      const live = controlledStreamResponse();
+      live.response.headers.set("x-eve-stream-tail-index", "1");
+      live.emit(events[0]!);
+      live.emit(events[1]!);
+      const fetchMock = vi
+        .spyOn(globalThis, "fetch")
+        .mockResolvedValueOnce(live.response)
+        .mockResolvedValueOnce(startedResponse());
+      const store = createStore({
+        initialSession: { sessionId: "session_1", streamIndex: 0 },
+        optimistic,
+        reducer: defaultMessageReducer(),
+      });
+      const onFinish = vi.fn();
+      store.setCallbacks({ onFinish });
+      const resuming = store.resume();
+      await vi.waitFor(() => expect(store.snapshot.status).toBe("streaming"));
+
+      const steering = store.send({ message: "Instead", turnPolicy: "steer" });
+      await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+      for (const event of events.slice(2)) live.emit(event);
+
+      await vi.waitFor(() => expect(store.snapshot.status).toBe("ready"));
+      await Promise.all([resuming, steering]);
+      expect(store.snapshot.events).toEqual(events);
+      expect(onFinish).toHaveBeenCalledOnce();
+    },
+  );
+
   it("finishes a settled replay without waiting for the probe stream to idle", async () => {
     const events = turnEvents();
     const probe = controlledStreamResponse();
@@ -394,7 +902,7 @@ describe("EveAgentStore session resume", () => {
     vi.spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(boundedStreamResponse(events))
       .mockResolvedValueOnce(probe.response);
-    const store = new EveAgentStore({
+    const store = createStore({
       initialSession: { sessionId: "session_1", streamIndex: 0 },
       reducer: defaultMessageReducer(),
     });
@@ -412,7 +920,7 @@ describe("EveAgentStore session resume", () => {
       .spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(boundedStreamResponse([events[3]!], 3))
       .mockResolvedValueOnce(streamResponse(events.slice(4)));
-    const store = new EveAgentStore({
+    const store = createStore({
       initialEvents: prefix,
       initialSession: { sessionId: "session_1", streamIndex: prefix.length },
       reducer: defaultMessageReducer(),
@@ -445,7 +953,7 @@ describe("EveAgentStore session resume", () => {
       .spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(boundedStreamResponse(events.slice(0, 4), 3))
       .mockResolvedValueOnce(streamResponse(events.slice(4)));
-    const store = new EveAgentStore({
+    const store = createStore({
       initialSession: { sessionId: "session_1", streamIndex: 3 },
       reducer: defaultMessageReducer(),
     });
@@ -477,7 +985,7 @@ describe("EveAgentStore session resume", () => {
       .spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(boundedStreamResponse([], events.length - 1))
       .mockResolvedValueOnce(boundedStreamResponse([], events.length - 1));
-    const store = new EveAgentStore({
+    const store = createStore({
       initialEvents: events,
       initialSession: { sessionId: "session_1", streamIndex: events.length },
       reducer: defaultMessageReducer(),
@@ -505,7 +1013,7 @@ describe("EveAgentStore session resume", () => {
       .spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(boundedStreamResponse(events))
       .mockResolvedValueOnce(boundedStreamResponse([], events.length - 1));
-    const store = new EveAgentStore({
+    const store = createStore({
       initialEvents: events.slice(0, 1),
       initialSession: { sessionId: "session_1", streamIndex: 2 },
       reducer: defaultMessageReducer(),
@@ -541,7 +1049,7 @@ describe("EveAgentStore session resume", () => {
       .spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(boundedStreamResponse([], initialEvents.length - 1))
       .mockResolvedValueOnce(live.response);
-    const store = new EveAgentStore({
+    const store = createStore({
       initialEvents,
       initialSession: { sessionId: "session_1", streamIndex: initialEvents.length },
       reducer: defaultMessageReducer(),
@@ -573,7 +1081,7 @@ describe("EveAgentStore session resume", () => {
       }),
     ])[0]!;
     vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(boundedStreamResponse([], 0));
-    const store = new EveAgentStore({
+    const store = createStore({
       initialEvents: [failed],
       initialSession: { sessionId: "session_1", streamIndex: 1 },
       reducer: defaultMessageReducer(),
@@ -592,13 +1100,12 @@ describe("EveAgentStore session resume", () => {
     expect(store.snapshot.error?.message).toBe("Session failed.");
   });
 
-  it("probes once beyond a settled replay without following an idle stream", async () => {
+  it("catches up through the initial tail without opening a probe stream", async () => {
     const events = turnEvents();
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
-      .mockResolvedValueOnce(boundedStreamResponse(events))
-      .mockResolvedValueOnce(boundedStreamResponse([], events.length - 1));
-    const store = new EveAgentStore({
+      .mockResolvedValueOnce(boundedStreamResponse(events));
+    const store = createStore({
       initialSession: { sessionId: "session_1", streamIndex: 0 },
       reducer: defaultMessageReducer(),
     });
@@ -607,19 +1114,18 @@ describe("EveAgentStore session resume", () => {
 
     await store.resume();
 
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(
-      new URL(fetchMock.mock.calls[1]![0].toString(), "http://localhost").searchParams.get(
+      new URL(fetchMock.mock.calls[0]![0].toString(), "http://localhost").searchParams.get(
         "startIndex",
       ),
-    ).toBe(String(events.length));
+    ).toBeNull();
     expect(
-      new URL(fetchMock.mock.calls[1]![0].toString(), "http://localhost").searchParams.get(
+      new URL(fetchMock.mock.calls[0]![0].toString(), "http://localhost").searchParams.get(
         "includeTailIndex",
       ),
     ).toBe("1");
-    expect(publishedEventCounts).not.toContain(1);
-    expect(publishedEventCounts).not.toContain(2);
+    expect(publishedEventCounts).toContain(events.length);
     expect(store.snapshot.status).toBe("ready");
     expect(store.snapshot.events).toEqual(events);
     expect(store.snapshot.session).toEqual({ sessionId: "session_1", streamIndex: events.length });
@@ -648,30 +1154,20 @@ describe("EveAgentStore session resume", () => {
       createSessionWaitingEvent(),
     ] as UnstampedMessageStreamEvent[]);
     const settled = events.slice(0, 3);
-    const [received, started, completed, waiting] = events.slice(3);
-    const fetchMock = vi
-      .spyOn(globalThis, "fetch")
-      .mockResolvedValueOnce(boundedStreamResponse(settled))
-      .mockResolvedValueOnce(boundedStreamResponse([received!, started!], settled.length + 1))
-      .mockResolvedValueOnce(streamResponse([completed!, waiting!]));
-    const store = new EveAgentStore({
+    const live = controlledStreamResponse();
+    live.response.headers.set("x-eve-stream-tail-index", String(settled.length - 1));
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(live.response);
+    for (const event of settled) live.emit(event);
+    const store = createStore({
       initialSession: { sessionId: "session_1", streamIndex: 0 },
       reducer: defaultMessageReducer(),
     });
 
     await store.resume();
 
-    expect(fetchMock).toHaveBeenCalledTimes(3);
-    expect(
-      new URL(fetchMock.mock.calls[1]![0].toString(), "http://localhost").searchParams.get(
-        "includeTailIndex",
-      ),
-    ).toBe("1");
-    expect(
-      new URL(fetchMock.mock.calls[2]![0].toString(), "http://localhost").searchParams.get(
-        "includeTailIndex",
-      ),
-    ).toBeNull();
+    for (const event of events.slice(settled.length)) live.emit(event);
+    await vi.waitFor(() => expect(store.snapshot.events).toHaveLength(events.length));
+    expect(fetchMock).toHaveBeenCalledOnce();
     expect(store.snapshot.status).toBe("ready");
     expect(store.snapshot.events.slice(settled.length).map((event) => event.type)).toEqual([
       "message.received",
@@ -704,23 +1200,21 @@ describe("EveAgentStore session resume", () => {
     ]);
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
-      .mockResolvedValueOnce(boundedStreamResponse(events.slice(0, 3)))
-      .mockResolvedValueOnce(boundedStreamResponse(events.slice(3, 8), 7))
-      .mockResolvedValueOnce(streamResponse(events.slice(8)));
-    const store = new EveAgentStore({
+      .mockResolvedValueOnce(boundedStreamResponse(events, 7));
+    const store = createStore({
       initialSession: { sessionId: "session_1", streamIndex: 0 },
       reducer: defaultMessageReducer(),
     });
 
     await store.resume();
 
-    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(store.snapshot.status).toBe("ready");
     expect(store.snapshot.events).toEqual(events);
     expect(store.snapshot.session?.streamIndex).toBe(events.length);
   });
 
-  it("keeps following when a bounded probe ends with pending authorization", async () => {
+  it("keeps following when catch-up ends with pending authorization", async () => {
     const events = stampTestEvents([
       createMessageReceivedEvent({ message: "Hello", sequence: 0, turnId: "turn_1" }),
       createMessageCompletedEvent({
@@ -751,20 +1245,17 @@ describe("EveAgentStore session resume", () => {
       createSessionWaitingEvent(),
     ] as UnstampedMessageStreamEvent[]);
     const settled = events.slice(0, 3);
-    const [required, waiting, completed, finalWaiting] = events.slice(3);
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
-      .mockResolvedValueOnce(boundedStreamResponse(settled))
-      .mockResolvedValueOnce(boundedStreamResponse([required!, waiting!], settled.length + 1))
-      .mockResolvedValueOnce(streamResponse([completed!, finalWaiting!]));
-    const store = new EveAgentStore({
+      .mockResolvedValueOnce(boundedStreamResponse(events, settled.length + 1));
+    const store = createStore({
       initialSession: { sessionId: "session_1", streamIndex: 0 },
       reducer: defaultMessageReducer(),
     });
 
     await store.resume();
 
-    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(store.snapshot.status).toBe("ready");
     expect(store.snapshot.events).toHaveLength(settled.length + 4);
   });
@@ -790,7 +1281,7 @@ describe("EveAgentStore session resume", () => {
       requests.push(url);
       return requests.length === 1 ? boundedStreamResponse([received!, started!]) : live.response;
     });
-    const store = new EveAgentStore({
+    const store = createStore({
       initialSession: { sessionId: "session_1", streamIndex: 0 },
       reducer: defaultMessageReducer(),
     });
@@ -821,13 +1312,164 @@ describe("EveAgentStore session resume", () => {
 });
 
 describe("EveAgentStore steering", () => {
-  it("accepts an in-flight steer and follows its replacement turn", async () => {
+  it("prepares a steering message once when the active turn finishes during preparation", async () => {
+    const live = controlledStreamResponse();
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(startedResponse())
+      .mockResolvedValueOnce(live.response)
+      .mockResolvedValueOnce(startedResponse("delivery_2"));
+    const store = createStore({ reducer: defaultMessageReducer() });
+    const first = store.send({ message: "First" });
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    const preparation = Promise.withResolvers<void>();
+    const prepareSend = vi.fn(async (input) => {
+      await preparation.promise;
+      return input;
+    });
+    store.setCallbacks({ prepareSend });
+    const second = store.send({ message: "Second", turnPolicy: "steer" });
+    for (const event of turnEvents()) live.emit(event);
+    await first;
+    preparation.resolve();
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+    for (const event of turnEvents())
+      live.emit({
+        ...event,
+        meta: { ...event.meta, id: `second-${event.meta.id}`, deliveryIds: ["delivery_2"] },
+      });
+    await second;
+    expect(prepareSend).toHaveBeenCalledOnce();
+    expect(store.snapshot.status).toBe("ready");
+  });
+
+  it("aborts steering transport on reset without publishing into the new conversation", async () => {
+    const live = controlledStreamResponse();
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(startedResponse())
+      .mockResolvedValueOnce(live.response)
+      .mockImplementationOnce(
+        (_request, init) =>
+          new Promise((_resolve, reject) => {
+            init?.signal?.addEventListener("abort", () => reject(init.signal?.reason), {
+              once: true,
+            });
+          }),
+      );
+    const store = createStore({ reducer: defaultMessageReducer() });
+    const first = store.send({ message: "First" });
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    const steering = expect(
+      store.send({ message: "Instead", turnPolicy: "steer" }),
+    ).rejects.toMatchObject({ name: "AbortError" });
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+    store.reset();
+    const onChange = vi.fn();
+    store.subscribe(onChange);
+    await Promise.all([first, steering]);
+    expect(onChange).not.toHaveBeenCalled();
+    expect(store.snapshot.status).toBe("ready");
+    expect(store.snapshot.events).toEqual([]);
+    expect(store.snapshot.error).toBeUndefined();
+  });
+
+  it.each([true, false])(
+    "completes steering received in the active turn (optimistic=%s)",
+    async (optimistic) => {
+      const active = controlledStreamResponse();
+      const events = stampTestEvents([
+        createTurnStartedEvent({ sequence: 0, turnId: "turn_1" }),
+        createMessageReceivedEvent({ message: "First", sequence: 0, turnId: "turn_1" }),
+        createMessageReceivedEvent({ message: "Instead", sequence: 0, turnId: "turn_1" }),
+        createMessageCompletedEvent({
+          finishReason: "stop",
+          message: "Updated reply.",
+          sequence: 0,
+          stepIndex: 1,
+          turnId: "turn_1",
+        }),
+        createSessionWaitingEvent(),
+      ] as UnstampedMessageStreamEvent[]).map((event) => ({
+        ...event,
+        meta: { ...event.meta, deliveryIds: ["delivery_1"] },
+      }));
+      const fetchMock = vi
+        .spyOn(globalThis, "fetch")
+        .mockResolvedValueOnce(startedResponse())
+        .mockResolvedValueOnce(active.response)
+        .mockResolvedValueOnce(startedResponse());
+      const store = createStore({ optimistic, reducer: defaultMessageReducer() });
+      const initial = store.send({ message: "First" });
+      await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+      active.emit(events[0]!);
+      active.emit(events[1]!);
+      const steering = store.send({ message: "Instead", turnPolicy: "steer" });
+      await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+      for (const event of events.slice(2)) active.emit(event);
+      active.close();
+      await Promise.all([initial, steering]);
+      expect(store.snapshot.status).toBe("ready");
+      expect(store.snapshot.events).toEqual(events);
+      expect(fetchMock).toHaveBeenCalledTimes(3);
+    },
+  );
+
+  it("settles steering whose delivery event arrives before its response", async () => {
     const activeStream = controlledStreamResponse();
-    const replacementStream = controlledStreamResponse();
+    const steeringAccepted = Promise.withResolvers<Response>();
+    const [firstReceived, firstStarted, steeringReceived, completed, waiting] = stampTestEvents([
+      createMessageReceivedEvent({ message: "First", sequence: 0, turnId: "turn_1" }),
+      createTurnStartedEvent({ sequence: 1, turnId: "turn_1" }),
+      createMessageReceivedEvent({ message: "Instead", sequence: 2, turnId: "turn_1" }),
+      createMessageCompletedEvent({
+        finishReason: "stop",
+        message: "Steered reply.",
+        sequence: 3,
+        stepIndex: 0,
+        turnId: "turn_1",
+      }),
+      createSessionWaitingEvent(),
+    ] as UnstampedMessageStreamEvent[]).map((event, index) => ({
+      ...event,
+      meta: {
+        ...event.meta,
+        deliveryIds: [index === 2 ? "steering-delivery" : "first-delivery"],
+      },
+    }));
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(startedResponse("first-delivery"))
+      .mockResolvedValueOnce(activeStream.response)
+      .mockReturnValueOnce(steeringAccepted.promise);
+    const store = createStore({ reducer: defaultMessageReducer() });
+
+    const firstSend = store.send({ message: "First" });
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    activeStream.emit(firstReceived!);
+    activeStream.emit(firstStarted!);
+
+    const steering = store.send({ message: "Instead", turnPolicy: "steer" });
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+    activeStream.emit(steeringReceived!);
+    activeStream.emit(completed!);
+    activeStream.emit(waiting!);
+    await vi.waitFor(() => expect(store.snapshot.events).toHaveLength(5));
+    steeringAccepted.resolve(startedResponse("steering-delivery"));
+
+    await Promise.all([firstSend, steering]);
+    expect(store.snapshot.status).toBe("ready");
+    expect(store.snapshot.data.messages.some((message) => message.metadata?.optimistic)).toBe(
+      false,
+    );
+  });
+
+  it("follows a late steering delivery after the active turn settles", async () => {
+    const activeStream = controlledStreamResponse();
     const [
       firstReceived,
       firstStarted,
-      firstCancelled,
+      firstCompleted,
       firstWaiting,
       secondReceived,
       secondStarted,
@@ -836,13 +1478,19 @@ describe("EveAgentStore steering", () => {
     ] = stampTestEvents([
       createMessageReceivedEvent({ message: "First", sequence: 0, turnId: "turn_1" }),
       createTurnStartedEvent({ sequence: 1, turnId: "turn_1" }),
-      createTurnCancelledEvent({ sequence: 2, turnId: "turn_1" }),
+      createMessageCompletedEvent({
+        finishReason: "stop",
+        message: "First reply.",
+        sequence: 2,
+        stepIndex: 0,
+        turnId: "turn_1",
+      }),
       createSessionWaitingEvent(),
       createMessageReceivedEvent({ message: "Instead", sequence: 0, turnId: "turn_2" }),
       createTurnStartedEvent({ sequence: 1, turnId: "turn_2" }),
       createMessageCompletedEvent({
         finishReason: "stop",
-        message: "Replacement reply.",
+        message: "Follow-up reply.",
         sequence: 2,
         stepIndex: 0,
         turnId: "turn_2",
@@ -856,9 +1504,8 @@ describe("EveAgentStore steering", () => {
       .spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(startedResponse())
       .mockResolvedValueOnce(activeStream.response)
-      .mockResolvedValueOnce(startedResponse())
-      .mockResolvedValueOnce(replacementStream.response);
-    const store = new EveAgentStore({ reducer: defaultMessageReducer() });
+      .mockResolvedValueOnce(startedResponse());
+    const store = createStore({ reducer: defaultMessageReducer() });
 
     const firstSend = store.send({ message: "First" });
     await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
@@ -872,22 +1519,26 @@ describe("EveAgentStore steering", () => {
       turnPolicy: "steer",
     });
 
-    activeStream.emit(firstCancelled!);
+    let settled = false;
+    const finished = Promise.all([firstSend, steering]).then(() => {
+      settled = true;
+    });
+    activeStream.emit(firstCompleted!);
     activeStream.emit(firstWaiting!);
-    activeStream.close();
-    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(4));
-    replacementStream.emit(secondReceived!);
-    replacementStream.emit(secondStarted!);
-    replacementStream.emit(secondCompleted!);
-    replacementStream.emit(secondWaiting!);
-    replacementStream.close();
-
-    await Promise.all([firstSend, steering]);
+    activeStream.emit(secondReceived!);
+    activeStream.emit(secondStarted!);
+    await vi.waitFor(() => expect(store.snapshot.events).toHaveLength(6));
+    expect(settled).toBe(false);
+    expect(store.snapshot.status).toBe("streaming");
+    activeStream.emit(secondCompleted!);
+    activeStream.emit(secondWaiting!);
+    await finished;
+    expect(fetchMock).toHaveBeenCalledTimes(3);
     expect(store.snapshot.status).toBe("ready");
     expect(store.snapshot.events).toEqual([
       firstReceived,
       firstStarted,
-      firstCancelled,
+      firstCompleted,
       firstWaiting,
       secondReceived,
       secondStarted,
@@ -897,7 +1548,7 @@ describe("EveAgentStore steering", () => {
     expect(store.snapshot.data.messages.at(-1)?.parts).toContainEqual({
       state: "done",
       stepIndex: 0,
-      text: "Replacement reply.",
+      text: "Follow-up reply.",
       type: "text",
     });
   });
@@ -915,7 +1566,7 @@ describe("EveAgentStore terminal failure", () => {
     vi.spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(startedResponse())
       .mockResolvedValueOnce(streamResponse([failed]));
-    const store = new EveAgentStore({ reducer: defaultMessageReducer() });
+    const store = createStore({ reducer: defaultMessageReducer() });
     const published: Array<{ eventType: string | undefined; status: string }> = [];
     store.subscribe(() => {
       published.push({
@@ -946,7 +1597,7 @@ describe("EveAgentStore cancellation", () => {
       .mockResolvedValueOnce(startedResponse())
       .mockResolvedValueOnce(stream.response)
       .mockResolvedValueOnce(acceptedCancellationResponse());
-    const store = new EveAgentStore({ optimistic: false, reducer: defaultMessageReducer() });
+    const store = createStore({ optimistic: false, reducer: defaultMessageReducer() });
 
     const sending = store.send({ message: "Hello" });
     const cancellation = store.cancel();
@@ -980,14 +1631,14 @@ describe("EveAgentStore cancellation", () => {
   });
 
   it("returns no_active_turn when idle", async () => {
-    const store = new EveAgentStore({ reducer: defaultMessageReducer() });
+    const store = createStore({ reducer: defaultMessageReducer() });
 
     await expect(store.cancel()).resolves.toEqual({ status: "no_active_turn" });
   });
 
   it("resolves a queued cancellation when reset wins before dispatch", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch");
-    const store = new EveAgentStore({ reducer: defaultMessageReducer() });
+    const store = createStore({ reducer: defaultMessageReducer() });
 
     const sending = store.send({ message: "Hello" });
     const cancellation = store.cancel();
@@ -1011,7 +1662,7 @@ describe("EveAgentStore cancellation", () => {
         );
       });
     });
-    const store = new EveAgentStore({ reducer: defaultMessageReducer() });
+    const store = createStore({ reducer: defaultMessageReducer() });
 
     const sending = store.send({ message: "Hello" });
     await vi.waitFor(() => expect(signal).toBeDefined());

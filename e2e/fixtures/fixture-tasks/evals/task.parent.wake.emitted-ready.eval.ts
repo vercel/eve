@@ -1,3 +1,4 @@
+import { taskReceipts } from "@eve-e2e/config/task-receipts";
 import { type EveEvalContext, type EveEvalTurn, type InputRequest } from "eve/evals";
 import { satisfies } from "eve/evals/expect";
 
@@ -25,7 +26,7 @@ export default defineTaskEval({
     const started = await t.send("TASK-PARENT-WAKE-UPDATES");
     started.expectOk();
     started.messageIncludes("TASK-FANOUT-STARTED");
-    started.calledSubagent("fanout-worker", { count: FANOUT_SIZE });
+    started.calledSubagent("fanout-worker", { status: "working", count: FANOUT_SIZE });
 
     const taskIds = backgroundTaskIds(started);
     await t.require(
@@ -36,7 +37,7 @@ export default defineTaskEval({
       ),
     );
 
-    const blocked = await waitForReleaseRequests(t, t, started);
+    const blocked = await waitForReleaseRequests(t, started.session, started);
     const released = await blocked.session.respond(
       blocked.requests.map((request) => ({
         optionId: "approve",
@@ -129,11 +130,7 @@ function collectReleaseRequests(turn: EveEvalTurn, requests: Map<string, InputRe
 }
 
 function backgroundTaskIds(turn: EveEvalTurn): readonly string[] {
-  return turn.events.flatMap((event) =>
-    event.type === "subagent.completed" && event.data.backgroundTask !== undefined
-      ? [event.data.backgroundTask.taskId]
-      : [],
-  );
+  return taskReceipts(turn.events).map(({ taskId }) => taskId);
 }
 
 function completedNotificationTaskIds(turn: EveEvalTurn): readonly string[] {

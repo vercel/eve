@@ -17,16 +17,17 @@ export default defineEval({
         "After the tool runs, reply with the exact words `inventory received` if the tool result contains inventory counts.",
       ].join("\n"),
     );
+    const session = parked.session;
     parked.expectOk();
 
-    t.requireInputRequest({
+    session.requireInputRequest({
       display: "confirmation",
       optionIds: ["approve", "cancel"],
       toolName: PETSTORE_APPROVAL_INVENTORY_TOOL,
     });
     parked.calledTool(PETSTORE_APPROVAL_INVENTORY_TOOL, { status: "pending", count: 1 });
 
-    const approved = await t.respondAll("approve");
+    const approved = await session.respondAll("approve");
     approved.expectOk();
 
     approved.event("action.result", {

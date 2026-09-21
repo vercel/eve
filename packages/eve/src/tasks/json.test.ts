@@ -8,9 +8,6 @@ import type { TaskView } from "#tasks/types.js";
 describe("taskViewToJson", () => {
   it("projects only the model-visible task fields", () => {
     const view: TaskView = {
-      executor: {
-        binding: { data: { runId: "run-1" }, kind: "workflow-tool" },
-      },
       lastOutput: { data: { answer: 42 }, type: "result" },
       metadata: {
         agentId: "agent-1",

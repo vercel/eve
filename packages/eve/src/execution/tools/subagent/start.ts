@@ -37,12 +37,19 @@ export async function startSubagent(input: {
   readonly callbackBaseUrl: string | undefined;
   readonly capabilities: Parameters<typeof buildSubagentRunInput>[0]["capabilities"];
   readonly channelMetadata: Parameters<typeof buildSubagentRunInput>[0]["channelMetadata"];
+  readonly inheritedConversation?: Parameters<
+    typeof buildSubagentRunInput
+  >[0]["inheritedConversation"];
   readonly currentSession: RuntimeSession;
   readonly fanoutSize: number;
   readonly initiatorAuth: Parameters<typeof buildSubagentRunInput>[0]["initiatorAuth"];
   readonly localDevRequest?: LocalDevRequestProvenance;
   readonly parentContinuationToken: string | undefined;
   readonly activityObserver?: ActivityObserverConfig & {
+    readonly workIdentity: ActivityWorkIdentityV1;
+  };
+  /** The backing agent reports as this task, rather than as a separate child work item. */
+  readonly taskActivityObserver?: ActivityObserverConfig & {
     readonly workIdentity: ActivityWorkIdentityV1;
   };
   readonly sandboxSessionId: string;
@@ -75,13 +82,14 @@ export async function startSubagent(input: {
         bundle: input.bundle,
         capabilities: input.capabilities,
         channelMetadata: input.channelMetadata,
+        inheritedConversation: input.inheritedConversation,
         currentSession: input.currentSession,
         dynamicSubagentAgentConfig: input.target.dynamicSubagentAgentConfig,
         fanoutSize: input.fanoutSize,
         initiatorAuth: input.initiatorAuth,
         localDevRequest: input.localDevRequest,
         parent,
-        activityObserver: input.activityObserver,
+        activityObserver: input.taskActivityObserver ?? input.activityObserver,
         sandboxSessionId: input.sandboxSessionId,
         session: input.session,
         source: input.target.source,
@@ -98,6 +106,7 @@ export async function startSubagent(input: {
         initiatorAuth: input.initiatorAuth,
         parent,
         activityObserver: input.activityObserver,
+        taskActivityObserver: input.taskActivityObserver,
         session: input.session,
         taskId: input.taskId,
       });

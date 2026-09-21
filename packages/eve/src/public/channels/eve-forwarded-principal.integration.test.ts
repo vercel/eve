@@ -15,11 +15,11 @@ import { contextStorage } from "#context/container.js";
 import { serializeContext } from "#context/serialize.js";
 import {
   AuthKey,
-  ChannelInstrumentationKey,
   InitiatorAuthKey,
   ParentTraceContextKey,
   SessionTraceSeedKey,
 } from "#context/keys.js";
+import { ConversationContextKey } from "#shared/conversation-context.js";
 import { buildRunContext } from "#execution/runtime-context.js";
 import { setChannelContext } from "#execution/channel-context.js";
 import { buildSessionAttributes } from "#execution/eve-workflow-attributes.js";
@@ -136,7 +136,8 @@ describe("eveChannel forwarded principal → runtime principal", () => {
         headers: {
           "content-type": "application/json",
           baggage: "vendor=value,eve.audience=private;ceiling=i1o0",
-          traceparent: `00-${"1".repeat(32)}-${"2".repeat(16)}-01`,
+          tracestate: `eve=${"2".repeat(16)}`,
+          traceparent: `00-${"1".repeat(32)}-${"3".repeat(16)}-01`,
         },
         method: "POST",
       }),
@@ -158,14 +159,14 @@ describe("eveChannel forwarded principal → runtime principal", () => {
 
     const current = ctx.get(AuthKey);
     const initiator = ctx.get(InitiatorAuthKey);
-    expect(ctx.get(ChannelInstrumentationKey)?.metadata.audience).toBe("unknown");
+    expect(ctx.get(ConversationContextKey)?.audience).toBe("private");
     expect(ctx.get(ParentTraceContextKey)?.forwardedTracePolicy).toEqual({
       ceiling: { recordInputs: true, recordOutputs: false },
       originAudience: "private",
     });
 
     setChannelContext(ctx, { ...run.adapter, state: { persisted: true } });
-    expect(ctx.get(ChannelInstrumentationKey)?.metadata.audience).toBe("unknown");
+    expect(ctx.get(ConversationContextKey)?.audience).toBe("private");
     ctx.set(SessionTraceSeedKey, {
       decision: { action: "record", recordInputs: true, recordOutputs: false },
       forwardedTracePolicy: {
@@ -184,7 +185,7 @@ describe("eveChannel forwarded principal → runtime principal", () => {
         originAudience: "private",
       },
     });
-    expect(buildSessionAttributes({ inputMessage: "research", serializedContext })).toMatchObject({
+    expect(buildSessionAttributes({ serializedContext })).toMatchObject({
       "$eve.is_trace_content_visible": false,
     });
     expect(ctx.get(ParentTraceContextKey)).toEqual({
@@ -222,7 +223,7 @@ describe("eveChannel forwarded principal → runtime principal", () => {
       type: "user",
     });
     // The audit attribute never enters Connect token-cache keying.
-    expect(principalKey(principal)).toBe("user:slack:slack:U123");
+    expect(principalKey(principal)).toBe('["user","slack","slack:U123"]');
     expect(trustedForwarders).toHaveBeenCalledTimes(1);
   });
 
@@ -268,7 +269,7 @@ describe("eveChannel forwarded principal → runtime principal", () => {
           ...options,
         },
       });
-      expect(ctx.get(ChannelInstrumentationKey)?.metadata.audience).toBe("unknown");
+      expect(ctx.get(ConversationContextKey)?.audience).toBe("unknown");
       expect(ctx.get(ParentTraceContextKey)?.forwardedTracePolicy).toEqual({
         ceiling: { recordInputs: false, recordOutputs: false },
         originAudience: "unknown",
@@ -348,7 +349,7 @@ describe("eveChannel forwarded principal → runtime principal", () => {
         ...options,
       },
     });
-    expect(ctx.get(ChannelInstrumentationKey)?.metadata.audience).toBe("unknown");
+    expect(ctx.get(ConversationContextKey)?.audience).toBe("unknown");
   });
 
   it("resolves the transport service principal (and fails Connect) without forwarding", async () => {

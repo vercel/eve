@@ -19,13 +19,13 @@ export default defineEval({
     started.expectOk();
 
     const completed = await t.target
-      .watchTurn(started.sessionId, { startIndex: requireStreamIndex(t) })
+      .watchTurn(started.sessionId, { startIndex: requireStreamIndex(started.session) })
       .result();
     completed.expectOk();
     completed.messageIncludes(CHILD_TOKEN);
 
     t.succeeded();
-    t.calledSubagent("agent", { count: 1 });
+    t.calledSubagent("agent", { status: "completed", count: 1 });
     t.noFailedActions();
   },
 });

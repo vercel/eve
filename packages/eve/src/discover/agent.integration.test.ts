@@ -607,29 +607,6 @@ describe("discoverAgent (memory)", () => {
     expect(result.diagnostics).toEqual([]);
   });
 
-  it("discovers single-file instrumentation as a module source", async () => {
-    const project = buildMemoryAgentProject({
-      agentFiles: {
-        "instrumentation.mjs":
-          'throw new Error("instrumentation modules should not execute during discovery");\n',
-        "instructions.md": "You are a precise assistant.",
-      },
-    });
-
-    const result = await discoverAgent({
-      agentRoot: project.agentRoot,
-      appRoot: project.appRoot,
-      source: project.source,
-    });
-
-    expect(result.diagnostics).toEqual([]);
-    expect(result.manifest.instrumentation).toEqual({
-      logicalPath: "instrumentation.mjs",
-      sourceId: "instrumentation.mjs",
-      sourceKind: "module",
-    });
-  });
-
   it("rejects authored tool filenames that violate the tool-name charset", async () => {
     const project = buildMemoryAgentProject({
       agentFiles: {
@@ -973,7 +950,7 @@ describe("discoverAgent (memory)", () => {
           eve: { extension: { source: "source", dist: "extension" } },
         }),
         "node_modules/@acme/crm/extension/_manifest.json": EXTENSION_COMPATIBILITY_MANIFEST,
-        "node_modules/@acme/crm/extension/instrumentation.ts": "export default {};",
+        "node_modules/@acme/crm/extension/instrumentation/audit.ts": "export default {};",
       },
       agentFiles: {
         "extensions/crm.ts": 'export { default } from "@acme/crm";\n',
@@ -990,7 +967,6 @@ describe("discoverAgent (memory)", () => {
     expect(result.diagnostics.map((diagnostic) => diagnostic.code)).toContain(
       DISCOVER_EXTENSION_INSTRUMENTATION_UNSUPPORTED,
     );
-    expect(result.manifest.resolvedExtensions[0]?.manifest.instrumentation).toBeUndefined();
   });
 
   it("rejects memory declared by a mounted extension", async () => {

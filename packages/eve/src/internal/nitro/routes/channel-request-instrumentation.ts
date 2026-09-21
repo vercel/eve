@@ -75,10 +75,7 @@ export async function traceChannelRequest<T extends Response>(
 
   const { request, routeKey } = input;
   const parentContext = propagation.extract(context.active(), request.headers, headersGetter);
-  const spanName =
-    getInstrumentationRuntime()?.instrumentationProviders === true
-      ? AGENT_SPAN_NAMES.channelRequest
-      : routeKey;
+  const spanName = AGENT_SPAN_NAMES.channelRequest;
   const span = trace.getTracer(TRACER_NAME).startSpan(
     spanName,
     {

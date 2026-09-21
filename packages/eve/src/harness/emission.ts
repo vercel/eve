@@ -64,6 +64,7 @@ import { isInlineAuthorizationToolResult } from "#harness/inline-tool-authorizat
 import type { HarnessEmissionState } from "#harness/emission-state.js";
 import type { HarnessEmitFn, HarnessToolMap, StepInput } from "#harness/types.js";
 import { normalizeAssistantStepFinishReason } from "#harness/finish-reason.js";
+import { frameworkMessageKindForStepInput } from "#harness/messages.js";
 
 export {
   getHarnessEmissionState,
@@ -80,20 +81,31 @@ export async function emitTurnPreamble(
   emitFn: HarnessEmitFn,
   input: StepInput,
   state: HarnessEmissionState,
+  messages: readonly ModelMessage[],
   runtimeIdentity?: RuntimeIdentity,
   traceContext?: RuntimeTraceContext,
 ): Promise<HarnessEmissionState> {
-  const turnId = `turn_${state.sequence}`;
+  // Steering re-enters an open turn: keep its id and step index and skip the
+  // `turn.started` it already emitted.
+  const steering = state.turnId !== "";
+  const turnId = steering ? state.turnId : `turn_${state.sequence}`;
 
   if (!state.sessionStarted) {
     await emitFn(createSessionStartedEvent({ runtime: runtimeIdentity, trace: traceContext }));
   }
 
-  await emitFn(createTurnStartedEvent({ sequence: state.sequence, trace: traceContext, turnId }));
+  if (!steering) {
+    await emitFn(
+      createTurnStartedEvent({ sequence: state.sequence, trace: traceContext, turnId }),
+      messages,
+    );
+  }
 
   if (input.message !== undefined) {
+    const kind = frameworkMessageKindForStepInput(input);
     await emitFn(
       createMessageReceivedEvent({
+        kind: kind === "execution.background_task" ? kind : undefined,
         message: input.message,
         sequence: state.sequence,
         turnId,
@@ -101,12 +113,15 @@ export async function emitTurnPreamble(
     );
   }
 
-  return {
+  const nextState: HarnessEmissionState = {
     sessionStarted: true,
     sequence: state.sequence,
-    stepIndex: 0,
+    stepIndex: steering ? state.stepIndex : 0,
     turnId,
   };
+  return steering && state.assistantOutputStarted
+    ? { ...nextState, assistantOutputStarted: true }
+    : nextState;
 }
 
 /**
@@ -257,21 +272,6 @@ interface EmittedStreamContent {
 interface StreamActionEmissionOptions {
   readonly excludedActionToolNames: ReadonlySet<string>;
   readonly tools: HarnessToolMap;
-}
-
-function readSubagentBackgroundTaskReceipt(
-  result: RuntimeToolResultActionResult,
-  tools: HarnessToolMap | undefined,
-): { readonly status: "working"; readonly taskId: string } | undefined {
-  if (result.isError === true || tools?.get(result.toolName)?.resultKind !== "subagent") {
-    return undefined;
-  }
-  if (typeof result.output !== "object" || result.output === null || Array.isArray(result.output)) {
-    return undefined;
-  }
-  const status = Reflect.get(result.output, "status");
-  const taskId = Reflect.get(result.output, "taskId");
-  return status === "working" && typeof taskId === "string" ? { status, taskId } : undefined;
 }
 
 /**
@@ -425,18 +425,6 @@ async function consumeStreamContent(
       return;
     }
     emittedActionResultCallIds.add(result.callId);
-    const backgroundTask = readSubagentBackgroundTaskReceipt(result, options?.tools);
-    if (backgroundTask !== undefined) {
-      await emitFn({
-        data: {
-          backgroundTask,
-          callId: result.callId,
-          output: typeof result.output === "string" ? result.output : JSON.stringify(result.output),
-          subagentName: result.toolName,
-        },
-        type: "subagent.completed",
-      });
-    }
     const resultPresentation =
       result.isError === true
         ? undefined

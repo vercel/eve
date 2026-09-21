@@ -1,9 +1,50 @@
+import { isDeepStrictEqual } from "node:util";
+
 import type { EveEvalTurn, InputRequest } from "eve/evals";
 
 type Event = EveEvalTurn["events"][number];
 export type SessionEvents = Pick<EveEvalTurn, "sessionId" | "events">;
 export const CHECKS = ["first", "second", "third"] as const;
 export type Check = (typeof CHECKS)[number];
+const COMPLETION = /Background task (task_[a-z0-9]+) \([^)]+\) is completed\./giu;
+
+/** Counts logical model steps while tolerating durable step retries with new event IDs. */
+export function modelStepCount(snapshots: readonly SessionEvents[]): number {
+  const steps = new Set<string>();
+  for (const snapshot of snapshots) {
+    for (const event of snapshot.events) {
+      if (event.type !== "step.started") continue;
+      steps.add(
+        JSON.stringify([
+          snapshot.sessionId,
+          event.data.turnId,
+          event.data.sequence,
+          event.data.stepIndex,
+          event.data.modelId,
+        ]),
+      );
+    }
+  }
+  return steps.size;
+}
+
+/** Extracts each logical notification once without hiding duplicates inside one message. */
+export function completedTaskIds(snapshot: SessionEvents): string[] {
+  const messages = new Set<string>();
+  const taskIds: string[] = [];
+  for (const event of snapshot.events) {
+    if (event.type !== "message.received") continue;
+    const logicalMessage = JSON.stringify([
+      event.data.turnId,
+      event.data.sequence,
+      event.data.message,
+    ]);
+    if (messages.has(logicalMessage)) continue;
+    messages.add(logicalMessage);
+    taskIds.push(...[...event.data.message.matchAll(COMPLETION)].map((match) => match[1]));
+  }
+  return taskIds;
+}
 
 export function requireOriginalTasksHealthy(
   snapshots: readonly SessionEvents[],
@@ -102,17 +143,29 @@ export function toolEvidence(
     }
     return entry;
   }
+  function appendRetry<T>(values: T[], value: T, label: string): void {
+    const previous = values[0];
+    if (previous === undefined) {
+      values.push(value);
+    } else if (!isDeepStrictEqual(previous, value)) {
+      throw new Error(`Retried ${label} changed its value.`);
+    }
+  }
   for (const event of eventsForSession(snapshots, sessionId)) {
     if (event.type === "actions.requested") {
       for (const action of event.data.actions) {
         if (action.kind === "tool-call" && action.toolName === toolName) {
-          call(action.callId).inputs.push(action.input);
+          appendRetry(call(action.callId).inputs, action.input, `tool input ${action.callId}`);
         }
       }
     } else if (event.type === "action.result") {
       const { result, status } = event.data;
       if (result.kind === "tool-result" && result.toolName === toolName) {
-        call(result.callId).results.push({ status, output: result.output });
+        appendRetry(
+          call(result.callId).results,
+          { status, output: result.output },
+          `tool result ${result.callId}`,
+        );
       }
     }
   }

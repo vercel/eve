@@ -4,7 +4,7 @@ import type { AgentInfoResult } from "#client/index.js";
 import { stripAnsi } from "#cli/ui/terminal-text.js";
 import { createTestAgentInfoResult } from "#internal/testing/agent-info-fixture.js";
 
-import { AGENT_HEADER_TIPS, buildAgentHeader, pickAgentHeaderTip } from "./agent-header.js";
+import { buildAgentHeader } from "./agent-header.js";
 import { createTheme } from "./theme.js";
 
 const INFO = createTestAgentInfoResult({
@@ -22,12 +22,14 @@ describe("buildAgentHeader", () => {
     const card = plain.join("\n");
     const titleIndex = plain.findIndex((line) => line.includes("Weather Agent"));
 
-    expect(plain[0]).toBe(`╭${"─".repeat(66)}╮`);
-    expect(plain[titleIndex]).toMatch(/^│ ☰eve \(v\d+\.\d+\.\d+\) +Weather Agent │$/u);
+    expect(plain).toHaveLength(1);
+    expect(plain[titleIndex]).toMatch(
+      /^☰eve v\d+\.\d+\.\d+ · Weather Agent · Run \/help for commands$/u,
+    );
     expect(card).not.toContain("model");
     expect(card).not.toContain("instructions");
     expect(card).not.toContain("⣿");
-    expect(lines[0]).toBe(theme.colors.dim(plain[0]!));
+    expect(lines[0]).toContain(theme.colors.bold("☰eve"));
   });
 
   it("renders only known fields before agent inspection", () => {
@@ -35,27 +37,21 @@ describe("buildAgentHeader", () => {
     const card = buildAgentHeader({
       name: "weather-agent",
       theme,
-      tip: "Use the /help command to see every command.",
       width: 120,
     }).join("\n");
 
     expect(card).toContain("weather-agent");
-    expect(card).toContain("Tip: Use the /help command to see every command.");
   });
 
-  it("renders the /add tip with a blue command", () => {
+  it("uses ASCII separators and wordmark when Unicode is disabled", () => {
     const theme = createTheme({ color: true, unicode: false });
-    const tip = AGENT_HEADER_TIPS.find((candidate) => candidate.includes("/add"));
+    const lines = buildAgentHeader({ info: INFO, theme, width: 120 });
 
-    expect(tip).toBe("Use the /add command to install an integration.");
-    if (tip === undefined) return;
-
-    const line = buildAgentHeader({ info: INFO, theme, width: 120, tip }).find((candidate) =>
-      candidate.includes("Tip:"),
+    expect(stripAnsi(lines[0] ?? "")).toMatch(
+      /^eve v\d+\.\d+\.\d+ - Weather Agent - Run \/help for commands$/u,
     );
-
-    expect(stripAnsi(line ?? "")).toContain(`| Tip: ${tip}`);
-    expect(line).toContain(theme.colors.blue("/add"));
+    expect(lines[0]).toContain(theme.colors.dim("Weather Agent"));
+    expect(lines[0]).toContain(theme.colors.dim("Run /help for commands"));
   });
 
   it("keeps the discovery-diagnostics line when the compiler reported problems", () => {
@@ -68,12 +64,5 @@ describe("buildAgentHeader", () => {
 
     expect(lines.some((line) => line.includes("1 error"))).toBe(true);
     expect(lines.some((line) => line.includes("2 warnings"))).toBe(true);
-  });
-});
-
-describe("pickAgentHeaderTip", () => {
-  it("maps the random draw across the whole pool", () => {
-    expect(pickAgentHeaderTip(() => 0)).toBe(AGENT_HEADER_TIPS[0]);
-    expect(pickAgentHeaderTip(() => 0.999)).toBe(AGENT_HEADER_TIPS.at(-1));
   });
 });

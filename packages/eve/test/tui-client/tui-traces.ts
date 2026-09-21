@@ -212,7 +212,7 @@ void (async () => {
     await screen.waitForText("smoke prompt", 5_000);
     await screen.waitForText("smoke reply", 5_000);
     await screen.waitForText("get_weather", 5_000);
-    if (screen.snapshot().includes("›")) {
+    if (screen.snapshot().includes("❯")) {
       throw new Error(`The chat prompt leaked into the viewer frame:\n${screen.snapshot()}`);
     }
     console.log(theme.muted("[tui-traces] /traces opened on the conversation cards"));

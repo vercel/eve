@@ -1,4 +1,4 @@
-import { type MessageStreamEvent } from "#protocol/message.js";
+import { EVE_STREAM_LEASE_ENDED_CONTROL, type MessageStreamEvent } from "#protocol/message.js";
 import {
   normalizeMessageStreamEvent,
   type MessageStreamEventForVersion,
@@ -41,7 +41,10 @@ export function isStreamDisconnectError(error: unknown): boolean {
 export async function* readNdjsonStream(
   body: ReadableStream<Uint8Array>,
   options: {
+    readonly controlVersion?: "1";
     readonly idleTimeoutMs?: number;
+    readonly onLeaseEnded?: () => void;
+    readonly signal?: AbortSignal;
     readonly streamVersion: MessageStreamVersion;
   },
 ): AsyncGenerator<MessageStreamEvent> {
@@ -49,10 +52,16 @@ export async function* readNdjsonStream(
   const decoder = new TextDecoder();
   let buffer = "";
   let reachedEof = false;
+  const abort = () => {
+    void reader.cancel().catch(() => {});
+  };
+  options.signal?.addEventListener("abort", abort, { once: true });
 
   try {
     while (true) {
+      options.signal?.throwIfAborted();
       const result = await readWithIdleTimeout(reader, options?.idleTimeoutMs);
+      options.signal?.throwIfAborted();
 
       if (result.done) {
         reachedEof = true;
@@ -72,7 +81,12 @@ export async function* readNdjsonStream(
         buffer = buffer.slice(newlineIndex + 1);
 
         if (line.length > 0) {
-          yield parseMessageStreamEvent(line, options.streamVersion);
+          const value = JSON.parse(line) as unknown;
+          if (options.controlVersion === "1" && isLeaseEndedControl(value)) {
+            options.onLeaseEnded?.();
+          } else {
+            yield parseMessageStreamEvent(value, options.streamVersion);
+          }
         }
 
         newlineIndex = buffer.indexOf("\n");
@@ -82,9 +96,15 @@ export async function* readNdjsonStream(
     // Yield any trailing content without a final newline.
     const trailing = buffer.trim();
     if (trailing.length > 0) {
-      yield parseMessageStreamEvent(trailing, options.streamVersion);
+      const value = JSON.parse(trailing) as unknown;
+      if (options.controlVersion === "1" && isLeaseEndedControl(value)) {
+        options.onLeaseEnded?.();
+      } else {
+        yield parseMessageStreamEvent(value, options.streamVersion);
+      }
     }
   } finally {
+    options.signal?.removeEventListener("abort", abort);
     if (!reachedEof) {
       // A cloned response waits for both branches to cancel. Let the caller
       // abort the fetch instead of blocking cleanup on a tracing reader.
@@ -94,12 +114,20 @@ export async function* readNdjsonStream(
   }
 }
 
+function isLeaseEndedControl(value: unknown): boolean {
+  if (value === null || typeof value !== "object") return false;
+  const record = value as Record<string, unknown>;
+  return (
+    record.$eve === EVE_STREAM_LEASE_ENDED_CONTROL.$eve &&
+    record.version === EVE_STREAM_LEASE_ENDED_CONTROL.version
+  );
+}
+
 function parseMessageStreamEvent<Version extends MessageStreamVersion>(
-  line: string,
+  value: unknown,
   version: Version,
 ): MessageStreamEvent {
-  const event = JSON.parse(line) as MessageStreamEventForVersion<Version>;
-  return normalizeMessageStreamEvent(version, event);
+  return normalizeMessageStreamEvent(version, value as MessageStreamEventForVersion<Version>);
 }
 
 async function readWithIdleTimeout(

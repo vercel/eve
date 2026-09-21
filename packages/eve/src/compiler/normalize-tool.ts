@@ -18,7 +18,6 @@ import { readWorkflowFunctionId } from "#internal/workflow/reference.js";
 export type CompiledToolEntry =
   | { readonly kind: "tool"; readonly definition: CompiledToolDefinition }
   | { readonly kind: "disabled"; readonly name: string }
-  | { readonly kind: "workflow-tool"; readonly maxSubagents?: number }
   | {
       readonly definition: CompiledToolDefinition;
       readonly kind: "web-search-tool";
@@ -57,10 +56,6 @@ export async function compileToolEntry(
 
   if (entry.kind === "disabled") {
     return { kind: "disabled", name: toolName };
-  }
-
-  if (entry.kind === "workflow-tool") {
-    return { kind: "workflow-tool", maxSubagents: entry.maxSubagents };
   }
 
   if (entry.kind === "web-search-tool") {
@@ -107,6 +102,18 @@ export async function compileToolEntry(
   }
 
   const workflowId = readWorkflowFunctionId(entry.definition.execute);
+  if (
+    entry.definition.execution === "background" &&
+    workflowId === undefined &&
+    !(
+      entry.definition.behavior?.handling?.kind === "dispatch" &&
+      entry.definition.behavior.handling.action === "self-agent"
+    )
+  ) {
+    throw new Error(
+      `Background tool "${source.logicalPath}" must use defineWorkflowTool(). defineTool() tools run in the foreground.`,
+    );
+  }
   const shape = {
     lifetime: entry.definition.execution === "background" ? ("task" as const) : ("step" as const),
     suspend: workflowId === undefined ? ("none" as const) : ("workflow" as const),
@@ -114,6 +121,7 @@ export async function compileToolEntry(
   return {
     kind: "tool",
     definition: {
+      availableInSubagents: entry.definition.availableInSubagents,
       behavior:
         workflowId === undefined
           ? entry.definition.behavior === undefined
@@ -132,6 +140,7 @@ export async function compileToolEntry(
       requiresApproval: entry.definition.hasApproval,
       sourceId: source.sourceId,
       sourceKind: "module",
+      workflowProgram: entry.definition.workflowProgram,
     },
   };
 }

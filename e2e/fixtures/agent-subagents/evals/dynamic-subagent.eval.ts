@@ -6,11 +6,17 @@ export default defineEval({
   async test(t) {
     const selected = await t.send("Call conditional-marker exactly once.");
     selected.expectOk();
-    selected.event("subagent.completed", {
+    selected.event("action.result", {
       count: 1,
-      data: { backgroundTask: { status: "working" }, subagentName: "conditional-marker" },
+      data: {
+        result: {
+          kind: "tool-result",
+          output: { status: "working" },
+          toolName: "conditional-marker",
+        },
+      },
     });
-    const completed = await waitForMessage(t, t, "DYNAMIC_SUBAGENT_ENABLED");
+    const completed = await waitForMessage(t, selected.session, "DYNAMIC_SUBAGENT_ENABLED");
 
     const omitted = await completed.send("Call omitted-marker exactly once.");
 

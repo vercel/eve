@@ -22,6 +22,27 @@ async function advanceRetry(): Promise<void> {
 }
 
 describe("probeAgentInfo", () => {
+  it("bounds stalled inspection, aborts the request, and does not retry", async () => {
+    vi.useFakeTimers();
+    try {
+      let signal: AbortSignal | undefined;
+      const info = vi.fn(async (options?: { signal?: AbortSignal }) => {
+        signal = options?.signal;
+        return await new Promise<AgentInfoResult>(() => {});
+      });
+      const probe = probeAgentInfo({ client: { info }, timeoutMs: 2000 });
+      await vi.advanceTimersByTimeAsync(1999);
+      expect(signal?.aborted).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(await probe).toMatchObject({ kind: "unavailable" });
+      expect(signal?.aborted).toBe(true);
+      expect(info).toHaveBeenCalledOnce();
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("retries a transient server failure and returns inspection once the server is ready", async () => {
     vi.useFakeTimers();
     try {

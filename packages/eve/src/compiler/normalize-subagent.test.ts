@@ -23,6 +23,19 @@ describe("normalizeSubagentConfig", () => {
     });
   });
 
+  it("preserves a local subagent's tool setting", () => {
+    expect(
+      normalizeSubagentConfig(
+        defineAgent({
+          description: "Research deeply.",
+          model: "openai/gpt-5.5",
+          tool: false,
+        }),
+        "Invalid subagent.",
+      ),
+    ).toMatchObject({ definition: { tool: false }, kind: "local" });
+  });
+
   it("normalizes a remote subagent", () => {
     expect(
       normalizeSubagentConfig(
@@ -33,5 +46,32 @@ describe("normalizeSubagentConfig", () => {
         "Invalid subagent.",
       ),
     ).toMatchObject({ kind: "remote" });
+  });
+
+  it("rejects a non-boolean remote subagent tool setting", () => {
+    expect(() =>
+      normalizeSubagentConfig(
+        {
+          description: "Review remotely.",
+          kind: "remote",
+          tool: "no",
+          url: "https://review.example.com",
+        },
+        "Invalid subagent.",
+      ),
+    ).toThrow("Invalid subagent.");
+  });
+
+  it("preserves a remote subagent's tool setting", () => {
+    expect(
+      normalizeSubagentConfig(
+        defineRemoteAgent({
+          description: "Review remotely.",
+          tool: false,
+          url: "https://review.example.com",
+        }),
+        "Invalid subagent.",
+      ),
+    ).toMatchObject({ kind: "remote", tool: false });
   });
 });

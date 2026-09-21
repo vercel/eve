@@ -17,25 +17,24 @@ import {
 } from "#tools/durable-callbacks.js";
 import { TOOL_BRAND } from "#tools/dynamic.js";
 import type { ToolModelOutput } from "#tools/model-output.js";
-import type { TaskExec, TaskReceipt } from "#tools/task.js";
 
 type ApprovalContextInput<TInput> = unknown extends TInput ? Record<string, unknown> : TInput;
 
 export type { ToolAuthDefinition, ToolAuthOptions, ToolAuthProvider } from "#tools/auth.js";
 export type { ToolModelOutput, ToolModelOutputPart } from "#tools/model-output.js";
-export type { TaskExec, TaskExecutorBinding, TaskReceipt } from "#tools/task.js";
 
 export type ToolExecuteOptions = Omit<ToolExecutionOptions<unknown>, "context">;
 
 export type ToolExecuteFn<TInput = unknown, TOutput = unknown> = (
   input: TInput,
   options: ToolExecuteOptions,
-  task?: TaskExec,
 ) => Promise<TOutput> | TOutput | AsyncIterable<TOutput>;
 
 export type ToolExecution = "background";
 
 interface ToolDefinitionBase {
+  /** Whether delegated agent sessions receive this tool. Defaults to `true`. */
+  readonly availableInSubagents?: boolean;
   readonly description: string;
   readonly execution?: ToolExecution;
 }
@@ -216,21 +215,6 @@ export interface ToolDefinition<TInput = unknown, TOutput = unknown> extends Pub
   toModelOutput?: (output: TOutput) => ToolModelOutput | Promise<ToolModelOutput>;
 }
 
-/** A tool whose executor can outlive the model tool-call phase as a durable task. */
-export interface BackgroundToolDefinition<
-  TInput = unknown,
-  TOutput = unknown,
-> extends PublicToolDefinition<TInput, TaskReceipt> {
-  readonly execution: "background";
-  execute(
-    input: TInput,
-    ctx: ToolContext,
-    task: TaskExec,
-  ): Promise<TOutput> | TOutput | AsyncIterable<unknown>;
-  approval?: Approval<ApprovalContextInput<TInput>>;
-  toModelOutput?: (output: TaskReceipt) => ToolModelOutput | Promise<ToolModelOutput>;
-}
-
 type ToolOutputFromExecuteReturn<TReturn> =
   TReturn extends Promise<infer TOutput>
     ? TOutput
@@ -238,22 +222,8 @@ type ToolOutputFromExecuteReturn<TReturn> =
       ? TOutput
       : TReturn;
 
-type BackgroundToolOutputFromExecuteReturn<TReturn> =
-  TReturn extends AsyncGenerator<unknown, infer TOutput>
-    ? TOutput
-    : TReturn extends AsyncIterable<unknown>
-      ? null
-      : Awaited<TReturn>;
-
 type ToolDefinitionWithExecuteReturn<TInput, TOutput, TReturn> = ToolDefinition<TInput, TOutput> & {
   execute(input: TInput, ctx: ToolContext): TReturn;
-};
-
-type BackgroundToolDefinitionWithExecuteReturn<TInput, TOutput, TReturn> = BackgroundToolDefinition<
-  TInput,
-  TOutput
-> & {
-  execute(input: TInput, ctx: ToolContext, task: TaskExec): TReturn;
 };
 
 /**
@@ -264,33 +234,6 @@ type BackgroundToolDefinitionWithExecuteReturn<TInput, TOutput, TReturn> = Backg
  * For static tools, the runtime tool name is the filename slug. `defineTool`
  * stamps a brand that lifecycle code validates; it rejects raw object literals.
  */
-export function defineTool<
-  TSchema extends StandardSchemaV1<unknown, unknown> | StandardJSONSchemaV1<unknown, unknown>,
-  TReturn,
->(definition: {
-  description: BackgroundToolDefinition<unknown, unknown>["description"];
-  execution: "background";
-  inputSchema: TSchema;
-  outputSchema?: PublicToolDefinition<unknown, TaskReceipt>["outputSchema"];
-  execute(input: StandardSchemaV1.InferOutput<TSchema>, ctx: ToolContext, task: TaskExec): TReturn;
-  label?: BackgroundToolDefinition<
-    StandardSchemaV1.InferOutput<TSchema>,
-    BackgroundToolOutputFromExecuteReturn<TReturn>
-  >["label"];
-  approval?: BackgroundToolDefinition<StandardSchemaV1.InferOutput<TSchema>, unknown>["approval"];
-  approvalKey?: BackgroundToolDefinition<
-    StandardSchemaV1.InferOutput<TSchema>,
-    unknown
-  >["approvalKey"];
-  toModelOutput?: BackgroundToolDefinition<
-    unknown,
-    BackgroundToolOutputFromExecuteReturn<TReturn>
-  >["toModelOutput"];
-}): BackgroundToolDefinitionWithExecuteReturn<
-  StandardSchemaV1.InferOutput<TSchema>,
-  BackgroundToolOutputFromExecuteReturn<TReturn>,
-  TReturn
->;
 export function defineTool<
   TInputSchema extends StandardSchemaV1<unknown, unknown> | StandardJSONSchemaV1<unknown, unknown>,
   TOutputSchema extends StandardJSONSchemaV1<unknown, unknown>,
@@ -382,14 +325,21 @@ export function defineTool<TInput = unknown, TOutput = unknown>(
   definition: ToolDefinition<TInput, TOutput>,
 ): ToolDefinition<TInput, TOutput>;
 export function defineTool<TInput = unknown, TOutput = unknown>(
-  definition: ToolDefinition<TInput, TOutput> | BackgroundToolDefinition<TInput, TOutput>,
-): ToolDefinition<TInput, TOutput> | BackgroundToolDefinition<TInput, TOutput> {
+  definition: ToolDefinition<TInput, TOutput>,
+): ToolDefinition<TInput, TOutput> {
+  if ("execution" in definition && definition.execution !== undefined) {
+    throw new Error(
+      'defineTool: "execution" is not supported. Use defineWorkflowTool for background work.',
+    );
+  }
   return stampToolDefinition(definition, "defineTool");
 }
 
 export function stampToolDefinition<
   T extends {
     readonly description: string;
+    readonly inputSchema?: unknown;
+    readonly outputSchema?: unknown;
     readonly execute: (...args: never[]) => unknown;
     readonly label?: ToolLabelDefinition;
     readonly approval?: Approval<never>;
@@ -407,6 +357,8 @@ export function stampToolDefinition<
   stampDurableDynamicToolCallbacks(
     definition,
     collectDurableDynamicToolCallbacks({
+      inputSchema: definition.inputSchema,
+      outputSchema: definition.outputSchema,
       label: definition.label,
       approval: definition.approval,
       approvalKey: definition.approvalKey,
@@ -425,15 +377,16 @@ const DISABLED_TOOL_SENTINEL_KIND = "eve:disabled-tool";
 
 /**
  * Marker value returned from {@link disableTool}. Export this as the default
- * export of a file in `agent/tools/` to remove the framework default whose
- * name matches the file's slug.
+ * export of a file in `agent/tools/` to remove the model tool whose name
+ * matches the file's slug, including framework defaults and derived subagent
+ * tools.
  */
 export interface DisabledToolSentinel {
   readonly kind: typeof DISABLED_TOOL_SENTINEL_KIND;
 }
 
 /**
- * Returns a sentinel that disables the framework tool whose name matches the
+ * Returns a sentinel that disables the model tool whose name matches the
  * containing file's slug.
  */
 export function disableTool(): DisabledToolSentinel {

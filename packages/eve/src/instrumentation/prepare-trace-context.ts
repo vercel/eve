@@ -29,7 +29,8 @@ export interface PrepareTurnTraceContextInput {
   readonly sequence: number;
   readonly sessionStarted: boolean;
   readonly traceContext?: RuntimeTraceContext;
-  readonly turnId: string;
+  /** Omit when preparing the session boundary before the first turn exists. */
+  readonly turnId?: string;
 }
 
 export async function prepareTurnTraceContext(
@@ -54,7 +55,7 @@ export async function prepareTurnTraceContext(
     }
   }
 
-  if (input.instrumentation?.prepareTurnTrace !== undefined) {
+  if (input.turnId !== undefined && input.instrumentation?.prepareTurnTrace !== undefined) {
     try {
       prepared = await input.instrumentation.prepareTurnTrace({
         ...session,

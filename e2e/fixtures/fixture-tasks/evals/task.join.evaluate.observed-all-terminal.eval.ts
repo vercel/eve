@@ -1,3 +1,4 @@
+import { taskReceipts } from "@eve-e2e/config/task-receipts";
 import { type EveEvalContext, type EveEvalTurn, type InputRequest } from "eve/evals";
 import { satisfies } from "eve/evals/expect";
 
@@ -31,7 +32,7 @@ export default defineTaskEval({
     const started = await t.send("TASK-FAN-IN");
     started.expectOk();
     started.messageIncludes("TASK-FAN-IN-STARTED");
-    started.calledSubagent("fanout-worker", { count: FAN_IN_SIZE });
+    started.calledSubagent("fanout-worker", { status: "working", count: FAN_IN_SIZE });
 
     const tasksByMarker = backgroundTasksByMarker(started);
     const taskIds = [...tasksByMarker.values()];
@@ -42,7 +43,7 @@ export default defineTaskEval({
         `${FAN_IN_SIZE} distinct background task receipts`,
       ),
     );
-    const blocked = await waitForReleaseRequests(t, t, started);
+    const blocked = await waitForReleaseRequests(t, started.session, started);
 
     const released = await blocked.session.respond(
       FAN_IN_CALLS.map(({ marker }) => ({
@@ -146,11 +147,9 @@ async function waitForTurnMessage(
 
 function backgroundTasksByMarker(turn: EveEvalTurn): ReadonlyMap<FanInMarker, string> {
   const tasksByMarker = new Map<FanInMarker, string>();
-  for (const event of turn.events) {
-    if (event.type !== "subagent.completed" || event.data.backgroundTask === undefined) continue;
-    const fanInCall = FAN_IN_CALLS.find(({ callId }) => callId === event.data.callId);
-    if (fanInCall !== undefined)
-      tasksByMarker.set(fanInCall.marker, event.data.backgroundTask.taskId);
+  for (const receipt of taskReceipts(turn.events)) {
+    const fanInCall = FAN_IN_CALLS.find(({ callId }) => callId === receipt.callId);
+    if (fanInCall !== undefined) tasksByMarker.set(fanInCall.marker, receipt.taskId);
   }
   return tasksByMarker;
 }

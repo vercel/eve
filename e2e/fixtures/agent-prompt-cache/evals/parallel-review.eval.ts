@@ -1,3 +1,4 @@
+import { taskReceipts } from "@eve-e2e/config/task-receipts";
 import assert from "node:assert/strict";
 import { defineEval, type EveEvalContext, type EveEvalTurn } from "eve/evals";
 import { satisfies } from "eve/evals/expect";
@@ -15,16 +16,22 @@ export default ["first", "later"].map((launchTurn) =>
     tags: ["real-model"],
     description: `Real provider cache hits survive five parallel reviews (${launchTurn} turn).`,
     async test(t) {
+      const session = await t.session();
       if (launchTurn === "later") {
-        const planning = await t.send(
-          "Eight workshops have twelve places each. How many places is that in total?",
+        const planning = await session.send(
+          "Alice is planning a community centre event with eight workshops and twelve places per workshop. " +
+            "Please calculate the total number of places. Bob is preparing the purchasing sheets and will send them next for review.",
         );
         expectHealthyTurn(planning);
         planning.messageIncludes("96");
         planning.notEvent("actions.requested");
       }
 
-      const started = await t.send(reviewPacket());
+      const started = await session.send(
+        launchTurn === "later"
+          ? `Bob has the purchasing sheets ready for the event we just discussed.\n\n${reviewPacket()}`
+          : reviewPacket(),
+      );
       const taskIds = expectFiveReviewers(started);
       const turns = await waitForReviews(t, started, taskIds);
       await expectParallelReviews(t, turns);
@@ -35,7 +42,7 @@ export default ["first", "later"].map((launchTurn) =>
 
 function expectFiveReviewers(started: EveEvalTurn) {
   expectHealthyTurn(started);
-  started.calledSubagent("reviewer", { count: 5 });
+  started.calledSubagent("reviewer", { status: "working", count: 5 });
   const launchSteps = started.events
     .filter((event) => event.type === "actions.requested")
     .flatMap(({ data }) =>
@@ -46,9 +53,7 @@ function expectFiveReviewers(started: EveEvalTurn) {
   assert.equal(launchSteps.length, 5, "five reviewer requests");
   assert.equal(new Set(launchSteps).size, 1, "all five reviewers launch in one model step");
 
-  const taskIds = started.events
-    .filter((event) => event.type === "subagent.completed")
-    .flatMap(({ data }) => (data.backgroundTask ? [data.backgroundTask.taskId] : []));
+  const taskIds = taskReceipts(started.events).map(({ taskId }) => taskId);
   assert.equal(taskIds.length, 5, "five background task receipts");
   assert.equal(new Set(taskIds).size, 5, "five distinct background tasks");
   return taskIds;
@@ -56,7 +61,7 @@ function expectFiveReviewers(started: EveEvalTurn) {
 
 async function waitForReviews(t: EveEvalContext, started: EveEvalTurn, taskIds: string[]) {
   const turns = [started];
-  let cursor = t.state?.streamIndex;
+  let cursor = started.session.state.streamIndex;
   for (let attempt = 0; attempt < 10 && !allCompleted(turns, taskIds); attempt += 1) {
     assert(cursor !== undefined, "parent stream cursor is present");
     const live = t.target.watchTurn(started.sessionId, { startIndex: cursor });

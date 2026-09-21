@@ -27,10 +27,8 @@ type PrincipalTokenCache = Readonly<Record<string, TokenResult>>;
  * Virtual context key mapping authorization scope to a per-principal
  * {@link TokenResult} cache.
  *
- * The principal sub-key is produced by
- * {@link principalKey} so identical string keys (for example
- * `"user:${issuer}:${id}"`) collide only when the resolved principal
- * genuinely matches.
+ * The principal sub-key is produced by {@link principalKey}, so JSON tuple
+ * encoding only collides when the resolved principal genuinely matches.
  */
 export const ConnectionAuthorizationTokensKey = new ContextKey<
   Readonly<Record<string, PrincipalTokenCache>>

@@ -16,7 +16,6 @@ import {
 } from "#internal/resolve-model-endpoint-status.js";
 import type { ChatGptAuthState } from "#public/models/openai/chatgpt/token-broker.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
-import { WORKFLOW_TOOL_NAME } from "#shared/workflow-sandbox.js";
 
 export type AgentInfoResponse = AgentInfoResult;
 
@@ -29,7 +28,7 @@ function toChatGptEndpoint(state: ChatGptAuthState | undefined) {
   return endpoint;
 }
 
-/** Projects v4 exclusively from the effective compiled graph. */
+/** Projects v5 exclusively from the effective compiled graph. */
 export function buildAgentInfoResponse(
   data: AgentInfoManifestData,
   input: {
@@ -141,10 +140,6 @@ export function buildAgentInfoResponse(
         role: definition.role,
       })),
     },
-    instrumentation:
-      manifest.instrumentation === undefined
-        ? undefined
-        : toModuleSource(manifest, manifest.instrumentation),
     kernelEffects: projectPreparedKernelEffects(manifest),
     kind: "eve-agent-info",
     memories: manifest.memories.map((memory) => ({
@@ -224,14 +219,6 @@ export function buildAgentInfoResponse(
       })),
     },
     version: 5,
-    workflow:
-      manifest.workflowTool === undefined
-        ? { enabled: false, toolName: WORKFLOW_TOOL_NAME }
-        : {
-            enabled: true,
-            source: toModuleSource(manifest, manifest.workflowTool),
-            toolName: WORKFLOW_TOOL_NAME,
-          },
     workspace: {
       resourceRoot: manifest.workspaceResourceRoot,
       rootEntries: [...manifest.workspaceResourceRoot.rootEntries],

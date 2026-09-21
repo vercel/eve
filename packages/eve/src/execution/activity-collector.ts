@@ -57,7 +57,7 @@ export async function activityCollectorWorkflow(input: ActivityCollectorInput): 
         ]);
         if (buffered.kind === "expired") return;
         if (buffered.kind === "render") break;
-        if (buffered.value.done === true) return;
+        if (buffered.value.done === true) break;
         pendingRead = undefined;
         snapshot = reduceActivityBatch(snapshot, buffered.value.value);
       }

@@ -11,6 +11,7 @@ import type {
   WorkflowStepResult,
 } from "#execution/tools/workflow/step-context.js";
 import type { ToolContext } from "#tools/definition.js";
+import type { WorkflowToolContext } from "#tools/workflow-definition.js";
 import type { AuthorizationDefinition } from "#shared/connection-types.js";
 
 const durable = vi.hoisted(() => ({
@@ -47,7 +48,6 @@ function context(user = "user-1"): WorkflowStepContext {
     principalType: "user" as const,
   };
   return {
-    authorizationSupported: true,
     baseUrl: "https://agent.example",
     token: `callback-${user}`,
     authorizationResults: [],
@@ -62,8 +62,8 @@ function context(user = "user-1"): WorkflowStepContext {
   };
 }
 
-async function runStep(
-  execute: (ctx: ToolContext) => unknown,
+async function runStep<TContext = ToolContext>(
+  execute: (ctx: TContext) => unknown,
   input = context(),
 ): Promise<WorkflowStepResult> {
   return (await withWorkflowStepAuthorization(execute)({
@@ -80,40 +80,32 @@ describe("workflow step authorization", () => {
     durable.entries.clear();
   });
   afterEach(() => vi.unstubAllEnvs());
-  it.each(["getToken", "requireAuth"] as const)(
-    "rejects %s before calling the provider when the parent driver lacks authorization support",
-    async (method) => {
-      const provider = {
-        principalType: "user" as const,
-        getToken: vi.fn(async () => ({ token: "secret" })),
-        startAuthorization: vi.fn(),
-        completeAuthorization: vi.fn(),
-      };
-      await expect(
-        runStep(async (ctx) => ctx[method](provider), {
-          ...context(),
-          authorizationSupported: false,
-        }),
-      ).rejects.toMatchObject({
+  it.each([
+    {
+      access: (ctx: WorkflowToolContext) => ctx.agents,
+      capability: "ctx.agents",
+      guidance:
+        "Read ctx.agents in the workflow body and pass the required serializable metadata into the step.",
+    },
+    {
+      access: (ctx: WorkflowToolContext) => ctx.agent("researcher", { message: "Investigate" }),
+      capability: "ctx.agent()",
+      guidance: "Call ctx.agent() in the workflow body.",
+    },
+    {
+      access: (ctx: WorkflowToolContext) => ctx.ask({ prompt: "Continue?" }),
+      capability: "ctx.ask()",
+      guidance: "Call ctx.ask() in the workflow body.",
+    },
+  ])(
+    "fails $capability misuse without retrying the step",
+    async ({ access, capability, guidance }) => {
+      await expect(runStep<WorkflowToolContext>((ctx) => access(ctx))).rejects.toMatchObject({
         fatal: true,
-        retryable: false,
-        reason: "workflow_task_authorization_unsupported",
-        message: expect.stringContaining("Start a new session"),
+        message: `${capability} is unavailable inside a "use step" function. ${guidance}`,
       });
-      expect(provider.getToken).not.toHaveBeenCalled();
-      expect(provider.startAuthorization).not.toHaveBeenCalled();
-      expect(provider.completeAuthorization).not.toHaveBeenCalled();
     },
   );
-
-  it("runs steps that do not use auth when the parent driver lacks authorization support", async () => {
-    await expect(
-      runStep(async (ctx) => ({ session: ctx.session.id }), {
-        ...context(),
-        authorizationSupported: false,
-      }),
-    ).resolves.toMatchObject({ kind: "result", output: { session: "session-1" } });
-  });
 
   it("does not exchange a consumed code again when the rest of the step retries", async () => {
     let exchanged = false;

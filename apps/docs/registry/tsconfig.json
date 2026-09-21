@@ -6,6 +6,7 @@
   },
   "include": [
     "channels/**/*.ts",
+    "schedules/**/*.ts",
     "connections/**/*.ts",
     "extensions/**/*.ts",
     "instrumentation/**/*.ts",

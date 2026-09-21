@@ -167,12 +167,39 @@ function stubCoreQuickJSEntrypoint() {
   };
 }
 
+function guardInlineStepExecution() {
+  return {
+    name: "eve:guard-inline-step-execution",
+    transform(source, id) {
+      if (!id.replaceAll("\\", "/").endsWith("/@workflow/core/dist/runtime.js")) return null;
+
+      // beta.51 only registers recovered inline steps with single-flight.
+      // A queued wake can therefore run a newly claimed step again while its
+      // original body is still active, especially when a local lease expires.
+      const unguarded =
+        /const executed = s\.lazyStepInput === undefined &&\s+s\.preclaimedStart === undefined\s+\? runStepSingleFlight\(runId, s\.correlationId, run\)\s+: run\(\);/;
+      if (!unguarded.test(source)) {
+        throw new Error("Recheck the @workflow/core inline step single-flight patch.");
+      }
+      return {
+        code: source.replace(
+          unguarded,
+          "const executed = runStepSingleFlight(runId, s.correlationId, run);",
+        ),
+        map: null,
+      };
+    },
+  };
+}
+
 export default {
   packageName: "@workflow/core",
   compiledPath: "@workflow/core",
   chunkGroup: "workflow",
-  plugins: [stubCoreWorldFactories(), stubCoreQuickJSEntrypoint()],
+  plugins: [stubCoreWorldFactories(), stubCoreQuickJSEntrypoint(), guardInlineStepExecution()],
   entries: [
+    { entry: "dist/serialization.js", outputPath: "serialization" },
+    { entry: "dist/runtime/helpers.js", outputPath: "runtime/helpers" },
     {
       outputPath: "index",
     },

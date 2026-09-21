@@ -1,5 +1,8 @@
 import type { CompiledAgentDefinition } from "#compiler/manifest.js";
-import type { PhaseOneNodeSourceState } from "#compiler/node-source-state.js";
+import type {
+  FinalizedNodeSourceState,
+  PhaseOneNodeSourceState,
+} from "#compiler/node-source-state.js";
 import type { CompiledToolEntry } from "#compiler/normalize-tool.js";
 import {
   canonicalSourceSlot,
@@ -20,7 +23,6 @@ export function assertFrameworkToolPolicy(
     );
   }
   const closedDispatchSlots = {
-    "tools/agent": "self-agent",
     "tools/task_cancel": "task-cancel",
   } as const;
   const expectedAction = closedDispatchSlots[slot as keyof typeof closedDispatchSlots];
@@ -35,6 +37,35 @@ export function assertFrameworkToolPolicy(
       `The framework "${toolName}" tool cannot be overridden. Re-export it from "eve/tools/${toolName}" or disable it with disableTool().`,
     );
   }
+}
+
+export function applyAgentToolPolicy(
+  phaseOne: PhaseOneNodeSourceState,
+  config: CompiledAgentDefinition,
+): void {
+  if (config.tool !== false) return;
+
+  const overridden = phaseOne.graph.orderedCandidates.some(
+    (candidate) =>
+      candidate.layer !== "framework-default" &&
+      canonicalSourceSlot(candidate.logicalPath) === "tools/agent",
+  );
+  if (overridden) return;
+
+  phaseOne.graph.composed = composeAgentModuleCandidates(
+    phaseOne.graph.orderedCandidates.filter(
+      (candidate) =>
+        candidate.layer !== "framework-default" ||
+        canonicalSourceSlot(candidate.logicalPath) !== "tools/agent",
+    ),
+  );
+}
+
+export function canDisableToolWithoutSelectedSource(
+  state: FinalizedNodeSourceState,
+  toolName: string,
+): boolean {
+  return state.projected.subagents.some((entry) => entry.source.subagentId === toolName);
 }
 
 export function applyDefaultToolPolicy(

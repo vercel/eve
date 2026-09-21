@@ -96,6 +96,7 @@ export async function compileAgentConfig(
     outputSchema?: JsonObject;
     reasoning?: CompiledAgentDefinition["reasoning"];
     source: ModuleSourceRef;
+    tool?: boolean;
     limits?: CompiledAgentDefinition["limits"];
   } = {
     compaction,
@@ -142,6 +143,10 @@ export async function compileAgentConfig(
 
   if (definition.reasoning !== undefined) {
     compiledConfig.reasoning = definition.reasoning;
+  }
+
+  if (definition.tool !== undefined) {
+    compiledConfig.tool = definition.tool;
   }
 
   if (definition.limits !== undefined) {
@@ -192,10 +197,6 @@ function normalizeExperimentalDefinition(
   }
 
   const compiledExperimental: Mutable<NonNullable<CompiledAgentDefinition["experimental"]>> = {};
-
-  if (experimental.instrumentationProviders !== undefined) {
-    compiledExperimental.instrumentationProviders = experimental.instrumentationProviders;
-  }
 
   if (experimental.workflow !== undefined) {
     compiledExperimental.workflow = {

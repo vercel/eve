@@ -24,17 +24,16 @@ export default defineEval({
     const started = await t.send(
       `Call the stock-price subagent exactly once with message 'Call the get_stock_price tool exactly once with ticker "GOOG". After it returns, do not call any tool again; return the result.'. After that single subagent call finishes, do not call any subagent or tool again; include the exact stock price in your final reply.`,
     );
-    started.event("subagent.completed", {
+    started.event("action.result", {
       count: 1,
       data: {
-        backgroundTask: { status: "working" },
-        subagentName: "stock-price",
+        result: { kind: "tool-result", output: { status: "working" }, toolName: "stock-price" },
       },
     });
 
     // Background delegation returns its receipt first. The child's approval
     // then wakes the parent in a separate server-initiated turn.
-    const blocked = await waitForInput(t, t, "get_stock_price");
+    const blocked = await waitForInput(t, started.session, "get_stock_price");
     const resumed = await blocked.respondAll("approve");
     t.check(resumed.inputRequests, equals([]));
     resumed.noFailedActions();
@@ -44,9 +43,7 @@ export default defineEval({
     completed.messageIncludes(GOOG_PRICE);
 
     t.succeeded();
-    t.calledSubagent("stock-price", {
-      count: 1,
-    });
+    t.calledSubagent("stock-price", { status: "completed", count: 1 });
     t.noFailedActions();
   },
 });

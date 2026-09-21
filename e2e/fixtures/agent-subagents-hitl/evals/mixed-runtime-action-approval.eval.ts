@@ -20,28 +20,42 @@ export default defineEval({
         `After both results arrive, reply with exactly ${COLLISION_MARKER}.`,
       ].join("\n"),
     );
+    const session = parked.session;
 
     parked.calledTool("collision-gate", { count: 1, status: "pending" });
-    parked.calledSubagent("collision-child", { count: 1, status: "completed" });
+    parked.calledSubagent("collision-child", { count: 1, status: "working" });
     parked.eventOrder([
       { type: "actions.requested" },
-      { type: "subagent.completed" },
+      {
+        type: "action.result",
+        data: {
+          result: {
+            kind: "tool-result",
+            toolName: "collision-child",
+            output: { status: "working" },
+          },
+        },
+      },
       { type: "input.requested" },
       { type: "session.waiting" },
     ]);
-    t.requireInputRequest({ display: "confirmation", toolName: "collision-gate" });
+    session.requireInputRequest({ display: "confirmation", toolName: "collision-gate" });
 
-    const resumed = await t.respondAll("approve");
+    const resumed = await session.respondAll("approve");
     resumed.expectOk();
     const completed = resumed.message?.includes(COLLISION_MARKER)
       ? resumed
-      : await waitForMessage(t, t, COLLISION_MARKER);
+      : await waitForMessage(t, resumed.session, COLLISION_MARKER);
     completed.messageIncludes(COLLISION_MARKER);
 
     t.succeeded();
     t.noFailedActions();
     t.calledTool("collision-gate", { count: 1, status: "completed" });
     t.calledSubagent("collision-child", { count: 1, status: "completed" });
+    t.event("subagent.completed", {
+      count: 1,
+      data: { callId: "collision-child-call", subagentName: "collision-child" },
+    });
   },
 });
 

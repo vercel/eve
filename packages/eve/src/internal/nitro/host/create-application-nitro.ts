@@ -57,6 +57,10 @@ const WORKFLOW_ALIAS_SPECIFIERS = [
   "workflow/internal/private",
   "workflow/runtime",
 ] as const;
+const INSTRUMENTATION_ALIAS_PATHS = {
+  "eve/instrumentation": "src/public/instrumentation/index.ts",
+  "eve/instrumentation/otel": "src/public/instrumentation/otel.ts",
+} as const;
 const WORKFLOW_TRANSFORM_PATCHED = Symbol("eve.workflow-transform-patched");
 const WORKFLOW_CACHE_PATH_FRAGMENT = "/.eve/workflow-cache/";
 
@@ -77,10 +81,10 @@ function resolveProductionNitroPreset(): "vercel" | undefined {
   return process.env.VERCEL ? "vercel" : undefined;
 }
 
-/** Whether any agent needs the dynamic Workflow sandbox runtime. */
-function manifestEnablesWorkflow(manifest: CompiledAgentManifest): boolean {
+/** Whether any agent exposes a generated-program tool that needs the workflow sandbox runtime. */
+function manifestHasWorkflowProgram(manifest: CompiledAgentManifest): boolean {
   const nodes = [manifest, ...manifest.subagents.map((subagent) => subagent.agent)];
-  return nodes.some((node) => node.workflowTool !== undefined);
+  return nodes.some((node) => node.tools.some((tool) => tool.workflowProgram !== undefined));
 }
 
 function manifestHasWebSocketChannel(manifest: CompiledAgentManifest): boolean {
@@ -389,29 +393,8 @@ function addWorkflowModuleSideEffectsPlugin(nitro: Nitro, workflowBuildDir: stri
 
 function addNitroStepModuleSideEffectsPlugin(
   nitro: Nitro,
-  input: {
-    stepEntrypointPath: string;
-  },
-): () => void {
-  let cachedStepTransformTargets: Set<string> | null = null;
-
-  const getStepTransformTargets = async (): Promise<Set<string>> => {
-    if (cachedStepTransformTargets !== null) {
-      return cachedStepTransformTargets;
-    }
-
-    cachedStepTransformTargets = await collectNitroStepTransformTargets(
-      input.stepEntrypointPath,
-      nitro.options.rootDir,
-    );
-    return cachedStepTransformTargets;
-  };
-
-  const clearCachedStepTransformTargets = () => {
-    cachedStepTransformTargets = null;
-  };
-  nitro.hooks.hook("build:before", clearCachedStepTransformTargets);
-
+  getStepTransformTargets: () => Promise<Set<string>>,
+): void {
   nitro.hooks.hook("rollup:before", (_nitro, config) => {
     if (!Array.isArray(config.plugins)) {
       return;
@@ -438,8 +421,6 @@ function addNitroStepModuleSideEffectsPlugin(
       },
     });
   });
-
-  return clearCachedStepTransformTargets;
 }
 
 /**
@@ -449,29 +430,8 @@ function addNitroStepModuleSideEffectsPlugin(
  */
 function addNitroStepTransformPlugin(
   nitro: Nitro,
-  input: {
-    stepEntrypointPath: string;
-  },
-): () => void {
-  let cachedStepTransformTargets: Set<string> | null = null;
-
-  const getStepTransformTargets = async (): Promise<Set<string>> => {
-    if (cachedStepTransformTargets !== null) {
-      return cachedStepTransformTargets;
-    }
-
-    cachedStepTransformTargets = await collectNitroStepTransformTargets(
-      input.stepEntrypointPath,
-      nitro.options.rootDir,
-    );
-    return cachedStepTransformTargets;
-  };
-
-  const clearCachedStepTransformTargets = () => {
-    cachedStepTransformTargets = null;
-  };
-  nitro.hooks.hook("build:before", clearCachedStepTransformTargets);
-
+  getStepTransformTargets: () => Promise<Set<string>>,
+): void {
   nitro.hooks.hook("rollup:before", (_nitro, config) => {
     if (!Array.isArray(config.plugins)) {
       return;
@@ -503,8 +463,6 @@ function addNitroStepTransformPlugin(
       name: "eve:workflow-step-transform",
     });
   });
-
-  return clearCachedStepTransformTargets;
 }
 
 /**
@@ -639,9 +597,9 @@ function createApplicationNitroBundlerConfiguration(
     extensionScopePlugin,
   ].filter((plugin) => plugin !== null);
   const nitroRolldownConfig = {
-    ...createNitroBundlerConfig(nitroBundlerPlugins),
     tsconfig: resolveAuthoredTsConfigPath(preparedHost.appRoot),
   };
+  // Nitro inherits rollupConfig in its Rolldown builder, concatenating plugin arrays.
   const nitroRollupConfig = createNitroBundlerConfig(nitroBundlerPlugins);
   const tracedAppDependencies = collectHostedTraceDependencies(
     preparedHost,
@@ -662,7 +620,7 @@ function createApplicationNitroPlugins(preparedHost: PreparedApplicationHost): s
     preparedHost.compiledArtifacts.bootstrapPath,
     preparedHost.compiledArtifacts.workflowWorldPluginPath,
   ];
-  if (manifestEnablesWorkflow(preparedHost.compileResult.manifest)) {
+  if (manifestHasWorkflowProgram(preparedHost.compileResult.manifest)) {
     nitroPlugins.push(
       resolvePackageSourceFilePath("src/internal/nitro/host/workflow-sandbox-runtime-plugin.ts"),
     );
@@ -683,6 +641,9 @@ function configureSharedApplicationNitro(
   for (const [specifier, resolvedPath] of Object.entries(workflowAliases)) {
     nitro.options.alias[specifier] = resolvedPath;
   }
+  for (const [specifier, sourcePath] of Object.entries(INSTRUMENTATION_ALIAS_PATHS)) {
+    nitro.options.alias[specifier] = resolvePackageSourceFilePath(sourcePath);
+  }
   addWorkflowModuleSideEffectsPlugin(nitro, preparedHost.workflowBuildDir);
   patchWorkflowTransformExcludePath(nitro, preparedHost.workflowBuildDir);
 
@@ -697,10 +658,16 @@ function configureSharedApplicationNitro(
 }
 
 function configureNitroStepPlugins(nitro: Nitro, stepEntrypointPath: string): Array<() => void> {
-  return [
-    addNitroStepModuleSideEffectsPlugin(nitro, { stepEntrypointPath }),
-    addNitroStepTransformPlugin(nitro, { stepEntrypointPath }),
-  ];
+  let targets: Promise<Set<string>> | undefined;
+  const getTargets = () =>
+    (targets ??= collectNitroStepTransformTargets(stepEntrypointPath, nitro.options.rootDir));
+  const invalidate = () => {
+    targets = undefined;
+  };
+  nitro.hooks.hook("build:before", invalidate);
+  addNitroStepModuleSideEffectsPlugin(nitro, getTargets);
+  addNitroStepTransformPlugin(nitro, getTargets);
+  return [invalidate];
 }
 
 function externalizeDevelopmentWorkflowBundle(

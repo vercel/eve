@@ -58,11 +58,11 @@ function createAcceptedResponse() {
   );
 }
 
-function createSessionNotActiveResponse() {
+function createSessionNotReadyResponse() {
   return Response.json(
     {
-      code: "session_not_active",
-      error: "The session is no longer active.",
+      code: "session_not_ready",
+      error: "The session is not ready to accept messages yet.",
       ok: false,
     },
     { status: 409 },
@@ -296,13 +296,15 @@ describe("ClientSession", () => {
     await expect(session.cancel()).rejects.toThrow("Cancel route returned an invalid response");
   });
 
-  it("retries session_not_active with exponential backoff", async () => {
+  it("retries session_not_ready beyond three seconds with current headers", async () => {
     let headerResolution = 0;
     const observedHeaders: string[] = [];
-    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (_request, init) => {
+    const observedPaths: string[] = [];
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (request, init) => {
+      observedPaths.push(new URL(String(request)).pathname);
       observedHeaders.push(new Headers(init?.headers).get("x-attempt") ?? "");
-      return fetchMock.mock.calls.length <= 3
-        ? createSessionNotActiveResponse()
+      return fetchMock.mock.calls.length <= 4
+        ? createSessionNotReadyResponse()
         : createAcceptedResponse();
     });
     const session = createSession(
@@ -331,19 +333,25 @@ describe("ClientSession", () => {
       await vi.advanceTimersByTimeAsync(999);
       expect(fetchMock).toHaveBeenCalledTimes(3);
       await vi.advanceTimersByTimeAsync(1);
+      expect(fetchMock).toHaveBeenCalledTimes(4);
+
+      await vi.advanceTimersByTimeAsync(1_999);
+      expect(fetchMock).toHaveBeenCalledTimes(4);
+      await vi.advanceTimersByTimeAsync(1);
       await expect(sent).resolves.toMatchObject({ sessionId: "session_1" });
     } finally {
       vi.useRealTimers();
     }
 
-    expect(fetchMock).toHaveBeenCalledTimes(4);
-    expect(observedHeaders).toEqual(["1", "2", "3", "4"]);
+    expect(fetchMock).toHaveBeenCalledTimes(5);
+    expect(observedHeaders).toEqual(["1", "2", "3", "4", "5"]);
+    expect(new Set(observedPaths)).toEqual(new Set(["/eve/v1/session/session_1"]));
   });
 
-  it("exposes the typed session_not_active conflict after three retries", async () => {
+  it("exposes the typed session_not_ready conflict after the readiness deadline", async () => {
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
-      .mockImplementation(async () => createSessionNotActiveResponse());
+      .mockImplementation(async () => createSessionNotReadyResponse());
     const session = createSession({ sessionId: "session_1", streamIndex: 0 });
 
     vi.useFakeTimers();
@@ -358,47 +366,47 @@ describe("ClientSession", () => {
 
     expect(error).toBeInstanceOf(ClientError);
     expect(error).toMatchObject({
-      code: "session_not_active",
-      message: "The session is no longer active.",
+      code: "session_not_ready",
+      message: "The session is not ready to accept messages yet.",
       status: 409,
     });
-    expect(fetchMock).toHaveBeenCalledTimes(4);
+    expect(fetchMock).toHaveBeenCalledTimes(14);
   });
 
-  it("does not retry another conflict from send", async () => {
+  it.each(["session_not_active", "another_conflict"])(
+    "does not retry %s from send",
+    async (code) => {
+      const fetchMock = vi
+        .spyOn(globalThis, "fetch")
+        .mockResolvedValue(
+          Response.json({ code, error: "The request conflicts.", ok: false }, { status: 409 }),
+        );
+      const session = createSession({ sessionId: "session_1", streamIndex: 0 });
+
+      await expect(session.send("conflict")).rejects.toMatchObject({
+        code,
+        status: 409,
+      });
+      expect(fetchMock).toHaveBeenCalledOnce();
+    },
+  );
+
+  it("does not retry session_not_ready from respond", async () => {
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
-      .mockResolvedValue(
-        Response.json(
-          { code: "another_conflict", error: "The request conflicts.", ok: false },
-          { status: 409 },
-        ),
-      );
-    const session = createSession({ sessionId: "session_1", streamIndex: 0 });
-
-    await expect(session.send("conflict")).rejects.toMatchObject({
-      code: "another_conflict",
-      status: 409,
-    });
-    expect(fetchMock).toHaveBeenCalledOnce();
-  });
-
-  it("does not retry session_not_active from respond", async () => {
-    const fetchMock = vi
-      .spyOn(globalThis, "fetch")
-      .mockImplementation(async () => createSessionNotActiveResponse());
+      .mockImplementation(async () => createSessionNotReadyResponse());
     const session = createSession({ sessionId: "session_1", streamIndex: 0 });
 
     await expect(
       session.respond([{ requestId: "approval_1", optionId: "approve" }]),
-    ).rejects.toMatchObject({ code: "session_not_active", status: 409 });
+    ).rejects.toMatchObject({ code: "session_not_ready", status: 409 });
     expect(fetchMock).toHaveBeenCalledOnce();
   });
 
-  it("stops session_not_active backoff when send is aborted", async () => {
+  it("stops session_not_ready backoff when send is aborted", async () => {
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
-      .mockImplementation(async () => createSessionNotActiveResponse());
+      .mockImplementation(async () => createSessionNotReadyResponse());
     const session = createSession({ sessionId: "session_1", streamIndex: 0 });
     const controller = new AbortController();
 
@@ -738,6 +746,23 @@ describe("ClientSession", () => {
     const result = await (await session.send("first")).result();
 
     expect(result.inputRequests.map((request) => request.requestId)).toEqual(["approval_1"]);
+  });
+
+  it("does not rewind the shared cursor when a historical reader stops early", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      createStreamResponse([
+        {
+          type: "session.waiting",
+          data: { continuationToken: "session-id", wait: "next-user-message" },
+        },
+      ]),
+    );
+    const session = createSession({ sessionId: "session_1", streamIndex: 7 });
+    for await (const _event of session.stream({ startIndex: 0 })) {
+      expect(session.state.streamIndex).toBe(7);
+      break;
+    }
+    expect(session.state.streamIndex).toBe(7);
   });
 
   it("opens a one-shot tail-relative stream without advancing the absolute cursor", async () => {

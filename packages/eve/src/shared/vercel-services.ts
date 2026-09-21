@@ -84,6 +84,7 @@ export type EveVercelServiceRequestPathRoute = {
 export type EveVercelGeneratedService = {
   readonly buildCommand: string;
   readonly framework: "eve";
+  readonly outputDirectory: ".vercel/output";
   readonly routes: readonly VercelRouteConfig[];
   readonly root: string;
 };
@@ -356,6 +357,7 @@ export async function ensureEveVercelServicesConfig(input: {
       [EVE_SERVICE_NAME]: {
         buildCommand: generatedServiceBuild.buildCommand,
         framework: "eve",
+        outputDirectory: ".vercel/output",
         routes: [createEveServiceRequestPathRoute()],
         root: generatedServiceBuild.root,
       },

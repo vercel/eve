@@ -12,6 +12,7 @@ import {
   type InstrumentationRuntime,
 } from "#instrumentation/runtime.js";
 import { createLogger, formatError } from "#internal/logging.js";
+import { resolveInstrumentationEnvironment } from "#internal/application/dev-environment.js";
 import { AgentSpanIdGenerator } from "#tracing/agent-span-id-generator.js";
 import { ContextAgentTraceStateStore } from "#tracing/agent-trace-context-store.js";
 import { createAgentOtelInstrumentation } from "#tracing/agent-otel-provider.js";
@@ -25,9 +26,8 @@ const log = createLogger("tracing.install-instrumentation-runtime");
 /**
  * Installs the process instrumentation runtime around a collected pipeline.
  *
- * Both layouts land here. `eve dev`'s zero-config default and an authored
- * `agent/instrumentation/` directory differ only in where the declared values
- * came from, so sharing the install keeps them on one runtime path.
+ * `eve dev`'s zero-config default and an authored `agent/instrumentation/`
+ * directory differ only in where the declared values came from.
  *
  * A directory that declared no OpenTelemetry still gets a bus: its providers
  * see every event, they just have no spans to hang them on.
@@ -35,7 +35,6 @@ const log = createLogger("tracing.install-instrumentation-runtime");
 export function installInstrumentationRuntime(input: {
   readonly collected: CollectedOtel;
   readonly frameworkVersion: string;
-  readonly instrumentationProviders?: boolean;
   readonly providers: readonly InstrumentationProviderDefinition[];
   readonly runtimeContextResolvers?: readonly RuntimeContextResolver[];
   readonly serviceName: string;
@@ -54,6 +53,7 @@ export function installInstrumentationRuntime(input: {
       serviceName: input.serviceName,
     });
     const agentOtel = createAgentOtelInstrumentation({
+      environment: resolveInstrumentationEnvironment(),
       frameworkVersion: input.frameworkVersion,
       idGenerator: otelRuntime.idGenerator,
       recordInputs: input.collected.settings.recordInputs,
@@ -92,7 +92,6 @@ export function installInstrumentationRuntime(input: {
       serialBefore,
     }),
     idGenerator: otelRuntime?.idGenerator ?? new AgentSpanIdGenerator(),
-    instrumentationProviders: input.instrumentationProviders,
     memoryOperations: otelRuntime !== undefined || input.providers.some(hasMemoryOperationHandler),
     otelSettings: input.collected.declared ? input.collected.settings : undefined,
     ownsAgentSpans: otelRuntime !== undefined,

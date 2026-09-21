@@ -7,7 +7,7 @@ import searchRegistry, {
   selectIntegrationPage,
   selectIntegrations,
   type CatalogEntry,
-} from "./extension/tools/search_registry.js";
+} from "./extension/subagents/agent/tools/search_registry.js";
 
 const INDEX = {
   items: [
@@ -31,23 +31,31 @@ const INDEX = {
       files: [{ target: "agent/connections/notion.ts" }],
     },
     {
-      name: "linear",
-      title: "Linear",
+      name: "channel/linear",
+      title: "Linear Agent",
       description: "Receive delegated Linear work.",
       meta: {
+        eve: { setup: { package: "eve", bin: "eve", args: ["integration", "setup", "linear"] } },
+      },
+    },
+    {
+      name: "connection/linear",
+      title: "Linear MCP",
+      description: "Search and update Linear through MCP.",
+      meta: {
         eve: {
-          components: [
-            {
-              item: "channel/linear-agent",
-              label: "Linear agent",
-              description: "Delegate Linear work to an agent.",
-            },
-            { item: "connection/linear", label: "Linear connection" },
-          ],
+          setup: {
+            package: "eve",
+            bin: "eve",
+            args: ["integration", "connect", "linear", "mcp.linear.app", "linear"],
+          },
         },
       },
     },
-    { name: "instrumentation/langfuse-tracing", files: [{ target: "agent/instrumentation.ts" }] },
+    {
+      name: "instrumentation/langfuse-tracing",
+      files: [{ target: "agent/instrumentation/langfuse-tracing.ts" }],
+    },
     { name: 42 },
   ],
 };
@@ -70,7 +78,8 @@ describe("parseRegistryIndex", () => {
       "channel/slack",
       "channel/discord",
       "connection/notion",
-      "linear",
+      "channel/linear",
+      "connection/linear",
       "instrumentation/langfuse-tracing",
     ]);
     expect(entries[0]).toEqual({
@@ -83,11 +92,15 @@ describe("parseRegistryIndex", () => {
     });
   });
 
-  it("keeps a bundle's components and leaves its category absent", () => {
-    const bundle = catalog().find((entry) => entry.address === "linear");
-
-    expect(bundle?.category).toBeUndefined();
-    expect(bundle?.components).toEqual(["channel/linear-agent", "connection/linear"]);
+  it("keeps Linear channel and connection entries separate", () => {
+    expect(
+      catalog()
+        .filter((entry) => entry.address.endsWith("/linear"))
+        .map((entry) => ({ address: entry.address, category: entry.category })),
+    ).toEqual([
+      { address: "channel/linear", category: "channel" },
+      { address: "connection/linear", category: "connection" },
+    ]);
   });
 
   it("recognizes memory registry items", () => {
@@ -115,11 +128,11 @@ describe("parseRegistryIndex", () => {
     expect(
       parseRegistryIndex({
         items: [
-          { name: "experimental/self-modification" },
-          { name: "experimental/self-modification/prod", meta: { eve: { hidden: true } } },
+          { name: "eve/self-modification" },
+          { name: "experimental/self-modification", meta: { eve: { hidden: true } } },
         ],
       }).map((entry) => entry.address),
-    ).toEqual(["experimental/self-modification"]);
+    ).toEqual(["eve/self-modification"]);
   });
 
   it("reads whether an item declares a setup flow, used by selfmod__registry_add's split rule", () => {
@@ -171,20 +184,20 @@ describe("selectIntegrations", () => {
         entries: catalog(),
         query: "Slack channel integration",
       }).map((row) => row.address),
-    ).toEqual(["channel/slack", "channel/discord"]);
+    ).toEqual(["channel/slack", "channel/discord", "channel/linear"]);
     expect(
       selectIntegrations({ entries: catalog(), query: "linear agent" }).map((row) => row.address),
-    ).toEqual(["linear"]);
+    ).toEqual(["channel/linear", "connection/linear"]);
     expect(
       selectIntegrations({ entries: catalog(), query: "agent notion" }).map((row) => row.address),
-    ).toEqual(["connection/notion"]);
+    ).toEqual(["connection/notion", "channel/linear"]);
     expect(selectIntegrations({ entries: catalog(), query: "nothing here" })).toEqual([]);
   });
 
-  it("includes a bundle whose components match the requested category", () => {
+  it("filters integrations by their address category", () => {
     expect(
       selectIntegrations({ category: "channel", entries: catalog() }).map((row) => row.address),
-    ).toEqual(["channel/slack", "channel/discord", "linear"]);
+    ).toEqual(["channel/slack", "channel/discord", "channel/linear"]);
   });
 
   it("filters memory integrations", () => {
@@ -203,7 +216,7 @@ describe("selectIntegrations", () => {
 
   it("bounds the result count", () => {
     expect(selectIntegrations({ entries: catalog(), limit: 2 })).toHaveLength(2);
-    expect(selectIntegrations({ entries: catalog(), limit: 500 })).toHaveLength(5);
+    expect(selectIntegrations({ entries: catalog(), limit: 500 })).toHaveLength(6);
   });
 
   it("reports totals and provides an offset for the next page", () => {
@@ -225,12 +238,15 @@ describe("selectIntegrations", () => {
         },
       ],
       nextOffset: 2,
-      total: 5,
+      total: 6,
     });
     expect(selectIntegrationPage({ entries: catalog(), limit: 2, offset: 4 })).toMatchObject({
       hasMore: false,
-      items: [{ address: "instrumentation/langfuse-tracing", title: "Langfuse Tracing" }],
-      total: 5,
+      items: [
+        { address: "connection/linear", title: "Linear MCP" },
+        { address: "instrumentation/langfuse-tracing", title: "Langfuse Tracing" },
+      ],
+      total: 6,
     });
   });
 
@@ -328,10 +344,10 @@ describe("selfmod__search_registry", () => {
           title: "Discord",
         },
         {
-          address: "linear",
-          components: ["channel/linear-agent", "connection/linear"],
+          address: "channel/linear",
+          category: "channel",
           description: "Receive delegated Linear work.",
-          title: "Linear",
+          title: "Linear Agent",
         },
       ],
       total: 3,

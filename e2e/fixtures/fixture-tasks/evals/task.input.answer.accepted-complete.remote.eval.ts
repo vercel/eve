@@ -29,12 +29,15 @@ export default defineTaskEval({
     const started = await t.send("TASK-C8-REMOTE-HITL");
     started.expectOk();
     started.messageIncludes("TASK-C8-STARTED");
-    started.event("subagent.completed", {
+    started.event("action.result", {
       count: 1,
       data: {
-        backgroundTask: { status: "working" },
-        callId: "task-c8-remote-worker",
-        subagentName: "remote-loopback",
+        result: {
+          kind: "tool-result",
+          output: { status: "working" },
+          callId: "task-c8-remote-worker",
+          toolName: "remote-loopback",
+        },
       },
     });
     const taskId = requireBackgroundTaskId(started);
@@ -44,7 +47,7 @@ export default defineTaskEval({
       data: { requests: [{ action: { toolName: "remote_gate" } }] },
     }).label("remote input callback reaches the parent");
     t.log("Waiting for the remote input callback to reach the parent.");
-    const gate = await waitForTaskInput(t, t, "remote_gate");
+    const gate = await waitForTaskInput(t, started.session, "remote_gate");
     const answered = await gate.session.respond([
       {
         optionId: "approve",

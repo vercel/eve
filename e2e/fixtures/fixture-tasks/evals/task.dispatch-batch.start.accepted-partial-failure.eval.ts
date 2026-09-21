@@ -1,3 +1,4 @@
+import { taskReceipts } from "@eve-e2e/config/task-receipts";
 import { type EveEvalTurn } from "eve/evals";
 import { satisfies } from "eve/evals/expect";
 
@@ -52,31 +53,30 @@ export default defineTaskEval({
     const firstTaskId = requireReceiptTaskId(receipts, FIRST_CALL_ID);
     const failedTaskId = requireReceiptTaskId(receipts, FAILED_CALL_ID);
     const thirdTaskId = requireReceiptTaskId(receipts, THIRD_CALL_ID);
-    started.event("subagent.completed", {
+    started.event("action.result", {
       count: 2,
       data: {
-        backgroundTask: { status: "working" },
-        subagentName: "busy-worker",
+        result: { kind: "tool-result", output: { status: "working" }, toolName: "busy-worker" },
       },
     });
 
     const firstCompleted = await waitForCompletedTask(
       t,
-      t,
+      started.session,
       "TASK-D6-PARTIAL-FANOUT-VERIFY",
       firstTaskId,
     );
     assertCompletedBusyWorker(firstCompleted, firstTaskId, "TASK-D6-FIRST-SUCCESS");
     const thirdCompleted = await waitForCompletedTask(
       t,
-      t,
+      started.session,
       "TASK-D6-PARTIAL-FANOUT-VERIFY",
       thirdTaskId,
     );
     assertCompletedBusyWorker(thirdCompleted, thirdTaskId, "TASK-D6-THIRD-SUCCESS");
     const failed = await waitForTaskStatus(
       t,
-      t,
+      started.session,
       "TASK-D6-PARTIAL-FANOUT-UNKNOWN",
       failedTaskId,
       "failed",
@@ -91,11 +91,7 @@ interface BackgroundReceipt {
 }
 
 function backgroundReceipts(turn: EveEvalTurn): readonly BackgroundReceipt[] {
-  return turn.events.flatMap((event) =>
-    event.type === "subagent.completed" && event.data.backgroundTask !== undefined
-      ? [{ callId: event.data.callId, taskId: event.data.backgroundTask.taskId }]
-      : [],
-  );
+  return taskReceipts(turn.events);
 }
 
 function requireReceiptTaskId(receipts: readonly BackgroundReceipt[], callId: string): string {

@@ -18,13 +18,14 @@ export default defineEval({
   description: "HITL regression (#533): a resolved approval park replays on the next turn.",
   async test(t) {
     const parked = await t.send(`Call the \`${TOOL_NAME}\` tool with note "replay-probe".`);
+    const session = parked.session;
     parked.calledTool(TOOL_NAME, { status: "pending", count: 1 });
-    t.requireInputRequest({
+    session.requireInputRequest({
       display: "confirmation",
       toolName: TOOL_NAME,
     });
 
-    const approved = await t.respondAll("approve");
+    const approved = await session.respondAll("approve");
     approved.expectOk();
     approved.event("action.result", {
       data: {
@@ -38,7 +39,7 @@ export default defineEval({
       count: 1,
     });
 
-    const followup = await t.send("Reply with exactly DYNAMIC-REPLAY-OK.");
+    const followup = await session.send("Reply with exactly DYNAMIC-REPLAY-OK.");
     followup.expectOk();
     followup.messageIncludes(/DYNAMIC-REPLAY-OK/i);
 

@@ -15,12 +15,15 @@ export default defineTaskEval({
     const started = await t.send("TASK-A3-DISPATCH-START-FAILURE");
     started.expectOk();
     started.messageIncludes("TASK-A3-PARENT-SURVIVED");
-    started.event("subagent.completed", {
+    started.event("action.result", {
       count: 1,
       data: {
-        backgroundTask: { status: "working" },
-        callId: CALL_ID,
-        subagentName: "unstartable-worker",
+        result: {
+          kind: "tool-result",
+          output: { status: "working" },
+          callId: CALL_ID,
+          toolName: "unstartable-worker",
+        },
       },
     });
     const taskId = requireBackgroundTaskId(started);
@@ -45,7 +48,13 @@ export default defineTaskEval({
       );
     });
 
-    const failed = await waitForTaskStatus(t, t, "TASK-A3-UNKNOWN-VERIFY", taskId, "failed");
+    const failed = await waitForTaskStatus(
+      t,
+      started.session,
+      "TASK-A3-UNKNOWN-VERIFY",
+      taskId,
+      "failed",
+    );
     failed.expectOk();
     failed.messageIncludes("TASK-A3-UNKNOWN");
     const view = requireTaskView(failed.requireToolCall("task_cancel").output, taskId);

@@ -6,7 +6,7 @@ import { appendEnv } from "../../append-env.js";
 import type { PackageManagerKind } from "../../package-manager.js";
 import { pinnedNodeEngineMajor, type NodeEngineOverride } from "../../node-engine.js";
 import { pathExists, writeTextFile } from "../files.js";
-import { resolveVersionToken } from "../version-tokens.js";
+import { DEFAULT_CONNECT_PACKAGE_VERSION, resolveVersionToken } from "../version-tokens.js";
 import {
   applyPackageManagerWorkspaceConfiguration,
   isPackageManagerWorkspaceMember,
@@ -32,7 +32,6 @@ export type { WebAuthentication, WebPackageVersions } from "./web-options.js";
 export const SLACK_CHANNEL_DEFAULT_ROUTE = "/eve/v1/slack";
 export const DEFAULT_SLACK_CONNECTOR_SLUG = "my-agent";
 
-const DEFAULT_CONNECT_PACKAGE_VERSION = "__VERCEL_CONNECT_VERSION__";
 const NEXT_TYPESCRIPT_PACKAGE_VERSION = "6.0.3";
 const CONNECT_PACKAGE_NAME = "@vercel/connect";
 const NEXT_PACKAGE_NAME = "next";
@@ -427,6 +426,8 @@ async function findCompetingNextConfigFiles(projectRoot: string): Promise<string
 
 export interface EnsureChannelOptions {
   projectRoot: string;
+  /** Root for environment files shared by workspace agents. */
+  environmentRoot?: string;
   kind: ChannelKind;
   /** Manager that owns generated project configuration. Defaults to pnpm. */
   packageManager?: PackageManagerKind;
@@ -613,7 +614,7 @@ async function ensureSlackChannel(
     template = buildSlackConnectTemplate(connectorUid);
   } else {
     template = SLACK_ENV_TEMPLATE;
-    const envExamplePath = join(options.projectRoot, ".env.example");
+    const envExamplePath = join(options.environmentRoot ?? options.projectRoot, ".env.example");
     const envExampleExisted = await pathExists(envExamplePath);
     envExampleRollback = {
       path: envExamplePath,

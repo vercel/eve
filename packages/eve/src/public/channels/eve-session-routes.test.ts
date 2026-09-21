@@ -4,6 +4,7 @@ import type { RouteHandlerArgs } from "#channel/routes.js";
 import type { Session } from "#channel/session.js";
 import { attachRouteSessionCreator } from "#internal/nitro/routes/channel-route-context.js";
 import { mockChannelContext } from "#internal/testing/mocks/mock-channel-operations.js";
+import { writeForwardedParentSessionBaggage } from "#protocol/baggage.js";
 import { none } from "#public/channels/auth.js";
 import { eveChannel } from "#public/channels/eve.js";
 
@@ -46,6 +47,69 @@ function createArgs(session = createFixedSession()): RouteHandlerArgs {
 }
 
 describe("eve ID-addressed session routes", () => {
+  it.each([
+    ["without a request body", undefined],
+    ["with an empty JSON object", "{}"],
+  ])("creates and parks a conversation %s", async (_description, body) => {
+    const createSession = vi.fn().mockResolvedValue({
+      events: new ReadableStream(),
+      sessionId: "wrun_A",
+    });
+    const args = attachRouteSessionCreator(createArgs(), createSession);
+    const onMessage = vi.fn();
+
+    const response = await route("POST", "/eve/v1/session", {
+      auth: none(),
+      onMessage,
+    })(
+      new Request("https://eve.test/eve/v1/session", {
+        body,
+        headers: body === undefined ? undefined : { "content-type": "application/json" },
+        method: "POST",
+      }),
+      args,
+    );
+
+    expect(response.status).toBe(202);
+    await expect(response.json()).resolves.toEqual({
+      ok: true,
+      sessionId: "wrun_A",
+      status: "accepted",
+    });
+    expect(onMessage).not.toHaveBeenCalled();
+    expect(createSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        capabilities: { requestInput: true },
+        input: {
+          context: undefined,
+          message: undefined,
+          outputSchema: undefined,
+        },
+        mode: "conversation",
+      }),
+    );
+  });
+
+  it.each([
+    ["malformed JSON", "{"],
+    ["a non-object JSON value", "[]"],
+  ])("rejects %s when creating a session", async (_description, body) => {
+    const createSession = vi.fn();
+    const args = attachRouteSessionCreator(createArgs(), createSession);
+
+    const response = await route("POST", "/eve/v1/session")(
+      new Request("https://eve.test/eve/v1/session", {
+        body,
+        headers: { "content-type": "application/json" },
+        method: "POST",
+      }),
+      args,
+    );
+
+    expect(response.status).toBe(400);
+    expect(createSession).not.toHaveBeenCalled();
+  });
+
   it("creates a session without a continuation token", async () => {
     const createSession = vi.fn().mockResolvedValue({
       events: new ReadableStream(),
@@ -133,6 +197,89 @@ describe("eve ID-addressed session routes", () => {
     );
   });
 
+  it("preserves the dispatch caller when the transport trace advances through ingress", async () => {
+    const createSession = vi.fn().mockResolvedValue({
+      events: new ReadableStream(),
+      sessionId: "wrun_A",
+    });
+    const args = attachRouteSessionCreator(createArgs(), createSession);
+
+    const response = await route("POST", "/eve/v1/session")(
+      new Request("https://eve.test/eve/v1/session", {
+        body: JSON.stringify({
+          callback: {
+            callId: "call-1",
+            subagentName: "research",
+            token: "tok123",
+            url: "https://caller.example.com/eve/v1/callback/tok123",
+          },
+          message: "hello",
+          mode: "conversation",
+        }),
+        headers: {
+          "content-type": "application/json",
+          tracestate: `eve=${"2".repeat(16)}`,
+          traceparent: `00-${"1".repeat(32)}-${"3".repeat(16)}-01`,
+        },
+        method: "POST",
+      }),
+      args,
+    );
+
+    expect(response.status).toBe(202);
+    expect(createSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        parentTraceContext: {
+          isRemote: true,
+          spanId: "2".repeat(16),
+          traceFlags: 1,
+          traceId: "1".repeat(32),
+        },
+      }),
+    );
+  });
+
+  it("falls back to transport correlation when the dispatch tracestate entry is malformed", async () => {
+    const createSession = vi.fn().mockResolvedValue({
+      events: new ReadableStream(),
+      sessionId: "wrun_A",
+    });
+    const args = attachRouteSessionCreator(createArgs(), createSession);
+
+    const response = await route("POST", "/eve/v1/session")(
+      new Request("https://eve.test/eve/v1/session", {
+        body: JSON.stringify({
+          callback: {
+            callId: "call-1",
+            subagentName: "research",
+            token: "tok123",
+            url: "https://caller.example.com/eve/v1/callback/tok123",
+          },
+          message: "hello",
+        }),
+        headers: {
+          "content-type": "application/json",
+          tracestate: "eve=malformed",
+          traceparent: `00-${"1".repeat(32)}-${"3".repeat(16)}-01`,
+        },
+        method: "POST",
+      }),
+      args,
+    );
+
+    expect(response.status).toBe(202);
+    expect(createSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        parentTraceContext: {
+          isRemote: true,
+          spanId: "3".repeat(16),
+          traceFlags: 1,
+          traceId: "1".repeat(32),
+        },
+      }),
+    );
+  });
+
   it.each([true, false])(
     "accepts trace correlation only with a callback (%s)",
     async (callback) => {
@@ -162,6 +309,7 @@ describe("eve ID-addressed session routes", () => {
           headers: {
             "content-type": "application/json",
             baggage: "eve.conversation.id=original-conversation",
+            tracestate: `eve=${"3".repeat(16)}`,
             traceparent: `00-${"1".repeat(32)}-${"2".repeat(16)}-01`,
           },
           method: "POST",
@@ -181,7 +329,7 @@ describe("eve ID-addressed session routes", () => {
           parentTraceContext: callback
             ? {
                 isRemote: true,
-                spanId: "2".repeat(16),
+                spanId: "3".repeat(16),
                 traceFlags: 1,
                 traceId: "1".repeat(32),
               }
@@ -189,6 +337,55 @@ describe("eve ID-addressed session routes", () => {
         }),
       );
       expect(trustedForwarders).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([true, false])(
+    "promotes remote parent lineage only from a trusted forwarder (%s)",
+    async (trusted) => {
+      const createSession = vi.fn().mockResolvedValue({
+        events: new ReadableStream(),
+        sessionId: "wrun_A",
+      });
+      const args = attachRouteSessionCreator(createArgs(), createSession);
+      const trustedForwarders = vi.fn(() => trusted);
+      const parent = {
+        callId: "call-1",
+        rootSessionId: "root-session",
+        sessionId: "parent-session",
+        turn: { id: "turn-1", sequence: 2 },
+      } as const;
+
+      const response = await route("POST", "/eve/v1/session", {
+        auth: none(),
+        trustedForwarders,
+      })(
+        new Request("https://eve.test/eve/v1/session", {
+          body: JSON.stringify({
+            callback: {
+              callId: "call-1",
+              subagentName: "research",
+              token: "tok123",
+              url: "https://caller.example.com/eve/v1/callback/tok123",
+            },
+            message: "hello",
+          }),
+          headers: {
+            "content-type": "application/json",
+            baggage: writeForwardedParentSessionBaggage(undefined, parent)!,
+          },
+          method: "POST",
+        }),
+        args,
+      );
+
+      expect(response.status).toBe(202);
+      expect(trustedForwarders).toHaveBeenCalledTimes(1);
+      expect(createSession).toHaveBeenCalledWith(
+        expect.objectContaining({
+          parent: trusted ? parent : undefined,
+        }),
+      );
     },
   );
 

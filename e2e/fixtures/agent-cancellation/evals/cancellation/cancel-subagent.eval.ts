@@ -10,10 +10,11 @@ export default defineEval({
   timeoutMs: 240_000,
 
   async test(t) {
+    const session = await t.session();
     // Explicit directive phrasing keeps the delegation deterministic so a
     // scripted mock responder can drive this eval in the world suites.
-    const parent = await t.start(
-      "Use the Workflow tool exactly once to call the sleeper subagent with message 'Call the wait-for-cancellation tool exactly once and wait until this delegated turn is cancelled.' Return the sleeper result.",
+    const parent = await session.start(
+      "Use the workflow tool exactly once to call the sleeper subagent with message 'Call the wait-for-cancellation tool exactly once and wait until this delegated turn is cancelled.' Return the sleeper result.",
     );
     const called = await parent.waitForEvent("subagent.called", {
       data: { name: "sleeper" },
@@ -52,7 +53,7 @@ export default defineEval({
     parentTurn.notEvent("turn.failed");
     parentTurn.notEvent("session.failed");
 
-    const followUp = await t.send("Reply with exactly CANCELLATION-SUBAGENT-FOLLOW-UP-OK.");
+    const followUp = await session.send("Reply with exactly CANCELLATION-SUBAGENT-FOLLOW-UP-OK.");
     followUp.expectOk();
     followUp.notEvent("turn.cancelled");
     followUp.messageIncludes(/CANCELLATION-SUBAGENT-FOLLOW-UP-OK/i);
@@ -61,7 +62,7 @@ export default defineEval({
     // [Agents] listing as a parked "(cancelled)" handle. A handle leaked as
     // `running` never re-enters the listing, so this catches the abandoned
     // cancelled batch regressing to a permanent leak.
-    const listing = await t.send(
+    const listing = await session.send(
       "Look at the [Agents] listing in your context and reply with the sleeper agent's entry verbatim, including its status.",
     );
     listing.expectOk();
@@ -69,11 +70,11 @@ export default defineEval({
     listing.messageIncludes(/sleeper/i);
     listing.messageIncludes(/\(cancelled\)/);
 
-    const resumed = await t.send(
+    const resumed = await session.send(
       [
-        "Use the Workflow tool exactly once.",
-        `In its JavaScript, call sleeper with agentId ${JSON.stringify(agentId)} and message ${JSON.stringify(RECOVERY_REQUEST)}.`,
-        "Return the inline result and reply with it verbatim. Do not call sleeper outside Workflow.",
+        "Use the workflow tool exactly once.",
+        `In its JavaScript, call ctx.agent for sleeper with agentId ${JSON.stringify(agentId)} and message ${JSON.stringify(RECOVERY_REQUEST)}.`,
+        "Return the inline result and reply with it verbatim. Do not call sleeper outside workflow.",
       ].join(" "),
     );
     resumed.expectOk();

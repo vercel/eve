@@ -61,7 +61,7 @@ export function submitRowIndex(visible: readonly PromptOption<string>[]): number
 }
 
 /**
- * Case-insensitive substring match across an option's label, value, and hints.
+ * Case-insensitive substring match across an option's label, value, hints, and keywords.
  * An empty query returns every option, so the cursor can always scroll the
  * full list; `featured` only shapes the searchable picker's default viewport,
  * not which rows exist.
@@ -80,7 +80,9 @@ export function filterOptions(
       (option.label.toLowerCase().includes(normalizedQuery) ||
         option.value.toLowerCase().includes(normalizedQuery) ||
         (option.hint?.toLowerCase().includes(normalizedQuery) ?? false) ||
-        (option.focusHint?.toLowerCase().includes(normalizedQuery) ?? false)),
+        (option.focusHint?.toLowerCase().includes(normalizedQuery) ?? false) ||
+        (option.keywords?.some((keyword) => keyword.toLowerCase().includes(normalizedQuery)) ??
+          false)),
   );
   if (searchAction !== undefined) {
     matches.push({ value: searchActionValue(query), label: searchAction.label(query) });

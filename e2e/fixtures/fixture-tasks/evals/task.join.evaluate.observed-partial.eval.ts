@@ -1,3 +1,4 @@
+import { taskReceipts } from "@eve-e2e/config/task-receipts";
 import type { EveEvalTurn, InputRequest } from "eve/evals";
 import { equals } from "eve/evals/expect";
 
@@ -29,8 +30,8 @@ export default defineTaskEval({
   async test(t) {
     const started = (await t.send("TASK-FAN-IN")).expectOk();
     started.messageIncludes("TASK-FAN-IN-STARTED");
-    started.calledSubagent("fanout-worker", { count: MARKERS.length });
-    let session: TaskEvalSessionDriver = t;
+    started.calledSubagent("fanout-worker", { status: "working", count: MARKERS.length });
+    let session: TaskEvalSessionDriver = started.session;
     const requests = new Map<string, InputRequest>();
     const setupEvents: EveEvalTurn["events"][number][] = [];
     collectRequests(started);
@@ -47,20 +48,14 @@ export default defineTaskEval({
       const called = setupEvents.find(
         (event) => event.type === "subagent.called" && event.data.callId === callId,
       );
-      const receipt = started.events.find(
-        (event) => event.type === "subagent.completed" && event.data.callId === callId,
-      );
-      if (
-        called?.type !== "subagent.called" ||
-        receipt?.type !== "subagent.completed" ||
-        receipt.data.backgroundTask === undefined
-      ) {
+      const receipt = taskReceipts(started.events).find((receipt) => receipt.callId === callId);
+      if (called?.type !== "subagent.called" || receipt === undefined) {
         throw new Error(`No child session and task receipt for ${marker}.`);
       }
       return {
         marker,
         sessionId: called.data.childSessionId,
-        taskId: receipt.data.backgroundTask.taskId,
+        taskId: receipt.taskId,
         turnId: called.data.turnId,
       };
     });
@@ -124,7 +119,7 @@ export default defineTaskEval({
       turn.notEvent("step.started");
     }
     await t.require(reported, equals(true));
-    t.calledSubagent("fanout-worker", { count: 2 });
+    t.calledSubagent("fanout-worker", { status: "completed", count: 2 });
     t.notCalledTool("task_peek");
     t.noFailedActions();
 

@@ -11,12 +11,11 @@ export default defineEval({
   tags: ["stress", "workflow", "concurrent"],
 
   async test(t) {
-    const sessions = Array.from({ length: SESSION_COUNT }, () => t.newSession());
     const firstBatchStartedAt = performance.now();
     const firstTurns = await Promise.all(
-      sessions.map(async (session, index) => {
+      Array.from({ length: SESSION_COUNT }, async (_, index) => {
         const startedAt = performance.now();
-        const result = await session.send(markerFor(index, 1));
+        const result = await t.send(markerFor(index, 1));
 
         return {
           durationMs: performance.now() - startedAt,
@@ -28,9 +27,9 @@ export default defineEval({
     const firstBatchDurationMs = performance.now() - firstBatchStartedAt;
     const secondBatchStartedAt = performance.now();
     const secondTurns = await Promise.all(
-      sessions.map(async (session, index) => {
+      firstTurns.map(async ({ result: first }, index) => {
         const startedAt = performance.now();
-        const result = await session.send(markerFor(index, 2));
+        const result = await first.session.send(markerFor(index, 2));
 
         return {
           durationMs: performance.now() - startedAt,

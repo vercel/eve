@@ -99,10 +99,13 @@ function deserializeSession(value: unknown): AgentSessionTraceState | undefined 
     agentName: typeof value.agentName === "string" ? value.agentName : undefined,
     channelAudience: normalizeChannelAudience(value.channelAudience),
     channelKind: typeof value.channelKind === "string" ? value.channelKind : undefined,
+    channelType: typeof value.channelType === "string" ? value.channelType : undefined,
     context: value.context,
     decision: readInstrumentationDecision(value.decision),
     parentLineage: deserializeParentLineage(value.parentLineage),
     rootSessionId: typeof value.rootSessionId === "string" ? value.rootSessionId : "",
+    scheduleId: typeof value.scheduleId === "string" ? value.scheduleId : undefined,
+    title: typeof value.title === "string" ? value.title : undefined,
   };
 }
 

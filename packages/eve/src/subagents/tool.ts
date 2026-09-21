@@ -17,6 +17,7 @@ import type { RuntimeSubagentDispatchRequest } from "#shared/action-types.js";
 import { mintSubagentContinuationToken } from "#execution/session.js";
 import { resolveRemainingSessionTokenLimits } from "#subagents/token-budget.js";
 import type { JsonObject } from "#shared/json.js";
+import type { ConversationContext } from "#shared/conversation-context.js";
 
 export type SubagentInputSource =
   | {
@@ -71,6 +72,8 @@ export function buildSubagentRunInput(input: {
    */
   readonly capabilities?: SessionCapabilities;
   readonly channelMetadata?: ChannelInstrumentationProjection;
+  /** Parent's immutable conversation classification. */
+  readonly inheritedConversation?: ConversationContext;
   /**
    * Number of local subagent calls dispatched in this batch. The parent's
    * remaining token quota is split evenly across them so parallel children
@@ -94,7 +97,16 @@ export function buildSubagentRunInput(input: {
   /** Owning task when this child starts from a background workflow tool. */
   readonly taskId?: string;
 }): SubagentRunInputBuild {
-  const { action, auth, capabilities, channelMetadata, initiatorAuth, session, source } = input;
+  const {
+    action,
+    auth,
+    capabilities,
+    channelMetadata,
+    inheritedConversation,
+    initiatorAuth,
+    session,
+    source,
+  } = input;
 
   const childContinuationToken = mintSubagentContinuationToken(
     `${session.sessionId}:${action.callId}`,
@@ -131,6 +143,7 @@ export function buildSubagentRunInput(input: {
     auth,
     capabilities,
     channelMetadata,
+    inheritedConversation,
     continuationToken: childContinuationToken,
     initiatorAuth,
     input: {

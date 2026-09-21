@@ -9,6 +9,8 @@ import {
   OtelTraceEnabledKey,
   ParentTraceContextKey,
   ParentSessionKey,
+  ScheduleIdKey,
+  SessionTitleKey,
   SessionTraceSeedKey,
 } from "#context/keys.js";
 import { setChannelContext } from "#execution/channel-context.js";
@@ -27,6 +29,7 @@ import { AgentSpanIdGenerator } from "#tracing/agent-span-id-generator.js";
 import { ContextAgentTraceStateStore } from "#tracing/agent-trace-context-store.js";
 import type { TraceCapturePolicy } from "#tracing/otel-declaration.js";
 import { readForwardedAudienceBaggage, writeForwardedAudienceBaggage } from "#protocol/baggage.js";
+import { ConversationContextKey } from "#shared/conversation-context.js";
 
 const boundSession = {
   agentName: "test-agent",
@@ -56,7 +59,14 @@ function createContext(audience: "private" | "public" | "unknown" = "public"): C
   const ctx = new ContextContainer();
   ctx.set(ChannelInstrumentationKey, {
     kind: "channel:test",
-    metadata: { audience },
+    metadata: {},
+  });
+  ctx.set(ConversationContextKey, {
+    audience,
+    channel: { kind: "channel:test", name: "test" },
+    environment: "production",
+    mode: "conversation",
+    principalType: "anonymous",
   });
   return ctx;
 }
@@ -156,22 +166,17 @@ describe("initializeSessionInstrumentation", () => {
   ] as const)(
     "applies the live %s delivery audience independently from a public origin",
     async (deliveryAudience, recordsContent) => {
-      const ctx = initializeRemoteSession(() => true);
-      ctx.set(ChannelInstrumentationKey, {
-        kind: "channel:test",
-        metadata: { audience: deliveryAudience },
-      });
+      const ctx = initializeRemoteSession(() => true, { liveAudience: deliveryAudience });
 
-      expect(
-        await readTelemetry(
-          bindSessionInstrumentation({
-            agentName: "remote-agent",
-            ctx,
-            rootSessionId: "session-1",
-            sessionId: "session-1",
-          }),
-        ),
-      ).toMatchObject({
+      const telemetry = await readTelemetry(
+        bindSessionInstrumentation({
+          agentName: "remote-agent",
+          ctx,
+          rootSessionId: "session-1",
+          sessionId: "session-1",
+        }),
+      );
+      expect(telemetry).toMatchObject({
         recordInputs: recordsContent,
         recordOutputs: recordsContent,
       });
@@ -220,14 +225,14 @@ describe("initializeSessionInstrumentation", () => {
 
   it("redacts runtime-context model input when the forwarded ceiling denies inputs", async () => {
     const ctx = createContext("public");
-    const runtime = createRuntime({ capturesContent: true, publish: vi.fn() }, () => ({
-      emit: true,
-      recordInputs: true,
-      recordOutputs: true,
-    }));
-    runtime.stepStartedRuntimeContextResolver = (event) => ({
-      runtimeContext: { messageCount: event.modelInput.messages.length },
-    });
+    const runtime: InstrumentationRuntime = {
+      ...createRuntime({ capturesContent: true, publish: vi.fn() }, () => ({
+        emit: true,
+        recordInputs: true,
+        recordOutputs: true,
+      })),
+      runtimeContextResolvers: [(event) => ({ messageCount: event.modelInput.messages.length })],
+    };
     registerInstrumentationRuntime({
       ...runtime,
       idGenerator: new AgentSpanIdGenerator(),
@@ -378,7 +383,7 @@ describe("bindInstrumentationRuntime", () => {
     expect(ctx.get(ConversationIdKey)).toBe("original-conversation");
   });
 
-  it("reads the channel audience when the step runs", async () => {
+  it("keeps the durable audience when projection metadata changes", async () => {
     const ctx = createContext("public");
     const instrumentation = bindInstrumentationRuntime(
       createRuntime({ capturesContent: true, publish: vi.fn() }),
@@ -392,8 +397,8 @@ describe("bindInstrumentationRuntime", () => {
     });
 
     expect(await readTelemetry(instrumentation)).toMatchObject({
-      recordInputs: false,
-      recordOutputs: false,
+      recordInputs: true,
+      recordOutputs: true,
     });
   });
 
@@ -401,11 +406,6 @@ describe("bindInstrumentationRuntime", () => {
     const boundHooks: InstrumentationHooks = { capturesContent: false, publish: vi.fn() };
     const forTrace = vi.fn(() => boundHooks);
     const ctx = createContext("private");
-    ctx.set(ChannelInstrumentationKey, {
-      channelType: "slack",
-      kind: "channel:test",
-      metadata: { audience: "private" },
-    });
     const instrumentation = bindInstrumentationRuntime(
       createRuntime({ capturesContent: false, forTrace, publish: vi.fn() }),
       ctx,
@@ -417,7 +417,10 @@ describe("bindInstrumentationRuntime", () => {
     expect(forTrace).toHaveBeenCalledExactlyOnceWith({
       agentName: "Weather Display Name",
       audience: "private",
-      channelType: "slack",
+      channel: { kind: "channel:test", name: "test" },
+      environment: "production",
+      mode: "conversation",
+      principalType: "anonymous",
     });
   });
 
@@ -488,6 +491,45 @@ describe("bindInstrumentationRuntime", () => {
       expect(JSON.stringify(event)).not.toContain("@example.com");
     },
   );
+
+  it("prepares root activation metadata before turn sampling", async () => {
+    const ctx = createContext("public");
+    ctx.set(ScheduleIdKey, "daily-report");
+    ctx.set(SessionTitleKey, "Prepare the daily report");
+    const seed = {
+      spanId: "1".repeat(16),
+      traceFlags: 1,
+      traceId: "2".repeat(32),
+    };
+    const prepareSessionTrace = vi.fn().mockResolvedValue(seed);
+    const prepareTurnTrace = vi.fn().mockResolvedValue(seed);
+    const instrumentation = bindInstrumentationRuntime(
+      {
+        ...createRuntime({ capturesContent: true, publish: vi.fn() }),
+        prepareSessionTrace,
+        prepareTurnTrace,
+      },
+      ctx,
+      boundSession,
+    );
+
+    await instrumentation?.preparePreamble({
+      sequence: 0,
+      sessionStarted: false,
+      turnId: "turn-1",
+    });
+
+    expect(prepareSessionTrace).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channelKind: "channel:test",
+        scheduleId: "daily-report",
+        title: "Prepare the daily report",
+      }),
+    );
+    expect(prepareSessionTrace.mock.invocationCallOrder[0]).toBeLessThan(
+      prepareTurnTrace.mock.invocationCallOrder[0]!,
+    );
+  });
 
   it("keeps the step-entry audience for the rest of the step", async () => {
     const ctx = createContext("private");
@@ -651,10 +693,10 @@ describe("bindInstrumentationRuntime", () => {
 
   it("isolates concurrent step decisions and audiences", async () => {
     const ctx = createContext("private");
-    const runtime = createRuntime({ capturesContent: true, publish: vi.fn() });
-    runtime.stepStartedRuntimeContextResolver = (event) => ({
-      runtimeContext: { messageCount: event.modelInput.messages.length },
-    });
+    const runtime: InstrumentationRuntime = {
+      ...createRuntime({ capturesContent: true, publish: vi.fn() }),
+      runtimeContextResolvers: [(event) => ({ messageCount: event.modelInput.messages.length })],
+    };
     const instrumentation = bindInstrumentationRuntime(
       runtime,
       ctx,
@@ -688,6 +730,13 @@ describe("bindInstrumentationRuntime", () => {
     ctx.set(ChannelInstrumentationKey, {
       kind: "channel:test",
       metadata: { audience: "public" },
+    });
+    ctx.set(ConversationContextKey, {
+      audience: "public",
+      channel: { kind: "channel:test", name: "test" },
+      environment: "production",
+      mode: "conversation",
+      principalType: "anonymous",
     });
     const second = instrumentation?.runStep(stepInput, async (scope) => readScopedState(scope));
     releaseFirst();
@@ -798,7 +847,7 @@ describe("bindInstrumentationRuntime", () => {
 
     setChannelContext(ctx, { kind: "subagent", state: { persisted: true } });
 
-    expect(ctx.get(ChannelInstrumentationKey)?.metadata.audience).toBe("public");
+    expect(ctx.get(ConversationContextKey)?.audience).toBe("public");
     expect(
       await readTelemetry(
         bindInstrumentationRuntime(

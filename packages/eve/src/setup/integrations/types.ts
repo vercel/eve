@@ -20,7 +20,10 @@ export type SetupPresenter = Pick<Prompter, "log" | "note"> & {
 };
 
 export interface SetupPrepareContext {
+  /** Selected agent project where authored files are changed. */
   readonly appRoot: string;
+  /** Project root for shared dependencies, Vercel links, and environment files. */
+  readonly projectRoot: string;
   readonly asker: Asker;
   readonly environment: IntegrationSetupEnvironment;
   readonly presenter: SetupPresenter;
@@ -30,7 +33,10 @@ export interface SetupPrepareContext {
 }
 
 export interface SetupApplyContext {
+  /** Selected agent project where authored files are changed. */
   readonly appRoot: string;
+  /** Project root for shared dependencies, Vercel links, and environment files. */
+  readonly projectRoot: string;
   readonly presenter: SetupPresenter;
   signal?: AbortSignal;
   force?: boolean;

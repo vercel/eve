@@ -180,7 +180,7 @@ export async function discoverEvalConfig(appRoot: string): Promise<EveEvalConfig
       throw new Error(
         `Missing required eval config at evals/${EVAL_CONFIG_FILE}. Create it with ` +
           "defineEvalConfig({}) (optionally `{ judge: { model } }` to set the default judge " +
-          "model for `t.judge.*` assertions).",
+          "model for `t.judge(...)` assertions).",
       );
     }
     throw error;

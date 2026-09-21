@@ -4,20 +4,12 @@ import type { InstrumentationStateSlot } from "#instrumentation/state.js";
 import type { RuntimeTraceContext } from "#protocol/message.js";
 import type { ChannelAudience } from "#shared/channel-audience.js";
 import type { InstrumentationDecision } from "#shared/instrumentation-decision.js";
-import type {
-  InstrumentationCapture,
-  TraceCaptureContext,
-  TraceCapturePolicy,
-} from "#shared/trace-policy.js";
+import type { TraceCaptureContext, TraceCapturePolicy } from "#shared/trace-policy.js";
 
 /**
- * Stable eve identity for one actual model attempt.
- *
- * A step retried three times produces three of these, all sharing `stepIndex`
- * and separated by `attemptIndex` — which is why the events carrying this
- * scope are named `step.attempt.*` and not `step.*`. The protocol's `step.*`
- * and the `events["step.started"]` resolver hook fire once per step; these
- * fire once per attempt.
+ * Stable eve identity for one model attempt. Retries share `stepIndex` and
+ * differ by `attemptIndex`, so `step.attempt.*` fires once per attempt while
+ * protocol `step.*` events and the resolver hook fire once per step.
  */
 export interface InstrumentationAttemptScope {
   readonly channelAudience?: ChannelAudience;
@@ -283,7 +275,9 @@ export interface InstrumentationSessionStartedEvent {
   readonly parentLineage?: InstrumentationParentLineage;
   readonly parentTraceContext?: InstrumentationTraceContext;
   readonly rootSessionId: string;
+  readonly scheduleId?: string;
   readonly sessionId: string;
+  readonly title?: string;
   readonly traceSeed?: InstrumentationTraceSeed;
 }
 
@@ -442,6 +436,7 @@ export interface InstrumentationModelCallCompletedEvent {
   readonly content?: readonly InstrumentationContentPart[];
   readonly finishReason: string;
   readonly idempotencyKey: string;
+  readonly responseModelId?: string;
   readonly responseId?: string;
   readonly scope: InstrumentationAttemptScope;
   readonly usage: InstrumentationUsage;
@@ -556,11 +551,9 @@ export type InstrumentationEventHandler<TEvent> = (
   ctx: InstrumentationHandlerContext,
 ) => void | PromiseLike<void>;
 
-/** Internal provider shape mirrored by the future public hook contract. */
+/** Internal normalized provider shape consumed by the instrumentation bus. */
 export interface InstrumentationProviderDefinition {
   readonly name: string;
-  /** @deprecated Use `tracePolicy` to select directional content. */
-  readonly capture?: InstrumentationCapture;
   /** Durable state identity, separate from the human-readable log name. */
   readonly stateNamespace?: string;
   /** Internal provider-specific projection applied after capture filtering. */

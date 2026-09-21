@@ -3,9 +3,7 @@ import { describe, expect, it } from "vitest";
 
 import { getAdvertisedTools } from "#harness/advertised-tools.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
-import type { HarnessSession, HarnessToolMap } from "#harness/types.js";
-import { buildToolSet } from "#harness/tools.js";
-import { WORKFLOW_TOOL_NAME } from "#shared/workflow-sandbox.js";
+import type { HarnessToolMap } from "#harness/types.js";
 
 describe("getAdvertisedTools", () => {
   it("keeps the built-in agent tool in the root session", () => {
@@ -60,37 +58,6 @@ describe("getAdvertisedTools", () => {
 
     expect([...advertisedTools.keys()]).toEqual(["add", "agent"]);
   });
-
-  it("does not add Workflow in runtime subagent sessions", async () => {
-    const tools = new Map([["delegate", createSubagentTool("delegate")]]) satisfies HarnessToolMap;
-
-    const advertisedTools = await getAdvertisedTools({
-      modelTools: buildToolSet({ tools }),
-      session: createSession({ rootSessionId: "root-session" }),
-      tools,
-      workflow: {},
-    });
-
-    expect(Object.keys(advertisedTools.modelTools)).toEqual(["delegate"]);
-    expect(advertisedTools.modelTools[WORKFLOW_TOOL_NAME]).toBeUndefined();
-  });
-
-  it("adds Workflow in root sessions", async () => {
-    const tools = new Map([
-      ["add", createTool("add")],
-      ["delegate", createSubagentTool("delegate")],
-    ]) satisfies HarnessToolMap;
-
-    const advertisedTools = await getAdvertisedTools({
-      modelTools: buildToolSet({ tools }),
-      session: createSession(),
-      tools,
-      workflow: {},
-    });
-
-    expect([...advertisedTools.harnessTools.keys()]).toEqual(["add", "delegate"]);
-    expect(advertisedTools.modelTools[WORKFLOW_TOOL_NAME]).toBeDefined();
-  });
 });
 
 describe("getAdvertisedTools for definition arrays", () => {
@@ -101,6 +68,17 @@ describe("getAdvertisedTools for definition arrays", () => {
     });
 
     expect(advertisedTools.map((tool) => tool.name)).toEqual(["add", "delegate"]);
+  });
+
+  it("hides tools marked unavailable in subagents from delegated sessions", () => {
+    const tools = new Map([
+      ["root_only", { ...createTool("root_only"), availableInSubagents: false }],
+    ]) satisfies HarnessToolMap;
+
+    expect([...getAdvertisedTools({ session: {}, tools }).keys()]).toEqual(["root_only"]);
+    expect([
+      ...getAdvertisedTools({ session: { rootSessionId: "root-session" }, tools }).keys(),
+    ]).toEqual([]);
   });
 
   it("keeps root-session tools in the root session", () => {
@@ -156,7 +134,6 @@ function createTool(name: string): HarnessToolDefinition {
 function createSubagentTool(name: string): HarnessToolDefinition {
   return {
     ...createTool(name),
-    resultKind: "subagent",
     workflowId: "workflow//./agent/subagents/researcher//execute",
   };
 }
@@ -175,20 +152,5 @@ function createAvailableTool(
   return {
     ...createTool(name),
     behavior: { availability },
-  };
-}
-
-function createSession(overrides: Partial<HarnessSession> = {}): HarnessSession {
-  return {
-    agent: {
-      modelReference: { id: "test-model" },
-      system: "",
-      tools: [],
-    },
-    compaction: { recentWindowSize: 4, threshold: 1_000_000 },
-    continuationToken: "test-token",
-    history: [],
-    sessionId: "test-session",
-    ...overrides,
   };
 }

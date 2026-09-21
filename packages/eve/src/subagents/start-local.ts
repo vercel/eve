@@ -1,3 +1,4 @@
+import { sessionInboxHookToken } from "#execution/session-inbox/address.js";
 import type { DispatchOutcome, RuntimeSession } from "#subagents/handle-dispatch.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import type { LocalDevRequestProvenance } from "#context/keys.js";
@@ -23,6 +24,9 @@ export async function startLocalSubagent(input: {
   readonly bundle: CompiledBundle;
   readonly capabilities: Parameters<typeof buildSubagentRunInput>[0]["capabilities"];
   readonly channelMetadata: Parameters<typeof buildSubagentRunInput>[0]["channelMetadata"];
+  readonly inheritedConversation?: Parameters<
+    typeof buildSubagentRunInput
+  >[0]["inheritedConversation"];
   readonly currentSession: RuntimeSession;
   readonly dynamicSubagentAgentConfig?: DynamicSubagentAgentConfig;
   readonly fanoutSize: number;
@@ -46,6 +50,7 @@ export async function startLocalSubagent(input: {
     auth: input.auth,
     capabilities: input.capabilities,
     channelMetadata: input.channelMetadata,
+    inheritedConversation: input.inheritedConversation,
     fanoutSize: input.fanoutSize,
     initiatorAuth: input.initiatorAuth,
     graph: input.bundle.graph,
@@ -64,7 +69,8 @@ export async function startLocalSubagent(input: {
     await contextStorage.run(new ContextContainer({ localDevRequest: input.localDevRequest }), () =>
       childRuntime.createSession(runInput),
     );
-    childSessionId = (await waitForCommandHookOwner(childContinuationToken)).runId;
+    childSessionId = (await waitForCommandHookOwner(sessionInboxHookToken(childContinuationToken)))
+      .runId;
   } catch (error) {
     logError(log, "local subagent start failed", error, {
       callId: action.callId,

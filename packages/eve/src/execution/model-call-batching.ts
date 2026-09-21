@@ -1,8 +1,8 @@
-import { derivePendingState } from "#execution/pending-turn-state.js";
-import { getPendingWorkflowInterrupt } from "#harness/workflow-interrupt-state.js";
+import { derivePendingState } from "#execution/session/pending-turn-state.js";
 import type { HarnessSession, StepInput, StepResult } from "#harness/types.js";
 
 export async function runModelCallBatch(input: {
+  readonly steeringSignal?: AbortSignal;
   readonly initialInput: StepInput | undefined;
   readonly initialSession: HarnessSession;
   readonly modelCallsPerStep: number;
@@ -24,6 +24,8 @@ export async function runModelCallBatch(input: {
     });
     completedModelCalls++;
     if (
+      input.steeringSignal?.aborted === true ||
+      result.steered === true ||
       !shouldRunAnotherModelCall({
         completedModelCalls,
         modelCallsPerStep: input.modelCallsPerStep,
@@ -46,8 +48,7 @@ function shouldRunAnotherModelCall(input: {
     input.completedModelCalls >= input.modelCallsPerStep ||
     typeof input.result.next !== "function" ||
     input.result.backgroundTaskSession !== undefined ||
-    input.result.backgroundTasks !== undefined ||
-    getPendingWorkflowInterrupt(input.result.session.state) !== undefined
+    input.result.backgroundTasks !== undefined
   ) {
     return false;
   }

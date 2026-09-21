@@ -195,9 +195,9 @@ import { includes } from "eve/evals/expect";
 
 export default defineEval({
   async test(t) {
-    await t.send("What is the weather in Brooklyn?");
+    const turn = await t.send("What is the weather in Brooklyn?");
     t.succeeded();
-    t.check(t.reply, includes("Sunny"));
+    t.check(turn.message, includes("Sunny"));
   },
 });`,
   },

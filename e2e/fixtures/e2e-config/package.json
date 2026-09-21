@@ -5,12 +5,16 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./instrumentation": "./src/instrumentation.ts"
+    "./instrumentation": "./src/instrumentation.ts",
+    "./instrumentation-otel": "./src/instrumentation-otel.ts",
+    "./task-receipts": "./src/task-receipts.ts"
   },
   "scripts": {
+    "test:integration": "node --test test/*.integration.test.mjs",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@ai-sdk/openai": "catalog:",
     "@opentelemetry/sdk-trace-base": "catalog:",
     "@vercel/otel": "catalog:",
     "eve": "workspace:*"

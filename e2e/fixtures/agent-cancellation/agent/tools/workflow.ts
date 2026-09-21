@@ -1,3 +1,3 @@
-import { experimental_workflow } from "eve/tools/workflow";
+import { workflow } from "eve/tools/workflow";
 
-export default experimental_workflow();
+export default workflow();

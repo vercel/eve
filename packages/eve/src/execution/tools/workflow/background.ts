@@ -2,14 +2,14 @@ import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import type { PreparedRuntimeTool } from "#runtime/sessions/turn.js";
 import { parseJsonObject, type JsonValue } from "#shared/json.js";
 import type { ToolExecuteOptions } from "#tools/definition.js";
-import type { TaskExec } from "#tools/task.js";
 import { UNSPECIFIED_INPUT_SCHEMA, toInputSchema, toOutputSchema } from "#tools/schema.js";
 
 export interface WorkflowToolHarnessDefinitionInput {
   readonly definition: HarnessToolDefinition;
   readonly executeInput?: (input: unknown) => JsonValue;
+  /** Selected agent definition's runtime graph ID; absent for authored workflow tools. */
   readonly nodeId?: string;
-  readonly resultKind?: "subagent" | "tool";
+
   readonly workflowId: string;
 }
 
@@ -20,7 +20,6 @@ export function createWorkflowToolHarnessDefinition(
   const workflow = {
     executeInput: input.executeInput,
     nodeId: input.nodeId,
-    resultKind: input.resultKind,
     workflowId: input.workflowId,
   };
   if (definition.execution !== "background") {
@@ -57,7 +56,6 @@ export function createPreparedWorkflowToolHarnessDefinition(
       rootOnly: tool.rootOnly,
     },
     nodeId: tool.task.nodeId,
-    resultKind: tool.task.resultKind,
     workflowId: tool.task.workflowId,
   };
   return createWorkflowToolHarnessDefinition(input);
@@ -68,7 +66,7 @@ export function createWorkflowToolBackgroundExecute(input: {
   readonly toolName: string;
   readonly workflowId: string;
 }): NonNullable<HarnessToolDefinition["execute"]> {
-  return (_toolInput: unknown, _options: ToolExecuteOptions, _task?: TaskExec): never => {
+  return (_toolInput: unknown, _options: ToolExecuteOptions): never => {
     throw new Error(
       `Background workflow tool "${input.toolName}" must be started by the task runtime (${input.workflowId}).`,
     );

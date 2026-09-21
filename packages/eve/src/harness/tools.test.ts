@@ -37,16 +37,18 @@ async function resolveApproval(
   tools: ReturnType<typeof buildToolSet>,
   toolName: string,
   input: unknown,
-  session: Session = {
+  session?: Session,
+  options: { readonly abortSignal?: AbortSignal } = {},
+): Promise<unknown> {
+  const approval = buildToolApproval(tools, options.abortSignal);
+  const activeSession = session ?? {
     auth: { current: null, initiator: null },
     sessionId: "session-1",
     turn: { id: "turn-1", sequence: 0 },
-  },
-): Promise<unknown> {
-  const approval = buildToolApproval(tools);
+  };
   if (typeof approval !== "function") throw new TypeError("Expected generic approval function.");
   const ctx = new ContextContainer();
-  ctx.set(SessionKey, session);
+  ctx.set(SessionKey, activeSession);
   return contextStorage.run(ctx, () =>
     approval({
       messages: [],
@@ -150,6 +152,7 @@ describe("buildToolSet", () => {
           execution: "background",
           inputSchema: jsonSchema({ type: "object" }),
           name: "background_work",
+          workflowId: "workflow//test//background_work",
         },
       ],
     ]);
@@ -1059,6 +1062,31 @@ describe("buildToolSet", () => {
       await resolveApproval(result, "vercel__list_projects", {});
 
       expect(capturedCallId).toBe("call_1");
+    });
+
+    it("passes cancellation into approval", async () => {
+      let capturedSignal: AbortSignal | undefined;
+      const tools: HarnessToolMap = new Map([
+        [
+          "deploy",
+          {
+            approval: (ctx: ApprovalContext) => {
+              capturedSignal = ctx.abortSignal;
+              return "user-approval";
+            },
+            description: "Deploy the application.",
+            execute: async () => "ok",
+            inputSchema: jsonSchema({}),
+            name: "deploy",
+          },
+        ],
+      ]);
+      const abortSignal = new AbortController().signal;
+
+      const result = buildToolSet({ tools });
+      await resolveApproval(result, "deploy", {}, undefined, { abortSignal });
+
+      expect(capturedSignal).toBe(abortSignal);
     });
 
     it("passes the active caller and session context into approval", async () => {
