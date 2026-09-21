@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { EveProjectContext } from "#internal/project-context.js";
 import { createFakePrompter } from "#internal/testing/fake-prompter.js";
-import { headlessAsker } from "#setup/ask.js";
+import { headlessAsker, withAnswers } from "#setup/ask.js";
 import { integrationSetupEnvironment } from "../shared/environment.js";
 import { createSetupContexts } from "../shared/ui.js";
 import { applyWebSetup, prepareWebSetup, type WebSetupDeps } from "./setup.js";
@@ -24,17 +24,18 @@ function deps(): WebSetupDeps {
 }
 
 describe("Web setup", () => {
-  it("selects peer services without asking for a hosting topology", async () => {
+  it("asks for the hosting target with Vercel recommended", async () => {
     const effects = deps();
     const ctx = createSetupContexts({
       appRoot: "/project",
-      asker: headlessAsker(),
+      asker: withAnswers({ "web-hosting": "vercel" })(headlessAsker()),
       environment: integrationSetupEnvironment("cli-missing", { kind: "unresolved" }),
       prompter: createFakePrompter().prompter,
       resolveVercelProject: async () => ({ orgId: "team", projectId: "project" }),
     });
 
     await expect(prepareWebSetup(ctx.prepare, effects)).resolves.toEqual({
+      hosting: "vercel",
       packageManager: "pnpm",
     });
   });
@@ -57,9 +58,9 @@ describe("Web setup", () => {
       resolveVercelProject: async () => ({ orgId: "team", projectId: "project" }),
     });
 
-    await expect(applyWebSetup({ packageManager: "pnpm" }, ctx.apply, effects)).rejects.toThrow(
-      "Web Chat setup requires a selected workspace agent.",
-    );
+    await expect(
+      applyWebSetup({ hosting: "vercel", packageManager: "pnpm" }, ctx.apply, effects),
+    ).rejects.toThrow("Web Chat setup requires a selected workspace agent.");
 
     expect(effects.writeTextFile).not.toHaveBeenCalled();
   });
@@ -82,7 +83,7 @@ describe("Web setup", () => {
       prompter: createFakePrompter().prompter,
       resolveVercelProject: async () => ({ orgId: "team", projectId: "project" }),
     });
-    await applyWebSetup({ packageManager: "pnpm" }, ctx.apply, effects);
+    await applyWebSetup({ hosting: "vercel", packageManager: "pnpm" }, ctx.apply, effects);
 
     expect(effects.writeTextFile).toHaveBeenNthCalledWith(
       1,
@@ -108,7 +109,7 @@ describe("Web setup", () => {
     );
     expect(effects.writeTextFile).toHaveBeenCalledWith(
       "/project/package.json",
-      expect.stringContaining('"dev:services": "vercel dev --local"'),
+      expect.stringContaining('"dev:services": "vercel dev"'),
       { force: true },
     );
   });
@@ -124,7 +125,7 @@ describe("Web setup", () => {
       resolveVercelProject: async () => ({ orgId: "team", projectId: "project" }),
     });
 
-    await applyWebSetup({ packageManager: "pnpm" }, ctx.apply, effects);
+    await applyWebSetup({ hosting: "vercel", packageManager: "pnpm" }, ctx.apply, effects);
 
     expect(effects.writeTextFile).toHaveBeenCalledWith(
       "/project/package.json",
@@ -133,12 +134,12 @@ describe("Web setup", () => {
     );
     expect(effects.writeTextFile).toHaveBeenCalledWith(
       "/project/package.json",
-      expect.stringContaining('"dev:services": "vercel dev --local"'),
+      expect.stringContaining('"dev:services": "vercel dev"'),
       { force: true },
     );
   });
 
-  it("configures peer services for a standalone agent and returns the local command", async () => {
+  it("configures Vercel services for a standalone agent and returns the local command", async () => {
     const effects = deps();
     const fake = createFakePrompter();
     const ctx = createSetupContexts({
@@ -148,8 +149,10 @@ describe("Web setup", () => {
       prompter: fake.prompter,
       resolveVercelProject: async () => ({ orgId: "team", projectId: "project" }),
     });
-    await expect(applyWebSetup({ packageManager: "npm" }, ctx.apply, effects)).resolves.toEqual({
-      facts: [{ label: "Start locally", value: "npm run dev:services" }],
+    await expect(
+      applyWebSetup({ hosting: "vercel", packageManager: "npm" }, ctx.apply, effects),
+    ).resolves.toEqual({
+      facts: [{ label: "", value: "Start locally with `npm run dev:services`." }],
     });
     expect(effects.writeTextFile).toHaveBeenCalledWith(
       "/project/agent/channels/eve.ts",
@@ -169,5 +172,32 @@ describe("Web setup", () => {
       { force: true },
     );
     expect(fake.prompter.note).not.toHaveBeenCalled();
+  });
+
+  it("configures Next.js hosting for other platforms", async () => {
+    const effects = deps();
+    const ctx = createSetupContexts({
+      appRoot: "/project",
+      asker: headlessAsker(),
+      environment: integrationSetupEnvironment("cli-missing", { kind: "unresolved" }),
+      prompter: createFakePrompter().prompter,
+      resolveVercelProject: async () => ({ orgId: "team", projectId: "project" }),
+    });
+
+    await expect(
+      applyWebSetup({ hosting: "next", packageManager: "yarn" }, ctx.apply, effects),
+    ).resolves.toEqual({
+      facts: [{ label: "", value: "Start locally with `yarn dev:web`." }],
+    });
+    expect(effects.writeTextFile).toHaveBeenCalledWith(
+      "/project/apps/web/next.config.ts",
+      expect.stringContaining('withEve(nextConfig, { eveRoot: "../.." })'),
+      { force: true },
+    );
+    expect(effects.writeTextFile).not.toHaveBeenCalledWith(
+      "/project/vercel.ts",
+      expect.anything(),
+      expect.anything(),
+    );
   });
 });

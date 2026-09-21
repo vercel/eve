@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { resolveEveProjectContext } from "#internal/project-context.js";
+import { select } from "#setup/ask.js";
 import { detectPackageManager, type PackageManagerKind } from "#setup/package-manager.js";
 import { pathExists, writeTextFile } from "#setup/scaffold/files.js";
 import { WEB_CHANNEL_TEMPLATE } from "#setup/scaffold/create/web-template.js";
@@ -11,7 +12,7 @@ import {
   type SetupPrepareContext,
 } from "../types.js";
 
-const LEGACY_NEXT_HOSTED_CONFIG = `import type { NextConfig } from "next";
+const NEXT_HOSTED_CONFIG = `import type { NextConfig } from "next";
 import { withEve } from "eve/next";
 
 const nextConfig: NextConfig = {};
@@ -53,6 +54,7 @@ const defaultDeps: WebSetupDeps = {
 };
 
 export interface WebSetupPlan {
+  hosting: "next" | "vercel";
   packageManager: PackageManagerKind;
 }
 
@@ -64,19 +66,44 @@ export async function prepareWebSetup(
   if (project.kind === "workspace") {
     throw new Error("Web Chat setup requires a selected workspace agent.");
   }
-  return { packageManager: (await deps.detectPackageManager(project.environmentRoot)).kind };
+  const hosting = await context.asker.ask(
+    select({
+      key: "web-hosting",
+      message: "Where will you host Web Chat?",
+      options: [
+        {
+          id: "vercel",
+          label: "Vercel",
+          hint: "Run Web Chat and each agent as separate Vercel services",
+          value: "vercel" as const,
+        },
+        {
+          id: "next",
+          label: "Other",
+          hint: "Run Web Chat and your agents together through Next.js",
+          value: "next" as const,
+        },
+      ],
+      recommended: "vercel" as const,
+      required: true,
+    }),
+  );
+  return {
+    hosting,
+    packageManager: (await deps.detectPackageManager(project.environmentRoot)).kind,
+  };
 }
 
-function devCommand(packageManager: PackageManagerKind): string {
+function runScriptCommand(packageManager: PackageManagerKind, script: string): string {
   switch (packageManager) {
     case "npm":
-      return "npm run dev";
+      return `npm run ${script}`;
     case "pnpm":
-      return "pnpm dev";
+      return `pnpm ${script}`;
     case "yarn":
-      return "yarn dev";
+      return `yarn ${script}`;
     case "bun":
-      return "bun run dev";
+      return `bun run ${script}`;
   }
 }
 
@@ -89,7 +116,7 @@ async function configurePeerServiceScripts(root: string, deps: WebSetupDeps): Pr
   const scripts = { ...document.scripts };
   scripts.dev ??= "eve dev";
   scripts["dev:eve"] ??= "eve dev";
-  scripts["dev:services"] ??= "vercel dev --local";
+  scripts["dev:services"] ??= "vercel dev";
   await deps.writeTextFile(path, `${JSON.stringify({ ...document, scripts }, null, 2)}\n`, {
     force: true,
   });
@@ -140,26 +167,33 @@ export default withEve(nextConfig);
 `;
   await assertInstallerOwned(nextConfigPath, [
     registryNextConfig,
-    LEGACY_NEXT_HOSTED_CONFIG,
+    NEXT_HOSTED_CONFIG,
     PEER_SERVICE_NEXT_CONFIG,
   ]);
-  const vercelTsPath = join(project.environmentRoot, "vercel.ts");
-  const vercelJsonPath = join(project.environmentRoot, "vercel.json");
-  await assertInstallerOwned(vercelTsPath, [PEER_SERVICE_VERCEL_CONFIG]);
-  if (await deps.pathExists(vercelJsonPath)) {
-    throw new Error(
-      `Could not configure peer services because ${vercelJsonPath} already exists. Preserve it and compose eve/vercel manually.`,
-    );
+  let startScript: string;
+  if (plan.hosting === "vercel") {
+    const vercelTsPath = join(project.environmentRoot, "vercel.ts");
+    const vercelJsonPath = join(project.environmentRoot, "vercel.json");
+    await assertInstallerOwned(vercelTsPath, [PEER_SERVICE_VERCEL_CONFIG]);
+    if (await deps.pathExists(vercelJsonPath)) {
+      throw new Error(
+        `Could not configure Vercel services because ${vercelJsonPath} already exists. Preserve it and compose eve/vercel manually.`,
+      );
+    }
+    await deps.writeTextFile(nextConfigPath, PEER_SERVICE_NEXT_CONFIG, { force: true });
+    await deps.writeTextFile(vercelTsPath, PEER_SERVICE_VERCEL_CONFIG, { force: true });
+    await configurePeerServiceScripts(project.environmentRoot, deps);
+    startScript = "dev:services";
+  } else {
+    await deps.writeTextFile(nextConfigPath, NEXT_HOSTED_CONFIG, { force: true });
+    startScript = "dev:web";
   }
-  await deps.writeTextFile(nextConfigPath, PEER_SERVICE_NEXT_CONFIG, { force: true });
-  await deps.writeTextFile(vercelTsPath, PEER_SERVICE_VERCEL_CONFIG, { force: true });
-  await configurePeerServiceScripts(project.environmentRoot, deps);
   context.presenter.log.success("Configured channel: web");
   return {
     facts: [
       {
-        label: "Start locally",
-        value: `${devCommand(plan.packageManager)}:services`,
+        label: "",
+        value: `Start locally with \`${runScriptCommand(plan.packageManager, startScript)}\`.`,
       },
     ],
   };
