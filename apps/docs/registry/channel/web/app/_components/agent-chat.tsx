@@ -19,7 +19,6 @@ import {
   PromptInputFooter,
   type PromptInputMessage,
   PromptInputSubmit,
-  PromptInputTextarea,
   usePromptInputAttachments,
 } from "@/components/ai-elements/prompt-input";
 import { Shimmer } from "@/components/ai-elements/shimmer";
@@ -29,6 +28,7 @@ import { getActiveChatTurn } from "@/lib/chat-turn-state";
 import { AgentMessage, type AgentInputResponse } from "./agent-message";
 import { useChatWorkspace } from "./chat-workspace";
 import { useServerStatus } from "./server-status";
+import { PersistentComposerEditor, type ComposerEditorHandle } from "./persistent-composer-editor";
 
 interface AgentChatProps {
   readonly sessionId?: string;
@@ -66,6 +66,7 @@ function AgentConversation({
 }: AgentChatProps & { readonly onSessionAssigned: (id: string) => void }) {
   const {
     cache,
+    draftOwner,
     preparedSession,
     sessionCreatedAt,
     model,
@@ -87,6 +88,9 @@ function AgentConversation({
   const [cancellationError, setCancellationError] = useState<string>();
   const [hasInputText, setHasInputText] = useState(false);
   const [reducer] = useState(chatMessageReducer);
+  const editorRef = useRef<ComposerEditorHandle>(null);
+  const pendingDraft = useRef<{ acknowledge: () => void } | null>(null);
+  const [isSending, setIsSending] = useState(false);
   const agent = useEveAgent<ChatMessageData>({
     reducer,
     initialEvents: saved?.events,
@@ -94,6 +98,7 @@ function AgentConversation({
     resume: sessionId !== undefined,
     onSessionChange(session) {
       if (!session || session.sessionId === knownSessionId.current) return;
+      editorRef.current?.move(session.sessionId);
       knownSessionId.current = session.sessionId;
       onSessionAssigned(session.sessionId);
       onSessionCreated();
@@ -102,6 +107,10 @@ function AgentConversation({
     },
     onEvent(event) {
       if (knownSessionId.current) onSessionEvent(knownSessionId.current, event);
+    },
+    onError() {
+      pendingDraft.current = null;
+      setIsSending(false);
     },
     onFinish(snapshot) {
       if (snapshot.session) cache.set({ events: snapshot.events, session: snapshot.session });
@@ -162,8 +171,13 @@ function AgentConversation({
 
   const handleSubmit = async (message: PromptInputMessage) => {
     const text = message.text.trim();
-    if ((text.length === 0 && message.files.length === 0) || isResuming || isDisconnected) return;
-    setHasInputText(false);
+    const submission = pendingDraft.current;
+    if (!submission) return;
+    if ((text.length === 0 && message.files.length === 0) || isResuming || isDisconnected) {
+      pendingDraft.current = null;
+      setIsSending(false);
+      return;
+    }
 
     // Sending returns to the live conversation after scrolling up or inspecting a tool.
     void conversationRef.current?.scrollToBottom({
@@ -192,21 +206,66 @@ function AgentConversation({
       });
     }
 
-    await agent.send(message.files.length ? parts : text, options);
+    try {
+      await agent.send(message.files.length ? parts : text, {
+        ...options,
+        onAccepted() {
+          submission.acknowledge();
+          if (pendingDraft.current === submission) {
+            pendingDraft.current = null;
+            setIsSending(false);
+          }
+        },
+      });
+    } finally {
+      if (pendingDraft.current === submission) {
+        pendingDraft.current = null;
+        setIsSending(false);
+      }
+    }
   };
 
   const composer = (
     <PromptInput
       className="rounded-3xl border-border/60 bg-card shadow-none"
+      managedDraft={!!draftOwner}
+      onError={(error) => {
+        pendingDraft.current = null;
+        setIsSending(false);
+        setCancellationError(error.message);
+      }}
+      onSubmitCapture={(event) => {
+        if (pendingDraft.current || isDisconnected || isResuming) {
+          event.preventDefault();
+          event.stopPropagation();
+          return;
+        }
+        // Without an authenticated owner, keep the ordinary transient composer.
+        if (!draftOwner) return;
+        const acknowledge = editorRef.current?.capture();
+        if (!acknowledge) {
+          event.preventDefault();
+          event.stopPropagation();
+          return;
+        }
+        pendingDraft.current = { acknowledge };
+        setIsSending(true);
+      }}
       onSubmit={handleSubmit}
     >
-      <PromptInputTextarea
-        disabled={isResuming || isDisconnected}
-        rows={1}
-        className="min-h-6 px-4 py-3"
-        onChange={(event) => setHasInputText(event.currentTarget.value.trim().length > 0)}
-        placeholder={isDisconnected ? "Server unavailable" : "Send a message…"}
-      />
+      {draftOwner ? (
+        <PersistentComposerEditor
+          key={draftOwner}
+          owner={draftOwner}
+          sessionId={sessionId}
+          editorRef={editorRef}
+          disabled={isResuming || isDisconnected}
+          onTextChange={setHasInputText}
+          placeholder={isDisconnected ? "Server unavailable" : "Send a message…"}
+        />
+      ) : (
+        <div className="px-4 pt-4 text-sm text-muted-foreground">Loading draft…</div>
+      )}
       <PromptInputFooter className="min-h-12 px-4 pb-3 pr-14">
         {!isDisconnected ? (
           <span
@@ -227,7 +286,7 @@ function AgentConversation({
       <ComposerAction
         hasInputText={hasInputText}
         isBusy={isBusy}
-        isDisabled={isResuming || isDisconnected}
+        isDisabled={isResuming || isDisconnected || isSending}
         onCancel={requestCancellation}
       />
     </PromptInput>

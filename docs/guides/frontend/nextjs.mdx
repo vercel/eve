@@ -189,6 +189,16 @@ Repeated user messages stay separate. The conversation scrolls to a newly submit
 
 Local history remembers up to 500 sessions opened or created in this browser, ordered by last message, with creation and last-turn tooltips. It does not enumerate server files or replay hidden conversations. Clearing browser storage clears this local list; known session URLs remain usable. Deployed history requires the authenticated session index.
 
+Persist composer drafts, attachments and undo history across reloads. Clear only acknowledged submissions without erasing newer edits.
+
+The composer clears the captured draft when its own send request is accepted,
+before waiting for the agent's response. Another tab's message cannot clear it.
+Custom clients can observe this boundary with `send(message, { onAccepted })`;
+the callback receives the accepted `sessionId` and, when supplied by the server,
+`deliveryId`. A rejected request leaves the draft available for retry.
+
+Browser draft storage retains up to eight distinct tab branches per conversation. Reloads reuse the same branch; if another branch cannot be saved, the composer warns and keeps that tab’s draft in memory instead of discarding existing work.
+
 ## What to read next
 
 - [Frontend overview](./overview): the `useEveAgent` API

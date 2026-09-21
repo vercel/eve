@@ -453,6 +453,8 @@ export interface PromptInputMessage {
 }
 
 export type PromptInputProps = Omit<HTMLAttributes<HTMLFormElement>, "onSubmit" | "onError"> & {
+  /** The caller owns draft clearing and attachment removal. */
+  managedDraft?: boolean;
   // e.g., "image/*" or leave undefined for any
   accept?: string;
   multiple?: boolean;
@@ -464,7 +466,10 @@ export type PromptInputProps = Omit<HTMLAttributes<HTMLFormElement>, "onSubmit" 
   maxFiles?: number;
   // bytes
   maxFileSize?: number;
-  onError?: (err: { code: "max_files" | "max_file_size" | "accept"; message: string }) => void;
+  onError?: (err: {
+    code: "max_files" | "max_file_size" | "accept" | "submit";
+    message: string;
+  }) => void;
   onSubmit: (
     message: PromptInputMessage,
     event: FormEvent<HTMLFormElement>,
@@ -473,6 +478,7 @@ export type PromptInputProps = Omit<HTMLAttributes<HTMLFormElement>, "onSubmit" 
 
 export const PromptInput = ({
   className,
+  managedDraft = false,
   accept,
   multiple,
   globalDrop,
@@ -801,7 +807,7 @@ export const PromptInput = ({
 
       // Reset form immediately after capturing text to avoid race condition
       // where user input during async blob conversion would be lost
-      if (!usingProvider) {
+      if (!usingProvider && !managedDraft) {
         form.reset();
       }
 
@@ -811,7 +817,8 @@ export const PromptInput = ({
           files.map(async ({ id: _id, ...item }) => {
             if (item.url?.startsWith("blob:")) {
               const dataUrl = await convertBlobUrlToDataUrl(item.url);
-              // If conversion failed, keep the original blob URL
+              if (managedDraft && !dataUrl)
+                throw new Error("Could not read an attachment. Your draft is still available.");
               return {
                 ...item,
                 url: dataUrl ?? item.url,
@@ -827,25 +834,31 @@ export const PromptInput = ({
         if (result instanceof Promise) {
           try {
             await result;
-            clear();
-            if (usingProvider) {
+            if (!managedDraft) clear();
+            if (usingProvider && !managedDraft) {
               controller.textInput.clear();
             }
-          } catch {
-            // Don't clear on error - user may want to retry
+          } catch (error) {
+            onError?.({
+              code: "submit",
+              message: error instanceof Error ? error.message : "Unable to send message.",
+            });
           }
         } else {
           // Sync function completed without throwing, clear inputs
-          clear();
-          if (usingProvider) {
+          if (!managedDraft) clear();
+          if (usingProvider && !managedDraft) {
             controller.textInput.clear();
           }
         }
-      } catch {
-        // Don't clear on error - user may want to retry
+      } catch (error) {
+        onError?.({
+          code: "submit",
+          message: error instanceof Error ? error.message : "Unable to prepare message.",
+        });
       }
     },
-    [usingProvider, controller, files, onSubmit, clear],
+    [usingProvider, controller, files, onSubmit, onError, clear, managedDraft],
   );
 
   // Render with or without local provider

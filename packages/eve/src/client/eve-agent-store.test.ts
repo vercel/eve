@@ -1674,3 +1674,32 @@ describe("EveAgentStore cancellation", () => {
     expect(store.snapshot.status).toBe("ready");
   });
 });
+
+describe("per-send acceptance", () => {
+  it("acknowledges exactly the accepted delivery even if the later turn fails", async () => {
+    const accepted = vi.fn();
+    const failed = stampTestEvents([
+      createSessionFailedEvent({
+        code: "SESSION_FAILED",
+        message: "failed",
+        sessionId: "session_1",
+      }),
+    ]);
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(startedResponse("delivery_mine"))
+      .mockResolvedValueOnce(streamResponse(failed));
+    const store = createStore({ reducer: defaultMessageReducer() });
+    await store.send({ message: "Hello", onAccepted: accepted });
+    expect(accepted).toHaveBeenCalledExactlyOnceWith({
+      sessionId: "session_1",
+      deliveryId: "delivery_mine",
+    });
+  });
+  it("does not acknowledge a rejected submission", async () => {
+    const accepted = vi.fn();
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("denied", { status: 403 }));
+    const store = createStore({ reducer: defaultMessageReducer() });
+    await store.send({ message: "Hello", onAccepted: accepted });
+    expect(accepted).not.toHaveBeenCalled();
+  });
+});

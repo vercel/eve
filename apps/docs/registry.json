@@ -1798,6 +1798,9 @@
         }
       },
       "dependencies": [
+        "@codemirror/commands@6.11.1",
+        "@codemirror/state@6.7.5",
+        "@codemirror/view@6.43.12",
         "@radix-ui/react-use-controllable-state@1.2.2",
         "@shikijs/core@3.23.0",
         "@shikijs/engine-javascript@3.23.0",
@@ -2048,9 +2051,19 @@
           "target": "lib/chat-turn-state.ts"
         },
         {
+          "path": "registry/channel/web/lib/composer-draft.ts",
+          "type": "registry:file",
+          "target": "lib/composer-draft.ts"
+        },
+        {
           "path": "registry/channel/web/lib/disposable-polyfill.ts",
           "type": "registry:file",
           "target": "lib/disposable-polyfill.ts"
+        },
+        {
+          "path": "registry/channel/web/lib/draft-files.ts",
+          "type": "registry:file",
+          "target": "lib/draft-files.ts"
         },
         {
           "path": "registry/channel/web/lib/format-elapsed.ts",
@@ -2086,6 +2099,11 @@
           "path": "registry/channel/web/app/_components/chat-workspace-layout.tsx",
           "type": "registry:file",
           "target": "app/_components/chat-workspace-layout.tsx"
+        },
+        {
+          "path": "registry/channel/web/app/_components/persistent-composer-editor.tsx",
+          "type": "registry:file",
+          "target": "app/_components/persistent-composer-editor.tsx"
         },
         {
           "path": "registry/channel/web/app/_components/session-sidebar.tsx",

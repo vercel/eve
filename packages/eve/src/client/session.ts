@@ -69,7 +69,8 @@ export class ClientSession {
     input: SendTurnInput<TOutput>,
   ): Promise<{ readonly response: MessageResponse<TOutput>; readonly session: ClientSession }> {
     const response = await postTurn(context, EVE_SESSION_ROUTE_PATH, input, true);
-    const { sessionId } = await readAcceptedMessage(response);
+    const { sessionId, deliveryId } = await readAcceptedMessage(response);
+    input.onAccepted?.({ sessionId, deliveryId });
     const session = new ClientSession(context, { sessionId, streamIndex: 0 });
 
     return {
@@ -153,6 +154,7 @@ export class ClientSession {
         "Message route did not return a delivery id. Update the server before sending with this client.",
       );
     }
+    input.onAccepted?.({ sessionId: responseSessionId, deliveryId });
     return this.#messageResponse<TOutput>(
       response,
       input,

@@ -118,6 +118,11 @@ export interface CreateSessionOptions {
 
 /** Options shared by message sends and HITL responses on a client session. */
 export interface SendTurnOptions<TOutput = unknown> {
+  /** Called once the server accepts this delivery, before following its response. */
+  readonly onAccepted?: (delivery: {
+    readonly sessionId: string;
+    readonly deliveryId?: string;
+  }) => void;
   /** Policy for a message sent while the fixed session has an active turn. */
   readonly turnPolicy?: TurnPolicy;
 

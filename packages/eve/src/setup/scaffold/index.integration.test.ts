@@ -269,7 +269,8 @@ describe("ensureChannel", () => {
       join(projectRoot, "app/_components/agent-chat.tsx"),
       "utf8",
     );
-    expect(agentChatSource).toContain("disabled={isResuming || isDisconnected}");
+    expect(agentChatSource).toContain("PersistentComposerEditor");
+    expect(agentChatSource).toContain("isDisconnected");
     expect(agentChatSource).toContain('turnPolicy: "steer"');
     expect(agentChatSource).toContain('const isResuming = agent.status === "resuming"');
     expect(agentChatSource).toContain("canRespond={!isBusy && !isResuming}");

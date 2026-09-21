@@ -8,6 +8,9 @@
     "test:unit": "node --experimental-strip-types --test test/*.test.ts"
   },
   "dependencies": {
+    "@codemirror/commands": "6.11.1",
+    "@codemirror/state": "6.7.5",
+    "@codemirror/view": "6.43.12",
     "@radix-ui/react-use-controllable-state": "1.2.2",
     "@shikijs/core": "3.23.0",
     "@shikijs/engine-javascript": "3.23.0",
