@@ -2012,6 +2012,11 @@
           "path": "registry/channel/web/postcss.config.mjs",
           "type": "registry:file",
           "target": "apps/web/postcss.config.mjs"
+        },
+        {
+          "path": "registry/channel/web/tsconfig.json",
+          "type": "registry:file",
+          "target": "apps/web/tsconfig.json"
         }
       ]
     },
