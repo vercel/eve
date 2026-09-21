@@ -1,7 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { Card, CardText } from "#compiled/chat/index.js";
-import { decodeSlackApiBody } from "#public/channels/slack/api-encoding.js";
+import { mockSlack, type MockSlack } from "#internal/testing/mocks/mock-slack.js";
+import type {
+  SlackApiMethod,
+  SlackApiResponseFor,
+} from "#internal/testing/mocks/slack-api-contract.js";
 import { buildSlackBinding, buildSlackWorkspaceHandle } from "#public/channels/slack/api.js";
 import {
   callSlackApi,
@@ -12,141 +16,98 @@ import {
   type SlackBotTokenContext,
 } from "#public/channels/slack/api-transport.js";
 
-interface FetchCall {
-  url: string;
-  body: unknown;
-  contentType: string | null;
+/** Thread root every refresh test hangs its replies off. */
+const THREAD_TS = "1700000000.000001";
+
+/**
+ * Declares the handful of methods a binding drives when a routing test
+ * exercises post / ephemeral / typing / raw-request in one go.
+ */
+function allowBindingCalls(slack: MockSlack): void {
+  slack.allow("chat.postMessage").andReturn({ ok: true, channel: "C01", ts: "1700.1" });
+  slack.allow("chat.postEphemeral").andReturn({ ok: true, message_ts: "1700.2" });
+  slack.allow("assistant.threads.setStatus").andReturn({ ok: true });
+  slack.allow("auth.test").andReturn({ ok: true });
 }
 
-function buildFetchMock(
-  threadMessages: readonly Record<string, unknown>[] = [
-    {
-      text: "Hello from user",
-      ts: "1700000000.123456",
-      thread_ts: "1700000000.000001",
-      user: "U01",
-      files: [
-        {
-          id: "F1",
-          name: "report.csv",
-          mimetype: "text/csv",
-          url_private: "https://files.slack.com/a/b/report.csv",
-          size: 128,
-        },
-      ],
-    },
-    {
-      text: "Hello from bot",
-      ts: "1700000001.000000",
-      thread_ts: "1700000000.000001",
-      bot_id: "B01",
-    },
-  ],
-): { fetch: ReturnType<typeof vi.fn>; calls: FetchCall[] } {
-  const calls: FetchCall[] = [];
-  const fetch = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
-    const url = String(input);
-    const contentType = init?.headers ? new Headers(init.headers).get("content-type") : null;
-    const parsedBody = decodeSlackApiBody(init?.body, contentType);
-    calls.push({ url, body: parsedBody, contentType });
+/**
+ * Declares what `conversations.replies` returns for this thread. The
+ * messages are the raw Slack payloads the parser under test reads.
+ */
+function allowReplies(slack: MockSlack, messages: readonly Record<string, unknown>[]): void {
+  slack.allow("conversations.replies").andReturn({ ok: true, messages });
+}
 
-    if (url === "https://slack.com/api/files.getUploadURLExternal") {
-      return new Response(
-        JSON.stringify({
-          ok: true,
-          upload_url: "https://files.slack.com/upload/abc",
-          file_id: `F${calls.length}`,
-        }),
-        { headers: { "content-type": "application/json" } },
-      );
+/**
+ * Declares Slack's three-leg external upload handshake, allocating the
+ * given file ids in order. Completion echoes back the files it was sent,
+ * which is what production reads the returned id out of.
+ */
+function allowUpload(slack: MockSlack, fileIds: readonly string[] = ["F1"]): void {
+  const pending = [...fileIds];
+  slack.allow("files.getUploadURLExternal").andRespond(() => {
+    const id = pending.shift();
+    // A violation, so it still surfaces on the paths that swallow a
+    // rejected fetch.
+    if (id === undefined) {
+      slack.reject("more files were uploaded than allowUpload declared ids for");
     }
-    if (url.startsWith("https://files.slack.com/upload/")) {
-      return new Response("OK", { status: 200 });
-    }
-    if (url === "https://slack.com/api/files.completeUploadExternal") {
-      return new Response(
-        JSON.stringify({
-          ok: true,
-          files: [{ id: "F1", title: "report.csv" }],
-        }),
-        { headers: { "content-type": "application/json" } },
-      );
-    }
-    if (url === "https://slack.com/api/conversations.replies") {
-      return new Response(
-        JSON.stringify({
-          ok: true,
-          messages: threadMessages,
-        }),
-        { headers: { "content-type": "application/json" } },
-      );
-    }
-    if (url === "https://slack.com/api/conversations.open") {
-      return new Response(JSON.stringify({ ok: true, channel: { id: "D777" } }), {
-        headers: { "content-type": "application/json" },
-      });
-    }
-    return new Response(JSON.stringify({ ok: true, ts: "1700000001.000001" }), {
-      headers: { "content-type": "application/json" },
-    });
+    return { ok: true, upload_url: slack.uploadUrl(id), file_id: id };
   });
-
-  return { fetch, calls };
+  slack
+    .allow("files.completeUploadExternal")
+    .andRespond((body) => ({ ok: true, files: body.files }));
 }
 
 describe("callSlackApi encoding", () => {
-  let mock: ReturnType<typeof buildFetchMock>;
-
-  beforeEach(() => {
-    mock = buildFetchMock();
-    vi.stubGlobal("fetch", mock.fetch);
-  });
-
-  afterEach(() => {
-    vi.unstubAllGlobals();
-  });
-
-  // Slack accepts form encoding on every endpoint but JSON on only a
-  // subset (conversations.replies rejects JSON). Lock in form so the
-  // partial-JSON endpoints don't silently break again.
+  // Slack accepts form encoding on every endpoint but JSON on only
+  // some (conversations.replies rejects JSON), so eve form-encodes
+  // everything bar the two JSON-only surfaces.
   it("sends every Slack API call as application/x-www-form-urlencoded", async () => {
-    for (const operation of [
-      "conversations.replies",
-      "conversations.history",
-      "chat.postMessage",
-      "chat.postEphemeral",
-      "files.getUploadURLExternal",
-      "files.completeUploadExternal",
-      "assistant.threads.setStatus",
-    ]) {
+    const slack = mockSlack();
+    const responses = {
+      "assistant.threads.setStatus": { ok: true },
+      "chat.postEphemeral": { ok: true, message_ts: "1700.2" },
+      "chat.postMessage": { ok: true, ts: "1700.1" },
+      "conversations.replies": { ok: true, messages: [] },
+      "files.completeUploadExternal": { ok: true, files: [{ id: "F1" }] },
+      "files.getUploadURLExternal": { ok: true, file_id: "F1", upload_url: "https://upload/F1" },
+    } satisfies { [M in SlackApiMethod]?: SlackApiResponseFor<M> };
+    const operations = Object.keys(responses) as (keyof typeof responses)[];
+    for (const operation of operations) {
+      slack.allow(operation).andReturn(responses[operation]);
+    }
+
+    for (const operation of operations) {
       await callSlackApi({
         botToken: "xoxb-test",
         operation,
-        body: { channel: "C01", ts: "1700000000.000001" },
+        body: { channel: "C01", ts: THREAD_TS },
+        fetch: slack.fetch,
       });
     }
 
-    expect(mock.calls.length).toBeGreaterThanOrEqual(7);
-    for (const call of mock.calls) {
+    expect(slack.calls).toHaveLength(6);
+    for (const call of slack.calls) {
       expect(call.contentType).toBe("application/x-www-form-urlencoded");
     }
+    // The double rejects an unencoded or unsigned call, so this covers
+    // a method added to the list later as well.
+    slack.assertNoViolations();
   });
 });
 
 describe("SlackHandle.uploadFiles", () => {
-  let mock: ReturnType<typeof buildFetchMock>;
+  let slack: MockSlack;
 
   beforeEach(() => {
-    mock = buildFetchMock();
-    vi.stubGlobal("fetch", mock.fetch);
-  });
-
-  afterEach(() => {
-    vi.unstubAllGlobals();
+    slack = mockSlack();
   });
 
   it("runs the 3-step Slack upload flow per file", async () => {
-    const { slack } = buildSlackBinding({
+    allowUpload(slack);
+    const binding = buildSlackBinding({
+      api: { fetch: slack.fetch },
       botToken: "xoxb-test",
       channelId: "C01",
       threadTs: "1.0",
@@ -155,83 +116,77 @@ describe("SlackHandle.uploadFiles", () => {
 
     const bytes = new TextEncoder().encode("hello,world\n1,2\n").buffer as ArrayBuffer;
 
-    const result = await slack.uploadFiles(
+    const result = await binding.slack.uploadFiles(
       [{ data: bytes, filename: "report.csv", mimeType: "text/csv" }],
       { initialComment: "*Report*" },
     );
 
     expect(result.fileIds).toEqual(["F1"]);
 
-    const urls = mock.calls.map((c) => c.url);
-    expect(urls).toEqual([
-      "https://slack.com/api/files.getUploadURLExternal",
-      "https://files.slack.com/upload/abc",
-      "https://slack.com/api/files.completeUploadExternal",
+    expect(slack.calls.map((call) => call.method)).toEqual([
+      "files.getUploadURLExternal",
+      "files.upload",
+      "files.completeUploadExternal",
     ]);
 
-    const getUrlBody = mock.calls[0]!.body as { filename: string; length: string };
+    const getUrlBody = slack.bodyOf("files.getUploadURLExternal");
     expect(getUrlBody.filename).toBe("report.csv");
     expect(getUrlBody.length).toBe(String(bytes.byteLength));
 
-    expect(mock.calls[1]!.contentType).toBe("application/octet-stream");
+    expect(slack.calls[1]!.contentType).toBe("application/octet-stream");
 
-    const completeBody = mock.calls[2]!.body as {
-      channel_id: string;
-      thread_ts: string;
-      initial_comment: string;
-      files: { id: string; title: string }[];
-    };
+    const completeBody = slack.bodyOf("files.completeUploadExternal");
     expect(completeBody.channel_id).toBe("C01");
     expect(completeBody.thread_ts).toBe("1.0");
     expect(completeBody.initial_comment).toBe("*Report*");
     expect(completeBody.files).toEqual([{ id: "F1", title: "report.csv" }]);
+
+    // The handshake only coheres if the bytes Slack was promised are the
+    // bytes it actually received.
+    expect(slack.uploadedBytes()).toEqual([new Uint8Array(bytes)]);
   });
 
   it("returns an empty result for zero files", async () => {
-    const { slack } = buildSlackBinding({
+    const binding = buildSlackBinding({
+      api: { fetch: slack.fetch },
       botToken: "xoxb-test",
       channelId: "C01",
       threadTs: "1.0",
       teamId: undefined,
     });
 
-    const result = await slack.uploadFiles([]);
+    const result = await binding.slack.uploadFiles([]);
     expect(result.fileIds).toEqual([]);
-    expect(mock.fetch).not.toHaveBeenCalled();
+    // Nothing is stubbed, so any call at all would have failed loudly.
+    expect(slack.calls).toEqual([]);
   });
 
   it("accepts options.channelId and options.threadTs overrides", async () => {
-    const { slack } = buildSlackBinding({
+    allowUpload(slack);
+    const binding = buildSlackBinding({
+      api: { fetch: slack.fetch },
       botToken: "xoxb-test",
       channelId: "C01",
       threadTs: "1.0",
       teamId: undefined,
     });
 
-    await slack.uploadFiles([{ data: Buffer.from([1, 2, 3]), filename: "x.bin" }], {
+    await binding.slack.uploadFiles([{ data: Buffer.from([1, 2, 3]), filename: "x.bin" }], {
       channelId: "CXYZ",
       threadTs: "9.9",
     });
 
-    const completeBody = mock.calls.at(-1)!.body as {
-      channel_id: string;
-      thread_ts: string;
-    };
-    expect(completeBody.channel_id).toBe("CXYZ");
-    expect(completeBody.thread_ts).toBe("9.9");
+    expect(slack.bodyOf("files.completeUploadExternal")).toMatchObject({
+      channel_id: "CXYZ",
+      thread_ts: "9.9",
+    });
   });
 
   it("propagates errors from files.getUploadURLExternal", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockResolvedValue(
-        new Response(JSON.stringify({ ok: false, error: "rate_limited" }), {
-          headers: { "content-type": "application/json" },
-        }),
-      ),
-    );
-
-    const { slack } = buildSlackBinding({
+    allowUpload(slack);
+    slack.failNext("files.getUploadURLExternal", "rate_limited");
+    const binding = buildSlackBinding({
+      api: { fetch: slack.fetch },
       botToken: "xoxb-test",
       channelId: "C01",
       threadTs: "1.0",
@@ -239,25 +194,46 @@ describe("SlackHandle.uploadFiles", () => {
     });
 
     await expect(
-      slack.uploadFiles([{ data: Buffer.from([1]), filename: "x.bin" }]),
+      binding.slack.uploadFiles([{ data: Buffer.from([1]), filename: "x.bin" }]),
     ).rejects.toThrow("rate_limited");
+    // It failed at the first leg, so no bytes were ever sent.
+    expect(slack.uploadedBytes()).toEqual([]);
+    expect(slack.callsTo("files.completeUploadExternal")).toEqual([]);
+  });
+
+  it("propagates an HTTP rate limit as a SlackApiError carrying the status", async () => {
+    allowUpload(slack);
+    slack.failNextHttp("files.getUploadURLExternal", { status: 429, retryAfter: 30 });
+    const binding = buildSlackBinding({
+      api: { fetch: slack.fetch },
+      botToken: "xoxb-test",
+      channelId: "C01",
+      threadTs: "1.0",
+      teamId: undefined,
+    });
+
+    const rejection = binding.slack.uploadFiles([{ data: Buffer.from([1]), filename: "x.bin" }]);
+
+    await expect(rejection).rejects.toThrow(SlackApiError);
+    await expect(rejection).rejects.toMatchObject({
+      method: "files.getUploadURLExternal",
+      status: 429,
+    });
   });
 });
 
 describe("SlackThread.post with files", () => {
-  let mock: ReturnType<typeof buildFetchMock>;
+  let slack: MockSlack;
 
   beforeEach(() => {
-    mock = buildFetchMock();
-    vi.stubGlobal("fetch", mock.fetch);
-  });
-
-  afterEach(() => {
-    vi.unstubAllGlobals();
+    slack = mockSlack();
   });
 
   it("{ markdown, files } posts markdown before uploading files", async () => {
+    slack.allow("chat.postMessage").andReturn({ ok: true, channel: "C01", ts: "1700.1" });
+    allowUpload(slack);
     const { thread } = buildSlackBinding({
+      api: { fetch: slack.fetch },
       botToken: "xoxb-test",
       channelId: "C01",
       threadTs: "1.0",
@@ -275,25 +251,24 @@ describe("SlackThread.post with files", () => {
       files: [{ data: Buffer.from([1, 2]), filename: "report.csv", mimeType: "text/csv" }],
     });
 
-    expect(posted.id).toBe("1700000001.000001");
+    const post = slack.bodyOf("chat.postMessage");
+    expect(post.markdown_text).toContain("| Metric | Value |");
+    expect(post.thread_ts).toBe("1.0");
 
-    const post = mock.calls.find((c) => c.url === "https://slack.com/api/chat.postMessage");
-    expect(post).toBeDefined();
-    expect((post!.body as { markdown_text: string; thread_ts: string }).markdown_text).toContain(
-      "| Metric | Value |",
-    );
-    expect((post!.body as { markdown_text: string; thread_ts: string }).thread_ts).toBe("1.0");
+    // The returned id has to be the message ts, not anything from the
+    // upload that followed it.
+    expect(posted.id).toBe("1700.1");
 
-    const complete = mock.calls.find(
-      (c) => c.url === "https://slack.com/api/files.completeUploadExternal",
-    )!;
-    expect((complete.body as { initial_comment?: string }).initial_comment).toBeUndefined();
-    expect((complete.body as { channel_id: string; thread_ts: string }).channel_id).toBe("C01");
-    expect((complete.body as { channel_id: string; thread_ts: string }).thread_ts).toBe("1.0");
+    const complete = slack.bodyOf("files.completeUploadExternal");
+    expect(complete.initial_comment).toBeUndefined();
+    expect(complete.channel_id).toBe("C01");
+    expect(complete.thread_ts).toBe("1.0");
   });
 
   it("{ text, files } keeps a single Slack upload comment", async () => {
+    allowUpload(slack);
     const { thread } = buildSlackBinding({
+      api: { fetch: slack.fetch },
       botToken: "xoxb-test",
       channelId: "C01",
       threadTs: "1.0",
@@ -305,19 +280,21 @@ describe("SlackThread.post with files", () => {
       files: [{ data: Buffer.from([1, 2]), filename: "report.csv", mimeType: "text/csv" }],
     });
 
-    const post = mock.calls.find((c) => c.url === "https://slack.com/api/chat.postMessage");
-    expect(post).toBeUndefined();
-
-    const complete = mock.calls.find(
-      (c) => c.url === "https://slack.com/api/files.completeUploadExternal",
-    )!;
-    expect((complete.body as { initial_comment: string }).initial_comment).toBe(
-      "*Report attached*",
-    );
+    // chat.postMessage is not stubbed, so posting separately would have
+    // failed outright: the text rides along as the upload's comment.
+    expect(slack.callsTo("chat.postMessage")).toEqual([]);
+    expect(slack.bodyOf("files.completeUploadExternal")).toMatchObject({
+      initial_comment: "*Report attached*",
+      channel_id: "C01",
+      thread_ts: "1.0",
+    });
   });
 
   it("{ card, files } posts the card via chat.postMessage and uploads files separately", async () => {
+    slack.allow("chat.postMessage").andReturn({ ok: true, channel: "C01", ts: "1700.1" });
+    allowUpload(slack);
     const { thread } = buildSlackBinding({
+      api: { fetch: slack.fetch },
       botToken: "xoxb-test",
       channelId: "C01",
       threadTs: "1.0",
@@ -329,34 +306,80 @@ describe("SlackThread.post with files", () => {
       files: [{ data: Buffer.from([1]), filename: "report.csv", mimeType: "text/csv" }],
     });
 
-    const post = mock.calls.find((c) => c.url === "https://slack.com/api/chat.postMessage");
-    expect(post).toBeDefined();
-    expect((post!.body as { blocks: unknown[] }).blocks).toBeDefined();
+    expect(slack.bodyOf("chat.postMessage").blocks).toBeDefined();
 
-    const complete = mock.calls.find(
-      (c) => c.url === "https://slack.com/api/files.completeUploadExternal",
-    );
-    expect(complete).toBeDefined();
-    expect((complete!.body as { initial_comment?: string }).initial_comment).toBeUndefined();
-    expect((complete!.body as { channel_id: string; thread_ts: string }).channel_id).toBe("C01");
-    expect((complete!.body as { channel_id: string; thread_ts: string }).thread_ts).toBe("1.0");
+    const complete = slack.bodyOf("files.completeUploadExternal");
+    expect(complete.initial_comment).toBeUndefined();
+    expect(complete.channel_id).toBe("C01");
+    expect(complete.thread_ts).toBe("1.0");
+  });
+});
+
+/**
+ * Pins a production bug, and does not fix it.
+ *
+ * {@link SlackPostedMessage.id} is documented as the Slack message `ts`,
+ * which is what a follow-up `chat.update` needs, and the
+ * `{ markdown | blocks | card } + files` branches return one. The
+ * `{ text, files }` branch returns `raw.files[0].id` — a file id, from a
+ * different Slack namespace — so a caller that updates the message it
+ * just posted addresses a file no `chat.update` can reach. The stubs
+ * below give the message `ts` and the file ids distinguishable values,
+ * which is what makes the difference visible.
+ */
+describe("SlackThread.post id namespace", () => {
+  let slack: MockSlack;
+
+  beforeEach(() => {
+    slack = mockSlack();
+  });
+
+  it("returns a file id from { text, files } and a message ts from the other branches", async () => {
+    slack.allow("chat.postMessage").andReturn({ ok: true, channel: "C01", ts: "1700.1" });
+    allowUpload(slack, ["F1", "F2", "F3"]);
+    const { thread } = buildSlackBinding({
+      api: { fetch: slack.fetch },
+      botToken: "xoxb-test",
+      channelId: "C01",
+      threadTs: "1.0",
+      teamId: undefined,
+    });
+
+    const fromText = await thread.post({
+      text: "*Report attached*",
+      files: [{ data: Buffer.from([1]), filename: "text.csv", mimeType: "text/csv" }],
+    });
+    const fromMarkdown = await thread.post({
+      markdown: "**Report attached**",
+      files: [{ data: Buffer.from([2]), filename: "markdown.csv", mimeType: "text/csv" }],
+    });
+    const fromCard = await thread.post({
+      card: Card({ children: [CardText("Report attached")] }),
+      files: [{ data: Buffer.from([3]), filename: "card.csv", mimeType: "text/csv" }],
+    });
+
+    // The sibling branches honor the contract: their id is the message
+    // ts Slack returned, so a follow-up chat.update would land.
+    expect(fromMarkdown.id).toBe("1700.1");
+    expect(fromCard.id).toBe("1700.1");
+
+    // The { text, files } branch does not: it hands back the first
+    // staged file id, from a namespace no chat.update can address.
+    expect(fromText.id).toBe("F1");
   });
 });
 
 describe("Slack outbound text", () => {
-  let mock: ReturnType<typeof buildFetchMock>;
+  let slack: MockSlack;
 
   beforeEach(() => {
-    mock = buildFetchMock();
-    vi.stubGlobal("fetch", mock.fetch);
-  });
-
-  afterEach(() => {
-    vi.unstubAllGlobals();
+    slack = mockSlack();
   });
 
   it("preserves literal at-prefixed tokens in markdown and text posts", async () => {
+    slack.allow("chat.postMessage").andReturn({ ok: true, channel: "C01", ts: "1700.1" });
     const { thread } = buildSlackBinding({
+      api: { fetch: slack.fetch },
       botToken: "xoxb-test",
       channelId: "C01",
       threadTs: "1.0",
@@ -368,20 +391,19 @@ describe("Slack outbound text", () => {
     await thread.post({ markdown: `bump @scope/package and ping ${mention}` });
     await thread.post({ text: "email @support or ping <@U012ABC456>" });
 
-    const posts = mock.calls.filter(
-      (call) => call.url === "https://slack.com/api/chat.postMessage",
-    );
-    expect(posts).toHaveLength(2);
-    expect(posts[0]!.body).toMatchObject({
+    expect(slack.callsTo("chat.postMessage")).toHaveLength(2);
+    expect(slack.bodyOf("chat.postMessage", 0)).toMatchObject({
       markdown_text: "bump @scope/package and ping <@U012ABC456>",
     });
-    expect(posts[1]!.body).toMatchObject({
+    expect(slack.bodyOf("chat.postMessage", 1)).toMatchObject({
       text: "email @support or ping <@U012ABC456>",
     });
   });
 
   it("preserves literal at-prefixed tokens in file upload comments", async () => {
+    allowUpload(slack);
     const { thread } = buildSlackBinding({
+      api: { fetch: slack.fetch },
       botToken: "xoxb-test",
       channelId: "C01",
       threadTs: "1.0",
@@ -393,32 +415,174 @@ describe("Slack outbound text", () => {
       files: [{ data: Buffer.from([1]), filename: "report.csv", mimeType: "text/csv" }],
     });
 
-    const complete = mock.calls.find(
-      (call) => call.url === "https://slack.com/api/files.completeUploadExternal",
-    );
-    expect(complete?.body).toMatchObject({
+    expect(slack.bodyOf("files.completeUploadExternal")).toMatchObject({
       initial_comment: "report for @scope/package and <@U012ABC456>",
     });
   });
 });
 
-describe("SlackThread.refresh", () => {
-  let mock: ReturnType<typeof buildFetchMock>;
+describe("Slack API failure surfaces", () => {
+  let slack: MockSlack;
 
   beforeEach(() => {
-    mock = buildFetchMock();
-    vi.stubGlobal("fetch", mock.fetch);
+    slack = mockSlack();
   });
 
-  afterEach(() => {
-    vi.unstubAllGlobals();
+  function bind() {
+    return buildSlackBinding({
+      api: { fetch: slack.fetch },
+      botToken: "xoxb-test",
+      channelId: "C01",
+      threadTs: "1.0",
+      teamId: undefined,
+    });
+  }
+
+  // The vendored Slack primitive has no retry logic, so a 429 fails
+  // the call outright even though Slack said how long to wait.
+  it("throws on HTTP 429 without honoring Retry-After", async () => {
+    slack.allow("chat.postMessage").andReturn({ ok: true, channel: "C01", ts: "1700.1" });
+    slack.failNextHttp("chat.postMessage", {
+      status: 429,
+      retryAfter: 30,
+      body: { ok: false, error: "rate_limited" },
+    });
+    const { thread } = bind();
+
+    const rejection = thread.post("anything");
+    await expect(rejection).rejects.toThrow(SlackApiError);
+    await expect(rejection).rejects.toMatchObject({ method: "chat.postMessage", status: 429 });
+
+    // One attempt: no back-off, no second try.
+    expect(slack.callsTo("chat.postMessage")).toHaveLength(1);
+  });
+
+  it.each(["msg_too_long", "invalid_blocks", "channel_not_found", "token_revoked"])(
+    "raises a SlackApiError for a Slack-level %s on chat.postMessage",
+    async (error) => {
+      slack.allow("chat.postMessage").andReturn({ ok: true, channel: "C01", ts: "1700.1" });
+      slack.failNext("chat.postMessage", error);
+      const { thread } = bind();
+
+      const rejection = thread.post({ markdown: "**too much**" });
+      await expect(rejection).rejects.toThrow(SlackApiError);
+      await expect(rejection).rejects.toMatchObject({
+        method: "chat.postMessage",
+        response: { ok: false, error },
+      });
+      expect(slack.callsTo("chat.postMessage")).toHaveLength(1);
+    },
+  );
+
+  it("raises channel_not_found from postEphemeral without delivering anything", async () => {
+    slack.allow("chat.postEphemeral").andReturn({ ok: true, message_ts: "1700.1" });
+    slack.failNext("chat.postEphemeral", "channel_not_found");
+    const { thread } = bind();
+
+    await expect(thread.postEphemeral("U99", { text: "psst" })).rejects.toThrow(
+      "chat.postEphemeral failed: channel_not_found",
+    );
+  });
+
+  it("raises invalid_auth from conversations.open before any DM is posted", async () => {
+    slack.allow("conversations.open").andReturn({ ok: true, channel: { id: "D99" } });
+    slack.failNext("conversations.open", "invalid_auth");
+    const { thread } = bind();
+
+    await expect(thread.postDirectMessage("U99", { text: "for your eyes only" })).rejects.toThrow(
+      /invalid_auth/,
+    );
+    expect(slack.callsTo("chat.postMessage")).toEqual([]);
+  });
+
+  // The typing indicator is a UX nicety, so eve swallows its failures:
+  // a revoked token silently leaves the thread with no status rather
+  // than failing the turn.
+  it("swallows a revoked token on the typing indicator", async () => {
+    slack.allow("assistant.threads.setStatus").andReturn({ ok: true });
+    slack.failNext("assistant.threads.setStatus", "token_revoked");
+    const { thread } = bind();
+
+    await expect(thread.startTyping("Working...")).resolves.toBeUndefined();
+    expect(slack.callsTo("assistant.threads.setStatus")).toHaveLength(1);
+    slack.assertNoViolations();
+  });
+
+  it("leaves the staged bytes orphaned when completeUploadExternal fails", async () => {
+    allowUpload(slack);
+    slack.failNext("files.completeUploadExternal", "invalid_arguments");
+    const binding = bind();
+
+    await expect(
+      binding.slack.uploadFiles([{ data: Buffer.from([1, 2]), filename: "x.bin" }]),
+    ).rejects.toThrow("invalid_arguments");
+
+    // The bytes landed, but Slack never shared them: the upload leg ran
+    // and the completion that would have published it failed.
+    expect(slack.uploadedBytes()).toEqual([new Uint8Array([1, 2])]);
+    expect(slack.callsTo("files.completeUploadExternal")).toHaveLength(1);
+  });
+
+  // `fileIds` is built from the ids eve staged and never reconciled
+  // against the files Slack says it completed, so a partial completion
+  // reaches the caller as a full success.
+  it("reports a partial completeUploadExternal as a full success", async () => {
+    allowUpload(slack, ["F1", "F2"]);
+    // Slack completing only one of the two files it was sent.
+    slack.allow("files.completeUploadExternal").andReturn({ ok: true, files: [{ id: "F1" }] });
+    const binding = bind();
+
+    const result = await binding.slack.uploadFiles([
+      { data: Buffer.from([1]), filename: "kept.bin" },
+      { data: Buffer.from([2]), filename: "dropped.bin" },
+    ]);
+
+    expect(result.fileIds).toEqual(["F1", "F2"]);
+    expect((result.raw.files as { id: string }[]).map((file) => file.id)).toEqual(["F1"]);
+  });
+});
+
+describe("SlackThread.refresh", () => {
+  let slack: MockSlack;
+
+  /** Declares the two-message thread most refresh assertions read back. */
+  function allowDefaultThread(api: MockSlack): void {
+    allowReplies(api, [
+      {
+        text: "Hello from user",
+        ts: "1700000000.123456",
+        thread_ts: THREAD_TS,
+        user: "U01",
+        files: [
+          {
+            id: "F1",
+            name: "report.csv",
+            mimetype: "text/csv",
+            url_private: "https://files.slack.com/a/b/report.csv",
+            size: 128,
+          },
+        ],
+      },
+      {
+        text: "Hello from bot",
+        ts: "1700000001.000000",
+        thread_ts: THREAD_TS,
+        bot_id: "B01",
+      },
+    ]);
+  }
+
+  beforeEach(() => {
+    slack = mockSlack();
   });
 
   it("hydrates recent messages with the eve-owned Slack thread shape", async () => {
+    allowDefaultThread(slack);
     const { thread } = buildSlackBinding({
+      api: { fetch: slack.fetch },
       botToken: "xoxb-test",
       channelId: "C01",
-      threadTs: "1700000000.000001",
+      threadTs: THREAD_TS,
       teamId: undefined,
     });
 
@@ -426,10 +590,9 @@ describe("SlackThread.refresh", () => {
 
     // conversations.replies rejects JSON; lock in the form encoding at
     // the public refresh surface so replies never get silently dropped.
-    const repliesCall = mock.calls.find(
-      (call) => call.url === "https://slack.com/api/conversations.replies",
+    expect(slack.callsTo("conversations.replies")[0]?.contentType).toBe(
+      "application/x-www-form-urlencoded",
     );
-    expect(repliesCall?.contentType).toBe("application/x-www-form-urlencoded");
 
     expect(thread.recentMessages).toHaveLength(2);
     expect(thread.recentMessages[0]).toMatchObject({
@@ -438,7 +601,7 @@ describe("SlackThread.refresh", () => {
       user: "U01",
       botId: undefined,
       ts: "1700000000.123456",
-      threadTs: "1700000000.000001",
+      threadTs: THREAD_TS,
       isMe: false,
       raw: { files: [{ id: "F1" }] },
     });
@@ -446,7 +609,7 @@ describe("SlackThread.refresh", () => {
       text: "Hello from bot",
       botId: "B01",
       ts: "1700000001.000000",
-      threadTs: "1700000000.000001",
+      threadTs: THREAD_TS,
       isMe: false,
     });
 
@@ -458,12 +621,11 @@ describe("SlackThread.refresh", () => {
   });
 
   it("extracts Block Kit and legacy attachment content for text-less replies", async () => {
-    vi.unstubAllGlobals();
-    mock = buildFetchMock([
+    allowReplies(slack, [
       {
         text: "",
         ts: "1700000000.123456",
-        thread_ts: "1700000000.000001",
+        thread_ts: THREAD_TS,
         bot_id: "B01",
         blocks: [
           { type: "section", text: { type: "mrkdwn", text: "*Alert:* Service latency is high" } },
@@ -472,12 +634,12 @@ describe("SlackThread.refresh", () => {
         attachments: [{ title: "Runbook", text: "Restart the pods." }],
       },
     ]);
-    vi.stubGlobal("fetch", mock.fetch);
 
     const { thread } = buildSlackBinding({
+      api: { fetch: slack.fetch },
       botToken: "xoxb-test",
       channelId: "C01",
-      threadTs: "1700000000.000001",
+      threadTs: THREAD_TS,
       teamId: undefined,
     });
 
@@ -491,18 +653,17 @@ describe("SlackThread.refresh", () => {
   });
 
   it("survives rich_text links whose URLs contain Slack control characters", async () => {
-    vi.unstubAllGlobals();
-    mock = buildFetchMock([
+    allowReplies(slack, [
       {
         text: "plain reply",
         ts: "1700000000.123456",
-        thread_ts: "1700000000.000001",
+        thread_ts: THREAD_TS,
         user: "U01",
       },
       {
         text: "",
         ts: "1700000000.123457",
-        thread_ts: "1700000000.000001",
+        thread_ts: THREAD_TS,
         bot_id: "B01",
         blocks: [
           {
@@ -519,12 +680,12 @@ describe("SlackThread.refresh", () => {
         ],
       },
     ]);
-    vi.stubGlobal("fetch", mock.fetch);
 
     const { thread } = buildSlackBinding({
+      api: { fetch: slack.fetch },
       botToken: "xoxb-test",
       channelId: "C01",
-      threadTs: "1700000000.000001",
+      threadTs: THREAD_TS,
       teamId: undefined,
     });
 
@@ -537,19 +698,19 @@ describe("SlackThread.refresh", () => {
   });
 
   it("shares one conversations.replies request across overlapping refreshes", async () => {
-    let resolveReplies!: (response: Response) => void;
-    const replies = new Promise<Response>((resolve) => {
-      resolveReplies = resolve;
+    allowReplies(slack, [{ text: "loaded once", ts: "1.0", user: "U01" }]);
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
     });
-    mock.fetch.mockImplementation(async (input: string | URL | Request) => {
-      if (String(input) === "https://slack.com/api/conversations.replies") {
-        return replies;
-      }
-      return new Response(JSON.stringify({ ok: true }), {
-        headers: { "content-type": "application/json" },
-      });
-    });
+    // Holding the reply in flight is what makes the overlap
+    // observable; the double behind the gate still serves it.
+    const gatedFetch: typeof globalThis.fetch = async (target, init) => {
+      if (String(target).endsWith("conversations.replies")) await gate;
+      return slack.fetch(target, init);
+    };
     const { thread } = buildSlackBinding({
+      api: { fetch: gatedFetch },
       botToken: "xoxb-test",
       channelId: "C01",
       threadTs: "1.0",
@@ -560,26 +721,22 @@ describe("SlackThread.refresh", () => {
     const second = thread.refresh();
 
     expect(second).toBe(first);
-    await vi.waitFor(() => {
-      expect(mock.fetch).toHaveBeenCalledTimes(1);
-    });
+    expect(slack.calls).toEqual([]);
 
-    resolveReplies(
-      new Response(
-        JSON.stringify({
-          ok: true,
-          messages: [{ text: "loaded once", ts: "1.0", user: "U01" }],
-        }),
-        { headers: { "content-type": "application/json" } },
-      ),
-    );
+    release();
     await Promise.all([first, second]);
 
+    expect(slack.callsTo("conversations.replies")).toHaveLength(1);
     expect(thread.recentMessages).toHaveLength(1);
   });
 
   it("starts a new request after the previous refresh completes", async () => {
+    allowReplies(slack, [
+      { text: "root", ts: "1.0", user: "U01" },
+      { text: "reply", ts: "1.1", thread_ts: "1.0", user: "U02" },
+    ]);
     const { thread } = buildSlackBinding({
+      api: { fetch: slack.fetch },
       botToken: "xoxb-test",
       channelId: "C01",
       threadTs: "1.0",
@@ -590,15 +747,15 @@ describe("SlackThread.refresh", () => {
     const firstSnapshot = thread.recentMessages;
     await thread.refresh();
 
-    expect(
-      mock.calls.filter((call) => call.url === "https://slack.com/api/conversations.replies"),
-    ).toHaveLength(2);
+    expect(slack.callsTo("conversations.replies")).toHaveLength(2);
     expect(thread.recentMessages).not.toBe(firstSnapshot);
     expect(firstSnapshot).toHaveLength(2);
   });
 
   it("preserves loaded messages when a later refresh fails", async () => {
+    allowReplies(slack, [{ text: "root", ts: "1.0", user: "U01" }]);
     const { thread } = buildSlackBinding({
+      api: { fetch: slack.fetch },
       botToken: "xoxb-test",
       channelId: "C01",
       threadTs: "1.0",
@@ -606,7 +763,7 @@ describe("SlackThread.refresh", () => {
     });
     await thread.refresh();
     const loadedMessages = [...thread.recentMessages];
-    mock.fetch.mockRejectedValueOnce(new Error("Slack unavailable"));
+    slack.failNextHttp("conversations.replies", { status: 500 });
 
     await thread.refresh();
 
@@ -614,42 +771,33 @@ describe("SlackThread.refresh", () => {
   });
 
   it("marks only replies from the bound Slack app as mine", async () => {
-    mock.fetch.mockImplementation(async (input: string | URL | Request) => {
-      if (String(input) === "https://slack.com/api/conversations.replies") {
-        return new Response(
-          JSON.stringify({
-            ok: true,
-            messages: [
-              {
-                app_id: "A_SELF",
-                bot_id: "B_SELF",
-                text: "own user-attributed reply",
-                ts: "1.1",
-                user: "U_SELF",
-              },
-              {
-                app_id: "A_OTHER",
-                bot_id: "B_OTHER",
-                text: "other bot reply",
-                ts: "1.2",
-                user: "U_OTHER",
-              },
-              {
-                app_id: "A_SELF",
-                bot_id: "B_SELF",
-                text: "own app-attributed reply",
-                ts: "1.3",
-              },
-            ],
-          }),
-          { headers: { "content-type": "application/json" } },
-        );
-      }
-      return new Response(JSON.stringify({ ok: true }), {
-        headers: { "content-type": "application/json" },
-      });
-    });
+    allowReplies(slack, [
+      {
+        app_id: "A_SELF",
+        bot_id: "B_SELF",
+        text: "own user-attributed reply",
+        thread_ts: "1.0",
+        ts: "1.1",
+        user: "U_SELF",
+      },
+      {
+        app_id: "A_OTHER",
+        bot_id: "B_OTHER",
+        text: "other bot reply",
+        thread_ts: "1.0",
+        ts: "1.2",
+        user: "U_OTHER",
+      },
+      {
+        app_id: "A_SELF",
+        bot_id: "B_SELF",
+        text: "own app-attributed reply",
+        thread_ts: "1.0",
+        ts: "1.3",
+      },
+    ]);
     const { thread } = buildSlackBinding({
+      api: { fetch: slack.fetch },
       appId: "A_SELF",
       botToken: "xoxb-test",
       botUserId: "U_SELF",
@@ -665,20 +813,23 @@ describe("SlackThread.refresh", () => {
 });
 
 describe("SlackThread.listParticipants", () => {
-  afterEach(() => {
-    vi.unstubAllGlobals();
-  });
-
   it("returns unique human user ids in first-appearance order", async () => {
-    const mock = buildFetchMock([
+    const slack = mockSlack();
+    allowReplies(slack, [
       { text: "root", ts: "1.0", user: "U01" },
-      { text: "bot reply", ts: "1.1", thread_ts: "1.0", user: "UAPP", bot_id: "B01" },
+      {
+        text: "bot reply",
+        ts: "1.1",
+        thread_ts: "1.0",
+        user: "UAPP",
+        bot_id: "B01",
+      },
       { text: "second person", ts: "1.2", thread_ts: "1.0", user: "U02" },
       { text: "starter again", ts: "1.3", thread_ts: "1.0", user: "U01" },
       { text: "system message", ts: "1.4", thread_ts: "1.0" },
     ]);
-    vi.stubGlobal("fetch", mock.fetch);
     const { thread } = buildSlackBinding({
+      api: { fetch: slack.fetch },
       botToken: "xoxb-test",
       channelId: "C01",
       threadTs: "1.0",
@@ -688,26 +839,16 @@ describe("SlackThread.listParticipants", () => {
     await expect(thread.listParticipants()).resolves.toEqual(["U01", "U02"]);
 
     expect(thread.recentMessages).toHaveLength(5);
-    expect(
-      mock.calls.filter((call) => call.url === "https://slack.com/api/conversations.replies"),
-    ).toHaveLength(1);
+    expect(slack.callsTo("conversations.replies")).toHaveLength(1);
   });
 });
 
 describe("SlackThread.postEphemeral", () => {
-  let mock: ReturnType<typeof buildFetchMock>;
-
-  beforeEach(() => {
-    mock = buildFetchMock();
-    vi.stubGlobal("fetch", mock.fetch);
-  });
-
-  afterEach(() => {
-    vi.unstubAllGlobals();
-  });
-
   it("posts via chat.postEphemeral with user / channel / thread_ts", async () => {
+    const slack = mockSlack();
+    slack.allow("chat.postEphemeral").andReturn({ ok: true, message_ts: "1700.1" });
     const { thread } = buildSlackBinding({
+      api: { fetch: slack.fetch },
       botToken: "xoxb-test",
       channelId: "C01",
       threadTs: "1.0",
@@ -716,30 +857,25 @@ describe("SlackThread.postEphemeral", () => {
 
     await thread.postEphemeral("U99", { text: "psst" });
 
-    const call = mock.calls.find((c) => c.url === "https://slack.com/api/chat.postEphemeral");
-    expect(call).toBeDefined();
-    const body = call!.body as { user: string; channel: string; thread_ts: string; text: string };
+    const body = slack.bodyOf("chat.postEphemeral");
     expect(body.user).toBe("U99");
     expect(body.channel).toBe("C01");
     expect(body.thread_ts).toBe("1.0");
     expect(body.text).toBe("psst");
+
+    // Ephemerals go through chat.postEphemeral and never through the
+    // ordinary post path, which is not stubbed here.
+    expect(slack.callsTo("chat.postMessage")).toEqual([]);
   });
 });
 
 describe("SlackThread.postDirectMessage", () => {
-  let mock: ReturnType<typeof buildFetchMock>;
-
-  beforeEach(() => {
-    mock = buildFetchMock();
-    vi.stubGlobal("fetch", mock.fetch);
-  });
-
-  afterEach(() => {
-    vi.unstubAllGlobals();
-  });
-
   it("opens the IM conversation and posts to it without a thread_ts", async () => {
+    const slack = mockSlack();
+    slack.allow("conversations.open").andReturn({ ok: true, channel: { id: "D99" } });
+    slack.allow("chat.postMessage").andReturn({ ok: true, channel: "D99", ts: "1700.1" });
     const { thread } = buildSlackBinding({
+      api: { fetch: slack.fetch },
       botToken: "xoxb-test",
       channelId: "C01",
       threadTs: "1.0",
@@ -748,35 +884,40 @@ describe("SlackThread.postDirectMessage", () => {
 
     const posted = await thread.postDirectMessage("U99", { text: "for your eyes only" });
 
-    const open = mock.calls.find((c) => c.url === "https://slack.com/api/conversations.open");
-    expect(open).toBeDefined();
-    expect((open!.body as { users: string }).users).toBe("U99");
+    expect(slack.bodyOf("conversations.open").users).toBe("U99");
 
-    const post = mock.calls.find((c) => c.url === "https://slack.com/api/chat.postMessage");
-    expect(post).toBeDefined();
-    const body = post!.body as { channel: string; thread_ts?: string; text: string };
-    expect(body.channel).toBe("D777");
+    const imChannelId = "D99";
+    const body = slack.bodyOf("chat.postMessage");
+    expect(body.channel).toBe(imChannelId);
     expect(body.thread_ts).toBeUndefined();
     expect(body.text).toBe("for your eyes only");
-    expect(posted.id).toBe("1700000001.000001");
+    // The DM's id is the message ts Slack returned for the IM post.
+    expect(posted.id).toBe("1700.1");
   });
 });
 
 describe("auto-anchor on first post", () => {
-  let mock: ReturnType<typeof buildFetchMock>;
+  let slack: MockSlack;
+
+  /** The ts Slack assigns the first post, which becomes the thread root. */
+  const ANCHOR_TS = "1700000000.000100";
 
   beforeEach(() => {
-    mock = buildFetchMock();
-    vi.stubGlobal("fetch", mock.fetch);
-  });
-
-  afterEach(() => {
-    vi.unstubAllGlobals();
+    slack = mockSlack();
+    // Successive posts get distinct ts values, so an assertion cannot
+    // pass by accident when production threads the wrong one.
+    let next = 0;
+    slack.allow("chat.postMessage").andRespond(() => ({
+      ok: true,
+      channel: "C01",
+      ts: next++ === 0 ? ANCHOR_TS : `1700000000.00020${next}`,
+    }));
   });
 
   it("first chat.postMessage on an unanchored binding adopts its own ts as the thread root", async () => {
     const anchors: string[] = [];
-    const { thread, slack } = buildSlackBinding({
+    const binding = buildSlackBinding({
+      api: { fetch: slack.fetch },
       botToken: "xoxb-test",
       channelId: "C01",
       threadTs: "",
@@ -786,42 +927,42 @@ describe("auto-anchor on first post", () => {
       },
     });
 
-    expect(slack.threadTs).toBe("");
+    expect(binding.slack.threadTs).toBe("");
 
-    const first = await thread.post("first reply");
+    const first = await binding.thread.post("first reply");
 
-    expect(first.id).toBe("1700000001.000001");
-    expect(anchors).toEqual(["1700000001.000001"]);
-    expect(slack.threadTs).toBe("1700000001.000001");
+    expect(first.id).toBe(ANCHOR_TS);
+    expect(anchors).toEqual([first.id]);
+    expect(binding.slack.threadTs).toBe(first.id);
 
     // The first post itself lands at the channel root (no thread_ts in body)
     // because the anchor is set AFTER Slack assigns the ts.
-    const firstCall = mock.calls.find((c) => c.url === "https://slack.com/api/chat.postMessage")!;
-    expect((firstCall.body as { thread_ts?: string }).thread_ts).toBeUndefined();
+    expect(slack.bodyOf("chat.postMessage").thread_ts).toBeUndefined();
   });
 
   it("subsequent posts thread under the anchored ts", async () => {
     const { thread } = buildSlackBinding({
+      api: { fetch: slack.fetch },
       botToken: "xoxb-test",
       channelId: "C01",
       threadTs: "",
       teamId: undefined,
     });
 
-    await thread.post("first");
+    const first = await thread.post("first");
     await thread.post("second");
     await thread.post("third");
 
-    const postCalls = mock.calls.filter((c) => c.url === "https://slack.com/api/chat.postMessage");
-    expect(postCalls).toHaveLength(3);
-    expect((postCalls[0]!.body as { thread_ts?: string }).thread_ts).toBeUndefined();
-    expect((postCalls[1]!.body as { thread_ts: string }).thread_ts).toBe("1700000001.000001");
-    expect((postCalls[2]!.body as { thread_ts: string }).thread_ts).toBe("1700000001.000001");
+    expect(slack.callsTo("chat.postMessage")).toHaveLength(3);
+    expect(slack.bodyOf("chat.postMessage", 0).thread_ts).toBeUndefined();
+    expect(slack.bodyOf("chat.postMessage", 1).thread_ts).toBe(first.id);
+    expect(slack.bodyOf("chat.postMessage", 2).thread_ts).toBe(first.id);
   });
 
   it("does not anchor when the binding already has a threadTs", async () => {
     const anchors: string[] = [];
-    const { thread, slack } = buildSlackBinding({
+    const binding = buildSlackBinding({
+      api: { fetch: slack.fetch },
       botToken: "xoxb-test",
       channelId: "C01",
       threadTs: "1700000000.000999",
@@ -831,15 +972,17 @@ describe("auto-anchor on first post", () => {
       },
     });
 
-    await thread.post("hello");
+    await binding.thread.post("hello");
 
     expect(anchors).toEqual([]);
-    expect(slack.threadTs).toBe("1700000000.000999");
+    expect(binding.slack.threadTs).toBe("1700000000.000999");
   });
 
   it("does not anchor on postEphemeral", async () => {
+    slack.allow("chat.postEphemeral").andReturn({ ok: true, message_ts: "1700.9" });
     const anchors: string[] = [];
-    const { thread, slack } = buildSlackBinding({
+    const binding = buildSlackBinding({
+      api: { fetch: slack.fetch },
       botToken: "xoxb-test",
       channelId: "C01",
       threadTs: "",
@@ -849,15 +992,17 @@ describe("auto-anchor on first post", () => {
       },
     });
 
-    await thread.postEphemeral("U99", { text: "psst" });
+    await binding.thread.postEphemeral("U99", { text: "psst" });
 
     expect(anchors).toEqual([]);
-    expect(slack.threadTs).toBe("");
+    expect(binding.slack.threadTs).toBe("");
   });
 
   it("anchors before uploading files for a markdown post", async () => {
+    allowUpload(slack);
     const anchors: string[] = [];
-    const { thread, slack } = buildSlackBinding({
+    const binding = buildSlackBinding({
+      api: { fetch: slack.fetch },
       botToken: "xoxb-test",
       channelId: "C01",
       threadTs: "",
@@ -867,26 +1012,25 @@ describe("auto-anchor on first post", () => {
       },
     });
 
-    await thread.post({
+    const posted = await binding.thread.post({
       markdown: "**Report attached**",
       files: [{ data: Buffer.from([1]), filename: "report.csv", mimeType: "text/csv" }],
     });
 
-    expect(anchors).toEqual(["1700000001.000001"]);
-    expect(slack.threadTs).toBe("1700000001.000001");
+    expect(anchors).toEqual([posted.id]);
+    expect(binding.slack.threadTs).toBe(posted.id);
 
-    const post = mock.calls.find((c) => c.url === "https://slack.com/api/chat.postMessage")!;
-    expect((post.body as { thread_ts?: string }).thread_ts).toBeUndefined();
+    expect(slack.bodyOf("chat.postMessage").thread_ts).toBeUndefined();
 
-    const complete = mock.calls.find(
-      (c) => c.url === "https://slack.com/api/files.completeUploadExternal",
-    )!;
-    expect((complete.body as { thread_ts: string }).thread_ts).toBe("1700000001.000001");
+    // The upload hangs off the anchor the post just created.
+    expect(slack.bodyOf("files.completeUploadExternal")).toMatchObject({ thread_ts: posted.id });
   });
 
   it("does not anchor on an upload-only text/file post", async () => {
+    allowUpload(slack);
     const anchors: string[] = [];
-    const { thread, slack } = buildSlackBinding({
+    const binding = buildSlackBinding({
+      api: { fetch: slack.fetch },
       botToken: "xoxb-test",
       channelId: "C01",
       threadTs: "",
@@ -896,17 +1040,19 @@ describe("auto-anchor on first post", () => {
       },
     });
 
-    await thread.post({
+    await binding.thread.post({
       text: "*Report attached*",
       files: [{ data: Buffer.from([1]), filename: "report.csv", mimeType: "text/csv" }],
     });
 
     expect(anchors).toEqual([]);
-    expect(slack.threadTs).toBe("");
+    expect(binding.slack.threadTs).toBe("");
   });
 
   it("enables startTyping after a post anchors the thread", async () => {
+    slack.allow("assistant.threads.setStatus").andReturn({ ok: true });
     const { thread } = buildSlackBinding({
+      api: { fetch: slack.fetch },
       botToken: "xoxb-test",
       channelId: "C01",
       threadTs: "",
@@ -914,22 +1060,26 @@ describe("auto-anchor on first post", () => {
     });
 
     await thread.startTyping("Pre-anchor");
-    expect(
-      mock.calls.find((c) => c.url === "https://slack.com/api/assistant.threads.setStatus"),
-    ).toBeUndefined();
+    expect(slack.callsTo("assistant.threads.setStatus")).toEqual([]);
 
-    await thread.post("anchor");
+    const anchor = await thread.post("anchor");
     await thread.startTyping("Post-anchor");
 
-    const setStatus = mock.calls.find(
-      (c) => c.url === "https://slack.com/api/assistant.threads.setStatus",
-    );
-    expect(setStatus).toBeDefined();
-    expect((setStatus!.body as { thread_ts: string }).thread_ts).toBe("1700000001.000001");
+    // Before the anchor there is no thread to show a status in; after it,
+    // the status targets the ts the post created.
+    expect(slack.callsTo("assistant.threads.setStatus")).toHaveLength(1);
+    expect(slack.bodyOf("assistant.threads.setStatus")).toMatchObject({
+      channel_id: "C01",
+      thread_ts: anchor.id,
+      status: "Post-anchor",
+      loading_messages: ["Post-anchor"],
+    });
   });
 
   it("sends assistant status as plain text", async () => {
+    slack.allow("assistant.threads.setStatus").andReturn({ ok: true });
     const { thread } = buildSlackBinding({
+      api: { fetch: slack.fetch },
       botToken: "xoxb-test",
       channelId: "C01",
       threadTs: "1.0",
@@ -938,10 +1088,7 @@ describe("auto-anchor on first post", () => {
 
     await thread.startTyping("**Considering turbo tasks**");
 
-    const setStatus = mock.calls.find(
-      (c) => c.url === "https://slack.com/api/assistant.threads.setStatus",
-    );
-    expect(setStatus?.body).toMatchObject({
+    expect(slack.bodyOf("assistant.threads.setStatus")).toMatchObject({
       status: "Considering turbo tasks",
       loading_messages: ["Considering turbo tasks"],
     });
@@ -950,6 +1097,7 @@ describe("auto-anchor on first post", () => {
   it("invokes onThreadTsChanged exactly once even on concurrent first-posts", async () => {
     const anchors: string[] = [];
     const { thread } = buildSlackBinding({
+      api: { fetch: slack.fetch },
       botToken: "xoxb-test",
       channelId: "C01",
       threadTs: "",
@@ -966,18 +1114,9 @@ describe("auto-anchor on first post", () => {
 });
 
 describe("Slack bot token context", () => {
-  let mock: ReturnType<typeof buildFetchMock>;
-
-  beforeEach(() => {
-    mock = buildFetchMock();
-    vi.stubGlobal("fetch", mock.fetch);
-  });
-
-  afterEach(() => {
-    vi.unstubAllGlobals();
-  });
-
   it("passes explicit identity to a context-aware token provider", async () => {
+    const slack = mockSlack();
+    slack.allow("auth.test").andReturn({ ok: true });
     const botToken = vi.fn((context: SlackBotTokenContext) => {
       expect(context).toEqual({ teamId: "T01" });
       return "xoxb-team-one";
@@ -988,6 +1127,7 @@ describe("Slack bot token context", () => {
       context: { teamId: "T01" },
       operation: "auth.test",
       body: {},
+      fetch: slack.fetch,
     });
 
     expect(botToken).toHaveBeenCalledTimes(1);
@@ -1005,14 +1145,13 @@ describe("Slack bot token context", () => {
 
 describe("Slack Web API base URL", () => {
   const ORIGINAL_SLACK_API_URL = process.env.SLACK_API_URL;
-  let fetchMock: ReturnType<typeof vi.fn>;
+  /** Workspace on Slack's own host, reached through the global `fetch`. */
+  let slackHost: MockSlack;
 
   beforeEach(() => {
     delete process.env.SLACK_API_URL;
-    fetchMock = vi.fn(async () =>
-      Response.json({ ok: true, ts: "1700000002.000002", channel: { id: "D01" } }),
-    );
-    vi.stubGlobal("fetch", fetchMock);
+    slackHost = mockSlack();
+    vi.stubGlobal("fetch", slackHost.fetch);
   });
 
   afterEach(() => {
@@ -1021,12 +1160,6 @@ describe("Slack Web API base URL", () => {
     else process.env.SLACK_API_URL = ORIGINAL_SLACK_API_URL;
   });
 
-  function requestedUrls(mock: {
-    readonly mock: { readonly calls: readonly unknown[][] };
-  }): string[] {
-    return mock.mock.calls.map(([url]) => String(url));
-  }
-
   it("defaults to Slack's own host", () => {
     expect(resolveSlackApiUrl()).toBe("https://slack.com/api/");
     expect(resolveSlackApiUrl({})).toBe("https://slack.com/api/");
@@ -1034,47 +1167,62 @@ describe("Slack Web API base URL", () => {
 
   it("normalizes a configured base to a trailing slash so the method is appended", async () => {
     expect(resolveSlackApiUrl({ url: "https://sim.example/api" })).toBe("https://sim.example/api/");
+    const simulator = mockSlack({ url: "https://sim.example/api" });
+    simulator.allow("chat.update").andReturn({ ok: true, ts: "1700.1" });
 
     for (const url of ["https://sim.example/api", "https://sim.example/api/"]) {
-      await callSlackApiJson({ api: { url }, body: {}, method: "chat.update", token: "xoxb" });
+      await callSlackApiJson({
+        api: { url, fetch: simulator.fetch },
+        body: {},
+        method: "chat.update",
+        token: "xoxb",
+      });
     }
 
-    expect(requestedUrls(fetchMock)).toEqual([
+    expect(simulator.calls.map((call) => call.url)).toEqual([
       "https://sim.example/api/chat.update",
       "https://sim.example/api/chat.update",
     ]);
   });
 
   it("encodes the JSON-only surfaces as JSON and signs them with the bot token", async () => {
+    // Asserts the transport headers themselves, so it reads the raw
+    // `init` instead of going through the double.
     const apiFetch = vi.fn(async (_input: string | URL | Request, _init?: RequestInit) =>
       Response.json({ ok: true }),
     );
 
     const response = await callSlackApiJson({
       api: { url: "https://sim.example/api", fetch: apiFetch },
-      body: { channel: "C01", ts: "1700000000.000001", dropped: undefined },
+      body: { channel: "C01", ts: THREAD_TS, dropped: undefined },
       method: "chat.update",
       token: "xoxb-json",
     });
 
     expect(response).toEqual({ ok: true });
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(slackHost.calls).toEqual([]);
     const [url, init] = apiFetch.mock.calls[0] ?? [];
     expect(String(url)).toBe("https://sim.example/api/chat.update");
     expect(init?.headers).toMatchObject({
       authorization: "Bearer xoxb-json",
       "content-type": "application/json",
     });
-    expect(JSON.parse(String(init?.body))).toEqual({ channel: "C01", ts: "1700000000.000001" });
+    expect(JSON.parse(String(init?.body))).toEqual({ channel: "C01", ts: THREAD_TS });
   });
 
   it("raises SlackApiError carrying the method and status on a non-2xx JSON call", async () => {
-    const apiFetch = vi.fn(async () =>
-      Response.json({ ok: false, error: "expired_trigger_id" }, { status: 500 }),
-    );
+    const simulator = mockSlack({ url: "https://sim.example/api" });
+    // Stubbed so the 500 is the only reason the call fails: without it
+    // the double would reject views.open as undeclared, and the test
+    // would pass on the wrong error.
+    simulator.allow("views.open").andReturn({ ok: true, view: {} });
+    simulator.failNextHttp("views.open", {
+      status: 500,
+      body: { ok: false, error: "expired_trigger_id" },
+    });
 
     const rejection = callSlackApiJson({
-      api: { url: "https://sim.example/api", fetch: apiFetch },
+      api: { url: "https://sim.example/api", fetch: simulator.fetch },
       body: { trigger_id: "T1", view: {} },
       method: "views.open",
       token: "xoxb-json",
@@ -1101,13 +1249,13 @@ describe("Slack Web API base URL", () => {
         api: { url },
         botToken: "xoxb-test",
         channelId: "C01",
-        threadTs: "1700000000.000001",
+        threadTs: THREAD_TS,
         teamId: "T01",
       });
       await expect(thread.post({ text: "hi" })).rejects.toThrow(/query string or fragment/);
     }
 
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(slackHost.calls).toEqual([]);
   });
 
   it("rejects a relative base URL", () => {
@@ -1130,18 +1278,21 @@ describe("Slack Web API base URL", () => {
   });
 
   it("keeps the default host for every binding call when nothing is configured", async () => {
-    const { thread, slack } = buildSlackBinding({
+    allowBindingCalls(slackHost);
+    const binding = buildSlackBinding({
       botToken: "xoxb-test",
       channelId: "C01",
-      threadTs: "1700000000.000001",
+      threadTs: THREAD_TS,
       teamId: "T01",
     });
 
-    await thread.post({ text: "hi" });
-    await thread.startTyping("Thinking...");
-    await slack.request("auth.test", {});
+    await binding.thread.post({ text: "hi" });
+    await binding.thread.startTyping("Thinking...");
+    await binding.slack.request("auth.test", {});
 
-    expect(requestedUrls(fetchMock)).toEqual([
+    // The double answers only on its own base, so landing these calls at
+    // all is itself the assertion that they went to Slack's host.
+    expect(slackHost.calls.map((call) => call.url)).toEqual([
       "https://slack.com/api/chat.postMessage",
       "https://slack.com/api/assistant.threads.setStatus",
       "https://slack.com/api/auth.test",
@@ -1149,53 +1300,49 @@ describe("Slack Web API base URL", () => {
   });
 
   it("routes every binding call through a configured api.url and api.fetch", async () => {
-    const apiFetch = vi.fn(async () => Response.json({ ok: true, ts: "1700000003.000003" }));
-    const { thread, slack } = buildSlackBinding({
-      api: { url: "https://sim.example/api", fetch: apiFetch },
+    const simulator = mockSlack({ url: "https://sim.example/api" });
+    allowBindingCalls(simulator);
+    allowReplies(simulator, [{ text: "root", ts: THREAD_TS, user: "U01" }]);
+    const binding = buildSlackBinding({
+      api: { url: "https://sim.example/api", fetch: simulator.fetch },
       botToken: "xoxb-test",
       channelId: "C01",
-      threadTs: "1700000000.000001",
+      threadTs: THREAD_TS,
       teamId: "T01",
     });
 
-    await thread.post({ text: "hi" });
-    await thread.postEphemeral("U01", { text: "psst" });
-    await thread.startTyping("Thinking...");
-    await thread.refresh();
-    await slack.request("auth.test", {});
+    await binding.thread.post({ text: "hi" });
+    await binding.thread.postEphemeral("U01", { text: "psst" });
+    await binding.thread.startTyping("Thinking...");
+    await binding.thread.refresh();
+    await binding.slack.request("auth.test", {});
 
-    expect(fetchMock).not.toHaveBeenCalled();
-    expect(requestedUrls(apiFetch)).toEqual([
+    expect(slackHost.calls).toEqual([]);
+    expect(simulator.calls.map((call) => call.url)).toEqual([
       "https://sim.example/api/chat.postMessage",
       "https://sim.example/api/chat.postEphemeral",
       "https://sim.example/api/assistant.threads.setStatus",
       "https://sim.example/api/conversations.replies",
       "https://sim.example/api/auth.test",
     ]);
+    // The refresh parsed the replies the simulator served. Slack would
+    // also return the "hi" just posted; the double returns only what it
+    // was told to.
+    expect(binding.thread.recentMessages.map((message) => message.text)).toEqual(["root"]);
   });
 
   it("routes the whole upload handshake through a configured api.url and api.fetch", async () => {
-    const apiFetch = vi.fn(async (input: string | URL | Request) => {
-      const url = String(input);
-      if (url === "https://sim.example/api/files.getUploadURLExternal") {
-        return Response.json({
-          ok: true,
-          upload_url: "https://sim.example/files/upload/abc",
-          file_id: "F1",
-        });
-      }
-      if (url === "https://sim.example/files/upload/abc") return new Response("OK");
-      return Response.json({ ok: true, files: [{ id: "F1", title: "report.csv" }] });
-    });
-    const { slack } = buildSlackBinding({
-      api: { url: "https://sim.example/api", fetch: apiFetch },
+    const simulator = mockSlack({ url: "https://sim.example/api" });
+    allowUpload(simulator);
+    const binding = buildSlackBinding({
+      api: { url: "https://sim.example/api", fetch: simulator.fetch },
       botToken: "xoxb-test",
       channelId: "C01",
-      threadTs: "1700000000.000001",
+      threadTs: THREAD_TS,
       teamId: "T01",
     });
 
-    const result = await slack.uploadFiles([
+    const result = await binding.slack.uploadFiles([
       {
         data: new TextEncoder().encode("a,b\n1,2\n").buffer as ArrayBuffer,
         filename: "report.csv",
@@ -1204,53 +1351,72 @@ describe("Slack Web API base URL", () => {
     ]);
 
     expect(result.fileIds).toEqual(["F1"]);
-    expect(fetchMock).not.toHaveBeenCalled();
-    expect(requestedUrls(apiFetch)).toEqual([
-      "https://sim.example/api/files.getUploadURLExternal",
-      "https://sim.example/files/upload/abc",
-      "https://sim.example/api/files.completeUploadExternal",
+    expect(slackHost.calls).toEqual([]);
+    expect(simulator.calls.map((call) => call.method)).toEqual([
+      "files.getUploadURLExternal",
+      "files.upload",
+      "files.completeUploadExternal",
     ]);
+    // Slack hands back an upload URL off the Web API path; it must still be
+    // fetched with the configured fetch rather than the global one.
+    expect(simulator.calls[1]!.url.startsWith("https://sim.example/files/upload/")).toBe(true);
   });
 
   it("routes binding calls through SLACK_API_URL with no explicit config", async () => {
     process.env.SLACK_API_URL = "https://env.example/api";
+    const environment = mockSlack({ url: "https://env.example/api" });
+    environment.allow("auth.test").andReturn({ ok: true });
+    vi.stubGlobal("fetch", environment.fetch);
     const { slack } = buildSlackBinding({
       botToken: "xoxb-test",
       channelId: "C01",
-      threadTs: "1700000000.000001",
+      threadTs: THREAD_TS,
       teamId: "T01",
     });
 
     await slack.request("auth.test", {});
 
-    expect(requestedUrls(fetchMock)).toEqual(["https://env.example/api/auth.test"]);
+    expect(environment.calls.map((call) => call.url)).toEqual([
+      "https://env.example/api/auth.test",
+    ]);
   });
 
   it("accepts apiUrl and fetch on the exported callSlackApi", async () => {
-    const apiFetch = vi.fn(async () => Response.json({ ok: true }));
+    const simulator = mockSlack({ url: "https://sim.example/api" });
+    simulator.allow("views.update").andReturn({ ok: true, view: {} });
+    slackHost.allow("views.open").andReturn({ ok: true, view: {} });
 
     await callSlackApi({
       botToken: "xoxb-test",
       operation: "views.update",
       body: {},
       apiUrl: "https://sim.example/api",
-      fetch: apiFetch,
+      fetch: simulator.fetch,
     });
     await callSlackApi({ botToken: "xoxb-test", operation: "views.open", body: {} });
 
-    expect(requestedUrls(apiFetch)).toEqual(["https://sim.example/api/views.update"]);
-    expect(requestedUrls(fetchMock)).toEqual(["https://slack.com/api/views.open"]);
+    expect(simulator.calls.map((call) => call.url)).toEqual([
+      "https://sim.example/api/views.update",
+    ]);
+    expect(slackHost.calls.map((call) => call.url)).toEqual(["https://slack.com/api/views.open"]);
   });
 
   it("routes the workspace handle through the configured base", async () => {
+    const simulator = mockSlack({ url: "https://sim.example/api/" });
+    // Reached through the raw request escape hatch, which is outside
+    // the typed contract.
+    simulator.allowUncheckedMethod("usergroups.list", { ok: true, usergroups: [] });
     const handle = buildSlackWorkspaceHandle({
-      api: { url: "https://sim.example/api/" },
+      api: { url: "https://sim.example/api/", fetch: simulator.fetch },
       botToken: "xoxb-test",
       teamId: "T01",
     });
 
     await handle.request("usergroups.list", {});
 
-    expect(requestedUrls(fetchMock)).toEqual(["https://sim.example/api/usergroups.list"]);
+    expect(slackHost.calls).toEqual([]);
+    expect(simulator.calls.map((call) => call.url)).toEqual([
+      "https://sim.example/api/usergroups.list",
+    ]);
   });
 });

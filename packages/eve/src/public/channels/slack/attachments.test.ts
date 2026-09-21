@@ -238,6 +238,19 @@ describe("createSlackFetchFile", () => {
     await expect(result).rejects.not.toThrow("PRIVATE");
   });
 
+  // The file download has no retry logic, so a rate-limited attachment
+  // fails the turn even though Slack said how long to wait.
+  it("throws on a rate-limited download and ignores Retry-After", async () => {
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(new Response("", { status: 429, headers: { "retry-after": "30" } }));
+
+    const fetchFile = createSlackFetchFile({ botToken: "xoxb-test-token" });
+
+    await expect(fetchFile("https://files.slack.com/a/b/cat.png")).rejects.toThrow("HTTP 429");
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+  });
+
   it("rejects HTML returned for a private Slack file", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response("<!DOCTYPE html><html><body>Slack sign in</body></html>", {
@@ -515,6 +528,27 @@ describe("createSlackFetchFile with a configured Slack API base", () => {
     expect(apiFetch).toHaveBeenCalledWith("http://localhost:3000/api/slack/files/F1/cat.png", {
       headers: { authorization: "Bearer xoxb-test-token" },
     });
+  });
+
+  // The configured transport is a separate code path from the global
+  // one, and a simulator behind a login wall answers the same way a
+  // scope-less Slack token does.
+  it("rejects an HTML sign-in page served over the configured transport", async () => {
+    const apiFetch = vi.fn(
+      async () =>
+        new Response("<!DOCTYPE html><html><body>Slack sign in</body></html>", {
+          status: 200,
+          headers: { "content-type": "text/html; charset=utf-8" },
+        }),
+    );
+    const fetchFile = createSlackFetchFile({
+      api: { url: "http://localhost:3000/api/slack", fetch: apiFetch },
+      botToken: "xoxb-test-token",
+    });
+
+    const result = fetchFile("http://localhost:3000/api/slack/files/F1/cat.png?sig=PRIVATE");
+    await expect(result).rejects.toThrow(/files:read.*reinstall/is);
+    await expect(result).rejects.not.toThrow("PRIVATE");
   });
 
   it("accepts the SLACK_API_URL origin", async () => {

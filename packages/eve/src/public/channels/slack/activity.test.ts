@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { isCompiledChannel } from "#channel/compiled-channel.js";
 import { getChannelActivityPresentation } from "#channel/activity-renderer.js";
 import { createActivitySnapshot, reduceActivityBatch } from "#execution/session-activity.js";
+import { mockSlack, type MockSlack } from "#internal/testing/mocks/mock-slack.js";
 import {
   buildSlackActivityRenderers,
   experimental_slackActivityRenderer,
@@ -10,6 +11,26 @@ import {
   experimental_slackActivityStatus,
 } from "#public/channels/slack/activity.js";
 import { slackChannel } from "#public/channels/slack/slackChannel.js";
+
+/** Every double this file creates, swept for violations after each test. */
+const doubles: MockSlack[] = [];
+
+/**
+ * A double registered for the {@link afterEach} sweep below.
+ *
+ * Renderers swallow transport errors so a failed status update never
+ * fails the turn. The sweep is what separates an unstubbed or malformed
+ * call from a render that legitimately did not happen.
+ */
+function slackDouble(): MockSlack {
+  const slack = mockSlack();
+  doubles.push(slack);
+  return slack;
+}
+
+afterEach(() => {
+  for (const slack of doubles.splice(0)) slack.assertNoViolations();
+});
 
 const root = {
   id: "work:root:turn",
@@ -36,7 +57,6 @@ function snapshot(events: Parameters<typeof reduceActivityBatch>[1]["events"]) {
 describe("Slack status activity", () => {
   afterEach(() => {
     vi.unstubAllEnvs();
-    vi.unstubAllGlobals();
   });
 
   it("installs renderer configuration with a narrow destination", () => {
@@ -235,12 +255,11 @@ describe("Slack status activity", () => {
   });
 
   it("passes the installation team to function bot tokens", async () => {
+    const slack = slackDouble();
+    slack.allow("assistant.threads.setStatus").andReturn({ ok: true });
     const tokenContext = vi.fn(() => "xoxb-team");
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async () => Response.json({ ok: true })),
-    );
     const renderer = buildSlackActivityRenderers({
+      api: { fetch: slack.fetch },
       botToken: tokenContext,
       renderers: [experimental_slackActivityStatus()],
     })[0]!;
@@ -258,9 +277,10 @@ describe("Slack status activity", () => {
 
   it("suppresses duplicate provider writes", async () => {
     vi.stubEnv("SLACK_BOT_TOKEN", "xoxb-test");
-    const fetchMock = vi.fn(async () => Response.json({ ok: true }));
-    vi.stubGlobal("fetch", fetchMock);
+    const slack = slackDouble();
+    slack.allow("assistant.threads.setStatus").andReturn({ ok: true });
     const renderer = buildSlackActivityRenderers({
+      api: { fetch: slack.fetch },
       botToken: undefined,
       renderers: [experimental_slackActivityStatus()],
     })[0]!;
@@ -277,16 +297,21 @@ describe("Slack status activity", () => {
       snapshot: active,
       state,
     });
-    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(slack.callsTo("assistant.threads.setStatus")).toHaveLength(1);
+    expect(slack.bodyOf("assistant.threads.setStatus")).toMatchObject({
+      channel_id: "C1",
+      thread_ts: "T1",
+      status: "Working…",
+      loading_messages: ["Working…"],
+    });
   });
 
   it("clears transient status on disposal", async () => {
     vi.stubEnv("SLACK_BOT_TOKEN", "xoxb-test");
-    const fetchMock = vi.fn(async (_url: string | URL | Request, _init?: RequestInit) =>
-      Response.json({ ok: true }),
-    );
-    vi.stubGlobal("fetch", fetchMock);
+    const slack = slackDouble();
+    slack.allow("assistant.threads.setStatus").andReturn({ ok: true });
     const renderer = buildSlackActivityRenderers({
+      api: { fetch: slack.fetch },
       botToken: undefined,
       renderers: [experimental_slackActivityStatus()],
     })[0]!;
@@ -294,6 +319,10 @@ describe("Slack status activity", () => {
       destination: { channelId: "C1", threadTs: "T1" },
       state: { status: "Working…" },
     });
-    expect(new URLSearchParams(String(fetchMock.mock.calls[0]?.[1]?.body)).get("status")).toBe("");
+    const cleared = slack.bodyOf("assistant.threads.setStatus");
+    expect(cleared).toMatchObject({ channel_id: "C1", thread_ts: "T1", status: "" });
+    // Clearing sends no loading_messages, so Slack drops the indicator
+    // rather than showing an empty one.
+    expect(cleared.loading_messages).toBeUndefined();
   });
 });

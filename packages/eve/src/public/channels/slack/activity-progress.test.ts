@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createActivitySnapshot, reduceActivityBatch } from "#execution/session-activity.js";
+import { mockSlack, type MockSlack } from "#internal/testing/mocks/mock-slack.js";
 import {
   activityMessages,
   buildSlackActivityRenderers,
@@ -8,6 +9,26 @@ import {
   experimental_slackActivityStatus,
   selectSlackActivityStatus,
 } from "#public/channels/slack/activity.js";
+
+/** Every double this file creates, swept for violations after each test. */
+const doubles: MockSlack[] = [];
+
+/**
+ * A double registered for the {@link afterEach} sweep below.
+ *
+ * Renderers swallow transport errors so a failed status update never
+ * fails the turn. The sweep is what separates an unstubbed or malformed
+ * call from a render that legitimately did not happen.
+ */
+function slackDouble(): MockSlack {
+  const slack = mockSlack();
+  doubles.push(slack);
+  return slack;
+}
+
+afterEach(() => {
+  for (const slack of doubles.splice(0)) slack.assertNoViolations();
+});
 
 const root = {
   id: "work:root:turn",
@@ -62,8 +83,6 @@ function snapshot() {
 }
 
 describe("Slack activity activity", () => {
-  afterEach(() => vi.unstubAllGlobals());
-
   it("derives one nested artifact per root turn and escapes untrusted text", () => {
     expect(activityMessages(snapshot())).toEqual(
       new Map([
@@ -222,17 +241,12 @@ describe("Slack activity activity", () => {
   });
 
   it("creates a metadata-tagged message and updates it in place", async () => {
-    const requests: Array<{ body: URLSearchParams; operation: string }> = [];
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
-        const operation = String(url).split("/").at(-1)!;
-        requests.push({ body: new URLSearchParams(String(init?.body ?? "")), operation });
-        if (operation === "conversations.replies") return Response.json({ ok: true, messages: [] });
-        return Response.json({ ok: true, ts: "1700.1" });
-      }),
-    );
+    const slack = slackDouble();
+    slack.allow("conversations.replies").andReturn({ ok: true, messages: [] });
+    slack.allow("chat.postMessage").andReturn({ ok: true, channel: "C1", ts: "1700.1" });
+    slack.allow("chat.update").andReturn({ ok: true, channel: "C1", ts: "1700.1" });
     const renderer = buildSlackActivityRenderers({
+      api: { fetch: slack.fetch },
       botToken: "xoxb-test",
       renderers: [experimental_slackActivityTree()],
     })[0]!;
@@ -261,47 +275,56 @@ describe("Slack activity activity", () => {
 
     expect(activityMessages(settled).get("turn")).toContain("✓ tester &amp; reviewer");
     expect(activityMessages(settled).get("turn")).toContain("⊘ search &lt;web&gt;");
-    expect(requests.map((request) => request.operation)).toEqual([
+    expect(slack.calls.map((call) => call.method)).toEqual([
       "conversations.replies",
       "chat.postMessage",
       "chat.update",
     ]);
-    expect(requests[1]?.body.get("metadata")).toContain('"root_turn_id":"turn"');
-    expect(requests[2]?.body.get("ts")).toBe("1700.1");
+    expect(slack.bodyOf("chat.postMessage")).toMatchObject({
+      metadata: { event_payload: { root_turn_id: "turn" }, event_type: "eve_progress" },
+    });
+
+    // One message was posted and then revised in place: the update has to
+    // target the ts the post handed back, carrying the settled tree.
+    expect(slack.callsTo("chat.postMessage")).toHaveLength(1);
+    expect(slack.bodyOf("chat.update")).toMatchObject({
+      channel: "C1",
+      ts: "1700.1",
+      text: activityMessages(settled).get("turn"),
+    });
   });
 
   it("recreates a deleted activity message", async () => {
-    const operations: string[] = [];
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async (url: string | URL | Request) => {
-        const operation = String(url).split("/").at(-1)!;
-        operations.push(operation);
-        return operation === "chat.update"
-          ? Response.json({ error: "message_not_found", ok: false })
-          : Response.json({ ok: true, ts: "1700.2" });
-      }),
-    );
+    const slack = slackDouble();
+    // Slack reporting the remembered ts as gone is the precondition.
+    slack.allow("chat.update").andFail("message_not_found");
+    slack.allow("chat.postMessage").andReturn({ ok: true, channel: "C1", ts: "1700.2" });
     const renderer = buildSlackActivityRenderers({
+      api: { fetch: slack.fetch },
       botToken: "xoxb-test",
       renderers: [experimental_slackActivityTree()],
     })[0]!;
+
+    // The remembered ts names a message nobody posted, which is exactly
+    // what a user deleting the activity message leaves behind.
     const state = await renderer.render({
       destination: { channelId: "C1", threadTs: "T1" },
       snapshot: snapshot(),
       state: { messages: { turn: { text: "old", ts: "1700.1" } } },
     });
-    expect(operations).toEqual(["chat.update", "chat.postMessage"]);
+
+    expect(slack.calls.map((call) => call.method)).toEqual(["chat.update", "chat.postMessage"]);
+    expect(slack.callsTo("chat.postMessage")).toHaveLength(1);
     expect(state).toMatchObject({ messages: { turn: { ts: "1700.2" } } });
   });
 
   it("passes the installation team to activity message token resolution", async () => {
+    const slack = slackDouble();
+    slack.allow("conversations.replies").andReturn({ ok: true, messages: [] });
+    slack.allow("chat.postMessage").andReturn({ ok: true, channel: "C1", ts: "1700.1" });
     const tokenContext = vi.fn(() => "xoxb-team");
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async () => Response.json({ ok: true, ts: "1700.1" })),
-    );
     const renderer = buildSlackActivityRenderers({
+      api: { fetch: slack.fetch },
       botToken: tokenContext,
       renderers: [experimental_slackActivityTree()],
     })[0]!;
@@ -316,116 +339,109 @@ describe("Slack activity activity", () => {
   });
 
   it("recovers provider identity from message metadata", async () => {
-    const operations: string[] = [];
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async (url: string | URL | Request) => {
-        const operation = String(url).split("/").at(-1)!;
-        operations.push(operation);
-        if (operation === "conversations.replies") {
-          return Response.json({
-            messages: [
-              {
-                metadata: {
-                  event_payload: { root_turn_id: "turn" },
-                  event_type: "eve_progress",
-                },
-                text: "old",
-                ts: "1700.1",
-              },
-            ],
-            ok: true,
-          });
-        }
-        return Response.json({ ok: true, ts: "1700.1" });
-      }),
-    );
+    const slack = slackDouble();
+    const activityMessage = {
+      metadata: { event_payload: { root_turn_id: "turn" }, event_type: "eve_progress" },
+      text: "old",
+      thread_ts: "T1",
+      ts: "1700.1",
+    };
+    slack.allow("conversations.replies").andReturn({ ok: true, messages: [activityMessage] });
+    slack.allow("chat.update").andReturn({ ok: true, channel: "C1", ts: "1700.1" });
     const renderer = buildSlackActivityRenderers({
+      api: { fetch: slack.fetch },
       botToken: "xoxb-test",
       renderers: [experimental_slackActivityTree()],
     })[0]!;
+
     await renderer.render({
       destination: { channelId: "C1", threadTs: "T1" },
       snapshot: snapshot(),
       state: undefined,
     });
-    expect(operations).toEqual(["conversations.replies", "chat.update"]);
+
+    expect(slack.calls.map((call) => call.method)).toEqual([
+      "conversations.replies",
+      "chat.update",
+    ]);
+    // Recovery adopted the existing message rather than posting a second
+    // one — chat.postMessage is not even stubbed, so a post would fail.
+    expect(slack.bodyOf("chat.update")).toMatchObject({
+      ts: "1700.1",
+      text: activityMessages(snapshot()).get("turn"),
+    });
   });
 
   it("paginates metadata recovery until a matching activity message is found", async () => {
-    const repliesBodies: URLSearchParams[] = [];
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
-        const operation = String(url).split("/").at(-1)!;
-        if (operation === "conversations.replies") {
-          const body = new URLSearchParams(String(init?.body ?? ""));
-          repliesBodies.push(body);
-          if (body.get("cursor") === null) {
-            return Response.json({
-              messages: [],
-              ok: true,
-              response_metadata: { next_cursor: "page-2" },
-            });
-          }
-          return Response.json({
-            messages: [
-              {
-                metadata: {
-                  event_payload: { root_turn_id: "turn" },
-                  event_type: "eve_progress",
-                },
-                text: "old",
-                ts: "1700.1",
-              },
-            ],
-            ok: true,
-            response_metadata: { next_cursor: "" },
-          });
-        }
-        return Response.json({ ok: true, ts: "1700.1" });
-      }),
-    );
+    const slack = slackDouble();
+    const activityMessage = {
+      metadata: { event_payload: { root_turn_id: "turn" }, event_type: "eve_progress" },
+      text: "old",
+      thread_ts: "T1",
+      ts: "1700.1",
+    };
+    // The match lives only on page two, reached by echoing back the
+    // cursor page one handed out.
+    slack.allow("conversations.replies").andReturnEach([
+      {
+        ok: true,
+        messages: [{ text: "unrelated", thread_ts: "T1", ts: "1700.0" }],
+        has_more: true,
+        response_metadata: { next_cursor: "page-2" },
+      },
+      { ok: true, messages: [activityMessage] },
+    ]);
+    slack.allow("chat.update").andReturn({ ok: true, channel: "C1", ts: "1700.1" });
     const renderer = buildSlackActivityRenderers({
+      api: { fetch: slack.fetch },
       botToken: "xoxb-test",
       renderers: [experimental_slackActivityTree()],
     })[0]!;
+
     await renderer.render({
       destination: { channelId: "C1", threadTs: "T1" },
       snapshot: snapshot(),
       state: undefined,
     });
 
-    expect(repliesBodies.map((body) => body.get("cursor"))).toEqual([null, "page-2"]);
+    const cursors = slack
+      .callsTo("conversations.replies")
+      .map((call) => (call.body as { cursor?: string }).cursor);
+    // The exact cursor, so the assertion pins that page one's cursor
+    // was echoed back and not merely that some cursor was sent.
+    expect(cursors).toEqual([undefined, "page-2"]);
+    expect(slack.calls.at(-1)?.method).toBe("chat.update");
+    expect(slack.bodyOf("chat.update")).toMatchObject({
+      ts: "1700.1",
+      text: activityMessages(snapshot()).get("turn"),
+    });
   });
 
   it("stops recovery when Slack repeats a cursor", async () => {
-    const operations: string[] = [];
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async (url: string | URL | Request) => {
-        const operation = String(url).split("/").at(-1)!;
-        operations.push(operation);
-        return operation === "conversations.replies"
-          ? Response.json({
-              messages: [],
-              ok: true,
-              response_metadata: { next_cursor: "same" },
-            })
-          : Response.json({ ok: true, ts: "1700.2" });
-      }),
-    );
+    const slack = slackDouble();
+    // Slack handing back the same cursor forever. Only two pages are
+    // declared, so a third fetch fails loudly instead of spinning.
+    const looped = {
+      ok: true,
+      messages: [{ text: "unrelated", thread_ts: "T1", ts: "1700.0" }],
+      has_more: true,
+      response_metadata: { next_cursor: "looped-cursor" },
+    } as const;
+    slack.allow("conversations.replies").andReturnEach([looped, looped]);
+    slack.allow("chat.postMessage").andReturn({ ok: true, channel: "C1", ts: "1700.2" });
     const renderer = buildSlackActivityRenderers({
+      api: { fetch: slack.fetch },
       botToken: "xoxb-test",
       renderers: [experimental_slackActivityTree()],
     })[0]!;
+
     await renderer.render({
       destination: { channelId: "C1", threadTs: "T1" },
       snapshot: snapshot(),
       state: undefined,
     });
 
-    expect(operations).toEqual([
+    expect(slack.calls.map((call) => call.method)).toEqual([
       "conversations.replies",
       "conversations.replies",
       "chat.postMessage",
