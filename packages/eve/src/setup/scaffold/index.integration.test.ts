@@ -1,5 +1,5 @@
 import { mkdtemp, mkdir, readFile, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { tmpdir } from "node:os";
 import { describe, expect, test } from "vitest";
 
@@ -505,6 +505,31 @@ describe("ensureChannel", () => {
     expect(proxySource).toContain('process.env.__VERCEL_DEV_RUNNING === "1"');
     expect(proxySource).toContain('request.headers.get("x-forwarded-host")');
     expect(proxySource).toContain("target.host = routerHost");
+  });
+
+  test("uses the targeted workspace agent as the Web Chat title", async () => {
+    const projectRoot = await createTempDir();
+    await mkdir(join(projectRoot, "agent"), { recursive: true });
+    await writeFile(
+      join(projectRoot, "package.json"),
+      `${JSON.stringify({ name: "demo", type: "module" }, null, 2)}\n`,
+      "utf8",
+    );
+
+    await ensureChannel({
+      projectRoot,
+      kind: "web",
+      webPackageVersions: TEST_WEB_PACKAGE_VERSIONS,
+    });
+
+    const agentChatSource = await readFile(
+      join(projectRoot, "app/_components/agent-chat.tsx"),
+      "utf8",
+    );
+    expect(agentChatSource).toContain(
+      `const DEFAULT_AGENT_NAME = ${JSON.stringify(basename(projectRoot))};`,
+    );
+    expect(agentChatSource).toContain("const AGENT_NAME = WEB_CHAT_AGENT ?? DEFAULT_AGENT_NAME;");
   });
 
   test("scaffolds Web Chat questions as visible response forms", async () => {
