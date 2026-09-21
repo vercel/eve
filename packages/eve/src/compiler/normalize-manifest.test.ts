@@ -562,6 +562,9 @@ describe("compileAgentManifest source graph", () => {
         tools: true,
       }),
     );
+    expect(compiled.dynamicTools).toContainEqual(
+      expect.objectContaining({ slug: "queries__schedules" }),
+    );
     expect(compiled.dynamicConnections).toContainEqual(
       expect.objectContaining({
         eventNames: ["turn.started"],
@@ -577,7 +580,7 @@ describe("compileAgentManifest source graph", () => {
       "instructions/dynamic.ts": { compile: true, runtimeEntry: true },
       "instructions/static.ts": { compile: true, runtimeEntry: false },
       "schedules/handler.ts": { compile: true, runtimeEntry: true },
-      "schedules/prompt.ts": { compile: true, runtimeEntry: false },
+      "schedules/prompt.ts": { compile: true, runtimeEntry: true },
       "schedules/queries.ts": { compile: true, runtimeEntry: true },
       "skills/dynamic.ts": { compile: true, runtimeEntry: true },
       "skills/static.ts": { compile: true, runtimeEntry: false },
