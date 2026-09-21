@@ -220,7 +220,7 @@ describe("Web setup", () => {
     });
     expect(effects.writeTextFile).toHaveBeenCalledWith(
       "/project/apps/web/next.config.ts",
-      expect.stringContaining('withEve(nextConfig, { eveRoot: "../.." })'),
+      expect.stringContaining('fileURLToPath(new URL("../..", import.meta.url))'),
       { force: true },
     );
     expect(effects.writeTextFile).not.toHaveBeenCalledWith(
