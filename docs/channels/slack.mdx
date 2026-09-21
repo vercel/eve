@@ -515,6 +515,10 @@ Start a session without an inbound message through `ctx.to(slack, target).send(m
 
 To post without invoking the model, use `ctx.thread.post(...)` in an inbound Slack handler or `channel.thread.post(...)` in an `events` handler. Use `callSlackApi(...)` where no Slack channel context exists. For application-managed retries and deduplication, see [Durable cross-channel notifications](../patterns/durable-cross-channel-notifications).
 
+`post(...)` resolves to `{ id, fileIds, raw }`. `id` is the Slack message `ts`, so a later `chat.update` can target the same message; `fileIds` lists the Slack file ids the post created, in upload order, and is empty when the post carried no `files`.
+
+One variant has no `id` to give. A `{ text, files }` post is delivered as a single Slack message by `files.completeUploadExternal`, and that method returns file ids without a message `ts`, so `id` is empty. Post `{ markdown | blocks | card }` with `files` when the message has to be targetable later; the message lands first through `chat.postMessage` and the files follow in the same thread.
+
 ### Pointing the channel at a different Slack API base (testing)
 
 Every outbound Slack Web API call the channel makes goes through one base URL. Set `api.url` to redirect it at a Slack simulator, a proxy, or a recorded fixture server:

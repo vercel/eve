@@ -58,8 +58,20 @@ export function slackContinuationToken(channelId: string, threadTs: string): str
  * target the same message with a follow-up `chat.update`.
  */
 export interface SlackPostedMessage {
-  /** Slack message `ts`. Empty when Slack did not return one. */
+  /**
+   * Slack message `ts`. Empty when Slack did not return one, which
+   * includes every `{ text, files }` post: those land through
+   * `files.completeUploadExternal`, and that method answers with file
+   * ids only. Post `{ markdown | blocks | card }` when the message has
+   * to be targetable later.
+   */
   readonly id: string;
+  /**
+   * Slack file ids created by this post, in upload order. Empty unless
+   * the post carried `files`. File ids and message `ts` values are
+   * separate namespaces, so they never share the `id` field.
+   */
+  readonly fileIds: readonly string[];
   /** Slack's raw JSON response. */
   readonly raw: SlackApiResponse;
 }
@@ -435,14 +447,12 @@ export function buildSlackBinding(input: {
 
       // text + files: single Slack message with files attached via
       // files.completeUploadExternal's mrkdwn-only initial_comment.
+      // That method returns no message ts, so `id` stays empty rather
+      // than carrying a file id the caller cannot post against.
       if (files.length > 0 && !shouldPostBeforeFiles) {
         const comment = "text" in message ? message.text : undefined;
         const result = await uploadFiles(files, { initialComment: comment });
-        const id =
-          Array.isArray(result.raw.files) && result.raw.files.length > 0
-            ? String((result.raw.files[0] as { id?: unknown }).id ?? "")
-            : "";
-        return { id, raw: result.raw };
+        return { id: "", fileIds: result.fileIds, raw: result.raw };
       }
 
       const response = await postSlackMessage(
@@ -460,14 +470,15 @@ export function buildSlackBinding(input: {
 
       // markdown / blocks / card + files: message lands first, then
       // files upload as a follow-up post in the same thread.
+      let fileIds: readonly string[] = [];
       if (files.length > 0 && shouldPostBeforeFiles) {
         try {
-          await uploadFiles(files);
+          fileIds = (await uploadFiles(files)).fileIds;
         } catch (error) {
           log.warn("file upload after message post failed", { error });
         }
       }
-      return { id, raw: response.raw };
+      return { id, fileIds, raw: response.raw };
     },
     async postEphemeral(userId, rawMessage) {
       const message = normalizePostInput(rawMessage);
@@ -482,7 +493,7 @@ export function buildSlackBinding(input: {
         ),
         user: userId,
       });
-      return { id: response.id, raw: response.raw };
+      return { id: response.id, fileIds: [], raw: response.raw };
     },
     async postDirectMessage(userId, rawMessage) {
       const open = await request("conversations.open", { users: userId });
@@ -495,7 +506,7 @@ export function buildSlackBinding(input: {
       const response = await postSlackMessage(
         buildPostMessageOptions(message, imChannelId, "", input.botToken, context, input.api),
       );
-      return { id: response.id, raw: response.raw };
+      return { id: response.id, fileIds: [], raw: response.raw };
     },
     async startTyping(status) {
       if (!input.channelId || !currentThreadTs) return;

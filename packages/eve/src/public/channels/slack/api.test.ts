@@ -256,8 +256,9 @@ describe("SlackThread.post with files", () => {
     expect(post.thread_ts).toBe("1.0");
 
     // The returned id has to be the message ts, not anything from the
-    // upload that followed it.
+    // upload that followed it; the file id rides in its own field.
     expect(posted.id).toBe("1700.1");
+    expect(posted.fileIds).toEqual(["F1"]);
 
     const complete = slack.bodyOf("files.completeUploadExternal");
     expect(complete.initial_comment).toBeUndefined();
@@ -275,7 +276,7 @@ describe("SlackThread.post with files", () => {
       teamId: undefined,
     });
 
-    await thread.post({
+    const posted = await thread.post({
       text: "*Report attached*",
       files: [{ data: Buffer.from([1, 2]), filename: "report.csv", mimeType: "text/csv" }],
     });
@@ -288,6 +289,13 @@ describe("SlackThread.post with files", () => {
       channel_id: "C01",
       thread_ts: "1.0",
     });
+
+    // files.completeUploadExternal answers with file ids and no message
+    // ts, so `id` stays empty. Handing back the file id instead would
+    // put a value from the wrong namespace in a field callers pass to
+    // chat.update.
+    expect(posted.id).toBe("");
+    expect(posted.fileIds).toEqual(["F1"]);
   });
 
   it("{ card, files } posts the card via chat.postMessage and uploads files separately", async () => {
@@ -301,10 +309,14 @@ describe("SlackThread.post with files", () => {
       teamId: undefined,
     });
 
-    await thread.post({
+    const posted = await thread.post({
       card: Card({ children: [CardText("Here's the data:")] }),
       files: [{ data: Buffer.from([1]), filename: "report.csv", mimeType: "text/csv" }],
     });
+
+    // The card branch posts first, so its id is the ts Slack named.
+    expect(posted.id).toBe("1700.1");
+    expect(posted.fileIds).toEqual(["F1"]);
 
     expect(slack.bodyOf("chat.postMessage").blocks).toBeDefined();
 
@@ -316,16 +328,20 @@ describe("SlackThread.post with files", () => {
 });
 
 /**
- * Pins a production bug, and does not fix it.
+ * Message `ts` values and file ids are separate Slack namespaces, and
+ * {@link SlackPostedMessage} keeps them in separate fields.
  *
  * {@link SlackPostedMessage.id} is documented as the Slack message `ts`,
  * which is what a follow-up `chat.update` needs, and the
  * `{ markdown | blocks | card } + files` branches return one. The
- * `{ text, files }` branch returns `raw.files[0].id` — a file id, from a
- * different Slack namespace — so a caller that updates the message it
- * just posted addresses a file no `chat.update` can reach. The stubs
- * below give the message `ts` and the file ids distinguishable values,
- * which is what makes the difference visible.
+ * `{ text, files }` branch has none to give: it is delivered by
+ * `files.completeUploadExternal`, which answers with file ids only. It
+ * reports the empty `id` the field documents rather than a file id no
+ * `chat.update` could address. Every variant reports its uploads under
+ * `fileIds`.
+ *
+ * The stubs below give the message `ts` and the file ids
+ * distinguishable values, which is what makes the difference visible.
  */
 describe("SlackThread.post id namespace", () => {
   let slack: MockSlack;
@@ -334,7 +350,7 @@ describe("SlackThread.post id namespace", () => {
     slack = mockSlack();
   });
 
-  it("returns a file id from { text, files } and a message ts from the other branches", async () => {
+  it("keeps file ids out of id and reports them under fileIds", async () => {
     slack.allow("chat.postMessage").andReturn({ ok: true, channel: "C01", ts: "1700.1" });
     allowUpload(slack, ["F1", "F2", "F3"]);
     const { thread } = buildSlackBinding({
@@ -363,9 +379,18 @@ describe("SlackThread.post id namespace", () => {
     expect(fromMarkdown.id).toBe("1700.1");
     expect(fromCard.id).toBe("1700.1");
 
-    // The { text, files } branch does not: it hands back the first
-    // staged file id, from a namespace no chat.update can address.
-    expect(fromText.id).toBe("F1");
+    // { text, files } sends no chat.postMessage, so Slack never named a
+    // message. It reports the empty id rather than the first staged
+    // file id, which no chat.update could address.
+    expect(fromText.id).toBe("");
+
+    // The uploads stay reachable, under the field that says what they
+    // are. Each post reports only the file it created.
+    expect([fromText, fromMarkdown, fromCard].map((posted) => posted.fileIds)).toEqual([
+      ["F1"],
+      ["F2"],
+      ["F3"],
+    ]);
   });
 });
 
