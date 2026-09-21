@@ -23,55 +23,52 @@ afterEach(() => {
   process.env = { ...savedEnvironment };
 });
 
-async function withDevRequest<T>(
-  address: string,
-  callback: () => Promise<T>,
-  trusted = true,
-): Promise<T> {
-  const secret = "test-secret";
-  const headers = new Headers();
-  if (trusted) {
-    stampDevelopmentClientAddress(headers, address, secret);
-  } else {
-    headers.set("x-eve-dev-client-address", address);
-    headers.set("x-eve-dev-client-address-signature", "forged");
-  }
+async function withDevHost<T>(callback: () => Promise<T>): Promise<T> {
   process.env.EVE_DEV = "1";
-  process.env[DEVELOPMENT_WORKFLOW_SECRET_ENV] = secret;
   const restore = installLocalDevCapabilityEnvironment({ appRoot: "/workspace/app", serverUrl });
   try {
-    return await withLocalDevRequestScope(new Request(serverUrl, { headers }), callback);
+    return await callback();
   } finally {
     restore();
   }
 }
 
 describe("self-modification local agent", () => {
-  it("is available to a verified loopback request", async () => {
-    await withDevRequest("127.0.0.1", async () => {
+  it("is available on an eve dev host without a request scope", async () => {
+    await withDevHost(async () => {
       const agent = defineSelfModificationAgent({ config: { local: { enabled: true } } });
 
       await expect(agent.events["turn.started"]?.({}, context)).resolves.not.toBeNull();
     });
   });
 
-  it("does not expose the editor to direct remote requests", async () => {
-    await withDevRequest("203.0.113.7", async () => {
-      const agent = defineSelfModificationAgent({ config: { local: { enabled: true } } });
+  it("is available to a direct remote request on an eve dev host", async () => {
+    await withDevHost(async () => {
+      const secret = "test-secret";
+      process.env[DEVELOPMENT_WORKFLOW_SECRET_ENV] = secret;
+      const headers = new Headers();
+      stampDevelopmentClientAddress(headers, "203.0.113.7", secret);
 
-      await expect(agent.events["turn.started"]?.({}, context)).resolves.toBeNull();
+      await withLocalDevRequestScope(new Request(serverUrl, { headers }), async () => {
+        const agent = defineSelfModificationAgent({ config: { local: { enabled: true } } });
+
+        await expect(agent.events["turn.started"]?.({}, context)).resolves.not.toBeNull();
+      });
     });
   });
 
-  it("does not trust client-supplied provenance headers", async () => {
-    await withDevRequest(
-      "127.0.0.1",
-      async () => {
-        const agent = defineSelfModificationAgent({ config: { local: { enabled: true } } });
+  it("does not expose the editor when eve dev facilities are absent", async () => {
+    process.env.EVE_DEV = "1";
+    const agent = defineSelfModificationAgent({ config: { local: { enabled: true } } });
 
-        await expect(agent.events["turn.started"]?.({}, context)).resolves.toBeNull();
-      },
-      false,
-    );
+    await expect(agent.events["turn.started"]?.({}, context)).resolves.toBeNull();
+  });
+
+  it("honors local.enabled: false even when eve dev facilities are available", async () => {
+    await withDevHost(async () => {
+      const agent = defineSelfModificationAgent({ config: { local: { enabled: false } } });
+
+      await expect(agent.events["turn.started"]?.({}, context)).resolves.toBeNull();
+    });
   });
 });

@@ -124,7 +124,6 @@ export function encodeLegacyCommand(command: Command, declaredVersion: unknown):
   }
   return {
     auth: command.auth,
-    localDevRequest: command.localDevRequest,
     caller,
     deliveryMetadata,
     kind: "deliver",

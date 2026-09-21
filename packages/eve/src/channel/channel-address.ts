@@ -22,8 +22,6 @@ import type {
   TurnPolicy,
 } from "#channel/types.js";
 import { DEFAULT_TURN_POLICY } from "#channel/types.js";
-import { contextStorage } from "#context/container.js";
-import { LocalDevRequestKey } from "#context/keys.js";
 import { isReservedSessionCommandToken } from "#execution/session-inbox/address.js";
 import type { RunMode } from "#shared/run-mode.js";
 
@@ -94,7 +92,6 @@ export function createChannelAddress<TState = undefined>(input: {
       const caller = sessionCallbackToTurnCaller(options.callback);
       const commandWithoutCaller = {
         auth: options.auth,
-        localDevRequest: contextStorage.getStore()?.get(LocalDevRequestKey) ?? null,
         delivery,
         kind: "send" as const,
         payload: {

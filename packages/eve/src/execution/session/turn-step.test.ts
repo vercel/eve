@@ -17,7 +17,6 @@ import {
   ContinuationHookTokensKey,
   ContinuationTokenKey,
   DynamicSubagentAgentConfigKey,
-  LocalDevRequestKey,
   ModeKey,
   ScheduleIdKey,
   SessionCallbackKey,
@@ -1020,17 +1019,11 @@ describe("turnStep", () => {
       subject: "alice",
     };
     const correctionAuth = { ...originalAuth, principalId: "bob", subject: "bob" };
-    const localDevRequest = {
-      address: "127.0.0.1",
-      interactiveClient: false,
-      signature: "signed",
-    };
     const adapter: ChannelAdapter = {
       kind: "ignore-correction",
       state: { reply: { recipient: "alice" } },
       deliver: (_payload, adapterCtx) => {
         expect(adapterCtx.ctx.get(AuthKey)).toEqual(correctionAuth);
-        expect(adapterCtx.ctx.get(LocalDevRequestKey)).toBeUndefined();
         (adapterCtx.state.reply as { recipient: string }).recipient = "bob";
         return undefined;
       },
@@ -1047,7 +1040,6 @@ describe("turnStep", () => {
     installSessionStoreMocks([session]);
     const execute = vi.fn(async (current: HarnessSession): Promise<StepResult> => {
       expect(loadContext().get(AuthKey)).toEqual(originalAuth);
-      expect(loadContext().get(LocalDevRequestKey)).toEqual(localDevRequest);
       expect(loadContext().get(TurnDeliveryIdsKey)).toEqual(["original-delivery"]);
       expect(loadContext().get(ChannelKey)?.state).toEqual({ reply: { recipient: "alice" } });
       return { next: { done: true, output: "Original answer" }, session: current };
@@ -1055,7 +1047,6 @@ describe("turnStep", () => {
     vi.mocked(createExecutionNodeStep).mockImplementation(() => execute);
     const ctx = new ContextContainer();
     ctx.set(AuthKey, originalAuth);
-    ctx.set(LocalDevRequestKey, localDevRequest);
     ctx.set(TurnDeliveryIdsKey, ["original-delivery"]);
     ctx.set(BundleKey, bundle);
     ctx.set(ChannelKey, adapter);
@@ -1066,7 +1057,6 @@ describe("turnStep", () => {
     const result = await turnStep({
       input: {
         auth: correctionAuth,
-        localDevRequest: null,
         kind: "deliver",
         payloads: [{ message: "Ignored correction" }],
         deliveryMetadata: [
@@ -1087,7 +1077,6 @@ describe("turnStep", () => {
     expect(execute.mock.calls[0]?.[0].history).toEqual(session.history);
     expect(result.sessionState.emissionState.turnId).toBe("turn_0");
     expect(result.serializedContext[AuthKey.name]).toEqual(originalAuth);
-    expect(result.serializedContext[LocalDevRequestKey.name]).toEqual(localDevRequest);
     expect(result.serializedContext[TurnDeliveryIdsKey.name]).toEqual(["original-delivery"]);
   });
   it("keeps one task stream open while hiding a scheduled fallback from delivery hooks", async () => {
@@ -1832,47 +1821,6 @@ describe("turnStep", () => {
     });
 
     expect(observed).toEqual(expected);
-  });
-
-  it("clears local development provenance for a direct remote delivery", async () => {
-    const bundle = createStubBundle();
-    installSessionStoreMocks([createStubSession()]);
-    const localDevRequest = {
-      address: "127.0.0.1",
-      interactiveClient: false,
-      signature: "signed",
-    };
-    const ctx = new ContextContainer();
-    ctx.set(AuthKey, null);
-    ctx.set(BundleKey, bundle);
-    ctx.set(ChannelKey, threadContextAdapter);
-    ctx.set(ContinuationTokenKey, "http:local-dev-replacement");
-    ctx.set(LocalDevRequestKey, localDevRequest);
-    ctx.set(ModeKey, "conversation");
-    ctx.set(SessionIdKey, "session-1");
-
-    let observed: unknown;
-    vi.mocked(createExecutionNodeStep).mockImplementation(() => {
-      return async (session): Promise<StepResult> => {
-        observed = loadContext().get(LocalDevRequestKey);
-        return { next: null, session };
-      };
-    });
-
-    const result = await turnStep({
-      input: {
-        auth: null,
-        kind: "deliver",
-        localDevRequest: null,
-        payloads: [{ message: "follow up" }],
-      },
-      sessionWritable: createTestWritable(),
-      serializedContext: serializeContext(ctx),
-      sessionState: createStubSessionState(),
-    });
-
-    expect(observed).toBeUndefined();
-    expect(result.serializedContext[LocalDevRequestKey.name]).toBeUndefined();
   });
 
   it("projects inherited task tool activity while routing HITL only to the parent callback", async () => {

@@ -6,7 +6,6 @@ import {
   getChannelActivityPresentation,
 } from "#channel/activity-renderer.js";
 import type { Runtime } from "#channel/types.js";
-import { ContextContainer, contextStorage } from "#context/container.js";
 
 function createRuntime(): Runtime {
   return {
@@ -44,14 +43,13 @@ describe("createChannelAddress", () => {
     await session.clear();
 
     expect(runtime.dispatchContinuation).toHaveBeenCalledWith({
-      command: expect.objectContaining({
+      command: {
         auth: null,
-        localDevRequest: null,
         kind: "send",
         payload: { message: "hello" },
         requestId: undefined,
         turnPolicy: "steer",
-      }),
+      },
       continuationToken: "slack:C1:T1",
     });
     expect(runtime.resolveContinuation).not.toHaveBeenCalled();
@@ -59,30 +57,6 @@ describe("createChannelAddress", () => {
     expect(runtime.dispatchSession).toHaveBeenCalledWith({
       command: { kind: "clear" },
       sessionId: "sess_1",
-    });
-  });
-
-  it("captures the active local development provenance for each delivery", async () => {
-    const runtime = createRuntime();
-    const address = createChannelAddress({
-      adapter: { kind: "http" },
-      channelName: "eve",
-      continuationToken: "session",
-      runtime,
-    });
-    const localDevRequest = {
-      address: "127.0.0.1",
-      interactiveClient: false,
-      signature: "signed",
-    };
-
-    await contextStorage.run(new ContextContainer({ localDevRequest }), async () => {
-      await address.send("hello", { auth: null });
-    });
-
-    expect(vi.mocked(runtime.dispatchContinuation).mock.calls[0]?.[0].command).toMatchObject({
-      kind: "send",
-      localDevRequest,
     });
   });
 

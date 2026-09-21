@@ -101,9 +101,8 @@ describe("fixed session operations", () => {
     );
 
     expect(runtime.dispatchSession).toHaveBeenCalledWith({
-      command: expect.objectContaining({
+      command: {
         auth: null,
-        localDevRequest: null,
         kind: "send",
         payload: expect.objectContaining({
           context: ["durable"],
@@ -111,7 +110,7 @@ describe("fixed session operations", () => {
         }),
         requestId: undefined,
         turnPolicy: "steer",
-      }),
+      },
       sessionId: "sess_1",
     });
     const call = vi.mocked(runtime.dispatchSession).mock.calls[0]?.[0];
@@ -153,24 +152,22 @@ describe("fixed session operations", () => {
     await session.reset({ reason: "fresh start" });
 
     expect(runtime.dispatchSession).toHaveBeenNthCalledWith(1, {
-      command: expect.objectContaining({
+      command: {
         auth: null,
-        localDevRequest: null,
         kind: "send",
         payload: { message: "hello" },
         requestId: "req_1",
         turnPolicy: "steer",
-      }),
+      },
       sessionId: "sess_1",
     });
     expect(runtime.dispatchSession).toHaveBeenNthCalledWith(2, {
-      command: expect.objectContaining({
+      command: {
         auth: null,
-        localDevRequest: null,
         kind: "send",
         payload: { inputResponses: [{ optionId: "approve", requestId: "request_1" }] },
         requestId: "req_1",
-      }),
+      },
       sessionId: "sess_1",
     });
     expect(runtime.dispatchSession).toHaveBeenNthCalledWith(3, {
@@ -205,9 +202,8 @@ describe("fixed session operations", () => {
     expect(invalidSend).toBeTypeOf("function");
 
     expect(runtime.dispatchSession).toHaveBeenCalledWith({
-      command: expect.objectContaining({
+      command: {
         auth: null,
-        localDevRequest: null,
         caller: {
           callId: "call_1",
           replyTo: { kind: "callback", token: callback.token, url: callback.url },
@@ -218,7 +214,7 @@ describe("fixed session operations", () => {
         payload: { message: "continue" },
         requestId: undefined,
         turnPolicy: "steer",
-      }),
+      },
       sessionId: "sess_1",
     });
   });

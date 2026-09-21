@@ -1,9 +1,8 @@
 /**
- * Runtime capabilities available to authored code handling a same-machine
- * request to `eve dev`.
+ * Host facilities available to authored code running on an `eve dev` server.
  *
- * A deployed runtime and a client attached to a development server over the
- * network receive `undefined`. A local TUI attached to an existing headless
- * server receives the capability because authorization follows its requests.
+ * The capability is present when the executing host owns the authored root and
+ * watcher control origin. It is unavailable in deployed runtimes and does not
+ * vary by request or peer address.
  */
 export { getLocalDevCapability, type LocalDevCapability } from "#runtime/local-dev-capability.js";

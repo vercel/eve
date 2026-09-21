@@ -2,4 +2,4 @@
 "eve": patch
 ---
 
-Restrict self-modification's editor and authored-source mount to local development requests.
+Local self-modification now depends on `eve dev` host facilities instead of request provenance.

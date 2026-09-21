@@ -28,13 +28,12 @@ const LOCAL_DEV_CONTROL_URL_ENV = "EVE_DEV_CONTROL_URL";
 export const LOCAL_DEV_INTERACTIVE_CLIENT_HEADER = "x-eve-dev-interactive-client";
 
 /**
- * Capabilities available to authored code in an execution initiated by a
- * request whose direct peer is loopback on the `eve dev` host.
+ * Host facilities available to authored code running on an `eve dev` server.
  *
- * Absence is the signal, not a disabled flag: a deployed runtime has no
- * authored tree to mutate or watcher to pause, and a request from a remote
- * client is not authorized to mutate the server's authored tree.
- * {@link getLocalDevCapability} returns `undefined` in both cases.
+ * Absence means this host has no authored tree to mutate or watcher to pause.
+ * When present, the capability is available to every execution on that host;
+ * callers admitted to the development server are trusted with enabled local
+ * editing tools.
  */
 export interface LocalDevCapability {
   /**
@@ -43,8 +42,9 @@ export interface LocalDevCapability {
    */
   readonly appRoot: string;
   /**
-   * Whether the requesting client is the dev TUI and can therefore run a flow
-   * that asks questions in its terminal.
+   * Whether the originating client is the dev TUI and can run a flow that asks
+   * questions in its terminal. This inherited hint is not proof that the
+   * current sender has a live terminal.
    */
   readonly interactiveClient: boolean;
   /**
@@ -78,9 +78,8 @@ export function installLocalDevCapabilityEnvironment(input: {
 }
 
 /**
- * Seeds durable local-dev provenance only when the dev host signed a loopback
- * peer address. Client-supplied address headers cannot grant access; a tunnel
- * or proxy that is itself a loopback peer can expose this capability.
+ * Seeds the inherited dev-TUI hint only when the dev host signed a loopback
+ * peer address. Client-supplied address headers cannot create that hint.
  */
 export async function withLocalDevRequestScope<T>(
   request: Request,
@@ -106,8 +105,10 @@ export async function withLocalDevRequestScope<T>(
 }
 
 /**
- * Resolves the local dev capability, or `undefined` outside an execution
- * initiated by an authorized local request to `eve dev`.
+ * Resolves local development host facilities, or `undefined` when this host
+ * lacks the authored root or watcher control origin installed by `eve dev`.
+ * Request provenance affects only the optional dev-TUI hint, never access to
+ * the authored tree.
  *
  * This is deliberately not a {@link import("#public/definitions/tool.js").ToolContext}
  * field: both values are meaningless in a deployed runtime, and a capability
@@ -119,29 +120,28 @@ export function getLocalDevCapability(
 ): LocalDevCapability | undefined {
   const appRoot = environment[LOCAL_DEV_APP_ROOT_ENV];
   const controlUrl = environment[LOCAL_DEV_CONTROL_URL_ENV];
-  const requestScope = contextStorage.getStore()?.localDevRequest;
-  if (
-    requestScope === undefined ||
-    typeof requestScope.address !== "string" ||
-    typeof requestScope.signature !== "string" ||
-    typeof requestScope.interactiveClient !== "boolean" ||
-    !isLoopbackHostname(requestScope.address) ||
-    !isTrustedDevelopmentClientAddress(
-      requestScope.address,
-      requestScope.signature,
-      process.env[DEVELOPMENT_WORKFLOW_SECRET_ENV],
-    ) ||
-    appRoot === undefined ||
-    appRoot === "" ||
-    controlUrl === undefined ||
-    controlUrl === ""
-  ) {
+  if (appRoot === undefined || appRoot === "" || controlUrl === undefined || controlUrl === "") {
     return undefined;
   }
 
+  const requestScope = contextStorage.getStore()?.localDevRequest;
+  const interactiveClient =
+    requestScope !== undefined &&
+    typeof requestScope.address === "string" &&
+    typeof requestScope.signature === "string" &&
+    typeof requestScope.interactiveClient === "boolean" &&
+    isLoopbackHostname(requestScope.address) &&
+    isTrustedDevelopmentClientAddress(
+      requestScope.address,
+      requestScope.signature,
+      process.env[DEVELOPMENT_WORKFLOW_SECRET_ENV],
+    )
+      ? requestScope.interactiveClient
+      : false;
+
   return {
     appRoot,
-    interactiveClient: requestScope.interactiveClient,
+    interactiveClient,
     async withSuspendedSource<T>(task: () => Promise<T>): Promise<T> {
       const leaseId = randomUUID();
       if (!(await suspendDevelopmentRuntimeArtifacts({ leaseId, serverUrl: controlUrl }))) {

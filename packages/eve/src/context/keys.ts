@@ -84,7 +84,10 @@ export const ContinuationHookTokensKey = new ContextKey<readonly string[]>(
   "eve.continuationHookTokens",
 );
 export const ChannelRequestIdKey = new ContextKey<string>("eve.channelRequestId");
-/** Dev-host-verified loopback peer provenance, valid only for the current host secret. */
+/**
+ * Dev-host-verified originating-client metadata, valid only for the current
+ * host secret. It carries the inherited dev-TUI hint, not editing authority.
+ */
 export interface LocalDevRequestProvenance {
   readonly address: string;
   readonly interactiveClient: boolean;

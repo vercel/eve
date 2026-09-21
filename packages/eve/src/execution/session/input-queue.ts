@@ -162,20 +162,11 @@ export class SessionInputQueue {
     admitted: ReadonlySet<number>,
     callerCallId: string | undefined,
   ): TurnSelection | undefined {
-    const first = this.entries.find(
-      (entry): entry is QueuedDelivery =>
-        entry.kind === "delivery" &&
-        admitted.has(entry.sequence) &&
-        isSteeringDelivery(entry.delivery, callerCallId),
-    );
-    if (first === undefined) return undefined;
     const steering = this.entries.filter(
       (entry): entry is QueuedDelivery =>
         entry.kind === "delivery" &&
         admitted.has(entry.sequence) &&
-        isSteeringDelivery(entry.delivery, callerCallId) &&
-        jsonValuesEqual(entry.delivery.auth, first.delivery.auth) &&
-        jsonValuesEqual(entry.delivery.localDevRequest, first.delivery.localDevRequest),
+        isSteeringDelivery(entry.delivery, callerCallId),
     );
     if (steering.length === 0) return undefined;
     this.retain((entry) => entry.kind !== "delivery" || !steering.includes(entry));
@@ -291,7 +282,6 @@ export class SessionInputQueue {
           next.delivery.taskDeliveryId !== undefined ||
           !authenticated ||
           !jsonValuesEqual(first.delivery.auth, next.delivery.auth) ||
-          !jsonValuesEqual(first.delivery.localDevRequest, next.delivery.localDevRequest) ||
           (caller !== undefined && next.delivery.caller !== undefined)
         ) {
           break;

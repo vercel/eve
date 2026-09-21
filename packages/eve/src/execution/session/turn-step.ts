@@ -15,7 +15,6 @@ import {
 import {
   AuthKey,
   InitiatorAuthKey,
-  LocalDevRequestKey,
   SessionTitleKey,
   ParentSessionKey,
   CapabilitiesKey,
@@ -118,11 +117,6 @@ async function runSessionStep(input: TurnStepInput): Promise<DurableStepResult> 
 
   let durableSession = readDurableSession(input.sessionState);
   const ctx = await deserializeContext(input.serializedContext);
-  const previousLocalDevRequest = ctx.get(LocalDevRequestKey);
-  if (rawDelivery?.localDevRequest !== undefined) {
-    if (rawDelivery.localDevRequest === null) ctx.delete(LocalDevRequestKey);
-    else ctx.set(LocalDevRequestKey, rawDelivery.localDevRequest);
-  }
   const adapter = ctx.require(ChannelKey);
   const bundle = ctx.require(BundleKey);
   const effectiveAgent = resolveEffectiveAgentRuntime(bundle, ctx);
@@ -283,8 +277,6 @@ async function runSessionStep(input: TurnStepInput): Promise<DurableStepResult> 
       // not change the identity or reply destination of the interrupted work.
       if (previousAuth === undefined) ctx.delete(AuthKey);
       else ctx.set(AuthKey, previousAuth);
-      if (previousLocalDevRequest === undefined) ctx.delete(LocalDevRequestKey);
-      else ctx.set(LocalDevRequestKey, previousLocalDevRequest);
       adapterCtx.state = previousAdapterState!;
     } else {
       if (rawDelivery !== undefined) ctx.set(TurnTaskDeliveryKey, "none");

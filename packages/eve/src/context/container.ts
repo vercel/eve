@@ -16,7 +16,7 @@ const EVE_CONTEXT_STORAGE_KEY = Symbol.for("eve.context-storage");
  * the serialization layer.
  */
 export interface AlsContext extends ContextAccessor {
-  /** Verified local development provenance, inherited across durable execution contexts. */
+  /** Verified originating-client metadata, inherited only for the dev-TUI hint. */
   readonly localDevRequest?: LocalDevRequestProvenance;
   /** Removes a durable or step-local value from the context. */
   delete<T>(key: ContextKey<T>): boolean;

@@ -5,12 +5,7 @@ import { join } from "node:path";
 import * as justBash from "just-bash";
 import { afterEach, describe, expect, it } from "vitest";
 
-import {
-  installLocalDevCapabilityEnvironment,
-  withLocalDevRequestScope,
-} from "#runtime/local-dev-capability.js";
-import { stampDevelopmentClientAddress } from "#internal/nitro/dev-client-address.js";
-import { DEVELOPMENT_WORKFLOW_SECRET_ENV } from "#internal/workflow/development-world-protocol.js";
+import { installLocalDevCapabilityEnvironment } from "#runtime/local-dev-capability.js";
 
 import { createLocalSelfModificationFilesystem } from "./filesystem.js";
 
@@ -24,29 +19,15 @@ afterEach(async () => {
   );
 });
 
-async function withLocalDevCapability<T>(
-  appRoot: string,
-  callback: () => Promise<T>,
-  address = "127.0.0.1",
-): Promise<T> {
-  const secret = "test-secret";
-  const headers = new Headers();
-  stampDevelopmentClientAddress(headers, address, secret);
-  const previousSecret = process.env[DEVELOPMENT_WORKFLOW_SECRET_ENV];
-  process.env[DEVELOPMENT_WORKFLOW_SECRET_ENV] = secret;
+async function withLocalDevCapability<T>(appRoot: string, callback: () => Promise<T>): Promise<T> {
   const restore = installLocalDevCapabilityEnvironment({
     appRoot,
     serverUrl: "http://127.0.0.1:3000",
   });
   try {
-    return await withLocalDevRequestScope(
-      new Request("http://127.0.0.1:3000", { headers }),
-      callback,
-    );
+    return await callback();
   } finally {
     restore();
-    if (previousSecret === undefined) delete process.env[DEVELOPMENT_WORKFLOW_SECRET_ENV];
-    else process.env[DEVELOPMENT_WORKFLOW_SECRET_ENV] = previousSecret;
   }
 }
 
@@ -131,20 +112,15 @@ describe("self-modification filesystem", () => {
     });
   });
 
-  it("does not expose authored files to direct remote requests", async () => {
+  it("rejects mounting authored files without eve dev facilities", async () => {
     const appRoot = await createAppRoot();
 
     await expect(
-      withLocalDevCapability(
+      createLocalSelfModificationFilesystem({
         appRoot,
-        async () =>
-          await createLocalSelfModificationFilesystem({
-            appRoot,
-            defaultFilesystem: new justBash.InMemoryFs(),
-            justBash,
-          }),
-        "203.0.113.7",
-      ),
-    ).rejects.toThrow("Self-modification requires a local development request.");
+        defaultFilesystem: new justBash.InMemoryFs(),
+        justBash,
+      }),
+    ).rejects.toThrow("Self-modification requires eve dev facilities");
   });
 });
