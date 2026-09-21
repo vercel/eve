@@ -145,6 +145,9 @@ describe("bindScheduleCollection", () => {
         name: "bad-jitter",
       }),
     ).rejects.toThrow("1 through 15");
+    await expect(client!.list({ cursor: "", limit: 1 })).resolves.toMatchObject({
+      cursor: null,
+    });
     await expect(client!.list({ limit: 101 })).rejects.toThrow("1 through 100");
     await expect(
       client!.create({

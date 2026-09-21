@@ -65,6 +65,19 @@ describe("vercelScheduleProvider", () => {
     });
   });
 
+  it("omits a blank first-page cursor", async () => {
+    vi.stubEnv("VERCEL", "1");
+    vi.stubEnv("VERCEL_ENV", "production");
+    const fetchImpl = vi.fn<typeof fetch>(async () => Response.json({ data: [], cursor: null }));
+    const provider = vercelScheduleProvider({ fetch: fetchImpl, token: "oidc" });
+
+    await provider.list(context, { cursor: "", limit: 20 });
+
+    expect(String(fetchImpl.mock.calls[0]![0])).toBe(
+      "https://vss-server.vercel.sh/v1/schedules?namespace=eve-namespace&limit=20",
+    );
+  });
+
   it("rejects preview deployments before calling the API", async () => {
     vi.stubEnv("VERCEL", "1");
     vi.stubEnv("VERCEL_ENV", "preview");

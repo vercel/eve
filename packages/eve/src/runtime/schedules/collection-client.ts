@@ -75,7 +75,10 @@ export async function bindScheduleCollection<TInput>(
     invoke: async (name) => provider.invoke(providerContext(), validateScheduleName(name)),
     list: async (input = {}) => {
       const limit = validateScheduleListLimit(input.limit);
-      const normalized: ScheduleList = limit === undefined ? { ...input } : { ...input, limit };
+      const cursor = input.cursor?.trim() || undefined;
+      let normalized: ScheduleList = {};
+      if (cursor !== undefined) normalized = { ...normalized, cursor };
+      if (limit !== undefined) normalized = { ...normalized, limit };
       return provider.list(providerContext(), normalized);
     },
     update: async (name, patch) => {

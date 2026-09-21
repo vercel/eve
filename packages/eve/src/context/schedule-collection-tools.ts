@@ -97,7 +97,12 @@ export function createScheduleCollectionToolDynamicDefinition<TInput>(
             tools[toolName("list")] = defineTool({
               description: description("List schedules in this collection for the current scope."),
               inputSchema: z.object({
-                cursor: z.string().optional(),
+                cursor: z
+                  .string()
+                  .optional()
+                  .describe(
+                    "Pagination cursor returned by a prior list call. Omit for the first page.",
+                  ),
                 limit: z.number().int().optional(),
               }),
               execute: async (toolInput) => await client.list(toolInput),

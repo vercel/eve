@@ -96,7 +96,8 @@ export function vercelScheduleProvider(
     },
     async list(context, input): Promise<SchedulePage> {
       const search = new URLSearchParams({ namespace: context.namespace });
-      if (input.cursor !== undefined) search.set("cursor", input.cursor);
+      const cursor = input.cursor?.trim();
+      if (cursor) search.set("cursor", cursor);
       if (input.limit !== undefined) search.set("limit", String(input.limit));
       const page = await request<{ data: VercelSchedule[]; cursor: string | null }>(
         "GET",
