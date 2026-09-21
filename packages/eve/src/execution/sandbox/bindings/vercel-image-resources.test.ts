@@ -32,7 +32,10 @@ function createDrive(name = "drive") {
   };
 }
 
-afterEach(() => vi.unstubAllEnvs());
+afterEach(() => {
+  vi.useRealTimers();
+  vi.unstubAllEnvs();
+});
 
 describe("Vercel image resources", () => {
   it("creates and populates a content-addressed Drive", async () => {
@@ -82,6 +85,38 @@ describe("Vercel image resources", () => {
       region: "iad1",
       resourceKey: "workspace-key",
     });
+  });
+
+  it("waits for another preparation writer to release the Drive", async () => {
+    vi.useFakeTimers();
+    setCredentials();
+    const drive = createDrive();
+    const writer = {
+      delete: vi.fn(async () => {}),
+      fs: {
+        readFile: vi.fn(async () => JSON.stringify({ key: "workspace-key" })),
+      },
+      writeFiles: vi.fn(),
+    };
+    const create = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("Drive is already attached as read-write to sandbox test"))
+      .mockResolvedValueOnce(writer);
+    const module = {
+      Drive: {
+        getOrCreate: vi.fn(async () => drive),
+        list: vi.fn(async () => ({ toArray: async () => [] })),
+      },
+      Sandbox: { create },
+    };
+    const prepared = prepareVercelImageResource({
+      createOptions: {},
+      module: module as never,
+      resource: resource(),
+    });
+    await vi.runAllTimersAsync();
+    await expect(prepared).resolves.toMatchObject({ resourceKey: "workspace-key" });
+    expect(create).toHaveBeenCalledTimes(2);
   });
 
   it("rejects conflicting content under an existing Drive identity", async () => {
