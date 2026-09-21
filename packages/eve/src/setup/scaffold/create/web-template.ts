@@ -89,6 +89,8 @@ export const WEB_APP_TEMPLATE_FILES = {
 
 export const WEB_CHANNEL_TEMPLATE =
   'import { eveChannel } from "eve/channels/eve";\nimport { localDev, placeholderAuth, vercelOidc } from "eve/channels/auth";\n\nexport default eveChannel({\n  auth: [\n    // Lets the eve TUI and your Vercel deployments reach the deployed agent.\n    vercelOidc(),\n    // Open on localhost for `eve dev` and the REPL; ignored in production.\n    localDev(),\n    // This placeholder will not allow browser requests in production.\n    // Replace it with your app\'s auth provider, like Auth.js or Clerk,\n    // or use none() for a public demo.\n    placeholderAuth(),\n  ],\n});\n';
+export const WEB_SIGN_IN_WITH_VERCEL_CHANNEL_TEMPLATE =
+  'import { eveChannel } from "eve/channels/eve";\nimport { localDev, type AuthFn, vercelOidc } from "eve/channels/auth";\nimport { auth } from "@/lib/auth";\n\nconst betterAuthSession: AuthFn<Request> = async (request) => {\n  const session = await auth.api.getSession({ headers: request.headers });\n  if (!session) return null;\n\n  const attributes: Record<string, string> = {\n    email: session.user.email,\n    name: session.user.name,\n  };\n  if (session.user.image) {\n    attributes.picture = session.user.image;\n  }\n\n  return {\n    attributes,\n    authenticator: "better-auth:vercel",\n    principalId: session.user.id,\n    principalType: "user",\n  };\n};\n\nexport default eveChannel({\n  auth: [betterAuthSession, vercelOidc(), localDev()],\n});\n';
 
 export const WEB_APP_SIGN_IN_WITH_VERCEL_TEMPLATE_FILES = {
   "app/_components/authenticated-agent-chat.tsx":
