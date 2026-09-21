@@ -22,6 +22,8 @@ export class ClientError extends Error {
   readonly headers: Readonly<Record<string, string>>;
 
   constructor(status: number, body: string, headers?: ConstructorParameters<typeof Headers>[0]) {
+    const normalizedHeaders = Object.freeze(Object.fromEntries(new Headers(headers).entries()));
+    const contentType = normalizedHeaders["content-type"]?.toLowerCase();
     let message = body || `Server returned ${status}.`;
     let code: string | undefined;
     try {
@@ -30,13 +32,17 @@ export class ClientError extends Error {
         if (typeof parsed.error === "string") message = parsed.error;
         if (typeof parsed.code === "string") code = parsed.code;
       }
-    } catch {}
+    } catch {
+      if (contentType?.includes("text/html")) {
+        message = `Server returned ${status} with an HTML response. Check the eve route and development server configuration.`;
+      }
+    }
 
     super(message);
     this.name = "ClientError";
     this.code = code;
     this.status = status;
     this.body = body;
-    this.headers = Object.freeze(Object.fromEntries(new Headers(headers).entries()));
+    this.headers = normalizedHeaders;
   }
 }
