@@ -17,6 +17,10 @@ export default defineEval({
       `Run the bash command \`cat ${PATH} /workspace/.eve/provider\` and reply with the command output verbatim.`,
     );
     read.expectOk();
+    if (write.sessionId === undefined || read.sessionId === undefined)
+      throw new Error("Reused sandbox eval did not receive session IDs.");
+    if (write.sessionId === read.sessionId)
+      throw new Error("Reused sandbox eval requires two distinct eve sessions.");
     t.check(read.message, includes(MARKER));
     if (process.env.EVE_E2E_MODEL === "mock")
       t.check(read.message, includes("vercel-reused-image"));
