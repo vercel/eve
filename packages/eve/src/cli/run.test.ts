@@ -382,7 +382,7 @@ describe("eve init compatibility flags", () => {
     expect(help).toContain("-y, --yes");
     expect(help).toContain("--model <model>");
     expect(help).toContain("--reasoning <effort>");
-    expect(help).toContain("--ni, --non-interactive");
+    expect(help).toContain("-n, --non-interactive");
   });
 
   it("forwards model settings to the init command", async () => {
@@ -411,11 +411,11 @@ describe("eve init compatibility flags", () => {
     );
   });
 
-  it("forwards --ni to the init command", async () => {
+  it("forwards -n to the init command", async () => {
     const logger = { error: vi.fn(), log: vi.fn() };
     runInitCommand.mockClear();
 
-    await runCli(["init", "my-agent", "--ni"], logger);
+    await runCli(["init", "my-agent", "-n"], logger);
 
     expect(runInitCommand).toHaveBeenCalledWith(
       logger,

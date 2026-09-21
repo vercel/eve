@@ -196,7 +196,7 @@ export function createCliProgram(
       parseAgentNamesOption,
     )
     .option("--model <model>", "Set the agent model (provider/model-id)")
-    .option("--ni, --non-interactive", "Scaffold the agent without starting development")
+    .option("-n, --non-interactive", "Scaffold the agent without starting development")
     .option(
       "--reasoning <effort>",
       "Set reasoning (provider-default|none|minimal|low|medium|high|xhigh)",
