@@ -18,7 +18,7 @@ describe("provided tool labels", () => {
     );
     expect(loadSkill.label?.start({ skill: "technical-writing" })).toBe("Load technical-writing");
     expect(readFile.label?.start({ filePath: "channels/slack/activity.ts" })).toBe(
-      "Read channels/slack/activity.ts",
+      "Read `channels/slack/activity.ts`",
     );
     expect(webFetch.label?.start({ url: "https://docs.slack.dev" })).toBe(
       "Fetch https://docs.slack.dev",
@@ -27,8 +27,19 @@ describe("provided tool labels", () => {
       "Search Slack plan blocks",
     );
     expect(writeFile.label?.start({ content: "", filePath: "activity.ts" })).toBe(
-      "Write activity.ts",
+      "Write `activity.ts`",
     );
+  });
+
+  it("keeps inline-code file labels valid at the activity text limit", () => {
+    const label = readFile.label?.start({ filePath: "a".repeat(600) });
+    expect(label).toHaveLength(500);
+    expect(label?.startsWith("Read `")).toBe(true);
+    expect(label?.endsWith("`")).toBe(true);
+  });
+
+  it("falls back to a plain detail when a path contains a backtick", () => {
+    expect(readFile.label?.start({ filePath: "with`tick.ts" })).toBe("Read with`tick.ts");
   });
 
   it("handles provider-specific web search inputs", () => {

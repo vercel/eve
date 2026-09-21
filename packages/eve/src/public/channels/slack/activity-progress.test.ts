@@ -70,12 +70,10 @@ describe("Slack activity activity", () => {
         [
           "turn",
           [
-            "```",
             "• Working",
             "└── • research &lt;team&gt;",
             "    └── • tester &amp; reviewer",
             "        └── • search &lt;web&gt;",
-            "```",
           ].join("\n"),
         ],
       ]),
@@ -89,14 +87,14 @@ describe("Slack activity activity", () => {
           actionId: `${grandchild.id}:search`,
           eventId: "search-label",
           kind: "action.label.updated",
-          label: "Search Slack docs",
+          label: "Read `agent/agent.ts`",
         },
       ],
       version: 1,
     });
 
-    expect(activityMessages(labeled).get("turn")).toContain("Search Slack docs");
-    expect(selectSlackActivityStatus(labeled)).toBe("Search Slack docs");
+    expect(activityMessages(labeled).get("turn")).toContain("Read `agent/agent.ts`");
+    expect(selectSlackActivityStatus(labeled)).toBe("Read agent/agent.ts");
 
     const completed = reduceActivityBatch(labeled, {
       events: [
@@ -168,7 +166,7 @@ describe("Slack activity activity", () => {
     });
 
     expect(activityMessages(activity).get("turn")).toBe(
-      "```\n• Working\n└── • slack\n    └── • search_slack\n```",
+      "• Working\n└── • slack\n    └── • search_slack",
     );
   });
 
@@ -203,7 +201,7 @@ describe("Slack activity activity", () => {
       version: 1,
     });
 
-    expect(activityMessages(background).get("turn")).toBe("```\n• Working\n└── • researcher\n```");
+    expect(activityMessages(background).get("turn")).toBe("• Working\n└── • researcher");
   });
 
   it("keeps temporarily orphaned nested work renderable", () => {

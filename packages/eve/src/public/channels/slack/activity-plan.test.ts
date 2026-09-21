@@ -83,7 +83,7 @@ describe("Slack activity plan", () => {
           actionId: "verify-action",
           eventId: "verify-action-label",
           kind: "action.label.updated",
-          label: "Verify release",
+          label: "Read `agent/release.ts`",
         },
       ],
     });
@@ -175,7 +175,7 @@ describe("Slack activity plan", () => {
       "chat.update",
     ]);
     expect(requests[1]!.body.get("chunks")).toContain("• verify_stage\\n");
-    expect(requests[1]!.body.get("chunks")).toContain("• Verify release\\n");
+    expect(requests[1]!.body.get("chunks")).toContain("• Read `agent/release.ts`\\n");
     expect(requests[2]!.body.get("chunks")).toContain("• Verifying tests\\n");
     expect(requests[3]!.body.get("chunks")).toContain('"id":"reviewer"');
     expect(requests[3]!.body.get("chunks")).toContain("• review_stage\\n");
