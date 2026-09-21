@@ -191,11 +191,20 @@ Local history remembers up to 500 sessions opened or created in this browser, or
 
 Persist composer drafts, attachments and undo history across reloads. Clear only acknowledged submissions without erasing newer edits.
 
+Inspect subagents in a closable, resizable detail pane with persistent transcripts and view state, named progress and accurate completion status.
+
 The composer clears the captured draft when its own send request is accepted,
 before waiting for the agent's response. Another tab's message cannot clear it.
 Custom clients can observe this boundary with `send(message, { onAccepted })`;
 the callback receives the accepted `sessionId` and, when supplied by the server,
 `deliveryId`. A rejected request leaves the draft available for retry.
+
+Child panes decode their stream using eve's versioned `readMessageStream(response, { signal })`
+reader. The workspace opens at most four child streams concurrently and parks a
+follower when its turn finishes or its last subscriber leaves. Reopening resumes
+from the retained cursor. Checkpoints are capped at 512 KiB each and 20 sessions;
+larger transcripts remain available in memory and replay from the last saved
+checkpoint after reload.
 
 Browser draft storage retains up to eight distinct tab branches per conversation. Reloads reuse the same branch; if another branch cannot be saved, the composer warns and keeps that tab’s draft in memory instead of discarding existing work.
 

@@ -2,6 +2,17 @@
 
 import { createLocalSessionHistory } from "@/lib/local-session-history";
 
+import type { SubagentSession } from "@/lib/subagent-session";
+import { subagentKey } from "@/lib/subagent-session";
+import { createSubagentPaneCache } from "@/lib/subagent-pane-cache";
+import { createBrowserSubagentStorage } from "@/lib/subagent-storage";
+import {
+  WorkspacePaneContext,
+  WorkspacePaneHost,
+  useWorkspacePaneController,
+  type WorkspacePaneRegistry,
+} from "./workspace-pane";
+import { SubagentPane } from "./subagent-pane";
 import { Client, type MessageStreamEvent } from "eve/client";
 import { usePathname, useRouter } from "next/navigation";
 import {
@@ -29,6 +40,8 @@ interface ChatModel {
 }
 
 interface WorkspaceContext {
+  readonly subagentCache: ReturnType<typeof createSubagentPaneCache>;
+  readonly openSubagent: (session: SubagentSession) => void;
   readonly draftOwner?: string;
   readonly cache: ReturnType<typeof createChatSessionCache>;
   readonly preparedSession?: SavedChatSession;
@@ -90,6 +103,25 @@ function Workspace({
       localHistory.flush();
     };
   }, [localHistory]);
+  const [subagentCache] = useState(() => {
+    const cache = createSubagentPaneCache(undefined, createBrowserSubagentStorage());
+    cache.setOwner(initialOwner ?? (localWorkspace ? "local" : "browser"));
+    return cache;
+  });
+  useEffect(() => {
+    const release = subagentCache.retain();
+    const flush = () => subagentCache.flush();
+    const visibility = () => {
+      if (document.visibilityState === "hidden") flush();
+    };
+    window.addEventListener("pagehide", flush);
+    document.addEventListener("visibilitychange", visibility);
+    return () => {
+      window.removeEventListener("pagehide", flush);
+      document.removeEventListener("visibilitychange", visibility);
+      release();
+    };
+  }, [subagentCache]);
   const pathname = usePathname();
   const router = useRouter();
   const [history, setHistory] = useState<SessionHistory>();
@@ -135,6 +167,7 @@ function Workspace({
     (id?: string) => {
       if (viewerId.current && viewerId.current !== id) {
         cache.clear();
+        subagentCache.clear(true);
         navigationVersion.current++;
         setPreparedSession(undefined);
         setPendingSessionId(undefined);
@@ -142,9 +175,10 @@ function Workspace({
         setIdentityVersion((value) => value + 1);
         router.replace("/");
       }
+      subagentCache.setOwner(id);
       viewerId.current = id;
     },
-    [cache, router],
+    [cache, router, subagentCache],
   );
 
   const refreshHistory = useCallback(() => {
@@ -330,8 +364,31 @@ function Workspace({
     (session) => session.id === activeSessionId,
   )?.createdAt;
   const draftOwner = initialOwner ?? history?.viewer.id ?? (localWorkspace ? "local" : "browser");
+  const paneController = useWorkspacePaneController(draftOwner, activeSessionId);
+  const { openPane } = paneController;
+  const openSubagent = useCallback(
+    (session: SubagentSession) => {
+      openPane({ kind: "subagent", payload: session });
+    },
+    [openPane],
+  );
+  const paneRegistry = useMemo<WorkspacePaneRegistry>(
+    () => ({
+      subagent: (session, close) => (
+        <SubagentPane
+          key={subagentKey(session)}
+          session={session}
+          saved={subagentCache.get(session)}
+          onClose={close}
+        />
+      ),
+    }),
+    [subagentCache],
+  );
   const context = useMemo(
     () => ({
+      subagentCache,
+      openSubagent,
       draftOwner,
       cache,
       preparedSession,
@@ -344,6 +401,8 @@ function Workspace({
       onSessionEvent,
     }),
     [
+      subagentCache,
+      openSubagent,
       draftOwner,
       cache,
       preparedSession,
@@ -358,31 +417,37 @@ function Workspace({
   );
 
   return (
-    <ChatWorkspaceContext.Provider key={identityVersion} value={context}>
-      <main className="relative flex h-dvh overflow-hidden bg-background text-foreground">
-        <SidebarProvider className="min-h-0 h-full">
-          <ChatWorkspaceLayout
-            sidebar={
-              <SessionSidebar
-                historyEnabled={localWorkspace}
-                activeSessionId={activeSessionId}
-                error={historyError}
-                history={history}
-                isLoadingMore={isLoadingMore}
-                onLoadMore={loadMoreHistory}
-                onRetry={refreshHistory}
-                onNewChat={startNewChat}
-                pendingSessionId={pendingSessionId}
-                navigationError={navigationError}
-                onPrefetchSession={prefetchSession}
-                onSelectSession={selectSession}
-              />
-            }
-          >
-            {children}
-          </ChatWorkspaceLayout>
-        </SidebarProvider>
-      </main>
-    </ChatWorkspaceContext.Provider>
+    <WorkspacePaneContext.Provider value={paneController}>
+      <ChatWorkspaceContext.Provider key={identityVersion} value={context}>
+        <main className="relative flex h-dvh overflow-hidden bg-background text-foreground">
+          <SidebarProvider className="min-h-0 h-full">
+            <ChatWorkspaceLayout
+              detail={
+                paneController.pane ? <WorkspacePaneHost registry={paneRegistry} /> : undefined
+              }
+              onCloseDetail={paneController.closePane}
+              sidebar={
+                <SessionSidebar
+                  historyEnabled={localWorkspace}
+                  activeSessionId={activeSessionId}
+                  error={historyError}
+                  history={history}
+                  isLoadingMore={isLoadingMore}
+                  onLoadMore={loadMoreHistory}
+                  onRetry={refreshHistory}
+                  onNewChat={startNewChat}
+                  pendingSessionId={pendingSessionId}
+                  navigationError={navigationError}
+                  onPrefetchSession={prefetchSession}
+                  onSelectSession={selectSession}
+                />
+              }
+            >
+              {children}
+            </ChatWorkspaceLayout>
+          </SidebarProvider>
+        </main>
+      </ChatWorkspaceContext.Provider>
+    </WorkspacePaneContext.Provider>
   );
 }

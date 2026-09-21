@@ -1,20 +1,35 @@
 "use client";
 
-import { useEffect, useRef, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { usePanelRef } from "react-resizable-panels";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
+import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import { SidebarTrigger, useSidebar } from "@/components/ui/sidebar";
 
 export function ChatWorkspaceLayout({
   sidebar,
   children,
+  detail,
+  onCloseDetail,
 }: {
+  readonly detail?: ReactNode;
+  readonly onCloseDetail: () => void;
   readonly sidebar: ReactNode;
   readonly children: ReactNode;
 }) {
   const { open, setOpen, isMobile } = useSidebar();
   const panel = usePanelRef();
   const expandedWidth = useRef(240);
+  const [detailWidth, setDetailWidth] = useState(40);
+  useEffect(() => {
+    try {
+      const width = Number(localStorage.getItem("eve:web:detail-width:v1"));
+      if (width >= 20 && width <= 70) setDetailWidth(width);
+    } catch {
+      /* Layout remains usable when storage is disabled. */
+    }
+  }, []);
+
   useEffect(() => {
     // The panel group measures after layout; restore after its ResizeObserver runs.
     let restoreFrame = 0;
@@ -37,6 +52,14 @@ export function ChatWorkspaceLayout({
         id="chat-workspace"
         onLayoutChanged={(layout, { isUserInteraction }) => {
           if (isUserInteraction && !isMobile) {
+            if (layout.detail > 0) {
+              setDetailWidth(layout.detail);
+              try {
+                localStorage.setItem("eve:web:detail-width:v1", String(layout.detail));
+              } catch {
+                /* Use the in-memory width. */
+              }
+            }
             requestAnimationFrame(() => {
               const width = panel.current?.getSize().inPixels;
               if (width && width >= 200) expandedWidth.current = width;
@@ -74,7 +97,37 @@ export function ChatWorkspaceLayout({
           ) : null}
           {children}
         </ResizablePanel>
+        {detail && !isMobile ? (
+          <>
+            <ResizableHandle aria-label="Resize detail pane" className="bg-border/50" />
+            <ResizablePanel
+              id="detail"
+              defaultSize={`${detailWidth}%`}
+              minSize="280px"
+              maxSize="70%"
+            >
+              {detail}
+            </ResizablePanel>
+          </>
+        ) : null}
       </ResizablePanelGroup>
+      {isMobile ? (
+        <Sheet
+          open={!!detail}
+          onOpenChange={(open) => {
+            if (!open) onCloseDetail();
+          }}
+        >
+          <SheetContent
+            showCloseButton={false}
+            aria-describedby={undefined}
+            className="w-full gap-0 sm:max-w-none"
+          >
+            <SheetTitle className="sr-only">Workspace detail</SheetTitle>
+            {detail}
+          </SheetContent>
+        </Sheet>
+      ) : null}
     </>
   );
 }

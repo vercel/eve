@@ -43,6 +43,7 @@ export async function* readNdjsonStream(
   options: {
     readonly controlVersion?: "1";
     readonly idleTimeoutMs?: number;
+    readonly maxRecordChars?: number;
     readonly onLeaseEnded?: () => void;
     readonly signal?: AbortSignal;
     readonly streamVersion: MessageStreamVersion;
@@ -77,6 +78,8 @@ export async function* readNdjsonStream(
       // Yield every complete line currently in the buffer.
       let newlineIndex = buffer.indexOf("\n");
       while (newlineIndex !== -1) {
+        if (options.maxRecordChars !== undefined && newlineIndex > options.maxRecordChars)
+          throw new Error("Stream record exceeds size limit.");
         const line = buffer.slice(0, newlineIndex).trim();
         buffer = buffer.slice(newlineIndex + 1);
 
@@ -91,6 +94,8 @@ export async function* readNdjsonStream(
 
         newlineIndex = buffer.indexOf("\n");
       }
+      if (options.maxRecordChars !== undefined && buffer.length > options.maxRecordChars)
+        throw new Error("Stream record exceeds size limit.");
     }
 
     // Yield any trailing content without a final newline.

@@ -7,7 +7,7 @@ import type {
   EveMessageInputRequest,
   EveMessagePart,
 } from "eve/react";
-import { useState } from "react";
+import { memo, useState } from "react";
 import {
   ArrowRightIcon,
   CheckCircleIcon,
@@ -39,6 +39,8 @@ import {
   ToolOutput,
 } from "@/components/ai-elements/tool";
 import { Button } from "@/components/ui/button";
+import type { SubagentSession } from "@/lib/subagent-session";
+import { SubagentStatus } from "./subagent-status";
 import { cn } from "@/lib/utils";
 
 export type AgentInputResponse = {
@@ -49,15 +51,25 @@ export type AgentInputResponse = {
 
 type EveFilePart = Extract<EveMessagePart, { type: "file" }>;
 
-export function AgentMessage({
+export const AgentMessage = memo(function AgentMessage({
   canRespond,
   isStreaming,
   message,
   onInputResponses,
+  subagents,
+  onOpenSubagent,
+  showReasoning = false,
+  disclosures,
+  onDisclosureChange,
 }: {
   readonly canRespond: boolean;
   readonly isStreaming: boolean;
   readonly message: EveMessage;
+  readonly showReasoning?: boolean;
+  readonly disclosures?: Readonly<Record<string, boolean>>;
+  readonly onDisclosureChange?: (key: string, open: boolean) => void;
+  readonly subagents?: Readonly<Record<string, SubagentSession>>;
+  readonly onOpenSubagent?: (session: SubagentSession) => void;
   readonly onInputResponses: (responses: readonly AgentInputResponse[]) => void | Promise<void>;
 }) {
   const lastTextIndex = message.parts.reduce(
@@ -75,8 +87,16 @@ export function AgentMessage({
     >
       <MessageContent>
         {message.parts.map((part, index) =>
-          hasAssistantText && part.type === "reasoning" ? null : (
+          !showReasoning && hasAssistantText && part.type === "reasoning" ? null : (
             <AgentMessagePart
+              disclosureOpen={disclosures?.[`${message.id}:${partKey(part, index)}`]}
+              onDisclosureChange={
+                onDisclosureChange
+                  ? (open) => onDisclosureChange(`${message.id}:${partKey(part, index)}`, open)
+                  : undefined
+              }
+              subagents={subagents}
+              onOpenSubagent={onOpenSubagent}
               canRespond={canRespond}
               key={partKey(part, index)}
               onInputResponses={onInputResponses}
@@ -88,18 +108,26 @@ export function AgentMessage({
       </MessageContent>
     </Message>
   );
-}
+});
 
 function AgentMessagePart({
+  disclosureOpen,
+  onDisclosureChange,
   canRespond,
   onInputResponses,
   part,
   showCaret,
+  subagents,
+  onOpenSubagent,
 }: {
+  readonly disclosureOpen?: boolean;
+  readonly onDisclosureChange?: (open: boolean) => void;
   readonly canRespond: boolean;
   readonly onInputResponses: (responses: readonly AgentInputResponse[]) => void | Promise<void>;
   readonly part: EveMessagePart;
   readonly showCaret: boolean;
+  readonly subagents?: Readonly<Record<string, SubagentSession>>;
+  readonly onOpenSubagent?: (session: SubagentSession) => void;
 }) {
   switch (part.type) {
     case "step-start":
@@ -112,7 +140,12 @@ function AgentMessagePart({
       );
     case "reasoning":
       return (
-        <Reasoning defaultOpen isStreaming={part.state === "streaming"}>
+        <Reasoning
+          defaultOpen
+          open={onDisclosureChange ? (disclosureOpen ?? true) : undefined}
+          onOpenChange={onDisclosureChange}
+          isStreaming={part.state === "streaming"}
+        >
           <ReasoningTrigger />
           <ReasoningContent>{part.text}</ReasoningContent>
         </Reasoning>
@@ -122,6 +155,9 @@ function AgentMessagePart({
     case "authorization":
       return <AuthorizationPrompt part={part} />;
     case "dynamic-tool": {
+      const child = subagents?.[part.toolCallId];
+      if (child && onOpenSubagent)
+        return <SubagentStatus session={child} onOpen={onOpenSubagent} />;
       const inputRequest = part.toolMetadata?.eve?.inputRequest;
       if (inputRequest?.kind === "question") {
         return (
@@ -136,6 +172,13 @@ function AgentMessagePart({
 
       return (
         <Tool
+          open={
+            onDisclosureChange
+              ? (disclosureOpen ??
+                (part.state === "approval-requested" || part.state === "approval-responded"))
+              : undefined
+          }
+          onOpenChange={onDisclosureChange}
           defaultOpen={part.state === "approval-requested" || part.state === "approval-responded"}
         >
           <ToolHeader

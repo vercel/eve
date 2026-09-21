@@ -2096,6 +2096,36 @@
           "target": "lib/session-pagination.ts"
         },
         {
+          "path": "registry/channel/web/lib/subagent-pane-cache.ts",
+          "type": "registry:file",
+          "target": "lib/subagent-pane-cache.ts"
+        },
+        {
+          "path": "registry/channel/web/lib/subagent-progress.ts",
+          "type": "registry:file",
+          "target": "lib/subagent-progress.ts"
+        },
+        {
+          "path": "registry/channel/web/lib/subagent-session.ts",
+          "type": "registry:file",
+          "target": "lib/subagent-session.ts"
+        },
+        {
+          "path": "registry/channel/web/lib/subagent-storage.ts",
+          "type": "registry:file",
+          "target": "lib/subagent-storage.ts"
+        },
+        {
+          "path": "registry/channel/web/lib/workspace-pane.ts",
+          "type": "registry:file",
+          "target": "lib/workspace-pane.ts"
+        },
+        {
+          "path": "registry/channel/web/app/_components/workspace-pane.tsx",
+          "type": "registry:file",
+          "target": "app/_components/workspace-pane.tsx"
+        },
+        {
           "path": "registry/channel/web/app/_components/chat-workspace-layout.tsx",
           "type": "registry:file",
           "target": "app/_components/chat-workspace-layout.tsx"
@@ -2104,6 +2134,11 @@
           "path": "registry/channel/web/app/_components/persistent-composer-editor.tsx",
           "type": "registry:file",
           "target": "app/_components/persistent-composer-editor.tsx"
+        },
+        {
+          "path": "registry/channel/web/app/_components/subagent-pane.tsx",
+          "type": "registry:file",
+          "target": "app/_components/subagent-pane.tsx"
         },
         {
           "path": "registry/channel/web/app/_components/session-sidebar.tsx",
@@ -2119,6 +2154,11 @@
           "path": "registry/channel/web/app/_components/server-status.tsx",
           "type": "registry:file",
           "target": "app/_components/server-status.tsx"
+        },
+        {
+          "path": "registry/channel/web/app/_components/subagent-status.tsx",
+          "type": "registry:file",
+          "target": "app/_components/subagent-status.tsx"
         },
         {
           "path": "registry/channel/web/components/ui/resizable.tsx",

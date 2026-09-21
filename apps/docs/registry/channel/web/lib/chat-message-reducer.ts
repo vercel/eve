@@ -1,11 +1,19 @@
+import type { SubagentSession } from "./subagent-session.ts";
 import { defaultMessageReducer, type EveAgentReducer, type EveMessageData } from "eve/client";
 
-export type ChatMessageData = EveMessageData;
+export type ChatMessageData = EveMessageData & {
+  subagents: Readonly<Record<string, SubagentSession>>;
+};
 export function chatMessageReducer(): EveAgentReducer<ChatMessageData> {
   const base = defaultMessageReducer();
   return {
-    initial: base.initial,
+    initial: () => ({ ...base.initial(), subagents: {} }),
     reduce(data, event) {
+      if (event.type === "subagent.called")
+        return {
+          ...base.reduce(data, event),
+          subagents: { ...data.subagents, [event.data.callId]: event.data },
+        };
       if (event.type !== "message.received" || event.data.kind === "execution.background_task")
         return { ...data, ...base.reduce(data, event) };
 
