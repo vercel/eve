@@ -156,6 +156,28 @@ describe("setupSelectionIntent", () => {
     ).toEqual({ kind: "submit", values: ["slack"] });
   });
 
+  it("deletes the previous word from searchable filters", () => {
+    const options = [{ value: "claude", label: "Claude Sonnet" }];
+    const searched = initialSelectState({ options, filter: "claude sonnet" });
+
+    expect(
+      reduceSetupSelectInput({
+        key: { type: "alt-backspace" },
+        kind: "search",
+        options,
+        select: searched,
+      }),
+    ).toMatchObject({ kind: "update", select: { filter: "claude " } });
+    expect(
+      reduceSetupSelectInput({
+        key: { type: "alt-backspace" },
+        kind: "single",
+        options,
+        select: searched,
+      }),
+    ).toEqual({ kind: "ignore" });
+  });
+
   it("clears a searchable filter with escape before cancelling the panel", () => {
     const options = [
       { value: "recent", label: "recent-agent" },

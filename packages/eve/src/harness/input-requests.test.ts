@@ -1269,6 +1269,34 @@ describe("pending input batch collection", () => {
       new Set(["approval-1", "question-1"]),
     );
   });
+
+  it("continues an internal step past HITL emitted by an older turn", () => {
+    const session = appendPendingInputBatch({
+      event: { sequence: 5, stepIndex: 1, turnId: "turn_0" },
+      requests: [approvalRequest("approval-1", "call-1")],
+      responseMessages: [batchOutput("call-1", "bash")],
+      session: createHarnessSession(),
+    });
+
+    const result = resolvePendingInput({ activeTurnId: "turn_1", internalStep: true, session });
+
+    expect(result.outcome).toBe("continue");
+    expect(getPendingInputRequestIds(result.session.state)).toEqual(new Set(["approval-1"]));
+  });
+
+  it("parks when the current turn emitted the pending HITL", () => {
+    const session = appendPendingInputBatch({
+      event: { sequence: 5, stepIndex: 1, turnId: "turn_1" },
+      requests: [approvalRequest("approval-1", "call-1")],
+      responseMessages: [batchOutput("call-1", "bash")],
+      session: createHarnessSession(),
+    });
+
+    const result = resolvePendingInput({ activeTurnId: "turn_1", internalStep: true, session });
+
+    expect(result.outcome).toBe("unresolved");
+    expect(getPendingInputRequestIds(result.session.state)).toEqual(new Set(["approval-1"]));
+  });
 });
 
 describe("resolvePendingInput with a session-limit continuation batch", () => {

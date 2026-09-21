@@ -86,6 +86,48 @@ describe("coordinateApprovalDelivery", () => {
     ]);
   });
 
+  it("keeps an earlier settled response when the remaining batch response arrives", async () => {
+    const secondRequest: InputRequest = {
+      ...request,
+      action: { ...request.action, callId: "call-2", toolName: "gate-2" },
+      prompt: "Approve tool call: gate-2",
+      requestId: "approval-2",
+    };
+    const parked = appendPendingInputBatch({
+      requests: [request, secondRequest],
+      responseMessages: [],
+      session: {
+        agent: { modelReference: { id: "test" }, system: "", tools: [] },
+        compaction: { recentWindowSize: 10, threshold: 0.8 },
+        continuationToken: "test",
+        history: [],
+        sessionId: "session-1",
+      },
+    });
+    const settled = settleDirectApprovalResponse({
+      actor: responder,
+      outcome: "allowed",
+      requestId: request.requestId,
+      settledAt: 100,
+      state: parked.state,
+    });
+    const result = await coordinateApprovalDelivery({
+      now: 101,
+      session: { ...parked, state: settled.state },
+      stepInput: {
+        inputResponses: [
+          { optionId: "approve", requestId: request.requestId },
+          { optionId: "approve", requestId: secondRequest.requestId },
+        ],
+      },
+      tools: new Map(),
+    });
+    expect(result.stepInput?.inputResponses).toEqual([
+      { optionId: "approve", requestId: request.requestId },
+      { optionId: "approve", requestId: secondRequest.requestId },
+    ]);
+  });
+
   it("forwards an unrelated message while a response-authorized approval remains pending", async () => {
     const messageAuth: SessionAuthContext = { ...responder, principalId: "user-2" };
     const result = await coordinateApprovalDelivery({

@@ -1,5 +1,5 @@
 ---
-title: "Agents"
+title: "Agent Configuration"
 description: "Configure an eve agent's model, reasoning effort, compaction, limits, and runtime behavior in agent.ts."
 ---
 

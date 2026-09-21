@@ -3,7 +3,11 @@ title: "Subagents"
 description: "Delegate work to root-agent copies or declared specialists with their own tools and sandbox."
 ---
 
-eve supports two ways to delegate work: the root-only built-in `agent` tool, which starts or continues a copy of the root agent, and declared subagents, which are specialists with their own directories. Use a subagent to run independent work in parallel, narrow the available tools, or give a task to a specialist.
+Use a subagent to run independent work in parallel, narrow the available tools, or give a task to a specialist.
+
+- Use the root-only [built-in `agent` tool](#the-built-in-agent-tool) to start or continue a copy of the root agent that shares its sandbox.
+- Use a [declared local subagent](#declared-subagents) for a specialist with its own directory and authored capabilities, rather than inheriting the root's.
+- Use a [remote agent](./guides/remote-agents) to delegate to a separately deployed eve agent, with its own configuration and authentication.
 
 ## Completion batching
 

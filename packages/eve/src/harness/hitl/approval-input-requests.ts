@@ -40,12 +40,12 @@ type ToolApprovalInputRequest = InputRequest & { readonly kind: "tool-approval" 
 
 export type RejectedActionBatch = ResolvedInputActionBatch;
 
-export function hasAnsweredApprovalBatch(
+export function findAnsweredApprovalBatches(
   batches: readonly PendingInputBatch[],
   responses: readonly InputResponse[],
-): boolean {
+): PendingInputBatch[] {
   const responseIds = new Set(responses.map((response) => response.requestId));
-  return batches.some((batch) =>
+  return batches.filter((batch) =>
     batch.requests.every(
       (request) => !isApprovalRequest(request) || responseIds.has(request.requestId),
     ),
@@ -59,13 +59,8 @@ export function resolveApprovalInputBatches(
     readonly resolveApprovalKey?: (request: InputRequest) => string | undefined;
   },
 ): ResolvePendingInputResult {
-  const responseIds = new Set(input.responses.map((response) => response.requestId));
   const answeredApprovalBatches = new Set(
-    input.approvalBatches.filter((batch) =>
-      batch.requests.every(
-        (request) => !isApprovalRequest(request) || responseIds.has(request.requestId),
-      ),
-    ),
+    findAnsweredApprovalBatches(input.approvalBatches, input.responses),
   );
   const answeredQuestionBatches = new Set(
     findAnsweredQuestionBatches(input.questionBatches, input.responses),
