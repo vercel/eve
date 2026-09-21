@@ -15,6 +15,7 @@ import {
   type CompiledHookDefinition,
   type CompiledRemoteAgentNode,
   type CompiledSkillDefinition,
+  type CompiledScheduleCollectionDefinition,
   type CompiledScheduleDefinition,
   type CompiledSandboxDefinition,
   type CompiledSubagentNode,
@@ -50,6 +51,8 @@ import { compileInstructionsEntry } from "#compiler/normalize-instructions.js";
 import { compileMemoryDefinition, deriveMemorySlot } from "#compiler/normalize-memory.js";
 import { compileSandboxDefinition } from "#compiler/normalize-sandbox.js";
 import { compileScheduleDefinition } from "#compiler/normalize-schedule.js";
+import { compileScheduleCollectionDefinition } from "#compiler/normalize-schedule-collection.js";
+import { isScheduleCollectionDefinition } from "#shared/schedule-collection-definition.js";
 import { compileSkillSource } from "#compiler/normalize-skill.js";
 import {
   assertRemoteAgentDefinitionHasNoLocalPackageEntries,
@@ -491,6 +494,7 @@ class AgentGraphCompiler {
     const memories: CompiledMemoryDefinition[] = [];
     const hooks: CompiledHookDefinition[] = [];
     const schedules: CompiledScheduleDefinition[] = [];
+    const scheduleCollections: CompiledScheduleCollectionDefinition[] = [];
     const channels: CompiledChannelDefinition[] = [];
     let sandbox: CompiledSandboxDefinition | undefined;
     const selectedSourceIds = collectSelectedSourceIds(state.composed);
@@ -575,6 +579,21 @@ class AgentGraphCompiler {
           }
           break;
         case "schedule": {
+          if (entry.source.sourceKind === "module") {
+            const exportValue = await loadModuleBackedDefinition({
+              binding: binding!,
+              loadNamespace,
+              kind: "schedule",
+              source: entry.source,
+            });
+            if (isScheduleCollectionDefinition(exportValue)) {
+              scheduleCollections.push(
+                await compileScheduleCollectionDefinition(entry.source, options),
+              );
+              state.evaluation.requireRuntimeEntry(candidate.sourceId);
+              break;
+            }
+          }
           const schedule = await compileScheduleDefinition(
             input.manifest.agentRoot,
             entry.source,
@@ -678,6 +697,7 @@ class AgentGraphCompiler {
         sourcePath: workspace.sourcePath,
       })),
       schedules,
+      scheduleCollections,
       skills,
       sourceComposition: state.composed.composition,
       tools,

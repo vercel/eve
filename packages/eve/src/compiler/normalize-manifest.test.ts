@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { z } from "zod";
 
 import {
   createAgentSourceManifest,
@@ -22,6 +23,8 @@ import { defineMcpClientConnection } from "#public/definitions/connections/mcp.j
 import { defineHook } from "#public/definitions/hook.js";
 import { defineInstructions } from "#public/definitions/instructions.js";
 import { defineSchedule } from "#public/definitions/schedule.js";
+import { defineScheduleCollection } from "#public/schedules/collection.js";
+import { inMemoryScheduleProvider } from "#public/schedules/providers/in-memory.js";
 import { defineSkill } from "#public/definitions/skill.js";
 import { resolveAgent } from "#runtime/resolve-agent.js";
 import { resolveRuntimeAgentGraph } from "#runtime/resolve-agent-graph.js";
@@ -479,6 +482,19 @@ describe("compileAgentManifest source graph", () => {
         }),
       },
       {
+        logicalPath: "schedules/queries.ts",
+        loadNamespace: async () => ({
+          default: defineScheduleCollection({
+            description: "Run saved queries.",
+            inputSchema: z.object({ query: z.string() }),
+            provider: inMemoryScheduleProvider(),
+            run: async () => {},
+            scope: "principal_1",
+            tools: true,
+          }),
+        }),
+      },
+      {
         logicalPath: "tools/executable.ts",
         loadNamespace: async () => ({
           default: defineTool({ description: "Execute.", execute: () => null, inputSchema: {} }),
@@ -537,6 +553,14 @@ describe("compileAgentManifest source graph", () => {
       Object.values(compiled.bindings).map((binding) => [binding.logicalPath, binding.usage]),
     );
 
+    expect(compiled.scheduleCollections).toContainEqual(
+      expect.objectContaining({
+        description: "Run saved queries.",
+        logicalPath: "schedules/queries.ts",
+        name: "queries",
+        tools: true,
+      }),
+    );
     expect(compiled.dynamicConnections).toContainEqual(
       expect.objectContaining({
         eventNames: ["turn.started"],
@@ -553,6 +577,7 @@ describe("compileAgentManifest source graph", () => {
       "instructions/static.ts": { compile: true, runtimeEntry: false },
       "schedules/handler.ts": { compile: true, runtimeEntry: true },
       "schedules/prompt.ts": { compile: true, runtimeEntry: false },
+      "schedules/queries.ts": { compile: true, runtimeEntry: true },
       "skills/dynamic.ts": { compile: true, runtimeEntry: true },
       "skills/static.ts": { compile: true, runtimeEntry: false },
       "tools/dynamic.ts": { compile: true, runtimeEntry: true },

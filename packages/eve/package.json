@@ -388,6 +388,11 @@
       "import": "./dist/src/public/schedules/index.js",
       "default": "./dist/src/public/schedules/index.js"
     },
+    "./schedules/testing": {
+      "types": "./dist/src/public/schedules/testing.d.ts",
+      "import": "./dist/src/public/schedules/testing.js",
+      "default": "./dist/src/public/schedules/testing.js"
+    },
     "./channels": {
       "types": "./dist/src/public/channels/index.d.ts",
       "import": "./dist/src/public/channels/index.js",
