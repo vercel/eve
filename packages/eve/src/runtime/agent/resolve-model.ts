@@ -110,7 +110,23 @@ async function loadSourceBackedRuntimeModelReference(
     );
   }
 
-  return model;
+  return withLocalGatewayConnection(model);
+}
+
+/**
+ * A gateway-routed SDK instance (`gateway("openai/gpt-5.6")`) authenticates
+ * from `AI_GATEWAY_API_KEY`/`VERCEL_OIDC_TOKEN` and never sees the connection
+ * `/login` saved. While such a connection is active, serve the same model id
+ * through it, as a string model would be. Outside `eve dev` the authored
+ * instance is returned untouched.
+ */
+function withLocalGatewayConnection(model: LanguageModel): LanguageModel {
+  if (typeof model === "string") return model;
+  if (typeof model.provider !== "string" || model.provider.split(".")[0] !== "gateway") {
+    return model;
+  }
+  if (typeof model.modelId !== "string" || model.modelId === "") return model;
+  return localGatewayModel(model.modelId) ?? model;
 }
 
 function isSourceBackedRuntimeModelReference(

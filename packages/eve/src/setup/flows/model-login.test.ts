@@ -304,6 +304,35 @@ it.each(["openai", "anthropic"] as const)(
     expect(mocks.writeDefault).not.toHaveBeenCalled();
   },
 );
+it.each(["vercel", "ai-gateway-key"] as const)(
+  "connects %s to a source-backed gateway model without rewriting agent.ts",
+  async (selected) => {
+    mocks.authored.mockResolvedValue(undefined);
+    mocks.inspect.mockResolvedValue({
+      compiledState: {
+        manifest: {
+          config: {
+            model: {
+              id: "anthropic/claude-sonnet-5",
+              source: {},
+              routing: { kind: "gateway", target: "anthropic" },
+            },
+          },
+        },
+      },
+    });
+    const fake = createFakePrompter({ single: () => selected, password: () => "new-key" });
+    await expect(
+      runModelLogin({ appRoot: "/agent", prompter: fake.prompter }),
+    ).resolves.toMatchObject({ kind: "ready", reload: false });
+    expect(fake.selectMessages).toEqual(["Choose a connection"]);
+    expect(mocks.change).not.toHaveBeenCalled();
+    expect(mocks.catalog).not.toHaveBeenCalled();
+    expect(mocks.writeSelection.mock.calls[0]?.slice(0, 2)).toEqual(["/agent", selected]);
+    expect(mocks.writeDefault).toHaveBeenCalledWith(selected);
+    expect(fake.prompter.log.warning).not.toHaveBeenCalled();
+  },
+);
 it("preserves an explicitly authored eve helper's compatible custom model", async () => {
   mocks.inspect.mockResolvedValue({
     compiledState: {

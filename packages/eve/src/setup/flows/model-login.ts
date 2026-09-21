@@ -45,20 +45,23 @@ export function environmentConnection(
 interface LoginModel {
   selection?: string;
   external: boolean;
+  /** A gateway-routed SDK model call (`gateway(...)`) the source editor cannot rewrite. */
+  gatewaySource: boolean;
 }
 
 async function readLoginModel(agentRoot: string): Promise<LoginModel> {
   const selection = await readAuthoredModelSelection(agentRoot);
   if (selection !== undefined)
-    return { selection, external: parseModelHelper(selection) !== undefined };
+    return { selection, external: parseModelHelper(selection) !== undefined, gatewaySource: false };
   // Dynamic models still need routing inspection, but ordinary source literals
   // and eve helpers do not need to compile the agent just to sign in.
   const inspection = await inspectApplication(agentRoot);
   const model = inspection.compiledState?.manifest.config.model;
+  const gateway = model?.routing.kind === "gateway";
   return {
-    selection:
-      model?.routing.kind === "gateway" && model.source === undefined ? model.id : undefined,
+    selection: gateway && model.source === undefined ? model.id : undefined,
     external: model?.routing.kind === "external",
+    gatewaySource: gateway && model.source !== undefined,
   };
 }
 
@@ -68,9 +71,11 @@ function modelSelection(selected: ModelConnectionSelection, model: LoginModel) {
       ? selected
       : undefined;
   const authored = model.selection === undefined ? undefined : parseModelHelper(model.selection);
+  // A Gateway connection serves a source-backed gateway model as-is; signing in
+  // must not depend on rewriting a `model` the editor cannot touch.
   const compatible = helper
     ? authored?.helper === helper
-    : model.selection !== undefined && !model.external;
+    : model.gatewaySource || (model.selection !== undefined && !model.external);
   const defaultId = helper ? MODEL_HELPERS[helper].defaultModel : "openai/gpt-5.6-luna-fast";
   const currentId = authored?.id ?? model.selection;
   return { helper, compatible, defaultId, needsModels: !compatible || currentId === defaultId };

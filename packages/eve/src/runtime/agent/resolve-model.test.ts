@@ -1,5 +1,5 @@
 import type { LanguageModel } from "ai";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ROOT_COMPILED_AGENT_NODE_ID } from "#compiler/manifest.js";
 import type { CompiledModuleMap } from "#compiler/module-map.js";
@@ -70,6 +70,58 @@ describe("dynamic runtime model resolution", () => {
     if (typeof model === "string") throw new Error("expected a mock model instance");
     expect(model.provider).toBe("eve-runtime-mock");
     expect(model.modelId).toBe("eve-mock/dynamic-subagent");
+  });
+
+  describe("source-backed models", () => {
+    const source = {
+      logicalPath: "agent.ts",
+      sourceId: "agent-config",
+      sourceKind: "module" as const,
+    };
+    const resolve = (model: LanguageModel) =>
+      resolveRuntimeModelReference(
+        { id: typeof model === "string" ? model : `${model.provider}/${model.modelId}`, source },
+        { moduleMap: createModuleMap({ default: { model } }), nodeId: undefined },
+      );
+
+    beforeEach(() => vi.stubEnv("NODE_ENV", "production"));
+
+    it("serves a gateway SDK instance through the /login connection in eve dev", async () => {
+      vi.stubEnv("EVE_DEV", "1");
+      vi.stubEnv("EVE_MODEL_CONNECTION", "vercel");
+      const authored = createLanguageModel("gateway", "anthropic/claude-sonnet-5");
+
+      const model = await resolve(authored);
+
+      expect(model).not.toBe(authored);
+      if (typeof model === "string") throw new Error("expected a model instance");
+      expect(model.provider).toBe("gateway");
+      expect(model.modelId).toBe("anthropic/claude-sonnet-5");
+    });
+
+    it("returns the authored gateway instance when no connection is active", async () => {
+      vi.stubEnv("EVE_DEV", "1");
+      vi.stubEnv("EVE_MODEL_CONNECTION", "");
+      const authored = createLanguageModel("gateway", "anthropic/claude-sonnet-5");
+
+      expect(await resolve(authored)).toBe(authored);
+    });
+
+    it("returns the authored gateway instance outside eve dev", async () => {
+      vi.stubEnv("EVE_DEV", "");
+      vi.stubEnv("EVE_MODEL_CONNECTION", "vercel");
+      const authored = createLanguageModel("gateway", "anthropic/claude-sonnet-5");
+
+      expect(await resolve(authored)).toBe(authored);
+    });
+
+    it("leaves a direct provider instance untouched", async () => {
+      vi.stubEnv("EVE_DEV", "1");
+      vi.stubEnv("EVE_MODEL_CONNECTION", "vercel");
+      const authored = createLanguageModel("openai.responses", "gpt-5.5");
+
+      expect(await resolve(authored)).toBe(authored);
+    });
   });
 
   it("loads resolver-only definitions and normalizes explicit metadata", async () => {
