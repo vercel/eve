@@ -1,6 +1,9 @@
 import { mkdir, readFile } from "node:fs/promises";
 import { dirname, join, relative } from "node:path";
 
+import { assembleEveVercelServices } from "#internal/vercel/assemble-eve-services.js";
+import { quoteVercelShellArgument, toVercelRelativePath } from "#internal/vercel/build-command.js";
+import { createEveServiceName } from "#internal/vercel/eve-service-contribution.js";
 import { shellQuote } from "#shared/shell-quote.js";
 
 import {
@@ -110,6 +113,7 @@ export type EnsureEveVercelServicesConfigResult =
   | { readonly mode: "root" }
   | {
       readonly mode: "generated";
+      readonly routes?: readonly VercelRouteConfig[];
       readonly services: Record<string, EveVercelGeneratedService>;
     };
 
@@ -317,6 +321,12 @@ function createGeneratedServiceBuild(input: {
  * longer routes it.
  */
 export async function ensureEveVercelServicesConfig(input: {
+  readonly agents?: readonly {
+    readonly appRoot: string;
+    readonly name?: string;
+    readonly publicRoutePrefix: string;
+    readonly workspaceMember: boolean;
+  }[];
   readonly appRoot: string;
   readonly eveBuildCommand?: string;
   readonly frameworkName: string;
@@ -338,7 +348,18 @@ export async function ensureEveVercelServicesConfig(input: {
   const rootServices = createServiceConfigRecord(rootVercelConfig.services);
 
   if (Object.keys(rootServices).length > 0) {
-    assertRootServicesIncludeEve(rootServices, input.frameworkName);
+    if (input.agents === undefined) {
+      assertRootServicesIncludeEve(rootServices, input.frameworkName);
+    } else {
+      for (const agent of input.agents) {
+        const serviceName = createEveServiceName(agent.name);
+        if (rootServices[serviceName]?.framework !== "eve") {
+          throw new Error(
+            `${VERCEL_JSON_FILE_NAME} already defines services, so the eve ${input.frameworkName} integration cannot add a generated service for ${agent.name ?? "the default agent"}. Add the ${serviceName} service (framework "eve") and its public route, or remove services from ${VERCEL_JSON_FILE_NAME}.`,
+          );
+        }
+      }
+    }
     return { mode: "root" };
   }
 
@@ -346,6 +367,33 @@ export async function ensureEveVercelServicesConfig(input: {
     console.warn(
       `[eve] ${VERCEL_JSON_FILE_NAME} defines experimentalServices, which Vercel no longer routes. The eve ${input.frameworkName} integration now generates the stable services config automatically — remove experimentalServices from ${VERCEL_JSON_FILE_NAME}.`,
     );
+  }
+
+  if (input.agents !== undefined) {
+    const assembled = assembleEveVercelServices({
+      agents: input.agents.map((agent) => ({
+        agent: {
+          ...agent,
+          buildCommand:
+            input.eveBuildCommand ??
+            `node ${quoteVercelShellArgument(
+              toVercelRelativePath(agent.appRoot, resolveEveBinaryPath(input.hostRoot)),
+            )} build`,
+        },
+        target: {
+          hostOutputDirectory: join(input.hostRoot, ".vercel", "output"),
+          projectRoot: input.hostRoot,
+        },
+      })),
+    });
+    await Promise.all(
+      assembled.rootDirectories.map((directory) => mkdir(directory, { recursive: true })),
+    );
+    return {
+      mode: "generated",
+      routes: assembled.routes as readonly VercelRouteConfig[],
+      services: assembled.services as Record<string, EveVercelGeneratedService>,
+    };
   }
 
   const generatedServiceBuild = createGeneratedServiceBuild(input);
@@ -374,10 +422,48 @@ export async function ensureEveVercelServicesConfig(input: {
  * the user is preserved and only gains the `request.path` route; everything
  * else passes through untouched.
  */
+function isSameServiceRoute(left: VercelRouteConfig, right: VercelRouteConfig): boolean {
+  if (left.src !== right.src) return false;
+  const leftDestination = left.destination;
+  const rightDestination = right.destination;
+  return (
+    isRecord(leftDestination) &&
+    isRecord(rightDestination) &&
+    leftDestination.type === "service" &&
+    rightDestination.type === "service" &&
+    leftDestination.service === rightDestination.service
+  );
+}
+
+function insertGeneratedServiceRoutes(
+  existing: readonly VercelRouteConfig[],
+  generated: readonly VercelRouteConfig[],
+): VercelRouteConfig[] {
+  const retained = existing.filter(
+    (route) => !generated.some((generatedRoute) => isSameServiceRoute(route, generatedRoute)),
+  );
+  const filesystemIndex = retained.findIndex((route) => route.handle === "filesystem");
+  return filesystemIndex < 0
+    ? [...generated, ...retained]
+    : [...retained.slice(0, filesystemIndex), ...generated, ...retained.slice(filesystemIndex)];
+}
+
 export function mergeEveVercelConfig(
   existing: VercelBuildConfig | undefined,
   generated: Extract<EnsureEveVercelServicesConfigResult, { mode: "generated" }>,
 ): VercelBuildConfig {
+  if (generated.routes !== undefined) {
+    return {
+      version: 3,
+      ...existing,
+      routes: insertGeneratedServiceRoutes(
+        (existing?.routes ?? []) as readonly VercelRouteConfig[],
+        generated.routes,
+      ),
+      services: { ...existing?.services, ...generated.services },
+    };
+  }
+
   const existingServices = existing?.services ?? {};
   const configuredEveEntry = Object.entries(existingServices).find(
     ([name, service]) => name === EVE_SERVICE_NAME || service.framework === "eve",

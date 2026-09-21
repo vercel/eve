@@ -6,6 +6,11 @@ import type { NuxtModule } from "@nuxt/schema";
 
 import { EVE_ROUTE_PREFIX } from "#protocol/routes.js";
 import {
+  assertFrameworkAgentsPresent,
+  resolveFrameworkAgents,
+  type ResolvedFrameworkAgent,
+} from "#shared/framework-agents.js";
+import {
   ensureEveVercelServicesConfig,
   mergeEveVercelConfig,
   type VercelBuildConfig,
@@ -62,20 +67,24 @@ interface NitroVercelConfigHost {
  * with the child handle so the caller can wire lifecycle-scoped cleanup.
  */
 async function resolveEveProxyTarget(input: {
-  readonly appRoot: string;
+  readonly agent: ResolvedFrameworkAgent;
   readonly dev: boolean;
+  readonly localProductionPortOffset: number;
   readonly onDevServerSpawned?: (child: ChildProcess) => void;
 }): Promise<string> {
   if (!input.dev) {
-    return resolveProductionTarget();
+    return resolveProductionTarget({
+      localPortOffset: input.localProductionPortOffset,
+      routePrefix: input.agent.transportRoutePrefix,
+    });
   }
 
   const configuredEveBaseUrl = process.env[EVE_BASE_URL_ENV]?.trim();
   if (configuredEveBaseUrl && configuredEveBaseUrl.length > 0) {
-    return joinRoutePrefix(normalizeOrigin(configuredEveBaseUrl), EVE_ROUTE_PREFIX);
+    return joinRoutePrefix(normalizeOrigin(configuredEveBaseUrl), input.agent.transportRoutePrefix);
   }
 
-  const handle = await resolveSharedEveDevServer(input.appRoot);
+  const handle = await resolveSharedEveDevServer(input.agent.appRoot);
   if (handle.process !== undefined) {
     input.onDevServerSpawned?.(handle.process);
   }
@@ -104,6 +113,8 @@ const eveNuxtModule: NuxtModule<EveNuxtModuleOptions> = defineNuxtModule<EveNuxt
   async setup(options, nuxt) {
     const nuxtRoot = nuxt.options.rootDir;
     const appRoot = resolveApplicationRoot(nuxtRoot, options.eveRoot);
+    const agents = await resolveFrameworkAgents(appRoot);
+    assertFrameworkAgentsPresent(agents, appRoot);
 
     // Auto-import the Vue composable so app code can call `useEveAgent()`
     // without an explicit import, matching Nuxt's composable conventions.
@@ -116,6 +127,7 @@ const eveNuxtModule: NuxtModule<EveNuxtModuleOptions> = defineNuxtModule<EveNuxt
     // integration.
     if (!nuxt.options.dev && process.env.VERCEL) {
       const configured = await ensureEveVercelServicesConfig({
+        agents,
         appRoot,
         eveBuildCommand: options.eveBuildCommand,
         frameworkName: "Nuxt",
@@ -137,25 +149,28 @@ const eveNuxtModule: NuxtModule<EveNuxtModuleOptions> = defineNuxtModule<EveNuxt
       // the proxy route rule is registered in time while other modules' setup
       // isn't blocked behind the spawn.
       nuxt.hook("modules:done", async () => {
-        const proxyTarget = await resolveEveProxyTarget({
-          appRoot,
-          dev: nuxt.options.dev,
-          onDevServerSpawned: (child) => {
-            // Prefer Nuxt's lifecycle for cleanup so the dev server is torn
-            // down on graceful shutdown and dev restarts. The process-exit
-            // guard in dev-server.ts remains as a fallback for non-graceful
-            // exits.
-            nuxt.hook("close", () => {
-              if (!child.killed) {
-                child.kill();
-              }
+        await Promise.all(
+          agents.map(async (agent, index) => {
+            const proxyTarget = await resolveEveProxyTarget({
+              agent,
+              dev: nuxt.options.dev,
+              localProductionPortOffset: index,
+              onDevServerSpawned: (child) => {
+                // Prefer Nuxt's lifecycle for cleanup so the dev server is torn
+                // down on graceful shutdown and dev restarts. The process-exit
+                // guard in dev-server.ts remains as a fallback for non-graceful
+                // exits.
+                nuxt.hook("close", () => {
+                  if (!child.killed) child.kill();
+                });
+              },
             });
-          },
-        });
 
-        extendRouteRules(`${EVE_ROUTE_PREFIX}/**`, {
-          proxy: `${proxyTarget}/**`,
-        });
+            extendRouteRules(`${agent.transportRoutePrefix}/**`, {
+              proxy: `${proxyTarget}/**`,
+            });
+          }),
+        );
       });
     }
   },

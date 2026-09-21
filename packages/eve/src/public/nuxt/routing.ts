@@ -41,12 +41,24 @@ export function readLocalProductionPort(): number {
  * Vercel the module routes at the edge via a Build Output service route
  * instead of proxying.
  */
-export function resolveProductionTarget(): string {
+export function resolveProductionTarget(
+  input: {
+    readonly localPortOffset?: number;
+    readonly routePrefix?: string;
+  } = {},
+): string {
   const configuredOrigin = process.env[EVE_NUXT_PRODUCTION_ORIGIN_ENV];
   if (configuredOrigin !== undefined && configuredOrigin.trim().length > 0) {
-    return joinRoutePrefix(normalizeOrigin(configuredOrigin), EVE_ROUTE_PREFIX);
+    return joinRoutePrefix(
+      normalizeOrigin(configuredOrigin),
+      input.routePrefix ?? EVE_ROUTE_PREFIX,
+    );
   }
 
-  const localOrigin = `http://127.0.0.1:${String(readLocalProductionPort())}`;
+  const localPort = readLocalProductionPort() + (input.localPortOffset ?? 0);
+  if (localPort > 65_535) {
+    throw new Error(`${EVE_NUXT_PRODUCTION_PORT_ENV} plus the eve agent count exceeds 65535.`);
+  }
+  const localOrigin = `http://127.0.0.1:${String(localPort)}`;
   return joinRoutePrefix(localOrigin, EVE_ROUTE_PREFIX);
 }

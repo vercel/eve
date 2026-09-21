@@ -20,6 +20,16 @@ const GENERATED: Extract<EnsureEveVercelServicesConfigResult, { mode: "generated
   },
 };
 
+const generatedService = GENERATED.services.eve!;
+const GENERATED_WORKSPACE: Extract<EnsureEveVercelServicesConfigResult, { mode: "generated" }> = {
+  mode: "generated",
+  routes: [createEveServiceRoute("eve-billing"), createEveServiceRoute("eve-support")],
+  services: {
+    "eve-billing": { ...generatedService, root: ".eve/vercel-services/eve-billing" },
+    "eve-support": { ...generatedService, root: ".eve/vercel-services/eve-support" },
+  },
+};
+
 describe("createEveServiceRoute", () => {
   it("routes the eve transport namespace to the eve service", () => {
     expect(createEveServiceRoute()).toEqual({
@@ -109,6 +119,19 @@ describe("mergeEveVercelConfig", () => {
     const once = mergeEveVercelConfig(undefined, GENERATED);
 
     expect(mergeEveVercelConfig(once, GENERATED)).toEqual(once);
+  });
+
+  it("inserts workspace routes before filesystem routing and stays idempotent", () => {
+    const existing = { routes: [{ src: "^/a$" }, { handle: "filesystem" }, { src: "^/b$" }] };
+    const once = mergeEveVercelConfig(existing, GENERATED_WORKSPACE);
+
+    expect(once.routes).toEqual([
+      { src: "^/a$" },
+      ...GENERATED_WORKSPACE.routes!,
+      { handle: "filesystem" },
+      { src: "^/b$" },
+    ]);
+    expect(mergeEveVercelConfig(once, GENERATED_WORKSPACE)).toEqual(once);
   });
 
   it("preserves unknown keys and an explicit version", () => {

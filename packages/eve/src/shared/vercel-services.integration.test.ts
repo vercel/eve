@@ -69,6 +69,47 @@ describe("ensureEveVercelServicesConfig", () => {
     });
   });
 
+  it("generates one named service and route per workspace agent", async () => {
+    const hostRoot = await createTempHostRoot();
+    const billingRoot = join(hostRoot, "agents", "billing");
+    const supportRoot = join(hostRoot, "agents", "support");
+
+    const result = await ensureEveVercelServicesConfig({
+      agents: [
+        {
+          appRoot: billingRoot,
+          name: "billing",
+          publicRoutePrefix: "/eve/billing",
+          workspaceMember: true,
+        },
+        {
+          appRoot: supportRoot,
+          name: "support",
+          publicRoutePrefix: "/eve/support",
+          workspaceMember: true,
+        },
+      ],
+      appRoot: hostRoot,
+      frameworkName: "Test",
+      hostRoot,
+    });
+
+    expect(result.mode).toBe("generated");
+    if (result.mode !== "generated") return;
+    expect(Object.keys(result.services)).toEqual(["eve-billing", "eve-support"]);
+    expect(result.routes?.map((route) => route.src)).toEqual([
+      "^/eve/billing/v1/(.*)$",
+      "^/eve/billing/?$",
+      "^/eve/support/v1/(.*)$",
+      "^/eve/support/?$",
+    ]);
+    expect(result.services["eve-support"]?.buildCommand).toContain(
+      "export EVE_PUBLIC_ROUTE_PREFIX='/eve/support'",
+    );
+    expect(await directoryExists(join(hostRoot, ".eve/vercel-services/eve-billing"))).toBe(true);
+    expect(await directoryExists(join(hostRoot, ".eve/vercel-services/eve-support"))).toBe(true);
+  });
+
   it("creates the isolated service build root", async () => {
     const hostRoot = await createTempHostRoot();
 
