@@ -49,8 +49,8 @@ export interface CurrentAgentModel {
 export type { GatewayServiceTierState };
 
 /**
- * Everything the composite Change-model screen edits, resolved before it
- * opens. The model section is a searchable catalog pick, or a fixed line when
+ * The model picker inputs, resolved before it opens. The first step is a
+ * searchable catalog, or a fixed model when
  * the authored model is a source-backed SDK call `/model` cannot rewrite.
  */
 export interface ModelSettingsRequest {
@@ -79,7 +79,7 @@ export interface ModelSettingsResult {
   serviceTier?: "standard" | "priority";
 }
 
-/** Renderer-owned composite model screen; only the dev TUI implements this. */
+/** Renderer-owned model picker; only the dev TUI implements this. */
 export type ModelSettingsPicker = (
   request: ModelSettingsRequest,
 ) => Promise<ModelSettingsResult | undefined>;
@@ -98,7 +98,7 @@ export interface ModelFlowDeps {
   }) => Promise<ApplyModelSettingsOutcome>;
   /** Catalog fetch behind the shared model picker. */
   selectModel?: SelectModelDeps;
-  /** The composite Change-model screen; the dev TUI renderer implements it. */
+  /** The model picker; the dev TUI renderer implements it. */
   pickModelSettings?: ModelSettingsPicker;
 }
 
@@ -118,7 +118,7 @@ export type ModelFlowResult =
       providerSelection?: ProviderSelection;
     };
 
-/** Selects a model or setting and applies the completed edit immediately. */
+/** Selects a model, speed, and reasoning, then applies the completed selection together. */
 export async function runModelFlow(input: {
   /** Selected agent root whose authored model settings are edited. */
   appRoot: string;

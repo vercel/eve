@@ -9,14 +9,7 @@ import {
   type SelectState,
 } from "#setup/cli/select-state.js";
 import type { PlannerNavigation, SelectMetadata, SelectNotice } from "#setup/prompter.js";
-import type { ModelSettingsRequest } from "#setup/flows/model.js";
 
-import {
-  modelEditorMenuRows,
-  reasoningPositions,
-  type ModelEditorRowId,
-  type ModelEditorState,
-} from "./model-editor.js";
 import type { ProviderPickerPhase } from "./provider-picker.js";
 import { maskLine, visibleLine, type LineState } from "./line-editor.js";
 import type { Theme } from "./theme.js";
@@ -56,6 +49,7 @@ interface SetupSelectPanelBase extends SetupQuestionPanelBase {
   loadingFrame?: string;
   /** A dim-inverse affordance appended to the cursor row, e.g. ` ↵ change `. */
   cursorBadge?: string;
+  footerHints?: readonly string[];
 }
 
 /**
@@ -921,23 +915,16 @@ export function renderSelectQuestion(
 
   rows.push(
     ...questionFooter(
-      railed
-        ? ["Enter select", "Esc back"]
-        : selectFooterHints(presentation, visible, cursor, plannerNavigation),
+      state.footerHints ??
+        (railed
+          ? ["Enter select", "Esc back"]
+          : selectFooterHints(presentation, visible, cursor, plannerNavigation)),
       theme,
       width,
     ),
   );
   return rows.map((row) => clip(row, width));
 }
-
-/** The composite Change-model screen's inputs: the resolved request plus live state. */
-export interface ModelEditorPanelInput {
-  request: ModelSettingsRequest;
-  state: ModelEditorState;
-}
-
-const MODEL_EDITOR_MESSAGE = "Select the model";
 
 /**
  * A dim, background-free selection badge carrying the Enter affordance, e.g.
@@ -946,141 +933,6 @@ const MODEL_EDITOR_MESSAGE = "Select the model";
 export function enterBadge(theme: Theme, label?: string): string {
   const c = theme.colors;
   return c.dim(label === undefined ? theme.glyph.enter : `${theme.glyph.enter} ${label}`);
-}
-
-/**
- * A discrete reasoning track: `●` below the current notch, `◉` on it, `○`
- * above, joined by `─` connectors. `accent` paints the covered stretch —
- * notches and connectors up to the current position — blue. `index` -1 means
- * unset: an all-`○` track with no fill.
- */
-export function reasoningTrack(input: {
-  count: number;
-  index: number;
-  connectorWidth: number;
-  accent: boolean;
-  theme: Theme;
-}): string {
-  const { count, index, theme } = input;
-  const glyphs = theme.glyph;
-  const connector = glyphs.trackLine.repeat(input.connectorWidth);
-  const pieces: string[] = [];
-  for (let at = 0; at < count; at += 1) {
-    if (at > 0) pieces.push(connector);
-    pieces.push(
-      at < index ? glyphs.trackFilled : at === index ? glyphs.trackCurrent : glyphs.trackEmpty,
-    );
-  }
-  if (!input.accent || index < 0) return pieces.join("");
-  // Pieces alternate notch/connector; the covered stretch ends at the current
-  // notch, which sits at piece position 2 * index.
-  const covered = pieces.slice(0, 2 * index + 1).join("");
-  return `${theme.colors.blue(covered)}${pieces.slice(2 * index + 1).join("")}`;
-}
-
-/**
- * Paints the Change-model screen: a value menu whose reasoning and tier rows
- * adjust inline with left/right, and whose Model row opens the searchable
- * catalog.
- */
-export function renderModelEditorQuestion(
-  input: ModelEditorPanelInput,
-  theme: Theme,
-  width: number,
-  message = MODEL_EDITOR_MESSAGE,
-): string[] {
-  const { request, state } = input;
-  switch (state.screen.kind) {
-    case "menu":
-      return renderModelEditorMenu(input, state.screen.cursor, theme, width);
-    case "model":
-      return renderModelEditorModelScreen(request, state.screen.select, theme, width, message);
-  }
-}
-
-/**
- * The value menu rides the ordinary stacked-select painter: each row's hint
- * line is the drafted value (mini track, `fast ↯`, the slug), dim at rest and
- * accent-keeping under the cursor.
- */
-function renderModelEditorMenu(
-  input: ModelEditorPanelInput,
-  cursor: ModelEditorRowId,
-  theme: Theme,
-  width: number,
-): string[] {
-  const { request, state } = input;
-  const { draft } = state;
-  const rows = modelEditorMenuRows(request, draft, state.capabilities);
-
-  const options: SetupPanelOption[] = rows.map((row) => {
-    if (row.disabled === true && row.value === "model") {
-      // The fixed model still shows its id; the description carries the reason.
-      return draft.modelId === null ? { ...row } : { ...row, hint: draft.modelId };
-    }
-    if (row.disabled === true || row.value === "done") return { ...row };
-    switch (row.value) {
-      case "model":
-        return { ...row, hint: draft.modelId ?? undefined };
-      case "reasoning": {
-        const positions = reasoningPositions(state.capabilities, draft.reasoning);
-        const index = draft.reasoning === "default" ? -1 : positions.indexOf(draft.reasoning);
-        const track = reasoningTrack({
-          count: positions.length,
-          index,
-          connectorWidth: 1,
-          accent: row.value === cursor,
-          theme,
-        });
-        const level = draft.reasoning === "default" ? "provider default" : draft.reasoning;
-        // Track first: the notches hold a fixed column while the
-        // variable-width level name trails, so nothing jumps on adjust.
-        return { ...row, hint: `${track} ${level}` };
-      }
-      case "tier":
-        return { ...row, hint: draft.tier === "priority" ? `fast ${theme.glyph.fast}` : "normal" };
-      default:
-        return { ...row };
-    }
-  });
-
-  const index = Math.max(
-    0,
-    options.findIndex((option) => option.value === cursor),
-  );
-  return renderSelectQuestion(
-    {
-      kind: "stacked",
-      message: "",
-      options,
-      select: { filter: "", cursor: index, selected: new Set() },
-    },
-    theme,
-    width,
-  );
-}
-
-/** The catalog sub-screen: `▏`-railed id rows under a `▏` filter line. */
-function renderModelEditorModelScreen(
-  request: ModelSettingsRequest,
-  select: SelectState,
-  theme: Theme,
-  width: number,
-  message: string,
-): string[] {
-  // The catalog list IS the shared railed searchable select — the same
-  // component behind the team and project pickers.
-  return renderSelectQuestion(
-    {
-      kind: "search",
-      message,
-      options: request.model.kind === "pick" ? request.model.options : [],
-      placeholder: "type to search",
-      select,
-    },
-    theme,
-    width,
-  );
 }
 
 /** Paints a text question section: message, a block-cursor input line, hints. */

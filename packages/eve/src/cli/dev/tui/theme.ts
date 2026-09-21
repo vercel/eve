@@ -117,14 +117,6 @@ export interface ThemeGlyphs {
   arrowDown: string;
   /** `↯` — Fast mode (Gateway priority tier) marker beside a model id. */
   fast: string;
-  /** `●` — a track notch below the current position (already covered). */
-  trackFilled: string;
-  /** `◉` — the track notch at the current position. */
-  trackCurrent: string;
-  /** `○` — a track notch above the current position. */
-  trackEmpty: string;
-  /** `─` — the connector segment between track notches. */
-  trackLine: string;
   /** `↵` — the Enter affordance inside a selection badge. */
   enter: string;
   /** `▪` — the marker beside an in-flight validation badge. */
@@ -161,10 +153,6 @@ const UNICODE_GLYPHS: ThemeGlyphs = {
   arrowUp: "↑",
   arrowDown: "↓",
   fast: "↯",
-  trackFilled: "●",
-  trackCurrent: "◉",
-  trackEmpty: "○",
-  trackLine: "─",
   enter: "↵",
   validating: "▪",
 };
@@ -199,10 +187,6 @@ const ASCII_GLYPHS: ThemeGlyphs = {
   arrowUp: "^",
   arrowDown: "v",
   fast: ">>",
-  trackFilled: "*",
-  trackCurrent: "O",
-  trackEmpty: ".",
-  trackLine: "-",
   enter: "<-'",
   validating: "o",
 };
