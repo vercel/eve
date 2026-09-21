@@ -44,9 +44,9 @@ export const benchmarkModels = [
     support: "supported",
   },
   {
-    id: "grok-4-6",
-    model: "xai/grok-4.6",
-    displayName: "Grok 4.6",
+    id: "grok-4-7",
+    model: "spacexai/grok-4.7",
+    displayName: "Grok 4.7",
     harness: "OpenCode",
     support: "supported",
   },

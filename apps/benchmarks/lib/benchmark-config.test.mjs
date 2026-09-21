@@ -15,7 +15,7 @@ test("publishes only compatibility-validated models", () => {
     [
       "kimi-k3",
       "claude-fable-5-1",
-      "grok-4-6",
+      "grok-4-7",
       "gpt-5-6-sol",
       "gpt-5-6-terra",
       "gpt-6-astra-high",
@@ -37,7 +37,7 @@ test("publishes only compatibility-validated models", () => {
     "author-006-custom-channel",
     "author-007-digest-schedule",
   ]);
-  assert.equal(findPublishedBenchmarkModel("grok-4-6").model, "xai/grok-4.6");
+  assert.equal(findPublishedBenchmarkModel("grok-4-7").model, "spacexai/grok-4.7");
   assert.equal(findPublishedBenchmarkModel("claude-sonnet-5").model, "anthropic/claude-sonnet-5");
   assert.equal(findPublishedBenchmarkModel("glm-5-3").model, "zai/glm-5.3");
   assert.equal(
@@ -60,7 +60,7 @@ test("allows candidate probes and rejects unknown models", () => {
   assert.equal(findBenchmarkModel("gemini-3-8-flash").support, "supported");
   assert.equal(findBenchmarkModel("minimax-m3").support, "supported");
   assert.equal(findBenchmarkModel("kimi-k2-7-code").support, "supported");
-  assert.equal(findBenchmarkModel("grok-4-6").support, "supported");
+  assert.equal(findBenchmarkModel("grok-4-7").support, "supported");
   assert.equal(findBenchmarkModel("claude-sonnet-4-6").support, "superseded");
   assert.equal(findBenchmarkModel("claude-fable-5").support, "superseded");
   assert.equal(findBenchmarkModel("glm-5-2").support, "superseded");

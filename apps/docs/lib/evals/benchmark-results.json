@@ -1,9 +1,9 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-09-15T16:54:39.105Z",
+  "generatedAt": "2026-09-21T17:01:29.004Z",
   "suite": {
-    "eveRevision": "6ce61cd85ecf4621bcefd363a3e8b9445b7e6e91",
-    "caseFingerprint": "7d990b7e2c429ee4a2cf4f758d15f408f61d0e5b1ef9782ba69a33e435cdb169",
+    "eveRevision": "de29d28e415de2b988a9d36cf2b1683d042a2d86",
+    "caseFingerprint": "d2e943039be9a70cb26419631985b8c669a37a10a73416fb66ead782466124b6",
     "caseCount": 7,
     "runsPerCell": 3
   },
@@ -41,18 +41,18 @@
       "treatment": "guided"
     },
     {
-      "id": "grok-4-6-opencode--baseline",
-      "groupId": "grok-4-6-opencode",
-      "model": "xai/grok-4.6",
-      "modelDisplayName": "Grok 4.6",
+      "id": "grok-4-7-opencode--baseline",
+      "groupId": "grok-4-7-opencode",
+      "model": "spacexai/grok-4.7",
+      "modelDisplayName": "Grok 4.7",
       "harness": "OpenCode",
       "treatment": "baseline"
     },
     {
-      "id": "grok-4-6-opencode--guided",
-      "groupId": "grok-4-6-opencode",
-      "model": "xai/grok-4.6",
-      "modelDisplayName": "Grok 4.6",
+      "id": "grok-4-7-opencode--guided",
+      "groupId": "grok-4-7-opencode",
+      "model": "spacexai/grok-4.7",
+      "modelDisplayName": "Grok 4.7",
       "harness": "OpenCode",
       "treatment": "guided"
     },
@@ -555,172 +555,74 @@
       "meanToolInvocationCount": 7.333333333333333
     },
     {
-      "experimentId": "grok-4-6-opencode--baseline",
+      "experimentId": "grok-4-7-opencode--baseline",
       "caseId": "author-001-weather-tool",
-      "status": "current",
-      "passedRuns": 3,
-      "validRuns": 3,
-      "meanDurationMs": 38613,
-      "measuredAt": "2026-08-28T19:22:01.000Z",
-      "meanEstimatedListCostUsd": 0.10434266666666665,
-      "meanTokenConsumption": 49566,
-      "meanToolInvocationCount": 19
+      "status": "missing"
     },
     {
-      "experimentId": "grok-4-6-opencode--baseline",
+      "experimentId": "grok-4-7-opencode--baseline",
       "caseId": "author-002-new-project",
-      "status": "current",
-      "passedRuns": 3,
-      "validRuns": 3,
-      "meanDurationMs": 83985,
-      "measuredAt": "2026-08-28T19:25:12.000Z",
-      "meanEstimatedListCostUsd": 0.07232866666666667,
-      "meanTokenConsumption": 32827.666666666664,
-      "meanToolInvocationCount": 16
+      "status": "missing"
     },
     {
-      "experimentId": "grok-4-6-opencode--baseline",
+      "experimentId": "grok-4-7-opencode--baseline",
       "caseId": "author-003-openapi-connection",
-      "status": "current",
-      "passedRuns": 0,
-      "validRuns": 3,
-      "meanDurationMs": 521954,
-      "measuredAt": "2026-08-28T19:22:01.000Z",
-      "meanEstimatedListCostUsd": 1.0741786666666668,
-      "meanTokenConsumption": 503422.6666666667,
-      "meanToolInvocationCount": 76.66666666666667
+      "status": "missing"
     },
     {
-      "experimentId": "grok-4-6-opencode--baseline",
+      "experimentId": "grok-4-7-opencode--baseline",
       "caseId": "author-004-packaged-skill",
-      "status": "current",
-      "passedRuns": 3,
-      "validRuns": 3,
-      "meanDurationMs": 41894,
-      "measuredAt": "2026-08-28T19:22:01.000Z",
-      "meanEstimatedListCostUsd": 0.065152,
-      "meanTokenConsumption": 29506,
-      "meanToolInvocationCount": 23.333333333333332
+      "status": "missing"
     },
     {
-      "experimentId": "grok-4-6-opencode--baseline",
+      "experimentId": "grok-4-7-opencode--baseline",
       "caseId": "author-005-conditional-approval",
-      "status": "current",
-      "passedRuns": 3,
-      "validRuns": 3,
-      "meanDurationMs": 50151,
-      "measuredAt": "2026-08-28T19:22:01.000Z",
-      "meanEstimatedListCostUsd": 0.141536,
-      "meanTokenConsumption": 66629.33333333333,
-      "meanToolInvocationCount": 22
+      "status": "missing"
     },
     {
-      "experimentId": "grok-4-6-opencode--baseline",
+      "experimentId": "grok-4-7-opencode--baseline",
       "caseId": "author-006-custom-channel",
-      "status": "current",
-      "passedRuns": 3,
-      "validRuns": 3,
-      "meanDurationMs": 37062,
-      "measuredAt": "2026-08-28T19:22:01.000Z",
-      "meanEstimatedListCostUsd": 0.07319533333333333,
-      "meanTokenConsumption": 33801.666666666664,
-      "meanToolInvocationCount": 17.666666666666668
+      "status": "missing"
     },
     {
-      "experimentId": "grok-4-6-opencode--baseline",
+      "experimentId": "grok-4-7-opencode--baseline",
       "caseId": "author-007-digest-schedule",
-      "status": "current",
-      "passedRuns": 3,
-      "validRuns": 3,
-      "meanDurationMs": 38280,
-      "measuredAt": "2026-08-28T19:22:01.000Z",
-      "meanEstimatedListCostUsd": 0.045748000000000004,
-      "meanTokenConsumption": 20122.666666666668,
-      "meanToolInvocationCount": 18
+      "status": "missing"
     },
     {
-      "experimentId": "grok-4-6-opencode--guided",
+      "experimentId": "grok-4-7-opencode--guided",
       "caseId": "author-001-weather-tool",
-      "status": "current",
-      "passedRuns": 3,
-      "validRuns": 3,
-      "meanDurationMs": 31700,
-      "measuredAt": "2026-08-28T19:22:02.000Z",
-      "meanEstimatedListCostUsd": 0.049695333333333334,
-      "meanTokenConsumption": 22963.666666666668,
-      "meanToolInvocationCount": 9.666666666666666
+      "status": "missing"
     },
     {
-      "experimentId": "grok-4-6-opencode--guided",
+      "experimentId": "grok-4-7-opencode--guided",
       "caseId": "author-002-new-project",
-      "status": "current",
-      "passedRuns": 3,
-      "validRuns": 3,
-      "meanDurationMs": 83621,
-      "measuredAt": "2026-08-28T19:25:07.000Z",
-      "meanEstimatedListCostUsd": 0.082842,
-      "meanTokenConsumption": 38261,
-      "meanToolInvocationCount": 16.333333333333332
+      "status": "missing"
     },
     {
-      "experimentId": "grok-4-6-opencode--guided",
+      "experimentId": "grok-4-7-opencode--guided",
       "caseId": "author-003-openapi-connection",
-      "status": "current",
-      "passedRuns": 3,
-      "validRuns": 3,
-      "meanDurationMs": 34833,
-      "measuredAt": "2026-08-28T19:25:07.000Z",
-      "meanEstimatedListCostUsd": 0.055174,
-      "meanTokenConsumption": 25952.333333333332,
-      "meanToolInvocationCount": 10
+      "status": "missing"
     },
     {
-      "experimentId": "grok-4-6-opencode--guided",
+      "experimentId": "grok-4-7-opencode--guided",
       "caseId": "author-004-packaged-skill",
-      "status": "current",
-      "passedRuns": 3,
-      "validRuns": 3,
-      "meanDurationMs": 30135,
-      "measuredAt": "2026-08-28T19:22:02.000Z",
-      "meanEstimatedListCostUsd": 0.035581999999999996,
-      "meanTokenConsumption": 16043.666666666666,
-      "meanToolInvocationCount": 8.666666666666666
+      "status": "missing"
     },
     {
-      "experimentId": "grok-4-6-opencode--guided",
+      "experimentId": "grok-4-7-opencode--guided",
       "caseId": "author-005-conditional-approval",
-      "status": "current",
-      "passedRuns": 3,
-      "validRuns": 3,
-      "meanDurationMs": 34026,
-      "measuredAt": "2026-08-28T19:22:02.000Z",
-      "meanEstimatedListCostUsd": 0.038532666666666666,
-      "meanTokenConsumption": 17059.666666666668,
-      "meanToolInvocationCount": 11.666666666666666
+      "status": "missing"
     },
     {
-      "experimentId": "grok-4-6-opencode--guided",
+      "experimentId": "grok-4-7-opencode--guided",
       "caseId": "author-006-custom-channel",
-      "status": "current",
-      "passedRuns": 3,
-      "validRuns": 3,
-      "meanDurationMs": 32109,
-      "measuredAt": "2026-08-28T19:22:02.000Z",
-      "meanEstimatedListCostUsd": 0.033709333333333334,
-      "meanTokenConsumption": 14610,
-      "meanToolInvocationCount": 9.666666666666666
+      "status": "missing"
     },
     {
-      "experimentId": "grok-4-6-opencode--guided",
+      "experimentId": "grok-4-7-opencode--guided",
       "caseId": "author-007-digest-schedule",
-      "status": "current",
-      "passedRuns": 3,
-      "validRuns": 3,
-      "meanDurationMs": 25583,
-      "measuredAt": "2026-08-28T19:22:02.000Z",
-      "meanEstimatedListCostUsd": 0.023458666666666666,
-      "meanTokenConsumption": 10328,
-      "meanToolInvocationCount": 7.333333333333333
+      "status": "missing"
     },
     {
       "experimentId": "gpt-5-6-sol-codex--baseline",

@@ -33,12 +33,12 @@ export const modelPricing = {
     cacheRead: 0.25,
     cacheWrite: 12.5,
   },
-  "xai/grok-4.6": {
-    effectiveDate: "2026-08-17",
-    source: "https://docs.x.ai/developers/models",
-    input: 2,
-    output: 6,
-    cacheRead: 0.5,
+  "spacexai/grok-4.7": {
+    effectiveDate: "2026-09-21",
+    source: "https://ai-gateway.vercel.sh/v1/models",
+    input: 1.2,
+    output: 3.6,
+    cacheRead: 0.3,
     cacheWrite: 0,
   },
   "openai/gpt-5.6-sol": {

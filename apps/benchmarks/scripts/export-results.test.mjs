@@ -46,7 +46,7 @@ test("exports missing cells without publishing private artifacts", () => {
       [
         "Kimi K3",
         "Claude Fable 5.1",
-        "Grok 4.6",
+        "Grok 4.7",
         "GPT-5.6 Sol",
         "GPT-5.6 Terra",
         "GPT-6 Astra (high)",
