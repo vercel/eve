@@ -1776,6 +1776,8 @@ describe("workflowEntry integration", () => {
         // make ingress wait for the successor instead of reporting the session
         // gone (which would let the channel start a replacement session).
         let gapDelivery: Promise<unknown> | undefined;
+        const createBatch = world.events.createBatch;
+        world.events.createBatch = undefined;
         const createEvent = world.events.create.bind(world.events);
         const spy = vi.spyOn(world.events, "create").mockImplementation(async (...args) => {
           const [runId, event] = args;
@@ -1843,6 +1845,8 @@ describe("workflowEntry integration", () => {
             sessionId: anchor.runId,
           });
         } finally {
+          spy.mockRestore();
+          world.events.createBatch = createBatch;
           stream.dispose();
           await anchor.cancel();
         }
