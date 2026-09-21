@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { setTimeout as sleep } from "node:timers/promises";
 
 import {
   getVercelSandboxCredentials,
@@ -117,15 +118,26 @@ async function populateDrive(input: {
   readonly signal?: AbortSignal;
 }): Promise<boolean> {
   const credentials = await getVercelSandboxCredentials(input.createOptions);
-  const writer = await input.module.Sandbox.create({
-    ...credentials,
-    fetch: getVercelSandboxFetch(input.createOptions),
-    image: VERCEL_EVE_SANDBOX_IMAGE,
-    mounts: { [DRIVE_UPLOAD_PATH]: input.drive },
-    persistent: false,
-    region: input.drive.region,
-    signal: input.signal,
-  });
+  const createWriter = () =>
+    input.module.Sandbox.create({
+      ...credentials,
+      fetch: getVercelSandboxFetch(input.createOptions),
+      image: VERCEL_EVE_SANDBOX_IMAGE,
+      mounts: { [DRIVE_UPLOAD_PATH]: input.drive },
+      persistent: false,
+      region: input.drive.region,
+      signal: input.signal,
+    });
+  let writer: Awaited<ReturnType<typeof createWriter>>;
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      writer = await createWriter();
+      break;
+    } catch (error) {
+      if (!isDriveWriteAttachmentConflict(error) || attempt === 29) throw error;
+      await sleep(1_000, undefined, { signal: input.signal });
+    }
+  }
   try {
     const manifest = await readResourceManifest(writer, input.signal);
     if (manifest === input.resource.key) return true;
@@ -151,6 +163,10 @@ async function populateDrive(input: {
   } finally {
     await writer.delete({ signal: input.signal });
   }
+}
+
+function isDriveWriteAttachmentConflict(error: unknown): boolean {
+  return error instanceof Error && /already attached as read-write/iu.test(error.message);
 }
 
 async function readResourceManifest(
