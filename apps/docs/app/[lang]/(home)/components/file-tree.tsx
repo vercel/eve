@@ -59,7 +59,7 @@ city in the world.`,
     code: `import { defineAgent } from "eve";
 
 export default defineAgent({
-  model: "xai/grok-4.5",
+  model: "spacexai/grok-4.7",
 });`,
   },
   {
@@ -164,7 +164,7 @@ export default defineMcpClientConnection({
 
 export default defineAgent({
   description: "Investigate questions",
-  model: "xai/grok-4.5",
+  model: "spacexai/grok-4.7",
 });`,
   },
   {

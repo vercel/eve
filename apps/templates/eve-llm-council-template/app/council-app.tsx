@@ -7,7 +7,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { councilResultSchema, type CouncilResult, type MemberId } from "../agent/lib/schemas";
 
 const members: ReadonlyArray<{ id: MemberId; label: string; model: string }> = [
-  { id: "grok", label: "xAI", model: "Grok 4.5" },
+  { id: "grok", label: "SpaceXAI", model: "Grok 4.7" },
   { id: "claude", label: "Anthropic", model: "Claude Opus 5" },
   { id: "openai", label: "OpenAI", model: "GPT-5.6 Sol" },
   { id: "kimi", label: "Moonshot AI", model: "Kimi K3" },
