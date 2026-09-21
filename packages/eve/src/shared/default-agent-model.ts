@@ -2,4 +2,4 @@
  * Model used when an agent does not declare one, baked in by `eve init`, and
  * pre-selected in the setup model picker.
  */
-export const DEFAULT_AGENT_MODEL_ID = "openai/gpt-5.6-luna-fast";
+export const DEFAULT_AGENT_MODEL_ID = "spacexai/grok-4.7";
