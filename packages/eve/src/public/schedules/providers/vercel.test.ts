@@ -81,7 +81,6 @@ describe("vercelScheduleProvider", () => {
     const provider = vercelScheduleProvider({
       fetch: fetchImpl,
       token: "local-oidc-token",
-      useInDevelopment: true,
     });
 
     expect(provider.kind).toBe("vercel");
