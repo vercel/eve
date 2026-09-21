@@ -112,12 +112,12 @@ describe("Vercel image resources", () => {
     ).rejects.toThrow("conflicts with existing content");
   });
 
-  it("strictly resolves prepared Drives without creating replacements", async () => {
+  it("resolves prepared Drive names with getOrCreate", async () => {
     setCredentials();
+    const drive = createDrive("prepared-drive");
     const module = {
       Drive: {
-        getOrCreate: vi.fn(),
-        list: vi.fn(async () => ({ toArray: async () => [] })),
+        getOrCreate: vi.fn(async () => drive),
       },
       Sandbox: { create: vi.fn() },
     };
@@ -127,14 +127,18 @@ describe("Vercel image resources", () => {
         createOptions: {},
         mounts: [
           {
-            driveName: "missing-drive",
+            driveName: "prepared-drive",
             mountPath: "/eve/resources/workspace",
             region: "iad1",
             resourceKey: "workspace-key",
           },
         ],
       }),
-    ).rejects.toThrow('Prepared sandbox resource "workspace-key" is unavailable');
-    expect(module.Drive.getOrCreate).not.toHaveBeenCalled();
+    ).resolves.toEqual({
+      "/eve/resources/workspace": { drive: "prepared-drive", mode: "snapshot" },
+    });
+    expect(module.Drive.getOrCreate).toHaveBeenCalledWith(
+      expect.objectContaining({ name: "prepared-drive", region: "iad1" }),
+    );
   });
 });

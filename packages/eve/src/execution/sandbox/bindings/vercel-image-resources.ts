@@ -23,13 +23,6 @@ export type VercelImageMountArtifact = {
   readonly resourceKey: string;
 };
 
-export class VercelImageResourceUnavailableError extends Error {
-  constructor(resourceKey: string) {
-    super(`Prepared sandbox resource "${resourceKey}" is unavailable.`);
-    this.name = "VercelImageResourceUnavailableError";
-  }
-}
-
 export async function prepareVercelImageResource(input: {
   readonly createOptions: VercelCreateOptions;
   readonly module: VercelModule;
@@ -82,15 +75,13 @@ export async function resolveVercelImageMounts(input: {
   const fetch = getVercelSandboxFetch(input.createOptions);
   const mounts: Record<string, ReturnType<VercelDrive["snapshot"]>> = {};
   for (const artifact of input.mounts) {
-    const drive = await findDrive({
-      credentials,
-      driveName: artifact.driveName,
+    const drive = await input.module.Drive.getOrCreate({
+      ...credentials,
       fetch,
-      module: input.module,
+      name: artifact.driveName,
       region: artifact.region,
       signal: input.signal,
     });
-    if (drive === null) throw new VercelImageResourceUnavailableError(artifact.resourceKey);
     mounts[artifact.mountPath] = drive.snapshot();
   }
   return mounts;
@@ -110,6 +101,7 @@ async function findDrive(input: {
       fetch: input.fetch,
       namePrefix: input.driveName,
       signal: input.signal,
+      sortBy: "name",
     })
   ).toArray();
   return (

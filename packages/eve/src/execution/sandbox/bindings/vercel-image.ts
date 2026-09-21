@@ -27,7 +27,6 @@ import {
 import {
   prepareVercelImageResource,
   resolveVercelImageMounts,
-  VercelImageResourceUnavailableError,
   type VercelImageMountArtifact,
 } from "#execution/sandbox/bindings/vercel-image-resources.js";
 import type {
@@ -166,11 +165,7 @@ export function createVercelImageSandboxProvider(
           wait: waitForImage,
         });
       } catch (error) {
-        if (
-          error instanceof VercelImageResourceUnavailableError ||
-          isVercelImageUnavailableError(error) ||
-          isVercelResourcePendingError(error)
-        ) {
+        if (isVercelImageUnavailableError(error) || isVercelResourcePendingError(error)) {
           throw new SandboxTemplateNotProvisionedError({
             providerName: VERCEL_IMAGE_PROVIDER_NAME,
             templateKey: artifact.image,
