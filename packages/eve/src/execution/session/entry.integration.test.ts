@@ -1574,6 +1574,7 @@ describe("workflowEntry integration", () => {
           });
           try {
             await stream.nextTurn();
+            await waitForParkedTurnStep(anchor.runId);
             await workflowRuntime.dispatchSession({
               command: followUp(
                 "dpl_b",
