@@ -2,9 +2,9 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import type { ReactNode } from "react";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { cn } from "@/lib/utils";
-import { ServerStatusProvider } from "./_components/server-status";
 import { disposablePolyfillScript } from "@/lib/disposable-polyfill";
+import { cn } from "@/lib/utils";
+import { ChatWorkspace } from "./_components/chat-workspace";
 import "./globals.css";
 
 const sans = Geist({
@@ -34,7 +34,14 @@ export default function RootLayout({ children }: { readonly children: ReactNode 
       </head>
       <body>
         <TooltipProvider>
-          <ServerStatusProvider>{children}</ServerStatusProvider>
+          <ChatWorkspace
+            localWorkspace={
+              process.env.NODE_ENV === "development" &&
+              !["production", "preview"].includes(process.env.VERCEL_ENV ?? "")
+            }
+          >
+            {children}
+          </ChatWorkspace>
         </TooltipProvider>
       </body>
     </html>

@@ -1,13 +1,11 @@
 "use client";
 
-import type { StickToBottomContext } from "use-stick-to-bottom";
-import { chatMessageReducer, type ChatMessageData } from "@/lib/chat-message-reducer";
-import { getActiveChatTurn } from "@/lib/chat-turn-state";
-import { useServerStatus, ServerStatusDot } from "./server-status";
 import type { UserContent } from "ai";
+import type { StickToBottomContext } from "use-stick-to-bottom";
 import { useEveAgent } from "eve/react";
-import { AlertCircleIcon, PlusIcon, SquareIcon } from "lucide-react";
-import { useLayoutEffect, useRef, useState } from "react";
+import { AlertCircleIcon, SquareIcon } from "lucide-react";
+import { usePathname } from "next/navigation";
+import { useCallback, useLayoutEffect, useRef, useState } from "react";
 import {
   Conversation,
   ConversationContent,
@@ -18,61 +16,118 @@ import { Message, MessageContent } from "@/components/ai-elements/message";
 import {
   PromptInput,
   PromptInputButton,
+  PromptInputFooter,
   type PromptInputMessage,
   PromptInputSubmit,
   PromptInputTextarea,
   usePromptInputAttachments,
 } from "@/components/ai-elements/prompt-input";
 import { Shimmer } from "@/components/ai-elements/shimmer";
-import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { AgentMessage } from "./agent-message";
+import { chatMessageReducer, type ChatMessageData } from "@/lib/chat-message-reducer";
+import { getActiveChatTurn } from "@/lib/chat-turn-state";
+import { AgentMessage, type AgentInputResponse } from "./agent-message";
+import { useChatWorkspace } from "./chat-workspace";
+import { useServerStatus } from "./server-status";
 
-const AGENT_NAME = "eve-agent";
-
-export function AgentChat({
-  sessionId,
-  sessionless = false,
-}: {
+interface AgentChatProps {
   readonly sessionId?: string;
   readonly sessionless?: boolean;
-}) {
+}
+
+export function AgentChat(props: AgentChatProps) {
+  const { newChatVersion } = useChatWorkspace();
+  const pathname = usePathname();
+  const sessionId = pathname.startsWith("/s/") ? decodeURIComponent(pathname.slice(3)) : undefined;
+  const [assignedSession, setAssignedSession] = useState<{ id: string; key: string }>();
+  // Assigning a URL to the first send must preserve its already-connected store.
+  const conversationKey =
+    sessionId && sessionId === assignedSession?.id
+      ? assignedSession.key
+      : (sessionId ?? `new-${newChatVersion}`);
+  const onSessionAssigned = useCallback(
+    (id: string) => setAssignedSession({ id, key: conversationKey }),
+    [conversationKey],
+  );
+  return (
+    <AgentConversation
+      key={conversationKey}
+      {...props}
+      sessionId={sessionId}
+      onSessionAssigned={onSessionAssigned}
+    />
+  );
+}
+
+function AgentConversation({
+  sessionId,
+  sessionless = false,
+  onSessionAssigned,
+}: AgentChatProps & { readonly onSessionAssigned: (id: string) => void }) {
+  const {
+    cache,
+    preparedSession,
+    sessionCreatedAt,
+    model,
+    onSessionCreated,
+    refreshHistory,
+    onSessionEvent,
+  } = useChatWorkspace();
   const isDisconnected = useServerStatus() === "unavailable";
+  const [saved] = useState(() =>
+    sessionId
+      ? (cache.get(sessionId) ??
+        (preparedSession?.session.sessionId === sessionId ? preparedSession : undefined))
+      : undefined,
+  );
+  const knownSessionId = useRef(sessionId);
   const conversationRef = useRef<StickToBottomContext>(null);
-  const [reducer] = useState(chatMessageReducer);
   const sectionRef = useRef<HTMLElement>(null);
   const composerRef = useRef<HTMLDivElement>(null);
   const [cancellationError, setCancellationError] = useState<string>();
   const [hasInputText, setHasInputText] = useState(false);
+  const [reducer] = useState(chatMessageReducer);
   const agent = useEveAgent<ChatMessageData>({
     reducer,
-    initialSession:
-      sessionId === undefined
-        ? undefined
-        : {
-            sessionId,
-            streamIndex: 0,
-          },
+    initialEvents: saved?.events,
+    initialSession: saved?.session ?? (sessionId ? { sessionId, streamIndex: 0 } : undefined),
     resume: sessionId !== undefined,
     onSessionChange(session) {
-      if (sessionId === undefined && session !== undefined) {
-        // Next patches window.history to navigate, which would detach the active stream.
-        History.prototype.replaceState.call(
-          window.history,
-          window.history.state,
-          "",
-          `/s/${encodeURIComponent(session.sessionId)}`,
-        );
-      }
+      if (!session || session.sessionId === knownSessionId.current) return;
+      knownSessionId.current = session.sessionId;
+      onSessionAssigned(session.sessionId);
+      onSessionCreated();
+      // Next synchronizes usePathname and Back/Forward for native history updates.
+      window.history.replaceState(null, "", `/s/${encodeURIComponent(session.sessionId)}`);
+    },
+    onEvent(event) {
+      if (knownSessionId.current) onSessionEvent(knownSessionId.current, event);
+    },
+    onFinish(snapshot) {
+      if (snapshot.session) cache.set({ events: snapshot.events, session: snapshot.session });
+      void refreshHistory();
     },
   });
+  useLayoutEffect(() => {
+    if (agent.session && agent.status !== "resuming")
+      cache.set({ events: agent.events, session: agent.session });
+  }, [cache, agent.events, agent.session, agent.status]);
+  const [restoredMessages] = useState(agent.data.messages);
+  const onInputResponses = useCallback(
+    (inputResponses: readonly AgentInputResponse[]) => {
+      setCancellationError(undefined);
+      return agent.respond(inputResponses);
+    },
+    [agent.respond],
+  );
 
   const activeTurnId = getActiveChatTurn(agent.events);
   const isBusy =
     agent.status === "submitted" || (agent.status === "streaming" && activeTurnId !== undefined);
   const isResuming = agent.status === "resuming";
-  const isEmpty = agent.data.messages.length === 0;
-  const lastMessage = agent.data.messages.at(-1);
+  const messages = isResuming ? restoredMessages : agent.data.messages;
+  const isEmpty = messages.length === 0;
+  const lastMessage = messages.at(-1);
   const isPendingAssistantShell =
     lastMessage?.role === "assistant" &&
     lastMessage.parts.every((part) => part.type === "step-start");
@@ -82,7 +137,7 @@ export function AgentChat({
   const turnFailure = isBusy || isResuming ? undefined : getLatestTurnFailure(agent.events);
   const errorMessage = cancellationError ?? agent.error?.message ?? turnFailure;
   const hasConversationContent = sessionless || !isEmpty || errorMessage !== undefined;
-  const showConversationLayout = isResuming || hasConversationContent;
+  const showConversationLayout = sessionId !== undefined || isResuming || hasConversationContent;
   const activeSessionId = sessionId ?? agent.session?.sessionId;
 
   useLayoutEffect(() => {
@@ -108,23 +163,21 @@ export function AgentChat({
   const handleSubmit = async (message: PromptInputMessage) => {
     const text = message.text.trim();
     if ((text.length === 0 && message.files.length === 0) || isResuming || isDisconnected) return;
+    setHasInputText(false);
 
+    // Sending returns to the live conversation after scrolling up or inspecting a tool.
     void conversationRef.current?.scrollToBottom({
       animation: window.matchMedia("(prefers-reduced-motion: reduce)").matches
         ? "instant"
         : "smooth",
     });
-    setHasInputText(false);
     setCancellationError(undefined);
+    // The SDK can retain its stream reader while children run. Its send API
+    // still requires steer in that state, even though the parent UI is idle.
     const options =
       agent.status === "submitted" || agent.status === "streaming"
         ? { turnPolicy: "steer" as const }
         : undefined;
-
-    if (message.files.length === 0) {
-      await agent.send(text, options);
-      return;
-    }
 
     const parts: UserContent = [];
     if (text.length > 0) {
@@ -139,7 +192,7 @@ export function AgentChat({
       });
     }
 
-    await agent.send(parts, options);
+    await agent.send(message.files.length ? parts : text, options);
   };
 
   const composer = (
@@ -154,55 +207,80 @@ export function AgentChat({
         onChange={(event) => setHasInputText(event.currentTarget.value.trim().length > 0)}
         placeholder={isDisconnected ? "Server unavailable" : "Send a message…"}
       />
+      <PromptInputFooter className="min-h-12 px-4 pb-3 pr-14">
+        {!isDisconnected ? (
+          <span
+            className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground"
+            title={model?.id}
+          >
+            <span className="truncate text-foreground/80">
+              {model
+                ? formatModelName(model.id)
+                : model === null
+                  ? "Model unavailable"
+                  : "Loading model…"}
+            </span>
+            {model?.reasoning ? <span className="capitalize">{model.reasoning}</span> : null}
+          </span>
+        ) : null}
+      </PromptInputFooter>
       <ComposerAction
         hasInputText={hasInputText}
         isBusy={isBusy}
-        isResuming={isResuming || isDisconnected}
+        isDisabled={isResuming || isDisconnected}
         onCancel={requestCancellation}
       />
     </PromptInput>
   );
 
   return (
-    <main
+    <section
       ref={sectionRef}
-      className="relative flex h-dvh flex-col overflow-hidden bg-background text-foreground [--composer-height:100px]"
+      className="relative flex min-h-0 min-w-0 flex-1 flex-col [--composer-height:144px]"
+      aria-label="Chat"
+      data-session-id={activeSessionId}
     >
       {showConversationLayout ? (
-        <ChatHeader canStartNewChat={activeSessionId !== undefined} />
-      ) : null}
-
-      {showConversationLayout ? (
         <Conversation
-          className="min-h-0 flex-1"
           contextRef={conversationRef}
+          className="min-h-0 flex-1"
           initial="instant"
           resize={activeSessionId === undefined ? "smooth" : "instant"}
         >
-          <ConversationTopFade className="top-14" />
-          <ConversationContent className="mx-auto w-full max-w-3xl gap-6 px-4 pt-20 pb-[calc(var(--composer-height)+4px)] sm:px-6">
-            {agent.data.messages.map((message, index) =>
-              showPendingThinking &&
-              isPendingAssistantShell &&
-              message.id === lastMessage.id ? null : (
-                <AgentMessage
-                  canRespond={!isBusy && !isResuming}
-                  isStreaming={
-                    isBusy &&
-                    message.metadata?.turnId === activeTurnId &&
-                    index === agent.data.messages.length - 1
-                  }
-                  key={message.id}
-                  message={message}
-                  onInputResponses={(inputResponses) => {
-                    setCancellationError(undefined);
-                    return agent.respond(inputResponses);
-                  }}
-                />
-              ),
-            )}
-            {showPendingThinking ? <PendingThinking /> : null}
-            {errorMessage ? <ErrorMessage message={errorMessage} /> : null}
+          <ConversationTopFade />
+          <ConversationContent className="mx-auto w-full max-w-3xl px-4 pt-6 pb-0 sm:px-6">
+            <div className="flex flex-col gap-6 pb-[calc(var(--composer-height)+4px)]">
+              <ChatHeader
+                createdAt={
+                  sessionCreatedAt ??
+                  agent.events.find((event) => event.type === "session.started")?.meta?.at
+                }
+              />
+              {isResuming && isEmpty ? (
+                <p role="status" className="text-sm text-muted-foreground">
+                  Loading conversation…
+                </p>
+              ) : null}
+              {messages.map((message, index) =>
+                showPendingThinking &&
+                isPendingAssistantShell &&
+                message.id === lastMessage.id ? null : (
+                  <AgentMessage
+                    canRespond={!isBusy && !isResuming}
+                    isStreaming={
+                      isBusy &&
+                      message.metadata?.turnId === activeTurnId &&
+                      index === messages.length - 1
+                    }
+                    key={message.id}
+                    message={message}
+                    onInputResponses={onInputResponses}
+                  />
+                ),
+              )}
+              {showPendingThinking ? <PendingThinking /> : null}
+              {errorMessage ? <ErrorMessage message={errorMessage} /> : null}
+            </div>
           </ConversationContent>
           <ConversationScrollButton className="bottom-[calc(var(--composer-height)+8px)]" />
         </Conversation>
@@ -214,36 +292,38 @@ export function AgentChat({
           "mx-auto w-full px-4 sm:px-6",
           showConversationLayout
             ? "absolute bottom-0 left-1/2 z-20 max-w-3xl -translate-x-1/2 bg-gradient-to-t from-background via-background to-transparent pt-4 pb-6"
-            : "flex max-w-xl flex-1 flex-col items-center justify-center gap-8 pb-[10vh]",
+            : "flex max-w-3xl flex-1 flex-col items-center justify-center gap-8 pb-[8vh]",
         )}
       >
         {showConversationLayout ? null : (
           <div className="flex flex-col items-center gap-3 text-center">
-            <h1 className="font-medium text-5xl tracking-tighter">{AGENT_NAME}</h1>
+            <h1 className="text-3xl font-medium tracking-tight sm:text-4xl">
+              What should we work on?
+            </h1>
           </div>
         )}
         <div className="w-full">{composer}</div>
       </div>
-    </main>
+    </section>
   );
 }
 
 function ComposerAction({
   hasInputText,
   isBusy,
-  isResuming,
+  isDisabled,
   onCancel,
 }: {
   readonly hasInputText: boolean;
   readonly isBusy: boolean;
-  readonly isResuming: boolean;
+  readonly isDisabled: boolean;
   readonly onCancel: () => void;
 }) {
   const attachments = usePromptInputAttachments();
   const canSubmit = hasInputText || attachments.files.length > 0;
 
   if (!isBusy || canSubmit) {
-    return <PromptInputSubmit disabled={isResuming} />;
+    return <PromptInputSubmit disabled={isDisabled} />;
   }
 
   return (
@@ -277,28 +357,25 @@ function ErrorMessage({ message }: { readonly message: string }) {
   );
 }
 
-function ChatHeader({ canStartNewChat }: { readonly canStartNewChat: boolean }) {
+function ChatHeader({ createdAt }: { readonly createdAt?: string }) {
+  const date = createdAt ? new Date(createdAt) : undefined;
+  const validDate = date && Number.isFinite(date.getTime()) ? date : undefined;
   return (
-    <header className="pointer-events-none fixed top-0 right-0 left-0 z-20 h-14">
-      <div className="relative mx-auto flex h-full w-full max-w-3xl items-center justify-center bg-background px-24">
-        <span className="flex items-center gap-2 truncate text-muted-foreground text-sm">
-          <ServerStatusDot />
-          {AGENT_NAME}
-        </span>
-        {canStartNewChat ? (
-          <Button
-            aria-label="Start a new chat"
-            className="pointer-events-auto fixed top-3 right-6 pr-4"
-            onClick={() => window.location.assign("/s")}
-            size="sm"
-            type="button"
-            variant="ghost"
-          >
-            <PlusIcon className="size-4" />
-            <span className="hidden font-normal text-sm sm:inline">New chat</span>
-          </Button>
-        ) : null}
-      </div>
+    <header className="relative flex min-h-4 items-center justify-center px-12">
+      {validDate ? (
+        <time
+          dateTime={validDate.toISOString()}
+          className="truncate text-[11px] text-muted-foreground"
+        >
+          {validDate.toLocaleString(undefined, {
+            month: "short",
+            day: "numeric",
+            year: "numeric",
+            hour: "numeric",
+            minute: "2-digit",
+          })}
+        </time>
+      ) : null}
     </header>
   );
 }
@@ -343,4 +420,14 @@ function getLatestTurnFailure(
   }
 
   return undefined;
+}
+
+function formatModelName(id: string): string {
+  return id
+    .split("/")
+    .at(-1)!
+    .split("-")
+    .map((part) => (part === "gpt" ? "GPT" : part.charAt(0).toUpperCase() + part.slice(1)))
+    .join(" ")
+    .replace(/^GPT (\d)/, "GPT-$1");
 }

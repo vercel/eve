@@ -23,8 +23,6 @@ const OUTPUT_PATH = join(SETUP_ROOT, "scaffold/create/web-template.ts");
 const SOURCE_ONLY_ROOT_ENTRIES = new Set([
   "README.md",
   "test",
-  "test",
-  "test",
   "coverage",
   "dist",
   "node_modules",
@@ -37,8 +35,8 @@ const SOURCE_ONLY_ROOT_ENTRIES = new Set([
 const WEB_CHANNEL_SOURCE_PATH = "agent/channels/eve.ts";
 
 const FILE_TRANSFORMS: Record<string, ReadonlyArray<readonly [string, string]>> = {
-  "app/_components/agent-chat.tsx": [
-    ['const AGENT_NAME = "eve-agent";', 'const AGENT_NAME = "__EVE_INIT_APP_NAME__";'],
+  "app/_components/session-sidebar.tsx": [
+    ['agentName = "eve-agent"', 'agentName = "__EVE_INIT_APP_NAME__"'],
   ],
   "app/layout.tsx": [['  title: "eve Next.js Starter",', '  title: "__EVE_INIT_APP_NAME__",']],
   "next.config.ts": [

@@ -187,6 +187,8 @@ Generated Web Chat includes copy buttons for tool commands, command output, para
 
 Repeated user messages stay separate. The conversation scrolls to a newly submitted message and shows Stop only while the active chat turn is running. Input is disabled while the server is unavailable and recovers on reconnection.
 
+Local history remembers up to 500 sessions opened or created in this browser, ordered by last message, with creation and last-turn tooltips. It does not enumerate server files or replay hidden conversations. Clearing browser storage clears this local list; known session URLs remain usable. Deployed history requires the authenticated session index.
+
 ## What to read next
 
 - [Frontend overview](./overview): the `useEveAgent` API

@@ -116,7 +116,7 @@ export function AccountControl({
   }
 
   return (
-    <div className="fixed top-3 left-4 z-30 flex h-8 items-center">
+    <div className="fixed top-3 right-4 z-30 flex h-8 items-center">
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <Button

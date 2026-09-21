@@ -353,7 +353,13 @@ describe("ensureChannel", () => {
 
     const layoutSource = await readFile(join(projectRoot, "app/layout.tsx"), "utf8");
     expect(layoutSource).toContain("disposablePolyfillScript");
-    expect(layoutSource).toContain("ServerStatusProvider");
+    expect(layoutSource).toContain("ChatWorkspace");
+    const workspaceSource = await readFile(
+      join(projectRoot, "app/_components/chat-workspace.tsx"),
+      "utf8",
+    );
+    expect(workspaceSource).toContain("ServerStatusProvider");
+    expect(layoutSource).toContain("initialOwner={owner}");
     const pageSource = await readFile(join(projectRoot, "app/page.tsx"), "utf8");
     expect(pageSource).toContain("<AuthenticatedAgentChat");
     const authenticatedChatSource = await readFile(

@@ -1816,6 +1816,7 @@
         "next@16.3.0-preview.6",
         "radix-ui@1.4.3",
         "react-dom@19.2.6",
+        "react-resizable-panels@4.12.4",
         "react@19.2.6",
         "shiki@3.23.0",
         "streamdown@2.5.0",
@@ -2037,6 +2038,11 @@
           "target": "lib/chat-message-reducer.ts"
         },
         {
+          "path": "registry/channel/web/lib/chat-session-cache.ts",
+          "type": "registry:file",
+          "target": "lib/chat-session-cache.ts"
+        },
+        {
           "path": "registry/channel/web/lib/chat-turn-state.ts",
           "type": "registry:file",
           "target": "lib/chat-turn-state.ts"
@@ -2052,14 +2058,74 @@
           "target": "lib/format-elapsed.ts"
         },
         {
+          "path": "registry/channel/web/lib/local-session-history.ts",
+          "type": "registry:file",
+          "target": "lib/local-session-history.ts"
+        },
+        {
+          "path": "registry/channel/web/lib/merge-session-history.ts",
+          "type": "registry:file",
+          "target": "lib/merge-session-history.ts"
+        },
+        {
           "path": "registry/channel/web/lib/server-status.ts",
           "type": "registry:file",
           "target": "lib/server-status.ts"
         },
         {
+          "path": "registry/channel/web/lib/session-history.ts",
+          "type": "registry:file",
+          "target": "lib/session-history.ts"
+        },
+        {
+          "path": "registry/channel/web/lib/session-pagination.ts",
+          "type": "registry:file",
+          "target": "lib/session-pagination.ts"
+        },
+        {
+          "path": "registry/channel/web/app/_components/chat-workspace-layout.tsx",
+          "type": "registry:file",
+          "target": "app/_components/chat-workspace-layout.tsx"
+        },
+        {
+          "path": "registry/channel/web/app/_components/session-sidebar.tsx",
+          "type": "registry:file",
+          "target": "app/_components/session-sidebar.tsx"
+        },
+        {
+          "path": "registry/channel/web/app/_components/chat-workspace.tsx",
+          "type": "registry:file",
+          "target": "app/_components/chat-workspace.tsx"
+        },
+        {
           "path": "registry/channel/web/app/_components/server-status.tsx",
           "type": "registry:file",
           "target": "app/_components/server-status.tsx"
+        },
+        {
+          "path": "registry/channel/web/components/ui/resizable.tsx",
+          "type": "registry:file",
+          "target": "components/ui/resizable.tsx"
+        },
+        {
+          "path": "registry/channel/web/components/ui/sheet.tsx",
+          "type": "registry:file",
+          "target": "components/ui/sheet.tsx"
+        },
+        {
+          "path": "registry/channel/web/components/ui/sidebar.tsx",
+          "type": "registry:file",
+          "target": "components/ui/sidebar.tsx"
+        },
+        {
+          "path": "registry/channel/web/components/ui/skeleton.tsx",
+          "type": "registry:file",
+          "target": "components/ui/skeleton.tsx"
+        },
+        {
+          "path": "registry/channel/web/hooks/use-mobile.ts",
+          "type": "registry:file",
+          "target": "hooks/use-mobile.ts"
         }
       ]
     },
