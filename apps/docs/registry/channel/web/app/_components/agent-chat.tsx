@@ -2,7 +2,7 @@
 
 import type { UserContent } from "ai";
 import { useEveAgent } from "eve/react";
-import { AlertCircleIcon, BrainIcon, PlusIcon, SquareIcon } from "lucide-react";
+import { AlertCircleIcon, PlusIcon, SquareIcon } from "lucide-react";
 import { useLayoutEffect, useRef, useState } from "react";
 import {
   Conversation,
@@ -289,8 +289,9 @@ function PendingThinking() {
     <Message aria-live="polite" from="assistant">
       <MessageContent>
         <div className="mb-4 flex w-full items-center gap-2 text-muted-foreground text-sm">
-          <BrainIcon className="size-4" />
-          <Shimmer duration={1}>Thinking</Shimmer>
+          <Shimmer duration={1} repeatDelay={2}>
+            Thinking
+          </Shimmer>
         </div>
       </MessageContent>
     </Message>

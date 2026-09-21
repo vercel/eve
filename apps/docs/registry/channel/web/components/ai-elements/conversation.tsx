@@ -117,9 +117,30 @@ function readScrollPosition(value: string | null):
 
 export type ConversationContentProps = ComponentProps<typeof StickToBottom.Content>;
 
-export const ConversationContent = ({ className, ...props }: ConversationContentProps) => (
-  <StickToBottom.Content className={cn("flex flex-col gap-8 p-4", className)} {...props} />
-);
+export const ConversationContent = ({
+  className,
+  onClickCapture,
+  ...props
+}: ConversationContentProps) => {
+  const { stopScroll } = useStickToBottomContext();
+
+  return (
+    <StickToBottom.Content
+      className={cn("flex flex-col gap-8 p-4", className)}
+      {...props}
+      onClickCapture={(event) => {
+        // Inspecting a disclosure should not pull the reader back to the latest message.
+        if (
+          event.target instanceof Element &&
+          event.target.closest('[data-slot="collapsible-trigger"]')
+        ) {
+          stopScroll();
+        }
+        onClickCapture?.(event);
+      }}
+    />
+  );
+};
 
 export type ConversationTopFadeProps = ComponentProps<"div">;
 

@@ -2030,6 +2030,11 @@
           "path": "registry/channel/web/postcss.config.mjs",
           "type": "registry:file",
           "target": "postcss.config.mjs"
+        },
+        {
+          "path": "registry/channel/web/lib/format-elapsed.ts",
+          "type": "registry:file",
+          "target": "lib/format-elapsed.ts"
         }
       ]
     },

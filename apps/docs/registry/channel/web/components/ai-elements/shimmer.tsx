@@ -28,6 +28,7 @@ export interface TextShimmerProps {
   as?: ElementType;
   className?: string;
   duration?: number;
+  repeatDelay?: number;
   spread?: number;
 }
 
@@ -36,6 +37,7 @@ const ShimmerComponent = ({
   as: Component = "p",
   className,
   duration = 2,
+  repeatDelay = 0,
   spread = 2,
 }: TextShimmerProps) => {
   const MotionComponent = getMotionComponent(Component as keyof JSX.IntrinsicElements);
@@ -60,6 +62,7 @@ const ShimmerComponent = ({
       }
       transition={{
         duration,
+        repeatDelay,
         ease: "linear",
         repeat: Number.POSITIVE_INFINITY,
       }}

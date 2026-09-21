@@ -1,11 +1,12 @@
 "use client";
 
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import type { DynamicToolUIPart, ToolUIPart } from "ai";
-import { ChevronRightIcon, TerminalIcon, WrenchIcon } from "lucide-react";
+import { CheckIcon, ChevronRightIcon, CopyIcon, TerminalIcon, WrenchIcon } from "lucide-react";
 import type { ComponentProps, ReactNode } from "react";
-import { isValidElement } from "react";
+import { isValidElement, useEffect, useRef, useState } from "react";
 
 import { CodeBlock } from "./code-block";
 
@@ -75,21 +76,20 @@ export const ToolHeader = ({
       )}
       <span className="text-sm">{displayName}</span>
       {getStatusIndicator(state)}
-      <ChevronRightIcon className="size-3.5 shrink-0 transition-transform group-data-[state=open]:rotate-90" />
+      <ChevronRightIcon className="size-3.5 shrink-0 transition-transform duration-150 ease-out group-data-[state=open]:rotate-90 motion-reduce:transition-none" />
     </CollapsibleTrigger>
   );
 };
 
 export type ToolContentProps = ComponentProps<typeof CollapsibleContent>;
 
-export const ToolContent = ({ className, ...props }: ToolContentProps) => (
+export const ToolContent = ({ className, children, ...props }: ToolContentProps) => (
   <CollapsibleContent
-    className={cn(
-      "data-[state=closed]:fade-out-0 data-[state=closed]:slide-out-to-top-2 data-[state=open]:slide-in-from-top-2 space-y-4 py-2 text-popover-foreground outline-none data-[state=closed]:animate-out data-[state=open]:animate-in",
-      className,
-    )}
+    className={cn("chat-disclosure text-popover-foreground outline-none", className)}
     {...props}
-  />
+  >
+    <div className="space-y-4 py-2">{children}</div>
+  </CollapsibleContent>
 );
 
 export type BashToolContentProps = ComponentProps<"div"> & {
@@ -110,34 +110,96 @@ export const BashToolContent = ({
   const stderr = getRecordValue(output, "stderr") ?? errorText ?? "";
   const exitCode = getRecordValue(output, "exitCode");
   const hasResult = Boolean(stdout || stderr || (typeof exitCode === "number" && exitCode !== 0));
+  const outputText = [
+    stdout ? String(stdout).trimEnd() : "",
+    stderr ? String(stderr).trimEnd() : "",
+    typeof exitCode === "number" && exitCode !== 0 ? `Exited with code ${exitCode}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
 
   return (
     <div className={cn("space-y-2", className)} {...props}>
-      <pre className="overflow-x-auto whitespace-pre-wrap rounded-md bg-muted/50 p-3 font-mono text-xs leading-relaxed">
-        <code>
-          <span className="text-muted-foreground">$ </span>
-          {command ?? "…"}
-        </code>
-      </pre>
-      {hasResult ? (
-        <pre className="overflow-x-auto whitespace-pre-wrap rounded-md bg-muted/50 p-3 font-mono text-xs leading-relaxed">
+      <div className="group/tool-block relative">
+        {command !== undefined ? (
+          <ToolCopyButton label="command" getText={() => String(command)} />
+        ) : null}
+        <pre className="overflow-x-auto whitespace-pre-wrap rounded-md bg-muted/50 p-3 pr-10 font-mono text-xs leading-relaxed">
           <code>
-            <span className="mb-2 block font-sans text-[10px] text-muted-foreground uppercase tracking-wide">
-              Output
-            </span>
-            {stdout ? <span className="block">{String(stdout).trimEnd()}</span> : null}
-            {stderr ? (
-              <span className="block text-destructive">{String(stderr).trimEnd()}</span>
-            ) : null}
-            {typeof exitCode === "number" && exitCode !== 0 ? (
-              <span className="block text-muted-foreground">Exited with code {exitCode}</span>
-            ) : null}
+            <span className="text-muted-foreground">$ </span>
+            {command ?? "…"}
           </code>
         </pre>
+      </div>
+      {hasResult ? (
+        <div className="group/tool-block relative">
+          <ToolCopyButton label="output" getText={() => outputText} />
+          <pre className="overflow-x-auto whitespace-pre-wrap rounded-md bg-muted/50 p-3 font-mono text-xs leading-relaxed">
+            <code>
+              <span className="mb-2 block pr-8 font-sans text-[10px] text-muted-foreground uppercase tracking-wide">
+                Output
+              </span>
+              {stdout ? <span className="block">{String(stdout).trimEnd()}</span> : null}
+              {stderr ? (
+                <span className="block text-destructive">{String(stderr).trimEnd()}</span>
+              ) : null}
+              {typeof exitCode === "number" && exitCode !== 0 ? (
+                <span className="block text-muted-foreground">Exited with code {exitCode}</span>
+              ) : null}
+            </code>
+          </pre>
+        </div>
       ) : null}
     </div>
   );
 };
+
+function ToolCopyButton({
+  label: contentLabel,
+  getText,
+}: {
+  label: string;
+  getText: () => string;
+}) {
+  const [status, setStatus] = useState<"idle" | "copied" | "error">("idle");
+
+  useEffect(() => {
+    if (status === "idle") return;
+    const timer = window.setTimeout(() => setStatus("idle"), 2000);
+    return () => window.clearTimeout(timer);
+  }, [status]);
+
+  const label =
+    status === "copied"
+      ? `Copied ${contentLabel}`
+      : status === "error"
+        ? "Copy failed. Try again"
+        : `Copy ${contentLabel}`;
+
+  return (
+    <Button
+      aria-label={label}
+      title={label}
+      className="absolute top-2 right-2 z-10 text-muted-foreground opacity-0 transition-opacity group-hover/tool-block:opacity-100 group-focus-within/tool-block:opacity-100 [@media(hover:none)]:opacity-100"
+      size="icon-xs"
+      variant="ghost"
+      type="button"
+      onClick={async () => {
+        try {
+          await navigator.clipboard.writeText(getText());
+          setStatus("copied");
+        } catch {
+          setStatus("error");
+        }
+      }}
+    >
+      {status === "copied" ? <CheckIcon /> : <CopyIcon />}
+      <span className="sr-only" role="status">
+        {status === "idle" ? "" : label}
+      </span>
+    </Button>
+  );
+}
 
 const getRecordValue = (value: unknown, key: string): string | number | undefined => {
   if (typeof value !== "object" || value === null || !(key in value)) {
@@ -153,8 +215,12 @@ export type ToolInputProps = ComponentProps<"div"> & {
 };
 
 export const ToolInput = ({ className, input, ...props }: ToolInputProps) => (
-  <div className={cn("overflow-hidden rounded-md bg-muted/50", className)} {...props}>
-    <span className="block px-3 pt-3 font-sans text-[10px] text-muted-foreground uppercase tracking-wide">
+  <div
+    className={cn("group/tool-block relative overflow-hidden rounded-md bg-muted/50", className)}
+    {...props}
+  >
+    <ToolCopyButton label="parameters" getText={() => JSON.stringify(input, null, 2) ?? ""} />
+    <span className="block px-3 pt-3 pr-10 font-sans text-[10px] text-muted-foreground uppercase tracking-wide">
       Parameters
     </span>
     <div>
@@ -173,6 +239,7 @@ export type ToolOutputProps = ComponentProps<"div"> & {
 };
 
 export const ToolOutput = ({ className, output, errorText, ...props }: ToolOutputProps) => {
+  const contentRef = useRef<HTMLDivElement>(null);
   if (!(output || errorText)) {
     return null;
   }
@@ -194,17 +261,23 @@ export const ToolOutput = ({ className, output, errorText, ...props }: ToolOutpu
   return (
     <div
       className={cn(
-        "overflow-x-auto rounded-md text-xs [&_table]:w-full",
+        "group/tool-block relative rounded-md text-xs [&_table]:w-full",
         errorText ? "bg-destructive/10 text-destructive" : "bg-muted/50 text-foreground",
         className,
       )}
       {...props}
     >
-      <span className="block px-3 pt-3 font-sans text-[10px] text-muted-foreground uppercase tracking-wide">
+      <ToolCopyButton
+        label={errorText ? "error" : "result"}
+        getText={() => contentRef.current?.innerText ?? ""}
+      />
+      <span className="block px-3 pt-3 pr-10 font-sans text-[10px] text-muted-foreground uppercase tracking-wide">
         {errorText ? "Error" : "Result"}
       </span>
-      {errorText && <div className="px-3 pt-2 pb-3">{errorText}</div>}
-      {Output}
+      <div ref={contentRef} className="overflow-x-auto">
+        {errorText && <div className="px-3 pt-2 pb-3">{errorText}</div>}
+        {Output}
+      </div>
     </div>
   );
 };
