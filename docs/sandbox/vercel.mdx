@@ -91,7 +91,7 @@ export default defineSandbox(() =>
 
 The build requires Vercel project credentials and an OCI builder: Docker locally or buildah in a hosted build environment. Registry credentials never appear in command arguments or prepared artifacts.
 
-This environment does not accept `prepare`. Add a Dockerfile when the eve base image is not sufficient, and put immutable software setup there. The build artifact records only the digest-pinned image reference and content-addressed Drive identities; it never records credentials. Runtime strictly resolves those resources and fails with rebuild or redeploy guidance when they are unavailable.
+This environment does not accept `prepare`. Add a Dockerfile when the eve base image is not sufficient, and put immutable software setup there. The build artifact records only the digest-pinned image reference and content-addressed Drive identities; it never records credentials. Runtime resolves each serialized Drive name with `Drive.getOrCreate()` and mounts its snapshot.
 
 ## Network policy
 
