@@ -486,6 +486,27 @@ describe("ensureChannel", () => {
     expect(normalizeEol(channelSource)).toBe(normalizeEol(sourceChannel));
   });
 
+  test("redirects direct Vercel service traffic to the local services router", async () => {
+    const projectRoot = await createTempDir();
+    await mkdir(join(projectRoot, "agent"), { recursive: true });
+    await writeFile(
+      join(projectRoot, "package.json"),
+      `${JSON.stringify({ name: "demo", type: "module" }, null, 2)}\n`,
+      "utf8",
+    );
+
+    await ensureChannel({
+      projectRoot,
+      kind: "web",
+      webPackageVersions: TEST_WEB_PACKAGE_VERSIONS,
+    });
+
+    const proxySource = await readFile(join(projectRoot, "proxy.ts"), "utf8");
+    expect(proxySource).toContain('process.env.__VERCEL_DEV_RUNNING === "1"');
+    expect(proxySource).toContain('request.headers.get("x-forwarded-host")');
+    expect(proxySource).toContain("target.host = routerHost");
+  });
+
   test("scaffolds Web Chat questions as visible response forms", async () => {
     const projectRoot = await createTempDir();
     await mkdir(join(projectRoot, "agent"), { recursive: true });
