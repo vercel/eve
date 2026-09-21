@@ -50,12 +50,10 @@ describe("schedule collection tools", () => {
       "schedule__collection__delete",
     ]);
     expect(tools).not.toHaveProperty("schedule__collection__invoke");
-    expect(
-      readDurableDynamicToolCallbacks(tools!.schedule__collection__create!)?.execute,
-    ).toBeDefined();
-    expect(
-      readDurableDynamicToolCallbacks(tools!.schedule__collection__create!)?.approvalRequest,
-    ).toBeDefined();
+    const callbacks = readDurableDynamicToolCallbacks(tools!.schedule__collection__create!);
+    expect(callbacks?.execute).toBeDefined();
+    expect(callbacks?.inputSchema).toBeDefined();
+    expect(callbacks?.approvalRequest).toBeDefined();
   });
 
   it("omits every generated tool when tools is false", async () => {

@@ -10,7 +10,10 @@ import { bindScheduleCollection } from "#runtime/schedules/collection-client.js"
 import { defineTool } from "#tools/definition.js";
 import type { DynamicToolEntry } from "#tools/dynamic.js";
 import { parseJsonObject } from "#shared/json.js";
-import { stampDurableDynamicToolCallbacks } from "#tools/durable-callbacks.js";
+import {
+  readDurableDynamicToolCallbacks,
+  stampDurableDynamicToolCallbacks,
+} from "#tools/durable-callbacks.js";
 import { z } from "#compiled/zod/index.js";
 
 const expressionSchema = z.discriminatedUnion("type", [
@@ -151,22 +154,16 @@ function stampGeneratedToolCallbacks(tool: unknown): void {
   const entry = tool as DynamicToolEntry;
   const closure = parseJsonObject({});
   const callbacks: Parameters<typeof stampDurableDynamicToolCallbacks>[1] = {
+    ...readDurableDynamicToolCallbacks(entry),
     execute: {
       callback: async (_rawClosure, toolInput, context) => await entry.execute(toolInput, context),
       closure,
     },
-  };
-  if (entry.approval !== undefined) {
-    callbacks.approvalRequest = {
-      callback: async (_rawClosure, context) => {
-        const approval = entry.approval;
-        if (approval === undefined) return "not-applicable";
-        if (typeof approval === "function") return await approval(context);
-        return await approval.request(context);
-      },
+    inputSchema: {
+      callback: async () => entry.inputSchema,
       closure,
-    };
-  }
+    },
+  };
   stampDurableDynamicToolCallbacks(entry, callbacks);
 }
 
