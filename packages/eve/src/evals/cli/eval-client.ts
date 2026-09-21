@@ -46,11 +46,15 @@ export async function createEvalClient(
     return new Client(base);
   }
 
-  const { options: verified } = await resolveVerifiedRemoteDevelopmentClient({
+  const verifiedClient = await resolveVerifiedRemoteDevelopmentClient({
     serverUrl: target.url,
     workspaceRoot: options.workspaceRoot,
     deps: options.deps,
   });
+  console.error(
+    `[eve:eval-auth-debug] deployment=${verifiedClient.deploymentResolution?.kind ?? "not-attempted"}`,
+  );
+  const { options: verified } = verifiedClient;
   return new Client({
     ...base,
     ...verified,
