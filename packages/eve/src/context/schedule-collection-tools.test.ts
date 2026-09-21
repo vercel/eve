@@ -4,6 +4,7 @@ import { z } from "zod";
 import { createScheduleCollectionToolDynamicDefinition } from "#context/schedule-collection-tools.js";
 import { defineScheduleCollection } from "#public/schedules/collection.js";
 import { inMemoryScheduleProvider } from "#public/schedules/providers/in-memory.js";
+import { readDurableDynamicToolCallbacks } from "#tools/durable-callbacks.js";
 
 const resolveContext = {
   abortSignal: new AbortController().signal,
@@ -49,6 +50,12 @@ describe("schedule collection tools", () => {
       "schedule__collection__delete",
     ]);
     expect(tools).not.toHaveProperty("schedule__collection__invoke");
+    expect(
+      readDurableDynamicToolCallbacks(tools!.schedule__collection__create!)?.execute,
+    ).toBeDefined();
+    expect(
+      readDurableDynamicToolCallbacks(tools!.schedule__collection__create!)?.approvalRequest,
+    ).toBeDefined();
   });
 
   it("omits every generated tool when tools is false", async () => {

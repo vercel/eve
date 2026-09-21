@@ -1,12 +1,16 @@
 import { always } from "#tools/approval/policies.js";
 import type { DynamicResolveContext } from "#dynamic/definition.js";
 import { defineDynamic } from "#dynamic/definition.js";
+import { markDynamicCallbackRebind } from "#internal/dynamic-tool-rebind.js";
 import type {
   ScheduleCollectionDefinition,
   ScheduleExpression,
 } from "#public/schedules/collection.js";
 import { bindScheduleCollection } from "#runtime/schedules/collection-client.js";
 import { defineTool } from "#tools/definition.js";
+import type { DynamicToolEntry } from "#tools/dynamic.js";
+import { parseJsonObject } from "#shared/json.js";
+import { stampDurableDynamicToolCallbacks } from "#tools/durable-callbacks.js";
 import { z } from "#compiled/zod/index.js";
 
 const expressionSchema = z.discriminatedUnion("type", [
@@ -27,111 +31,143 @@ export function createScheduleCollectionToolDynamicDefinition<TInput>(
   definition: ScheduleCollectionDefinition<TInput>,
   input: { readonly application: string; readonly collection: string },
 ) {
-  return defineDynamic({
-    events: {
-      "turn.started": async (_event, context) => {
-        const options = resolveToolOptions(definition.tools);
-        if (options === null) return null;
-        const client = await bindScheduleCollection(
-          input.collection,
-          definition,
-          bindingContext(input.application, context),
-        );
-        if (client === null) return null;
+  return markDynamicCallbackRebind(
+    defineDynamic({
+      events: {
+        "turn.started": async (_event, context) => {
+          const options = resolveToolOptions(definition.tools);
+          if (options === null) return null;
+          const client = await bindScheduleCollection(
+            input.collection,
+            definition,
+            bindingContext(input.application, context),
+          );
+          if (client === null) return null;
 
-        const tools: Record<string, unknown> = {};
-        const description = (value: string) =>
-          definition.description === undefined ? value : `${definition.description}\n\n${value}`;
+          const tools: Record<string, unknown> = {};
+          const description = (value: string) =>
+            definition.description === undefined ? value : `${definition.description}\n\n${value}`;
 
-        const toolName = (operation: string) => `schedule__${input.collection}__${operation}`;
+          const toolName = (operation: string) => `schedule__${input.collection}__${operation}`;
 
-        if (options.create) {
-          tools[toolName("create")] = defineTool({
-            approval: always(),
-            description: description("Create a recurring or one-time schedule in this collection."),
-            inputSchema: z.object({
-              expression: expressionSchema,
-              input: z.unknown(),
-              name: z.string(),
-              state: z.enum(["active", "inactive"]).optional(),
-            }),
-            execute: async (toolInput) =>
-              await client.create({
-                expression: toolInput.expression as ScheduleExpression,
-                input: toolInput.input as TInput,
-                name: toolInput.name,
-                state: toolInput.state,
+          if (options.create) {
+            tools[toolName("create")] = defineTool({
+              approval: always(),
+              description: description(
+                "Create a recurring or one-time schedule in this collection.",
+              ),
+              inputSchema: z.object({
+                expression: expressionSchema,
+                input: z.unknown(),
+                name: z.string(),
+                state: z.enum(["active", "inactive"]).optional(),
               }),
-          });
-        }
-        if (options.read) {
-          tools[toolName("list")] = defineTool({
-            description: description("List schedules in this collection for the current scope."),
-            inputSchema: z.object({
-              cursor: z.string().optional(),
-              limit: z.number().int().optional(),
-            }),
-            execute: async (toolInput) => await client.list(toolInput),
-          });
-          tools[toolName("read")] = defineTool({
-            description: description("Read one schedule in this collection by its exact name."),
-            inputSchema: z.object({ name: z.string() }),
-            execute: async ({ name }) => await client.get(name),
-          });
-        }
-        if (options.update) {
-          tools[toolName("update")] = defineTool({
-            approval: always(),
-            description: description("Update the timing or typed input of an existing schedule."),
-            inputSchema: z.object({
-              expression: expressionSchema.optional(),
-              input: z.unknown().optional(),
-              name: z.string(),
-            }),
-            execute: async ({ name, ...patch }) =>
-              await client.update(name, {
-                ...(patch.expression === undefined
-                  ? {}
-                  : { expression: patch.expression as ScheduleExpression }),
-                ...(patch.input === undefined ? {} : { input: patch.input as TInput }),
+              execute: async (toolInput) =>
+                await client.create({
+                  expression: toolInput.expression as ScheduleExpression,
+                  input: toolInput.input as TInput,
+                  name: toolInput.name,
+                  state: toolInput.state,
+                }),
+            });
+          }
+          if (options.read) {
+            tools[toolName("list")] = defineTool({
+              description: description("List schedules in this collection for the current scope."),
+              inputSchema: z.object({
+                cursor: z.string().optional(),
+                limit: z.number().int().optional(),
               }),
-          });
-          tools[toolName("enable")] = defineTool({
-            approval: always(),
-            description: description("Enable an inactive schedule."),
-            inputSchema: z.object({ name: z.string() }),
-            execute: async ({ name }) => await client.enable(name),
-          });
-          tools[toolName("disable")] = defineTool({
-            approval: always(),
-            description: description("Disable a schedule without deleting it."),
-            inputSchema: z.object({ name: z.string() }),
-            execute: async ({ name }) => await client.disable(name),
-          });
-        }
-        if (options.delete) {
-          tools[toolName("delete")] = defineTool({
-            approval: always(),
-            description: description("Permanently delete a schedule from this collection."),
-            inputSchema: z.object({ name: z.string() }),
-            execute: async ({ name }) => ({ deleted: await client.delete(name) }),
-          });
-        }
-        if (options.invoke) {
-          tools[toolName("invoke")] = defineTool({
-            approval: always(),
-            description: description("Run a schedule now without changing its timing or state."),
-            inputSchema: z.object({ name: z.string() }),
-            execute: async ({ name }) => {
-              await client.invoke(name);
-              return { invoked: true };
-            },
-          });
-        }
-        return tools;
+              execute: async (toolInput) => await client.list(toolInput),
+            });
+            tools[toolName("read")] = defineTool({
+              description: description("Read one schedule in this collection by its exact name."),
+              inputSchema: z.object({ name: z.string() }),
+              execute: async ({ name }) => await client.get(name),
+            });
+          }
+          if (options.update) {
+            tools[toolName("update")] = defineTool({
+              approval: always(),
+              description: description("Update the timing or typed input of an existing schedule."),
+              inputSchema: z.object({
+                expression: expressionSchema.optional(),
+                input: z.unknown().optional(),
+                name: z.string(),
+              }),
+              execute: async ({ name, ...patch }) =>
+                await client.update(name, {
+                  ...(patch.expression === undefined
+                    ? {}
+                    : { expression: patch.expression as ScheduleExpression }),
+                  ...(patch.input === undefined ? {} : { input: patch.input as TInput }),
+                }),
+            });
+            tools[toolName("enable")] = defineTool({
+              approval: always(),
+              description: description("Enable an inactive schedule."),
+              inputSchema: z.object({ name: z.string() }),
+              execute: async ({ name }) => await client.enable(name),
+            });
+            tools[toolName("disable")] = defineTool({
+              approval: always(),
+              description: description("Disable a schedule without deleting it."),
+              inputSchema: z.object({ name: z.string() }),
+              execute: async ({ name }) => await client.disable(name),
+            });
+          }
+          if (options.delete) {
+            tools[toolName("delete")] = defineTool({
+              approval: always(),
+              description: description("Permanently delete a schedule from this collection."),
+              inputSchema: z.object({ name: z.string() }),
+              execute: async ({ name }) => ({ deleted: await client.delete(name) }),
+            });
+          }
+          if (options.invoke) {
+            tools[toolName("invoke")] = defineTool({
+              approval: always(),
+              description: description("Run a schedule now without changing its timing or state."),
+              inputSchema: z.object({ name: z.string() }),
+              execute: async ({ name }) => {
+                await client.invoke(name);
+                return { invoked: true };
+              },
+            });
+          }
+          return Object.fromEntries(
+            Object.entries(tools).map(([name, tool]) => {
+              stampGeneratedToolCallbacks(tool);
+              return [name, tool];
+            }),
+          );
+        },
       },
+    }),
+  );
+}
+
+function stampGeneratedToolCallbacks(tool: unknown): void {
+  const entry = tool as DynamicToolEntry;
+  const closure = parseJsonObject({});
+  const callbacks: Parameters<typeof stampDurableDynamicToolCallbacks>[1] = {
+    execute: {
+      callback: async (_rawClosure, toolInput, context) => await entry.execute(toolInput, context),
+      closure,
     },
-  });
+  };
+  if (entry.approval !== undefined) {
+    callbacks.approvalRequest = {
+      callback: async (_rawClosure, context) => {
+        const approval = entry.approval;
+        if (approval === undefined) return "not-applicable";
+        if (typeof approval === "function") return await approval(context);
+        return await approval.request(context);
+      },
+      closure,
+    };
+  }
+  stampDurableDynamicToolCallbacks(entry, callbacks);
 }
 
 function bindingContext(application: string, context: DynamicResolveContext) {
