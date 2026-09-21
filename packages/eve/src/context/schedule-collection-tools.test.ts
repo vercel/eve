@@ -40,15 +40,15 @@ describe("schedule collection tools", () => {
     const tools = await dynamic.events["turn.started"]!({}, resolveContext);
 
     expect(Object.keys(tools!)).toEqual([
-      "collection__create_schedule",
-      "collection__list_schedules",
-      "collection__read_schedule",
-      "collection__update_schedule",
-      "collection__enable_schedule",
-      "collection__disable_schedule",
-      "collection__delete_schedule",
+      "schedule__collection__create",
+      "schedule__collection__list",
+      "schedule__collection__read",
+      "schedule__collection__update",
+      "schedule__collection__enable",
+      "schedule__collection__disable",
+      "schedule__collection__delete",
     ]);
-    expect(tools).not.toHaveProperty("collection__invoke_schedule");
+    expect(tools).not.toHaveProperty("schedule__collection__invoke");
   });
 
   it("omits every generated tool when tools is false", async () => {

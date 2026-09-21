@@ -6,4 +6,4 @@ Exercises provider-backed `defineScheduleCollection(...)` authoring and its auto
 pnpm --filter dynamic-schedules dev
 ```
 
-The in-memory provider keeps schedules only for the current process. Registering `agent/schedules/collection.ts` contributes `collection__create_schedule`, `collection__list_schedules`, `collection__read_schedule`, `collection__update_schedule`, `collection__enable_schedule`, `collection__disable_schedule`, and `collection__delete_schedule`. Immediate invocation remains programmatic and is not model-facing by default.
+The in-memory provider keeps schedules only for the current process. Registering `agent/schedules/collection.ts` contributes `schedule__collection__create`, `schedule__collection__list`, `schedule__collection__read`, `schedule__collection__update`, `schedule__collection__enable`, `schedule__collection__disable`, and `schedule__collection__delete`. Immediate invocation remains programmatic and is not model-facing by default.

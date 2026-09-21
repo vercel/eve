@@ -43,8 +43,10 @@ export function createScheduleCollectionToolDynamicDefinition<TInput>(
         const description = (value: string) =>
           definition.description === undefined ? value : `${definition.description}\n\n${value}`;
 
+        const toolName = (operation: string) => `schedule__${input.collection}__${operation}`;
+
         if (options.create) {
-          tools[`${input.collection}__create_schedule`] = defineTool({
+          tools[toolName("create")] = defineTool({
             approval: always(),
             description: description("Create a recurring or one-time schedule in this collection."),
             inputSchema: z.object({
@@ -63,7 +65,7 @@ export function createScheduleCollectionToolDynamicDefinition<TInput>(
           });
         }
         if (options.read) {
-          tools[`${input.collection}__list_schedules`] = defineTool({
+          tools[toolName("list")] = defineTool({
             description: description("List schedules in this collection for the current scope."),
             inputSchema: z.object({
               cursor: z.string().optional(),
@@ -71,14 +73,14 @@ export function createScheduleCollectionToolDynamicDefinition<TInput>(
             }),
             execute: async (toolInput) => await client.list(toolInput),
           });
-          tools[`${input.collection}__read_schedule`] = defineTool({
+          tools[toolName("read")] = defineTool({
             description: description("Read one schedule in this collection by its exact name."),
             inputSchema: z.object({ name: z.string() }),
             execute: async ({ name }) => await client.get(name),
           });
         }
         if (options.update) {
-          tools[`${input.collection}__update_schedule`] = defineTool({
+          tools[toolName("update")] = defineTool({
             approval: always(),
             description: description("Update the timing or typed input of an existing schedule."),
             inputSchema: z.object({
@@ -94,13 +96,13 @@ export function createScheduleCollectionToolDynamicDefinition<TInput>(
                 ...(patch.input === undefined ? {} : { input: patch.input as TInput }),
               }),
           });
-          tools[`${input.collection}__enable_schedule`] = defineTool({
+          tools[toolName("enable")] = defineTool({
             approval: always(),
             description: description("Enable an inactive schedule."),
             inputSchema: z.object({ name: z.string() }),
             execute: async ({ name }) => await client.enable(name),
           });
-          tools[`${input.collection}__disable_schedule`] = defineTool({
+          tools[toolName("disable")] = defineTool({
             approval: always(),
             description: description("Disable a schedule without deleting it."),
             inputSchema: z.object({ name: z.string() }),
@@ -108,7 +110,7 @@ export function createScheduleCollectionToolDynamicDefinition<TInput>(
           });
         }
         if (options.delete) {
-          tools[`${input.collection}__delete_schedule`] = defineTool({
+          tools[toolName("delete")] = defineTool({
             approval: always(),
             description: description("Permanently delete a schedule from this collection."),
             inputSchema: z.object({ name: z.string() }),
@@ -116,7 +118,7 @@ export function createScheduleCollectionToolDynamicDefinition<TInput>(
           });
         }
         if (options.invoke) {
-          tools[`${input.collection}__invoke_schedule`] = defineTool({
+          tools[toolName("invoke")] = defineTool({
             approval: always(),
             description: description("Run a schedule now without changing its timing or state."),
             inputSchema: z.object({ name: z.string() }),

@@ -424,7 +424,7 @@ class AgentGraphCompiler {
         return instantiateProgrammaticTemplate({
           anchor: candidate,
           dependencies: { collection: candidate },
-          logicalPath: `tools/${collection}__schedules.ts`,
+          logicalPath: `tools/schedule__${collection}.ts`,
           owner: { feature: "schedule-collection", kind: "framework" },
           parameters: {
             application: input.manifest.agentId,
