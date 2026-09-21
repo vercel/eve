@@ -64,7 +64,11 @@ import {
   loadThreadContextMessages,
   type LoadThreadContextMessagesOptions,
 } from "#public/channels/slack/thread.js";
-import { buildSlackAuthContext, slackUserIdFromAuthContext } from "#public/channels/slack/auth.js";
+import {
+  admitSlackUser,
+  buildSlackAuthContext,
+  slackUserIdFromAuthContext,
+} from "#public/channels/slack/auth.js";
 import { SLACK_CHANNEL_DEFAULT_ROUTE } from "#public/channels/slack/constants.js";
 import { handleInteractionPost } from "#public/channels/slack/interactions.js";
 import {
@@ -645,6 +649,15 @@ export interface SlackChannelConfig {
   readonly botName?: string;
 
   /**
+   * Excludes both workspace guests (single- and multi-channel) and external
+   * Slack Connect members from inbound events and interactive callbacks,
+   * including authored handlers and HITL answers. Defaults to `false`.
+   * Requires `users:read`; failed or incomplete member lookups reject access.
+   * Does not filter thread history, hide shared-channel replies, or gate proactive sends.
+   */
+  readonly excludeOutsiders?: boolean;
+
+  /**
    * Chooses where each input request is delivered. Direct-message requests go to the
    * Slack user who triggered the active turn; the session thread names that reviewer
    * without exposing the request. Defaults to `"thread"` when omitted.
@@ -791,9 +804,9 @@ export interface SlackChannelConfig {
    * Return `{ auth }` to accept the response, or `null` to reject it and keep
    * the request pending. Thrown errors are logged and treated as rejection.
    *
-   * When this hook is omitted, Slack preserves its built-in behavior and
-   * accepts the response with the submitting user's auth, regardless of other
-   * authored handlers.
+   * When this hook is omitted, Slack accepts the response with the submitting
+   * user's auth after `excludeOutsiders` admission (when enabled), regardless
+   * of other authored handlers.
    */
   onInputResponse?(
     ctx: SlackInputResponseContext,
@@ -1320,7 +1333,15 @@ async function handleEventPost(input: {
     markEventHandled(eventId, input.handledEvents);
   }
 
-  input.waitUntil(dispatch());
+  const handler = dispatch;
+  input.waitUntil(
+    (async () => {
+      if (!(await admitSlackUser({ config, installationTeamId, userId: envelope.event.user }))) {
+        return;
+      }
+      await handler();
+    })(),
+  );
   return new Response("ok");
 }
 

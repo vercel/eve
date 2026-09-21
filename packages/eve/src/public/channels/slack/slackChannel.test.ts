@@ -4403,6 +4403,246 @@ describe("slackChannel().receive", () => {
   });
 });
 
+describe("slackChannel() excludeOutsiders", () => {
+  const member = {
+    id: "U01",
+    team_id: "T01",
+    is_restricted: false,
+    is_ultra_restricted: false,
+    is_bot: false,
+  };
+  const credentials = { botToken: "xoxb-test", signingSecret: SIGNING_SECRET };
+  let fetchMock: ReturnType<typeof vi.fn>;
+  let user: Record<string, unknown>;
+
+  beforeEach(() => {
+    user = { ...member };
+    fetchMock = vi.fn(async (url: string | URL | Request) => {
+      if (String(url).endsWith("auth.test")) return Response.json({ ok: true, team_id: "T01" });
+      if (String(url).endsWith("users.info")) return Response.json({ ok: true, user });
+      return Response.json({ ok: true, ts: "1700000001.000001" });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+  });
+  afterEach(() => vi.unstubAllGlobals());
+
+  function interactionRequest(type: string): Request {
+    const base = {
+      type,
+      team: { id: "T01" },
+      user: { id: "U01", team_id: "T_ACTOR" },
+      channel: { id: "C01" },
+      trigger_id: "trigger-123",
+      callback_id: "inspect",
+      message: { ts: "1700000000.000010", thread_ts: "1700000000.000001", blocks: [] },
+    };
+    if (type === "view_submission") {
+      return buildSignedInteractionRequest({
+        ...base,
+        team: { id: "T_ACTOR" },
+        view: {
+          app_installed_team_id: "T01",
+          callback_id: HITL_FREEFORM_MODAL_CALLBACK_ID,
+          private_metadata: JSON.stringify({
+            channelId: "C01",
+            continuationToken: "C01:1700000000.000001",
+            messageTs: "1700000000.000010",
+            requestId: "request1",
+            threadTs: "1700000000.000001",
+          }),
+          state: {
+            values: {
+              [HITL_FREEFORM_MODAL_BLOCK_ID]: {
+                [HITL_FREEFORM_MODAL_ACTION_ID]: { value: "Alice reviewed the report." },
+              },
+            },
+          },
+        },
+      });
+    }
+    return buildSignedInteractionRequest({
+      ...base,
+      type: ["hitl", "freeform", "custom"].includes(type) ? "block_actions" : type,
+      actions: [
+        {
+          action_id:
+            type === "hitl"
+              ? `${HITL_ACTION_PREFIX}tool-approval:request1:button:0`
+              : type === "freeform"
+                ? `${HITL_FREEFORM_ACTION_PREFIX}request1`
+                : "inspect",
+          text: { type: "plain_text", text: "Review" },
+          value: "approve",
+        },
+      ],
+    });
+  }
+
+  const ingress = [
+    "mention",
+    "dm",
+    "message",
+    "event",
+    "hitl",
+    "view_submission",
+    "custom",
+    "slash",
+    "shortcut",
+    "message_action",
+    "freeform",
+  ] as const;
+  for (const actor of ["member", "guest", "external"] as const) {
+    it.each(ingress)(`${actor}: guards %s before authored handlers and delivery`, async (kind) => {
+      if (actor === "guest") user.is_restricted = true;
+      if (actor === "external") {
+        user.team_id = "T_EXTERNAL";
+        user.is_stranger = false;
+      }
+      const botToken = vi.fn(() => "xoxb-test");
+      const onMessage = vi.fn(() => ({ auth: null }));
+      const onEvent = vi.fn();
+      const onInteraction = vi.fn();
+      const onShortcut = vi.fn();
+      const onSlashCommand = vi.fn();
+      const onInputResponse = vi.fn((ctx: SlackInputResponseContext) => ({
+        auth: ctx.defaultAuth,
+      }));
+      const channel = slackChannel({
+        credentials: { ...credentials, botToken },
+        excludeOutsiders: true,
+        onMessage,
+        onEvent,
+        onInteraction,
+        onShortcut,
+        onSlashCommand,
+        onInputResponse,
+      });
+      const request =
+        kind === "mention"
+          ? buildSignedRequest({ body: buildMentionBody().body })
+          : kind === "dm"
+            ? buildSignedRequest({ body: buildDirectMessageBody().body })
+            : kind === "message"
+              ? buildSignedRequest({
+                  body: buildEventBody({
+                    type: "message",
+                    user: "U01",
+                    channel: "C01",
+                    ts: "1700000000.000001",
+                    text: "Alice shares a report.",
+                  }),
+                })
+              : kind === "event"
+                ? buildSignedRequest({
+                    body: buildEventBody(
+                      { type: "reaction_added", user: "U01", reaction: "eyes" },
+                      { authorizations: [{ team_id: "T01", is_bot: true }] },
+                    ),
+                  })
+                : kind === "slash"
+                  ? buildSignedSlashCommandRequest()
+                  : interactionRequest(kind);
+      const { response, send } = await firePost(channel, request);
+      expect(response.status).toBe(200);
+      expect(fetchMock.mock.calls.slice(0, 2).map(([url]) => String(url))).toEqual([
+        "https://slack.com/api/auth.test",
+        "https://slack.com/api/users.info",
+      ]);
+      const handler = ["mention", "dm", "message"].includes(kind)
+        ? onMessage
+        : kind === "event"
+          ? onEvent
+          : ["hitl", "view_submission"].includes(kind)
+            ? onInputResponse
+            : kind === "custom"
+              ? onInteraction
+              : kind === "slash"
+                ? onSlashCommand
+                : onShortcut;
+      if (kind === "freeform") {
+        expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith("views.open"))).toBe(
+          actor === "member",
+        );
+      } else {
+        expect(handler).toHaveBeenCalledTimes(actor === "member" ? 1 : 0);
+      }
+      if (actor !== "member") {
+        expect(send).not.toHaveBeenCalled();
+        expect(fetchMock).toHaveBeenCalledTimes(2);
+      }
+      if (!["mention", "dm", "message"].includes(kind)) {
+        expect(botToken).toHaveBeenCalledWith({ teamId: "T01" });
+      }
+    });
+  }
+
+  it.each([true, false, undefined])(
+    "preserves default mention dispatch with excludeOutsiders=%s",
+    async (excludeOutsiders) => {
+      const { send } = await firePost(
+        slackChannel({ credentials, excludeOutsiders }),
+        buildSignedRequest({ body: buildMentionBody().body }),
+      );
+      expect(send).toHaveBeenCalledTimes(1);
+      expect(send.mock.calls[0]?.[1]).toMatchObject({ auth: { principalId: "slack:T01:U01" } });
+      expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith("users.info"))).toBe(
+        excludeOutsiders === true,
+      );
+    },
+  );
+
+  it("does not look up users for invalid signatures or URL verification", async () => {
+    const channel = slackChannel({ credentials, excludeOutsiders: true });
+    const invalid = await firePost(
+      channel,
+      buildSignedRequest({ body: buildMentionBody().body, signingSecret: "wrong" }),
+    );
+    expect(invalid.response.status).toBe(401);
+    const challenge = await firePost(
+      channel,
+      buildSignedRequest({
+        body: JSON.stringify({ type: "url_verification", challenge: "challenge" }),
+      }),
+    );
+    expect(await challenge.response.text()).toBe("challenge");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("drops events without a verifiable actor before onEvent", async () => {
+    const onEvent = vi.fn();
+    await firePost(
+      slackChannel({ credentials, excludeOutsiders: true, onEvent }),
+      buildSignedRequest({ body: buildEventBody({ type: "app_uninstalled" }) }),
+    );
+    expect(onEvent).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("acknowledges interactions without waiting for Slack member lookup", async () => {
+    const { promise, resolve: release } = Promise.withResolvers<Response>();
+    fetchMock.mockImplementationOnce(() => promise);
+    const onShortcut = vi.fn();
+    const channel = asCompiled(slackChannel({ credentials, excludeOutsiders: true, onShortcut }));
+    const route = channel.routes.find((r) => r.method === "POST")!;
+    if (!isHttpRouteDefinition(route)) throw new Error("Expected HTTP route");
+    const tasks: Promise<unknown>[] = [];
+    const response = await route.handler(interactionRequest("shortcut"), {
+      ...mockChannelContext(vi.fn()),
+      waitUntil: (task: Promise<unknown>) => tasks.push(task),
+      attachSession: vi.fn() as any,
+      to: vi.fn() as any,
+      params: {},
+      requestIp: null,
+    });
+    expect(response.status).toBe(200);
+    expect(await response.text()).toBe("");
+    expect(onShortcut).not.toHaveBeenCalled();
+    release(Response.json({ ok: true, team_id: "T01" }));
+    for (const task of tasks) await task;
+    expect(onShortcut).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe("constrainAuthorizationRequired", () => {
   function buildFullContext() {
     const postEphemeral = vi.fn().mockResolvedValue({ id: "eph1" });

@@ -17,7 +17,7 @@ import {
   resolveSlackBotToken,
   slackContinuationToken,
 } from "#public/channels/slack/api.js";
-import { buildSlackAuthContext } from "#public/channels/slack/auth.js";
+import { admitSlackUser, buildSlackAuthContext } from "#public/channels/slack/auth.js";
 import {
   buildFreeformModalView,
   decodeFreeformHitlActionId,
@@ -266,6 +266,31 @@ export async function handleInteractionPost(
     return ack;
   }
 
+  if (deps.config.excludeOutsiders === true) {
+    const raw = "raw" in payload && isObjectRecord(payload.raw) ? payload.raw : undefined;
+    const user = isObjectRecord(raw?.user) ? raw.user : undefined;
+    ctx.waitUntil(
+      (async () => {
+        const allowed = await admitSlackUser({
+          config: deps.config,
+          installationTeamId:
+            payload.kind === "slash_command" ? payload.teamId : readInstallationTeamId(raw),
+          userId: payload.kind === "slash_command" ? payload.userId : user?.id,
+        });
+        if (allowed) await handleInteractionPayload(payload, ctx, deps);
+      })(),
+    );
+    return new Response(null, { status: 200 });
+  }
+  return handleInteractionPayload(payload, ctx, deps);
+}
+
+async function handleInteractionPayload(
+  payload: ReturnType<typeof parseSlackWebhookBody>,
+  ctx: Parameters<typeof handleInteractionPost>[1],
+  deps: InteractionHandlerDeps,
+): Promise<Response> {
+  const ack = new Response("ok", { status: 200 });
   if (payload.kind === "view_submission") {
     return handleViewSubmission(payload, ctx, deps);
   }
