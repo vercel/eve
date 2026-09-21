@@ -95,7 +95,7 @@ Every handler receives a `MemoryOperationContext`:
 | `memory.scope.value`     | The resolved scope string or tuple                                                                         |
 | `memory.slot`            | The path-derived slot name                                                                                 |
 | `messages`               | Projected conversation history for this phase                                                              |
-| `operationId`            | Stable per session, sequence, phase, and slot. Use it as an idempotency key.                               |
+| `operationId`            | Stable per session, sequence, phase, and slot. Use it to make external side effects idempotent.            |
 | `abortSignal`            | Cancellation for the operation                                                                             |
 | `session`                | Session ID, authentication, and other `SessionContext` fields                                              |
 
@@ -192,8 +192,13 @@ Providers must:
 - Partition every read and write by `memory.scope.key`. For semantic
   retrieval, include the key in the query itself, not as a filter after a
   global search.
-- Treat `operationId` as an idempotency key. eve may replay a handler with the
-  same ID; replaying a recall with a different result is an error.
+- Use `operationId` as the idempotency key for `capture` and any other external
+  side effect. A workflow replay may invoke the handler again after the side
+  effect succeeded but before its completion was recorded.
+- Return the same normalized result when eve replays a `recall` handler with the
+  same `operationId`. eve records a digest of the accepted result and rejects a
+  replay with a different result, so a provider does not need to persist a
+  recall result by `operationId` unless its store can change before a replay.
 - Enforce their own size and retention policies. eve does not truncate or
   expire provider content.
 - Treat recalled content as user-controlled data.
