@@ -382,7 +382,7 @@ describe("eve init compatibility flags", () => {
     expect(help).toContain("-y, --yes");
     expect(help).toContain("--model <model>");
     expect(help).toContain("--reasoning <effort>");
-    expect(help).toContain("--scaffold-only");
+    expect(help).toContain("--ni, --non-interactive");
   });
 
   it("forwards model settings to the init command", async () => {
@@ -403,7 +403,7 @@ describe("eve init compatibility flags", () => {
         channelWebNextjs: undefined,
         model: "openai/gpt-5.6-sol",
         reasoning: "high",
-        scaffoldOnly: undefined,
+        nonInteractive: undefined,
       },
       undefined,
       expect.any(Function),
@@ -411,11 +411,11 @@ describe("eve init compatibility flags", () => {
     );
   });
 
-  it("forwards --scaffold-only to the init command", async () => {
+  it("forwards --ni to the init command", async () => {
     const logger = { error: vi.fn(), log: vi.fn() };
     runInitCommand.mockClear();
 
-    await runCli(["init", "my-agent", "--scaffold-only"], logger);
+    await runCli(["init", "my-agent", "--ni"], logger);
 
     expect(runInitCommand).toHaveBeenCalledWith(
       logger,
@@ -426,7 +426,7 @@ describe("eve init compatibility flags", () => {
         channelWebNextjs: undefined,
         model: undefined,
         reasoning: undefined,
-        scaffoldOnly: true,
+        nonInteractive: true,
       },
       undefined,
       expect.any(Function),

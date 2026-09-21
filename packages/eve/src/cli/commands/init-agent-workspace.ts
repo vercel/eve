@@ -23,7 +23,7 @@ export interface InitCommandOptions {
   model?: string;
   reasoning?: AgentReasoningDefinition;
   /** Do not start development after initialization. */
-  scaffoldOnly?: boolean;
+  nonInteractive?: boolean;
 }
 
 export interface InitCliLogger {
