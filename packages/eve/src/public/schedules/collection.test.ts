@@ -33,6 +33,7 @@ describe("schedule collections", () => {
     });
 
     expect(definition.provider).toBe(provider);
+    expect(definition.provider.kind).toBe("in-memory");
     expect(isScheduleCollectionDefinition(definition)).toBe(true);
   });
 
@@ -124,5 +125,27 @@ describe("inMemoryScheduleProvider", () => {
 
     const otherNamespace = { ...providerContext("get_other"), namespace: "principal_2" };
     await expect(provider.get(otherNamespace, input.name)).resolves.toBeNull();
+  });
+
+  it("delivers an invocation once when an operation is replayed", async () => {
+    const delivered: unknown[] = [];
+    const provider = inMemoryScheduleProvider({
+      now: () => new Date("2026-09-20T12:00:00.000Z"),
+    });
+    const createContext = {
+      ...providerContext("create"),
+      target: { key: "queries", deliver: async (value: unknown) => void delivered.push(value) },
+    };
+    await provider.create(createContext, {
+      expression: { type: "cron", cron: "0 9 * * 0" },
+      input: { query: "open incidents" },
+      name: "weekly-incidents",
+    });
+    const invokeContext = { ...providerContext("invoke"), target: { key: "queries" } };
+
+    await provider.invoke(invokeContext, "weekly-incidents");
+    await provider.invoke(invokeContext, "weekly-incidents");
+
+    expect(delivered).toHaveLength(1);
   });
 });

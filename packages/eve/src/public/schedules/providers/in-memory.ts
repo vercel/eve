@@ -15,6 +15,7 @@ export interface InMemoryScheduleProviderOptions {
 
 interface StoredSchedule extends ScheduleRecord {
   readonly input: unknown;
+  readonly target: ScheduleProviderContext["target"];
 }
 
 export function inMemoryScheduleProvider(
@@ -25,6 +26,8 @@ export function inMemoryScheduleProvider(
   const now = options.now ?? (() => new Date());
 
   return {
+    kind: "in-memory",
+
     async create<TInput>(context: ScheduleProviderContext, input: ScheduleCreate<TInput>) {
       return withOperationResult(operationResults, context.operationId, () => {
         const key = scheduleKey(context, input.name);
@@ -39,6 +42,7 @@ export function inMemoryScheduleProvider(
           name: input.name,
           scheduleId: createScheduleId(context, input.name),
           state: input.state ?? "active",
+          target: context.target,
           updatedAt: timestamp,
         };
         schedules.set(key, record);
@@ -94,9 +98,20 @@ export function inMemoryScheduleProvider(
     },
 
     async invoke(context: ScheduleProviderContext, name: string) {
-      await withOperationResult(operationResults, context.operationId, () => {
-        requireSchedule(schedules, scheduleKey(context, name), name);
-      });
+      if (operationResults.has(context.operationId)) return;
+      const schedule = requireSchedule(schedules, scheduleKey(context, name), name);
+      const firedAt = now().toISOString();
+      const delivery = {
+        input: schedule.input,
+        occurrence: {
+          firedAt,
+          id: `${schedule.scheduleId}:${firedAt}`,
+          name: schedule.name,
+          scheduleId: schedule.scheduleId,
+        },
+      };
+      operationResults.set(context.operationId, delivery);
+      if (schedule.target.deliver !== undefined) await schedule.target.deliver(delivery);
     },
 
     async delete(context: ScheduleProviderContext, name: string) {

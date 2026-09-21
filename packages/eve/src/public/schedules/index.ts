@@ -17,6 +17,7 @@ export {
   type ScheduleCollectionRunArgs,
   type ScheduleCollectionToolOptions,
   type ScheduleCreate,
+  type ScheduleDelivery,
   type ScheduleDeliveryTarget,
   type ScheduleExpression,
   type ScheduleList,

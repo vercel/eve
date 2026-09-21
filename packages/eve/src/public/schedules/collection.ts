@@ -35,8 +35,14 @@ export interface ScheduleProviderContext {
   readonly target: ScheduleDeliveryTarget;
 }
 
+export interface ScheduleDelivery<TInput = unknown> {
+  readonly input: TInput;
+  readonly occurrence: ScheduleOccurrence;
+}
+
 export interface ScheduleDeliveryTarget {
   readonly key: string;
+  readonly deliver?: (delivery: ScheduleDelivery<any>) => Promise<void>;
 }
 
 export type ScheduleExpression =
@@ -86,6 +92,7 @@ export interface SchedulePatch<TInput> {
 }
 
 export interface ScheduleProvider {
+  readonly kind: string;
   create<TInput>(
     context: ScheduleProviderContext,
     input: ScheduleCreate<TInput>,

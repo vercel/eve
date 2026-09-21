@@ -732,6 +732,7 @@ const compiledScheduleCollectionDefinitionSchema = z
     inputSchema: jsonObjectSchema,
     logicalPath: z.string(),
     name: z.string(),
+    providerKind: z.string(),
     sourceId: z.string(),
     sourceKind: z.literal("module"),
     tools: z

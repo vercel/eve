@@ -7,7 +7,8 @@ import type {
 import { isScheduleCollectionDefinition } from "#shared/schedule-collection-definition.js";
 import { hasSchemaValidator } from "#tools/durable-schema.js";
 
-const PROVIDER_METHODS = [
+const PROVIDER_KEYS = [
+  "kind",
   "create",
   "list",
   "get",
@@ -17,6 +18,10 @@ const PROVIDER_METHODS = [
   "invoke",
   "delete",
 ] as const satisfies readonly (keyof ScheduleProvider)[];
+
+const PROVIDER_METHODS = PROVIDER_KEYS.filter(
+  (key): key is Exclude<(typeof PROVIDER_KEYS)[number], "kind"> => key !== "kind",
+);
 
 const TOOL_OPTIONS = [
   "create",
@@ -59,7 +64,10 @@ export function normalizeScheduleCollectionDefinition(
   }
 
   const provider = expectObjectRecord(record.provider, `${message} "provider" must be an object.`);
-  expectOnlyKnownKeys(provider, PROVIDER_METHODS, `${message} "provider"`);
+  expectOnlyKnownKeys(provider, PROVIDER_KEYS, `${message} "provider"`);
+  if (typeof provider.kind !== "string" || provider.kind.trim().length === 0) {
+    throw new Error(`${message} provider.kind must be a non-empty string.`);
+  }
   for (const method of PROVIDER_METHODS) {
     if (typeof provider[method] !== "function") {
       throw new Error(`${message} provider.${method} must be a function.`);

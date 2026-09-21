@@ -558,6 +558,7 @@ describe("compileAgentManifest source graph", () => {
         description: "Run saved queries.",
         logicalPath: "schedules/queries.ts",
         name: "queries",
+        providerKind: "in-memory",
         tools: true,
       }),
     );

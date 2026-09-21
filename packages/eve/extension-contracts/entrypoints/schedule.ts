@@ -8,6 +8,7 @@ export {
   type ScheduleCollectionToolOptions,
   type ScheduleCreate,
   type ScheduleDefinition,
+  type ScheduleDelivery,
   type ScheduleDeliveryTarget,
   type ScheduleExpression,
   type ScheduleHandlerArgs,

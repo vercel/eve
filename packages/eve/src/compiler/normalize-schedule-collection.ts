@@ -29,6 +29,7 @@ export async function compileScheduleCollectionDefinition(
     inputSchema: serializeInputSchema(definition.inputSchema),
     logicalPath: source.logicalPath,
     name: stripLogicalPathExtension(source.logicalPath).replace(/^schedules\//u, ""),
+    providerKind: definition.provider.kind,
     sourceId: source.sourceId,
     sourceKind: "module",
   };
