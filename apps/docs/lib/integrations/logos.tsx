@@ -210,6 +210,16 @@ export const contextLogo = (props: LogoProps) => (
   </svg>
 );
 
+export const replynodesLogo = (props: LogoProps) => (
+  <svg fill="none" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" {...props}>
+    <path d="M7 7h10M7 17h10M7 7v10M17 7v10" stroke="currentColor" strokeWidth="2" />
+    <circle cx="7" cy="7" fill="currentColor" r="2.5" />
+    <circle cx="17" cy="7" fill="currentColor" r="2.5" />
+    <circle cx="7" cy="17" fill="currentColor" r="2.5" />
+    <circle cx="17" cy="17" fill="currentColor" r="2.5" />
+  </svg>
+);
+
 export const notionLogo = (props: LogoProps) => <SiNotion {...props} />;
 
 export const upstashLogo = (props: LogoProps) => <SiUpstash color="default" {...props} />;
@@ -812,6 +822,7 @@ export const logos = {
   vercel: vercelLogo,
   linear: linearLogo,
   context: contextLogo,
+  replynodes: replynodesLogo,
   notion: notionLogo,
   datadog: datadogLogo,
   honeycomb: honeycombLogo,

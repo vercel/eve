@@ -2063,6 +2063,19 @@ const connectionPresentations: Record<string, ConnectionPresentation> = {
     ],
     authModes: ["user"],
   },
+  replynodes: {
+    logo: "replynodes",
+    docsHref: "https://docs.replynodes.com/docs/mcp/capabilities",
+    connectors: {
+      user: {
+        uid: "mcp.replynodes.com/replynodes",
+        service: "mcp.replynodes.com",
+        name: "replynodes",
+      },
+    },
+    keywords: ["mcp", "social media", "channels", "groups", "schemas", "oauth", "connect"],
+    authModes: ["user"],
+  },
   egnyte: {
     logo: "egnyte",
     docsHref: "/docs/connections/mcp",

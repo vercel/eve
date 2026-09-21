@@ -1030,6 +1030,31 @@
       ]
     },
     {
+      "name": "connection/replynodes",
+      "type": "registry:item",
+      "title": "ReplyNodes",
+      "description": "Inspect connected social channels and their posting requirements.",
+      "meta": {
+        "eve": {
+          "setup": {
+            "command": "eve",
+            "package": "eve",
+            "bin": "eve",
+            "args": ["integration", "connect", "replynodes", "mcp.replynodes.com", "replynodes"]
+          },
+          "requires": ">=0.29.0"
+        }
+      },
+      "dependencies": ["@vercel/connect"],
+      "files": [
+        {
+          "path": "registry/connections/replynodes.ts",
+          "type": "registry:file",
+          "target": "agent/connections/replynodes.ts"
+        }
+      ]
+    },
+    {
       "name": "connection/embat",
       "type": "registry:item",
       "title": "Embat",

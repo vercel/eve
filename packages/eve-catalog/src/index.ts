@@ -558,6 +558,18 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     },
   },
   {
+    slug: "replynodes",
+    name: "ReplyNodes",
+    kind: "connection",
+    tagline: "Inspect connected social channels and their posting requirements.",
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
+    connection: {
+      description:
+        "ReplyNodes: inspect connected social channels, integration groups, and channel posting requirements.",
+      mcp: { url: "https://mcp.replynodes.com/mcp" },
+    },
+  },
+  {
     slug: "embat",
     name: "Embat",
     kind: "connection",
