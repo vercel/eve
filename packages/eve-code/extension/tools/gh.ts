@@ -16,7 +16,7 @@ const permissionSchema = z.object({
 
 const inputSchema = z.object({
   command: z.string().trim().min(1).max(20_000),
-  permissions: z.tuple([permissionSchema]),
+  permissions: z.array(permissionSchema).length(1),
   description: z
     .string()
     .trim()

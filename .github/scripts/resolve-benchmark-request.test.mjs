@@ -198,3 +198,24 @@ test("workflow names and concurrency preserve independent authorized harness run
   );
   assert.match(workflow, /agent-ref: \$\{\{ needs\.request\.outputs\.sha \}\}/u);
 });
+
+test("the consumer tracks eve-bench main and owns its model selection", async () => {
+  const workflow = await readFile(
+    new URL("../workflows/eve-code-benchmark.yml", import.meta.url),
+    "utf8",
+  );
+  assert.match(workflow, /repository: vercel-labs\/eve-bench\n\s+ref: main\n/u);
+  assert.match(workflow, /uses: \.\/\.eve-bench-action/u);
+  assert.match(
+    workflow,
+    /model: \$\{\{ vars\.EVE_CODE_BENCH_MODEL \|\| 'google\/gemini-3\.8-flash' \}\}/u,
+  );
+  assert.doesNotMatch(workflow, /runner-revision:/u);
+  assert.match(
+    workflow,
+    /reference-artifact-ids: \$\{\{ needs\.request\.outputs\.harness == 'eve-code' && vars\.EVE_CODE_BENCH_REFERENCE_ARTIFACT_IDS \|\| '' \}\}/u,
+  );
+  assert.match(workflow, /dataset: swe-lean\n/u);
+  assert.doesNotMatch(workflow, /^\s+task:/mu);
+  assert.equal((workflow.match(/uses: \.\/\.eve-bench-action/gu) ?? []).length, 1);
+});

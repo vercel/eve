@@ -15,7 +15,7 @@ export interface GitHubPermission {
 export interface GitHubShellInput {
   readonly command: string;
   readonly description: string;
-  readonly permissions: readonly [GitHubPermission];
+  readonly permissions: readonly GitHubPermission[];
   readonly workingDirectory?: string;
 }
 
@@ -79,7 +79,7 @@ export async function executeGitHubShell(
   if (argv[0] === "git" || argv[0] === "gh-signed-commit") {
     workingDirectory = await validateRepositoryRoot(sandbox, workingDirectory);
   }
-  const declaredRepositories = input.permissions[0].repositories;
+  const declaredRepositories = input.permissions[0]!.repositories;
   const remoteRepository = await assertCommandTargets(
     argv,
     declaredRepositories,
@@ -267,10 +267,11 @@ export function parseCommand(command: string): string[] {
 
 function validateGitHubShellInput(input: GitHubShellInput): string[] {
   const argv = parseCommand(input.command);
-  if (input.permissions.length !== 1 || input.permissions[0].provider !== "github") {
+  const permission = input.permissions[0];
+  if (input.permissions.length !== 1 || permission?.provider !== "github") {
     throw new Error("Exactly one GitHub permission is required.");
   }
-  if (input.permissions[0].access !== "write") {
+  if (permission.access !== "write") {
     throw new Error("GitHub App commands require explicit write-capable access.");
   }
   if (!input.description.trim()) throw new Error("description must describe the intended result.");

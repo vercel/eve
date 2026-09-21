@@ -64,13 +64,13 @@ jobs:
     timeout-minutes: 360
     steps:
       # vercel/eve is public and eve-bench is private; GitHub never lets a public
-      # repository `uses:` a private action, so fetch the pinned runner with a
-      # read-only deploy key and run it as a local action instead.
-      - name: Checkout pinned eve-bench action
+      # repository `uses:` a private action, so fetch main with a read-only deploy
+      # key and run it locally. The action records the resolved runner SHA.
+      - name: Checkout eve-bench main
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: vercel-labs/eve-bench
-          ref: 84a9b0dca06fa3ce8b7740e0736d76b7dd7432ad
+          ref: main
           ssh-key: ${{ secrets.EVE_BENCH_SSH_KEY }}
           path: .eve-bench-action
           persist-credentials: false
@@ -82,11 +82,12 @@ jobs:
           agent-path: packages/eve-code
           agent-ref: ${{ needs.request.outputs.sha }}
           dataset: swe-lean
-          model: ${{ vars.EVE_CODE_BENCH_MODEL || 'openai/gpt-5.6-terra' }}
+          model: ${{ vars.EVE_CODE_BENCH_MODEL || 'google/gemini-3.8-flash' }}
           attempts: "1"
           concurrency: "4"
           native-build: "false"
           baseline-artifact-id: ${{ needs.request.outputs.harness == 'eve-code' && vars.EVE_BENCH_BASELINE_ARTIFACT_ID || '' }}
+          reference-artifact-ids: ${{ needs.request.outputs.harness == 'eve-code' && vars.EVE_CODE_BENCH_REFERENCE_ARTIFACT_IDS || '' }}
           artifact-name: swe-lean-${{ needs.request.outputs.harness }}
           gateway-key: ${{ secrets.AI_GATEWAY_API_KEY }}
           github-token: ${{ github.token }}

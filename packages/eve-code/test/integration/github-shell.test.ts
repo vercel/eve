@@ -142,6 +142,27 @@ test("fails closed on invalid permissions, missing commands, env assignments, an
   }
 });
 
+test("rejects empty or multiple permissions before sandbox access or token minting", async () => {
+  for (const permissions of [[], [...READ.permissions, ...READ.permissions]]) {
+    const input = { ...READ, permissions };
+    assert.deepEqual(githubShellApproval(input), {
+      type: "denied",
+      reason: "Exactly one GitHub permission is required.",
+    });
+    await assert.rejects(
+      executeGitHubShell(input, CONFIG, {
+        async getSandbox() {
+          assert.fail("invalid permissions must not access the sandbox");
+        },
+        async getConnectToken() {
+          assert.fail("invalid permissions must not mint a token");
+        },
+      }),
+      /Exactly one GitHub permission is required/u,
+    );
+  }
+});
+
 test("mints a repository-scoped token only during execution and redacts output", async () => {
   const tokenCalls: Array<{ connector: string; params: ConnectTokenParams }> = [];
   const runs: Parameters<SandboxSession["run"]>[0][] = [];
