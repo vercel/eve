@@ -16,17 +16,36 @@ import {
 } from "#tools/durable-callbacks.js";
 import { z } from "#compiled/zod/index.js";
 
+const scheduleNameSchema = z
+  .string()
+  .min(1)
+  .max(256)
+  .regex(/^[0-9A-Za-z][0-9A-Za-z._-]*$/u)
+  .describe(
+    "Stable schedule identifier. Start with a letter or digit and use only letters, digits, dots, underscores, and dashes. Convert a human title to a slug such as review-prs-daily; do not use spaces.",
+  );
+
+const timezoneSchema = z
+  .string()
+  .describe(
+    "IANA timezone such as America/New_York, Europe/London, Asia/Tokyo, or UTC. Never send local; ask for the user's IANA timezone when it is unknown.",
+  );
+
 const expressionSchema = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("cron"),
-    cron: z.string(),
-    timezone: z.string().optional(),
-    jitter: z.number().int().optional(),
+    cron: z.string().describe("Standard five-field cron expression."),
+    timezone: timezoneSchema.optional(),
+    jitter: z.number().int().min(1).max(15).optional(),
   }),
   z.object({
     type: z.literal("single"),
-    at: z.string(),
-    timezone: z.string().optional(),
+    at: z
+      .string()
+      .describe(
+        "Local datetime in YYYY-MM-DDTHH:mm:ss format without an offset or fractional seconds.",
+      ),
+    timezone: timezoneSchema.optional(),
   }),
 ]);
 
@@ -62,7 +81,7 @@ export function createScheduleCollectionToolDynamicDefinition<TInput>(
               inputSchema: z.object({
                 expression: expressionSchema,
                 input: z.unknown(),
-                name: z.string(),
+                name: scheduleNameSchema,
                 state: z.enum(["active", "inactive"]).optional(),
               }),
               execute: async (toolInput) =>
@@ -85,7 +104,7 @@ export function createScheduleCollectionToolDynamicDefinition<TInput>(
             });
             tools[toolName("read")] = defineTool({
               description: description("Read one schedule in this collection by its exact name."),
-              inputSchema: z.object({ name: z.string() }),
+              inputSchema: z.object({ name: scheduleNameSchema }),
               execute: async ({ name }) => await client.get(name),
             });
           }
@@ -96,7 +115,7 @@ export function createScheduleCollectionToolDynamicDefinition<TInput>(
               inputSchema: z.object({
                 expression: expressionSchema.optional(),
                 input: z.unknown().optional(),
-                name: z.string(),
+                name: scheduleNameSchema,
               }),
               execute: async ({ name, ...patch }) =>
                 await client.update(name, {
@@ -109,13 +128,13 @@ export function createScheduleCollectionToolDynamicDefinition<TInput>(
             tools[toolName("enable")] = defineTool({
               approval: always(),
               description: description("Enable an inactive schedule."),
-              inputSchema: z.object({ name: z.string() }),
+              inputSchema: z.object({ name: scheduleNameSchema }),
               execute: async ({ name }) => await client.enable(name),
             });
             tools[toolName("disable")] = defineTool({
               approval: always(),
               description: description("Disable a schedule without deleting it."),
-              inputSchema: z.object({ name: z.string() }),
+              inputSchema: z.object({ name: scheduleNameSchema }),
               execute: async ({ name }) => await client.disable(name),
             });
           }
@@ -123,7 +142,7 @@ export function createScheduleCollectionToolDynamicDefinition<TInput>(
             tools[toolName("delete")] = defineTool({
               approval: always(),
               description: description("Permanently delete a schedule from this collection."),
-              inputSchema: z.object({ name: z.string() }),
+              inputSchema: z.object({ name: scheduleNameSchema }),
               execute: async ({ name }) => ({ deleted: await client.delete(name) }),
             });
           }
@@ -131,7 +150,7 @@ export function createScheduleCollectionToolDynamicDefinition<TInput>(
             tools[toolName("invoke")] = defineTool({
               approval: always(),
               description: description("Run a schedule now without changing its timing or state."),
-              inputSchema: z.object({ name: z.string() }),
+              inputSchema: z.object({ name: scheduleNameSchema }),
               execute: async ({ name }) => {
                 await client.invoke(name);
                 return { invoked: true };
