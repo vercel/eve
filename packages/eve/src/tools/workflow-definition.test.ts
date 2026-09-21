@@ -94,7 +94,7 @@ describe("defineWorkflowTool", () => {
       description: "Ordinary",
       inputSchema: z.object({}),
       async execute(_input, ctx) {
-        // @ts-expect-error agent is available only on WorkflowToolContext.
+        // Ordinary tools return a background task receipt.
         void ctx.agent;
         // @ts-expect-error agents is available only on WorkflowToolContext.
         void ctx.agents;

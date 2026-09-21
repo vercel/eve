@@ -97,76 +97,89 @@ describe("background agent invocation routing", () => {
     expect(mocks.disposeHook).toHaveBeenCalledOnce();
   });
 
-  it("sends the invocation through the task owner after admission", async () => {
-    const result = {
-      callId: "call-1:agent-reply",
-      kind: "subagent-result" as const,
-      origin: "child" as const,
-      outcome: {
-        kind: "parked" as const,
-        result: { kind: "succeeded" as const, output: { findings: ["available"] } },
-        usageDelta: {
-          cacheReadTokens: 0,
-          cacheWriteTokens: 0,
-          inputTokens: 0,
-          outputTokens: 0,
+  it.each(["name", "handle"])(
+    "sends the %s invocation through the task owner after admission",
+    async (kind) => {
+      const result = {
+        callId: "call-1:agent-reply",
+        kind: "subagent-result" as const,
+        origin: "child" as const,
+        outcome: {
+          kind: "parked" as const,
+          result: { kind: "succeeded" as const, output: { findings: ["available"] } },
+          usageDelta: {
+            cacheReadTokens: 0,
+            cacheWriteTokens: 0,
+            inputTokens: 0,
+            outputTokens: 0,
+          },
         },
-      },
-      output: { findings: ["available"] },
-      subagentName: "research",
-    };
-    const replies: AgentInvocationReply[] = [
-      { kind: "runtime-action-result", results: [result] },
-      { kind: "agent-settled", callId: result.callId },
-    ];
-    mocks.createHook.mockReturnValue({
-      [Symbol.asyncIterator]: () => ({
-        next: async () =>
-          replies.length > 0
-            ? { done: false as const, value: replies.shift()! }
-            : { done: true as const, value: undefined },
-      }),
-      token: "agent-reply",
-    });
-    mocks.resumeHook.mockImplementation(async () => undefined);
-    const from: WorkflowToolRunRef = {
-      callId: "call-1",
-      execution: "background",
-      input: { message: "Find it" },
-      runId: "run-1",
-      sequence: 0,
-      stepIndex: 0,
-      toolName: "research",
-      turnId: "turn-1",
-    };
-    const ctx = { callId: "call-1" } as ToolContext;
-    attachWorkflowToolRunContext(ctx, {
-      from,
-      owner: {
-        inbox: "owner-inbox",
-      },
-    });
+        output: { findings: ["available"] },
+        subagentName: "research",
+      };
+      const replies: AgentInvocationReply[] = [
+        { kind: "runtime-action-result", results: [result] },
+        { kind: "agent-settled", callId: result.callId },
+      ];
+      mocks.createHook.mockReturnValue({
+        [Symbol.asyncIterator]: () => ({
+          next: async () =>
+            replies.length > 0
+              ? { done: false as const, value: replies.shift()! }
+              : { done: true as const, value: undefined },
+        }),
+        token: "agent-reply",
+      });
+      mocks.resumeHook.mockImplementation(async () => undefined);
+      const from: WorkflowToolRunRef = {
+        callId: "call-1",
+        execution: "background",
+        input: { message: "Find it" },
+        runId: "run-1",
+        sequence: 0,
+        stepIndex: 0,
+        toolName: "research",
+        turnId: "turn-1",
+      };
+      const ctx = { callId: "call-1" } as ToolContext;
+      attachWorkflowToolRunContext(ctx, {
+        from,
+        owner: {
+          inbox: "owner-inbox",
+        },
+      });
 
-    const outputSchema = {
-      properties: { findings: { items: { type: "string" }, type: "array" } },
-      required: ["findings"],
-      type: "object",
-    };
-    await expect(agent(ctx, "research", { message: "Find it", outputSchema })).resolves.toEqual({
-      findings: ["available"],
-    });
+      const outputSchema = {
+        properties: { findings: { items: { type: "string" }, type: "array" } },
+        required: ["findings"],
+        type: "object",
+      };
+      await expect(
+        agent(ctx, kind === "handle" ? { id: "registered" } : "research", {
+          message: "Find it",
+          outputSchema,
+        }),
+      ).resolves.toEqual({
+        findings: ["available"],
+      });
 
-    expect(mocks.resumeHook).toHaveBeenCalledWith("owner-inbox", {
-      kind: "request",
-      from,
-      replyTo: "agent-reply",
-      request: {
-        input: { message: "Find it", outputSchema, target: "research" },
-        invocationId: "call-1:agent-reply",
-        kind: "agent-invoke",
-      },
-    });
-  });
+      expect(mocks.resumeHook).toHaveBeenCalledWith("owner-inbox", {
+        kind: "request",
+        from,
+        replyTo: "agent-reply",
+        request: {
+          input: {
+            message: "Find it",
+            outputSchema,
+            target: kind === "handle" ? "registered" : "research",
+            agentId: kind === "handle" ? "registered" : undefined,
+          },
+          invocationId: "call-1:agent-reply",
+          kind: "agent-invoke",
+        },
+      });
+    },
+  );
 
   it("derives unique invocation ids for repeated parallel calls", async () => {
     for (const token of ["reply-1", "reply-2"]) {

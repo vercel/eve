@@ -21,8 +21,8 @@ import { bindSessionInstrumentation } from "#instrumentation/runtime.js";
 import { createLogger } from "#internal/logging.js";
 import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
 import { isInputRequest } from "#shared/input.js";
-import { getAgentHandleStore } from "#subagents/handles/store.js";
-import { applyTaskAgentHandleCommand } from "#subagents/handles/transitions.js";
+import { getAgentRegistryState } from "#subagents/registry/state.js";
+import { applySessionAgentRegistryCommand } from "#subagents/registry/transitions.js";
 import { createEveTaskInputRoutePath } from "#protocol/routes.js";
 import {
   recordWorkflowTaskView,
@@ -61,7 +61,7 @@ export async function recordTaskInputRequestStep(input: {
     ...request,
     requestId: createTaskInputRequestId(input.request.taskId, request.requestId),
   }));
-  const handle = getAgentHandleStore(durableSession.state)?.handles.find(
+  const handle = getAgentRegistryState(durableSession.state)?.handles.find(
     (candidate) => candidate.phase === "claimed" && candidate.ownerId === input.request.taskId,
   );
   const remoteResponseUrl =
@@ -139,7 +139,7 @@ export async function recordTerminalTaskViewsStep(input: {
     }
     acceptedViews.push(readWorkflowTaskView(entry.task) ?? view);
     session = clearProxyInputRequestsForTask(session, view.taskId);
-    session = applyTaskAgentHandleCommand(session, {
+    session = applySessionAgentRegistryCommand(session, {
       kind: "release-owner",
       ownerId: view.taskId,
     }).session;

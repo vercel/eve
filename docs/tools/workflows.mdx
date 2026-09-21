@@ -303,6 +303,12 @@ and can only show the model's input. Both compose: `approval` before the run, `c
 
 ## Delegate work: `ctx.agent`
 
+Pass a declared target name or a registered `{ id: agentId }` handle. Workflow
+calls wait for the final result; ordinary tools return a background receipt.
+[Register destinations](/docs/subagents#register-destinations-at-runtime) in hooks
+or ordinary tools before calling the workflow. Registry mutations are unavailable
+inside workflow bodies.
+
 Workflow tools can call a subagent and wait for its result:
 
 ```ts

@@ -72,8 +72,13 @@ import {
 import type { RuntimeTraceContext } from "#protocol/message.js";
 import { ASK_QUESTION_TOOL_NAME } from "#harness/request-input-tool.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
-import { projectParkedAgentHandles, resolveAgentsAnnouncement } from "#subagents/handles/prompt.js";
-import { getAgentHandleStore } from "#subagents/handles/store.js";
+import { AgentRegistryKey } from "#context/agent-registry-key.js";
+import {
+  projectRegisteredAgentViews,
+  projectParkedAgentRegistryEntries,
+  resolveAgentsAnnouncement,
+} from "#subagents/registry/prompt.js";
+import { getAgentRegistryState } from "#subagents/registry/state.js";
 import type { InputRequest } from "#shared/input.js";
 import {
   hydrateSandboxAttachments,
@@ -1100,36 +1105,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     }
     session = continuation.session;
 
-    // Announce the parked-agents listing as framework-injected user-role
-    // content, before any new user input so a message present on this step
-    // stays the turn's focus. On a no-input settle resume it trails the tool
-    // results, keeping the request user-final for providers that reject
-    // assistant-final histories. See resolveAgentsAnnouncement for the role
-    // rationale (assistant-final rejection, prompt-cache preservation).
-    const agentStore = getAgentHandleStore(session.state);
-    if (!hasUnansweredToolCall(messages)) {
-      const taskAgentViews = await store?.get(BackgroundToolExecutorKey)?.readAgentViews?.();
-      const agentViews =
-        taskAgentViews === undefined || taskAgentViews.length === 0
-          ? undefined
-          : [
-              ...projectParkedAgentHandles(agentStore ?? { handles: [] }).map((handle) => ({
-                availability: "available" as const,
-                id: handle.identity.id,
-                name: handle.identity.name,
-                statusLine: handle.phase === "parked" ? handle.lastStatus : undefined,
-              })),
-              ...taskAgentViews,
-            ];
-      const announcement = resolveAgentsAnnouncement({
-        agentViews,
-        messages: projectHistory(messages, session.state),
-        store: agentStore,
-      });
-      if (announcement !== undefined) {
-        messages.push(createFrameworkUserMessage("context.state", announcement));
-      }
-    }
+    const agentAnnouncementIndex = messages.length;
 
     // Keep ephemeral client context at the same position across durable steps.
     let turnClientContext = storedClientContext;
@@ -1219,6 +1195,48 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       } catch (error) {
         return failBoundaryEvent(error, emissionState);
       }
+    }
+    const agentStore = getAgentRegistryState(session.state);
+    if (!hasUnansweredToolCall(messages)) {
+      const handles = ctx?.get(AgentRegistryKey)?.entries ?? agentStore?.handles ?? [];
+      const taskViews = (await ctx?.get(BackgroundToolExecutorKey)?.readAgentViews?.()) ?? [];
+      const hidden = new Set(
+        handles
+          .filter((handle) => handle.identity.registration !== undefined)
+          .map((handle) => handle.identity.id),
+      );
+      const views = [
+        ...projectParkedAgentRegistryEntries({ handles })
+          .filter((handle) => !hidden.has(handle.identity.id))
+          .map((handle) => ({
+            availability: "available" as const,
+            id: handle.identity.id,
+            name: handle.identity.name,
+            statusLine: handle.phase === "parked" ? handle.lastStatus : undefined,
+          })),
+        ...taskViews.filter((view) => !hidden.has(view.id)),
+        ...projectRegisteredAgentViews(handles).map((view) => ({
+          ...taskViews.find((task) => task.id === view.id),
+          ...view,
+        })),
+      ];
+      const announcement = resolveAgentsAnnouncement({
+        agentViews:
+          hidden.size === 0 && taskViews.length === 0
+            ? undefined
+            : [...new Map(views.map((view) => [view.id, view])).values()],
+        messages: projectHistory(messages, session.state),
+        store: agentStore,
+      });
+      if (announcement !== undefined)
+        messages.splice(
+          agentAnnouncementIndex,
+          0,
+          createFrameworkUserMessage("context.state", announcement),
+        );
+      projectedMessages = validateHarnessModelMessages(
+        normalizeModelMessages(projectHistory(createModelMessages(messages), session.state)),
+      );
     }
     const approvedTools = getApprovedTools(
       session,

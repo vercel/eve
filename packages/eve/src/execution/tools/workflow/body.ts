@@ -128,15 +128,17 @@ function resolveWorkflowToolExecute(input: WorkflowBodyInput): WorkflowToolExecu
 function createWorkflowBodyContext(
   input: WorkflowBodyInput,
   signal: AbortSignal,
-): ToolContext & WorkflowToolContext {
+): Omit<ToolContext, "agent"> & WorkflowToolContext {
   const unavailable = (member: string, hint: string): never => {
     throw new Error(
       `ctx.${member} is not available inside a workflow tool; ${hint}. Tool "${input.toolName}" runs as a durable workflow body, which only replays deterministic code.`,
     );
   };
-  const ctx: ToolContext & WorkflowToolContext = {
-    agent: ((target: string, agentInput: AgentInput) =>
-      agent(ctx, target, agentInput)) as WorkflowToolContext["agent"],
+  const ctx: Omit<ToolContext, "agent"> & WorkflowToolContext = {
+    agent: ((
+      target: string | import("#subagents/registration.js").AgentReference,
+      agentInput: AgentInput,
+    ) => agent(ctx, target, agentInput)) as WorkflowToolContext["agent"],
     agents: Object.freeze(
       Object.fromEntries(
         Object.entries(input.agents ?? {}).map(([name, metadata]) => [
@@ -148,6 +150,12 @@ function createWorkflowBodyContext(
     ask: (request) => ask(ctx, request),
     abortSignal: signal,
     callId: input.callId,
+    registerAgent: () =>
+      unavailable("registerAgent()", "register destinations in an ordinary tool or a hook"),
+    updateAgent: () =>
+      unavailable("updateAgent()", "update destinations in an ordinary tool or a hook"),
+    unregisterAgent: () =>
+      unavailable("unregisterAgent()", "unregister destinations in an ordinary tool or a hook"),
     getSandbox: () => unavailable("getSandbox()", "the session sandbox belongs to the turn"),
     getSkill: () => unavailable("getSkill()", "skills are read through the session sandbox"),
     getToken: () =>

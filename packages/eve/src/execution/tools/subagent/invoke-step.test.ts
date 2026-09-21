@@ -10,7 +10,7 @@ import { dispatchToClaimedAgentAddress } from "#subagents/handle-dispatch.js";
 import { startSubagent } from "#execution/tools/subagent/start.js";
 import { prepareOwnerAgentInvocation } from "#execution/tools/subagent/invoke-preparation.js";
 import { readDurableSession } from "#execution/durable-session-store.js";
-import { getAgentHandleStore, setAgentHandleStore } from "#subagents/handles/store.js";
+import { getAgentRegistryState, setAgentRegistryState } from "#subagents/registry/state.js";
 import { registerWorkflowToolRun } from "#harness/workflow-tool-runs.js";
 import {
   AuthKey,
@@ -69,7 +69,7 @@ const session = {
   continuationToken: "parent-token",
   history: [],
   sessionId: "parent",
-  state: setAgentHandleStore(undefined, { handles: [availableRecord] }),
+  state: setAgentRegistryState(undefined, { handles: [availableRecord] }),
 };
 const prepared = {
   adapter: {},
@@ -120,7 +120,7 @@ describe("owner agent invocation dispatch", () => {
       }),
     );
     expect(dispatched).toMatchObject({ agentId: "agent-1", kind: "dispatched" });
-    expect(getAgentHandleStore(dispatched.sessionState.snapshot.session.state)?.handles).toEqual([
+    expect(getAgentRegistryState(dispatched.sessionState.snapshot.session.state)?.handles).toEqual([
       expect.objectContaining({
         identity: availableRecord.identity,
         phase: "claimed",
@@ -139,7 +139,7 @@ describe("owner agent invocation dispatch", () => {
     };
     const claimedSession = {
       ...session,
-      state: setAgentHandleStore(undefined, { handles: [claimed] }),
+      state: setAgentRegistryState(undefined, { handles: [claimed] }),
     };
     vi.mocked(readDurableSession).mockReturnValue(claimedSession as never);
     vi.mocked(prepareOwnerAgentInvocation).mockResolvedValue({
@@ -178,7 +178,7 @@ describe("owner agent invocation dispatch", () => {
     expect(first.kind).toBe("dispatched");
     const firstHandle =
       first.kind === "dispatched"
-        ? getAgentHandleStore(first.sessionState.snapshot.session.state)?.handles[0]
+        ? getAgentRegistryState(first.sessionState.snapshot.session.state)?.handles[0]
         : undefined;
     expect(firstHandle).toMatchObject({
       identity: { id: "agent-1" },
@@ -188,7 +188,7 @@ describe("owner agent invocation dispatch", () => {
 
     vi.mocked(readDurableSession).mockReturnValue({
       ...session,
-      state: setAgentHandleStore(undefined, { handles: [availableRecord] }),
+      state: setAgentRegistryState(undefined, { handles: [availableRecord] }),
     } as never);
     const second = await dispatchAgentInvocation({
       callbackBaseUrl: "https://parent.example",
@@ -436,13 +436,13 @@ describe("owner agent invocation dispatch", () => {
     };
     vi.mocked(readDurableSession).mockReturnValue({
       ...session,
-      state: setAgentHandleStore(undefined, { handles: [reserved] }),
+      state: setAgentRegistryState(undefined, { handles: [reserved] }),
     } as never);
     vi.mocked(prepareOwnerAgentInvocation).mockResolvedValue({
       ...prepared,
       session: {
         ...session,
-        state: setAgentHandleStore(undefined, { handles: [reserved] }),
+        state: setAgentRegistryState(undefined, { handles: [reserved] }),
       },
       plan: [{ kind: "start", target: { action, kind: "local", source: { type: "runtime" } } }],
     } as never);
@@ -466,7 +466,7 @@ describe("owner agent invocation dispatch", () => {
         }),
       }),
     );
-    expect(getAgentHandleStore(dispatched.sessionState.snapshot.session.state)?.handles).toEqual(
+    expect(getAgentRegistryState(dispatched.sessionState.snapshot.session.state)?.handles).toEqual(
       expect.arrayContaining([expect.objectContaining({ ownerId: "task-1", phase: "claimed" })]),
     );
   });
@@ -502,7 +502,7 @@ describe("task-owned agent settlement", () => {
           });
     vi.mocked(readDurableSession).mockReturnValue({
       ...owner,
-      state: setAgentHandleStore(owner.state, { handles: [claimed] }),
+      state: setAgentRegistryState(owner.state, { handles: [claimed] }),
     } as never);
 
     const settled = await settleTaskAgentInvocationStep({
@@ -537,7 +537,8 @@ describe("task-owned agent settlement", () => {
             data: { callId: "call-1", subagentName: "research", output: "done" },
           },
     );
-    const handles = getAgentHandleStore(settled.sessionState.snapshot.session.state)?.handles ?? [];
+    const handles =
+      getAgentRegistryState(settled.sessionState.snapshot.session.state)?.handles ?? [];
     expect(handles).toEqual(
       kind === "parked" ? [expect.objectContaining({ phase: "available" })] : [],
     );
@@ -553,7 +554,7 @@ describe("task-owned agent settlement", () => {
     };
     vi.mocked(readDurableSession).mockReturnValue({
       ...session,
-      state: setAgentHandleStore(undefined, { handles: [claimed] }),
+      state: setAgentRegistryState(undefined, { handles: [claimed] }),
     } as never);
 
     const released = await releaseAgentInvocationOwnerStep({
@@ -561,7 +562,7 @@ describe("task-owned agent settlement", () => {
       sessionState: {} as never,
     });
 
-    expect(getAgentHandleStore(released.sessionState.snapshot.session.state)?.handles).toEqual([
+    expect(getAgentRegistryState(released.sessionState.snapshot.session.state)?.handles).toEqual([
       availableRecord,
     ]);
   });
@@ -576,7 +577,7 @@ describe("task-owned agent settlement", () => {
     };
     vi.mocked(readDurableSession).mockReturnValue({
       ...session,
-      state: setAgentHandleStore(undefined, { handles: [claimed] }),
+      state: setAgentRegistryState(undefined, { handles: [claimed] }),
     } as never);
 
     const released = await releaseAgentInvocationOwnerStep({
@@ -585,7 +586,7 @@ describe("task-owned agent settlement", () => {
       sessionState: {} as never,
     });
 
-    expect(getAgentHandleStore(released.sessionState.snapshot.session.state)?.handles).toEqual([
+    expect(getAgentRegistryState(released.sessionState.snapshot.session.state)?.handles).toEqual([
       {
         address: availableRecord.address,
         identity: availableRecord.identity,
@@ -605,7 +606,7 @@ describe("task-owned agent settlement", () => {
     };
     vi.mocked(readDurableSession).mockReturnValue({
       ...session,
-      state: setAgentHandleStore(undefined, { handles: [claimed] }),
+      state: setAgentRegistryState(undefined, { handles: [claimed] }),
     } as never);
 
     const settled = await settleTaskAgentInvocationStep({
@@ -632,7 +633,7 @@ describe("task-owned agent settlement", () => {
     });
 
     expect(settled.completion).toBeUndefined();
-    expect(getAgentHandleStore(settled.sessionState.snapshot.session.state)?.handles).toEqual([
+    expect(getAgentRegistryState(settled.sessionState.snapshot.session.state)?.handles).toEqual([
       {
         address: availableRecord.address,
         identity: availableRecord.identity,

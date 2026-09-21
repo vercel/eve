@@ -3,6 +3,7 @@ import type { loadContext } from "#context/container.js";
 import { createSubagentReceiptIdentity } from "#execution/tools/subagent/receipt-identity.js";
 import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
 import type { JsonObject } from "#shared/json.js";
+import { AgentRegistryKey } from "#context/agent-registry-key.js";
 
 export interface SubagentTaskProjection {
   readonly identity?: ReturnType<typeof createSubagentReceiptIdentity>;
@@ -27,12 +28,39 @@ export function projectSubagentTask(input: {
   };
 }): SubagentTaskProjection {
   const continuation = input.input.agentId;
+  const handle =
+    typeof continuation === "string"
+      ? input.ctx.get(AgentRegistryKey)?.entries.find((entry) => entry.identity.id === continuation)
+      : undefined;
+  if (handle?.phase === "registered") {
+    const identity = createSubagentReceiptIdentity({
+      ...input.taskInput,
+      subagentName: handle.identity.name,
+      nodeId: handle.identity.nodeId,
+    });
+    return {
+      identity: { ...identity, identity: handle.identity },
+      metadata: {
+        agentId: handle.identity.id,
+        kind: "subagent",
+        mode:
+          handle.identity.registration.target.kind === "remote"
+            ? "remote"
+            : readSubagentTaskMode(input.ctx, handle.identity.nodeId),
+        name: handle.identity.name,
+      },
+      receipt: { agentId: handle.identity.id },
+    };
+  }
   if (typeof continuation === "string" && continuation.trim() !== "") {
     return {
       metadata: {
         agentId: continuation,
         kind: "subagent",
-        mode: readSubagentTaskMode(input.ctx, input.nodeId),
+        mode:
+          handle?.identity.registration?.target.kind === "remote"
+            ? "remote"
+            : readSubagentTaskMode(input.ctx, input.nodeId),
         name: input.name,
       },
       receipt: { agentId: continuation },

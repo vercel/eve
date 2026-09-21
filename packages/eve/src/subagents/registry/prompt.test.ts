@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  projectParkedAgentHandles,
+  projectParkedAgentRegistryEntries,
   renderAgentViewsSnippet,
   renderAgentsSnippet,
   resolveAgentsAnnouncement,
-} from "#subagents/handles/prompt.js";
-import type { AgentHandle } from "#subagents/handles/store.js";
+} from "#subagents/registry/prompt.js";
+import type { AgentRegistryEntry } from "#subagents/registry/state.js";
 
 const identity = {
   id: "ag_research:abcdef123456",
@@ -14,7 +14,7 @@ const identity = {
   nodeId: "node_research",
 } as const;
 
-const runningHandle: AgentHandle = {
+const runningHandle: AgentRegistryEntry = {
   address: {
     continuationToken: "CONTINUATION_TOKEN_SENTINEL",
     kind: "agent/local",
@@ -30,7 +30,7 @@ const runningHandle: AgentHandle = {
   phase: "running",
 };
 
-const parkedRemoteHandle: AgentHandle = {
+const parkedRemoteHandle: AgentRegistryEntry = {
   address: {
     callbackBaseUrl: "https://CALLBACK_SENTINEL.invalid",
     kind: "agent/remote",
@@ -42,14 +42,14 @@ const parkedRemoteHandle: AgentHandle = {
   phase: "parked",
 };
 
-describe("projectParkedAgentHandles / renderAgentsSnippet", () => {
+describe("projectParkedAgentRegistryEntries / renderAgentsSnippet", () => {
   it("projects and renders only idle handles", () => {
     const runningStore = { handles: [runningHandle] };
-    expect(projectParkedAgentHandles(runningStore)).toEqual([]);
+    expect(projectParkedAgentRegistryEntries(runningStore)).toEqual([]);
     expect(renderAgentsSnippet(runningStore)).toBe("[Agents]\n<agents>\n</agents>");
 
     const parkedStore = { handles: [parkedRemoteHandle] };
-    expect(projectParkedAgentHandles(parkedStore)).toEqual([parkedRemoteHandle]);
+    expect(projectParkedAgentRegistryEntries(parkedStore)).toEqual([parkedRemoteHandle]);
     const snippet = renderAgentsSnippet(parkedStore);
     expect(snippet.startsWith("[Agents]\n<agents>")).toBe(true);
     expect(snippet).toContain(

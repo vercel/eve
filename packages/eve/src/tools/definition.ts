@@ -147,6 +147,11 @@ export interface ToolInputResponse {
  * `defineWorkflowTool`.
  */
 export type ToolContext = SessionContext & {
+  /** Starts or steers session-owned background work and returns its receipt. */
+  agent(
+    target: string | import("#subagents/registration.js").AgentReference,
+    input: import("#tools/workflow-definition.js").AgentInput,
+  ): Promise<import("#subagents/registration.js").AgentTaskReceipt>;
   /**
    * Aborts when the work this tool is doing is cancelled: the active turn
    * for an ordinary tool, the durable run for a workflow tool. In a workflow

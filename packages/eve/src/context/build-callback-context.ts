@@ -1,3 +1,4 @@
+import { AgentRegistryKey } from "#context/agent-registry-key.js";
 import type { SessionContext } from "#context/session-context.js";
 import type { SkillHandle } from "#shared/skill-types.js";
 import type { RuntimeSandboxSession, SandboxSession } from "#shared/sandbox-session.js";
@@ -16,6 +17,9 @@ export function buildCallbackContext(): SessionContext {
   const session = ctx.require(SessionKey);
 
   return {
+    registerAgent: (destination) => ctx.require(AgentRegistryKey).register(destination),
+    updateAgent: (handle, description) => ctx.require(AgentRegistryKey).update(handle, description),
+    unregisterAgent: (handle) => ctx.require(AgentRegistryKey).unregister(handle),
     session: {
       id: session.sessionId,
       auth: session.auth,

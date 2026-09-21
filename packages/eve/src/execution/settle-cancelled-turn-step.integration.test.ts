@@ -11,13 +11,13 @@ import {
   registerWorkflowToolRun,
   type BackgroundWorkflowToolRun,
 } from "#harness/workflow-tool-runs.js";
-import { deriveAgentOperationId } from "#subagents/handles/operation-id.js";
+import { deriveAgentOperationId } from "#subagents/registry/operation-id.js";
 import {
-  AGENT_HANDLES_STATE_KEY,
+  AGENT_REGISTRY_STATE_KEY,
   deriveAgentId,
-  getAgentHandleStore,
-  type AgentHandle,
-} from "#subagents/handles/store.js";
+  getAgentRegistryState,
+  type AgentRegistryEntry,
+} from "#subagents/registry/state.js";
 import type { HarnessSession } from "#harness/types.js";
 
 const bindSessionInstrumentationSpy = vi.hoisted(() => vi.fn());
@@ -49,7 +49,7 @@ const RUNNING_OPERATION_ID = deriveAgentOperationId({
   parentTurnId: "turn-1",
 });
 
-const RUNNING_HANDLE: AgentHandle = {
+const RUNNING_HANDLE: AgentRegistryEntry = {
   address: {
     continuationToken: "subagent:child-running",
     kind: "agent/local",
@@ -75,7 +75,7 @@ const PARKED_OPERATION_ID = deriveAgentOperationId({
   parentTurnId: "turn-0",
 });
 
-const PARKED_HANDLE: AgentHandle = {
+const PARKED_HANDLE: AgentRegistryEntry = {
   address: {
     continuationToken: "subagent:child-parked",
     kind: "agent/local",
@@ -90,7 +90,7 @@ const PARKED_HANDLE: AgentHandle = {
   phase: "parked",
 };
 
-const CLAIMED_HANDLE: AgentHandle = {
+const CLAIMED_HANDLE: AgentRegistryEntry = {
   address: {
     continuationToken: "subagent:child-claimed",
     kind: "agent/local",
@@ -107,7 +107,7 @@ const CLAIMED_HANDLE: AgentHandle = {
   phase: "claimed",
 };
 
-function createCancelledTurnSession(handles: readonly AgentHandle[]): HarnessSession {
+function createCancelledTurnSession(handles: readonly AgentRegistryEntry[]): HarnessSession {
   return setHarnessEmissionState(
     {
       agent: { modelReference: { id: "openai/gpt-5.4" }, system: "", tools: [] },
@@ -116,7 +116,7 @@ function createCancelledTurnSession(handles: readonly AgentHandle[]): HarnessSes
       history: [],
       outputSchema: { type: "object" },
       sessionId: PARENT_SESSION_ID,
-      state: { [AGENT_HANDLES_STATE_KEY]: { handles } },
+      state: { [AGENT_REGISTRY_STATE_KEY]: { handles } },
     },
     { sequence: 3, sessionStarted: true, stepIndex: 1, turnId: "turn-1" },
   );
@@ -133,7 +133,7 @@ function buildSerializedContext(): Record<string, unknown> {
   };
 }
 
-describe("settleCancelledTurnStep handle store", () => {
+describe("settleCancelledTurnStep agent registry", () => {
   it("parks abandoned running handles as cancelled and keeps parked ones", async () => {
     bindSessionInstrumentationSpy.mockClear();
     const runtime = await createTestRuntime({ agent: { name: "settle-cancel-handles" } });
@@ -147,7 +147,8 @@ describe("settleCancelledTurnStep handle store", () => {
         }),
       });
 
-      expect(getAgentHandleStore(result.sessionState.snapshot.session.state)).toEqual({
+      expect(getAgentRegistryState(result.sessionState.snapshot.session.state)).toEqual({
+        registrationsInitialized: true,
         handles: [
           {
             address: RUNNING_HANDLE.address,
@@ -182,7 +183,8 @@ describe("settleCancelledTurnStep handle store", () => {
         sessionState: createDurableSessionState({ session }),
       });
 
-      expect(getAgentHandleStore(result.sessionState.snapshot.session.state)).toEqual({
+      expect(getAgentRegistryState(result.sessionState.snapshot.session.state)).toEqual({
+        registrationsInitialized: true,
         handles: [
           {
             address: CLAIMED_HANDLE.address,

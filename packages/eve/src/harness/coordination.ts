@@ -11,8 +11,11 @@ import type {
 import { markRuntimeWorkflowToolAction } from "#shared/action-types.js";
 import { parseJsonObject, type JsonObject } from "#shared/json.js";
 import type { AgentTurnOutcome } from "#shared/agent-turn-outcome.js";
-import { findRunningAgentHandle, isResultBoundToRunningHandle } from "#subagents/handles/query.js";
-import { settleAgentTurn } from "#subagents/handles/transitions.js";
+import {
+  findRunningAgentRegistryEntry,
+  isResultBoundToRunningHandle,
+} from "#subagents/registry/query.js";
+import { settleAgentTurn } from "#subagents/registry/transitions.js";
 import {
   clearProxyInputRequestsForChild,
   clearProxyInputRequestsWhere,
@@ -66,7 +69,7 @@ interface PendingCoordinationEventMetadata {
 /**
  * Serializable pending coordination batch stored on `session.state`.
  *
- * Child ownership does not live here: the agent handle store records every
+ * Child ownership does not live here: the agent registry records every
  * dispatched child (from before its start side effect) and is the sole
  * authority for continuing, settling, and cancelling children.
  */
@@ -258,7 +261,7 @@ export async function resolvePendingCoordination(input: {
     if (readBackgroundTaskReceipt(result) !== undefined) {
       continue;
     }
-    const handle = findRunningAgentHandle(nextSession.state, { callId: result.callId });
+    const handle = findRunningAgentRegistryEntry(nextSession.state, { callId: result.callId });
     if (handle === undefined) {
       continue;
     }

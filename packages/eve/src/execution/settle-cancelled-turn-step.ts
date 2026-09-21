@@ -30,7 +30,7 @@ import {
 import {
   abandonAgentInvocationOwners,
   abandonRunningAgentTurns,
-} from "#subagents/handles/transitions.js";
+} from "#subagents/registry/transitions.js";
 import { clearPendingCoordinationBatch } from "#harness/coordination.js";
 import {
   removeBlockingWorkflowToolRuns,

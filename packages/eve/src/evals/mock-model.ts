@@ -2,7 +2,7 @@ import type { LanguageModel } from "ai";
 import { MockLanguageModelV3 } from "ai/test";
 
 import { markMockModel } from "#internal/mock-model-identity.js";
-import { AGENTS_SNIPPET_LABEL } from "#subagents/handles/prompt.js";
+import { AGENTS_SNIPPET_LABEL } from "#subagents/registry/prompt.js";
 import { isPendingApprovalsSnippet } from "#harness/hitl/approval-prompt.js";
 
 type GenerateOptions = Parameters<MockLanguageModelV3["doGenerate"]>[0];

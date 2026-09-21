@@ -20,7 +20,7 @@ import {
 import { setHarnessEmissionState } from "#harness/emission-state.js";
 import { TurnCancelledError } from "#harness/turn-cancellation.js";
 import type { HarnessSession } from "#harness/types.js";
-import { getAgentHandleStore, setAgentHandleStore } from "#subagents/handles/store.js";
+import { getAgentRegistryState, setAgentRegistryState } from "#subagents/registry/state.js";
 import {
   getBackgroundWorkflowToolRuns,
   registerWorkflowToolRun,
@@ -67,7 +67,7 @@ function createSession(owned = true): HarnessSession {
       continuationToken: "parent-token",
       history: [],
       sessionId: "parent",
-      state: setAgentHandleStore(undefined, { handles: [handle] }),
+      state: setAgentRegistryState(undefined, { handles: [handle] }),
     },
     { sessionStarted: true, sequence: 2, stepIndex: 0, turnId: "turn-2" },
   );
@@ -147,7 +147,7 @@ describe("background subagent steering", () => {
     );
     expect(receipt).toEqual({ agentId: identity.id, status: "working", taskId: entry.task.taskId });
     const session = await scope.commit();
-    expect(getAgentHandleStore(session.state)?.handles).toEqual([handle]);
+    expect(getAgentRegistryState(session.state)?.handles).toEqual([handle]);
     expect(getBackgroundWorkflowToolRuns(session.state)).toEqual([entry]);
     expect(startTaskRun).not.toHaveBeenCalled();
     expect(waitForTaskCommandOwner).not.toHaveBeenCalled();
@@ -159,7 +159,7 @@ describe("background subagent steering", () => {
     vi.mocked(steerBackgroundAgent).mockRejectedValueOnce(new Error("Delivery failed"));
     await expect(scope.execute()).rejects.toThrow("Delivery failed");
     expect(startTaskRun).not.toHaveBeenCalled();
-    expect(getAgentHandleStore((await scope.commit()).state)?.handles).toEqual([handle]);
+    expect(getAgentRegistryState((await scope.commit()).state)?.handles).toEqual([handle]);
   });
 
   it("persists the creating turn's auth on the background task", async () => {
@@ -326,7 +326,7 @@ describe("background subagent steering", () => {
     const session = createSession();
     const scope = await createScope({
       ...session,
-      state: setAgentHandleStore(session.state, {
+      state: setAgentRegistryState(session.state, {
         handles: [
           {
             ...handle,
@@ -349,7 +349,7 @@ describe("background subagent steering", () => {
     const session = createSession();
     const scope = await createScope({
       ...session,
-      state: setAgentHandleStore(session.state, {
+      state: setAgentRegistryState(session.state, {
         handles: [{ ...reservation, phase: "reserved" }],
       }),
     });
@@ -366,7 +366,7 @@ describe("background subagent steering", () => {
     const session = createSession();
     const scope = await createScope({
       ...session,
-      state: setAgentHandleStore(session.state, { handles: [handle, second] }),
+      state: setAgentRegistryState(session.state, { handles: [handle, second] }),
     });
     const delivery = Promise.withResolvers<void>();
     vi.mocked(steerBackgroundAgent).mockReturnValueOnce(delivery.promise);
@@ -374,7 +374,7 @@ describe("background subagent steering", () => {
     await scope.execute("second-call", second.identity.id);
     delivery.resolve();
     await first;
-    expect(getAgentHandleStore((await scope.commit()).state)?.handles).toEqual([
+    expect(getAgentRegistryState((await scope.commit()).state)?.handles).toEqual([
       handle,
       expect.objectContaining({
         identity: second.identity,
@@ -393,7 +393,7 @@ describe("background subagent steering", () => {
     ]);
     expect(steerBackgroundAgent).toHaveBeenCalledTimes(2);
     expect(startTaskRun).not.toHaveBeenCalled();
-    expect(getAgentHandleStore((await scope.commit()).state)?.handles).toEqual([handle]);
+    expect(getAgentRegistryState((await scope.commit()).state)?.handles).toEqual([handle]);
   });
 
   it("allows another steering attempt after delivery fails", async () => {
@@ -407,7 +407,7 @@ describe("background subagent steering", () => {
     });
     expect(steerBackgroundAgent).toHaveBeenCalledTimes(2);
     expect(startTaskRun).not.toHaveBeenCalled();
-    expect(getAgentHandleStore((await scope.commit()).state)?.handles).toEqual([handle]);
+    expect(getAgentRegistryState((await scope.commit()).state)?.handles).toEqual([handle]);
   });
 
   it.each([new Error("Parent step failed"), new TurnCancelledError()])(
@@ -417,7 +417,7 @@ describe("background subagent steering", () => {
       await scope.execute();
       await scope.rollback(cause);
       expect(sendTaskCommand).not.toHaveBeenCalled();
-      expect(getAgentHandleStore((await scope.commit()).state)?.handles).toEqual([handle]);
+      expect(getAgentRegistryState((await scope.commit()).state)?.handles).toEqual([handle]);
       expect(scope.retained()).toBeUndefined();
     },
   );

@@ -86,6 +86,26 @@ afterEach(() => {
 });
 
 describe("requestPublicUrl", () => {
+  it("sends registered-agent POST bodies without following redirects", async () => {
+    queueResponse({ status: 307, headers: { location: "https://other.example" } });
+    const response = await requestPublicUrl("https://example.com/api/eve", {
+      ...REQUEST_OPTIONS,
+      method: "POST",
+      body: '{"message":"Review"}',
+      followRedirects: false,
+    });
+    expect(response.status).toBe(307);
+    expect(networkMocks.fetch).toHaveBeenCalledOnce();
+    expect(networkMocks.fetch).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        method: "POST",
+        body: '{"message":"Review"}',
+        redirect: "manual",
+      }),
+    );
+  });
+
   it("rejects HTTP and non-network URLs", async () => {
     for (const url of ["http://example.com", "file:///etc/passwd"]) {
       await expect(requestPublicUrl(url, REQUEST_OPTIONS), url).rejects.toThrow(

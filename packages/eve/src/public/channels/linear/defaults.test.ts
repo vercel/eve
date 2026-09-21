@@ -9,6 +9,9 @@ import type {
 
 function sessionContext(): SessionContext {
   return {
+    registerAgent: vi.fn(),
+    updateAgent: vi.fn(),
+    unregisterAgent: vi.fn(),
     getSandbox: vi.fn(),
     getSkill: vi.fn(),
     session: {

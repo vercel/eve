@@ -58,8 +58,8 @@ describe("planAgentDispatch", () => {
     ).toMatchObject({ kind: "reject", result: { output: { code: "SUBAGENT_UNAVAILABLE" } } });
   });
 
-  it("falls back to a fresh start for an unknown agentId", () => {
-    expect(
+  it("rejects an unknown agentId without starting a replacement", () => {
+    expect(() =>
       planAgentDispatch({
         action: { ...localAction, input: { agentId: "unknown", message: "Find it" } },
         bundle: {
@@ -74,6 +74,6 @@ describe("planAgentDispatch", () => {
         knownAgentIds: [],
         session: session() as never,
       }),
-    ).toMatchObject({ kind: "start", target: { action: localAction, kind: "local" } });
+    ).toThrow("Unknown or unregistered agent handle");
   });
 });

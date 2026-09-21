@@ -18,7 +18,7 @@ import {
 import { workflowEntryReference } from "#execution/workflow-runtime.js";
 import { getWorkflowMetadata } from "#compiled/@workflow/core/index.js";
 import { resolveWorkflowCallbackBaseUrl } from "#execution/workflow-callback-url.js";
-import { deriveAgentOperationId } from "#subagents/handles/operation-id.js";
+import { deriveAgentOperationId } from "#subagents/registry/operation-id.js";
 import { createSubagentReceiptIdentity } from "#execution/tools/subagent/receipt-identity.js";
 import {
   readDurableSession,
@@ -27,15 +27,16 @@ import {
 } from "#execution/durable-session-store.js";
 import { projectToDurableSession } from "#execution/session.js";
 import {
-  getAgentHandleStore,
-  writeHandles,
-  type AgentHandle,
-  type AgentHandleStoreCommand,
-  type AgentHandleStoreCommandResult,
-  type TaskOwnedAgentHandle,
-} from "#subagents/handles/store.js";
-import { applyTaskAgentHandleCommand } from "#subagents/handles/transitions.js";
-import { abandonAgentInvocationOwners } from "#subagents/handles/transitions.js";
+  getAgentRegistryState,
+  retireAgentRegistryEntry,
+  writeAgentRegistryEntries,
+  type AgentRegistryEntry,
+  type AgentRegistryCommand,
+  type AgentRegistryCommandResult,
+  type TaskOwnedAgentEntry,
+} from "#subagents/registry/state.js";
+import { applySessionAgentRegistryCommand } from "#subagents/registry/transitions.js";
+import { abandonAgentInvocationOwners } from "#subagents/registry/transitions.js";
 import {
   AGENT_BUSY,
   AGENT_MISMATCH,
@@ -103,7 +104,7 @@ export async function dispatchAgentInvocation(input: {
   readonly taskId?: string | undefined;
 }): Promise<AgentInvocationDispatchResult> {
   const durableSession = readDurableSession(input.sessionState);
-  const agentHandles = getAgentHandleStore(durableSession.state)?.handles ?? [];
+  const agentHandles = getAgentRegistryState(durableSession.state)?.handles ?? [];
   const prepared = await prepareOwnerAgentInvocation({
     invocation: input.request.input,
     invocationId: input.request.invocationId,
@@ -141,8 +142,8 @@ export async function dispatchAgentInvocation(input: {
       ? undefined
       : { sink: prepared.activityObserver.sink, workIdentity: input.activityWorkIdentity };
   let session = prepared.session;
-  const currentAgentHandles = (): readonly AgentHandle[] =>
-    getAgentHandleStore(session.state)?.handles ?? [];
+  const currentAgentRegistryEntries = (): readonly AgentRegistryEntry[] =>
+    getAgentRegistryState(session.state)?.handles ?? [];
   const sessionState = (): DurableSessionState =>
     replaceDurableSessionSnapshot({
       session: projectToDurableSession(session),
@@ -154,16 +155,16 @@ export async function dispatchAgentInvocation(input: {
     serializedContext: await flushAgentInvocationTraces(tracing.fail(result)),
     sessionState: sessionState(),
   });
-  const applyHandleCommand = (command: AgentHandleStoreCommand): AgentHandleStoreCommandResult => {
-    const applied = applyTaskAgentHandleCommand(session, command);
+  const applyHandleCommand = (command: AgentRegistryCommand): AgentRegistryCommandResult => {
+    const applied = applySessionAgentRegistryCommand(session, command);
     session = applied.session;
     return applied.result;
   };
   let outcome: DispatchOutcome;
   let agentId: string;
   if (entry.kind === "resume") {
-    const existingClaims = currentAgentHandles().filter(
-      (handle): handle is Extract<TaskOwnedAgentHandle, { readonly phase: "claimed" }> =>
+    const existingClaims = currentAgentRegistryEntries().filter(
+      (handle): handle is Extract<TaskOwnedAgentEntry, { readonly phase: "claimed" }> =>
         handle.phase === "claimed" &&
         handle.ownerId === input.ownerId &&
         handle.callId === entry.action.callId &&
@@ -221,15 +222,15 @@ export async function dispatchAgentInvocation(input: {
     agentId = claimed.identity.id;
   } else {
     const action = entry.target.action;
-    const reserved = currentAgentHandles().filter(
-      (handle): handle is Extract<TaskOwnedAgentHandle, { readonly phase: "reserved" }> =>
+    const reserved = currentAgentRegistryEntries().filter(
+      (handle): handle is Extract<TaskOwnedAgentEntry, { readonly phase: "reserved" }> =>
         handle.phase === "reserved" &&
         handle.ownerId === input.ownerId &&
         handle.callId === action.callId &&
         handle.identity.name === action.name &&
         handle.identity.nodeId === action.nodeId,
     );
-    const start =
+    let start =
       reserved.length === 1
         ? { identity: reserved[0]!.identity, operation: { id: reserved[0]!.operationId } }
         : createSubagentReceiptIdentity({
@@ -240,6 +241,11 @@ export async function dispatchAgentInvocation(input: {
             parentSessionId: prepared.session.sessionId,
             parentTurnId: prepared.batch.event.turnId,
           });
+    const destination = currentAgentRegistryEntries().find(
+      (handle) => handle.identity.id === action.input.agentId,
+    );
+    if (reserved.length === 0 && destination?.phase === "registered")
+      start = { ...start, identity: destination.identity };
     if (reserved.length > 1) {
       throw new Error(
         `Invocation owner "${input.ownerId}" has multiple reservations for "${action.callId}".`,
@@ -254,34 +260,68 @@ export async function dispatchAgentInvocation(input: {
         ownerId: input.ownerId,
       });
       if (reservation.kind !== "ready") {
-        throw new Error(`Agent handle store rejected start operation "${start.operation.id}".`);
+        throw new Error(`Agent registry rejected start operation "${start.operation.id}".`);
       }
     }
-    outcome = await startSubagent({
-      auth: prepared.auth,
-      batchEvent: prepared.batch.event,
-      bundle: prepared.bundle,
-      callbackBaseUrl: input.callbackBaseUrl,
-      capabilities: prepared.capabilities,
-      channelMetadata: prepared.channelMetadata,
-      inheritedConversation: prepared.inheritedConversation,
-      currentSession: session,
-      fanoutSize: prepared.fanoutSize,
-      initiatorAuth: prepared.initiatorAuth,
-      localDevRequest: prepared.localDevRequest,
-      parentContinuationToken: input.replyTo,
-      activityObserver: prepared.activityObserver,
-      taskActivityObserver,
-      sandboxSessionId: prepared.sandboxSessionId,
-      session,
-      taskId: input.taskId,
-      target: entry.target,
-      trace: tracing.dispatch,
-    });
+    const binding = start.identity.registration?.target;
+    if (
+      binding?.kind === "remote" &&
+      binding.sessionId !== undefined &&
+      entry.target.kind === "remote"
+    ) {
+      const confirmed = applyHandleCommand({
+        kind: "confirm",
+        operationId: start.operation.id,
+        ownerId: input.ownerId,
+        address: {
+          kind: "agent/remote",
+          sessionId: binding.sessionId,
+          url: binding.url,
+          callbackBaseUrl: input.callbackBaseUrl,
+          credentialResolver: {},
+        },
+      });
+      const claimed = readClaimedHandle(confirmed);
+      if (!claimed) throw new Error("Cannot bind registered remote session.");
+      outcome = await dispatchToClaimedAgentAddress({
+        action,
+        auth: prepared.auth,
+        bundle: createAgentContinuationBundle({
+          action,
+          bundle: prepared.bundle,
+          dynamicRemoteAgent: entry.target.dynamicRemoteAgent,
+        }),
+        currentSession: session,
+        handle: claimed,
+        reply: { kind: "reply", parentToken: input.replyTo, taskId: input.taskId },
+      });
+    } else {
+      outcome = await startSubagent({
+        auth: prepared.auth,
+        batchEvent: prepared.batch.event,
+        bundle: prepared.bundle,
+        callbackBaseUrl: input.callbackBaseUrl,
+        capabilities: prepared.capabilities,
+        channelMetadata: prepared.channelMetadata,
+        inheritedConversation: prepared.inheritedConversation,
+        currentSession: session,
+        fanoutSize: prepared.fanoutSize,
+        initiatorAuth: prepared.initiatorAuth,
+        localDevRequest: prepared.localDevRequest,
+        parentContinuationToken: input.replyTo,
+        activityObserver: prepared.activityObserver,
+        taskActivityObserver,
+        sandboxSessionId: prepared.sandboxSessionId,
+        session,
+        taskId: input.taskId,
+        target: entry.target,
+        trace: tracing.dispatch,
+      });
+    }
     agentId = start.identity.id;
     if (outcome.kind === "error") {
       applyHandleCommand({ agentId, kind: "remove", ownerId: input.ownerId });
-    } else {
+    } else if (!(binding?.kind === "remote" && binding.sessionId !== undefined)) {
       const confirmed = applyHandleCommand({
         address: outcome.address,
         kind: "confirm",
@@ -290,7 +330,7 @@ export async function dispatchAgentInvocation(input: {
       });
       if (readClaimedHandle(confirmed) === undefined) {
         throw new Error(
-          `Agent handle store could not confirm start operation "${start.operation.id}".`,
+          `Agent registry could not confirm start operation "${start.operation.id}".`,
         );
       }
     }
@@ -412,7 +452,7 @@ export async function settleTaskAgentInvocationStep(input: {
   "use step";
 
   const durable = readDurableSession(input.sessionState);
-  const handles = getAgentHandleStore(durable.state)?.handles ?? [];
+  const handles = getAgentRegistryState(durable.state)?.handles ?? [];
   const handle = handles.find(
     (candidate) =>
       candidate.phase === "claimed" &&
@@ -437,7 +477,9 @@ export async function settleTaskAgentInvocationStep(input: {
 
   const nextHandles =
     input.result.outcome.kind === "terminal"
-      ? handles.filter((candidate) => candidate !== handle)
+      ? handles.flatMap((candidate) =>
+          candidate === handle ? retireAgentRegistryEntry(candidate) : [candidate],
+        )
       : handles.map((candidate) =>
           candidate === handle
             ? input.result.outcome.result.kind === "cancelled"
@@ -454,7 +496,7 @@ export async function settleTaskAgentInvocationStep(input: {
                 }
             : candidate,
         );
-  let session = writeHandles(durable, nextHandles);
+  let session = writeAgentRegistryEntries(durable, nextHandles);
   if (input.result.outcome.kind === "terminal") {
     session =
       input.taskId === undefined
@@ -514,7 +556,7 @@ export async function releaseAgentInvocationOwnerStep(input: {
   const durable = readDurableSession(input.sessionState);
   const session = input.cancelled
     ? abandonAgentInvocationOwners(durable, new Set([input.ownerId]))
-    : applyTaskAgentHandleCommand(durable, {
+    : applySessionAgentRegistryCommand(durable, {
         kind: "release-owner",
         ownerId: input.ownerId,
       }).session;
@@ -527,8 +569,8 @@ export async function releaseAgentInvocationOwnerStep(input: {
 }
 
 function readClaimedHandle(
-  result: AgentHandleStoreCommandResult,
-): Extract<TaskOwnedAgentHandle, { phase: "claimed" }> | undefined {
+  result: AgentRegistryCommandResult,
+): Extract<TaskOwnedAgentEntry, { phase: "claimed" }> | undefined {
   const handle = result.kind === "ready" ? result.handle : undefined;
   return handle?.phase === "claimed" ? handle : undefined;
 }
@@ -536,7 +578,7 @@ function readClaimedHandle(
 function createTaskClaimError(
   action: Parameters<typeof createAgentErrorResult>[0]["action"],
   agentId: string,
-  result: AgentHandleStoreCommandResult,
+  result: AgentRegistryCommandResult,
 ): RuntimeSubagentResult {
   if (result.kind === "mismatch") {
     return createAgentErrorResult({

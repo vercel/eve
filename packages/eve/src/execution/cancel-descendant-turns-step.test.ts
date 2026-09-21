@@ -10,7 +10,7 @@ import {
   resolveRemoteAgentForAction,
 } from "#subagents/remote-dispatch.js";
 import { requestWorkflowTurnCancellation } from "#execution/workflow-runtime.js";
-import { AGENT_HANDLES_STATE_KEY, type AgentHandle } from "#subagents/handles/store.js";
+import { AGENT_REGISTRY_STATE_KEY, type AgentRegistryEntry } from "#subagents/registry/state.js";
 import type { HarnessSession } from "#harness/types.js";
 
 vi.mock("#execution/tools/workflow/cancel.js", () => ({ cancelWorkflowToolRun: vi.fn() }));
@@ -29,7 +29,7 @@ vi.mock("../subagents/remote-dispatch.js", () => ({
   resolveRemoteAgentForAction: vi.fn(),
 }));
 
-const LOCAL_RUNNING_HANDLE: AgentHandle = {
+const LOCAL_RUNNING_HANDLE: AgentRegistryEntry = {
   address: {
     continuationToken: "subagent:parent:call-local",
     kind: "agent/local",
@@ -49,7 +49,7 @@ const LOCAL_RUNNING_HANDLE: AgentHandle = {
   phase: "running",
 };
 
-const REMOTE_RUNNING_HANDLE: AgentHandle = {
+const REMOTE_RUNNING_HANDLE: AgentRegistryEntry = {
   address: {
     callbackBaseUrl: "https://parent.example.com",
     kind: "agent/remote",
@@ -84,6 +84,41 @@ afterEach(() => {
 });
 
 describe("cancelDescendantTurnsStep", () => {
+  it("does not propagate cancellation to an attached remote session", async () => {
+    const state = createRunningState();
+    const handle = {
+      ...REMOTE_RUNNING_HANDLE,
+      identity: {
+        ...REMOTE_RUNNING_HANDLE.identity,
+        registration: {
+          key: "shared",
+          description: "Shared conversation",
+          visible: true,
+          target: {
+            kind: "remote" as const,
+            url: "https://remote.example.com",
+            sessionId: "remote-child",
+          },
+        },
+      },
+    };
+    await cancelDescendantTurnsStep({
+      serializedContext: {},
+      sessionState: {
+        ...state,
+        snapshot: {
+          ...state.snapshot,
+          session: {
+            ...state.snapshot.session,
+            state: { [AGENT_REGISTRY_STATE_KEY]: { handles: [handle] } },
+          },
+        },
+      },
+    });
+    expect(cancelRemoteAgentTurn).not.toHaveBeenCalled();
+    expect(requestWorkflowTurnCancellation).not.toHaveBeenCalled();
+  });
+
   it("cancels every running local and remote child in parallel", async () => {
     installRemoteRegistry();
     vi.mocked(resolveRemoteAgentForAction).mockReturnValue(remote as never);
@@ -146,7 +181,7 @@ describe("cancelDescendantTurnsStep", () => {
               },
             ],
           },
-          [AGENT_HANDLES_STATE_KEY]: {
+          [AGENT_REGISTRY_STATE_KEY]: {
             handles: [
               {
                 phase: "claimed",
@@ -221,7 +256,7 @@ describe("cancelDescendantTurnsStep", () => {
 
   it("skips parked handles: an idle child has no turn to cancel", async () => {
     const session = createSession({
-      [AGENT_HANDLES_STATE_KEY]: {
+      [AGENT_REGISTRY_STATE_KEY]: {
         handles: [
           {
             address: LOCAL_RUNNING_HANDLE.address,
@@ -349,7 +384,7 @@ function createRunningState(input: { readonly includeRemote?: boolean } = {}) {
     ? [LOCAL_RUNNING_HANDLE, REMOTE_RUNNING_HANDLE]
     : [LOCAL_RUNNING_HANDLE];
   return createDurableSessionState({
-    session: createSession({ [AGENT_HANDLES_STATE_KEY]: { handles } }),
+    session: createSession({ [AGENT_REGISTRY_STATE_KEY]: { handles } }),
   });
 }
 

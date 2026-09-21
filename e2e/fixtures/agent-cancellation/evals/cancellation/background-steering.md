@@ -72,7 +72,7 @@ runtime operation is warranted.
 [worker]: ../../agent/subagents/steering-worker/agent.ts
 [instructions]: ../../agent/subagents/steering-worker/instructions.md
 [wait]: ../../agent/subagents/sleeper/tools/wait-for-cancellation.ts
-[claim]: ../../../../../packages/eve/src/subagents/handles/transitions.ts
+[claim]: ../../../../../packages/eve/src/subagents/registry/transitions.ts
 [busy]: ../../../../../packages/eve/src/execution/tools/subagent/invoke-step.ts
 [cancel]: ../../../../../packages/eve/src/execution/tools/subagent/task-cancel.ts
 [settle]: ../../../../../packages/eve/src/execution/tools/subagent/task-agent-requests.ts

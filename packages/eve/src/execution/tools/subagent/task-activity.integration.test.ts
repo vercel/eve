@@ -20,7 +20,7 @@ import { ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 import { createRuntimeSubagentRegistry } from "#runtime/subagents/registry.js";
 import { SUBAGENT_ADAPTER_KIND } from "#subagents/adapter-state.js";
 import { dispatchToClaimedAgentAddress } from "#subagents/handle-dispatch.js";
-import type { AgentAddress } from "#subagents/handles/store.js";
+import type { AgentAddress } from "#subagents/registry/state.js";
 import { bindTurnCallerContextStep } from "#subagents/parent-notification.js";
 import type {
   continueRemoteAgentSession as ContinueRemote,

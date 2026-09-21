@@ -8,6 +8,9 @@ function sessionContext(
   current: SessionContext["session"]["auth"]["current"] = null,
 ): SessionContext {
   return {
+    registerAgent: vi.fn(),
+    updateAgent: vi.fn(),
+    unregisterAgent: vi.fn(),
     getSandbox: vi.fn(),
     getSkill: vi.fn(),
     session: {

@@ -44,3 +44,9 @@ export {
   type WorkflowAgentMetadata,
 } from "#tools/workflow-definition.js";
 export type { ToolInputRequest, ToolInputResponse } from "#tools/definition.js";
+
+export type {
+  AgentDestination,
+  AgentReference,
+  AgentTaskReceipt,
+} from "#subagents/registration.js";

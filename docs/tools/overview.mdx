@@ -6,6 +6,11 @@ url: /tools
 
 A tool is a typed action the agent can call, such as hitting an API, running a query, or writing a file. Define a tool when you implement the action in code you control. To give the model tools published by an external MCP or OpenAPI service, use a [connection](/docs/connections) instead. Authored tools run in your app runtime with full access to `process.env`, not in the [sandbox](/docs/sandbox).
 
+Ordinary tools can [register agent destinations](/docs/subagents#register-destinations-at-runtime)
+through `ctx.registerAgent()` and invoke the returned handle with `ctx.agent(handle, input)`.
+That call returns a background task receipt; completion arrives through task notifications.
+Workflow tools retain their `ctx.agent()` behavior of waiting for the final result.
+
 ## Define a tool
 
 The filename is the tool name the model sees. A file at `agent/tools/get_weather.ts` is exposed as `get_weather`.

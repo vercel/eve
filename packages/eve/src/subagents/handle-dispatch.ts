@@ -2,7 +2,7 @@
 
 import type { ActivityObserverConfig, SessionAuthContext } from "#channel/types.js";
 import { AGENT_UNREACHABLE } from "#subagents/agent-handle-errors.js";
-import type { AgentAddress, AgentIdentity } from "#subagents/handles/store.js";
+import type { AgentAddress, AgentIdentity } from "#subagents/registry/state.js";
 import type {
   RuntimeAgentDispatchRequest,
   RuntimeRemoteAgentDispatchRequest,
@@ -25,7 +25,7 @@ import { createLogger, logError } from "#internal/logging.js";
 import { createEveCallbackRoutePath } from "#protocol/routes.js";
 import { err, ok, type Result } from "#shared/result.js";
 import { readTaskIdFromInboxToken } from "#tasks/task-inbox-token.js";
-import type { TaskOwnedAgentHandle } from "#subagents/handles/store.js";
+import type { TaskOwnedAgentEntry } from "#subagents/registry/state.js";
 
 const log = createLogger("execution.agent-handle-dispatch");
 
@@ -86,7 +86,7 @@ export async function dispatchToClaimedAgentAddress(input: {
   readonly auth: SessionAuthContext | null;
   readonly bundle: CompiledBundle;
   readonly currentSession: RuntimeSession;
-  readonly handle: Extract<TaskOwnedAgentHandle, { phase: "claimed" }>;
+  readonly handle: Extract<TaskOwnedAgentEntry, { phase: "claimed" }>;
   readonly reply: AgentReplyTarget;
 }): Promise<DispatchOutcome> {
   const { action, handle } = input;

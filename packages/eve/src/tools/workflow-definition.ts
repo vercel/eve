@@ -69,6 +69,7 @@ type JsonSchemaOutput<TSchema> = TSchema extends { readonly const: infer TValue 
                 : JsonValue;
 
 export interface WorkflowAgentMetadata {
+  readonly id?: string;
   readonly description: string;
 }
 
@@ -80,10 +81,13 @@ export type WorkflowStepToolContext = Pick<
 
 interface WorkflowAgent {
   <const TOutputSchema extends JsonObject>(
-    target: string,
+    target: string | import("#subagents/registration.js").AgentReference,
     input: AgentInput & { readonly outputSchema: TOutputSchema },
   ): Promise<JsonSchemaOutput<TOutputSchema>>;
-  (target: string, input: AgentInput): Promise<JsonValue>;
+  (
+    target: string | import("#subagents/registration.js").AgentReference,
+    input: AgentInput,
+  ): Promise<JsonValue>;
 }
 
 /**

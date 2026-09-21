@@ -1,5 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { requestPublicUrl } from "#execution/web-fetch/request.js";
+
+vi.mock("#execution/web-fetch/request.js", () => ({ requestPublicUrl: vi.fn() }));
+
 import type { SessionAuthContext } from "#channel/types.js";
 import { readForwardedParentSessionBaggage } from "#protocol/baggage.js";
 import {
@@ -169,6 +173,46 @@ describe("startRemoteAgentSession", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
     vi.unstubAllEnvs();
+  });
+
+  it("dispatches an uncompiled registered destination through the public-address transport", async () => {
+    vi.mocked(requestPublicUrl).mockResolvedValue(
+      Response.json({ ok: true, sessionId: "remote-session", status: "accepted" }),
+    );
+    const remote = resolveRemoteAgentForAction({
+      nodeId: "registered",
+      registry: new Map(),
+      remoteAgentName: "reviewer",
+      dynamicRemoteAgent: {
+        description: "Review",
+        path: "/api/eve/session",
+        url: "https://review.example",
+        publicUrl: true,
+      },
+    });
+    const result = await startRemoteAgentSession({
+      action: createAction(),
+      callbackBaseUrl: "https://caller.example.com",
+      remote,
+      session: {
+        agent: { modelReference: { id: "mock/test" }, system: "", tools: [] },
+        compaction: { recentWindowSize: 10, threshold: 100000 },
+        continuationToken: "eve:parent-token",
+        history: [],
+        sessionId: "parent-session",
+      },
+    });
+    expect(result).toEqual({ sessionId: "remote-session" });
+    expect(requestPublicUrl).toHaveBeenCalledWith(
+      expect.stringContaining("https://review.example"),
+      expect.objectContaining({
+        method: "POST",
+        followRedirects: false,
+        maxResponseSize: 1_048_576,
+        signal: expect.any(AbortSignal),
+        body: expect.any(String),
+      }),
+    );
   });
 
   it("carries a replay-stable operation id so the receiver can create once", async () => {

@@ -12,6 +12,27 @@ export default defineAgent({
         message.includes("E2E_INTERNAL_ROOT_COPY"),
       );
       if (internalCopy) return "INTERNAL-ROOT-COPY-OK";
+      if (request.lastUserMessage?.includes("DYNAMIC_AGENT_REGISTRY")) {
+        const prompt = JSON.stringify(request.messages);
+        if (!prompt.includes("startup-directory-agent"))
+          throw new Error("Startup registration was not advertised.");
+        const stale = request.lastUserMessage.includes("stale");
+        const delegate = request.lastUserMessage.includes("delegate");
+        const name = stale ? "reject-stale-agent" : "discover-agents";
+        const result = request.toolResults.find((entry) => entry.name === name);
+        if (result === undefined)
+          return { toolCalls: [{ name, input: stale ? {} : { delegate } }] };
+        if (stale) {
+          if (prompt.includes('name=\\"removed-destination\\"'))
+            throw new Error("Removed handle was advertised.");
+          return "STALE-AGENT-REJECTED";
+        }
+        if (!prompt.includes("Researcher selected for this request."))
+          throw new Error("Tool registration was not advertised after its result.");
+        if (delegate && prompt.includes("AUTO-ROUTER-RESEARCHER"))
+          return "DYNAMIC-AGENT-CALL-COMPLETED";
+        return delegate ? "DYNAMIC-AGENT-CALL-STARTED" : "DYNAMIC-AGENT-REGISTERED";
+      }
       if (request.tools.some((tool) => ["agent", "operator", "researcher"].includes(tool.name))) {
         throw new Error("A hidden agent tool was exposed to the model.");
       }

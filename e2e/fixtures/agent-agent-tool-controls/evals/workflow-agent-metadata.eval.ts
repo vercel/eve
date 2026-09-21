@@ -12,7 +12,7 @@ export default defineEval({
     turn.messageIncludes("Execute operational changes to systems and deployments.");
     await t.require(
       Object.keys(JSON.parse(turn.message ?? "{}")).sort(),
-      equals(["agent", "operator", "researcher"]),
+      equals(["agent", "operator", "researcher", "startup-directory-agent"]),
     );
     turn.calledTool("inspect-agents", { count: 1 });
     turn.calledSubagent("agent", { count: 0 });

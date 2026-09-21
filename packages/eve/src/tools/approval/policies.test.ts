@@ -12,6 +12,9 @@ function approvalContext(overrides: Partial<ApprovalContext> = {}): ApprovalCont
     abortSignal: new AbortController().signal,
     approvedTools: new Set(),
     callId: "call-1",
+    registerAgent: vi.fn(),
+    updateAgent: vi.fn(),
+    unregisterAgent: vi.fn(),
     getSandbox: vi.fn(),
     getSkill: vi.fn(),
     session: {

@@ -5,7 +5,7 @@ import { requestWorkflowTurnCancellation } from "#execution/workflow-runtime.js"
 import { createTestSessionState } from "#internal/testing/session-state.js";
 import { deserializeContext } from "#context/serialize.js";
 import { cancelRemoteAgentTurn, resolveRemoteAgentForAction } from "#subagents/remote-dispatch.js";
-import { setAgentHandleStore, type AgentHandle } from "#subagents/handles/store.js";
+import { setAgentRegistryState, type AgentRegistryEntry } from "#subagents/registry/state.js";
 import type { BackgroundWorkflowToolRun } from "#harness/workflow-tool-runs.js";
 
 vi.mock("#execution/workflow-runtime.js", () => ({ requestWorkflowTurnCancellation: vi.fn() }));
@@ -29,7 +29,7 @@ const entry: BackgroundWorkflowToolRun = {
     dispatchContext: { auth: { current: null, initiator: null } },
   },
 };
-const claimed = (id: string, ownerId = "owner"): AgentHandle => ({
+const claimed = (id: string, ownerId = "owner"): AgentRegistryEntry => ({
   phase: "claimed",
   ownerId,
   operationId: `op-${id}`,
@@ -37,7 +37,7 @@ const claimed = (id: string, ownerId = "owner"): AgentHandle => ({
   address: { kind: "agent/local", sessionId: id, continuationToken: `token-${id}` },
 });
 const session = {
-  state: setAgentHandleStore(undefined, {
+  state: setAgentRegistryState(undefined, {
     handles: [
       claimed("child-a"),
       claimed("child-b"),
@@ -104,7 +104,7 @@ it("waits for sibling cancellation requests before returning a failure", async (
 
 it("cancels remote children at their recorded address", async () => {
   const remoteSession = {
-    state: setAgentHandleStore(undefined, {
+    state: setAgentRegistryState(undefined, {
       handles: [
         {
           ...claimed("remote"),
@@ -140,4 +140,29 @@ it("cancels remote children at their recorded address", async () => {
     remote: expect.objectContaining({ url: "https://original.example" }),
     sessionId: "remote",
   });
+});
+
+it("does not cancel an externally supplied remote conversation", async () => {
+  const attached = claimed("external");
+  const remoteSession = {
+    state: setAgentRegistryState(undefined, {
+      handles: [
+        {
+          ...attached,
+          identity: {
+            ...attached.identity,
+            registration: {
+              key: "external",
+              description: "External",
+              visible: true,
+              target: { kind: "remote", url: "https://external.example", sessionId: "shared" },
+            },
+          },
+        },
+      ],
+    }),
+  };
+  await cancelBackgroundAgentTask({ entry, session: remoteSession, serializedContext: {} });
+  expect(cancelRemoteAgentTurn).not.toHaveBeenCalled();
+  expect(requestWorkflowTurnCancellation).not.toHaveBeenCalled();
 });

@@ -21,7 +21,7 @@ describe("workflow", () => {
 
     expect(isWorkflowToolDefinition(definition)).toBe(true);
     expect(definition.description).toContain(
-      "ctx.agent(name, { message: string, agentId?: string, outputSchema?: object })",
+      "ctx.agent(nameOrHandle, { message: string, agentId?: string, outputSchema?: object })",
     );
     expect(definition.description).toContain(
       "resolves directly to the child's JSON-serializable output",

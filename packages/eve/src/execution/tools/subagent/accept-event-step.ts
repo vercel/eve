@@ -1,5 +1,5 @@
 import { type DurableSessionState, readDurableSession } from "#execution/durable-session-store.js";
-import { getAgentHandleStore } from "#subagents/handles/store.js";
+import { getAgentRegistryState } from "#subagents/registry/state.js";
 import {
   readWorkflowTaskView,
   findBackgroundWorkflowToolRun,
@@ -32,7 +32,7 @@ export async function acceptTaskAuthorizationEventStep(input: {
     return hookPayload.event.type === "authorization.completed" || view === undefined;
   }
 
-  const handles = getAgentHandleStore(durableSession.state)?.handles ?? [];
+  const handles = getAgentRegistryState(durableSession.state)?.handles ?? [];
   const claimed = handles.find(
     (candidate) =>
       candidate.phase === "claimed" &&

@@ -23,7 +23,7 @@ import {
 import { deriveBackgroundTaskActivityObserver } from "#execution/activity-work.js";
 import { projectToolStartLabel } from "#harness/action-presentation.js";
 import type { ToolExecuteOptions } from "#tools/definition.js";
-import type { AgentView } from "#subagents/handles/prompt.js";
+import type { AgentView } from "#subagents/registry/prompt.js";
 import {
   createTaskAgentDispatchContext,
   prepareBackgroundTask,
@@ -33,17 +33,19 @@ import { parseWorkflowToolInput } from "#execution/tools/workflow/background.js"
 import { startTaskRun, waitForTaskCommandOwner } from "#execution/tasks/parent/run-parent.js";
 import { sessionCommandHookToken } from "#execution/session-inbox/address.js";
 import { projectSubagentTask } from "#execution/tasks/parent/subagent-task-projection.js";
-import { deriveAgentOperationId } from "#subagents/handles/operation-id.js";
+import { deriveAgentOperationId } from "#subagents/registry/operation-id.js";
 import { AGENT_BUSY, AGENT_MISMATCH, AGENT_UNREACHABLE } from "#subagents/agent-handle-errors.js";
 import { formatAgentBusyMessage } from "#subagents/agent-handle-errors.js";
 import {
-  getAgentHandleStore,
-  writeHandles,
-  type AgentHandleStoreCommand,
-  type AgentHandleStoreCommandResult,
-} from "#subagents/handles/store.js";
-import { applyTaskAgentHandleCommand } from "#subagents/handles/transitions.js";
+  type AgentRegistryCommand,
+  type AgentRegistryCommandResult,
+} from "#subagents/registry/state.js";
 import { steerBackgroundAgent } from "#execution/tools/subagent/steer.js";
+import { AgentRegistry, AgentRegistryKey } from "#subagents/registry/registry.js";
+import { subagentToolExecuteWorkflowReference } from "#runtime/subagents/workflow-reference.js";
+import { createBackgroundToolCallBatch } from "#harness/background-tools.js";
+import type { AgentReference, AgentTaskReceipt } from "#subagents/registration.js";
+import type { AgentInput } from "#tools/workflow-definition.js";
 
 interface BackgroundToolExecutionRecord {
   readonly callId: string;
@@ -99,8 +101,10 @@ export function runBackgroundStep(
  */
 export const backgroundToolExecutionProvider: FrameworkContextProvider<BackgroundToolExecutor> = {
   key: BackgroundToolExecutorKey,
-  create(_ctx, session) {
-    return { value: new BackgroundToolExecutionScope(session) };
+  create(ctx, session) {
+    const registry = ctx.get(AgentRegistryKey) ?? new AgentRegistry(ctx, session);
+    ctx.setVirtualContext(AgentRegistryKey, registry);
+    return { value: new BackgroundToolExecutionScope(session, registry) };
   },
   async commit(executor, session) {
     return await requireExecutionScope(executor).commit(session);
@@ -131,15 +135,48 @@ export function readRetainedBackgroundToolResult(
 class BackgroundToolExecutionScope implements BackgroundToolExecutor {
   private readonly executions = new Map<string, Promise<unknown>>();
   private readonly records: BackgroundToolExecutionRecord[] = [];
-  private agentHandleSession: HarnessSession;
-  private agentHandlesChanged = false;
+  private readonly registry: AgentRegistry;
+  private get currentSession(): HarnessSession {
+    let session = this.registry.commit(this.initialSession);
+    for (const record of this.records) {
+      if (record.settled && record.task) session = registerWorkflowToolRun(session, record.task);
+    }
+    return session;
+  }
+  private registryInvocationChanged = false;
   private retained = false;
 
   private readonly initialSession: HarnessSession;
 
-  constructor(initialSession: HarnessSession) {
+  constructor(initialSession: HarnessSession, registry: AgentRegistry) {
     this.initialSession = initialSession;
-    this.agentHandleSession = initialSession;
+    this.registry = registry;
+  }
+
+  async invokeAgent(
+    target: string | AgentReference,
+    input: AgentInput,
+    options: ToolExecuteOptions,
+  ): Promise<AgentTaskReceipt> {
+    const handle =
+      typeof target === "string"
+        ? this.registry.entries.find(
+            (entry) =>
+              entry.identity.registration?.visible &&
+              (entry.identity.registration.key === target || entry.identity.id === target),
+          )
+        : this.registry.resolve(target.id);
+    if (!handle) throw new Error("Unknown or unregistered agent destination.");
+    const definition = {
+      name: handle.identity.name,
+      nodeId: handle.identity.nodeId,
+      workflowId: subagentToolExecuteWorkflowReference.workflowId,
+    };
+    const toolInput = { ...input, agentId: handle.identity.id };
+    const batch = createBackgroundToolCallBatch();
+    batch.setTool(definition.name, definition);
+    batch.register({ callId: options.toolCallId, toolName: definition.name, input: toolInput });
+    return (await this.execute({ batch, definition, options, toolInput })) as AgentTaskReceipt;
   }
 
   execute(input: {
@@ -155,13 +192,34 @@ class BackgroundToolExecutionScope implements BackgroundToolExecutor {
         `Background tool call "${input.options.toolCallId}" was not registered before execution.`,
       );
     }
-    const execution = this.start(input);
+    const requestedId = (input.toolInput as { agentId?: unknown })?.agentId;
+    const registered =
+      typeof requestedId === "string"
+        ? this.registry.entries.find(
+            (handle) =>
+              handle.identity.id === requestedId && handle.identity.registration !== undefined,
+          )
+        : undefined;
+    if (registered?.identity.registration?.visible === false)
+      throw new Error("Unknown or unregistered agent handle.");
+    const execution = this.start(
+      registered === undefined
+        ? input
+        : {
+            ...input,
+            definition: {
+              ...input.definition,
+              name: registered.identity.name,
+              nodeId: registered.identity.nodeId,
+            },
+          },
+    );
     this.executions.set(input.options.toolCallId, execution);
     return execution;
   }
 
   async readAgentViews(): Promise<readonly AgentView[]> {
-    const handles = getAgentHandleStore(this.agentHandleSession.state)?.handles ?? [];
+    const handles = this.registry.entries;
     return handles.flatMap<AgentView>((handle) => {
       if (handle.phase === "reserved") return [];
       if (handle.phase === "available") {
@@ -213,7 +271,7 @@ class BackgroundToolExecutionScope implements BackgroundToolExecutor {
       await this.compensate(incomplete, cause);
     }
     if (settled.length === 0) {
-      this.retained = this.agentHandlesChanged && isTurnCancellation(cause);
+      this.retained = this.registryInvocationChanged && isTurnCancellation(cause);
       return;
     }
     // Cancellation must not compensate settled records: their tasks are
@@ -230,13 +288,10 @@ class BackgroundToolExecutionScope implements BackgroundToolExecutor {
   }
 
   private apply(session: HarnessSession): HarnessSession {
-    let next = session;
+    let next = this.registry.commit(session);
     for (const record of this.records) {
       if (!record.settled || record.task === undefined) continue;
       next = registerWorkflowToolRun(next, record.task);
-    }
-    if (this.agentHandlesChanged) {
-      next = writeHandles(next, getAgentHandleStore(this.agentHandleSession.state)?.handles ?? []);
     }
     return next;
   }
@@ -254,7 +309,7 @@ class BackgroundToolExecutionScope implements BackgroundToolExecutor {
           ]
         : [],
     );
-    if (tasks.length === 0 && !this.agentHandlesChanged) return undefined;
+    if (tasks.length === 0 && !this.registryInvocationChanged) return undefined;
     return {
       backgroundTaskSession: this.apply(this.initialSession),
       backgroundTasks: tasks,
@@ -312,9 +367,12 @@ class BackgroundToolExecutionScope implements BackgroundToolExecutor {
       }
   > {
     const workflow = input.input.definition;
-    let workflowInput = parseWorkflowToolInput(input.input.toolInput, input.input.definition.name);
+    const workflowInput = parseWorkflowToolInput(
+      input.input.toolInput,
+      input.input.definition.name,
+    );
     const parentTurnId = activeTurnId(input.emission);
-    let subagentProjection =
+    const subagentProjection =
       workflow.nodeId !== undefined
         ? projectSubagentTask({
             ctx: input.ctx,
@@ -331,21 +389,11 @@ class BackgroundToolExecutionScope implements BackgroundToolExecutor {
     if (
       subagentProjection !== undefined &&
       subagentProjection.identity === undefined &&
-      !hasAgentHandle(this.agentHandleSession, subagentProjection.metadata.agentId)
+      !this.registry.entries.some(
+        (entry) => entry.identity.id === subagentProjection.metadata.agentId,
+      )
     ) {
-      const { agentId: _unknownAgentId, ...freshWorkflowInput } = workflowInput;
-      workflowInput = freshWorkflowInput;
-      subagentProjection = projectSubagentTask({
-        ctx: input.ctx,
-        input: freshWorkflowInput,
-        name: input.input.definition.name,
-        nodeId: workflow.nodeId ?? input.input.definition.name,
-        taskInput: {
-          callId: input.input.options.toolCallId,
-          parentSessionId: this.initialSession.sessionId,
-          parentTurnId,
-        },
-      });
+      throw new Error("Unknown or unregistered agent handle.");
     }
     const metadata = subagentProjection?.metadata ?? {
       kind: "tool" as const,
@@ -385,7 +433,7 @@ class BackgroundToolExecutionScope implements BackgroundToolExecutor {
       subagentProjection.identity !== undefined
     ) {
       const identity = subagentProjection.identity;
-      const reservation = this.applyAgentHandleCommand({
+      const reservation = this.applyRegistryCommand({
         identity: identity.identity,
         callId: taskInput.callId,
         kind: "reserve",
@@ -393,7 +441,7 @@ class BackgroundToolExecutionScope implements BackgroundToolExecutor {
         ownerId: task.task.taskId,
       });
       if (reservation.kind !== "ready") {
-        throw new Error(`Agent handle store rejected start operation "${identity.operation.id}".`);
+        throw new Error(`Agent registry rejected start operation "${identity.operation.id}".`);
       }
       input.record.reservation = {
         agentId: identity.identity.id,
@@ -410,7 +458,7 @@ class BackgroundToolExecutionScope implements BackgroundToolExecutor {
         parentSessionId: taskInput.parentSessionId,
         parentTurnId,
       });
-      const claim = this.applyAgentHandleCommand({
+      const claim = this.applyRegistryCommand({
         agentId: subagentProjection.metadata.agentId,
         callId: taskInput.callId,
         expectedTarget: subagentProjection.metadata.mode,
@@ -421,7 +469,7 @@ class BackgroundToolExecutionScope implements BackgroundToolExecutor {
       });
       if (claim.kind === "busy" && claim.handle.phase === "claimed") {
         const handle = claim.handle;
-        const entry = findBackgroundWorkflowToolRun(this.agentHandleSession.state, handle.ownerId);
+        const entry = findBackgroundWorkflowToolRun(this.currentSession.state, handle.ownerId);
         if (
           entry?.task.metadata.kind === "subagent" &&
           entry.task.metadata.agentId === handle.identity.id &&
@@ -433,7 +481,7 @@ class BackgroundToolExecutionScope implements BackgroundToolExecutor {
             handle,
             callId: taskInput.callId,
             input: workflowInput,
-            session: this.agentHandleSession,
+            session: this.currentSession,
           });
           return {
             kind: "steered",
@@ -482,13 +530,11 @@ class BackgroundToolExecutionScope implements BackgroundToolExecutor {
     return { kind: "started", receipt: subagentProjection.receipt, task: backgroundTask };
   }
 
-  private applyAgentHandleCommand(command: AgentHandleStoreCommand): AgentHandleStoreCommandResult {
-    const applied = applyTaskAgentHandleCommand(this.agentHandleSession, command);
-    if (applied.session !== this.agentHandleSession) {
-      this.agentHandleSession = applied.session;
-      this.agentHandlesChanged = true;
-    }
-    return applied.result;
+  private applyRegistryCommand(command: AgentRegistryCommand): AgentRegistryCommandResult {
+    const entries = this.registry.entries;
+    const result = this.registry.dispatch(command);
+    if (this.registry.entries !== entries) this.registryInvocationChanged = true;
+    return result;
   }
 
   private async compensate(
@@ -511,10 +557,10 @@ class BackgroundToolExecutionScope implements BackgroundToolExecutor {
         }
       }
       if (record.claim !== undefined) {
-        this.applyAgentHandleCommand({ kind: "release-owner", ownerId: record.claim.taskId });
+        this.applyRegistryCommand({ kind: "release-owner", ownerId: record.claim.taskId });
       }
       if (record.reservation !== undefined && record.task !== undefined) {
-        this.applyAgentHandleCommand({
+        this.applyRegistryCommand({
           agentId: record.reservation.agentId,
           kind: "remove",
           ownerId: record.task.task.taskId,
@@ -531,13 +577,6 @@ class BackgroundToolExecutionScope implements BackgroundToolExecutor {
   }
 }
 
-function hasAgentHandle(session: HarnessSession, agentId: string): boolean {
-  return (
-    getAgentHandleStore(session.state)?.handles.some((handle) => handle.identity.id === agentId) ===
-    true
-  );
-}
-
 function requireExecutionScope(executor: BackgroundToolExecutor): BackgroundToolExecutionScope {
   if (!(executor instanceof BackgroundToolExecutionScope)) {
     throw new Error("The background tool executor is not owned by the task runtime.");
@@ -545,11 +584,11 @@ function requireExecutionScope(executor: BackgroundToolExecutor): BackgroundTool
   return executor;
 }
 
-function readClaimedHandle(result: AgentHandleStoreCommandResult): boolean {
+function readClaimedHandle(result: AgentRegistryCommandResult): boolean {
   return result.kind === "ready" && result.handle?.phase === "claimed";
 }
 
-function throwAgentClaimError(agentId: string, result: AgentHandleStoreCommandResult): never {
+function throwAgentClaimError(agentId: string, result: AgentRegistryCommandResult): never {
   if (result.kind === "mismatch") {
     throw new Error(
       JSON.stringify({

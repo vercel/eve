@@ -22,7 +22,7 @@ export const agent = attachToolBehavior(
     },
     "defineTool",
   ),
-  { availability: ["root-session"], handling: { action: "self-agent", kind: "dispatch" } },
+  { availability: [], handling: { action: "self-agent", kind: "dispatch" } },
 );
 
 export default agent;

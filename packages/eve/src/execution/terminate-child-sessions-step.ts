@@ -1,3 +1,4 @@
+import { isAttachedRemoteSession } from "#subagents/registry/registered-remote.js";
 import { deserializeContext } from "#context/serialize.js";
 import type { ContextContainer } from "#context/container.js";
 import { getDynamicSubagentSelection } from "#context/dynamic-subagent-lifecycle.js";
@@ -8,7 +9,7 @@ import {
   resolveRemoteAgentForAction,
   resolveRemoteAgentStreamHeaders,
 } from "#subagents/remote-dispatch.js";
-import { getAgentHandleStore } from "#subagents/handles/store.js";
+import { getAgentRegistryState } from "#subagents/registry/state.js";
 import { createLogger, logError } from "#internal/logging.js";
 import { cancelRun, getWorld } from "#internal/workflow/runtime.js";
 import { BundleKey, type CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
@@ -41,7 +42,9 @@ export async function terminateChildSessionsStep(input: {
     return;
   }
 
-  const handles = getAgentHandleStore(session.state)?.handles ?? [];
+  const handles = (getAgentRegistryState(session.state)?.handles ?? []).filter(
+    (handle) => !isAttachedRemoteSession(handle.identity),
+  );
   const hasRemoteHandle = handles.some(
     (handle) => "address" in handle && handle.address.kind === "agent/remote",
   );
@@ -91,7 +94,11 @@ export async function terminateChildSessionsStep(input: {
                 });
           await resetRemoteAgentSession({
             headers,
-            remote: { name: handle.identity.name, url: handle.address.url },
+            remote: {
+              name: handle.identity.name,
+              url: handle.address.url,
+              publicUrl: handle.identity.registration?.target.kind === "remote" || undefined,
+            },
             sessionId: handle.address.sessionId,
           });
         } else {
@@ -111,7 +118,11 @@ export async function terminateChildSessionsStep(input: {
           } else {
             await resetRemoteAgentSession({
               headers: {},
-              remote: { name: handle.identity.name, url: handle.address.url },
+              remote: {
+                name: handle.identity.name,
+                url: handle.address.url,
+                publicUrl: handle.identity.registration?.target.kind === "remote" || undefined,
+              },
               sessionId: handle.address.sessionId,
             });
           }

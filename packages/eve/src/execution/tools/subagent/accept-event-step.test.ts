@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { readDurableSession } from "#execution/durable-session-store.js";
 import { acceptTaskAuthorizationEventStep } from "#execution/tools/subagent/accept-event-step.js";
-import { setAgentHandleStore } from "#subagents/handles/store.js";
+import { setAgentRegistryState } from "#subagents/registry/state.js";
 
 vi.mock("#execution/durable-session-store.js", async (importOriginal) => ({
   ...(await importOriginal()),
@@ -60,7 +60,7 @@ function mockSession(handles: readonly unknown[]): void {
     continuationToken: "parent-token",
     history: [],
     sessionId: "parent-session",
-    state: setAgentHandleStore(taskIndex, { handles: handles as never }),
+    state: setAgentRegistryState(taskIndex, { handles: handles as never }),
   });
 }
 

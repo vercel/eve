@@ -9,7 +9,7 @@ import {
 import { resumeHook } from "#internal/workflow/runtime.js";
 import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
 import { isObject } from "#shared/guards.js";
-import { getAgentHandleStore } from "#subagents/handles/store.js";
+import { getAgentRegistryState } from "#subagents/registry/state.js";
 
 /** Parses retained work with this deployment's code before deciding whether it can move. */
 export function isSessionStateIdleForHandoff(sessionState: DurableSessionState): boolean {
@@ -19,7 +19,7 @@ export function isSessionStateIdleForHandoff(sessionState: DurableSessionState):
   for (const entry of invocations) {
     if (entry.lifetime === "session") readWorkflowTaskView(entry.task);
   }
-  const handles = getAgentHandleStore(state);
+  const handles = getAgentRegistryState(state);
 
   // These registries are deleted when work settles. Their ordinary readers
   // tolerate malformed values as absent; that must not authorize a handoff.

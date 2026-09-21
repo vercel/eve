@@ -404,6 +404,15 @@ function toolsContext(): MemoryToolsContext {
 function operationContext() {
   return {
     abortSignal: signal,
+    registerAgent: () => {
+      throw new Error("not available");
+    },
+    updateAgent: () => {
+      throw new Error("not available");
+    },
+    unregisterAgent: () => {
+      throw new Error("not available");
+    },
     getSandbox: async () => {
       throw new Error("not available");
     },

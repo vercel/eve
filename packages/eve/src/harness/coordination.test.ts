@@ -1,7 +1,7 @@
 import {
   isInboxSubagentResultFromRunningHandle,
   isResultBoundToRunningHandle,
-} from "#subagents/handles/query.js";
+} from "#subagents/registry/query.js";
 import { describe, expect, it } from "vitest";
 import { createPresentedRuntimeActionRequestFromToolCall } from "#harness/action-presentation.js";
 import {
@@ -12,9 +12,9 @@ import {
   resolveToolCallInputObject,
   setPendingCoordinationBatch,
 } from "#harness/coordination.js";
-import { deriveAgentOperationId } from "#subagents/handles/operation-id.js";
-import { deriveAgentId, getAgentHandleStore } from "#subagents/handles/store.js";
-import { confirmAgentStarted, prepareAgentStart } from "#subagents/handles/transitions.js";
+import { deriveAgentOperationId } from "#subagents/registry/operation-id.js";
+import { deriveAgentId, getAgentRegistryState } from "#subagents/registry/state.js";
+import { confirmAgentStarted, prepareAgentStart } from "#subagents/registry/transitions.js";
 import { getProxyInputRequests, upsertProxyInputRequests } from "#harness/proxy-input-requests.js";
 import {
   getBlockingWorkflowToolRuns,
@@ -413,7 +413,7 @@ describe("resolvePendingCoordination", () => {
 
     expect(events.some((event) => event.type === "subagent.completed")).toBe(false);
     expect(events).toContainEqual(expect.objectContaining({ type: "action.result" }));
-    expect(getAgentHandleStore(resolved.session.state)).toBeUndefined();
+    expect(getAgentRegistryState(resolved.session.state)).toBeUndefined();
   });
 
   it("settles the running handle terminally and deletes it with the batch", async () => {
@@ -441,7 +441,7 @@ describe("resolvePendingCoordination", () => {
 
     expect(resolved.outcome).toBe("resolved");
     expect(getPendingCoordinationBatch(resolved.session.state)).toBeUndefined();
-    expect(getAgentHandleStore(resolved.session.state)).toEqual({ handles: [] });
+    expect(getAgentRegistryState(resolved.session.state)).toEqual({ handles: [] });
   });
 
   it("settles a failed child result terminally as well", async () => {
@@ -472,7 +472,7 @@ describe("resolvePendingCoordination", () => {
     });
 
     expect(resolved.outcome).toBe("resolved");
-    expect(getAgentHandleStore(resolved.session.state)).toEqual({ handles: [] });
+    expect(getAgentRegistryState(resolved.session.state)).toEqual({ handles: [] });
   });
 
   it("does not report a cancelled child outcome as successful completion", async () => {
@@ -736,7 +736,7 @@ describe("resolvePendingCoordination", () => {
     });
 
     expect(parkedResolve.outcome).toBe("resolved");
-    expect(getAgentHandleStore(parkedResolve.session.state)?.handles).toEqual([
+    expect(getAgentRegistryState(parkedResolve.session.state)?.handles).toEqual([
       expect.objectContaining({ phase: "parked" }),
     ]);
 
@@ -746,7 +746,7 @@ describe("resolvePendingCoordination", () => {
       parentSessionId: "test-session",
       parentTurnId: "turn_1",
     });
-    const parkedHandle = getAgentHandleStore(parkedResolve.session.state)?.handles[0];
+    const parkedHandle = getAgentRegistryState(parkedResolve.session.state)?.handles[0];
     if (parkedHandle?.phase !== "parked") throw new Error("expected parked handle");
     const continuedSession = {
       ...parkedResolve.session,
@@ -818,7 +818,7 @@ describe("resolvePendingCoordination", () => {
     });
 
     expect(terminalResolve.outcome).toBe("resolved");
-    expect(getAgentHandleStore(terminalResolve.session.state)).toEqual({ handles: [] });
+    expect(getAgentRegistryState(terminalResolve.session.state)).toEqual({ handles: [] });
   });
 
   it("folds each turn's usage delta once so a two-turn child never double-counts", async () => {
@@ -863,7 +863,7 @@ describe("resolvePendingCoordination", () => {
     });
 
     // Turn 2: the child spent another 1000/100 (cumulative 5000/500).
-    const parkedHandle = getAgentHandleStore(firstResolve.session.state)?.handles[0];
+    const parkedHandle = getAgentRegistryState(firstResolve.session.state)?.handles[0];
     if (parkedHandle?.phase !== "parked") throw new Error("expected parked handle");
     const continuedSession = {
       ...firstResolve.session,

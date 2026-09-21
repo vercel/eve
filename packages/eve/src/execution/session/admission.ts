@@ -11,7 +11,7 @@ import {
 import { reportDroppedWirePayloadStep } from "#execution/report-dropped-wire-payload-step.js";
 import type { SessionStateCursor } from "#execution/session/state-cursor.js";
 import type { WorkflowToolRunMessage } from "#execution/tools/workflow/messages.js";
-import { findRunningAgentHandle } from "#subagents/handles/query.js";
+import { findRunningAgentRegistryEntry } from "#subagents/registry/query.js";
 import { runProxySubagentEventStep } from "#subagents/event-proxy-step.js";
 
 export type SessionCancellation = Extract<SessionCommand, { readonly kind: "cancel" }>;
@@ -44,7 +44,7 @@ export async function admitSessionInboxPayload(
     return { kind: "consumed" };
   }
   if (value.kind === "subagent-input-request" || value.kind === "subagent-authorization-event") {
-    const handle = findRunningAgentHandle(input.cursor.sessionState.snapshot.session.state, {
+    const handle = findRunningAgentRegistryEntry(input.cursor.sessionState.snapshot.session.state, {
       callId: value.callId,
     });
     if (

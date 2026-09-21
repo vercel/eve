@@ -1,26 +1,26 @@
 import { describe, expect, it } from "vitest";
 
-import { deriveAgentOperationId } from "#subagents/handles/operation-id.js";
+import { deriveAgentOperationId } from "#subagents/registry/operation-id.js";
 import {
-  EMPTY_AGENT_HANDLE_STORE,
+  EMPTY_AGENT_REGISTRY_STATE,
   deriveAgentId,
-  getAgentHandleStore,
-  writeHandles,
+  getAgentRegistryState,
+  writeAgentRegistryEntries,
   type AgentAddress,
-  type AgentHandle,
+  type AgentRegistryEntry,
   type AgentIdentity,
   type StartOperation,
-  type TaskOwnedAgentHandle,
-} from "#subagents/handles/store.js";
+  type TaskOwnedAgentEntry,
+} from "#subagents/registry/state.js";
 import {
   abandonAgentInvocationOwners,
   abandonRunningAgentTurns,
-  applyAgentHandleStoreCommand,
+  applyAgentRegistryCommand,
   confirmAgentStarted,
   prepareAgentStart,
   rejectAgentEffect,
   settleAgentTurn,
-} from "#subagents/handles/transitions.js";
+} from "#subagents/registry/transitions.js";
 import type { HarnessSession } from "#harness/types.js";
 import type { TokenUsage } from "#shared/token-usage.js";
 
@@ -99,8 +99,8 @@ function parkedSession(): HarnessSession {
   return settled.session;
 }
 
-function handlesOf(session: HarnessSession): readonly AgentHandle[] {
-  return getAgentHandleStore(session.state)?.handles ?? [];
+function handlesOf(session: HarnessSession): readonly AgentRegistryEntry[] {
+  return getAgentRegistryState(session.state)?.handles ?? [];
 }
 
 describe("prepareAgentStart", () => {
@@ -164,7 +164,7 @@ describe("rejectAgentEffect", () => {
       previousStatus: "initial findings",
     } as const;
     const prepared = {
-      session: writeHandles(parkedSession(), [
+      session: writeAgentRegistryEntries(parkedSession(), [
         { address, identity, operation: continueOperation, phase: "running" },
       ]),
     };
@@ -213,8 +213,8 @@ describe("abandonRunningAgentTurns", () => {
 
 describe("owner-scoped handle claims", () => {
   it("keeps a recorded workflow run's claim separate from a task claim", () => {
-    const available: TaskOwnedAgentHandle = { address, identity, phase: "available" };
-    const workflowClaim = applyAgentHandleStoreCommand(
+    const available: TaskOwnedAgentEntry = { address, identity, phase: "available" };
+    const workflowClaim = applyAgentRegistryCommand(
       { handles: [available] },
       {
         agentId: identity.id,
@@ -232,7 +232,7 @@ describe("owner-scoped handle claims", () => {
       kind: "ready",
     });
     expect(
-      applyAgentHandleStoreCommand(workflowClaim.store, {
+      applyAgentRegistryCommand(workflowClaim.store, {
         agentId: identity.id,
         callId: "call-task",
         expectedTarget: "local",
@@ -311,9 +311,9 @@ describe("settleAgentTurn", () => {
   });
 });
 
-describe("agent handle store task leases", () => {
+describe("agent registry task leases", () => {
   it("reserves and confirms a task-owned start, then releases it for another task", () => {
-    const reserved = applyAgentHandleStoreCommand(EMPTY_AGENT_HANDLE_STORE, {
+    const reserved = applyAgentRegistryCommand(EMPTY_AGENT_REGISTRY_STATE, {
       identity,
       kind: "reserve",
       operationId: "operation-1",
@@ -321,7 +321,7 @@ describe("agent handle store task leases", () => {
     });
     expect(reserved.result).toMatchObject({ handle: { phase: "reserved" }, kind: "ready" });
 
-    const confirmed = applyAgentHandleStoreCommand(reserved.store, {
+    const confirmed = applyAgentRegistryCommand(reserved.store, {
       address,
       kind: "confirm",
       operationId: "operation-1",
@@ -338,7 +338,7 @@ describe("agent handle store task leases", () => {
       },
     });
 
-    const released = applyAgentHandleStoreCommand(confirmed.store, {
+    const released = applyAgentRegistryCommand(confirmed.store, {
       kind: "release-owner",
       ownerId: "task-1",
     });
@@ -346,8 +346,13 @@ describe("agent handle store task leases", () => {
   });
 
   it("claims a parked child through the owner-scoped continuation path", () => {
-    const parked: AgentHandle = { address, identity, lastStatus: "(cancelled)", phase: "parked" };
-    const claimed = applyAgentHandleStoreCommand(
+    const parked: AgentRegistryEntry = {
+      address,
+      identity,
+      lastStatus: "(cancelled)",
+      phase: "parked",
+    };
+    const claimed = applyAgentRegistryCommand(
       { handles: [parked] },
       {
         agentId: identity.id,
@@ -366,7 +371,7 @@ describe("agent handle store task leases", () => {
   });
 
   it("parks claimed workflow owners as cancelled without changing available handles", () => {
-    const claimed: AgentHandle = {
+    const claimed: AgentRegistryEntry = {
       address,
       identity,
       operationId: "operation-1",
@@ -374,7 +379,7 @@ describe("agent handle store task leases", () => {
       phase: "claimed",
     };
     const availableIdentity = { ...identity, id: "agent-2" };
-    const session = writeHandles(createSession(), [
+    const session = writeAgentRegistryEntries(createSession(), [
       claimed,
       { address, identity: availableIdentity, phase: "available" },
     ]);
@@ -386,8 +391,8 @@ describe("agent handle store task leases", () => {
   });
 
   it("allows only one task to claim an available session agent", () => {
-    const available: TaskOwnedAgentHandle = { address, identity, phase: "available" };
-    const claimed = applyAgentHandleStoreCommand(
+    const available: TaskOwnedAgentEntry = { address, identity, phase: "available" };
+    const claimed = applyAgentRegistryCommand(
       { handles: [available] },
       {
         agentId: identity.id,
@@ -400,7 +405,7 @@ describe("agent handle store task leases", () => {
     );
     expect(claimed.result).toMatchObject({ handle: { phase: "claimed" }, kind: "ready" });
 
-    const competing = applyAgentHandleStoreCommand(claimed.store, {
+    const competing = applyAgentRegistryCommand(claimed.store, {
       agentId: identity.id,
       expectedTarget: "local",
       invokedName: identity.name,
@@ -413,13 +418,13 @@ describe("agent handle store task leases", () => {
   });
 
   it("rejects a name or target mismatch without changing the store", () => {
-    const available: TaskOwnedAgentHandle = { address, identity, phase: "available" };
+    const available: TaskOwnedAgentEntry = { address, identity, phase: "available" };
 
     for (const command of [
       { expectedTarget: "local" as const, invokedName: "writer" },
       { expectedTarget: "remote" as const, invokedName: identity.name },
     ]) {
-      const result = applyAgentHandleStoreCommand(
+      const result = applyAgentRegistryCommand(
         { handles: [available] },
         {
           agentId: identity.id,
@@ -435,14 +440,14 @@ describe("agent handle store task leases", () => {
   });
 
   it("does not let one task remove another task's claimed agent", () => {
-    const claimed: TaskOwnedAgentHandle = {
+    const claimed: TaskOwnedAgentEntry = {
       address,
       identity,
       operationId: "operation-1",
       phase: "claimed",
       ownerId: "task-1",
     };
-    const result = applyAgentHandleStoreCommand(
+    const result = applyAgentRegistryCommand(
       { handles: [claimed] },
       { agentId: identity.id, kind: "remove", ownerId: "task-2" },
     );

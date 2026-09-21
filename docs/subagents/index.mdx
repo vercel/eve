@@ -3,7 +3,163 @@ title: "Subagents"
 description: "Delegate work to root-agent copies or declared specialists with their own tools and sandbox."
 ---
 
-eve supports two ways to delegate work: the root-only built-in `agent` tool, which starts or continues a copy of the root agent, and declared subagents, which are specialists with their own directories. Use a subagent to run independent work in parallel, narrow the available tools, or give a task to a specialist.
+eve delegates work through declared subagents, registered destinations, and copies of the root agent. Use a subagent to run independent work in parallel, narrow the available tools, or give a task to a specialist.
+
+## Register destinations at runtime
+
+Use `ctx.registerAgent()` in an ordinary tool or hook to add a destination to the
+current session. A destination can name a declared agent or a remote eve endpoint;
+it does not need to be running or reachable. Every registered destination appears
+in the model's `[Agents]` listing, including destinations that are busy or have
+never been contacted. URLs and remote session IDs stay outside that listing.
+
+Declared agents are registered automatically. In an ordinary tool,
+`ctx.agent("researcher", { message: "Review this change." })` calls that registered
+destination. A named model tool without `agentId` still starts a separate child.
+Use a registered handle to establish and reuse one conversation.
+
+### Read an external directory
+
+Both examples below read a trusted, operator-managed JSON file outside the agent
+directory. Deploy the file at `AGENT_DIRECTORY_PATH`. Keep source access and parsing
+in a shared helper; tools and hooks register the destinations it returns.
+
+```ts title="lib/agent-directory.ts"
+import { readFile } from "node:fs/promises";
+import { z } from "zod";
+
+const directory = z
+  .array(
+    z.object({
+      key: z.string().min(1).max(128),
+      description: z.string().min(1).max(2048),
+      url: z.string().url(),
+      sessionId: z.string().min(1).optional(),
+    }),
+  )
+  .max(128);
+
+export async function readAgentDirectory() {
+  const path = process.env.AGENT_DIRECTORY_PATH;
+  if (!path) throw new Error("Set AGENT_DIRECTORY_PATH to the agent directory JSON file.");
+  const entries = directory.parse(JSON.parse(await readFile(path, "utf8")));
+  return entries.map(({ key, description, url, sessionId }) => ({
+    key,
+    description,
+    target: { kind: "remote" as const, url, sessionId },
+  }));
+}
+```
+
+For example, the file can contain a destination with no existing session:
+
+```json
+[
+  {
+    "key": "reviewer",
+    "description": "Review proposed changes.",
+    "url": "https://reviewer.example.com"
+  }
+]
+```
+
+The reader limits the file to 128 entries. The session's registry also has a total
+limit of 128 destinations, including automatically registered declarations.
+Reading the directory does not contact the destination agents.
+
+### Load a directory at startup
+
+Register the external directory in `session.started` to populate the registry
+before the first model request:
+
+```ts title="agent/hooks/agents.ts"
+import { defineHook } from "eve/hooks";
+import { readAgentDirectory } from "../../lib/agent-directory";
+
+export default defineHook({
+  events: {
+    async "session.started"(_event, ctx) {
+      for (const destination of await readAgentDirectory()) {
+        ctx.registerAgent(destination);
+      }
+    },
+  },
+});
+```
+
+Remote URLs must use HTTPS, contain no embedded credentials or fragment, and resolve
+to public network addresses when called. Calls use the eve session protocol, reject
+redirects, and carry no additional credentials. To reuse authored authentication,
+register `{ kind: "agent", name: "reviewer" }` for a declared remote agent instead.
+The remote service still decides whether to authorize the request.
+
+### Register from an ordinary tool
+
+Load one destination on demand by its directory key. The tool reads the external
+source each time, registers the selected destination, and optionally calls it in
+the same execution:
+
+```ts title="agent/tools/load-agent.ts"
+import { defineTool } from "eve/tools";
+import { z } from "zod";
+import { readAgentDirectory } from "../../lib/agent-directory";
+
+export default defineTool({
+  description: "Load an agent from the directory and optionally send it a message.",
+  inputSchema: z.object({
+    key: z.string().min(1).max(128),
+    message: z.string().min(1).optional(),
+  }),
+  async execute({ key, message }, ctx) {
+    const destination = (await readAgentDirectory()).find((entry) => entry.key === key);
+    if (!destination) throw new Error(`No agent destination named "${key}" in the directory.`);
+    const handle = ctx.registerAgent(destination);
+    if (message !== undefined) return ctx.agent(handle, { message });
+    return { agentId: handle.id };
+  },
+});
+```
+
+For the sample directory, call the tool with `{ key: "reviewer" }` to advertise the
+destination, or add `message` to delegate immediately. Both examples use the same
+registration operation. Loading an unchanged entry after the startup hook returns
+the same handle. The tool's registration appears in the next eligible model
+request even if the tool returns no handle.
+
+Ordinary `ctx.agent()` returns `{ status: "working", taskId, agentId }` after local
+background work is accepted. This receipt does not prove remote delivery. Completion
+and failure arrive through the normal task notifications. A later call to a busy,
+addressed handle steers its current task; a handle still waiting for its first
+address can reject the call as busy. A [workflow tool](/docs/tools/workflows#delegate-work-ctxagent)
+can also pass `{ id: agentId }` to `ctx.agent()`, which waits for the final result.
+Register and update destinations in hooks or ordinary tools, outside workflow bodies.
+
+### Update, remove, and publish
+
+`ctx.updateAgent(handle, description)` changes the description without changing the
+handle or destination. `ctx.unregisterAgent(handle)` hides it and rejects future
+calls through that handle; accepted work continues. Registering the same key with
+identical content returns the same handle. Different content is a conflict: update
+the description explicitly, or unregister and register to change the target.
+A newly registered replacement receives a new ID. Handles belong to one session.
+At most 128 destinations may be registered at once.
+
+Code sees a mutation immediately. The enclosing harness step persists it together
+with session state. An ordinary tool error reported as a tool result does not undo
+earlier registration; an aborted step follows the runtime's rollback rules.
+Registrations made in `session.started` or `step.started` enter the next model
+request. Registrations made during a tool call enter the next eligible request,
+after tool results. The tool's return value does not control publication. A request
+already in flight keeps its snapshot, and registration alone does not wake an idle
+session. Resume rebuilds the listing from persisted handles.
+
+Omitting `target.sessionId` creates a remote session on the first call. Providing
+it attaches to that specific remote conversation. Registration grants no ownership
+of that conversation: parent-session termination does not reset it, and local cancellation does not cancel its remote turn. Cancelling the local task stops waiting for the result; remote work may continue. After a binding
+exists, an expired or unavailable session fails explicitly; eve does not silently
+start a replacement. A failed call preserves registration. Retry, offline queueing,
+and health checks remain application decisions. `availability="available"` in the
+listing means the handle has no active invocation; it is not a health check.
 
 ## Completion batching
 
@@ -23,7 +179,7 @@ To follow work in progress, subscribe to the child session streams.
 
 ## The built-in `agent` tool
 
-The root session receives `agent` by default. The model calls it to delegate a task to a new copy of the root agent or continue an existing copy:
+The model uses `agent` with a listed `agentId` to call a registered destination. In the root session, omitting `agentId` delegates to a new copy of the root agent:
 
 ```ts
 {
@@ -33,9 +189,9 @@ The root session receives `agent` by default. The model calls it to delegate a t
 }
 ```
 
-The copy uses the root's instructions, connections, auth, and sandbox. It receives the same tools except for the root-only `agent`, and starts with fresh conversation history and fresh state. Its file writes are immediately visible to the root. The built-in `agent` always runs in the background and needs no configuration: each call returns `{ status: "working", taskId, agentId }`, then task notifications wake the parent with completion, failure, or cancellation. Give parallel children non-overlapping write scopes.
+The copy uses the root's instructions, connections, auth, and sandbox. It receives the same tools, subject to their availability settings, and starts with fresh conversation history and fresh state. Its file writes are immediately visible to the root. The built-in `agent` always runs in the background and needs no configuration: each call returns `{ status: "working", taskId, agentId }`, then task notifications wake the parent with completion, failure, or cancellation. Give parallel children non-overlapping write scopes.
 
-`agent` is intentionally root-only. Copies created by it cannot call `agent`, and declared subagents never receive the built-in tool. If a stale or forced recursive call reaches execution, eve rejects it instead of starting another child session.
+`agent` can address registered destinations in child sessions too. Starting a fresh root copy remains root-only; a call without a destination from a child session is rejected.
 
 The parent transfers data to the child through the `message` input it gives the subagent. Do not include sensitive data in a subagent request unless that child and its inherited tools, connections, sandbox, and telemetry path are appropriate for that data.
 
@@ -65,7 +221,7 @@ export default defineAgent({
 });
 ```
 
-`description` is required. The parent reads it to decide whether to delegate, so the compiler rejects any subagent whose `agent.ts` leaves it out. The path-derived invocation name `agent` is reserved for the built-in root-copy target; rename a declared subagent at `agent/subagents/agent/`. Namespaced names such as `crm__agent` do not collide and remain valid. Set `tool: false` to keep the subagent out of the parent model's tools while allowing an authored [workflow tool](/docs/tools/workflows) to call it by name through `ctx.agent()`:
+`description` is required. The parent reads it to decide whether to delegate, so the compiler rejects any subagent whose `agent.ts` leaves it out. The path-derived invocation name `agent` is reserved for the built-in root-copy target; rename a declared subagent at `agent/subagents/agent/`. Namespaced names such as `crm__agent` do not collide and remain valid. Set `tool: false` to omit the dedicated model tool while allowing an authored [workflow tool](/docs/tools/workflows) to call it by name through `ctx.agent()`:
 
 ```ts title="agent/subagents/researcher/agent.ts"
 import { defineAgent } from "eve";
@@ -77,7 +233,7 @@ export default defineAgent({
 });
 ```
 
-The parent can alternatively export `disableTool()` from a same-named tool path, such as `agent/tools/researcher.ts`. This suppresses the derived model tool without removing `researcher` from the workflow invocation registry. A same-named authored tool replaces the model-facing surface while the workflow can still call the underlying subagent with `ctx.agent("researcher", ...)`.
+The parent can alternatively export `disableTool()` from a same-named tool path, such as `agent/tools/researcher.ts`. This suppresses the derived model tool without removing `researcher` from the registered destinations or workflow invocation registry. Registered destinations remain advertised and callable through `agent` when that tool is enabled. A same-named authored tool replaces the model-facing surface while the workflow can still call the underlying subagent with `ctx.agent("researcher", ...)`.
 
 Every declared local or remote subagent runs as a durable background task: the call returns `{ status: "working", taskId, agentId }` immediately, then task notifications wake the parent with completion, failure, or cancellation. Human input requests surface separately on the parent session.
 
@@ -215,9 +371,9 @@ The root built-in `agent` tool is the exception. Its children share the root's s
 
 eve lowers every tool-enabled subagent visible to the current agent (the root built-in copy, declared, or [remote](./guides/remote-agents)) into a model-visible tool with the same `{ message, agentId?, outputSchema? }` shape. The parent packs `message` with everything the child needs, since the child never sees the parent's history. Set `outputSchema` to require structured output for that turn; the child remains available for follow-up messages afterward.
 
-Declared subagents can call nested subagents defined under their own directories. eve does not apply a separate depth limit; nesting ends where the authored directory tree ends. The built-in `agent` follows the stricter root-only rule above, so `limits.maxSubagentDepth` no longer exists.
+Declared subagents can call nested subagents defined under their own directories. eve does not apply a separate depth limit; nesting ends where the authored directory tree ends. Starting a root copy remains root-only, so `limits.maxSubagentDepth` no longer exists.
 
-Child sessions can still call their own declared or remote subagents, but they do not receive the built-in `agent`. Authored workflow tools use the same subagent availability and authorization checks as direct delegation. In a delegated root copy, `ctx.agents` also omits `agent`, so a router cannot select another root copy recursively.
+Child sessions can call their own declared or remote subagents and use `agent` with a registered destination ID. Authored workflow tools use the same subagent availability and authorization checks as direct delegation. In a delegated root copy, `ctx.agents` also omits `agent`, so a router cannot select another root copy recursively.
 
 A directly declared subagent's tool name is the bare path-derived name, with no prefix. `agent/subagents/researcher/` registers as the tool `researcher`. A subagent supplied by a mounted extension includes the mount namespace, such as `crm__reviewer`. The model, approvals, logs, and evals reference the resulting name. Its input schema is:
 
@@ -229,7 +385,7 @@ A directly declared subagent's tool name is the bare path-derived name, with no 
 }
 ```
 
-By default, a subagent named `researcher` collides with an authored tool named `researcher`. Set the subagent's `tool` to `false` when the authored tool intentionally wraps that subagent; the authored tool becomes the model-facing capability while `ctx.agent("researcher", ...)` continues to address the child. A same-named `disableTool()` removes the model-facing capability entirely. Other static and active dynamic collisions remain errors.
+By default, a subagent named `researcher` collides with an authored tool named `researcher`. Set the subagent's `tool` to `false` when the authored tool intentionally wraps that subagent; the authored tool becomes the model-facing capability while `ctx.agent("researcher", ...)` continues to address the child. A same-named `disableTool()` removes the dedicated tool; the registered destination remains advertised. Other static and active dynamic collisions remain errors.
 
 Do not rely on subagent delegation by itself as an approval boundary. Put sensitive tools behind `approval`, connection approval, route/session authorization, or other controls wherever those tools can be called.
 
@@ -237,7 +393,7 @@ Each delegated subagent spins up its own child session and stream. The parent st
 
 Both blocking and background invocations emit `subagent.called` after dispatch and `subagent.completed` after the parent records successful completion. Completion carries the actual output and identifies the same invocation by `callId`; the child session can remain available for reuse. A background working receipt is returned as an `action.result` tool output and does not emit completion. Background completion events do not wait for the cohort report. Failure and cancellation are not successful completion; task notifications retain those outcomes.
 
-Channels with activity reporting attribute the backing agent's tool activity to its background task. Local and remote subagents share the task's progress item rather than adding a separate agent item. Continuing or steering a child with `agentId` attaches its new activity to the new task; the previous task keeps its completed or cancelled status. This applies to the built-in `agent` and declared subagent tools, not to child invocations inside custom workflow tools. Activity reporting is best-effort and does not change task execution or result delivery.
+Channels with activity reporting attribute the backing agent's tool activity to its background task. Local and remote subagents share the task's progress item rather than adding a separate agent item. Continuing an idle child with `agentId` attaches activity to the new task. Steering a busy child retains the current task. This applies to the built-in `agent` and declared subagent tools, not to child invocations inside custom workflow tools. Activity reporting is best-effort and does not change task execution or result delivery.
 
 A background task that was already admitted survives cancellation of the turn that started it; background work that has not yet been admitted is rejected with the cancelled step. Use `task_cancel` to stop an admitted task. Cancellation delivers the task's final notification to an active parent even if the task must be stopped forcibly. Parent-session finalization cancels remaining live tasks.
 
@@ -245,15 +401,19 @@ Subagent model calls automatically retry classified transient provider failures,
 
 ## Agent messaging
 
-A child parks after answering instead of terminating, keeping its session and conversation history alive. A failed child turn can also leave the child parked — its latest status shows the error and the parent may message it again. Pass a parked child's `agentId` to the same subagent tool with a new `message` to continue that session. Omitting `agentId` (or passing an empty string or `null`) always starts a new child, and an `agentId` that matches no known agent falls back to starting a new child rather than failing. Passing a known `agentId` through a different subagent tool fails with `AGENT_MISMATCH`.
+A child parks after answering instead of terminating, keeping its session and conversation history alive. A failed child turn can also leave the child parked — its latest status shows the error and the parent may message it again. Pass a parked child's `agentId` to the same subagent tool with a new `message` to continue that session. Omitting `agentId` (or passing an empty string or `null`) always starts a new child, and an unknown or removed `agentId` fails. Registered IDs resolve their destination independently of the named tool; a legacy child ID passed through a different named tool can fail with `AGENT_MISMATCH`.
 
 To steer a running background child, call the same subagent tool with its `agentId` and the updated `message`. Before answer output or local tool execution begins, steering interrupts the child's pending model generation and applies the update in the same turn. Executing tools finish and checkpoint their results first; after answer output starts, steering waits for the next committed Workflow boundary. The receipt retains the same `agentId` and `taskId`; steering does not cancel the task, replace its completion callback, or undo tool side effects that have already occurred.
 
 A child that is still starting, or is owned by a blocking workflow invocation rather than an admitted background task, continues to return `AGENT_BUSY`. Delivery failures are reported to the caller; eve does not start a replacement child session to hide them.
 
-Whenever the set of parked (resumable) children changes, eve appends a framework-injected note to the conversation — labeled `[Agents]` and carrying an `<agents>` block — listing each child's `agentId`, name, and latest status. The static system prompt tells the model the note is injected by eve, not written by the user. The note is appended only when the listing changes (an append-only design that preserves the provider prompt cache), the most recent note is authoritative, and children that are starting or running do not appear until they park again.
+Whenever the advertised set changes, eve appends a framework-injected `[Agents]`
+note containing each handle's ID, name, description, and execution state. Registered
+destinations remain listed before first contact and while busy. The latest note is
+authoritative; unchanged listings are not repeated. See the
+[publication boundary](#update-remove-and-publish) for hook and tool timing.
 
-The parent holds agent handles only for its session lifetime. When the parent session ends, eve terminates local children and sends authenticated reset requests for remote children. Remote reset is best-effort: an unreachable deployment may retain the parked child until its own session deadline. For [remote agents](./guides/remote-agents), upgrade both deployments before relying on continuation or reset behavior introduced by a newer eve version.
+The parent holds agent handles only for its session lifetime. When the parent session ends, eve terminates local children and sends reset requests for remote children it created, using their configured credentials. Externally supplied remote sessions are exempt from automatic reset and cancellation. Remote reset is best-effort: an unreachable deployment may retain the parked child until its own session deadline. For [remote agents](./guides/remote-agents), upgrade both deployments before relying on continuation or reset behavior introduced by a newer eve version.
 
 ## When to split
 

@@ -17,6 +17,9 @@ type DispatcherRequestInit = Omit<RequestInit, "dispatcher"> & {
 
 /** Options for an SSRF-safe HTTPS request. */
 export interface PublicUrlRequestOptions {
+  readonly method?: "GET" | "POST";
+  readonly body?: string;
+  readonly followRedirects?: boolean;
   readonly headers: Readonly<Record<string, string>>;
   readonly maxResponseSize: number;
   readonly signal: AbortSignal;
@@ -42,6 +45,7 @@ export async function requestPublicUrl(
       const location = response.headers.get("location");
 
       if (
+        options.followRedirects !== false &&
         location !== null &&
         REDIRECT_STATUSES.has(response.status) &&
         redirectCount < MAX_REDIRECTS
@@ -91,6 +95,8 @@ async function requestOnce(
     const response = await fetchWithDispatcher(url, {
       dispatcher,
       headers: options.headers,
+      method: options.method,
+      body: options.body,
       redirect: "manual",
       signal: options.signal,
     });

@@ -81,7 +81,9 @@ import {
 import { activeTurnId } from "#harness/active-turn-id.js";
 import { registerWorkflowToolRun } from "#harness/workflow-tool-runs.js";
 import { getPendingCoordinationBatch } from "#harness/coordination.js";
-import { AGENT_HANDLES_STATE_KEY } from "#subagents/handles/store.js";
+import { AGENT_REGISTRY_STATE_KEY } from "#subagents/registry/state.js";
+import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
+import { AgentRegistry, AgentRegistryKey } from "#subagents/registry/registry.js";
 import { BackgroundToolExecutorKey } from "#harness/background-tools.js";
 import { PendingSkillAnnouncementKey } from "#context/dynamic-skill-lifecycle.js";
 import { deserializeContext, serializeContext } from "#context/serialize.js";
@@ -1322,7 +1324,7 @@ describe("createToolLoopHarness", () => {
     );
     const session = createTestSession({
       state: {
-        [AGENT_HANDLES_STATE_KEY]: {
+        [AGENT_REGISTRY_STATE_KEY]: {
           handles: [
             {
               address: {
@@ -1375,6 +1377,39 @@ describe("createToolLoopHarness", () => {
     });
   });
 
+  it("publishes registrations made by step.started before the model request is frozen", async () => {
+    setupMockAgent({
+      finishReason: "stop",
+      response: { messages: [{ content: "Hello", role: "assistant" }] },
+      text: "Hello",
+      toolCalls: [],
+      toolResults: [],
+    });
+    const ctx = new ContextContainer();
+    ctx.set(BundleKey, { subagentRegistry: { subagentsByName: new Map() } } as never);
+    const session = createTestSession();
+    const registry = new AgentRegistry(ctx, session);
+    ctx.setVirtualContext(AgentRegistryKey, registry);
+    const runStep = createToolLoopHarness(
+      createTestConfig("conversation", async (event) => {
+        if (event.type === "step.started")
+          registry.register({
+            key: "offline-reviewer",
+            description: "Reviews changes",
+            target: { kind: "remote", url: "https://private-route.example" },
+          });
+      }),
+    );
+    await contextStorage.run(ctx, () => runStep(session, { message: "Hello" }));
+    const agent = vi.mocked(ToolLoopAgent).mock.results[0]?.value as {
+      stream: ReturnType<typeof vi.fn>;
+    };
+    const messages = agent.stream.mock.calls[0]?.[0].messages;
+    expect(JSON.stringify(messages)).toContain("offline-reviewer");
+    expect(JSON.stringify(messages)).toContain("reachability unknown");
+    expect(JSON.stringify(messages)).not.toContain("private-route.example");
+  });
+
   it("skips the agents snippet when no handle is parked", async () => {
     setupMockAgent({
       finishReason: "stop",
@@ -1387,7 +1422,7 @@ describe("createToolLoopHarness", () => {
     const runStep = createToolLoopHarness(createTestConfig("conversation"));
     const session = createTestSession({
       state: {
-        [AGENT_HANDLES_STATE_KEY]: {
+        [AGENT_REGISTRY_STATE_KEY]: {
           handles: [
             {
               identity: {
@@ -1463,7 +1498,7 @@ describe("createToolLoopHarness", () => {
         },
       ],
       state: {
-        [AGENT_HANDLES_STATE_KEY]: {
+        [AGENT_REGISTRY_STATE_KEY]: {
           handles: [
             {
               address: {
@@ -2003,7 +2038,7 @@ describe("createToolLoopHarness", () => {
       ...parked.session,
       state: {
         ...parked.session.state,
-        [AGENT_HANDLES_STATE_KEY]: {
+        [AGENT_REGISTRY_STATE_KEY]: {
           handles: [
             {
               address: {
@@ -6833,7 +6868,7 @@ describe("createToolLoopHarness", () => {
       ...pending,
       state: {
         ...pending.state,
-        [AGENT_HANDLES_STATE_KEY]: {
+        [AGENT_REGISTRY_STATE_KEY]: {
           handles: [
             {
               address: {

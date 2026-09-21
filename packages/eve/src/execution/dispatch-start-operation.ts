@@ -1,9 +1,9 @@
-import { deriveAgentOperationId } from "#subagents/handles/operation-id.js";
+import { deriveAgentOperationId } from "#subagents/registry/operation-id.js";
 import {
   deriveAgentId,
   type AgentIdentity,
   type StartOperation,
-} from "#subagents/handles/store.js";
+} from "#subagents/registry/state.js";
 
 /**
  * Mints deterministic parent-controlled ownership data before the child exists,

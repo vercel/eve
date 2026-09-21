@@ -1,3 +1,4 @@
+import { AgentRegistryKey } from "#context/agent-registry-key.js";
 import {
   ParentSessionKey,
   SessionDynamicSubagentSelectionsKey,
@@ -39,6 +40,14 @@ export function resolveWorkflowAgentMetadata(
     });
   }
 
+  for (const handle of ctx.get(AgentRegistryKey)?.entries ?? []) {
+    const registration = handle.identity.registration;
+    if (registration?.visible === true)
+      agents.set(registration.key, {
+        id: handle.identity.id,
+        description: registration.description,
+      });
+  }
   return Object.fromEntries(agents);
 }
 

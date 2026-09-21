@@ -9,7 +9,7 @@ import {
 import { prepareOwnerAgentInvocation } from "#execution/tools/subagent/invoke-preparation.js";
 import { dispatchToClaimedAgentAddress } from "#subagents/handle-dispatch.js";
 import { startSubagent } from "#execution/tools/subagent/start.js";
-import { getAgentHandleStore, setAgentHandleStore } from "#subagents/handles/store.js";
+import { getAgentRegistryState, setAgentRegistryState } from "#subagents/registry/state.js";
 
 vi.mock("#execution/tools/subagent/invoke-preparation.js", () => ({
   prepareOwnerAgentInvocation: vi.fn(),
@@ -74,6 +74,89 @@ describe("blocking workflow agent continuation", () => {
       session: input.currentSession,
       toolName: "research",
     }));
+  });
+
+  it("attaches an existing remote session without starting a replacement conversation", async () => {
+    const registration = {
+      key: "existing-reviewer",
+      description: "Existing reviewer",
+      visible: true,
+      target: { kind: "remote" as const, url: "https://review.example", sessionId: "existing" },
+    };
+    const session = {
+      agent: { dynamicModel: true as const, system: "", tools: [] },
+      compaction: { recentWindowSize: 5, threshold: 10_000 },
+      continuationToken: "parent-token",
+      history: [],
+      sessionId: "parent",
+      state: setAgentRegistryState(undefined, {
+        handles: [{ phase: "registered", identity: { ...identity, registration } }],
+      }),
+    };
+    const sessionState = createDurableSessionState({ session });
+    const request = {
+      input: { target: identity.id, agentId: identity.id, message: "Continue review" },
+      invocationId: "attach-call",
+      kind: "agent-invoke" as const,
+    };
+    const prepared = await prepareOwnerAgentInvocation({
+      invocation: request.input,
+      invocationId: request.invocationId,
+      serializedContext: {},
+      sessionState,
+    });
+    vi.mocked(prepareOwnerAgentInvocation).mockResolvedValue({
+      ...prepared,
+      bundle: { subagentRegistry: { subagentsByNodeId: new Map() } },
+      plan: [
+        {
+          kind: "start",
+          target: {
+            kind: "remote",
+            dynamicRemoteAgent: {
+              url: registration.target.url,
+              description: registration.description,
+              publicUrl: true,
+            },
+            action: {
+              callId: request.invocationId,
+              description: registration.description,
+              input: request.input,
+              kind: "remote-agent-call",
+              name: identity.name,
+              nodeId: identity.nodeId,
+              remoteAgentName: identity.name,
+            },
+          },
+        },
+      ],
+    } as never);
+    const result = await dispatchAgentInvocation({
+      callbackBaseUrl: "https://parent.example",
+      ownerId: "workflow-run-1",
+      replyTo: "reply-1",
+      request,
+      serializedContext: {},
+      sessionState,
+    });
+    expect(startSubagent).not.toHaveBeenCalled();
+    expect(dispatchToClaimedAgentAddress).toHaveBeenCalledWith(
+      expect.objectContaining({
+        handle: expect.objectContaining({
+          phase: "claimed",
+          identity: expect.objectContaining({ id: identity.id }),
+          address: expect.objectContaining({ kind: "agent/remote", sessionId: "existing" }),
+        }),
+      }),
+    );
+    expect(
+      getAgentRegistryState(readDurableSession(result.sessionState).state)?.handles,
+    ).toContainEqual(
+      expect.objectContaining({
+        identity: expect.objectContaining({ registration }),
+        address: expect.objectContaining({ sessionId: "existing" }),
+      }),
+    );
   });
 
   it("forwards inherited activity when starting a background subagent", async () => {
@@ -167,7 +250,7 @@ describe("blocking workflow agent continuation", () => {
       continuationToken: "parent-token",
       history: [],
       sessionId: "parent",
-      state: setAgentHandleStore(undefined, {
+      state: setAgentRegistryState(undefined, {
         handles: [{ address, identity, phase: "available" }],
       }),
     };
@@ -190,7 +273,9 @@ describe("blocking workflow agent continuation", () => {
       });
       expect(dispatched).toMatchObject({ agentId: identity.id, kind: "dispatched" });
       if (dispatched.kind !== "dispatched") throw new Error("Expected dispatch.");
-      const claimed = getAgentHandleStore(dispatched.sessionState.snapshot.session.state)?.handles;
+      const claimed = getAgentRegistryState(
+        dispatched.sessionState.snapshot.session.state,
+      )?.handles;
       expect(claimed).toEqual([
         expect.objectContaining({ identity, ownerId: "workflow-run-1", phase: "claimed" }),
       ]);
@@ -246,7 +331,7 @@ describe("blocking workflow agent continuation", () => {
       });
       previousSettlement = settlement;
       sessionState = settled.sessionState;
-      expect(getAgentHandleStore(sessionState.snapshot.session.state)?.handles).toEqual([
+      expect(getAgentRegistryState(sessionState.snapshot.session.state)?.handles).toEqual([
         { address, identity, phase: "available" },
       ]);
     }

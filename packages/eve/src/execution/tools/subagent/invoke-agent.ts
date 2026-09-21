@@ -56,23 +56,24 @@ export type AgentInvocationReply =
 
 /** Invokes an agent from a workflow tool. */
 export async function agent(
-  ctx: ToolContext,
-  target: string,
+  ctx: Omit<ToolContext, "agent">,
+  target: string | import("#subagents/registration.js").AgentReference,
   input: AgentInput,
 ): Promise<JsonValue> {
   readWorkflowToolRunRef(ctx);
-  validateAgentInput({ ...input, target });
+  const destination = typeof target === "string" ? target : target.id;
+  validateAgentInput({ ...input, target: destination });
   return await invokeAgent(ctx, {
-    agentId: input.agentId,
+    agentId: typeof target === "string" ? input.agentId : target.id,
     message: input.message,
     outputSchema: input.outputSchema,
-    target,
+    target: destination,
   });
 }
 
 /** Invokes an agent with a framework-selected replay-stable invocation id. */
 export async function invokeAgent(
-  ctx: ToolContext,
+  ctx: Omit<ToolContext, "agent">,
   input: InternalAgentInput,
   options: { readonly invocationId?: string } = {},
 ): Promise<JsonValue> {

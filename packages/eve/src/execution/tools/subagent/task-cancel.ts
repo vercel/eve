@@ -1,10 +1,14 @@
+import {
+  registeredRemoteConfig,
+  isAttachedRemoteSession,
+} from "#subagents/registry/registered-remote.js";
 import type { RuntimeSession } from "#subagents/handle-dispatch.js";
 import type { TaskExecutorCancel } from "#execution/tasks/parent/task-cancel.js";
 import { requestWorkflowTurnCancellation } from "#execution/workflow-runtime.js";
 import { cancelRemoteAgentTurn, resolveRemoteAgentForAction } from "#subagents/remote-dispatch.js";
 import { deserializeContext } from "#context/serialize.js";
 import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
-import { getAgentHandleStore, type AgentHandle } from "#subagents/handles/store.js";
+import { getAgentRegistryState, type AgentRegistryEntry } from "#subagents/registry/state.js";
 import { readDurableSession, type DurableSessionState } from "#execution/durable-session-store.js";
 import { getDynamicSubagentSelection } from "#context/dynamic-subagent-lifecycle.js";
 import { createLogger, logError } from "#internal/logging.js";
@@ -45,9 +49,11 @@ async function cancelAgentInvocationOwner(input: {
   readonly serializedContext: Record<string, unknown>;
   readonly session: Pick<RuntimeSession, "state">;
 }): Promise<void> {
-  const handles = (getAgentHandleStore(input.session.state)?.handles ?? []).filter(
-    (candidate): candidate is Extract<AgentHandle, { phase: "claimed" }> =>
-      candidate.phase === "claimed" && candidate.ownerId === input.ownerId,
+  const handles = (getAgentRegistryState(input.session.state)?.handles ?? []).filter(
+    (candidate): candidate is Extract<AgentRegistryEntry, { phase: "claimed" }> =>
+      candidate.phase === "claimed" &&
+      candidate.ownerId === input.ownerId &&
+      !isAttachedRemoteSession(candidate.identity),
   );
   if (handles.length === 0) return;
   let remoteContext: ReturnType<typeof deserializeContext> | undefined;
@@ -62,7 +68,9 @@ async function cancelAgentInvocationOwner(input: {
       const bundle = ctx.require(BundleKey);
       const selection = getDynamicSubagentSelection(ctx, handle.identity.nodeId);
       const remote = resolveRemoteAgentForAction({
-        dynamicRemoteAgent: selection?.kind === "remote" ? selection.remoteAgent : undefined,
+        dynamicRemoteAgent:
+          registeredRemoteConfig(handle.identity) ??
+          (selection?.kind === "remote" ? selection.remoteAgent : undefined),
         nodeId: handle.identity.nodeId,
         registry: bundle.subagentRegistry.subagentsByNodeId,
         remoteAgentName: handle.identity.name,

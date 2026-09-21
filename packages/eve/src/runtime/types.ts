@@ -307,6 +307,7 @@ export type ResolvedRuntimeSubagentNode = Readonly<
 export type ResolvedRuntimeRemoteAgentNode = Readonly<
   ModuleSourceRef &
     Node & {
+      publicUrl?: boolean;
       auth?: OutboundAuthFn;
       description: string;
       forwardPrincipal?: boolean;

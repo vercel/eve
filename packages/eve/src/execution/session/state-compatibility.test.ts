@@ -9,7 +9,7 @@ import {
 } from "#harness/workflow-tool-runs.js";
 import { parseActivityWorkIdentityV1 } from "#protocol/activity.js";
 import type { HarnessSession } from "#harness/types.js";
-import type { AgentHandle, AgentHandlePhase } from "#subagents/handles/store.js";
+import type { AgentRegistryEntry, AgentRegistryPhase } from "#subagents/registry/state.js";
 
 const metadata = { kind: "tool", name: "research" };
 const activity = {
@@ -75,8 +75,21 @@ const startOperation = {
   parentTurnId: "turn",
 };
 
-function handle(phase: AgentHandlePhase): AgentHandle {
+function handle(phase: AgentRegistryPhase): AgentRegistryEntry {
   switch (phase) {
+    case "registered":
+      return {
+        phase,
+        identity: {
+          ...identity,
+          registration: {
+            key: "research",
+            description: "Research",
+            target: { kind: "agent", name: "research" },
+            visible: true,
+          },
+        },
+      };
     case "starting":
       return {
         identity,
@@ -212,7 +225,7 @@ describe("handoff state inspection", () => {
           },
         }),
       ),
-    ).toThrow("Corrupt agent handle store");
+    ).toThrow("Corrupt agent registry");
   });
   it("parses settled entries before checking their terminal status", () => {
     const incompatible = { ...task, address: { ...task.address, hookToken: 42 } };

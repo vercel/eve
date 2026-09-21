@@ -13,6 +13,17 @@ export type { SessionAuth, SessionParent, SessionTurn };
  * domain-specific arguments instead.
  */
 export interface SessionContext {
+  /** Registers a destination without invoking it. Changes commit with the enclosing step. */
+  registerAgent(
+    destination: import("#subagents/registration.js").AgentDestination,
+  ): import("#subagents/registration.js").AgentReference;
+  /** Changes the next model advertisement without replacing the handle. */
+  updateAgent(
+    handle: import("#subagents/registration.js").AgentReference,
+    description: string,
+  ): void;
+  /** Removes advertisement and future invocation access without cancelling accepted work. */
+  unregisterAgent(handle: import("#subagents/registration.js").AgentReference): void;
   /**
    * Active session metadata for the callback's exact durable session.
    */

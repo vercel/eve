@@ -12,6 +12,7 @@ import type { JsonObject } from "#shared/json.js";
 import { serializeOutputSchema, type ToolSchemaSource } from "#tools/schema.js";
 
 export interface DynamicRemoteAgentConfig {
+  readonly publicUrl?: boolean;
   readonly credentialsStepId?: string;
   readonly description: string;
   readonly forwardPrincipal?: boolean;

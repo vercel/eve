@@ -32,7 +32,7 @@ import { coalesceDeliveries } from "#harness/messages.js";
 import { TurnCancelledError } from "#harness/turn-cancellation.js";
 import { decodeSessionInboxPayload } from "#execution/session-inbox/protocol.js";
 import { isInboxToolResultFromRecordedWorkflowToolRun } from "#harness/workflow-tool-runs.js";
-import { isInboxSubagentResultFromRunningHandle } from "#subagents/handles/query.js";
+import { isInboxSubagentResultFromRunningHandle } from "#subagents/registry/query.js";
 import { resolveRuntimeActionResultsForCallIds } from "#runtime/actions/results.js";
 import type { RunMode } from "#shared/run-mode.js";
 import type { RuntimeActionResult } from "#shared/action-types.js";

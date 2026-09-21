@@ -417,6 +417,9 @@ function createApprovalContext(input: {
     abortSignal: new AbortController().signal,
     approvedTools: new Set(),
     callId: "call_1",
+    registerAgent: vi.fn(),
+    updateAgent: vi.fn(),
+    unregisterAgent: vi.fn(),
     getSandbox: vi.fn(),
     getSkill: vi.fn(),
     session: {

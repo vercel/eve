@@ -14,7 +14,7 @@ const SUBAGENT_TOOL_INPUT_SCHEMA = {
     agentId: {
       type: ["string", "null"],
       description:
-        "The id of an existing agent from the <agents> list or a task receipt. A message to a busy agent steers it: its previous task is cancelled and the updated work runs in the same child session. Omit this field (or pass null or an empty string) to start a new agent.",
+        "The id of a registered destination or existing agent from the <agents> list or a task receipt. Registered destinations may be offline or have no session yet. A message to a busy agent steers its current work and retains its task. Omit this field (or pass null or an empty string) to start a new agent.",
     },
     message: {
       type: "string",

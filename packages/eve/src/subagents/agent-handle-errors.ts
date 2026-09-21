@@ -3,7 +3,7 @@
  *
  * Every producer that mints a code imports from this module, so the set
  * stays closed. Codes are diagnostic only: child lifecycle is owned by the
- * agent handle store and is never inferred from an error code.
+ * agent registry and is never inferred from an error code.
  */
 
 /** Error code for an agent id invoked through the wrong subagent tool. */

@@ -14,7 +14,7 @@ import {
 import { bindSessionInstrumentation } from "#instrumentation/runtime.js";
 import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
 import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
-import { getAgentHandleStore, setAgentHandleStore } from "#subagents/handles/store.js";
+import { getAgentRegistryState, setAgentRegistryState } from "#subagents/registry/state.js";
 import {
   getProxyInputRequests,
   upsertProxyInputRequestState,
@@ -140,7 +140,7 @@ describe("recordTaskInputRequestStep", () => {
       continuationToken: "parent-token",
       history: [],
       sessionId: "parent-session",
-      state: setAgentHandleStore(
+      state: setAgentRegistryState(
         {
           "eve.workflowTool": {
             version: 3,
@@ -210,7 +210,7 @@ describe("recordTerminalTaskViewsStep", () => {
       continuationToken: "parent-token",
       history: [],
       sessionId: "parent-session",
-      state: setAgentHandleStore(
+      state: setAgentRegistryState(
         {
           "eve.workflowTool": {
             version: 3,
@@ -287,7 +287,7 @@ describe("recordTerminalTaskViewsStep", () => {
     });
     expect(getProxyInputRequests(state).size).toBe(0);
     expect(result.sessionState.hasProxyInputRequests).toBe(false);
-    expect(getAgentHandleStore(state)?.handles).toEqual([
+    expect(getAgentRegistryState(state)?.handles).toEqual([
       expect.objectContaining({ phase: "available" }),
     ]);
     expect(result.serializedContext).toEqual({});

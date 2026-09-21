@@ -22,7 +22,7 @@ type WorkflowToolRunContextCarrier = {
 };
 
 export function attachWorkflowToolRunContext(
-  ctx: ToolContext,
+  ctx: Omit<ToolContext, "agent">,
   context: WorkflowToolRunContext,
 ): void {
   Object.defineProperty(ctx, WORKFLOW_TOOL_RUN_CONTEXT, {
@@ -32,7 +32,7 @@ export function attachWorkflowToolRunContext(
 }
 
 function readWorkflowToolRunContext(
-  ctx: ToolContext,
+  ctx: Omit<ToolContext, "agent">,
   helper: "agent" | "ask",
 ): WorkflowToolRunContext {
   const context = (ctx as WorkflowToolRunContextCarrier | undefined)?.[WORKFLOW_TOOL_RUN_CONTEXT];
@@ -48,16 +48,19 @@ export function findWorkflowToolRunContext(value: unknown): WorkflowToolRunConte
     : undefined;
 }
 
-export function readWorkflowToolRunRef(ctx: ToolContext): WorkflowToolRunRef {
+export function readWorkflowToolRunRef(ctx: Omit<ToolContext, "agent">): WorkflowToolRunRef {
   return readWorkflowToolRunContext(ctx, "agent").from;
 }
 
-export function readWorkflowToolRunOwner(ctx: ToolContext): WorkflowToolRunOwner {
+export function readWorkflowToolRunOwner(ctx: Omit<ToolContext, "agent">): WorkflowToolRunOwner {
   return readWorkflowToolRunContext(ctx, "agent").owner;
 }
 
 /** Returns an answer hook which may be awaited or raced with another workflow operation. */
-export function ask(ctx: ToolContext, request: ToolInputRequest): Hook<ToolInputResponse> {
+export function ask(
+  ctx: Omit<ToolContext, "agent">,
+  request: ToolInputRequest,
+): Hook<ToolInputResponse> {
   const context = readWorkflowToolRunContext(ctx, "ask");
   const answer = createHook<ToolInputResponse>();
   void resumeHookStep(context.owner.inbox, {

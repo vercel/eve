@@ -28,7 +28,8 @@ import {
   type RuntimeAgentHandleAction,
   type RuntimeSession,
 } from "#subagents/handle-dispatch.js";
-import { getAgentHandleStore } from "#subagents/handles/store.js";
+import { getAgentRegistryState, type AgentRegistryEntry } from "#subagents/registry/state.js";
+import { EVE_SESSION_ROUTE_PATH } from "#protocol/routes.js";
 import { getDynamicSubagentSelection } from "#context/dynamic-subagent-lifecycle.js";
 import {
   createRecursiveAgentRootOnlyResult,
@@ -72,6 +73,8 @@ export async function prepareOwnerAgentInvocation(input: {
     ctx,
     input: input.invocation,
     invocationId: input.invocationId,
+    handles: getAgentRegistryState(durableSession.state)?.handles,
+    allowUnregistered: task !== undefined,
   });
   return await prepareActionDispatch({
     batch: {
@@ -108,31 +111,44 @@ export function planAgentDispatch(input: {
 }): OwnerAgentDispatchPlanEntry {
   const knownAgentIds = new Set(
     input.knownAgentIds ??
-      (getAgentHandleStore(input.session.state)?.handles ?? []).map((handle) => handle.identity.id),
+      (getAgentRegistryState(input.session.state)?.handles ?? []).map(
+        (handle) => handle.identity.id,
+      ),
   );
   const rawAgentId = input.action.input.agentId;
   const agentId =
     typeof rawAgentId === "string" && rawAgentId.trim() !== "" ? rawAgentId : undefined;
   if (agentId !== undefined && isAgentHandleAction(input.action)) {
+    const handle = getAgentRegistryState(input.session.state)?.handles.find(
+      (entry) => entry.identity.id === agentId,
+    );
+    if (handle?.phase === "registered" || handle?.phase === "reserved")
+      return classifyFreshStart(input);
     if (knownAgentIds.has(agentId)) {
       const dynamicSubagentSelection =
         input.bundle.subagentRegistry.dynamicNodeIds?.has(input.action.nodeId) === true
           ? getDynamicSubagentSelection(input.ctx, input.action.nodeId)
           : undefined;
+      const registeredRemote = handle?.identity.registration?.target;
       return {
         action: input.action,
         agentId,
         dynamicRemoteAgent:
-          input.action.kind === "remote-agent-call" && dynamicSubagentSelection?.kind === "remote"
-            ? dynamicSubagentSelection.remoteAgent
-            : undefined,
+          registeredRemote?.kind === "remote"
+            ? {
+                description: handle!.identity.registration!.description,
+                path: EVE_SESSION_ROUTE_PATH,
+                url: registeredRemote.url,
+                publicUrl: true,
+              }
+            : input.action.kind === "remote-agent-call" &&
+                dynamicSubagentSelection?.kind === "remote"
+              ? dynamicSubagentSelection.remoteAgent
+              : undefined,
         kind: "resume",
       };
     }
-    log.warn("unknown agentId on subagent call; starting a new agent", {
-      agentId,
-      callId: input.action.callId,
-    });
+    throw new Error("Unknown or unregistered agent handle.");
   }
   return classifyFreshStart(input);
 }
@@ -173,14 +189,25 @@ function classifyFreshStart(input: {
     return { kind: "reject", result: createRecursiveAgentRootOnlyResult(action) };
   }
   if (action.kind === "remote-agent-call") {
+    const registration = getAgentRegistryState(input.session.state)?.handles.find(
+      (handle) => handle.identity.id === action.input.agentId,
+    )?.identity.registration;
+    const destination = registration?.target;
     return {
       kind: "start",
       target: {
         action,
         dynamicRemoteAgent:
-          dynamicSubagentSelection?.kind === "remote"
-            ? dynamicSubagentSelection.remoteAgent
-            : undefined,
+          destination?.kind === "remote"
+            ? {
+                description: registration!.description,
+                path: EVE_SESSION_ROUTE_PATH,
+                url: destination.url,
+                publicUrl: true,
+              }
+            : dynamicSubagentSelection?.kind === "remote"
+              ? dynamicSubagentSelection.remoteAgent
+              : undefined,
         kind: "remote",
       },
     };
@@ -242,8 +269,44 @@ export function resolveAgentInvocationAction(input: {
   readonly ctx: ContextReader;
   readonly input: AgentInvocationRequest["input"];
   readonly invocationId: string;
+  readonly handles?: readonly AgentRegistryEntry[];
+  readonly allowUnregistered?: boolean;
 }): RuntimeAgentDispatchRequest {
   const bundle = input.ctx.require(BundleKey);
+  const referenceId = input.input.agentId ?? input.input.target;
+  const reference =
+    input.handles?.find((handle) => handle.identity.id === referenceId) ??
+    (input.input.agentId === undefined
+      ? input.handles?.find(
+          (handle) =>
+            handle.identity.registration?.visible === true &&
+            handle.identity.registration.key === input.input.target,
+        )
+      : undefined);
+  if (reference) {
+    const registration = reference.identity.registration;
+    if (registration?.visible === false && !input.allowUnregistered)
+      throw new Error("Unknown or unregistered agent handle.");
+    const remote =
+      registration?.target.kind === "remote" ||
+      bundle.subagentRegistry.subagentsByNodeId.get(reference.identity.nodeId)?.definition.kind ===
+        "remote";
+    const actionInput: { message: string; agentId: string; outputSchema?: JsonObject } = {
+      message: input.input.message,
+      agentId: reference.identity.id,
+    };
+    if (input.input.outputSchema !== undefined) actionInput.outputSchema = input.input.outputSchema;
+    const common = {
+      callId: input.invocationId,
+      description: registration?.description ?? "",
+      input: actionInput,
+      name: reference.identity.name,
+      nodeId: reference.identity.nodeId,
+    };
+    return remote
+      ? { ...common, kind: "remote-agent-call", remoteAgentName: reference.identity.name }
+      : { ...common, kind: "subagent-call", subagentName: reference.identity.name };
+  }
   const registered = bundle.subagentRegistry.subagentsByName.get(input.input.target);
   const dynamicSelection =
     registered === undefined

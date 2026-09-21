@@ -24,7 +24,7 @@ import {
 } from "#runtime/sessions/runtime-context-keys.js";
 import { deserializeContext } from "#context/serialize.js";
 import type { RuntimeSession } from "#subagents/handle-dispatch.js";
-import { getAgentHandleStore } from "#subagents/handles/store.js";
+import { getAgentRegistryState } from "#subagents/registry/state.js";
 import { deriveRootTurnActivityWorkId } from "#execution/activity-work-id.js";
 import {
   assertUniqueCoordinationCallIds,
@@ -193,7 +193,7 @@ export async function prepareActionDispatch<PlanEntry>(input: {
 
   // A corrupt handle store and rejected actions must resolve before sandbox
   // initialization, which can provision backend resources and run onSession.
-  getAgentHandleStore(durableSession.state);
+  getAgentRegistryState(durableSession.state);
   const plan = input.plan({
     bundle,
     ctx,

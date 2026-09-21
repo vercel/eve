@@ -1,3 +1,4 @@
+import { requestPublicUrl } from "#execution/web-fetch/request.js";
 import { z } from "#compiled/zod/index.js";
 import { CancelTurnResponseSchema } from "#protocol/cancel-turn.js";
 import { ResetResponseSchema, type ResetResponse } from "#protocol/reset-session.js";
@@ -158,7 +159,7 @@ export async function startRemoteAgentSession(input: {
     "baggage",
     writeForwardedParentSessionBaggage(conversationBaggage, input.parent?.lineage),
   );
-  const response = await fetch(createRemoteAgentSessionUrl(input.remote), {
+  const response = await fetchRemoteAgent(input.remote, createRemoteAgentSessionUrl(input.remote), {
     body: JSON.stringify(requestBody),
     headers: {
       "content-type": "application/json",
@@ -248,14 +249,18 @@ export async function continueRemoteAgentSession(input: {
     requestBody.forwardedPrincipal = forwardedPrincipal;
   }
 
-  const response = await fetch(createRemoteAgentContinueUrl(input.remote, input.sessionId), {
-    body: JSON.stringify(requestBody),
-    headers: {
-      "content-type": "application/json",
-      ...(await resolveRemoteAgentRequestHeaders(input.remote)),
+  const response = await fetchRemoteAgent(
+    input.remote,
+    createRemoteAgentContinueUrl(input.remote, input.sessionId),
+    {
+      body: JSON.stringify(requestBody),
+      headers: {
+        "content-type": "application/json",
+        ...(await resolveRemoteAgentRequestHeaders(input.remote)),
+      },
+      method: "POST",
     },
-    method: "POST",
-  });
+  );
 
   if (!response.ok) {
     const responseCode = await readRemoteAgentErrorCode(response);
@@ -357,20 +362,27 @@ function buildForwardedPrincipalField(input: {
 
 export async function cancelRemoteAgentTurn(input: {
   readonly headers?: Record<string, string>;
-  readonly remote: Pick<ResolvedRuntimeRemoteAgentNode, "auth" | "headers" | "name" | "url">;
+  readonly remote: Pick<
+    ResolvedRuntimeRemoteAgentNode,
+    "auth" | "headers" | "name" | "url" | "publicUrl"
+  >;
   readonly sessionId: string;
   readonly taskId?: string;
   readonly turnId?: string;
 }): Promise<CancelTurnResult> {
   const headers = input.headers ?? (await resolveRemoteAgentRequestHeaders(input.remote));
-  const response = await fetch(createRemoteAgentCancelTurnUrl(input.remote, input.sessionId), {
-    body:
-      input.turnId === undefined && input.taskId === undefined
-        ? undefined
-        : JSON.stringify({ taskId: input.taskId, turnId: input.turnId }),
-    headers,
-    method: "POST",
-  });
+  const response = await fetchRemoteAgent(
+    input.remote,
+    createRemoteAgentCancelTurnUrl(input.remote, input.sessionId),
+    {
+      body:
+        input.turnId === undefined && input.taskId === undefined
+          ? undefined
+          : JSON.stringify({ taskId: input.taskId, turnId: input.turnId }),
+      headers,
+      method: "POST",
+    },
+  );
 
   if (!response.ok) {
     throw new RemoteAgentCancelRequestError(
@@ -420,11 +432,15 @@ function setHeader(headers: Record<string, string>, name: string, value: string 
 /** Retires one exact remote child session through eve's authenticated reset route. */
 export async function resetRemoteAgentSession(input: {
   readonly headers?: Record<string, string>;
-  readonly remote: Pick<ResolvedRuntimeRemoteAgentNode, "auth" | "headers" | "name" | "url">;
+  readonly remote: Pick<
+    ResolvedRuntimeRemoteAgentNode,
+    "auth" | "headers" | "name" | "url" | "publicUrl"
+  >;
   readonly sessionId: string;
 }): Promise<ResetResponse> {
   const headers = input.headers ?? (await resolveRemoteAgentRequestHeaders(input.remote));
-  const response = await fetch(
+  const response = await fetchRemoteAgent(
+    input.remote,
     createRemoteAgentRouteUrl(input.remote.url, createEveSessionResetRoutePath(input.sessionId)),
     {
       body: JSON.stringify({ reason: "Parent session ended" }),
@@ -460,12 +476,13 @@ export function resolveRemoteAgentForAction(input: {
   const registered = input.registry.get(input.nodeId);
   const definition = registered?.definition;
   if (input.dynamicRemoteAgent !== undefined) {
-    if (definition === undefined) {
+    if (definition === undefined && input.dynamicRemoteAgent.publicUrl !== true) {
       throw new Error(`Missing remote agent "${input.remoteAgentName}" in runtime registry.`);
     }
     const credentials = resolveDynamicRemoteAgentCredentials(input.dynamicRemoteAgent);
     const config = input.dynamicRemoteAgent;
     const remote: {
+      publicUrl?: boolean;
       auth?: ResolvedRuntimeRemoteAgentNode["auth"];
       description: string;
       forwardPrincipal?: boolean;
@@ -480,14 +497,15 @@ export function resolveRemoteAgentForAction(input: {
       sourceKind: "module";
       url: string;
     } = {
+      publicUrl: config.publicUrl,
       description: config.description,
       kind: "remote",
-      logicalPath: definition.logicalPath,
+      logicalPath: definition?.logicalPath ?? "registered-agent",
       name: input.remoteAgentName,
       nodeId: input.nodeId,
       outputSchema: config.outputSchema,
       path: config.path,
-      sourceId: definition.sourceId,
+      sourceId: definition?.sourceId ?? input.nodeId,
       sourceKind: "module",
       url: config.url,
     };
@@ -653,4 +671,20 @@ function formatRemoteAgentCallInputMessage(input: {
     name: input.action.remoteAgentName,
     type: "remote",
   }).message;
+}
+
+async function fetchRemoteAgent(
+  remote: { readonly publicUrl?: boolean },
+  url: string,
+  init: RequestInit,
+): Promise<Response> {
+  if (remote.publicUrl !== true) return fetch(url, init);
+  return requestPublicUrl(url, {
+    method: "POST",
+    body: typeof init.body === "string" ? init.body : undefined,
+    headers: Object.fromEntries(new Headers(init.headers).entries()),
+    signal: AbortSignal.timeout(30_000),
+    maxResponseSize: 1_048_576,
+    followRedirects: false,
+  });
 }

@@ -1,17 +1,17 @@
 import { describe, expect, it } from "vitest";
 
-import { deriveAgentOperationId } from "#subagents/handles/operation-id.js";
+import { deriveAgentOperationId } from "#subagents/registry/operation-id.js";
 import {
-  AGENT_HANDLES_STATE_KEY,
-  assertPersistableAgentHandleStore,
+  AGENT_REGISTRY_STATE_KEY,
+  assertPersistableAgentRegistryState,
   deriveAgentId,
   formatAgentStatus,
-  getAgentHandleStore,
+  getAgentRegistryState,
   type AgentAddress,
-  type AgentHandle,
+  type AgentRegistryEntry,
   type AgentIdentity,
   type StartOperation,
-} from "#subagents/handles/store.js";
+} from "#subagents/registry/state.js";
 
 const startOperation: StartOperation = {
   callId: "call_1",
@@ -36,7 +36,7 @@ const address: AgentAddress = {
   sessionId: "session_child",
 };
 
-const parkedHandle: AgentHandle = {
+const parkedHandle: AgentRegistryEntry = {
   address,
   identity,
   lastStatus: "initial findings",
@@ -65,10 +65,10 @@ describe("deriveAgentOperationId / deriveAgentId", () => {
   });
 });
 
-describe("getAgentHandleStore", () => {
+describe("getAgentRegistryState", () => {
   it("returns undefined only when no store has been written", () => {
-    expect(getAgentHandleStore(undefined)).toBeUndefined();
-    expect(getAgentHandleStore({})).toBeUndefined();
+    expect(getAgentRegistryState(undefined)).toBeUndefined();
+    expect(getAgentRegistryState({})).toBeUndefined();
   });
 
   it("throws on a present but malformed store instead of treating it as absent", () => {
@@ -87,30 +87,30 @@ describe("getAgentHandleStore", () => {
         ],
       },
     ]) {
-      expect(() => getAgentHandleStore({ [AGENT_HANDLES_STATE_KEY]: malformed })).toThrow(
-        AGENT_HANDLES_STATE_KEY,
+      expect(() => getAgentRegistryState({ [AGENT_REGISTRY_STATE_KEY]: malformed })).toThrow(
+        AGENT_REGISTRY_STATE_KEY,
       );
     }
   });
 
   it("rejects duplicate handle ids", () => {
     expect(() =>
-      getAgentHandleStore({
-        [AGENT_HANDLES_STATE_KEY]: { handles: [parkedHandle, parkedHandle] },
+      getAgentRegistryState({
+        [AGENT_REGISTRY_STATE_KEY]: { handles: [parkedHandle, parkedHandle] },
       }),
     ).toThrow("unique");
   });
 });
 
-describe("assertPersistableAgentHandleStore", () => {
+describe("assertPersistableAgentRegistryState", () => {
   it("returns a valid store unchanged in shape", () => {
-    expect(assertPersistableAgentHandleStore({ handles: [parkedHandle] })).toEqual({
+    expect(assertPersistableAgentRegistryState({ handles: [parkedHandle] })).toEqual({
       handles: [parkedHandle],
     });
   });
 
   it("preserves a remote child's creation-time credential resolver", () => {
-    const remoteHandle: AgentHandle = {
+    const remoteHandle: AgentRegistryEntry = {
       address: {
         callbackBaseUrl: "https://parent.example.com",
         credentialResolver: { resolverId: "dynamic-credentials-step" },
@@ -123,7 +123,7 @@ describe("assertPersistableAgentHandleStore", () => {
       phase: "parked",
     };
 
-    expect(assertPersistableAgentHandleStore({ handles: [remoteHandle] })).toEqual({
+    expect(assertPersistableAgentRegistryState({ handles: [remoteHandle] })).toEqual({
       handles: [remoteHandle],
     });
   });
@@ -132,8 +132,8 @@ describe("assertPersistableAgentHandleStore", () => {
     const corrupt = {
       handles: [{ ...parkedHandle, lastStatus: "x".repeat(121) }],
     };
-    expect(() => assertPersistableAgentHandleStore(corrupt)).toThrow(
-      "Refusing to persist a corrupt agent handle store",
+    expect(() => assertPersistableAgentRegistryState(corrupt)).toThrow(
+      "Refusing to persist a corrupt agent registry",
     );
   });
 });

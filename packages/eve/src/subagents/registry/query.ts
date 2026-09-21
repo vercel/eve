@@ -1,10 +1,10 @@
 import type { RuntimeActionResult, RuntimeSubagentChildResult } from "#shared/action-types.js";
-import { AGENT_HANDLES_STATE_KEY } from "#subagents/handles/state-key.js";
-import type { AgentHandle, TurnOwnedAgentHandle } from "#subagents/handles/store.js";
+import { AGENT_REGISTRY_STATE_KEY } from "#subagents/registry/state-key.js";
+import type { AgentRegistryEntry, TurnOwnedAgentEntry } from "#subagents/registry/state.js";
 import type { SessionStateMap } from "#harness/types.js";
 
 /** A handle with one outstanding operation and a confirmed child address. */
-export type RunningAgentHandle = Extract<TurnOwnedAgentHandle, { phase: "running" }>;
+export type RunningAgentRegistryEntry = Extract<TurnOwnedAgentEntry, { phase: "running" }>;
 
 /**
  * Schema-free read of the agent handles from session state.
@@ -13,13 +13,15 @@ export type RunningAgentHandle = Extract<TurnOwnedAgentHandle, { phase: "running
  * Owner-side reads trust that invariant instead of re-validating, so the
  * session owner bundle stays free of compiled zod.
  */
-function readAgentHandles(state: SessionStateMap | undefined): readonly AgentHandle[] {
-  const raw = state?.[AGENT_HANDLES_STATE_KEY];
+function readAgentRegistryEntries(
+  state: SessionStateMap | undefined,
+): readonly AgentRegistryEntry[] {
+  const raw = state?.[AGENT_REGISTRY_STATE_KEY];
   if (raw === undefined) {
     return [];
   }
   const handles = (raw as { handles?: unknown }).handles;
-  return Array.isArray(handles) ? (handles as readonly AgentHandle[]) : [];
+  return Array.isArray(handles) ? (handles as readonly AgentRegistryEntry[]) : [];
 }
 
 /**
@@ -34,13 +36,13 @@ function readAgentHandles(state: SessionStateMap | undefined): readonly AgentHan
  * settle the call in place of the owned child — an accepted trade-off,
  * since both children computed the same input.
  */
-export function findRunningAgentHandle(
+export function findRunningAgentRegistryEntry(
   state: SessionStateMap | undefined,
   input: { readonly callId: string },
-): RunningAgentHandle | undefined {
-  const handles = readAgentHandles(state);
+): RunningAgentRegistryEntry | undefined {
+  const handles = readAgentRegistryEntries(state);
   return handles.find(
-    (handle): handle is RunningAgentHandle =>
+    (handle): handle is RunningAgentRegistryEntry =>
       handle.phase === "running" && handle.operation.callId === input.callId,
   );
 }
@@ -65,7 +67,7 @@ export function isResultBoundToRunningHandle(
   if (result.origin === "dispatch" || result.backgroundTask !== undefined) {
     return true;
   }
-  return findRunningAgentHandle(state, { callId: result.callId }) !== undefined;
+  return findRunningAgentRegistryEntry(state, { callId: result.callId }) !== undefined;
 }
 
 /**
@@ -79,5 +81,5 @@ export function isInboxSubagentResultFromRunningHandle(
   state: SessionStateMap | undefined,
   result: RuntimeSubagentChildResult,
 ): boolean {
-  return findRunningAgentHandle(state, { callId: result.callId }) !== undefined;
+  return findRunningAgentRegistryEntry(state, { callId: result.callId }) !== undefined;
 }
