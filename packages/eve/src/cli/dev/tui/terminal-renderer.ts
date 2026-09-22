@@ -977,6 +977,14 @@ export class TerminalRenderer implements AgentTUIRenderer {
             // Complete only genuine prefixes: a draft that already parses
             // (exact name, alias, or argument form) submits verbatim, so
             // /quit echoes as the user typed it.
+            if (
+              argumentOpen !== undefined &&
+              argumentSelected?.next !== undefined &&
+              argumentOpen.completed.length === 0
+            ) {
+              apply(lineOf(`${argumentTypeaheadCompletion(argumentOpen, argumentSelected)} `));
+              break;
+            }
             const prompt =
               argumentOpen !== undefined && argumentSelected !== undefined
                 ? argumentTypeaheadCompletion(argumentOpen, argumentSelected)

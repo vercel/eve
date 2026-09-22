@@ -54,15 +54,26 @@ export interface RunDevelopmentTuiInput extends TuiDisplayOptions {
 function inlineArgumentSuggestions(appRoot: string) {
   return async (command: "model" | "add"): Promise<readonly PromptArgumentSuggestion[]> => {
     if (command === "model") {
+      const { gatewayModelCapabilities } = await import("#setup/boxes/model-capabilities.js");
       const { fetchGatewayCatalog, modelOptionsFromCatalog } =
         await import("#setup/boxes/select-model.js");
-      return modelOptionsFromCatalog(await fetchGatewayCatalog().catch(() => undefined)).map(
-        (option) => ({
+      const catalog = await fetchGatewayCatalog().catch(() => undefined);
+      return modelOptionsFromCatalog(catalog).map((option) => {
+        const reasoning = gatewayModelCapabilities(catalog, option.value)?.reasoningLevels;
+        return {
           value: option.value,
           label: option.value,
           hint: option.hint,
-        }),
-      );
+          ...(reasoning === undefined || reasoning.length === 0
+            ? {}
+            : {
+                next: [
+                  { value: "default", label: "default" },
+                  ...reasoning.map((value) => ({ value, label: value })),
+                ],
+              }),
+        };
+      });
     }
     const { browseRegistryCatalog } = await import("#cli/commands/registry.js");
     const catalog = await browseRegistryCatalog(appRoot);

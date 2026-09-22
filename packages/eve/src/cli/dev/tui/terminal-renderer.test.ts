@@ -5270,6 +5270,35 @@ describe("TerminalRenderer command typeahead", () => {
     renderer.shutdown();
   });
 
+  it("advances to reasoning after selecting a model with reasoning choices", async () => {
+    const screen = new MockScreen({ columns: 80, rows: 30 });
+    const input = new MockUserInput();
+    const renderer = new TerminalRenderer({
+      input,
+      output: screen,
+      captureForeignOutput: false,
+      unicode: true,
+      argumentSuggestions: async () => [
+        {
+          value: "openai/gpt-6-sol",
+          label: "openai/gpt-6-sol",
+          next: [{ value: "high", label: "high" }],
+        },
+      ],
+    });
+
+    const prompt = renderer.readPrompt();
+    input.type("/model sol");
+    await vi.waitFor(() => expect(screen.snapshot()).toContain("openai/gpt-6-sol"));
+    input.enter();
+    expect(screen.snapshot()).toContain("❯ /model openai/gpt-6-sol ");
+    expect(screen.snapshot()).toContain("high");
+    input.enter();
+
+    expect(await prompt).toBe("/model openai/gpt-6-sol high");
+    renderer.shutdown();
+  });
+
   it("completes a model argument from its inline catalog", async () => {
     const screen = new MockScreen({ columns: 80, rows: 30 });
     const input = new MockUserInput();

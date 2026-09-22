@@ -1,4 +1,5 @@
 import type { ApplyModelOutcome } from "#setup/flows/model-source-change.js";
+import type { AgentReasoningDefinition } from "#shared/agent-definition.js";
 import { toErrorMessage } from "#shared/errors.js";
 
 import type {
@@ -40,8 +41,8 @@ export function createPromptCommandHandler(
         };
       }
 
-      // `/model <slug>` applies directly; only the bare command opens the
-      // configure menu flow below.
+      // `/model <slug> [reasoning]` applies directly; only the bare command
+      // opens the configure menu flow below.
       if (command.name === "model" && command.argument.length > 0) {
         if (target.kind !== "local") {
           return {
@@ -53,8 +54,26 @@ export function createPromptCommandHandler(
         // Package-loading failures are command outcomes at this CLI boundary.
         try {
           const { modelChangeRefusalForUneditableModel } = await import("#setup/flows/model.js");
-          const { changeAgentModel, formatApplyModelOutcome } =
-            await import("#setup/flows/model-source-change.js");
+          const {
+            changeAgentModel,
+            changeAgentModelSettings,
+            formatApplyModelOutcome,
+            formatApplyModelSettingsOutcome,
+          } = await import("#setup/flows/model-source-change.js");
+          const [slug, reasoning, ...extra] = command.argument.split(/\s+/u);
+          if (slug === undefined || extra.length > 0) {
+            return {
+              message: "Use `/model provider/model [default|none|minimal|low|medium|high|xhigh]`.",
+            };
+          }
+          if (
+            reasoning !== undefined &&
+            !["default", "none", "minimal", "low", "medium", "high", "xhigh"].includes(reasoning)
+          ) {
+            return {
+              message: "Use `/model provider/model [default|none|minimal|low|medium|high|xhigh]`.",
+            };
+          }
           // A source-backed model (an SDK model call) isn't a string literal eve
           // can rewrite; refuse with a clear reason rather than silently no-op.
           const checkRefusal = options.modelChangeRefusal ?? modelChangeRefusalForUneditableModel;
@@ -62,10 +81,25 @@ export function createPromptCommandHandler(
           if (refusal !== null) {
             return { message: refusal };
           }
+          if (reasoning !== undefined) {
+            return {
+              message: formatApplyModelSettingsOutcome(
+                await changeAgentModelSettings({
+                  appRoot,
+                  patch: {
+                    model: { kind: "set", value: slug },
+                    reasoning:
+                      reasoning === "default"
+                        ? { kind: "remove" }
+                        : { kind: "set", value: reasoning as AgentReasoningDefinition },
+                    gatewayServiceTier: { kind: "keep" },
+                  },
+                }),
+              ),
+            };
+          }
           const applyModel = options.applyModel ?? changeAgentModel;
-          return {
-            message: formatApplyModelOutcome(await applyModel({ appRoot, slug: command.argument })),
-          };
+          return { message: formatApplyModelOutcome(await applyModel({ appRoot, slug })) };
         } catch (error) {
           return {
             message: `Couldn't change the model: ${toErrorMessage(error)}`,

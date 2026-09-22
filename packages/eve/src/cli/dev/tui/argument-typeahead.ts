@@ -7,12 +7,16 @@ export interface PromptArgumentSuggestion {
   readonly value: string;
   readonly label: string;
   readonly hint?: string;
+  /** Follow-up values available after selecting this exact value. */
+  readonly next?: readonly PromptArgumentSuggestion[];
 }
 
 export interface ArgumentTypeaheadQuery {
   readonly command: "model" | "add";
   readonly argument: string;
-  /** Offset of the argument in the composer draft. */
+  /** Complete arguments before the one currently being typed. */
+  readonly completed: readonly string[];
+  /** Offset of the current argument in the composer draft. */
   readonly argumentStart: number;
 }
 
@@ -22,9 +26,8 @@ export interface ArgumentTypeaheadState extends ArgumentTypeaheadQuery {
 }
 
 /**
- * Parses one supported slash command and its unfinished single-token argument.
- * Keeping this deliberately small makes the inline picker independent of the
- * execution parser while preserving the exact composer offsets it needs.
+ * Parses the current argument in one supported slash command. `/model` accepts
+ * a second token for reasoning; `/add` accepts only its registry address.
  */
 export function argumentTypeaheadQuery(text: string): ArgumentTypeaheadQuery | undefined {
   if (!text.startsWith("/")) return undefined;
@@ -33,45 +36,55 @@ export function argumentTypeaheadQuery(text: string): ArgumentTypeaheadQuery | u
   const command = text.slice(1, separator);
   if (command !== "model" && command !== "add") return undefined;
 
-  let argumentStart = separator;
-  while (text[argumentStart] === " ") argumentStart += 1;
-  const argument = text.slice(argumentStart);
-  return [...argument].some((character) => character.trim().length === 0)
-    ? undefined
-    : { command, argument, argumentStart };
+  const tail = text.slice(separator + 1);
+  const leadingSpaces = tail.length - tail.trimStart().length;
+  const tokens = tail.slice(leadingSpaces).split(" ");
+  if (tail.length > 0 && tokens.some((token) => token.length === 0) && !tail.endsWith(" ")) {
+    return undefined;
+  }
+  const completed = tokens.slice(0, -1).filter(Boolean);
+  const argument = tokens.at(-1) ?? "";
+  if (
+    (command === "add" && completed.length > 0) ||
+    (command === "model" && completed.length > 1)
+  ) {
+    return undefined;
+  }
+  const argumentStart = text.length - argument.length;
+  return { command, argument, completed, argumentStart };
 }
 
-/** Removes terminal controls before a catalog field can render or enter the composer. */
 function sanitizeSuggestion(suggestion: PromptArgumentSuggestion): PromptArgumentSuggestion {
   return {
     value: sanitizeForTerminal(suggestion.value),
     label: sanitizeForTerminal(suggestion.label),
     ...(suggestion.hint === undefined ? {} : { hint: sanitizeForTerminal(suggestion.hint) }),
+    ...(suggestion.next === undefined ? {} : { next: suggestion.next.map(sanitizeSuggestion) }),
   };
 }
 
 /** Filters catalog entries case-insensitively across their visible labels and ids. */
 export function argumentTypeaheadFor(
   query: ArgumentTypeaheadQuery,
-  suggestions: readonly PromptArgumentSuggestion[],
+  catalog: readonly PromptArgumentSuggestion[],
   previous?: ArgumentTypeaheadState,
 ): ArgumentTypeaheadState {
+  const root = catalog.map(sanitizeSuggestion);
+  const candidates =
+    query.completed.length === 0
+      ? root
+      : (root.find((suggestion) => suggestion.value === query.completed[0])?.next ?? []);
   const normalized = query.argument.toLowerCase();
-  const matches = suggestions
-    .map(sanitizeSuggestion)
-    .filter(
-      (suggestion) =>
-        suggestion.value.toLowerCase().includes(normalized) ||
-        suggestion.label.toLowerCase().includes(normalized) ||
-        (suggestion.hint?.toLowerCase().includes(normalized) ?? false),
-    );
+  const suggestions = candidates.filter(
+    (suggestion) =>
+      suggestion.value.toLowerCase().includes(normalized) ||
+      suggestion.label.toLowerCase().includes(normalized) ||
+      (suggestion.hint?.toLowerCase().includes(normalized) ?? false),
+  );
   const selected = previous?.suggestions[previous.selectedIndex];
-  const selectedIndex = selected === undefined ? -1 : matches.indexOf(selected);
-  return {
-    ...query,
-    suggestions: matches,
-    selectedIndex: selectedIndex >= 0 ? selectedIndex : 0,
-  };
+  const selectedIndex =
+    selected === undefined ? -1 : suggestions.findIndex((item) => item.value === selected.value);
+  return { ...query, suggestions, selectedIndex: selectedIndex >= 0 ? selectedIndex : 0 };
 }
 
 export function moveArgumentTypeaheadSelection(
@@ -92,15 +105,15 @@ export function selectedArgumentSuggestion(
   return state.suggestions[state.selectedIndex];
 }
 
-/** Replaces the current argument, leaving the command ready to submit. */
+/** Replaces only the active argument, retaining selected preceding model tokens. */
 export function argumentTypeaheadCompletion(
   state: ArgumentTypeaheadState,
   suggestion: PromptArgumentSuggestion,
 ): string {
-  return `/${state.command} ${suggestion.value}`;
+  return `/${state.command} ${[...state.completed, suggestion.value].join(" ")}`;
 }
 
-/** Paints canonical catalog values under the command's argument column. */
+/** Paints canonical catalog values under the command's active argument column. */
 export function renderArgumentSuggestions(
   state: ArgumentTypeaheadState,
   theme: Theme,
@@ -115,8 +128,7 @@ export function renderArgumentSuggestions(
   return state.suggestions.slice(start, start + viewSize).map((suggestion, index) => {
     const value =
       start + index === state.selectedIndex ? c.bold(suggestion.value) : c.dim(suggestion.value);
-    const indent = " ".repeat(state.argumentStart + 2);
-    const row = `${indent}${value}`;
+    const row = `${" ".repeat(state.argumentStart + 2)}${value}`;
     return visibleLength(row) > width ? sliceVisible(row, width) : row;
   });
 }
