@@ -20,6 +20,15 @@ export const MODEL_HELPERS = {
   },
 } as const;
 export type ModelHelper = keyof typeof MODEL_HELPERS;
+
+/**
+ * Raw AI SDK provider ids that `eve dev` can serve through the same `/login`
+ * connection as the corresponding eve helper, keyed to that connection.
+ */
+export const LOGIN_SERVED_SDK_PROVIDERS: Readonly<Record<string, "openai" | "anthropic">> = {
+  "openai.responses": "openai",
+  "anthropic.messages": "anthropic",
+};
 export function parseModelHelper(
   selection: string,
 ): { helper: ModelHelper; id: string } | undefined {

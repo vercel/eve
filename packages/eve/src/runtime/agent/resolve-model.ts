@@ -1,4 +1,8 @@
-import { localGatewayModel } from "#internal/model-auth/transport.js";
+import { localGatewayModel, MODEL_CONNECTION_ENV } from "#internal/model-auth/transport.js";
+import { isEveDevEnvironment } from "#internal/application/dev-environment.js";
+import { anthropic } from "#public/models/anthropic/index.js";
+import { openai } from "#public/models/openai/index.js";
+import { LOGIN_SERVED_SDK_PROVIDERS } from "#shared/model-helper.js";
 import type { LanguageModel } from "ai";
 import type { CompiledModuleMap } from "#compiler/module-map.js";
 import type { ContextAccessor } from "#context/key.js";
@@ -110,23 +114,31 @@ async function loadSourceBackedRuntimeModelReference(
     );
   }
 
-  return withLocalGatewayConnection(model);
+  return withLoginConnection(model);
 }
 
 /**
- * A gateway-routed SDK instance (`gateway("openai/gpt-5.6")`) authenticates
- * from `AI_GATEWAY_API_KEY`/`VERCEL_OIDC_TOKEN` and never sees the connection
- * `/login` saved. While such a connection is active, serve the same model id
- * through it, as a string model would be. Outside `eve dev` the authored
- * instance is returned untouched.
+ * A raw AI SDK instance (`gateway("openai/gpt-5.6")`, `createOpenAI()(...)`)
+ * authenticates from its own env vars and never sees the connection `/login`
+ * saved. While the matching connection is active in `eve dev`, serve the same
+ * model id through eve's transport instead, as a string or eve-helper model
+ * would be. Otherwise the authored instance is returned untouched.
  */
-function withLocalGatewayConnection(model: LanguageModel): LanguageModel {
+function withLoginConnection(model: LanguageModel): LanguageModel {
   if (typeof model === "string") return model;
-  if (typeof model.provider !== "string" || model.provider.split(".")[0] !== "gateway") {
+  if (typeof model.provider !== "string" || typeof model.modelId !== "string" || !model.modelId) {
     return model;
   }
-  if (typeof model.modelId !== "string" || model.modelId === "") return model;
-  return localGatewayModel(model.modelId) ?? model;
+  if (model.provider.split(".")[0] === "gateway") return localGatewayModel(model.modelId) ?? model;
+  const connection = LOGIN_SERVED_SDK_PROVIDERS[model.provider];
+  if (
+    connection === undefined ||
+    !isEveDevEnvironment() ||
+    process.env[MODEL_CONNECTION_ENV] !== connection
+  ) {
+    return model;
+  }
+  return connection === "openai" ? openai(model.modelId) : anthropic(model.modelId);
 }
 
 function isSourceBackedRuntimeModelReference(

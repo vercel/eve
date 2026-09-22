@@ -115,9 +115,36 @@ describe("dynamic runtime model resolution", () => {
       expect(await resolve(authored)).toBe(authored);
     });
 
-    it("leaves a direct provider instance untouched", async () => {
+    it.each([
+      ["openai.responses", "gpt-5.5", "openai"],
+      ["anthropic.messages", "claude-sonnet-5", "anthropic"],
+    ])(
+      "serves a raw %s instance through the matching /login key",
+      async (provider, id, connection) => {
+        vi.stubEnv("EVE_DEV", "1");
+        vi.stubEnv("EVE_MODEL_CONNECTION", connection);
+        const authored = createLanguageModel(provider, id);
+
+        const model = await resolve(authored);
+
+        expect(model).not.toBe(authored);
+        if (typeof model === "string") throw new Error("expected a model instance");
+        expect(model.provider).toBe(provider);
+        expect(model.modelId).toBe(id);
+      },
+    );
+
+    it("leaves a direct provider instance untouched when a different connection is active", async () => {
       vi.stubEnv("EVE_DEV", "1");
       vi.stubEnv("EVE_MODEL_CONNECTION", "vercel");
+      const authored = createLanguageModel("openai.responses", "gpt-5.5");
+
+      expect(await resolve(authored)).toBe(authored);
+    });
+
+    it("leaves a direct provider instance untouched outside eve dev", async () => {
+      vi.stubEnv("EVE_DEV", "");
+      vi.stubEnv("EVE_MODEL_CONNECTION", "openai");
       const authored = createLanguageModel("openai.responses", "gpt-5.5");
 
       expect(await resolve(authored)).toBe(authored);

@@ -333,6 +333,32 @@ it.each(["vercel", "ai-gateway-key"] as const)(
     expect(fake.prompter.log.warning).not.toHaveBeenCalled();
   },
 );
+it.each([
+  ["openai", "openai.responses/gpt-5.5"],
+  ["anthropic", "anthropic.messages/claude-sonnet-5"],
+] as const)(
+  "connects %s to a raw SDK instance of the same provider without rewriting agent.ts",
+  async (selected, id) => {
+    mocks.authored.mockResolvedValue(undefined);
+    mocks.inspect.mockResolvedValue({
+      compiledState: {
+        manifest: {
+          config: {
+            model: { id, source: {}, routing: { kind: "external", provider: selected } },
+          },
+        },
+      },
+    });
+    const fake = createFakePrompter({ single: () => selected, password: () => "new-key" });
+    await expect(
+      runModelLogin({ appRoot: "/agent", prompter: fake.prompter }),
+    ).resolves.toMatchObject({ kind: "ready" });
+    expect(mocks.change).not.toHaveBeenCalled();
+    expect(mocks.writeSecret).toHaveBeenCalledWith(`${selected}-key`, "new-key");
+    expect(mocks.writeSelection.mock.calls[0]?.slice(0, 2)).toEqual(["/agent", selected]);
+    expect(fake.prompter.log.warning).not.toHaveBeenCalled();
+  },
+);
 it("preserves an explicitly authored eve helper's compatible custom model", async () => {
   mocks.inspect.mockResolvedValue({
     compiledState: {
