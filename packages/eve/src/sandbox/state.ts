@@ -1,4 +1,5 @@
 import type { SandboxSession } from "#public/definitions/sandbox.js";
+import type { SandboxEnvironmentIdentity } from "#shared/sandbox-environment.js";
 import type { SandboxDeleteOptions, SandboxPreparedArtifact } from "#shared/sandbox-provider.js";
 
 export interface SandboxSessionState {
@@ -12,6 +13,7 @@ export interface SandboxState {
 }
 
 export interface SandboxAccess {
+  readonly environment?: SandboxEnvironmentIdentity;
   captureState(): Promise<SandboxState>;
   delete?(options?: SandboxDeleteOptions): Promise<void>;
   get(): Promise<SandboxSession | null>;

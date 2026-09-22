@@ -60,6 +60,17 @@ const result = await sandbox.run({ command: "npm test" });
 
 The accessor is asynchronous because eve may need to bind or restore the sandbox. A subagent sees its own sandbox, not its parent's. The returned handle also exposes `stop()` and `delete()`; see [Sandbox lifecycle](../sandbox#lifecycle) for their behavior.
 
+When you need capabilities specific to the configured environment, pass its exported environment object. The return type preserves the environment's session capabilities:
+
+```ts
+import { environment } from "../sandbox";
+
+const sandbox = await ctx.getSandbox(environment);
+await sandbox.setNetworkPolicy("deny-all");
+```
+
+The environment must be the one configured for the current sandbox. eve rejects a different environment instead of returning a handle with capabilities that may not exist.
+
 ## Custom state with `defineState`
 
 Use `defineState` for durable per-session values that tools, hooks, and channel handlers share. Unlike the `ctx` accessors, import it from `eve/context` and declare the handle at module scope. Its `get()` and `update()` methods still require active eve execution. See [State](../concepts/state) for the read, update, reset, and subagent-isolation model.
@@ -83,5 +94,4 @@ eve establishes the managed context before invoking authored runtime code and ke
 
 - [State](../concepts/state): durable typed values scoped to one session.
 - [Sandbox](../sandbox): runtime filesystem and process access.
-- [Skills](../skills): load procedures and read packaged skill files.
 - [Sessions, runs, and streaming](../concepts/sessions-runs-and-streaming): the durable session and event contract.

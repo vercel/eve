@@ -4,6 +4,7 @@ import { buildCallbackContext } from "#context/build-callback-context.js";
 import { createTestRuntime } from "#internal/testing/app-harness.js";
 import { mockSandbox } from "#internal/testing/mocks/mock-sandbox.js";
 import type { RuntimeSandboxSession, SandboxSession } from "#public/definitions/sandbox.js";
+import { VercelSandbox } from "#public/sandbox/vercel.js";
 
 /**
  * Integration coverage for {@link buildCallbackContext} — the single
@@ -96,6 +97,33 @@ describe("buildCallbackContext – getSandbox", () => {
     await live.run({ command: "echo ready" });
 
     expect(sandbox.commandLog).toEqual(["echo ready"]);
+  });
+
+  it("accepts the configured sandbox environment", async () => {
+    const environment = VercelSandbox.environment();
+    const sandbox = mockSandbox();
+    const runtime = await createTestRuntime();
+
+    const live = await runtime.runAsSession(
+      { sandboxAccess: { ...sandbox.access, environment } },
+      async () => await buildCallbackContext().getSandbox(environment),
+    );
+
+    expect(live).toBeDefined();
+  });
+
+  it("rejects a sandbox environment that is not active for the session", async () => {
+    const environment = VercelSandbox.environment();
+    const otherEnvironment = VercelSandbox.environment();
+    const sandbox = mockSandbox();
+    const runtime = await createTestRuntime();
+
+    await expect(
+      runtime.runAsSession(
+        { sandboxAccess: { ...sandbox.access, environment } },
+        async () => await buildCallbackContext().getSandbox(otherEnvironment),
+      ),
+    ).rejects.toThrow("The requested sandbox environment is not active for the current session.");
   });
 
   it("passes file operations through the expanded session surface", async () => {
