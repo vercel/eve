@@ -14,12 +14,10 @@ const provider = defineSandboxProvider<undefined, undefined, null, CustomState, 
         return null;
       },
       async resume(_context, _artifact, state) {
-        console.info(`[custom-provider-e2e] resume version=${state.version}`);
         return createHandle(state.marker);
       },
       async start(context) {
         const marker = `${CUSTOM_PROVIDER_TOKEN}:${context.session.id}`;
-        console.info("[custom-provider-e2e] start version=1");
         return {
           handle: createHandle(marker),
           state: { marker, version: 1 },
