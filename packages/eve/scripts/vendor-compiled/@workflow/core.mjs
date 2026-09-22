@@ -101,6 +101,10 @@ const copyDeclarations = createDeclarationCopier({
       stubBaseName: "_ms",
       build: buildMsStub,
     },
+    zod: {
+      kind: "vendored",
+      compiledPath: "zod",
+    },
     "quickjs-wasi": {
       kind: "stub",
       stubBaseName: "_quickjs-wasi",
@@ -173,9 +177,10 @@ function guardInlineStepExecution() {
     transform(source, id) {
       if (!id.replaceAll("\\", "/").endsWith("/@workflow/core/dist/runtime.js")) return null;
 
-      // beta.51 only registers recovered inline steps with single-flight.
+      // beta.55 only registers recovered inline steps with single-flight.
       // A queued wake can therefore run a newly claimed step again while its
       // original body is still active, especially when a local lease expires.
+      // Keep that protection quiet for expected fresh-step contention.
       const unguarded =
         /const executed = s\.lazyStepInput === undefined &&\s+s\.preclaimedStart === undefined\s+\? runStepSingleFlight\(runId, s\.correlationId, run\)\s+: run\(\);/;
       if (!unguarded.test(source)) {
@@ -184,7 +189,14 @@ function guardInlineStepExecution() {
       return {
         code: source.replace(
           unguarded,
-          "const executed = runStepSingleFlight(runId, s.correlationId, run);",
+          `const executed = runStepSingleFlight(
+            runId,
+            s.correlationId,
+            run,
+            s.lazyStepInput !== undefined || s.preclaimedStart !== undefined
+              ? "debug"
+              : "warn",
+          );`,
         ),
         map: null,
       };

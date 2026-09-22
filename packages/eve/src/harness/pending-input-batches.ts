@@ -246,7 +246,7 @@ export function hasDeferredStepInput(session: HarnessSession): boolean {
   return getDeferredStepInput(session) !== undefined;
 }
 
-function getDeferredStepInput(session: HarnessSession): StepInput | undefined {
+export function getDeferredStepInput(session: HarnessSession): StepInput | undefined {
   return session.state?.[DEFERRED_STEP_INPUT_KEY] as StepInput | undefined;
 }
 

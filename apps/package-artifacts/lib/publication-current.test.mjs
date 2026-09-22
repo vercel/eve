@@ -36,26 +36,28 @@ describe("current package publication target", () => {
     ).rejects.toThrow("stale build");
   });
 
-  test("accepts the current open pull request build without a GitHub token", async () => {
-    const fetchImplementation = vi
-      .fn()
-      .mockResolvedValue(response({ state: "open", base: { ref: "main" }, head: { sha } }));
-    await expect(
-      assertCurrentPublicationTarget({ ...input, token: undefined }, fetchImplementation),
-    ).resolves.toBeUndefined();
-    expect(fetchImplementation).toHaveBeenCalledWith(
-      "https://api.github.com/repos/vercel/eve/pulls/123",
-      expect.objectContaining({
-        headers: expect.not.objectContaining({ Authorization: expect.anything() }),
-      }),
-    );
-  });
+  test.each(["main", "feature/base"])(
+    "accepts a current open pull request build based on %s without a GitHub token",
+    async (base) => {
+      const fetchImplementation = vi
+        .fn()
+        .mockResolvedValue(response({ state: "open", base: { ref: base }, head: { sha } }));
+      await expect(
+        assertCurrentPublicationTarget({ ...input, token: undefined }, fetchImplementation),
+      ).resolves.toBeUndefined();
+      expect(fetchImplementation).toHaveBeenCalledWith(
+        "https://api.github.com/repos/vercel/eve/pulls/123",
+        expect.objectContaining({
+          headers: expect.not.objectContaining({ Authorization: expect.anything() }),
+        }),
+      );
+    },
+  );
 
-  test("rejects stale, closed, and retargeted pull requests", async () => {
+  test("rejects stale and closed pull requests", async () => {
     const invalidPulls = [
       { state: "open", base: { ref: "main" }, head: { sha: "b".repeat(40) } },
       { state: "closed", base: { ref: "main" }, head: { sha } },
-      { state: "open", base: { ref: "release" }, head: { sha } },
     ];
     for (const pull of invalidPulls) {
       const fetchImplementation = vi.fn().mockResolvedValue(response(pull));

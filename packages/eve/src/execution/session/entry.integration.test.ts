@@ -1436,6 +1436,15 @@ describe("workflowEntry integration", () => {
               sessionInboxHookToken(sessionCommandHookToken(anchor.runId)),
             );
             expect(nextOwner.runId).not.toBe(successor.runId);
+            await vi.waitFor(async () =>
+              expect((await world.runs.get(successor.runId)).status).toBe("completed"),
+            );
+            expect((await world.runs.get(anchor.runId)).status).toBe("running");
+            expect(
+              (await world.steps.list({ runId: successor.runId })).data.some((step) =>
+                step.stepName.endsWith("//signalSessionAnchorStep"),
+              ),
+            ).toBe(false);
             if (sessionTimeoutMs !== false && successorTimer !== undefined) {
               const nextTimer = await readSessionTimer(nextOwner.runId);
               const owner = await world.runs.get(nextOwner.runId);
@@ -1458,7 +1467,27 @@ describe("workflowEntry integration", () => {
               }
             }
 
-            // Reset ends the session on the successor; the anchor closes the stream once.
+            await waitForParkedTurnStep(nextOwner.runId);
+            await workflowRuntime.dispatchSession({
+              command: followUp("dpl_d", "fifth message", "delivery-e"),
+              sessionId: anchor.runId,
+            });
+            expect((await stream.nextTurn()).at(-1)?.type).toBe("session.waiting");
+            const finalOwner = await waitForCommandHookOwner(
+              sessionInboxHookToken(sessionCommandHookToken(anchor.runId)),
+            );
+            expect(finalOwner.runId).not.toBe(nextOwner.runId);
+            await vi.waitFor(async () =>
+              expect((await world.runs.get(nextOwner.runId)).status).toBe("completed"),
+            );
+            expect((await world.runs.get(anchor.runId)).status).toBe("running");
+            expect(
+              (await world.steps.list({ runId: nextOwner.runId })).data.some((step) =>
+                step.stepName.endsWith("//signalSessionAnchorStep"),
+              ),
+            ).toBe(false);
+
+            // Reset ends the session on the final owner; the anchor closes the stream once.
             await workflowRuntime.dispatchSession({
               command: { kind: "reset", reason: "handoff test" },
               sessionId: anchor.runId,
@@ -1574,6 +1603,7 @@ describe("workflowEntry integration", () => {
           });
           try {
             await stream.nextTurn();
+            await waitForParkedTurnStep(anchor.runId);
             await workflowRuntime.dispatchSession({
               command: followUp(
                 "dpl_b",

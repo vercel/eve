@@ -28,6 +28,10 @@ caller using the built-in file provider. Swap `provider` for
 [Supermemory](#supermemory), [Upstash AgentKit](#upstash-agentkit), or your own
 implementation and the rest of the definition stays the same.
 
+For an application with multiple tenants, follow the
+[Multi-tenant memory](/docs/patterns/multi-tenant-memory) guide to scope memory
+by authenticated tenant and caller.
+
 ## How a memory slot works
 
 A memory slot is the unit eve manages. Each slot binds one provider to an

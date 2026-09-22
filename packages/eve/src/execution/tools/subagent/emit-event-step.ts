@@ -1,3 +1,4 @@
+import { sessionProvider } from "#context/providers/session.js";
 import { contextStorage } from "#context/container.js";
 import { deserializeContext, serializeContext } from "#context/serialize.js";
 import { readDurableSession, type DurableSessionState } from "#execution/durable-session-store.js";
@@ -18,6 +19,7 @@ export async function emitSubagentEventStep(input: {
   const ctx = await deserializeContext(input.serializedContext);
   const bundle = ctx.require(BundleKey);
   const session = readDurableSession(input.sessionState);
+  ctx.setVirtualContext(sessionProvider.key, sessionProvider.create(ctx, session).value);
   const sink = createSessionEventSink({
     abortSignal: undefined,
     adapter: ctx.require(ChannelKey),

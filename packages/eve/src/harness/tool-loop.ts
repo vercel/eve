@@ -112,6 +112,7 @@ import {
   emitTurnEpilogue,
   emitTurnPreamble,
   getHarnessEmissionState,
+  isHarnessBetweenTurns,
   setHarnessEmissionState,
 } from "#harness/emission.js";
 import {
@@ -144,7 +145,7 @@ import {
   consumeDeferredStepInput,
   getApprovedTools,
   getPendingInputRequestIds,
-  hasDeferredStepInput,
+  hasRunnableDeferredStepInput,
   hasPendingApprovalBatch,
   hasStepInput,
   resolvePendingInput,
@@ -210,6 +211,7 @@ import {
 import { resolveFrameworkToolFromUpstreamType } from "#harness/provider-tools.js";
 import {
   createCoordinationRequestFromToolCall,
+  getPendingCoordinationBatch,
   resolvePendingCoordination,
   setPendingCoordinationBatch,
 } from "#harness/coordination.js";
@@ -706,6 +708,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     });
     session = stepInput.session;
 
+    const pendingCoordination = getPendingCoordinationBatch(session.state);
     const resolvedCoordination = await resolvePendingCoordination({
       emit,
       session,
@@ -894,8 +897,10 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     }
 
     const pending = resolvePendingInput({
+      activeTurnId: pendingCoordination?.event.turnId ?? activeTurnId(emissionState),
       deferMessagesWhileApprovalsPending: config.mode !== "conversation",
       history: resolvedCoordination.messages,
+      internalStep: !isHarnessBetweenTurns(session),
       resolveApprovalKey: resolveApprovalKeyFromTools(responseAuthorizationTools),
       session,
       stepInput: coordinated.stepInput,
@@ -1070,7 +1075,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
 
     let instructionMessages: UserModelMessage[] = [];
     let memoryCommit: ReturnType<typeof drainMemoryCommit> = undefined;
-    if (emit && hasStepInput(input)) {
+    if (emit && (hasStepInput(effectiveStepInput) || hasStepInput(coordinated.stepInput))) {
       if (store !== undefined) {
         prepareDynamicInstructionPreamble(
           store,
@@ -2917,7 +2922,7 @@ async function handleStepResult(input: {
     }
 
     return {
-      next: hasDeferredStepInput(parkedSession) ? runStep : null,
+      next: hasRunnableDeferredStepInput(parkedSession) ? runStep : null,
       session: parkedSession,
     };
   }
@@ -3009,7 +3014,7 @@ async function handleStepResult(input: {
     !calledFinalOutput &&
     (continuationMessages.at(-1)?.role === "tool" ||
       normalizedProviderHistory.outcomeEndsResponse ||
-      hasDeferredStepInput(nextSession));
+      hasRunnableDeferredStepInput(nextSession));
   if (continueLoop) {
     if (emit) {
       emissionState = advanceStep(emissionState);

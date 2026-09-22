@@ -118,6 +118,14 @@ describe("reduceSelect", () => {
     expect(reduceSelect(state, { type: "backspace" }, context()).filter).toBe("");
   });
 
+  it("deletes to the previous readline-style word boundary", () => {
+    expect(reduceSelect(initial, { type: "delete-word-backward" }, context())).toBe(initial);
+    const state = { filter: "one,  two_three 世界", cursor: 2, selected: new Set<string>() };
+    const next = reduceSelect(state, { type: "delete-word-backward" }, context());
+    expect(next.filter).toBe("one,  two_three ");
+    expect(next.cursor).toBe(0);
+  });
+
   it("wraps the cursor across the visible list", () => {
     expect(reduceSelect(initial, { type: "up" }, context()).cursor).toBe(2);
     expect(reduceSelect({ ...initial, cursor: 2 }, { type: "down" }, context()).cursor).toBe(0);
