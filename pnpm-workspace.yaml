@@ -35,6 +35,7 @@ catalog:
   "@ai-sdk/google": "^4.0.64"
   "@ai-sdk/harness": "^1.0.102"
   "@ai-sdk/harness-claude-code": "^1.0.106"
+  "@ai-sdk/harness-codex": "^1.0.119"
   "@ai-sdk/mcp": "^2.0.45"
   "@ai-sdk/openai": "^4.0.60"
   "@ai-sdk/otel": "^1.0.93"

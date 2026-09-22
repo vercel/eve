@@ -1,9 +1,9 @@
 import { defineAgent } from "eve";
-import { claudeCode } from "@ai-sdk/harness-claude-code";
+import { codex } from "@ai-sdk/harness-codex";
 
 export default defineAgent({
   build: {
-    externalDependencies: ["@ai-sdk/harness-claude-code"],
+    externalDependencies: ["@ai-sdk/harness-codex"],
   },
-  harness: claudeCode,
+  harness: codex,
 });
