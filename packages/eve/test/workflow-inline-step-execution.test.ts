@@ -11,7 +11,7 @@ const executed = s.lazyStepInput === undefined &&
 return executed;
 `;
 
-type StepResult = { type: "completed" | "failed" | "skipped" };
+type StepResult = { type: "completed" | "skipped" };
 
 type VendorPlugin = {
   name: string;
@@ -140,52 +140,41 @@ describe("inline step single-flight vendoring patch", () => {
     expect(logLevels).toEqual(["debug", "debug", "warn"]);
   });
 
-  it.each([{ maxRetries: 1 }, { maxRetries: 0 }])(
-    "runs the preclaim owner when a rejected preclaim enters first ($maxRetries retries)",
-    async ({ maxRetries }) => {
-      const singleFlight = createSingleFlight();
-      const loserEntered = deferred();
-      const ownerRan = deferred();
-      const releaseLoser = deferred();
-      let executions = 0;
-      let recoveryFailures = 0;
+  it("runs the preclaim owner when a rejected preclaim enters first", async () => {
+    const singleFlight = createSingleFlight();
+    const loserEntered = deferred();
+    const ownerRan = deferred();
+    const releaseLoser = deferred();
+    let executions = 0;
 
-      const loser = executeInlineStep(
-        singleFlight.run,
-        "run",
-        { correlationId: "step", preclaimedStart: { owned: false } },
-        async () => {
-          loserEntered.resolve();
-          await releaseLoser.promise;
-          return { type: "skipped" };
-        },
-      );
-      await loserEntered.promise;
+    const loser = executeInlineStep(
+      singleFlight.run,
+      "run",
+      { correlationId: "step", preclaimedStart: { owned: false } },
+      async () => {
+        loserEntered.resolve();
+        await releaseLoser.promise;
+        return { type: "skipped" };
+      },
+    );
+    await loserEntered.promise;
 
-      const owner = executeInlineStep(
-        singleFlight.run,
-        "run",
-        { correlationId: "step", preclaimedStart: { owned: true } },
-        async () => {
-          executions += 1;
-          ownerRan.resolve();
-          return { type: "completed" };
-        },
-      ).then((result) => {
-        if (result.type === "skipped" && maxRetries === 0) {
-          recoveryFailures += 1;
-          return { type: "failed" };
-        }
-        return result;
-      });
-      await ownerRan.promise;
+    const owner = executeInlineStep(
+      singleFlight.run,
+      "run",
+      { correlationId: "step", preclaimedStart: { owned: true } },
+      async () => {
+        executions += 1;
+        ownerRan.resolve();
+        return { type: "completed" };
+      },
+    );
+    await ownerRan.promise;
 
-      releaseLoser.resolve();
-      await expect(owner).resolves.toEqual({ type: "completed" });
-      await expect(loser).resolves.toEqual({ type: "skipped" });
-      expect(executions).toBe(1);
-      expect(recoveryFailures).toBe(0);
-      expect(singleFlight.logLevels).toEqual([]);
-    },
-  );
+    releaseLoser.resolve();
+    await expect(owner).resolves.toEqual({ type: "completed" });
+    await expect(loser).resolves.toEqual({ type: "skipped" });
+    expect(executions).toBe(1);
+    expect(singleFlight.logLevels).toEqual([]);
+  });
 });
