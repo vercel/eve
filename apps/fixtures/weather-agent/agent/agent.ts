@@ -1,9 +1,13 @@
 import { defineAgent } from "eve";
-import { claudeCode } from "@ai-sdk/harness-claude-code";
 
 export default defineAgent({
-  build: {
-    externalDependencies: ["@ai-sdk/harness-claude-code"],
+  model: "openai/gpt-5.6-luna-fast",
+  modelOptions: {
+    providerOptions: {
+      openai: {
+        reasoningEffort: "high",
+        reasoningSummary: "auto",
+      },
+    },
   },
-  harness: claudeCode,
 });

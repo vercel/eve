@@ -1,5 +1,5 @@
 {
-  "name": "weather-agent",
+  "name": "weather-harness-agent",
   "private": true,
   "type": "module",
   "scripts": {
@@ -10,6 +10,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
+    "@ai-sdk/harness-claude-code": "catalog:",
     "eve": "workspace:*",
     "zod": "catalog:"
   }
