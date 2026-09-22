@@ -87,7 +87,7 @@ describe("ensureAiSdkWarningLogger", () => {
       {
         level: "info",
         namespace: "harness.ai-sdk-warnings",
-        message: "AI SDK compatibility warning",
+        message: "AI SDK warning",
         fields: {
           model: "openai/gpt-5",
           provider: "gateway",
@@ -139,7 +139,7 @@ describe("ensureAiSdkWarningLogger", () => {
       {
         level: "warn",
         namespace: "harness.ai-sdk-warnings",
-        message: "AI SDK provider warning",
+        message: "AI SDK warning",
         fields: {
           model: "openai/gpt-5",
           provider: "gateway",
