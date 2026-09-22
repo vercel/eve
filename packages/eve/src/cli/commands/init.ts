@@ -228,6 +228,7 @@ async function scaffoldProject(
       await dependencies.ensureChannel({
         projectRoot: stagedProjectPath,
         kind: "web",
+        webAuthentication: options.webAuthentication,
         packageManager,
         force: overwriteExisting,
         workspaceProbeDirectory: projectPath,
@@ -497,6 +498,8 @@ export async function runInitCommand(
   trackStep?: (step: EveCliSetupStep) => void,
   trackTerminal?: InitTerminalTracker,
 ): Promise<void> {
+  if (options.webAuthentication && !options.channelWebNextjs)
+    throw new Error("--web-authentication requires --channel-web-nextjs");
   const agentLaunched = await dependencies.isCodingAgentLaunch();
   const interactive = dependencies.hasInteractiveTerminal();
   if (interactive && !agentLaunched) logger.log("");

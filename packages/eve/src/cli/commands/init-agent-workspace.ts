@@ -20,6 +20,7 @@ import { InitTargetError } from "./init-telemetry.js";
 export interface InitCommandOptions {
   agents?: readonly string[];
   channelWebNextjs?: boolean;
+  webAuthentication?: "sign-in-with-vercel";
   model?: string;
   reasoning?: AgentReasoningDefinition;
 }

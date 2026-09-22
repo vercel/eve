@@ -191,6 +191,14 @@ export function createCliProgram(
     .description("Create a new eve agent, or add one to an existing project directory.")
     .option("--channel-web-nextjs", "Add the Web Chat application (Next.js)")
     .option(
+      "--web-authentication <provider>",
+      "Web Chat authentication (sign-in-with-vercel)",
+      (value: string) => {
+        if (value !== "sign-in-with-vercel") throw new Error("Expected sign-in-with-vercel");
+        return value;
+      },
+    )
+    .option(
       "--agents <names>",
       "Create an agents/ workspace with comma-separated agent names",
       parseAgentNamesOption,
@@ -208,6 +216,7 @@ export function createCliProgram(
         options: {
           agents?: string[];
           channelWebNextjs?: boolean;
+          webAuthentication?: "sign-in-with-vercel";
           model?: string;
           reasoning?: AgentReasoningDefinition;
           yes?: boolean;
@@ -225,6 +234,7 @@ export function createCliProgram(
           {
             agents: options.agents,
             channelWebNextjs: options.channelWebNextjs,
+            webAuthentication: options.webAuthentication,
             model: options.model,
             reasoning: options.reasoning,
           },

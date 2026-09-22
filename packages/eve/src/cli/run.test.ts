@@ -318,6 +318,7 @@ describe("bare eve command", () => {
       {
         agents: undefined,
         channelWebNextjs: undefined,
+        webAuthentication: undefined,
         model: undefined,
         reasoning: undefined,
       },
@@ -400,6 +401,7 @@ describe("eve init compatibility flags", () => {
       {
         agents: undefined,
         channelWebNextjs: undefined,
+        webAuthentication: undefined,
         model: "openai/gpt-5.6-sol",
         reasoning: "high",
       },
@@ -1219,4 +1221,17 @@ describe("resolveTuiDisplayOptions", () => {
     expect(resolved).not.toHaveProperty("contextSize");
     expect(resolved.logs).toBe("stderr");
   });
+});
+
+it("passes authenticated web scaffolding through the public init command", async () => {
+  runInitCommand.mockClear();
+  await runCli(
+    ["init", "chat", "--channel-web-nextjs", "--web-authentication", "sign-in-with-vercel"],
+    { error: vi.fn(), log: vi.fn() },
+  );
+  expect(runInitCommand.mock.calls.at(-1)).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({ channelWebNextjs: true, webAuthentication: "sign-in-with-vercel" }),
+    ]),
+  );
 });

@@ -387,6 +387,16 @@ describe("ensureChannel", () => {
     const channelSource = await readFile(join(projectRoot, "agent/channels/eve.ts"), "utf8");
     expect(channelSource).toContain("auth.api.getSession");
     expect(channelSource).toContain('authenticator: "better-auth:vercel"');
+    expect(channelSource).toContain("principalId: session.user.id");
+    const authenticatedPackage = await readFile(join(projectRoot, "package.json"), "utf8");
+    expect(authenticatedPackage).not.toContain("@neondatabase/serverless");
+    expect(authenticatedPackage).not.toContain("@electric-sql/pglite");
+    expect(authSource).not.toContain("database:");
+    expect(result.filesWritten).not.toContain(join(projectRoot, "db/session-index.sql"));
+    expect(result.filesWritten).not.toContain(
+      join(projectRoot, "scripts/migrate-session-index.mjs"),
+    );
+
     expect(channelSource).not.toContain('issuer: "https://vercel.com"');
     expect(channelSource).toContain("vercelOidc()");
     expect(channelSource).toContain("localDev()");
