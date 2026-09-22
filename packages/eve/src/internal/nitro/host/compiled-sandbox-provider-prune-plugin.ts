@@ -34,10 +34,14 @@ export function createCompiledSandboxProviderPrunePlugin(): BundlerPluginShape {
       const sourcePath = id.split(/[?#]/u, 1)[0] ?? id;
       if (id === PRUNED_DEFAULT_SANDBOX_MODULE_ID || DEFAULT_PROVIDER_SOURCE_RE.test(sourcePath)) {
         return [
-          'import { VercelSandbox } from "#sandbox/providers/vercel.js";',
-          "export const DefaultSandbox = VercelSandbox;",
+          'import { createDefaultVercelEnvironment } from "#sandbox/providers/vercel.js";',
+          "function environment(options = {}) {",
+          "  const vercelOptions = Object.assign({}, options.vercel, options.prepare === undefined ? {} : { prepare: options.prepare });",
+          "  return createDefaultVercelEnvironment(vercelOptions);",
+          "}",
+          'export const DefaultSandbox = { name: "default", environment };',
           "export const SANDBOX_PROVIDER_PROBES = {};",
-          "export function defineDefaultSandboxProvider() { return VercelSandbox; }",
+          'export function defineDefaultSandboxProvider() { return { name: "default", environment }; }',
           "",
         ].join("\n");
       }

@@ -23,6 +23,7 @@ const provider = defineSandboxProvider<
   MutableNetworkSandboxSession
 >({
   name: "microsandbox",
+  stateProtocolVersion: 3,
   environment: (options) => createMicrosandboxSandboxProvider(options),
 });
 

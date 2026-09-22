@@ -5,15 +5,11 @@ import {
   type MicrosandboxPreparedArtifact,
   prewarmMicrosandboxTemplate,
 } from "#execution/sandbox/bindings/microsandbox-lifecycle.js";
-import type { MicrosandboxSessionMetadata } from "#execution/sandbox/bindings/microsandbox-metadata.js";
 import {
   microsandboxOptionsForHash,
   resolveMicrosandboxOptions,
 } from "#execution/sandbox/bindings/microsandbox-options.js";
-import {
-  createProviderName,
-  createStableHash,
-} from "#execution/sandbox/bindings/microsandbox-runtime.js";
+import { createStableHash } from "#execution/sandbox/bindings/microsandbox-runtime.js";
 import { materializeSandboxDockerfile } from "#execution/sandbox/dockerfile.js";
 import { createSandboxProviderIdentity } from "#execution/sandbox/provider-identity.js";
 import type {
@@ -31,7 +27,11 @@ export { pruneMicrosandboxTemplates } from "#execution/sandbox/bindings/microsan
 
 export const MICROSANDBOX_PROVIDER_NAME = "microsandbox";
 
-export type MicrosandboxProviderSessionState = MicrosandboxSessionMetadata;
+export type MicrosandboxProviderSessionState = {
+  readonly optionsHash: string;
+  readonly sessionIdentity: string;
+  readonly version: 3;
+};
 
 export function createMicrosandboxSandboxProvider(
   authoredOptions: MicrosandboxSandboxCreateOptions | undefined = undefined,
@@ -81,7 +81,8 @@ export function createMicrosandboxSandboxProvider(
       if (
         state.optionsHash !== optionsHash ||
         artifact.optionsHash !== optionsHash ||
-        state.sandboxName !== microsandboxSessionName(context.session.id, artifact, optionsHash)
+        state.sessionIdentity !==
+          microsandboxSessionIdentity(context.session.id, artifact, optionsHash)
       ) {
         throw new Error("microsandbox session state is incompatible with this environment.");
       }
@@ -89,11 +90,10 @@ export function createMicrosandboxSandboxProvider(
         artifact,
         context,
         createIfMissing: false,
-        existingState: state,
+        sessionIdentity: state.sessionIdentity,
         options,
         optionsHash,
         providerName: MICROSANDBOX_PROVIDER_NAME,
-        runtimeOptions: { networkPolicy: state.networkPolicy },
       });
       return result.handle;
     },
@@ -112,7 +112,7 @@ export function createMicrosandboxSandboxProvider(
   };
 }
 
-function microsandboxSessionName(
+function microsandboxSessionIdentity(
   sessionId: string,
   artifact: MicrosandboxPreparedArtifact,
   optionsHash: string,
@@ -121,7 +121,7 @@ function microsandboxSessionName(
     0,
     32,
   );
-  return createProviderName("eve-sbx-ses", identity);
+  return identity;
 }
 
 function requireArtifact(artifact: SandboxPreparedArtifact): MicrosandboxPreparedArtifact {
@@ -144,18 +144,15 @@ function requireArtifact(artifact: SandboxPreparedArtifact): MicrosandboxPrepare
 function requireState(state: unknown): MicrosandboxProviderSessionState {
   if (
     !isSandboxPreparedArtifactRecord(state) ||
-    state.version !== 2 ||
+    state.version !== 3 ||
     typeof state.optionsHash !== "string" ||
-    typeof state.sandboxName !== "string"
+    typeof state.sessionIdentity !== "string"
   ) {
     throw new Error("Invalid microsandbox session state.");
   }
   return {
-    image: typeof state.image === "string" ? state.image : undefined,
     optionsHash: state.optionsHash,
-    sandboxName: state.sandboxName,
-    stateSnapshotName:
-      typeof state.stateSnapshotName === "string" ? state.stateSnapshotName : undefined,
-    version: 2,
+    sessionIdentity: state.sessionIdentity,
+    version: 3,
   };
 }

@@ -159,6 +159,7 @@ function createGraph(
     sourceKind: "module",
   };
   const root = {
+    agent: { metadata: { agentRoot: process.cwd(), appRoot: process.cwd() } },
     nodeId: ROOT_RUNTIME_AGENT_NODE_ID,
     sandboxRegistry: {
       sandbox: {

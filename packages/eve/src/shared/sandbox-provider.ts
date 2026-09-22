@@ -159,6 +159,7 @@ export type SandboxProviderDefinition<
   Session extends SandboxSession,
 > = {
   readonly name: string;
+  readonly stateProtocolVersion?: number;
   environment(
     ...args: SandboxOptionArguments<EnvironmentOptions>
   ): SandboxProviderImplementation<OpenOptions, PreparedArtifact, SessionState, Session>;
@@ -185,6 +186,7 @@ type ErasedSandboxProviderImplementation = SandboxProviderImplementation<
 export interface SandboxProviderRuntime {
   readonly implementation: ErasedSandboxProviderImplementation;
   readonly providerName: string;
+  readonly stateProtocolVersion: number;
 }
 
 export function defineSandboxProvider<
@@ -202,6 +204,7 @@ export function defineSandboxProvider<
     Session
   >,
 ): SandboxProvider<EnvironmentOptions, OpenOptions, Session> {
+  const stateProtocolVersion = definition.stateProtocolVersion ?? 1;
   return {
     name: definition.name,
     environment(...args: SandboxOptionArguments<EnvironmentOptions>) {
@@ -210,6 +213,7 @@ export function defineSandboxProvider<
         runtime: {
           implementation: eraseSandboxProviderImplementation(definition.environment(...args)),
           providerName: definition.name,
+          stateProtocolVersion,
         },
       });
     },

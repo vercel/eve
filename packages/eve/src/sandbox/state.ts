@@ -4,6 +4,7 @@ import type { SandboxDeleteOptions, SandboxPreparedArtifact } from "#shared/sand
 export interface SandboxSessionState {
   readonly providerName: string;
   readonly state: SandboxPreparedArtifact;
+  readonly stateProtocolVersion: number;
 }
 
 export interface SandboxState {

@@ -10,6 +10,7 @@ const provider = defineSandboxProvider<
   { readonly nativeId: string; readonly version: 1 }
 >({
   name: "test-provider",
+  stateProtocolVersion: 4,
   environment: (environmentOptions) => ({
     async prepare() {
       return { templateId: environmentOptions?.image ?? "default" };
@@ -49,6 +50,7 @@ describe("defineSandboxProvider", () => {
   it("preserves provider-owned environment and open option types", () => {
     const environment = provider.environment({ image: "node:24" });
     expect(environment.provider).toBe("test-provider");
+    expect(getSandboxEnvironmentRuntime(environment).stateProtocolVersion).toBe(4);
     expectTypeOf(environment.open).parameter(0).toEqualTypeOf<
       | {
           readonly networkPolicy?: "allow-all" | "deny-all";

@@ -25,6 +25,7 @@ import {
   MICROSANDBOX_METADATA_VERSION,
   type MicrosandboxSessionMetadata,
   type MicrosandboxTemplateMetadata,
+  readSessionMetadata,
   readTemplateMetadata,
   resolveMicrosandboxMetadataPath,
   writeTemplateMetadata,
@@ -222,38 +223,43 @@ export async function createMicrosandboxHandle(input: {
   readonly artifact: MicrosandboxPreparedArtifact;
   readonly context: SandboxProviderSessionContext;
   readonly createIfMissing?: boolean;
-  readonly existingState?: MicrosandboxSessionMetadata;
   readonly options: ResolvedMicrosandboxOptions;
   readonly optionsHash: string;
   readonly providerName: string;
   readonly runtimeOptions?: MicrosandboxSandboxRuntimeOptions;
+  readonly sessionIdentity?: string;
 }): Promise<{
   readonly handle: SandboxProviderHandle<MutableNetworkSandboxSession>;
-  readonly state: MicrosandboxSessionMetadata;
+  readonly state: {
+    readonly optionsHash: string;
+    readonly sessionIdentity: string;
+    readonly version: 3;
+  };
 }> {
   const preparedTemplate = requirePreparedMicrosandboxTemplate(input.artifact, input.providerName);
-  const existingState = input.existingState;
-  const image = resolveMicrosandboxImage(existingState ?? null, preparedTemplate, input.options);
+  const sessionIdentity =
+    input.sessionIdentity ??
+    createStableHash(
+      `${input.context.session.id}:${preparedTemplate.snapshotName}:${input.optionsHash}`,
+    ).slice(0, 32);
+  const sessionRootPath = resolveMicrosandboxSessionRootPath(
+    input.context.storagePath,
+    sessionIdentity,
+  );
+  const metadataPath = resolveMicrosandboxMetadataPath(sessionRootPath);
+  const existingState = await readSessionMetadata(metadataPath);
+  const image = resolveMicrosandboxImage(existingState, preparedTemplate, input.options);
   const options: LiveMicrosandboxOptions = {
     ...input.options,
     ...image,
     networkPolicy: input.runtimeOptions?.networkPolicy,
   };
   const module = await loadMicrosandboxModule({ host: input.context.host, options });
-  const sessionIdentity = createStableHash(
-    `${input.context.session.id}:${preparedTemplate.snapshotName}:${input.optionsHash}`,
-  ).slice(0, 32);
-  const sessionRootPath = resolveMicrosandboxSessionRootPath(
-    input.context.storagePath,
-    sessionIdentity,
-  );
   const activeSessionKey = createActiveMicrosandboxSessionKey(sessionRootPath, input.optionsHash);
   const activeHandle = activeMicrosandboxSessionHandles.get(activeSessionKey);
-  if (activeHandle !== undefined && existingState !== undefined) {
-    return { handle: activeHandle, state: existingState };
-  }
+  const state = { optionsHash: input.optionsHash, sessionIdentity, version: 3 as const };
+  if (activeHandle !== undefined) return { handle: activeHandle, state };
 
-  const metadataPath = resolveMicrosandboxMetadataPath(sessionRootPath);
   const sessionTags = withDevelopmentSandboxMetadataPathTag(
     { sessionId: input.context.session.id },
     metadataPath,
@@ -280,14 +286,14 @@ export async function createMicrosandboxHandle(input: {
             activeMicrosandboxSessionHandles.delete(activeSessionKey);
           }),
         ),
-        state: existingState,
+        state,
       };
     }
   }
 
-  if (existingState !== undefined && input.createIfMissing === false) {
+  if (input.sessionIdentity !== undefined && input.createIfMissing === false) {
     throw new Error(
-      `microsandbox session "${existingState.sandboxName}" is no longer available to resume.`,
+      `microsandbox session "${input.sessionIdentity}" is no longer available to resume.`,
     );
   }
 
@@ -318,7 +324,7 @@ export async function createMicrosandboxHandle(input: {
       activeMicrosandboxSessionHandles.delete(activeSessionKey);
     }),
   );
-  return { handle, state: await sandbox.captureState(input.optionsHash) };
+  return { handle, state };
 }
 
 function resolveMicrosandboxImage(

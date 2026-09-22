@@ -1,5 +1,4 @@
-import { stat } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 
 import type { CompiledWorkspaceResourceRoot } from "#compiler/manifest.js";
 import { loadCompiledModuleMapFromAuthoredSource } from "#internal/authored-module-map-loader.js";
@@ -15,7 +14,11 @@ import {
   type RuntimeCompiledArtifactsSource,
   type RuntimeDiskCompiledArtifactsSource,
 } from "#runtime/compiled-artifacts-source.js";
-import { type ResolvedAgentGraphBundle, ROOT_RUNTIME_AGENT_NODE_ID } from "#runtime/graph.js";
+import {
+  getResolvedRuntimeAgentNode,
+  type ResolvedAgentGraphBundle,
+  ROOT_RUNTIME_AGENT_NODE_ID,
+} from "#runtime/graph.js";
 import { loadCompiledManifest } from "#runtime/loaders/manifest.js";
 import { resolveRuntimeCompilerArtifactPaths } from "#runtime/loaders/artifact-paths.js";
 import { resolveRuntimeAgentGraph } from "#runtime/resolve-agent-graph.js";
@@ -189,8 +192,10 @@ async function collectPrewarmTargets(input: {
 
   await Promise.all(
     collectNodeSandboxes(input.graph).map(async ({ definition, nodeId, workspaceResourceRoot }) => {
-      const resolvedAgentRoot = await resolveAuthoredAgentRoot(input.appRoot, nodeId);
-      const sandboxRoot = join(resolvedAgentRoot, "sandbox");
+      const sandboxRoot = join(
+        getResolvedRuntimeAgentNode(input.graph, nodeId).agent.metadata.agentRoot,
+        "sandbox",
+      );
       const provider = getSandboxEnvironmentRuntime(definition.environment);
       const seedFiles = await loadResourceRootSeedFiles({
         compileDirectoryPath: input.compileDirectoryPath,
@@ -262,17 +267,6 @@ async function loadGraphFromArtifacts(input: {
     manifest,
     moduleMap,
   });
-}
-
-async function resolveAuthoredAgentRoot(appRoot: string, nodeId: string): Promise<string> {
-  const path =
-    nodeId === ROOT_RUNTIME_AGENT_NODE_ID ? join(appRoot, "agent") : join(appRoot, "agent", nodeId);
-  try {
-    return (await stat(path)).isDirectory() ? path : dirname(path);
-  } catch (error) {
-    if (error instanceof Error && "code" in error && error.code === "ENOENT") return path;
-    throw error;
-  }
 }
 
 function collectNodeSandboxes(graph: ResolvedAgentGraphBundle): readonly NodeSandbox[] {

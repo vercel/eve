@@ -61,26 +61,20 @@ export function buildCallbackContext(): SessionContext {
   };
 }
 
-export function withRuntimeSandboxLifecycle(
-  sandbox: SandboxSession,
+export function withRuntimeSandboxLifecycle<Session extends SandboxSession>(
+  sandbox: Session,
   deleteSandbox: RuntimeSandboxSession["delete"],
   stop: () => Promise<void>,
-): RuntimeSandboxSession {
-  return {
-    delete: deleteSandbox,
-    readBinaryFile: (options) => sandbox.readBinaryFile(options),
-    readFile: (options) => sandbox.readFile(options),
-    readTextFile: (options) => sandbox.readTextFile(options),
-    removePath: (options) => sandbox.removePath(options),
-    resolvePath: (path) => sandbox.resolvePath(path),
-    run: (options) => sandbox.run(options),
-    ...(sandbox.setNetworkPolicy === undefined
-      ? {}
-      : { setNetworkPolicy: (policy) => sandbox.setNetworkPolicy!(policy) }),
-    spawn: (options) => sandbox.spawn(options),
-    stop,
-    writeBinaryFile: (options) => sandbox.writeBinaryFile(options),
-    writeFile: (options) => sandbox.writeFile(options),
-    writeTextFile: (options) => sandbox.writeTextFile(options),
-  };
+): Session & Pick<RuntimeSandboxSession, "delete" | "stop"> {
+  return new Proxy(sandbox, {
+    get(target, property) {
+      if (property === "delete") return deleteSandbox;
+      if (property === "stop") return stop;
+      const value = Reflect.get(target, property, target);
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+    has(target, property) {
+      return property === "delete" || property === "stop" || Reflect.has(target, property);
+    },
+  }) as Session & Pick<RuntimeSandboxSession, "delete" | "stop">;
 }

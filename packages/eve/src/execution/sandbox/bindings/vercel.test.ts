@@ -188,11 +188,16 @@ describe("createVercelSandbox", () => {
   });
 
   it("reuses template identity until authored source or resources change", async () => {
-    async function prepareName(input: { resourcesKey?: string; sourceRevision: string }) {
+    async function prepareName(input: {
+      createOptions?: NonNullable<Parameters<typeof createVercelImplementation>[0]>["createOptions"];
+      resourcesKey?: string;
+      sourceRevision: string;
+    }) {
       const create = vi.fn(async (options: { name: string }) =>
         createMockSandbox({ name: options.name }),
       );
       const provider = createTestVercelSandbox({
+        createOptions: input.createOptions,
         loadSandboxModule: async () =>
           ({ Sandbox: { create, get: vi.fn().mockResolvedValue(null) } }) as never,
       });
@@ -207,10 +212,15 @@ describe("createVercelSandbox", () => {
       resourcesKey: "resources-b",
       sourceRevision: "revision-a",
     });
+    const explicitImage = await prepareName({
+      createOptions: { image: "registry.example/eve:custom" },
+      sourceRevision: "revision-a",
+    });
 
     expect(unchanged).toBe(first);
     expect(changedSource).not.toBe(first);
     expect(changedResources).not.toBe(first);
+    expect(explicitImage).not.toBe(first);
   });
 
   it("uses an author-supplied image for fresh Vercel sandboxes", async () => {

@@ -1,4 +1,5 @@
 import type { MutableNetworkSandboxSession } from "#shared/sandbox-session.js";
+import { VERCEL_EVE_SANDBOX_IMAGE } from "#execution/sandbox/bindings/eve-image.js";
 import {
   applyInitialVercelNetworkPolicy,
   createVercelNetworkPolicySetter,
@@ -67,9 +68,8 @@ export type VercelSandboxPreparedArtifact = {
 };
 
 export type VercelSandboxSessionState = {
-  readonly generation: string;
   readonly sandboxName: string;
-  readonly version: 2;
+  readonly version: 3;
 };
 
 type VercelEnvironmentOptions = VercelCreateOptions & {
@@ -201,6 +201,10 @@ export function createVercelSandbox(
         return {};
       const templateKey = `eve-sbx-tpl-vercel-${createSandboxProviderIdentity({
         createOptions: vercelIdentityOptions(createOptions),
+        resolvedImage:
+          createOptions.source === undefined
+            ? (createOptions.image ?? VERCEL_EVE_SANDBOX_IMAGE)
+            : undefined,
         resources: sandboxProviderResourceIdentity(context.resources),
         sourceRevision: context.sourceRevision,
         version: 2,
@@ -225,9 +229,6 @@ export function createVercelSandbox(
     async resume(_context, artifact, stateValue) {
       requirePreparedVercelTemplate(artifact);
       const state = requireVercelSessionState(stateValue);
-      if (state.generation !== vercelGeneration(artifact, createOptions)) {
-        throw new Error("Vercel sandbox session state is incompatible with this environment.");
-      }
       const sandboxModule = await loadSandboxModule();
       const sandbox = await getNamedVercelSandbox({
         createOptions,
@@ -245,7 +246,7 @@ export function createVercelSandbox(
       const handle = await openSession(context, options, artifact, sandboxName);
       return {
         handle,
-        state: { generation: vercelGeneration(artifact, createOptions), sandboxName, version: 2 },
+        state: { sandboxName, version: 3 },
       };
     },
   };
@@ -255,17 +256,6 @@ interface VercelSandboxTemplateRecord {
   readonly sandboxName: string;
   readonly snapshotId: string;
   readonly templateKey: string;
-}
-
-function vercelGeneration(
-  artifact: SandboxPreparedArtifact,
-  createOptions: VercelCreateOptions,
-): string {
-  return createSandboxProviderIdentity({
-    artifact: requirePreparedVercelTemplate(artifact),
-    createOptions: vercelIdentityOptions(createOptions),
-    version: 1,
-  });
 }
 
 function vercelSessionName(
@@ -293,13 +283,12 @@ function vercelIdentityOptions(options: object | undefined): object | undefined 
 function requireVercelSessionState(state: SandboxPreparedArtifact): VercelSandboxSessionState {
   if (
     !isSandboxPreparedArtifactRecord(state) ||
-    state.version !== 2 ||
-    typeof state.generation !== "string" ||
+    state.version !== 3 ||
     typeof state.sandboxName !== "string"
   ) {
     throw new Error("Invalid Vercel sandbox session state.");
   }
-  return { generation: state.generation, sandboxName: state.sandboxName, version: 2 };
+  return { sandboxName: state.sandboxName, version: 3 };
 }
 
 function requirePreparedVercelTemplate(

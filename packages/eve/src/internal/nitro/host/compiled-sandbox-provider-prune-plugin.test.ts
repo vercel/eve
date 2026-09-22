@@ -7,7 +7,9 @@ describe("createCompiledSandboxProviderPrunePlugin", () => {
     const plugin = createCompiledSandboxProviderPrunePlugin();
     const source = plugin.load?.("/repo/packages/eve/src/sandbox/providers/default.ts");
 
-    expect(source).toContain("DefaultSandbox = VercelSandbox");
+    expect(source).toContain('DefaultSandbox = { name: "default", environment }');
+    expect(source).toContain("options.vercel");
+    expect(source).toContain("prepare: options.prepare");
   });
 
   it("replaces local provider constructors with hosted stubs", () => {

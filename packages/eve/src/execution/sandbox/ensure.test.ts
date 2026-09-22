@@ -102,7 +102,7 @@ describe("ensureSandboxAccess", () => {
     const setup = vi.fn();
     const value = fixture(setup);
     await open(value.registry, "session-1", {
-      session: { providerName: "test", state: null },
+      session: { providerName: "test", state: null, stateProtocolVersion: 1 },
     });
     expect(setup).not.toHaveBeenCalled();
     expect(value.create).toHaveBeenCalledOnce();

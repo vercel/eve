@@ -106,7 +106,11 @@ export async function ensureSandboxAccess(input: EnsureSandboxAccessInput): Prom
           `Sandbox provider "${provider.providerName}" returned non-serializable session state.`,
         );
       }
-      persisted = { providerName: provider.providerName, state: result.state };
+      persisted = {
+        providerName: provider.providerName,
+        state: result.state,
+        stateProtocolVersion: provider.stateProtocolVersion,
+      };
       return result.handle;
     };
     opening = createHandle().catch((error: unknown) => {
@@ -140,6 +144,11 @@ export async function ensureSandboxAccess(input: EnsureSandboxAccessInput): Prom
     if (persisted.providerName !== provider.providerName) {
       throw new Error(
         `Sandbox session state belongs to provider "${persisted.providerName}", not "${provider.providerName}".`,
+      );
+    }
+    if (persisted.stateProtocolVersion !== provider.stateProtocolVersion) {
+      throw new Error(
+        `Sandbox session state protocol ${persisted.stateProtocolVersion} is incompatible with provider "${provider.providerName}" protocol ${provider.stateProtocolVersion}.`,
       );
     }
     const inherited = registered.inheritance;
@@ -182,7 +191,7 @@ export async function ensureSandboxAccess(input: EnsureSandboxAccessInput): Prom
     if (definition.kind !== "independent")
       throw new Error(`Sandbox "${definition.logicalPath}" has no resolved parent.`);
 
-    const session =
+    const activeSession =
       contextStorage.getStore() === undefined
         ? {
             auth: { current: null, initiator: null },
@@ -190,6 +199,7 @@ export async function ensureSandboxAccess(input: EnsureSandboxAccessInput): Prom
             turn: { id: "sandbox-initialization", sequence: 0 },
           }
         : buildCallbackContext().session;
+    const session = { ...activeSession, id: input.sessionId };
 
     if (persisted !== null) {
       return await resumePersisted(definition, session);
@@ -245,8 +255,8 @@ export async function ensureSandboxAccess(input: EnsureSandboxAccessInput): Prom
   }
 
   function requireHandle(): Promise<SandboxProviderHandle> {
-    if (opened !== undefined) return Promise.resolve(opened.handle);
-    requiring ??= resolveHandle().catch((error: unknown) => {
+    if (requiring !== undefined) return requiring;
+    requiring = resolveHandle().catch((error: unknown) => {
       requiring = undefined;
       throw error;
     });
