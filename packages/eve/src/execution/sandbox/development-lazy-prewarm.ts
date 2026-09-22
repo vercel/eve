@@ -1,6 +1,11 @@
-import { mkdir, rm } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 
+import {
+  acquireRecoveryLease,
+  startPublicationJournalHeartbeat,
+} from "#internal/application/output-publication-lock.js";
 import type { RuntimeDiskCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { loadSandboxPreparedArtifact } from "#runtime/sandbox/prepared-artifacts.js";
 import { resolveRuntimeCompilerArtifactPaths } from "#runtime/loaders/artifact-paths.js";
@@ -20,20 +25,16 @@ export async function ensureDevelopmentSandboxesPrepared(input: {
   const lockPath = join(compileDirectoryPath, "sandbox-preparation.lock");
   const deadline = Date.now() + PREPARATION_WAIT_TIMEOUT_MS;
   await mkdir(compileDirectoryPath, { recursive: true });
-  for (;;) {
-    try {
-      await mkdir(lockPath);
-      break;
-    } catch (error) {
-      if (!(error instanceof Error && "code" in error && error.code === "EEXIST")) throw error;
-      if (Date.now() >= deadline) {
-        throw new Error(
-          "Timed out waiting for development sandbox preparation. Restart eve dev to create a new development generation.",
-        );
-      }
-      await new Promise((resolve) => setTimeout(resolve, 250));
+  const token = randomUUID();
+  let lease;
+  while ((lease = await acquireRecoveryLease(lockPath, token)) === undefined) {
+    if (Date.now() >= deadline) {
+      throw new Error("Timed out waiting for development sandbox preparation.");
     }
+    await new Promise((resolve) => setTimeout(resolve, 250));
   }
+  // Workers share the parent's pid: heartbeat expiry, not pid alone, detects a crashed worker.
+  const stopHeartbeat = startPublicationJournalHeartbeat(join(lockPath, "lease"));
   try {
     if ((await loadSandboxPreparedArtifact(input)) !== undefined) return;
     await prewarmAppSandboxes({
@@ -42,6 +43,7 @@ export async function ensureDevelopmentSandboxesPrepared(input: {
       log: (message) => console.info(message),
     });
   } finally {
-    await rm(lockPath, { recursive: true, force: true });
+    stopHeartbeat();
+    await lease.complete();
   }
 }

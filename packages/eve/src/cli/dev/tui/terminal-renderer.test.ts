@@ -3462,22 +3462,26 @@ describe("TerminalRenderer (inline scrollback)", () => {
     renderer.shutdown();
   });
 
-  it("records sandbox log lines in the diagnostic log", () => {
+  it("records captured sandbox log lines in the diagnostic log", () => {
     const screen = new MockScreen({ columns: 80, rows: 30 });
     const input = new MockUserInput();
     const stub = stubDiagnostics();
-    const append = stub.append;
     const renderer = new TerminalRenderer({
       input,
       output: screen,
-      captureForeignOutput: false,
+      captureForeignOutput: true,
       unicode: true,
       diagnostics: stub.diagnostics,
     });
-
-    renderer.renderSandboxLog('eve: sandbox template "root" (microsandbox): apt-get update');
-    expect(append).toHaveBeenCalledWith({ source: "sandbox", detail: expect.any(String) });
+    renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
+    process.stdout.write('eve: sandbox template "root" (microsandbox): apt-get update\n');
     renderer.shutdown();
+    expect(stub.append).toHaveBeenCalledWith(
+      expect.objectContaining({
+        source: "stdout",
+        detail: expect.stringContaining("apt-get update"),
+      }),
+    );
   });
 
   it("shows delayed build progress and immediate completion when logs are hidden", () => {
@@ -3660,22 +3664,22 @@ describe("TerminalRenderer (inline scrollback)", () => {
     expect(snapshot).toContain("ordinary stdout log");
   });
 
-  it("renders subscribed sandbox logs under the sandbox log level", () => {
+  it("renders captured lazy preparation logs under the sandbox log level", () => {
     const screen = new MockScreen({ columns: 100, rows: 30 });
     const input = new MockUserInput();
     const renderer = new TerminalRenderer({
       input,
       output: screen,
-      captureForeignOutput: false,
+      captureForeignOutput: true,
       logs: "sandbox",
       unicode: true,
     });
     renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
 
-    renderer.renderSandboxLog?.('eve: sandbox template "root" (docker): checking Docker daemon');
-    renderer.renderSandboxLog?.("eve: initializing 3 sandbox templates...");
-    renderer.renderSandboxLog?.('eve: built sandbox template "root" on backend "docker".');
-    renderer.renderSandboxLog?.("ordinary stdout log");
+    process.stdout.write('eve: sandbox template "root" (docker): checking Docker daemon\n');
+    process.stdout.write("eve: initializing 3 sandbox templates...\n");
+    process.stdout.write('eve: built sandbox template "root" on backend "docker".\n');
+    process.stdout.write("ordinary stdout log\n");
     renderer.shutdown();
 
     const snapshot = screen.snapshot();

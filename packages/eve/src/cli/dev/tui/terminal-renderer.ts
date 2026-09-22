@@ -1841,16 +1841,6 @@ export class TerminalRenderer implements AgentTUIRenderer {
     this.#paint();
   }
 
-  renderSandboxLog(text: string): void {
-    const content = stripTerminalControls(text);
-    const sandboxMessage = parseSandboxLogLine(content);
-    if (sandboxMessage === undefined) return;
-    this.#diagnostics?.append({ source: "sandbox", detail: sandboxMessage });
-    this.#start();
-    this.#pushBlock({ kind: "sandbox", body: sandboxMessage, live: false });
-    this.#paint();
-  }
-
   /**
    * Sets the setup attention line (yellow `⚠`, commands blue) as a live footer
    * element above the prompt. Unlike committed scrollback, it can be cleared:

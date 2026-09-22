@@ -125,7 +125,6 @@ const mocks = vi.hoisted(() => {
     rm: vi.fn(async (path: string) => {
       files.delete(path);
     }),
-    startDevelopmentSandboxPrewarmInBackground: vi.fn(() => undefined),
     pruneLocalSandboxTemplatesInBackground: vi.fn(() => undefined),
     stopDevelopmentSandboxResources: vi.fn(async () => undefined),
     resolveDiscoveryProject: vi.fn(async () => ({
@@ -201,10 +200,6 @@ vi.mock("#discover/project.js", () => ({
 
 vi.mock("#internal/nitro/host/artifacts-config.js", () => ({
   createDevelopmentGenerationArtifactsSource: () => mocks.resolveNitroCompiledArtifactsSource(),
-}));
-
-vi.mock("#execution/sandbox/development-prewarm.js", () => ({
-  prewarmDevelopmentSandboxes: mocks.startDevelopmentSandboxPrewarmInBackground,
 }));
 
 vi.mock("#execution/sandbox/bindings/local.js", () => ({
@@ -393,7 +388,6 @@ describe("createDevelopmentServer", () => {
     const server = await startDevelopmentServer("/tmp/eve-test");
 
     expect(mocks.prepareDevelopmentApplicationHost).toHaveBeenCalledWith("/tmp/eve-test");
-    expect(mocks.startDevelopmentSandboxPrewarmInBackground).not.toHaveBeenCalled();
     expect(mocks.pruneLocalSandboxTemplatesInBackground).toHaveBeenCalledWith("/tmp/eve-test");
     expect(mocks.createParentDevelopmentWorkflowWorld).toHaveBeenCalledWith(
       expect.objectContaining({ agentName: "test-agent", appRoot: "/tmp/eve-test" }),

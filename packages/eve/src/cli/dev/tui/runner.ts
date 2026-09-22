@@ -26,7 +26,6 @@ import { renderApplicationInfo } from "#cli/commands/info.js";
 import type { EveCliSetupStepEvent, EveCliSetupTerminalEvent } from "#cli/telemetry/index.js";
 import type { OnboardingScreenEvent } from "./setup-commands.js";
 import { loadDevelopmentEnvironmentFiles } from "#cli/dev/environment.js";
-import { subscribeDevelopmentSandboxPrewarmLogs } from "#execution/sandbox/development-prewarm.js";
 import { createEventDeduper } from "#protocol/event-dedupe.js";
 import { isCurrentTurnBoundaryEvent } from "#protocol/message.js";
 import {
@@ -279,7 +278,6 @@ export type AgentTUIRenderer = {
    * Commits one development sandbox lifecycle line to the transcript.
    * Optional so non-terminal renderers can ignore local prewarm progress.
    */
-  renderSandboxLog?(text: string): void;
   renderSetupWarning?(text: string): void;
   /** Clears the setup attention line once its issue is resolved. */
   clearSetupWarning?(): void;
@@ -612,7 +610,6 @@ export class EveTUIRunner {
    * only if it is still current, so a stale failure from A cannot replace B.
    */
   #failedSession?: ClientSession;
-  #unsubscribeDevelopmentSandboxLogs?: () => void;
   readonly #lifecycle?: CommandLifecycle;
 
   constructor(options: EveTUIRunnerOptions) {
@@ -768,8 +765,6 @@ export class EveTUIRunner {
       this.#authProbeAbort.abort();
       this.#subagentPump.abortAll();
       // Restore captured stdout/stderr before a fatal error reaches the CLI.
-      this.#unsubscribeDevelopmentSandboxLogs?.();
-      this.#unsubscribeDevelopmentSandboxLogs = undefined;
       this.#renderer.shutdown?.();
       // Drops any in-flight link probe so a late resolution cannot paint
       // into a torn-down terminal.
@@ -788,7 +783,6 @@ export class EveTUIRunner {
     let streamWithoutPrompt = false;
     this.#renderer.setStartupPhase?.("starting");
     await this.#loadInitialAgentInfo();
-    this.#subscribeDevelopmentSandboxLogs();
     // Fire-and-forget: the link identity is network-bound to resolve, and the
     // first prompt must not wait on it. The segment appears when it lands.
     this.#vercelStatus?.refreshIdentity();
@@ -1743,20 +1737,6 @@ export class EveTUIRunner {
     } catch {
       return;
     }
-  }
-
-  #subscribeDevelopmentSandboxLogs(): void {
-    if (this.#appRoot === undefined || this.#renderer.renderSandboxLog === undefined) {
-      return;
-    }
-    if (this.#unsubscribeDevelopmentSandboxLogs !== undefined) {
-      return;
-    }
-
-    this.#unsubscribeDevelopmentSandboxLogs = subscribeDevelopmentSandboxPrewarmLogs({
-      appRoot: this.#appRoot,
-      log: (message) => this.#renderer.renderSandboxLog?.(message),
-    });
   }
 
   #renderCommandOutcome(text: string | undefined, tone?: "success" | "error"): void {
