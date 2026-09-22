@@ -18,9 +18,9 @@ type VendorPlugin = {
   transform?: (source: string, id: string) => { code: string } | null | undefined;
 };
 
-const inlineStepPlugin = (
-  workflowCoreVendor as unknown as { plugins: VendorPlugin[] }
-).plugins.find((plugin) => plugin.name === "eve:guard-inline-step-execution");
+const inlineStepPlugin = (workflowCoreVendor as { plugins: VendorPlugin[] }).plugins.find(
+  (plugin) => plugin.name === "eve:guard-inline-step-execution",
+);
 
 function transformInlineStepExecution(source: string) {
   const transformed = inlineStepPlugin?.transform?.(
