@@ -14,7 +14,8 @@ patch releases.
 
 ## Choose from Gateway models
 
-By default, `auto` evaluates with `typesafe-ai/jev`. Like other AI SDK
+By default, `auto` evaluates with `typesafe-ai/jev`, Vercel's
+[Jev evaluation model](https://vercel.com/i/what-is-jev). Like other AI SDK
 model strings, it uses Vercel AI Gateway unless the application has configured a
 different global default provider.
 
@@ -141,7 +142,7 @@ export default defineTool({
 
 The choice above is typed as `"billing" | "support"`. Each question appears under
 its authored key in `result.answers`. Results also include token usage, warnings,
-provider metadata, and response metadata. To use that choice to delegate while keeping specialist subagents out of the parent model's tools, see [Route to a hidden subagent with JEV](/docs/tools/workflows#route-to-a-hidden-subagent-with-jev).
+provider metadata, and response metadata. To use that choice to delegate while keeping specialist subagents out of the parent model's tools, see [Route to a hidden subagent with Jev](/docs/tools/workflows#route-to-a-hidden-subagent-with-jev).
 
 `evaluate` accepts AI SDK evaluation options, including `maxRetries`, `headers`,
 and `providerOptions`. Pass an `abortSignal` to cancel the request. Input and
@@ -178,7 +179,9 @@ export default defineTool({
 The evaluation model reviews the tool name and input for dangerous effects. A
 caution, failed review, or incomplete input requires human approval. See
 [Human-in-the-loop approvals](/docs/human-in-the-loop#approvals) for classifier
-options and data handling.
+options and data handling, and the
+[Auto-approve tool calls with Jev](https://vercel.com/kb/guide/auto-approve-tool-calls-eve-jev)
+guide for an end-to-end walkthrough.
 
 ## Runtime behavior
 

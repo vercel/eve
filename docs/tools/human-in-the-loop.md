@@ -39,7 +39,7 @@ export default defineTool({
 
 By default, omitted `approval` behaves like `never()`, so tool calls may execute without human approval. Require human approval or other safeguards for sensitive, irreversible, regulated, financial, healthcare, employment, housing, legal, safety-impacting, user-impacting, or external side-effecting actions.
 
-`auto()` uses an [AI SDK evaluation model](/docs/guides/evaluate) to classify each call as `clear` or `caution`. It defaults to `typesafe-ai/jev`. Like `evaluate`, a model string uses Vercel AI Gateway unless the application configures a global AI SDK default provider:
+`auto()` uses an [AI SDK evaluation model](/docs/guides/evaluate) to classify each call as `clear` or `caution`. It defaults to `typesafe-ai/jev`, Vercel's [Jev evaluation model](https://vercel.com/i/what-is-jev). Like `evaluate`, a model string uses Vercel AI Gateway unless the application configures a global AI SDK default provider:
 
 ```ts
 approval: auto({ model: "typesafe-ai/jev" });

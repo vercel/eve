@@ -322,9 +322,9 @@ The first argument is an available agent target. On the root agent, `"agent"` st
 continue an existing child. An inline `outputSchema` requires structured output and determines the
 return type, so `result` in the example is typed as `{ findings: string[] }`.
 
-### Route to a hidden subagent with JEV
+### Route to a hidden subagent with Jev
 
-Use an authored workflow tool when the parent model should decide to delegate, but JEV should choose the specialist. Set `tool: false` on each specialist so the parent model sees only the routing tool. The specialists remain available through `ctx.agents` and callable through `ctx.agent()`.
+Use an authored workflow tool when the parent model should decide to delegate, but [Jev](https://vercel.com/i/what-is-jev) should choose the specialist. Set `tool: false` on each specialist so the parent model sees only the routing tool. The specialists remain available through `ctx.agents` and callable through `ctx.agent()`.
 
 If the router may select the root-copy `agent`, author a root `description` that explains which work should stay with a copy of the root. `ctx.agents.agent` always exists in a top-level root workflow, but its `description` is an empty string when omitted from `agent.ts`. `agentRouter()` considers only entries with a non-empty description, so it does not route to an undescribed root copy.
 
@@ -357,7 +357,7 @@ export default defineAgent({
 });
 ```
 
-Define the model-visible router under `agent/tools/`. Build the JEV criteria from the subagents' effective descriptions, then pass its typed choice directly to `ctx.agent()`:
+Define the model-visible router under `agent/tools/`. Build the Jev criteria from the subagents' effective descriptions, then pass its typed choice directly to `ctx.agent()`:
 
 ```ts title="agent/tools/agent-router.ts"
 import { evaluate } from "eve/ai";
@@ -406,7 +406,7 @@ export default defineWorkflowTool({
 });
 ```
 
-The evaluation runs in a step so workflow replay records its result instead of making the routing request again. The parent model receives `agent-router`, but not `researcher` or `operator`. JEV returns the typed `"researcher" | "operator"` choice, and the selected subagent's result becomes the `agent-router` tool result.
+The evaluation runs in a step so workflow replay records its result instead of making the routing request again. The parent model receives `agent-router`, but not `researcher` or `operator`. Jev returns the typed `"researcher" | "operator"` choice, and the selected subagent's result becomes the `agent-router` tool result.
 
 `ctx.agents` is a replay-stable metadata snapshot taken when the workflow starts. In a top-level root workflow, `ctx.agents.agent` always represents the root-copy target and carries the root's authored `description` when provided. The snapshot also includes declared agents hidden from the parent model with `tool: false` or `disableTool()`, but exposes no model definitions, credentials, or callbacks. A delegated root copy omits `agent`, so `agentRouter()` cannot select another root copy recursively. Invocation still checks each target's availability through `ctx.agent()`.
 
@@ -420,11 +420,11 @@ import { agentRouter } from "eve/tools/agent-router";
 export default agentRouter();
 ```
 
-Its input is `{ message: string, outputSchema?: object }`. `agentRouter()` ignores entries without a non-empty description. With two or more described targets, it sends the message and effective descriptions to JEV, then invokes the selected name through `ctx.agent()`. It invokes a sole target without evaluation and forwards an optional `outputSchema` unchanged. In a top-level root session, the candidates include the root-copy `agent`; delegated root copies and declared subagent contexts include only their declared targets.
+Its input is `{ message: string, outputSchema?: object }`. `agentRouter()` ignores entries without a non-empty description. With two or more described targets, it sends the message and effective descriptions to Jev, then invokes the selected name through `ctx.agent()`. It invokes a sole target without evaluation and forwards an optional `outputSchema` unchanged. In a top-level root session, the candidates include the root-copy `agent`; delegated root copies and declared subagent contexts include only their declared targets.
 
 When an authored tool accepts a JSON Schema supplied by the model, represent that input with a permissive object such as `z.looseObject({})`. Avoid `z.record(z.string(), z.json())`: its generated JSON Schema uses `propertyNames`, which OpenAI does not support. Validate the supplied value at the point where your tool consumes it.
 
-This pattern controls specialist selection, not whether the parent model delegates at all. Route before the parent model runs if every incoming request must go through JEV.
+This pattern controls specialist selection, not whether the parent model delegates at all. Route before the parent model runs if every incoming request must go through Jev.
 
 ## Report progress: `yield`
 
