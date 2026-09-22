@@ -149,6 +149,7 @@ function setupMockHarnessAgent(): void {
     this: Record<string, unknown>,
     settings: Record<string, unknown>,
   ) {
+    const harness = settings.harness as HarnessV1;
     const onStepEnd = settings.onStepEnd as ((step: unknown) => Promise<void>) | undefined;
     const result = {
       finishReason: "stop",
@@ -161,7 +162,7 @@ function setupMockHarnessAgent(): void {
     this.createSession = vi.fn().mockResolvedValue({
       detach: vi.fn().mockResolvedValue({
         data: {},
-        harnessId: "test-harness",
+        harnessId: harness.harnessId,
         specificationVersion: "harness-v1",
         type: "resume-session",
       }),
@@ -594,11 +595,28 @@ describe("createHarnessAgentTools", () => {
 });
 
 describe("createExecutionNodeStep", () => {
-  it("passes a live harness to the tool-loop boundary without constructing ToolLoopAgent", async () => {
+  it.each([
+    {
+      expectedSkills: [
+        {
+          content: "# Get weather\n\nUse the weather tool.",
+          description: "Get the weather for a location.",
+          name: "get-weather",
+        },
+      ],
+      harnessId: "claude-code",
+      name: "passes static skills to Claude Code's separate skill directory",
+    },
+    {
+      expectedSkills: [],
+      harnessId: "codex",
+      name: "does not pass static skills to a harness that shares eve's skill directory",
+    },
+  ])("$name", async ({ expectedSkills, harnessId }) => {
     setupMockHarnessAgent();
     const harness = {
       builtinTools: {},
-      harnessId: "test-harness",
+      harnessId,
       specificationVersion: "harness-v1",
       doStart: vi.fn(async () => {
         throw new Error("Not implemented in this test.");
@@ -643,13 +661,7 @@ describe("createExecutionNodeStep", () => {
     expect(HarnessAgent).toHaveBeenCalledWith(
       expect.objectContaining({
         harness,
-        skills: [
-          {
-            content: "# Get weather\n\nUse the weather tool.",
-            description: "Get the weather for a location.",
-            name: "get-weather",
-          },
-        ],
+        skills: expectedSkills,
       }),
     );
     expect(harness.doStart).not.toHaveBeenCalled();

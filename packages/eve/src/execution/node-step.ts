@@ -104,11 +104,20 @@ export function createExecutionNodeStep(input: CreateExecutionNodeStepInput): St
       ? undefined
       : {
           harness: input.node.turnAgent.harness,
-          skills: input.node.agent.skills.map((skill) => ({
-            content: skill.markdown,
-            description: skill.description,
-            name: skill.name,
-          })),
+          /*
+           * eve already materializes skills under $HOME/.agents/skills. Claude Code
+           * is the only supported harness that discovers skills elsewhere, under
+           * $HOME/.claude/skills; forwarding skills to other harnesses would make
+           * their AI SDK adapters collide with eve-owned skill directories.
+           */
+          skills:
+            input.node.turnAgent.harness.harnessId === "claude-code"
+              ? input.node.agent.skills.map((skill) => ({
+                  content: skill.markdown,
+                  description: skill.description,
+                  name: skill.name,
+                }))
+              : [],
           tools: createHarnessAgentTools({ node: input.node, tools }),
         };
   const step = createToolLoopHarness({
