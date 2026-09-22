@@ -1,6 +1,7 @@
 import { resolveModelEndpointStatus } from "#internal/resolve-model-endpoint-status.js";
 import { classifyModelRouting } from "#internal/classify-model-routing.js";
 import type { ConnectedModel } from "#shared/model-connection.js";
+import { DEFAULT_AGENT_MODEL_ID } from "#shared/default-agent-model.js";
 import { measureLoginStage, withLoginProgress } from "./model-login-progress.js";
 import { availableHelperModels } from "#internal/model-auth/available-models.js";
 import { fetchGatewayCatalog } from "../boxes/select-model.js";
@@ -71,7 +72,7 @@ function modelSelection(selected: ModelConnectionSelection, model: LoginModel) {
   const compatible = helper
     ? authored?.helper === helper
     : model.selection !== undefined && !model.external;
-  const defaultId = helper ? MODEL_HELPERS[helper].defaultModel : "openai/gpt-5.6-luna-fast";
+  const defaultId = helper ? MODEL_HELPERS[helper].defaultModel : DEFAULT_AGENT_MODEL_ID;
   const currentId = authored?.id ?? model.selection;
   return { helper, compatible, defaultId, needsModels: !compatible || currentId === defaultId };
 }

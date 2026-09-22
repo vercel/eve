@@ -47,7 +47,7 @@ const ROOT_TYPE_DEFINITIONS = fileURLToPath(
 const TSC_BIN_PATH = fileURLToPath(
   new URL("../../../../node_modules/typescript/bin/tsc", import.meta.url),
 );
-const DEFAULT_AGENT_MODEL_ID = "openai/gpt-5.6-luna-fast";
+const DEFAULT_AGENT_MODEL_ID = "spacexai/grok-4.7";
 
 function applicationOwnedEntries<TEntry extends { readonly sourceId: string }>(
   manifest: CompiledAgentManifest,

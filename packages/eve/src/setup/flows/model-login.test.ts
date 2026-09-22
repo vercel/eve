@@ -80,7 +80,7 @@ beforeEach(() => {
     compiledState: {
       manifest: {
         config: {
-          model: { id: "openai/gpt-5.6-luna-fast", routing: { kind: "gateway", target: "openai" } },
+          model: { id: "spacexai/grok-4.7", routing: { kind: "gateway", target: "spacexai" } },
         },
       },
     },
@@ -90,9 +90,9 @@ beforeEach(() => {
   vi.stubEnv("EVE_MODEL_CONNECTION", undefined);
   mocks.session.mockResolvedValue({ accessToken: "access", teamId: "team_123", teamName: "Alice" });
   mocks.readSession.mockResolvedValue({ refreshToken: "refresh" });
-  mocks.authored.mockResolvedValue("openai/gpt-5.6-luna-fast");
+  mocks.authored.mockResolvedValue("spacexai/grok-4.7");
   mocks.oauth.mockResolvedValue({ teamId: "team_123", teamName: "Alice" });
-  mocks.catalog.mockResolvedValue([{ id: "openai/gpt-5.6-luna-fast", type: "language" }]);
+  mocks.catalog.mockResolvedValue([{ id: "spacexai/grok-4.7", type: "language" }]);
   mocks.change.mockResolvedValue({ kind: "changed" });
   mocks.readSecret.mockResolvedValue("stored-key");
   mocks.models.mockResolvedValue({
@@ -122,6 +122,20 @@ describe("model login", () => {
         );
       if (selected === "vercel") expect(mocks.oauth).toHaveBeenCalledOnce();
       if (selected === "chatgpt") expect(mocks.chatgpt).toHaveBeenCalledOnce();
+    },
+  );
+  it.each(["vercel", "ai-gateway-key"])(
+    "selects Grok when switching from ChatGPT to %s",
+    async (selected) => {
+      mocks.authored.mockResolvedValue("chatgpt/gpt-5.6-luna-fast");
+      const fake = createFakePrompter({ single: () => selected, password: () => "new-key" });
+
+      expect(await runModelLogin({ appRoot: "/agent", prompter: fake.prompter })).toMatchObject({
+        kind: "ready",
+        reload: true,
+      });
+      expect(fake.selectMessages).toEqual(["Choose a connection"]);
+      expect(mocks.change).toHaveBeenCalledWith({ appRoot: "/agent", slug: "spacexai/grok-4.7" });
     },
   );
   it("reuses the CLI team without any prompts or project linking", async () => {
@@ -363,7 +377,7 @@ it("overlaps Gateway catalog loading with OAuth and does not validate the return
   mocks.oauth.mockReturnValue(oauth.promise);
   mocks.catalog.mockImplementation(async () => {
     catalogStarted.resolve();
-    return [{ id: "openai/gpt-5.6-luna-fast", type: "language" }];
+    return [{ id: "spacexai/grok-4.7", type: "language" }];
   });
   const result = runModelLogin({
     appRoot: "/agent",
@@ -454,7 +468,7 @@ it("changes teams without recompiling an unchanged Gateway model", async () => {
     kind: "ready",
     reload: false,
     model: {
-      id: "openai/gpt-5.6-luna-fast",
+      id: "spacexai/grok-4.7",
       endpoint: { kind: "gateway", connected: true, credential: "oauth", team: "Alice" },
     },
   });

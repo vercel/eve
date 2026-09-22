@@ -59,7 +59,7 @@ describe("initAgentInstructions", () => {
 describe("initAgentReadySummary", () => {
   it("reports the model and generated instructions path", () => {
     expect(stripAnsi(initAgentReadySummary(undefined, "/app"))).toBe(
-      "✓ Model openai/gpt-5.6-luna-fast (eve default)\n✓ Instructions /app/agent/instructions.md",
+      "✓ Model spacexai/grok-4.7 (eve default)\n✓ Instructions /app/agent/instructions.md",
     );
     expect(stripAnsi(initAgentReadySummary("openai/gpt-5.5", "/app"))).toContain(
       "✓ Model openai/gpt-5.5\n",
@@ -68,7 +68,7 @@ describe("initAgentReadySummary", () => {
 
   it("reports the agents directory for a workspace", () => {
     expect(stripAnsi(initAgentReadySummary(undefined, "/app", { workspace: true }))).toBe(
-      "✓ Model openai/gpt-5.6-luna-fast (eve default)\n✓ Agents /app/agents",
+      "✓ Model spacexai/grok-4.7 (eve default)\n✓ Agents /app/agents",
     );
   });
 });
