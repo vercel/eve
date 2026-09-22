@@ -66,8 +66,15 @@ function makeEvalResult(overrides: Partial<EveEvalResult> = {}): EveEvalResult {
       traceContexts: [],
     },
     assertions: [
-      { name: "succeeded", score: 1, severity: "gate", passed: true },
-      { name: "similarity", score: 1, severity: "soft", threshold: 0.6, passed: true },
+      { name: "succeeded", score: 1, severity: "gate", passed: true, errored: false },
+      {
+        name: "similarity",
+        score: 1,
+        severity: "soft",
+        threshold: 0.6,
+        passed: true,
+        errored: false,
+      },
     ],
     verdict: "passed",
     startedAt: "2026-01-01T00:00:00.000Z",
@@ -146,6 +153,7 @@ describe("Braintrust", () => {
             },
             name: "judge.boolean",
             passed: false,
+            errored: false,
             score: 0,
             severity: "soft",
             threshold: 0.8,
@@ -168,6 +176,7 @@ describe("Braintrust", () => {
               },
               name: "judge.boolean",
               passed: false,
+              errored: false,
               score: 0,
               severity: "soft",
               threshold: 0.8,
@@ -212,8 +221,8 @@ describe("Braintrust", () => {
     reporter.onEvalComplete(
       makeEvalResult({
         assertions: [
-          { name: "similarity", passed: true, score: 0.8, severity: "soft" },
-          { name: "similarity", passed: true, score: 0.6, severity: "soft" },
+          { name: "similarity", passed: true, score: 0.8, severity: "soft", errored: false },
+          { name: "similarity", passed: true, score: 0.6, severity: "soft", errored: false },
         ],
       }),
     );
