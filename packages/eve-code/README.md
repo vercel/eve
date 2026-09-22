@@ -77,23 +77,32 @@ The `typescript-compiler` development alias supplies the JavaScript compiler API
 
 ## Benchmarks
 
-Use [eve-bench](https://github.com/vercel-labs/eve-bench#readme) directly with `agent-path: packages/eve-code` in its GitHub Action or `--agent packages/eve-code` on the CLI. The package is a self-contained benchmark target and resolves its workspace `eve` development dependency after installation.
+eve-code is benchmarked with [eve-bench](https://github.com/vercel-labs/eve-bench#readme) on the SWE-lean dataset. eve-bench owns datasets, execution, comparisons, and reports; this package keeps no benchmark runner of its own.
 
-Dataset selection, execution, comparisons, and report generation belong to eve-bench. This package does not maintain a separate benchmark runner or reporting layer.
+### In CI
 
-### Latest SWE-lean comparison
+The `eve-code > Benchmark harness` workflow runs this PR's eve-code whenever `packages/eve-code/**` changes. Each trial runs in its own Vercel Sandbox, using the model in the `EVE_CODE_BENCH_MODEL` repository variable. The report goes to the job summary and a PR comment. It covers resolved tasks, latency, and token usage, and compares against the stored eve-code baseline and stored results of other harnesses.
 
-CI runs the full eight-task SWE-lean suite against the original eve-code baseline (`ca27ee898`), this PR's eve-code, Codex, and OpenCode. The latter two support the suite's MCP tasks. The native eve-bench action publishes the same table to the CI summary, PR comment, and the block below. Only a completed comparison updates this block; its source revision identifies the code tested. The rest of this README is left unchanged.
+To run another harness on the PR, comment `/benchmark <harness>`, for example `/benchmark opencode`. You need write access to the repository. `/benchmark` alone re-runs eve-code. Runs on `main` publish their results to the eve-bench result store, so later PRs compare against them.
 
-<!-- eve-code-benchmark:start -->
-swe-lean@v2 · openai/gpt-5.6-terra · 8 tasks × 1 attempt(s) · 11304338b35c vs ca27ee898e28
+### Locally
 
-| Harness | Passed | Score | Δbaseline | Time | Cost |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| baseline | 7/8 | 87.5% | — | 954.3s | $0.80 |
-| candidate | 6/8 | 75.0% | -12.5 pp | 400.1s | $0.60 |
-| codex | 7/8 | 87.5% | +0.0 pp | 687.5s | unreported |
-| opencode | 8/8 | 100.0% | +12.5 pp | 1456.4s | $1.12 |
+With [eve-bench](https://github.com/vercel-labs/eve-bench#readme) linked (`npm link` in its checkout), commit and push this checkout, then run:
 
-[CI run](<https://github.com/vercel/eve/actions/runs/35264574875>)
-<!-- eve-code-benchmark:end -->
+```sh
+eve-bench -a eve-code --agent-dir packages/eve-code --model google/gemini-3.8-flash \
+  --scope <vercel-team> --execution vercel-sandbox
+```
+
+Pass several harnesses to compare them in one run, for example `-a eve-code,opencode,pi`. Use `--task <name>` to run a single task. Local runs never publish to the result store.
+
+### Investigating a failed trial
+
+Trial sandboxes are deleted as soon as each trial finishes. Before deletion, eve-bench pulls each trial's logs and traces out of the sandbox and uploads them with the workflow artifact. To read them, point eve-bench at the CI run:
+
+```sh
+eve-bench trials logs https://github.com/vercel/eve/actions/runs/<id>
+eve-bench trials logs https://github.com/vercel/eve/actions/runs/<id> --harness eve-code --task <task>
+```
+
+The report's Diagnostics section prints this command with the run URL filled in. The download uses the GitHub CLI and needs read access to this repository. The raw files (`agent.log`, `events.ndjson`, `observability.ndjson`, `verifier.log`) are cached under `~/.cache/eve-bench/runs/`.
