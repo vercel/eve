@@ -372,6 +372,22 @@ describe("routeDeliverPayload message resolution", () => {
     expect(routed.forChildren).toEqual([]);
   });
 
+  it("routes only the first answer when a payload repeats a request", () => {
+    const routed = routeDeliverPayload({
+      payload: {
+        inputResponses: [
+          { optionId: "1", requestId: "ask-1" },
+          { optionId: "2", requestId: "ask-1" },
+        ],
+      },
+      state: askSession([["ask-1", {}]]).state,
+    });
+
+    expect(routed.forChildren[0]?.payload.inputResponses).toEqual([
+      { optionId: "1", requestId: "ask-1" },
+    ]);
+  });
+
   it("prefers explicit input responses over resolving the message", () => {
     const routed = routeDeliverPayload({
       payload: {

@@ -157,6 +157,7 @@ export function routeDeliverPayload(input: {
     return bucket;
   };
 
+  const routedRequestIds = new Set<string>();
   for (const response of inputResponses) {
     const route = entries.get(response.requestId);
 
@@ -164,6 +165,9 @@ export function routeDeliverPayload(input: {
       unroutedResponses.push(response);
       continue;
     }
+    // A request takes one answer; the first one in the payload wins.
+    if (routedRequestIds.has(response.requestId)) continue;
+    routedRequestIds.add(response.requestId);
 
     if (route.kind === "session-limit" && response.optionId === SESSION_LIMIT_STOP_OPTION_ID) {
       parentAction = { kind: "cancel-turn" };
