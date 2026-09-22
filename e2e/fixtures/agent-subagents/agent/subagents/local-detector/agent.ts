@@ -2,9 +2,7 @@ import { defineAgent, defineDynamic } from "eve";
 import { nestedBackgroundModel } from "../../lib/nested-background-model.js";
 
 export default defineAgent({
-  description: "Complete Alice's nested verification after she releases the worker.",
-  // Return the authored instance so the world suite's generic static-model
-  // adapter cannot replace the gate-driving responder.
+  description: "Coordinate Alice's verification using the declared verification-worker.",
   model: defineDynamic({
     events: {
       "step.started": () => ({ model: nestedBackgroundModel, modelContextWindowTokens: 1_000_000 }),
