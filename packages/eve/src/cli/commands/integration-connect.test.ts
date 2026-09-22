@@ -58,6 +58,36 @@ describe("runIntegrationConnect", () => {
     );
   });
 
+  it("provisions Sent's service and patches its assigned connector UID", async () => {
+    const deps = dependencies({
+      setupConnectionConnector: vi.fn(async () => ({
+        kind: "existing" as const,
+        connectorUid: "sent/assigned",
+      })),
+    });
+
+    await runIntegrationConnect({
+      appRoot: "/project",
+      slug: "sent",
+      service: "mcp.sent.dm",
+      canonicalConnectorName: "sent",
+      dependencies: deps,
+    });
+
+    expect(deps.setupConnectionConnector).toHaveBeenCalledWith(
+      expect.objectContaining({
+        slug: "sent",
+        service: "mcp.sent.dm",
+        canonicalConnectorName: "sent",
+        project: PROJECT,
+      }),
+    );
+    expect(deps.updateConnectionConnectorUid).toHaveBeenCalledWith(
+      "/project/agent/connections/sent.ts",
+      "sent/assigned",
+    );
+  });
+
   it("passes connector creation options to setup", async () => {
     const deps = dependencies();
 
