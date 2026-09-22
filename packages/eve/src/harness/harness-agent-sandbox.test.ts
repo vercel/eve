@@ -1,6 +1,7 @@
 import type { VercelSandbox } from "#execution/sandbox/bindings/vercel-sdk-types.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { withRuntimeSandboxLifecycle } from "#context/build-callback-context.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { SandboxKey } from "#context/keys.js";
 import { registerVercelSandboxForSandboxSession } from "#execution/sandbox/bindings/vercel-session-registry.js";
@@ -79,6 +80,27 @@ describe("loadHarnessAgentSandboxSession", () => {
     routes.push({ port: 5000 });
     expect(session.ports).toEqual([3000, 4000, 5000]);
     expect(session).not.toHaveProperty("setPorts");
+  });
+
+  it("resolves the registered Vercel sandbox through lifecycle wrappers", async () => {
+    const { eveSandbox } = createRegisteredSandbox();
+    const wrapped = withRuntimeSandboxLifecycle(
+      eveSandbox.session,
+      async () => {},
+      async () => {},
+    );
+    const nested = withRuntimeSandboxLifecycle(
+      wrapped,
+      async () => {},
+      async () => {},
+    );
+
+    await expect(
+      loadWithAccess({ ...eveSandbox.access, get: async () => wrapped }),
+    ).resolves.toMatchObject({ id: "vercel-session", ports: [3000, 4000] });
+    await expect(
+      loadWithAccess({ ...eveSandbox.access, get: async () => nested }),
+    ).resolves.toMatchObject({ id: "vercel-session", ports: [3000, 4000] });
   });
 
   it.each([

@@ -17,26 +17,38 @@ import type { SandboxSession } from "#shared/sandbox-session.js";
  */
 
 const VERCEL_SANDBOX_SESSION_REGISTRY_KEY = Symbol.for("eve.vercel-sandbox-session-registry");
+const VERCEL_SANDBOX_SESSION_TOKEN_KEY = Symbol.for("eve.vercel-sandbox-session-token");
 
 type VercelSandboxSessionRegistryGlobal = typeof globalThis & {
-  [VERCEL_SANDBOX_SESSION_REGISTRY_KEY]?: WeakMap<SandboxSession, VercelSandbox>;
+  [VERCEL_SANDBOX_SESSION_REGISTRY_KEY]?: WeakMap<object, VercelSandbox>;
 };
 
 const registryGlobal = globalThis as VercelSandboxSessionRegistryGlobal;
 const registry = (registryGlobal[VERCEL_SANDBOX_SESSION_REGISTRY_KEY] ??= new WeakMap<
-  SandboxSession,
+  object,
   VercelSandbox
 >());
+
+function getVercelSandboxSessionToken(session: SandboxSession): object | undefined {
+  const token = Reflect.get(session, VERCEL_SANDBOX_SESSION_TOKEN_KEY);
+  return typeof token === "object" && token !== null ? token : undefined;
+}
 
 export function registerVercelSandboxForSandboxSession(input: {
   readonly sandbox: VercelSandbox;
   readonly session: SandboxSession;
 }): void {
-  registry.set(input.session, input.sandbox);
+  let token = getVercelSandboxSessionToken(input.session);
+  if (token === undefined) {
+    token = Object.freeze({});
+    Object.defineProperty(input.session, VERCEL_SANDBOX_SESSION_TOKEN_KEY, { value: token });
+  }
+  registry.set(token, input.sandbox);
 }
 
 export function getVercelSandboxForSandboxSession(input: {
   readonly session: SandboxSession;
 }): VercelSandbox | undefined {
-  return registry.get(input.session);
+  const token = getVercelSandboxSessionToken(input.session);
+  return token === undefined ? undefined : registry.get(token);
 }
