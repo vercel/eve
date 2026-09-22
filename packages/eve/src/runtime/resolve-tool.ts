@@ -120,12 +120,9 @@ export async function resolveToolDefinition(
  * result without clobbering required fields with `undefined`.
  */
 type OptionalResolvedFields = {
-  -readonly [K in
-    | "label"
-    | "approval"
-    | "approvalKey"
-    | "approvalPrompt"
-    | "toModelOutput"]?: ResolvedToolDefinition[K];
+  -readonly [
+    K in "label" | "approval" | "approvalKey" | "approvalPrompt" | "toModelOutput"
+  ]?: ResolvedToolDefinition[K];
 };
 
 /**
