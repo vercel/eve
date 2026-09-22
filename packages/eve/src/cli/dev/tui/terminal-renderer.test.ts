@@ -5241,6 +5241,87 @@ describe("TerminalRenderer command typeahead", () => {
     renderer.shutdown();
   });
 
+  it("shows loading before model argument suggestions arrive", async () => {
+    const screen = new MockScreen({ columns: 80, rows: 30 });
+    const input = new MockUserInput();
+    const suggestions = Promise.withResolvers<
+      readonly {
+        value: string;
+        label: string;
+        hint?: string;
+      }[]
+    >();
+    const renderer = new TerminalRenderer({
+      input,
+      output: screen,
+      captureForeignOutput: false,
+      unicode: true,
+      argumentSuggestions: async () => suggestions.promise,
+    });
+
+    const prompt = renderer.readPrompt();
+    input.type("/model ");
+    expect(screen.snapshot()).toContain("Loading models…");
+    suggestions.resolve([{ value: "openai/gpt-5", label: "GPT-5" }]);
+    await vi.waitFor(() => expect(screen.snapshot()).toContain("GPT-5"));
+    input.enter();
+    await prompt;
+    renderer.shutdown();
+  });
+
+  it("completes a model argument from its inline catalog", async () => {
+    const screen = new MockScreen({ columns: 80, rows: 30 });
+    const input = new MockUserInput();
+    const renderer = new TerminalRenderer({
+      input,
+      output: screen,
+      captureForeignOutput: false,
+      unicode: true,
+      argumentSuggestions: async (command) =>
+        command === "model"
+          ? [
+              {
+                value: "anthropic/claude-sonnet-5",
+                label: "Claude Sonnet 5",
+                hint: "Anthropic",
+              },
+            ]
+          : [],
+    });
+
+    const prompt = renderer.readPrompt();
+    input.type("/model claude");
+    await vi.waitFor(() => expect(screen.snapshot()).toContain("Claude Sonnet 5"));
+    input.enter();
+
+    expect(await prompt).toBe("/model anthropic/claude-sonnet-5");
+    renderer.shutdown();
+  });
+
+  it("completes an add argument from its inline registry catalog", async () => {
+    const screen = new MockScreen({ columns: 80, rows: 30 });
+    const input = new MockUserInput();
+    const renderer = new TerminalRenderer({
+      input,
+      output: screen,
+      captureForeignOutput: false,
+      unicode: true,
+      argumentSuggestions: async (command) =>
+        command === "add"
+          ? [{ value: "channel/slack", label: "Slack", hint: "Slack channel" }]
+          : [],
+    });
+
+    const prompt = renderer.readPrompt();
+    input.type("/add slack");
+    await vi.waitFor(() => expect(screen.snapshot()).toContain("Slack channel"));
+    input.send("\t");
+    input.enter();
+
+    expect(await prompt).toBe("/add channel/slack");
+    renderer.shutdown();
+  });
+
   it("tab completes the highlighted command without submitting", async () => {
     const { input, renderer } = makeRenderer();
 
