@@ -147,11 +147,6 @@ export type ExtensionSourceRef = ModuleSourceRef;
  * consuming agent, prefixing contributions with {@link namespace}.
  */
 export interface ResolvedExtensionMount {
-  /** Programmatic declaration used when the mount does not exist on disk. */
-  readonly programmaticDeclaration?: {
-    readonly logicalPath: string;
-    readonly sourceId: string;
-  };
   /** Mount namespace derived from the mount filename (e.g. `crm`). */
   readonly namespace: string;
   /** Package specifier the mount imports (e.g. `@acme/crm`). */

@@ -1,5 +1,4 @@
 import { compileAgentInWorkspace, type CompileAgentResult } from "#compiler/compile-agent.js";
-import type { DevelopmentExtensionSelection } from "#compiler/development-extensions.js";
 import { createScheduleRegistrations } from "#runtime/schedules/register.js";
 import { resolveSchedules } from "#runtime/schedules/resolve-schedule.js";
 import type { ResolvedScheduleDefinition } from "#runtime/types.js";
@@ -35,7 +34,6 @@ export async function prepareDevelopmentApplicationHost(
   appRoot: string,
   options: {
     readonly changedPaths?: readonly string[];
-    readonly developmentExtensions?: DevelopmentExtensionSelection;
     readonly previousExtensions?: readonly DevelopmentWorkspaceExtension[];
   } = {},
 ): Promise<PreparedDevelopmentApplicationHost> {
@@ -60,7 +58,6 @@ export async function prepareDevelopmentApplicationHost(
         publishedRoot: join(appRoot, ".eve"),
         writeRoot: workspace.compilerArtifactsDir,
       },
-      developmentExtensions: options.developmentExtensions,
       startPath: appRoot,
     });
     const schedules = await resolveSchedules({ manifest: compileResult.manifest });

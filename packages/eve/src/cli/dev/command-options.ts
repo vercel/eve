@@ -9,7 +9,6 @@ export interface DevelopmentCliOptions {
   assistantResponseStats?: AssistantResponseStatsMode;
   connectionAuth?: TerminalPartDisplayMode;
   contextSize?: number;
-  defaultExtensions?: boolean;
   header?: DevelopmentRequestHeaders;
   host?: string;
   input?: string;

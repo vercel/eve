@@ -92,7 +92,6 @@ export function createDevelopmentServer(
       childPath,
       [
         JSON.stringify({
-          developmentExtensions: options.developmentExtensions,
           existing: options.existing,
           host: options.host,
           port: options.port,

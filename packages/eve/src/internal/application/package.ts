@@ -266,43 +266,7 @@ export function resolvePackageSourceDirectoryPath(relativeSourcePath: string): s
 }
 
 export function resolvePackageDependencyPath(specifier: string): string {
-  try {
-    return require.resolve(specifier);
-  } catch (error) {
-    const packageRoot = tryResolvePackageRoot();
-    const sourcePath =
-      packageRoot === undefined || !isSourceCheckout(packageRoot)
-        ? undefined
-        : resolveSourceCheckoutExport(packageRoot, specifier);
-    if (sourcePath !== undefined) return sourcePath;
-    throw error;
-  }
-}
-
-function resolveSourceCheckoutExport(packageRoot: string, specifier: string): string | undefined {
-  if (specifier !== EVE_PACKAGE_NAME && !specifier.startsWith(`${EVE_PACKAGE_NAME}/`)) {
-    return undefined;
-  }
-  const exportKey =
-    specifier === EVE_PACKAGE_NAME ? "." : `.${specifier.slice(EVE_PACKAGE_NAME.length)}`;
-  try {
-    const manifest = JSON.parse(readFileSync(join(packageRoot, "package.json"), "utf8")) as {
-      exports?: Record<string, string | Record<string, string>>;
-    };
-    const declaration = manifest.exports?.[exportKey];
-    const target =
-      typeof declaration === "string"
-        ? declaration
-        : (declaration?.["eve-source"] ?? declaration?.import ?? declaration?.default);
-    if (target === undefined) return undefined;
-    const sourceRelativePath = target
-      .replace(/^\.\/dist\/src\//, "src/")
-      .replace(/\.[cm]?js$/u, ".ts");
-    const sourcePath = join(packageRoot, sourceRelativePath);
-    return existsSync(sourcePath) ? sourcePath : undefined;
-  } catch {
-    return undefined;
-  }
+  return require.resolve(specifier);
 }
 
 /**

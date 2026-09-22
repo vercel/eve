@@ -8,7 +8,6 @@ import {
   EVE_EVALUATION_ENV_FLAG,
   EVE_EVALUATION_RUN_ID_ENV,
 } from "#internal/application/dev-environment.js";
-import { noDevelopmentExtensions } from "#compiler/development-extensions.js";
 import { createDevelopmentServer, type DevelopmentServer } from "#internal/nitro/host.js";
 import { createEvalClient } from "#evals/cli/eval-client.js";
 import { filterEvalsByTags } from "#evals/cli/filter.js";
@@ -152,11 +151,7 @@ export async function runEvalCommand(
       // once at startup and never again.
       process.env[EVE_EVALUATION_ENV_FLAG] = "1";
       process.env[EVE_EVALUATION_RUN_ID_ENV] = randomUUID();
-      devServer = createDevelopmentServer(appRoot, {
-        developmentExtensions: noDevelopmentExtensions(),
-        host: "127.0.0.1",
-        port: 0,
-      });
+      devServer = createDevelopmentServer(appRoot, { host: "127.0.0.1", port: 0 });
       const started = await devServer.start();
       client = await createEvalClient({ kind: "local", url: started.url });
       target = await resolveEvalTargetHandle({

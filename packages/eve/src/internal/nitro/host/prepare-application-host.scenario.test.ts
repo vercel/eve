@@ -4,8 +4,6 @@ import { join } from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { defaultDevelopmentExtensions } from "#compiler/development-extensions.js";
-import { compiledAgentManifestSchema } from "#compiler/manifest.js";
 import { normalizeEsmImportSpecifier } from "#internal/application/import-specifier.js";
 import {
   createApplicationBuildWorkspace,
@@ -77,33 +75,6 @@ describe("application host preparation", () => {
     } finally {
       await removeApplicationBuildWorkspace(workspace);
     }
-  });
-
-  it("stages the bundled development extension subagent outside the eve workspace", async () => {
-    const { appRoot } = await createAppRoot("eve-bundled-dev-extension-", {
-      files: {
-        "agent/agent.mjs": 'export default { model: "openai/gpt-5.4" };\n',
-        "agent/instructions.md": "Help Alice maintain her agent.",
-      },
-      packageName: "bundled-dev-extension",
-    });
-    const host = await prepareDevelopmentApplicationHost(appRoot, {
-      developmentExtensions: defaultDevelopmentExtensions(),
-    });
-    const manifest = compiledAgentManifestSchema.parse(
-      JSON.parse(
-        await readFile(
-          join(host.generation.runtimeAppRoot, ".eve", "compile", "compiled-agent-manifest.json"),
-          "utf8",
-        ),
-      ),
-    );
-    const subagent = manifest.subagents.find((node) => node.name === "self-modification__agent");
-    expect(subagent).toBeDefined();
-    expect(subagent!.agent.appRoot).toBe(
-      join(host.generation.runtimeAppRoot, "node_modules", "eve"),
-    );
-    expect(subagent!.agent.agentRoot.startsWith(`${subagent!.agent.appRoot}/`)).toBe(true);
   });
 
   it("keeps Nitro host inputs outside retained runtime generations", async () => {
