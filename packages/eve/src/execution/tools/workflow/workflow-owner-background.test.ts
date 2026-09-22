@@ -217,6 +217,22 @@ describe("workflowToolRunWorkflow", () => {
     });
   });
 
+  it("discards sandbox requests after background cancellation", async () => {
+    queueCommand({ kind: "ready" });
+    queueCommand({ kind: "cancel" });
+    queueOwnerRequest({
+      ...bufferedAgentRequest,
+      replyTo: "eve.sandbox.step-1",
+      request: { kind: "sandbox-request" },
+    });
+    mocks.raceChannelReads.mockResolvedValueOnce({ channel: "commands", next: { done: true } });
+    await workflowToolRunWorkflow(workflowInput);
+    expect(mocks.notifyTaskParent).toHaveBeenCalledExactlyOnceWith({
+      token: "parent-token",
+      view: { ...initialView, status: "cancelled" },
+    });
+  });
+
   it("acknowledges discarded authorization prompts after cancellation", async () => {
     queueCommand({ kind: "ready" });
     queueCommand({ kind: "cancel" });

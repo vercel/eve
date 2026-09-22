@@ -1,3 +1,4 @@
+import { HookNotFoundError } from "#compiled/@workflow/errors/index.js";
 import { sessionInboxHookToken } from "#execution/session-inbox/address.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -5,16 +6,51 @@ import { sessionCommandHookToken } from "#execution/session-inbox/address.js";
 import { resumeSessionInbox } from "#execution/session-inbox/resume.js";
 
 const resumeHookMock = vi.fn();
+const getHookMock = vi.fn();
 
 vi.mock("#internal/workflow/runtime.js", () => ({
   resumeHook: (...args: unknown[]) => resumeHookMock(...args),
+  getHookByToken: (...args: unknown[]) => getHookMock(...args),
 }));
 
 afterEach(() => {
   resumeHookMock.mockReset();
+  getHookMock.mockReset();
+  vi.useRealTimers();
 });
 
 describe("session inbox resume", () => {
+  it("delivers a workflow request to the successor after a handoff gap", async () => {
+    vi.useFakeTimers();
+    const token = sessionCommandHookToken("session-1");
+    const message = {
+      kind: "request" as const,
+      from: {
+        callId: "call-1",
+        execution: "background" as const,
+        input: {},
+        runId: "run-1",
+        sequence: 0,
+        stepIndex: 0,
+        toolName: "probe",
+        turnId: "turn-1",
+      },
+      replyTo: "eve.sandbox.step-1",
+      request: { kind: "sandbox-request" as const, taskId: "task-1" },
+    };
+    resumeHookMock
+      .mockRejectedValueOnce(new HookNotFoundError(token))
+      .mockResolvedValueOnce(sessionHook("successor", token, { sessionId: "session-1" }));
+    getHookMock.mockResolvedValue({ runId: "previous-owner" });
+    const delivery = resumeSessionInbox(token, message);
+    await vi.advanceTimersByTimeAsync(20);
+    expect((await delivery).ownerRunId).toBe("successor");
+    expect(resumeHookMock.mock.calls).toEqual([
+      [sessionInboxHookToken(token), message],
+      [sessionInboxHookToken(token), message],
+    ]);
+  });
+
   it("resumes the current owner while preserving public session identity", async () => {
     const token = sessionCommandHookToken("session-1");
     const hook = sessionHook("owner-2", token, { sessionId: "session-1" });

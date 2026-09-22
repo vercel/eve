@@ -261,6 +261,29 @@ describe("deliverTaskInputResponsesStep", () => {
 });
 
 describe("notifyTaskParent", () => {
+  it("forwards sandbox access as an internal workflow request", async () => {
+    const request = {
+      from: {
+        callId: "call-1",
+        execution: "background" as const,
+        input: {},
+        runId: "run-1",
+        sequence: 0,
+        stepIndex: 0,
+        toolName: "probe",
+        turnId: "turn-1",
+      },
+      replyTo: "eve.sandbox.step-1",
+      request: { kind: "sandbox-request" as const },
+    };
+    await notifyTaskParent({ request, taskId: "task-1", token: "parent-token" });
+    expect(resumeSessionInbox).toHaveBeenCalledExactlyOnceWith("parent-token", {
+      ...request,
+      kind: "request",
+      request: { kind: "sandbox-request", taskId: "task-1" },
+    });
+  });
+
   it("forwards an agent invocation through the typed task envelope", async () => {
     const request = {
       from: {

@@ -197,6 +197,124 @@ async function planDeployStep(service: string): Promise<string> {
   return `plan:${service}`;
 }
 
+export async function sandboxAcrossStepsWorkflow(
+  input: DeployInput,
+  ctx: WorkflowToolContext,
+): Promise<{
+  readonly commandExitCode: number;
+  readonly content: string | null;
+  readonly marker: string;
+  readonly processExitCode: number;
+}> {
+  "use workflow";
+
+  const marker = await writeSandboxMarkerStep(ctx, input.service);
+  await workflowSleep("10ms");
+  return await inspectSandboxMarkerStep(ctx, marker);
+}
+
+export async function sharedSandboxWorkflow(_input: DeployInput, ctx: WorkflowToolContext) {
+  "use workflow";
+  await appendSharedSandboxStep(ctx);
+  await workflowSleep("10ms");
+  return await appendSharedSandboxStep(ctx);
+}
+
+async function appendSharedSandboxStep(ctx: WorkflowToolContext) {
+  "use step";
+  const sandbox = await ctx.getSandbox();
+  const previous = await sandbox.readTextFile({ path: "shared.txt" });
+  const content = `${previous}|workflow`;
+  await sandbox.writeTextFile({ path: "shared.txt", content });
+  return { content };
+}
+
+export async function recoverSandboxFailureWorkflow(_input: DeployInput, ctx: WorkflowToolContext) {
+  "use workflow";
+  return await recoverSandboxFailureStep(ctx);
+}
+
+async function recoverSandboxFailureStep(ctx: WorkflowToolContext) {
+  "use step";
+  try {
+    await ctx.getSandbox();
+    return "unexpected sandbox";
+  } catch {
+    return "sandbox failure handled";
+  }
+}
+
+export async function concurrentSandboxWorkflow(input: DeployInput, ctx: WorkflowToolContext) {
+  "use workflow";
+  const identities = await Promise.all([sandboxIdentityStep(ctx), sandboxIdentityStep(ctx)]);
+  const retried = await retrySandboxStep(ctx);
+  return {
+    sameSandbox: retried.marker !== null && identities.every((marker) => marker === retried.marker),
+    attempt: retried.attempt,
+    service: input.service,
+  };
+}
+
+async function sandboxIdentityStep(ctx: WorkflowToolContext) {
+  "use step";
+  return (await ctx.getSandbox()).readTextFile({ path: "initialization.txt" });
+}
+
+async function retrySandboxStep(ctx: WorkflowToolContext) {
+  "use step";
+  const sandbox = await ctx.getSandbox();
+  const { attempt } = getStepMetadata();
+  if (attempt === 1) throw new Error("Retry after accessing the sandbox.");
+  return { marker: await sandbox.readTextFile({ path: "initialization.txt" }), attempt };
+}
+
+export async function sandboxFromWorkflowBodyWorkflow(
+  _input: DeployInput,
+  ctx: WorkflowToolContext,
+): Promise<never> {
+  "use workflow";
+
+  await ctx.getSandbox();
+  throw new Error("workflow body unexpectedly received sandbox access");
+}
+
+async function writeSandboxMarkerStep(ctx: WorkflowToolContext, service: string): Promise<string> {
+  "use step";
+
+  const marker = `workflow-sandbox:${service}`;
+  const sandbox = await ctx.getSandbox();
+  await sandbox.writeTextFile({ content: marker, path: "workflow-marker.txt" });
+  return marker;
+}
+
+async function inspectSandboxMarkerStep(
+  ctx: WorkflowToolContext,
+  marker: string,
+): Promise<{
+  readonly commandExitCode: number;
+  readonly content: string | null;
+  readonly marker: string;
+  readonly processExitCode: number;
+}> {
+  "use step";
+
+  const sandbox = await ctx.getSandbox();
+  const content = await sandbox.readTextFile({ path: "workflow-marker.txt" });
+  const command = await sandbox.run({ command: "test -f /workspace/workflow-marker.txt" });
+  const process = await sandbox.spawn({ command: "printf workflow-process; sleep 30" });
+  const reader = process.stdout.getReader();
+  await reader.read();
+  reader.releaseLock();
+  await process.kill();
+  const { exitCode: processExitCode } = await process.wait();
+  return {
+    commandExitCode: command.exitCode,
+    content,
+    marker,
+    processExitCode,
+  };
+}
+
 export async function stepThenRaceWorkflow(
   input: DeployInput,
 ): Promise<{ readonly decided: string; readonly service: string }> {

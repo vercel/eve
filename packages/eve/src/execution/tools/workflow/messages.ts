@@ -43,6 +43,7 @@ export interface WorkflowToolInputRequestBatch {
 }
 
 export type WorkflowToolRequest =
+  | { readonly kind: "sandbox-request"; readonly taskId?: string }
   | WorkflowToolAgentRequest
   | WorkflowToolAuthorizationRequest
   | WorkflowToolAskRequest

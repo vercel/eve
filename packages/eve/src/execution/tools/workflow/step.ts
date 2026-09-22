@@ -75,6 +75,7 @@ async function executeAuthorizedStep(
           args,
           authorizationResults,
           callbackToken: callback.token,
+          run,
           ctx,
           execute,
           receiver,
@@ -117,6 +118,7 @@ async function invokeAuthorizedStep(input: {
   readonly args: unknown[];
   readonly authorizationResults: readonly WorkflowStepAuthorizationResult[];
   readonly callbackToken: string;
+  readonly run: WorkflowToolRunContext;
   readonly ctx: ToolContext;
   readonly execute: (invocation: WorkflowStepInvocation) => Promise<unknown>;
   readonly receiver: unknown;
@@ -124,6 +126,7 @@ async function invokeAuthorizedStep(input: {
   const { args, authorizationResults, callbackToken, ctx, execute, receiver } = input;
   const context: WorkflowStepContext = {
     callId: ctx.callId,
+    run: input.run,
     toolName: ctx.toolName,
     session: ctx.session,
     abortSignal: ctx.abortSignal,

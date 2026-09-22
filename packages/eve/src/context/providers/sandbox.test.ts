@@ -4,13 +4,14 @@ import { ensureSandboxAccess } from "#execution/sandbox/ensure.js";
 import type { HarnessSession } from "#harness/types.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import type { RuntimeSandboxRegistry } from "#runtime/sandbox/registry.js";
-import { SessionIdKey } from "#context/keys.js";
+import { SandboxKey, SessionIdKey } from "#context/keys.js";
 import {
   BundleKey,
   ChannelKey,
   type CompiledBundle,
 } from "#runtime/sessions/runtime-context-keys.js";
 import { ContextContainer } from "#context/container.js";
+import { captureWorkflowSandboxReference } from "#execution/sandbox/workflow-reference.js";
 import { sandboxProvider } from "#context/providers/sandbox.js";
 import { createStubSandboxRegistry } from "#internal/testing/stub-sandbox-registry.js";
 
@@ -58,7 +59,7 @@ function createBundle(input: {
 describe("sandboxProvider", () => {
   beforeEach(() => {
     vi.mocked(ensureSandboxAccess).mockResolvedValue({
-      captureState: vi.fn().mockResolvedValue({ initialized: false, session: null }),
+      captureState: vi.fn().mockResolvedValue({ session: null }),
       get: vi.fn().mockResolvedValue(null),
       stop: vi.fn().mockResolvedValue(undefined),
     });
@@ -67,7 +68,7 @@ describe("sandboxProvider", () => {
   it("uses explicit sharing metadata for self-delegation even without inheritsParent", async () => {
     const ctx = new ContextContainer();
     const registry: RuntimeSandboxRegistry = createStubSandboxRegistry();
-    const parentSandboxState = { initialized: true, session: null };
+    const parentSandboxState = { session: null };
 
     ctx.set(BundleKey, createBundle({ agentName: "weather-agent", registry }));
     ctx.set(ChannelKey, {
@@ -84,6 +85,30 @@ describe("sandboxProvider", () => {
         sessionId: "root-sandbox-session",
         state: parentSandboxState,
       }),
+    );
+  });
+
+  it("uses the same reconnect identity for workflow steps", async () => {
+    const ctx = new ContextContainer();
+    const registry = createStubSandboxRegistry();
+    const bundle = createBundle({ agentName: "child", registry });
+    Object.assign(bundle.graph.root, { nodeId: "child-node" });
+    ctx.set(BundleKey, bundle);
+    ctx.set(ChannelKey, { kind: "subagent", state: { sandboxSessionId: "parent-sandbox" } });
+    ctx.set(SessionIdKey, "child-session");
+    const session = createHarnessSession();
+    const provider = await sandboxProvider.create(ctx, session);
+    if (provider === undefined) throw new Error("Missing sandbox provider");
+    ctx.setVirtualContext(SandboxKey, provider.value);
+    const reference = await captureWorkflowSandboxReference({ ctx, session });
+    expect(reference).toEqual({
+      compiledArtifactsSource: bundle.compiledArtifactsSource,
+      nodeId: "child-node",
+      sessionId: "parent-sandbox",
+      state: { session: null },
+    });
+    expect(ensureSandboxAccess).toHaveBeenLastCalledWith(
+      expect.objectContaining({ ...reference, state: null }),
     );
   });
 

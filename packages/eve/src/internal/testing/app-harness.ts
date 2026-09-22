@@ -17,6 +17,7 @@ import { resolveRuntimeAgentGraph } from "#runtime/resolve-agent-graph.js";
 import { createNodeHarnessTools } from "#execution/node-step.js";
 import { serializeInputSchema, serializeOutputSchema } from "#tools/schema.js";
 import { defineSandbox } from "#public/definitions/sandbox.js";
+import { createSandboxPreparedArtifactsManifest } from "#shared/sandbox-prepared-artifacts.js";
 import { defineSandboxProvider } from "#shared/sandbox-provider.js";
 import {
   buildActiveSessionContext,
@@ -144,34 +145,40 @@ const DEFAULT_AGENT_NAME = "test-agent";
  */
 export const TEST_DEFAULT_MODEL_ID = "openai/gpt-5.4";
 
-const TEST_SANDBOX_PROVIDER = defineSandboxProvider({
-  name: "eve-test-memory",
-  environment: () => ({
-    async prepare() {
-      return null;
-    },
-    async resume(context) {
-      return createHandle(context.session.id);
-    },
-    async start(context) {
-      return { handle: createHandle(context.session.id), state: null };
-    },
-  }),
-});
-
-function createHandle(sessionId: string) {
-  const sandbox = mockSandbox({ id: sessionId });
-  return {
-    sandbox: sandbox.session,
-    async onSessionDelete(options?: import("#shared/sandbox-provider.js").SandboxDeleteOptions) {
-      await sandbox.access.delete?.(options);
-    },
-    async onSessionStop() {},
-    async onRuntimeShutdown() {},
-  };
+function createTestSandboxProvider() {
+  const sandboxes = new Map<string, MockSandbox>();
+  function createHandle(sessionId: string) {
+    const sandbox = sandboxes.get(sessionId);
+    if (sandbox === undefined) throw new Error(`Missing test sandbox for ${sessionId}`);
+    return {
+      sandbox: sandbox.session,
+      async onSessionDelete(options?: import("#shared/sandbox-provider.js").SandboxDeleteOptions) {
+        await sandbox.access.delete?.(options);
+        sandboxes.delete(sessionId);
+      },
+      async onSessionStop() {},
+      async onRuntimeShutdown() {},
+    };
+  }
+  return defineSandboxProvider({
+    name: "eve-test-memory",
+    environment: () => ({
+      async prepare() {
+        return null;
+      },
+      async resume(context) {
+        return createHandle(context.session.id);
+      },
+      async start(context) {
+        sandboxes.set(context.session.id, mockSandbox({ id: context.session.id }));
+        return { handle: createHandle(context.session.id), state: null };
+      },
+    }),
+  });
 }
 
 export async function createTestRuntime(descriptor: TestAppDescriptor = {}): Promise<TestRuntime> {
+  const sandboxProvider = createTestSandboxProvider();
   const compileInput: CompileFromMemoryInput = {
     name: descriptor.agent?.name ?? DEFAULT_AGENT_NAME,
     model: descriptor.agent?.model ?? TEST_DEFAULT_MODEL_ID,
@@ -179,7 +186,7 @@ export async function createTestRuntime(descriptor: TestAppDescriptor = {}): Pro
     modules: [
       {
         loadNamespace: async () => {
-          const environment = TEST_SANDBOX_PROVIDER.environment();
+          const environment = sandboxProvider.environment();
           return { environment, default: defineSandbox(() => environment.open()) };
         },
         logicalPath: "sandbox.ts",
@@ -228,7 +235,13 @@ export async function createTestRuntime(descriptor: TestAppDescriptor = {}): Pro
   const skills = descriptor.skills ?? [];
 
   function install(): void {
-    installBundledCompiledArtifacts({ manifest, moduleMap });
+    installBundledCompiledArtifacts({
+      manifest,
+      moduleMap,
+      sandboxPreparedArtifacts: createSandboxPreparedArtifactsManifest([
+        { nodeId: "__root__", providerName: "eve-test-memory", artifact: null },
+      ]),
+    });
   }
 
   async function run<T>(fn: () => Promise<T> | T): Promise<T> {

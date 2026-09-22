@@ -109,7 +109,7 @@ import template from "../../prompts/template.txt?raw";
 | `ctx.getToken(provider)`    | Resolve a bearer token for an inline auth provider such as `connect("...")`  |
 | `ctx.requireAuth(provider)` | Evict and re-authorize an inline provider, commonly after a downstream `401` |
 
-Tool definitions accept `availableInSubagents: false` to restrict the tool to top-level root sessions. Authored workflow bodies also receive `ctx.agents`, a replay-stable map of callable-agent metadata, and `ctx.agent(name, input)` for invocation. A `"use step"` helper that receives the context directly should type it as `WorkflowStepToolContext`, which excludes `agents`, `agent`, and `ask`. The root-copy `agent` entry has an empty description when the root omits `description`. See [Workflows as tools](../tools/workflows#delegate-work-ctxagent) for the workflow-only context.
+Tool definitions accept `availableInSubagents: false` to restrict the tool to top-level root sessions. Authored workflow bodies also receive `ctx.agents`, a replay-stable map of callable-agent metadata, and `ctx.agent(name, input)` for invocation. A `"use step"` helper that receives the context directly should type it as `WorkflowStepToolContext`, which excludes `agents`, `agent`, and `ask`. Workflow steps can use `ctx.getSandbox()` to open the sandbox on demand; sandbox lifecycle methods remain owned by the session. The root-copy `agent` entry has an empty description when the root omits `description`. See [Workflows as tools](../tools/workflows#delegate-work-ctxagent) for the workflow-only context.
 
 ## Imports at a glance
 

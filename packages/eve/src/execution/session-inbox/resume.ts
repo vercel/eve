@@ -1,3 +1,4 @@
+import type { WorkflowToolRunMessage } from "#execution/tools/workflow/messages.js";
 import { HookNotFoundError } from "#compiled/@workflow/errors/index.js";
 import type {
   DeliverHookPayload,
@@ -38,7 +39,7 @@ export interface ResumedSessionInboxHook {
  */
 export async function resumeSessionInbox(
   address: string | SessionInboxAddress,
-  command: DeliverHookPayload | SessionCommand | SessionTimeoutHookPayload,
+  command: DeliverHookPayload | SessionCommand | SessionTimeoutHookPayload | WorkflowToolRunMessage,
 ): Promise<ResumedSessionInboxHook> {
   const token = logicalToken(address);
   const deadline = Date.now() + HANDOFF_RETRY_WINDOW_MS;
@@ -49,6 +50,9 @@ export async function resumeSessionInbox(
     } catch (error) {
       if (!HookNotFoundError.is(error)) throw error;
       if (await isHandoffInProgress(token, deadline)) continue;
+      if (command.kind === "request" || command.kind === "report" || command.kind === "outcome") {
+        throw error;
+      }
       return await resumeLegacyInbox(token, command).catch(rethrowUnsupportedAsNotFound);
     }
     let identity: Promise<string> | undefined;
