@@ -411,11 +411,10 @@ describe("app runtime dependency tracing", () => {
           join(appRoot, "agent", "sandbox.ts"),
           [
             'import { defineSandbox } from "eve/sandbox";',
-            'import { justbash } from "eve/sandbox/just-bash";',
+            'import { JustBashSandbox } from "eve/sandbox/just-bash";',
             "",
-            "export default defineSandbox({",
-            "  backend: justbash(),",
-            "});",
+            "export const environment = JustBashSandbox.environment();",
+            "export default defineSandbox(() => environment.open());",
             "",
           ].join("\n"),
         );
@@ -860,6 +859,20 @@ describe("app runtime dependency tracing", () => {
     // `DataDirAccessError`, and @workflow/core's runtime world factory
     // (stubbed out at vendor time) names `WORKFLOW_LOCAL_DATA_DIR`.
     expect(vercelFunctionsSource).not.toContain("[world-local]");
+
+    vi.stubEnv("VERCEL_DEPLOYMENT_ID", "dpl_hosted_no_dev_runtime_test");
+    const serverModule = (await import(
+      `${pathToFileURL(join(outputDir, "functions", "__server.func", "index.mjs")).href}?test=${Date.now()}`
+    )) as {
+      default: {
+        fetch(request: Request, context: { waitUntil(): void }): Promise<Response>;
+      };
+    };
+    const healthResponse = await serverModule.default.fetch(
+      new Request("https://example.com/eve/v1/health"),
+      { waitUntil() {} },
+    );
+    expect(healthResponse.status).toBe(200);
   }, 30_000);
 
   it("loads instrumentation runtime dependencies from hosted Vercel output", async () => {

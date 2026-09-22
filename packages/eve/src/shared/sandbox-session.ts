@@ -1,6 +1,6 @@
 import type { Experimental_SandboxSession as AiSdkSandbox } from "ai";
 
-import type { SandboxDeleteOptions } from "#shared/sandbox-backend.js";
+import type { SandboxDeleteOptions } from "#shared/sandbox-provider.js";
 import type { SandboxNetworkPolicy } from "#shared/sandbox-network-policy.js";
 
 /**
@@ -83,12 +83,11 @@ export interface SandboxRemovePathOptions {
  * The eight I/O methods (`run`, `spawn`, `readFile`, `readBinaryFile`,
  * `readTextFile`, `writeFile`, `writeBinaryFile`, `writeTextFile`) are
  * pulled directly from the AI SDK {@link AiSdkSandbox} type, so authored
- * code that targets either surface uses identical signatures. `id` and
- * `resolvePath` are eve-specific extensions that the runtime relies on
- * for caching and `/workspace` path anchoring.
+ * code that targets either surface uses identical signatures. `resolvePath`
+ * is an eve-specific extension for `/workspace` path anchoring.
  *
  * Relative paths resolve from `/workspace`, the live working directory
- * for every backend. Absolute paths pass through unchanged.
+ * for every provider. Absolute paths pass through unchanged.
  *
  */
 export interface SandboxSession extends Pick<
@@ -103,17 +102,6 @@ export interface SandboxSession extends Pick<
   | "writeTextFile"
 > {
   /**
-   * Stable identifier for the backend session this handle wraps.
-   *
-   * Persists across reconnects to the same logical session: two calls
-   * that resume the same underlying backend sandbox observe the same
-   * `id`. Template sessions constructed during bootstrap expose the
-   * template key; live sessions expose the session key assigned by the
-   * runtime. Useful as a cache key for per-session state that must
-   * outlive individual step executions.
-   */
-  readonly id: string;
-  /**
    * Anchors a sandbox-relative path to `/workspace` and returns the
    * resulting absolute path.
    *
@@ -121,21 +109,8 @@ export interface SandboxSession extends Pick<
    * The read and write methods already apply this internally.
    */
   resolvePath(path: string): string;
-  /**
-   * Applies a firewall network policy to this live sandbox at run time,
-   * for changing the policy *during* a turn (e.g. brokering a credential
-   * resolved mid-turn, or tightening egress after fetching data). A
-   * per-domain `transform` injects headers at the firewall so secrets
-   * never enter the sandbox process. The policy takes effect from the time
-   * the call resolves, so await it before the egress you want governed.
-   *
-   * When the policy is known at session start, prefer configuring it up
-   * front in the sandbox backend factory or `onSession`'s `use()`. The
-   * Docker backend honors only `"allow-all"` and `"deny-all"`;
-   * the just-bash backend rejects this call entirely (its network policy
-   * is fixed at sandbox creation and it runs no binaries to govern).
-   */
-  setNetworkPolicy(policy: SandboxNetworkPolicy): Promise<void>;
+  /** Applies a firewall policy when the selected provider supports mutable networking. */
+  setNetworkPolicy?(policy: SandboxNetworkPolicy): Promise<void>;
   /**
    * Removes one file or directory from the sandbox filesystem.
    *
@@ -151,27 +126,37 @@ export interface SandboxSession extends Pick<
  * Unlike the I/O-only session used during sandbox initialization, this handle
  * exposes provider-backed lifecycle operations.
  */
+export interface MutableNetworkSandboxSession extends SandboxSession {
+  /** Applies a firewall policy to the live sandbox. */
+  setNetworkPolicy(policy: SandboxNetworkPolicy): Promise<void>;
+}
+
+export type FixedNetworkSandboxSession = Omit<SandboxSession, "setNetworkPolicy">;
+
 export interface RuntimeSandboxSession extends SandboxSession {
-  /** Permanently deletes this sandbox and its disposable backend state. */
+  /** Permanently deletes this sandbox and its disposable provider state. */
   delete(options?: SandboxDeleteOptions): Promise<void>;
   /**
    * Stops the backing sandbox compute while preserving the durable session.
    * A later runtime callback reopens the session through its configured
-   * backend. Providers may also support resuming the same handle.
+   * provider. Providers may also support resuming the same handle.
    */
   stop(): Promise<void>;
 }
 
+export type RuntimeSandboxSessionFor<Session extends SandboxSession> = Session &
+  Pick<RuntimeSandboxSession, "delete" | "stop">;
+
 /**
  * Internal sandbox session, used to construct the public {@link SandboxSession}.
  *
- * Backend implementers only need to provide byte-oriented file I/O and
+ * Provider implementations only need to provide byte-oriented file I/O and
  * a `spawn` primitive; the public surface (binary and text variants,
  * line-range slicing, encoding handling, the `run` wrapper) is built on
  * top of these primitives by `buildSandboxSession`.
  *
  * Each method's signature mirrors its public counterpart (and the AI
- * SDK {@link AiSdkSandbox} surface) so backends look symmetric with
+ * SDK {@link AiSdkSandbox} surface) so providers look symmetric with
  * what authored code sees. The `path` field on `readFile`/`writeFile`
  * here is the **already-resolved** path: the public-surface builder
  * calls `resolvePath` before delegating.
@@ -180,12 +165,8 @@ export interface InternalSandboxSession extends Pick<
   AiSdkSandbox,
   "spawn" | "readFile" | "writeFile"
 > {
-  /**
-   * Stable identifier surfaced on the public {@link SandboxSession}.
-   */
-  readonly id: string;
-  /** Removes an already-resolved path from the backend filesystem. */
+  /** Removes an already-resolved path from the provider filesystem. */
   removePath(options: SandboxRemovePathOptions): Promise<void>;
-  /** Translates a user-facing path to the backend's native path. */
+  /** Translates a user-facing path to the provider's native path. */
   resolvePath(path: string): string;
 }

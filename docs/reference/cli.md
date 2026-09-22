@@ -223,6 +223,7 @@ Pass a bare URL and the UI connects to that server instead of booting a local on
 | `-u, --url <url>`                   | string | none               | Connect to an existing server URL instead of starting one                                 |
 | `-H, --header <header>`             | string | none               | Request header for a URL target, in `Name: value` form; repeat for multiple headers       |
 | `--no-ui`                           | flag   | UI on              | Start the server without an interactive UI                                                |
+| `--no-default-extensions`           | flag   | extensions on      | Do not mount bundled development extensions                                               |
 | `--name <name>`                     | string | app folder name    | Title shown in the terminal UI                                                            |
 | `--input <text>`                    | string | none               | Pre-fill the prompt input                                                                 |
 | `--tools <mode>`                    | enum   | `auto-collapsed`   | Tool-call rendering: `full` \| `collapsed` \| `auto-collapsed` \| `hidden`                |
@@ -232,6 +233,8 @@ Pass a bare URL and the UI connects to that server instead of booting a local on
 | `--assistant-response-stats <mode>` | enum   | `tokensPerSecond`  | Assistant header statistic: `tokens` \| `tokensPerSecond`                                 |
 | `--context-size <tokens>`           | number | none               | Model context window size, shown as a usage percentage                                    |
 | `--logs <mode>`                     | enum   | `stderr`           | Server/agent logs to show: `all` \| `stderr` \| `sandbox` \| `none`                       |
+
+Local development mounts bundled development extensions without adding files to your project. The default set includes the self-modification extension and its `self-modification__agent` subagent. Pass `--no-default-extensions` to disable the complete set for that server.
 
 `eve acp` reserves stdin and stdout for newline-delimited JSON-RPC and sends diagnostics to stderr. Without a URL, it supervises an isolated local development server. With a URL, it bridges ACP to that server's existing eve HTTP API and accepts the same URL credentials and request headers as `eve dev <url>`. Pass `--scope <team>` when the active Vercel scope does not own the deployment; `EVE_VERCEL_SCOPE` provides the same value for managed harnesses. See [Agent Client Protocol (ACP)](../protocols/acp) for client configuration and capability limits.
 

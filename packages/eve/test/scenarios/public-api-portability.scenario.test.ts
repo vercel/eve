@@ -65,42 +65,59 @@ export default withEve(config);
   {
     descriptor: {
       files: {
-        "agent/sandbox.ts": `import { defaultBackend, defineSandbox } from "eve/sandbox";
-import { docker } from "eve/sandbox/docker";
-import { justbash } from "eve/sandbox/just-bash";
-import { microsandbox } from "eve/sandbox/microsandbox";
-import { Drive, vercel } from "eve/sandbox/vercel";
+        "agent/sandbox.ts": `import { DefaultSandbox, defineSandbox } from "eve/sandbox";
+import { defineSandboxProvider } from "eve/sandbox/provider";
+import { DockerSandbox } from "eve/sandbox/docker";
+import { JustBashSandbox } from "eve/sandbox/just-bash";
+import { MicrosandboxSandbox } from "eve/sandbox/microsandbox";
+import { Drive, VercelSandbox } from "eve/sandbox/vercel";
 
-const fallback = defaultBackend({
-  docker: { image: "ghcr.io/vercel/eve:latest" },
-  justBash: {},
-  microsandbox: {},
-  vercel: { resources: { vcpus: 2 } },
+const custom = defineSandboxProvider({
+  name: "custom",
+  environment() {
+    return {
+      async prepare() { return null; },
+      async resume() { throw new Error("unused"); },
+      async start() { throw new Error("unused"); },
+    };
+  },
 });
+void custom.environment();
+
+export const environment = process.env.VERCEL === "1"
+  ? VercelSandbox.environment({ resources: { vcpus: 2 } })
+  : DefaultSandbox.environment({ docker: { image: "ghcr.io/vercel/eve:latest" } });
 void Drive;
+async function verifyMutableNetworkCapability() {
+  const sandbox = await DockerSandbox.dockerfile().open({ networkPolicy: "deny-all" });
+  await sandbox.setNetworkPolicy("allow-all");
+}
+void verifyMutableNetworkCapability;
+void DockerSandbox.image("ghcr.io/acme/agent:latest");
+void JustBashSandbox.environment();
+void MicrosandboxSandbox.dockerfile();
+void MicrosandboxSandbox.image("ghcr.io/acme/agent:latest");
 
-void docker;
-void justbash;
-void microsandbox;
-
-export default defineSandbox({
-  backend: process.env.VERCEL === "1" ? vercel() : fallback,
-});
+export default defineSandbox(() => environment.open());
 `,
       },
       name: "sandbox-public-api-portability",
     },
     include: [
       "src/public/sandbox/index.ts",
+      "src/public/sandbox/provider.ts",
       "src/public/sandbox/docker.ts",
       "src/public/sandbox/just-bash.ts",
       "src/public/sandbox/microsandbox.ts",
       "src/public/sandbox/vercel.ts",
     ],
-    name: "lets tsc typecheck sandbox backend factories from nested subpath imports",
+    name: "lets tsc typecheck sandbox environments from nested subpath imports",
     packageExports: {
       "./sandbox": {
         types: "./dist/src/public/sandbox/index.d.ts",
+      },
+      "./sandbox/provider": {
+        types: "./dist/src/public/sandbox/provider.d.ts",
       },
       "./sandbox/docker": {
         types: "./dist/src/public/sandbox/docker.d.ts",
@@ -346,9 +363,17 @@ async function expectPortableFixtureToTypecheck(testCase: PortabilityCase): Prom
     )}\n`,
   );
 
-  await runFile(process.execPath, [TSC_BIN_PATH, "-p", consumerTsconfigPath], {
-    cwd: appRoot,
-  });
+  try {
+    await runFile(process.execPath, [TSC_BIN_PATH, "-p", consumerTsconfigPath], {
+      cwd: appRoot,
+    });
+  } catch (error) {
+    const stderr =
+      typeof error === "object" && error !== null && "stderr" in error
+        ? String(error.stderr)
+        : String(error);
+    throw new Error(`Portable consumer typecheck failed:\n${stderr}`, { cause: error });
+  }
 }
 
 async function writeDescriptorAppFiles(input: {

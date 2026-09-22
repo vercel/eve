@@ -73,14 +73,11 @@ The configured target branch is checked out as a disposable workspace under /wor
 
 Complete all edits and registry installations before publication, and call publish by itself. Before publication, review and summarize the complete intended scope. Call publish once with a concise title and summary. A successful result is only a draft pull request. Return its URL and changed paths, and state that merge and deployment have not occurred.`;
 
-function packagedSubagentGuidance(event: unknown): string {
-  const invocation = (
-    event as { readonly data?: { readonly invocation?: { readonly kind?: string } } }
-  ).data?.invocation;
-  if (invocation?.kind !== "subagent") return "";
+const packagedSubagentGuidance = `## Configure this subagent
 
-  return "This self-modification subagent is implemented by the eve package, not an authored directory under /source. Configure its model, reasoning, and policy in /source/extensions/self-modification/extension.ts; do not search for or edit a child implementation directory.";
-}
+Configure this self-modification subagent's model, reasoning, and policy only through its authored mount. Check /source/extensions/self-modification.ts and /source/extensions/self-modification/extension.ts; modify whichever exists. If neither file exists, this subagent is the bundled eve development default and is using the default settings: first call registry_add with the exact address eve/self-modification to scaffold the authored mount. This known scaffold does not require search_registry.
+
+After registry_add reports successful installation, try to read /source/extensions/self-modification.ts and /source/extensions/self-modification/extension.ts. If either is available, modify it. If neither is yet available, you may need to wait for the next turn, by asking the requester to confirm.`;
 
 function readTrace(
   event: unknown,
@@ -117,7 +114,7 @@ export default defineDynamic({
         markdown: renderInstructions([
           role,
           sourceWorkspace,
-          packagedSubagentGuidance(event),
+          packagedSubagentGuidance,
           sourceEditing,
           toolAuthoring,
           registryWorkflow,

@@ -136,7 +136,7 @@ Tool definitions accept `availableInSubagents: false` to restrict the tool to to
 | `eve/memory/file`                                                           | `fileMemory`, `inMemory`, and the conditional document backend contract                                                        |
 | `eve/memory/file/vercel`                                                    | `vercelBlob` and Vercel Blob backend options                                                                                   |
 | `eve/context`                                                               | `defineState`, session and state types                                                                                         |
-| `eve/sandbox`                                                               | `defineSandbox`, backends                                                                                                      |
+| `eve/sandbox`                                                               | `defineSandbox`, provider environments, and sandbox session types                                                              |
 | `eve/instrumentation`                                                       | `defineInstrumentation`, `disableInstrumentation`, `isChannel`, lifecycle provider types                                       |
 | `eve/instrumentation/otel`                                                  | `otel`, `otelIntegration`, `localTraces`, `agentRuns`, OpenTelemetry policy types                                              |
 | `eve/local-dev`                                                             | `getLocalDevCapability`, `LocalDevCapability`                                                                                  |

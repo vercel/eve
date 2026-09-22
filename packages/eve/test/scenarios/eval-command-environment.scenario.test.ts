@@ -369,10 +369,10 @@ describe("eve eval environment loading", () => {
     };
     const exit = vi.spyOn(process, "exit").mockImplementation(() => undefined as never);
     const close = vi.fn(async () => {});
-    const handle = { shutdown: vi.fn(async () => {}) };
+    const handle = { onRuntimeShutdown: vi.fn(async () => {}) };
     const evaluation = makeEvaluation("local");
 
-    trackActiveSandboxHandle({ backendName: "microsandbox", handle, sessionKey: "session-1" });
+    trackActiveSandboxHandle({ providerName: "microsandbox", handle, sessionId: "session-1" });
     process.chdir(fixtureRoot);
     mockedEvalDependencies.createDevelopmentServer.mockReturnValue({
       close,
@@ -401,7 +401,7 @@ describe("eve eval environment loading", () => {
     }
 
     expect(close).toHaveBeenCalledTimes(1);
-    expect(handle.shutdown).toHaveBeenCalledTimes(1);
+    expect(handle.onRuntimeShutdown).toHaveBeenCalledTimes(1);
     expect(process.env.EVE_EVALUATION).toBe("1");
     expect(process.env.EVE_EVALUATION_RUN_ID).toMatch(/^[0-9a-f-]{36}$/u);
     expect(exit).toHaveBeenCalledWith(0);

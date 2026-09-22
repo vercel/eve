@@ -6,7 +6,7 @@ export const AGENT_TOOL_DESCRIPTION = [
   "Delegate a focused subtask to a copy of yourself, or continue or steer a previous delegation with `agentId`.",
   "Use it to isolate complex work or split a large task into independent pieces.",
   "Issue multiple `agent` calls in one response to run a small fixed set in parallel.",
-  "A new child has fresh history and state but shares your tools and sandbox, so include essential context in `message` and give parallel writers non-overlapping scopes.",
+  "A new child has fresh history and state but reuses your tools and sandbox, so include essential context in `message` and give parallel writers non-overlapping scopes.",
 ].join(" ");
 
 export const SUBAGENT_TOOL_INPUT_SCHEMA = z.strictObject({

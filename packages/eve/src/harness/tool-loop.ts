@@ -498,6 +498,7 @@ function buildHarnessToolsWithDynamicSubagents(
 }
 
 export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
+  config.instrumentation?.installAiSdkWarningLogger();
   const baseEmit = config.handleEvent;
 
   async function runStep(

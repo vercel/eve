@@ -68,6 +68,7 @@ async function makeCompiledState(): Promise<CompileAgentResult> {
       discoveryManifestPath: `${APP_ROOT}/.eve/discovery/agent-discovery-manifest.json`,
       discoveryDirectoryPath: `${APP_ROOT}/.eve/discovery`,
       moduleMapPath: `${APP_ROOT}/.eve/compile/module-map.mjs`,
+      sandboxPreparedArtifactsPath: `${APP_ROOT}/.eve/compile/sandbox-prepared-artifacts.json`,
     },
     project: { agentRoot: AGENT_ROOT, appRoot: APP_ROOT, layout: "nested" },
   };

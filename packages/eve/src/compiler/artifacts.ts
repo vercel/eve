@@ -21,7 +21,9 @@ import {
 } from "#compiler/diagnostics.js";
 import { createCompiledModuleMapSource } from "#compiler/module-map.js";
 import { compileAgentManifest } from "#compiler/normalize-manifest.js";
+import type { DevelopmentExtensionSelection } from "#compiler/development-extensions.js";
 import { materializeWorkspaceResources } from "#compiler/workspace-resources.js";
+import { createSandboxPreparedArtifactsManifest } from "#shared/sandbox-prepared-artifacts.js";
 
 /**
  * Stable diagnostics artifact kind emitted by the compiler.
@@ -55,6 +57,7 @@ export interface CompilerArtifactPaths {
   discoveryManifestPath: string;
   discoveryDirectoryPath: string;
   moduleMapPath: string;
+  sandboxPreparedArtifactsPath: string;
 }
 
 /**
@@ -117,6 +120,7 @@ export interface CompilerArtifactLocations {
  */
 interface WriteCompilerArtifactsInput {
   appRoot: string;
+  developmentExtensions?: DevelopmentExtensionSelection;
   artifactLocations: CompilerArtifactLocations;
   diagnostics: readonly DiscoverDiagnostic[];
   manifest: AgentSourceManifest;
@@ -156,6 +160,7 @@ function resolveCompilerArtifactPathsAt(
     discoveryManifestPath: join(discoveryDirectoryPath, "agent-discovery-manifest.json"),
     discoveryDirectoryPath,
     moduleMapPath: join(compileDirectoryPath, "module-map.mjs"),
+    sandboxPreparedArtifactsPath: join(compileDirectoryPath, "sandbox-prepared-artifacts.json"),
   };
 }
 
@@ -241,7 +246,10 @@ export async function writeCompilerArtifacts(
   );
   const compiledManifest = await materializeWorkspaceResources({
     compileDirectoryPath: paths.compileDirectoryPath,
-    manifest: await compileAgentManifest(input.manifest, { diagnostics }),
+    manifest: await compileAgentManifest(input.manifest, {
+      developmentExtensions: input.developmentExtensions,
+      diagnostics,
+    }),
   });
   const diagnosticsArtifact = createCompilerDiagnosticsArtifact(diagnostics);
   const compiledManifestJson = serializeArtifactJson(compiledManifest);
@@ -261,6 +269,9 @@ export async function writeCompilerArtifacts(
     paths: publishedPaths,
   });
   const metadataJson = serializeArtifactJson(metadata);
+  const sandboxPreparedArtifactsJson = serializeArtifactJson(
+    createSandboxPreparedArtifactsManifest([]),
+  );
 
   await mkdir(paths.discoveryDirectoryPath, {
     recursive: true,
@@ -274,6 +285,7 @@ export async function writeCompilerArtifacts(
     writeFile(paths.discoveryManifestPath, discoveryManifestJson),
     writeFile(paths.moduleMapPath, moduleMapSource),
     writeFile(paths.compileMetadataPath, metadataJson),
+    writeFile(paths.sandboxPreparedArtifactsPath, sandboxPreparedArtifactsJson),
   ]);
 
   return {

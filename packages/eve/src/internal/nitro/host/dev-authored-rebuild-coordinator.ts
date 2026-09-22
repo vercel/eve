@@ -1,13 +1,12 @@
-import { relative, resolve } from "node:path";
-
 import { stageDevelopmentEnvironmentFiles } from "#cli/dev/environment.js";
-import { startDevelopmentSandboxPrewarmInBackground } from "#execution/sandbox/development-prewarm.js";
-import { createDevelopmentNitroArtifactsConfig } from "#internal/nitro/host/artifacts-config.js";
+import { prewarmDevelopmentSandboxes } from "#execution/sandbox/development-prewarm.js";
+import { createDevelopmentGenerationArtifactsSource } from "#internal/nitro/host/artifacts-config.js";
 import { createDevelopmentApplicationNitro } from "#internal/nitro/host/create-application-nitro.js";
 import { buildDevelopmentHostCandidate } from "#internal/nitro/host/dev-host-candidate.js";
 import { computeDevelopmentHostFingerprint } from "#internal/nitro/host/dev-host-fingerprint.js";
 import { removeDevelopmentHostWorkspace } from "#internal/nitro/host/dev-host-workspace.js";
 import { prepareDevelopmentApplicationHost } from "#internal/nitro/host/prepare-application-host.js";
+import type { DevelopmentExtensionSelection } from "#compiler/development-extensions.js";
 import { DrainedNitroDevServer } from "#internal/nitro/host/drained-nitro-dev-server.js";
 import { usesParentDevelopmentWorkflowWorld } from "#internal/workflow/development-world-protocol.js";
 import type { PreparedDevelopmentApplicationHost } from "#internal/nitro/host/types.js";
@@ -15,7 +14,6 @@ import {
   activateDevelopmentGeneration,
   discardDevelopmentGeneration,
 } from "#internal/nitro/development-generation.js";
-import { resolveNitroCompiledArtifactsSource } from "#internal/nitro/routes/runtime-artifacts.js";
 
 export type DevelopmentRebuildKind = "structural" | "unchanged" | "runtime";
 
@@ -58,11 +56,13 @@ export interface DevelopmentAuthoredRebuildCoordinator {
 }
 
 export async function createDevelopmentAuthoredRebuildCoordinator(input: {
+  readonly developmentExtensions?: DevelopmentExtensionSelection;
   readonly devServer: DrainedNitroDevServer;
   readonly initialHost: PreparedDevelopmentApplicationHost;
 }): Promise<DevelopmentAuthoredRebuildCoordinator> {
   return new TransactionalDevelopmentAuthoredRebuildCoordinator({
     currentHostFingerprint: await computeDevelopmentHostFingerprint(input.initialHost),
+    developmentExtensions: input.developmentExtensions,
     currentRuntimeFingerprint: input.initialHost.generation.fingerprint,
     devServer: input.devServer,
     initialHost: input.initialHost,
@@ -83,17 +83,20 @@ class TransactionalDevelopmentAuthoredRebuildCoordinator implements DevelopmentA
   #currentHost: PreparedDevelopmentApplicationHost;
   #currentHostFingerprint: string;
   #currentRuntimeFingerprint: string;
+  readonly #developmentExtensions: DevelopmentExtensionSelection | undefined;
   readonly #devServer: DrainedNitroDevServer;
   readonly #usesParentWorkflowWorld: boolean;
 
   constructor(input: {
     readonly currentHostFingerprint: string;
     readonly currentRuntimeFingerprint: string;
+    readonly developmentExtensions: DevelopmentExtensionSelection | undefined;
     readonly devServer: DrainedNitroDevServer;
     readonly initialHost: PreparedDevelopmentApplicationHost;
   }) {
     this.#currentHost = input.initialHost;
     this.#currentHostFingerprint = input.currentHostFingerprint;
+    this.#developmentExtensions = input.developmentExtensions;
     this.#currentRuntimeFingerprint = input.currentRuntimeFingerprint;
     this.#devServer = input.devServer;
     this.#usesParentWorkflowWorld = usesParentDevelopmentWorkflowWorld(
@@ -115,6 +118,7 @@ class TransactionalDevelopmentAuthoredRebuildCoordinator implements DevelopmentA
     try {
       nextHost = await prepareDevelopmentApplicationHost(previousHost.appRoot, {
         changedPaths: input.changedPaths,
+        developmentExtensions: this.#developmentExtensions,
         previousExtensions: previousHost.workspaceExtensions,
       });
       if (
@@ -124,6 +128,7 @@ class TransactionalDevelopmentAuthoredRebuildCoordinator implements DevelopmentA
       ) {
         throw new DevelopmentWorkflowWorldChangeRequiresRestartError();
       }
+      await prewarmDevelopmentHost(nextHost);
       const nextHostFingerprint = await computeDevelopmentHostFingerprint(nextHost);
       const nextRuntimeFingerprint = nextHost.generation.fingerprint;
       const hasStructuralChange = nextHostFingerprint !== this.#currentHostFingerprint;
@@ -155,7 +160,6 @@ class TransactionalDevelopmentAuthoredRebuildCoordinator implements DevelopmentA
         this.#commitState(committedHost, nextHostFingerprint, nextRuntimeFingerprint);
         nextHost = undefined;
         environmentReload.commit();
-        startSandboxPrewarmAfterCommit(committedHost, input.changedPaths);
         return { host: committedHost, kind: "runtime" };
       }
 
@@ -167,7 +171,6 @@ class TransactionalDevelopmentAuthoredRebuildCoordinator implements DevelopmentA
       });
       nextHost = undefined;
       environmentReload.commit();
-      startSandboxPrewarmAfterCommit(result.host, input.changedPaths);
       return result;
     } catch (error) {
       if (error instanceof PostCommitDevelopmentRebuildError) {
@@ -266,37 +269,15 @@ function retainActiveHostWorkspace(
   };
 }
 
-function startSandboxPrewarmAfterCommit(
-  host: PreparedDevelopmentApplicationHost,
-  changedPaths: readonly string[],
-): void {
-  if (!hasSandboxRelatedChange(host.compileResult.project.agentRoot, changedPaths)) {
-    return;
-  }
-  const artifactsConfig = createDevelopmentNitroArtifactsConfig({
+async function prewarmDevelopmentHost(host: PreparedDevelopmentApplicationHost): Promise<void> {
+  await prewarmDevelopmentSandboxes({
     appRoot: host.appRoot,
-    configuredWorld: host.compileResult.manifest.config.experimental?.workflow?.world,
-  });
-  startDevelopmentSandboxPrewarmInBackground({
-    appRoot: host.appRoot,
-    compiledArtifactsSource: resolveNitroCompiledArtifactsSource(artifactsConfig),
+    compiledArtifactsSource: createDevelopmentGenerationArtifactsSource({
+      appRoot: host.appRoot,
+      configuredWorld: host.compileResult.manifest.config.experimental?.workflow?.world,
+      runtimeAppRoot: host.generation.runtimeAppRoot,
+    }),
     log: (message) => console.log(message),
-  });
-}
-
-function hasSandboxRelatedChange(agentRoot: string, changedPaths: readonly string[]): boolean {
-  return changedPaths.some((path) => {
-    const relativePath = relative(resolve(agentRoot), resolve(path));
-    const segments = relativePath.split(/[\\/]/u);
-    if (segments[0] === ".." || relativePath === "") {
-      return false;
-    }
-    return (
-      segments[0] === "sandbox.ts" ||
-      segments[0] === "sandbox" ||
-      segments[0] === "workspace" ||
-      segments[0] === "skills"
-    );
   });
 }
 

@@ -2,25 +2,23 @@ import { createHash } from "node:crypto";
 
 import { DEFAULT_EVE_SANDBOX_IMAGE } from "#execution/sandbox/bindings/eve-image.js";
 import type {
-  DockerSandboxCreateOptions,
-  DockerSandboxNetworkPolicy,
+  DockerSandboxEnvironmentOptions,
   DockerSandboxPullPolicy,
 } from "#public/sandbox/docker-sandbox.js";
 
 /**
- * Default base image for the Docker backend: eve's published sandbox
+ * Default base image for the Docker provider: eve's published sandbox
  * runtime image.
  */
 export const DEFAULT_DOCKER_SANDBOX_IMAGE = DEFAULT_EVE_SANDBOX_IMAGE;
 
 /**
- * Fully-defaulted Docker backend options consumed by the backend
+ * Fully-defaulted Docker provider options consumed by the provider
  * implementation.
  */
 export interface ResolvedDockerSandboxOptions {
   readonly env: Readonly<Record<string, string>>;
   readonly image: string;
-  readonly networkPolicy: DockerSandboxNetworkPolicy;
   readonly pullPolicy: DockerSandboxPullPolicy;
 }
 
@@ -28,12 +26,11 @@ export interface ResolvedDockerSandboxOptions {
  * Applies defaults to `docker(opts)`.
  */
 export function resolveDockerSandboxOptions(
-  options: DockerSandboxCreateOptions = {},
+  options: DockerSandboxEnvironmentOptions = {},
 ): ResolvedDockerSandboxOptions {
   return {
     env: options.env ?? {},
     image: options.image ?? DEFAULT_DOCKER_SANDBOX_IMAGE,
-    networkPolicy: options.networkPolicy ?? "allow-all",
     pullPolicy: options.pullPolicy ?? "if-not-present",
   };
 }
@@ -45,11 +42,16 @@ export function createDockerSandboxOptionsHash(options: ResolvedDockerSandboxOpt
     .slice(0, 20);
 }
 
-function dockerOptionsForHash(options: ResolvedDockerSandboxOptions): Record<string, unknown> {
+interface DockerTemplateOptions {
+  readonly env: Readonly<Record<string, string>>;
+  readonly image: string;
+  readonly pullPolicy: DockerSandboxPullPolicy;
+}
+
+function dockerOptionsForHash(options: ResolvedDockerSandboxOptions): DockerTemplateOptions {
   return {
     env: sortStringRecord(options.env),
     image: options.image,
-    networkPolicy: options.networkPolicy,
     pullPolicy: options.pullPolicy,
   };
 }

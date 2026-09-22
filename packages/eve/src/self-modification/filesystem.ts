@@ -1,13 +1,13 @@
 import { mkdir } from "node:fs/promises";
 import { resolve } from "node:path";
-
 import type { IFileSystem } from "just-bash";
 
 import { getLocalDevCapability } from "eve/local-dev";
 
-export async function createLocalSelfModificationFilesystem(input: {
-  readonly appRoot: string;
+export async function createSelfModificationFilesystem(input: {
+  readonly appRoot?: string;
   readonly defaultFilesystem: IFileSystem;
+  resolveProjectPath?(path: string): string;
   readonly justBash: typeof import("just-bash");
 }): Promise<IFileSystem> {
   const capability = getLocalDevCapability();
@@ -64,3 +64,5 @@ export async function createLocalSelfModificationFilesystem(input: {
     ],
   });
 }
+
+export const createLocalSelfModificationFilesystem = createSelfModificationFilesystem;

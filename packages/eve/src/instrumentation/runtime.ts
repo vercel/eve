@@ -71,6 +71,7 @@ import {
   registerInstrumentationRuntime,
 } from "#instrumentation/runtime-global.js";
 import { initializeSessionInstrumentation } from "#instrumentation/session-init.js";
+import { ensureAiSdkWarningLogger } from "#instrumentation/ai-sdk-warnings.js";
 
 export { getInstrumentationRuntime, registerInstrumentationRuntime };
 export { initializeSessionInstrumentation };
@@ -162,6 +163,7 @@ export interface InstrumentationRuntime {
 
 /** Worker-bound instrumentation operations consumed by one session execution. */
 export interface SessionInstrumentation {
+  readonly installAiSdkWarningLogger: () => void;
   readonly runStep: <TSession extends InstrumentedStepSession, TResult>(
     input: {
       readonly environment: string;
@@ -264,6 +266,7 @@ export function bindInstrumentationRuntime(
   const prepareExecution = (): SessionInstrumentation => {
     const executionRuntime = captureExecutionRuntime();
     return {
+      installAiSdkWarningLogger: ensureAiSdkWarningLogger,
       runStep: async (input, execute) => {
         const policyContext = readSessionContext();
         const hooks = bindHooks(policyContext);

@@ -1,6 +1,6 @@
 import type { SandboxSession } from "#shared/sandbox-session.js";
 import { truncateTail } from "#execution/sandbox/truncate-output.js";
-import { isEveDevEnvironment } from "#internal/application/optional-package-install.js";
+import { isEveDevEnvironment } from "#internal/application/dev-environment.js";
 
 const MAX_LOG_COMMAND_LENGTH = 240;
 

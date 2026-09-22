@@ -219,12 +219,9 @@ const memory = source
 
 const sandbox = source
   .extend({
-    backendKind: z.string().optional(),
-    description: z.string().optional(),
-    hasBootstrap: z.boolean(),
-    hasOnSession: z.boolean(),
-    revalidationKey: z.string().optional(),
-    sourceHash: z.string().optional(),
+    provider: z.string().optional(),
+    environmentExportName: z.string().optional(),
+    revisionHash: z.string(),
   })
   .strict();
 

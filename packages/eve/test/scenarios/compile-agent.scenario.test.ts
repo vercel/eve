@@ -773,11 +773,12 @@ describe("compileAgent", () => {
       },
     ]);
     expect(result.manifest.sandbox).toEqual({
-      description: undefined,
+      providerName: expect.any(String),
+      environmentExportName: "environment",
       exportName: undefined,
+      inheritsParent: undefined,
       logicalPath: "sandbox/sandbox.cjs",
-      revalidationKey: undefined,
-      sourceHash: expect.any(String),
+      revisionHash: expect.any(String),
       sourceId: "sandbox/sandbox.cjs",
       sourceKind: "module",
     });
@@ -1292,105 +1293,6 @@ describe("compileAgent", () => {
     );
   });
 
-  it("stores resolved sandbox bootstrap revalidation keys in compiled artifacts", async () => {
-    const { agentRoot, appRoot } = await createAppRoot(
-      "eve-compile-sandbox-revalidation-key-",
-      APP_ROOT_OPTIONS,
-    );
-
-    await mkdir(join(agentRoot, "sandbox"), {
-      recursive: true,
-    });
-    await writeFile(join(agentRoot, "agent.mjs"), 'export default { model: "openai/gpt-5.4" };\n');
-    await writeFile(join(agentRoot, "instructions.md"), "You are a precise assistant.");
-    await writeFile(
-      join(agentRoot, "sandbox", "sandbox.mjs"),
-      [
-        "export default {",
-        "  async revalidationKey() {",
-        '    return "bootstrap-revalidation-key-v1";',
-        "  },",
-        "  async bootstrap({ use }) {",
-        "    const sandbox = await use();",
-        '    await sandbox.run({ command: "echo bootstrap" });',
-        "  },",
-        "};",
-        "",
-      ].join("\n"),
-    );
-
-    const result = await compileAgent({
-      startPath: appRoot,
-    });
-
-    expect(result.manifest.sandbox).toEqual({
-      description: undefined,
-      exportName: undefined,
-      logicalPath: "sandbox/sandbox.mjs",
-      revalidationKey: "bootstrap-revalidation-key-v1",
-      sourceHash: expect.any(String),
-      sourceId: "sandbox/sandbox.mjs",
-      sourceKind: "module",
-    });
-  });
-
-  it("compiles sandbox bootstrap without a revalidation key", async () => {
-    const { agentRoot, appRoot } = await createAppRoot(
-      "eve-compile-sandbox-without-revalidation-key-",
-      APP_ROOT_OPTIONS,
-    );
-
-    await mkdir(join(agentRoot, "sandbox"), {
-      recursive: true,
-    });
-    await writeFile(join(agentRoot, "agent.mjs"), 'export default { model: "openai/gpt-5.4" };\n');
-    await writeFile(join(agentRoot, "instructions.md"), "You are a precise assistant.");
-    await writeFile(
-      join(agentRoot, "sandbox", "sandbox.mjs"),
-      [
-        "export default {",
-        "  async bootstrap({ use }) {",
-        "    const sandbox = await use();",
-        '    await sandbox.run({ command: "echo bootstrap" });',
-        "  },",
-        "};",
-        "",
-      ].join("\n"),
-    );
-
-    const result = await compileAgent({
-      startPath: appRoot,
-    });
-
-    expect(result.manifest.sandbox).toEqual({
-      description: undefined,
-      exportName: undefined,
-      logicalPath: "sandbox/sandbox.mjs",
-      revalidationKey: undefined,
-      sourceHash: expect.any(String),
-      sourceId: "sandbox/sandbox.mjs",
-      sourceKind: "module",
-    });
-  });
-
-  it("rejects sandbox bootstrap revalidation keys that resolve to empty or non-string values", async () => {
-    const emptyKeyApp = await createSandboxRevalidationKeyValidationApp({
-      name: "empty",
-      revalidationKeyExpression: '() => ""',
-    });
-    const nonStringKeyApp = await createSandboxRevalidationKeyValidationApp({
-      name: "non-string",
-      revalidationKeyExpression: "() => 123",
-    });
-
-    await expect(compileAgent({ startPath: emptyKeyApp.appRoot })).rejects.toThrow(
-      /must return a non-empty string/,
-    );
-    await expect(compileAgent({ startPath: nonStringKeyApp.appRoot })).rejects.toThrow(
-      /must return a string/,
-    );
-  });
-
   it("compiles authored subagent sandboxes into child runtime nodes", async () => {
     const { agentRoot, appRoot } = await createAppRoot(
       "eve-compile-subagent-sandbox-",
@@ -1417,12 +1319,13 @@ describe("compileAgent", () => {
     await writeFile(
       join(subagentRoot, "sandbox", "sandbox.mjs"),
       [
-        "export default {",
-        "  async onSession({ use }) {",
-        "    const sandbox = await use();",
-        '    await sandbox.run({ command: "mkdir -p .research" });',
-        "  },",
-        "};",
+        'import { DefaultSandbox, defineSandbox } from "eve/sandbox";',
+        "export const environment = DefaultSandbox.environment();",
+        "export default defineSandbox(async () => {",
+        "  const sandbox = await environment.open();",
+        '  await sandbox.run({ command: "mkdir -p .research" });',
+        "  return sandbox;",
+        "});",
         "",
       ].join("\n"),
     );
@@ -1527,40 +1430,6 @@ describe("compileAgent", () => {
     expect(metadata.status).toBe("failed");
   });
 });
-
-async function createSandboxRevalidationKeyValidationApp(input: {
-  readonly name: string;
-  readonly revalidationKeyExpression: string;
-}): Promise<{ readonly agentRoot: string; readonly appRoot: string }> {
-  const app = await createAppRoot(
-    `eve-compile-sandbox-${input.name}-revalidation-key-`,
-    APP_ROOT_OPTIONS,
-  );
-
-  await mkdir(join(app.agentRoot, "sandbox"), {
-    recursive: true,
-  });
-  await writeFile(
-    join(app.agentRoot, "agent.mjs"),
-    'export default { model: "openai/gpt-5.4" };\n',
-  );
-  await writeFile(join(app.agentRoot, "instructions.md"), "You are a precise assistant.");
-  await writeFile(
-    join(app.agentRoot, "sandbox", "sandbox.mjs"),
-    [
-      "export default {",
-      `  revalidationKey: ${input.revalidationKeyExpression},`,
-      "  async bootstrap({ use }) {",
-      "    const sandbox = await use();",
-      '    await sandbox.run({ command: "echo bootstrap" });',
-      "  },",
-      "};",
-      "",
-    ].join("\n"),
-  );
-
-  return app;
-}
 
 async function expectTscToPass(
   args: readonly string[],

@@ -90,8 +90,6 @@ import {
   isAgentModuleCandidate,
   type AgentModuleCandidate,
   type AgentSourceCandidate,
-  type AgentSourceLayer,
-  type AgentSourceOwner,
   type AgentSourceRegistry,
   canonicalSourceSlot,
 } from "#compiler/source-graph.js";
@@ -99,29 +97,21 @@ import {
   frameworkAgentSourceRegistry,
   memoryWrapperTemplate,
 } from "#framework/sources/registry.js";
-
-export interface CompileAgentManifestOptions {
-  readonly diagnostics?: CompilerDiagnostic[];
-  readonly sourceRegistries?: readonly AgentSourceRegistry[];
-}
-
-interface NodeCompileInput {
-  readonly extensionScope?: { readonly namespace: string; readonly sourceRoot: string };
-  readonly inheritedExternalDependencies: readonly string[];
-  readonly isRoot: boolean;
-  readonly layer: AgentSourceLayer;
-  readonly manifest: AgentSourceManifest;
-  readonly nodeId: string;
-  readonly owner: AgentSourceOwner;
-  readonly parentNodeId?: string;
-}
+import {
+  noDevelopmentExtensions,
+  prepareDevelopmentExtensions,
+} from "#compiler/development-extensions.js";
+import type {
+  CompileAgentManifestOptions,
+  NodeCompileInput,
+} from "#compiler/normalize-manifest-types.js";
+export type { CompileAgentManifestOptions } from "#compiler/normalize-manifest-types.js";
 
 interface CompiledLocalNodeResult {
   readonly descendants: readonly CompiledSubagentNode[];
   readonly manifest: CompiledAgentNodeManifest;
 }
 
-/** Compiles one discovery graph through the canonical source composition pipeline. */
 export async function compileAgentManifest(
   manifest: AgentSourceManifest,
   options: CompileAgentManifestOptions = {},
@@ -133,12 +123,19 @@ export async function compileAgentManifest(
     registries,
   };
   const diagnostics = options.diagnostics ?? [];
+  const developmentExtensions = await prepareDevelopmentExtensions({
+    diagnostics,
+    manifest,
+    nodeId: ROOT_COMPILED_AGENT_NODE_ID,
+    selection: options.developmentExtensions ?? noDevelopmentExtensions(),
+  });
   const compiler = new AgentGraphCompiler(context, registries, diagnostics);
   const root = await compiler.compileStaticNode({
+    developmentExtensionCandidates: developmentExtensions.candidates,
     inheritedExternalDependencies: [],
     isRoot: true,
     layer: "application",
-    manifest,
+    manifest: developmentExtensions.manifest,
     nodeId: ROOT_COMPILED_AGENT_NODE_ID,
     owner: { kind: "application" },
   });
@@ -221,7 +218,6 @@ class AgentGraphCompiler {
     const subagents = state.projected.subagents.filter((source) =>
       selectedSourceIds.has(source.candidate.sourceId),
     );
-
     for (const projected of subagents) {
       const source = projected.source;
       const nodeId = createCompiledSubagentNodeId(input.nodeId, source.sourceId);
@@ -412,6 +408,7 @@ class AgentGraphCompiler {
       });
     const orderedCandidates: AgentSourceCandidate[] = [
       ...frameworkCandidates,
+      ...(input.developmentExtensionCandidates ?? []),
       ...projected.candidates,
       ...memoryWrapperCandidates,
       ...applicationCandidates,

@@ -7,7 +7,9 @@ import {
   type SessionOwnerActivation,
 } from "#execution/session/handoff.js";
 import { resumeHook } from "#internal/workflow/runtime.js";
+import { getResolvedRuntimeAgentNode } from "#runtime/graph.js";
 import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
+import { getSandboxEnvironmentRuntime } from "#shared/sandbox-environment.js";
 import { isObject } from "#shared/guards.js";
 import { getAgentHandleStore } from "#subagents/handles/store.js";
 
@@ -74,7 +76,25 @@ export async function validateSessionCheckpointStep(input: {
   )
     throw new Error("Session checkpoint contains an invalid timeout duration.");
   const context = await deserializeContext(checkpoint.serializedContext);
-  context.require(BundleKey);
+  const bundle = context.require(BundleKey);
+  const session = readDurableSession(checkpoint.sessionState);
+  const sandboxState = session.sandboxState?.session;
+  if (sandboxState !== null && sandboxState !== undefined) {
+    const definition =
+      getResolvedRuntimeAgentNode(bundle.graph, bundle.nodeId).sandboxRegistry.sandbox.inheritance
+        ?.definition ??
+      getResolvedRuntimeAgentNode(bundle.graph, bundle.nodeId).sandboxRegistry.sandbox.definition;
+    if (definition.kind !== "independent") {
+      throw new Error("Session checkpoint sandbox has no resolved provider.");
+    }
+    const provider = getSandboxEnvironmentRuntime(definition.environment);
+    if (
+      sandboxState.providerName !== provider.providerName ||
+      sandboxState.stateProtocolVersion !== provider.stateProtocolVersion
+    ) {
+      throw new Error("Session checkpoint sandbox provider state is incompatible.");
+    }
+  }
   if (!isSessionStateIdleForHandoff(checkpoint.sessionState)) {
     throw new Error("Session checkpoint contains pending work and cannot be handed off.");
   }

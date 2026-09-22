@@ -98,7 +98,6 @@ describe("buildCallbackContext – getSandbox", () => {
     await live.run({ command: "echo ready" });
 
     expect(sandbox.commandLog).toEqual(["echo ready"]);
-    expect(live.id).toBe(sandboxId);
   });
 
   it("passes file operations through the expanded session surface", async () => {

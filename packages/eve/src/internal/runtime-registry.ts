@@ -11,8 +11,8 @@ export interface RuntimeRegistryEntryLocation {
 
 /**
  * Error raised when a runtime-owned subsystem rejects an entry — for
- * example a duplicate authored sandbox name, a tool name reserved by the
- * framework, or a subagent whose node id is already taken.
+ * example a tool name reserved by the framework or a subagent whose node id
+ * is already taken.
  *
  * The `registry` field identifies which subsystem produced the error
  * (`"sandbox"`, `"tool"`, `"subagent"`, …) so consumers can branch on

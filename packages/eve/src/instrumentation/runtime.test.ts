@@ -882,6 +882,26 @@ describe("bindInstrumentationRuntime", () => {
 });
 
 describe("bindSessionInstrumentation", () => {
+  it("installs the AI SDK warning logger through the bound facade", () => {
+    const originalLogger = globalThis.AI_SDK_LOG_WARNINGS;
+    try {
+      globalThis.AI_SDK_LOG_WARNINGS = undefined;
+      registerInstrumentationRuntime(createRuntime({ capturesContent: true, publish: vi.fn() }));
+
+      const instrumentation = bindSessionInstrumentation({
+        agentName: "test-agent",
+        ctx: createContext(),
+        rootSessionId: "session-1",
+        sessionId: "session-1",
+      })?.prepareExecution();
+      instrumentation?.installAiSdkWarningLogger();
+
+      expect(globalThis.AI_SDK_LOG_WARNINGS).toBeTypeOf("function");
+    } finally {
+      globalThis.AI_SDK_LOG_WARNINGS = originalLogger;
+    }
+  });
+
   it("uses a persisted decision without migrating the durable context", async () => {
     const policy = vi.fn(() => true);
     registerInstrumentationRuntime(

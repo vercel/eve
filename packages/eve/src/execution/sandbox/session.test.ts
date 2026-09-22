@@ -28,7 +28,6 @@ function createTestPrimitives(
   overrides: Partial<InternalSandboxSession> = {},
 ): InternalSandboxSession {
   return {
-    id: overrides.id ?? "test-session-id",
     readFile: overrides.readFile ?? vi.fn(async () => null),
     removePath: overrides.removePath ?? vi.fn(async () => {}),
     resolvePath: overrides.resolvePath ?? ((path: string) => `/resolved/${path}`),
@@ -38,16 +37,6 @@ function createTestPrimitives(
 }
 
 describe("buildSandboxSession", () => {
-  // ---------------------------------------------------------------------------
-  // id
-  // ---------------------------------------------------------------------------
-
-  it("exposes the primitives id as the public session id", () => {
-    const session = buildSandboxSession(createTestPrimitives({ id: "sbx-123" }));
-
-    expect(session.id).toBe("sbx-123");
-  });
-
   // ---------------------------------------------------------------------------
   // setNetworkPolicy
   // ---------------------------------------------------------------------------
@@ -62,15 +51,13 @@ describe("buildSandboxSession", () => {
       },
     };
 
-    await session.setNetworkPolicy(policy);
+    await session.setNetworkPolicy?.(policy);
 
     expect(apply).toHaveBeenCalledWith(policy);
   });
 
-  it("defaults setNetworkPolicy to a no-op when no applier is supplied", async () => {
-    const session = buildSandboxSession(createTestPrimitives());
-
-    await expect(session.setNetworkPolicy("deny-all")).resolves.toBeUndefined();
+  it("omits setNetworkPolicy when no applier is supplied", () => {
+    expect(buildSandboxSession(createTestPrimitives()).setNetworkPolicy).toBeUndefined();
   });
 
   // ---------------------------------------------------------------------------

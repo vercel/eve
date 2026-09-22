@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { createDockerSandboxBackend } from "#execution/sandbox/bindings/docker.js";
+import { createDockerSandboxProvider } from "#execution/sandbox/bindings/docker.js";
+import { createSandboxProviderHarness } from "#internal/testing/sandbox-provider-harness.js";
 import type { DockerCli } from "#execution/sandbox/bindings/docker-cli.js";
 
 describe("Docker sandbox deletion", () => {
@@ -22,15 +23,18 @@ describe("Docker sandbox deletion", () => {
         throw new Error("stream is not used by this test");
       },
     };
-    const backend = createDockerSandboxBackend({ dockerCli });
-    const handle = await backend.create({
-      runtimeContext: { appRoot: "/tmp/eve-app" },
-      sessionKey: "session-key",
-      templateKey: null,
+    const provider = createSandboxProviderHarness(
+      createDockerSandboxProvider(undefined, dockerCli),
+      {},
+      { preparedArtifact: () => ({ imageReference: "prepared-image" }) },
+    );
+    const handle = await provider.openSession({
+      appRoot: "/tmp/eve-app",
+      sandboxName: "session-key",
     });
     vi.mocked(run).mockClear();
 
-    await handle.delete();
+    await handle.onSessionDelete();
 
     expect(run).toHaveBeenNthCalledWith(1, ["stop", "-t", "0", "container-id-1"]);
     expect(run).toHaveBeenNthCalledWith(2, ["rm", "-f", "container-id-1"]);
@@ -55,22 +59,24 @@ describe("Docker sandbox deletion", () => {
         throw new Error("stream is not used by this test");
       },
     };
-    const backend = createDockerSandboxBackend({ dockerCli });
-    const oldHandle = await backend.create({
-      runtimeContext: { appRoot: "/tmp/eve-app" },
-      sessionKey: "session-key",
-      templateKey: null,
+    const provider = createSandboxProviderHarness(
+      createDockerSandboxProvider(undefined, dockerCli),
+      {},
+      { preparedArtifact: () => ({ imageReference: "prepared-image" }) },
+    );
+    const oldHandle = await provider.openSession({
+      appRoot: "/tmp/eve-app",
+      sandboxName: "session-key",
     });
-    await oldHandle.delete();
+    await oldHandle.onSessionDelete();
     containerId = "container-id-2";
-    await backend.create({
-      runtimeContext: { appRoot: "/tmp/eve-app" },
-      sessionKey: "session-key",
-      templateKey: null,
+    await provider.openSession({
+      appRoot: "/tmp/eve-app",
+      sandboxName: "session-key",
     });
     vi.mocked(run).mockClear();
 
-    await oldHandle.session.writeTextFile({ content: "stale", path: "/workspace/stale.txt" });
+    await oldHandle.sandbox.writeTextFile({ content: "stale", path: "/workspace/stale.txt" });
 
     expect(run).toHaveBeenCalledWith(
       expect.arrayContaining(["container-id-1"]),

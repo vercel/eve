@@ -111,6 +111,11 @@ export async function stageDevelopmentRuntimeArtifactsSnapshot(
     );
     await rewriteSnapshotCompiledManifest({
       appRoot: compileResult.project.appRoot,
+      extensionPackageRoots: (compileResult.manifest?.subagents ?? []).flatMap((subagent) =>
+        subagent.owner.kind === "extension"
+          ? [{ sourceRoot: subagent.agent.appRoot, packageName: subagent.owner.packageName }]
+          : [],
+      ),
       manifestPath: join(
         sourceSnapshotPlan.runtimeAppRoot,
         ".eve",
@@ -429,8 +434,14 @@ function readDevelopmentRuntimeArtifactsPointer(
   }
 }
 
+interface ExtensionPackageRoot {
+  readonly sourceRoot: string;
+  readonly packageName: string;
+}
+
 async function rewriteSnapshotCompiledManifest(input: {
   readonly appRoot: string;
+  readonly extensionPackageRoots: readonly ExtensionPackageRoot[];
   readonly manifestPath: string;
   readonly runtimeAppRoot: string;
   readonly snapshotSourceRoot: string;
@@ -439,6 +450,7 @@ async function rewriteSnapshotCompiledManifest(input: {
   const manifest = JSON.parse(await readFile(input.manifestPath, "utf8")) as unknown;
   const rewritten = rewriteManifestRoots({
     appRoot: input.appRoot,
+    extensionPackageRoots: input.extensionPackageRoots,
     runtimeAppRoot: input.runtimeAppRoot,
     snapshotSourceRoot: input.snapshotSourceRoot,
     sourceRoot: input.sourceRoot,
@@ -450,6 +462,7 @@ async function rewriteSnapshotCompiledManifest(input: {
 
 function rewriteManifestRoots(input: {
   readonly appRoot: string;
+  readonly extensionPackageRoots: readonly ExtensionPackageRoot[];
   readonly runtimeAppRoot: string;
   readonly snapshotSourceRoot: string;
   readonly sourceRoot: string;
@@ -466,17 +479,20 @@ function rewriteManifestRoots(input: {
   const rewritten: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(input.value)) {
     if (typeof value === "string" && (key === "appRoot" || key === "agentRoot")) {
-      rewritten[key] = isPathInsideOrEqual(value, input.appRoot)
-        ? rewritePathWithinAppRoot({
-            appRoot: input.appRoot,
-            path: value,
-            runtimeAppRoot: input.runtimeAppRoot,
-          })
-        : rewritePathWithinSourceRoot({
-            path: value,
-            snapshotSourceRoot: input.snapshotSourceRoot,
-            sourceRoot: input.sourceRoot,
-          });
+      rewritten[key] =
+        isPathInsideOrEqual(value, input.appRoot) ||
+        input.extensionPackageRoots.some((root) => isPathInsideOrEqual(value, root.sourceRoot))
+          ? rewritePathWithinAppRoot({
+              appRoot: input.appRoot,
+              extensionPackageRoots: input.extensionPackageRoots,
+              path: value,
+              runtimeAppRoot: input.runtimeAppRoot,
+            })
+          : rewritePathWithinSourceRoot({
+              path: value,
+              snapshotSourceRoot: input.snapshotSourceRoot,
+              sourceRoot: input.sourceRoot,
+            });
       continue;
     }
 
@@ -491,6 +507,7 @@ function rewriteManifestRoots(input: {
 
     rewritten[key] = rewriteManifestRoots({
       appRoot: input.appRoot,
+      extensionPackageRoots: input.extensionPackageRoots,
       runtimeAppRoot: input.runtimeAppRoot,
       snapshotSourceRoot: input.snapshotSourceRoot,
       sourceRoot: input.sourceRoot,
@@ -519,11 +536,24 @@ function rewritePathWithinSourceRoot(input: {
 
 function rewritePathWithinAppRoot(input: {
   readonly appRoot: string;
+  readonly extensionPackageRoots: readonly ExtensionPackageRoot[];
   readonly path: string;
   readonly runtimeAppRoot: string;
 }): string {
   if (!isPathInsideOrEqual(input.path, input.appRoot)) {
-    return input.path;
+    // Extension subagents retain package-owned roots at compile time; runtime
+    // code is materialized separately, but their metadata must be snapshot-local.
+    const extension = input.extensionPackageRoots.find((root) =>
+      isPathInsideOrEqual(input.path, root.sourceRoot),
+    );
+    return extension === undefined
+      ? input.path
+      : join(
+          input.runtimeAppRoot,
+          "node_modules",
+          extension.packageName,
+          relative(extension.sourceRoot, input.path),
+        );
   }
 
   const relativePath = relative(input.appRoot, input.path);
