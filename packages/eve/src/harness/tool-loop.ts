@@ -252,6 +252,10 @@ import {
   type StepResult,
   type ToolLoopHarnessConfig,
 } from "#harness/types.js";
+import {
+  getPersistedHarnessAgentSession,
+  setPersistedHarnessAgentSession,
+} from "#harness/harness-agent-persistence.js";
 
 type HarnessAgentCallExtensions = {
   session?: HarnessAgentSession;
@@ -1653,6 +1657,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       });
 
       let agent: Agent;
+      let harnessSession: HarnessAgentSession | undefined;
       const turnInput:
         | (AgentCallParameters<never> & HarnessAgentCallExtensions)
         | (AgentStreamParameters<never, any> & HarnessAgentCallExtensions) = {
@@ -1660,7 +1665,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         messages: callMessages,
       };
       if (execution.kind === "harness") {
-        agent = new HarnessAgent({
+        const harnessAgent = new HarnessAgent({
           instructions: typeof instructions === "string" ? instructions : instructions?.content,
           harness: execution.harness,
           onLanguageModelCallEnd(event: LanguageModelCallEndEvent) {
@@ -1690,11 +1695,20 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
           stopWhen: isStepCount(1),
           telemetry: attempt?.telemetry,
         });
+        agent = harnessAgent;
 
-        turnInput.session = await (agent as HarnessAgent).createSession({
+        const persistedHarnessSession = getPersistedHarnessAgentSession({ session });
+        harnessSession = await harnessAgent.createSession({
           abortSignal: generation.signal,
           sandboxSession: await loadHarnessAgentSandboxSession(),
+          ...(persistedHarnessSession === undefined
+            ? {}
+            : {
+                resumeFrom: persistedHarnessSession.resumeFrom,
+                sessionId: persistedHarnessSession.sessionId,
+              }),
         });
+        turnInput.session = harnessSession;
       } else {
         const agentSettings = {
           headers: attributionHeaders,
@@ -1842,6 +1856,17 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
 
       try {
         const result = await executeModelCall();
+        if (harnessSession !== undefined) {
+          const resumeFrom = await harnessSession.detach();
+          session = setPersistedHarnessAgentSession({
+            persistence: {
+              resumeFrom,
+              sessionId: harnessSession.sessionId,
+              version: 1,
+            },
+            session,
+          });
+        }
         await attempt?.complete();
         return result;
       } catch (error) {

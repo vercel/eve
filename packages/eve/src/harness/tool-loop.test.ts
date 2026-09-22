@@ -638,10 +638,19 @@ async function invokeMockStepStart(
 
 type MockHarnessAgentSettings = Pick<MockAgentSettings, "onStepEnd" | "onStepStart">;
 
-type MockHarnessAgentConstructor = (settings: MockHarnessAgentSettings) => HarnessAgent;
-
 function setupMockHarnessAgent(result: Record<string, unknown>) {
-  const createSession = vi.fn().mockResolvedValue({ sessionId: "harness-session" });
+  const resumeFrom = {
+    data: {},
+    harnessId: "test-harness",
+    specificationVersion: "harness-v1",
+    type: "resume-session",
+  } as const;
+  const detach = vi.fn().mockResolvedValue(resumeFrom);
+  const harnessSession = {
+    detach,
+    sessionId: "harness-session",
+  };
+  const createSession = vi.fn().mockResolvedValue(harnessSession);
   vi.mocked(HarnessAgent).mockImplementation(function (
     this: Record<string, unknown>,
     settings: MockHarnessAgentSettings,
@@ -660,8 +669,14 @@ function setupMockHarnessAgent(result: Record<string, unknown>) {
       return mockResult;
     });
     return this as unknown as HarnessAgent;
-  } as unknown as MockHarnessAgentConstructor);
-  return createSession;
+  } as unknown as ConstructorParameters<typeof HarnessAgent> extends [infer Settings]
+    ? (settings: Settings) => HarnessAgent
+    : never);
+  return {
+    createSession,
+    detach,
+    resumeFrom,
+  };
 }
 
 function setupMockAgent(result: Record<string, unknown>): void {
@@ -1638,7 +1653,7 @@ describe("createToolLoopHarness", () => {
   );
 
   it("runs a harness-backed step without model resolution", async () => {
-    const createSession = setupMockHarnessAgent({
+    const { createSession, detach, resumeFrom } = setupMockHarnessAgent({
       finishReason: "stop",
       response: { messages: [{ content: "Hello!", role: "assistant" }] },
       text: "Hello!",
@@ -1686,6 +1701,14 @@ describe("createToolLoopHarness", () => {
       abortSignal: expect.any(AbortSignal),
       sandboxSession: harnessSandbox,
     });
+    expect(detach).toHaveBeenCalledOnce();
+    expect(result.session.state).toMatchObject({
+      "eve.harness.agentSession": {
+        resumeFrom,
+        sessionId: "harness-session",
+        version: 1,
+      },
+    });
     expect(events.find((event) => event.type === "step.started")).toEqual({
       data: {
         harnessId: "test-harness",
@@ -1696,6 +1719,45 @@ describe("createToolLoopHarness", () => {
       type: "step.started",
     });
     expect(result.session.history).toContainEqual({ content: "Hello!", role: "assistant" });
+  });
+
+  it("resumes the persisted HarnessAgent session on a follow-up turn", async () => {
+    const { createSession, detach, resumeFrom } = setupMockHarnessAgent({
+      finishReason: "stop",
+      response: { messages: [{ content: "Hello!", role: "assistant" }] },
+      text: "Hello!",
+      toolCalls: [],
+      toolResults: [],
+    });
+    const harnessSandbox = {} as HarnessV1NetworkSandboxSession;
+    mockLoadHarnessAgentSandboxSession.mockResolvedValue(harnessSandbox);
+    const harness = createTestHarness();
+    const runStep = createToolLoopHarness(
+      createTestConfig("conversation", createEventCollector().emit, { harness }),
+    );
+    const session = createTestSession({
+      agent: {
+        harnessId: harness.harnessId,
+        system: "You are a test assistant.",
+        tools: [],
+      },
+    });
+
+    const first = await contextStorage.run(new ContextContainer(), () =>
+      runStep(session, { message: "Who are you?" }),
+    );
+    await contextStorage.run(new ContextContainer(), () =>
+      runStep(first.session, { message: "Repeat that." }),
+    );
+
+    expect(createSession).toHaveBeenCalledTimes(2);
+    expect(createSession.mock.calls[1]?.[0]).toEqual({
+      abortSignal: expect.any(AbortSignal),
+      resumeFrom,
+      sandboxSession: harnessSandbox,
+      sessionId: "harness-session",
+    });
+    expect(detach).toHaveBeenCalledTimes(2);
   });
 
   it("rejects a harness that does not match the persisted harness identity", async () => {
@@ -10284,7 +10346,7 @@ describe("createToolLoopHarness", () => {
         system: "You are a test assistant.",
         tools: [],
       },
-      history: [{ content: "Keep this history", role: "user" }],
+      history: [{ content: "Keep this history", kind: "user", role: "user" }],
     });
 
     const result = await runStep(session);

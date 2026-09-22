@@ -152,7 +152,15 @@ function setupMockHarnessAgent(): void {
       toolResults: [],
       usage: undefined,
     };
-    this.createSession = vi.fn().mockResolvedValue({ sessionId: "harness-session" });
+    this.createSession = vi.fn().mockResolvedValue({
+      detach: vi.fn().mockResolvedValue({
+        data: {},
+        harnessId: "test-harness",
+        specificationVersion: "harness-v1",
+        type: "resume-session",
+      }),
+      sessionId: "harness-session",
+    });
     this.generate = vi.fn().mockImplementation(async () => {
       await onStepEnd?.(result);
       return { ...result, responseMessages: result.response.messages };

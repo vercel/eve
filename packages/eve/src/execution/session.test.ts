@@ -116,6 +116,42 @@ describe("createSession", () => {
     expect(hydrated.agent).toMatchObject({ harnessId: "test-harness" });
   });
 
+  it("preserves HarnessAgent resume state through durable projection and hydration", () => {
+    const harness = {
+      builtinTools: {},
+      harnessId: "test-harness",
+      specificationVersion: "harness-v1",
+      async doStart() {
+        throw new Error("Not implemented in this test.");
+      },
+    } as HarnessV1;
+    const turnAgent = createHarnessTurnAgent(harness);
+    const persistence = {
+      resumeFrom: {
+        data: { cursor: 1 },
+        harnessId: "test-harness",
+        specificationVersion: "harness-v1",
+        type: "resume-session",
+      },
+      sessionId: "harness-session",
+      version: 1,
+    } as const;
+    const session = {
+      ...createSession({
+        continuationToken: "root-token",
+        sessionId: "sess-root",
+        turnAgent,
+      }),
+      state: { "eve.harness.agentSession": persistence },
+    };
+
+    const durable = projectToDurableSession(session);
+    const hydrated = hydrateDurableSession({ durable, turnAgent });
+
+    expect(durable.state?.["eve.harness.agentSession"]).toEqual(persistence);
+    expect(hydrated.state?.["eve.harness.agentSession"]).toEqual(persistence);
+  });
+
   it("creates a session with correct agent configuration", () => {
     const outputSchema = { properties: { title: { type: "string" } }, type: "object" } as const;
     const session = createSession({
