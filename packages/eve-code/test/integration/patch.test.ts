@@ -149,6 +149,7 @@ test("reports every planning failure before writing", async () => {
   });
   await assert.rejects(
     applyPatchToSandbox({
+      sessionId: "session-1",
       repoRoot: "/workspace/eve",
       sandbox,
       patchText: `*** Begin Patch
@@ -182,6 +183,7 @@ test("validates every operation before changing the sandbox", async () => {
   });
   await assert.rejects(
     applyPatchToSandbox({
+      sessionId: "session-1",
       repoRoot: "/workspace/eve",
       sandbox,
       patchText: `*** Begin Patch
@@ -207,6 +209,7 @@ test("applies add, update, move, and delete after prevalidation", async () => {
     "/workspace/eve/delete.txt": "remove\n",
   });
   const files = await applyPatchToSandbox({
+    sessionId: "session-1",
     repoRoot: "/workspace/eve",
     sandbox,
     patchText: `*** Begin Patch
@@ -238,10 +241,27 @@ test("applies add, update, move, and delete after prevalidation", async () => {
   assert.equal(await sandbox.readTextFile({ path: "/workspace/eve/delete.txt" }), null);
 });
 
+test("serializes patches from distinct sandbox handles in one session", async () => {
+  const sandbox = memorySandbox({ "/workspace/eve/file.txt": "one\ntwo\n" });
+  const patch = (from: string, to: string) =>
+    applyPatchToSandbox({
+      sessionId: "session-serialized",
+      repoRoot: "/workspace/eve",
+      // Each ctx.getSandbox() call returns a new handle for the same sandbox.
+      sandbox: { ...sandbox },
+      patchText: `*** Begin Patch\n*** Update File: file.txt\n@@\n-${from}\n+${to}\n*** End Patch`,
+    });
+
+  await Promise.all([patch("one", "ONE"), patch("two", "TWO")]);
+
+  assert.equal(await sandbox.readTextFile({ path: "/workspace/eve/file.txt" }), "ONE\nTWO\n");
+});
+
 test("collects pre-commit evidence inside the patch lock before writing", async () => {
   const sandbox = memorySandbox({ "/workspace/eve/file.txt": "before\n" });
   let observed = "";
   await applyPatchToSandbox({
+    sessionId: "session-1",
     async beforeCommit(files) {
       observed = (await sandbox.readTextFile({ path: "/workspace/eve/file.txt" })) ?? "";
       assert.deepEqual(files, [{ operation: "update", path: "file.txt" }]);
@@ -263,6 +283,7 @@ test("collects pre-commit evidence inside the patch lock before writing", async 
 test("rejects paths outside the selected repository", async () => {
   await assert.rejects(
     applyPatchToSandbox({
+      sessionId: "session-1",
       repoRoot: "/workspace/eve",
       sandbox: memorySandbox({}),
       patchText: `*** Begin Patch
@@ -277,6 +298,7 @@ test("rejects paths outside the selected repository", async () => {
 test("rejects paths that cross a repository symlink", async () => {
   await assert.rejects(
     applyPatchToSandbox({
+      sessionId: "session-1",
       repoRoot: "/workspace/eve",
       sandbox: memorySandbox({}, { "/workspace/eve/escape/file.txt": "/workspace/other/file.txt" }),
       patchText: `*** Begin Patch
@@ -303,6 +325,7 @@ test("a partial temporary write leaves the target unchanged", async () => {
   };
   await assert.rejects(
     applyPatchToSandbox({
+      sessionId: "session-1",
       repoRoot: "/workspace/eve",
       sandbox,
       patchText: `*** Begin Patch
@@ -323,7 +346,6 @@ function memorySandbox(
 ): SandboxSession {
   const files = new Map(Object.entries(initial));
   return {
-    id: `sandbox-${crypto.randomUUID()}`,
     resolvePath(path) {
       return path.startsWith("/") ? path : `/workspace/${path}`;
     },

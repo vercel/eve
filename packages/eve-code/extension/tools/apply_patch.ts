@@ -77,6 +77,7 @@ export default defineTool({
       patchText,
       repoRoot,
       sandbox,
+      sessionId: ctx.session.id,
     });
 
     const changedPaths = files.filter((f) => f.operation !== "delete").map((f) => f.path);

@@ -16,43 +16,39 @@ export default code({
 });
 ```
 
-Both connectors are optional; `code({})` mounts without either. The Vercel connector requests an app-subject token. Use `delivery: "command"` on the Vercel connector for local backends without `setNetworkPolicy`. Firewall delivery is the default and keeps tokens outside sandbox processes. A top-level `broker(sandbox, rules)` callback lets the consumer merge Vercel credential rules into its own network policy.
+Both connectors are optional; `code({})` mounts without either. The Vercel connector requests an app-subject token. Firewall delivery is the default and keeps tokens outside sandbox processes; without a consumer `broker`, it requires a sandbox provider that exposes `setNetworkPolicy()` and fails otherwise. Use `delivery: "command"` on the Vercel connector for providers without mutable network policy. A top-level `broker(sandbox, rules)` callback lets the consumer merge Vercel credential rules into its own network policy.
 
 To enable the authenticated `gh` tool, configure `github` with `connector`, `org`, and a required `broker(sandbox, rules)` callback. The tool requests a token for exactly one repository in that organization. The callback installs the supplied GitHub header-transform rules for the command, then receives `null` to remove the lease. It must preserve the consumer's other network rules. GitHub authentication has no command-delivery option on this tool; sandbox processes receive a placeholder token, not the real credential.
 
 ## Sandbox bootstrap
 
-Install CLI tooling and computer-use assets during `bootstrap`, then start the desktop and driver in `onSession`. Computer use requires an apt-based Linux image with root or passwordless sudo; it cannot run on the `just-bash` backend. Include both revalidation keys so cached templates rebuild when either helper changes:
+Install CLI tooling and computer-use assets in the environment's `prepare` callback, then start the desktop and driver after `open()` in `defineSandbox()`. Computer use requires an apt-based Linux image with root or passwordless sudo; it cannot run on the `just-bash` provider.
 
 ```ts
 // agent/sandbox.ts
 import { defineSandbox } from "eve/sandbox";
-import { vercel } from "eve/sandbox/vercel";
-import {
-  CODE_TOOLING_REVALIDATION_KEY,
-  COMPUTER_USE_REVALIDATION_KEY,
-  installCodeTooling,
-  installComputerUse,
-  startComputerUse,
-} from "eve-code/sandbox";
+import { VercelSandbox } from "eve/sandbox/vercel";
+import { installCodeTooling, installComputerUse, startComputerUse } from "eve-code/sandbox";
 
-export default defineSandbox({
-  backend: vercel(),
-  revalidationKey: () => `${CODE_TOOLING_REVALIDATION_KEY}:${COMPUTER_USE_REVALIDATION_KEY}`,
-  async bootstrap({ use }) {
-    const sandbox = await use();
+export const environment = VercelSandbox.environment({
+  prepare: async (sandbox) => {
     await installCodeTooling(sandbox, { vercel: true });
     await installComputerUse(sandbox);
   },
-  async onSession({ use }) {
-    await startComputerUse(await use());
-  },
+});
+
+export default defineSandbox(async () => {
+  const sandbox = await environment.open();
+  await startComputerUse(sandbox);
+  return sandbox;
 });
 ```
 
-Mounting the extension exposes `computer_use` but does not install or start its driver. Bootstrap caches files, not running processes; `onSession` starts the driver for each new session. If the driver exits or the backend restores only filesystem state, call `startComputerUse` again before using the tool; reattachment does not necessarily rerun `onSession`. Stop recordings with `record_stop` to finalize the MP4 at the returned sandbox path. A five-minute watchdog also finalizes forgotten recordings, and the driver attempts finalization on `SIGINT` or `SIGTERM`; abrupt VM termination cannot guarantee a finalized MP4.
+eve derives the prepared environment generation from the sandbox file and environment options, not from imported helpers, so upgrading eve-code alone does not rebuild an existing prepared artifact.
 
-Bootstrap ensures `gh`, installs wrappers for `gh`, `vc`, and `gh-signed-commit`, and installs TypeScript diagnostics. For repositories requiring verified signatures, stage the intended changes and use `gh-signed-commit`.
+Mounting the extension exposes `computer_use` but does not install or start its driver. The prepared artifact captures files, not running processes; the `defineSandbox()` selector starts the driver once for each new durable sandbox. If the driver exits or the provider resumes only filesystem state, call `startComputerUse` again before using the tool; resuming a sandbox does not rerun the selector. Stop recordings with `record_stop` to finalize the MP4 at the returned sandbox path. A five-minute watchdog also finalizes forgotten recordings, and the driver attempts finalization on `SIGINT` or `SIGTERM`; abrupt VM termination cannot guarantee a finalized MP4.
+
+Preparation ensures `gh`, installs wrappers for `gh`, `vc`, and `gh-signed-commit`, and installs TypeScript diagnostics. For repositories requiring verified signatures, stage the intended changes and use `gh-signed-commit`.
 
 ## Non-Connect escape hatch
 
@@ -81,9 +77,9 @@ eve-code is benchmarked with [eve-bench](https://github.com/vercel-labs/eve-benc
 
 ### In CI
 
-The `eve-code > Benchmark harness` workflow runs this PR's eve-code whenever `packages/eve-code/**` changes. Each trial runs in its own Vercel Sandbox, using the model in the `EVE_CODE_BENCH_MODEL` repository variable. The report goes to the job summary and a PR comment. It covers resolved tasks, latency, and token usage, and compares against the stored eve-code baseline and stored results of other harnesses.
+The `eve-code > Benchmark harness` workflow runs whenever `packages/eve-code/**` changes. It benchmarks the PR head's eve-code, opencode, and pi together, using the model in the `EVE_CODE_BENCH_MODEL` repository variable. Every trial runs in its own Vercel Sandbox, and all of them start at once, so a run takes about as long as its slowest trial. Each harness is compared with its own latest result from `main`. The report covers resolved tasks, latency, and token usage. It goes to the job summary and a PR comment.
 
-To run another harness on the PR, comment `/benchmark <harness>`, for example `/benchmark opencode`. You need write access to the repository. `/benchmark` alone re-runs eve-code. Runs on `main` publish their results to the eve-bench result store, so later PRs compare against them.
+Comment `/benchmark` to re-run the default harnesses, or `/benchmark <harness>[,<harness>...]` to choose, for example `/benchmark codex,eve-code`. You need write access to the repository. Every push to `main` that touches eve-code publishes fresh results to the eve-bench result store, which is where later PRs get their baselines.
 
 ### Locally
 

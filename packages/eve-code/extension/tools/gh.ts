@@ -24,6 +24,7 @@ export default defineTool({
   execute(input, ctx) {
     return executeGitHubShell(input, extension.config.github, {
       getSandbox: () => ctx.getSandbox(),
+      sessionId: ctx.session.id,
     });
   },
 });

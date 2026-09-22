@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { ConnectTokenParams } from "@vercel/connect";
-import type { SandboxSession } from "eve/sandbox";
+import type { MutableNetworkSandboxSession, SandboxSession } from "eve/sandbox";
 
 import {
   executeGitHubShell,
@@ -10,6 +10,8 @@ import {
   type GitHubLeaseRule,
   type GitHubShellInput,
 } from "../../extension/lib/github-shell.ts";
+
+type NetworkPolicy = Parameters<MutableNetworkSandboxSession["setNetworkPolicy"]>[0];
 
 const CONFIG = {
   connector: "github/citron-compass",
@@ -21,6 +23,7 @@ const CONFIG = {
     const allow = Object.fromEntries(
       Object.entries(rules ?? {}).map(([host, entries]) => [host, [...entries]]),
     );
+    if (sandbox.setNetworkPolicy === undefined) throw new Error("test sandbox lacks networking");
     await sandbox.setNetworkPolicy(rules ? { allow: { "*": [], ...allow } } : "allow-all");
   },
 };
@@ -74,6 +77,7 @@ test("runs clone without approval while retaining repository-scoped write-capabl
   const runs: Parameters<SandboxSession["run"]>[0][] = [];
 
   await executeGitHubShell(CLONE, CONFIG, {
+    sessionId: "session-1",
     async getConnectToken(connector, params) {
       tokenCalls.push({ connector, params });
       return "secret-token";
@@ -151,6 +155,7 @@ test("rejects empty or multiple permissions before sandbox access or token minti
     });
     await assert.rejects(
       executeGitHubShell(input, CONFIG, {
+        sessionId: "session-1",
         async getSandbox() {
           assert.fail("invalid permissions must not access the sandbox");
         },
@@ -166,8 +171,9 @@ test("rejects empty or multiple permissions before sandbox access or token minti
 test("mints a repository-scoped token only during execution and redacts output", async () => {
   const tokenCalls: Array<{ connector: string; params: ConnectTokenParams }> = [];
   const runs: Parameters<SandboxSession["run"]>[0][] = [];
-  const policies: Parameters<SandboxSession["setNetworkPolicy"]>[0][] = [];
+  const policies: NetworkPolicy[] = [];
   const output = await executeGitHubShell(WRITE, CONFIG, {
+    sessionId: "session-1",
     async getConnectToken(connector, params) {
       tokenCalls.push({ connector, params });
       return "secret-token";
@@ -224,8 +230,9 @@ test("mints a repository-scoped token only during execution and redacts output",
 
 test("runs gh auth token with only the placeholder credential and redacts injected secrets", async () => {
   const runs: Parameters<SandboxSession["run"]>[0][] = [];
-  const policies: Parameters<SandboxSession["setNetworkPolicy"]>[0][] = [];
+  const policies: NetworkPolicy[] = [];
   const output = await executeGitHubShell({ ...READ, command: "gh auth token" }, CONFIG, {
+    sessionId: "session-1",
     async getConnectToken() {
       return "secret-token";
     },
@@ -260,6 +267,7 @@ test("accepts workspace-relative working directories and rejects escapes", async
     { ...READ, workingDirectory: "internal-agents" },
     CONFIG,
     {
+      sessionId: "session-1",
       async getConnectToken() {
         return "token";
       },
@@ -273,6 +281,7 @@ test("accepts workspace-relative working directories and rejects escapes", async
 
   await assert.rejects(
     executeGitHubShell({ ...READ, workingDirectory: "../outside" }, CONFIG, {
+      sessionId: "session-1",
       async getConnectToken() {
         return "token";
       },
@@ -297,6 +306,7 @@ test("rejects explicit command targets outside the declared repository before mi
     let tokenRequested = false;
     await assert.rejects(
       executeGitHubShell({ ...READ, command }, CONFIG, {
+        sessionId: "session-1",
         async getConnectToken() {
           tokenRequested = true;
           return "token";
@@ -325,6 +335,7 @@ test("rejects repositories outside the configured organization before minting", 
       },
       CONFIG,
       {
+        sessionId: "session-1",
         async getConnectToken() {
           tokenRequested = true;
           return "token";
@@ -348,13 +359,10 @@ function fakeSandbox(
         stdout: string;
         stderr: string;
       }),
-  policies: Parameters<SandboxSession["setNetworkPolicy"]>[0][] = [],
+  policies: NetworkPolicy[] = [],
 ): SandboxSession {
-  const sandbox: Pick<
-    SandboxSession,
-    "id" | "resolvePath" | "run" | "removePath" | "setNetworkPolicy"
-  > = {
-    id: "sandbox-1",
+  const sandbox: Pick<SandboxSession, "resolvePath" | "run" | "removePath"> &
+    Pick<MutableNetworkSandboxSession, "setNetworkPolicy"> = {
     resolvePath(path: string) {
       if (path === ".") return "/workspace";
       if (path.startsWith("/")) return path;
@@ -365,7 +373,7 @@ function fakeSandbox(
       return typeof result === "function" ? result(input) : result;
     },
     async removePath() {},
-    async setNetworkPolicy(policy: Parameters<SandboxSession["setNetworkPolicy"]>[0]) {
+    async setNetworkPolicy(policy: NetworkPolicy) {
       policies.push(policy);
     },
   };

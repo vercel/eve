@@ -48,6 +48,8 @@ export interface GitHubLeaseRule {
 interface GitHubShellDependencies {
   readonly getConnectToken?: typeof getToken;
   readonly getSandbox: () => Promise<SandboxSession>;
+  /** Serializes credential leases per eve session; every `ctx.getSandbox()` call returns a new handle. */
+  readonly sessionId: string;
 }
 
 const MAX_OUTPUT_BYTES = 100_000;
@@ -119,6 +121,7 @@ export async function executeGitHubShell(
   try {
     result = await withGitHubCredentialLease(
       sandbox,
+      dependencies.sessionId,
       { authorization, placeholder, placeholderAuthorization, token },
       () => {
         const env: Record<string, string> = {
@@ -152,6 +155,7 @@ export async function executeGitHubShell(
 
 async function withGitHubCredentialLease<T>(
   sandbox: SandboxSession,
+  sessionId: string,
   credential: {
     readonly authorization: string;
     readonly placeholder: string;
@@ -161,13 +165,13 @@ async function withGitHubCredentialLease<T>(
   run: () => PromiseLike<T>,
   broker: GitHubConfig["broker"],
 ): Promise<T> {
-  const previous = leaseQueues.get(sandbox.id) ?? Promise.resolve();
+  const previous = leaseQueues.get(sessionId) ?? Promise.resolve();
   let release!: () => void;
   const gate = new Promise<void>((resolve) => {
     release = resolve;
   });
   const current = previous.then(() => gate);
-  leaseQueues.set(sandbox.id, current);
+  leaseQueues.set(sessionId, current);
   await previous;
   try {
     await broker(sandbox, {
@@ -204,7 +208,7 @@ async function withGitHubCredentialLease<T>(
       await broker(sandbox, null);
     } finally {
       release();
-      if (leaseQueues.get(sandbox.id) === current) leaseQueues.delete(sandbox.id);
+      if (leaseQueues.get(sessionId) === current) leaseQueues.delete(sessionId);
     }
   }
 }

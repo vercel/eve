@@ -1,4 +1,4 @@
-import type { SandboxSession } from "eve/sandbox";
+import type { MutableNetworkSandboxSession, SandboxSession } from "eve/sandbox";
 
 import { toolingPaths } from "./tooling.ts";
 
@@ -16,9 +16,10 @@ export interface BrokeredCredentialOptions {
   ) => Promise<void>;
 }
 
-const headersBySandbox = new Map<string, Map<string, Record<string, string>>>();
-const policyQueues = new Map<string, Promise<void>>();
-const environmentQueues = new Map<string, Promise<void>>();
+// Keyed by session object because eve sessions expose no sandbox identity.
+const headersBySandbox = new WeakMap<SandboxSession, Map<string, Record<string, string>>>();
+const policyQueues = new WeakMap<SandboxSession, Promise<void>>();
+const environmentQueues = new WeakMap<SandboxSession, Promise<void>>();
 
 export async function authenticateGitHub(
   sandbox: SandboxSession,
@@ -66,13 +67,18 @@ async function brokerRules(
     await custom(sandbox, rules);
     return;
   }
+  if (!hasMutableNetworkPolicy(sandbox)) {
+    throw new Error(
+      'eve-code firewall credential delivery requires a sandbox provider with mutable network policy (setNetworkPolicy). Use delivery: "command" or pass a broker callback.',
+    );
+  }
 
-  const byHost = headersBySandbox.get(sandbox.id) ?? new Map();
+  const byHost = headersBySandbox.get(sandbox) ?? new Map();
   for (const [host, headers] of Object.entries(rules)) {
     byHost.set(host, { ...(byHost.get(host) ?? {}), ...headers });
   }
-  headersBySandbox.set(sandbox.id, byHost);
-  const previous = policyQueues.get(sandbox.id) ?? Promise.resolve();
+  headersBySandbox.set(sandbox, byHost);
+  const previous = policyQueues.get(sandbox) ?? Promise.resolve();
   const next = previous.then(async () => {
     const allow: Record<string, { transform: { headers: Record<string, string> }[] }[]> = {
       "*": [],
@@ -82,11 +88,11 @@ async function brokerRules(
     }
     await sandbox.setNetworkPolicy({ allow });
   });
-  policyQueues.set(sandbox.id, next);
+  policyQueues.set(sandbox, next);
   try {
     await next;
   } finally {
-    if (policyQueues.get(sandbox.id) === next) policyQueues.delete(sandbox.id);
+    if (policyQueues.get(sandbox) === next) policyQueues.delete(sandbox);
   }
 }
 
@@ -95,7 +101,7 @@ async function writeToolEnvironment(
   name: "GH_TOKEN" | "VERCEL_TOKEN",
   value: string,
 ): Promise<void> {
-  const previous = environmentQueues.get(sandbox.id) ?? Promise.resolve();
+  const previous = environmentQueues.get(sandbox) ?? Promise.resolve();
   const next = previous.then(async () => {
     const path = toolingPaths(sandbox).env;
     const existing = (await sandbox.readTextFile({ path })) ?? "";
@@ -109,12 +115,16 @@ async function writeToolEnvironment(
       throw new Error(`Failed to secure eve-code CLI environment: ${secured.stderr}`);
     }
   });
-  environmentQueues.set(sandbox.id, next);
+  environmentQueues.set(sandbox, next);
   try {
     await next;
   } finally {
-    if (environmentQueues.get(sandbox.id) === next) environmentQueues.delete(sandbox.id);
+    if (environmentQueues.get(sandbox) === next) environmentQueues.delete(sandbox);
   }
+}
+
+function hasMutableNetworkPolicy(sandbox: SandboxSession): sandbox is MutableNetworkSandboxSession {
+  return sandbox.setNetworkPolicy !== undefined;
 }
 
 function shellQuote(value: string): string {
