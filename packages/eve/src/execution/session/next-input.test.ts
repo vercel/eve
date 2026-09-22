@@ -151,7 +151,7 @@ describe("nextTurnDelivery", () => {
       kind: "turn",
       delivery: {
         auth,
-        payloads: [...first.payloads, ...second.payloads],
+        payloads: [...report(first).payloads, ...report(second).payloads],
         deliveryMetadata: [
           first.deliveryMetadata![0],
           { ...second.deliveryMetadata![0], payloadIndex: 1 },
@@ -578,6 +578,68 @@ describe("buffered task completion batching", () => {
       expect(input.queue.pendingCount).toBe(0);
     },
   );
+
+  it.each(["completed", "failed", "cancelled"] as const)(
+    "auto wakes for a %s outcome while its cross-turn sibling remains unfinished",
+    async (status) => {
+      const input = batchingInput(2, true);
+      await input.cursor.apply({ serializedContext: { "eve.runtime.taskDeliveryPolicy": "auto" } });
+      const first =
+        status === "completed" ? completion("task_0") : terminalDelivery("task_0", status);
+      input.queue.enqueueDelivery(first);
+      await expect(nextTurnDelivery(input)).resolves.toMatchObject({
+        kind: "turn",
+        delivery: report(first),
+      });
+      expect(input.queue.pendingCount).toBe(0);
+    },
+  );
+
+  it("auto combines ready siblings without waiting for the remaining task", async () => {
+    const input = batchingInput(3);
+    await input.cursor.apply({ serializedContext: { "eve.runtime.taskDeliveryPolicy": "auto" } });
+    const first = completion("task_0");
+    const second = completion("task_1");
+    input.queue.enqueueDelivery(first);
+    input.queue.enqueueDelivery(first);
+    input.queue.enqueueDelivery(second);
+    await expect(nextTurnDelivery(input)).resolves.toMatchObject({
+      kind: "turn",
+      delivery: {
+        payloads: [...report(first).payloads, ...report(second).payloads],
+        taskDeliveryIds: [first.taskDeliveryId, second.taskDeliveryId],
+      },
+    });
+    expect(input.queue.pendingCount).toBe(0);
+    input.queue.enqueueDelivery(first);
+    expect(input.queue.pendingCount).toBe(0);
+  });
+
+  it("auto preserves intervening user input and deferred delivery boundaries", async () => {
+    const input = batchingInput(3);
+    await input.cursor.apply({ serializedContext: { "eve.runtime.taskDeliveryPolicy": "auto" } });
+    const question = {
+      kind: "deliver",
+      payloads: [{ message: "Alice checks the status." }],
+    } as const;
+    const first = completion("task_0");
+    const second = completion("task_1");
+    input.queue.enqueueDelivery(first);
+    input.queue.enqueueDelivery(question);
+    input.queue.enqueueDelivery(second);
+    await expect(nextTurnDelivery(input)).resolves.toMatchObject({
+      kind: "turn",
+      delivery: question,
+    });
+    expect(
+      input.queue.takeNext(new Map(), { taskDeliveryPolicy: "auto", deferDeliveries: true }),
+    ).toBeUndefined();
+    expect(input.queue.pendingCount).toBe(2);
+    await expect(nextTurnDelivery(input)).resolves.toMatchObject({
+      kind: "turn",
+      delivery: { payloads: [...report(first).payloads, ...report(second).payloads] },
+    });
+  });
 
   it("delivers 100 buffered sibling results and their metadata in one parent turn", async () => {
     const input = batchingInput();

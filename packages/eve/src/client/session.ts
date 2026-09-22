@@ -450,6 +450,9 @@ function createMessageBody(
   if (!requireMessage && input.message !== undefined && input.turnPolicy !== undefined) {
     body.turnPolicy = input.turnPolicy;
   }
+  if (input.message !== undefined && input.taskDeliveryPolicy !== undefined) {
+    body.taskDeliveryPolicy = input.taskDeliveryPolicy;
+  }
   if (input.clientContext !== undefined) body.clientContext = input.clientContext;
   const outputSchema = serializeOutputSchema(input.outputSchema);
   if (outputSchema !== undefined) body.outputSchema = outputSchema;

@@ -25,6 +25,7 @@ export default defineTaskEval({
 
     // One authenticated caller creates the session and remains its initiator.
     const firstTurn = await t.send("TASK-AUTH-SNAPSHOT-ROOT", {
+      taskDeliveryPolicy: "cohort",
       headers: { authorization: SESSION_INITIATOR_AUTHORIZATION },
     });
     const session = firstTurn.session;
@@ -40,6 +41,7 @@ export default defineTaskEval({
     // A route-authenticated, schedule-shaped turn has no current session principal.
     const key = crypto.randomUUID();
     const started = await session.send(`TASK-AUTH-SNAPSHOT ${key}`, {
+      taskDeliveryPolicy: "cohort",
       headers: { [ANONYMOUS_TASK_CREATOR_HEADER]: "1" },
     });
     started.expectOk();
@@ -57,6 +59,7 @@ export default defineTaskEval({
 
     // Another authenticated caller takes the last parent turn before nested dispatch.
     const lastParentTurn = await session.send("TASK-AUTH-SNAPSHOT-LATER", {
+      taskDeliveryPolicy: "cohort",
       headers: { authorization: LATER_PARENT_CALLER_AUTHORIZATION },
     });
     lastParentTurn.expectOk();

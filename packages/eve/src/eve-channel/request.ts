@@ -6,6 +6,7 @@ import type {
   SessionCallback,
   SessionCapabilities,
   TurnPolicy,
+  TaskDeliveryPolicy,
 } from "#channel/types.js";
 import type { Session } from "#channel/session.js";
 import { parseSessionCallback } from "#channel/session-callback.js";
@@ -34,6 +35,10 @@ import {
 import { isInputResponse, type ValidatedInputResponse } from "#shared/input.js";
 import { parseJsonObject, type JsonObject } from "#shared/json.js";
 import type { RunMode } from "#shared/run-mode.js";
+import {
+  parseTaskDeliveryPolicyField,
+  parseTurnPolicyField,
+} from "#eve-channel/delivery-policy-request.js";
 import { type ParsedCreateBody, validateMessageFreeCreate } from "#eve-channel/create-request.js";
 
 const SESSION_STREAM_HEARTBEAT_MS = 10_000;
@@ -88,6 +93,8 @@ export function parseCreateBody(payload: Record<string, unknown>): ParsedCreateB
   const mode = parseModeField(payload.mode);
   if (mode instanceof Response) return mode;
 
+  const taskDeliveryPolicy = parseTaskDeliveryPolicyField(payload.taskDeliveryPolicy, message);
+  if (taskDeliveryPolicy instanceof Response) return taskDeliveryPolicy;
   const outputSchema = parseOutputSchemaField(payload.outputSchema);
   if (outputSchema instanceof Response) return outputSchema;
 
@@ -111,6 +118,7 @@ export function parseCreateBody(payload: Record<string, unknown>): ParsedCreateB
   }
 
   const result: ParsedCreateBody = {
+    taskDeliveryPolicy,
     activityObserver,
     callback,
     capabilities,
@@ -124,6 +132,7 @@ export function parseCreateBody(payload: Record<string, unknown>): ParsedCreateB
 }
 
 interface ParsedSessionMessageBody {
+  taskDeliveryPolicy?: TaskDeliveryPolicy;
   activityObserver?: ActivityObserverConfig;
   callback?: SessionCallback;
   message?: string | UserContent;
@@ -153,6 +162,8 @@ export function parseSessionMessageBody(
   if (inputResponses instanceof Response) return inputResponses;
   const context = parseClientContextField(payload.clientContext);
   if (context instanceof Response) return context;
+  const taskDeliveryPolicy = parseTaskDeliveryPolicyField(payload.taskDeliveryPolicy, message);
+  if (taskDeliveryPolicy instanceof Response) return taskDeliveryPolicy;
   const outputSchema = parseOutputSchemaField(payload.outputSchema);
   if (outputSchema instanceof Response) return outputSchema;
   const turnPolicy = parseTurnPolicyField(payload.turnPolicy);
@@ -183,6 +194,7 @@ export function parseSessionMessageBody(
     context,
     outputSchema,
     turnPolicy,
+    taskDeliveryPolicy,
   };
 }
 
@@ -392,15 +404,6 @@ function parseModeField(value: unknown): RunMode | Response | undefined {
   if (value === "conversation" || value === "task") return value;
   return Response.json(
     { error: "Expected 'mode' to be either 'conversation' or 'task'.", ok: false },
-    { status: 400 },
-  );
-}
-
-function parseTurnPolicyField(value: unknown): TurnPolicy | Response | undefined {
-  if (value === undefined) return undefined;
-  if (value === "queue" || value === "steer") return value;
-  return Response.json(
-    { error: "Expected 'turnPolicy' to be either 'queue' or 'steer'.", ok: false },
     { status: 400 },
   );
 }

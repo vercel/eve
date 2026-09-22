@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { CONDITIONAL_DELIVERY_INSTRUCTION } from "#shared/empty-delivery.js";
 import {
+  TASK_DELIVERY_AUTO_INSTRUCTION,
   TASK_DELIVERY_INITIATING_INSTRUCTION,
   TASK_DELIVERY_SETTLED_INSTRUCTION,
 } from "#tasks/delivery-context.js";
@@ -24,6 +25,7 @@ describe("resolveDeliveryPolicy", () => {
     ) => {
       expect(
         resolveDeliveryPolicy({
+          taskDeliveryPolicy: "cohort",
           hasScheduleProvenance,
           hasOutputSchema: false,
           isChild: false,
@@ -34,9 +36,26 @@ describe("resolveDeliveryPolicy", () => {
     },
   );
 
+  it.each(["pending", "settled"] as const)(
+    "allows auto to withhold a %s report",
+    (taskDeliveryPhase) => {
+      expect(
+        resolveDeliveryPolicy({
+          taskDeliveryPolicy: "auto",
+          taskDeliveryPhase,
+          hasScheduleProvenance: false,
+          hasOutputSchema: false,
+          isChild: false,
+          isFirstTurn: false,
+        }),
+      ).toEqual({ allowsEmptyDelivery: true, instruction: TASK_DELIVERY_AUTO_INSTRUCTION });
+    },
+  );
+
   it("allows an empty pending wake without instructing the model to stay silent", () => {
     expect(
       resolveDeliveryPolicy({
+        taskDeliveryPolicy: "cohort",
         hasScheduleProvenance: false,
         hasOutputSchema: false,
         isChild: false,
@@ -52,6 +71,7 @@ describe("resolveDeliveryPolicy", () => {
   ] as const)("keeps %s mandatory", (_name, hasOutputSchema, isChild) => {
     expect(
       resolveDeliveryPolicy({
+        taskDeliveryPolicy: "cohort",
         hasScheduleProvenance: true,
         hasOutputSchema,
         isChild,
@@ -64,6 +84,7 @@ describe("resolveDeliveryPolicy", () => {
   it("acknowledges background work launched on a later turn", () => {
     expect(
       resolveDeliveryPolicy({
+        taskDeliveryPolicy: "cohort",
         hasOutputSchema: false,
         hasScheduleProvenance: true,
         isChild: false,

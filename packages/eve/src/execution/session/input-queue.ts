@@ -1,4 +1,4 @@
-import type { DeliverHookPayload, DeliverPayload } from "#channel/types.js";
+import type { TaskDeliveryPolicy, DeliverHookPayload, DeliverPayload } from "#channel/types.js";
 import { coalesceDeliveries } from "#harness/messages.js";
 import { jsonValuesEqual } from "#shared/json.js";
 import type { getSessionTaskCohorts } from "#tasks/session-task-cohorts.js";
@@ -182,6 +182,7 @@ export class SessionInputQueue {
     cohorts: TaskCohorts,
     options?: {
       readonly deferDeliveries?: boolean;
+      readonly taskDeliveryPolicy?: TaskDeliveryPolicy;
       /**
        * Attempt ids of the open authorization challenge. Callbacks for other
        * attempts are stale and dropped; once every expected attempt has
@@ -209,12 +210,20 @@ export class SessionInputQueue {
         };
       }
     }
-    const index = this.nextActionableIndex(cohorts, options?.deferDeliveries === true);
+    const index = this.nextActionableIndex(
+      cohorts,
+      options?.deferDeliveries === true,
+      options?.taskDeliveryPolicy ?? "cohort",
+    );
     if (index < 0) return undefined;
     return this.takeSelectionAt(index, cohorts, options?.freshSequence);
   }
 
-  private nextActionableIndex(cohorts: TaskCohorts, deferDeliveries: boolean): number {
+  private nextActionableIndex(
+    cohorts: TaskCohorts,
+    deferDeliveries: boolean,
+    taskDeliveryPolicy: TaskDeliveryPolicy,
+  ): number {
     const pendingCohorts = new Set<string>();
     for (const [taskId, cohortId] of cohorts) {
       // A control step can record cancellation before its notification is admitted.
@@ -227,7 +236,7 @@ export class SessionInputQueue {
       if (entry.kind === "control") return true;
       if (entry.kind === "authorization" || deferDeliveries) return false;
       const cohort = terminalCohort(entry.delivery, cohorts);
-      return cohort === undefined || !pendingCohorts.has(cohort);
+      return taskDeliveryPolicy === "auto" || cohort === undefined || !pendingCohorts.has(cohort);
     });
   }
 
@@ -331,9 +340,17 @@ export function isSteeringDelivery(
 }
 
 function combine(entries: readonly DeliveryAdmission[]): DeliverHookPayload {
-  return entries.length === 1
-    ? entries[0]!.delivery
-    : coalesceDeliveries(entries.map(({ delivery }) => delivery));
+  if (entries.length === 1) return entries[0]!.delivery;
+  const deliveries = entries.map(({ delivery }) => delivery);
+  const taskDeliveryIds = deliveries.flatMap(
+    (delivery) =>
+      delivery.taskDeliveryIds ??
+      (delivery.taskDeliveryId === undefined ? [] : [delivery.taskDeliveryId]),
+  );
+  return {
+    ...coalesceDeliveries(deliveries),
+    taskDeliveryIds: taskDeliveryIds.length > 0 ? taskDeliveryIds : undefined,
+  };
 }
 
 function authorizationAttemptId(payload: DeliverPayload): string | undefined {

@@ -17,6 +17,7 @@ import type {
   SessionAuthContext,
   SessionCallback,
   TurnPolicy,
+  TaskDeliveryPolicy,
 } from "#channel/types.js";
 import {
   type InputResponse,
@@ -35,6 +36,8 @@ interface BaseChannelSendOptions {
   readonly outputSchema?: JsonObject;
   readonly title?: string;
   readonly turnPolicy?: TurnPolicy;
+  /** Updates the session policy; omission preserves it. New sessions default to auto, schedules to cohort. */
+  readonly taskDeliveryPolicy?: TaskDeliveryPolicy;
 }
 
 /** Options for sending a message from a channel-local continuation address. */
@@ -100,6 +103,7 @@ export function createChannelOperations<TState = undefined>(input: {
   readonly metadata?: ChannelDeliverySource;
   readonly runtime: Runtime;
   readonly turnPolicy?: TurnPolicy;
+  readonly taskDeliveryPolicy?: TaskDeliveryPolicy;
 }): ChannelReceiveContext<TState> {
   const channelAddress = createChannelAddressFn<TState>(input);
 

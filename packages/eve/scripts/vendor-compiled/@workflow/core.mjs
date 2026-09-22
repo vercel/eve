@@ -189,14 +189,10 @@ function guardInlineStepExecution() {
       return {
         code: source.replace(
           unguarded,
-          `const executed = runStepSingleFlight(
-            runId,
-            s.correlationId,
-            run,
-            s.lazyStepInput !== undefined || s.preclaimedStart !== undefined
-              ? "debug"
-              : "warn",
-          );`,
+          `const fresh = s.lazyStepInput !== undefined || s.preclaimedStart !== undefined;
+          const executed = s.preclaimedStart?.owned === false
+            ? run()
+            : runStepSingleFlight(runId, s.correlationId, run, fresh ? "debug" : "warn");`,
         ),
         map: null,
       };
