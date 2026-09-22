@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import type { SandboxSession } from "eve/sandbox";
+import type { MutableNetworkSandboxSession, SandboxSession } from "eve/sandbox";
 
 import { authenticateGitHub, authenticateVercel } from "../../extension/lib/credentials.ts";
 
@@ -42,6 +42,18 @@ test("custom broker receives complete rules for each credential", async () => {
   assert.deepEqual(Object.keys(received[1] ?? {}).sort(), ["api.vercel.com", "vercel.com"]);
 });
 
+test("firewall delivery fails precisely without mutable network policy", async () => {
+  const { setNetworkPolicy: _omitted, ...fixed } = fakeSandbox({});
+  const sandbox = fixed as SandboxSession;
+
+  for (const authenticate of [authenticateGitHub, authenticateVercel]) {
+    await assert.rejects(
+      authenticate(sandbox, { token: "token" }),
+      /requires a sandbox provider with mutable network policy \(setNetworkPolicy\)\. Use delivery: "command" or pass a broker callback\./u,
+    );
+  }
+});
+
 test("command delivery configures git and writes both CLI tokens", async () => {
   const commands: string[] = [];
   const writes = new Map<string, string>();
@@ -62,11 +74,8 @@ function fakeSandbox(input: {
   setPolicy?: (policy: unknown) => void;
 }): SandboxSession {
   const writes = input.writes ?? new Map<string, string>();
-  const sandbox: Pick<
-    SandboxSession,
-    "id" | "resolvePath" | "readTextFile" | "writeTextFile" | "run" | "setNetworkPolicy"
-  > = {
-    id: `sandbox-${crypto.randomUUID()}`,
+  const sandbox: Pick<SandboxSession, "resolvePath" | "readTextFile" | "writeTextFile" | "run"> &
+    Pick<MutableNetworkSandboxSession, "setNetworkPolicy"> = {
     resolvePath(path: string) {
       return `/workspace/${path}`.replace(/\/$/u, "");
     },
@@ -80,7 +89,7 @@ function fakeSandbox(input: {
       input.commands?.push(command);
       return { exitCode: 0, stdout: "", stderr: "" };
     },
-    async setNetworkPolicy(policy: Parameters<SandboxSession["setNetworkPolicy"]>[0]) {
+    async setNetworkPolicy(policy) {
       input.setPolicy?.(policy);
     },
   };

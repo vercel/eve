@@ -46,8 +46,10 @@ export async function applyPatchToSandbox(input: {
   readonly patchText: string;
   readonly repoRoot: string;
   readonly sandbox: SandboxSession;
+  /** Serializes patches per eve session; every `ctx.getSandbox()` call returns a new handle. */
+  readonly sessionId: string;
 }): Promise<AppliedPatchFile[]> {
-  return withPatchLock(`${input.sandbox.id}:${input.repoRoot}`, () => applyPatchUnlocked(input));
+  return withPatchLock(`${input.sessionId}:${input.repoRoot}`, () => applyPatchUnlocked(input));
 }
 
 async function applyPatchUnlocked(input: {

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { ConnectError, type ConnectTokenParams } from "@vercel/connect";
-import type { SandboxSession } from "eve/sandbox";
+import type { MutableNetworkSandboxSession, SandboxSession } from "eve/sandbox";
 
 (globalThis as Record<symbol, unknown>)[Symbol.for("eve.ext-config-scope")] =
   "eve-code-connect-authentication-test";
@@ -73,10 +73,10 @@ test("Connect errors fail with the connector UID", async () => {
 });
 
 function fakeSandbox(policies: { allow: Record<string, unknown> }[]): SandboxSession {
-  return {
-    id: `sandbox-${crypto.randomUUID()}`,
-    async setNetworkPolicy(policy: Parameters<SandboxSession["setNetworkPolicy"]>[0]) {
+  const sandbox: Pick<MutableNetworkSandboxSession, "setNetworkPolicy"> = {
+    async setNetworkPolicy(policy) {
       policies.push(policy as { allow: Record<string, unknown> });
     },
-  } as SandboxSession;
+  };
+  return sandbox as SandboxSession;
 }

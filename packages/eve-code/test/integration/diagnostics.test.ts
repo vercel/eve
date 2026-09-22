@@ -91,7 +91,6 @@ function commandSandbox(
   worker: string | null = "worker",
 ): SandboxSession {
   return {
-    id: `sandbox-${crypto.randomUUID()}`,
     run,
     resolvePath(path) {
       return `/workspace/${path}`;
