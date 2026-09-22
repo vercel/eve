@@ -154,29 +154,6 @@ Tool definitions accept `availableInSubagents: false` to restrict the tool to to
 
 Exported types ship from the same entrypoint as the helper they describe (for example `ToolDefinition` and `ToolContext` from `eve/tools`). The `exports` field in `packages/eve/package.json` lists every public entrypoint.
 
-## Local development capability
-
-Use `getLocalDevCapability()` when an authored tool needs to modify the local application's source tree during an interactive development turn:
-
-```ts
-import { getLocalDevCapability } from "eve/local-dev";
-
-const localDev = getLocalDevCapability();
-if (localDev === undefined) {
-  throw new Error("This tool is available only from a local eve dev client.");
-}
-
-await localDev.withSuspendedSource(async () => {
-  // Write under localDev.appRoot here.
-});
-```
-
-The function returns `LocalDevCapability | undefined`. It returns a capability only while authored code handles a request from a client on the same machine as the `eve dev` server. Deployed runtimes and clients attached over the network receive `undefined`, even when the target is another development server. A local TUI that attaches to an existing headless server receives the capability because availability follows each request rather than the process that started the server.
-
-`appRoot` is the authored application directory containing `package.json` and `agent/`, not the temporary runtime snapshot. `interactiveClient` is `true` when the requesting local client is the dev TUI; check it before starting a flow that requires terminal interaction.
-
-Run source mutations inside `withSuspendedSource()`. It acquires a unique watcher lease, waits for your asynchronous callback to settle, and then releases the lease. Concurrent or nested calls cannot resume each other early, and releasing the final lease rebuilds the runtime artifacts. The callback's return value is returned, and its error is rethrown after release. If suspension cannot be acquired, the callback does not run. If the host cannot confirm release after a retry, the method throws an actionable error; restart `eve dev` before making more source changes.
-
 ## Direct provider models
 
 `openai(model?)` from `eve/models/openai` and `anthropic(model?)` from `eve/models/anthropic` return eve-owned model instances using the vendored providers. They accept only an optional model ID. Defaults are `gpt-5.6-luna-fast` and `claude-sonnet-5`, respectively.

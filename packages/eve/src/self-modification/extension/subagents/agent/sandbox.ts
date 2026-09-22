@@ -12,7 +12,7 @@ import { vercel } from "eve/sandbox/vercel";
 
 import { resolveSelfModificationConfig, type SelfModificationConfig } from "../../../config.js";
 import { createGitHubCredentialProvider } from "../../../credentials.js";
-import { createSelfModificationFilesystem } from "../../../filesystem.js";
+import { createLocalSelfModificationFilesystem } from "../../../filesystem.js";
 import { prepareSelfModificationWorkspace, REPOSITORY_PATH } from "../../../git-workspace.js";
 import { resolveSelfModificationMode } from "../../../mode.js";
 import { SELF_MODIFICATION_BASELINE_NETWORK_POLICY } from "../../../network-policy.js";
@@ -44,7 +44,7 @@ export function defineSelfModificationSandbox(
   return defineSandbox({
     backend: () => {
       const mode = resolveSelfModificationMode(config);
-      if (mode === "local") return justbash({ filesystem: createSelfModificationFilesystem });
+      if (mode === "local") return justbash({ filesystem: createLocalSelfModificationFilesystem });
       if (mode === "disabled") return options.backend ?? defaultBackend();
       return selectDeployedSelfModificationBackend(options.backend, SANDBOX_BACKEND_PROBES);
     },
