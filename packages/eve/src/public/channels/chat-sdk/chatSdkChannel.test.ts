@@ -1,4 +1,5 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, expectTypeOf, it, vi } from "vitest";
+import type { Message as ExternalMessage, Thread as ExternalThread } from "chat";
 
 import { buildAdapterContext } from "#channel/adapter-context.js";
 import { callAdapterEventHandler, type ChannelAdapter } from "#channel/adapter.js";
@@ -29,6 +30,11 @@ import type {
   WebhookOptions,
 } from "#compiled/chat/index.js";
 import { Message, parseMarkdown } from "#compiled/chat/index.js";
+
+it("shares Chat SDK type identity with external adapters and handlers", () => {
+  expectTypeOf<Message>().toEqualTypeOf<ExternalMessage>();
+  expectTypeOf<Thread>().toEqualTypeOf<ExternalThread>();
+});
 
 const THREAD_ID = "test:C01:1700000000.000001";
 const CHANNEL_ID = "test:C01";
