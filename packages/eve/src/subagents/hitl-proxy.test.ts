@@ -362,18 +362,6 @@ describe("routeDeliverPayload message resolution", () => {
     expect(routed.forChildren).toMatchObject([{ dismissedRequestIds: ["ask-1"] }]);
   });
 
-  it("leaves a question another payload already resolved to the parent", () => {
-    const routed = routeDeliverPayload({
-      allowRoute: (requestId) => requestId !== "ask-1",
-      payload: { message: "Use the canary pool" },
-      resolveMessage: true,
-      state: askSession([["ask-1", { allowFreeform: true, dismissible: true }]]).state,
-    });
-
-    expect(routed.forSelf).toEqual({ message: "Use the canary pool" });
-    expect(routed.forChildren).toEqual([]);
-  });
-
   it("leaves questions alone unless a person's message may resolve them", () => {
     const routed = routeDeliverPayload({
       payload: { message: "production" },

@@ -374,6 +374,44 @@ describe("routeProxiedDeliverStep", () => {
     );
   });
 
+  it("answers a question once when one delivery carries several messages", async () => {
+    const session = upsertProxyInputRequests({
+      entries: [
+        [
+          "ask-1",
+          {
+            answerHook: { question: { allowFreeform: true, dismissible: true }, runId: "run-1" },
+            childContinuationToken: "answer-token",
+            kind: "question",
+          },
+        ],
+      ],
+      forChildContinuationToken: "answer-token",
+      session: createStubSession(),
+    });
+    installSessionStoreMocks([session]);
+
+    const result = await routeProxiedDeliverStep({
+      delivery: {
+        kind: "deliver",
+        payloads: [{ message: "Use the canary pool." }, { message: "Also check the logs." }],
+      },
+      sessionWritable: createTestWritable(),
+      sessionState: createStubSessionState({ hasProxyInputRequests: true }),
+    });
+
+    expect(resumeHookMock).toHaveBeenCalledTimes(1);
+    expect(resumeHookMock).toHaveBeenCalledWith("answer-token", {
+      optionId: undefined,
+      status: "answered",
+      text: "Use the canary pool.",
+    });
+    expect(result).toMatchObject({
+      kind: "continue",
+      remainder: { payloads: [{ message: "Also check the logs." }] },
+    });
+  });
+
   it("forwards descendant input responses as session send commands", async () => {
     const auth = {
       attributes: {},

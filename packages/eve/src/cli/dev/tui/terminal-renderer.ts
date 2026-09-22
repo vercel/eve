@@ -1321,7 +1321,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
         id: sectionKey,
         kind: "question",
         title: stripTerminalControls(question.prompt),
-        body: `${this.#theme.colors.dim(this.#theme.glyph.elbow)}  ${this.#theme.colors.dim("Skipped. Your next message can answer it.")}`,
+        body: `${this.#theme.colors.dim(this.#theme.glyph.elbow)}  ${this.#theme.colors.dim("Skipped. The question stays open.")}`,
         preformatted: true,
         live: false,
       });

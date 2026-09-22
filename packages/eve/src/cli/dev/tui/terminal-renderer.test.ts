@@ -2920,7 +2920,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
 
     const snapshot = screen.snapshot();
     expect(snapshot).toContain("? Choose access");
-    expect(snapshot).toContain("⎿  Skipped. Your next message can answer it.");
+    expect(snapshot).toContain("⎿  Skipped. The question stays open.");
     // The option list does not survive the dismissal.
     expect(snapshot).not.toContain("Managed access");
     expect(snapshot).not.toContain("Enter to select");
@@ -2951,7 +2951,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
 
     await escape();
     await expect(answer).resolves.toBeUndefined();
-    expect(screen.snapshot()).toContain("⎿  Skipped. Your next message can answer it.");
+    expect(screen.snapshot()).toContain("⎿  Skipped. The question stays open.");
     renderer.shutdown();
   });
 
@@ -3068,7 +3068,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
 
     await escape();
     await expect(answer).resolves.toBeUndefined();
-    expect(screen.snapshot()).toContain("⎿  Skipped. Your next message can answer it.");
+    expect(screen.snapshot()).toContain("⎿  Skipped. The question stays open.");
     renderer.shutdown();
   });
 

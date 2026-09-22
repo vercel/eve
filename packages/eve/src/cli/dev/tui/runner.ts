@@ -1177,8 +1177,8 @@ export class EveTUIRunner {
             if (responses.length === 0) {
               // Every pending question was skipped without an answer. Fall
               // back to the prompt rather than sending an empty response set:
-              // the questions stay open, and the user's next message answers
-              // one when it can, otherwise it arrives as a normal message.
+              // the questions stay open, and the server decides whether the
+              // user's next message answers, dismisses, or leaves them.
               break;
             }
 

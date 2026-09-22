@@ -292,7 +292,7 @@ The answer's `status` tells the body what happened:
 
 - `answered`: the person picked an option (`optionId`) or typed a reply (`text`).
 - `dismissed`: the request set `dismissible: true` and the person sent a message that did not answer
-  it. The message reaches the agent as a normal turn.
+  it. The message reaches the agent as a normal turn. Only blocking tools can be dismissed this way.
 - `unavailable`: the session cannot request input, such as a scheduled run. `ctx.ask` returns this
   immediately instead of waiting for an answer no one can give.
 

@@ -313,7 +313,7 @@ import { askQuestion } from "eve/tools/ask_question";
 export default askQuestion();
 ```
 
-`ask_question` is a [workflow tool](/docs/tools/workflows) that calls `ctx.ask()`. The model receives `{ status: "answered", answer }`, where `answer` is the chosen option's label or the user's own words. A plain follow-up message answers the question too. When several questions are pending and a message cannot be matched to one of them, each question resolves as `{ status: "dismissed" }` and the message reaches the model normally. In a session that cannot request input, such as a scheduled run, the result is `{ status: "unavailable" }` and the model continues on its own judgment. Remove the file to remove the tool.
+`ask_question` is a [workflow tool](/docs/tools/workflows) that calls `ctx.ask()`. The model receives `{ status: "answered", answer }`, where `answer` is the chosen option's label or the user's own words. A plain follow-up message answers the question too when it is the only pending question. When other questions are also pending, a message does not answer any of them: `ask_question` resolves as `{ status: "dismissed" }` and the message reaches the model normally. In a session that cannot request input, such as a scheduled run, the result is `{ status: "unavailable" }` and the model continues on its own judgment. Remove the file to remove the tool.
 
 ### `glob`
 

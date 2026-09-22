@@ -70,9 +70,9 @@ export async function routeProxiedDeliverStep(input: {
   // Only a person's own message may answer or skip a pending question.
   const resolveMessage =
     sourceDelivery.caller === undefined && sourceDelivery.taskDeliveryId === undefined;
-  // Every payload routes against the same state, so a `ctx.ask()` question
-  // resolved by an earlier payload is hidden from later ones; its answer hook
-  // accepts one answer, and later messages must reach the parent instead.
+  // Every payload routes against the same state, so an answer-hook request
+  // resolved by an earlier payload is hidden from later ones; its hook accepts
+  // one answer, and later messages must reach the parent instead.
   const resolvedQuestions = new Set<string>();
 
   for (const [sourcePayloadIndex, payload] of sourceDelivery.payloads.entries()) {
