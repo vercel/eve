@@ -1,4 +1,5 @@
-import { readFile, writeFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import { readFile, rename, rm, writeFile } from "node:fs/promises";
 
 import type { RuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { readBundledCompiledArtifacts } from "#runtime/loaders/bundled-artifacts.js";
@@ -27,10 +28,17 @@ export async function writeSandboxPreparedArtifactsManifest(input: {
   }
   const entries = new Map(existing?.entries.map((entry) => [entry.nodeId, entry]));
   for (const entry of input.entries) entries.set(entry.nodeId, entry);
-  await writeFile(
-    path,
-    `${JSON.stringify(createSandboxPreparedArtifactsManifest([...entries.values()]), null, 2)}\n`,
-  );
+  const temporaryPath = `${path}.${randomUUID()}.tmp`;
+  try {
+    await writeFile(
+      temporaryPath,
+      `${JSON.stringify(createSandboxPreparedArtifactsManifest([...entries.values()]), null, 2)}\n`,
+    );
+    // Dev workers may read while another worker publishes the prepared generation.
+    await rename(temporaryPath, path);
+  } finally {
+    await rm(temporaryPath, { force: true });
+  }
 }
 
 export async function loadSandboxPreparedArtifact(input: {

@@ -11,6 +11,7 @@ import { defineParentSandbox, defineSandbox } from "#public/definitions/sandbox.
 import { defineSandboxProvider } from "#shared/sandbox-provider.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import type { RuntimeSandboxRegistry } from "#runtime/sandbox/registry.js";
+import { loadSandboxPreparedArtifact } from "#runtime/sandbox/prepared-artifacts.js";
 
 vi.mock("#runtime/sandbox/prepared-artifacts.js", () => ({
   loadSandboxPreparedArtifact: vi.fn(async () => null),
@@ -93,6 +94,25 @@ async function open(
 afterEach(() => clearActiveSandboxHandlesForTest());
 
 describe("ensureSandboxAccess", () => {
+  it("does not prepare or start anything until the sandbox is requested", async () => {
+    const value = fixture();
+    await ensureSandboxAccess({
+      compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
+      nodeId: "__root__",
+      registry: value.registry,
+      sessionId: "unused",
+      state: null,
+    });
+    expect(value.create).not.toHaveBeenCalled();
+  });
+
+  it("keeps missing production artifacts fatal without starting a sandbox", async () => {
+    vi.mocked(loadSandboxPreparedArtifact).mockResolvedValueOnce(undefined);
+    const value = fixture();
+    await expect(open(value.registry)).rejects.toThrow();
+    expect(value.create).not.toHaveBeenCalled();
+  });
+
   it("creates and returns a real sandbox", async () => {
     const value = fixture();
     expect((await open(value.registry)).sandbox).toBeTruthy();

@@ -1,5 +1,6 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 
+import { prewarmDevelopmentSandboxes } from "#execution/sandbox/development-prewarm.js";
 import type { CompileAgentResult } from "#compiler/compile-agent.js";
 import {
   createDevelopmentAuthoredRebuildCoordinator,
@@ -197,6 +198,7 @@ describe("transactional authored rebuild coordinator", () => {
 
     const retried = await coordinator.rebuild({ changedPaths: [] });
     expect(retried.kind).toBe("runtime");
+    expect(prewarmDevelopmentSandboxes).not.toHaveBeenCalled();
     expect(mocks.activateDevelopmentGeneration).toHaveBeenLastCalledWith({
       appRoot: retryHost.appRoot,
       generation: retryHost.generation,

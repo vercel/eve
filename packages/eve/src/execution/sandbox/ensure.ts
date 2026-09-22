@@ -1,3 +1,7 @@
+import { pathToFileURL } from "node:url";
+
+import { isEveDevEnvironment } from "#internal/application/dev-environment.js";
+import { resolvePackageSourceFilePath } from "#internal/application/package.js";
 import { contextStorage } from "#context/container.js";
 import {
   buildCallbackContext,
@@ -190,6 +194,22 @@ export async function ensureSandboxAccess(input: EnsureSandboxAccessInput): Prom
     const definition = inherited?.definition ?? registered.definition;
     if (definition.kind !== "independent")
       throw new Error(`Sandbox "${definition.logicalPath}" has no resolved parent.`);
+
+    if (isEveDevEnvironment() && input.compiledArtifactsSource.kind === "disk") {
+      // Load from the installed package so preparation stays outside production bundles
+      // and uses the same provider module instances as the authored graph loader.
+      const modulePath = resolvePackageSourceFilePath(
+        "src/execution/sandbox/development-lazy-prewarm.ts",
+      );
+      const { ensureDevelopmentSandboxesPrepared } = (await import(
+        pathToFileURL(modulePath).href
+      )) as typeof import("./development-lazy-prewarm.js");
+      await ensureDevelopmentSandboxesPrepared({
+        compiledArtifactsSource: input.compiledArtifactsSource,
+        nodeId: inherited?.nodeId ?? input.nodeId,
+        providerName: getSandboxEnvironmentRuntime(definition.environment).providerName,
+      });
+    }
 
     const activeSession =
       contextStorage.getStore() === undefined

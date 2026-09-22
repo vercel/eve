@@ -1,6 +1,4 @@
 import { stageDevelopmentEnvironmentFiles } from "#cli/dev/environment.js";
-import { prewarmDevelopmentSandboxes } from "#execution/sandbox/development-prewarm.js";
-import { createDevelopmentGenerationArtifactsSource } from "#internal/nitro/host/artifacts-config.js";
 import { createDevelopmentApplicationNitro } from "#internal/nitro/host/create-application-nitro.js";
 import { buildDevelopmentHostCandidate } from "#internal/nitro/host/dev-host-candidate.js";
 import { computeDevelopmentHostFingerprint } from "#internal/nitro/host/dev-host-fingerprint.js";
@@ -121,7 +119,6 @@ class TransactionalDevelopmentAuthoredRebuildCoordinator implements DevelopmentA
       ) {
         throw new DevelopmentWorkflowWorldChangeRequiresRestartError();
       }
-      await prewarmDevelopmentHost(nextHost);
       const nextHostFingerprint = await computeDevelopmentHostFingerprint(nextHost);
       const nextRuntimeFingerprint = nextHost.generation.fingerprint;
       const hasStructuralChange = nextHostFingerprint !== this.#currentHostFingerprint;
@@ -260,18 +257,6 @@ function retainActiveHostWorkspace(
     workflowBuildDir: activeHost.workflowBuildDir,
     workspace: activeHost.workspace,
   };
-}
-
-async function prewarmDevelopmentHost(host: PreparedDevelopmentApplicationHost): Promise<void> {
-  await prewarmDevelopmentSandboxes({
-    appRoot: host.appRoot,
-    compiledArtifactsSource: createDevelopmentGenerationArtifactsSource({
-      appRoot: host.appRoot,
-      configuredWorld: host.compileResult.manifest.config.experimental?.workflow?.world,
-      runtimeAppRoot: host.generation.runtimeAppRoot,
-    }),
-    log: (message) => console.log(message),
-  });
 }
 
 async function discardPreparedHost(host: PreparedDevelopmentApplicationHost): Promise<void> {
