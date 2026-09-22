@@ -143,22 +143,6 @@ describe("packed package consumption", () => {
       appRoot,
     );
     await access(join(appRoot, "node_modules/eve/dist/src/self-modification/agent.js"));
-    await writeAppFile(
-      appRoot,
-      "verify-development-extension.mjs",
-      `import { defaultDevelopmentExtensions } from "./node_modules/eve/dist/src/compiler/development-extensions.js";
-import { compileAgentManifest } from "./node_modules/eve/dist/src/compiler/normalize-manifest.js";
-import { createAgentSourceManifest } from "./node_modules/eve/dist/src/discover/manifest.js";
-
-const manifest = createAgentSourceManifest({ agentId: "packed-dev", agentRoot: "/virtual/agent", appRoot: "/virtual" });
-const compiled = await compileAgentManifest(manifest, { developmentExtensions: defaultDevelopmentExtensions() });
-const subagent = compiled.subagents.find((entry) => entry.name === "self-modification__agent");
-if (compiled.subagents.length !== 1 || subagent === undefined || !subagent.agent.tools.some((tool) => tool.name === "edit_file")) {
-  throw new Error("Packed eve did not discover the bundled self-modification extension.");
-}
-`,
-    );
-    await run("node", ["verify-development-extension.mjs"], appRoot);
     const build = await run("pnpm", ["build"], appRoot);
     const output = `${build.stdout}\n${build.stderr}`;
     if (output.includes("Could not resolve '#shared/")) {

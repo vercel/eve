@@ -181,9 +181,9 @@ export function compileExtensionMounts(
 ): CompiledExtensionMount[] {
   const selected = collectSelectedSourceIds(composed);
   return manifest.resolvedExtensions.flatMap((mount) => {
-    const mountRef =
-      mount.programmaticDeclaration ??
-      manifest.extensions.find((entry) => mountRefNamespace(entry.logicalPath) === mount.namespace);
+    const mountRef = manifest.extensions.find(
+      (entry) => mountRefNamespace(entry.logicalPath) === mount.namespace,
+    );
     if (mountRef === undefined || !selected.has(mountRef.sourceId)) return [];
     return [
       {

@@ -392,9 +392,7 @@ describe("createDevelopmentServer", () => {
 
     const server = await startDevelopmentServer("/tmp/eve-test");
 
-    expect(mocks.prepareDevelopmentApplicationHost).toHaveBeenCalledWith("/tmp/eve-test", {
-      developmentExtensions: { enabled: ["self-modification"] },
-    });
+    expect(mocks.prepareDevelopmentApplicationHost).toHaveBeenCalledWith("/tmp/eve-test");
     expect(mocks.startDevelopmentSandboxPrewarmInBackground).toHaveBeenCalledWith({
       appRoot: "/tmp/eve-test",
       compiledArtifactsSource: {
