@@ -81,6 +81,7 @@ export async function writeCompiledArtifactsFiles(input: {
     JSON.parse(await readFile(input.compileResult.paths.sandboxPreparedArtifactsPath, "utf8")),
   );
   const prepared = await prepareAuthoredRuntimeModules({
+    appRoot: input.compileResult.project.appRoot,
     manifest: input.compileResult.manifest,
     moduleMapPath: input.compileResult.paths.moduleMapPath,
   });

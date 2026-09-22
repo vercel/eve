@@ -1,5 +1,23 @@
 # eve
 
+## 0.64.0
+
+### Minor Changes
+
+- 3be0b74: Add `taskDeliveryPolicy: "auto" | "cohort"` to message sends. New channel sessions default to `"auto"`, allowing independently useful reports or silence until related work settles; schedules default to `"cohort"`, and explicit sends can select or update the session's policy.
+- 49971b7: Replace object-form sandbox definitions with exported provider environments whose `open()` method starts and returns the current eve session's persistent live sandbox. After successful selector initialization, durable boundaries resume directly from immutable provider state without rerunning `defineSandbox()`; provider-specific session capabilities remain precisely typed.
+
+### Patch Changes
+
+- fa92e5e: Route AI SDK provider warnings to eve's diagnostics instead of presenting successful compatibility fallbacks as stderr errors. Existing custom warning handlers and `AI_SDK_LOG_WARNINGS=false` remain respected.
+- 3be0b74: Align the bundled Chat SDK and adapters with version 4.41.0. Chat SDK channel types now reference the installed `chat` package so external adapters and handlers share the same type identity; `chat` is an optional peer for this integration.
+- 3e5ff9f: Fix a Vercel Workflow race where a rejected inline-step preclaim could skip the owner's body, leaving the durable step to fail after exhausting its retry limit without running user code.
+- aceb298: Local self-modification now depends on `eve dev` host facilities instead of request provenance.
+- f2b8792: Pre-approve esbuild install scripts in newly initialized pnpm projects so registry additions that install the Vercel CLI no longer require a separate `pnpm approve-builds` step.
+- b174a62: Remove the redundant Enter badge from searchable setup pickers; the selected-row cursor already indicates the active choice.
+- 9f17453: Clarify that `eve build --skip-sandbox-prewarm` skips sandbox preparation for local and hosted builds. Workspace fixture typechecks now use this mode instead of provisioning sandbox infrastructure.
+- d98edb2: Add `eve init --non-interactive` to scaffold and install an agent without opening the development TUI.
+
 ## 0.63.1
 
 ### Patch Changes

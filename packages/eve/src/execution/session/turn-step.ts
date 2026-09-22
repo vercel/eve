@@ -398,13 +398,17 @@ async function runSessionStep(input: TurnStepInput): Promise<DurableStepResult> 
             messages: history.initial.messages,
             runtimeRevision: dynamicRuntimeRevision,
           }),
-          refreshDynamicSessionToolsForRuntimeRevision({
+          contextStorage.run(
             ctx,
-            resolvers: dynamicToolResolvers,
-            event: refreshEvent,
-            messages: history.initial.messages,
-            runtimeRevision: dynamicRuntimeRevision,
-          }),
+            async () =>
+              await refreshDynamicSessionToolsForRuntimeRevision({
+                ctx,
+                resolvers: dynamicToolResolvers,
+                event: refreshEvent,
+                messages: history.initial.messages,
+                runtimeRevision: dynamicRuntimeRevision,
+              }),
+          ),
         ]);
         await rebindMissingCompiledDynamicToolCallbacks({
           ctx,

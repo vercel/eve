@@ -58,6 +58,7 @@ import {
 import { buildRuntimeIdentity, createExecutionNodeStep } from "#execution/node-step.js";
 import { defineTool } from "#tools/definition.js";
 import { defineMemory } from "#public/memory/index.js";
+import { defineState } from "#public/definitions/state.js";
 import { stampDurableDynamicCallback } from "#tools/durable-callbacks.js";
 import { dispatchCoordinationStep } from "#execution/coordination-dispatch-step.js";
 import { runProxySubagentEventStep } from "#subagents/event-proxy-step.js";
@@ -3112,8 +3113,10 @@ describe("turnStep", () => {
       callback: async () => ({ ok: true }),
       closure: {},
     });
+    const resolverState = defineState("test.dynamic-tool-refresh", () => "available");
     const handler = vi.fn(() => {
       lifecycleOrder.push("refresh");
+      expect(resolverState.get()).toBe("available");
       return {
         current_tool: defineTool({
           description: "Current deployment tool",

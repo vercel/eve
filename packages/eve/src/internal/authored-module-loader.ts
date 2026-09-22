@@ -277,9 +277,12 @@ export interface AuthoredModuleMapBundle {
 }
 
 export async function bundleAuthoredModuleMapForGeneration(input: {
+  readonly appRoot: string;
   readonly manifest: CompiledAgentManifest;
   readonly moduleMapPath: string;
 }): Promise<AuthoredModuleMapBundle> {
+  // The package root owns dependency resolution, while the selected app root
+  // owns authored workflow IDs and must match the workflow driver.
   const packageRoot = resolveAuthoredPackageRoot(input.manifest.agentRoot);
   const programmaticLoaderImportSpecifier = resolvePackageSourceFilePath(
     "src/internal/programmatic-source-loader.ts",
@@ -306,7 +309,7 @@ export async function bundleAuthoredModuleMapForGeneration(input: {
         })),
     ),
   );
-  const workflowSources = new AuthoredWorkflowSourceRecorder(packageRoot);
+  const workflowSources = new AuthoredWorkflowSourceRecorder(input.appRoot);
   const plugins = [
     createVirtualGenerationModuleMapPlugin({
       id: input.moduleMapPath,
@@ -314,7 +317,7 @@ export async function bundleAuthoredModuleMapForGeneration(input: {
     }),
     createExternalRuntimeImportPlugin(programmaticLoaderImportSpecifier),
     // Before callback stamping, which must see the stub and never the directive.
-    createAuthoredWorkflowDirectivePlugin({ appRoot: packageRoot, recorder: workflowSources }),
+    createAuthoredWorkflowDirectivePlugin({ appRoot: input.appRoot, recorder: workflowSources }),
     createDynamicCapabilityTransformPlugin({
       workflowFunctions: (id) => workflowSources.workflowFunctions(id),
     }),
