@@ -39,10 +39,7 @@ export function registerBuildCommand(input: {
     })
     .description("Build the current eve application.")
     .option("--profile <path>", "Write best-effort timing and output-size profile JSON to a file")
-    .option(
-      "--skip-sandbox-prewarm",
-      "Skip sandbox template prewarm for a Vercel build; output may not be deployable",
-    )
+    .option("--skip-sandbox-prewarm", "Skip sandbox preparation; output may not be deployable")
     .action(async (options: BuildCliOptions) => {
       const { loadDevelopmentEnvironmentFiles } = await import("#cli/dev/environment.js");
 
@@ -78,12 +75,12 @@ export function registerBuildCommand(input: {
       const buildOptions: {
         profileOutputPath?: string;
         readonly publicRoutePrefix: ApplicationBuildOptions["publicRoutePrefix"];
-        readonly skipVercelSandboxPrewarm: boolean;
+        readonly skipSandboxPrewarm: boolean;
         readonly vercelServiceOutput: ApplicationBuildOptions["vercelServiceOutput"];
         readonly workspaceMember: boolean;
       } = {
         publicRoutePrefix: normalizePublicRoutePrefix(process.env[EVE_PUBLIC_ROUTE_PREFIX_ENV]),
-        skipVercelSandboxPrewarm: options.skipSandboxPrewarm === true,
+        skipSandboxPrewarm: options.skipSandboxPrewarm === true,
         vercelServiceOutput: resolveInternalVercelServiceOutput(input.applicationContext.root),
         workspaceMember:
           projectContext.kind === "workspace-member" ||

@@ -161,7 +161,7 @@ Run this first when something behaves unexpectedly. It confirms a file was disco
 eve build [--profile <path>] [--skip-sandbox-prewarm]
 ```
 
-Compiles and bundles in an invocation-owned directory under `.eve/builds/`, then publishes the completed host output and prints its path. Scratch workspaces are removed after success or failure.
+Compiles and bundles in an invocation-owned directory under `.eve/builds/`, prepares sandbox artifacts, then publishes the completed host output and prints its path. Scratch workspaces are removed after success or failure. Pass `--skip-sandbox-prewarm` when you only need compiled output, such as before a separate typecheck. Skipping preparation can produce output that cannot start its configured sandbox, so do not deploy that output.
 
 Authored bundles preserve custom Node.js resolution conditions supplied through `--conditions`,
 `-C`, or `NODE_OPTIONS`. For example, `NODE_OPTIONS="--conditions=react-server" eve build`
@@ -170,7 +170,7 @@ keeps a channel's `server-only` imports on the same export used during compilati
 | Flag                     | Type   | Default | Description                                                                                   |
 | ------------------------ | ------ | ------- | --------------------------------------------------------------------------------------------- |
 | `--profile <path>`       | string | off     | Best-effort versioned JSON report with build-phase timings and final output-size measurements |
-| `--skip-sandbox-prewarm` | flag   | off     | Skip sandbox template prewarm for a Vercel build; the output might not be deployable          |
+| `--skip-sandbox-prewarm` | flag   | off     | Skip sandbox preparation; the output might not be deployable                                  |
 
 Use a profile file to establish a repeatable baseline before changing the build pipeline:
 

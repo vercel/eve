@@ -20,7 +20,7 @@ const EVE_PACKAGE_INFO = resolveInstalledPackageInfo();
 const EVE_PACKAGE_ROOT = resolvePackageRoot();
 const createScratchDirectory = useTemporaryDirectories();
 const DEPLOYABLE_BUILD_OPTIONS = {
-  skipVercelSandboxPrewarm: false,
+  skipSandboxPrewarm: false,
 } as const;
 
 async function readJavaScriptModulesRecursively(rootDirectory: string): Promise<string> {

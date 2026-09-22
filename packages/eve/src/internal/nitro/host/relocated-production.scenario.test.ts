@@ -83,7 +83,7 @@ describe("relocated production applications", () => {
       await rename(join(root, entry), join(buildRoot, entry));
     }
     const appRoot = join(buildRoot, "apps", "service");
-    await buildApplication(appRoot, { skipVercelSandboxPrewarm: false });
+    await buildApplication(appRoot, { skipSandboxPrewarm: false });
     await rename(buildRoot, runtimeRoot);
     await expect(access(buildRoot)).rejects.toMatchObject({ code: "ENOENT" });
 

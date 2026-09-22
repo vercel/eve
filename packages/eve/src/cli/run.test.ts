@@ -1173,7 +1173,7 @@ describe("eve build output ownership", () => {
 
     expect(buildHost).toHaveBeenCalledWith(process.cwd(), {
       profileOutputPath: resolve(process.cwd(), profilePath),
-      skipVercelSandboxPrewarm: false,
+      skipSandboxPrewarm: false,
       vercelServiceOutput: undefined,
       workspaceMember: false,
     });
@@ -1193,7 +1193,7 @@ describe("eve build output ownership", () => {
     }
 
     expect(buildHost).toHaveBeenCalledWith(process.cwd(), {
-      skipVercelSandboxPrewarm: false,
+      skipSandboxPrewarm: false,
       vercelServiceOutput: {
         hostOutputDirectory: resolve(process.cwd(), configuredHostDirectory),
         serviceOutputDirectory: resolve(process.cwd(), configuredDirectory),
