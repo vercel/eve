@@ -21,6 +21,7 @@ import { interruptedError } from "./errors.js";
 import {
   argumentTypeaheadCompletion,
   argumentTypeaheadFor,
+  argumentTypeaheadLoadingLabel,
   argumentTypeaheadQuery,
   moveArgumentTypeaheadSelection,
   renderArgumentSuggestions,
@@ -715,6 +716,29 @@ export class TerminalRenderer implements AgentTUIRenderer {
     );
   }
 
+  #typeaheadDrawerRows(width: number): string[] {
+    const query = argumentTypeaheadQuery(this.#inputText);
+    const catalog = query === undefined ? undefined : this.#argumentCatalogs.get(query.command);
+    if (catalog?.kind === "loading" && query !== undefined) {
+      return [
+        clip(
+          this.#theme.colors.dim(`Loading ${argumentTypeaheadLoadingLabel(query.command)}…`),
+          width,
+        ),
+      ];
+    }
+    if (this.#argumentTypeahead !== undefined) {
+      return renderArgumentSuggestions(this.#argumentTypeahead, this.#theme, width);
+    }
+    const inlineHint =
+      this.#typeahead === undefined ? undefined : inlineCommandHint(this.#typeahead);
+    return inlineHint === undefined &&
+      this.#typeahead !== undefined &&
+      isTypeaheadOpen(this.#typeahead)
+      ? renderCommandSuggestions(this.#typeahead, this.#theme, width)
+      : [];
+  }
+
   setStartupPhase(phase: "starting" | "connecting" | "updating" | undefined): void {
     this.#startupPhase = phase;
     if (phase === undefined) this.#stopTicker();
@@ -983,6 +1007,17 @@ export class TerminalRenderer implements AgentTUIRenderer {
               argumentOpen.completed.length === 0
             ) {
               apply(lineOf(`${argumentTypeaheadCompletion(argumentOpen, argumentSelected)} `));
+              break;
+            }
+            // `/add` and `/model` share their inline drawer whether the
+            // command was typed exactly or reached through slash completion.
+            if (
+              argumentOpen === undefined &&
+              selected !== undefined &&
+              this.#argumentSuggestions !== undefined &&
+              (selected.name === "add" || selected.name === "model")
+            ) {
+              apply(lineOf(typeaheadCompletion(selected)));
               break;
             }
             const prompt =
@@ -4441,24 +4476,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
       // still open the list above the input.
       const inlineHint =
         this.#typeahead !== undefined ? inlineCommandHint(this.#typeahead) : undefined;
-      const argumentQuery = argumentTypeaheadQuery(this.#inputText);
-      const argumentCatalog =
-        argumentQuery === undefined ? undefined : this.#argumentCatalogs.get(argumentQuery.command);
-      const typeaheadRows =
-        argumentCatalog?.kind === "loading"
-          ? [
-              clip(
-                c.dim(`Loading ${argumentQuery?.command === "model" ? "models" : "registry"}…`),
-                width,
-              ),
-            ]
-          : this.#argumentTypeahead !== undefined
-            ? renderArgumentSuggestions(this.#argumentTypeahead, this.#theme, width)
-            : inlineHint === undefined &&
-                this.#typeahead !== undefined &&
-                isTypeaheadOpen(this.#typeahead)
-              ? renderCommandSuggestions(this.#typeahead, this.#theme, width)
-              : [];
+      const typeaheadRows = this.#typeaheadDrawerRows(width);
       if (this.#exitArmed) {
         rows.push(clip(c.dim("Press Ctrl+C again to exit"), width), "");
       }

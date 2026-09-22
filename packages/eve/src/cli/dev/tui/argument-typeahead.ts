@@ -11,8 +11,10 @@ export interface PromptArgumentSuggestion {
   readonly next?: readonly PromptArgumentSuggestion[];
 }
 
+export type ArgumentTypeaheadCommand = "model" | "add";
+
 export interface ArgumentTypeaheadQuery {
-  readonly command: "model" | "add";
+  readonly command: ArgumentTypeaheadCommand;
   readonly argument: string;
   /** Complete arguments before the one currently being typed. */
   readonly completed: readonly string[];
@@ -25,33 +27,48 @@ export interface ArgumentTypeaheadState extends ArgumentTypeaheadQuery {
   readonly selectedIndex: number;
 }
 
+const ARGUMENT_LIMIT: Record<ArgumentTypeaheadCommand, number> = { add: 1, model: 2 };
+
+export function isArgumentTypeaheadCommand(command: string): command is ArgumentTypeaheadCommand {
+  return command === "model" || command === "add";
+}
+
+export function argumentTypeaheadLoadingLabel(command: ArgumentTypeaheadCommand): string {
+  return command === "model" ? "models" : "registry";
+}
+
 /**
- * Parses the current argument in one supported slash command. `/model` accepts
- * a second token for reasoning; `/add` accepts only its registry address.
+ * Parses the active token in an inline command drawer. The command grammar
+ * deliberately uses literal spaces, matching slash-command dispatch.
  */
 export function argumentTypeaheadQuery(text: string): ArgumentTypeaheadQuery | undefined {
   if (!text.startsWith("/")) return undefined;
-  const separator = text.indexOf(" ");
-  if (separator < 0) return undefined;
-  const command = text.slice(1, separator);
-  if (command !== "model" && command !== "add") return undefined;
+  const commandEnd = text.indexOf(" ");
+  if (commandEnd < 0) return undefined;
+  const command = text.slice(1, commandEnd);
+  if (!isArgumentTypeaheadCommand(command)) return undefined;
 
-  const tail = text.slice(separator + 1);
-  const leadingSpaces = tail.length - tail.trimStart().length;
-  const tokens = tail.slice(leadingSpaces).split(" ");
-  if (tail.length > 0 && tokens.some((token) => token.length === 0) && !tail.endsWith(" ")) {
+  const tokens: { value: string; start: number }[] = [];
+  let cursor = commandEnd;
+  while (cursor < text.length) {
+    while (text[cursor] === " ") cursor += 1;
+    if (cursor === text.length) break;
+    const start = cursor;
+    while (cursor < text.length && text[cursor] !== " ") cursor += 1;
+    tokens.push({ value: text.slice(start, cursor), start });
+  }
+  if (text.slice(commandEnd).includes("\n") || tokens.length > ARGUMENT_LIMIT[command]) {
     return undefined;
   }
-  const completed = tokens.slice(0, -1).filter(Boolean);
-  const argument = tokens.at(-1) ?? "";
-  if (
-    (command === "add" && completed.length > 0) ||
-    (command === "model" && completed.length > 1)
-  ) {
-    return undefined;
-  }
-  const argumentStart = text.length - argument.length;
-  return { command, argument, completed, argumentStart };
+  const active = tokens.at(-1);
+  const completed = tokens.map((token) => token.value);
+  if (!text.endsWith(" ") && active !== undefined) completed.pop();
+  return {
+    command,
+    argument: text.endsWith(" ") ? "" : (active?.value ?? ""),
+    completed,
+    argumentStart: text.endsWith(" ") ? text.length : (active?.start ?? text.length),
+  };
 }
 
 function sanitizeSuggestion(suggestion: PromptArgumentSuggestion): PromptArgumentSuggestion {
