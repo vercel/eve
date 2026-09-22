@@ -66,15 +66,25 @@ export function withRuntimeSandboxLifecycle<Session extends SandboxSession>(
   deleteSandbox: RuntimeSandboxSession["delete"],
   stop: () => Promise<void>,
 ): Session & Pick<RuntimeSandboxSession, "delete" | "stop"> {
-  return new Proxy(sandbox, {
-    get(target, property) {
+  return new Proxy(Object.create(null) as object, {
+    get(_proxyTarget, property) {
       if (property === "delete") return deleteSandbox;
       if (property === "stop") return stop;
-      const value = Reflect.get(target, property, target);
-      return typeof value === "function" ? value.bind(target) : value;
+      const value = Reflect.get(sandbox, property, sandbox);
+      return typeof value === "function" ? value.bind(sandbox) : value;
     },
-    has(target, property) {
-      return property === "delete" || property === "stop" || Reflect.has(target, property);
+    getOwnPropertyDescriptor(_proxyTarget, property) {
+      if (property === "delete" || property === "stop") {
+        return { configurable: true, enumerable: true, writable: false };
+      }
+      const descriptor = Reflect.getOwnPropertyDescriptor(sandbox, property);
+      return descriptor === undefined ? undefined : { ...descriptor, configurable: true };
+    },
+    has(_proxyTarget, property) {
+      return property === "delete" || property === "stop" || Reflect.has(sandbox, property);
+    },
+    ownKeys() {
+      return [...new Set([...Reflect.ownKeys(sandbox), "delete", "stop"])];
     },
   }) as Session & Pick<RuntimeSandboxSession, "delete" | "stop">;
 }

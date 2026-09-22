@@ -21,7 +21,7 @@ export default defineEval({
 
     t.succeeded();
     t.calledSubagent("deny-all", { count: 1, status: "completed" });
-    t.calledTool("bash", { output: { stderr: NETWORK_FAILURE } });
+    child.calledTool("bash", { output: { stderr: NETWORK_FAILURE } });
   },
 });
 

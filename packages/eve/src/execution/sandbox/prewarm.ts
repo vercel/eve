@@ -1,4 +1,4 @@
-import { join } from "node:path";
+import { join, relative, resolve } from "node:path";
 
 import type { CompiledWorkspaceResourceRoot } from "#compiler/manifest.js";
 import { loadCompiledModuleMapFromAuthoredSource } from "#internal/authored-module-map-loader.js";
@@ -192,8 +192,9 @@ async function collectPrewarmTargets(input: {
 
   await Promise.all(
     collectNodeSandboxes(input.graph).map(async ({ definition, nodeId, workspaceResourceRoot }) => {
+      const agent = getResolvedRuntimeAgentNode(input.graph, nodeId).agent;
       const sandboxRoot = join(
-        getResolvedRuntimeAgentNode(input.graph, nodeId).agent.metadata.agentRoot,
+        resolve(input.appRoot, relative(agent.metadata.appRoot, agent.metadata.agentRoot)),
         "sandbox",
       );
       const provider = getSandboxEnvironmentRuntime(definition.environment);
