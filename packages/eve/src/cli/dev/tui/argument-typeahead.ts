@@ -8,30 +8,45 @@ export interface PromptArgumentSuggestion {
   readonly hint?: string;
 }
 
-export interface ArgumentTypeaheadState {
+export interface ArgumentTypeaheadQuery {
   readonly command: "model" | "add";
-  readonly query: string;
+  readonly argument: string;
+  /** Offset of the argument in the composer draft. */
+  readonly argumentStart: number;
+}
+
+export interface ArgumentTypeaheadState extends ArgumentTypeaheadQuery {
   readonly suggestions: readonly PromptArgumentSuggestion[];
   readonly selectedIndex: number;
 }
 
-/** Returns the command and its single-token argument while it is being composed. */
-export function argumentTypeaheadQuery(
-  text: string,
-): Pick<ArgumentTypeaheadState, "command" | "query"> | undefined {
-  const match = /^\/(model|add)\s+([^\s]*)$/u.exec(text);
-  if (match === null) return undefined;
-  return { command: match[1]! as ArgumentTypeaheadState["command"], query: match[2]! };
+/**
+ * Parses one supported slash command and its unfinished single-token argument.
+ * Keeping this deliberately small makes the inline picker independent of the
+ * execution parser while preserving the exact composer offsets it needs.
+ */
+export function argumentTypeaheadQuery(text: string): ArgumentTypeaheadQuery | undefined {
+  if (!text.startsWith("/")) return undefined;
+  const separator = text.indexOf(" ");
+  if (separator < 0) return undefined;
+  const command = text.slice(1, separator);
+  if (command !== "model" && command !== "add") return undefined;
+
+  let argumentStart = separator;
+  while (text[argumentStart] === " ") argumentStart += 1;
+  const argument = text.slice(argumentStart);
+  return [...argument].some((character) => character.trim().length === 0)
+    ? undefined
+    : { command, argument, argumentStart };
 }
 
 /** Filters catalog entries case-insensitively across their visible labels and ids. */
 export function argumentTypeaheadFor(
-  command: ArgumentTypeaheadState["command"],
-  query: string,
+  query: ArgumentTypeaheadQuery,
   suggestions: readonly PromptArgumentSuggestion[],
   previous?: ArgumentTypeaheadState,
 ): ArgumentTypeaheadState {
-  const normalized = query.toLowerCase();
+  const normalized = query.argument.toLowerCase();
   const matches = suggestions.filter(
     (suggestion) =>
       suggestion.value.toLowerCase().includes(normalized) ||
@@ -41,8 +56,7 @@ export function argumentTypeaheadFor(
   const selected = previous?.suggestions[previous.selectedIndex];
   const selectedIndex = selected === undefined ? -1 : matches.indexOf(selected);
   return {
-    command,
-    query,
+    ...query,
     suggestions: matches,
     selectedIndex: selectedIndex >= 0 ? selectedIndex : 0,
   };
@@ -84,7 +98,7 @@ export function renderArgumentSuggestions(
   return state.suggestions.slice(0, 8).map((suggestion, index) => {
     const value =
       index === state.selectedIndex ? c.bold(suggestion.value) : c.dim(suggestion.value);
-    const indent = " ".repeat(state.command.length + 4);
+    const indent = " ".repeat(state.argumentStart + 2);
     const row = `${indent}${value}`;
     return visibleLength(row) > width ? sliceVisible(row, width) : row;
   });

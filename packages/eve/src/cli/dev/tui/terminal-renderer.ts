@@ -484,11 +484,10 @@ export class TerminalRenderer implements AgentTUIRenderer {
    */
   #typeahead?: CommandTypeaheadState;
   #argumentTypeahead?: ArgumentTypeaheadState;
-  #argumentSuggestionsLoading?: ArgumentTypeaheadState["command"];
   readonly #argumentSuggestions?: TerminalRendererOptions["argumentSuggestions"];
-  readonly #argumentSuggestionCache = new Map<
+  readonly #argumentCatalogs = new Map<
     ArgumentTypeaheadState["command"],
-    Promise<readonly PromptArgumentSuggestion[]>
+    { kind: "loading" } | { kind: "ready"; suggestions: readonly PromptArgumentSuggestion[] }
   >();
   /**
    * Whether the empty input row invites with a rotating placeholder. Only
@@ -690,38 +689,30 @@ export class TerminalRenderer implements AgentTUIRenderer {
     const query = argumentTypeaheadQuery(text);
     if (query === undefined || this.#argumentSuggestions === undefined) {
       this.#argumentTypeahead = undefined;
-      this.#argumentSuggestionsLoading = undefined;
       return;
     }
-    const catalog = this.#argumentSuggestionCache.get(query.command);
+    const catalog = this.#argumentCatalogs.get(query.command);
     if (catalog === undefined) {
-      const loading = this.#argumentSuggestions(query.command).catch(() => []);
-      this.#argumentSuggestionCache.set(query.command, loading);
-      this.#argumentSuggestionsLoading = query.command;
-      void loading.then(() => {
-        if (this.#argumentSuggestionsLoading === query.command) {
-          this.#argumentSuggestionsLoading = undefined;
-        }
-        if (this.#inputActive) this.#syncTypeahead(this.#inputText);
-        this.#paint();
-      });
+      this.#argumentCatalogs.set(query.command, { kind: "loading" });
+      void this.#argumentSuggestions(query.command)
+        .catch(() => [])
+        .then((suggestions) => {
+          this.#argumentCatalogs.set(query.command, { kind: "ready", suggestions });
+          if (this.#inputActive) this.#syncTypeahead(this.#inputText);
+          this.#paint();
+        });
       this.#argumentTypeahead = undefined;
       return;
     }
-    const previous = this.#argumentTypeahead;
-    this.#argumentTypeahead = undefined;
-    this.#argumentSuggestionsLoading = undefined;
-    void catalog.then((suggestions) => {
-      if (this.#inputActive && argumentTypeaheadQuery(this.#inputText)?.command === query.command) {
-        this.#argumentTypeahead = argumentTypeaheadFor(
-          query.command,
-          argumentTypeaheadQuery(this.#inputText)!.query,
-          suggestions,
-          previous,
-        );
-        this.#paint();
-      }
-    });
+    if (catalog.kind === "loading") {
+      this.#argumentTypeahead = undefined;
+      return;
+    }
+    this.#argumentTypeahead = argumentTypeaheadFor(
+      query,
+      catalog.suggestions,
+      this.#argumentTypeahead,
+    );
   }
 
   setStartupPhase(phase: "starting" | "connecting" | "updating" | undefined): void {
@@ -4442,13 +4433,14 @@ export class TerminalRenderer implements AgentTUIRenderer {
       // still open the list above the input.
       const inlineHint =
         this.#typeahead !== undefined ? inlineCommandHint(this.#typeahead) : undefined;
+      const argumentQuery = argumentTypeaheadQuery(this.#inputText);
+      const argumentCatalog =
+        argumentQuery === undefined ? undefined : this.#argumentCatalogs.get(argumentQuery.command);
       const typeaheadRows =
-        this.#argumentSuggestionsLoading !== undefined
+        argumentCatalog?.kind === "loading"
           ? [
               clip(
-                c.dim(
-                  `Loading ${this.#argumentSuggestionsLoading === "model" ? "models" : "registry"}…`,
-                ),
+                c.dim(`Loading ${argumentQuery?.command === "model" ? "models" : "registry"}…`),
                 width,
               ),
             ]
