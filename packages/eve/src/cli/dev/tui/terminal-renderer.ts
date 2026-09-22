@@ -4473,7 +4473,13 @@ export class TerminalRenderer implements AgentTUIRenderer {
       // (attention or typeahead), so the prompt receives only what remains.
       const maxPromptRows = Math.max(
         1,
-        this.#height() - 1 - rows.length - 1 - typeaheadRows.length - statusRows.length,
+        this.#height() -
+          1 -
+          rows.length -
+          1 -
+          typeaheadRows.length -
+          statusRows.length -
+          (typeaheadRows.length > 0 ? 2 : 0),
       );
       const promptRows: Parameters<typeof promptInputRows>[0] = {
         text: this.#inputText,
@@ -4497,6 +4503,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
       }
       rows.push(...promptInputRows(promptRows));
       // Keep menus beneath the composer so opening them never moves the caret.
+      if (typeaheadRows.length > 0) rows.push(c.dim(this.#theme.glyph.dash.repeat(width)));
       rows.push(...typeaheadRows);
       if (typeaheadRows.length > 0 && statusRows.length > 0) {
         rows.push(c.dim(this.#theme.glyph.dash.repeat(width)));

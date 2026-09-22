@@ -1,7 +1,7 @@
 import { sliceVisible, visibleLength } from "#cli/ui/terminal-text.js";
 
-// `❯ /model ` and `❯ /add ` both put their argument at column eight.
-const COMPOSER_ARGUMENT_INDENT = "        ";
+// The command argument begins after the `❯ ` prompt gutter and command token.
+const COMPOSER_ARGUMENT_INDENT = "         ";
 
 import type { Theme } from "./theme.js";
 

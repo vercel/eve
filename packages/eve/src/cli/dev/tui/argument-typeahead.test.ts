@@ -47,8 +47,8 @@ describe("argumentTypeaheadFor", () => {
       createTheme({ color: false, unicode: true }),
       80,
     ).map(stripAnsi);
-    expect(rows[0]).toMatch(/^ {8}anthropic\/claude-sonnet$/u);
-    expect(rows[1]).toMatch(/^ {8}openai\/gpt-5$/u);
+    expect(rows[0]).toMatch(/^ {9}anthropic\/claude-sonnet$/u);
+    expect(rows[1]).toMatch(/^ {9}openai\/gpt-5$/u);
     expect(rows.join("\n")).not.toContain("Anthropic");
   });
 });
