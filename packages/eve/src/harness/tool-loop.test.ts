@@ -1756,7 +1756,7 @@ describe("createToolLoopHarness", () => {
     const runStep = createToolLoopHarness(
       createTestConfig("conversation", emit, {
         dispatchDynamicModelEvent,
-        harness,
+        harnessAgent: { harness, skills: [] },
         resolveModel,
       }),
     );
@@ -1818,7 +1818,9 @@ describe("createToolLoopHarness", () => {
     mockLoadHarnessAgentSandboxSession.mockResolvedValue(harnessSandbox);
     const harness = createTestHarness();
     const runStep = createToolLoopHarness(
-      createTestConfig("conversation", createEventCollector().emit, { harness }),
+      createTestConfig("conversation", createEventCollector().emit, {
+        harnessAgent: { harness, skills: [] },
+      }),
     );
     const session = createTestSession({
       agent: {
@@ -1851,7 +1853,7 @@ describe("createToolLoopHarness", () => {
     const runStep = createToolLoopHarness(
       createTestConfig("conversation", undefined, {
         dispatchDynamicModelEvent,
-        harness: createTestHarness("authored-harness"),
+        harnessAgent: { harness: createTestHarness("authored-harness"), skills: [] },
         resolveModel,
       }),
     );

@@ -410,7 +410,17 @@ describe("createExecutionNodeStep", () => {
       tools: [],
       workspaceSpec: { rootEntries: [] },
     };
-    const node = createTestNode(turnAgent);
+    const node = createTestNode(turnAgent, {
+      agent: {
+        skills: [
+          {
+            description: "Get the weather for a location.",
+            markdown: "# Get weather\n\nUse the weather tool.",
+            name: "get-weather",
+          },
+        ],
+      } as ResolvedRuntimeAgentNode["agent"],
+    });
     const step = createExecutionNodeStep({
       createRuntime: () => createNoopRuntime(),
       instrumentation: undefined,
@@ -429,7 +439,18 @@ describe("createExecutionNodeStep", () => {
     );
 
     expect(result.next).toEqual({ done: true, output: "Harness result" });
-    expect(HarnessAgent).toHaveBeenCalledWith(expect.objectContaining({ harness }));
+    expect(HarnessAgent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        harness,
+        skills: [
+          {
+            content: "# Get weather\n\nUse the weather tool.",
+            description: "Get the weather for a location.",
+            name: "get-weather",
+          },
+        ],
+      }),
+    );
     expect(harness.doStart).not.toHaveBeenCalled();
     expect(resolveRuntimeModelReference).not.toHaveBeenCalled();
     expect(ToolLoopAgent).not.toHaveBeenCalled();

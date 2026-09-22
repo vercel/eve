@@ -1,5 +1,5 @@
 import type { LanguageModel, ModelMessage, UserContent } from "ai";
-import type { HarnessV1 } from "@ai-sdk/harness";
+import type { HarnessV1, HarnessV1Skill } from "@ai-sdk/harness";
 
 import type { SessionAuthContext, SessionCapabilities } from "#channel/types.js";
 import type { AlsContext } from "#context/container.js";
@@ -278,6 +278,19 @@ export type HandleEventFn = (
   messages?: readonly import("ai").ModelMessage[],
 ) => Promise<void>;
 
+export interface HarnessAgentExecutionConfig {
+  readonly harness: HarnessV1;
+  /**
+   * Static authored skills projected to the AI SDK harness contract. Only the
+   * skill name, description, and primary Markdown content are supported;
+   * sibling files are not forwarded.
+   *
+   * TODO: Include active dynamic skills once their complete content can be
+   * projected at this boundary.
+   */
+  readonly skills: readonly HarnessV1Skill[];
+}
+
 /**
  * Dependencies injected into the tool-loop harness at construction time.
  */
@@ -301,10 +314,11 @@ export interface ToolLoopHarnessConfig {
   /** Execution-prepared view of the history supplied to the first harness step. */
   readonly historyView?: PreparedHistoryView;
   /**
-   * Live authored AI SDK harness retained at the tool-loop boundary. This
-   * instance stays outside durable session state because it contains methods.
+   * Live authored AI SDK HarnessAgent configuration retained at the tool-loop
+   * boundary. It stays outside durable session state because the harness
+   * contains methods.
    */
-  readonly harness?: HarnessV1;
+  readonly harnessAgent?: HarnessAgentExecutionConfig;
   /**
    * Internal lifecycle hooks injected into each actual model attempt.
    * Omitted in production until an instrumentation runtime opts in.

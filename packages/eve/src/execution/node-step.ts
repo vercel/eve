@@ -98,6 +98,17 @@ export function createExecutionNodeStep(input: CreateExecutionNodeStepInput): St
   const tools = createNodeHarnessTools({ node: input.node });
   const instrumentation = input.instrumentation;
   const sessionInstrumentation = instrumentation?.prepareExecution();
+  const harnessAgent =
+    input.node.turnAgent.harness === undefined
+      ? undefined
+      : {
+          harness: input.node.turnAgent.harness,
+          skills: input.node.agent.skills.map((skill) => ({
+            content: skill.markdown,
+            description: skill.description,
+            name: skill.name,
+          })),
+        };
   const step = createToolLoopHarness({
     steeringSignal: input.steeringSignal,
     abortSignal: input.abortSignal,
@@ -107,7 +118,7 @@ export function createExecutionNodeStep(input: CreateExecutionNodeStepInput): St
     handleEvent: input.handleEvent,
     historyProjector: input.historyProjector,
     historyView: input.historyView,
-    harness: input.node.turnAgent.harness,
+    harnessAgent,
     instrumentation: sessionInstrumentation,
     mode: input.mode,
     onCompaction: preserveFrameworkStateOnCompaction,

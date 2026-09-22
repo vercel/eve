@@ -263,9 +263,10 @@ type HarnessAgentCallExtensions = {
 };
 
 type ActiveHarnessExecution = {
-  readonly harness: NonNullable<ToolLoopHarnessConfig["harness"]>;
+  readonly harness: NonNullable<ToolLoopHarnessConfig["harnessAgent"]>["harness"];
   readonly harnessId: string;
   readonly kind: "harness";
+  readonly skills: NonNullable<ToolLoopHarnessConfig["harnessAgent"]>["skills"];
 };
 
 type ActiveExecution =
@@ -280,12 +281,13 @@ function resolveActiveHarnessExecution(input: {
   readonly config: ToolLoopHarnessConfig;
   readonly session: HarnessSession;
 }): ActiveHarnessExecution | undefined {
-  const harness = input.config.harness;
+  const harnessAgent = input.config.harnessAgent;
   const harnessId = input.session.agent.harnessId;
-  if (harness === undefined && harnessId === undefined) return undefined;
-  if (harness === undefined) {
+  if (harnessAgent === undefined && harnessId === undefined) return undefined;
+  if (harnessAgent === undefined) {
     throw new Error(`Harness-backed session requires the authored harness "${harnessId}".`);
   }
+  const { harness, skills } = harnessAgent;
   if (harnessId === undefined) {
     throw new Error(`Authored harness "${harness.harnessId}" cannot run a model-backed session.`);
   }
@@ -294,7 +296,7 @@ function resolveActiveHarnessExecution(input: {
       `Harness-backed session requires harness "${harnessId}", but the authored harness is "${harness.harnessId}".`,
     );
   }
-  return { harness, harnessId, kind: "harness" };
+  return { harness, harnessId, kind: "harness", skills };
 }
 
 /** Creates a tool-loop harness step function backed by an AI SDK agent. */
@@ -665,7 +667,8 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     }
 
     if (config.compactOnly === true) {
-      const isHarnessBacked = config.harness !== undefined || session.agent.harnessId !== undefined;
+      const isHarnessBacked =
+        config.harnessAgent !== undefined || session.agent.harnessId !== undefined;
       if (!isHarnessBacked && session.history.length > 0) {
         try {
           const ctx = contextStorage.getStore();
@@ -1671,6 +1674,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         const harnessAgent = new HarnessAgent({
           instructions: typeof instructions === "string" ? instructions : instructions?.content,
           harness: execution.harness,
+          skills: execution.skills,
           onLanguageModelCallEnd(event: LanguageModelCallEndEvent) {
             if (generation.interrupted) return;
             interruptedUsage = extractTokenUsageDelta({
