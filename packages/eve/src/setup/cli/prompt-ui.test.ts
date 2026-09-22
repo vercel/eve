@@ -84,25 +84,6 @@ describe("renderSelectPrompt", () => {
     expect(rendered).not.toContain("◼");
   });
 
-  test("renders stacked hints beneath labels with space between options", () => {
-    const rendered = renderSelectPrompt({
-      colors: styledColors,
-      cursor: 0,
-      hintLayout: "stacked",
-      message: "How should Web Chat reach your agents?",
-      options: [
-        { value: "services", label: "Separate services", hint: "Recommended for Vercel." },
-        { value: "next", label: "Through Next.js", hint: "Next.js proxies requests." },
-      ],
-      state: "active",
-    });
-
-    expect(rendered).toContain(
-      "<b> › Separate services</b>\n│     <dim>Recommended for Vercel.</dim>\n│\n│     Through Next.js\n│     <dim>Next.js proxies requests.</dim>",
-    );
-    expect(rendered).not.toContain("· Recommended for Vercel.");
-  });
-
   test("moves the dimmed question to the front of the chosen answer on submit", () => {
     const rendered = renderSelectPrompt({
       colors: styledColors,

@@ -92,7 +92,6 @@ export async function prepareWebSetup(
       ],
       recommended: "vercel" as const,
       required: true,
-      hintLayout: "stacked",
     }),
   );
   if (hosting === "vercel") {

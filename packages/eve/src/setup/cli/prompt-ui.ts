@@ -215,7 +215,6 @@ export function renderMultiselectPrompt<T extends PromptValue>(input: {
   footerNote?: string;
   leadingRail?: "white" | "green";
   message: string;
-  hintLayout?: "stacked" | "inline";
   options: readonly PromptOption<T>[];
   selectedValues: readonly T[];
   state: PromptState;
@@ -276,7 +275,6 @@ export function renderSelectPrompt<T extends PromptValue>(input: {
   footerNote?: string;
   leadingRail?: "white" | "green";
   message: string;
-  hintLayout?: "stacked" | "inline";
   options: readonly PromptOption<T>[];
   state: PromptState;
 }): string {
@@ -308,15 +306,14 @@ export function renderSelectPrompt<T extends PromptValue>(input: {
           const isCursor = index === input.cursor;
           const row = optionRow(option, {
             colors: input.colors,
-            hintLayout: input.hintLayout,
             isCursor,
             isChecked: false,
             placeholder: false,
             hintPadding: width - option.label.length,
           });
-          return `${row}${stackedHintLine(option, input.hintLayout, rail, input.colors)}${descriptionLine(option, isCursor, rail, input.colors)}`;
+          return `${row}${descriptionLine(option, isCursor, rail, input.colors)}`;
         })
-        .join(optionSeparator(rail, input.hintLayout));
+        .join(`\n${rail}  `);
       const corner = cornerWithNote(cornerFor(input.state, input.colors), input.footerNote);
       return `${head}${rail}  ${rows}\n${corner}\n`;
     }
@@ -333,7 +330,6 @@ function optionRow<T extends PromptValue>(
   option: PromptOption<T>,
   input: {
     colors: PromptColors;
-    hintLayout?: "stacked" | "inline";
     isCursor: boolean;
     isChecked: boolean;
     placeholder: boolean;
@@ -344,7 +340,7 @@ function optionRow<T extends PromptValue>(
     colors: input.colors,
     glyphs: UNICODE_ROW_GLYPHS,
     label: option.label,
-    hint: input.hintLayout === "stacked" ? undefined : option.hint,
+    hint: option.hint,
     focusHint: option.focusHint,
     accent: option.accent,
     isCursor: input.isCursor,
@@ -352,21 +348,6 @@ function optionRow<T extends PromptValue>(
     placeholder: input.placeholder,
     hintPadding: input.hintPadding,
   });
-}
-
-function optionSeparator(rail: string, hintLayout: "stacked" | "inline" | undefined): string {
-  return hintLayout === "stacked" ? `\n${rail}\n${rail}  ` : `\n${rail}  `;
-}
-
-function stackedHintLine<T extends PromptValue>(
-  option: PromptOption<T>,
-  hintLayout: "stacked" | "inline" | undefined,
-  rail: string,
-  colors: PromptColors,
-): string {
-  return hintLayout === "stacked" && option.hint
-    ? `\n${rail}  ${renderOptionRowContinuation(colors.dim(option.hint))}`
-    : "";
 }
 
 /** The dimmed description line shown beneath the cursor row, when it has one. */
@@ -406,7 +387,6 @@ export function renderSubmitRow(
 function renderMultiselectRows<T extends PromptValue>(input: {
   colors: PromptColors;
   cursor: number;
-  hintLayout?: "stacked" | "inline";
   options: readonly PromptOption<T>[];
   rail: string;
   selectedValues: readonly T[];
@@ -419,15 +399,14 @@ function renderMultiselectRows<T extends PromptValue>(input: {
       const isCursor = index === input.cursor;
       const row = optionRow(option, {
         colors: input.colors,
-        hintLayout: input.hintLayout,
         isCursor,
         isChecked: selectedSet.has(option.value),
         placeholder: true,
         hintPadding: width - option.label.length,
       });
-      return `${row}${stackedHintLine(option, input.hintLayout, input.rail, input.colors)}${descriptionLine(option, isCursor, input.rail, input.colors)}`;
+      return `${row}${descriptionLine(option, isCursor, input.rail, input.colors)}`;
     })
-    .join(optionSeparator(input.rail, input.hintLayout));
+    .join(`\n${input.rail}  `);
   const submit = renderSubmitRow(
     input.cursor === input.options.length,
     input.colors,
@@ -471,7 +450,6 @@ export function renderSearchableSelect<T extends PromptValue>(input: {
   state: PromptState;
   leadingRail?: "white" | "green";
   message: string;
-  hintLayout?: "stacked" | "inline";
   multiple: boolean;
   filter: string;
   placeholder?: string;
@@ -542,16 +520,15 @@ export function renderSearchableSelect<T extends PromptValue>(input: {
             const isCursor = !onSubmitRow && index + start === cursor;
             const row = optionRow(option, {
               colors,
-              hintLayout: input.hintLayout,
               isCursor,
               isChecked: input.multiple && selectedSet.has(option.value),
               // Search gates the placeholder dot off, matching the dev TUI.
               placeholder: false,
               hintPadding: width - option.label.length,
             });
-            return `${row}${stackedHintLine(option, input.hintLayout, rail, colors)}${descriptionLine(option, isCursor, rail, colors)}`;
+            return `${row}${descriptionLine(option, isCursor, rail, colors)}`;
           })
-          .join(optionSeparator(rail, input.hintLayout));
+          .join(`\n${rail}  `);
 
   const submitLine = input.multiple
     ? `\n${rail}\n${rail}  ${renderSubmitRow(onSubmitRow, colors, input.submitLabel)}`

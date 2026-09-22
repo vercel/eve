@@ -25,7 +25,7 @@ function deps(): WebSetupDeps {
 }
 
 describe("Web setup", () => {
-  it("presents the hosting topology with stacked guidance", async () => {
+  it("presents the hosting topology with concise guidance", async () => {
     const effects = deps();
     const fake = createFakePrompter({ single: () => "vercel" });
     const select = vi.spyOn(fake.prompter, "select");
@@ -42,7 +42,6 @@ describe("Web setup", () => {
     expect(select).toHaveBeenCalledWith(
       expect.objectContaining({
         message: "How should Web Chat reach your agents?",
-        hintLayout: "stacked",
         initialValue: "vercel",
         options: [
           {

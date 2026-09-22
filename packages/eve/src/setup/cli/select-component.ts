@@ -196,11 +196,7 @@ export class SelectComponent extends Prompt<string | string[]> {
 /** Renders the active component by dispatching to the renderer for its mode. */
 function renderSelectComponent(
   self: SelectComponent,
-  opts: {
-    message: string;
-    hintLayout?: "stacked" | "inline";
-    placeholder?: string;
-  },
+  opts: { message: string; placeholder?: string },
   leadingRail: "white" | "green",
   footerNote: string | undefined,
 ): string {
@@ -212,7 +208,6 @@ function renderSelectComponent(
       state,
       leadingRail,
       message: opts.message,
-      hintLayout: opts.hintLayout,
       multiple: self.multiple,
       filter: self.filter,
       placeholder: opts.placeholder,
@@ -234,7 +229,6 @@ function renderSelectComponent(
       footerNote,
       leadingRail,
       message: opts.message,
-      hintLayout: opts.hintLayout,
       options: self.options,
       selectedValues: self.selectedValues(),
       state,
@@ -248,7 +242,6 @@ function renderSelectComponent(
     footerNote,
     leadingRail,
     message: opts.message,
-    hintLayout: opts.hintLayout,
     options: self.options,
     state,
   });
@@ -272,7 +265,6 @@ export async function runSelectComponent<T extends PromptValue>(input: {
   search: boolean;
   searchAction?: { label(query: string): string; value(query: string): T };
   required: boolean;
-  hintLayout?: "stacked" | "inline";
   placeholder?: string;
   defaultValue?: T;
   initialValues?: readonly T[];
@@ -303,11 +295,7 @@ export async function runSelectComponent<T extends PromptValue>(input: {
       if (!promptRef) return "";
       return renderSelectComponent(
         promptRef,
-        {
-          message: input.message,
-          hintLayout: input.hintLayout,
-          placeholder: input.placeholder,
-        },
+        { message: input.message, placeholder: input.placeholder },
         input.leadingRail,
         guard?.note(),
       );
