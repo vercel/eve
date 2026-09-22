@@ -5,6 +5,8 @@ import { handleConnectionCallbackRequest } from "#execution/connections/callback
 import { sessionCommandHookToken } from "#execution/session-inbox/address.js";
 import { executeSleepTool, SLEEP_INPUT_SCHEMA } from "#execution/tools/sleep.js";
 import { resumeSessionInbox } from "#execution/session-inbox/resume.js";
+import { cancelBackgroundAgentTask } from "#execution/tools/subagent/task-cancel.js";
+import { setAgentHandleStore } from "#subagents/handles/store.js";
 import { workflowEntry } from "#execution/session/entry.js";
 import { createTestRuntime, type TestRuntime } from "#internal/testing/app-harness.js";
 import { captureTurnEvents, filterEventsByType } from "#internal/testing/events.js";
@@ -691,6 +693,84 @@ describe("workflow tools", () => {
       } finally {
         stream.dispose();
         await run.cancel();
+      }
+    });
+  }, 30_000);
+
+  it("cancels nested work after its owning child has yielded", async () => {
+    const runtime = await createWorkflowToolRuntime({
+      agentName: "yielded-child-cancel",
+      background: true,
+      execute: holdUntilAbortedWorkflow,
+      toolName: "deploy_service",
+    });
+    await runtime.run(async () => {
+      const before = await listWorkflowToolRunIds();
+      const child = await start(workflowEntry, [
+        {
+          kind: "initial",
+          ownerDeploymentId: "dpl_inline",
+          input: { message: 'Run deploy_service with service "api"' },
+          serializedContext: buildSerializedContext({
+            continuationToken: "http:yielded-child-cancel",
+            mode: "conversation",
+          }),
+        },
+      ]);
+      const stream = captureTurnEvents(child);
+      let nestedRunId: string | undefined;
+      try {
+        const yielded = await stream.nextTurn();
+        expect(filterEventsByType(yielded, "turn.completed")).toHaveLength(1);
+        expect(yielded.at(-1)?.type).toBe("session.waiting");
+        nestedRunId = await waitForNewWorkflowToolRun(before);
+        await waitForHook({ runId: nestedRunId });
+        expect(await getRun(nestedRunId).status).toBe("running");
+
+        await cancelBackgroundAgentTask({
+          entry: {
+            callId: "delegate",
+            toolName: "child",
+            lifetime: "session",
+            origin: { turnId: "parent-turn", stepIndex: 0 },
+            address: { runId: child.runId, hookToken: "unused" },
+            task: {
+              taskId: "outer-task",
+              metadata: { kind: "subagent", name: "child" },
+              dispatchContext: { auth: { current: null, initiator: null } },
+            },
+          },
+          session: {
+            state: setAgentHandleStore(undefined, {
+              handles: [
+                {
+                  phase: "claimed",
+                  ownerId: "outer-task",
+                  operationId: "delegate",
+                  identity: { id: "child", name: "child", nodeId: "subagents/child" },
+                  address: {
+                    kind: "agent/local",
+                    sessionId: child.runId,
+                    continuationToken: "child",
+                  },
+                },
+              ],
+            }),
+          },
+          serializedContext: {},
+        });
+
+        // The held step can finish only after its abort signal fires or its 60s timer expires.
+        // Finishing within 15s proves cancellation reached the yielded child's work.
+        expect(await waitForWorkflowToolRunTerminal(nestedRunId)).toBe("completed");
+      } finally {
+        stream.dispose();
+        if (nestedRunId !== undefined) {
+          const nested = getRun(nestedRunId);
+          const status = await nested.status;
+          if (status === "pending" || status === "running") await nested.cancel();
+        }
+        await child.cancel();
       }
     });
   }, 30_000);
