@@ -97,8 +97,8 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
     },
   },
   channel: {
-    current: 28,
-    supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 14, 15, 16, 17, 18, 27, 28],
+    current: 29,
+    supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 14, 15, 16, 17, 18, 29],
     dropped: {
       12: "Message and reasoning append events now expose deltas instead of cumulative snapshots.",
       19: "Continuation rekey was removed; channel extensions must use additive continuation.alias instead.",
@@ -110,6 +110,7 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
       25: "Task views no longer expose executor bindings; background work is owned by workflow runs.",
       26: "Task views no longer expose executor bindings; background work is owned by workflow runs.",
       27: "Sandbox sessions no longer expose core identity and mutable networking is provider-specific.",
+      28: "Sandbox sessions no longer expose core identity and mutable networking is provider-specific.",
     },
   },
   schedule: {
