@@ -25,6 +25,23 @@
     "typescript": "catalog:"
   },
   "e2e": {
-    "worlds": []
+    "worlds": [],
+    "modelShards": [
+      {
+        "name": "repair",
+        "evals": [
+          "self-modification/offer-repair",
+          "self-modification/repair-order-total"
+        ]
+      },
+      {
+        "name": "create",
+        "evals": [
+          "self-modification/create-background-replication-check",
+          "self-modification/create-shipping-quote",
+          "self-modification/create-incident-triage"
+        ]
+      }
+    ]
   }
 }
