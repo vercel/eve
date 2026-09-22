@@ -70,12 +70,17 @@ export async function routeProxiedDeliverStep(input: {
   // Only a person's own message may answer or skip a pending question.
   const resolveMessage =
     sourceDelivery.caller === undefined && sourceDelivery.taskDeliveryId === undefined;
+  // Every payload routes against the same state, so a `ctx.ask()` question
+  // resolved by an earlier payload is hidden from later ones; its answer hook
+  // accepts one answer, and later messages must reach the parent instead.
+  const resolvedQuestions = new Set<string>();
 
   for (const [sourcePayloadIndex, payload] of sourceDelivery.payloads.entries()) {
     const routed = routeDeliverPayload({
-      allowRoute: (_requestId, route) =>
-        route.taskId === undefined ||
-        findBackgroundWorkflowToolRun(durableSession.state, route.taskId) !== undefined,
+      allowRoute: (requestId, route) =>
+        !resolvedQuestions.has(requestId) &&
+        (route.taskId === undefined ||
+          findBackgroundWorkflowToolRun(durableSession.state, route.taskId) !== undefined),
       payload,
       resolveMessage,
       state: durableSession.state,
@@ -84,6 +89,9 @@ export async function routeProxiedDeliverStep(input: {
     if (routed.forSelf !== undefined) parentPayloads.set(sourcePayloadIndex, routed.forSelf);
 
     for (const [childIndex, forChild] of routed.forChildren.entries()) {
+      if (forChild.answerHook !== undefined) {
+        for (const requestId of forChild.retireRequestIds) resolvedQuestions.add(requestId);
+      }
       const key = [
         forChild.childContinuationToken,
         forChild.childSessionInbox?.sessionId ?? "",

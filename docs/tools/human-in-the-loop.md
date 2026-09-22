@@ -176,7 +176,7 @@ Approvals and questions share one protocol:
 3. The turn parks at `session.waiting`, durably, for as long as it takes.
 4. The client answers with `inputResponses` (structured, keyed by `requestId`) or a normal follow-up `message`. A follow-up whose text matches an option ID, option label, or numeric option index resolves automatically, including approval options such as `approve` and `cancel`.
 
-For `ctx.ask()` questions, a follow-up message answers the question only when exactly one question is pending. The message must match an option, or the question must allow free text. Otherwise the message reaches the model as a normal turn, and each pending question created with `dismissible: true` resolves as `dismissed`.
+For `ctx.ask()` questions from blocking tools, a follow-up message answers the question only when exactly one question is pending. The message must match an option, or the question must allow free text. Otherwise the message reaches the model as a normal turn, and each pending question created with `dismissible: true` resolves as `dismissed`. Questions from background tools and subagents need a structured response.
 
 Each request includes a `kind` discriminator: `tool-approval`, `question`, or
 `session-limit`. Clients should use `kind` to choose behavior and presentation.

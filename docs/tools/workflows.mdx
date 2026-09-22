@@ -297,7 +297,8 @@ The answer's `status` tells the body what happened:
   immediately instead of waiting for an answer no one can give.
 
 A plain follow-up message answers the request when it is the only pending question and the message
-matches an option or the request allows free text.
+matches an option or the request allows free text. This applies to blocking tools only: answer a
+question from a background tool or a subagent with a structured response.
 
 `ctx.ask` composes with the SDK's own constructs; race it against a deadline:
 
@@ -307,8 +308,8 @@ const answer = await Promise.race([pending, sleep("4h")]);
 if (answer === undefined) return { deployed: false, reason: "timed out" };
 ```
 
-- The request belongs to the run, not the turn. It stays answerable until it is answered or the run
-  ends. In a background tool that means long after the turn that started it.
+- The request belongs to the run, not the turn. It stays answerable until it is answered, dismissed,
+  or the run ends. In a background tool that means long after the turn that started it.
 - A request is answered once. Ask again for the next answer.
 - Choose option `id`s that read well on their own, such as `approve` or the option's label. A
   response carries only the `id`. If a person answers after the request has already resolved, for

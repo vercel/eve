@@ -1175,11 +1175,10 @@ export class EveTUIRunner {
             }
 
             if (responses.length === 0) {
-              // Every pending question was dismissed without an answer. Fall
-              // back to the prompt rather than resuming with an empty
-              // response set: the turn stays parked, and the user's next
-              // message resumes it with the unanswered requests recorded as
-              // `ignored` (the server's continued-without-responding path).
+              // Every pending question was skipped without an answer. Fall
+              // back to the prompt rather than sending an empty response set:
+              // the questions stay open, and the user's next message answers
+              // one when it can, otherwise it arrives as a normal message.
               break;
             }
 

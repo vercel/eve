@@ -1313,15 +1313,15 @@ export class TerminalRenderer implements AgentTUIRenderer {
       return response;
     };
 
-    // Dismissal resolves `undefined` — no answer travels; the transcript
-    // records the question compactly instead of preserving its option list.
+    // Dismissal resolves `undefined` — no answer travels and the question stays
+    // open; the transcript records it compactly instead of keeping its options.
     const dismiss = () => {
       this.#questionPanel = undefined;
       this.#upsertBlock({
         id: sectionKey,
         kind: "question",
         title: stripTerminalControls(question.prompt),
-        body: `${this.#theme.colors.dim(this.#theme.glyph.elbow)}  ${this.#theme.colors.dim("Dismissed.")}`,
+        body: `${this.#theme.colors.dim(this.#theme.glyph.elbow)}  ${this.#theme.colors.dim("Skipped. Your next message can answer it.")}`,
         preformatted: true,
         live: false,
       });

@@ -346,6 +346,34 @@ describe("routeDeliverPayload message resolution", () => {
     ]);
   });
 
+  it("does not answer a question while a subagent question is also pending", () => {
+    const session = upsertProxyInputRequests({
+      entries: [["child-ask", { childContinuationToken: "child-token", kind: "question" }]],
+      forChildContinuationToken: "child-token",
+      session: askSession([["ask-1", { allowFreeform: true, dismissible: true }]]),
+    });
+    const routed = routeDeliverPayload({
+      payload: { message: "Use the canary pool" },
+      resolveMessage: true,
+      state: session.state,
+    });
+
+    expect(routed.forSelf).toEqual({ message: "Use the canary pool" });
+    expect(routed.forChildren).toMatchObject([{ dismissedRequestIds: ["ask-1"] }]);
+  });
+
+  it("leaves a question another payload already resolved to the parent", () => {
+    const routed = routeDeliverPayload({
+      allowRoute: (requestId) => requestId !== "ask-1",
+      payload: { message: "Use the canary pool" },
+      resolveMessage: true,
+      state: askSession([["ask-1", { allowFreeform: true, dismissible: true }]]).state,
+    });
+
+    expect(routed.forSelf).toEqual({ message: "Use the canary pool" });
+    expect(routed.forChildren).toEqual([]);
+  });
+
   it("leaves questions alone unless a person's message may resolve them", () => {
     const routed = routeDeliverPayload({
       payload: { message: "production" },

@@ -2914,13 +2914,13 @@ describe("TerminalRenderer (inline scrollback)", () => {
     expect(screen.snapshot()).toContain("Esc to dismiss");
 
     await escape();
-    // No answer travels; the runner returns to the prompt and the server
-    // records the parked request as ignored on the next message.
+    // No answer travels; the runner returns to the prompt and the question
+    // stays open for the next message.
     await expect(answer).resolves.toBeUndefined();
 
     const snapshot = screen.snapshot();
     expect(snapshot).toContain("? Choose access");
-    expect(snapshot).toContain("⎿  Dismissed.");
+    expect(snapshot).toContain("⎿  Skipped. Your next message can answer it.");
     // The option list does not survive the dismissal.
     expect(snapshot).not.toContain("Managed access");
     expect(snapshot).not.toContain("Enter to select");
@@ -2951,7 +2951,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
 
     await escape();
     await expect(answer).resolves.toBeUndefined();
-    expect(screen.snapshot()).toContain("⎿  Dismissed.");
+    expect(screen.snapshot()).toContain("⎿  Skipped. Your next message can answer it.");
     renderer.shutdown();
   });
 
@@ -3068,7 +3068,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
 
     await escape();
     await expect(answer).resolves.toBeUndefined();
-    expect(screen.snapshot()).toContain("⎿  Dismissed.");
+    expect(screen.snapshot()).toContain("⎿  Skipped. Your next message can answer it.");
     renderer.shutdown();
   });
 

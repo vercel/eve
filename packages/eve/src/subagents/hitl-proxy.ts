@@ -106,7 +106,7 @@ interface ChildResponseBucket {
  * Splits a deliver payload into parent-local and proxied-child buckets.
  *
  * With `resolveMessage`, a plain-text message is also resolved against pending
- * `ctx.ask()` questions: when exactly one is pending, a matching option or
+ * `ctx.ask()` questions: when exactly one question is pending, a matching option or
  * permitted free text answers it and consumes the message. Otherwise the
  * message dismisses every `dismissible` question and stays with the parent.
  */
@@ -258,17 +258,20 @@ function resolveMessageAgainstQuestions(input: {
   if (!input.enabled || (input.payload.inputResponses?.length ?? 0) > 0) return none;
   if (input.payload.message === undefined) return none;
 
-  const questions = [...input.entries].flatMap(([requestId, route]) => {
+  // Task and subagent questions carry no answer-hook metadata, so plain text
+  // cannot resolve them, but they still make the message ambiguous.
+  const pending = [...input.entries].filter(
+    ([requestId, route]) => route.kind === "question" && input.routable(requestId, route),
+  );
+  const questions = pending.flatMap(([requestId, route]) => {
     const question = route.answerHook?.question;
-    return question !== undefined && input.routable(requestId, route)
-      ? [{ requestId, ...question }]
-      : [];
+    return question !== undefined ? [{ requestId, ...question }] : [];
   });
   if (questions.length === 0) return none;
 
   const [only] = questions;
   const answer =
-    questions.length === 1 && only !== undefined && typeof input.payload.message === "string"
+    pending.length === 1 && only !== undefined && typeof input.payload.message === "string"
       ? resolveTextToResponse(input.payload.message, only)
       : undefined;
   if (answer !== undefined) return { consumed: true, dismissedRequestIds: [], responses: [answer] };
