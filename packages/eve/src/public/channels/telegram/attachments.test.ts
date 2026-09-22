@@ -78,6 +78,41 @@ describe("createTelegramFetchFile", () => {
     ]);
   });
 
+  it("prefers the known attachment media type over the HTTP content-type header", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ ok: true, result: { file_path: "photos/file_0.jpg" } }), {
+          headers: { "content-type": "application/json" },
+        }),
+      )
+      .mockResolvedValueOnce(
+        // Telegram's file endpoint commonly serves photos as octet-stream.
+        new Response("JPEGBYTES", { headers: { "content-type": "application/octet-stream" } }),
+      );
+
+    const fetchFile = createTelegramFetchFile({
+      api: { apiBaseUrl: "https://telegram.example", fetch: fetchMock },
+      credentials: { botToken: "123456:ABCDEF" },
+      policy: { allowedMediaTypes: ["image/*"], maxBytes: 1024 },
+    });
+
+    const result = await fetchFile(
+      String(
+        createTelegramFileUrl({
+          fileId: "file-id",
+          filename: "photo.jpg",
+          mediaType: "image/jpeg",
+        }),
+      ),
+    );
+
+    expect(result).toMatchObject({
+      filename: "photo.jpg",
+      mediaType: "image/jpeg",
+    });
+  });
+
   it("returns null for non-Telegram file URLs", async () => {
     const fetchFile = createTelegramFetchFile({
       credentials: { botToken: "bot-token" },
