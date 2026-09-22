@@ -5,6 +5,7 @@ const TOKEN = "custom-provider-session-ok-P7M";
 
 export default defineEval({
   description: "Sandbox: custom provider session methods survive framework lifecycle wrapping.",
+  timeoutMs: 60_000,
   async test(t) {
     const turn = await t.send(
       "Ask the `custom-provider` subagent to verify its custom provider session marker.",

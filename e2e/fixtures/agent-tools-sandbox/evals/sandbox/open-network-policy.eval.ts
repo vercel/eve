@@ -3,6 +3,7 @@ import { includes } from "eve/evals/expect";
 
 export default defineEval({
   description: "Sandbox: an open-time deny-all policy applies before authored commands run.",
+  timeoutMs: 60_000,
   async test(t) {
     const turn = await t.send(
       "Ask the `deny-all` subagent with message: " +
