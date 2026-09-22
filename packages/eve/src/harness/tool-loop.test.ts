@@ -1756,7 +1756,7 @@ describe("createToolLoopHarness", () => {
     const runStep = createToolLoopHarness(
       createTestConfig("conversation", emit, {
         dispatchDynamicModelEvent,
-        harnessAgent: { harness, skills: [] },
+        harnessAgent: { harness, skills: [], tools: new Map() },
         resolveModel,
       }),
     );
@@ -1819,7 +1819,7 @@ describe("createToolLoopHarness", () => {
     const harness = createTestHarness();
     const runStep = createToolLoopHarness(
       createTestConfig("conversation", createEventCollector().emit, {
-        harnessAgent: { harness, skills: [] },
+        harnessAgent: { harness, skills: [], tools: new Map() },
       }),
     );
     const session = createTestSession({
@@ -1853,7 +1853,11 @@ describe("createToolLoopHarness", () => {
     const runStep = createToolLoopHarness(
       createTestConfig("conversation", undefined, {
         dispatchDynamicModelEvent,
-        harnessAgent: { harness: createTestHarness("authored-harness"), skills: [] },
+        harnessAgent: {
+          harness: createTestHarness("authored-harness"),
+          skills: [],
+          tools: new Map(),
+        },
         resolveModel,
       }),
     );

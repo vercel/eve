@@ -4,7 +4,7 @@ const evaluate = vi.hoisted(() => vi.fn());
 vi.mock("#ai/evaluate.js", () => ({ evaluate }));
 
 import type { ApprovalContext } from "#approval/definition.js";
-import { always, auto, never, once } from "#tools/approval/policies.js";
+import { always, auto, isNeverApprovalPolicy, never, once } from "#tools/approval/policies.js";
 import { readDurableDynamicCallback } from "#tools/durable-callbacks.js";
 
 function approvalContext(overrides: Partial<ApprovalContext> = {}): ApprovalContext {
@@ -37,6 +37,22 @@ describe("dynamic tool approval helpers", () => {
     expect(reference?.closure).toEqual({});
 
     expect(await reference!.callback(reference!.closure, {} as never)).toBe(expected);
+  });
+
+  it("recognizes only the built-in never policy without executing approval callbacks", () => {
+    const policy = never();
+    const custom = vi.fn(() => "not-applicable" as const);
+
+    expect(isNeverApprovalPolicy(policy)).toBe(true);
+    expect(isNeverApprovalPolicy({ request: policy })).toBe(true);
+    expect(isNeverApprovalPolicy(always())).toBe(false);
+    expect(isNeverApprovalPolicy(once())).toBe(false);
+    expect(isNeverApprovalPolicy(auto())).toBe(false);
+    expect(isNeverApprovalPolicy(custom)).toBe(false);
+    expect(custom).not.toHaveBeenCalled();
+    expect(
+      Object.getOwnPropertyDescriptor(policy, Symbol.for("eve:never-approval-policy")),
+    ).toMatchObject({ enumerable: false, value: true });
   });
 
   it.each([

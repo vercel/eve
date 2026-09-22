@@ -289,6 +289,11 @@ export interface HarnessAgentExecutionConfig {
    * projected at this boundary.
    */
   readonly skills: readonly HarnessV1Skill[];
+  /**
+   * Static application and extension tools projected to HarnessAgent. Dynamic,
+   * workflow, framework, and approval-requiring tools remain unsupported.
+   */
+  readonly tools: HarnessToolMap;
 }
 
 /**

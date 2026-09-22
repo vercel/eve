@@ -230,6 +230,7 @@ import {
 import { mergeProviderSafetyIdentifier } from "#harness/provider-safety.js";
 import {
   buildToolApproval,
+  buildToolSet,
   buildToolSetFromDefinitions,
   buildToolSetWithProviderTools,
 } from "#harness/tools.js";
@@ -267,6 +268,7 @@ type ActiveHarnessExecution = {
   readonly harnessId: string;
   readonly kind: "harness";
   readonly skills: NonNullable<ToolLoopHarnessConfig["harnessAgent"]>["skills"];
+  readonly tools: NonNullable<ToolLoopHarnessConfig["harnessAgent"]>["tools"];
 };
 
 type ActiveExecution =
@@ -287,7 +289,7 @@ function resolveActiveHarnessExecution(input: {
   if (harnessAgent === undefined) {
     throw new Error(`Harness-backed session requires the authored harness "${harnessId}".`);
   }
-  const { harness, skills } = harnessAgent;
+  const { harness, skills, tools } = harnessAgent;
   if (harnessId === undefined) {
     throw new Error(`Authored harness "${harness.harnessId}" cannot run a model-backed session.`);
   }
@@ -296,7 +298,7 @@ function resolveActiveHarnessExecution(input: {
       `Harness-backed session requires harness "${harnessId}", but the authored harness is "${harness.harnessId}".`,
     );
   }
-  return { harness, harnessId, kind: "harness", skills };
+  return { harness, harnessId, kind: "harness", skills, tools };
 }
 
 /** Creates a tool-loop harness step function backed by an AI SDK agent. */
@@ -1459,7 +1461,10 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     };
 
     const prepareModelTools = async (opts: ModelCallOptions) => {
-      const harnessTools = buildHarnessToolsWithDynamicSubagents(config.tools, ctx);
+      const harnessTools =
+        execution.kind === "harness"
+          ? execution.tools
+          : buildHarnessToolsWithDynamicSubagents(config.tools, ctx);
       const backgroundBatch = createBackgroundToolCallBatch();
       const advertisedHarnessTools = getAdvertisedTools({
         session,
@@ -1469,7 +1474,14 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
 
       let modelTools: ToolSet = {};
       let effectiveTools: ToolSet = {};
-      if (execution.kind === "model") {
+      if (execution.kind === "harness") {
+        modelTools = buildToolSet({
+          backgroundBatch,
+          capabilities: config.capabilities,
+          tools: advertisedHarnessTools,
+        });
+        effectiveTools = modelTools;
+      } else {
         const flatTools = await buildToolSetWithProviderTools({
           approvedTools,
           backgroundBatch,
@@ -1701,6 +1713,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
           onToolExecutionEnd: logToolExecutionError,
           stopWhen: isStepCount(1),
           telemetry: attempt?.telemetry,
+          tools: effectiveTools,
         });
         agent = harnessAgent;
 

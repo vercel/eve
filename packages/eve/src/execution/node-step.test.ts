@@ -27,12 +27,18 @@ import { createEmptyHookRegistry } from "#runtime/hooks/registry.js";
 import type { RuntimeToolRegistry } from "#runtime/tools/registry.js";
 import { createRuntimeToolRegistry } from "#runtime/tools/registry.js";
 import { createPreparedRuntimeSubagentTool } from "#runtime/subagents/registry.js";
-import { createExecutionNodeStep, createNodeHarnessTools } from "#execution/node-step.js";
+import {
+  createExecutionNodeStep,
+  createHarnessAgentTools,
+  createNodeHarnessTools,
+} from "#execution/node-step.js";
 import { createSession } from "#execution/session.js";
 import { createStubSandboxRegistry } from "#internal/testing/stub-sandbox-registry.js";
 import { defineTool } from "#tools/definition.js";
 import { stampDurableDynamicCallback } from "#tools/durable-callbacks.js";
 import { toInputSchema } from "#tools/schema.js";
+import { always, auto, never, once } from "#tools/approval/policies.js";
+import type { ResolvedToolDefinition } from "#runtime/types.js";
 import {
   AGENT_TOOL_DESCRIPTION,
   AGENT_TOOL_NAME,
@@ -171,6 +177,58 @@ function setupMockHarnessAgent(): void {
     : never);
 }
 
+function setupMockHarnessAgentForToolExecution(input: {
+  readonly args: unknown;
+  readonly onOutput: (output: unknown) => void;
+  readonly toolName: string;
+}): void {
+  vi.mocked(HarnessAgent).mockImplementation(function (
+    this: Record<string, unknown>,
+    settings: Record<string, unknown>,
+  ) {
+    const onStepEnd = settings.onStepEnd as ((step: unknown) => Promise<void>) | undefined;
+    this.createSession = vi.fn().mockResolvedValue({
+      detach: vi.fn().mockResolvedValue({
+        data: {},
+        harnessId: "test-harness",
+        specificationVersion: "harness-v1",
+        type: "resume-session",
+      }),
+      sessionId: "harness-session",
+    });
+    this.generate = vi.fn().mockImplementation(async () => {
+      const tools = settings.tools as Record<
+        string,
+        {
+          execute: (
+            toolInput: unknown,
+            options: { readonly toolCallId: string },
+          ) => Promise<unknown>;
+        }
+      >;
+      const tool = tools[input.toolName];
+      if (tool === undefined) {
+        throw new Error(`Missing HarnessAgent test tool "${input.toolName}".`);
+      }
+      const output = await tool.execute(input.args, { toolCallId: `call-${input.toolName}` });
+      input.onOutput(output);
+      const result = {
+        finishReason: "stop",
+        response: { messages: [{ content: JSON.stringify(output), role: "assistant" }] },
+        text: JSON.stringify(output),
+        toolCalls: [],
+        toolResults: [],
+        usage: undefined,
+      };
+      await onStepEnd?.(result);
+      return { ...result, responseMessages: result.response.messages };
+    });
+    return this as unknown as HarnessAgent;
+  } as unknown as ConstructorParameters<typeof HarnessAgent> extends [infer S]
+    ? (settings: S) => HarnessAgent
+    : never);
+}
+
 function createEmptyToolRegistry(): RuntimeToolRegistry {
   return {
     preparedTools: [],
@@ -220,7 +278,12 @@ async function createNodeWithSourceOwnedTools(input: {
   readonly names: readonly string[];
   readonly owner?:
     | { readonly kind: "application" }
-    | { readonly feature: string; readonly kind: "framework" };
+    | { readonly feature: string; readonly kind: "framework" }
+    | {
+        readonly kind: "extension";
+        readonly namespace: string;
+        readonly packageName: string;
+      };
   readonly turnTools?: StaticRuntimeTurnAgent["tools"];
 }): Promise<ResolvedRuntimeAgentNode> {
   const toolRegistry = await createRuntimeToolRegistry(
@@ -264,6 +327,60 @@ async function createNodeWithSourceOwnedTools(input: {
       },
     },
   };
+}
+
+function createTestHarness(): HarnessV1 {
+  return {
+    builtinTools: {},
+    harnessId: "test-harness",
+    specificationVersion: "harness-v1",
+    doStart: vi.fn(async () => {
+      throw new Error("Not implemented in this test.");
+    }),
+  } as HarnessV1;
+}
+
+async function createHarnessNodeWithTools(input: {
+  readonly tools: readonly {
+    readonly approval?: ResolvedToolDefinition["approval"];
+    readonly behavior?: ResolvedToolDefinition["behavior"];
+    readonly execute?: ResolvedToolDefinition["execute"];
+    readonly execution?: ResolvedToolDefinition["execution"];
+    readonly inputSchema?: ResolvedToolDefinition["inputSchema"];
+    readonly name: string;
+    readonly owner: ResolvedToolDefinition["owner"];
+    readonly toModelOutput?: ResolvedToolDefinition["toModelOutput"];
+  }[];
+  readonly turnTools?: StaticRuntimeTurnAgent["tools"];
+}): Promise<ResolvedRuntimeAgentNode> {
+  const toolRegistry = await createRuntimeToolRegistry({
+    tools: input.tools.map((tool) => ({
+      approval: tool.approval,
+      behavior: tool.behavior,
+      description: `${tool.name} test tool.`,
+      execute: tool.execute ?? (async () => `${tool.name}-sentinel`),
+      execution: tool.execution,
+      inputSchema: tool.inputSchema ?? null,
+      logicalPath: `tools/${tool.name}.ts`,
+      name: tool.name,
+      owner: tool.owner,
+      sourceId: `test:tools/${tool.name}.ts`,
+      sourceKind: "module" as const,
+      toModelOutput: tool.toModelOutput,
+    })),
+  });
+  const harness = createTestHarness();
+  const turnAgent: RuntimeTurnAgent = {
+    harness,
+    id: "test-agent",
+    instructions: ["You are a test agent."],
+    tools: [...toolRegistry.preparedTools, ...(input.turnTools ?? [])],
+    workspaceSpec: { rootEntries: [] },
+  };
+  return createTestNode(turnAgent, {
+    agent: { skills: [] } as unknown as ResolvedRuntimeAgentNode["agent"],
+    toolRegistry,
+  });
 }
 
 function createNoopRuntime(): Runtime {
@@ -392,6 +509,90 @@ describe("createNodeHarnessTools", () => {
   });
 });
 
+describe("createHarnessAgentTools", () => {
+  it("selects static application and extension tools only", async () => {
+    const delegation = createPreparedRuntimeSubagentTool({
+      description: "Delegate research.",
+      kind: "subagent",
+      logicalPath: "subagents/research",
+      name: "research",
+      nodeId: "subagents/research",
+      sourceId: "subagents/research",
+      sourceKind: "module",
+    });
+    const node = await createHarnessNodeWithTools({
+      tools: [
+        {
+          name: "application_tool",
+          owner: { kind: "application" },
+        },
+        {
+          approval: never(),
+          name: "extension_tool",
+          owner: {
+            kind: "extension",
+            namespace: "example",
+            packageName: "@example/eve-extension",
+          },
+        },
+        {
+          name: "framework_tool",
+          owner: { feature: "test", kind: "framework" },
+        },
+        {
+          behavior: {
+            availability: [],
+            handling: { kind: "workflow-tool", workflowId: "workflow//test" },
+          },
+          execution: "background",
+          name: "workflow_tool",
+          owner: { kind: "application" },
+        },
+      ],
+      turnTools: [delegation],
+    });
+    const tools = createNodeHarnessTools({ node });
+
+    expect([...createHarnessAgentTools({ node, tools }).keys()]).toEqual([
+      "application_tool",
+      "extension_tool",
+    ]);
+  });
+
+  it("rejects approval policies other than never", async () => {
+    const unsupported = [always(), once(), auto(), () => "not-applicable" as const] as const;
+
+    for (const [index, approval] of unsupported.entries()) {
+      const name = `approval_tool_${index}`;
+      const node = await createHarnessNodeWithTools({
+        tools: [{ approval, name, owner: { kind: "application" } }],
+      });
+      const tools = createNodeHarnessTools({ node });
+
+      expect(() => createHarnessAgentTools({ node, tools })).toThrow(
+        `Harness-backed agents do not support approval-required eve tools yet. Tool "${name}" must omit approval or use approval: never().`,
+      );
+    }
+  });
+
+  it("rejects an authored toModelOutput projection", async () => {
+    const node = await createHarnessNodeWithTools({
+      tools: [
+        {
+          name: "projected_tool",
+          owner: { kind: "application" },
+          toModelOutput: () => ({ type: "text", value: "projected" }),
+        },
+      ],
+    });
+    const tools = createNodeHarnessTools({ node });
+
+    expect(() => createHarnessAgentTools({ node, tools })).toThrow(
+      'Harness-backed agents do not support eve tools with toModelOutput yet. Tool "projected_tool" must omit toModelOutput.',
+    );
+  });
+});
+
 describe("createExecutionNodeStep", () => {
   it("passes a live harness to the tool-loop boundary without constructing ToolLoopAgent", async () => {
     setupMockHarnessAgent();
@@ -454,6 +655,107 @@ describe("createExecutionNodeStep", () => {
     expect(harness.doStart).not.toHaveBeenCalled();
     expect(resolveRuntimeModelReference).not.toHaveBeenCalled();
     expect(ToolLoopAgent).not.toHaveBeenCalled();
+  });
+
+  it("executes a static eve tool through HarnessAgent with its raw output", async () => {
+    const rawOutput = { conditions: "sunny", temperature: 72 };
+    const execute = vi.fn(async () => rawOutput);
+    const onOutput = vi.fn();
+    setupMockHarnessAgentForToolExecution({
+      args: { location: "Austin" },
+      onOutput,
+      toolName: "get_weather",
+    });
+    const node = await createHarnessNodeWithTools({
+      tools: [
+        {
+          execute,
+          inputSchema: toInputSchema({
+            properties: { location: { type: "string" } },
+            required: ["location"],
+            type: "object",
+          }),
+          name: "get_weather",
+          owner: { kind: "application" },
+        },
+      ],
+    });
+    const step = createExecutionNodeStep({
+      createRuntime: () => createNoopRuntime(),
+      instrumentation: undefined,
+      mode: "task",
+      modelResolutionScope: { moduleMap: { nodes: {} }, nodeId: undefined },
+      node,
+    });
+    const ctx = new ContextContainer();
+    ctx.set(AuthKey, null);
+    ctx.set(InitiatorAuthKey, null);
+    ctx.set(BundleKey, {
+      compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
+    } as never);
+    ctx.set(ChannelKey, { kind: "http" });
+    ctx.set(SessionIdKey, "sess-harness-tool");
+    ctx.set(SessionKey, {
+      auth: { current: null, initiator: null },
+      sessionId: "sess-harness-tool",
+      turn: { id: "harness-tool-turn", sequence: 0 },
+    });
+
+    await contextStorage.run(ctx, () =>
+      step(
+        createSession({
+          continuationToken: "test-harness-tool",
+          sessionId: "sess-harness-tool",
+          turnAgent: node.turnAgent,
+        }),
+        { message: "What's the weather?" },
+      ),
+    );
+
+    expect(execute).toHaveBeenCalledWith(
+      { location: "Austin" },
+      expect.objectContaining({
+        session: expect.objectContaining({ id: "sess-harness-tool" }),
+      }),
+    );
+    expect(onOutput).toHaveBeenCalledWith(rawOutput);
+    expect(HarnessAgent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        tools: expect.objectContaining({
+          get_weather: expect.objectContaining({
+            description: "get_weather test tool.",
+            execute: expect.any(Function),
+            inputSchema: expect.anything(),
+          }),
+        }),
+      }),
+    );
+    expect(ToolLoopAgent).not.toHaveBeenCalled();
+  });
+
+  it("rejects unsupported tool approval before constructing HarnessAgent", async () => {
+    const node = await createHarnessNodeWithTools({
+      tools: [
+        {
+          approval: always(),
+          name: "guarded_tool",
+          owner: { kind: "application" },
+        },
+      ],
+    });
+
+    expect(() =>
+      createExecutionNodeStep({
+        createRuntime: () => createNoopRuntime(),
+        instrumentation: undefined,
+        mode: "task",
+        modelResolutionScope: { moduleMap: { nodes: {} }, nodeId: undefined },
+        node,
+      }),
+    ).toThrow(
+      'Harness-backed agents do not support approval-required eve tools yet. Tool "guarded_tool" must omit approval or use approval: never().',
+    );
+    expect(HarnessAgent).not.toHaveBeenCalled();
   });
 
   it("builds a usable harness step for the root node", async () => {
