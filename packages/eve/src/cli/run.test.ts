@@ -384,6 +384,14 @@ describe("eve init compatibility flags", () => {
     expect(help).toContain("--reasoning <effort>");
   });
 
+  it("does not print the boot banner because interactive onboarding owns its header", async () => {
+    const logger = { error: vi.fn(), log: vi.fn() };
+
+    await runCli(["init", "my-agent"], logger);
+
+    expect(logger.log).not.toHaveBeenCalledWith(expect.stringContaining("☰eve"));
+  });
+
   it("forwards model settings to the init command", async () => {
     const logger = { error: vi.fn(), log: vi.fn() };
     runInitCommand.mockClear();
