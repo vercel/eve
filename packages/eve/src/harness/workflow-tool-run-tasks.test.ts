@@ -5,6 +5,7 @@ import {
   recordWorkflowTaskView,
   findBackgroundWorkflowToolRun,
   getBackgroundWorkflowToolRuns,
+  getBackgroundTasks,
   registerWorkflowToolRun,
 } from "#harness/workflow-tool-runs.js";
 import { getTaskCohortId, getSessionTaskCohorts } from "#tasks/session-task-cohorts.js";
@@ -35,6 +36,50 @@ describe("session task index", () => {
   it("returns an empty index when the key is absent", () => {
     expect(getBackgroundWorkflowToolRuns({})).toEqual([]);
     expect(getBackgroundWorkflowToolRuns(undefined)).toEqual([]);
+  });
+
+  it("queries restored background tasks by state across turns, excluding blocking runs", () => {
+    let session = registerWorkflowToolRun(createSession(), task("working", "turn-1"));
+    for (const status of ["completed", "failed", "cancelled"] as const) {
+      session = registerWorkflowToolRun(session, task(status, "turn-2"));
+      session = {
+        ...session,
+        state: recordWorkflowTaskView(session.state, terminal(status, status)),
+      };
+    }
+    session = registerWorkflowToolRun(session, {
+      callId: "blocking",
+      toolName: "research",
+      lifetime: "turn",
+      origin: { turnId: "turn-2", stepIndex: 0 },
+      address: { runId: "blocking", hookToken: "blocking" },
+    });
+
+    const backgroundTasks = getBackgroundTasks(JSON.parse(JSON.stringify(session.state)));
+    expect(backgroundTasks.query({ state: "working" })).toEqual([
+      { taskId: "working", metadata, status: "working" },
+    ]);
+    expect(backgroundTasks.query({ state: "completed" })).toEqual([
+      terminal("completed", "completed"),
+    ]);
+    expect(backgroundTasks.query({ state: "failed" })).toEqual([terminal("failed", "failed")]);
+    expect(backgroundTasks.query({ state: "cancelled" })).toEqual([
+      terminal("cancelled", "cancelled"),
+    ]);
+    expect(getBackgroundTasks(undefined).query({ state: "working" })).toEqual([]);
+  });
+
+  it("rejects a corrupt task outcome when querying background state", () => {
+    const entry = task("task_a", "turn-1");
+    const state = {
+      "eve.workflowTool": {
+        version: 3,
+        runs: [{ ...entry, task: { ...entry.task, outcome: { status: "completed" } } }],
+      },
+    };
+    expect(() => getBackgroundTasks(state).query({ state: "working" })).toThrow(
+      "Corrupt workflow task result",
+    );
   });
 
   it("records a task and finds it by id", () => {

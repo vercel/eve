@@ -7,6 +7,7 @@ import {
   sameTaskMetadata,
   type TaskMetadata,
   type TaskOutput,
+  type TaskStatus,
   type TaskUsage,
   type TaskView,
 } from "#tasks/types.js";
@@ -281,6 +282,22 @@ export function getBackgroundWorkflowToolRuns(
   return getWorkflowToolRuns(state).filter(
     (entry): entry is BackgroundWorkflowToolRun => entry.lifetime === "session",
   );
+}
+
+/** Read-only parent view: tasks without a recorded terminal outcome are working. */
+export function getBackgroundTasks(state: SessionStateMap | undefined) {
+  return {
+    query(filter: { readonly state: Exclude<TaskStatus, "input_required"> }): readonly TaskView[] {
+      return getBackgroundWorkflowToolRuns(state).flatMap(({ task }) => {
+        const view = readWorkflowTaskView(task) ?? {
+          taskId: task.taskId,
+          metadata: task.metadata,
+          status: "working" as const,
+        };
+        return view.status === filter.state ? [view] : [];
+      });
+    },
+  };
 }
 
 export function getBlockingWorkflowToolRuns(

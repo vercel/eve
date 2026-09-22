@@ -1,10 +1,7 @@
 import { createDurableSessionState } from "#execution/durable-session-store.js";
 import { derivePendingState } from "#execution/session/pending-turn-state.js";
 import type { DurableStepResult } from "#execution/session/turn-step-types.js";
-import {
-  getBackgroundWorkflowToolRuns,
-  readWorkflowTaskView,
-} from "#harness/workflow-tool-runs.js";
+import { getBackgroundTasks } from "#harness/workflow-tool-runs.js";
 import { hasPendingInputBatch } from "#harness/input-requests.js";
 import { getTurnUsageState, takeSessionUsageDelta, toUsage } from "#harness/turn-tag-state.js";
 import type { StepResult } from "#harness/types.js";
@@ -66,10 +63,11 @@ export function resolveSessionStepResult(
     // Ending a model turn does not settle its caller while nested tasks remain open.
     // Leave usage unreported across yields so the final result includes every turn.
     if (stepResult.settledTurn !== undefined) {
-      const hasPendingTasks = getBackgroundWorkflowToolRuns(stepResult.session.state).some(
-        (run) => readWorkflowTaskView(run.task) === undefined,
-      );
-      if (hasPendingTasks && stepResult.settledTurn.isError !== true) {
+      const backgroundTasks = getBackgroundTasks(stepResult.session.state);
+      if (
+        backgroundTasks.query({ state: "working" }).length > 0 &&
+        stepResult.settledTurn.isError !== true
+      ) {
         return {
           action: "park",
           ...backgroundTransition,
