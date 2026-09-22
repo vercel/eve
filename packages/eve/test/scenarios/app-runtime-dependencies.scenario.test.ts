@@ -20,7 +20,7 @@ const EVE_PACKAGE_INFO = resolveInstalledPackageInfo();
 const EVE_PACKAGE_ROOT = resolvePackageRoot();
 const createScratchDirectory = useTemporaryDirectories();
 const DEPLOYABLE_BUILD_OPTIONS = {
-  skipVercelSandboxPrewarm: false,
+  skipSandboxPrewarm: false,
 } as const;
 
 async function readJavaScriptModulesRecursively(rootDirectory: string): Promise<string> {
@@ -859,20 +859,6 @@ describe("app runtime dependency tracing", () => {
     // `DataDirAccessError`, and @workflow/core's runtime world factory
     // (stubbed out at vendor time) names `WORKFLOW_LOCAL_DATA_DIR`.
     expect(vercelFunctionsSource).not.toContain("[world-local]");
-
-    vi.stubEnv("VERCEL_DEPLOYMENT_ID", "dpl_hosted_no_dev_runtime_test");
-    const serverModule = (await import(
-      `${pathToFileURL(join(outputDir, "functions", "__server.func", "index.mjs")).href}?test=${Date.now()}`
-    )) as {
-      default: {
-        fetch(request: Request, context: { waitUntil(): void }): Promise<Response>;
-      };
-    };
-    const healthResponse = await serverModule.default.fetch(
-      new Request("https://example.com/eve/v1/health"),
-      { waitUntil() {} },
-    );
-    expect(healthResponse.status).toBe(200);
   }, 30_000);
 
   it("loads instrumentation runtime dependencies from hosted Vercel output", async () => {

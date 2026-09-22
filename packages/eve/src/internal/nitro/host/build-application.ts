@@ -329,7 +329,7 @@ async function buildApplicationInWorkspace(
   try {
     // Complete sandbox preparation before bundling so runtime never needs to
     // mutate or repair the prepared artifacts embedded in production output.
-    if (!options.skipVercelSandboxPrewarm) {
+    if (!options.skipSandboxPrewarm) {
       const prewarmInput = {
         appRoot: preparedHost.appRoot,
         compiledArtifactsSource: createDiskRuntimeCompiledArtifactsSource(

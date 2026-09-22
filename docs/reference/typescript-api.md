@@ -138,7 +138,7 @@ Tool definitions accept `availableInSubagents: false` to restrict the tool to to
 | `eve/context`                                                               | `defineState`, session and state types                                                                                         |
 | `eve/sandbox`                                                               | `defineSandbox`, provider environments, and sandbox session types                                                              |
 | `eve/instrumentation`                                                       | `defineInstrumentation`, `disableInstrumentation`, `isChannel`, lifecycle provider types                                       |
-| `eve/instrumentation/otel`                                                  | `otel`, `otelIntegration`, `localTraces`, `agentRuns`, OpenTelemetry policy types                                              |
+| `eve/instrumentation/otel`                                                  | `otel`, `otelIntegration`, `localTraces`, OpenTelemetry policy types                                                           |
 | `eve/local-dev`                                                             | `getLocalDevCapability`, `LocalDevCapability`                                                                                  |
 | [`eve/models`](../guides/evaluate)                                          | Automatic model selection with `auto`                                                                                          |
 | `eve/models/openai`                                                         | `openai`, `chatgpt`, deprecated `experimental_chatgpt`                                                                         |

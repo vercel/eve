@@ -125,7 +125,7 @@ vi.mock("#execution/sandbox/prewarm.js", () => ({
 }));
 
 const createScratchDirectory = useTemporaryDirectories();
-const DEPLOYABLE_BUILD_OPTIONS = { skipVercelSandboxPrewarm: false } as const;
+const DEPLOYABLE_BUILD_OPTIONS = { skipSandboxPrewarm: false } as const;
 
 async function createPreparedHost(appRoot: string): Promise<PreparedApplicationHost> {
   const agentRoot = join(appRoot, "agent");
@@ -280,7 +280,7 @@ describe("buildApplication", () => {
     const { buildApplication } = await import("#internal/nitro/host/build-application.js");
     await buildApplication(appRoot, {
       profileOutputPath: profilePath,
-      skipVercelSandboxPrewarm: false,
+      skipSandboxPrewarm: false,
     });
 
     const profile = JSON.parse(await readFile(profilePath, "utf8")) as ApplicationBuildProfile;
@@ -327,7 +327,7 @@ describe("buildApplication", () => {
       const { buildApplication } = await import("#internal/nitro/host/build-application.js");
       const outputDir = await buildApplication(appRoot, {
         profileOutputPath: profilePath,
-        skipVercelSandboxPrewarm: false,
+        skipSandboxPrewarm: false,
       });
 
       expect(outputDir).toBe(join(appRoot, ".output"));
@@ -358,7 +358,7 @@ describe("buildApplication", () => {
       const { buildApplication } = await import("#internal/nitro/host/build-application.js");
       const outputDir = await buildApplication(appRoot, {
         profileOutputPath: profilePath,
-        skipVercelSandboxPrewarm: false,
+        skipSandboxPrewarm: false,
       });
 
       expect(outputDir).toBe(join(appRoot, ".output"));
@@ -550,7 +550,7 @@ describe("buildApplication", () => {
     expect((summary.agent as { name: string }).name).toBe("scenario-test-agent");
   });
 
-  it("skips Vercel sandbox prewarm only when the build opts out", async () => {
+  it("skips sandbox preparation when the build opts out", async () => {
     vi.stubEnv("VERCEL", "1");
     const appRoot = await createScratchDirectory("eve-build-application-skip-prewarm-");
 
@@ -562,7 +562,7 @@ describe("buildApplication", () => {
 
     const { buildApplication } = await import("#internal/nitro/host/build-application.js");
     const outputDir = await buildApplication(appRoot, {
-      skipVercelSandboxPrewarm: true,
+      skipSandboxPrewarm: true,
     });
 
     expect(outputDir).toBe(join(appRoot, ".vercel", "output"));
