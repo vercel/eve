@@ -1,7 +1,7 @@
 import type { CompiledToolDefinition } from "#compiler/manifest.js";
 import type { CompiledModuleMap } from "#compiler/module-map.js";
 import { expectFunction, expectObjectRecord } from "#internal/authored-module.js";
-import { normalizeApproval } from "#internal/authored-definition/approval.js";
+import { normalizeToolApproval } from "#internal/authored-definition/approval.js";
 import {
   registerDefinitionSource,
   stampDefinitionKey,
@@ -121,7 +121,7 @@ export async function resolveToolDefinition(
  */
 type OptionalResolvedFields = {
   -readonly [
-    K in "label" | "approval" | "approvalKey" | "approvalPrompt" | "toModelOutput"
+    K in "label" | "approval" | "approvalKey" | "toModelOutput"
   ]?: ResolvedToolDefinition[K];
 };
 
@@ -164,7 +164,7 @@ function extractOptionalHooks(
   }
 
   if (record.approval !== undefined) {
-    optional.approval = normalizeApproval(
+    optional.approval = normalizeToolApproval(
       record.approval,
       describe(definition, "to provide a valid approval definition"),
     );
@@ -175,13 +175,6 @@ function extractOptionalHooks(
       record.approvalKey,
       describe(definition, "to provide an approvalKey function"),
     ) as ResolvedToolDefinition["approvalKey"];
-  }
-
-  if (record.approvalPrompt !== undefined) {
-    optional.approvalPrompt = expectFunction(
-      record.approvalPrompt,
-      describe(definition, "to provide an approvalPrompt function"),
-    ) as ResolvedToolDefinition["approvalPrompt"];
   }
 
   if (record.toModelOutput !== undefined) {

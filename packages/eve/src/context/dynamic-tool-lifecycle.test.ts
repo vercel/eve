@@ -214,6 +214,26 @@ describe("durable callback capture validation", () => {
       'Dynamic tool "guarded" callback "approvalRequest" does not have a durable descriptor',
     );
   });
+
+  it("requires a durable descriptor for an object-form approval prompt", () => {
+    const entry = defineTool({
+      approval: {
+        request: () => "user-approval" as const,
+        prompt: () => "Review this?",
+      },
+      description: "guarded tool",
+      inputSchema: { type: "object" },
+      execute: async () => null,
+    });
+    stampDurableDynamicToolCallbacks(entry, {
+      execute: { callback: () => null, closure: {} },
+    });
+    expect(() =>
+      validateDurableDynamicToolCallbacks("guarded", entry, callbackOwner("guarded")),
+    ).toThrow(
+      'Dynamic tool "guarded" callback "approvalPrompt" does not have a durable descriptor',
+    );
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -1741,8 +1761,8 @@ describe("programmatic dynamic tools (no bundler transform)", () => {
       "guarded",
       "approvalPrompt",
       (_closure, ...args) => {
-        const context = args[0] as { toolInput: Record<string, unknown> };
-        return `Review ${String(context.toolInput.draftId)}?`;
+        const context = args[0] as { input: Record<string, unknown> };
+        return `Review ${String(context.input.draftId)}?`;
       },
       owner,
     );
@@ -1769,12 +1789,46 @@ describe("programmatic dynamic tools (no bundler transform)", () => {
       resolveApprovalPolicy(tool.approval)(createApprovalContext({ toolName: "guarded" })),
     ).resolves.toBe("user-approval");
     expect(
-      tool.approvalPrompt?.({
-        callId: "call-1",
-        toolInput: { draftId: "draft-1" },
-        toolName: "guarded",
-      }),
+      typeof tool.approval === "function"
+        ? undefined
+        : tool.approval?.prompt?.({
+            callId: "call-1",
+            input: { draftId: "draft-1" },
+            toolName: "guarded",
+          }),
     ).toBe("Review draft-1?");
+    getDynamicCallbackRegistry().delete("guarded");
+  });
+
+  it("falls back to the default prompt when a replayed prompt callback is unavailable", () => {
+    const ctx = createCtx();
+    const owner = {
+      sessionId: ctx.require(SessionIdKey),
+      scope: "turn" as const,
+      resolverSlug: "legacy",
+      entryKey: "legacy:guarded",
+    };
+    registerTestCallback("guarded", "execute", () => ({ ok: true }), owner);
+    registerTestCallback("guarded", "approvalRequest", () => "user-approval", owner);
+    ctx.set(TurnDynamicToolMetadataKey, [
+      {
+        callbacks: {
+          approvalPrompt: { closure: {} },
+          approvalRequest: { closure: {} },
+          execute: { closure: {} },
+        },
+        description: "legacy guarded tool",
+        entryKey: "legacy:guarded",
+        inputSchema: { type: "object" },
+        name: "guarded",
+        resolverSlug: "legacy",
+      },
+    ]);
+
+    const tool = buildDynamicTools(ctx)[0];
+    expect(
+      typeof tool?.approval === "function" ? undefined : tool?.approval?.prompt,
+    ).toBeUndefined();
     getDynamicCallbackRegistry().delete("guarded");
   });
 

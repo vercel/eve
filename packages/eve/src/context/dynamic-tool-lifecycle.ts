@@ -211,10 +211,12 @@ export function validateDurableDynamicToolCallbacks(
   }
 
   const hasApproval = entry.approval !== undefined;
-  const hasApprovalResponse =
-    entry.approval !== undefined &&
-    typeof entry.approval !== "function" &&
-    entry.approval.response !== undefined;
+  const approvalConfiguration =
+    entry.approval !== undefined && typeof entry.approval !== "function"
+      ? entry.approval
+      : undefined;
+  const hasApprovalPrompt = approvalConfiguration?.prompt !== undefined;
+  const hasApprovalResponse = approvalConfiguration?.response !== undefined;
   const execute = validateReference({
     name,
     owner,
@@ -255,7 +257,7 @@ export function validateDurableDynamicToolCallbacks(
     owner,
     phase: "approvalPrompt",
     stamped: raw.approvalPrompt,
-    required: entry.approvalPrompt !== undefined,
+    required: hasApprovalPrompt,
   });
   const approvalRequest = validateReference({
     name,

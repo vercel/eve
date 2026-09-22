@@ -221,14 +221,16 @@ describe("normalizeToolDefinition", () => {
     const tool = defineTool({
       description: "Requests city-scoped approval.",
       inputSchema: z.object({ city: z.string() }),
-      approval: once(),
-      approvalPrompt({ callId, toolInput, toolName }) {
-        const city: string = toolInput.city;
-        // @ts-expect-error approval prompt input is schema-typed, not an open record.
-        const missing = toolInput.missing;
-        void callId;
-        void missing;
-        return `Run ${toolName} for ${city}?`;
+      approval: {
+        request: once(),
+        prompt({ callId, input, toolName }) {
+          const city: string = input.city;
+          // @ts-expect-error approval prompt input is schema-typed, not an open record.
+          const missing = input.missing;
+          void callId;
+          void missing;
+          return `Run ${toolName} for ${city}?`;
+        },
       },
       execute(input) {
         return input.city;
@@ -281,11 +283,11 @@ describe("normalizeToolDefinition", () => {
     ).toThrow('Unknown key "needsApproval"');
   });
 
-  it("rejects authored tools whose `approvalPrompt` is not a function", () => {
+  it("rejects authored tools whose approval prompt is not a function", () => {
     expect(() =>
       normalizeToolDefinition(
         {
-          approvalPrompt: "not a function",
+          approval: { request: once(), prompt: "not a function" },
           description: "Echo.",
           execute(input: unknown) {
             return input;

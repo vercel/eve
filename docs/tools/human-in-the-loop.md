@@ -62,7 +62,7 @@ approval: auto({
 
 A reusable approval grant applies only after every matching request that is already pending has been resolved. If several calls to a `once()`-gated tool have each produced an approval prompt, approving one does not authorize the others; each visible prompt remains an independent decision. After those pending requests are resolved, later calls in the session are allowed automatically.
 
-Use `approvalPrompt` to replace the default `Approve tool call: <toolName>` text with a tool-specific summary. The callback receives the validated `toolInput`, final `toolName`, and `callId`:
+Use the object form of `approval` to replace the default `Approve tool call: <toolName>` text with a tool-specific summary. The `prompt` callback receives the validated `input`, final `toolName`, and `callId`:
 
 ```ts title="agent/tools/refund_charge.ts"
 import { defineTool } from "eve/tools";
@@ -72,9 +72,10 @@ import { z } from "zod";
 export default defineTool({
   description: "Refund a charge.",
   inputSchema: z.object({ chargeId: z.string(), amount: z.number() }),
-  approval: always(),
-  approvalPrompt: ({ toolInput }) =>
-    `Refund $${toolInput.amount.toFixed(2)} for charge ${toolInput.chargeId}?`,
+  approval: {
+    request: always(),
+    prompt: ({ input }) => `Refund $${input.amount.toFixed(2)} for charge ${input.chargeId}?`,
+  },
   async execute(input) {
     return refund(input);
   },

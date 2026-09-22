@@ -58,8 +58,10 @@ describe("extractToolApprovalInputRequests", () => {
         [
           "send_payment",
           {
-            approvalPrompt: ({ toolInput }) =>
-              `Send $${String(toolInput.amount)} to ${String(toolInput.recipient)}?`,
+            approval: {
+              request: () => "user-approval",
+              prompt: ({ input }) => `Send $${String(input.amount)} to ${String(input.recipient)}?`,
+            },
             description: "Send a payment.",
             inputSchema: {} as never,
             name: "send_payment",

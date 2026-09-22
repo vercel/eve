@@ -29,7 +29,7 @@ type CallbackPropertyName =
   | "approvalKey"
   | "label"
   | "approval"
-  | "approvalPrompt"
+  | "prompt"
   | "execute"
   | "start"
   | "request"
@@ -239,14 +239,6 @@ function collectToolCallbacks(
   }
   collectCallbackProperty(
     source,
-    findProperty(tool, "approvalPrompt"),
-    "approvalPrompt",
-    "approvalPrompt",
-    results,
-    nestedScopes,
-  );
-  collectCallbackProperty(
-    source,
     findProperty(tool, "toModelOutput"),
     "toModelOutput",
     "toModelOutput",
@@ -295,6 +287,14 @@ function collectToolCallbacks(
       findProperty(approvalValue, "request"),
       "approvalRequest",
       "request",
+      results,
+      nestedScopes,
+    );
+    collectCallbackProperty(
+      source,
+      findProperty(approvalValue, "prompt"),
+      "approvalPrompt",
+      "prompt",
       results,
       nestedScopes,
     );

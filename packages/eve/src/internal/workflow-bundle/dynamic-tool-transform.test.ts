@@ -60,7 +60,6 @@ async function transformAndEval(
         label: entry.label as { complete?: never; delta?: never; start?: never } | undefined,
         approval: entry.approval as never,
         approvalKey: entry.approvalKey as never,
-        approvalPrompt: entry.approvalPrompt as never,
         execute: entry.execute as never,
         toModelOutput: entry.toModelOutput as never,
       }),
@@ -125,6 +124,7 @@ export default defineDynamic({
       const resultPrefix = "Deployed to";
       const updateSuffix = " sources";
       const requestReason = "confirm";
+      const promptPrefix = "Review";
       const allowedResponder = "user-123";
       const projectionPrefix = "visible";
       return {
@@ -145,6 +145,9 @@ export default defineDynamic({
           approval: {
             request(ctx) {
               return ctx.toolInput.force ? { type: "user-approval", reason: requestReason } : "not-applicable";
+            },
+            prompt(ctx) {
+              return promptPrefix + " " + ctx.input.value;
             },
             response(ctx) {
               return ctx.responder.principalId === allowedResponder
@@ -173,6 +176,7 @@ export default defineDynamic({
     expect(Object.keys(callbacks)).toEqual([
       "execute",
       "label",
+      "approvalPrompt",
       "approvalRequest",
       "approvalResponse",
       "toModelOutput",
@@ -182,6 +186,7 @@ export default defineDynamic({
     expect(callbacks.label?.complete?.closure).toEqual({ resultPrefix: "Deployed to" });
     expect(callbacks.label?.delta?.closure).toEqual({ updateSuffix: " sources" });
     expect(callbacks.approvalRequest!.closure).toEqual({ requestReason: "confirm" });
+    expect(callbacks.approvalPrompt!.closure).toEqual({ promptPrefix: "Review" });
     expect(callbacks.approvalResponse!.closure).toEqual({ allowedResponder: "user-123" });
     expect(callbacks.toModelOutput!.closure).toEqual({ projectionPrefix: "visible" });
     const callbackValues = [
@@ -190,10 +195,11 @@ export default defineDynamic({
       callbacks.label?.complete,
       callbacks.label?.delta,
       callbacks.approvalRequest,
+      callbacks.approvalPrompt,
       callbacks.approvalResponse,
       callbacks.toModelOutput,
     ];
-    expect(new Set(callbackValues.map((callback) => callback!.callback)).size).toBe(7);
+    expect(new Set(callbackValues.map((callback) => callback!.callback)).size).toBe(8);
     for (const callback of callbackValues) expect(callback!.callback).toBeTypeOf("function");
   });
 

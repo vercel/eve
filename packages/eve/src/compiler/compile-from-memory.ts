@@ -45,7 +45,6 @@ export interface CompileFromMemoryToolInput {
   readonly execute?: ToolDefinition["execute"];
   readonly label?: ToolDefinition["label"];
   readonly approval?: ToolDefinition["approval"];
-  readonly approvalPrompt?: ToolDefinition["approvalPrompt"];
   readonly toModelOutput?: ToolDefinition["toModelOutput"];
 }
 
@@ -121,7 +120,6 @@ function createMemoryToolDefinition(input: CompileFromMemoryToolInput): ToolDefi
   return defineTool({
     label: input.label,
     approval: input.approval,
-    approvalPrompt: input.approvalPrompt,
     description: input.description ?? `${input.name} test tool.`,
     execute:
       input.execute ??

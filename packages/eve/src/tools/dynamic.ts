@@ -1,4 +1,4 @@
-import type { Approval } from "#approval/definition.js";
+import type { ToolApproval } from "#approval/definition.js";
 import type { DynamicResolveContext, DynamicToolEventName } from "#dynamic/definition.js";
 import type {
   PublicToolInputSchema,
@@ -27,11 +27,6 @@ export interface DynamicToolEntry<TInput = Record<string, unknown>, TOutput = an
   readonly description: string;
   readonly inputSchema: PublicToolInputSchema<TInput>;
   readonly outputSchema?: PublicToolOutputSchema<TOutput>;
-  readonly approvalPrompt?: (context: {
-    readonly callId: string;
-    readonly toolInput: TInput;
-    readonly toolName: string;
-  }) => string;
   execute(input: TInput, ctx: ToolContext): TOutput | Promise<TOutput>;
   readonly toModelOutput?: (output: TOutput) => ToolModelOutput | Promise<ToolModelOutput>;
   /**
@@ -40,7 +35,7 @@ export interface DynamicToolEntry<TInput = Record<string, unknown>, TOutput = an
    * before the call executes. Dynamic approval request and response callbacks
    * use the same durable descriptor boundary as `execute` and `toModelOutput`.
    */
-  readonly approval?: Approval;
+  readonly approval?: ToolApproval<TInput>;
   /** Derives the input-scoped key recorded when this tool is approved. */
   readonly approvalKey?: (toolInput: Readonly<Record<string, unknown>>) => string;
 }

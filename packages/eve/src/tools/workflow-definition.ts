@@ -2,12 +2,11 @@ import type {
   StandardJSONSchemaV1,
   StandardSchemaV1,
 } from "#compiled/@standard-schema/spec/index.js";
-import type { Approval } from "#approval/definition.js";
+import type { ToolApproval } from "#approval/definition.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
 import {
   stampToolDefinition,
   type PublicToolDefinition,
-  type ApprovalPrompt,
   type ToolContext,
   type ToolInputRequest,
   type ToolInputResponse,
@@ -113,8 +112,7 @@ export interface BlockingWorkflowToolDefinition<
   readonly [WORKFLOW_TOOL_BRAND]: true;
   readonly execution?: never;
   execute(input: TInput, ctx: WorkflowToolContext): Promise<TOutput> | AsyncIterable<TOutput>;
-  approval?: Approval<unknown extends TInput ? Record<string, unknown> : TInput>;
-  approvalPrompt?: ApprovalPrompt<unknown extends TInput ? Record<string, unknown> : TInput>;
+  approval?: ToolApproval<unknown extends TInput ? Record<string, unknown> : TInput>;
   toModelOutput?: (output: TOutput) => ToolModelOutput | Promise<ToolModelOutput>;
 }
 
@@ -125,8 +123,7 @@ export type BackgroundWorkflowToolDefinition<TInput, TOutput> = PublicToolDefini
   readonly [WORKFLOW_TOOL_BRAND]: true;
   readonly execution: "background";
   execute(input: TInput, ctx: WorkflowToolContext): Promise<TOutput> | AsyncIterable<unknown>;
-  approval?: Approval<unknown extends TInput ? Record<string, unknown> : TInput>;
-  approvalPrompt?: ApprovalPrompt<unknown extends TInput ? Record<string, unknown> : TInput>;
+  approval?: ToolApproval<unknown extends TInput ? Record<string, unknown> : TInput>;
   toModelOutput?: (output: TaskReceipt) => ToolModelOutput | Promise<ToolModelOutput>;
 };
 

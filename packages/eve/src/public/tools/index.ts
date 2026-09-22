@@ -3,8 +3,6 @@
  */
 
 export {
-  type ApprovalPrompt,
-  type ApprovalPromptContext,
   type DisabledToolSentinel,
   defineTool,
   disableTool,

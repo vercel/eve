@@ -8,7 +8,7 @@ import type { ChannelRouteMethod, RouteContext } from "#public/definitions/chann
 import type { RouteHandler, WebSocketRouteHandler } from "#channel/routes.js";
 import type { OutboundAuthFn } from "#public/agents/auth.js";
 import type { StreamEventHook } from "#public/definitions/hook.js";
-import type { Approval } from "#approval/definition.js";
+import type { Approval, ToolApproval } from "#approval/definition.js";
 import type { ToolModelOutput } from "#tools/definition.js";
 import type { ConnectionToolCallDefinition } from "#public/definitions/connections/tool-call.js";
 import type {
@@ -173,13 +173,7 @@ export type ResolvedToolDefinition = Readonly<
      * approval is required before executing this tool. See
      * {@link Approval} for the shared callback contract.
      */
-    readonly approval?: Approval;
-    /** Optional human-readable prompt for approval requests from this tool. */
-    readonly approvalPrompt?: (context: {
-      readonly callId: string;
-      readonly toolInput: Record<string, unknown>;
-      readonly toolName: string;
-    }) => string;
+    readonly approval?: ToolApproval;
     /**
      * Optional function that derives a compound approval key from the tool
      * input. When present, the runtime records this key (instead of just

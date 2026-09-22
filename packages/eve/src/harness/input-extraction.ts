@@ -98,13 +98,17 @@ function extractApprovalRequests(input: {
       !Array.isArray(toolCall.input)
         ? (toolCall.input as Record<string, unknown>)
         : {};
-    const prompt = input.tools?.get(toolCall.toolName)?.approvalPrompt?.({
-      callId: toolCall.toolCallId,
-      toolInput,
-      toolName: toolCall.toolName,
-    });
+    const toolApproval = input.tools?.get(toolCall.toolName)?.approval;
+    const prompt =
+      toolApproval === undefined || typeof toolApproval === "function"
+        ? undefined
+        : toolApproval.prompt?.({
+            callId: toolCall.toolCallId,
+            input: toolInput,
+            toolName: toolCall.toolName,
+          });
     if (prompt !== undefined && typeof prompt !== "string") {
-      throw new Error(`Tool "${toolCall.toolName}" approvalPrompt must return a string.`);
+      throw new Error(`Tool "${toolCall.toolName}" approval prompt must return a string.`);
     }
 
     requests.push({
