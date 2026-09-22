@@ -23,10 +23,13 @@ async function loadWithAccess(access?: SandboxAccess) {
 function createRegisteredSandbox() {
   const eveSandbox = mockSandbox({ id: "eve-session" });
   const routes = [{ port: 3000 }, { port: 4000 }];
+  const update = vi.fn(async () => {});
   const vercelSandbox = {
+    currentSession: () => ({ networkPolicy: "allow-all" }),
     domain: vi.fn((port: number) => `https://${port}.example.test`),
     name: "vercel-session",
     routes,
+    update,
   } as unknown as VercelSandbox;
 
   registerVercelSandboxForSandboxSession({
@@ -34,7 +37,7 @@ function createRegisteredSandbox() {
     session: eveSandbox.session,
   });
 
-  return { eveSandbox, routes, vercelSandbox };
+  return { eveSandbox, routes, update, vercelSandbox };
 }
 
 describe("loadHarnessAgentSandboxSession", () => {
@@ -126,6 +129,53 @@ describe("loadHarnessAgentSandboxSession", () => {
     );
   });
 
+  it("adds request transformations through the Vercel network policy", async () => {
+    const { eveSandbox, update } = createRegisteredSandbox();
+    const session = await loadWithAccess(eveSandbox.access);
+
+    await session.addRequestTransformations?.([
+      {
+        match: {
+          headers: [
+            {
+              key: { exact: "x-api-key" },
+              value: { exact: "sandbox-placeholder" },
+            },
+          ],
+          host: "ai-gateway.vercel.sh",
+          method: ["POST"],
+          path: { startsWith: "/v1/" },
+        },
+        transform: {
+          headers: { "x-api-key": "real-credential" },
+        },
+      },
+    ]);
+
+    expect(update).toHaveBeenCalledWith({
+      networkPolicy: {
+        allow: {
+          "*": [],
+          "ai-gateway.vercel.sh": [
+            {
+              match: {
+                headers: [
+                  {
+                    key: { exact: "x-api-key" },
+                    value: { exact: "sandbox-placeholder" },
+                  },
+                ],
+                method: ["POST"],
+                path: { startsWith: "/v1/" },
+              },
+              transform: [{ headers: { "x-api-key": "real-credential" } }],
+            },
+          ],
+        },
+      },
+    });
+  });
+
   it("returns only the AI SDK I/O surface from restricted", async () => {
     const { eveSandbox } = createRegisteredSandbox();
     const session = await loadWithAccess(eveSandbox.access);
@@ -147,6 +197,7 @@ describe("loadHarnessAgentSandboxSession", () => {
     expect(restricted.run).toBe(eveSandbox.session.run);
     expect(restricted).not.toHaveProperty("removePath");
     expect(restricted).not.toHaveProperty("resolvePath");
+    expect(restricted).not.toHaveProperty("addRequestTransformations");
     expect(restricted).not.toHaveProperty("setNetworkPolicy");
   });
 

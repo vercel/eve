@@ -9,6 +9,7 @@ import { loadContext } from "#context/container.js";
 import { SandboxKey } from "#context/keys.js";
 import { getVercelSandboxForSandboxSession } from "#execution/sandbox/bindings/vercel-session-registry.js";
 import { WORKSPACE_ROOT } from "#runtime/workspace/types.js";
+import { VercelNetworkPolicyManager } from "./vercel-network-policy-manager.js";
 
 export async function loadHarnessAgentSandboxSession(): Promise<HarnessV1NetworkSandboxSession> {
   const access = loadContext().get(SandboxKey);
@@ -22,6 +23,8 @@ export async function loadHarnessAgentSandboxSession(): Promise<HarnessV1Network
   if (sandbox === undefined) {
     throw new Error("Harness-backed agents currently require the Vercel sandbox backend.");
   }
+
+  const networkPolicyManager = new VercelNetworkPolicyManager({ sandbox });
 
   const restricted: Experimental_SandboxSession = {
     description: [
@@ -74,6 +77,8 @@ export async function loadHarnessAgentSandboxSession(): Promise<HarnessV1Network
 
   return {
     ...restricted,
+    addRequestTransformations: (transformations) =>
+      networkPolicyManager.addRequestTransformations(transformations),
     defaultWorkingDirectory: WORKSPACE_ROOT,
     destroy: callerOwnedLifecycleNoop,
     get ports() {
