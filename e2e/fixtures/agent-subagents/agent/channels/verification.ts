@@ -44,8 +44,9 @@ export default defineChannel({
         return new Response(null, { status: 403 });
       }
       if (action === "ready") return Response.json({ status: await getRun(hook.runId).status });
-      await resumeHook(token, undefined);
-      return Response.json({ released: true });
+      const result = `VERIFIED: ${crypto.randomUUID()}`;
+      await resumeHook(token, result);
+      return Response.json({ released: true, result });
     }),
   ],
 });
