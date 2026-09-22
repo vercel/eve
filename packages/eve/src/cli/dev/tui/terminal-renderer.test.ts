@@ -5314,7 +5314,7 @@ describe("TerminalRenderer command typeahead", () => {
 
     const prompt = renderer.readPrompt();
     input.type("/add slack");
-    await vi.waitFor(() => expect(screen.snapshot()).toContain("Slack channel"));
+    await vi.waitFor(() => expect(screen.snapshot()).toContain("channel/slack"));
     input.send("\t");
     input.enter();
 

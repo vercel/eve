@@ -1,6 +1,8 @@
 import { sliceVisible, visibleLength } from "#cli/ui/terminal-text.js";
 import { renderCursorRow } from "#setup/cli/option-row.js";
 
+const COMPOSER_ARGUMENT_INDENT = "         ";
+
 import type { Theme } from "./theme.js";
 
 export interface PromptArgumentSuggestion {
@@ -82,18 +84,12 @@ export function renderArgumentSuggestions(
   width: number,
 ): string[] {
   const c = theme.colors;
-  const visible = state.suggestions.slice(0, 8);
-  const valueColumn = Math.max(...visible.map((suggestion) => suggestion.value.length)) + 2;
-  return visible.map((suggestion, index) => {
+  return state.suggestions.slice(0, 8).map((suggestion, index) => {
     const selected = index === state.selectedIndex;
-    // Keep the value column fixed so descriptions do not jump as selection changes.
     const content = selected
       ? `${theme.glyph.selectedPointer} ${suggestion.value}`
       : `  ${suggestion.value}`;
-    const detail = suggestion.hint === undefined ? "" : c.dim(suggestion.hint);
-    const row = `${renderCursorRow(content, selected, c)}${" ".repeat(
-      valueColumn - suggestion.value.length,
-    )}${detail}`;
+    const row = `${COMPOSER_ARGUMENT_INDENT}${renderCursorRow(content, selected, c)}`;
     return visibleLength(row) > width ? sliceVisible(row, width) : row;
   });
 }

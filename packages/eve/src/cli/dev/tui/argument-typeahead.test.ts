@@ -41,13 +41,14 @@ describe("argumentTypeaheadFor", () => {
     expect(selectedArgumentSuggestion(state)).toEqual(models[1]);
   });
 
-  it("uses a fixed value column for hints", () => {
+  it("indents canonical values under the command argument without hints", () => {
     const rows = renderArgumentSuggestions(
       argumentTypeaheadFor("model", "", models),
       createTheme({ color: false, unicode: true }),
       80,
     ).map(stripAnsi);
-    expect(rows[0]?.indexOf("Anthropic")).toBe(rows[1]?.indexOf("OpenAI"));
-    expect(rows[0]).toContain("anthropic/claude-sonnet");
+    expect(rows[0]).toMatch(/^ {9} › anthropic\/claude-sonnet$/u);
+    expect(rows[1]).toMatch(/^ {12}openai\/gpt-5$/u);
+    expect(rows.join("\n")).not.toContain("Anthropic");
   });
 });
