@@ -86,7 +86,7 @@ import {
   resolveCompactionModel,
   shouldCompact,
 } from "#harness/compaction.js";
-import { createCurrentMessages } from "#harness/current-messages.js";
+import { createCurrentMessages, hasTailApprovalResponse } from "#harness/current-messages.js";
 import { estimateTokens } from "#harness/token-estimate.js";
 import {
   accumulateTurnUsage,
@@ -1162,7 +1162,9 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
 
       const insertionIndex = Math.min(
         Math.max(0, turnClientContext.insertionIndex),
-        durableMessages.length,
+        hasTailApprovalResponse(durableMessages)
+          ? Math.max(0, durableMessages.length - 1)
+          : durableMessages.length,
       );
       return [
         ...durableMessages.slice(0, insertionIndex),

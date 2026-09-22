@@ -12722,6 +12722,49 @@ describe("createToolLoopHarness", () => {
       }
     });
 
+    it("keeps a tail approval response last when a client context-only send follows it", async () => {
+      setupMockAgent(defaultModelResult());
+      const runStep = createToolLoopHarness(createTestConfig("conversation"));
+      const approvalResponse = {
+        approvalId: "approval-1",
+        approved: true,
+        reason: undefined,
+        type: "tool-approval-response" as const,
+      };
+      const clientContext = "Client context: current page";
+
+      await runStep(
+        createTestSession({
+          history: [
+            { content: "Add 20 and 22.", kind: "user" as const, role: "user" },
+            {
+              content: [
+                {
+                  input: { a: 20, b: 22 },
+                  toolCallId: "call-1",
+                  toolName: "add",
+                  type: "tool-call" as const,
+                },
+                {
+                  approvalId: approvalResponse.approvalId,
+                  toolCallId: "call-1",
+                  type: "tool-approval-request" as const,
+                },
+              ],
+              role: "assistant" as const,
+            },
+            { content: [approvalResponse], role: "tool" as const },
+          ],
+        }),
+        attachClientContext({}, [clientContext]),
+      );
+
+      expect(getLastAgentSettings().messages.at(-1)).toEqual({
+        content: [approvalResponse],
+        role: "tool",
+      });
+    });
+
     it("keeps client context at a stable prompt position through every step of its turn", async () => {
       const toolCallMessage = {
         content: [
