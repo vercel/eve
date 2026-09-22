@@ -178,9 +178,11 @@ function configuredSessionUsageLimits(
  * measures everything since the last report, so the deltas of a
  * multi-turn persistent child sum exactly to its session totals.
  */
-export function takeSessionUsageDelta(session: HarnessSession): {
+export function takeSessionUsageDelta<T extends Pick<HarnessSession, "state">>(
+  session: T,
+): {
   readonly delta: TokenUsage;
-  readonly session: HarnessSession;
+  readonly session: T;
 } {
   const totals = getSessionTokenUsage(session);
   const reported =

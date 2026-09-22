@@ -19,6 +19,7 @@ import {
   failingDeployWorkflow,
   holdUntilAbortedWorkflow,
   reportingDeployWorkflow,
+  receiveDelegatedResultWorkflow,
   stepThenRaceWorkflow,
   stepReferenceWorkflow,
   workflowContextMisuseWorkflow,
@@ -696,6 +697,92 @@ describe("workflow tools", () => {
       }
     });
   }, 30_000);
+
+  it.each(["session-timeout", "reset"] as const)(
+    "fails the retained caller when a yielded child receives %s",
+    async (kind) => {
+      const runtime = await createWorkflowToolRuntime({
+        agentName: `yielded-child-${kind}`,
+        background: true,
+        execute: holdUntilAbortedWorkflow,
+        toolName: "deploy_service",
+      });
+      await runtime.run(async () => {
+        const parentToken = `parent-result-${kind}`;
+        const parent = await start(receiveDelegatedResultWorkflow, [parentToken]);
+        let child: ReturnType<typeof getRun> | undefined;
+        let stream: ReturnType<typeof captureTurnEvents> | undefined;
+        let nestedRunId: string | undefined;
+        try {
+          await waitForHook(parent, { token: parentToken });
+          const before = await listWorkflowToolRunIds();
+          child = await start(workflowEntry, [
+            {
+              kind: "initial",
+              ownerDeploymentId: "dpl_inline",
+              input: { message: 'Run deploy_service with service "api"' },
+              serializedContext: {
+                ...buildSerializedContext({
+                  continuationToken: `child-${kind}`,
+                  mode: "conversation",
+                }),
+                "eve.channel": {
+                  kind: "subagent",
+                  state: {
+                    callId: "delegate",
+                    subagentName: "detector",
+                    parentContinuationToken: parentToken,
+                    parentSessionId: parent.runId,
+                  },
+                },
+              },
+            },
+          ]);
+          stream = captureTurnEvents(child);
+          const yielded = await stream.nextTurn();
+          expect(filterEventsByType(yielded, "turn.completed")).toHaveLength(1);
+          expect(yielded.at(-1)?.type).toBe("session.waiting");
+          nestedRunId = await waitForNewWorkflowToolRun(before);
+          await waitForHook({ runId: nestedRunId });
+          expect(await parent.status).toBe("running");
+          await resumeSessionInbox(
+            sessionCommandHookToken(child.runId),
+            kind === "session-timeout" ? { kind, ownerRunId: child.runId } : { kind },
+          );
+          await expect(parent.returnValue).resolves.toMatchObject({
+            kind: "runtime-action-result",
+            results: [
+              {
+                callId: "delegate",
+                isError: true,
+                outcome: {
+                  kind: "terminal",
+                  result: { kind: "failed" },
+                },
+              },
+            ],
+          });
+          await expect(child.returnValue).resolves.toEqual({
+            output: "The session ended before the delegated task completed.",
+          });
+          expect(await waitForWorkflowToolRunTerminal(nestedRunId)).toBe("completed");
+        } finally {
+          stream?.dispose();
+          if (nestedRunId !== undefined) {
+            const nested = getRun(nestedRunId);
+            const status = await nested.status;
+            if (status === "pending" || status === "running") await nested.cancel();
+          }
+          for (const run of [child, parent]) {
+            if (run === undefined) continue;
+            const status = await run.status;
+            if (status === "pending" || status === "running") await run.cancel();
+          }
+        }
+      });
+    },
+    30_000,
+  );
 
   it("cancels nested work after its owning child has yielded", async () => {
     const runtime = await createWorkflowToolRuntime({

@@ -263,3 +263,10 @@ export async function askThenRaceWorkflow(
   const answer = await Promise.race([pending, workflowSleep("50ms")]);
   return { decided: answer === undefined ? "timed out" : "answered", service: input.service };
 }
+
+/** Receives the actual delegated result over the durable parent hook. */
+export async function receiveDelegatedResultWorkflow(token: string): Promise<unknown> {
+  "use workflow";
+  using result = createHook<unknown>({ token });
+  return await result;
+}
