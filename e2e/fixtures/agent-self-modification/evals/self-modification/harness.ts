@@ -197,18 +197,22 @@ export class SelfModificationHarness {
 
   /** Approves the registry install on the parent and observes the resumed child turn. */
   async approveRegistry(run: SelfModificationRun): Promise<EveEvalTurn> {
-    const toolName = "selfmod__registry_add";
-    let session = run.session;
-    for (let attempt = 0; attempt < 5; attempt++) {
-      if (session.pendingInputRequests.some((request) => request.action.toolName === toolName))
-        break;
-      const live = this.#t.target.watchTurn(session.sessionId, {
-        startIndex: session.state.streamIndex,
-      });
-      this.#turns.add(live);
-      (await live.result()).expectOk();
-      session = live.session;
+    const toolName = "registry_add";
+    const liveParent = this.#t.target.watchTurn(run.session.sessionId, {
+      startIndex: run.session.state.streamIndex,
+    });
+    this.#turns.add(liveParent);
+    const approval = await liveParent.waitForEvent("input.requested", {
+      data: { requests: [{ action: { kind: "tool-call", toolName } }] },
+    });
+    const requests = approval.data.requests.filter(
+      (request) => request.action.kind === "tool-call" && request.action.toolName === toolName,
+    );
+    if (requests.length !== 1) {
+      throw new Error(`Expected one pending ${toolName} approval, found ${requests.length}.`);
     }
+    (await liveParent.result()).expectOk();
+    const session = liveParent.session;
     session.requireInputRequest({ toolName });
     const childSessionId = run.child.sessionId;
     const previousChild = [...this.#turns]
