@@ -2230,11 +2230,6 @@
           "path": "registry/channel/web/lib/session-viewer.ts",
           "type": "registry:file",
           "target": "lib/session-viewer.ts"
-        },
-        {
-          "path": "registry/channel/web/lib/session-identity.ts",
-          "type": "registry:file",
-          "target": "lib/session-identity.ts"
         }
       ]
     },

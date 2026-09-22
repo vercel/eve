@@ -204,14 +204,18 @@ remain same-origin when Vercel routes them to the internal eve service. Configur
 (a stable scope unique to the app/environment) in both Next.js and eve services.
 Run `node scripts/migrate-session-index.mjs` once before serving production traffic.
 
-Better Auth still handles browser sign-in and cookie verification. The channel's
-`betterAuthSession` adapter calls `sessionViewer`, which verifies the cookie with
-`auth.api.getSession()` and shares the verified identity with history and ownership
-checks. The channel principal ID now uses the verified Vercel account subject
-instead of Better Auth's user ID; the history owner key derives from that subject
-so it stays stable across sign-ins. Existing cookies without the provider subject
-require signing out and back in. Email, name, and profile picture remain principal
-attributes. Deployment OIDC credentials are separate from browser identity.
+Better Auth handles browser sign-in and cookie verification. The channel's
+`betterAuthSession` adapter preserves the Better Auth user ID as `principalId`
+and the email, name, and profile picture attributes. History does not modify the
+authentication principal or add history-specific auth attributes.
+
+The history store derives its owner key from the verified Vercel account subject
+in the Better Auth session, keeping ownership stable across sign-ins. It records
+that owner when creating a session. Activity updates and child-call bindings use
+this stored ownership; event hooks do not read ownership from auth attributes.
+Existing cookies without the provider subject require signing out and back in to
+access indexed sessions. Deployment OIDC credentials remain separate from browser
+identity.
 
 The base Web Chat scaffold deliberately leaves its production viewer
 adapter unconfigured; custom authentication must implement `lib/session-viewer.ts`

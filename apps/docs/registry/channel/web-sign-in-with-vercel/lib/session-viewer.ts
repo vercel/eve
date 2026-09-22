@@ -1,12 +1,7 @@
 import { auth } from "./auth";
-import { viewerFromVerifiedSession, type SessionViewer } from "./session-identity";
+import { sessionOwner, type SessionOwner } from "./session-store";
 
-const requests = new WeakMap<Request, Promise<SessionViewer | null>>();
-export function sessionViewer(request: Request): Promise<SessionViewer | null> {
-  let result = requests.get(request);
-  if (!result) {
-    result = auth.api.getSession({ headers: request.headers }).then(viewerFromVerifiedSession);
-    requests.set(request, result);
-  }
-  return result;
+export async function sessionViewer(request: Request): Promise<SessionOwner | null> {
+  const session = await auth.api.getSession({ headers: request.headers });
+  return sessionOwner(session?.user);
 }

@@ -388,10 +388,11 @@ describe("ensureChannel", () => {
     expect(channelSource).toContain("withSessionAccess");
     const viewerSource = await readFile(join(projectRoot, "lib/session-viewer.ts"), "utf8");
     expect(viewerSource).toContain("auth.api.getSession");
-    expect(viewerSource).toContain("viewerFromVerifiedSession");
-    const identitySource = await readFile(join(projectRoot, "lib/session-identity.ts"), "utf8");
-    expect(identitySource).toContain('authenticator: "better-auth:vercel"');
-    expect(identitySource).toContain("session?.user.vercelSubject");
+    expect(viewerSource).toContain("sessionOwner(session?.user)");
+    expect(channelSource).toContain("principalId: session.user.id");
+    expect(channelSource).toContain('authenticator: "better-auth:vercel"');
+    expect(channelSource).not.toContain("webSessionOwner");
+    await expect(readFile(join(projectRoot, "lib/session-identity.ts"), "utf8")).rejects.toThrow();
     expect(authSource).toContain("vercelSubject: profile.sub");
     expect(result.filesWritten).toContain(join(projectRoot, "agent/hooks/session-history.ts"));
     expect(result.filesWritten).toContain(join(projectRoot, "db/session-index.sql"));

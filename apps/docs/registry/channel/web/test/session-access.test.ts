@@ -183,6 +183,7 @@ test("configured public origin permits browser mutations through an internal ser
           ownsChild: async () => false,
           recordChild: async () => {},
           record: async () => {},
+          update: async () => {},
           list: async () => ({ sessions: [] }),
         }),
       },

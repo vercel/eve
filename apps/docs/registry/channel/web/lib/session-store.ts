@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type { ChatSession } from "./session-history.ts";
 import { sessionCursor, type SessionPage, type SessionPageQuery } from "./session-pagination.ts";
 
@@ -6,6 +7,27 @@ export interface SessionOwner {
   readonly key: string;
   readonly name: string;
 }
+/** Map an authenticated browser user to index ownership without changing its auth principal. */
+export function sessionOwner(
+  user:
+    | {
+        vercelSubject?: string | null;
+        name: string;
+        email: string;
+      }
+    | null
+    | undefined,
+): SessionOwner | null {
+  if (!user) return null;
+  if (!user.vercelSubject) throw new Error("Sign in again to access session history.");
+  return {
+    key: createHash("sha256")
+      .update(JSON.stringify(["better-auth:vercel", user.vercelSubject]))
+      .digest("hex"),
+    name: user.name || user.email,
+  };
+}
+
 export interface SessionRecord extends ChatSession {
   readonly ownerKey: string;
   readonly titleAt?: string;
@@ -14,11 +36,12 @@ export interface SessionRecord extends ChatSession {
 /** This index owns browser access and metadata. eve remains the transcript store. */
 export function createSessionStore(query: SessionQuery, scope: string) {
   return {
-    async recordChild(ownerKey: string, parent: string, call: string, child: string) {
+    async recordChild(root: string, parent: string, call: string, child: string) {
       await query(
         `INSERT INTO web_session_children (scope, owner_key, parent_session_id, call_id, child_session_id)
-        VALUES ($1, $2, $3, $4, $5) ON CONFLICT DO NOTHING`,
-        [scope, ownerKey, parent, call, child],
+        SELECT scope, owner_key, $3, $4, $5 FROM web_sessions
+        WHERE scope = $1 AND session_id = $2 ON CONFLICT DO NOTHING`,
+        [scope, root, parent, call, child],
       );
     },
     async ownsChild(ownerKey: string, parent: string, call: string, child: string) {
@@ -61,6 +84,25 @@ export function createSessionStore(query: SessionQuery, scope: string) {
         ],
       );
       if (rows.length !== 1) throw new Error("Session ownership conflict.");
+    },
+    async update(session: Omit<SessionRecord, "ownerKey" | "createdAt">) {
+      // Hooks may arrive from any channel. Only existing browser-owned roots are projected.
+      await query(
+        `UPDATE web_sessions SET
+          title = CASE WHEN $4::timestamptz IS NOT NULL AND (title_at IS NULL OR $4 < title_at) THEN $3 ELSE title END,
+          title_at = LEAST(title_at, $4::timestamptz),
+          last_message_at = GREATEST(last_message_at, $5::timestamptz),
+          last_turn_at = GREATEST(last_turn_at, $6::timestamptz)
+        WHERE scope = $1 AND session_id = $2`,
+        [
+          scope,
+          session.id,
+          session.title,
+          session.titleAt ?? null,
+          session.lastMessageAt ?? null,
+          session.lastTurnAt ?? null,
+        ],
+      );
     },
     async list(ownerKey: string, page: SessionPageQuery): Promise<SessionPage> {
       const rows = await query(

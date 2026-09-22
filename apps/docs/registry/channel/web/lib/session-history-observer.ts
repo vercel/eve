@@ -3,8 +3,7 @@ import type { SessionStore } from "./session-store.ts";
 
 type ObservedSession = {
   id: string;
-  parent?: unknown;
-  auth: { initiator?: { attributes: Record<string, unknown> } | null };
+  parent?: { rootSessionId: string };
 };
 
 /** Activity indexing never joins the durable transcript's success path. */
@@ -14,15 +13,13 @@ export function createSessionHistoryObserver(
   onError: (error: unknown) => void = console.error,
 ) {
   return (event: HookEvent, ctx: { session: ObservedSession }) => {
-    const owner = ctx.session.auth.initiator?.attributes.webSessionOwner;
-    if (typeof owner !== "string") return;
     background(
       Promise.resolve()
         .then(async () => {
           if (event.type === "subagent.called") {
             if (!event.data.remote)
               await store().recordChild(
-                owner,
+                ctx.session.parent?.rootSessionId ?? ctx.session.id,
                 event.data.sessionId,
                 event.data.callId,
                 event.data.childSessionId,
@@ -35,10 +32,8 @@ export function createSessionHistoryObserver(
             event.type === "message.received"
               ? event.data.message.trim().replace(/\s+/g, " ").slice(0, 160)
               : undefined;
-          await store().record({
+          await store().update({
             id: ctx.session.id,
-            ownerKey: owner,
-            createdAt: at,
             title: title || "New chat",
             titleAt: title ? at : undefined,
             lastMessageAt: ["message.received", "message.completed"].includes(event.type)

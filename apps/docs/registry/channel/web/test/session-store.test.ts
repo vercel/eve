@@ -39,14 +39,32 @@ test("production index isolates owners and environments, paginates activity, and
     assert.equal(await store.owns("bob", "wrun_A"), false);
     assert.equal(await store.owns("alice", "wrun_missing"), false);
     assert.equal(await store.owns("alice", "wrun_P"), false);
-    await store.recordChild("alice", "wrun_A", "call", "child");
-    await store.recordChild("alice", "wrun_A", "call", "child");
-    await store.recordChild("alice", "child", "nested-call", "grandchild");
+    // A nested call may be projected before its parent's background write.
+    await store.recordChild("wrun_A", "child", "nested-call", "grandchild");
+    await store.recordChild("wrun_A", "wrun_A", "call", "child");
+    await store.recordChild("wrun_A", "wrun_A", "call", "child");
     assert.equal(await store.ownsChild("alice", "wrun_A", "call", "child"), true);
     assert.equal(await store.ownsChild("alice", "child", "nested-call", "grandchild"), true);
     assert.equal(await store.ownsChild("bob", "wrun_A", "call", "child"), false);
     assert.equal(await store.ownsChild("alice", "wrun_A", "other-call", "child"), false);
     assert.equal(await preview.ownsChild("alice", "wrun_A", "call", "child"), false);
+    // Child ownership comes from stored root session state, never caller-provided auth attributes.
+    await store.recordChild("missing", "missing", "call", "unowned");
+    assert.equal(await store.ownsChild("alice", "missing", "call", "unowned"), false);
+    await preview.recordChild("wrun_A", "wrun_A", "call", "child");
+    assert.equal(await preview.ownsChild("alice", "wrun_A", "call", "child"), false);
+    await store.update({ id: "unindexed", title: "Hidden", lastMessageAt: late });
+    assert.equal(
+      (await db.query("SELECT 1 FROM web_sessions WHERE session_id = 'unindexed'")).rows.length,
+      0,
+    );
+    await store.update({
+      id: "wrun_A",
+      title: "Ignored later title",
+      titleAt: late,
+      lastMessageAt: late,
+      lastTurnAt: late,
+    });
     const first = await store.list("alice", { limit: 1 });
     assert.equal(first.sessions[0].id, "wrun_A");
     assert.equal(first.sessions[0].title, "First message");
