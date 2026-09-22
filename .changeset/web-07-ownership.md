@@ -2,4 +2,4 @@
 "eve": patch
 ---
 
-Add production session history scoped to verified Vercel users, with paginated metadata and ownership checks for session controls and child reads.
+Expose the existing Sign in with Vercel Web Chat scaffold through `eve init --channel-web-nextjs --web-authentication sign-in-with-vercel`.

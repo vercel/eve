@@ -22,6 +22,7 @@ import type { SessionHistory } from "@/lib/session-history";
 import { ServerStatusDot, useServerStatus } from "./server-status";
 
 export const SessionSidebar = memo(function SessionSidebar({
+  historyEnabled = true,
   history,
   agentName = "eve-agent",
   error,
@@ -35,6 +36,7 @@ export const SessionSidebar = memo(function SessionSidebar({
   onPrefetchSession,
   onSelectSession,
 }: {
+  readonly historyEnabled?: boolean;
   readonly history?: SessionHistory;
   readonly agentName?: string;
   readonly error?: string;
@@ -124,7 +126,7 @@ export const SessionSidebar = memo(function SessionSidebar({
               </Button>
             </div>
           ) : null}
-          {!history && !error && !isDisconnected ? (
+          {historyEnabled && !history && !error && !isDisconnected ? (
             <p className="px-3 text-xs text-muted-foreground">Loading chats…</p>
           ) : history?.sessions.length === 0 ? (
             <p className="px-3 text-xs leading-relaxed text-muted-foreground">

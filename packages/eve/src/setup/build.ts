@@ -73,8 +73,6 @@ function shouldCopySourcePath(relativePath: string): boolean {
   }
   return (
     !relativePath.startsWith("agent/") ||
-    relativePath === "agent/hooks" ||
-    relativePath.startsWith("agent/hooks/") ||
     relativePath === WEB_CHANNEL_SOURCE_PATH ||
     WEB_CHANNEL_SOURCE_PATH.startsWith(`${relativePath}/`)
   );

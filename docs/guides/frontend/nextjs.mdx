@@ -179,56 +179,19 @@ See [Resumable sessions](./overview#resumable-sessions) for persistence and repl
 
   If the public routing layer mounts an agent below a path, set `EVE_PUBLIC_ROUTE_PREFIX` in that agent's build and runtime environments so callback URLs use the public path. Process restarts, persistent workflow storage, sandbox configuration, and workflow callback routing remain hosting responsibilities; see [Self-host eve](../deployment/self-hosting).
 
-## Session history and persistent drafts
+## Generated chat behavior
 
-New Web Chat apps include a responsive history sidebar, persistent per-session
-drafts with undo/redo and attachments, connection recovery, and a closable subagent
-inspection pane. Drafts and cached child transcripts are stored in the browser,
-isolated by workspace user. Clearing browser storage removes these local copies;
-eve remains the server transcript store.
+Generated Web Chat renders links and inline code with distinct colors, removes code-block headers, and keeps the composer visible while you scroll.
 
-Local history remembers up to 500 sessions opened or created in this browser.
-It does not enumerate the machine's workflow storage or replay hidden sessions.
-Clearing browser storage clears this local list; known session URLs still work.
-For deployed, signed-in history, create an app with:
+Generated Web Chat includes copy buttons for tool commands, command output, parameters, results, and errors. Reasoning panels stay open or closed while responses stream, and the thinking animation pauses between sweeps.
 
-```bash
-pnpm dlx eve init my-agent --channel-web-nextjs --web-authentication sign-in-with-vercel
-```
+Repeated user messages stay separate. The conversation scrolls to a newly submitted message and shows Stop only while the active chat turn is running. Input is disabled while the server is unavailable and recovers on reconnection.
 
-Register a Vercel OAuth application and set `BETTER_AUTH_SECRET`,
-`VERCEL_APP_CLIENT_ID`, and `VERCEL_APP_CLIENT_SECRET`. Set `WEB_CHAT_ORIGIN` to the
-public HTTPS origin (for example, `https://chat.example.com`) so browser mutations
-remain same-origin when Vercel routes them to the internal eve service. Configure
-`SESSION_DATABASE_URL` (a Neon-compatible Postgres URL) and `SESSION_INDEX_SCOPE`
-(a stable scope unique to the app/environment) in both Next.js and eve services.
-Run `node scripts/migrate-session-index.mjs` once before serving production traffic.
+Local history remembers up to 500 sessions opened or created in this browser, ordered by last message, with creation and last-turn tooltips. It does not enumerate server files or replay hidden conversations. Clearing browser storage clears this local list; known session URLs remain usable. This browser-local list is not cross-device history. The scaffold does not add a database or a production session index.
 
-Better Auth handles browser sign-in and cookie verification. The channel's
-`betterAuthSession` adapter preserves the Better Auth user ID as `principalId`
-and the email, name, and profile picture attributes. History does not modify the
-authentication principal or add history-specific auth attributes.
+Persist composer drafts, attachments and undo history across reloads. Clear only acknowledged submissions without erasing newer edits.
 
-The history store derives its owner key from the verified Vercel account subject
-in the Better Auth session, keeping ownership stable across sign-ins. It records
-that owner when creating a session. Activity updates and child-call bindings use
-this stored ownership; event hooks do not read ownership from auth attributes.
-Existing cookies without the provider subject require signing out and back in to
-access indexed sessions. Deployment OIDC credentials remain separate from browser
-identity.
-
-The base Web Chat scaffold deliberately leaves its production viewer
-adapter unconfigured; custom authentication must implement `lib/session-viewer.ts`
-and enforce the same owner checks in the eve channel.
-
-The index stores ownership, title, creation time, last-message time, and last-turn
-time; it does not duplicate transcripts. Browser users can read/control only their
-indexed sessions and inspect children linked by indexed, owner-scoped call records.
-Session creation and index writes are not transactional together: a database
-outage may leave an unlisted session. Activity and child-call metadata is projected
-with `waitUntil`; failures are logged and leave stale metadata or
-unavailable child access until the index is repaired without failing the chat turn. Existing sessions
-are not automatically backfilled.
+Inspect subagents in a closable, resizable detail pane with persistent transcripts and view state, named progress and accurate completion status.
 
 The composer clears the captured draft when its own send request is accepted,
 before waiting for the agent's response. Another tab's message cannot clear it.
@@ -244,6 +207,21 @@ larger transcripts remain available in memory and replay from the last saved
 checkpoint after reload.
 
 Browser draft storage retains up to eight distinct tab branches per conversation. Reloads reuse the same branch; if another branch cannot be saved, the composer warns and keeps that tab’s draft in memory instead of discarding existing work.
+
+### Sign in with Vercel
+
+Select the existing Better Auth integration when creating the Web Chat app:
+
+```bash
+pnpm dlx eve init my-agent --channel-web-nextjs --web-authentication sign-in-with-vercel
+```
+
+Register a Vercel OAuth application and configure `BETTER_AUTH_SECRET`,
+`VERCEL_APP_CLIENT_ID`, and `VERCEL_APP_CLIENT_SECRET`. Better Auth verifies browser
+sessions; deployment OIDC remains a separate authentication path. This option
+adds sign-in, not a user-scoped session index or cross-device history. It requires
+no application database or migrations. Custom session listing and resource access
+policies remain application responsibilities.
 
 ## What to read next
 

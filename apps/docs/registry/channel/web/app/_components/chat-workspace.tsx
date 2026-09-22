@@ -186,6 +186,7 @@ function Workspace({
       setHistory(localHistory.load());
       return Promise.resolve();
     }
+    if (!localWorkspace) return Promise.resolve();
     if (historyRequest.current) return historyRequest.current;
     const version = ++historyVersion.current;
     const request = (async () => {
@@ -427,6 +428,7 @@ function Workspace({
               onCloseDetail={paneController.closePane}
               sidebar={
                 <SessionSidebar
+                  historyEnabled={localWorkspace}
                   activeSessionId={activeSessionId}
                   error={historyError}
                   history={history}

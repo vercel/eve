@@ -229,18 +229,20 @@ function AgentConversation({
   const composer = (
     <PromptInput
       className="rounded-3xl border-border/60 bg-card shadow-none"
-      managedDraft
+      managedDraft={!!draftOwner}
       onError={(error) => {
         pendingDraft.current = null;
         setIsSending(false);
         setCancellationError(error.message);
       }}
       onSubmitCapture={(event) => {
-        if (pendingDraft.current || !draftOwner || isDisconnected || isResuming) {
+        if (pendingDraft.current || isDisconnected || isResuming) {
           event.preventDefault();
           event.stopPropagation();
           return;
         }
+        // Without an authenticated owner, keep the ordinary transient composer.
+        if (!draftOwner) return;
         const acknowledge = editorRef.current?.capture();
         if (!acknowledge) {
           event.preventDefault();
@@ -263,9 +265,7 @@ function AgentConversation({
           placeholder={isDisconnected ? "Server unavailable" : "Send a message…"}
         />
       ) : (
-        <div className="px-4 pt-4 text-sm text-muted-foreground">
-          {isDisconnected ? "Server unavailable" : "Loading draft…"}
-        </div>
+        <div className="px-4 pt-4 text-sm text-muted-foreground">Loading draft…</div>
       )}
       <PromptInputFooter className="min-h-12 px-4 pb-3 pr-14">
         {!isDisconnected ? (
@@ -287,7 +287,7 @@ function AgentConversation({
       <ComposerAction
         hasInputText={hasInputText}
         isBusy={isBusy}
-        isDisabled={isResuming || isDisconnected || isSending || !draftOwner}
+        isDisabled={isResuming || isDisconnected || isSending}
         onCancel={requestCancellation}
       />
     </PromptInput>

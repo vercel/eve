@@ -1,9 +1,6 @@
 import { eveChannel } from "eve/channels/eve";
 import { localDev, type AuthFn, vercelOidc } from "eve/channels/auth";
 import { auth } from "@/lib/auth";
-import { sessionViewer } from "../../lib/session-viewer";
-import { productionSessionStore } from "../../lib/production-session-store";
-import { withSessionAccess } from "../../lib/session-access";
 
 const betterAuthSession: AuthFn<Request> = async (request) => {
   const session = await auth.api.getSession({ headers: request.headers });
@@ -25,7 +22,6 @@ const betterAuthSession: AuthFn<Request> = async (request) => {
   };
 };
 
-const channel = eveChannel({
+export default eveChannel({
   auth: [betterAuthSession, vercelOidc(), localDev()],
 });
-export default withSessionAccess(channel, { viewer: sessionViewer, store: productionSessionStore });

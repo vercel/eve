@@ -275,7 +275,7 @@ describe("ensureChannel", () => {
     expect(agentChatSource).toContain('const isResuming = agent.status === "resuming"');
     expect(agentChatSource).toContain("canRespond={!isBusy && !isResuming}");
     expect(agentChatSource).toContain("{showPendingThinking ? <PendingThinking /> : null}");
-    expect(agentChatSource).not.toContain("StatusDot");
+    expect(agentChatSource).toContain("useServerStatus");
     await expect(readFile(join(projectRoot, "app/icon.svg"), "utf8")).resolves.toContain(
       'viewBox="0 0 102 102"',
     );
@@ -385,18 +385,18 @@ describe("ensureChannel", () => {
     expect(authSource).not.toContain("*.vercel.app");
 
     const channelSource = await readFile(join(projectRoot, "agent/channels/eve.ts"), "utf8");
-    expect(channelSource).toContain("withSessionAccess");
-    const viewerSource = await readFile(join(projectRoot, "lib/session-viewer.ts"), "utf8");
-    expect(viewerSource).toContain("auth.api.getSession");
-    expect(viewerSource).toContain("sessionOwner(session?.user)");
-    expect(channelSource).toContain("principalId: session.user.id");
+    expect(channelSource).toContain("auth.api.getSession");
     expect(channelSource).toContain('authenticator: "better-auth:vercel"');
-    expect(channelSource).not.toContain("webSessionOwner");
-    await expect(readFile(join(projectRoot, "lib/session-identity.ts"), "utf8")).rejects.toThrow();
-    expect(authSource).toContain("vercelSubject: profile.sub");
-    expect(result.filesWritten).toContain(join(projectRoot, "agent/hooks/session-history.ts"));
-    expect(result.filesWritten).toContain(join(projectRoot, "db/session-index.sql"));
-    expect(result.filesWritten.some((file) => file.includes("/test/"))).toBe(false);
+    expect(channelSource).toContain("principalId: session.user.id");
+    const authenticatedPackage = await readFile(join(projectRoot, "package.json"), "utf8");
+    expect(authenticatedPackage).not.toContain("@neondatabase/serverless");
+    expect(authenticatedPackage).not.toContain("@electric-sql/pglite");
+    expect(authSource).not.toContain("database:");
+    expect(result.filesWritten).not.toContain(join(projectRoot, "db/session-index.sql"));
+    expect(result.filesWritten).not.toContain(
+      join(projectRoot, "scripts/migrate-session-index.mjs"),
+    );
+
     expect(channelSource).not.toContain('issuer: "https://vercel.com"');
     expect(channelSource).toContain("vercelOidc()");
     expect(channelSource).toContain("localDev()");

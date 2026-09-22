@@ -11,7 +11,6 @@
     "@codemirror/commands": "6.11.1",
     "@codemirror/state": "6.7.5",
     "@codemirror/view": "6.43.12",
-    "@neondatabase/serverless": "1.1.0",
     "@radix-ui/react-use-controllable-state": "1.2.2",
     "@shikijs/core": "3.23.0",
     "@shikijs/engine-javascript": "3.23.0",
@@ -42,12 +41,9 @@
     "zod": "4.5.4"
   },
   "devDependencies": {
-    "@electric-sql/pglite": "0.4.5",
     "@types/node": "26",
     "@types/react": "19.2.15",
     "@types/react-dom": "19.2.3",
-    "@vercel/functions": "3.9.8",
-    "better-auth": "catalog:",
     "typescript": "6.0.3"
   }
 }

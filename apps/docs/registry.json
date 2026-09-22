@@ -1801,7 +1801,6 @@
         "@codemirror/commands@6.11.1",
         "@codemirror/state@6.7.5",
         "@codemirror/view@6.43.12",
-        "@neondatabase/serverless@1.1.0",
         "@radix-ui/react-use-controllable-state@1.2.2",
         "@shikijs/core@3.23.0",
         "@shikijs/engine-javascript@3.23.0",
@@ -2082,19 +2081,9 @@
           "target": "lib/merge-session-history.ts"
         },
         {
-          "path": "registry/channel/web/lib/production-session-store.ts",
-          "type": "registry:file",
-          "target": "lib/production-session-store.ts"
-        },
-        {
           "path": "registry/channel/web/lib/server-status.ts",
           "type": "registry:file",
           "target": "lib/server-status.ts"
-        },
-        {
-          "path": "registry/channel/web/lib/session-access.ts",
-          "type": "registry:file",
-          "target": "lib/session-access.ts"
         },
         {
           "path": "registry/channel/web/lib/session-history.ts",
@@ -2105,21 +2094,6 @@
           "path": "registry/channel/web/lib/session-pagination.ts",
           "type": "registry:file",
           "target": "lib/session-pagination.ts"
-        },
-        {
-          "path": "registry/channel/web/lib/session-history-observer.ts",
-          "type": "registry:lib",
-          "target": "lib/session-history-observer.ts"
-        },
-        {
-          "path": "registry/channel/web/lib/session-store.ts",
-          "type": "registry:file",
-          "target": "lib/session-store.ts"
-        },
-        {
-          "path": "registry/channel/web/lib/subagent-access.ts",
-          "type": "registry:file",
-          "target": "lib/subagent-access.ts"
         },
         {
           "path": "registry/channel/web/lib/subagent-pane-cache.ts",
@@ -2187,21 +2161,6 @@
           "target": "app/_components/subagent-status.tsx"
         },
         {
-          "path": "registry/channel/web/app/api/sessions/route.ts",
-          "type": "registry:file",
-          "target": "app/api/sessions/route.ts"
-        },
-        {
-          "path": "registry/channel/web/db/session-index.sql",
-          "type": "registry:file",
-          "target": "db/session-index.sql"
-        },
-        {
-          "path": "registry/channel/web/scripts/migrate-session-index.mjs",
-          "type": "registry:file",
-          "target": "scripts/migrate-session-index.mjs"
-        },
-        {
           "path": "registry/channel/web/components/ui/resizable.tsx",
           "type": "registry:file",
           "target": "components/ui/resizable.tsx"
@@ -2225,11 +2184,6 @@
           "path": "registry/channel/web/hooks/use-mobile.ts",
           "type": "registry:file",
           "target": "hooks/use-mobile.ts"
-        },
-        {
-          "path": "registry/channel/web/lib/session-viewer.ts",
-          "type": "registry:file",
-          "target": "lib/session-viewer.ts"
         }
       ]
     },
