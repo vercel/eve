@@ -8,7 +8,7 @@ export default defineEval({
   timeoutMs: 60_000,
   async test(t) {
     const turn = await t.send(
-      "Ask the `custom-provider` subagent to verify its custom provider session marker.",
+      "Ask the `custom-provider` subagent with message: Verify the custom provider session marker.",
     );
     turn.expectOk();
     const sessionId = turn.sessionId;
