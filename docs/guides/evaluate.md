@@ -26,7 +26,7 @@ export default defineAgent({
   model: auto({
     options: {
       "openai/gpt-6-sol": "Difficult reasoning and engineering tasks",
-      "openai/gpt-5.6-luna": "Routine tasks where fast completion matters",
+      "openai/gpt-6-luna": "Routine tasks where fast completion matters",
     },
   }),
 });
@@ -38,7 +38,7 @@ Gateway evaluator uses the same connection selected through `/login` as Gateway
 language models. A configured AI SDK default provider still owns string model
 resolution during development. The TUI footer displays `dynamic model` when the
 agent uses `auto`, then adds the resolved model for the current turn, such as
-`dynamic model · openai/gpt-5.6-luna`.
+`dynamic model · openai/gpt-6-luna`.
 
 ## Use a provider directly
 
@@ -59,7 +59,7 @@ export default defineAgent({
     model: typeSafeAi.evaluationModel("jev-latest"),
     options: {
       "openai/gpt-6-sol": "Difficult reasoning and engineering tasks",
-      "openai/gpt-5.6-luna": "Routine tasks where fast completion matters",
+      "openai/gpt-6-luna": "Routine tasks where fast completion matters",
     },
   }),
 });
