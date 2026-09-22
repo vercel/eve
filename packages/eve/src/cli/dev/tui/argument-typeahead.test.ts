@@ -49,6 +49,35 @@ describe("argumentTypeaheadFor", () => {
     expect(selectedArgumentSuggestion(state)).toEqual(models[1]);
   });
 
+  it("sanitizes catalog text before it can render or complete", () => {
+    const state = argumentTypeaheadFor({ command: "model", argument: "", argumentStart: 7 }, [
+      { value: "openai/\u001b]52;c;clipboard\u0007gpt", label: "GPT", hint: "\u001b[31mred" },
+    ]);
+    expect(state.suggestions[0]).toMatchObject({ value: "openai/gpt", hint: "red" });
+    expect(argumentTypeaheadCompletion(state, selectedArgumentSuggestion(state)!)).toBe(
+      "/model openai/gpt",
+    );
+  });
+
+  it("keeps the selected item visible in an eight-row window", () => {
+    const suggestions = Array.from({ length: 9 }, (_, index) => ({
+      value: `provider/model-${index}`,
+      label: `Model ${index}`,
+    }));
+    const state = {
+      ...argumentTypeaheadFor({ command: "model", argument: "", argumentStart: 7 }, suggestions),
+      selectedIndex: 8,
+    };
+    const rows = renderArgumentSuggestions(
+      state,
+      createTheme({ color: false, unicode: true }),
+      80,
+    ).map(stripAnsi);
+    expect(rows).toHaveLength(8);
+    expect(rows.some((row) => row.includes("model-8"))).toBe(true);
+    expect(rows.some((row) => row.includes("model-0"))).toBe(false);
+  });
+
   it("indents canonical values under the command argument without hints", () => {
     const rows = renderArgumentSuggestions(
       argumentTypeaheadFor({ command: "model", argument: "", argumentStart: 7 }, models),

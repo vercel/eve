@@ -1,3 +1,4 @@
+import { sanitizeForTerminal } from "#cli/ui/output.js";
 import { sliceVisible, visibleLength } from "#cli/ui/terminal-text.js";
 
 import type { Theme } from "./theme.js";
@@ -40,6 +41,15 @@ export function argumentTypeaheadQuery(text: string): ArgumentTypeaheadQuery | u
     : { command, argument, argumentStart };
 }
 
+/** Removes terminal controls before a catalog field can render or enter the composer. */
+function sanitizeSuggestion(suggestion: PromptArgumentSuggestion): PromptArgumentSuggestion {
+  return {
+    value: sanitizeForTerminal(suggestion.value),
+    label: sanitizeForTerminal(suggestion.label),
+    ...(suggestion.hint === undefined ? {} : { hint: sanitizeForTerminal(suggestion.hint) }),
+  };
+}
+
 /** Filters catalog entries case-insensitively across their visible labels and ids. */
 export function argumentTypeaheadFor(
   query: ArgumentTypeaheadQuery,
@@ -47,12 +57,14 @@ export function argumentTypeaheadFor(
   previous?: ArgumentTypeaheadState,
 ): ArgumentTypeaheadState {
   const normalized = query.argument.toLowerCase();
-  const matches = suggestions.filter(
-    (suggestion) =>
-      suggestion.value.toLowerCase().includes(normalized) ||
-      suggestion.label.toLowerCase().includes(normalized) ||
-      (suggestion.hint?.toLowerCase().includes(normalized) ?? false),
-  );
+  const matches = suggestions
+    .map(sanitizeSuggestion)
+    .filter(
+      (suggestion) =>
+        suggestion.value.toLowerCase().includes(normalized) ||
+        suggestion.label.toLowerCase().includes(normalized) ||
+        (suggestion.hint?.toLowerCase().includes(normalized) ?? false),
+    );
   const selected = previous?.suggestions[previous.selectedIndex];
   const selectedIndex = selected === undefined ? -1 : matches.indexOf(selected);
   return {
@@ -95,9 +107,14 @@ export function renderArgumentSuggestions(
   width: number,
 ): string[] {
   const c = theme.colors;
-  return state.suggestions.slice(0, 8).map((suggestion, index) => {
+  const viewSize = Math.min(8, state.suggestions.length);
+  const start = Math.max(
+    0,
+    Math.min(state.selectedIndex - Math.floor(viewSize / 2), state.suggestions.length - viewSize),
+  );
+  return state.suggestions.slice(start, start + viewSize).map((suggestion, index) => {
     const value =
-      index === state.selectedIndex ? c.bold(suggestion.value) : c.dim(suggestion.value);
+      start + index === state.selectedIndex ? c.bold(suggestion.value) : c.dim(suggestion.value);
     const indent = " ".repeat(state.argumentStart + 2);
     const row = `${indent}${value}`;
     return visibleLength(row) > width ? sliceVisible(row, width) : row;
