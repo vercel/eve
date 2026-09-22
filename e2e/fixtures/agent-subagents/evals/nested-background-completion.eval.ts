@@ -12,9 +12,9 @@ export default defineEval({
     launch.requireToolCall("remote-loopback", { output: { status: "working" } });
     const detectorId = await childSession(t, launch.sessionId, "remote-loopback");
     const detector = (await t.target.watchTurn(detectorId).result()).expectOk();
-    detector.requireToolCall("agent", { output: { status: "working" } });
+    detector.requireToolCall("verification-worker", { output: { status: "working" } });
     detector.notEvent("subagent.completed");
-    const workerId = await childSession(t, detectorId, "agent");
+    const workerId = await childSession(t, detectorId, "verification-worker");
     const gatePath = `/test/verification/${encodeURIComponent(workerId)}/${key}`;
     const gate = async (action: "ready" | "release") => {
       const response = await t.target.fetch(`${gatePath}/${action}`, {
@@ -50,7 +50,7 @@ export default defineEval({
     ).expectOk();
     detectorFinal.messageIncludes(NESTED_FINAL);
     detectorFinal.event("subagent.completed", {
-      data: { subagentName: "agent", output: NESTED_FINAL },
+      data: { subagentName: "verification-worker", output: NESTED_FINAL },
       count: 1,
     });
 
