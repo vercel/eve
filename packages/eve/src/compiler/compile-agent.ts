@@ -14,12 +14,15 @@ import {
 } from "#compiler/artifacts.js";
 import type { CompiledAgentManifest } from "#compiler/manifest.js";
 import { summarizeCompilerDiagnostics, type CompilerDiagnostic } from "#compiler/diagnostics.js";
+import type { DevelopmentExtensionSelection } from "#compiler/development-extensions.js";
 
 /**
  * Input for compiling the current authored agent into framework-owned
  * discovery artifacts.
  */
 export interface CompileAgentInput {
+  /** Development-only source extensions applied before source composition. */
+  developmentExtensions?: DevelopmentExtensionSelection;
   /**
    * Optional {@link ProjectSource} used for discovery reads. Defaults to a
    * disk-backed source so production callers keep their current behaviour.
@@ -91,15 +94,20 @@ export async function compileAgent(input: CompileAgentInput = {}): Promise<Compi
  */
 export async function compileAgentInWorkspace(input: {
   readonly artifactLocations: CompilerArtifactLocations;
+  readonly developmentExtensions?: DevelopmentExtensionSelection;
   readonly startPath: string;
 }): Promise<CompileAgentResult> {
-  const discovered = await discoverAgentForCompilation({ startPath: input.startPath });
+  const discovered = await discoverAgentForCompilation({
+    developmentExtensions: input.developmentExtensions,
+    startPath: input.startPath,
+  });
   const result = await writeAgentCompilation(discovered, input.artifactLocations);
 
   return finishAgentCompilation(result, CompileAgentError.fromTransientArtifacts);
 }
 
 interface DiscoveredAgentCompilation {
+  readonly developmentExtensions: DevelopmentExtensionSelection | undefined;
   readonly diagnostics: DiscoverDiagnostic[];
   readonly manifest: AgentSourceManifest;
   readonly project: ResolvedDiscoveryProject;
@@ -113,6 +121,7 @@ async function discoverAgentForCompilation(
   const discoveryResult = await discoverAgent({ ...project, source });
 
   return {
+    developmentExtensions: input.developmentExtensions,
     diagnostics: discoveryResult.diagnostics,
     manifest: discoveryResult.manifest,
     project,
@@ -127,6 +136,7 @@ async function writeAgentCompilation(
     appRoot: discovered.project.appRoot,
     artifactLocations,
     diagnostics: discovered.diagnostics,
+    developmentExtensions: discovered.developmentExtensions,
     manifest: discovered.manifest,
   });
 

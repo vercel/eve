@@ -285,7 +285,9 @@ export async function bundleAuthoredModuleMapForGeneration(input: {
   // owns authored workflow IDs and must match the workflow driver.
   const packageRoot = resolveAuthoredPackageRoot(input.manifest.agentRoot);
   const programmaticLoaderImportSpecifier = resolvePackageSourceFilePath(
-    "src/internal/programmatic-source-loader.ts",
+    usesDevelopmentExtensionModules(input.manifest)
+      ? "src/internal/development-programmatic-source-loader.ts"
+      : "src/internal/programmatic-source-loader.ts",
   );
   const externalDependencies = normalizeExternalDependencies([
     ...(input.manifest.config.build?.externalDependencies ?? []),
@@ -358,6 +360,16 @@ export async function bundleAuthoredModuleMapForGeneration(input: {
   } catch (error) {
     throw createAuthoredModuleBundleError(input.moduleMapPath, error);
   }
+}
+
+function usesDevelopmentExtensionModules(manifest: CompiledAgentManifest): boolean {
+  return [manifest, ...manifest.subagents.map((subagent) => subagent.agent)].some((node) =>
+    Object.values(node.bindings).some(
+      (binding) =>
+        binding.backing.kind === "programmatic" &&
+        binding.backing.registryId.startsWith("eve:development-extension:"),
+    ),
+  );
 }
 
 function createExternalRuntimeImportPlugin(importSpecifier: string): Record<string, unknown> {

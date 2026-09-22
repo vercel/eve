@@ -569,6 +569,24 @@ describe("eve dev --input", () => {
     },
   );
 
+  it("passes the default extension opt-out to the local server", async () => {
+    const startHost = vi.fn(() => ({
+      start: async () => ({
+        kind: "existing" as const,
+        appRoot: "/canonical/app",
+        url: "http://127.0.0.1:4321/",
+      }),
+      close: async () => {},
+    }));
+
+    await runInteractiveDev(["dev", "--no-default-extensions"], { startHost });
+
+    expect(startHost).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ developmentExtensions: { enabled: [] } }),
+    );
+  });
+
   it("forwards the internal init onboarding handoff to the local TUI", async () => {
     const startHost = vi.fn(() => ({
       start: async () => ({

@@ -71,7 +71,10 @@ describe("eve dev server with bun", () => {
     async () => {
       const app = await scenarioApp(BUN_LAYOUT_DESCRIPTOR);
 
-      const result = await runEveDevToExit(app.appRoot, { runtime: "bun" });
+      const result = await runEveDevToExit(app.appRoot, {
+        defaultExtensions: false,
+        runtime: "bun",
+      });
 
       expect(result.code).not.toBe(0);
       expect(result.output).toContain("failed before readiness");

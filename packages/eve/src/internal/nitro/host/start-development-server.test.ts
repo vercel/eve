@@ -387,7 +387,9 @@ describe("createDevelopmentServer", () => {
 
     const server = await startDevelopmentServer("/tmp/eve-test");
 
-    expect(mocks.prepareDevelopmentApplicationHost).toHaveBeenCalledWith("/tmp/eve-test");
+    expect(mocks.prepareDevelopmentApplicationHost).toHaveBeenCalledWith("/tmp/eve-test", {
+      developmentExtensions: { enabled: ["self-modification"] },
+    });
     expect(mocks.pruneLocalSandboxTemplatesInBackground).toHaveBeenCalledWith("/tmp/eve-test");
     expect(mocks.createParentDevelopmentWorkflowWorld).toHaveBeenCalledWith(
       expect.objectContaining({ agentName: "test-agent", appRoot: "/tmp/eve-test" }),

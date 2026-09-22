@@ -867,7 +867,23 @@ describe("app runtime dependency tracing", () => {
       // semantic-error catalog embeds error-class names like
       // `DataDirAccessError`, and @workflow/core's runtime world factory
       // (stubbed out at vendor time) names `WORKFLOW_LOCAL_DATA_DIR`.
-      if (vercel) expect(runtimeSource).not.toContain("[world-local]");
+      if (vercel) {
+        expect(runtimeSource).not.toContain("[world-local]");
+
+        vi.stubEnv("VERCEL_DEPLOYMENT_ID", "dpl_hosted_no_dev_runtime_test");
+        const serverModule = (await import(
+          `${pathToFileURL(join(outputDir, "functions", "__server.func", "index.mjs")).href}?test=${Date.now()}`
+        )) as {
+          default: {
+            fetch(request: Request, context: { waitUntil(): void }): Promise<Response>;
+          };
+        };
+        const healthResponse = await serverModule.default.fetch(
+          new Request("https://example.com/eve/v1/health"),
+          { waitUntil() {} },
+        );
+        expect(healthResponse.status).toBe(200);
+      }
     },
     30_000,
   );
