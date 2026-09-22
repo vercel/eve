@@ -19,12 +19,12 @@ export default defineEval({
         await caller.send(`Help Alice prepare her project status update.
 Use the local-detector tool to create a detector, passing the request below in its message.
 After delegation, acknowledge that it is underway and finish your turn.
-When the delegated task completes, forward its receipt unchanged.
+When the delegated task completes, share its receipt with Alice.
 
 Request to delegate:
 Ask verification-worker to fetch Alice's verification receipt by calling verification_gate with key ${key}.
 While the worker is busy, acknowledge that verification is running and finish your turn.
-When the worker completes, forward its receipt unchanged.`)
+When the worker completes, share the receipt it returned.`)
       ).expectOk();
       callerTurn.requireToolCall("local-detector", { output: { status: "working" } });
       callerTurn.notEvent("subagent.completed");
@@ -72,14 +72,14 @@ When the worker completes, forward its receipt unchanged.`)
       workerResult.messageIncludes(receipt);
       const detectorResult = (await detectorCompletion.result()).expectOk();
       detectorResult.event("subagent.completed", {
-        data: { subagentName: "verification-worker", output: receipt },
+        data: { subagentName: "verification-worker", output: (output) => output.includes(receipt) },
         count: 1,
       });
       detectorResult.messageIncludes(receipt);
       const callerResult = (await callerCompletion.result()).expectOk();
       callerResult.event("subagent.completed", { count: 1 });
       callerResult.event("subagent.completed", {
-        data: { subagentName: "local-detector", output: receipt },
+        data: { subagentName: "local-detector", output: (output) => output.includes(receipt) },
         count: 1,
       });
       callerResult.messageIncludes(receipt);

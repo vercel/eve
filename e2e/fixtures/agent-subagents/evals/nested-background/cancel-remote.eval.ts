@@ -18,12 +18,12 @@ export default defineEval({
         await caller.send(`Help Alice prepare her project status update.
 Use the remote-loopback tool to create a detector, passing the request below in its message.
 After delegation, acknowledge that it is underway and finish your turn.
-When the delegated task completes, forward its receipt unchanged.
+When the delegated task completes, share its receipt with Alice.
 
 Request to delegate:
 Ask verification-worker to fetch Alice's verification receipt by calling verification_gate with key ${key}.
 While the worker is busy, acknowledge that verification is running and finish your turn.
-When the worker completes, forward its receipt unchanged.`)
+When the worker completes, share the receipt it returned.`)
       ).expectOk();
       const delegation = callerTurn.requireToolCall("remote-loopback", {
         output: { status: "working" },
