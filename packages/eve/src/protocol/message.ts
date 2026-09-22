@@ -1763,14 +1763,6 @@ function normalizeActionResultOutcome(result: RuntimeActionResult): {
     };
   }
 
-  const outputError = readActionResultOutputError(result.output);
-  if (outputError !== undefined) {
-    return {
-      error: outputError,
-      status: "failed",
-    };
-  }
-
   return {
     status: "completed",
   };
