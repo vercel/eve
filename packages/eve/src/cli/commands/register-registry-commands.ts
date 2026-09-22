@@ -1,5 +1,6 @@
 import { InvalidArgumentError, type Command } from "#compiled/commander/index.js";
 import { applicationCommand, type CliApplicationContext } from "#cli/application-command.js";
+import { agentCommand } from "#cli/agent-command.js";
 
 import { parseSetupAnswer } from "./setup-answers.js";
 
@@ -33,7 +34,7 @@ export function registerRegistryCommands(input: {
 }): void {
   const { applicationContext, logger, program } = input;
 
-  const add = applicationCommand(program.command("add [item]"), applicationContext)
+  const add = agentCommand(program.command("add [item]"), applicationContext)
     .description("Install a registry item; relative paths use the official eve registry.")
     .option("-o, --overwrite", "Overwrite existing files.")
     .option("--skip-install", "Run the item's setup flow without installing it.")

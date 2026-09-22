@@ -13,13 +13,14 @@ export default defineEval({
   description: "HITL smoke: replayed dynamic tools preserve approval.",
   async test(t) {
     const parked = await t.send(`Call the \`${TOOL_NAME}\` tool with note "before-approval".`);
-    t.requireInputRequest({
+    const session = parked.session;
+    session.requireInputRequest({
       display: "confirmation",
       toolName: TOOL_NAME,
     });
     parked.calledTool(TOOL_NAME, { status: "pending", count: 1 });
 
-    const approved = await t.respondAll("approve");
+    const approved = await session.respondAll("approve");
     approved.expectOk();
     approved.event("action.result", {
       data: {

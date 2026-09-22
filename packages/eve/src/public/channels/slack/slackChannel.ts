@@ -8,6 +8,7 @@ import type {
 } from "#channel/channel-operations.js";
 import { defaultDeliverResult } from "#channel/adapter.js";
 import type { Session, SessionHandle } from "#channel/session.js";
+import { setChannelActivityRenderers } from "#channel/compiled-channel.js";
 import type { SessionAuthContext, TurnPolicy } from "#channel/types.js";
 import type { CardElement } from "#compiled/chat/index.js";
 import type { SessionContext } from "#public/definitions/callback-context.js";
@@ -15,7 +16,12 @@ import type { ChannelContinuationOps } from "#public/definitions/channel.js";
 
 import { createLogger, logError } from "#internal/logging.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
-import type { InputResponse, StrictInputResponses, ValidatedInputResponse } from "#shared/input.js";
+import type {
+  InputRequest,
+  InputResponse,
+  StrictInputResponses,
+  ValidatedInputResponse,
+} from "#shared/input.js";
 import {
   buildSlackBinding,
   buildSlackWorkspaceHandle,
@@ -35,6 +41,7 @@ import {
   defaultInputRequestedHandler,
   defaultOnAppMention,
   defaultOnDirectMessage,
+  postCompletedSlackReply,
 } from "#public/channels/slack/defaults.js";
 import {
   parseMessageEvent,
@@ -72,8 +79,13 @@ import {
 } from "#public/channels/upload-policy.js";
 import { verifySlackRequest, type SlackWebhookVerifier } from "#public/channels/slack/verify.js";
 import { defineChannel, POST, type Channel } from "#public/definitions/channel.js";
-import type { ChannelAudience } from "#shared/channel-audience.js";
+import { normalizeChannelAudience, type ChannelAudience } from "#shared/channel-audience.js";
 import { markEventHandled } from "./utils.js";
+import {
+  buildSlackActivityRenderers,
+  hasSlackActivityStatus,
+  type SlackActivityRenderer,
+} from "#public/channels/slack/activity.js";
 
 export type {
   SlackRespondOptions,
@@ -132,6 +144,18 @@ type SlackEventHandler<T extends UnstampedMessageStreamEvent["type"]> = (
   ctx: SessionContext,
 ) => void | Promise<void>;
 
+export type SlackInputRequestedEvent = EventData<"input.requested">;
+
+/** Bound access to eve's standard Slack input delivery. */
+export type SlackInputRequestedDefaultDeliver = (data: SlackInputRequestedEvent) => Promise<void>;
+
+export type SlackInputRequestedHandler = (
+  data: SlackInputRequestedEvent,
+  channel: SlackEventContext,
+  ctx: SessionContext,
+  defaultDeliver: SlackInputRequestedDefaultDeliver,
+) => void | Promise<void>;
+
 /**
  * Delivery surface handed to `authorization.required` overrides. The
  * connection challenge is a credential: anyone who completes the sign-in
@@ -183,6 +207,8 @@ type SlackSessionFailedHandler = (
  * `JSON.stringify` / `JSON.parse`.
  */
 export interface SlackPendingApprovalCard {
+  /** Channel containing the approval card; differs from the session channel for DM delivery. */
+  readonly messageChannelId?: string;
   readonly messageBlocks: readonly unknown[];
   readonly messageTs: string;
 }
@@ -196,6 +222,8 @@ export interface SlackChannelState {
   threadTs: string | null;
   /** Slack team id, when the inbound event carried one. */
   teamId: string | null;
+  /** Slack message ts that triggered the active turn. */
+  triggeringMessageTs?: string | null;
   /** Slack workspace whose app installation supplies this session's credentials. */
   installationTeamId?: string | null;
   /**
@@ -241,7 +269,6 @@ export interface SlackChannelState {
  * can attach extra span attributes.
  */
 export interface SlackInstrumentationMetadata extends Record<string, unknown> {
-  readonly audience: ChannelAudience;
   readonly channelId: string | null;
   readonly teamId: string | null;
   readonly threadTs: string | null;
@@ -278,6 +305,12 @@ export interface SlackChannelCredentials {
 export interface SlackReceiveTarget {
   readonly channelId: string;
   readonly threadTs?: string;
+  /**
+   * Optional audience for proactive receives. Omit to leave `unknown`.
+   * Pass when the caller already knows channel visibility, for example a
+   * webhook or schedule that classified the Slack destination before handoff.
+   */
+  readonly audience?: ChannelAudience;
   /** Slack workspace whose app installation supplies credentials for this send. */
   readonly installationTeamId?: string;
   /**
@@ -559,7 +592,11 @@ export interface SlackChannelEvents {
   readonly "message.appended"?: SlackEventHandler<"message.appended">;
   readonly "reasoning.appended"?: SlackEventHandler<"reasoning.appended">;
   readonly "reasoning.completed"?: SlackEventHandler<"reasoning.completed">;
-  readonly "input.requested"?: SlackEventHandler<"input.requested">;
+  /**
+   * An override may pass selected requests to `defaultDeliver()` while
+   * rendering the rest itself. The default delivery honors `approvalChannel`.
+   */
+  readonly "input.requested"?: SlackInputRequestedHandler;
   readonly "turn.failed"?: SlackEventHandler<"turn.failed">;
   readonly "turn.completed"?: SlackEventHandler<"turn.completed">;
   readonly "turn.cancelled"?: SlackEventHandler<"turn.cancelled">;
@@ -586,14 +623,38 @@ export interface SlackChannelEvents {
  */
 export interface SlackChannelInternalEvents extends Omit<
   SlackChannelEvents,
-  "authorization.required"
+  "authorization.required" | "input.requested"
 > {
   readonly "authorization.required"?: SlackEventHandler<"authorization.required">;
+  readonly "input.requested"?: SlackEventHandler<"input.requested">;
 }
+
+export type SlackApprovalChannel = "direct-message" | "thread";
+
+/** Input request passed to a {@link SlackApprovalChannelResolver}. */
+export type SlackApprovalRequest = InputRequest;
+
+/** Chooses the Slack destination for one input request. */
+export type SlackApprovalChannelResolver = (
+  request: SlackApprovalRequest,
+  ctx: SessionContext,
+) => SlackApprovalChannel | Promise<SlackApprovalChannel>;
 
 export interface SlackChannelConfig {
   readonly credentials?: SlackChannelCredentials;
   readonly botName?: string;
+
+  /**
+   * Chooses where each input request is delivered. Direct-message requests go to the
+   * Slack user who triggered the active turn; the session thread names that reviewer
+   * without exposing the request. Defaults to `"thread"` when omitted.
+   */
+  readonly approvalChannel?: SlackApprovalChannelResolver;
+
+  /** Optional presentation-only activity rendered without starting parent turns. */
+  readonly activity?: {
+    readonly renderers: readonly SlackActivityRenderer[];
+  };
 
   /** Override the default webhook route path (`/eve/v1/slack`). */
   readonly route?: string;
@@ -742,6 +803,27 @@ export interface SlackChannelConfig {
   readonly events?: SlackChannelEvents;
 }
 
+const ignoreSlackActivityEvent = async (): Promise<void> => undefined;
+
+const activityOwnedMessageCompleted: NonNullable<SlackChannelEvents["message.completed"]> = async (
+  event,
+  channel,
+) => {
+  channel.state.pendingToolCallMessage = null;
+  if (event.finishReason !== "tool-calls" && event.message) {
+    await postCompletedSlackReply(channel, event.message);
+  }
+};
+
+const clearSlackTurnState: NonNullable<SlackChannelEvents["turn.started"]> = async (
+  _data,
+  channel,
+) => {
+  channel.state.pendingToolCallMessage = null;
+  channel.state.lastReasoningTypingAtMs = null;
+  channel.state.lastReasoningTypingStatus = null;
+};
+
 function rebuildSlackContext(
   state: SlackChannelState,
   session: SessionHandle,
@@ -756,7 +838,7 @@ function rebuildSlackContext(
     onThreadTsChanged(ts) {
       state.threadTs = ts;
       if (state.channelId) {
-        session.continuation?.rekey(slackContinuationToken(state.channelId, ts));
+        session.continuation?.alias(slackContinuationToken(state.channelId, ts));
       }
     },
   });
@@ -787,11 +869,38 @@ export interface SlackChannel extends Channel<
 export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
   const uploadPolicy = mergeUploadPolicy(config.uploadPolicy);
   const slackFetchFile = createSlackFetchFile({ botToken: config.credentials?.botToken });
+  const activityRenderers = buildSlackActivityRenderers({
+    botToken: config.credentials?.botToken,
+    renderers: config.activity?.renderers ?? [],
+  });
   const onInputResponse = config.onInputResponse ?? defaultOnInputResponse;
   const authorizationRequiredOverride = config.events?.["authorization.required"];
   const candidateHandler =
     config.events?.["approval.candidate"] ?? defaultEvents["approval.candidate"]!;
-  const turnStartedHandler = config.events?.["turn.started"] ?? defaultEvents["turn.started"]!;
+  const activityOwnsTypingStatus = hasSlackActivityStatus(config.activity?.renderers);
+  const turnStartedHandler =
+    config.events?.["turn.started"] ??
+    (activityOwnsTypingStatus ? clearSlackTurnState : defaultEvents["turn.started"]!);
+  const reasoningHandler =
+    config.events?.["reasoning.appended"] ??
+    (activityOwnsTypingStatus ? ignoreSlackActivityEvent : defaultEvents["reasoning.appended"]!);
+  const actionsHandler =
+    config.events?.["actions.requested"] ??
+    (activityOwnsTypingStatus ? ignoreSlackActivityEvent : defaultEvents["actions.requested"]!);
+  const messageCompletedHandler =
+    config.events?.["message.completed"] ??
+    (activityOwnsTypingStatus
+      ? activityOwnedMessageCompleted
+      : defaultEvents["message.completed"]!);
+  const defaultInputRequested = defaultInputRequestedHandler(config.approvalChannel);
+  const inputRequestedOverride = config.events?.["input.requested"];
+  const inputRequestedHandler =
+    inputRequestedOverride === undefined
+      ? defaultInputRequested
+      : async (data: SlackInputRequestedEvent, channel: SlackEventContext, ctx: SessionContext) =>
+          inputRequestedOverride(data, channel, ctx, async (nextData) => {
+            await defaultInputRequested(nextData, channel, ctx);
+          });
   const mergedEvents: SlackChannelInternalEvents = {
     ...defaultEvents,
     ...config.events,
@@ -817,7 +926,10 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
       }
       await turnStartedHandler(data, channel, ctx);
     },
-    "input.requested": config.events?.["input.requested"] ?? defaultInputRequestedHandler(),
+    "reasoning.appended": reasoningHandler,
+    "actions.requested": actionsHandler,
+    "message.completed": messageCompletedHandler,
+    "input.requested": inputRequestedHandler,
     "authorization.required":
       authorizationRequiredOverride === undefined
         ? defaultEvents["authorization.required"]
@@ -828,7 +940,7 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
   // Light weight dedup mechanism - not reliable across multiple invocations.
   const handledEvents = new Set<string>();
 
-  return defineChannel<
+  const channel = defineChannel<
     SlackChannelState,
     SlackChannelContext,
     SlackReceiveTarget,
@@ -837,12 +949,12 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
     kindHint: "slack",
     turnPolicy: config.turnPolicy,
     state: {
-      audience: "unknown",
       channelId: null as string | null,
       threadTs: null as string | null,
       teamId: null as string | null,
       installationTeamId: null as string | null,
       triggeringUserId: null,
+      triggeringMessageTs: null,
       pendingToolCallMessage: null,
       lastReasoningTypingAtMs: null,
       lastReasoningTypingStatus: null,
@@ -854,13 +966,13 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
     fetchFile: slackFetchFile,
     metadata(state): SlackInstrumentationMetadata {
       return {
-        audience: state.audience ?? "unknown",
         channelId: state.channelId,
         teamId: state.teamId,
         threadTs: state.threadTs,
         triggeringUserId: state.triggeringUserId ?? null,
       };
     },
+    audience: ({ state }) => state.audience ?? "unknown",
 
     context(state, session) {
       return rebuildSlackContext(state, session, config.credentials);
@@ -920,6 +1032,20 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
 
     events: mergedEvents,
   });
+  setChannelActivityRenderers(channel, {
+    destination(state) {
+      const slack = state as Partial<SlackChannelState> | undefined;
+      return {
+        channelId: slack?.channelId ?? null,
+        installationTeamId: slack?.installationTeamId ?? null,
+        teamId: slack?.teamId ?? null,
+        threadTs: slack?.threadTs ?? null,
+        triggeringUserId: slack?.triggeringUserId ?? null,
+      };
+    },
+    renderers: activityRenderers,
+  });
+  return channel;
 }
 
 function defaultOnInputResponse(ctx: SlackInputResponseContext): SlackInputResponseResult {
@@ -986,18 +1112,33 @@ async function receiveOnSlack(
   }
 
   // Threadless proactive runs need distinct identities until their first
-  // Slack post supplies the real thread timestamp and re-keys the session.
+  // Slack post supplies the real thread timestamp and aliases the session.
   const continuationThreadTs = threadTs || crypto.randomUUID();
+  const audience =
+    receiveTarget.audience === undefined
+      ? undefined
+      : normalizeChannelAudience(receiveTarget.audience);
+  const state: {
+    channelId: string;
+    installationTeamId: string | null;
+    threadTs: string | null;
+    teamId: string | null;
+    triggeringUserId: string | null;
+    audience?: ChannelAudience;
+  } = {
+    channelId,
+    installationTeamId: installationTeamId ?? null,
+    threadTs: threadTs || null,
+    teamId: deps.teamId ?? null,
+    triggeringUserId: deps.triggeringUserId ?? null,
+  };
+  if (audience !== undefined) {
+    state.audience = audience;
+  }
 
   return deps.from(slackContinuationToken(channelId, continuationThreadTs)).send(input.message, {
     auth: input.auth,
-    state: {
-      channelId,
-      installationTeamId: installationTeamId ?? null,
-      threadTs: threadTs || null,
-      teamId: deps.teamId ?? null,
-      triggeringUserId: deps.triggeringUserId ?? null,
-    },
+    state,
     title: input.title,
   });
 }
@@ -1222,11 +1363,11 @@ async function dispatchSlackMessage(input: {
   });
   const author = input.message.author;
   const channelState: SlackChannelState = {
-    audience: "unknown",
     channelId: input.message.channelId,
     installationTeamId: input.installationTeamId ?? null,
     teamId: input.message.teamId ?? null,
     threadTs: input.message.threadTs,
+    triggeringMessageTs: input.message.ts,
     triggeringUserId: author?.userId ?? null,
   };
   const sessionOperations = bindSlackSessionOperations({

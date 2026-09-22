@@ -31,13 +31,14 @@ the DCO `Signed-off-by` trailer. Use `git commit -s` for every commit, and if a
 commit is missing the trailer, amend it with `git commit --amend -s --no-edit`
 before pushing.
 
-PR descriptions are reviewer-oriented explanations of the problem, solution,
-meaningful behavior changes, and validation—not file lists or commit logs. Keep
-them proportional to the change, link a prior issue or discussion when one
-exists, call out important scope boundaries or preserved behavior, and report
-only checks actually run. Never create an issue solely to accompany a PR. Use the
-[`gh-pr-description`](./.agents/skills/gh-pr-description/SKILL.md) skill when
-drafting or updating one.
+PR descriptions are reviewer-oriented explanations of the problem or decision
+behind the change, the solution, meaningful behavior changes, and validation—not
+file lists or commit logs. Keep the Summary short and lead with that
+justification before implementation details. Link a prior issue or discussion
+when one exists, call out important scope boundaries or preserved behavior, and
+report only checks actually run. Never create an issue solely to accompany a PR.
+Use the [`gh-pr-description`](./.agents/skills/gh-pr-description/SKILL.md)
+skill when drafting or updating one.
 
 ## Commands
 
@@ -201,6 +202,13 @@ Pick the fixture that exercises the surface you changed; if none does, add a
 new eval under the matching fixture's `evals/` directory. E2E evals must be
 deterministic and self-contained. Keep e2e free of external service startup
 and injected env requirements (beyond model-provider credentials).
+
+Write model-facing eval prompts as benign, process-oriented narratives. Use
+neutral named actors such as Alice and Bob, and describe the ordinary workflow
+that produces the state under test. Avoid terse, adversarial, or probe-like
+wording when a natural scenario can test the same behavior. Such wording can
+trigger provider refusals and cause live-model flake. Do not weaken the
+behavior or security boundary under test.
 
 Do not set `VERCEL_TEAM_ID` at build: sandbox template keys must derive
 identically at build and runtime, and Vercel has no team variable at runtime.

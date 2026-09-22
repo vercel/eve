@@ -1,3 +1,4 @@
+import { joinEveRoutePath } from "#shared/eve-route-path.js";
 import {
   EVE_PUBLIC_ROUTE_PREFIX_ENV,
   normalizePublicRoutePrefix,
@@ -61,7 +62,10 @@ export function resolveWorkflowCallbackBaseUrl(metadataUrl: string): string {
  * `new URL(path, base)` would drop for absolute paths.
  */
 export function createWorkflowCallbackUrl(baseUrl: string, callbackPath: string): string {
-  const url = new URL(`${baseUrl.replace(/\/$/, "")}${callbackPath}`);
+  const callback = new URL(callbackPath, "http://eve.local");
+  const url = new URL(baseUrl);
+  url.pathname = joinEveRoutePath(url.pathname, callback.pathname);
+  url.search = callback.search;
 
   // https://vercel.com/docs/deployment-protection/methods-to-bypass-deployment-protection/protection-bypass-automation
   const bypassSecret = process.env.VERCEL_AUTOMATION_BYPASS_SECRET?.trim();
@@ -77,7 +81,10 @@ export function createWorkflowCallbackUrl(baseUrl: string, callbackPath: string)
  * protection bypass secret to an authored external origin.
  */
 export function createRemoteTaskInputCallbackUrl(baseUrl: string, callbackPath: string): string {
-  const url = new URL(`${baseUrl.replace(/\/$/, "")}${callbackPath}`);
+  const callback = new URL(callbackPath, "http://eve.local");
+  const url = new URL(baseUrl);
+  url.pathname = joinEveRoutePath(url.pathname, callback.pathname);
+  url.search = callback.search;
   const bypassSecret = process.env.VERCEL_AUTOMATION_BYPASS_SECRET?.trim();
   const isCurrentVercelHost = VERCEL_CALLBACK_HOST_ENVS.some(
     (name) => process.env[name]?.trim().toLowerCase() === url.hostname.toLowerCase(),

@@ -1,5 +1,5 @@
 ---
-title: "Agents"
+title: "Agent Configuration"
 description: "Configure an eve agent's model, reasoning effort, compaction, limits, and runtime behavior in agent.ts."
 ---
 
@@ -21,31 +21,29 @@ For a static AI Gateway model ID, you can make the same source change from the
 project root with `eve set --model anthropic/claude-opus-4.8` or from the local
 dev TUI with `/model anthropic/claude-opus-4.8`.
 
-The root `agent.ts` can be omitted when no runtime config is needed. eve then selects its default `agent.ts` source at the same slot, configured with `openai/gpt-5.6-luna-fast`; authoring the file replaces that source.
+The root `agent.ts` can be omitted when no runtime config is needed. eve then selects its default `agent.ts` source at the same slot, configured with `spacexai/grok-4.7`; authoring the file replaces that source.
 When `agent.ts` is present, `model` is required.
 
 A config that selects a static Gateway model is compile-only. A config that contains a dynamic model or a direct-provider `LanguageModel` remains a runtime entry because eve must resolve that authored value while the agent runs. See [Authored module lifecycle](./reference/typescript-api#authored-module-lifecycle).
 
 `model` accepts a gateway model id string, which routes through the [Vercel AI Gateway](https://vercel.com/docs/ai-gateway). To call a provider directly and configure the model in code, pass a provider-authored `LanguageModel`.
 
-Provider-specific AI SDK packages are regular project dependencies. A fresh `eve init` app includes the core `ai` package, but it does not install every provider package. Install the provider package you import, then set that provider's API key:
-
-```bash
-npm install @ai-sdk/anthropic
-```
+Use eve's helpers for direct OpenAI or Anthropic access without installing another provider package:
 
 ```ts title="agent/agent.ts"
-import { anthropic } from "@ai-sdk/anthropic";
 import { defineAgent } from "eve";
+import { anthropic } from "eve/models/anthropic";
 
 export default defineAgent({
-  model: anthropic("claude-opus-4-8"),
+  model: anthropic(), // claude-sonnet-5
 });
 ```
 
-Direct provider model ids use the provider's native format. For Anthropic, the
-version uses hyphens (`claude-opus-4-8`), while the Gateway id above uses a dot
-(`anthropic/claude-opus-4.8`).
+`openai()` from `eve/models/openai` defaults to `gpt-5.6-luna-fast`. Both helpers accept an optional native provider model ID and use `OPENAI_API_KEY` or `ANTHROPIC_API_KEY`. During local development they can also use credentials saved through `/login`. Deployments require their API key in the server environment.
+
+For a local ChatGPT subscription, use `chatgpt()` from `eve/models/openai` and sign in with `/login`. It defaults to `gpt-5.6-luna-fast` and cannot run in a deployment.
+
+`/login` can switch a static Gateway string to an eve helper and manage its import. `/model` changes the selected model and settings immediately. Custom provider SDK calls and dynamic expressions retain their authored behavior and require manual source edits. You can still install an AI SDK provider package and pass its `LanguageModel` when you need provider-specific configuration.
 
 Model use is subject to the terms, data-processing commitments, retention behavior, and available controls of the selected provider and routing path. Review the [AI Gateway model catalog](https://vercel.com/ai-gateway/models) for gateway-routed models, and review the provider's terms when you configure a direct `LanguageModel`.
 
@@ -63,6 +61,9 @@ at either provider path takes precedence and is forwarded unchanged. When
 to compaction calls.
 
 ### Choose the model dynamically
+
+To select a model from the incoming prompt with an AI SDK evaluation model, use
+[`auto` from `eve/models`](./guides/evaluate).
 
 `model` also accepts `defineDynamic({ events })`. Each matching handler must
 return the concrete model for its scope; a dynamic model has no compiled
@@ -87,9 +88,9 @@ export default defineAgent({
 ```
 
 Handlers receive the shared [dynamic resolver
-context](./guides/dynamic-capabilities) (`ctx.session`, `ctx.channel`,
-`ctx.messages`) and return a gateway model id, an AI SDK `LanguageModel`, a
-selection object. Returning `null` or `undefined` fails the turn.
+context](./guides/dynamic-capabilities) and return a gateway model id, an AI
+SDK `LanguageModel`, or a selection object. Returning `null` or `undefined`
+fails the turn.
 
 - **Scopes.** `session.started` (once per session), `turn.started` (once per
   turn), `step.started` (every model step). Precedence: step > turn >
@@ -101,7 +102,7 @@ selection object. Returning `null` or `undefined` fails the turn.
   model without valid credentials fails at request time.
 - **Serialization.** Session/turn selections must be model id strings; return
   live `LanguageModel` objects only from `step.started`.
-- **Selection object.** `{ model, modelContextWindowTokens?, modelOptions? }`.
+- **Selection object.** `{ model, reasoning?, modelContextWindowTokens?, modelOptions? }`.
   When `modelContextWindowTokens` is omitted, eve resolves it from the AI
   Gateway catalog and caches successful metadata in durable session state for
   24 hours. Set it explicitly for an unlisted or custom model. Dynamic agents
@@ -128,6 +129,10 @@ Supported values are `"provider-default"`, `"none"`, `"minimal"`, `"low"`,
 `"medium"`, `"high"`, and `"xhigh"`. The selected model and provider determine
 which levels are available and how they map to provider-native settings. Use
 `modelOptions.providerOptions` when you need provider-specific reasoning controls.
+A dynamic model selection can return `reasoning` alongside `model` to override
+the agent-level setting for that selection. Omitting it inherits the agent setting;
+`"provider-default"` explicitly uses the provider's default.
+
 Run `eve set --reasoning high` to update this field from the command line.
 
 ## Compaction
@@ -147,9 +152,9 @@ See [Default harness](./concepts/default-harness#compaction) for how the loop ap
 
 ## Runtime limits
 
-Use `limits` for framework-owned runtime caps. Session token limits stop the
+Use `limits` for framework-owned runtime caps. Session usage limits stop the
 current durable session from starting another model call after accumulated
-provider-reported input or output token usage reaches the configured limit:
+provider-reported tokens or model token cost reaches a configured limit:
 
 ```ts title="agent/agent.ts"
 export default defineAgent({
@@ -157,26 +162,28 @@ export default defineAgent({
   limits: {
     maxInputTokensPerSession: 200_000,
     maxOutputTokensPerSession: 20_000,
+    maxTokenCostUsdPerSession: 1.5,
     sessionTimeoutMs: 7 * 24 * 60 * 60 * 1_000,
   },
 });
 ```
 
-`sessionTimeoutMs` sets an absolute lifetime for every session, including
-delegated sessions. It defaults to 30 days, starts at creation, and survives
-restarts and redeployments. At the deadline, eve lets an active turn settle,
-then emits `session.completed` and releases the continuation; the next
+`sessionTimeoutMs` sets the lifetime for every session, including delegated
+sessions. It defaults to 30 days and starts at creation. Each successful
+deployment handoff or legacy-session import restarts the original configured
+duration. Process restarts, ordinary messages, and failed or skipped handoffs
+keep the existing deadline. At the deadline, eve lets an active turn settle,
+then emits `session.completed` and releases every continuation address; the next
 qualifying channel message starts fresh. Set it to `false` to disable the
 timeout. Expiration does not delete stored session data.
 
-Input and output budgets are checked independently. The model call that crosses
-either limit is allowed to finish because providers only report exact token
-usage after a call completes. Before the next model call, eve pauses the
+Input tokens, output tokens, and model token cost are checked independently.
+The model call that crosses a limit is allowed to finish because exact usage
+arrives after the call completes. Before the next model call, eve pauses the
 session and sends a deterministic continuation prompt with two options:
-**Approve** grants a fresh budget window of the configured size (both input
-and output windows reset together), and **Stop** cancels the in-flight turn
-through the standard cancellation path (`turn.cancelled` → `session.waiting`)
-— a user decision, not an error. The session stays resumable; because it is
+**Approve** grants a fresh window of each configured size, and **Stop**
+cancels the in-flight turn through the standard cancellation path
+(`turn.cancelled` → `session.waiting`) — a user decision, not an error. The session stays resumable; because it is
 still over budget, the next message re-raises the prompt. Declining a
 delegated child's prompt cancels the root turn, which cascades to the whole
 delegation tree — the delegating parent never receives an error result it
@@ -186,23 +193,28 @@ copy. The reply is processed once the budget is granted.
 
 Sessions that cannot reach a human — task-mode runs such as schedules and
 delegated runs without input proxying — skip the prompt and fail the next model
-call with `SESSION_TOKEN_LIMIT_REACHED`. A delegated task with no inherited
-quota also fails instead of raising a continuation prompt that could only
-grant another zero-token window.
+call with `SESSION_TOKEN_LIMIT_REACHED` for token budgets or
+`SESSION_TOKEN_COST_LIMIT_REACHED` for model token cost. A delegated task with
+no inherited quota also fails instead of raising a continuation prompt that
+could only grant another zero-value window.
 
 When `maxInputTokensPerSession` is omitted, root sessions apply a default
 input budget of `40_000_000` provider-reported input tokens.
-`maxOutputTokensPerSession` is unset unless configured. Setting either limit
-to `false` uncaps that axis — the session never stops on it.
+`maxOutputTokensPerSession` and `maxTokenCostUsdPerSession` are unset by
+default. `maxTokenCostUsdPerSession` is a US-dollar limit on model token cost,
+not tool or infrastructure spend. It uses the cost reported with each model
+step; AI Gateway supplies this value, while model steps without reported cost
+do not add to the limit. Set any usage limit to `false` to uncap that axis.
 
 Delegated subagent sessions have no fixed default. Each child receives a
 share of the delegating parent's remaining quota at dispatch time — the
 remainder in the current budget window split evenly across the batch's local
 subagent calls — and a completed child's usage counts against the parent's
-quota, so a delegation tree can never outspend the budget configured at its
-root. Approving a continuation opens a fresh parent window for later child
-grants without erasing lifetime usage. An authored child limit applies only
-when it is tighter than the parent's grant; an uncapped parent delegates
+quota. Token-cost budgets follow the same rules, including splitting the
+remaining US-dollar budget across a batch and adding completed child cost back
+to the parent. Approving a continuation opens a fresh parent window for later
+child grants without erasing lifetime usage. An authored child limit applies
+only when it is tighter than the parent's grant; an uncapped parent delegates
 uncapped children.
 
 ## Workflow world
@@ -242,18 +254,89 @@ putting the connection string or credentials in the env vars it reads. If the
 installed package must stay external in hosted output, list it in
 `build.externalDependencies`.
 
+## Workflow checkpoint batching
+
+By default, eve commits a durable Workflow step after every model call and its
+inline tool calls. You can experimentally let one Workflow step run several
+sequential model calls:
+
+```ts title="agent/agent.ts"
+import { defineAgent } from "eve";
+
+export default defineAgent({
+  model: "anthropic/claude-opus-4.8",
+  experimental: {
+    workflow: {
+      modelCallsPerStep: 4,
+    },
+  },
+});
+```
+
+`experimental.workflow.modelCallsPerStep` is a positive-integer ceiling. It defaults to
+`1` and applies independently to each root agent or declared subagent. A higher
+value can reduce Workflow checkpoint overhead in sequential tool loops, but it
+widens the replay unit: if the Workflow step is interrupted, its earlier model
+calls and inline tool executions can run again. That can repeat provider costs,
+events, and side effects. Use stable idempotency keys for non-idempotent tools.
+
+eve ends a batch before it waits for input, authorization, or blocking
+coordination, and before it acknowledges a background task. A batch can also
+end below the configured ceiling when the turn completes or steering arrives.
+Before assistant output begins, steering can interrupt pending model generation.
+Executing tools finish safely before the batch yields and applies the correction.
+This option is experimental and may change or
+disappear in any release. See [Execution model and
+durability](./concepts/execution-model-and-durability#resuming-after-a-crash)
+for the retry behavior.
+
+## Run data retention
+
+The runtime keeps each run's data after the run finishes: model and tool
+payloads, streamed output, and the event log eve replays from. How long it keeps
+them is the World's decision, and on Vercel that follows your team's plan. Set
+`experimental.workflow.retention` to `0` to have it deleted as soon as the run
+finishes instead:
+
+```ts title="agent/agent.ts"
+import { defineAgent } from "eve";
+
+export default defineAgent({
+  model: "anthropic/claude-opus-4.8",
+  experimental: {
+    workflow: {
+      retention: 0,
+    },
+  },
+});
+```
+
+This applies to every run that owns the session, including successor owners
+started after a deployment handoff, and to the run that collects session
+activity. Runs eve starts for other purposes keep the world's default: session
+timeouts, background tasks, and [workflow tools](./tools/workflows).
+
+The value applies per agent. A [subagent](./subagents) that runs its own session
+uses its own value, unlike `experimental.workflow.world`, which is root-only.
+
+Custom Worlds used with eve might not support this feature, in which case
+it falls back to the World's default retention period.
+
+> ⚠️ **At `0`, a finished session's output is usually gone before you can read it.** Since data is deleted immediately before it can be read back, results and transcripts become unreadable and a client polling for a finished session's output can see it disappear.
+
 ## Other defineAgent fields
 
 `defineAgent` takes a few more fields, all optional. For the exported types, see the [TypeScript API Reference](./reference/typescript-api).
 
-| Field          | Type                                    | Default          | Description                                                                                                                                                                                                   |
-| -------------- | --------------------------------------- | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `reasoning`    | `AgentReasoningDefinition`              | provider default | Provider-agnostic reasoning effort forwarded to the agent's turn model calls.                                                                                                                                 |
-| `modelOptions` | `AgentModelOptionsDefinition`           | none             | Provider option overrides forwarded to the model call.                                                                                                                                                        |
-| `limits`       | `AgentLimitsDefinition`                 | field-specific   | Framework-owned runtime limits. Sessions complete after 30 days by default; token-limit defaults and inheritance are described above. Set a limit to `false` to disable it.                                   |
-| `experimental` | `{ workflow?: { world?: string } }`     | unset            | Opt-in settings that can change or disappear in any release. Treat them as unstable. `workflow.world` selects the Workflow world package backing session state, queues, hooks, and streams on the root agent. |
-| `outputSchema` | Standard Schema or a JSON Schema object | none             | Structured return type for function-like invocations such as a subagent turn, schedule, or remote job. Ordinary interactive turns ignore it unless the client supplies a per-message schema.                  |
-| `build`        | `{ externalDependencies?: string[] }`   | none             | Hosted-build packaging controls. `externalDependencies` keeps listed packages external while eve compiles authored modules such as tools and channels, and traces those packages into the hosted output.      |
+| Field          | Type                                    | Default          | Description                                                                                                                                                                                                                                               |
+| -------------- | --------------------------------------- | ---------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `reasoning`    | `AgentReasoningDefinition`              | provider default | Provider-agnostic reasoning effort forwarded to the agent's turn model calls.                                                                                                                                                                             |
+| `modelOptions` | `AgentModelOptionsDefinition`           | none             | Provider option overrides forwarded to the model call.                                                                                                                                                                                                    |
+| `limits`       | `AgentLimitsDefinition`                 | field-specific   | Framework-owned runtime limits. Sessions complete after 30 days by default; usage-limit defaults and inheritance are described above. Set a limit to `false` to disable it.                                                                               |
+| `experimental` | `AgentExperimentalDefinition`           | unset            | Unstable opt-ins. `workflow.world` selects the Workflow world package on the root agent; `workflow.modelCallsPerStep` batches sequential model calls into a wider replay unit; `workflow.retention` controls how long the durable runtime keeps run data. |
+| `outputSchema` | Standard Schema or a JSON Schema object | none             | Structured return type for function-like invocations such as a subagent turn, schedule, or remote job. Ordinary interactive turns ignore it unless the client supplies a per-message schema.                                                              |
+| `build`        | `{ externalDependencies?: string[] }`   | none             | Hosted-build packaging controls. `externalDependencies` keeps listed packages external while eve compiles authored modules such as tools and channels, and traces those packages into the hosted output.                                                  |
+| `tool`         | `boolean`                               | `true`           | Exposes this agent to its parent model as a tool. On the root agent, controls the built-in `agent` tool. A subagent with `tool: false` remains callable from authored workflow tools through `ctx.agent()`.                                               |
 
 `externalDependencies` is a packaging control only. It keeps selected packages as runtime dependencies in the hosted output; it does not authorize, configure, or review any third-party service those packages may call.
 
@@ -267,7 +350,7 @@ During `eve dev`, ordinary dependencies are bundled into each retained runtime g
 | Per-tool approval (HITL)      | `agent/tools/*.ts`, [Tools](./tools)                                             |
 | Inbound auth & network policy | the channel layer, [Auth & route protection](./guides/auth-and-route-protection) |
 | Sandbox / workspace           | `agent/sandbox/`, [Sandbox](./sandbox)                                           |
-| Telemetry & debugging         | `agent/instrumentation.ts`, [Instrumentation](./guides/instrumentation)          |
+| Telemetry & debugging         | `agent/instrumentation/`, [Instrumentation](./observability/instrumentation)     |
 
 ## What to read next
 

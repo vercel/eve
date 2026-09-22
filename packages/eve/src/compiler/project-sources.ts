@@ -34,7 +34,6 @@ export type ProjectedModuleSource =
         | "extension"
         | "hook"
         | "instructions"
-        | "instrumentation"
         | "memory"
         | "sandbox"
         | "schedule"
@@ -70,7 +69,6 @@ const MODULE_KIND_BY_SLOT_ROOT: Partial<
   extensions: "extension",
   hooks: "hook",
   instructions: "instructions",
-  instrumentation: "instrumentation",
   memory: "memory",
   sandbox: "sandbox",
   schedules: "schedule",
@@ -320,9 +318,6 @@ function projectManifest(input: {
       canonicalSourceSlot(logicalPath) === "agent" ? undefined : "agent.ts",
     );
   }
-  if (input.manifest.instrumentation !== undefined) {
-    pushModule(input.manifest.instrumentation);
-  }
   for (const source of input.manifest.extensions) pushModule(source);
   for (const source of input.manifest.channels) pushModule(source);
   for (const source of input.manifest.connections) pushModule(source);
@@ -345,6 +340,11 @@ function projectManifest(input: {
   for (const source of input.manifest.subagents) {
     const name = projection.name(source.subagentId);
     const logicalPath = projection.logicalPath(source.logicalPath);
+    if (name === "agent") {
+      throw new Error(
+        `Subagent "${logicalPath}" uses the reserved name "agent". Rename its path; eve reserves "agent" for the built-in root-copy target.`,
+      );
+    }
     const projectedSource = {
       ...source,
       logicalPath,

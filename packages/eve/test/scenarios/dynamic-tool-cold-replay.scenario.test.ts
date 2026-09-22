@@ -36,11 +36,12 @@ function writeMarker(phase: string, key: string, extra: Record<string, unknown> 
 }
 
 export function createDurableMarkerTool(key: string) {
+  const suffix = process.env.EVE_SCHEMA_TEST_SUFFIX ?? "";
   services.set(key, { createdInPid: process.pid, key });
 
   return tool({
     description: "Durable marker tool " + key + ".",
-    inputSchema: z.object({ label: z.string().optional() }),
+    inputSchema: z.object({ label: z.string().transform((value) => value.toUpperCase() + suffix).optional() }),
     approval: {
       request(context) {
         writeMarker("approval-request", key, { callId: context.callId });
@@ -57,6 +58,7 @@ export function createDurableMarkerTool(key: string) {
       const output = {
         key,
         label: input.label ?? "unlabeled",
+        suffix,
         pid: process.pid,
         rawSecret: "raw-secret-" + key,
         serviceCreatedInPid: service.createdInPid,
@@ -115,6 +117,8 @@ interface Marker {
   readonly phase: string;
   readonly pid: number;
   readonly serviceCreatedInPid?: number;
+  readonly label?: string;
+  readonly suffix?: string;
 }
 
 async function readMarker(appRoot: string, phase: string, key: string): Promise<Marker> {
@@ -129,10 +133,11 @@ describe("dynamic tool cold replay", () => {
     async () => {
       const app = await scenarioApp(DYNAMIC_TOOL_COLD_REPLAY_DESCRIPTOR);
       const pinnedEnv = {
-        VERCEL_DEPLOYMENT_ID: "dynamic-tool-cold-replay",
         WORKFLOW_INLINE_OWNERSHIP_LEASE_SECONDS: "1",
       };
-      let server = await startEveDev(app.appRoot, { env: pinnedEnv });
+      let server = await startEveDev(app.appRoot, {
+        env: { ...pinnedEnv, EVE_SCHEMA_TEST_SUFFIX: ":original" },
+      });
 
       try {
         const client = new Client({ host: server.url });
@@ -169,7 +174,9 @@ describe("dynamic tool cold replay", () => {
             return error instanceof Error && "code" in error && error.code === "ENOENT";
           }
         }, "The crashed development server did not release its state record.");
-        server = await startEveDev(app.appRoot, { env: pinnedEnv });
+        server = await startEveDev(app.appRoot, {
+          env: { ...pinnedEnv, EVE_SCHEMA_TEST_SUFFIX: ":changed" },
+        });
 
         const resumedSession = new Client({ host: server.url }).sessions.attach(
           sessionState.sessionId,
@@ -193,12 +200,14 @@ describe("dynamic tool cold replay", () => {
           expect(response.pid).not.toBe(firstRequest.pid);
           expect(execute.pid).toBe(response.pid);
           expect(execute.serviceCreatedInPid).toBe(execute.pid);
+          expect(execute.label).toBe("STRUCTURED-OUTPUT:original");
+          expect(execute.suffix).toBe(":original");
           expect(projection.pid).toBe(execute.pid);
         }
 
         // The fresh process rebinds persisted callbacks by re-running session
-        // resolvers exactly once (identity is the tool name, so the same
-        // definitions re-register); replay itself never depends on it.
+        // resolvers exactly once for this session; the same resolver entries
+        // re-register without replacing another session's bindings.
         const resolverRunsAfterRestart = (
           await readFile(join(app.appRoot, ".dynamic-resolver-runs"), "utf8")
         )

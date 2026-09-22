@@ -11,7 +11,8 @@ export default defineEval({
     "Messages queued during an active turn preserve one limit prompt, and approve resets the budget.",
   timeoutMs: 90_000,
   async test(t) {
-    const active = await t.start(
+    const conversation = await t.session();
+    const active = await conversation.start(
       'Call the `hold-open` tool exactly once with marker "limit-race". Wait for its result, then reply with exactly "approved".',
     );
     await active.waitForEvent("actions.requested");
@@ -35,18 +36,18 @@ export default defineEval({
 
     const prompted = await active.result();
     prompted.event("input.requested", { count: 1 });
-    const request = t.requireInputRequest({
+    const request = conversation.requireInputRequest({
       display: "confirmation",
       optionIds: ["continue", "stop"],
       toolName: "session_limit_continuation",
     });
 
-    const activeState = t.state;
+    const activeState = conversation.state;
     if (activeState === undefined) {
       throw new Error("The active eval session did not expose client state.");
     }
-    // Both messages were queued behind the active turn, so eve delivers them
-    // coalesced into one follow-up turn while the limit prompt stays pending.
+    // These requests have the same local-dev auth, so they can batch while
+    // the session-limit prompt remains pending.
     const queuedSession = t.target.watchTurn(active.sessionId, {
       startIndex: activeState.streamIndex,
     });

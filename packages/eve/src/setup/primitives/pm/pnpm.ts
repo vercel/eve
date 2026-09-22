@@ -16,6 +16,7 @@ export const PNPM_WORKSPACE_MEMBERSHIP_ARGUMENTS = ["list", "--depth", "-1", "--
 const SHARP_BUILD_POLICY = "  sharp: false";
 
 export const PNPM_WORKSPACE_CONTENT = [
+  "minimumReleaseAge: 0",
   "minimumReleaseAgeStrict: true",
   "allowBuilds:",
   SHARP_BUILD_POLICY,
@@ -242,6 +243,8 @@ export const pnpmPackageManager = {
   installArguments: (options) => [
     "install",
     "--no-frozen-lockfile",
+    ...(options.autoApprove === true ? ["--yes"] : []),
+    ...(options.bypassMinimumReleaseAge === true ? ["--config.minimum-release-age=0"] : []),
     ...(options.ignoreWorkspace === true ? ["--ignore-workspace"] : []),
   ],
   prepareArguments: (projectRoot, args) => ["--dir", projectRoot, ...args],

@@ -1,8 +1,11 @@
 import { z } from "#compiled/zod/index.js";
 
-import { agentTurnOutcomeSchema } from "#shared/agent-turn-outcome.js";
+import {
+  agentTurnOutcomeSchema,
+  agentTurnOutcomeWithCostSchema,
+} from "#shared/agent-turn-outcome.js";
 import { jsonObjectSchema, jsonValueSchema } from "#shared/json-schemas.js";
-import { tokenUsageSchema } from "#shared/token-usage.js";
+import { tokenUsageSchema, tokenUsageWithCostSchema } from "#shared/token-usage.js";
 
 /**
  * Eve-owned `tool-call` action requested by the model.
@@ -24,17 +27,10 @@ export const runtimeToolCallActionRequestSchema = z
   })
   .strict();
 
-/**
- * Runtime-owned subagent-call request surfaced by a harness and executed later
- * by workflow-backed runtime code.
- */
 export type RuntimeSubagentCallActionRequest = z.infer<
   typeof runtimeSubagentCallActionRequestSchema
 >;
 
-/**
- * Zod schema for one runtime-owned subagent-call action request.
- */
 const runtimeSubagentCallActionRequestSchema = z
   .object({
     callId: z.string(),
@@ -47,17 +43,10 @@ const runtimeSubagentCallActionRequestSchema = z
   })
   .strict();
 
-/**
- * Runtime-owned remote-agent-call request surfaced by a harness and executed
- * later by workflow-backed runtime code.
- */
 export type RuntimeRemoteAgentCallActionRequest = z.infer<
   typeof runtimeRemoteAgentCallActionRequestSchema
 >;
 
-/**
- * Zod schema for one runtime-owned remote-agent-call action request.
- */
 export const runtimeRemoteAgentCallActionRequestSchema = z
   .object({
     callId: z.string(),
@@ -67,6 +56,87 @@ export const runtimeRemoteAgentCallActionRequestSchema = z
     name: z.string(),
     nodeId: z.string(),
     remoteAgentName: z.string(),
+  })
+  .strict();
+
+export type RuntimeWorkflowToolCallActionRequest = z.infer<
+  typeof runtimeWorkflowToolCallActionRequestSchema
+>;
+
+const runtimeWorkflowToolCallActionRequestSchema = z
+  .object({
+    callId: z.string(),
+    input: jsonObjectSchema,
+    kind: z.literal("workflow-tool-call"),
+    toolName: z.string(),
+    workflowId: z.string(),
+  })
+  .strict();
+
+/**
+ * Internal subagent dispatch request issued by the agent workflow task.
+ *
+ * This is deliberately not a {@link RuntimeActionRequest}: subagent tools are
+ * workflow tasks, while runtime actions are reserved for framework controls.
+ */
+export type RuntimeSubagentDispatchRequest = z.infer<typeof runtimeSubagentDispatchRequestSchema>;
+
+/**
+ * Zod schema for one internal local-subagent dispatch request.
+ */
+const runtimeSubagentDispatchRequestSchema = z
+  .object({
+    callId: z.string(),
+    description: z.string(),
+    input: jsonObjectSchema,
+    kind: z.literal("subagent-call"),
+    name: z.string(),
+    nodeId: z.string(),
+    subagentName: z.string(),
+  })
+  .strict();
+
+/**
+ * Internal remote-agent dispatch request issued by the agent workflow task.
+ */
+export type RuntimeRemoteAgentDispatchRequest = z.infer<
+  typeof runtimeRemoteAgentDispatchRequestSchema
+>;
+
+/**
+ * Zod schema for one internal remote-agent dispatch request.
+ */
+export const runtimeRemoteAgentDispatchRequestSchema = z
+  .object({
+    callId: z.string(),
+    description: z.string(),
+    input: jsonObjectSchema,
+    kind: z.literal("remote-agent-call"),
+    name: z.string(),
+    nodeId: z.string(),
+    remoteAgentName: z.string(),
+  })
+  .strict();
+
+/**
+ * One workflow task requested by the harness. The turn owner starts the
+ * durable run named by `workflowId`; blocking tools wait for its result,
+ * while background tools settle after task admission.
+ *
+ * Tasks are the coordination contract for authored workflow tools and
+ * subagents. They are intentionally separate from `RuntimeActionRequest`.
+ */
+export type RuntimeWorkflowTaskRequest = z.infer<typeof runtimeWorkflowTaskRequestSchema>;
+
+export const runtimeWorkflowTaskRequestSchema = z
+  .object({
+    callId: z.string(),
+    executeInput: jsonValueSchema.optional(),
+    input: jsonObjectSchema,
+    kind: z.literal("workflow-task"),
+    nodeId: z.string().optional(),
+    toolName: z.string(),
+    workflowId: z.string(),
   })
   .strict();
 
@@ -89,14 +159,39 @@ const runtimeLoadSkillActionRequestSchema = z
 /**
  * Eve-owned action request surfaced by the harness.
  *
- * A `tool-call` is one action kind, alongside control-plane work such as
- * `load-skill` and runtime-dispatched subagent calls.
+ * `tool-call` covers ordinary model-visible calls, including framework task
+ * controls. Deferred workflow and subagent execution uses
+ * {@link RuntimeWorkflowTaskRequest} instead.
  */
 export type RuntimeActionRequest =
   | RuntimeLoadSkillActionRequest
   | RuntimeRemoteAgentCallActionRequest
   | RuntimeSubagentCallActionRequest
-  | RuntimeToolCallActionRequest;
+  | RuntimeToolCallActionRequest
+  | RuntimeWorkflowToolCallActionRequest;
+
+const RUNTIME_WORKFLOW_TOOL_ACTION = Symbol.for("eve:runtime-workflow-tool-action");
+
+/** Marks an in-process tool action without changing its serialized protocol shape. */
+export function markRuntimeWorkflowToolAction(
+  action: RuntimeToolCallActionRequest,
+): RuntimeToolCallActionRequest {
+  Object.defineProperty(action, RUNTIME_WORKFLOW_TOOL_ACTION, { value: true });
+  return action;
+}
+
+/** Reads the in-process marker or the older explicit protocol action kind. */
+export function isRuntimeWorkflowToolAction(action: RuntimeActionRequest): boolean {
+  return (
+    action.kind === "workflow-tool-call" ||
+    (action.kind === "tool-call" && Reflect.get(action, RUNTIME_WORKFLOW_TOOL_ACTION) === true)
+  );
+}
+
+/** Internal agent dispatch request owned by a workflow task. */
+export type RuntimeAgentDispatchRequest =
+  | RuntimeRemoteAgentDispatchRequest
+  | RuntimeSubagentDispatchRequest;
 
 /**
  * Zod schema for one runtime action request.
@@ -106,6 +201,7 @@ export const runtimeActionRequestSchema = z.discriminatedUnion("kind", [
   runtimeRemoteAgentCallActionRequestSchema,
   runtimeSubagentCallActionRequestSchema,
   runtimeToolCallActionRequestSchema,
+  runtimeWorkflowToolCallActionRequestSchema,
 ]);
 
 /**
@@ -152,12 +248,38 @@ const runtimeToolResultActionResultSchema = z
  * the child settles. Stream consumers use the marker to keep child lifecycle
  * open while still recording the receipt as the tool result.
  */
-export type RuntimeSubagentChildResult = z.infer<typeof runtimeSubagentChildResultSchema>;
+export interface RuntimeSubagentChildResult {
+  readonly backgroundTask?: {
+    readonly status: "working";
+    readonly taskId: string;
+  };
+  readonly callId: string;
+  readonly isError?: boolean;
+  readonly kind: "subagent-result";
+  readonly origin: "child";
+  readonly outcome: import("#shared/agent-turn-outcome.js").AgentTurnOutcome;
+  readonly output: import("#shared/json.js").JsonValue;
+  readonly subagentName: string;
+  readonly usage?: import("#shared/token-usage.js").TokenUsage;
+}
 
-/**
- * Zod schema for one child-produced subagent result.
- */
-const runtimeSubagentChildResultSchema = z
+const runtimeSubagentChildResultFields = {
+  backgroundTask: z
+    .strictObject({
+      status: z.literal("working"),
+      taskId: z.string(),
+    })
+    .optional(),
+  callId: z.string(),
+  isError: z.boolean().optional(),
+  kind: z.literal("subagent-result"),
+  origin: z.literal("child"),
+  output: jsonValueSchema,
+  subagentName: z.string(),
+};
+
+/** Token-only subagent result schema retained for historical wire formats. */
+export const runtimeSubagentChildResultSchema = z
   .object({
     backgroundTask: z
       .strictObject({
@@ -173,6 +295,15 @@ const runtimeSubagentChildResultSchema = z
     output: jsonValueSchema,
     subagentName: z.string(),
     usage: tokenUsageSchema.optional(),
+  })
+  .strict();
+
+/** Current subagent result schema, including optional model token cost. */
+export const runtimeSubagentChildResultWithCostSchema: z.ZodType<RuntimeSubagentChildResult> = z
+  .object({
+    ...runtimeSubagentChildResultFields,
+    outcome: agentTurnOutcomeWithCostSchema,
+    usage: tokenUsageWithCostSchema.optional(),
   })
   .strict();
 

@@ -1,63 +1,40 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { RuntimeSession } from "#execution/agent-handle-dispatch.js";
-import {
-  acknowledgeDelegatedTasksStep,
-  settleDelegatedDispatch,
-  type DelegatedTask,
-} from "#execution/tasks/parent/delegate.js";
+import { acknowledgeDelegatedTasksStep } from "#execution/tasks/parent/delegate.js";
 import { sendTaskCommandToOwner } from "#execution/tasks/parent/run-parent.js";
-import { getSessionTaskIndex } from "#tasks/session-index.js";
 
 vi.mock("#execution/tasks/parent/run-parent.js", () => ({
-  readLatestTaskView: vi.fn(),
   sendTaskCommandToOwner: vi.fn(),
 }));
 
-describe("delegated task settlement", () => {
+const mocks = vi.hoisted(() => ({ getRun: vi.fn() }));
+vi.mock("#internal/workflow/runtime.js", () => mocks);
+
+describe("task readiness", () => {
   beforeEach(() => {
     vi.resetAllMocks();
     vi.mocked(sendTaskCommandToOwner).mockResolvedValue({ runId: "run-owner" });
   });
 
-  it("indexes the resolved command-hook owner before readiness", async () => {
-    const session = {
-      agent: { modelReference: { id: "model" }, system: "", tools: [] },
-      compaction: { recentWindowSize: 4, threshold: 1_000_000 },
-      continuationToken: "parent-token",
-      history: [],
-      sessionId: "parent-session",
-    } as RuntimeSession;
-    const task: DelegatedTask = {
-      taskInboxToken: "task-token",
-      createdByTurnId: "turn-parent",
-      metadata: {
-        agentId: "agent-1",
-        kind: "subagent",
-        mode: "local",
-        name: "research",
-      },
-      operationId: "operation-1",
-      taskId: "task-1",
-      taskRunId: "run-candidate",
-    };
-
-    const result = await settleDelegatedDispatch({
-      callId: "call-task",
-      session,
-      subagentName: "research",
-      task,
+  it("acknowledges a generic background task after indexing", async () => {
+    await acknowledgeDelegatedTasksStep({
+      tasks: [{ taskId: "task-1", taskInboxToken: "task-token", taskRunId: "run-1" }],
     });
-
-    expect(sendTaskCommandToOwner).not.toHaveBeenCalled();
-    expect(getSessionTaskIndex(result.session.state)[0]).toMatchObject({
-      taskId: "task-1",
-      taskRunId: "run-candidate",
-    });
-
-    await acknowledgeDelegatedTasksStep({ tasks: [task] });
     expect(sendTaskCommandToOwner).toHaveBeenCalledWith(
-      expect.objectContaining({ command: { kind: "ready" } }),
+      expect.objectContaining({ command: { kind: "ready" }, taskInboxToken: "task-token" }),
     );
   });
+  it.each(["completed", "cancelled", "failed", "running"] as const)(
+    "handles a missing readiness hook when the run is %s",
+    async (status) => {
+      vi.mocked(sendTaskCommandToOwner).mockResolvedValue(undefined);
+      mocks.getRun.mockReturnValue({ status: Promise.resolve(status) });
+      const ready = acknowledgeDelegatedTasksStep({
+        tasks: [{ taskId: "task-1", taskInboxToken: "task-token", taskRunId: "run-1" }],
+      });
+      if (status === "completed" || status === "cancelled")
+        await expect(ready).resolves.toBeUndefined();
+      else await expect(ready).rejects.toThrow("did not accept its readiness command");
+    },
+  );
 });

@@ -1,15 +1,18 @@
-import type { DeliverHookPayload, DeliverPayload, SessionAuthContext } from "#channel/types.js";
+import type { SessionInboxAddress } from "#execution/session-inbox/address.js";
+import type { DeliverHookPayload, DeliverPayload } from "#channel/types.js";
 import { coalesceDeliverPayloads } from "#execution/deliver-payloads.js";
 import {
   type DurableSessionState,
   readDurableSession,
   replaceDurableSessionSnapshot,
 } from "#execution/durable-session-store.js";
-import { routeDeliverPayload } from "#execution/subagent-hitl-proxy.js";
+import { routeDeliverPayload } from "#subagents/hitl-proxy.js";
 import { sendTaskInboundPayload } from "#execution/tasks/parent/run-parent.js";
-import { resumeSessionInbox } from "#execution/wire/session-inbox-resume.js";
+import { resumeSessionInbox } from "#execution/session-inbox/resume.js";
+import { resumeWorkflowToolRunAnswers } from "#execution/tools/workflow/answer.js";
+import type { AnswerHookRoute } from "#harness/proxy-input-requests.js";
 import type { InputResponse } from "#shared/input.js";
-import { findSessionTaskEntry } from "#tasks/session-index.js";
+import { findBackgroundWorkflowToolRun } from "#harness/workflow-tool-runs.js";
 import {
   createTaskInputRequestId,
   retireProxyInputRequests,
@@ -28,21 +31,10 @@ export type RoutedDeliverResult =
       readonly sessionState: DurableSessionState;
     };
 
-type LegacyRoutedDeliverResult =
-  | {
-      readonly kind: "cancel-turn";
-      readonly serializedContext: Record<string, unknown>;
-      readonly sessionState: DurableSessionState;
-    }
-  | {
-      readonly kind: "continue";
-      readonly remainder: DeliverPayload | undefined;
-      readonly serializedContext: Record<string, unknown>;
-      readonly sessionState: DurableSessionState;
-    };
-
 interface ChildBucket {
+  readonly answerHook?: AnswerHookRoute;
   readonly childContinuationToken: string;
+  readonly childSessionInbox?: SessionInboxAddress;
   readonly childResponseUrl?: string;
   readonly metadata: NonNullable<DeliverHookPayload["deliveryMetadata"]>[number][];
   readonly payloads: DeliverPayload[];
@@ -52,43 +44,15 @@ interface ChildBucket {
 }
 
 /** Splits an envelope and validates task routes before forwarding descendant input. */
-export function routeProxiedDeliverStep(input: {
+export async function routeProxiedDeliverStep(input: {
   readonly delivery: DeliverHookPayload;
-  readonly parentWritable: WritableStream<Uint8Array>;
+  readonly sessionWritable: WritableStream<Uint8Array>;
   readonly serializedContext?: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
-}): Promise<RoutedDeliverResult>;
-export function routeProxiedDeliverStep(input: {
-  readonly auth?: SessionAuthContext | null;
-  readonly parentWritable: WritableStream<Uint8Array>;
-  readonly payload: DeliverPayload;
-  readonly serializedContext?: Record<string, unknown>;
-  readonly sessionState: DurableSessionState;
-}): Promise<LegacyRoutedDeliverResult>;
-export async function routeProxiedDeliverStep(
-  input:
-    | {
-        readonly delivery: DeliverHookPayload;
-        readonly parentWritable: WritableStream<Uint8Array>;
-        readonly serializedContext?: Record<string, unknown>;
-        readonly sessionState: DurableSessionState;
-      }
-    | {
-        readonly auth?: SessionAuthContext | null;
-        readonly parentWritable: WritableStream<Uint8Array>;
-        readonly payload: DeliverPayload;
-        readonly serializedContext?: Record<string, unknown>;
-        readonly sessionState: DurableSessionState;
-      },
-): Promise<LegacyRoutedDeliverResult | RoutedDeliverResult> {
+}): Promise<RoutedDeliverResult> {
   "use step";
-
-  let durableSession = await readDurableSession(input.sessionState);
-  const legacyInput = !("delivery" in input);
-  const sourceDelivery: DeliverHookPayload =
-    "delivery" in input
-      ? input.delivery
-      : { auth: input.auth, kind: "deliver", payloads: [input.payload] };
+  let durableSession = readDurableSession(input.sessionState);
+  const sourceDelivery = input.delivery;
   const parentPayloads = new Map<number, DeliverPayload>();
   const children = new Map<string, ChildBucket>();
   let parentAction: { readonly kind: "cancel-turn" } | undefined;
@@ -97,7 +61,7 @@ export async function routeProxiedDeliverStep(
     const routed = routeDeliverPayload({
       allowRoute: (_requestId, route) =>
         route.taskId === undefined ||
-        findSessionTaskEntry(durableSession.state, route.taskId) !== undefined,
+        findBackgroundWorkflowToolRun(durableSession.state, route.taskId) !== undefined,
       payload,
       state: durableSession.state,
     });
@@ -105,16 +69,16 @@ export async function routeProxiedDeliverStep(
     if (routed.forSelf !== undefined) parentPayloads.set(sourcePayloadIndex, routed.forSelf);
 
     for (const [childIndex, forChild] of routed.forChildren.entries()) {
-      const key =
-        forChild.taskId === undefined
-          ? forChild.childContinuationToken
-          : [
-              forChild.childContinuationToken,
-              forChild.childResponseUrl ?? "",
-              forChild.taskId,
-            ].join("\0");
+      const key = [
+        forChild.childContinuationToken,
+        forChild.childSessionInbox?.sessionId ?? "",
+        forChild.childResponseUrl ?? "",
+        forChild.taskId ?? "",
+      ].join("\0");
       const child = children.get(key) ?? {
+        answerHook: forChild.answerHook,
         childContinuationToken: forChild.childContinuationToken,
+        childSessionInbox: forChild.childSessionInbox,
         childResponseUrl: forChild.childResponseUrl,
         metadata: [],
         payloads: [],
@@ -139,22 +103,22 @@ export async function routeProxiedDeliverStep(
 
   let retired = false;
   for (const child of children.values()) {
-    // Task-owned children are addressed through their run, never
-    // directly: the run must forward and clear the batch under one
-    // durable decision, or a late answer could unblock a question the
-    // child raised after this one.
+    // A task-owned executor is addressed through its task controller. The
+    // controller forwards the answer and clears `input_required` as one
+    // durable decision, so its view cannot claim the child resumed first.
     const taskId = child.taskId;
     if (taskId !== undefined) {
-      const entry = findSessionTaskEntry(durableSession.state, taskId);
+      const entry = findBackgroundWorkflowToolRun(durableSession.state, taskId);
       if (entry === undefined) {
         mergeStrandedResponses(parentPayloads, child, taskId);
         continue;
       }
       const delivery = await sendTaskInboundPayload({
-        taskInboxToken: entry.taskInboxToken,
+        taskInboxToken: entry.address.hookToken,
         payload: {
           auth: sourceDelivery.auth,
           childContinuationToken: child.childContinuationToken,
+          childSessionInbox: child.childSessionInbox,
           childResponseUrl: child.childResponseUrl,
           inputResponses: coalesceDeliverPayloads(child.payloads).inputResponses ?? [],
           kind: "input-response",
@@ -165,9 +129,16 @@ export async function routeProxiedDeliverStep(
         mergeStrandedResponses(parentPayloads, child, taskId);
         continue;
       }
-      // Hand-off to the task run succeeded. Retire the parent-visible
-      // routes so a later click cannot re-enter the same batch after the
-      // run has already accepted (or no-op'd) this answer.
+      durableSession = retireProxyInputRequests(durableSession, child.retireRequestIds);
+      retired = true;
+      continue;
+    }
+
+    if (child.answerHook !== undefined) {
+      await resumeWorkflowToolRunAnswers(
+        child.childContinuationToken,
+        coalesceDeliverPayloads(child.payloads).inputResponses,
+      );
       durableSession = retireProxyInputRequests(durableSession, child.retireRequestIds);
       retired = true;
       continue;
@@ -178,7 +149,10 @@ export async function routeProxiedDeliverStep(
       deliveryMetadata: child.metadata.length === 0 ? undefined : child.metadata,
       payloads: child.payloads,
     };
-    await resumeSessionInbox(child.childContinuationToken, childDelivery);
+    await resumeSessionInbox(
+      child.childSessionInbox ?? child.childContinuationToken,
+      childDelivery,
+    );
     // Successfully forwarded request IDs are retired so later deliveries
     // cannot route through stale entries.
     durableSession = retireProxyInputRequests(durableSession, child.retireRequestIds);
@@ -201,13 +175,11 @@ export async function routeProxiedDeliverStep(
   const remainder =
     orderedParentPayloads.length === 0
       ? undefined
-      : legacyInput
-        ? coalesceDeliverPayloads(orderedParentPayloads.map(([, payload]) => payload))
-        : {
-            ...sourceDelivery,
-            deliveryMetadata: parentMetadata.length === 0 ? undefined : parentMetadata,
-            payloads: orderedParentPayloads.map(([, payload]) => payload),
-          };
+      : {
+          ...sourceDelivery,
+          deliveryMetadata: parentMetadata.length === 0 ? undefined : parentMetadata,
+          payloads: orderedParentPayloads.map(([, payload]) => payload),
+        };
   return { ...context, kind: "continue", remainder };
 }
 

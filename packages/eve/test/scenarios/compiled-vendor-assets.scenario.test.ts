@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { createHash } from "node:crypto";
 import { readdir, readFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
@@ -8,16 +9,20 @@ import { promisify } from "node:util";
 import { describe, expect, it } from "vitest";
 
 const EVE_PACKAGE_ROOT = fileURLToPath(new URL("../../", import.meta.url));
+const EVE_CATALOG_ROOT = join(EVE_PACKAGE_ROOT, "..", "eve-catalog");
+const EVE_CATALOG_FINGERPRINT_FILES = [
+  "../../tsconfig.json",
+  "package.json",
+  "src/index.ts",
+  "tsconfig.build.json",
+  "tsconfig.json",
+] as const;
 const COMPILED_VENDOR_ROOT = join(EVE_PACKAGE_ROOT, ".generated", "compiled");
 const VENDOR_WARNING_LOG_PATH = join(EVE_PACKAGE_ROOT, "scripts", "vendor-warning-log.mjs");
 const execFileAsync = promisify(execFile);
 const require = createRequire(import.meta.url);
 const VERCEL_BLOB_DIST_ROOT = dirname(require.resolve("@vercel/blob"));
-const VERCEL_SANDBOX_DRIVES_DIST_ROOT = join(
-  dirname(require.resolve("@vercel/sandbox-drives/package.json")),
-  "dist",
-);
-const VERCEL_SANDBOX_STABLE_DIST_ROOT = join(
+const VERCEL_SANDBOX_DIST_ROOT = join(
   dirname(require.resolve("@vercel/sandbox/package.json")),
   "dist",
 );
@@ -62,14 +67,55 @@ function rewriteDeclarationImports(
 }
 
 describe("compiled vendor assets", () => {
-  it("stamps the Nitro-resolved Rolldown version", async () => {
+  it("lazily compiles schemas created by the vendored Zod runtime", async () => {
+    const zodUrl = pathToFileURL(join(COMPILED_VENDOR_ROOT, "zod", "index.js")).href;
+    const { z } = await import(zodUrl);
+    const schema = z.object({
+      id: z.string(),
+      nested: z.array(z.object({ active: z.boolean(), count: z.number() })),
+    });
+
+    expect(schema._zod.bag.validator).toBeUndefined();
+    expect(schema.parse({ id: "agent", nested: [{ active: true, count: 1 }] })).toEqual({
+      id: "agent",
+      nested: [{ active: true, count: 1 }],
+    });
+    expect(schema._zod.bag.validator).toBeTypeOf("function");
+  });
+
+  it("stamps the compiler versions that drive vendored output", async () => {
     const stamp = JSON.parse(
       await readFile(join(COMPILED_VENDOR_ROOT, ".vendor-stamp.json"), "utf8"),
-    ) as { toolVersions?: { rolldown?: string } };
+    ) as { toolVersions?: { rolldown?: string; typescript?: string } };
     const nitroRequire = createRequire(require.resolve("nitro/package.json"));
     const rolldownPackage = nitroRequire("rolldown/package.json") as { version: string };
+    const typescriptPackage = require("typescript/package.json") as { version: string };
 
     expect(stamp.toolVersions?.rolldown).toBe(rolldownPackage.version);
+    expect(stamp.toolVersions?.typescript).toBe(typescriptPackage.version);
+  });
+
+  it("copies generated catalog declarations and fingerprints their sources", async () => {
+    const sourceHash = createHash("sha256");
+    for (const file of EVE_CATALOG_FINGERPRINT_FILES) {
+      sourceHash.update(file);
+      sourceHash.update("\0");
+      sourceHash.update(await readFile(join(EVE_CATALOG_ROOT, file), "utf8"));
+      sourceHash.update("\0");
+    }
+
+    const stamp = JSON.parse(
+      await readFile(join(COMPILED_VENDOR_ROOT, ".vendor-stamp.json"), "utf8"),
+    ) as { moduleFingerprints?: Record<string, string> };
+    const [catalogDeclaration, vendoredDeclaration] = await Promise.all([
+      readFile(join(EVE_CATALOG_ROOT, "dist", "src", "index.d.ts"), "utf8"),
+      readFile(join(COMPILED_VENDOR_ROOT, "@eve", "catalog", "index.d.ts"), "utf8"),
+    ]);
+
+    expect(stamp.moduleFingerprints?.["@eve/catalog"]).toBe(sourceHash.digest("hex"));
+    expect(vendoredDeclaration.trimEnd()).toBe(
+      catalogDeclaration.replace(/\n?\/\/# sourceMappingURL=.*$/u, "").trimEnd(),
+    );
   });
 
   it("shares the OpenTelemetry provider registered through @vercel/otel", async () => {
@@ -293,7 +339,7 @@ describe("compiled vendor assets", () => {
         readFile(join(COMPILED_VENDOR_ROOT, "@workflow/core/runtime/run.d.ts"), "utf8"),
       ]);
 
-    expect(indexDts).toContain("Just the core utilities");
+    expect(indexDts).toContain("Core utilities intended for import by user");
     expect(indexDts).toContain("from '#compiled/@workflow/errors/index.js'");
     expect(createHookDts).toContain("Creates a {@link Hook}");
     expect(workflowDts).toBe(`export * from "./workflow/index.js";\n`);
@@ -311,9 +357,9 @@ describe("compiled vendor assets", () => {
     expect(vercelWorld).toContain("createWorld");
   });
 
-  it("copies the complete Drives-capable @vercel/sandbox declaration tree", async () => {
+  it("copies the complete stable @vercel/sandbox declaration tree", async () => {
     const [upstreamEntries, vendoredEntries] = await Promise.all([
-      readdir(VERCEL_SANDBOX_DRIVES_DIST_ROOT, { recursive: true }),
+      readdir(VERCEL_SANDBOX_DIST_ROOT, { recursive: true }),
       readdir(join(COMPILED_VENDOR_ROOT, "@vercel/sandbox"), { recursive: true }),
     ]);
     const upstreamDeclarations = upstreamEntries.filter((entry) => entry.endsWith(".d.ts")).sort();
@@ -325,7 +371,7 @@ describe("compiled vendor assets", () => {
     expect(vendoredDeclarations).toEqual(upstreamDeclarations);
 
     const [upstreamIndex, vendoredIndex, vendoredSandbox, vendoredBaseClient] = await Promise.all([
-      readFile(join(VERCEL_SANDBOX_DRIVES_DIST_ROOT, "index.d.ts"), "utf8"),
+      readFile(join(VERCEL_SANDBOX_DIST_ROOT, "index.d.ts"), "utf8"),
       readFile(join(COMPILED_VENDOR_ROOT, "@vercel/sandbox/index.d.ts"), "utf8"),
       readFile(join(COMPILED_VENDOR_ROOT, "@vercel/sandbox/sandbox.d.ts"), "utf8"),
       readFile(join(COMPILED_VENDOR_ROOT, "@vercel/sandbox/api-client/base-client.d.ts"), "utf8"),
@@ -335,24 +381,7 @@ describe("compiled vendor assets", () => {
     expect(vendoredSandbox).toContain('from "./_workflow-serde.js"');
     expect(vendoredBaseClient).toContain('from "../_async-retry.js"');
     expect(vendoredBaseClient).toContain('import "#compiled/zod/index.js"');
-  });
-
-  it("copies stable @vercel/sandbox declarations without a second runtime bundle", async () => {
-    const [upstreamEntries, vendoredEntries] = await Promise.all([
-      readdir(VERCEL_SANDBOX_STABLE_DIST_ROOT, { recursive: true }),
-      readdir(join(COMPILED_VENDOR_ROOT, "@vercel/sandbox-stable"), { recursive: true }),
-    ]);
-    const generatedStubNames = new Set(["_async-retry.d.ts", "_workflow-serde.d.ts"]);
-    const upstreamDeclarations = upstreamEntries.filter((entry) => entry.endsWith(".d.ts")).sort();
-    const vendoredDeclarations = vendoredEntries
-      .filter((entry) => entry.endsWith(".d.ts") && !generatedStubNames.has(entry))
-      .sort();
-
-    expect(vendoredDeclarations).toEqual(upstreamDeclarations);
     expect(vendoredEntries.filter((entry) => entry.endsWith(".js"))).toEqual(["index.js"]);
-    await expect(
-      readFile(join(COMPILED_VENDOR_ROOT, "@vercel/sandbox-stable/index.js"), "utf8"),
-    ).resolves.toBe("export {};\n");
   });
 
   it("copies AI SDK declarations from the installed packages without authored stubs", async () => {
@@ -370,6 +399,7 @@ describe("compiled vendor assets", () => {
         rewrites: {
           "@ai-sdk/provider": "#compiled/@ai-sdk/provider/index.js",
           "@ai-sdk/provider-utils": "#compiled/@ai-sdk/provider-utils/index.js",
+          "zod/v4": "#compiled/zod/index.js",
         },
       },
       {

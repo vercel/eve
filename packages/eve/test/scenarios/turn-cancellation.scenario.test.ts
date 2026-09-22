@@ -18,8 +18,16 @@ const REMOTE_DESCRIPTOR: ScenarioAppDescriptor = {
   dependencies: { zod: "^4.3.6" },
   files: {
     "agent/agent.ts": `import { defineAgent } from "eve";
+import { mockModel } from "eve/evals";
 
-export default defineAgent({ model: "openai/gpt-5.4-mini" });
+export default defineAgent({
+  model: mockModel(({ lastUserMessage }) =>
+    lastUserMessage?.includes("wait-for-cancel") === true
+      ? { toolCalls: [{ name: "wait-for-cancel", input: {} }] }
+      : "cancelled",
+  ),
+  modelContextWindowTokens: 32_000,
+});
 `,
     "agent/channels/eve.ts": `import { eveChannel } from "eve/channels/eve";
 
@@ -56,20 +64,58 @@ export default defineTool({
   name: "remote-cancellation-child",
 };
 
-function createParentDescriptor(remoteUrl: string): ScenarioAppDescriptor {
+function createParentDescriptor(
+  remoteUrl: string,
+  options: { readonly sessionInputLimit?: number } = {},
+): ScenarioAppDescriptor {
   return {
     dependencies: { zod: "^4.3.6" },
     files: {
       "agent/agent.ts": `import { defineAgent } from "eve";
+import { mockModel } from "eve/evals";
 
-export default defineAgent({ model: "openai/gpt-5.4-mini" });
+const model = mockModel((request) => {
+  const message = request.lastUserMessage ?? "";
+  if (message.includes("Use workflow exactly once")) {
+    const localOnly = message.includes("local-sleeper only");
+    return {
+      toolCalls: [
+        {
+          name: "workflow",
+          input: {
+            js: localOnly
+              ? 'return await ctx.agent("local-sleeper", { message: "Use wait-for-cancel." });'
+              : 'return await Promise.all([ctx.agent("local-sleeper", { message: "Use wait-for-cancel." }), ctx.agent("remote-sleeper", { message: "Use wait-for-cancel." })]);',
+          },
+        },
+      ],
+    };
+  }
+  return "still-alive";
+});
+
+export default defineAgent({
+  ${options.sessionInputLimit === undefined ? "" : `limits: { maxInputTokensPerSession: ${String(options.sessionInputLimit)} },`}
+  model,
+  modelContextWindowTokens: 32_000,
+});
 `,
       "agent/instructions.md": "Delegate cancellation waits as requested.\n",
+      "agent/tools/workflow.ts": `import { workflow } from "eve/tools/workflow";
+
+export default workflow();
+`,
       "agent/subagents/local-sleeper/agent.ts": `import { defineAgent } from "eve";
+import { mockModel } from "eve/evals";
 
 export default defineAgent({
   description: "Runs the wait-for-cancel tool and waits for cancellation.",
-  model: "openai/gpt-5.4-mini",
+  model: mockModel(({ lastUserMessage }) =>
+    lastUserMessage?.includes("wait-for-cancel") === true
+      ? { toolCalls: [{ name: "wait-for-cancel", input: {} }] }
+      : "cancelled",
+  ),
+  modelContextWindowTokens: 32_000,
 });
 `,
       "agent/subagents/local-sleeper/instructions.md":
@@ -109,18 +155,22 @@ describe("turn cancellation descendant cascade", () => {
     "cancels racing local and authenticated remote children then continues the parent",
     async () => {
       const remoteApp = await scenarioApp(REMOTE_DESCRIPTOR);
-      const remoteServer = await startEveDev(remoteApp.appRoot);
+      const remoteServer = await startEveDev(remoteApp.appRoot, {
+        env: { EVE_MOCK_AUTHORED_MODELS: "", NODE_ENV: "production" },
+      });
 
       try {
         const parentApp = await scenarioApp(createParentDescriptor(remoteServer.url));
-        const parentServer = await startEveDev(parentApp.appRoot);
+        const parentServer = await startEveDev(parentApp.appRoot, {
+          env: { EVE_MOCK_AUTHORED_MODELS: "", NODE_ENV: "production" },
+        });
 
         try {
           const parentClient = new Client({ host: parentServer.url });
           const { session: parentSession, response } = await parentClient.sessions.create({
             message: [
-              "Call tools in parallel: local-sleeper, remote-sleeper",
-              'message: "Use wait-for-cancel."',
+              "Use workflow exactly once to call local-sleeper and remote-sleeper in parallel.",
+              'Pass both the message "Use wait-for-cancel." and return Promise.all of their results.',
             ].join("\n"),
           });
           const parentIterator = response[Symbol.asyncIterator]();
@@ -198,7 +248,7 @@ describe("turn cancellation descendant cascade", () => {
           ).result();
           expect(followUp.sessionId).toBe(response.sessionId);
           expect(followUp.status).toBe("waiting");
-          expect(followUp.message).toBe("still-alive");
+          expect(followUp.message, JSON.stringify(followUp.events)).toBe("still-alive");
           expect(followUp.events.some((event) => event.type === "turn.cancelled")).toBe(false);
         } catch (error) {
           throw new Error(
@@ -215,6 +265,55 @@ describe("turn cancellation descendant cascade", () => {
         }
       } finally {
         await remoteServer.stop();
+      }
+    },
+    SCENARIO_TIMEOUT_MS,
+  );
+
+  it(
+    "declines the root continuation after a generated child inherits zero input quota",
+    async () => {
+      const parentApp = await scenarioApp(
+        createParentDescriptor("http://127.0.0.1:1", { sessionInputLimit: 1 }),
+      );
+      const parentServer = await startEveDev(parentApp.appRoot, {
+        env: { EVE_MOCK_AUTHORED_MODELS: "", NODE_ENV: "production" },
+      });
+
+      try {
+        const parentClient = new Client({ host: parentServer.url });
+        const { session, response } = await parentClient.sessions.create({
+          message:
+            "Use workflow exactly once to call local-sleeper only with message Use wait-for-cancel.",
+        });
+        const events = await readThroughBoundary({
+          iterator: response[Symbol.asyncIterator](),
+          label: "root session-limit prompt",
+        });
+        const calls = events.filter((event) => event.type === "subagent.called");
+        const requests = events.flatMap((event) =>
+          event.type === "input.requested" ? event.data.requests : [],
+        );
+        expect(calls).toHaveLength(1);
+        expect(requests).toHaveLength(1);
+        expect(requests[0]?.requestId.startsWith(`${response.sessionId}:limit:`)).toBe(true);
+
+        const requestId = requests[0]?.requestId;
+        if (requestId === undefined) throw new Error("Root limit prompt has no request id.");
+        const declined = await (await session.respond([{ optionId: "stop", requestId }])).result();
+        expect(declined.status).toBe("waiting");
+        expectCancellationBoundary(declined.events);
+        expect(declined.events.some((event) => event.type === "subagent.called")).toBe(false);
+      } catch (error) {
+        throw new Error(
+          [
+            `parent stdout:\n${parentServer.stdout()}`,
+            `parent stderr:\n${parentServer.stderr()}`,
+          ].join("\n\n"),
+          { cause: error },
+        );
+      } finally {
+        await parentServer.stop();
       }
     },
     SCENARIO_TIMEOUT_MS,

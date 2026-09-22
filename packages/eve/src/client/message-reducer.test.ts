@@ -13,12 +13,14 @@ import {
   createInputRequestedEvent,
   createMessageAppendedEvent,
   createMessageCompletedEvent,
+  createMessageReceivedEvent,
   createReasoningAppendedEvent,
   createReasoningCompletedEvent,
   createResultCompletedEvent,
   createStepStartedEvent,
   createTurnCancelledEvent,
   createTurnFailedEvent,
+  type MessageStreamEvent,
   type UnstampedMessageStreamEvent,
 } from "#protocol/message.js";
 
@@ -35,13 +37,95 @@ function reduceServerEvents(
 }
 
 describe("defaultMessageReducer", () => {
+  it("accumulates message and reasoning deltas without a start marker", () => {
+    const reducer = defaultMessageReducer();
+    const data = reduceServerEvents(reducer, reducer.initial(), [
+      createReasoningAppendedEvent({
+        reasoningDelta: "I",
+        sequence: 0,
+        stepIndex: 0,
+        turnId: "turn_1",
+      }),
+      createReasoningAppendedEvent({
+        reasoningDelta: " can",
+        sequence: 0,
+        stepIndex: 0,
+        turnId: "turn_1",
+      }),
+      createMessageAppendedEvent({
+        messageDelta: "Hel",
+        sequence: 0,
+        stepIndex: 0,
+        turnId: "turn_1",
+      }),
+      createMessageAppendedEvent({
+        messageDelta: "lo",
+        sequence: 0,
+        stepIndex: 0,
+        turnId: "turn_1",
+      }),
+    ]);
+
+    expect(data.messages[0]?.parts).toEqual([
+      { type: "step-start" },
+      { state: "streaming", stepIndex: 0, text: "I can", type: "reasoning" },
+      { state: "streaming", stepIndex: 0, text: "Hello", type: "text" },
+    ]);
+  });
+
+  it("uses the canonical completion after an interrupted attempt", () => {
+    const reducer = defaultMessageReducer();
+    let data = reduceServerEvents(reducer, reducer.initial(), [
+      createMessageAppendedEvent({
+        messageDelta: "abandoned",
+        sequence: 0,
+        stepIndex: 0,
+        turnId: "turn_1",
+      }),
+      createMessageAppendedEvent({
+        messageDelta: "replacement",
+        sequence: 0,
+        stepIndex: 0,
+        turnId: "turn_1",
+      }),
+      createMessageAppendedEvent({
+        messageDelta: " complete",
+        sequence: 0,
+        stepIndex: 0,
+        turnId: "turn_1",
+      }),
+    ]);
+
+    expect(data.messages[0]?.parts).toContainEqual({
+      state: "streaming",
+      stepIndex: 0,
+      text: "abandonedreplacement complete",
+      type: "text",
+    });
+
+    data = reduceServerEvents(reducer, data, [
+      createMessageCompletedEvent({
+        message: "replacement complete",
+        sequence: 0,
+        stepIndex: 0,
+        turnId: "turn_1",
+      }),
+    ]);
+
+    expect(data.messages[0]?.parts).toContainEqual({
+      state: "done",
+      stepIndex: 0,
+      text: "replacement complete",
+      type: "text",
+    });
+  });
+
   it("projects streamed tool input and upgrades it to the validated request", () => {
     const reducer = defaultMessageReducer();
     let data = reduceServerEvents(reducer, reducer.initial(), [
       createActionInputAppendedEvent({
         callId: "call_render",
         inputTextDelta: "",
-        inputTextOffset: 0,
         sequence: 1,
         stepIndex: 0,
         toolName: "render",
@@ -50,7 +134,6 @@ describe("defaultMessageReducer", () => {
       createActionInputAppendedEvent({
         callId: "call_render",
         inputTextDelta: '{"title":"Hel',
-        inputTextOffset: 0,
         sequence: 1,
         stepIndex: 0,
         toolName: "render",
@@ -69,19 +152,19 @@ describe("defaultMessageReducer", () => {
       type: "dynamic-tool",
     });
 
-    const contiguous = data;
     data = reduceServerEvents(reducer, data, [
       createActionInputAppendedEvent({
         callId: "call_render",
-        inputTextDelta: "gap",
-        inputTextOffset: 99,
+        inputTextDelta: 'lo"}',
         sequence: 1,
         stepIndex: 0,
         toolName: "render",
         turnId: "turn_1",
       }),
     ]);
-    expect(data).toBe(contiguous);
+    expect(data.messages[0]?.parts).toContainEqual(
+      expect.objectContaining({ inputText: '{"title":"Hello"}' }),
+    );
 
     data = reduceServerEvents(reducer, data, [
       createActionsRequestedEvent({
@@ -114,7 +197,6 @@ describe("defaultMessageReducer", () => {
       createActionInputAppendedEvent({
         callId: "call_render",
         inputTextDelta: "late",
-        inputTextOffset: 0,
         sequence: 1,
         stepIndex: 0,
         toolName: "render",
@@ -124,13 +206,44 @@ describe("defaultMessageReducer", () => {
     expect(data).toBe(settled);
   });
 
+  it("projects workflow tool requests as named tool parts", () => {
+    const reducer = defaultMessageReducer();
+    const data = reduceServerEvents(reducer, reducer.initial(), [
+      createActionsRequestedEvent({
+        actions: [
+          {
+            callId: "call_publish",
+            input: { report: "weekly" },
+            kind: "workflow-tool-call",
+            toolName: "publish",
+            workflowId: "publish-workflow",
+          },
+        ],
+        sequence: 1,
+        stepIndex: 0,
+        turnId: "turn_1",
+      }),
+    ]);
+
+    expect(data.messages[0]?.parts).toContainEqual({
+      input: { report: "weekly" },
+      state: "input-available",
+      stepIndex: 0,
+      toolCallId: "call_publish",
+      toolMetadata: {
+        eve: { inputRequest: undefined, kind: "tool-call", name: "publish" },
+      },
+      toolName: "publish",
+      type: "dynamic-tool",
+    });
+  });
+
   it("removes an unfinished streamed tool input when the turn is cancelled", () => {
     const reducer = defaultMessageReducer();
     const data = reduceServerEvents(reducer, reducer.initial(), [
       createActionInputAppendedEvent({
         callId: "call_render",
         inputTextDelta: "{",
-        inputTextOffset: 0,
         sequence: 1,
         stepIndex: 0,
         toolName: "render",
@@ -1028,7 +1141,6 @@ describe("defaultMessageReducer", () => {
     const data = reduceServerEvents(reducer, reducer.initial(), [
       createMessageAppendedEvent({
         messageDelta: "Checking Vienna",
-        messageSoFar: "Checking Vienna",
         sequence: 0,
         stepIndex: 0,
         turnId: "turn_0",
@@ -1055,7 +1167,6 @@ describe("defaultMessageReducer", () => {
       }),
       createMessageAppendedEvent({
         messageDelta: "Now Berlin",
-        messageSoFar: "Now Berlin",
         sequence: 3,
         stepIndex: 0,
         turnId: "turn_0",
@@ -1081,14 +1192,12 @@ describe("defaultMessageReducer", () => {
     const data = reduceServerEvents(reducer, reducer.initial(), [
       createReasoningAppendedEvent({
         reasoningDelta: "Thinking",
-        reasoningSoFar: "Thinking",
         sequence: 0,
         stepIndex: 0,
         turnId: "turn_1",
       }),
       createMessageAppendedEvent({
         messageDelta: "Partial",
-        messageSoFar: "Partial",
         sequence: 1,
         stepIndex: 0,
         turnId: "turn_1",
@@ -1134,7 +1243,6 @@ describe("defaultMessageReducer", () => {
       }),
       createMessageAppendedEvent({
         messageDelta: "<eve-empty-delivery/>",
-        messageSoFar: "<eve-empty-delivery/>",
         sequence: 1,
         stepIndex: 1,
         turnId: "turn_1",
@@ -1157,6 +1265,72 @@ describe("defaultMessageReducer", () => {
       },
       { type: "step-start" },
     ]);
+  });
+
+  it("preserves separate participant messages received within one turn", () => {
+    const reducer = defaultMessageReducer();
+    const events = stampTestEvents([
+      createMessageReceivedEvent({ message: "test message", sequence: 0, turnId: "turn_1" }),
+      createMessageReceivedEvent({ message: "a", sequence: 1, turnId: "turn_1" }),
+    ]).map((event, index) => ({
+      ...event,
+      meta: { ...event.meta, deliveryIds: [`delivery_${index}`] },
+    }));
+    const reduce = () =>
+      events.reduce((data, event) => reducer.reduce(data, event), reducer.initial());
+
+    const data = reduce();
+    expect(data.messages.map((message) => message.id)).toEqual(
+      events.map((event) => `${event.meta.id}:user`),
+    );
+    expect(data.messages.map((message) => message.parts)).toEqual([
+      [{ state: "done", text: "test message", type: "text" }],
+      [{ state: "done", text: "a", type: "text" }],
+    ]);
+    expect(reduce().messages.map((message) => message.id)).toEqual(
+      data.messages.map((message) => message.id),
+    );
+  });
+
+  it("projects one bubble for one coalesced participant event", () => {
+    const reducer = defaultMessageReducer();
+    const [event] = stampTestEvents([
+      createMessageReceivedEvent({ message: "first\n\nsecond", sequence: 0, turnId: "turn_1" }),
+    ]).map((candidate) => ({
+      ...candidate,
+      meta: { ...candidate.meta, deliveryIds: ["delivery_1", "delivery_2"] },
+    }));
+    const data = reducer.reduce(reducer.initial(), event!);
+
+    expect(data.messages).toHaveLength(1);
+    expect(data.messages[0]?.parts).toEqual([
+      { state: "done", text: "first\n\nsecond", type: "text" },
+    ]);
+  });
+
+  it("uses a stable fallback id for legacy received events", () => {
+    const reducer = defaultMessageReducer();
+    const event = {
+      ...createMessageReceivedEvent({ message: "legacy", sequence: 2, turnId: "turn_1" }),
+      meta: { at: "2026-07-27T18:04:11.912Z" },
+    } as MessageStreamEvent;
+
+    const data = reducer.reduce(reducer.initial(), event);
+    expect(data.messages[0]?.id).toBe("turn_1:2:user");
+  });
+
+  it("does not project framework-authored task input", () => {
+    const reducer = defaultMessageReducer();
+    const [event] = stampTestEvents([
+      createMessageReceivedEvent({
+        kind: "execution.background_task",
+        message: "Task completed",
+        sequence: 1,
+        turnId: "turn_1",
+      }),
+    ]);
+
+    expect(reducer.reduce(reducer.initial(), event!).messages).toEqual([]);
   });
 
   it("projects structured file parts from message.received onto the user message", () => {

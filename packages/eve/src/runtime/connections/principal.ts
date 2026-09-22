@@ -21,21 +21,18 @@ import { isVercelOidcIssuer } from "#shared/vercel-project.js";
  * per-principal token cache.
  *
  * - `{ type: "app" }` → `"app"`. Shared across all sessions.
- * - `{ type: "user", issuer, id }` → `"user:${issuer}:${id}"`. The
- *   issuer prefix prevents collisions when the same `id` across
- *   identity providers (for example Slack `U123` vs Google `U123`)
- *   would otherwise alias to the same cache slot.
- * - `{ type: "user", id }` → `"user:${id}"`. This is the native
- *   Vercel Connect user projection.
+ * - `{ type: "user", issuer, id }` → `["user", issuer, id]` JSON.
+ * - `{ type: "user", id }` → `["user", null, id]` JSON. This is the
+ *   native Vercel Connect user projection.
+ *
+ * JSON tuple encoding preserves the boundaries between issuer and id, so
+ * user-provided separators and percent sequences cannot alias cache entries.
  */
 export function principalKey(principal: ConnectionPrincipal): string {
   if (principal.type === "app") {
     return "app";
   }
-  if (principal.issuer === undefined) {
-    return `user:${principal.id}`;
-  }
-  return `user:${principal.issuer}:${principal.id}`;
+  return JSON.stringify(["user", principal.issuer ?? null, principal.id]);
 }
 
 /**

@@ -83,7 +83,8 @@ const modelEndpoint = z.union([
     .object({
       kind: z.literal("gateway"),
       connected: z.literal(true),
-      credential: z.enum(["api-key", "oidc"]),
+      credential: z.enum(["api-key", "oidc", "oauth"]),
+      team: z.optional(z.string()),
     })
     .strict(),
   z.object({ kind: z.literal("gateway"), connected: z.literal(false) }).strict(),
@@ -254,16 +255,8 @@ const remoteAgent = entry
 
 const kernelEffect = z
   .object({
-    action: z.enum(["subagent-call", "task-update", "task-cancel"]).optional(),
-    audience: z.array(
-      z.enum([
-        "root-session",
-        "delegated-task-child",
-        "requires-request-input",
-        "requires-loadable-skill",
-        "below-subagent-depth",
-      ]),
-    ),
+    action: z.enum(["subagent-call", "task-cancel", "workflow-tool-call"]).optional(),
+    audience: z.array(z.enum(["root-session", "delegated-task-child", "requires-request-input"])),
     kind: z.enum(["request-input", "dispatch", "provider-tool"]),
     sourceId: z.string(),
   })
@@ -278,11 +271,6 @@ const compositionDiagnostic = z
     winnerSourceId: z.string().optional(),
   })
   .strict();
-
-const workflow = z.discriminatedUnion("enabled", [
-  z.object({ enabled: z.literal(false), toolName: z.string() }).strict(),
-  z.object({ enabled: z.literal(true), source, toolName: z.string() }).strict(),
-]);
 
 /** Runtime contract for the authoritative `/eve/v1/info` v4 response. */
 export const AgentInfoResultSchema = z
@@ -327,7 +315,6 @@ export const AgentInfoResultSchema = z
     subagents: z.object({ local: z.array(subagent), total: z.number() }).strict(),
     tools: z.object({ dynamic: z.array(dynamicResolver), static: z.array(tool) }).strict(),
     version: z.literal(4),
-    workflow,
     workspace: z.object({ resourceRoot: z.unknown(), rootEntries: z.array(z.string()) }).strict(),
   })
   .strict()
@@ -424,9 +411,6 @@ export const AgentInfoResultSchema = z
       ),
       ...value.tools.dynamic.map((entry, index) => [entry, ["tools", "dynamic", index]] as const),
       ...value.tools.static.map((entry, index) => [entry, ["tools", "static", index]] as const),
-      ...(value.workflow.enabled
-        ? ([[value.workflow.source, ["workflow", "source"]]] as const)
-        : []),
       [value.sandbox, ["sandbox"]],
     ];
     for (const [entry, path] of boundSources) {

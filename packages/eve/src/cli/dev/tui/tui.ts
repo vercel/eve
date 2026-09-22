@@ -1,3 +1,4 @@
+import type { EveCliSetupStepEvent, EveCliSetupTerminalEvent } from "#cli/telemetry/index.js";
 import { Client } from "#client/index.js";
 import type { DevBootProgressReporter } from "#internal/dev-boot-progress.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
@@ -19,7 +20,6 @@ import { createDevDiagnostics, type DevDiagnostics } from "../diagnostics.js";
 
 import { createPromptCommandHandler } from "./prompt-command-handler.js";
 import { promptCommandsFor } from "./prompt-commands.js";
-import { pickAgentHeaderTip } from "./agent-header.js";
 import { formatRemoteAuthChallengeMessage } from "./remote-auth-result.js";
 import { probeMcpConnection } from "./mcp-connection-status.js";
 import { EveTUIRunner, type EveTUIRunnerOptions } from "./runner.js";
@@ -34,11 +34,13 @@ export interface RunDevelopmentTuiInput extends TuiDisplayOptions {
   readonly target: DevelopmentTuiTarget;
   /** Additional request headers sent by this TUI client. */
   readonly headers?: Readonly<Record<string, string>>;
-  /**
-   * Text to seed the prompt input with after the UI launches. A bare local
-   * `/model` starts fresh-agent onboarding. Applies to the first prompt only.
-   */
+  /** Text to seed the prompt input with after the UI launches. Applies to the first prompt only. */
   readonly initialInput?: string;
+  /** Explicit fresh-agent onboarding handoff from `eve init`. */
+  readonly onboard?: boolean;
+  /** Reports timestamped steps and terminal result for fresh-agent onboarding. */
+  readonly onOnboardingStep?: (input: EveCliSetupStepEvent) => void;
+  readonly onOnboardingTerminal?: (input: EveCliSetupTerminalEvent) => void;
   /** Reports local CLI boot phases. Omitted for remote and programmatic TUI runs. */
   readonly onBootProgress?: DevBootProgressReporter;
   /** Gives setup subprocesses exclusive terminal and development-host ownership. */
@@ -50,9 +52,8 @@ export interface RunDevelopmentTuiInput extends TuiDisplayOptions {
 
 export interface DevelopmentTuiStartup {
   readonly diagnostics: DevDiagnostics | undefined;
-  readonly headerTip: string;
   readonly renderer: TerminalRenderer;
-  finish(): string;
+  finish(): { draft: string; queuedPrompt: string | undefined };
   shutdown(): Promise<void>;
 }
 
@@ -64,7 +65,6 @@ export async function startDevelopmentTuiStartup(
   },
 ): Promise<DevelopmentTuiStartup> {
   const diagnostics = await createDevDiagnostics(input.appRoot).catch(() => undefined);
-  const headerTip = pickAgentHeaderTip();
   const renderer = new TerminalRenderer({
     ...input,
     diagnostics,
@@ -72,12 +72,10 @@ export async function startDevelopmentTuiStartup(
   });
   renderer.beginStartupDraft({
     initialDraft: input.initialInput,
-    tip: headerTip,
     title: input.name ?? "eve",
   });
   return {
     diagnostics,
-    headerTip,
     renderer,
     finish: () => renderer.finishStartupDraft(),
     async shutdown() {
@@ -141,6 +139,9 @@ export async function runDevelopmentTui(input: RunDevelopmentTuiInput): Promise<
     target,
     headers,
     initialInput,
+    onboard,
+    onOnboardingStep,
+    onOnboardingTerminal,
     onBootProgress,
     lifecycle,
     startup,
@@ -155,6 +156,7 @@ export async function runDevelopmentTui(input: RunDevelopmentTuiInput): Promise<
     prepared.kind === "local"
       ? resolveLocalDevelopmentClientOptions({
           ...headerOptions,
+          interactiveClient: true,
           serverUrl,
           token: () => resolveLinkedDevelopmentOidcToken(prepared.target.workspaceRoot),
         })
@@ -187,6 +189,9 @@ export async function runDevelopmentTui(input: RunDevelopmentTuiInput): Promise<
     options.renderer = startup.renderer;
     options.startup = startup;
   }
+  if (onboard !== undefined) options.onboard = onboard;
+  if (onOnboardingStep !== undefined) options.onOnboardingStep = onOnboardingStep;
+  if (onOnboardingTerminal !== undefined) options.onOnboardingTerminal = onOnboardingTerminal;
   if (onBootProgress !== undefined) options.onBootProgress = onBootProgress;
   if (lifecycle !== undefined) options.lifecycle = lifecycle;
   if (withExclusiveTerminal !== undefined) options.withExclusiveTerminal = withExclusiveTerminal;

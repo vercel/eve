@@ -298,8 +298,8 @@ describe("stageAttachmentsToSandbox (integration)", () => {
     expect(sandbox.writes).toHaveLength(0);
   });
 
-  it("wraps uncategorized fetchFile throws as resolver-threw", async () => {
-    const upstream = new Error("boom");
+  it("degrades plain resolver errors to a channel-neutral safe note", async () => {
+    const upstream = new Error("boom https://secret.example/file?token=private");
     const adapter: ChannelAdapter<any> = {
       async fetchFile() {
         throw upstream;
@@ -318,18 +318,25 @@ describe("stageAttachmentsToSandbox (integration)", () => {
       },
     ];
 
-    await expect(
-      runtime.runAsSession({ channel: adapter, sandbox }, async () =>
-        stageAttachmentsToSandbox(content),
-      ),
-    ).rejects.toMatchObject({ cause: upstream, kind: "resolver-threw" });
+    const staged = (await runtime.runAsSession({ channel: adapter, sandbox }, async () =>
+      stageAttachmentsToSandbox(content),
+    )) as Exclude<UserContent, string>;
+
+    expect(staged).toEqual([
+      {
+        text: 'Attachment a.bin could not be retrieved: Attachment retrieval failed in the "custom-channel" channel.',
+        type: "text",
+      },
+    ]);
+    expect(staged[0]).not.toHaveProperty("text", expect.stringContaining("secret.example"));
+    expect(sandbox.writes).toHaveLength(0);
   });
 
-  it("propagates EveAttachmentError from fetchFile unchanged", async () => {
+  it("exposes a channel-authored safe resolver error to the model", async () => {
     const resolverError = new EveAttachmentError({
       adapterKind: "custom-channel",
       kind: "resolver-threw",
-      message: "test resolver error",
+      message: "Slack file fetch returned HTTP 403.",
     });
     const adapter: ChannelAdapter<any> = {
       async fetchFile() {
@@ -349,11 +356,61 @@ describe("stageAttachmentsToSandbox (integration)", () => {
       },
     ];
 
-    await expect(
-      runtime.runAsSession({ channel: adapter, sandbox }, async () =>
-        stageAttachmentsToSandbox(content),
-      ),
-    ).rejects.toBe(resolverError);
+    const staged = (await runtime.runAsSession({ channel: adapter, sandbox }, async () =>
+      stageAttachmentsToSandbox(content),
+    )) as Exclude<UserContent, string>;
+
+    expect(staged).toEqual([
+      {
+        text: "Attachment a.bin could not be retrieved: Slack file fetch returned HTTP 403.",
+        type: "text",
+      },
+    ]);
+    expect(sandbox.writes).toHaveLength(0);
+  });
+
+  it("stages sibling attachments when one resolver call fails", async () => {
+    const adapter: ChannelAdapter<any> = {
+      async fetchFile(url) {
+        if (url.endsWith("missing.bin")) {
+          throw new EveAttachmentError({
+            adapterKind: "custom-channel",
+            kind: "resolver-threw",
+            message: "Attachment service returned HTTP 503.",
+          });
+        }
+        return { bytes: Buffer.from("available") };
+      },
+      kind: "custom-channel",
+      state: {},
+    };
+    const sandbox = mockSandbox({ id: "sbx_partial_failure" });
+    const runtime = await createTestRuntime();
+    const content: UserContent = [
+      {
+        data: new URL("https://example.com/missing.bin"),
+        filename: "missing.bin",
+        mediaType: "application/octet-stream",
+        type: "file",
+      },
+      {
+        data: new URL("https://example.com/available.bin"),
+        filename: "available.bin",
+        mediaType: "application/octet-stream",
+        type: "file",
+      },
+    ];
+
+    const staged = (await runtime.runAsSession({ channel: adapter, sandbox }, async () =>
+      stageAttachmentsToSandbox(content),
+    )) as Exclude<UserContent, string>;
+
+    expect(staged[0]).toEqual({
+      text: "Attachment missing.bin could not be retrieved: Attachment service returned HTTP 503.",
+      type: "text",
+    });
+    expect((staged[1] as FilePart).filename).toMatch(/\/available\.bin$/);
+    expect(sandbox.writes).toHaveLength(1);
   });
 
   it("works alongside non-file parts in the same user message", async () => {

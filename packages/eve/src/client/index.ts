@@ -13,7 +13,11 @@ export { defaultMessageReducer } from "#client/message-reducer.js";
 export { createDataUrlFilePart, createTextWithFileContent } from "#client/file-parts.js";
 export { MessageResponse } from "#client/message-response.js";
 export { ClientSession } from "#client/session.js";
-export { ClientSessions, type CreatedClientSession } from "#client/sessions.js";
+export {
+  ClientSessions,
+  type CreatedClientSession,
+  type CreatedIdleClientSession,
+} from "#client/sessions.js";
 
 // ---------------------------------------------------------------------------
 // Client types
@@ -51,6 +55,7 @@ export type {
   ClientAuth,
   ClientOptions,
   ClientRedirectPolicy,
+  CreateSessionOptions,
   HeadersValue,
   HealthResult,
   MessageResult,

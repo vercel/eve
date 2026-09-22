@@ -120,7 +120,7 @@ describe("eve dev server workflow generations", () => {
           createGenerationMarkerToolSource("generation-two", false),
         );
         await writeFile(
-          join(app.appRoot, "agent", "instrumentation.ts"),
+          join(app.appRoot, "agent", "instrumentation", "reload.ts"),
           createInstrumentationSource("two"),
         );
         await forceDevelopmentRebuild(server.url);
@@ -132,10 +132,9 @@ describe("eve dev server workflow generations", () => {
           `Timed out waiting for the selected-generation retry.\n\nstdout:\n${server.stdout()}\n\nstderr:\n${server.stderr()}`,
         );
         expect(readCompletedMessages(firstResult.events)).toContain("generation-one");
-        // Instrumentation is now an ordinary compiled source. Retrying an old
-        // generation therefore restores that generation's instrumentation
-        // together with its tool modules.
-        expect(readCompletedMessages(firstResult.events)).toContain("instrumentation-one");
+        // Providers are installed once by the active host, while durable tool
+        // code can retry from the generation that originally selected it.
+        expect(readCompletedMessages(firstResult.events)).toContain("instrumentation-two");
 
         const secondResult = await sendDevelopmentMessage({
           message: "Use get_marker.",
@@ -143,9 +142,7 @@ describe("eve dev server workflow generations", () => {
           serverUrl: server.url,
         });
         expect(readCompletedMessages(secondResult.events)).toContain("generation-two");
-        // The retained generation's ordinary instrumentation module was the
-        // last instrumentation source evaluated in this worker.
-        expect(readCompletedMessages(secondResult.events)).toContain("instrumentation-one");
+        expect(readCompletedMessages(secondResult.events)).toContain("instrumentation-two");
       } finally {
         await server.stop();
       }
@@ -222,7 +219,7 @@ describe("eve dev server workflow generations", () => {
           createGenerationMarkerToolSource("generation-two", false),
         );
         await writeFile(
-          join(app.appRoot, "agent", "instrumentation.ts"),
+          join(app.appRoot, "agent", "instrumentation", "reload.ts"),
           createInstrumentationSource("two"),
         );
         await forceDevelopmentRebuild(server.url);

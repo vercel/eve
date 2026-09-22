@@ -5,8 +5,10 @@ import type {
   ResolvedRuntimeDelegationNode,
 } from "#runtime/types.js";
 import type { JsonObject } from "#shared/json.js";
-import { serializeInputSchema } from "#tools/schema.js";
+import { serializeInputSchema, serializeOutputSchema } from "#tools/schema.js";
 import { SUBAGENT_TOOL_INPUT_SCHEMA } from "#tools/framework/agent-contract.js";
+import { SUBAGENT_TASK_RECEIPT_OUTPUT_SCHEMA } from "#tools/framework/task-contract.js";
+import { subagentToolExecuteWorkflowReference } from "#runtime/subagents/workflow-reference.js";
 
 /**
  * One runtime-owned subagent tracked by the prepared registry.
@@ -20,10 +22,12 @@ export interface ResolvedDynamicSubagentResolver extends ResolvedDynamicSubagent
   readonly kind: "subagent";
   readonly name: string;
   readonly nodeId: string;
+  readonly tool?: boolean;
 }
 
 /**
- * Runtime-owned registry that exposes resolved subagents as model-visible tools.
+ * Runtime-owned registry that keeps all resolved subagents addressable while
+ * preparing only their selected model-tool projections.
  */
 export interface RuntimeSubagentRegistry {
   readonly dynamicNodeIds: ReadonlySet<string>;
@@ -38,22 +42,23 @@ export interface RuntimeSubagentRegistry {
  * accept one free-form `message` string from the parent agent.
  */
 const SUBAGENT_TOOL_INPUT_JSON_SCHEMA = serializeInputSchema(SUBAGENT_TOOL_INPUT_SCHEMA);
+const SUBAGENT_TOOL_OUTPUT_JSON_SCHEMA = serializeOutputSchema(SUBAGENT_TASK_RECEIPT_OUTPUT_SCHEMA);
 
 /**
- * Builds the runtime-owned registry for the resolved subagents visible from one
+ * Builds the runtime-owned registry for the resolved subagents owned by one
  * runtime agent node.
  */
 export function createRuntimeSubagentRegistry(input: {
+  readonly disabledToolNames?: readonly string[];
   readonly reservedToolNames?: readonly string[];
   readonly subagents: readonly ResolvedRuntimeDelegationNode[];
 }): RuntimeSubagentRegistry {
   const preparedTools: PreparedRuntimeDelegationTool[] = [];
   const dynamicNodeIds = new Set<string>();
   const dynamicResolvers: ResolvedDynamicSubagentResolver[] = [];
-  const registry = new RuntimeRegistry<RuntimeRegisteredSubagent>(
-    "subagent",
-    input.reservedToolNames ?? [],
-  );
+  const registry = new RuntimeRegistry<RuntimeRegisteredSubagent>("subagent");
+  const reservedToolNames = new Set(input.reservedToolNames ?? []);
+  const disabledToolNames = new Set(input.disabledToolNames ?? []);
   const subagentsByNodeId = new Map<string, RuntimeRegisteredSubagent>();
 
   for (const subagentDefinition of input.subagents) {
@@ -73,7 +78,10 @@ export function createRuntimeSubagentRegistry(input: {
     let registeredSubagent: RuntimeRegisteredSubagent;
     const dynamic = subagentDefinition.kind === "subagent" ? subagentDefinition.dynamic : undefined;
     if (dynamic === undefined) {
-      const prepared = createPreparedRuntimeSubagentTool(subagentDefinition);
+      const prepared = createPreparedRuntimeSubagentTool(
+        subagentDefinition,
+        SUBAGENT_TOOL_INPUT_JSON_SCHEMA,
+      );
       registeredSubagent = {
         definition: subagentDefinition,
         prepared,
@@ -81,9 +89,17 @@ export function createRuntimeSubagentRegistry(input: {
       registry.register(subagentDefinition.name, registeredSubagent, {
         location,
         duplicateMessage: `Found multiple subagents named "${subagentDefinition.name}". Subagent names must be unique at runtime.`,
-        reservedMessage: `Subagent "${subagentDefinition.name}" collides with another runtime-visible tool name.`,
       });
-      preparedTools.push(prepared);
+      const modelVisible =
+        subagentDefinition.tool !== false && !disabledToolNames.has(subagentDefinition.name);
+      if (modelVisible && reservedToolNames.has(subagentDefinition.name)) {
+        throw new RuntimeRegistryError(
+          "subagent",
+          `Subagent "${subagentDefinition.name}" collides with another runtime-visible tool name.`,
+          { ...location, entryName: subagentDefinition.name },
+        );
+      }
+      if (modelVisible) preparedTools.push(prepared);
     } else {
       dynamicNodeIds.add(subagentDefinition.nodeId);
       dynamicResolvers.push({
@@ -94,6 +110,7 @@ export function createRuntimeSubagentRegistry(input: {
         nodeId: subagentDefinition.nodeId,
         sourceId: subagentDefinition.sourceId,
         sourceKind: "module",
+        tool: disabledToolNames.has(subagentDefinition.name) ? false : undefined,
       });
       registeredSubagent = {
         definition: subagentDefinition,
@@ -119,13 +136,36 @@ export function createPreparedRuntimeSubagentTool(
     throw new Error(`Static subagent "${definition.name}" is missing a description.`);
   }
   return {
-    description: definition.description,
+    behavior: {
+      availability: [],
+      handling: {
+        kind: "dispatch",
+        target:
+          definition.kind === "remote"
+            ? {
+                kind: "remote-agent-call",
+                nodeId: definition.nodeId,
+                remoteAgentName: definition.name,
+              }
+            : {
+                kind: "subagent-call",
+                nodeId: definition.nodeId,
+                subagentName: definition.name,
+              },
+      },
+    },
+    description: `${definition.description}\n\nThis call starts a background task and returns a task receipt immediately.`,
+    execution: "background",
     inputSchema,
     kind: definition.kind,
     logicalPath: definition.logicalPath,
     name: definition.name,
     nodeId: definition.nodeId,
-    outputSchema: definition.kind === "remote" ? definition.outputSchema : undefined,
+    outputSchema: SUBAGENT_TOOL_OUTPUT_JSON_SCHEMA,
     sourceId: definition.sourceId,
+    task: {
+      nodeId: definition.nodeId,
+      workflowId: subagentToolExecuteWorkflowReference.workflowId,
+    },
   };
 }

@@ -74,9 +74,9 @@ const WEATHER_SYSTEM_SOURCE =
 const WEATHER_EVAL_CONFIG_SOURCE = `import { defineEvalConfig } from "eve/evals";
 
 // Run-wide config shared by every eval. The optional \`judge\` model is the
-// default for \`t.judge.*\` assertions, so individual evals need not repeat it.
+// default for \`t.judge(...)\` assertions, so individual evals need not repeat it.
 export default defineEvalConfig({
-  judge: { model: "openai/gpt-5.4-mini" },
+  judge: { model: "typesafe-ai/jev" },
 });
 `;
 

@@ -1,10 +1,16 @@
+import {
+  type BackgroundWorkflowToolRun,
+  findBackgroundWorkflowToolRun,
+  registerWorkflowToolRun,
+} from "#harness/workflow-tool-runs.js";
 import type { ContextContainer } from "#context/container.js";
 import { loadContext } from "#context/container.js";
+import { ActivityObserverKey } from "#context/keys.js";
 import type { FrameworkContextProvider } from "#context/provider.js";
 import { runStep } from "#context/run-step.js";
-import { CallbackBaseUrlKey } from "#harness/authorization.js";
-import { isAuthorizationSignal } from "#harness/authorization.js";
+import { buildCallbackContext } from "#context/build-callback-context.js";
 import { activeTurnId } from "#harness/active-turn-id.js";
+import { resolveWorkflowAgentMetadata } from "#execution/tools/subagent/metadata.js";
 import { getHarnessEmissionState } from "#harness/emission.js";
 import { isTurnCancellation } from "#harness/turn-cancellation.js";
 import type { HarnessSession, StepResult } from "#harness/types.js";
@@ -14,32 +20,43 @@ import {
   type BackgroundToolCallBatch,
   type BackgroundToolExecutor,
 } from "#harness/background-tools.js";
-import { createEveCallbackRoutePath } from "#protocol/routes.js";
-import { isAsyncIterable } from "#shared/async-iterable.js";
-import { parseJsonValue } from "#shared/json.js";
+import { deriveBackgroundTaskActivityObserver } from "#execution/activity-work.js";
+import { projectToolStartLabel } from "#harness/action-presentation.js";
 import type { ToolExecuteOptions } from "#tools/definition.js";
+import type { AgentView } from "#subagents/handles/prompt.js";
 import {
-  createTaskDelegated,
-  isTaskDelegated,
-  type TaskExec,
-  type TaskSendCommand,
-} from "#tools/task.js";
-import { recordTaskAgentAddress } from "#harness/handles/transitions.js";
-import { BundleKey, type CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
-import { recordSessionTask } from "#tasks/session-index.js";
-import { readSubagentExecutor, type TaskInboundUpdate } from "#tasks/types.js";
-import { createWorkflowCallbackUrl } from "#execution/workflow-callback-url.js";
-import {
-  beginBackgroundTask,
+  createTaskAgentDispatchContext,
+  prepareBackgroundTask,
   rejectDelegatedDispatch,
-  type BackgroundTask,
 } from "#execution/tasks/parent/delegate.js";
-import { propagateSubagentExecutorCancel } from "#execution/tasks/parent/dispatch.js";
-import { sendTaskCommand, sendTaskInboundPayload } from "#execution/tasks/parent/run-parent.js";
+import { parseWorkflowToolInput } from "#execution/tools/workflow/background.js";
+import { startTaskRun, waitForTaskCommandOwner } from "#execution/tasks/parent/run-parent.js";
+import { sessionCommandHookToken } from "#execution/session-inbox/address.js";
+import { projectSubagentTask } from "#execution/tasks/parent/subagent-task-projection.js";
+import { deriveAgentOperationId } from "#subagents/handles/operation-id.js";
+import { AGENT_BUSY, AGENT_MISMATCH, AGENT_UNREACHABLE } from "#subagents/agent-handle-errors.js";
+import { formatAgentBusyMessage } from "#subagents/agent-handle-errors.js";
+import {
+  getAgentHandleStore,
+  writeHandles,
+  type AgentHandleStoreCommand,
+  type AgentHandleStoreCommandResult,
+} from "#subagents/handles/store.js";
+import { applyTaskAgentHandleCommand } from "#subagents/handles/transitions.js";
+import { steerBackgroundAgent } from "#execution/tools/subagent/steer.js";
 
 interface BackgroundToolExecutionRecord {
+  readonly callId: string;
+  claim?: {
+    readonly operationId: string;
+    readonly taskId: string;
+  };
+  reservation?: {
+    readonly agentId: string;
+    readonly operationId: string;
+  };
   settled: boolean;
-  task?: BackgroundTask;
+  task?: BackgroundWorkflowToolRun;
 }
 
 interface BackgroundToolStepResult {
@@ -58,7 +75,7 @@ export function runBackgroundStep(
 /**
  * Makes background tool work transactional with the harness step.
  *
- * Concretely: when the model calls a background tool (e.g. a subagent spawn),
+ * Concretely: when the model calls a background tool,
  * the tool does real external work mid-step — it creates a task run and
  * delivers commands to its inbox — while the step itself can still fail. This
  * provider scopes that work to the step so it either lands with the step or
@@ -71,8 +88,7 @@ export function runBackgroundStep(
  *
  * - `commit` — step succeeded. Compensates executions that never settled
  *   (the tool neither delegated nor completed its task), then records the
- *   task entries and executor-owned session writes onto the session being
- *   persisted.
+ *   task entries onto the session being persisted.
  * - `rollback` — step failed. Compensates incomplete executions, and settled
  *   ones too — unless the cause is turn cancellation: those tasks are already
  *   running, so they are retained for {@link readRetainedBackgroundToolResult}
@@ -83,8 +99,8 @@ export function runBackgroundStep(
  */
 export const backgroundToolExecutionProvider: FrameworkContextProvider<BackgroundToolExecutor> = {
   key: BackgroundToolExecutorKey,
-  create(ctx, session) {
-    return { value: new BackgroundToolExecutionScope(session, ctx.get(BundleKey)) };
+  create(_ctx, session) {
+    return { value: new BackgroundToolExecutionScope(session) };
   },
   async commit(executor, session) {
     return await requireExecutionScope(executor).commit(session);
@@ -113,16 +129,17 @@ export function readRetainedBackgroundToolResult(
 }
 
 class BackgroundToolExecutionScope implements BackgroundToolExecutor {
-  private readonly bundle: CompiledBundle | undefined;
   private readonly executions = new Map<string, Promise<unknown>>();
   private readonly records: BackgroundToolExecutionRecord[] = [];
+  private agentHandleSession: HarnessSession;
+  private agentHandlesChanged = false;
   private retained = false;
 
   private readonly initialSession: HarnessSession;
 
-  constructor(initialSession: HarnessSession, bundle: CompiledBundle | undefined) {
-    this.bundle = bundle;
+  constructor(initialSession: HarnessSession) {
     this.initialSession = initialSession;
+    this.agentHandleSession = initialSession;
   }
 
   execute(input: {
@@ -143,13 +160,42 @@ class BackgroundToolExecutionScope implements BackgroundToolExecutor {
     return execution;
   }
 
+  async readAgentViews(): Promise<readonly AgentView[]> {
+    const handles = getAgentHandleStore(this.agentHandleSession.state)?.handles ?? [];
+    return handles.flatMap<AgentView>((handle) => {
+      if (handle.phase === "reserved") return [];
+      if (handle.phase === "available") {
+        return [
+          {
+            availability: "available" as const,
+            id: handle.identity.id,
+            name: handle.identity.name,
+          },
+        ];
+      }
+      if (handle.phase !== "claimed") return [];
+      return [
+        {
+          availability: "busy" as const,
+          id: handle.identity.id,
+          name: handle.identity.name,
+          taskId: handle.ownerId,
+          taskStatus: "working" as const,
+        },
+      ];
+    });
+  }
+
+  hasPendingTasks(): boolean {
+    return this.records.some((record) => record.settled && record.task !== undefined);
+  }
+
   async commit(session: HarnessSession): Promise<HarnessSession> {
     const incomplete = this.records.filter((record) => !record.settled);
     if (incomplete.length > 0) {
-      await compensateBackgroundToolExecution(
+      await this.compensate(
         incomplete,
         new Error("Background tool execution did not delegate or complete its task."),
-        this.bundle,
       );
     }
     return this.apply(session);
@@ -164,16 +210,19 @@ class BackgroundToolExecutionScope implements BackgroundToolExecutor {
     const settled = this.records.filter((record) => record.settled);
     const incomplete = this.records.filter((record) => !record.settled);
     if (incomplete.length > 0) {
-      await compensateBackgroundToolExecution(incomplete, cause, this.bundle);
+      await this.compensate(incomplete, cause);
     }
-    if (settled.length === 0) return;
+    if (settled.length === 0) {
+      this.retained = this.agentHandlesChanged && isTurnCancellation(cause);
+      return;
+    }
     // Cancellation must not compensate settled records: their tasks are
     // already running. Retain them for readRetainedBackgroundToolResult.
     if (isTurnCancellation(cause)) {
       this.retained = true;
       return;
     }
-    await compensateBackgroundToolExecution(settled, cause, this.bundle);
+    await this.compensate(settled, cause);
   }
 
   retainedResult(): BackgroundToolStepResult | undefined {
@@ -184,29 +233,31 @@ class BackgroundToolExecutionScope implements BackgroundToolExecutor {
     let next = session;
     for (const record of this.records) {
       if (!record.settled || record.task === undefined) continue;
-      // Framework-owned executor commits, matched by executor kind. The
-      // subagent binding is the durable copy of the child's addressed
-      // handle; committing the task also commits that address into the
-      // parent's handle store.
-      const subagent = readSubagentExecutor(record.task.executor);
-      if (subagent !== undefined) next = recordTaskAgentAddress(next, subagent);
-      next = recordSessionTask(next, record.task);
+      next = registerWorkflowToolRun(next, record.task);
+    }
+    if (this.agentHandlesChanged) {
+      next = writeHandles(next, getAgentHandleStore(this.agentHandleSession.state)?.handles ?? []);
     }
     return next;
   }
 
   private resultFields(): BackgroundToolStepResult | undefined {
     const tasks = this.records.flatMap((record) =>
-      record.settled && record.task !== undefined ? [record.task] : [],
+      record.settled && record.task !== undefined
+        ? [
+            {
+              callId: record.callId,
+              taskInboxToken: record.task.address.hookToken,
+              taskId: record.task.task.taskId,
+              taskRunId: record.task.address.runId,
+            },
+          ]
+        : [],
     );
-    if (tasks.length === 0) return undefined;
+    if (tasks.length === 0 && !this.agentHandlesChanged) return undefined;
     return {
       backgroundTaskSession: this.apply(this.initialSession),
-      backgroundTasks: tasks.map(({ taskInboxToken, taskId, taskRunId }) => ({
-        taskInboxToken,
-        taskId,
-        taskRunId,
-      })),
+      backgroundTasks: tasks,
     };
   }
 
@@ -216,61 +267,275 @@ class BackgroundToolExecutionScope implements BackgroundToolExecutor {
     readonly options: ToolExecuteOptions;
     readonly toolInput: unknown;
   }): Promise<unknown> {
-    const record: BackgroundToolExecutionRecord = { settled: false };
+    const record: BackgroundToolExecutionRecord = {
+      callId: input.options.toolCallId,
+      settled: false,
+    };
     this.records.push(record);
     const emission = getHarnessEmissionState(this.initialSession.state);
-    const task = await beginBackgroundTask({
-      callId: input.options.toolCallId,
-      metadata: { kind: "tool", name: input.definition.name },
-      parentSessionId: this.initialSession.sessionId,
-      parentStepIndex: emission.stepIndex,
-      parentTurnId: activeTurnId(emission),
-      session: this.initialSession,
-    });
+    const ctx = loadContext();
+    const started = await this.startTask({ ctx, emission, input, record });
+    if (started.kind === "steered") {
+      record.settled = true;
+      return started.receipt;
+    }
+    const task = started.task;
     record.task = task;
 
-    const callbackBaseUrl = loadContext().get(CallbackBaseUrlKey);
-    const binding = {
-      taskId: task.taskId,
-      token: task.taskInboxToken,
-      ...(callbackBaseUrl === undefined
-        ? {}
-        : {
-            url: createWorkflowCallbackUrl(
-              callbackBaseUrl,
-              createEveCallbackRoutePath(task.taskInboxToken),
-            ),
-          }),
-    };
-    const taskExec: TaskExec = {
-      batch: input.batch.calls,
-      binding,
-      delegated: ({ executor, receipt }) => createTaskDelegated({ binding, executor, receipt }),
-      send: createTaskSender(task, input.options.toolCallId),
-      session: this.initialSession,
-      task,
-    };
-
-    const output = input.definition.execute(input.toolInput, input.options, taskExec);
-    if (isAsyncIterable(output)) {
-      throw new Error("Background tools cannot return AsyncIterable output.");
-    }
-    const settled = await output;
-    if (isAuthorizationSignal(settled)) return settled;
-    if (isTaskDelegated(settled)) {
-      await deliverTaskCommand(task, {
-        executor: settled.executor,
-        kind: "bind",
-      });
-      record.task = { ...task, executor: settled.executor };
-      record.settled = true;
-      return settled.receipt;
-    }
-
-    await deliverTaskCommand(task, { data: parseJsonValue(settled), kind: "complete" });
     record.settled = true;
-    return settled;
+    return { ...started.receipt, status: "working", taskId: task.task.taskId };
   }
+
+  private async startTask(input: {
+    readonly ctx: ReturnType<typeof loadContext>;
+    readonly emission: ReturnType<typeof getHarnessEmissionState>;
+    readonly input: {
+      readonly batch: BackgroundToolCallBatch;
+      readonly definition: BackgroundExecutableTool;
+      readonly options: ToolExecuteOptions;
+      readonly toolInput: unknown;
+    };
+    readonly record: BackgroundToolExecutionRecord;
+  }): Promise<
+    | {
+        readonly kind: "started";
+        readonly receipt?: { readonly agentId: string };
+        readonly task: BackgroundWorkflowToolRun;
+      }
+    | {
+        readonly kind: "steered";
+        readonly receipt: {
+          readonly agentId: string;
+          readonly taskId: string;
+          readonly status: "working";
+        };
+      }
+  > {
+    const workflow = input.input.definition;
+    let workflowInput = parseWorkflowToolInput(input.input.toolInput, input.input.definition.name);
+    const parentTurnId = activeTurnId(input.emission);
+    let subagentProjection =
+      workflow.nodeId !== undefined
+        ? projectSubagentTask({
+            ctx: input.ctx,
+            input: workflowInput,
+            name: input.input.definition.name,
+            nodeId: workflow.nodeId ?? input.input.definition.name,
+            taskInput: {
+              callId: input.input.options.toolCallId,
+              parentSessionId: this.initialSession.sessionId,
+              parentTurnId,
+            },
+          })
+        : undefined;
+    if (
+      subagentProjection !== undefined &&
+      subagentProjection.identity === undefined &&
+      !hasAgentHandle(this.agentHandleSession, subagentProjection.metadata.agentId)
+    ) {
+      const { agentId: _unknownAgentId, ...freshWorkflowInput } = workflowInput;
+      workflowInput = freshWorkflowInput;
+      subagentProjection = projectSubagentTask({
+        ctx: input.ctx,
+        input: freshWorkflowInput,
+        name: input.input.definition.name,
+        nodeId: workflow.nodeId ?? input.input.definition.name,
+        taskInput: {
+          callId: input.input.options.toolCallId,
+          parentSessionId: this.initialSession.sessionId,
+          parentTurnId,
+        },
+      });
+    }
+    const metadata = subagentProjection?.metadata ?? {
+      kind: "tool" as const,
+      name: input.input.definition.name,
+    };
+    const activityLabel = projectToolStartLabel(input.input.definition, input.input.toolInput);
+    const callbackSession = buildCallbackContext().session;
+    const taskInput = {
+      activityObserver: deriveBackgroundTaskActivityObserver({
+        activityObserver: input.ctx.get(ActivityObserverKey),
+        callId: input.input.options.toolCallId,
+        label: activityLabel,
+        name: metadata.name,
+        parentSessionId: this.initialSession.sessionId,
+        parentTurnId,
+        rootSessionId: this.initialSession.rootSessionId ?? this.initialSession.sessionId,
+      }),
+      callId: input.input.options.toolCallId,
+      dispatchContext: createTaskAgentDispatchContext(input.ctx, callbackSession.auth),
+      metadata,
+      parentSessionId: this.initialSession.sessionId,
+      parentStepIndex: input.emission.stepIndex,
+      parentTurnId,
+      session: this.initialSession,
+    };
+    const prepared = prepareBackgroundTask(taskInput);
+    const task = {
+      ...prepared,
+      task: {
+        ...prepared.task,
+        activityWorkIdentity: taskInput.activityObserver?.workIdentity,
+      },
+    };
+    if (
+      workflow.nodeId !== undefined &&
+      subagentProjection !== undefined &&
+      subagentProjection.identity !== undefined
+    ) {
+      const identity = subagentProjection.identity;
+      const reservation = this.applyAgentHandleCommand({
+        identity: identity.identity,
+        callId: taskInput.callId,
+        kind: "reserve",
+        operationId: identity.operation.id,
+        ownerId: task.task.taskId,
+      });
+      if (reservation.kind !== "ready") {
+        throw new Error(`Agent handle store rejected start operation "${identity.operation.id}".`);
+      }
+      input.record.reservation = {
+        agentId: identity.identity.id,
+        operationId: identity.operation.id,
+      };
+    }
+    if (
+      workflow.nodeId !== undefined &&
+      subagentProjection !== undefined &&
+      subagentProjection.identity === undefined
+    ) {
+      const operationId = deriveAgentOperationId({
+        callId: taskInput.callId,
+        parentSessionId: taskInput.parentSessionId,
+        parentTurnId,
+      });
+      const claim = this.applyAgentHandleCommand({
+        agentId: subagentProjection.metadata.agentId,
+        callId: taskInput.callId,
+        expectedTarget: subagentProjection.metadata.mode,
+        invokedName: subagentProjection.metadata.name,
+        kind: "claim",
+        operationId,
+        ownerId: task.task.taskId,
+      });
+      if (claim.kind === "busy" && claim.handle.phase === "claimed") {
+        const handle = claim.handle;
+        const entry = findBackgroundWorkflowToolRun(this.agentHandleSession.state, handle.ownerId);
+        if (
+          entry?.task.metadata.kind === "subagent" &&
+          entry.task.metadata.agentId === handle.identity.id &&
+          entry.task.metadata.name === handle.identity.name &&
+          entry.task.outcome === undefined
+        ) {
+          await steerBackgroundAgent({
+            ctx: input.ctx,
+            handle,
+            callId: taskInput.callId,
+            input: workflowInput,
+            session: this.agentHandleSession,
+          });
+          return {
+            kind: "steered",
+            receipt: { agentId: handle.identity.id, taskId: entry.task.taskId, status: "working" },
+          };
+        }
+      }
+      if (!readClaimedHandle(claim)) {
+        throwAgentClaimError(subagentProjection.metadata.agentId, claim);
+      } else {
+        input.record.claim = {
+          operationId,
+          taskId: task.task.taskId,
+        };
+      }
+    }
+    await startTaskRun({
+      activityObserver: taskInput.activityObserver,
+      initialView: { metadata: task.task.metadata, status: "working", taskId: task.task.taskId },
+      parentContinuationToken: sessionCommandHookToken(this.initialSession.sessionId),
+      taskInboxToken: task.address.hookToken,
+      workflow: {
+        agents: resolveWorkflowAgentMetadata(input.ctx),
+        callId: taskInput.callId,
+        executeInput: workflow.executeInput?.(workflowInput),
+        input: workflowInput,
+        session: callbackSession,
+        stepIndex: input.emission.stepIndex,
+        toolName: input.input.definition.name,
+        workflowId: workflow.workflowId,
+      },
+    });
+    const owner = await waitForTaskCommandOwner({ taskInboxToken: task.address.hookToken });
+    const backgroundTask = {
+      ...task,
+      address: { ...task.address, runId: owner.runId },
+    };
+    input.record.task = backgroundTask;
+    if (workflow.nodeId === undefined) {
+      return { kind: "started", task: backgroundTask };
+    }
+
+    if (subagentProjection === undefined) {
+      return { kind: "started", task: backgroundTask };
+    }
+    return { kind: "started", receipt: subagentProjection.receipt, task: backgroundTask };
+  }
+
+  private applyAgentHandleCommand(command: AgentHandleStoreCommand): AgentHandleStoreCommandResult {
+    const applied = applyTaskAgentHandleCommand(this.agentHandleSession, command);
+    if (applied.session !== this.agentHandleSession) {
+      this.agentHandleSession = applied.session;
+      this.agentHandlesChanged = true;
+    }
+    return applied.result;
+  }
+
+  private async compensate(
+    records: readonly BackgroundToolExecutionRecord[],
+    cause: unknown,
+  ): Promise<void> {
+    const failures: unknown[] = [];
+    for (const record of records.toReversed()) {
+      if (record.task !== undefined) {
+        try {
+          await rejectDelegatedDispatch({
+            error: {
+              code: "PARENT_STEP_FAILED",
+              message: cause instanceof Error ? cause.message : String(cause),
+            },
+            task: record.task,
+          });
+        } catch (error) {
+          failures.push(error);
+        }
+      }
+      if (record.claim !== undefined) {
+        this.applyAgentHandleCommand({ kind: "release-owner", ownerId: record.claim.taskId });
+      }
+      if (record.reservation !== undefined && record.task !== undefined) {
+        this.applyAgentHandleCommand({
+          agentId: record.reservation.agentId,
+          kind: "remove",
+          ownerId: record.task.task.taskId,
+        });
+      }
+    }
+    if (failures.length > 0) {
+      throw new AggregateError(
+        [cause, ...failures],
+        "Background tool execution failed and its tasks could not all be rejected.",
+        { cause },
+      );
+    }
+  }
+}
+
+function hasAgentHandle(session: HarnessSession, agentId: string): boolean {
+  return (
+    getAgentHandleStore(session.state)?.handles.some((handle) => handle.identity.id === agentId) ===
+    true
+  );
 }
 
 function requireExecutionScope(executor: BackgroundToolExecutor): BackgroundToolExecutionScope {
@@ -280,80 +545,35 @@ function requireExecutionScope(executor: BackgroundToolExecutor): BackgroundTool
   return executor;
 }
 
-async function deliverTaskCommand(
-  task: BackgroundTask,
-  command: Parameters<typeof sendTaskCommand>[0]["command"],
-): Promise<void> {
-  const outcome = await sendTaskCommand({ command, taskInboxToken: task.taskInboxToken });
-  if (outcome !== "delivered") {
-    throw new Error(`Task run "${task.taskId}" did not accept "${command.kind}".`);
-  }
+function readClaimedHandle(result: AgentHandleStoreCommandResult): boolean {
+  return result.kind === "ready" && result.handle?.phase === "claimed";
 }
 
-function createTaskSender(
-  task: BackgroundTask,
-  callId: string,
-): (command: TaskSendCommand) => Promise<void> {
-  let nextUpdateIndex = 0;
-  return async (command) => {
-    if (command.kind !== "update") {
-      await deliverTaskCommand(task, command);
-      return;
-    }
-
-    const payload: TaskInboundUpdate = {
-      callId,
-      kind: "task-update",
-      message: command.message,
-      updateEpoch: task.taskId,
-      updateIndex: nextUpdateIndex++,
-    };
-    const outcome = await sendTaskInboundPayload({
-      payload,
-      taskInboxToken: task.taskInboxToken,
-    });
-    if (outcome !== "delivered") {
-      throw new Error(`Task run "${task.taskId}" did not accept "${command.kind}".`);
-    }
-  };
-}
-
-async function compensateBackgroundToolExecution(
-  records: readonly BackgroundToolExecutionRecord[],
-  cause: unknown,
-  bundle: CompiledBundle | undefined,
-): Promise<void> {
-  const failures: unknown[] = [];
-  for (const record of records.toReversed()) {
-    if (record.task === undefined) continue;
-    try {
-      await rejectDelegatedDispatch({
-        error: {
-          code: "PARENT_STEP_FAILED",
-          message: cause instanceof Error ? cause.message : String(cause),
-        },
-        task: record.task,
-      });
-    } catch (error) {
-      failures.push(error);
-    }
-    // Reject first so the task is terminal and a late child result cannot
-    // revive it, then best-effort abort the already-dispatched child using
-    // the address carried on its durable executor binding.
-    const subagent = readSubagentExecutor(record.task.executor);
-    if (subagent !== undefined) {
-      await propagateSubagentExecutorCancel({
-        bundle,
-        executor: subagent,
-        taskId: record.task.taskId,
-      });
-    }
-  }
-  if (failures.length > 0) {
-    throw new AggregateError(
-      [cause, ...failures],
-      "Background tool execution failed and its tasks could not all be rejected.",
-      { cause },
+function throwAgentClaimError(agentId: string, result: AgentHandleStoreCommandResult): never {
+  if (result.kind === "mismatch") {
+    throw new Error(
+      JSON.stringify({
+        code: AGENT_MISMATCH,
+        message: `Agent "${agentId}" no longer matches this subagent definition. Start a new agent instead.`,
+      }),
     );
   }
+  if (result.kind === "busy") {
+    throw new Error(
+      JSON.stringify({
+        code: AGENT_BUSY,
+        message: formatAgentBusyMessage({
+          agentId,
+          agentName: result.handle.identity.name,
+          ownerId: "ownerId" in result.handle ? result.handle.ownerId : undefined,
+        }),
+      }),
+    );
+  }
+  throw new Error(
+    JSON.stringify({
+      code: AGENT_UNREACHABLE,
+      message: `Agent with id "${agentId}" is no longer reachable.`,
+    }),
+  );
 }

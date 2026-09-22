@@ -42,6 +42,7 @@ export interface TestAppDescriptor {
     readonly limits?: {
       readonly maxInputTokensPerSession?: number | false;
       readonly maxOutputTokensPerSession?: number | false;
+      readonly maxTokenCostUsdPerSession?: number | false;
       readonly sessionTimeoutMs?: number | false;
     };
     readonly model?: string;
@@ -184,6 +185,7 @@ export async function createTestRuntime(descriptor: TestAppDescriptor = {}): Pro
     Object.assign(compileInput, {
       tools: descriptor.tools.map((tool) => ({
         name: tool.name,
+        label: tool.label?.start === undefined ? undefined : { start: tool.label.start },
         description: tool.description,
         execute: tool.execute,
         inputSchema: serializeInputSchema(tool.inputSchema),

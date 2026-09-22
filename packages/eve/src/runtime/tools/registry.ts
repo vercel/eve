@@ -2,6 +2,14 @@ import { RuntimeRegistry } from "#internal/runtime-registry.js";
 import type { PreparedRuntimeAuthoredTool } from "#runtime/sessions/turn.js";
 import type { ResolvedToolDefinition } from "#runtime/types.js";
 import { serializeInputSchema, serializeOutputSchema } from "#tools/schema.js";
+import { AGENT_TOOL_NAME } from "#tools/framework/agent-contract.js";
+import { ROOT_RUNTIME_AGENT_NODE_ID } from "#runtime/graph.js";
+import { subagentToolExecuteWorkflowReference } from "#runtime/subagents/workflow-reference.js";
+import type {
+  CompiledToolBehavior,
+  PreparedToolBehavior,
+  PreparedToolHandling,
+} from "#tools/behavior.js";
 
 /**
  * One executable authored tool tracked by the runtime-owned registry.
@@ -28,6 +36,7 @@ export async function createRuntimeToolRegistry(
     readonly tools: readonly ResolvedToolDefinition[];
   },
   input: {
+    readonly nodeId?: string;
     readonly reservedToolNames?: readonly string[];
   } = {},
 ): Promise<RuntimeToolRegistry> {
@@ -38,7 +47,7 @@ export async function createRuntimeToolRegistry(
   );
 
   for (const toolDefinition of definitions.tools) {
-    const prepared = await createPreparedRuntimeTool(toolDefinition);
+    const prepared = await createPreparedRuntimeTool(toolDefinition, input.nodeId);
     registry.register(
       toolDefinition.name,
       { definition: toolDefinition, prepared },
@@ -72,15 +81,87 @@ export function findRegisteredRuntimeTool(
 
 async function createPreparedRuntimeTool(
   definition: ResolvedToolDefinition,
+  nodeId: string | undefined,
 ): Promise<PreparedRuntimeAuthoredTool> {
+  const isSelfAgent =
+    definition.behavior?.handling?.kind === "dispatch" &&
+    definition.behavior.handling.action === "self-agent";
+  const workflowId = isSelfAgent
+    ? subagentToolExecuteWorkflowReference.workflowId
+    : definition.behavior?.handling?.kind === "workflow-tool"
+      ? definition.behavior.handling.workflowId
+      : undefined;
   return {
+    availableInSubagents: definition.availableInSubagents,
+    behavior: prepareToolBehavior(
+      definition.behavior,
+      nodeId,
+      isSelfAgent ? subagentToolExecuteWorkflowReference.workflowId : undefined,
+    ),
     description: definition.description,
+    execution: definition.execution,
     inputSchema: serializeInputSchema(definition.inputSchema),
     kind: "authored-tool",
     logicalPath: definition.logicalPath,
     name: definition.name,
     owner: definition.owner,
     outputSchema: serializeOutputSchema(definition.outputSchema),
+    rootOnly: isSelfAgent || undefined,
     sourceId: definition.sourceId,
+    task:
+      workflowId === undefined
+        ? undefined
+        : isSelfAgent
+          ? {
+              nodeId: ROOT_RUNTIME_AGENT_NODE_ID,
+
+              workflowId,
+            }
+          : { workflowId },
+  };
+}
+
+function prepareToolBehavior(
+  behavior: CompiledToolBehavior | undefined,
+  nodeId: string | undefined,
+  workflowIdOverride?: string,
+): PreparedToolBehavior | undefined {
+  if (behavior === undefined) return undefined;
+
+  let handling: PreparedToolHandling | undefined;
+  if (workflowIdOverride !== undefined && nodeId !== undefined) {
+    handling = {
+      kind: "dispatch",
+      target: { kind: "self-agent-call", nodeId, subagentName: AGENT_TOOL_NAME },
+    };
+  } else if (behavior.handling?.kind === "dispatch") {
+    if (behavior.handling.action === "self-agent" && nodeId === undefined) {
+      throw new Error("The self-agent tool requires a concrete runtime node id.");
+    }
+    const target =
+      behavior.handling.action === "self-agent"
+        ? {
+            kind: "self-agent-call" as const,
+            nodeId: nodeId!,
+            subagentName: AGENT_TOOL_NAME,
+          }
+        : { kind: behavior.handling.action };
+    handling = { kind: "dispatch", target };
+  } else if (behavior.handling?.kind === "workflow-tool") {
+    handling = {
+      kind: "dispatch",
+      target: {
+        kind: "workflow-tool-call",
+        workflowId: workflowIdOverride ?? behavior.handling.workflowId,
+      },
+    };
+  } else {
+    handling = behavior.handling;
+  }
+
+  return {
+    availability: behavior.availability,
+    handling,
+    presentation: behavior.presentation,
   };
 }

@@ -107,16 +107,39 @@ describe("startAuthoredSourceWatcher", () => {
     const watcher = await startAuthoredSourceWatcher({ coordinator, preparedHost: host });
 
     try {
-      await watcher.suspend();
+      await watcher.suspend("setup");
       mockedWatcher.emit("change", join(host.appRoot, "package.json"));
       await vi.advanceTimersByTimeAsync(200);
       expect(coordinator.rebuild).not.toHaveBeenCalled();
 
-      await watcher.resume();
+      await watcher.resume("setup");
       expect(coordinator.rebuild).toHaveBeenCalledOnce();
       expect(coordinator.rebuild).toHaveBeenCalledWith({
         changedPaths: [join(host.appRoot, "package.json")],
       });
+    } finally {
+      await watcher.close();
+    }
+  });
+
+  it("keeps nested holders suspended and releases each lease idempotently", async () => {
+    const host = await createPreparedHost();
+    const coordinator = createCoordinator(host);
+    const watcher = await startAuthoredSourceWatcher({ coordinator, preparedHost: host });
+
+    try {
+      await watcher.suspend("first");
+      await watcher.suspend("second");
+      await watcher.suspend("second");
+
+      await watcher.resume("first");
+      expect(coordinator.rebuild).not.toHaveBeenCalled();
+
+      await watcher.resume("second");
+      expect(coordinator.rebuild).toHaveBeenCalledOnce();
+
+      await watcher.resume("second");
+      expect(coordinator.rebuild).toHaveBeenCalledOnce();
     } finally {
       await watcher.close();
     }
@@ -203,7 +226,7 @@ describe("startAuthoredSourceWatcher", () => {
     }
   });
 
-  it("watches root config, provider selection, env, workspace lockfiles, and tsconfig extends", async () => {
+  it("watches authored config and environment files but excludes connection metadata", async () => {
     const workspaceRoot = await mkdtemp(join(tmpdir(), "eve-dev-watch-root-"));
     const appRoot = join(workspaceRoot, "apps", "watch-agent");
     temporaryDirectories.push(workspaceRoot);
@@ -225,7 +248,10 @@ describe("startAuthoredSourceWatcher", () => {
       const paths = getInitialWatchPaths();
       expect(paths).toContain(join(appRoot, "package.json"));
       expect(paths).toContain(join(appRoot, ".env.local"));
-      expect(paths).toContain(join(appRoot, ".eve", "provider.json"));
+      expect(paths).not.toContain(join(appRoot, ".eve", "provider.json"));
+      expect(
+        mockedWatcher.watch.mock.calls[0]?.[1]?.ignored?.(join(appRoot, ".eve", "provider.json")),
+      ).toBe(true);
       expect(paths).toContain(join(workspaceRoot, "pnpm-lock.yaml"));
       expect(paths).toContain(join(workspaceRoot, "tsconfig.base.json"));
     } finally {

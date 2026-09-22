@@ -1,28 +1,24 @@
-import { getRuntimeActionResultKey } from "#runtime/actions/keys.js";
 import type { RuntimeActionResult } from "#shared/action-types.js";
 
-/** Returns results in pending-key order once every requested action has completed. */
-export function resolveRuntimeActionResultsForKeys<TResult extends RuntimeActionResult>(input: {
-  readonly pendingKeys: readonly string[];
+/** Returns results in pending-call order once every requested call has completed. */
+export function resolveRuntimeActionResultsForCallIds<TResult extends RuntimeActionResult>(input: {
+  readonly pendingCallIds: readonly string[];
   readonly results: readonly TResult[];
 }): TResult[] | undefined {
-  const pendingKeySet = new Set(input.pendingKeys);
-  const resultsByKey = new Map<string, TResult>();
+  const pendingCallIdSet = new Set(input.pendingCallIds);
+  const resultsByCallId = new Map<string, TResult>();
 
   for (const result of input.results) {
-    const key = getRuntimeActionResultKey(result);
-
-    if (!pendingKeySet.has(key)) {
+    if (!pendingCallIdSet.has(result.callId)) {
       continue;
     }
-
-    resultsByKey.set(key, result);
+    resultsByCallId.set(result.callId, result);
   }
 
   const orderedResults: TResult[] = [];
 
-  for (const key of input.pendingKeys) {
-    const result = resultsByKey.get(key);
+  for (const callId of input.pendingCallIds) {
+    const result = resultsByCallId.get(callId);
 
     if (result === undefined) {
       return undefined;

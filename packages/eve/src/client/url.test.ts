@@ -15,6 +15,12 @@ describe("createClientUrl", () => {
     );
   });
 
+  it("maps internal routes onto an absolute compact named-agent mount", () => {
+    expect(createClientUrl("https://app.example.com/eve/support", "/eve/v1/session")).toBe(
+      "https://app.example.com/eve/support/v1/session",
+    );
+  });
+
   it("preserves host query parameters on agent routes", () => {
     expect(
       createClientUrl(
@@ -36,6 +42,10 @@ describe("createClientUrl", () => {
 
   it("supports same-origin proxy prefixes", () => {
     expect(createClientUrl("/api", "/eve/v1/session")).toBe("/api/eve/v1/session");
+  });
+
+  it("maps internal routes onto a same-origin compact named-agent mount", () => {
+    expect(createClientUrl("/eve/support", "/eve/v1/session")).toBe("/eve/support/v1/session");
   });
 
   it("adds query parameters without forcing an absolute URL", () => {

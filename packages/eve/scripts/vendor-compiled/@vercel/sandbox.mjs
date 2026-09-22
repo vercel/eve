@@ -16,14 +16,9 @@ async function discoverDeclarationFiles({ distDir }) {
     .map((file) => ({ source: file, output: file }));
 }
 
-/**
- * Copy the complete declaration tree from the installed SDK so every Vercel
- * Sandbox version bump updates eve's public option types automatically.
- * Bare type dependencies are redirected to existing vendored declarations
- * or local stubs, while Node built-ins remain external.
- */
+/** Copy the complete stable Sandbox declaration tree for public types and runtime loading. */
 export default {
-  packageName: "@vercel/sandbox-drives",
+  packageName: "@vercel/sandbox",
   packageJsonName: "@vercel/sandbox",
   compiledPath: "@vercel/sandbox",
   plugins: [createOptionalNativeStubPlugin(["fsevents"])],

@@ -8,6 +8,7 @@ export type TemplateIntegration =
   | "GitHub"
   | "HTTP API"
   | "Linear"
+  | "Mux"
   | "Notion"
   | "Resend"
   | "Sanity"
@@ -49,25 +50,26 @@ export const templateManifest: TemplateManifestEntry[] = [
     slug: "eve-chat-template",
     title: "Chat",
     setupPrompt:
-      "Set up the eve chat template in my current workspace using https://github.com/vercel/eve-examples/tree/main/eve-chat-template as the source. Copy the project files, install its dependencies, and follow the repository README to configure it. Preserve the existing project if the workspace is not empty, and tell me about any required environment variables or manual setup steps.",
+      "Set up the eve chat template in my current workspace using https://github.com/vercel/eve/tree/main/apps/templates/eve-chat-template as the source. Copy the project files, install its dependencies, and follow the repository README to configure it. Preserve the existing project if the workspace is not empty, and tell me about any required environment variables or manual setup steps.",
     description:
-      "A persisted Next.js chat template for eve, built with shadcn/ui, Tailwind CSS, Streamdown, Better Auth, Drizzle, Neon, and Upstash Redis.",
-    sourceHref: "https://github.com/vercel/eve-examples/tree/main/eve-chat-template",
+      "A persisted Next.js chat template for eve, with per-user long-term memory, Better Auth, Drizzle, Neon, and Upstash Redis.",
+    sourceHref: "https://github.com/vercel/eve/tree/main/apps/templates/eve-chat-template",
     category: "Chat",
     model: "anthropic/claude-sonnet-5",
     integrations: ["Web chat", "Slack"],
     source: "Vercel Templates",
     github: {
       owner: "vercel",
-      repo: "eve-examples",
+      repo: "eve",
       ref: "main",
-      pathPrefix: "eve-chat-template",
+      pathPrefix: "apps/templates/eve-chat-template",
     },
     files: [
       "agent/agent.ts",
       "agent/channels/eve.ts",
       "agent/channels/slack.ts",
       "agent/instructions.md",
+      "agent/memory/profile.ts",
       "agent/skills/plan_a_trip.md",
       "agent/tools/get_weather.ts",
     ],
@@ -76,19 +78,19 @@ export const templateManifest: TemplateManifestEntry[] = [
     slug: "eve-llm-council-template",
     title: "LLM council",
     setupPrompt:
-      "Set up the LLM council template in my current workspace using https://github.com/vercel/eve-examples/tree/main/eve-llm-council-template as the source. Copy the project files, install its dependencies, and follow the repository README to configure it. Preserve the existing project if the workspace is not empty, and tell me about any required environment variables or manual setup steps.",
+      "Set up the LLM council template in my current workspace using https://github.com/vercel/eve/tree/main/apps/templates/eve-llm-council-template as the source. Copy the project files, install its dependencies, and follow the repository README to configure it. Preserve the existing project if the workspace is not empty, and tell me about any required environment variables or manual setup steps.",
     description:
       "A Next.js LLM council that sends one prompt to four models in parallel, streams their answers, and asks a judge model for a concise answer with per-model agreement scores.",
-    sourceHref: "https://github.com/vercel/eve-examples/tree/main/eve-llm-council-template",
+    sourceHref: "https://github.com/vercel/eve/tree/main/apps/templates/eve-llm-council-template",
     category: "Example",
     model: "anthropic/claude-opus-5",
     integrations: ["Web chat"],
     source: "Vercel Templates",
     github: {
       owner: "vercel",
-      repo: "eve-examples",
+      repo: "eve",
       ref: "main",
-      pathPrefix: "eve-llm-council-template",
+      pathPrefix: "apps/templates/eve-llm-council-template",
     },
     files: [
       "agent/agent.ts",
@@ -132,19 +134,19 @@ export const templateManifest: TemplateManifestEntry[] = [
     slug: "eve-slack-agent",
     title: "Slack",
     setupPrompt:
-      "Set up the eve Slack agent template in my current workspace using https://github.com/vercel/eve-examples/tree/main/eve-slack-agent-template as the source. Copy the project files, install its dependencies, and follow the repository README to configure it. Preserve the existing project if the workspace is not empty, and tell me about any required environment variables or manual setup steps.",
+      "Set up the eve Slack agent template in my current workspace using https://github.com/vercel/eve/tree/main/apps/templates/eve-slack-agent-template as the source. Copy the project files, install its dependencies, and follow the repository README to configure it. Preserve the existing project if the workspace is not empty, and tell me about any required environment variables or manual setup steps.",
     description:
       "A Slack agent template with webhook handling, Vercel Connect, a starter agent, and an example tool ready to deploy on Vercel.",
-    sourceHref: "https://github.com/vercel/eve-examples/tree/main/eve-slack-agent-template",
+    sourceHref: "https://github.com/vercel/eve/tree/main/apps/templates/eve-slack-agent-template",
     category: "Collaboration",
     model: "anthropic/claude-sonnet-5",
     integrations: ["Slack"],
     source: "Vercel Templates",
     github: {
       owner: "vercel",
-      repo: "eve-examples",
+      repo: "eve",
       ref: "main",
-      pathPrefix: "eve-slack-agent-template",
+      pathPrefix: "apps/templates/eve-slack-agent-template",
     },
     files: [
       "agent/agent.ts",
@@ -313,6 +315,32 @@ export const templateManifest: TemplateManifestEntry[] = [
       "agent/subagents/researcher/agent.ts",
       "agent/subagents/reviewer/agent.ts",
       "agent/tools/lint_against_style.ts",
+    ],
+  },
+  {
+    slug: "mux-video-agent",
+    title: "Mux video",
+    setupPrompt:
+      "Set up the Mux Video Agent template in my current workspace using https://github.com/muxinc/mux-video-agent as the source. Copy the project files, install its dependencies, and follow the repository README to configure it. Preserve the existing project if the workspace is not empty, and tell me about the required Mux credentials, AI Gateway setup, and manual deployment steps.",
+    description:
+      "A durable video agent that creates and inspects Mux assets, makes clips, and runs supported Mux Robots workflows with human approval for write actions.",
+    sourceHref: "https://github.com/muxinc/mux-video-agent",
+    category: "Example",
+    model: "openai/gpt-5.6-luna",
+    integrations: ["Mux"],
+    source: "GitHub",
+    github: { owner: "muxinc", repo: "mux-video-agent", ref: "main" },
+    files: [
+      "agent/agent.ts",
+      "agent/channels/eve.ts",
+      "agent/extensions/mux_video.ts",
+      "agent/instructions.md",
+      "packages/eve-video/extension/extension.ts",
+      "packages/eve-video/extension/instructions.md",
+      "packages/eve-video/extension/skills/workflows/SKILL.md",
+      "packages/eve-video/extension/tools/create_asset.ts",
+      "packages/eve-video/extension/tools/create_clip.ts",
+      "packages/eve-video/extension/tools/run_workflow.ts",
     ],
   },
   {

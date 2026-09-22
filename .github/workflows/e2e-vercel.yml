@@ -36,7 +36,7 @@ jobs:
           fi
           # HEAD is the PR merge commit; HEAD^1 is the base branch tip, so
           # this diff is exactly the PR's changed files.
-          if git diff --name-only HEAD^1 HEAD | grep -qE '^(packages/eve/|apps/fixtures/|e2e/|pnpm-workspace\.yaml$|pnpm-lock\.yaml$|scripts/build-profile-report\.mjs$|\.github/workflows/e2e-vercel\.yml$|\.github/scripts/discover-e2e-fixtures\.mjs$)'; then
+          if git diff --name-only HEAD^1 HEAD | grep -qE '^(packages/eve/|apps/fixtures/|e2e/|pnpm-workspace\.yaml$|pnpm-lock\.yaml$|scripts/build-profile-report\.mjs$|scripts/workflow-stress-report\.(mjs|test\.mjs)$|\.github/workflows/e2e-vercel\.yml$|\.github/scripts/discover-e2e-fixtures\.mjs$)'; then
             echo "relevant=true" >> "$GITHUB_OUTPUT"
           else
             echo "relevant=false" >> "$GITHUB_OUTPUT"
@@ -77,6 +77,7 @@ jobs:
     env:
       EVE_E2E_MODEL: mock
       EVE_EVAL_JUNIT_DIR: ${{ github.workspace }}/.junit
+      EVE_SANDBOX_IMAGE_TAG: latest
       VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
       VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
       VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
@@ -121,6 +122,10 @@ jobs:
           pnpm --filter "./e2e/fixtures/*-extension" run --if-present build
           pnpm --filter dist-extensions update gizmo-extension gadget-extension
 
+      - name: Test Workflow stress reporting
+        if: needs.changes.outputs.relevant == 'true' && matrix.name == 'agent-workflow-stress'
+        run: node --test scripts/workflow-stress-report.test.mjs
+
       - name: Stage workspace extension fixtures as dist-only
         if: needs.changes.outputs.relevant == 'true'
         # Removing author source proves the deployment consumes the same
@@ -152,6 +157,7 @@ jobs:
 
           pnpm exec vc link --yes --project "$VERCEL_PROJECT_ID" "${team_args[@]}" "${token_args[@]}"
           pnpm exec vc env pull --yes --environment=preview "${token_args[@]}"
+          VERCEL_OIDC_TOKEN="$(node --env-file=.env.local -p 'process.env.VERCEL_OIDC_TOKEN ?? ""')"
           # Sandbox templates key on VERCEL_PROJECT_ID (present at build and
           # runtime). Do not add VERCEL_TEAM_ID: it does not exist at runtime,
           # so the deployed function could not resolve a team-scoped template.
@@ -161,8 +167,30 @@ jobs:
             VERCEL_PROJECT_ID="$VERCEL_PROJECT_ID" \
             pnpm exec eve build --profile "$EVE_BUILD_PROFILE"
           DEPLOYMENT_URL="$(pnpm exec vc deploy --prebuilt --yes --target=preview \
-            --env "EVE_E2E_MODEL=$EVE_E2E_MODEL" "${token_args[@]}" | tail -n 1)"
+            --env "EVE_E2E_MODEL=$EVE_E2E_MODEL" \
+            --env "EVE_SANDBOX_IMAGE_TAG=$EVE_SANDBOX_IMAGE_TAG" \
+            "${token_args[@]}" | tail -n 1)"
 
+          wait_for_target() {
+            local target="$1"
+            local attempt status
+            for attempt in $(seq 1 15); do
+              status="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' \
+                --header "Authorization: Bearer $VERCEL_OIDC_TOKEN" \
+                --header "x-vercel-trusted-oidc-idp-token: $VERCEL_OIDC_TOKEN" \
+                --max-time 3 "$target/eve/v1/health" || true)"
+              if [ "$status" = "200" ]; then
+                echo "Eval target ready: $target (attempt $attempt)"
+                return 0
+              fi
+              echo "Eval target not ready: $target (attempt $attempt/15, health status ${status:-transport-error})"
+              sleep 1
+            done
+            echo "Timed out waiting for eval target health: $target (last health status ${status:-transport-error})" >&2
+            return 1
+          }
+
+          wait_for_target "$DEPLOYMENT_URL"
           npx eve eval --strict --verbose --exclude-tag real-model \
             --url "$DEPLOYMENT_URL" \
             --junit "$EVE_EVAL_JUNIT_DIR/${{ matrix.name }}.xml"
@@ -177,6 +205,7 @@ jobs:
             # vc alias does not infer the team from the project link the way
             # link/deploy do, so pass the scope explicitly.
             pnpm exec vc alias set "$DEPLOYMENT_URL" "$ALIAS" "${token_args[@]}" "${scope_args[@]}"
+            wait_for_target "https://$ALIAS"
             EVE_E2E_REDEPLOY_ALIAS="$ALIAS" \
               npx eve eval --tag redeploy --strict --verbose --exclude-tag real-model \
               --url "https://$ALIAS" \
@@ -195,6 +224,28 @@ jobs:
             --sandbox-prewarm included \
             --require-phase sandbox.prewarm \
             --output-format build-time
+
+      - name: Report Workflow stress performance
+        if: success() && needs.changes.outputs.relevant == 'true' && matrix.name == 'agent-workflow-stress'
+        run: |
+          node ./scripts/workflow-stress-report.mjs \
+            --artifacts e2e/fixtures/agent-workflow-stress/.eve/evals \
+            --json .artifacts/workflow-stress-report.json \
+            --markdown .artifacts/workflow-stress-report.md
+          cat .artifacts/workflow-stress-report.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload Workflow stress performance
+        if: success() && needs.changes.outputs.relevant == 'true' && matrix.name == 'agent-workflow-stress'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: workflow-stress-performance
+          path: |
+            .artifacts/workflow-stress-report.json
+            .artifacts/workflow-stress-report.md
+            e2e/fixtures/agent-workflow-stress/.eve/evals
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 30
 
       - name: Upload eval artifacts
         if: (failure()) && needs.changes.outputs.relevant == 'true'

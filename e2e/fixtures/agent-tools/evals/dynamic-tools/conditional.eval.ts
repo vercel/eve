@@ -10,12 +10,13 @@ export default defineEval({
     const first = await t.send(
       "Use the `check_stability` tool and tell me the branch and invocations values.",
     );
+    const session = first.session;
     first.expectOk();
     first.calledTool("check_stability", {
       output: { branch: "first" },
     });
 
-    const second = await t.send(
+    const second = await session.send(
       "Use the `check_stability` tool to check stability. Call it now and report the branch and invocations values.",
     );
     second.calledTool("check_stability", {

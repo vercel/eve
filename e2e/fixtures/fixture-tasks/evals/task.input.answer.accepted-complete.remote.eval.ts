@@ -5,15 +5,22 @@ import {
   requireTaskView,
   waitForCompletedTask,
   waitForTaskInput,
+  waitForTaskNotification,
 } from "./shared.js";
 import { defineTaskEval } from "./task-transition.js";
 
 const REMOTE_PRINCIPAL_MARKER = "C8-REMOTE-PRINCIPAL:user:remote-http-child";
 
-/** A remote task's HITL answer must use its persisted HTTP child route. */
+/**
+ * Also covers the /eve/v1 callback-prefix regression (#3047): vercel.json
+ * mounts this fixture at /eve/v1. Both the input request and completion must
+ * reach the parent through its generated callback URL. A doubled /eve/v1 prefix
+ * prevents these deliveries. The build scenario checks the prefix itself;
+ * this eval checks the remote round trip through the public event stream.
+ */
 export default defineTaskEval({
   description:
-    "A loopback remote child surfaces HITL and resumes over its remote response route with the remote transport principal intact.",
+    "A remote child delivers HITL and completion through /eve/v1/callback/* and resumes with its HTTP principal intact.",
   transition: {
     primary: "task.input.answer.accepted-complete",
     dimensions: { transport: "remote" },
@@ -22,17 +29,25 @@ export default defineTaskEval({
     const started = await t.send("TASK-C8-REMOTE-HITL");
     started.expectOk();
     started.messageIncludes("TASK-C8-STARTED");
-    started.event("subagent.completed", {
+    started.event("action.result", {
       count: 1,
       data: {
-        backgroundTask: { status: "working" },
-        callId: "task-c8-remote-worker",
-        subagentName: "remote-loopback",
+        result: {
+          kind: "tool-result",
+          output: { status: "working" },
+          callId: "task-c8-remote-worker",
+          toolName: "remote-loopback",
+        },
       },
     });
     const taskId = requireBackgroundTaskId(started);
 
-    const gate = await waitForTaskInput(t, t, "remote_gate");
+    t.event("input.requested", {
+      count: 1,
+      data: { requests: [{ action: { toolName: "remote_gate" } }] },
+    }).label("remote input callback reaches the parent");
+    t.log("Waiting for the remote input callback to reach the parent.");
+    const gate = await waitForTaskInput(t, started.session, "remote_gate");
     const answered = await gate.session.respond([
       {
         optionId: "approve",
@@ -52,7 +67,26 @@ export default defineTaskEval({
     );
     answered.noFailedActions();
 
-    const terminal = await waitForCompletedTask(t, gate.session, "TASK-C8-REMOTE-VERIFY", taskId);
+    t.eventsSatisfy("remote completion callback reaches the parent", (events) =>
+      events.some(
+        (event) =>
+          event.type === "message.received" &&
+          messageText(event.data.message).includes(`Background task ${taskId}`) &&
+          messageText(event.data.message).includes(REMOTE_PRINCIPAL_MARKER),
+      ),
+    );
+    t.log("Waiting for the remote completion callback to reach the parent.");
+    const completed = await waitForTaskNotification(t, gate.session, taskId, "completed", [
+      answered,
+    ]);
+    completed.turn.expectOk();
+
+    const terminal = await waitForCompletedTask(
+      t,
+      completed.session,
+      "TASK-C8-REMOTE-VERIFY",
+      taskId,
+    );
     terminal.expectOk();
     const view = requireTaskView(terminal.requireToolCall("task_cancel").output, taskId);
     await t.require(
@@ -60,22 +94,18 @@ export default defineTaskEval({
       satisfies(
         (task: Record<string, unknown>) =>
           Reflect.get(task, "status") === "completed" &&
-          hasRemoteMetadata(task) &&
+          hasRemoteSubagentMetadata(task) &&
           hasRemotePrincipalOutput(task),
-        "completed remote task retains remote mode and the HTTP child principal",
+        "completed remote task retains subagent identity and the HTTP child principal",
       ),
     );
 
-    t.event("input.requested", {
-      count: 1,
-      data: { requests: [{ action: { toolName: "remote_gate" } }] },
-    });
     t.notEvent("authorization.required");
     t.noFailedActions();
   },
 });
 
-function hasRemoteMetadata(task: Record<string, unknown>): boolean {
+function hasRemoteSubagentMetadata(task: Record<string, unknown>): boolean {
   const metadata = Reflect.get(task, "metadata");
   return (
     metadata !== null &&

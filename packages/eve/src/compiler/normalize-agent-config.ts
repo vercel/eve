@@ -82,18 +82,24 @@ export async function compileAgentConfig(
       model?: CompiledRuntimeModelReference;
       thresholdPercent?: number;
     };
+    defaultTools?: boolean;
     description?: string;
     experimental?: CompiledAgentDefinition["experimental"];
     name: string;
     outputSchema?: JsonObject;
     reasoning?: CompiledAgentDefinition["reasoning"];
     source: ModuleSourceRef;
+    tool?: boolean;
     limits?: CompiledAgentDefinition["limits"];
   } = {
     compaction,
     name: manifest.agentId,
     source: { ...configModule },
   };
+
+  if (definition.defaultTools !== undefined) {
+    compiledConfig.defaultTools = definition.defaultTools;
+  }
 
   if (definition.description !== undefined) {
     compiledConfig.description = definition.description;
@@ -132,10 +138,15 @@ export async function compileAgentConfig(
     compiledConfig.reasoning = definition.reasoning;
   }
 
+  if (definition.tool !== undefined) {
+    compiledConfig.tool = definition.tool;
+  }
+
   if (definition.limits !== undefined) {
     compiledConfig.limits = {
       maxInputTokensPerSession: definition.limits.maxInputTokensPerSession,
       maxOutputTokensPerSession: definition.limits.maxOutputTokensPerSession,
+      maxTokenCostUsdPerSession: definition.limits.maxTokenCostUsdPerSession,
       sessionTimeoutMs: definition.limits.sessionTimeoutMs,
     };
   }
@@ -176,16 +187,10 @@ function normalizeExperimentalDefinition(
 
   const compiledExperimental: Mutable<NonNullable<CompiledAgentDefinition["experimental"]>> = {};
 
-  if (experimental.instrumentationProviders !== undefined) {
-    compiledExperimental.instrumentationProviders = experimental.instrumentationProviders;
-  }
-
-  if (experimental.tasks !== undefined) {
-    compiledExperimental.tasks = experimental.tasks;
-  }
-
   if (experimental.workflow !== undefined) {
     compiledExperimental.workflow = {
+      modelCallsPerStep: experimental.workflow.modelCallsPerStep,
+      retention: experimental.workflow.retention,
       world: experimental.workflow.world,
     };
   }

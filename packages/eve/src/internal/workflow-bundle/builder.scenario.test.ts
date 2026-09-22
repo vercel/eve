@@ -138,7 +138,11 @@ describe("WorkflowBundleBuilder", () => {
 
     expect(builder.snapshot.projectRoot).toBe(appRoot);
     expect(builder.snapshot.workingDir).toBe(rootDir);
-    expect(builder.snapshot.dirs).toEqual([resolvePackageSourceDirectoryPath("src/execution")]);
+    expect(builder.snapshot.dirs).toEqual([
+      resolvePackageSourceDirectoryPath("src/execution"),
+      resolvePackageSourceDirectoryPath("src/runtime/subagents"),
+      resolvePackageSourceDirectoryPath("src/subagents"),
+    ]);
   });
 
   it("writes a Nitro-owned step registration entry", async () => {
@@ -533,6 +537,61 @@ describe("WorkflowBundleBuilder", () => {
     }
   });
 
+  it("fails the driver build when a workflow body calls workflow/api", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "eve-workflow-bundle-api-in-body-"));
+    const outDir = join(tempRoot, "workflow-build");
+    const flowFilePath = join(tempRoot, "flow.ts");
+    const compiledArtifactsBootstrapPath = join(tempRoot, "compiled-artifacts-bootstrap.mjs");
+
+    try {
+      await Promise.all([
+        writeFile(
+          compiledArtifactsBootstrapPath,
+          [
+            "export async function __eveInstallCompiledArtifactsStep() {",
+            '  "use step";',
+            "  return null;",
+            "}",
+            "",
+          ].join("\n"),
+        ),
+        writeFile(
+          flowFilePath,
+          [
+            'import { start } from "workflow/api";',
+            "export async function child() {",
+            '  "use workflow";',
+            "  return 1;",
+            "}",
+            "export async function parent() {",
+            '  "use workflow";',
+            "  return await start(child, []);",
+            "}",
+            "",
+          ].join("\n"),
+        ),
+      ]);
+
+      const builder = new FixtureWorkflowBundleBuilder(
+        {
+          agentName: "test-agent",
+          appRoot: tempRoot,
+          compiledArtifactsBootstrapPath,
+          outDir,
+          rootDir: tempRoot,
+          watch: false,
+        },
+        [flowFilePath],
+      );
+
+      await expect(builder.build()).rejects.toThrow(
+        /cannot import "workflow\/api".*not available inside a workflow body.*"use step"/s,
+      );
+    } finally {
+      await rm(tempRoot, { force: true, recursive: true });
+    }
+  });
+
   it("bundles hook ownership checks through the workflow core shim", async () => {
     const tempRoot = await mkdtemp(join(tmpdir(), "eve-workflow-bundle-hook-conflict-"));
     const outDir = join(tempRoot, "workflow-build");
@@ -600,6 +659,53 @@ describe("WorkflowBundleBuilder", () => {
     }
   });
 
+  it.each([
+    ["sleep tool", "src/execution/tools/sleep-workflow.ts", "executeSleepTool"],
+    ["session owner", "src/execution/session/entry.ts", "nextTurnDelivery"],
+    [
+      "workflow tool owner",
+      "src/execution/tools/workflow/workflow.ts",
+      "createBackgroundWorkflowOwner",
+    ],
+  ])("keeps the %s schemas out of the workflow driver", async (_name, sourcePath, marker) => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "eve-workflow-bundle-no-schemas-"));
+    const outDir = join(tempRoot, "workflow-build");
+    const compiledArtifactsBootstrapPath = join(tempRoot, "compiled-artifacts-bootstrap.mjs");
+    const workflowPath = resolvePackageSourceFilePath(sourcePath);
+
+    try {
+      await writeFile(compiledArtifactsBootstrapPath, "export {};\n");
+
+      const builder = new FixtureWorkflowBundleBuilder(
+        {
+          agentName: "test-agent",
+          appRoot: tempRoot,
+          compiledArtifactsBootstrapPath,
+          outDir,
+          rootDir: resolvePackageRoot(),
+          watch: false,
+        },
+        [workflowPath],
+      );
+
+      await builder.build();
+
+      const workflowsSource = await readFile(join(outDir, "workflows.mjs"), "utf8");
+      const encodedChunksMatch = workflowsSource.match(
+        /Buffer\.from\((\[[\s\S]*?\])\.join\(""\), "base64"\)\.toString\("utf8"\)/,
+      );
+      expect(encodedChunksMatch).not.toBeNull();
+
+      const encodedChunks = JSON.parse(encodedChunksMatch?.[1] ?? "[]") as string[];
+      const decodedWorkflowCode = Buffer.from(encodedChunks.join(""), "base64").toString("utf8");
+
+      expect(decodedWorkflowCode).toContain(marker);
+      expect(decodedWorkflowCode).not.toContain("compiled/zod");
+    } finally {
+      await rm(tempRoot, { force: true, recursive: true });
+    }
+  });
+
   it("allows a node builtin used only inside a use step body", async () => {
     const tempRoot = await mkdtemp(join(tmpdir(), "eve-workflow-bundle-node-step-ok-"));
     const outDir = join(tempRoot, "workflow-build");
@@ -655,6 +761,147 @@ describe("WorkflowBundleBuilder", () => {
       expect(workflowsSource).not.toContain("node:crypto");
     } finally {
       await rm(tempRoot, { force: true, recursive: true });
+    }
+  });
+
+  it("bundles authored workflow tools from the application root", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "eve-workflow-bundle-authored-"));
+    const appRoot = join(tempRoot, "app");
+    const outDir = join(tempRoot, "workflow-build");
+    const flowFilePath = join(tempRoot, "flow.ts");
+    const compiledArtifactsBootstrapPath = join(tempRoot, "compiled-artifacts-bootstrap.mjs");
+    const toolPath = join(appRoot, "agent", "tools", "deploy.ts");
+    const stepsPath = join(appRoot, "agent", "lib", "steps.ts");
+
+    try {
+      await mkdir(join(appRoot, "agent", "tools"), { recursive: true });
+      await mkdir(join(appRoot, "agent", "lib"), { recursive: true });
+      await mkdir(join(appRoot, "node_modules", "vendored"), { recursive: true });
+      await Promise.all([
+        writeFile(compiledArtifactsBootstrapPath, "export {};\n"),
+        writeFile(
+          flowFilePath,
+          ["export async function flow() {", '  "use workflow";', "  return 1;", "}", ""].join(
+            "\n",
+          ),
+        ),
+        writeFile(
+          join(appRoot, "package.json"),
+          `${JSON.stringify({ dependencies: { eve: "*" }, name: "authored-app", version: "0.0.0" })}\n`,
+        ),
+        // Dependency trees are never authored modules, even with directives.
+        writeFile(
+          join(appRoot, "node_modules", "vendored", "index.js"),
+          'export async function vendored() {\n  "use step";\n}\n',
+        ),
+        writeFile(
+          stepsPath,
+          [
+            'import { createHash } from "node:crypto";',
+            "",
+            "export function describePlan(service: string): string {",
+            "  return `deploy ${service}`;",
+            "}",
+            "",
+            "export async function hashPlan(plan: string): Promise<string> {",
+            '  "use step";',
+            '  return createHash("sha256").update(plan).digest("hex");',
+            "}",
+            "",
+          ].join("\n"),
+        ),
+        writeFile(
+          join(appRoot, "agent", "tools", "imported.ts"),
+          'import { defineWorkflowTool } from "eve/tools";\nimport { run } from "../lib/run";\nexport default defineWorkflowTool({ description: "Imported", inputSchema: {}, execute: run });',
+        ),
+        writeFile(
+          join(appRoot, "agent", "lib", "run.ts"),
+          'import { hashPlan } from "./steps";\nexport async function run() { "use workflow"; return hashPlan("imported"); }',
+        ),
+        writeFile(
+          toolPath,
+          [
+            'import { defineWorkflowTool } from "eve/tools";',
+            'import { sleep } from "workflow";',
+            'import { describePlan, hashPlan } from "../lib/steps";',
+            "",
+            "export default defineWorkflowTool({",
+            '  description: "Deploy a service.",',
+            '  inputSchema: { type: "object", properties: { service: { type: "string" } } },',
+            "  async execute({ service }: { service: string }) {",
+            '    "use workflow";',
+            "    const digest = await hashPlan(describePlan(service));",
+            '    await sleep("1s");',
+            "    return { digest };",
+            "  },",
+            "});",
+            "",
+          ].join("\n"),
+        ),
+      ]);
+
+      const builder = new FixtureWorkflowBundleBuilder(
+        {
+          authoredWorkflowModules: {
+            directiveModules: [toolPath, stepsPath, join(appRoot, "agent", "lib", "run.ts")],
+            workflowModules: [toolPath, join(appRoot, "agent", "lib", "run.ts")],
+          },
+          agentName: "test-agent",
+          appRoot,
+          compiledArtifactsBootstrapPath,
+          outDir,
+          rootDir: resolvePackageRoot(),
+          watch: false,
+        },
+        [flowFilePath],
+      );
+
+      await builder.build();
+
+      const stepsSource = await readFile(join(outDir, "steps.mjs"), "utf8");
+      expect(stepsSource).toContain("agent/tools/deploy.ts");
+      expect(stepsSource).toContain("agent/lib/steps.ts");
+      expect(stepsSource).toContain("agent/lib/run.ts");
+      expect(stepsSource).not.toContain("vendored");
+
+      const workflowsSource = await readFile(join(outDir, "workflows.mjs"), "utf8");
+      const encodedChunksMatch = workflowsSource.match(
+        /Buffer\.from\((\[[\s\S]*?\])\.join\(""\), "base64"\)\.toString\("utf8"\)/,
+      );
+      const encodedChunks = JSON.parse(encodedChunksMatch?.[1] ?? "[]") as string[];
+      const workflowCode = Buffer.from(encodedChunks.join(""), "base64").toString("utf8");
+      expect(workflowCode).toContain('"workflow//./agent/tools/deploy//execute"');
+      expect(workflowCode).toContain('"workflow//./agent/lib/run//run"');
+      expect(workflowCode).toContain('"step//./agent/lib/steps//hashPlan"');
+      expect(workflowCode).toContain("deploy ${service}");
+      expect(workflowCode).not.toContain("defineWorkflowTool");
+      expect(workflowCode).not.toContain("node:crypto");
+    } finally {
+      await rm(tempRoot, { force: true, recursive: true });
+    }
+  });
+  it("rejects unresolved workflow imports before emitting a VM bundle", async () => {
+    const root = await mkdtemp(join(tmpdir(), "eve-workflow-missing-import-"));
+    const flow = join(root, "flow.ts");
+    try {
+      await writeFile(
+        flow,
+        'import { value } from "missing-workflow-package"; export async function flow() { "use workflow"; return value; }',
+      );
+      const builder = new FixtureWorkflowBundleBuilder(
+        {
+          agentName: "missing-import",
+          appRoot: root,
+          rootDir: root,
+          outDir: join(root, "out"),
+          compiledArtifactsBootstrapPath: join(root, "bootstrap.mjs"),
+          watch: false,
+        },
+        [flow],
+      );
+      await expect(builder.build()).rejects.toThrow("missing-workflow-package");
+    } finally {
+      await rm(root, { recursive: true, force: true });
     }
   });
 });

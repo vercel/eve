@@ -1,0 +1,102 @@
+# syntax=docker/dockerfile:1.7
+
+FROM ubuntu:26.04
+
+ARG DEBIAN_FRONTEND=noninteractive
+ARG NODE_MAJOR=24
+ARG PNPM_VERSION=11.5.2
+
+LABEL org.opencontainers.image.description="Sandbox base image for eve agents."
+LABEL org.opencontainers.image.source="https://github.com/vercel/eve"
+
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+
+ENV LANG=C.UTF-8
+ENV LC_ALL=C.UTF-8
+ENV PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+RUN set -eux; \
+  printf 'APT::Sandbox::User "root";\n' >/etc/apt/apt.conf.d/99eve-sandbox-user; \
+  apt-get update; \
+  apt-get install -y --no-install-recommends \
+    ca-certificates \
+    curl \
+    dnsutils \
+    gpgv \
+    git \
+    jq \
+    python-is-python3 \
+    python3 \
+    python3-pip \
+    ripgrep \
+    sudo \
+    unzip \
+    xz-utils \
+    zstd; \
+  arch="$(dpkg --print-architecture)"; \
+  case "${arch}" in \
+    amd64) node_arch="x64" ;; \
+    arm64) node_arch="arm64" ;; \
+    *) echo "Unsupported architecture: ${arch}" >&2; exit 1 ;; \
+  esac; \
+  base_url="https://nodejs.org/dist/latest-v${NODE_MAJOR}.x"; \
+  shasums="$(mktemp)"; \
+  curl -fsSL "${base_url}/SHASUMS256.txt" -o "${shasums}"; \
+  node_file="$(awk -v node_arch="${node_arch}" '$2 ~ "^node-v.*-linux-" node_arch "\\.tar\\.xz$" { print $2; exit }' "${shasums}")"; \
+  test -n "${node_file}"; \
+  curl -fsSLO "${base_url}/${node_file}"; \
+  grep " ${node_file}$" "${shasums}" | sha256sum -c -; \
+  tar -xJf "${node_file}" -C /usr/local --strip-components=1 --no-same-owner; \
+  rm "${node_file}" "${shasums}"; \
+  rm -rf /usr/local/include/node /usr/local/share/doc /usr/local/share/man; \
+  npm install -g "pnpm@${PNPM_VERSION}"; \
+  apt-get purge -y --auto-remove xz-utils; \
+  rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*; \
+  npm cache clean --force; \
+  node --version; \
+  npm --version; \
+  pnpm --version; \
+  python --version; \
+  python3 --version; \
+  pip --version; \
+  pip3 --version; \
+  dig -v; \
+  gpgv --version | head -1; \
+  git --version; \
+  jq --version; \
+  rg --version | head -1; \
+  sudo -V | head -1; \
+  unzip -v | head -1; \
+  zstd --version
+
+RUN set -eux; \
+  if ! id -u vercel-sandbox >/dev/null 2>&1; then \
+    useradd --create-home --shell /bin/bash vercel-sandbox; \
+  fi; \
+  # Ubuntu's skel .bash_logout runs `clear_console` when a login shell exits at
+  # SHLVL=1. Backends run every command through `bash -lc` with no TTY, so it
+  # prints "TERM environment variable not set." and, under `set -e`, turns a
+  # successful `exit 0` into exit 1.
+  rm -f /home/vercel-sandbox/.bash_logout; \
+  # Keep Node and pnpm root-owned: recursively changing their ownership copies
+  # them into another image layer. A small user-owned prefix retains global installs.
+  install -d --owner=vercel-sandbox --group=vercel-sandbox \
+    /home/vercel-sandbox/.local \
+    /home/vercel-sandbox/.local/bin \
+    /home/vercel-sandbox/.local/share/pnpm; \
+  mkdir -p /workspace; \
+  chown vercel-sandbox:vercel-sandbox /workspace; \
+  # !fqdn: sandbox hostnames are not resolvable, so sudo would otherwise warn on stderr.
+  printf '%s\n' \
+    'Defaults !fqdn' \
+    'vercel-sandbox ALL=(ALL) NOPASSWD:ALL' \
+    >/etc/sudoers.d/vercel-sandbox; \
+  chmod 0440 /etc/sudoers.d/vercel-sandbox; \
+  visudo -cf /etc/sudoers.d/vercel-sandbox
+
+ENV NPM_CONFIG_PREFIX=/home/vercel-sandbox/.local
+ENV PNPM_HOME=/home/vercel-sandbox/.local/share/pnpm
+ENV PATH=/home/vercel-sandbox/.local/share/pnpm/bin:/home/vercel-sandbox/.local/bin:${PATH}
+
+USER vercel-sandbox
+WORKDIR /workspace

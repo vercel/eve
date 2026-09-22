@@ -1,5 +1,6 @@
 import { Command } from "#compiled/commander/index.js";
-import { applicationCommand, type CliApplicationContext } from "#cli/application-command.js";
+import type { CliApplicationContext } from "#cli/application-command.js";
+import { agentCommand } from "#cli/agent-command.js";
 import { loadDevelopmentEnvironmentFiles } from "#cli/dev/environment.js";
 import {
   parseDevelopmentHeaderOption,
@@ -34,7 +35,7 @@ export interface RegisterAcpCommandOptions {
 
 /** Registers the ACP stdio bridge for local and deployed eve agents. */
 export function registerAcpCommand(options: RegisterAcpCommandOptions): void {
-  applicationCommand(options.program.command("acp"), options.applicationContext, (command) => {
+  agentCommand(options.program.command("acp"), options.applicationContext, (command) => {
     const commandOptions = command.opts<AcpCliOptions>();
     return (
       resolveDevelopmentUrlTarget(
@@ -58,7 +59,7 @@ export function registerAcpCommand(options: RegisterAcpCommandOptions): void {
     )
     .action(async (positionalUrl: string | undefined, commandOptions: AcpCliOptions) => {
       const target = resolveDevelopmentUrlTarget(commandOptions, positionalUrl);
-      loadDevelopmentEnvironmentFiles(options.applicationContext.root);
+      await loadDevelopmentEnvironmentFiles(options.applicationContext.root);
       const lifecycle = installShutdownSignal({ exitAfterMs: FORCED_EXIT_BACKSTOP_MS });
 
       if (target !== undefined) {

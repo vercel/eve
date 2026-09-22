@@ -1,6 +1,10 @@
 import type { SpanProcessor } from "#compiled/@vercel/otel/index.js";
+import { isAgentActivationSpan } from "#tracing/agent-span-contract.js";
+
+const REMEMBERED_TRACE_LIMIT = 2048;
 
 interface SpanLike {
+  readonly name?: string;
   readonly attributes: Readonly<Record<string, unknown>>;
   readonly instrumentationScope?: { readonly name?: string };
   readonly spanContext: () => { readonly traceId: string };
@@ -10,8 +14,9 @@ interface SpanLike {
 export class AgentTraceSpanProcessor implements SpanProcessor {
   readonly #children: readonly SpanProcessor[];
   readonly #ownedTraceIds = new Set<string>();
-  readonly #sessionTraceIds = new Map<string, Set<string>>();
-  readonly #traceOwners = new Map<string, string>();
+  readonly #completedTraceIds = new Set<string>();
+  readonly #rememberedTraceIds = new Set<string>();
+  readonly #traceConversations = new Map<string, string>();
   constructor(children: readonly SpanProcessor[]) {
     this.#children = children;
   }
@@ -22,15 +27,13 @@ export class AgentTraceSpanProcessor implements SpanProcessor {
 
   onStart(span: unknown, parentContext: unknown): void {
     if (!isSpanLike(span)) return;
-    const sessionId = span.attributes["agent.session.id"];
-    if (typeof sessionId === "string") {
+    const conversationId = span.attributes["gen_ai.conversation.id"];
+    if (typeof conversationId === "string") {
       const traceId = span.spanContext().traceId;
-      this.#ownedTraceIds.add(traceId);
-      if (!this.#traceOwners.has(traceId)) {
-        this.#traceOwners.set(traceId, sessionId);
-        const owned = this.#sessionTraceIds.get(sessionId) ?? new Set<string>();
-        owned.add(traceId);
-        this.#sessionTraceIds.set(sessionId, owned);
+      const known = this.#ownedTraceIds.has(traceId) || this.#rememberedTraceIds.has(traceId);
+      if (!known) {
+        this.#ownedTraceIds.add(traceId);
+        this.#traceConversations.set(traceId, conversationId);
       }
     }
     if (!this.#accepts(span)) return;
@@ -40,27 +43,47 @@ export class AgentTraceSpanProcessor implements SpanProcessor {
   onEnd(span: unknown): void {
     if (!isSpanLike(span) || !this.#accepts(span)) return;
     for (const child of this.#children) child.onEnd(span);
+    const traceId = span.spanContext().traceId;
+    if (
+      isAgentActivationSpan({ name: span.name ?? "", attributes: span.attributes }) &&
+      this.#traceConversations.get(traceId) === span.attributes["gen_ai.conversation.id"]
+    ) {
+      this.#completedTraceIds.add(traceId);
+    }
   }
 
-  /** Trace ids whose session is still open, so retention never evicts them. */
+  /** Trace IDs protected by an unfinished activation or pending final writes. */
   activeTraceIds(): ReadonlySet<string> {
     return this.#ownedTraceIds;
   }
 
-  /**
-   * Forgets every trace one root session owned, reporting whether it owned any.
-   * A subagent child owns none, so releasing one reports `false` and leaves the
-   * shared trace pinned until its root finishes.
-   */
-  releaseSession(sessionId: string): boolean {
-    const owned = this.#sessionTraceIds.get(sessionId);
-    if (owned === undefined) return false;
-    for (const traceId of owned) {
+  /** Called only after writes drain; recently completed IDs still accept late descendants. */
+  releaseCompletedTraces(): boolean {
+    if (this.#completedTraceIds.size === 0) return false;
+    for (const traceId of this.#completedTraceIds) {
       this.#ownedTraceIds.delete(traceId);
-      this.#traceOwners.delete(traceId);
+      this.#traceConversations.delete(traceId);
+      this.#rememberedTraceIds.add(traceId);
     }
-    this.#sessionTraceIds.delete(sessionId);
+    this.#completedTraceIds.clear();
+    while (this.#rememberedTraceIds.size > REMEMBERED_TRACE_LIMIT) {
+      const oldest = this.#rememberedTraceIds.values().next().value!;
+      this.#rememberedTraceIds.delete(oldest);
+    }
     return true;
+  }
+
+  /** Releases only traces owned by this conversation. */
+  releaseConversation(conversationId: string): boolean {
+    let released = false;
+    for (const [traceId, traceConversationId] of this.#traceConversations) {
+      if (traceConversationId !== conversationId) continue;
+      released = true;
+      this.#ownedTraceIds.delete(traceId);
+      this.#completedTraceIds.delete(traceId);
+      this.#traceConversations.delete(traceId);
+    }
+    return released;
   }
 
   async shutdown(): Promise<void> {
@@ -70,7 +93,8 @@ export class AgentTraceSpanProcessor implements SpanProcessor {
   #accepts(span: SpanLike): boolean {
     return (
       span.instrumentationScope?.name !== "workflow" &&
-      this.#ownedTraceIds.has(span.spanContext().traceId)
+      (this.#ownedTraceIds.has(span.spanContext().traceId) ||
+        this.#rememberedTraceIds.has(span.spanContext().traceId))
     );
   }
 }

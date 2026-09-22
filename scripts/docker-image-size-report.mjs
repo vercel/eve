@@ -163,7 +163,7 @@ function parseArguments(argv) {
     baselineSizeBytes: null,
     currentLabel: "current",
     currentSizeBytes: null,
-    imageLabel: "Dockerfile",
+    imageLabel: "packages/eve/Dockerfile",
     outputJsonPath: null,
     outputMarkdownPath: null,
   };

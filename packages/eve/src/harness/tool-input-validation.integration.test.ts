@@ -87,6 +87,10 @@ describe("framework tool input validation (real AI SDK)", () => {
       [
         "ask_question",
         {
+          behavior: {
+            availability: ["requires-request-input"],
+            handling: { kind: "request-input", request: "question" },
+          },
           description: askQuestion.description,
           inputSchema: ASK_QUESTION_INPUT_SCHEMA,
           name: "ask_question",

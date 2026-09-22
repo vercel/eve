@@ -12,6 +12,7 @@ interface StatePattern {
   readonly parent?: "active" | "parked" | "finalizing";
   readonly ownership?: "owned" | "unowned";
   readonly usage?: "absent" | "retained";
+  readonly cohort?: "pending" | "terminal";
 }
 
 type SemanticInput =
@@ -27,6 +28,7 @@ type SemanticInput =
   | "authorization-callback"
   | "start-turn"
   | "agent-continuation"
+  | "agent-steering"
   | "task-peek"
   | "task-notification"
   | "task-update"
@@ -37,6 +39,7 @@ type SemanticEvent =
   | "input-requested"
   | "authorization-required"
   | "authorization-completed"
+  | "task-failed-notification"
   | "task-ready-notification"
   | "task-update-notification";
 
@@ -48,6 +51,7 @@ type SemanticSideEffect =
   | "child-abort"
   | "parent-model-step"
   | "parent-wake"
+  | "completion-hold"
   | "task-view-read"
   | "authorization-request";
 
@@ -86,7 +90,8 @@ export const TASK_TRANSITIONS = {
       outcome: "accepted",
       postState: { lifecycle: "completed", outstandingInput: "none" },
       events: { emitted: ["task-ready-notification"] },
-      sideEffects: { executed: ["task-view-append", "parent-wake"] },
+      // Lifecycle readiness is distinct from admitting the notification to a parent turn.
+      sideEffects: { executed: ["task-view-append"] },
     },
   }),
   "task.lifecycle.fail.accepted-nonterminal": transition({
@@ -109,6 +114,28 @@ export const TASK_TRANSITIONS = {
       postState: { lifecycle: "cancelled", outstandingInput: "none" },
       events: { emitted: ["task-ready-notification"] },
       sideEffects: { executed: ["task-view-append", "parent-wake", "child-abort"] },
+    },
+  }),
+  "task.lifecycle.cancel.owned-session-accepted-nonterminal": transition({
+    preState: { lifecycle: ["working", "input_required"] },
+    input: "cancel",
+    guards: ["task-is-nonterminal", "parent-session-owns-task"],
+    expected: {
+      outcome: "accepted",
+      postState: { lifecycle: "cancelled", outstandingInput: "none" },
+      events: { emitted: ["task-ready-notification"] },
+      sideEffects: { executed: ["task-view-append", "parent-wake", "child-abort"] },
+    },
+  }),
+  "task.lifecycle.cancel.default-preserves-nonterminal": transition({
+    preState: { lifecycle: "input_required" },
+    input: "cancel",
+    guards: ["session-cancel-omits-task-scope"],
+    expected: {
+      outcome: "noop",
+      postState: { lifecycle: "input_required" },
+      events: { suppressed: ["task-ready-notification"] },
+      sideEffects: { suppressed: ["task-view-append", "child-abort"] },
     },
   }),
   "task.lifecycle.cancel.noop-already-cancelled": transition({
@@ -276,10 +303,10 @@ export const TASK_TRANSITIONS = {
     input: "dispatch-start",
     guards: ["child-start-is-unreachable"],
     expected: {
-      outcome: "rejected",
-      postState: { lifecycle: "absent", dispatch: "rejected", ownership: "unowned" },
-      events: { suppressed: ["background-receipt"] },
-      sideEffects: { executed: ["child-dispatch"], suppressed: ["task-index-write"] },
+      outcome: "accepted",
+      postState: { lifecycle: "failed", dispatch: "acknowledged", ownership: "owned" },
+      events: { emitted: ["background-receipt", "task-failed-notification"] },
+      sideEffects: { executed: ["child-dispatch", "task-index-write"] },
     },
   }),
   "task.dispatch-batch.start.accepted-partial-failure": transition({
@@ -288,8 +315,8 @@ export const TASK_TRANSITIONS = {
     guards: ["one-member-is-unreachable", "other-members-are-reachable"],
     expected: {
       outcome: "accepted",
-      postState: { dispatch: "acknowledged", ownership: "owned" },
-      events: { emitted: ["background-receipt"] },
+      postState: { lifecycle: ["working", "failed"], dispatch: "acknowledged", ownership: "owned" },
+      events: { emitted: ["background-receipt", "task-failed-notification"] },
       sideEffects: { executed: ["child-dispatch", "task-index-write"] },
     },
   }),
@@ -307,12 +334,23 @@ export const TASK_TRANSITIONS = {
   "task.agent.continue.rejected-agent-busy": transition({
     preState: { agent: "busy" },
     input: "agent-continuation",
-    guards: ["agent-has-a-nonterminal-task"],
+    guards: ["agent-is-claimed-by-another-call-in-the-same-batch"],
     expected: {
       outcome: "rejected",
       postState: { agent: "busy" },
       events: { suppressed: ["background-receipt"] },
       sideEffects: { suppressed: ["task-index-write", "child-delivery"] },
+    },
+  }),
+  "task.agent.steer.accepted-busy": transition({
+    preState: { lifecycle: "working", agent: "busy", ownership: "owned" },
+    input: "agent-steering",
+    guards: ["parent-owns-admitted-task", "agent-has-a-confirmed-address"],
+    expected: {
+      outcome: "accepted",
+      postState: { lifecycle: "cancelled", agent: "busy", ownership: "owned" },
+      events: { emitted: ["background-receipt", "task-ready-notification"] },
+      sideEffects: { executed: ["child-abort", "task-index-write", "child-delivery"] },
     },
   }),
   "task.update.emitted-working": transition({
@@ -351,12 +389,33 @@ export const TASK_TRANSITIONS = {
   "task.parent.wake.emitted-ready": transition({
     preState: { lifecycle: ["input_required", "completed", "failed", "cancelled"] },
     input: "task-notification",
-    guards: ["task-entered-a-ready-status"],
+    guards: [
+      "task-entered-a-ready-status",
+      "status-is-not-completed-or-all-same-createdByTurnId-siblings-are-terminal",
+    ],
     expected: {
       outcome: "emitted",
       postState: { lifecycle: ["input_required", "completed", "failed", "cancelled"] },
       events: { emitted: ["task-ready-notification"] },
       sideEffects: { executed: ["parent-wake"] },
+    },
+  }),
+  "task.parent.wake.noop-pending-cohort": transition({
+    preState: { lifecycle: "completed", cohort: "pending" },
+    input: "task-notification",
+    guards: [
+      "a-same-createdByTurnId-sibling-is-nonterminal",
+      "unrelated-user-turns-and-cohorts-do-not-release-held-successes",
+      "input-authorization-failure-and-cancellation-bypass-the-hold",
+    ],
+    expected: {
+      outcome: "noop",
+      postState: { lifecycle: "completed", cohort: "pending" },
+      events: {},
+      sideEffects: {
+        executed: ["completion-hold"],
+        suppressed: ["parent-wake", "parent-model-step"],
+      },
     },
   }),
   "task.parent-interaction.send.accepted-live-children": transition({
@@ -371,25 +430,25 @@ export const TASK_TRANSITIONS = {
     },
   }),
   "task.join.evaluate.observed-partial": transition({
-    preState: { lifecycle: ["completed", "input_required"] },
-    input: "task-peek",
-    guards: ["at-least-one-task-is-nonterminal"],
+    preState: { lifecycle: ["completed", "input_required"], cohort: "pending" },
+    input: "parent-message",
+    guards: ["one-child-has-completed", "a-sibling-still-awaits-input", "independent-user-message"],
     expected: {
       outcome: "observed",
-      postState: { lifecycle: ["completed", "input_required"] },
+      postState: { lifecycle: ["completed", "input_required"], cohort: "pending" },
       events: {},
-      sideEffects: { executed: ["task-view-read", "parent-model-step"] },
+      sideEffects: { executed: ["parent-model-step"] },
     },
   }),
   "task.join.evaluate.observed-all-terminal": transition({
-    preState: { lifecycle: "completed" },
-    input: "task-peek",
-    guards: ["all-joined-tasks-are-terminal"],
+    preState: { lifecycle: "completed", cohort: "terminal" },
+    input: "task-notification",
+    guards: ["all-joined-tasks-are-terminal", "every-result-is-in-the-cohort-notification"],
     expected: {
       outcome: "observed",
-      postState: { lifecycle: "completed" },
+      postState: { lifecycle: "completed", cohort: "terminal" },
       events: {},
-      sideEffects: { executed: ["task-view-read", "parent-model-step"] },
+      sideEffects: { executed: ["parent-model-step"] },
     },
   }),
 } as const satisfies Record<string, TransitionSpec>;

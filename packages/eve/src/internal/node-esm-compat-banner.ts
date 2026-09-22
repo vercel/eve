@@ -16,23 +16,30 @@ interface NodeEsmCompatBannerOptions {
 interface BannerLine {
   readonly importLine: string;
   readonly declarationLine: string;
-  readonly bindingPattern: RegExp;
+  readonly bindingName: string;
 }
 
-// Match `const|let|var <name>` at the literal start of a line. Bundler
-// output places module-scope declarations at column zero; indented
-// declarations live inside functions, classes, or blocks and therefore do
-// not collide with the banner.
+interface ParsedNode {
+  readonly body?: ParsedNode | readonly ParsedNode[];
+  readonly type: string;
+  readonly name?: string;
+  readonly declarations?: readonly { readonly id: ParsedNode }[];
+}
+
+interface ParsedProgram {
+  readonly body: readonly ParsedNode[];
+}
+
 const BANNER_LINES: readonly BannerLine[] = [
   {
     importLine: 'import { fileURLToPath as __eveFileURLToPath } from "node:url";',
     declarationLine: "const __filename = __eveFileURLToPath(import.meta.url);",
-    bindingPattern: /^(?:const|let|var)\s+__filename(?![\w$])/m,
+    bindingName: "__filename",
   },
   {
     importLine: 'import { dirname as __eveDirname } from "node:path";',
     declarationLine: "const __dirname = __eveDirname(__filename);",
-    bindingPattern: /^(?:const|let|var)\s+__dirname(?![\w$])/m,
+    bindingName: "__dirname",
   },
 ];
 
@@ -42,19 +49,18 @@ const DIRNAME_BANNER_LINE = BANNER_LINES[1]!;
 const REQUIRE_LINE: BannerLine = {
   importLine: 'import { createRequire as __eveCreateRequire } from "node:module";',
   declarationLine: "const require = __eveCreateRequire(import.meta.url);",
-  bindingPattern: /^(?:const|let|var)\s+require(?![\w$])/m,
+  bindingName: "require",
 };
 
 /**
- * Builds the ESM CommonJS-compatibility banner appropriate for a single
- * bundle chunk's code. Identifiers the chunk already binds at the top
- * level (e.g. `const __dirname = ...` emitted by an inlined module) are
- * skipped so the prepended banner never re-declares them.
+ * Builds the ESM CommonJS-compatibility banner appropriate for a parsed
+ * bundle chunk. Identifiers the chunk already binds in a top-level variable
+ * declaration are skipped so the prepended banner never re-declares them.
  *
  * Returns an empty string when the chunk already provides every binding.
  */
 export function buildNodeEsmCompatBanner(
-  code: string,
+  program: ParsedProgram,
   options: NodeEsmCompatBannerOptions = {},
 ): string {
   const lines: BannerLine[] = [...BANNER_LINES];
@@ -65,11 +71,12 @@ export function buildNodeEsmCompatBanner(
 
   const imports: string[] = [];
   const declarations: string[] = [];
-  const chunkProvidesFilename = FILENAME_BANNER_LINE.bindingPattern.test(code);
-  const chunkProvidesDirname = DIRNAME_BANNER_LINE.bindingPattern.test(code);
+  const topLevelBindings = collectTopLevelVariableBindings(program);
+  const chunkProvidesFilename = topLevelBindings.has(FILENAME_BANNER_LINE.bindingName);
+  const chunkProvidesDirname = topLevelBindings.has(DIRNAME_BANNER_LINE.bindingName);
 
   for (const line of lines) {
-    if (line.bindingPattern.test(code)) {
+    if (topLevelBindings.has(line.bindingName)) {
       continue;
     }
 
@@ -93,9 +100,32 @@ export function buildNodeEsmCompatBanner(
   return [...imports, ...declarations].join("\n");
 }
 
+function collectTopLevelVariableBindings(program: ParsedProgram): ReadonlySet<string> {
+  const bindings = new Set<string>();
+
+  for (const statement of program.body) {
+    if (statement.type !== "VariableDeclaration") {
+      continue;
+    }
+
+    for (const declaration of statement.declarations ?? []) {
+      if (declaration.id.type === "Identifier" && declaration.id.name !== undefined) {
+        bindings.add(declaration.id.name);
+      }
+    }
+  }
+
+  return bindings;
+}
+
+interface BannerPluginContext {
+  parse(code: string): ParsedProgram;
+}
+
 interface BannerPlugin {
   readonly name: string;
   renderChunk(
+    this: BannerPluginContext,
     code: string,
     chunk?: { readonly fileName?: string },
   ): { code: string; map: SourceMap } | null;
@@ -120,7 +150,10 @@ export function createNodeEsmCompatBannerPlugin(
   return {
     name: "eve-node-esm-compat-banner",
     renderChunk(code, chunk) {
-      const banner = buildNodeEsmCompatBanner(code, options);
+      const program = mayDeclareCompatibilityBinding(code, options)
+        ? this.parse(code)
+        : { body: [] };
+      const banner = buildNodeEsmCompatBanner(program, options);
 
       if (banner === "") {
         return null;
@@ -138,6 +171,27 @@ export function createNodeEsmCompatBannerPlugin(
   };
 }
 
+const DECLARATION_TRIVIA = String.raw`(?:\s|/\*[\s\S]*?\*/|//[^\r\n\u2028\u2029]*[\r\n\u2028\u2029])*`;
+const PATH_BINDING_DECLARATION = new RegExp(
+  String.raw`(?:\b(?:var|let|const|using)\b|,)${DECLARATION_TRIVIA}(?:__filename|__dirname)\b`,
+);
+const REQUIRE_BINDING_DECLARATION = new RegExp(
+  String.raw`(?:\b(?:var|let|const|using)\b|,)${DECLARATION_TRIVIA}require\b`,
+);
+
+function mayDeclareCompatibilityBinding(
+  code: string,
+  options: NodeEsmCompatBannerOptions,
+): boolean {
+  // This is only a negative filter: comments/strings can cause extra parsing,
+  // never a missed declaration. Escaped identifiers always use the parser.
+  return (
+    code.includes("\\u") ||
+    PATH_BINDING_DECLARATION.test(code) ||
+    (options.includeRequire === true && REQUIRE_BINDING_DECLARATION.test(code))
+  );
+}
+
 function createPrependedLineSourceMap({
   insertedLineCount,
   source,
@@ -148,43 +202,12 @@ function createPrependedLineSourceMap({
   sourceContent: string;
 }): SourceMap {
   const originalLineCount = sourceContent.split("\n").length;
-  const lineMappings = Array.from({ length: originalLineCount }, (_, index) =>
-    encodeVlqFields(index === 0 ? [0, 0, 0, 0] : [0, 0, 1, 0]),
-  );
 
   return {
     version: 3,
     sources: [source],
     sourcesContent: [sourceContent],
     names: [],
-    mappings: `${";".repeat(insertedLineCount)}${lineMappings.join(";")}`,
+    mappings: `${";".repeat(insertedLineCount)}AAAA${";AACA".repeat(originalLineCount - 1)}`,
   };
-}
-
-const BASE64_VLQ_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-const VLQ_BASE_SHIFT = 5;
-const VLQ_BASE = 1 << VLQ_BASE_SHIFT;
-const VLQ_BASE_MASK = VLQ_BASE - 1;
-const VLQ_CONTINUATION_BIT = VLQ_BASE;
-
-function encodeVlqFields(fields: readonly number[]): string {
-  return fields.map((field) => encodeVlqInteger(field)).join("");
-}
-
-function encodeVlqInteger(value: number): string {
-  let vlq = value < 0 ? (-value << 1) + 1 : value << 1;
-  let encoded = "";
-
-  do {
-    let digit = vlq & VLQ_BASE_MASK;
-    vlq >>>= VLQ_BASE_SHIFT;
-
-    if (vlq > 0) {
-      digit |= VLQ_CONTINUATION_BIT;
-    }
-
-    encoded += BASE64_VLQ_CHARS[digit];
-  } while (vlq > 0);
-
-  return encoded;
 }

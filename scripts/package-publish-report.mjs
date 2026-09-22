@@ -510,7 +510,14 @@ async function collectInstalledPackageSnapshot(input) {
   );
   await execFile(
     "npm",
-    ["install", "--ignore-scripts", "--no-package-lock", "--no-save", resolve(input.tarballPath)],
+    [
+      "install",
+      "--ignore-scripts",
+      "--no-audit",
+      "--no-package-lock",
+      "--no-save",
+      resolve(input.tarballPath),
+    ],
     {
       cwd: installRoot,
       maxBuffer: 16 * 1024 * 1024,

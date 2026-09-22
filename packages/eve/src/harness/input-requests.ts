@@ -3,28 +3,37 @@ import type { ModelMessage } from "ai";
 import type { RuntimeToolCallActionRequest } from "#shared/action-types.js";
 import type { InputRequest, InputResponse } from "#shared/input.js";
 import { resolveTextToResponses } from "#channel/resolve-text.js";
+import { hasTailApprovalResponse } from "#harness/current-messages.js";
 import {
   getApprovedTools,
-  hasAnsweredApprovalBatch,
+  findAnsweredApprovalBatches,
   resolveApprovalInputBatches,
 } from "#harness/hitl/approval-input-requests.js";
 import type { RejectedActionBatch } from "#harness/hitl/approval-input-requests.js";
 import { isApprovalRequest } from "#harness/input-request-class.js";
 import type { PendingInputBatch } from "#harness/pending-input-batches.js";
-import { getPendingInputBatches, queueDeferredStepInput } from "#harness/pending-input-batches.js";
+import {
+  getDeferredStepInput,
+  getPendingInputBatches,
+  queueDeferredStepInput,
+} from "#harness/pending-input-batches.js";
 import { compactStepInput } from "#harness/hitl/pending-input-resolution.js";
 import type {
   ResolvePendingInputResult,
   ResolvedStepInput,
 } from "#harness/hitl/pending-input-resolution.js";
-import { resolveQuestionOnlyInputBatches } from "#harness/hitl/question-input-requests.js";
-import { resolveToolCallInputObject } from "#harness/runtime-actions.js";
+import {
+  findAnsweredQuestionBatches,
+  resolveQuestionOnlyInputBatches,
+} from "#harness/hitl/question-input-requests.js";
+import { resolveToolCallInputObject } from "#harness/coordination.js";
 import {
   clearPendingSessionLimitPrompt,
   isSessionLimitInputBatch,
   resolveSessionLimitInput,
 } from "#harness/hitl/session-limit-input-requests.js";
 import type { HarnessSession, StepInput } from "#harness/types.js";
+import { readClientContext } from "#internal/client-context.js";
 
 export { getApprovedTools, clearPendingSessionLimitPrompt };
 export type { RejectedActionBatch };
@@ -43,6 +52,42 @@ export function hasStepInput(input?: StepInput): boolean {
   return input.message !== undefined || (input.inputResponses?.length ?? 0) > 0;
 }
 
+/** Stored partial answers are not runnable work until they can resolve a batch. */
+export function hasRunnableDeferredStepInput(session: HarnessSession): boolean {
+  const deferred = getDeferredStepInput(session);
+  if (deferred === undefined) return false;
+  if (
+    deferred.message !== undefined ||
+    (deferred.context?.length ?? 0) > 0 ||
+    readClientContext(deferred) !== undefined ||
+    deferred.outputSchema !== undefined ||
+    (deferred.runtimeActionResults?.length ?? 0) > 0
+  )
+    return true;
+
+  const responses = [
+    ...(deferred.inputResponses ?? []),
+    ...(deferred.attributedInputResponses ?? []).map(({ response }) => response),
+  ];
+  if (responses.length === 0) return false;
+  const batches = getPendingInputBatches(session.state);
+  const route = routePendingInput(batches);
+  switch (route.kind) {
+    case "session-limit":
+      return route.batch.requests.every((request) =>
+        responses.some((response) => response.requestId === request.requestId),
+      );
+    case "with-approvals":
+      // An unanswered approval must not prevent an answered question from running.
+      return (
+        findAnsweredApprovalBatches(route.approvalBatches, responses).length > 0 ||
+        findAnsweredQuestionBatches(route.questionBatches, responses).length > 0
+      );
+    case "questions-only":
+      return findAnsweredQuestionBatches(batches, responses).length > 0;
+  }
+}
+
 /** Returns true when any pending batch still contains a tool approval. */
 export function hasPendingApprovalBatch(session: HarnessSession): boolean {
   return getPendingInputBatches(session.state).some((batch) =>
@@ -58,6 +103,10 @@ export function hasPendingApprovalBatch(session: HarnessSession): boolean {
  * requirement; question-only batches retain dismiss-and-continue behavior.
  */
 export function resolvePendingInput(input: {
+  /** The turn currently advancing through the harness tool loop. */
+  readonly activeTurnId?: string;
+  /** True while the harness has an open turn to continue. */
+  readonly internalStep?: boolean;
   readonly deferMessagesWhileApprovalsPending?: boolean;
   readonly history?: readonly ModelMessage[];
   readonly resolveApprovalKey?: (request: InputRequest) => string | undefined;
@@ -81,10 +130,30 @@ export function resolvePendingInput(input: {
   const responses = canonicalizeInputResponses(resolvedStepInput?.inputResponses ?? []);
 
   if (
-    route.kind === "approval" &&
+    input.internalStep === true &&
+    canContinuePastHistoricalInput({
+      activeTurnId: input.activeTurnId,
+      batches,
+      responses,
+      route,
+    }) &&
+    resolvedStepInput?.message === undefined
+  ) {
+    return {
+      outcome: "continue",
+      messages: baseHistory,
+      session:
+        resolvedStepInput === undefined
+          ? input.session
+          : queueDeferredStepInput(input.session, compactStepInput(resolvedStepInput)),
+    };
+  }
+
+  if (
+    route.kind === "with-approvals" &&
     input.deferMessagesWhileApprovalsPending === true &&
     resolvedStepInput?.message !== undefined &&
-    !hasAnsweredApprovalBatch(route.approvalBatches, responses)
+    findAnsweredApprovalBatches(route.approvalBatches, responses).length === 0
   ) {
     return {
       deferredMessage: true,
@@ -97,7 +166,9 @@ export function resolvePendingInput(input: {
   if (responses.length === 0 && resolvedStepInput?.message === undefined) {
     const deferredInput = compactStepInput(resolvedStepInput);
     const session =
-      deferredInput.context !== undefined || deferredInput.outputSchema !== undefined
+      deferredInput.context !== undefined ||
+      readClientContext(deferredInput) !== undefined ||
+      deferredInput.outputSchema !== undefined
         ? queueDeferredStepInput(input.session, deferredInput)
         : input.session;
     return { outcome: "unresolved", messages: baseHistory, session };
@@ -114,26 +185,51 @@ export function resolvePendingInput(input: {
   switch (route.kind) {
     case "session-limit":
       return resolveSessionLimitInput({ ...resolverInput, pendingBatch: route.batch });
-    case "approval":
+    case "with-approvals":
       return resolveApprovalInputBatches({
         ...resolverInput,
         approvalBatches: route.approvalBatches,
         questionBatches: route.questionBatches,
         resolveApprovalKey: input.resolveApprovalKey,
       });
-    case "question":
+    case "questions-only":
       return resolveQuestionOnlyInputBatches(resolverInput);
   }
+}
+
+/**
+ * An internal tool-loop step must not be parked by input emitted by an older
+ * turn. The current turn can still park on its own HITL request; session-limit
+ * prompts remain a harness gate regardless of the turn that created them.
+ */
+function canContinuePastHistoricalInput(input: {
+  readonly activeTurnId?: string;
+  readonly batches: readonly PendingInputBatch[];
+  readonly responses: readonly InputResponse[];
+  readonly route: PendingInputRoute;
+}): boolean {
+  if (input.activeTurnId === undefined || input.route.kind === "session-limit") return false;
+  if (
+    input.responses.length > 0 &&
+    (input.route.kind !== "with-approvals" ||
+      findAnsweredApprovalBatches(input.route.approvalBatches, input.responses).length > 0 ||
+      findAnsweredQuestionBatches(input.route.questionBatches, input.responses).length > 0)
+  ) {
+    return false;
+  }
+  return input.batches.every(
+    (batch) => batch.event !== undefined && batch.event.turnId !== input.activeTurnId,
+  );
 }
 
 type PendingInputRoute =
   | { readonly batch: PendingInputBatch; readonly kind: "session-limit" }
   | {
       readonly approvalBatches: readonly PendingInputBatch[];
-      readonly kind: "approval";
+      readonly kind: "with-approvals";
       readonly questionBatches: readonly PendingInputBatch[];
     }
-  | { readonly kind: "question" };
+  | { readonly kind: "questions-only" };
 
 type PendingInputBatchDomain = "approval" | "question" | "session-limit";
 
@@ -149,12 +245,12 @@ function routePendingInput(batches: readonly PendingInputBatch[]): PendingInputR
     const approvalSet = new Set(approvalBatches);
     return {
       approvalBatches,
-      kind: "approval",
+      kind: "with-approvals",
       questionBatches: batches.filter((batch) => !approvalSet.has(batch)),
     };
   }
 
-  return { kind: "question" };
+  return { kind: "questions-only" };
 }
 
 function classifyPendingInputBatch(batch: PendingInputBatch): PendingInputBatchDomain {
@@ -179,13 +275,6 @@ function canonicalizeInputResponses(responses: readonly InputResponse[]): readon
   const byRequestId = new Map<string, InputResponse>();
   for (const response of responses) byRequestId.set(response.requestId, response);
   return [...byRequestId.values()];
-}
-
-function hasTailApprovalResponse(messages: readonly ModelMessage[]): boolean {
-  const tail = messages.at(-1);
-  return (
-    tail?.role === "tool" && tail.content.some((part) => part.type === "tool-approval-response")
-  );
 }
 
 function resolveTextMessageInput(

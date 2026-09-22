@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { Client } from "#client/index.js";
+import { EVE_MESSAGE_STREAM_VERSION, EVE_STREAM_VERSION_HEADER } from "#protocol/message.js";
 import { createDevelopmentRuntimeArtifactRefresher } from "#services/dev-client.js";
 
 const encoder = new TextEncoder();
@@ -258,6 +259,7 @@ function createDevFetchMock(input: {
   let nextRebuildIndex = 0;
   let nextRevisionIndex = 0;
   let nextSessionIndex = 0;
+  let nextDeliveryIndex = 0;
 
   return vi.fn(async (request: Parameters<typeof fetch>[0], init?: RequestInit) => {
     const url = resolveRequestUrl(request);
@@ -288,7 +290,7 @@ function createDevFetchMock(input: {
         pathname === "/eve/v1/session"
           ? `session-${String(++nextSessionIndex)}`
           : (pathname.split("/")[4] ?? `session-${String(++nextSessionIndex)}`);
-      return Response.json({ sessionId });
+      return Response.json({ sessionId, deliveryId: `delivery-${++nextDeliveryIndex}` });
     }
 
     return new Response(
@@ -299,12 +301,20 @@ function createDevFetchMock(input: {
               `${JSON.stringify({
                 data: { continuationToken: "session-id", wait: "next-user-message" },
                 type: "session.waiting",
+                meta: {
+                  at: new Date().toISOString(),
+                  id: `event-${nextDeliveryIndex}`,
+                  deliveryIds: [`delivery-${nextDeliveryIndex}`],
+                },
               })}\n`,
             ),
           );
           controller.close();
         },
       }),
+      {
+        headers: { [EVE_STREAM_VERSION_HEADER]: EVE_MESSAGE_STREAM_VERSION },
+      },
     );
   });
 }

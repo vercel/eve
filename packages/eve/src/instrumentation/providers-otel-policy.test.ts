@@ -24,6 +24,15 @@ vi.mock("#tracing/otel-registration.js", () => ({
 const REGISTRY_GLOBAL_KEY = Symbol.for("eve.harness-instrumentation-providers");
 const RUNTIME_GLOBAL_KEY = Symbol.for("eve.instrumentation-runtime");
 
+const traceContext = (audience: "public" | "private" | "unknown") => ({
+  agentName: "weather-agent",
+  audience,
+  channel: { kind: "http" as const },
+  environment: "production" as const,
+  mode: "conversation" as const,
+  principalType: "anonymous",
+});
+
 describe("otel and authored provider composition", () => {
   beforeEach(() => {
     delete (globalThis as Record<symbol, unknown>)[REGISTRY_GLOBAL_KEY];
@@ -51,10 +60,7 @@ describe("otel and authored provider composition", () => {
         }),
       });
       const runtime = finalizeInstrumentationProviders({ serviceName: "weather-agent" });
-      const hooks = runtime.hooks.forTrace!({
-        agentName: "weather-agent",
-        audience: "private",
-      });
+      const hooks = runtime.hooks.forTrace!(traceContext("private"));
 
       await contextStorage.run(new ContextContainer(), () =>
         hooks.publish({

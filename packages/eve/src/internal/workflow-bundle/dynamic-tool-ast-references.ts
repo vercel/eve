@@ -11,6 +11,7 @@ export type DynamicToolAstNode = {
   computed?: boolean;
   declaration?: DynamicToolAstNode | null;
   declarations?: DynamicToolAstNode[];
+  directive?: string;
   end?: number;
   expression?: DynamicToolAstNode | null;
   generator?: boolean;
@@ -23,8 +24,10 @@ export type DynamicToolAstNode = {
   local?: { name?: string } | null;
   method?: boolean;
   name?: string;
+  object?: DynamicToolAstNode | null;
   params?: DynamicToolAstNode[];
   properties?: DynamicToolAstNode[];
+  property?: DynamicToolAstNode | null;
   right?: DynamicToolAstNode | null;
   source?: { value?: unknown } | null;
   specifiers?: DynamicToolAstNode[];

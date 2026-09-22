@@ -7,8 +7,10 @@ export type AuthoringBenchmarkSupport = "supported" | "candidate" | "superseded"
 export interface AuthoringBenchmarkModel {
   readonly id: string;
   readonly model: string;
+  /** Model reference sent to the native harness when it differs from the public model ID. */
+  readonly agentModel?: string;
   readonly displayName: string;
-  readonly harness: "OpenCode" | "Claude Code";
+  readonly harness: "OpenCode" | "Claude Code" | "Codex";
   readonly support: AuthoringBenchmarkSupport;
 }
 
@@ -32,6 +34,13 @@ export const benchmarkModels = [
     model: "anthropic/claude-fable-5",
     displayName: "Claude Fable 5",
     harness: "Claude Code",
+    support: "superseded",
+  },
+  {
+    id: "claude-fable-5-1",
+    model: "anthropic/claude-fable-5.1",
+    displayName: "Claude Fable 5.1",
+    harness: "Claude Code",
     support: "supported",
   },
   {
@@ -45,14 +54,22 @@ export const benchmarkModels = [
     id: "gpt-5-6-sol",
     model: "openai/gpt-5.6-sol",
     displayName: "GPT-5.6 Sol",
-    harness: "OpenCode",
+    harness: "Codex",
     support: "supported",
   },
   {
     id: "gpt-5-6-terra",
     model: "openai/gpt-5.6-terra",
     displayName: "GPT-5.6 Terra",
-    harness: "OpenCode",
+    harness: "Codex",
+    support: "supported",
+  },
+  {
+    id: "gpt-6-astra-high",
+    model: "openai/gpt-6-astra",
+    agentModel: "openai/gpt-6-astra?reasoningEffort=high",
+    displayName: "GPT-6 Astra (high)",
+    harness: "Codex",
     support: "supported",
   },
   {
@@ -67,6 +84,13 @@ export const benchmarkModels = [
     model: "zai/glm-5.2",
     displayName: "GLM 5.2",
     harness: "OpenCode",
+    support: "superseded",
+  },
+  {
+    id: "glm-5-3",
+    model: "zai/glm-5.3",
+    displayName: "GLM 5.3",
+    harness: "OpenCode",
     support: "supported",
   },
   {
@@ -80,6 +104,27 @@ export const benchmarkModels = [
     id: "gemini-3-1-pro-preview",
     model: "google/gemini-3.1-pro-preview",
     displayName: "Gemini 3.1 Pro Preview",
+    harness: "OpenCode",
+    support: "supported",
+  },
+  {
+    id: "gemini-3-8-flash",
+    model: "google/gemini-3.8-flash",
+    displayName: "Gemini 3.8 Flash",
+    harness: "OpenCode",
+    support: "supported",
+  },
+  {
+    id: "minimax-m3",
+    model: "minimax/minimax-m3",
+    displayName: "MiniMax M3",
+    harness: "OpenCode",
+    support: "supported",
+  },
+  {
+    id: "kimi-k2-7-code",
+    model: "moonshotai/kimi-k2.7-code",
+    displayName: "Kimi K2.7 Code",
     harness: "OpenCode",
     support: "supported",
   },
@@ -110,7 +155,9 @@ export function publishedExperimentId(
 }
 
 export function harnessId(harness: AuthoringBenchmarkModel["harness"]): string {
-  return harness === "Claude Code" ? "claude-code" : "opencode";
+  if (harness === "Claude Code") return "claude-code";
+  if (harness === "Codex") return "codex";
+  return "opencode";
 }
 
 export function parseAuthoringTreatment(value: string): AuthoringTreatment {

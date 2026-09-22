@@ -2,6 +2,10 @@ import type { SubagentInputRequestHookPayload } from "#channel/types.js";
 import type { HarnessSession, SessionStateMap } from "#harness/types.js";
 import type { InputRequestKind } from "#shared/input.js";
 import { isLoopbackHostname } from "#shared/network-address.js";
+import {
+  isSessionInboxAddress,
+  type SessionInboxAddress,
+} from "#execution/session-inbox/address.js";
 
 const PROXY_INPUT_REQUESTS_KEY = "eve.runtime.proxyInputRequests";
 
@@ -11,11 +15,21 @@ const PROXY_INPUT_REQUEST_KINDS = {
   "tool-approval": true,
 } satisfies Readonly<Record<InputRequestKind, true>>;
 
+/**
+ * Marks a continuation token as a bare hook a workflow tool run created for one
+ * request, resumed with the plain response, rather than a child session inbox.
+ */
+export interface AnswerHookRoute {
+  readonly runId: string;
+}
+
 /** Routing and control metadata for one descendant-owned input request. */
 export interface ProxyInputRequest {
+  readonly answerHook?: AnswerHookRoute;
   /** Batch semantics are optional so sessions written before this field remain routable. */
   readonly batch?: ProxyInputRequestBatch;
   readonly childContinuationToken: string;
+  readonly childSessionInbox?: SessionInboxAddress;
   /** Child-local id restored before forwarding a namespaced task response. */
   readonly childRequestId?: string;
   /** Trusted parent-derived capability URL for a remote task child. */
@@ -115,23 +129,30 @@ export function clearProxyInputRequestsForChild(
   session: HarnessSession,
   childContinuationToken: string,
 ): HarnessSession {
+  return clearProxyInputRequestsWhere(
+    session,
+    (route) => route.childContinuationToken === childContinuationToken,
+  );
+}
+
+/** Removes every proxy route the predicate selects. */
+export function clearProxyInputRequestsWhere<T extends { readonly state?: SessionStateMap }>(
+  session: T,
+  select: (route: ProxyInputRequest) => boolean,
+): T {
   const current = readMap(session.state);
   const next: Record<string, ProxyInputRequest> = {};
   let changed = false;
 
   for (const [requestId, route] of Object.entries(current)) {
-    if (route.childContinuationToken === childContinuationToken) {
+    if (select(route)) {
       changed = true;
       continue;
     }
     next[requestId] = route;
   }
 
-  if (!changed) {
-    return session;
-  }
-
-  return writeMap(session, next);
+  return changed ? writeMap(session, next) : session;
 }
 
 /** Removes only the request IDs whose responses were successfully forwarded. */
@@ -154,21 +175,11 @@ export function retireProxyInputRequests<T extends { readonly state?: SessionSta
 }
 
 /** Removes every proxy route owned by one durable task. */
-export function clearProxyInputRequestsForTask(
-  session: HarnessSession,
+export function clearProxyInputRequestsForTask<T extends { readonly state?: SessionStateMap }>(
+  session: T,
   taskId: string,
-): HarnessSession {
-  const current = readMap(session.state);
-  const next: Record<string, ProxyInputRequest> = {};
-  let changed = false;
-  for (const [requestId, route] of Object.entries(current)) {
-    if (route.taskId === taskId) {
-      changed = true;
-    } else {
-      next[requestId] = route;
-    }
-  }
-  return changed ? writeMap(session, next) : session;
+): T {
+  return clearProxyInputRequestsWhere(session, (route) => route.taskId === taskId);
 }
 
 /**
@@ -199,6 +210,7 @@ export function toProxyInputRequestEntries(
   return payload.event.requests.map((request) => {
     const route: {
       readonly childContinuationToken: string;
+      childSessionInbox?: SessionInboxAddress;
       childResponseUrl?: string;
       readonly kind: InputRequestKind;
       taskId?: string;
@@ -208,6 +220,10 @@ export function toProxyInputRequestEntries(
       kind: request.kind,
     };
     if (taskId !== undefined) route.taskId = taskId;
+    if (payload.childSessionInbox?.sessionId === payload.childSessionId) {
+      route.childSessionInbox = payload.childSessionInbox;
+    }
+
     return [request.requestId, route] as const;
   });
 }
@@ -277,9 +293,16 @@ function parseProxyInputRequest(value: unknown, requestId: string): ProxyInputRe
     return undefined;
   }
   const batch = "batch" in value ? parseProxyInputRequestBatch(value.batch) : undefined;
+  const answerHook = "answerHook" in value ? parseAnswerHookRoute(value.answerHook) : undefined;
+  if ("answerHook" in value && answerHook === undefined) return undefined;
+  const childSessionInbox = "childSessionInbox" in value ? value.childSessionInbox : undefined;
+  if (childSessionInbox !== undefined && !isSessionInboxAddress(childSessionInbox))
+    return undefined;
   const request: {
+    answerHook?: AnswerHookRoute;
     batch?: ProxyInputRequestBatch;
     readonly childContinuationToken: string;
+    childSessionInbox?: SessionInboxAddress;
     childRequestId?: string;
     childResponseUrl?: string;
     readonly kind: InputRequestKind;
@@ -288,11 +311,20 @@ function parseProxyInputRequest(value: unknown, requestId: string): ProxyInputRe
     childContinuationToken: value.childContinuationToken,
     kind: value.kind,
   };
+  if (answerHook !== undefined) request.answerHook = answerHook;
+  if (childSessionInbox !== undefined) request.childSessionInbox = childSessionInbox;
   if (batch !== undefined && batch.requestIds.includes(requestId)) request.batch = batch;
   if (typeof childRequestId === "string") request.childRequestId = childRequestId;
   if (typeof childResponseUrl === "string") request.childResponseUrl = childResponseUrl;
   if (typeof taskId === "string") request.taskId = taskId;
   return request;
+}
+
+function parseAnswerHookRoute(value: unknown): AnswerHookRoute | undefined {
+  if (value === null || typeof value !== "object" || !("runId" in value)) return undefined;
+  return typeof value.runId === "string" && value.runId.length > 0
+    ? { runId: value.runId }
+    : undefined;
 }
 
 function parseProxyInputRequestBatch(value: unknown): ProxyInputRequestBatch | undefined {

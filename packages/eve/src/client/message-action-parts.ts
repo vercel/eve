@@ -102,6 +102,7 @@ export function normalizeActionRequest(action: RuntimeActionRequest): ActionDesc
         toolName: "eve:load-skill",
       };
     case "tool-call":
+    case "workflow-tool-call":
       return {
         kind: "tool-call",
         name: action.toolName,

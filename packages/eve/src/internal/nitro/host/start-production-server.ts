@@ -19,10 +19,6 @@ const LOCAL_SERVER_URL_PATTERN = /https?:\/\/(?:\[[^\]\s]+\]|[^\s/:[\]]+)(?::\d+
 const TERMINATE_GRACE_MS = 20_000;
 const WILDCARD_LISTEN_HOSTNAMES: ReadonlySet<string> = new Set(["[::]", "::", "0.0.0.0"]);
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
-}
-
 function resolveOutputServerEntry(appRoot: string): string {
   return join(resolve(appRoot), ".output", "server", "index.mjs");
 }
@@ -208,7 +204,7 @@ export async function startProductionServer(
     );
   }
 
-  loadDevelopmentEnvironmentFiles(appRoot);
+  await loadDevelopmentEnvironmentFiles(appRoot);
   await prewarmBuiltAppSandboxes({
     appRoot,
     log: (message) => console.log(message),
@@ -293,7 +289,7 @@ export async function startProductionServer(
     closing = true;
     await terminate(child);
 
-    if (isRecord(error) && error.name === "AbortError") {
+    if (error instanceof Error && error.name === "AbortError") {
       throw new Error("Timed out waiting for built eve server to respond.", { cause: error });
     }
 

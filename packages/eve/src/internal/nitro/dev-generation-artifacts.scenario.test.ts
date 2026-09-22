@@ -255,6 +255,56 @@ describe("development generation artifacts", () => {
     expect(tool.default.execute()).toBe("configured");
   });
 
+  it("honors disabled local self-modification in the materialized development graph", async () => {
+    const previousDev = process.env.EVE_DEV;
+    process.env.EVE_DEV = "1";
+    try {
+      const app = await scenarioApp({
+        files: {
+          "agent/agent.mjs": 'export default { model: "openai/gpt-5.4" };\n',
+          "agent/instructions.md": "Use the available tools.",
+          "agent/extensions/self-modification.mjs": [
+            'import selfModification from "eve/self-modification";',
+            "export default selfModification({ local: { enabled: false } });",
+            "",
+          ].join("\n"),
+        },
+        name: "disabled-local-self-modification-generation",
+      });
+      await mkdir(join(app.appRoot, "node_modules"), { recursive: true });
+      await symlink(resolvePackageRoot(), join(app.appRoot, "node_modules", "eve"), "junction");
+
+      const compileResult = await compileAgent({ startPath: app.appRoot });
+      const snapshot = await stageDevelopmentGeneration(compileResult);
+      const moduleMap = await loadCompiledModuleMapFromAuthoredSource({
+        compiledArtifactsSource: createAuthoredSourceRuntimeCompiledArtifactsSource(
+          snapshot.runtimeAppRoot,
+        ),
+      });
+      const child = compileResult.manifest.subagents[0];
+      if (child?.configResolver === undefined) throw new Error("expected a dynamic subagent");
+      const modules = moduleMap.nodes[child.nodeId]!.modules;
+      const agent = modules[child.configResolver.sourceId] as {
+        default: { events: Record<string, Function> };
+      };
+      for (const event of ["session.started", "turn.started"]) {
+        await expect(agent.default.events[event]!({}, { model: null })).resolves.toBeNull();
+      }
+
+      const sandbox = modules[child.agent.sandbox.sourceId] as {
+        defineSelfModificationSandbox(options: { backend: { name: string } }): {
+          backend(): { name: string };
+        };
+      };
+      const backend = { name: "disabled-local-test" };
+      // Local mode ignores this backend and installs the writable host filesystem instead.
+      expect(sandbox.defineSelfModificationSandbox({ backend }).backend()).toBe(backend);
+    } finally {
+      if (previousDev === undefined) delete process.env.EVE_DEV;
+      else process.env.EVE_DEV = previousDev;
+    }
+  });
+
   it("materializes a mounted extension from a physical installed directory", async () => {
     const packageName = "@acme/physical-extension";
     const app = await scenarioApp({
@@ -479,7 +529,16 @@ describe("development generation artifacts", () => {
     const app = await scenarioApp({
       files: {
         "agent/agent.mjs": 'export default { model: "openai/gpt-5.4" };\n',
-        "agent/instrumentation.mjs": 'export default { marker: "one" };\n',
+        "agent/instrumentation/audit.mjs": [
+          'import { defineInstrumentation } from "eve/instrumentation";',
+          'const marker = "one";',
+          "export default defineInstrumentation({",
+          "  setup() {",
+          "    globalThis.__EVE_PROVIDER_FINGERPRINT__ = marker;",
+          "  },",
+          "});",
+          "",
+        ].join("\n"),
         "agent/instructions.md": "Use the configured model.",
         "agent/skills/guide.md": [
           "---",
@@ -501,7 +560,10 @@ describe("development generation artifacts", () => {
         "utf8",
       ),
     ) as { readonly instrumentation?: MaterializedInstrumentation; readonly moduleMap: string };
-    expect(firstIndex.instrumentation).toBeUndefined();
+    expect(firstIndex.instrumentation).toMatchObject({
+      kind: "directory",
+      modulePathsBySlot: { audit: expect.any(String) },
+    });
     const materializedModuleMap = await readFile(
       join(first.runtimeAppRoot, ".eve", "compile", firstIndex.moduleMap),
       "utf8",
@@ -526,16 +588,22 @@ describe("development generation artifacts", () => {
     expect(restoredInstructions.fingerprint).toBe(first.fingerprint);
 
     await writeFile(
-      join(app.appRoot, "agent", "instrumentation.mjs"),
-      'export default { marker: "two" };\n',
+      join(app.appRoot, "agent", "instrumentation", "audit.mjs"),
+      [
+        'import { defineInstrumentation } from "eve/instrumentation";',
+        'const marker = "two";',
+        "export default defineInstrumentation({",
+        "  setup() {",
+        "    globalThis.__EVE_PROVIDER_FINGERPRINT__ = marker;",
+        "  },",
+        "});",
+        "",
+      ].join("\n"),
     );
     const changedCompile = await compileAgent({ startPath: app.appRoot });
     const changed = await stageDevelopmentGeneration(changedCompile);
 
     expect(changed.fingerprint).not.toBe(first.fingerprint);
-    expect(changedCompile.manifest.instrumentation).toMatchObject({
-      logicalPath: "instrumentation.mjs",
-    });
 
     await writeFile(
       join(app.appRoot, "agent", "skills", "guide.md"),
@@ -549,7 +617,83 @@ describe("development generation artifacts", () => {
     expect(changedResources.fingerprint).not.toBe(changed.fingerprint);
   });
 
-  it("rejects only authored workflow directives", async () => {
+  it("compiles authored workflow tools for the development runtime", async () => {
+    const app = await scenarioApp({
+      files: {
+        "agent/agent.mjs": 'export default { model: "openai/gpt-5.4" };\n',
+        "agent/instructions.md": "Use the available tools.",
+        "agent/lib/plan.mjs": 'export const PLAN_PREFIX = "plan:";\n',
+        "agent/tools/deploy.mjs": [
+          'import { defineWorkflowTool } from "eve/tools";',
+          'import { PLAN_PREFIX } from "../lib/plan.mjs";',
+          "",
+          "export default defineWorkflowTool({",
+          '  description: "Deploy a service.",',
+          '  inputSchema: { type: "object", properties: { service: { type: "string" } } },',
+          "  async execute({ service }) {",
+          '    "use workflow";',
+          "    return { plan: await planDeploy(service) };",
+          "  },",
+          "});",
+          "",
+          "async function planDeploy(service) {",
+          '  "use step";',
+          "  return `${PLAN_PREFIX}${service}`;",
+          "}",
+          "",
+        ].join("\n"),
+        "agent/tools/plain.mjs": [
+          'export default { description: "Plain tool.", execute: () => "plain" };',
+          "",
+        ].join("\n"),
+      },
+      installDependencies: true,
+      name: "authored-workflow-tools-generation",
+    });
+
+    const compileResult = await compileAgent({ startPath: app.appRoot });
+    const generation = await stageDevelopmentGeneration(compileResult);
+    expect(generation.workflowSourceFingerprint).toEqual(expect.any(String));
+
+    const moduleMap = await loadCompiledModuleMapFromAuthoredSource({
+      compiledArtifactsSource: createAuthoredSourceRuntimeCompiledArtifactsSource(
+        generation.runtimeAppRoot,
+      ),
+    });
+    const deploySourceId = compileResult.manifest.tools.find(
+      (tool) => tool.name === "deploy",
+    )?.sourceId;
+    const deploy = moduleMap.nodes[ROOT_COMPILED_AGENT_NODE_ID]?.modules[deploySourceId!] as {
+      default: { execute: { (input: unknown): Promise<unknown>; workflowId?: string } };
+    };
+    expect(deploy.default.execute.workflowId).toBe("workflow//./agent/tools/deploy//execute");
+    await expect(deploy.default.execute({ service: "api" })).rejects.toThrow(
+      /use start\(execute\) from workflow\/api/u,
+    );
+
+    // A helper the step imports is part of the workflow source graph; an
+    // unrelated tool is not.
+    await writeFile(
+      join(app.appRoot, "agent", "lib", "plan.mjs"),
+      'export const PLAN_PREFIX = "plan v2:";\n',
+    );
+    const helperChanged = await stageDevelopmentGeneration(
+      await compileAgent({ startPath: app.appRoot }),
+    );
+    expect(helperChanged.workflowSourceFingerprint).not.toBe(generation.workflowSourceFingerprint);
+
+    await writeFile(
+      join(app.appRoot, "agent", "tools", "plain.mjs"),
+      'export default { description: "Plain tool.", execute: () => "plain v2" };\n',
+    );
+    const plainChanged = await stageDevelopmentGeneration(
+      await compileAgent({ startPath: app.appRoot }),
+    );
+    expect(plainChanged.workflowSourceFingerprint).toBe(helperChanged.workflowSourceFingerprint);
+    expect(plainChanged.fingerprint).not.toBe(helperChanged.fingerprint);
+  });
+
+  it("rejects module-level authored workflow directives", async () => {
     const app = await scenarioApp({
       files: {
         "agent/agent.mjs": 'export default { model: "openai/gpt-5.4" };\n',
@@ -578,10 +722,8 @@ describe("development generation artifacts", () => {
         "",
       ].join("\n"),
     );
-    const invalidCompile = await compileAgent({ startPath: app.appRoot });
-
-    await expect(stageDevelopmentGeneration(invalidCompile)).rejects.toThrow(
-      /actual "use step" directive/u,
+    await expect(compileAgent({ startPath: app.appRoot })).rejects.toThrow(
+      /"use step" in .* is a module-level directive/u,
     );
     await expect(readdir(snapshotsRoot)).resolves.toEqual(stagedGenerations);
   });

@@ -1,5 +1,7 @@
+import { atomicWriteFile } from "#shared/atomic-write-file.js";
+import { isModelConnection, type ModelConnectionSelection } from "#shared/model-connection.js";
 import { readFileSync } from "node:fs";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { hasEnvValue } from "#internal/resolve-model-endpoint-status.js";
@@ -8,9 +10,7 @@ import { AI_GATEWAY_API_KEY_ENV_VAR } from "#setup/ai-gateway-api-key.js";
 import { findEnvFileWithKey } from "#setup/boxes/detect-ai-gateway.js";
 import { readProjectLink } from "#setup/project-resolution.js";
 
-const PROVIDER_SELECTIONS = ["chatgpt", "ai-gateway-key", "ai-gateway-project"] as const;
-
-export type ProviderSelection = (typeof PROVIDER_SELECTIONS)[number];
+export type ProviderSelection = ModelConnectionSelection;
 
 export function providerSettingsPath(appRoot: string): string {
   return join(appRoot, ".eve", "provider.json");
@@ -56,24 +56,58 @@ export async function readProviderSelection(
   }
 }
 
-/** Synchronous counterpart for the synchronous dev-environment loader. */
-export function readProviderSelectionSync(appRoot: string): ProviderSelection | undefined {
+export function readProviderSettingsSync(appRoot: string): ProviderSettings | undefined {
   try {
-    return parseProviderSelection(JSON.parse(readFileSync(providerSettingsPath(appRoot), "utf8")));
+    const value: unknown = JSON.parse(readFileSync(providerSettingsPath(appRoot), "utf8"));
+    if (!isObject(value) || !isProviderSelection(value.selected)) return undefined;
+    return {
+      selected: value.selected,
+      ...(typeof value.teamId === "string" &&
+        typeof value.teamName === "string" && { teamId: value.teamId, teamName: value.teamName }),
+      ...((value.keySource === "environment" || value.keySource === "secret") && {
+        keySource: value.keySource,
+      }),
+    };
   } catch {
     return undefined;
+  }
+}
+
+export interface ProviderSettings {
+  selected: ProviderSelection;
+  teamId?: string;
+  teamName?: string;
+  keySource?: "environment" | "secret";
+}
+
+export async function providerSettingsMatch(
+  appRoot: string,
+  settings: ProviderSettings,
+): Promise<boolean> {
+  try {
+    const current = JSON.parse(await readFile(providerSettingsPath(appRoot), "utf8"));
+    return (
+      isObject(current) &&
+      current.selected === settings.selected &&
+      current.teamId === settings.teamId &&
+      current.teamName === settings.teamName &&
+      current.keySource === settings.keySource
+    );
+  } catch {
+    return false;
   }
 }
 
 export async function writeProviderSelection(
   appRoot: string,
   selected: ProviderSelection,
+  team?: { teamId: string; teamName: string },
+  keySource?: "environment" | "secret",
 ): Promise<void> {
   await mkdir(join(appRoot, ".eve"), { recursive: true });
-  await writeFile(
+  await atomicWriteFile(
     providerSettingsPath(appRoot),
-    `${JSON.stringify({ selected }, null, 2)}\n`,
-    "utf8",
+    `${JSON.stringify({ selected, ...team, keySource }, null, 2)}\n`,
   );
 }
 
@@ -82,5 +116,18 @@ function parseProviderSelection(value: unknown): ProviderSelection | undefined {
 }
 
 function isProviderSelection(value: unknown): value is ProviderSelection {
-  return PROVIDER_SELECTIONS.some((selection) => selection === value);
+  return isModelConnection(value) || value === "vercel-cli" || value === "ai-gateway-project";
+}
+
+export function readProviderTeamSync(
+  appRoot: string,
+): { teamId: string; teamName: string } | undefined {
+  const settings = readProviderSettingsSync(appRoot);
+  return settings?.teamId && settings.teamName
+    ? { teamId: settings.teamId, teamName: settings.teamName }
+    : undefined;
+}
+
+export function readProviderKeySourceSync(appRoot: string): "environment" | "secret" | undefined {
+  return readProviderSettingsSync(appRoot)?.keySource;
 }

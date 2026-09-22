@@ -1,6 +1,13 @@
 import { createRequire } from "node:module";
 
-import { context, propagation, trace, type Context } from "#compiled/@opentelemetry/api/index.js";
+import {
+  context,
+  metrics,
+  propagation,
+  trace,
+  SpanKind,
+  type Context,
+} from "#compiled/@opentelemetry/api/index.js";
 import {
   registerOTel,
   type Configuration,
@@ -10,10 +17,22 @@ import {
 
 import { AgentSpanIdGenerator } from "#tracing/agent-span-id-generator.js";
 import type { OtelPipeline } from "#tracing/otel-declaration.js";
+import {
+  agentInvocationSpanName,
+  type AgentSamplingOperation,
+} from "#tracing/agent-span-contract.js";
 
 const REGISTRATION_SPAN_NAME = "eve.otel.registration";
 const REPLAY_DEDUPLICATION_LIMIT = 100_000;
+const PENDING_CHILD_SPAN_LIMIT = 10_000;
+const REPLAY_DEDUPLICATION_KEY = Symbol.for("eve.otel.replay-deduplication");
 const require = createRequire(import.meta.url);
+
+interface ReplayDeduplicationGlobal {
+  [REPLAY_DEDUPLICATION_KEY]?: Set<string>;
+}
+
+const replayDeduplicationGlobal = globalThis as typeof globalThis & ReplayDeduplicationGlobal;
 
 class RegistrationMarkerPropagator {
   #injected = false;
@@ -39,17 +58,20 @@ class RegistrationMarkerPropagator {
 
 /** Keeps eve's ownership check out of every authored destination. */
 class PrivateSpanFilteringProcessor implements SpanProcessor {
-  private readonly endedSpans = new Set<string>();
+  private readonly endedSpans: Set<string>;
   private readonly forwardedSpans = new Set<string>();
   private readonly pendingByParent = new Map<string, unknown[]>();
+  private pendingSpanCount = 0;
   private readonly processors: readonly SpanProcessor[];
   private readonly startedSpans = new Set<string>();
 
-  constructor(processors: readonly SpanProcessor[]) {
+  constructor(processors: readonly SpanProcessor[], endedSpans: Set<string>) {
     this.processors = processors;
+    this.endedSpans = endedSpans;
   }
 
   async forceFlush(): Promise<void> {
+    this.drainPendingSpans();
     await Promise.all(this.processors.map((processor) => processor.forceFlush()));
   }
 
@@ -69,6 +91,8 @@ class PrivateSpanFilteringProcessor implements SpanProcessor {
       const pending = this.pendingByParent.get(parent) ?? [];
       pending.push(span);
       this.pendingByParent.set(parent, pending);
+      this.pendingSpanCount += 1;
+      if (this.pendingSpanCount > PENDING_CHILD_SPAN_LIMIT) this.releaseOldestPendingParent();
       return;
     }
     this.forward(span, identity);
@@ -82,17 +106,38 @@ class PrivateSpanFilteringProcessor implements SpanProcessor {
   }
 
   async shutdown(): Promise<void> {
+    this.drainPendingSpans();
     await Promise.all(this.processors.map((processor) => processor.shutdown()));
+  }
+
+  // A parent that never ends (lost worker, abandoned attempt) must not hold
+  // its ended children forever: flush and shutdown are the last chance to
+  // export them, and the cap bounds what one stuck parent can buffer. Spans
+  // released here precede their parent; an ordinary flush drains nothing
+  // because parents end before the per-step flush runs.
+  private drainPendingSpans(): void {
+    while (this.pendingByParent.size > 0) this.releaseOldestPendingParent();
+  }
+
+  private releaseOldestPendingParent(): void {
+    const parent = this.pendingByParent.keys().next().value;
+    if (parent === undefined) return;
+    this.releaseChildren(parent);
+  }
+
+  private releaseChildren(parent: string): void {
+    const children = this.pendingByParent.get(parent);
+    if (children === undefined) return;
+    this.pendingByParent.delete(parent);
+    this.pendingSpanCount -= children.length;
+    for (const child of children) this.forward(child, spanIdentity(child));
   }
 
   private forward(span: unknown, identity: string | undefined): void {
     for (const processor of this.processors) processor.onEnd(span);
     if (identity === undefined) return;
     addBounded(this.forwardedSpans, identity);
-    const children = this.pendingByParent.get(identity);
-    if (children === undefined) return;
-    this.pendingByParent.delete(identity);
-    for (const child of children) this.forward(child, spanIdentity(child));
+    this.releaseChildren(identity);
   }
 }
 
@@ -115,6 +160,7 @@ export function registerOtelPipeline(input: {
   const optionalPeerTracerProxy = captureOptionalPeerTracerProxy();
   const idGenerator = new AgentSpanIdGenerator();
   const markerPropagator = new RegistrationMarkerPropagator();
+  const spanProcessors = privateSpanProcessors(pipeline.spanProcessors);
   const configuration: Configuration = {
     attributes: pipeline.resource,
     autoDetectResources: false,
@@ -123,9 +169,7 @@ export function registerOtelPipeline(input: {
     metricReaders: pipeline.metricReaders,
     propagators: [...(pipeline.propagators ?? ["auto"]), markerPropagator],
     serviceName: input.serviceName,
-    spanProcessors: pipeline.spanProcessors.map((processor) =>
-      isSpanProcessor(processor) ? new PrivateSpanFilteringProcessor([processor]) : processor,
-    ),
+    spanProcessors,
   };
   registerOTel(
     // Absent means "let `@vercel/otel` decide", which is not the same as
@@ -156,21 +200,82 @@ export function registerOtelPipeline(input: {
     throw new Error("The registered OpenTelemetry tracer provider has no lifecycle methods.");
   }
   optionalPeerTracerProxy?.setDelegate(provider);
+  // `registerOTel` also registers a global meter provider when metric readers
+  // are declared, but returns no handle to it. Capture it now so metrics get
+  // the same flush and shutdown coverage as spans; without metric readers the
+  // global is a no-op provider with no lifecycle methods.
+  const meterProvider = runtimeMeterProvider();
   return {
-    forceFlush: () => provider.forceFlush!(),
+    forceFlush: async () => {
+      await Promise.all([provider.forceFlush!(), meterProvider.forceFlush?.()]);
+    },
     idGenerator,
-    shutdown: () => provider.shutdown!(),
+    samplesTrace: (traceId, operation) => samplerAdmitsTrace(idGenerator, traceId, operation),
+    shutdown: async () => {
+      // Stop auto-instrumentations first so nothing records into providers
+      // that are about to shut down.
+      disableInstrumentations(pipeline.instrumentations);
+      await Promise.all([provider.shutdown!(), meterProvider.shutdown?.()]);
+    },
   };
 }
 
-/** Lifecycle retained from the tracer provider that owns every destination. */
+function privateSpanProcessors(processors: readonly SpanProcessorOrName[]): SpanProcessorOrName[] {
+  const concrete = processors.filter(isSpanProcessor);
+  if (concrete.length === 0) return [...processors];
+  const filtering = new PrivateSpanFilteringProcessor(concrete, replayDeduplicationRegistry());
+  const result: SpanProcessorOrName[] = [];
+  let inserted = false;
+  for (const processor of processors) {
+    if (!isSpanProcessor(processor)) {
+      result.push(processor);
+      continue;
+    }
+    if (inserted) continue;
+    inserted = true;
+    result.push(filtering);
+  }
+  return result;
+}
+
+function replayDeduplicationRegistry(): Set<string> {
+  const existing = replayDeduplicationGlobal[REPLAY_DEDUPLICATION_KEY];
+  if (existing !== undefined) return existing;
+  const created = new Set<string>();
+  replayDeduplicationGlobal[REPLAY_DEDUPLICATION_KEY] = created;
+  return created;
+}
+
+/** Lifecycle retained from the providers that own every destination. */
 export interface RegisteredOtelPipeline {
   readonly forceFlush: () => Promise<void>;
   readonly idGenerator: AgentSpanIdGenerator;
+  /** Whether the installed sampler would record a trace with this id. */
+  readonly samplesTrace: (traceId: string, operation?: AgentSamplingOperation) => boolean;
   readonly shutdown: () => Promise<void>;
 }
 
+function samplerAdmitsTrace(
+  idGenerator: AgentSpanIdGenerator,
+  traceId: string,
+  operation: AgentSamplingOperation = { name: agentInvocationSpanName(undefined) },
+): boolean {
+  const probe = idGenerator.withTraceId(traceId, () =>
+    trace.getTracer("eve.registration").startSpan(operation.name, {
+      attributes: operation.attributes,
+      kind: SpanKind.INTERNAL,
+      root: true,
+    }),
+  );
+  return (probe.spanContext().traceFlags & 1) === 1;
+}
+
 interface RuntimeTracerProvider {
+  forceFlush(): Promise<void>;
+  shutdown(): Promise<void>;
+}
+
+interface RuntimeMeterProvider {
   forceFlush(): Promise<void>;
   shutdown(): Promise<void>;
 }
@@ -215,6 +320,33 @@ function runtimeTracerProvider(): Partial<RuntimeTracerProvider> {
   return (globalProvider.getDelegate?.() ?? globalProvider) as Partial<RuntimeTracerProvider>;
 }
 
+function runtimeMeterProvider(): Partial<RuntimeMeterProvider> {
+  const globalProvider = metrics.getMeterProvider() as {
+    forceFlush?: unknown;
+    shutdown?: unknown;
+  } | null;
+  return {
+    forceFlush:
+      typeof globalProvider?.forceFlush === "function"
+        ? () => (globalProvider as RuntimeMeterProvider).forceFlush()
+        : undefined,
+    shutdown:
+      typeof globalProvider?.shutdown === "function"
+        ? () => (globalProvider as RuntimeMeterProvider).shutdown()
+        : undefined,
+  };
+}
+
+function disableInstrumentations(instrumentations: readonly unknown[] | undefined): void {
+  for (const instrumentation of instrumentations ?? []) {
+    const disable = (instrumentation as { disable?: unknown } | null)?.disable;
+    if (typeof disable !== "function") continue;
+    try {
+      disable.call(instrumentation);
+    } catch {}
+  }
+}
+
 function globalTracerUses(idGenerator: AgentSpanIdGenerator): boolean {
   const spanId = idGenerator.allocateSpanId();
   const probe = idGenerator.withSpanId(spanId, () =>
@@ -229,8 +361,9 @@ function isRegistrationSpan(span: unknown): boolean {
   return (
     typeof span === "object" &&
     span !== null &&
-    "name" in span &&
-    span.name === REGISTRATION_SPAN_NAME
+    (("name" in span && span.name === REGISTRATION_SPAN_NAME) ||
+      ("instrumentationScope" in span &&
+        (span.instrumentationScope as { name?: string } | undefined)?.name === "eve.registration"))
   );
 }
 

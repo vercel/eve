@@ -96,6 +96,7 @@ function createBlockedInstrumentationSource(): string {
   return [
     'import { existsSync, watch, writeFileSync } from "node:fs";',
     'import { join } from "node:path";',
+    'import { defineInstrumentation } from "eve/instrumentation";',
     "",
     "declare global {",
     "  var __EVE_INSTRUMENTATION_MARKER__: string | undefined;",
@@ -120,7 +121,7 @@ function createBlockedInstrumentationSource(): string {
     "  }",
     "});",
     'globalThis.__EVE_INSTRUMENTATION_MARKER__ = "two";',
-    "export default {};",
+    "export default defineInstrumentation({});",
     "",
   ].join("\n");
 }
@@ -149,7 +150,7 @@ async function waitForWebSocketEvent<T>(
     }, 10_000);
     const cleanup = () => {
       clearTimeout(deadline);
-      socket.removeEventListener(eventName, onEvent as EventListener);
+      socket.removeEventListener(eventName, onEvent);
       socket.removeEventListener("error", onError);
     };
     const onEvent = (event: Event) => {
@@ -160,7 +161,7 @@ async function waitForWebSocketEvent<T>(
       cleanup();
       reject(new Error(`WebSocket failed while waiting for ${eventName}.`));
     };
-    socket.addEventListener(eventName, onEvent as EventListener, { once: true });
+    socket.addEventListener(eventName, onEvent, { once: true });
     socket.addEventListener("error", onError, { once: true });
   });
 }
@@ -204,7 +205,7 @@ describe("eve dev server live connections", () => {
         })();
 
         await writeFile(
-          join(app.appRoot, "agent", "instrumentation.ts"),
+          join(app.appRoot, "agent", "instrumentation", "reload.ts"),
           createBlockedInstrumentationSource(),
         );
         const rebuild = forceDevelopmentRebuild(server.url);
@@ -248,7 +249,7 @@ describe("eve dev server live connections", () => {
         expect(first.localPort).toBeDefined();
 
         await writeFile(
-          join(app.appRoot, "agent", "instrumentation.ts"),
+          join(app.appRoot, "agent", "instrumentation", "reload.ts"),
           createInstrumentationSource("keep-alive-two"),
         );
         await forceDevelopmentRebuild(server.url, agent);

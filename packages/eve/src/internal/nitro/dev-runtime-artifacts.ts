@@ -43,6 +43,7 @@ export interface DevelopmentRuntimeArtifactsRevision {
 }
 
 export interface DevelopmentRuntimeArtifactsSnapshot {
+  readonly sourceWatchPaths?: readonly string[];
   readonly runtimeAppRoot: string;
   readonly snapshotRoot: string;
   readonly snapshotSourceRoot: string;
@@ -127,7 +128,7 @@ export async function stageDevelopmentRuntimeArtifactsSnapshot(
         "compile",
         "compiled-agent-manifest.json",
       ),
-      runtimeAppRoot: sourceSnapshotPlan.runtimeAppRoot,
+      snapshotSourceRoot: sourceSnapshotPlan.snapshotSourceRoot,
     });
     await writeFile(
       join(snapshotRoot, DEV_RUNTIME_ARTIFACTS_GENERATION_METADATA),
@@ -139,6 +140,7 @@ export async function stageDevelopmentRuntimeArtifactsSnapshot(
   }
 
   return {
+    sourceWatchPaths: sourceSnapshotPlan.watchPaths,
     runtimeAppRoot: sourceSnapshotPlan.runtimeAppRoot,
     snapshotRoot,
     snapshotSourceRoot: sourceSnapshotPlan.snapshotSourceRoot,
@@ -464,11 +466,17 @@ function rewriteManifestRoots(input: {
   const rewritten: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(input.value)) {
     if (typeof value === "string" && (key === "appRoot" || key === "agentRoot")) {
-      rewritten[key] = rewritePathWithinAppRoot({
-        appRoot: input.appRoot,
-        path: value,
-        runtimeAppRoot: input.runtimeAppRoot,
-      });
+      rewritten[key] = isPathInsideOrEqual(value, input.appRoot)
+        ? rewritePathWithinAppRoot({
+            appRoot: input.appRoot,
+            path: value,
+            runtimeAppRoot: input.runtimeAppRoot,
+          })
+        : rewritePathWithinSourceRoot({
+            path: value,
+            snapshotSourceRoot: input.snapshotSourceRoot,
+            sourceRoot: input.sourceRoot,
+          });
       continue;
     }
 
@@ -613,18 +621,18 @@ async function restoreDevelopmentRuntimeArtifactsActivation(input: {
 
 async function validateSnapshotCompiledManifestRoots(input: {
   readonly manifestPath: string;
-  readonly runtimeAppRoot: string;
+  readonly snapshotSourceRoot: string;
 }): Promise<void> {
   const manifest = JSON.parse(await readFile(input.manifestPath, "utf8")) as unknown;
   const rootPaths = collectManifestRootPaths(manifest);
 
   for (const path of rootPaths) {
-    if (isPathInsideOrEqual(path, input.runtimeAppRoot)) {
+    if (isPathInsideOrEqual(path, input.snapshotSourceRoot)) {
       continue;
     }
 
     throw new Error(
-      `Development runtime snapshot manifest root "${path}" is outside runtime app root "${input.runtimeAppRoot}".`,
+      `Development runtime snapshot manifest root "${path}" is outside runtime snapshot source root "${input.snapshotSourceRoot}".`,
     );
   }
 }

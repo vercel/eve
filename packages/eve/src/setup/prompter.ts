@@ -1,4 +1,4 @@
-import { isCancel, Prompt, settings, type State, TextPrompt } from "@clack/core";
+import { isCancel, Prompt, settings, type State, TextPrompt } from "#compiled/@clack/core/index.js";
 import {
   cornerFor,
   formatPromptCancellation,
@@ -34,6 +34,8 @@ export type PrompterValue = string | number | boolean;
 export interface SelectOption<T extends PrompterValue> {
   value: T;
   label: string;
+  /** Additional searchable text that is never rendered in the menu. */
+  keywords?: readonly string[];
   /** Completion action kept after searchable results instead of being filtered. */
   trailingAction?: boolean;
   hint?: string;
@@ -96,6 +98,28 @@ export interface SelectMetadata {
   value: string;
 }
 
+/** Directional transition requested from a batch-planner step. */
+export class PlannerNavigationError extends Error {
+  readonly direction: "back" | "forward";
+  readonly values: readonly PrompterValue[];
+
+  constructor(direction: "back" | "forward", values: readonly PrompterValue[]) {
+    super(`Planner requested ${direction} navigation.`);
+    this.name = "PlannerNavigationError";
+    this.direction = direction;
+    this.values = values;
+  }
+}
+
+/** Progress rail and directional controls for a multi-step picker. */
+export interface PlannerNavigation {
+  kind: "planner";
+  activeStep: number;
+  /** Earliest step reachable with Left Arrow; defaults to the first step. */
+  firstNavigableStep?: number;
+  steps: readonly { label: string; count?: number; complete?: boolean }[];
+}
+
 /** Options common to every {@link Prompter.select} call. */
 export interface SelectCommonOptions<T extends PrompterValue> {
   message: string;
@@ -106,7 +130,7 @@ export interface SelectCommonOptions<T extends PrompterValue> {
   options: SelectOption<T>[];
   /**
    * Add a type-ahead filter line. The filter is a case-insensitive substring
-   * match against each option's label, value, and hint.
+   * match against each option's label, value, hints, and keywords.
    */
   search?: boolean;
   /** Placeholder shown in the filter line while it is empty (with `search`). */
@@ -120,14 +144,16 @@ export interface SelectCommonOptions<T extends PrompterValue> {
   /**
    * How option hints are laid out in the dev TUI panel (the CLI prompter ignores
    * it and keeps its default inline, unnumbered rendering). "stacked" renders
-   * each hint on its own line below the label with a blank line between options —
-   * for small action menus whose hints carry current values. "inline" keeps hints
-   * on the label row, suppresses numeric shortcuts, and separates the trailing
-   * completion action (e.g. the `/add` task list).
+   * each hint on its own line below the label with a blank line between options;
+   * it works for both action menus and checklists. "inline" keeps hints on the
+   * label row, suppresses numeric shortcuts, and separates a trailing completion
+   * action.
    */
   hintLayout?: "stacked" | "inline";
   /** Outcome lines from earlier laps of a looping menu. */
   notices?: readonly SelectNotice[];
+  /** Optional batch-planner navigation grammar. */
+  navigation?: PlannerNavigation;
 }
 
 /** A selectable action appended after local matches for a non-empty query. */

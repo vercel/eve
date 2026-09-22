@@ -36,6 +36,12 @@ console.log(result.status, result.message);
 
 When the stream includes `session.failed`, the turn returns `status: "failed"` rather than throwing. Transport and route errors throw `ClientError`.
 
+`session.send()` retries `409 session_not_ready` with bounded exponential backoff for up to 20
+seconds when a durable run has been accepted but its command inbox is still starting. The caller's
+abort signal cancels the wait. Other errors, `session.respond()`, control methods, and raw HTTP
+requests do not use this retry. An unknown
+or terminal session throws `ClientError` immediately with `session_not_active`. The client never creates a replacement session.
+
 ## Send a full turn payload
 
 Pass the full payload to `create()` for the first turn or `send()` for a follow-up:
@@ -53,7 +59,7 @@ const { session, response } = await client.sessions.create({
 await response.result();
 ```
 
-`clientContext` is one-turn context for the next model call. Strings become user-role context messages, arrays of strings become multiple context messages, and objects are JSON-serialized into one context message. It isn't persisted to durable session history and doesn't dispatch a turn by itself.
+`clientContext` is ephemeral context for the current turn. Strings become user-role context messages, arrays of strings become multiple context messages, and objects are JSON-serialized into one context message. The context remains available to every model call in the turn, then disappears before the next turn. It isn't persisted to durable session history and doesn't dispatch a turn by itself.
 
 ## Send attachments
 

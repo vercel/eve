@@ -46,7 +46,7 @@ describe("normalizeVercelServiceCrons", () => {
         { path: "/eve/v1/cron/current", schedule: "*/15 * * * *" },
         { path: "/eve/v1/cron/current", schedule: "*/15 * * * *" },
         {
-          path: "/eve/agents/support/eve/v1/cron/keep",
+          path: "/eve/support/v1/cron/keep",
           schedule: "*/5 * * * *",
         },
       ],
@@ -55,11 +55,11 @@ describe("normalizeVercelServiceCrons", () => {
     });
 
     await normalizeVercelServiceCrons({
-      publicRoutePrefix: "/eve/agents/billing/",
+      publicRoutePrefix: "/eve/billing/",
       serviceOutputDirectory: outputDirectory,
     });
     await normalizeVercelServiceCrons({
-      publicRoutePrefix: "/eve/agents/billing/",
+      publicRoutePrefix: "/eve/billing/",
       serviceOutputDirectory: outputDirectory,
     });
 
@@ -67,11 +67,11 @@ describe("normalizeVercelServiceCrons", () => {
       crons: [
         { path: "/api/service-cleanup", schedule: "0 0 * * *" },
         {
-          path: "/eve/agents/billing/eve/v1/cron/current",
+          path: "/eve/billing/v1/cron/current",
           schedule: "*/15 * * * *",
         },
         {
-          path: "/eve/agents/support/eve/v1/cron/keep",
+          path: "/eve/support/v1/cron/keep",
           schedule: "*/5 * * * *",
         },
       ],
@@ -109,7 +109,7 @@ describe("normalizeVercelServiceCrons", () => {
     const before = await readFile(configPath, "utf8");
 
     await normalizeVercelServiceCrons({
-      publicRoutePrefix: "/eve/agents/billing",
+      publicRoutePrefix: "/eve/billing",
       serviceOutputDirectory: outputDirectory,
     });
 

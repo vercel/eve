@@ -59,7 +59,7 @@ city in the world.`,
     code: `import { defineAgent } from "eve";
 
 export default defineAgent({
-  model: "xai/grok-4.5",
+  model: "spacexai/grok-4.7",
 });`,
   },
   {
@@ -164,7 +164,7 @@ export default defineMcpClientConnection({
 
 export default defineAgent({
   description: "Investigate questions",
-  model: "xai/grok-4.5",
+  model: "spacexai/grok-4.7",
 });`,
   },
   {
@@ -195,9 +195,9 @@ import { includes } from "eve/evals/expect";
 
 export default defineEval({
   async test(t) {
-    await t.send("What is the weather in Brooklyn?");
+    const turn = await t.send("What is the weather in Brooklyn?");
     t.succeeded();
-    t.check(t.reply, includes("Sunny"));
+    t.check(turn.message, includes("Sunny"));
   },
 });`,
   },

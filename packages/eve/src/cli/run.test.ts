@@ -2,7 +2,8 @@ import { resolve } from "node:path";
 
 import { describe, expect, it, vi } from "vitest";
 
-import { resolveDevUiMode, resolveTuiDisplayOptions, runCli } from "#cli/run.js";
+import { createCliProgram, resolveDevUiMode, resolveTuiDisplayOptions, runCli } from "#cli/run.js";
+import { cliTelemetryCommandPaths, internalCliCommandPaths } from "#cli/telemetry/index.js";
 import { MockScreen } from "#cli/dev/tui/test/mock-terminal.js";
 import type { RunDevelopmentTuiInput } from "#cli/dev/tui/tui.js";
 import type { DevelopmentServerOptions } from "#internal/nitro/host/types.js";
@@ -11,7 +12,8 @@ function resolvedProject(appRoot: string) {
   return { agentRoot: `${appRoot}/agent`, appRoot, layout: "nested" as const };
 }
 
-const { runInitCommand, runSetCommand } = vi.hoisted(() => ({
+const { runDeployCommand, runInitCommand, runSetCommand } = vi.hoisted(() => ({
+  runDeployCommand: vi.fn(async () => {}),
   runInitCommand: vi.fn(async () => {}),
   runSetCommand: vi.fn(async () => {}),
 }));
@@ -20,8 +22,17 @@ vi.mock("#cli/application-root.js", () => ({
   findCliApplicationRoot: vi.fn(async () => undefined),
   resolveCliApplicationProject: vi.fn(async (cwd: string) => resolvedProject(cwd)),
 }));
+vi.mock("#cli/commands/deploy.js", () => ({ runDeployCommand }));
 vi.mock("#cli/commands/init.js", () => ({ runInitCommand }));
 vi.mock("#cli/commands/set.js", () => ({ runSetCommand }));
+vi.mock("#internal/project-context.js", () => ({
+  findEveProjectContext: vi.fn(async () => undefined),
+  resolveEveProjectContext: vi.fn(async (appRoot: string) => ({
+    appRoot,
+    environmentRoot: appRoot,
+    kind: "standalone",
+  })),
+}));
 
 async function withInteractiveTerminal<T>(fn: () => Promise<T>): Promise<T> {
   const stdinDescriptor = Object.getOwnPropertyDescriptor(process.stdin, "isTTY");
@@ -56,6 +67,28 @@ async function runInteractiveDev(
 }
 
 describe("CLI command registration", () => {
+  it("keeps telemetry's command allowlist aligned with registered commands", () => {
+    const program = createCliProgram(
+      { error: () => {}, log: () => {} },
+      {},
+      {
+        resolve: async () => {},
+        resolveAgent: async () => undefined as never,
+        root: process.cwd(),
+      },
+      { trackDevContext: () => {}, trackSetupStep: () => {}, trackSetupTerminal: () => {} },
+    );
+    const paths: string[] = [];
+    const visit = (command: (typeof program.commands)[number], parentPath = ""): void => {
+      const path = [parentPath, command.name()].filter(Boolean).join(":");
+      paths.push(path);
+      for (const child of command.commands) visit(child, path);
+    };
+    for (const command of program.commands) visit(command);
+
+    expect([...cliTelemetryCommandPaths, ...internalCliCommandPaths].sort()).toEqual(paths.sort());
+  });
+
   it("lists the current project creation and Vercel commands", async () => {
     const output: string[] = [];
 
@@ -70,6 +103,7 @@ describe("CLI command registration", () => {
     expect(help).toContain("link");
     expect(help).toContain("deploy");
     expect(help).toContain("registry");
+    expect(help).toContain("telemetry");
     expect(help).not.toContain("setup [options] <item>");
   });
 
@@ -82,6 +116,24 @@ describe("CLI command registration", () => {
     expect(runSetCommand).toHaveBeenCalledWith(logger, resolve(process.cwd()), {
       model: "openai/gpt-5.6-sol",
       reasoning: "high",
+    });
+  });
+
+  it("runs deploy from a workspace root without application discovery", async () => {
+    const logger = { error: vi.fn(), log: vi.fn() };
+    const resolveProject = vi.fn(async () => {
+      throw new Error("application discovery must not run for a workspace root");
+    });
+    runDeployCommand.mockClear();
+
+    await runCli(["deploy"], logger, { resolveApplicationProject: resolveProject });
+
+    expect(resolveProject).not.toHaveBeenCalled();
+    expect(runDeployCommand).toHaveBeenCalledWith(logger, resolve(process.cwd()), undefined, {
+      nonInteractive: undefined,
+      project: undefined,
+      team: undefined,
+      yes: undefined,
     });
   });
 
@@ -259,11 +311,20 @@ describe("bare eve command", () => {
     await runCli([], logger, { findApplicationRoot });
 
     expect(findApplicationRoot).toHaveBeenCalledWith(resolve(process.cwd()));
-    expect(runInitCommand).toHaveBeenCalledWith(logger, resolve(process.cwd()), undefined, {
-      channelWebNextjs: undefined,
-      model: undefined,
-      reasoning: undefined,
-    });
+    expect(runInitCommand).toHaveBeenCalledWith(
+      logger,
+      resolve(process.cwd()),
+      undefined,
+      {
+        agents: undefined,
+        channelWebNextjs: undefined,
+        model: undefined,
+        reasoning: undefined,
+      },
+      undefined,
+      expect.any(Function),
+      expect.any(Function),
+    );
   });
 
   it("runs dev from the enclosing eve application", async () => {
@@ -332,11 +393,20 @@ describe("eve init compatibility flags", () => {
       logger,
     );
 
-    expect(runInitCommand).toHaveBeenCalledWith(logger, resolve(process.cwd()), "my-agent", {
-      channelWebNextjs: undefined,
-      model: "openai/gpt-5.6-sol",
-      reasoning: "high",
-    });
+    expect(runInitCommand).toHaveBeenCalledWith(
+      logger,
+      resolve(process.cwd()),
+      "my-agent",
+      {
+        agents: undefined,
+        channelWebNextjs: undefined,
+        model: "openai/gpt-5.6-sol",
+        reasoning: "high",
+      },
+      undefined,
+      expect.any(Function),
+      expect.any(Function),
+    );
   });
 
   it("rejects unsupported reasoning before running the init command", async () => {
@@ -416,6 +486,68 @@ describe("eve dev --input", () => {
         { runDevelopmentTui: vi.fn(async () => {}) },
       ),
     ).rejects.toThrow("--input requires the interactive UI");
+  });
+
+  it.each([false, true])(
+    "starts the composer before the host is ready (onboard: %s)",
+    async (onboard) => {
+      let release!: () => void;
+      const ready = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const startup = {
+        renderer: {},
+        finish: vi.fn(() => ({ draft: "", queuedPrompt: undefined })),
+        shutdown: vi.fn(async () => {}),
+      };
+      const startDevelopmentTuiStartup = vi.fn(async () => startup);
+      const runDevelopmentTui = vi.fn(async () => {});
+      vi.doMock("#cli/dev/tui/tui.js", () => ({ startDevelopmentTuiStartup, runDevelopmentTui }));
+      const startHost = vi.fn(() => ({
+        start: async () => {
+          await ready;
+          return {
+            kind: "started" as const,
+            appRoot: "/canonical/app",
+            url: "http://127.0.0.1:4321/",
+          };
+        },
+        close: async () => {},
+      }));
+      try {
+        await withInteractiveTerminal(async () => {
+          const run = runCli(
+            onboard ? ["dev", "--onboard"] : ["dev"],
+            { error: () => {}, log: () => {} },
+            { startHost },
+          );
+          try {
+            await vi.waitFor(() => expect(startDevelopmentTuiStartup).toHaveBeenCalledOnce());
+            expect(runDevelopmentTui).not.toHaveBeenCalled();
+          } finally {
+            release();
+            await run;
+          }
+        });
+        expect(runDevelopmentTui).toHaveBeenCalledWith(expect.objectContaining({ startup }));
+      } finally {
+        vi.doUnmock("#cli/dev/tui/tui.js");
+      }
+    },
+  );
+
+  it("forwards the internal init onboarding handoff to the local TUI", async () => {
+    const startHost = vi.fn(() => ({
+      start: async () => ({
+        kind: "existing" as const,
+        appRoot: "/canonical/app",
+        url: "http://127.0.0.1:4321/",
+      }),
+      close: async () => {},
+    }));
+    const runDevelopmentTui = await runInteractiveDev(["dev", "--onboard"], { startHost });
+
+    expect(runDevelopmentTui).toHaveBeenCalledWith(expect.objectContaining({ onboard: true }));
   });
 
   it("rejects the option with explicit --no-ui", async () => {
@@ -886,6 +1018,8 @@ describe("eve dev boot progress", () => {
 
     expect(hostReporter).toBeTypeOf("function");
     expect(tuiReporter).toBe(hostReporter);
+    expect(writes.join("")).toContain("Starting your agent");
+    expect(writes.join("")).not.toContain("compiling agent");
     // Replaying every write through a terminal emulator: the boot progress row
     // is erased, leaving a clean screen for the error to print onto.
     const screen = new MockScreen({ columns: 80, rows: 10 });
@@ -990,6 +1124,7 @@ describe("eve build output ownership", () => {
       profileOutputPath: resolve(process.cwd(), profilePath),
       skipVercelSandboxPrewarm: false,
       vercelServiceOutput: undefined,
+      workspaceMember: false,
     });
   });
 
@@ -1012,6 +1147,7 @@ describe("eve build output ownership", () => {
         hostOutputDirectory: resolve(process.cwd(), configuredHostDirectory),
         serviceOutputDirectory: resolve(process.cwd(), configuredDirectory),
       },
+      workspaceMember: false,
     });
   });
 

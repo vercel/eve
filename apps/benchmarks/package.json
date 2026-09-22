@@ -12,12 +12,7 @@
     "benchmark:timings": "node scripts/timings.mjs"
   },
   "dependencies": {
-    "@ai-sdk/harness": "1.0.87",
-    "@ai-sdk/harness-claude-code": "1.0.90",
-    "@ai-sdk/harness-opencode": "1.0.88",
-    "@ai-sdk/sandbox-vercel": "1.0.87",
-    "@vercel/agent-eval": "1.5.0",
-    "@vercel/sandbox": "3.2.0",
+    "@vercel/agent-eval": "2.2.1",
     "jiti": "2.7.0",
     "zod": "catalog:"
   },

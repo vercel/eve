@@ -229,6 +229,15 @@ export const arcanaLogo = (props: LogoProps) => (
   </svg>
 );
 
+export const supermemoryLogo = (props: LogoProps) => (
+  <svg fill="none" viewBox="0 0 39.467 32" xmlns="http://www.w3.org/2000/svg" {...props}>
+    <path
+      d="M39.126 12.632H24.606V.01h-4.692v13.695c0 1.454.574 2.851 1.595 3.88l11.856 11.958 3.318-3.346-8.758-8.831h11.204v-4.732ZM2.446 5.822l8.757 8.832H0v4.731h14.52v12.623h4.692V18.312c0-1.453-.573-2.847-1.595-3.88L5.764 2.476 2.446 5.822Z"
+      fill="currentColor"
+    />
+  </svg>
+);
+
 export const hindsightLogo = (props: LogoProps) => (
   <svg fill="none" viewBox="0 0 186 139" xmlns="http://www.w3.org/2000/svg" {...props}>
     <g stroke="#078BC2" strokeLinecap="round" strokeLinejoin="round" strokeWidth="8">
@@ -394,6 +403,15 @@ export const naturalLogo = (props: LogoProps) => (
     <path
       d="M0.773438 17.7891H16.6289C17.1211 17.7891 17.4023 17.543 17.4023 17.0156V0.914062C17.4023 0.421875 17.1211 0.140625 16.6289 0.140625H0.773438C0.246094 0.140625 0 0.421875 0 0.914062V17.0156C0 17.543 0.246094 17.7891 0.773438 17.7891Z"
       fill="currentColor"
+    />
+  </svg>
+);
+
+export const neonLogo = (props: LogoProps) => (
+  <svg fill="none" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" {...props}>
+    <path
+      d="M24 0V24l-9.365-8.045V24H0V0ZM2.942 21.087h8.751V9.563l9.365 8.204V2.919L2.942 2.914Z"
+      fill="#34D59A"
     />
   </svg>
 );
@@ -587,6 +605,52 @@ export const typefullyLogo = (props: LogoProps) => (
   </svg>
 );
 
+// Source: https://www.gstatic.com/images/branding/productlogos/gmail_2026/v2/web/192px.svg
+export const gmailLogo = (props: LogoProps) => (
+  <svg fill="none" viewBox="0 0 192 192" xmlns="http://www.w3.org/2000/svg" {...props}>
+    <path d="M146 44h38v110c0 6.627-5.373 12-12 12h-20a6 6 0 0 1-6-6z" fill="url(#gmail-side)" />
+    <path d="M46 44H8v110c0 6.627 5.373 12 12 12h20a6 6 0 0 0 6-6z" fill="#fc413d" />
+    <path
+      d="M39.226 30.456c-8.033-6.752-20.018-5.714-26.77 2.319-6.752 8.032-5.714 20.017 2.319 26.77l76.078 63.949a8 8 0 0 0 10.295 0l76.078-63.95c8.032-6.752 9.07-18.737 2.318-26.77-6.752-8.032-18.737-9.07-26.769-2.318L96 78.18z"
+      fill="url(#gmail-chevron)"
+    />
+    <defs>
+      <linearGradient
+        gradientUnits="userSpaceOnUse"
+        id="gmail-side"
+        x1="165"
+        x2="165"
+        y1="44"
+        y2="166"
+      >
+        <stop stopColor="#60d673" />
+        <stop offset=".17" stopColor="#42c868" />
+        <stop offset=".39" stopColor="#0ebc5f" />
+        <stop offset=".62" stopColor="#00a9bb" />
+        <stop offset=".86" stopColor="#3c90ff" />
+        <stop offset="1" stopColor="#3186ff" />
+      </linearGradient>
+      <linearGradient
+        gradientUnits="userSpaceOnUse"
+        id="gmail-chevron"
+        x1="8"
+        x2="184"
+        y1="46.13"
+        y2="46.13"
+      >
+        <stop offset=".08" stopColor="#ff63a0" />
+        <stop offset=".3" stopColor="#fc413d" />
+        <stop offset=".5" stopColor="#fc413d" />
+        <stop offset=".65" stopColor="#fc413d" />
+        <stop offset=".72" stopColor="#fc5c30" />
+        <stop offset=".86" stopColor="#feb10c" />
+        <stop offset=".91" stopColor="#fec700" />
+        <stop offset=".96" stopColor="#ffdb0f" />
+      </linearGradient>
+    </defs>
+  </svg>
+);
+
 export const googlechatLogo = (props: LogoProps) => <SiGooglechat color="default" {...props} />;
 
 export const whatsappLogo = (props: LogoProps) => <SiWhatsapp color="default" {...props} />;
@@ -600,6 +664,15 @@ export const blitzreelsLogo = (props: LogoProps) => (
     <path d="M85 0h155v174h-95L0 0h85Z" fill="#0E8062" opacity="0.85" />
     <path d="M0 0h215v174h-70L0 0Z" fill="#17FFA6" />
     <path d="M55 0h160v87h-46L98 0H55Z" fill="#15D990" opacity="0.62" />
+  </svg>
+);
+
+export const muxLogo = (props: LogoProps) => (
+  <svg fill="currentColor" viewBox="0 0 1600 500" xmlns="http://www.w3.org/2000/svg" {...props}>
+    <path
+      d="M994.287 93.486c-17.121 0-31-13.879-31-31 0-17.121 13.879-31 31-31 17.121 0 31 13.879 31 31 0 17.121-13.879 31-31 31m0-93.486c-34.509 0-62.484 27.976-62.484 62.486v187.511c0 68.943-56.09 125.033-125.032 125.033s-125.03-56.09-125.03-125.033V62.486C681.741 27.976 653.765 0 619.256 0s-62.484 27.976-62.484 62.486v187.511C556.772 387.85 668.921 500 806.771 500c137.851 0 250.001-112.15 250.001-250.003V62.486c0-34.51-27.976-62.486-62.485-62.486M1537.51 468.511c-17.121 0-31-13.879-31-31 0-17.121 13.879-31 31-31 17.121 0 31 13.879 31 31 0 17.121-13.879 31-31 31m-275.883-218.509-143.33 143.329c-24.402 24.402-24.402 63.966 0 88.368 24.402 24.402 63.967 24.402 88.369 0l143.33-143.329 143.328 143.329c24.402 24.4 63.967 24.402 88.369 0 24.403-24.402 24.403-63.966.001-88.368l-143.33-143.329.001-.004 143.329-143.329c24.402-24.402 24.402-63.965 0-88.367s-63.967-24.402-88.369 0L1349.996 161.63 1206.667 18.302c-24.402-24.401-63.967-24.402-88.369 0s-24.402 63.965 0 88.367l143.329 143.329v.004ZM437.511 468.521c-17.121 0-31-13.879-31-31 0-17.121 13.879-31 31-31 17.121 0 31 13.879 31 31 0 17.121-13.879 31-31 31M461.426 4.759C438.078-4.913 411.2.432 393.33 18.303L249.999 161.632 106.669 18.303C88.798.432 61.922-4.913 38.573 4.759 15.224 14.43-.001 37.214-.001 62.488v375.026c0 34.51 27.977 62.486 62.487 62.486 34.51 0 62.486-27.976 62.486-62.486V213.341l80.843 80.844c24.404 24.402 63.965 24.402 88.369 0l80.843-80.844v224.173c0 34.51 27.976 62.486 62.486 62.486s62.486-27.976 62.486-62.486V62.488c0-25.274-15.224-48.058-38.573-57.729"
+      fillRule="nonzero"
+    />
   </svg>
 );
 
@@ -749,6 +822,7 @@ export const logos = {
   kernel: kernelLogo,
   upstash: upstashLogo,
   arcana: arcanaLogo,
+  supermemory: supermemoryLogo,
   hindsight: hindsightLogo,
   airtable: airtableLogo,
   bitly: bitlyLogo,
@@ -767,6 +841,7 @@ export const logos = {
   miro: miroLogo,
   mixpanel: mixpanelLogo,
   natural: naturalLogo,
+  neon: neonLogo,
   netlify: netlifyLogo,
   oreilly: oreillyLogo,
   planetscale: planetscaleLogo,
@@ -802,11 +877,13 @@ export const logos = {
   lark: larkLogo,
   beeper: beeperLogo,
   resend: resendLogo,
+  gmail: gmailLogo,
   googlechat: googlechatLogo,
   whatsapp: whatsappLogo,
   messenger: messengerLogo,
   x: xLogo,
   blitzreels: blitzreelsLogo,
+  mux: muxLogo,
   browserbase: browserbaseLogo,
   jetty: jettyLogo,
   "agent-browser": agentBrowserLogo,

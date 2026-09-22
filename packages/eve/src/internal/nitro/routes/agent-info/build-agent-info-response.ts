@@ -15,7 +15,7 @@ import {
   resolveModelEndpointStatus,
 } from "#internal/resolve-model-endpoint-status.js";
 import type { ChatGptAuthState } from "#public/models/openai/chatgpt/token-broker.js";
-import { WORKFLOW_TOOL_NAME } from "#shared/workflow-sandbox.js";
+import type { JsonObject, JsonValue } from "#shared/json.js";
 
 export type AgentInfoResponse = AgentInfoResult;
 
@@ -61,7 +61,9 @@ export function buildAgentInfoResponse(
                 toChatGptEndpoint(input.chatgptAuth),
               ),
               id: manifest.config.model.id,
-              providerOptions: manifest.config.model.providerOptions,
+              providerOptions: sanitizeProviderOptionsForInfo(
+                manifest.config.model.providerOptions,
+              ),
               reasoning: manifest.config.reasoning,
               routing: manifest.config.model.routing,
               source:
@@ -125,10 +127,6 @@ export function buildAgentInfoResponse(
         role: definition.role,
       })),
     },
-    instrumentation:
-      manifest.instrumentation === undefined
-        ? undefined
-        : toModuleSource(manifest, manifest.instrumentation),
     kernelEffects: projectPreparedKernelEffects(manifest),
     kind: "eve-agent-info",
     memories: manifest.memories.map((memory) => ({
@@ -208,19 +206,69 @@ export function buildAgentInfoResponse(
       })),
     },
     version: 4,
-    workflow:
-      manifest.workflowTool === undefined
-        ? { enabled: false, toolName: WORKFLOW_TOOL_NAME }
-        : {
-            enabled: true,
-            source: toModuleSource(manifest, manifest.workflowTool),
-            toolName: WORKFLOW_TOOL_NAME,
-          },
     workspace: {
       resourceRoot: manifest.workspaceResourceRoot,
       rootEntries: [...manifest.workspaceResourceRoot.rootEntries],
     },
   };
+}
+
+/**
+ * `providerOptions` can carry deployment-owner credentials: the shipped BYOK
+ * scaffold places the provider `apiKey` under `gateway.byok`, and custom
+ * providers may accept credential-bearing fields such as `headers`. The info
+ * route is served to every caller the application's channel auth admits, so
+ * the inspection payload must never serialize credential material. Drop the
+ * BYOK block (its provider slug is already reported via `routing.byok`) and
+ * redact credential-shaped keys recursively, while keeping non-secret options
+ * such as `gateway.serviceTier` that the dev TUI reads.
+ */
+const CREDENTIAL_OPTION_KEY =
+  /^(api[-_]?key|access[-_]?token|auth|authorization|bearer|client[-_]?secret|credentials?|headers|password|private[-_]?key|secret|token)$/i;
+
+const REDACTED_CREDENTIAL = "[redacted]";
+
+function sanitizeProviderOptionsForInfo(
+  providerOptions: Record<string, JsonObject> | undefined,
+): Record<string, JsonObject> | undefined {
+  if (providerOptions === undefined) return undefined;
+  const sanitized: Record<string, JsonObject> = {};
+  for (const [provider, options] of Object.entries(providerOptions)) {
+    sanitized[provider] = redactCredentialOptions(options);
+  }
+  return sanitized;
+}
+
+function redactCredentialOptions(value: JsonValue): JsonObject {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    return {};
+  }
+  const redacted: Record<string, JsonValue> = {};
+  for (const [key, entry] of Object.entries(value)) {
+    if (key === "byok") {
+      // BYOK entries are `{ apiKey }` credential objects; the provider slug is
+      // already exposed through `routing.byok`.
+      continue;
+    }
+    if (CREDENTIAL_OPTION_KEY.test(key)) {
+      redacted[key] = REDACTED_CREDENTIAL;
+      continue;
+    }
+    if (entry !== null && typeof entry === "object") {
+      if (Array.isArray(entry)) {
+        redacted[key] = entry.map((item) =>
+          item !== null && typeof item === "object" && !Array.isArray(item)
+            ? redactCredentialOptions(item)
+            : item,
+        );
+      } else {
+        redacted[key] = redactCredentialOptions(entry);
+      }
+      continue;
+    }
+    redacted[key] = entry;
+  }
+  return redacted;
 }
 
 function toModuleSource(
@@ -370,29 +418,51 @@ function collectCompositionDiagnostics(manifest: CompiledAgentManifest) {
   };
 }
 
-const KERNEL_EFFECT_BY_SLOT = {
-  "tools/agent": { action: "subagent-call", audience: ["root-session"], kind: "dispatch" },
-  "tools/ask_question": {
-    audience: ["requires-request-input"],
-    kind: "request-input",
-  },
-  "tools/task_cancel": { action: "task-cancel", audience: ["root-session"], kind: "dispatch" },
-  "tools/task_update": {
-    action: "task-update",
-    audience: ["delegated-task-child"],
-    kind: "dispatch",
-  },
-  "tools/web_search": { audience: [], kind: "provider-tool" },
-} as const;
+function projectPreparedKernelEffects(
+  manifest: CompiledAgentManifest,
+): AgentInfoResponse["kernelEffects"] {
+  const effects: AgentInfoResponse["kernelEffects"][number][] = [];
+  for (const tool of manifest.tools) {
+    const behavior = tool.behavior;
+    const handling = behavior?.handling;
+    if (behavior === undefined || handling === undefined) continue;
 
-function projectPreparedKernelEffects(manifest: CompiledAgentManifest) {
-  return manifest.tools.flatMap((tool) => {
-    const binding = manifest.bindings[tool.sourceId];
-    const slot = tool.logicalPath.replace(/\.(?:[cm]?[jt]sx?)$/, "");
-    const effect = KERNEL_EFFECT_BY_SLOT[slot as keyof typeof KERNEL_EFFECT_BY_SLOT];
-    const isAuthoredWebSearch =
-      slot === "tools/web_search" && manifest.webSearchProvider !== undefined;
-    if (binding?.owner.kind !== "framework" && !isAuthoredWebSearch) return [];
-    return effect === undefined ? [] : [{ ...effect, sourceId: tool.sourceId }];
-  });
+    switch (handling.kind) {
+      case "dispatch":
+        effects.push({
+          action: handling.action === "self-agent" ? "subagent-call" : handling.action,
+          audience: [...behavior.availability],
+          kind: "dispatch",
+          sourceId: tool.sourceId,
+        });
+        break;
+      case "provider-tool":
+        effects.push({
+          audience: [...behavior.availability],
+          kind: "provider-tool",
+          sourceId: tool.sourceId,
+        });
+        break;
+      case "request-input":
+        effects.push({
+          audience: [...behavior.availability],
+          kind: "request-input",
+          sourceId: tool.sourceId,
+        });
+        break;
+      case "workflow-tool":
+        effects.push({
+          action: "workflow-tool-call",
+          audience: [...behavior.availability],
+          kind: "dispatch",
+          sourceId: tool.sourceId,
+        });
+        break;
+      default: {
+        const _exhaustive: never = handling;
+        throw new Error(`Unsupported compiled tool handling: ${String(_exhaustive)}`);
+      }
+    }
+  }
+  return effects;
 }

@@ -6,10 +6,17 @@ import {
 } from "#compiled/@modelcontextprotocol/server/index.js";
 
 import type { SessionAuthContext } from "#channel/types.js";
+import { createLogger, logError } from "#internal/logging.js";
+
+const log = createLogger("mcp.server");
 
 export const MCP_PROTOCOL_VERSION = "2026-07-28";
 export const MCP_LEGACY_PROTOCOL_VERSION = "2025-11-25";
-const MCP_COMPATIBILITY_INSPECTION_MAX_BYTES = 4 * 1024 * 1024;
+/**
+ * Upper bound for any MCP POST body. Tool arguments are small JSON; the
+ * largest legitimate payload is an `outputSchema`, itself capped at 64 KiB.
+ */
+export const MCP_REQUEST_BODY_MAX_BYTES = 1024 * 1024;
 
 export interface McpToolDefinition<
   TInputSchema extends StandardSchemaWithJSON = StandardSchemaWithJSON,
@@ -26,12 +33,45 @@ export interface McpCallToolResult<
 > {
   readonly content: readonly McpContent[];
   readonly isError?: boolean;
-  readonly structuredContent?: TStructured;
+  readonly structuredContent?: TStructured | McpToolOperationErrorEnvelope;
+}
+
+export interface McpToolOperationErrorEnvelope {
+  readonly error: McpToolOperationErrorData;
 }
 
 export type McpContent =
   | { readonly type: "text"; readonly text: string }
   | { readonly type: "resource_link"; readonly name: string; readonly uri: string };
+
+/**
+ * Stable, client-actionable reason a tool call was rejected before it could
+ * return a result. `invalid_input` and `conflict` mean the caller should
+ * change or re-read something; `not_found` means stop; `internal` means the
+ * server failed and `errorId` correlates with its logs.
+ */
+export type McpToolOperationErrorCode = "invalid_input" | "not_found" | "conflict" | "internal";
+
+export interface McpToolOperationErrorData {
+  readonly code: McpToolOperationErrorCode;
+  readonly errorId?: string;
+  readonly message: string;
+  readonly retryable: boolean;
+}
+
+/** Thrown by tool handlers to produce a structured `isError` result. */
+export class McpToolOperationError extends Error {
+  readonly code: McpToolOperationErrorCode;
+
+  constructor(code: McpToolOperationErrorCode, message: string) {
+    super(message);
+    this.name = "McpToolOperationError";
+    this.code = code;
+  }
+}
+
+/** Only `conflict` is retryable: the caller re-reads state and tries again. */
+const RETRYABLE_CODES: ReadonlySet<McpToolOperationErrorCode> = new Set(["conflict"]);
 
 export interface McpServerTool {
   readonly name: string;
@@ -84,6 +124,8 @@ export function defineMcpTool<
 export interface McpStreamableHttpServerOptions {
   readonly name: string;
   readonly version: string;
+  /** Server-level usage guidance returned from `initialize` and `server/discover`. */
+  readonly instructions?: string;
   readonly tools: readonly McpServerTool[];
   authenticate(request: Request): Promise<SessionAuthContext | null | Response>;
 }
@@ -104,22 +146,24 @@ export function createMcpStreamableHttpServer(
     const auth = await options.authenticate(request);
     if (auth instanceof Response) return auth;
 
-    const preflight = await preflightModernRequest(request);
-    if (preflight.response !== undefined) return preflight.response;
-
     const handler = createMcpHandler(() => createServer(options, tools, auth), {
       legacy: "stateless",
     });
-    return await handler.fetch(
-      request,
-      preflight.parsedBody === undefined ? undefined : { parsedBody: preflight.parsedBody },
-    );
-  };
-}
+    if (request.method.toUpperCase() !== "POST") return await handler.fetch(request);
 
-interface ModernRequestPreflight {
-  readonly parsedBody?: unknown;
-  readonly response?: Response;
+    // Every POST body is read here, bounded, before the SDK sees it. The
+    // parsed value is handed to the SDK so the body is never read twice.
+    const inspected = await inspectRequestBody(request);
+    if (inspected.tooLarge) return requestBodyTooLargeResponse();
+    if (inspected.invalidJson) return invalidJsonResponse();
+    const parsedBody = inspected.value;
+    if (parsedBody === undefined) return await handler.fetch(request);
+
+    const preflightFailure = await preflightModernRequest(request, parsedBody);
+    if (preflightFailure !== undefined) return preflightFailure;
+
+    return await handler.fetch(request, { parsedBody });
+  };
 }
 
 /**
@@ -128,30 +172,15 @@ interface ModernRequestPreflight {
  * missing-header case here until the upstream handler does:
  * modelcontextprotocol/typescript-sdk#2589.
  */
-async function preflightModernRequest(request: Request): Promise<ModernRequestPreflight> {
-  if (request.method.toUpperCase() !== "POST" || request.headers.has("mcp-protocol-version")) {
-    return {};
-  }
-
-  const inspected = await inspectRequestBody(request);
-  if (inspected.tooLarge) return { response: requestBodyTooLargeResponse() };
-  if (inspected.invalidJson) return { response: invalidJsonResponse() };
-  const parsedBody = inspected.value;
-  if (parsedBody === undefined) return {};
-
-  if (!claimsCurrentProtocolVersion(parsedBody)) {
-    return { parsedBody };
-  }
+async function preflightModernRequest(
+  request: Request,
+  parsedBody: unknown,
+): Promise<Response | undefined> {
+  if (request.headers.has("mcp-protocol-version")) return undefined;
+  if (!claimsCurrentProtocolVersion(parsedBody)) return undefined;
 
   const earlierFailure = await probeEarlierValidationFailure(request, parsedBody);
-  if (earlierFailure !== undefined) {
-    return { parsedBody, response: earlierFailure };
-  }
-
-  return {
-    parsedBody,
-    response: headerMismatchResponse(parsedBody),
-  };
+  return earlierFailure ?? headerMismatchResponse(parsedBody);
 }
 
 async function inspectRequestBody(request: Request): Promise<{
@@ -162,6 +191,13 @@ async function inspectRequestBody(request: Request): Promise<{
   const body = request.body;
   if (body === null) return { tooLarge: false };
 
+  // Trust a declared length only to fail fast; the streamed count is the guard.
+  const declaredLength = Number(request.headers.get("content-length"));
+  if (Number.isFinite(declaredLength) && declaredLength > MCP_REQUEST_BODY_MAX_BYTES) {
+    await body.cancel().catch(() => {});
+    return { tooLarge: true };
+  }
+
   const reader = body.getReader();
   const chunks: Uint8Array[] = [];
   let size = 0;
@@ -170,7 +206,7 @@ async function inspectRequestBody(request: Request): Promise<{
       const chunk = await reader.read();
       if (chunk.done) break;
       size += chunk.value.byteLength;
-      if (size > MCP_COMPATIBILITY_INSPECTION_MAX_BYTES) {
+      if (size > MCP_REQUEST_BODY_MAX_BYTES) {
         await reader.cancel();
         return { tooLarge: true };
       }
@@ -298,14 +334,15 @@ function readJsonRpcRequestId(body: unknown): string | number | null {
 }
 
 function createServer(
-  options: Pick<McpStreamableHttpServerOptions, "name" | "version">,
+  options: Pick<McpStreamableHttpServerOptions, "instructions" | "name" | "version">,
   tools: ReadonlyMap<string, McpServerTool>,
   auth: SessionAuthContext | null,
 ): McpServer {
-  const server = new McpServer(
-    { name: options.name, version: options.version },
-    { capabilities: { tools: { listChanged: false } } },
-  );
+  const serverOptions: { capabilities: Record<string, unknown>; instructions?: string } = {
+    capabilities: { tools: { listChanged: false } },
+  };
+  if (options.instructions !== undefined) serverOptions.instructions = options.instructions;
+  const server = new McpServer({ name: options.name, version: options.version }, serverOptions);
 
   for (const tool of tools.values()) tool.register(server, auth);
 
@@ -324,15 +361,35 @@ async function callTool<TInput, TStructured extends Readonly<Record<string, unkn
   try {
     return await call(input, { auth, signal });
   } catch (error) {
-    return toolError(error instanceof Error ? error.message : "Tool call failed.");
+    if (error instanceof McpToolOperationError) {
+      return toolError({
+        code: error.code,
+        message: error.message,
+        retryable: RETRYABLE_CODES.has(error.code),
+      });
+    }
+    // Unexpected failures never forward their message: it may carry provider
+    // responses, hostnames, or workflow payloads. The errorId is the handle.
+    const errorId = logError(log, "MCP tool call failed", error);
+    return toolError({
+      code: "internal",
+      errorId,
+      message: "The server could not complete this tool call.",
+      retryable: false,
+    });
   }
 }
 
 function toolError<TStructured extends Readonly<Record<string, unknown>>>(
-  message: string,
+  error: McpToolOperationErrorData,
 ): McpCallToolResult<TStructured> {
+  const text =
+    error.errorId === undefined ? error.message : `${error.message} (errorId: ${error.errorId})`;
+  // The SDK skips outputSchema validation when isError is set, so this shape
+  // does not need to appear in each tool's declared output schema.
   return {
-    content: [{ type: "text", text: message }],
+    content: [{ type: "text", text }],
     isError: true,
+    structuredContent: { error },
   };
 }

@@ -13,14 +13,15 @@ export default defineEval({
   description: "HITL smoke: unrelated message during approval runs immediately.",
   async test(t) {
     const parked = await t.send('Call the guarded-echo tool with note "open-approval".');
+    const session = parked.session;
     parked.calledTool("guarded-echo", { status: "pending", count: 1 });
-    const request = t.requireInputRequest({
+    const request = session.requireInputRequest({
       display: "confirmation",
       toolName: "guarded-echo",
     });
 
     // The message runs now; the approval is untouched.
-    const message = await t.send(
+    const message = await session.send(
       "Leave the pending approval alone. Do not call any tools. Reply with exactly OPEN-APPROVAL-MSG-OK.",
     );
     message.expectOk();
@@ -36,7 +37,7 @@ export default defineEval({
     message.event("session.waiting", { count: 1 });
 
     // The approval still resolves afterwards and runs the tool once.
-    const approved = await t.respond([
+    const approved = await session.respond([
       {
         requestId: request.requestId,
         optionId: "approve",

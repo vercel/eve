@@ -6,6 +6,7 @@ import type {
   CompiledAgentDefinition,
   CompiledExtensionMount,
   CompiledRemoteAgentNode,
+  CompiledSubagentNode,
 } from "#compiler/manifest.js";
 import { ROOT_COMPILED_AGENT_NODE_ID } from "#compiler/manifest.js";
 import type { ModuleSourceRef } from "#shared/source-ref.js";
@@ -29,14 +30,9 @@ export function assertRootOnlyConfig(
   agentId: string,
 ): void {
   if (isRoot) return;
-  if (config.experimental?.workflow !== undefined) {
+  if (config.experimental?.workflow?.world !== undefined) {
     throw new Error(
-      `Workflow runtime configuration is only supported on the root agent config. Remove "experimental.workflow" from "${agentId}".`,
-    );
-  }
-  if (config.experimental?.tasks !== undefined) {
-    throw new Error(
-      `Background tasks are only supported on the root agent config. Remove "experimental.tasks" from "${agentId}".`,
+      `Workflow world configuration is only supported on the root agent config. Remove "experimental.workflow.world" from "${agentId}".`,
     );
   }
 }
@@ -109,6 +105,17 @@ export function assertUniqueBy<T>(
   }
 }
 
+export function withDiagnosticsSummary(
+  subagents: readonly CompiledSubagentNode[],
+  diagnosticsSummary: import("#discover/diagnostics.js").DiscoverDiagnosticsSummary,
+): CompiledSubagentNode[] {
+  return subagents.map((subagent) =>
+    subagent.configResolver === undefined
+      ? { ...subagent, agent: { ...subagent.agent, diagnosticsSummary } }
+      : { ...subagent, agent: { ...subagent.agent, diagnosticsSummary } },
+  );
+}
+
 export function expectSubagentDescription(
   config: CompiledAgentDefinition,
   source: LocalSubagentSourceRef,
@@ -163,6 +170,7 @@ export function createCompiledRemoteAgent(input: {
   if (input.definition.outputSchema !== undefined) {
     Object.assign(node, { outputSchema: input.definition.outputSchema });
   }
+  if (input.definition.tool !== undefined) Object.assign(node, { tool: input.definition.tool });
   if (input.definition.url !== undefined) Object.assign(node, { url: input.definition.url });
   return node;
 }

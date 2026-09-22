@@ -4,7 +4,6 @@ import { z } from "#compiled/zod/index.js";
 
 import { defineDynamic } from "#dynamic/definition.js";
 import { defineTool, disableTool } from "#tools/definition.js";
-import { experimental_workflow } from "#tools/workflow.js";
 import { once } from "#tools/approval/policies.js";
 import { webSearch } from "#tools/provided/web-search.js";
 import { normalizeToolDefinition } from "#internal/authored-definition/schema-backed.js";
@@ -31,24 +30,19 @@ describe("normalizeToolDefinition", () => {
     expect(typeof entry.definition.execute).toBe("function");
   });
 
-  it("preserves the background execution discriminator", () => {
+  it("preserves subagent visibility", () => {
     const tool = defineTool({
-      description: "Starts an export.",
-      execution: "background",
-      inputSchema: z.object({ exportId: z.string() }),
-      execute(input, _ctx, task) {
-        return task.delegated({
-          executor: { data: { exportId: input.exportId }, kind: "export" },
-          receipt: { exportId: input.exportId },
-        });
-      },
+      availableInSubagents: false,
+      description: "Runs only in a root session.",
+      inputSchema: z.object({}),
+      execute: () => null,
     });
 
     const entry = normalizeToolDefinition(tool, FAILURE_MESSAGE);
 
     expect(entry.kind).toBe("tool");
     if (entry.kind !== "tool") throw new Error("expected tool kind");
-    expect(entry.definition.execution).toBe("background");
+    expect(entry.definition.availableInSubagents).toBe(false);
   });
 
   it("normalizes a tool with a Zod 3 input schema", () => {
@@ -80,15 +74,6 @@ describe("normalizeToolDefinition", () => {
     expect(entry).toEqual({ kind: "disabled" });
   });
 
-  it("returns a configured entry for the experimental Workflow tool", () => {
-    const entry = normalizeToolDefinition(
-      experimental_workflow({ maxSubagents: 6 }),
-      FAILURE_MESSAGE,
-    );
-
-    expect(entry).toEqual({ kind: "workflow-tool", maxSubagents: 6 });
-  });
-
   it("returns a configured entry for the provider-managed web search tool", () => {
     expect(normalizeToolDefinition(webSearch({ provider: "exa" }), FAILURE_MESSAGE)).toEqual({
       kind: "web-search-tool",
@@ -100,15 +85,6 @@ describe("normalizeToolDefinition", () => {
     expect(() =>
       normalizeToolDefinition({ kind: "eve:web-search-tool", provider: "other" }, FAILURE_MESSAGE),
     ).toThrow('Expected "provider" to be one of: exa, parallel');
-  });
-
-  it.each([0, 1.5, -1, "6"])("rejects invalid workflow max subagents %j", (maxSubagents) => {
-    expect(() =>
-      normalizeToolDefinition(
-        experimental_workflow({ maxSubagents: maxSubagents as number }),
-        FAILURE_MESSAGE,
-      ),
-    ).toThrow(FAILURE_MESSAGE);
   });
 
   it("rejects authored tool exports that carry an authored `name` field", () => {
@@ -134,6 +110,50 @@ describe("normalizeToolDefinition", () => {
       FAILURE_MESSAGE,
     );
     expect(() => normalizeToolDefinition(null, FAILURE_MESSAGE)).toThrow(FAILURE_MESSAGE);
+  });
+
+  it("accepts and types authored tool labels", () => {
+    const tool = defineTool({
+      label: {
+        start(input) {
+          const city: string = input.city;
+          // @ts-expect-error label start callback input is schema-typed.
+          const missing = input.missing;
+          void missing;
+          return `Fetch ${city}`;
+        },
+      },
+      description: "Fetch weather.",
+      inputSchema: z.object({ city: z.string() }),
+      execute: ({ city }) => city,
+    });
+
+    expect(normalizeToolDefinition(tool, FAILURE_MESSAGE).kind).toBe("tool");
+  });
+
+  it("rejects malformed label definitions", () => {
+    expect(() =>
+      normalizeToolDefinition(
+        {
+          label: { start: "Fetch weather" },
+          description: "Fetch weather.",
+          execute: () => null,
+          inputSchema: { type: "object" },
+        },
+        FAILURE_MESSAGE,
+      ),
+    ).toThrow(FAILURE_MESSAGE);
+    expect(() =>
+      normalizeToolDefinition(
+        {
+          label: { label: () => "Fetch weather", result: "Done" },
+          description: "Fetch weather.",
+          execute: () => null,
+          inputSchema: { type: "object" },
+        },
+        FAILURE_MESSAGE,
+      ),
+    ).toThrow(FAILURE_MESSAGE);
   });
 
   it("accepts authored tools that declare a `toModelOutput` function", () => {

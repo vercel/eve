@@ -35,13 +35,20 @@ export type TerminalKey =
       y: number;
     }
   | { type: "ctrl-a" }
+  | { type: "ctrl-b" }
   | { type: "ctrl-e" }
+  | { type: "ctrl-f" }
   | { type: "ctrl-d" }
+  | { type: "alt-b" }
+  | { type: "alt-f" }
+  | { type: "alt-backspace" }
+  | { type: "alt-y" }
   | { type: "ctrl-k" }
   | { type: "ctrl-n" }
   | { type: "ctrl-p" }
   | { type: "ctrl-u" }
   | { type: "ctrl-w" }
+  | { type: "ctrl-y" }
   | { type: "ctrl-l" }
   | { type: "ctrl-r" }
   | { type: "ctrl-c" }
@@ -182,7 +189,21 @@ export function nextKey(buffer: string): KeyToken {
         consumed: end + (end === bel ? 1 : 2),
       };
     }
-    // `ESC` + another byte (e.g. Alt+key): surface the Escape and re-tokenize.
+    // Alt/Meta letter chords arrive as ESC followed by the letter. Decode the
+    // readline word-movement chords together instead of surfacing Escape first.
+    if (second === "b" || second === "B") {
+      return { key: { type: "alt-b" }, consumed: 2 };
+    }
+    if (second === "f" || second === "F") {
+      return { key: { type: "alt-f" }, consumed: 2 };
+    }
+    if (second === "y" || second === "Y") {
+      return { key: { type: "alt-y" }, consumed: 2 };
+    }
+    if (second === "\x7f" || second === "\b") {
+      return { key: { type: "alt-backspace" }, consumed: 2 };
+    }
+    // Other `ESC` + byte chords surface Escape and then re-tokenize the byte.
     return { key: { type: "escape" }, consumed: 1 };
   }
 
@@ -224,8 +245,12 @@ export function parseKey(chunk: Buffer): TerminalKey {
   switch (value) {
     case "\u0001":
       return { type: "ctrl-a" };
+    case "\u0002":
+      return { type: "ctrl-b" };
     case "\u0005":
       return { type: "ctrl-e" };
+    case "\u0006":
+      return { type: "ctrl-f" };
     case "\u0004":
       return { type: "ctrl-d" };
     case "\u000b":
@@ -242,6 +267,8 @@ export function parseKey(chunk: Buffer): TerminalKey {
       return { type: "ctrl-u" };
     case "\u0017":
       return { type: "ctrl-w" };
+    case "\u0019":
+      return { type: "ctrl-y" };
     case "\u0003":
       return { type: "ctrl-c" };
     case "\r":
@@ -267,6 +294,14 @@ export function parseKey(chunk: Buffer): TerminalKey {
     case "\x1B[D":
     case "\x1BOD":
       return { type: "left" };
+    case "\x1B[1;3C":
+    case "\x1B[1;5C":
+    case "\x1B[5C":
+      return { type: "alt-f" };
+    case "\x1B[1;3D":
+    case "\x1B[1;5D":
+    case "\x1B[5D":
+      return { type: "alt-b" };
     case "\x1B[H":
     case "\x1BOH":
     case "\x1B[1~":
@@ -277,6 +312,13 @@ export function parseKey(chunk: Buffer): TerminalKey {
       return { type: "end" };
     case "\x1B[3~":
       return { type: "delete" };
+    // Alt+Backspace commonly arrives as Meta+Backspace, kitty CSI-u, or
+    // xterm's modifyOtherKeys form.
+    case "\x1B[127;3u":
+    case "\x1B[8;3u":
+    case "\x1B[27;3;127~":
+    case "\x1B[27;3;8~":
+      return { type: "alt-backspace" };
     case "\t":
       return { type: "tab" };
     case "\x1B":
@@ -335,17 +377,6 @@ export function formatCompactTokenCount(count: number): string {
   const scaled = count < 1_000_000 ? count / 1000 : count / 1_000_000;
   const suffix = count < 1_000_000 ? "K" : "M";
   return `${scaled.toFixed(1).replace(/\.0$/, "")}${suffix}`;
-}
-
-/**
- * Reveals `text` one character per `stepMs` of elapsed time, typewriter
- * style: the first character shows immediately, the full text after
- * `(length - 1) * stepMs`. Painted on the shared ticker beat, so no timer
- * of its own.
- */
-export function typewriterText(text: string, elapsedMs: number, stepMs: number): string {
-  const visible = Math.floor(Math.max(0, elapsedMs) / stepMs) + 1;
-  return visible >= text.length ? text : text.slice(0, visible);
 }
 
 /**

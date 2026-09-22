@@ -13,21 +13,38 @@ export default defineEval({
       `Run the bash command \`printf %s ${PARENT_TOKEN} > ${PARENT_PATH}\`. ` +
         "Reply with the single word: done.",
     );
+    const conversation = parentWrite.session;
     parentWrite.expectOk();
 
-    const childTurn = await t.send(
+    const childTurn = await conversation.send(
       `Ask the \`shared-sandbox\` subagent with message: ` +
         `Run the bash command \`cat ${PARENT_PATH} && printf %s ${CHILD_TOKEN} > ${CHILD_PATH}\` ` +
         "and reply with the command output verbatim.",
     );
-    await t.require(childTurn.message, includes(PARENT_TOKEN));
+    childTurn.expectOk();
+    const sessionId = childTurn.sessionId;
+    if (sessionId === undefined) throw new Error("Shared sandbox turn has no session id.");
+    const completed = t.target.watchTurn(sessionId, {
+      startIndex: requireStreamIndex(childTurn.session),
+    });
+    const childCompletion = await completed.result();
+    childCompletion.expectOk();
+    await t.require(childCompletion.message, includes(PARENT_TOKEN));
 
-    const parentRead = await t.send(
+    const parentRead = await completed.session.send(
       `Run the bash command \`cat ${CHILD_PATH}\` and reply with the file contents verbatim.`,
     );
 
     t.succeeded();
-    t.calledSubagent("shared-sandbox", { output: new RegExp(PARENT_TOKEN) });
+    t.calledSubagent("shared-sandbox", { status: "completed", count: 1 });
     t.check(parentRead.message, includes(CHILD_TOKEN));
   },
 });
+
+function requireStreamIndex(session: {
+  readonly state?: { readonly streamIndex?: number };
+}): number {
+  const streamIndex = session.state?.streamIndex;
+  if (streamIndex === undefined) throw new Error("Shared sandbox turn has no stream index.");
+  return streamIndex;
+}

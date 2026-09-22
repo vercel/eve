@@ -1,8 +1,10 @@
 /** Server target used by development clients. */
 interface DevelopmentTargetBase {
   readonly serverUrl: string;
-  /** Local workspace root for app files and the fallback Vercel project link. */
+  /** Project root for shared dependencies, Vercel links, and environment files. */
   readonly workspaceRoot: string;
+  /** The selected agent's root when it is a member of a multi-agent project. */
+  readonly agentRoot?: string;
 }
 
 /** A development client backed by a local `eve dev` server. */

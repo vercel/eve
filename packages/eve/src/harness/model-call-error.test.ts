@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   classifyModelCallError,
+  ContentFilteredModelResponseError,
   EmptyModelResponseError,
   extractModelCallErrorDetails,
   extractUnsupportedProviderToolTypes,
@@ -127,6 +128,20 @@ describe("EmptyModelResponseError", () => {
     const error = new EmptyModelResponseError({ cause: sdkError });
     expect(error.cause).toBe(sdkError);
     expect(error.message).toContain("did not return a response");
+  });
+});
+
+describe("ContentFilteredModelResponseError", () => {
+  it("reports safe filtering diagnostics without classifying the response as retryable", () => {
+    const error = new ContentFilteredModelResponseError("gen_filtered");
+    expect(classifyModelCallError(error)).toBe("recoverable");
+    expect(extractModelCallErrorDetails(error)).toEqual({
+      finishReason: "content-filter",
+      generationId: "gen_filtered",
+    });
+    expect(extractModelCallErrorDetails(new ContentFilteredModelResponseError())).toEqual({
+      finishReason: "content-filter",
+    });
   });
 });
 

@@ -15,9 +15,10 @@ const MATERIALIZED_MODULES_INDEX = "authored-modules.json";
  * The materialized instrumentation modules, mirroring the layout they were
  * authored in. Paths are relative to `.eve/compile`.
  */
-export type MaterializedInstrumentation =
-  | { readonly kind: "file"; readonly modulePath: string }
-  | { readonly kind: "directory"; readonly modulePathsBySlot: Readonly<Record<string, string>> };
+export interface MaterializedInstrumentation {
+  readonly kind: "directory";
+  readonly modulePathsBySlot: Readonly<Record<string, string>>;
+}
 
 export interface MaterializedAuthoredModuleIndex {
   readonly fingerprint: string;
@@ -70,15 +71,11 @@ export async function writeMaterializedAuthoredModules(input: {
     return join(MATERIALIZED_MODULES_DIRECTORY, fileName);
   };
 
-  let instrumentation: MaterializedInstrumentation | undefined;
-
-  if (input.prepared.instrumentation !== undefined) {
-    const modulePathsBySlot: Record<string, string> = {};
-    for (const [slot, code] of Object.entries(input.prepared.instrumentation.moduleCodeBySlot)) {
-      modulePathsBySlot[slot] = await materializeInstrumentationModule(slot, code);
-    }
-    instrumentation = { kind: "directory", modulePathsBySlot };
+  const modulePathsBySlot: Record<string, string> = {};
+  for (const [slot, code] of Object.entries(input.prepared.instrumentation.moduleCodeBySlot)) {
+    modulePathsBySlot[slot] = await materializeInstrumentationModule(slot, code);
   }
+  const instrumentation: MaterializedInstrumentation = { kind: "directory", modulePathsBySlot };
 
   await hashDirectoryIfPresent({
     fingerprint,
@@ -95,9 +92,7 @@ export async function writeMaterializedAuthoredModules(input: {
     moduleMap: moduleMapPath,
     version: 3,
   };
-  if (instrumentation !== undefined) {
-    index.instrumentation = instrumentation;
-  }
+  index.instrumentation = instrumentation;
   await writeFile(join(compileRoot, MATERIALIZED_MODULES_INDEX), `${JSON.stringify(index)}\n`);
   return index;
 }
@@ -132,9 +127,6 @@ function isMaterializedInstrumentation(value: unknown): boolean {
   if (typeof value !== "object" || value === null) return false;
 
   const candidate = value as Partial<MaterializedInstrumentation>;
-  if (candidate.kind === "file") {
-    return typeof (candidate as { modulePath?: unknown }).modulePath === "string";
-  }
   if (candidate.kind === "directory") {
     const paths = (candidate as { modulePathsBySlot?: unknown }).modulePathsBySlot;
     return (

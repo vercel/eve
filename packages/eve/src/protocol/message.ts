@@ -27,7 +27,16 @@ export const EVE_STREAM_TAIL_INDEX_HEADER = "x-eve-stream-tail-index";
 export const EVE_STREAM_VERSION_HEADER = "x-eve-stream-version";
 export const EVE_MESSAGE_STREAM_CONTENT_TYPE = "application/x-ndjson; charset=utf-8";
 export const EVE_MESSAGE_STREAM_FORMAT = "ndjson";
-export const EVE_MESSAGE_STREAM_VERSION = "24";
+export const EVE_MESSAGE_STREAM_VERSION = "25";
+
+/** Version of transport control records understood by this eve release. */
+export const EVE_STREAM_CONTROL_VERSION = "1";
+export const EVE_STREAM_CONTROL_VERSION_QUERY = "streamControlVersion";
+/** Internal record emitted when a leased HTTP response should be renewed. */
+export const EVE_STREAM_LEASE_ENDED_CONTROL = {
+  $eve: "stream.lease-ended",
+  version: 1,
+} as const;
 
 /**
  * eve-owned finish reason for one completed assistant step.
@@ -61,6 +70,8 @@ export interface StepCompletedProviderMetadata {
  * or replaying a finished session — yields the same values every time.
  */
 export interface MessageStreamEventMeta {
+  /** Server-issued message delivery identities, retained across the turn's workflow steps. */
+  readonly deliveryIds?: readonly string[];
   /** ISO-8601 emission time. */
   readonly at: string;
   /**
@@ -140,8 +151,9 @@ export interface RuntimeTraceContext {
  * `message` is either a plain text string or an AI SDK `UserContent`
  * array (mixing `text`, `image`, and `file` parts). Clients pass
  * multimodal attachments with the same shape AI SDK's `useChat`
- * `sendMessage({ files })` produces. `clientContext` is one-turn
- * client/page context; the channel converts it into internal model context.
+ * `sendMessage({ files })` produces. `clientContext` is turn-scoped
+ * client/page context; the channel converts it into internal model context
+ * for every model call in that turn.
  */
 export type HandleMessageRequestBody =
   | {
@@ -190,6 +202,8 @@ export interface TurnStartedStreamEvent {
  */
 export interface MessageReceivedStreamEvent {
   data: {
+    /** Present when eve, rather than a channel participant, authored the input. */
+    kind?: "execution.background_task";
     message: string;
     parts?: readonly MessageReceivedPart[];
     sequence: number;
@@ -221,9 +235,16 @@ export type MessageReceivedPart =
  * action lifecycles by call ID rather than assume one event contains every call
  * from an assistant step.
  */
+export interface ActionPresentation {
+  readonly label?: string;
+}
+
+export type ActionPresentationByCallId = Readonly<Record<string, ActionPresentation>>;
+
 export interface ActionsRequestedStreamEvent {
   data: {
     actions: readonly RuntimeActionRequest[];
+    presentation?: ActionPresentationByCallId;
     sequence: number;
     stepIndex: number;
     turnId: string;
@@ -307,6 +328,7 @@ export interface InputResolvedStreamEvent {
 export interface ActionResultStreamEvent {
   data: {
     error?: ActionResultError;
+    presentation?: ActionPresentationByCallId;
     result: RuntimeActionResult;
     sequence: number;
     stepIndex: number;
@@ -322,6 +344,7 @@ export interface ActionResultStreamEvent {
  */
 export interface ActionPartialStreamEvent {
   data: {
+    presentation?: ActionPresentationByCallId;
     result: RuntimeToolResultActionResult;
     sequence: number;
     stepIndex: number;
@@ -335,6 +358,7 @@ export interface ActionPartialStreamEvent {
  */
 export interface SubagentCalledStreamEvent {
   data: {
+    agentId?: string;
     callId: string;
     childSessionId: string;
     childStreamPath: string;
@@ -388,14 +412,14 @@ export interface SubagentChildEventStreamEvent {
 }
 
 /**
- * Stream event emitted when an inline subagent completes.
+ * Stream event emitted after the parent accepts a successful subagent invocation result.
  */
 export interface SubagentCompletedStreamEvent {
   data: {
     /**
-     * Present when the originating call completed with a background-task
-     * receipt while the child itself kept running. Consumers must not treat
-     * this as the child's terminal boundary; the child stream owns that.
+     * Historical admission marker retained for reading existing streams.
+     * A marked event is a working receipt, not a completed invocation.
+     * New receipts are published only as action.result tool outputs.
      */
     backgroundTask?: {
       taskId: string;
@@ -415,7 +439,6 @@ export interface SubagentCompletedStreamEvent {
 export interface MessageAppendedStreamEvent {
   data: {
     messageDelta: string;
-    messageSoFar: string;
     sequence: number;
     stepIndex: number;
     turnId: string;
@@ -431,8 +454,6 @@ export interface ActionInputAppendedStreamEvent {
   data: {
     callId: string;
     inputTextDelta: string;
-    /** Zero-based UTF-16 code-unit offset where `inputTextDelta` begins. */
-    inputTextOffset: number;
     sequence: number;
     stepIndex: number;
     toolName: string;
@@ -448,7 +469,6 @@ export interface ActionInputAppendedStreamEvent {
 export interface ReasoningAppendedStreamEvent {
   data: {
     reasoningDelta: string;
-    reasoningSoFar: string;
     sequence: number;
     stepIndex: number;
     turnId: string;
@@ -879,12 +899,15 @@ export function createTurnStartedEvent(input: {
  * consumers while preserving the authored turn content upstream.
  */
 export function createMessageReceivedEvent(input: {
+  /** Present when eve, rather than a channel participant, authored the input. */
+  readonly kind?: "execution.background_task";
   readonly message: string | UserContent;
   readonly sequence: number;
   readonly turnId: string;
 }): MessageReceivedStreamEvent {
   return {
     data: {
+      kind: input.kind,
       message: summarizeUserContent(input.message),
       parts: projectUserContentParts(input.message),
       sequence: input.sequence,
@@ -1085,6 +1108,7 @@ function basenameOf(path: string): string {
  */
 export function createActionsRequestedEvent(input: {
   readonly actions: readonly RuntimeActionRequest[];
+  readonly presentation?: ActionPresentationByCallId;
   readonly sequence: number;
   readonly stepIndex: number;
   readonly turnId: string;
@@ -1092,6 +1116,7 @@ export function createActionsRequestedEvent(input: {
   return {
     data: {
       actions: input.actions,
+      ...optionalPresentation(input.presentation),
       sequence: input.sequence,
       stepIndex: input.stepIndex,
       turnId: input.turnId,
@@ -1100,11 +1125,16 @@ export function createActionsRequestedEvent(input: {
   };
 }
 
+function optionalPresentation(presentation: ActionPresentationByCallId | undefined): {
+  readonly presentation?: ActionPresentationByCallId;
+} {
+  return presentation === undefined ? {} : { presentation };
+}
+
 /** Creates an `action.input.appended` event for streamed tool input text. */
 export function createActionInputAppendedEvent(input: {
   readonly callId: string;
   readonly inputTextDelta: string;
-  readonly inputTextOffset: number;
   readonly sequence: number;
   readonly stepIndex: number;
   readonly toolName: string;
@@ -1114,7 +1144,6 @@ export function createActionInputAppendedEvent(input: {
     data: {
       callId: input.callId,
       inputTextDelta: input.inputTextDelta,
-      inputTextOffset: input.inputTextOffset,
       sequence: input.sequence,
       stepIndex: input.stepIndex,
       toolName: input.toolName,
@@ -1269,6 +1298,7 @@ export function createInputResolvedEvent(input: {
  * derived from the synthesized denial output.
  */
 export function createActionResultEvent(input: {
+  readonly presentation?: ActionPresentationByCallId;
   readonly rejected?: boolean;
   readonly result: RuntimeActionResult;
   readonly sequence: number;
@@ -1283,6 +1313,7 @@ export function createActionResultEvent(input: {
   return {
     data: {
       error: outcome.error,
+      ...optionalPresentation(input.presentation),
       result: input.result,
       sequence: input.sequence,
       status: outcome.status,
@@ -1295,6 +1326,7 @@ export function createActionResultEvent(input: {
 
 /** Creates an `action.partial` event for one preliminary tool-result snapshot. */
 export function createActionPartialEvent(input: {
+  readonly presentation?: ActionPresentationByCallId;
   readonly result: RuntimeToolResultActionResult;
   readonly sequence: number;
   readonly stepIndex: number;
@@ -1302,6 +1334,7 @@ export function createActionPartialEvent(input: {
 }): ActionPartialStreamEvent {
   return {
     data: {
+      ...optionalPresentation(input.presentation),
       result: input.result,
       sequence: input.sequence,
       stepIndex: input.stepIndex,
@@ -1315,6 +1348,7 @@ export function createActionPartialEvent(input: {
  * Creates the `subagent.called` event for one started child workflow session.
  */
 export function createSubagentCalledEvent(input: {
+  readonly agentId?: string;
   readonly callId: string;
   readonly childSessionId: string;
   readonly sessionId: string;
@@ -1330,6 +1364,7 @@ export function createSubagentCalledEvent(input: {
 }): SubagentCalledStreamEvent {
   return {
     data: {
+      agentId: input.agentId,
       callId: input.callId,
       childSessionId: input.childSessionId,
       childStreamPath:
@@ -1357,7 +1392,6 @@ export function createSubagentCalledEvent(input: {
  */
 export function createMessageAppendedEvent(input: {
   readonly messageDelta: string;
-  readonly messageSoFar: string;
   readonly sequence: number;
   readonly stepIndex: number;
   readonly turnId: string;
@@ -1365,7 +1399,6 @@ export function createMessageAppendedEvent(input: {
   return {
     data: {
       messageDelta: input.messageDelta,
-      messageSoFar: input.messageSoFar,
       sequence: input.sequence,
       stepIndex: input.stepIndex,
       turnId: input.turnId,
@@ -1379,7 +1412,6 @@ export function createMessageAppendedEvent(input: {
  */
 export function createReasoningAppendedEvent(input: {
   readonly reasoningDelta: string;
-  readonly reasoningSoFar: string;
   readonly sequence: number;
   readonly stepIndex: number;
   readonly turnId: string;
@@ -1387,7 +1419,6 @@ export function createReasoningAppendedEvent(input: {
   return {
     data: {
       reasoningDelta: input.reasoningDelta,
-      reasoningSoFar: input.reasoningSoFar,
       sequence: input.sequence,
       stepIndex: input.stepIndex,
       turnId: input.turnId,
@@ -1699,13 +1730,18 @@ export function createSessionCompletedEvent(): SessionCompletedStreamEvent {
  * One stamping seam is what makes the persisted stream and authored hooks
  * observe the same `meta.id`.
  */
-export function stampMessageStreamEvent(event: UnstampedMessageStreamEvent): MessageStreamEvent {
+export function stampMessageStreamEvent(
+  event: UnstampedMessageStreamEvent,
+  deliveryIds?: readonly string[],
+): MessageStreamEvent {
+  const meta: { at: string; id: string; deliveryIds?: readonly string[] } = {
+    at: new Date().toISOString(),
+    id: createEventId(),
+  };
+  if (deliveryIds !== undefined && deliveryIds.length > 0) meta.deliveryIds = deliveryIds;
   return {
     ...event,
-    meta: {
-      at: new Date().toISOString(),
-      id: createEventId(),
-    },
+    meta,
   };
 }
 

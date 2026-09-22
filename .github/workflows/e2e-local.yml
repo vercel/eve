@@ -66,6 +66,7 @@ jobs:
     name: e2e-local (${{ matrix.name }}, ${{ matrix.model_name }})
     runs-on: ubuntu-latest
     needs: [changes, discover-fixtures]
+    continue-on-error: ${{ matrix.optional }}
     # No job-level `if`: the stable aggregate check below requires a successful
     # matrix result. Guarding each step lets an irrelevant diff satisfy it in
     # seconds without running setup or evals.
@@ -78,6 +79,7 @@ jobs:
       AI_GATEWAY_API_KEY: ${{ secrets.AI_GATEWAY_API_KEY }}
       EVE_E2E_MODEL: ${{ matrix.model_id }}
       EVE_EVAL_JUNIT_DIR: ${{ github.workspace }}/.junit
+      EVE_SANDBOX_IMAGE_TAG: latest
 
     steps:
       - name: Checkout code
@@ -132,8 +134,13 @@ jobs:
         run: |
           mkdir -p "$EVE_EVAL_JUNIT_DIR"
           cd "${{ matrix.dir }}"
+          pnpm run --if-present e2e:prepare
           pnpm exec eve eval --strict --verbose \
             --junit "$EVE_EVAL_JUNIT_DIR/${{ matrix.name }}-${{ matrix.model_name }}.xml"
+
+      - name: Capture failed workflow event ordering
+        if: failure() && needs.changes.outputs.relevant == 'true'
+        run: node .github/scripts/capture-workflow-events.mjs "${{ matrix.dir }}" .artifacts
 
       - name: Upload eval artifacts
         if: (failure()) && needs.changes.outputs.relevant == 'true'
@@ -142,8 +149,10 @@ jobs:
           name: eval-artifacts-${{ matrix.name }}-${{ matrix.model_name }}
           path: |
             .junit
+            .artifacts/workflow-events.json
             e2e/fixtures/*/.eve/evals
             apps/fixtures/*/.eve/evals
+            ${{ matrix.dir }}/.eve/traces
           include-hidden-files: true
           if-no-files-found: ignore
           retention-days: 7

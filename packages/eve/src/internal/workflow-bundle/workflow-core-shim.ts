@@ -6,9 +6,22 @@ const WORKFLOW_USE_STEP = Symbol.for("WORKFLOW_USE_STEP");
 const STREAM_NAME_SYMBOL = Symbol.for("WORKFLOW_STREAM_NAME");
 const workflowGlobal = globalThis as typeof globalThis & Record<symbol, unknown>;
 
-export class RetryableError extends Error {}
+// The SDK matches these by `name` and `fatal` when it serializes an error out of a body.
+export class RetryableError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "RetryableError";
+  }
+}
 
-export class FatalError extends Error {}
+export class FatalError extends Error {
+  readonly fatal = true;
+
+  constructor(message: string) {
+    super(message);
+    this.name = "FatalError";
+  }
+}
 
 interface WorkflowHook<T> extends AsyncIterable<T> {
   readonly token: string;
@@ -71,7 +84,17 @@ export function getWritable<T = unknown>(options: { namespace?: string } = {}): 
  * Creates a Workflow webhook from inside a durable workflow body.
  */
 export function createWebhook<T = unknown>(options?: unknown): WorkflowHook<T> & { url?: string } {
-  const hook = createHook<T>(options) as WorkflowHook<T> & { url?: string };
+  const { respondWith, token, ...rest } = (options ?? {}) as Record<string, unknown>;
+  if (token !== undefined) {
+    throw new Error(
+      "`createWebhook()` does not accept a `token` option. Use `createHook()` with `resumeHook()` for deterministic tokens.",
+    );
+  }
+  const hook = createHook<T>({
+    ...rest,
+    metadata: respondWith === undefined ? undefined : { respondWith },
+    isWebhook: true,
+  }) as WorkflowHook<T> & { url?: string };
   const metadata = getWorkflowMetadata();
   const baseUrl = typeof metadata.url === "string" ? metadata.url : "";
 

@@ -1,0 +1,216 @@
+import type {
+  StandardJSONSchemaV1,
+  StandardSchemaV1,
+} from "#compiled/@standard-schema/spec/index.js";
+import type { Approval } from "#approval/definition.js";
+import type { JsonObject, JsonValue } from "#shared/json.js";
+import {
+  stampToolDefinition,
+  type PublicToolDefinition,
+  type ToolContext,
+  type ToolInputRequest,
+  type ToolInputResponse,
+} from "#tools/definition.js";
+import type { ToolModelOutput } from "#tools/model-output.js";
+
+/** Fixed acknowledgement returned when a background task is admitted. */
+export interface TaskReceipt {
+  readonly status: "working";
+  readonly taskId: string;
+}
+
+export interface AgentInput {
+  readonly agentId?: string;
+  readonly message: string;
+  readonly outputSchema?: JsonObject;
+}
+
+type JsonSchemaProperties = Readonly<Record<string, JsonObject>>;
+type JsonSchemaRequiredKeys<
+  TProperties extends JsonSchemaProperties,
+  TRequired,
+> = TRequired extends readonly string[] ? Extract<TRequired[number], keyof TProperties> : never;
+type Simplify<TValue> = { [TKey in keyof TValue]: TValue[TKey] };
+type JsonSchemaObjectOutput<TProperties extends JsonSchemaProperties, TRequired> = Simplify<
+  {
+    -readonly [TKey in JsonSchemaRequiredKeys<TProperties, TRequired>]-?: JsonSchemaOutput<
+      TProperties[TKey]
+    >;
+  } & {
+    -readonly [
+      TKey in Exclude<keyof TProperties, JsonSchemaRequiredKeys<TProperties, TRequired>>
+    ]?: JsonSchemaOutput<TProperties[TKey]>;
+  }
+>;
+
+type JsonSchemaOutput<TSchema> = TSchema extends { readonly const: infer TValue }
+  ? Extract<TValue, JsonValue>
+  : TSchema extends { readonly enum: readonly (infer TValue)[] }
+    ? Extract<TValue, JsonValue>
+    : TSchema extends {
+          readonly type: "object";
+          readonly properties: infer TProperties extends JsonSchemaProperties;
+          readonly required?: infer TRequired;
+        }
+      ? JsonSchemaObjectOutput<TProperties, TRequired>
+      : TSchema extends {
+            readonly type: "array";
+            readonly items: infer TItems extends JsonObject;
+          }
+        ? JsonSchemaOutput<TItems>[]
+        : TSchema extends { readonly type: "string" }
+          ? string
+          : TSchema extends { readonly type: "integer" | "number" }
+            ? number
+            : TSchema extends { readonly type: "boolean" }
+              ? boolean
+              : TSchema extends { readonly type: "null" }
+                ? null
+                : JsonValue;
+
+export interface WorkflowAgentMetadata {
+  readonly description: string;
+}
+
+/** Context capabilities available inside an authored `"use step"` helper. */
+export type WorkflowStepToolContext = Pick<
+  ToolContext,
+  "abortSignal" | "callId" | "session" | "toolName" | "getToken" | "requireAuth"
+>;
+
+interface WorkflowAgent {
+  <const TOutputSchema extends JsonObject>(
+    target: string,
+    input: AgentInput & { readonly outputSchema: TOutputSchema },
+  ): Promise<JsonSchemaOutput<TOutputSchema>>;
+  (target: string, input: AgentInput): Promise<JsonValue>;
+}
+
+/**
+ * Context supplied to a workflow tool body. When passed directly to a step,
+ * eve replaces it with {@link WorkflowStepToolContext}.
+ */
+export type WorkflowToolContext = Pick<
+  ToolContext,
+  "abortSignal" | "callId" | "session" | "toolName" | "getToken" | "requireAuth"
+> & {
+  /** Invoke an agent by its invocation name. */
+  agent: WorkflowAgent;
+  /** Metadata for agents callable by this workflow, including hidden agents. */
+  agents: Readonly<Record<string, WorkflowAgentMetadata>>;
+  /** Ask the human on the session's channel; awaiting the answer suspends the run. */
+  ask(request: ToolInputRequest): PromiseLike<ToolInputResponse>;
+};
+
+const WORKFLOW_TOOL_BRAND = Symbol.for("eve:workflow-tool-brand");
+
+/** A static tool whose executor runs as a durable workflow. Its executor must start with "use workflow". */
+export interface BlockingWorkflowToolDefinition<
+  TInput = unknown,
+  TOutput = unknown,
+> extends PublicToolDefinition<TInput, TOutput> {
+  readonly [WORKFLOW_TOOL_BRAND]: true;
+  readonly execution?: never;
+  execute(input: TInput, ctx: WorkflowToolContext): Promise<TOutput> | AsyncIterable<TOutput>;
+  approval?: Approval<unknown extends TInput ? Record<string, unknown> : TInput>;
+  toModelOutput?: (output: TOutput) => ToolModelOutput | Promise<ToolModelOutput>;
+}
+
+export type BackgroundWorkflowToolDefinition<TInput, TOutput> = PublicToolDefinition<
+  TInput,
+  TaskReceipt
+> & {
+  readonly [WORKFLOW_TOOL_BRAND]: true;
+  readonly execution: "background";
+  execute(input: TInput, ctx: WorkflowToolContext): Promise<TOutput> | AsyncIterable<unknown>;
+  approval?: Approval<unknown extends TInput ? Record<string, unknown> : TInput>;
+  toModelOutput?: (output: TaskReceipt) => ToolModelOutput | Promise<ToolModelOutput>;
+};
+
+/** A static tool whose executor runs as a durable workflow. */
+export type WorkflowToolDefinition<TInput = unknown, TOutput = unknown> =
+  | BlockingWorkflowToolDefinition<TInput, TOutput>
+  | BackgroundWorkflowToolDefinition<TInput, TOutput>;
+
+type Unbranded<T> = T extends unknown ? Omit<T, typeof WORKFLOW_TOOL_BRAND> : never;
+type BackgroundReturn<T> =
+  T extends AsyncGenerator<unknown, infer Output>
+    ? Output
+    : T extends AsyncIterable<unknown>
+      ? null
+      : Awaited<T>;
+type BackgroundDefinition<TInput, TReturn> = Omit<
+  BackgroundWorkflowToolDefinition<TInput, BackgroundReturn<TReturn>>,
+  typeof WORKFLOW_TOOL_BRAND | "execute"
+> & {
+  execute(input: TInput, ctx: WorkflowToolContext): TReturn;
+};
+
+type WorkflowReturn<T> = T extends AsyncIterable<infer Output> ? Output : Awaited<T>;
+type Schema = StandardSchemaV1<unknown, unknown> | StandardJSONSchemaV1<unknown, unknown>;
+type Definition<TInput, TReturn> = Omit<
+  BlockingWorkflowToolDefinition<TInput, WorkflowReturn<TReturn>>,
+  typeof WORKFLOW_TOOL_BRAND | "execute"
+> & {
+  execute(input: TInput, ctx: WorkflowToolContext): TReturn;
+};
+
+export function defineWorkflowTool<
+  TInputSchema extends Schema,
+  TOutputSchema extends StandardJSONSchemaV1<unknown, unknown>,
+  TReturn extends
+    | Promise<StandardJSONSchemaV1.InferOutput<TOutputSchema>>
+    | AsyncIterable<StandardJSONSchemaV1.InferOutput<TOutputSchema>>,
+>(
+  definition: Omit<
+    Definition<StandardSchemaV1.InferOutput<TInputSchema>, TReturn>,
+    "inputSchema" | "outputSchema"
+  > & {
+    inputSchema: TInputSchema;
+    outputSchema: TOutputSchema;
+  },
+): BlockingWorkflowToolDefinition<
+  StandardSchemaV1.InferOutput<TInputSchema>,
+  StandardJSONSchemaV1.InferOutput<TOutputSchema>
+>;
+export function defineWorkflowTool<
+  TSchema extends Schema,
+  TReturn extends Promise<unknown> | AsyncIterable<unknown>,
+>(
+  definition: Omit<
+    BackgroundDefinition<StandardSchemaV1.InferOutput<TSchema>, TReturn>,
+    "inputSchema"
+  > & { inputSchema: TSchema },
+): BackgroundWorkflowToolDefinition<
+  StandardSchemaV1.InferOutput<TSchema>,
+  BackgroundReturn<TReturn>
+>;
+export function defineWorkflowTool<TReturn extends Promise<unknown> | AsyncIterable<unknown>>(
+  definition: BackgroundDefinition<Record<string, unknown>, TReturn> & { inputSchema: JsonObject },
+): BackgroundWorkflowToolDefinition<Record<string, unknown>, BackgroundReturn<TReturn>>;
+export function defineWorkflowTool<
+  TSchema extends Schema,
+  TReturn extends Promise<unknown> | AsyncIterable<unknown>,
+>(
+  definition: Omit<Definition<StandardSchemaV1.InferOutput<TSchema>, TReturn>, "inputSchema"> & {
+    inputSchema: TSchema;
+  },
+): BlockingWorkflowToolDefinition<StandardSchemaV1.InferOutput<TSchema>, WorkflowReturn<TReturn>>;
+export function defineWorkflowTool<TReturn extends Promise<unknown> | AsyncIterable<unknown>>(
+  definition: Definition<Record<string, unknown>, TReturn> & { inputSchema: JsonObject },
+): BlockingWorkflowToolDefinition<Record<string, unknown>, WorkflowReturn<TReturn>>;
+export function defineWorkflowTool<TInput = unknown, TOutput = unknown>(
+  definition: Unbranded<WorkflowToolDefinition<TInput, TOutput>>,
+): WorkflowToolDefinition<TInput, TOutput>;
+export function defineWorkflowTool<TInput, TOutput>(
+  definition: Unbranded<WorkflowToolDefinition<TInput, TOutput>>,
+): WorkflowToolDefinition<TInput, TOutput> {
+  stampToolDefinition(definition, "defineWorkflowTool");
+  return Object.assign(definition, { [WORKFLOW_TOOL_BRAND]: true as const });
+}
+
+export function isWorkflowToolDefinition(value: unknown): boolean {
+  return (
+    typeof value === "object" && value !== null && Reflect.get(value, WORKFLOW_TOOL_BRAND) === true
+  );
+}

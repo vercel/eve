@@ -347,6 +347,80 @@ describe("deriveRunFacts", () => {
     expect(facts.reasoningBlockCount).toBe(2);
   });
 
+  it("keeps a working receipt working until an actual result arrives", () => {
+    const admission: UnstampedMessageStreamEvent = {
+      type: "subagent.completed",
+      data: {
+        callId: "c1",
+        subagentName: "researcher",
+        output: "working",
+        backgroundTask: { status: "working", taskId: "task-1" },
+      },
+    };
+    const receipt: UnstampedMessageStreamEvent = {
+      type: "action.result",
+      data: {
+        sequence: 1,
+        stepIndex: 0,
+        turnId: "t1",
+        status: "completed",
+        result: {
+          kind: "subagent-result",
+          origin: "child",
+          callId: "c1",
+          subagentName: "researcher",
+          backgroundTask: { status: "working", taskId: "task-1" },
+          output: { status: "working", taskId: "task-1" },
+          outcome: {
+            kind: "parked",
+            result: { kind: "succeeded", output: "working" },
+            usageDelta: {
+              inputTokens: 0,
+              outputTokens: 0,
+              cacheReadTokens: 0,
+              cacheWriteTokens: 0,
+            },
+          },
+        },
+      },
+    };
+    const toolReceipt = actionResult({
+      callId: "c1",
+      toolName: "researcher",
+      output: { agentId: "agent-1", status: "working", taskId: "task-1" },
+    });
+    for (const events of [
+      [admission],
+      [receipt],
+      [toolReceipt],
+      [admission, receipt],
+      [receipt, admission],
+    ]) {
+      expect(derive(events).subagentCalls).toEqual([
+        expect.objectContaining({ callId: "c1", status: "working" }),
+      ]);
+      expect(derive(events).subagentCalls[0]?.output).toBeUndefined();
+    }
+    const completed: UnstampedMessageStreamEvent = {
+      type: "subagent.completed",
+      data: { callId: "c1", subagentName: "researcher", output: "actual result" },
+    };
+    expect(derive([toolReceipt, completed, admission, receipt, toolReceipt]).subagentCalls).toEqual(
+      [expect.objectContaining({ callId: "c1", status: "completed", output: "actual result" })],
+    );
+    for (const status of ["failed", "rejected"] as const) {
+      const failure = subagentResult({
+        callId: "c1",
+        subagentName: "researcher",
+        output: "child failed",
+        status,
+      });
+      expect(derive([admission, failure, admission, receipt]).subagentCalls).toEqual([
+        expect.objectContaining({ callId: "c1", status: "failed", output: "child failed" }),
+      ]);
+    }
+  });
+
   it("joins subagent.called with subagent.completed by call id", () => {
     const events: UnstampedMessageStreamEvent[] = [
       turnStarted("t1", 0),
@@ -419,6 +493,47 @@ describe("deriveRunFacts", () => {
     ];
     const facts = derive(events);
     expect(facts.subagentCalls.map((call) => call.name)).toEqual(["inline-agent"]);
+    expect(facts.subagentCalls[0]?.status).toBe("working");
+  });
+
+  it("preserves explicit cancellation even when the action reports failure or a late completion", () => {
+    const cancelled: UnstampedMessageStreamEvent = {
+      type: "action.result",
+      data: {
+        sequence: 1,
+        stepIndex: 0,
+        turnId: "t1",
+        status: "failed",
+        result: {
+          callId: "c1",
+          kind: "subagent-result",
+          origin: "child",
+          subagentName: "researcher",
+          isError: true,
+          output: "The agent invocation was cancelled.",
+          outcome: {
+            kind: "parked",
+            result: { kind: "cancelled" },
+            usageDelta: {
+              inputTokens: 0,
+              outputTokens: 0,
+              cacheReadTokens: 0,
+              cacheWriteTokens: 0,
+            },
+          },
+        },
+      },
+    };
+    const lateCompletion: UnstampedMessageStreamEvent = {
+      type: "subagent.completed",
+      data: { callId: "c1", subagentName: "researcher", output: "late result" },
+    };
+    for (const events of [[cancelled], [cancelled, lateCompletion]]) {
+      expect(derive(events).subagentCalls[0]).toMatchObject({
+        status: "cancelled",
+        output: "The agent invocation was cancelled.",
+      });
+    }
   });
 
   it("records every subagent invocation separately", () => {

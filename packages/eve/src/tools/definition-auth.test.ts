@@ -1,4 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, expectTypeOf, it } from "vitest";
+
+import { z } from "zod";
 
 import { defineTool } from "#tools/definition.js";
 
@@ -15,6 +17,31 @@ describe("defineTool auth field", () => {
       execute: () => null,
     };
 
-    expect(() => defineTool(definition as never)).toThrow(/"auth" field is no longer supported/);
+    expect(() => defineTool(definition)).toThrow(/"auth" field is no longer supported/);
+  });
+});
+
+describe("defineTool approvalKey", () => {
+  it("infers readonly input from the schema", () => {
+    const definition = defineTool({
+      description: "Scoped write",
+      inputSchema: z.object({ scope: z.string() }),
+      approvalKey(input) {
+        expectTypeOf(input).toEqualTypeOf<Readonly<{ scope: string }>>();
+        return `write:${input.scope}`;
+      },
+      execute: (input) => input.scope,
+    });
+    expect(definition.approvalKey?.({ scope: "repo" })).toBe("write:repo");
+  });
+
+  it("rejects background execution", () => {
+    const definition = {
+      description: "Scoped background write",
+      execution: "background",
+      inputSchema: z.object({ scope: z.string() }),
+      execute: async () => null,
+    };
+    expect(() => defineTool(definition)).toThrow("Use defineWorkflowTool for background work");
   });
 });

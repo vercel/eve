@@ -1,0 +1,13 @@
+enableGlobalVirtualStore: false
+
+packages:
+  - "."
+
+minimumReleaseAgeExclude:
+  - "@ai-sdk/*"
+  - "@vercel/connect"
+  - ai
+  - eve
+
+allowBuilds:
+  esbuild: true

@@ -34,18 +34,20 @@ export const TRANSACTIONAL_REBUILD_DESCRIPTOR: ScenarioAppDescriptor = {
   files: {
     ...DEV_SERVER_AGENT_DESCRIPTOR.files,
     "agent/channels/dev-generation.ts": createTransactionalRouteSource(),
-    "agent/instrumentation.ts": createInstrumentationSource("one"),
+    "agent/instrumentation/reload.ts": createInstrumentationSource("one"),
   },
 };
 
 export function createInstrumentationSource(marker: string): string {
   return [
+    'import { defineInstrumentation } from "eve/instrumentation";',
+    "",
     "declare global {",
     "  var __EVE_INSTRUMENTATION_MARKER__: string | undefined;",
     "}",
     "",
     `globalThis.__EVE_INSTRUMENTATION_MARKER__ = ${JSON.stringify(marker)};`,
-    "export default {};",
+    "export default defineInstrumentation({});",
     "",
   ].join("\n");
 }

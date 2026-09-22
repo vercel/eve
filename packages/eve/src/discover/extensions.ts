@@ -10,7 +10,10 @@ import { parseExtensionMountSpecifier } from "#discover/extension-specifier.js";
 import { SUPPORTED_AUTHORED_MODULE_FILE_EXTENSIONS } from "#discover/filesystem.js";
 import type { ExtensionSourceRef } from "#discover/manifest.js";
 import type { ProjectSource } from "#discover/project-source.js";
-import { parseExtensionPackageRoots } from "#shared/extension-package-contract.js";
+import {
+  parseBuiltInExtensionPackageRoots,
+  parseExtensionPackageRoots,
+} from "#shared/extension-package-contract.js";
 
 /**
  * Emitted when a mount file cannot be resolved to an extension package.
@@ -113,6 +116,8 @@ export interface ExtensionMountPackageLocation {
   readonly authoredSourceRoot?: string;
   /** Absolute path to the agent-shaped distribution root. */
   readonly distRoot: string;
+  /** The distribution is shipped by the resolved eve package itself. */
+  readonly builtIn: boolean;
 }
 
 /**
@@ -180,6 +185,20 @@ export async function locateExtensionMount(input: {
   }
 
   const { location } = locatedPackage;
+  if (location.builtIn) {
+    return {
+      location: {
+        namespace: location.namespace,
+        specifier: location.specifier,
+        packageName: location.packageName,
+        packageRoot: location.packageRoot,
+        sourceRoot: location.distRoot,
+        externalDependencies: [],
+      },
+      diagnostics: [],
+    };
+  }
+
   const compatibilityPath = join(location.distRoot, EXTENSION_COMPATIBILITY_MANIFEST_FILENAME);
   let compatibility;
   try {
@@ -291,7 +310,7 @@ export async function locateExtensionMountPackage(input: {
   }
 
   const manifestPath = join(packageRoot, "package.json");
-  let pkg: { name?: unknown; eve?: { extension?: unknown } };
+  let pkg: { name?: unknown; eve?: { extension?: unknown; builtInExtensions?: unknown } };
   try {
     pkg = JSON.parse(await input.source.readTextFile(manifestPath)) as typeof pkg;
   } catch {
@@ -306,7 +325,11 @@ export async function locateExtensionMountPackage(input: {
     };
   }
 
-  const extension = parseExtensionPackageRoots(pkg.eve?.extension);
+  const builtInExtension = parseBuiltInExtensionPackageRoots(
+    pkg.eve?.builtInExtensions,
+    packageSpecifierSubpath(specifier),
+  );
+  const extension = builtInExtension ?? parseExtensionPackageRoots(pkg.eve?.extension);
   if (extension === null) {
     return {
       diagnostics: [
@@ -330,6 +353,7 @@ export async function locateExtensionMountPackage(input: {
       ...(extension.source === undefined
         ? {}
         : { authoredSourceRoot: resolve(packageRoot, extension.source) }),
+      builtIn: builtInExtension !== null,
       distRoot: resolve(packageRoot, extension.dist),
     },
     diagnostics: [],
@@ -370,6 +394,12 @@ async function resolvePackageRoot(input: {
     }
     current = parent;
   }
+}
+
+/** Returns the export subpath of a bare package specifier. */
+function packageSpecifierSubpath(specifier: string): string {
+  const subpath = specifier.slice(bareSpecifierPackagePath(specifier).length);
+  return subpath.length === 0 ? "." : `.${subpath}`;
 }
 
 /**

@@ -1,3 +1,6 @@
+import { z } from "#compiled/zod/index.js";
+import { defineDurableSchema } from "#tools/durable-schema.js";
+import { isToolSchema } from "#tools/schema.js";
 import { describe, expect, it, beforeEach } from "vitest";
 
 import { transformDynamicToolExecute } from "./dynamic-tool-transform.js";
@@ -52,7 +55,11 @@ async function transformAndEval(
     stampDurableDynamicToolCallbacks(
       entry,
       collectDurableDynamicToolCallbacks({
+        inputSchema: entry.inputSchema,
+        outputSchema: entry.outputSchema,
+        label: entry.label as { complete?: never; delta?: never; start?: never } | undefined,
         approval: entry.approval as never,
+        approvalKey: entry.approvalKey as never,
         execute: entry.execute as never,
         toModelOutput: entry.toModelOutput as never,
       }),
@@ -62,8 +69,14 @@ async function transformAndEval(
 
   // Evaluate in a function scope to provide our stubs. The transform
   // prepends its own __eveStepRegistry setup, so we don't need to add it.
-  const evalFn = new Function("defineDynamic", "defineTool", `${code}\nreturn __exported;`);
-  evalFn(defineDynamic, defineTool);
+  const evalFn = new Function(
+    "defineDynamic",
+    "defineTool",
+    "__eveDefineDurableSchema",
+    "z",
+    `${code}\nreturn __exported;`,
+  );
+  evalFn(defineDynamic, defineTool, defineDurableSchema, z);
 
   return {
     code,
@@ -76,7 +89,10 @@ async function transformAndEval(
   };
 }
 
-type StampedCallbacks = Record<string, { callback: Function; closure: Record<string, unknown> }>;
+type StampedCallback = { callback: Function; closure: Record<string, unknown> };
+type StampedCallbacks = Record<string, StampedCallback> & {
+  label?: { complete?: StampedCallback; delta?: StampedCallback; start?: StampedCallback };
+};
 
 function durableCallbacks(tool: unknown): StampedCallbacks {
   return (tool as Record<symbol, StampedCallbacks>)[
@@ -86,7 +102,7 @@ function durableCallbacks(tool: unknown): StampedCallbacks {
 
 // Clear resolve-time registrations between tests so each assertion observes only its module.
 beforeEach(() => {
-  const sym = Symbol.for("eve:dynamic-tool-callbacks");
+  const sym = Symbol.for("eve:scoped-dynamic-tool-callbacks");
   const reg = (globalThis as Record<symbol, Map<string, Function> | undefined>)[sym];
   if (reg) reg.clear();
 });
@@ -103,7 +119,10 @@ import { defineDynamic, defineTool } from "eve/tools";
 export default defineDynamic({
   events: {
     "session.started": async () => {
+      const labelPrefix = "Deploy";
       const executePrefix = "execute";
+      const resultPrefix = "Deployed to";
+      const updateSuffix = " sources";
       const requestReason = "confirm";
       const allowedResponder = "user-123";
       const projectionPrefix = "visible";
@@ -111,6 +130,17 @@ export default defineDynamic({
         guarded: defineTool({
           description: "Guarded",
           inputSchema: { type: "object" },
+          label: {
+            start(input) {
+              return labelPrefix + " " + input.value;
+            },
+            complete(_input, output) {
+              return resultPrefix + " " + output.url;
+            },
+            delta(_input, partial) {
+              return partial.phase + updateSuffix;
+            },
+          },
           approval: {
             request(ctx) {
               return ctx.toolInput.force ? { type: "user-approval", reason: requestReason } : "not-applicable";
@@ -141,18 +171,29 @@ export default defineDynamic({
 
     expect(Object.keys(callbacks)).toEqual([
       "execute",
+      "label",
       "approvalRequest",
       "approvalResponse",
       "toModelOutput",
     ]);
     expect(callbacks.execute!.closure).toEqual({ executePrefix: "execute" });
+    expect(callbacks.label?.start?.closure).toEqual({ labelPrefix: "Deploy" });
+    expect(callbacks.label?.complete?.closure).toEqual({ resultPrefix: "Deployed to" });
+    expect(callbacks.label?.delta?.closure).toEqual({ updateSuffix: " sources" });
     expect(callbacks.approvalRequest!.closure).toEqual({ requestReason: "confirm" });
     expect(callbacks.approvalResponse!.closure).toEqual({ allowedResponder: "user-123" });
     expect(callbacks.toModelOutput!.closure).toEqual({ projectionPrefix: "visible" });
-    expect(new Set(Object.values(callbacks).map((callback) => callback!.callback)).size).toBe(4);
-    for (const callback of Object.values(callbacks)) {
-      expect(callback!.callback).toBeTypeOf("function");
-    }
+    const callbackValues = [
+      callbacks.execute,
+      callbacks.label?.start,
+      callbacks.label?.complete,
+      callbacks.label?.delta,
+      callbacks.approvalRequest,
+      callbacks.approvalResponse,
+      callbacks.toModelOutput,
+    ];
+    expect(new Set(callbackValues.map((callback) => callback!.callback)).size).toBe(7);
+    for (const callback of callbackValues) expect(callback!.callback).toBeTypeOf("function");
   });
 
   it("preserves top-level function-form approval properties", async () => {
@@ -1971,6 +2012,53 @@ export default defineDynamic({
 `;
     expect(await transformDynamicToolExecute("tools/null.ts", source)).toBeNull();
   });
+
+  it.each(["named", "namespace"])(
+    "leaves workflow executors unstamped with a %s import",
+    async (style) => {
+      // The shape the directive transform hands over: bodies hoisted to
+      // top-level declarations (here already stubbed) and referenced by name.
+      let source = `
+import { defineWorkflowTool } from "eve/tools";
+
+async function execute(input) {
+  throw new Error("stub");
+}
+execute.workflowId = "workflow//./agent/tools/deploy//execute";
+
+async function deploy(input) {
+  throw new Error("stub");
+}
+deploy.workflowId = "workflow//./agent/tools/deploy//deploy";
+
+export default defineWorkflowTool({
+  description: "Inline body",
+  inputSchema: {},
+  execute,
+  async toModelOutput(output) { return String(output); },
+});
+
+export const referenced = defineWorkflowTool({
+  description: "Referenced body",
+  inputSchema: {},
+  execute: deploy,
+});
+`;
+      if (style === "namespace") {
+        source = source
+          .replace("import { defineWorkflowTool }", "import * as tools")
+          .replaceAll("defineWorkflowTool({", "tools.defineWorkflowTool({");
+      }
+      const result = await transformDynamicToolExecute(
+        "agent/tools/deploy.ts",
+        source,
+        new Set(["execute", "deploy"]),
+      );
+      expect(result).not.toBeNull();
+      expect(result?.code).not.toContain("__eve_dynamic_exec_");
+      expect(result?.code).toContain("toModelOutput: __eveStampDynamicCallback(");
+    },
+  );
 });
 
 // ===========================================================================
@@ -2377,5 +2465,82 @@ export default defineDynamic({
 
     expect(code).toContain("const { tag } = __vars");
     expect(code).toMatch(/\(\.\.\.__args\) => __eve_dynamic_exec_\d+\(\{ tag \}, \.\.\.__args\)/);
+  });
+});
+
+describe("approvalKey callbacks", () => {
+  it("captures input-scoped approval keys for durable replay", async () => {
+    const { callHandler } = await transformAndEval(
+      "tools/scoped.ts",
+      `
+      import { defineDynamic, defineTool } from "eve";
+      export default defineDynamic({ events: { "step.started": () => {
+        const prefix = "repo";
+        return { write: defineTool({
+          description: "write",
+          inputSchema: { type: "object" },
+          execute: () => ({ ok: true }),
+          approvalKey: (input) => prefix + ":" + input.branch,
+        }) };
+      } } });
+    `,
+    );
+    const result = await callHandler();
+    const entry = result.write as { approvalKey: (input: unknown) => string };
+    const descriptor = readDurableDynamicCallback(entry.approvalKey)!;
+    expect(descriptor.closure).toEqual({ prefix: "repo" });
+    expect(
+      (descriptor.callback as Function)(JSON.parse(JSON.stringify(descriptor.closure)), {
+        branch: "main",
+      }),
+    ).toBe("repo:main");
+  });
+});
+
+describe("durable schema expression transform", () => {
+  it("captures inline refinement values separately from the current resolver invocation", async () => {
+    const { callHandler } = await transformAndEval(
+      "schema.ts",
+      `
+      import { defineTool, defineDynamic } from "eve/tools";
+      import { z } from "zod";
+      const output = z.object({ value: z.string().trim() });
+      export default defineDynamic({ events: { "session.started": (_event, ctx) => {
+        const limit = ctx.limit;
+        return { checked: defineTool({
+          description: "Checked",
+          inputSchema: z.object({ amount: z.number().refine(value => value <= limit) }),
+          outputSchema: output,
+          execute: () => limit,
+        }) };
+      } } });
+    `,
+      { ctx: { limit: 10 } },
+    );
+    const entry = (await callHandler()).checked;
+    const callbacks = durableCallbacks(entry);
+    expect(callbacks.inputSchema!.closure).toEqual({ limit: 10 });
+    expect(callbacks.outputSchema!.closure).toEqual({});
+    const schema = callbacks.inputSchema!.callback({ limit: 5 });
+    if (!isToolSchema(schema)) throw new Error("Expected schema");
+    expect(await schema["~standard"].validate({ amount: 6 })).toHaveProperty("issues");
+    expect(await schema["~standard"].validate({ amount: 4 })).toEqual({ value: { amount: 4 } });
+    const output = callbacks.outputSchema!.callback({});
+    if (!isToolSchema(output)) throw new Error("Expected output schema");
+    expect(await output["~standard"].validate({ value: " a " })).toEqual({ value: { value: "a" } });
+  });
+
+  it("does not wrap explicit durable schema factories again", async () => {
+    const result = await transformDynamicToolExecute(
+      "schema.ts",
+      `
+      import { defineTool, defineDurableSchema as durable } from "eve/tools";
+      import { z } from "zod";
+      export function tool(limit) {
+        return defineTool({ inputSchema: durable({ closure: { limit }, schema: ({ limit }) => z.number().max(limit) }), execute: () => null });
+      }
+    `,
+    );
+    expect(result!.code).not.toContain("__eveDefineDurableSchema");
   });
 });

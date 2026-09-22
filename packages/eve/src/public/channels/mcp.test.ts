@@ -7,7 +7,10 @@ import {
   attachRouteChannelName,
   attachRouteSessionCreator,
 } from "#internal/nitro/routes/channel-route-context.js";
-import { MCP_LEGACY_PROTOCOL_VERSION } from "#internal/mcp/streamable-http-server.js";
+import {
+  MCP_LEGACY_PROTOCOL_VERSION,
+  MCP_PROTOCOL_VERSION,
+} from "#internal/mcp/streamable-http-server.js";
 import { ForbiddenError, none, oauthResource, withAuthChallenges } from "#public/channels/auth.js";
 import { mcpChannel } from "#public/channels/mcp.js";
 
@@ -49,8 +52,37 @@ describe("mcpChannel", () => {
       routeArgs(),
     );
     await expect(jsonRpcResponse(initialize)).resolves.toMatchObject({
-      result: { serverInfo: { name: "compiled-agent" } },
+      result: {
+        instructions: expect.stringContaining("pollAfterMs"),
+        serverInfo: { name: "compiled-agent" },
+      },
     });
+
+    const discovered = await postRoute.handler(
+      mcpRequest(
+        {
+          id: "discover",
+          jsonrpc: "2.0",
+          method: "server/discover",
+          params: {
+            _meta: {
+              "io.modelcontextprotocol/clientCapabilities": {},
+              "io.modelcontextprotocol/clientInfo": { name: "test-client", version: "0.0.0" },
+              "io.modelcontextprotocol/protocolVersion": MCP_PROTOCOL_VERSION,
+            },
+          },
+        },
+        { "mcp-method": "server/discover", "mcp-protocol-version": MCP_PROTOCOL_VERSION },
+      ),
+      routeArgs(),
+    );
+    const discovery = (await jsonRpcResponse(discovered)) as {
+      result: { instructions: string };
+    };
+    expect(discovery.result.instructions).toContain("agent_start is not idempotent");
+    expect(discovery.result.instructions).toContain("ask the user before starting again");
+    expect(discovery.result.instructions).toContain("agent_cancel");
+    expect(discovery.result.instructions.length).toBeLessThan(800);
 
     const tools = await postRoute.handler(
       mcpRequest({ id: 2, jsonrpc: "2.0", method: "tools/list" }),
@@ -80,13 +112,18 @@ describe("mcpChannel", () => {
       description: expect.stringContaining("Investigates tasks."),
       outputSchema: { type: "object" },
     });
+    expect(body.result.tools[0]?.description).toContain("Not idempotent");
     expect(body.result.tools[1]).toMatchObject({
       annotations: {
         idempotentHint: true,
         openWorldHint: false,
         readOnlyHint: true,
       },
+      description: expect.stringContaining("pollAfterMs"),
     });
+    expect(body.result.tools[2]?.description).toContain("partial batches are rejected");
+    expect(body.result.tools[3]?.description).toContain("until status is terminal");
+    expect(body.result.tools[3]?.description).not.toContain("until status is cancelled");
     expect(body.result.tools[2]).toMatchObject({
       annotations: {
         idempotentHint: false,
@@ -207,7 +244,61 @@ describe("mcpChannel", () => {
           },
         ],
         isError: true,
+        structuredContent: {
+          error: {
+            code: "invalid_input",
+            message: "outputSchema external $ref values are not supported.",
+            retryable: false,
+          },
+        },
       },
+    });
+    expect(createSession).not.toHaveBeenCalled();
+  });
+
+  it("rejects oversized UTF-8 messages and input responses before starting work", async () => {
+    const createSession = vi.fn();
+    const channel = mcpChannel({ auth: none() });
+    const route = channel.routes[1]!;
+    if (route.transport === "websocket") throw new Error("expected HTTP route");
+
+    const oversizedStart = await route.handler(
+      mcpRequest({
+        id: 1,
+        jsonrpc: "2.0",
+        method: "tools/call",
+        params: {
+          // 3 bytes per char: well under 64 Ki characters, over 64 KiB.
+          arguments: { message: "日".repeat(24 * 1_024) },
+          name: "agent_start",
+        },
+      }),
+      routeArgs(createSession),
+    );
+    await expect(jsonRpcResponse(oversizedStart)).resolves.toMatchObject({
+      result: {
+        content: [{ text: expect.stringContaining("Input validation error"), type: "text" }],
+        isError: true,
+      },
+    });
+
+    const oversizedUpdate = await route.handler(
+      mcpRequest({
+        id: 2,
+        jsonrpc: "2.0",
+        method: "tools/call",
+        params: {
+          arguments: {
+            invocationId: "inv",
+            responses: [{ requestId: "r", text: "日".repeat(6 * 1_024) }],
+          },
+          name: "agent_update",
+        },
+      }),
+      routeArgs(createSession),
+    );
+    await expect(jsonRpcResponse(oversizedUpdate)).resolves.toMatchObject({
+      result: { isError: true },
     });
     expect(createSession).not.toHaveBeenCalled();
   });

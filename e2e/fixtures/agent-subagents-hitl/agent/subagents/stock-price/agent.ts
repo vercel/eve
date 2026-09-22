@@ -4,6 +4,11 @@ import { defineAgent } from "eve";
 export default defineAgent({
   description:
     'Look up the current stock price for a given ticker symbol. Pass the ticker symbol you want to look up in the message (e.g. "AAPL", "GOOG", or "TSLA").',
-  ...e2eSubagentConfig(),
+  ...e2eSubagentConfig({
+    mock: ({ toolResults }) =>
+      toolResults.find((result) => result.name === "get_stock_price") === undefined
+        ? { toolCalls: [{ input: { ticker: "GOOG" }, name: "get_stock_price" }] }
+        : "GOOG is trading at 178.92.",
+  }),
   reasoning: "high",
 });

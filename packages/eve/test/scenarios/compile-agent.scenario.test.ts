@@ -47,7 +47,7 @@ const ROOT_TYPE_DEFINITIONS = fileURLToPath(
 const TSC_BIN_PATH = fileURLToPath(
   new URL("../../../../node_modules/typescript/bin/tsc", import.meta.url),
 );
-const DEFAULT_AGENT_MODEL_ID = "openai/gpt-5.6-luna-fast";
+const DEFAULT_AGENT_MODEL_ID = "spacexai/grok-4.7";
 
 function applicationOwnedEntries<TEntry extends { readonly sourceId: string }>(
   manifest: CompiledAgentManifest,
@@ -153,6 +153,39 @@ describe("compiler artifacts", () => {
     await writeFile(join(agentRoot, "agent.mjs"), "export default {};\n");
     await expect(compileAgent({ startPath: appRoot })).rejects.toThrow(
       'The "model" field is required.',
+    );
+  });
+
+  it("compiles the provided sleep definition as a workflow tool", async () => {
+    const { agentRoot, appRoot } = await createAppRoot(
+      "eve-compiler-workflow-sleep-",
+      APP_ROOT_OPTIONS,
+    );
+    await mkdir(join(agentRoot, "tools"), { recursive: true });
+    await writeFile(join(agentRoot, "instructions.md"), "Wait when requested.");
+    await writeFile(
+      join(agentRoot, "tools", "sleep.mjs"),
+      'import { sleep } from "eve/tools/sleep";\nexport default sleep();\n',
+    );
+
+    const result = await compileAgent({ startPath: appRoot });
+    const packageInfo = resolveInstalledPackageInfo();
+
+    expect(result.manifest.tools).toContainEqual(
+      expect.objectContaining({
+        behavior: {
+          availability: [],
+          handling: {
+            kind: "workflow-tool",
+            workflowId: `workflow//${packageInfo.name}@${packageInfo.version}//executeSleepTool`,
+          },
+          shape: { lifetime: "step", suspend: "workflow" },
+        },
+        logicalPath: "tools/sleep.mjs",
+        name: "sleep",
+        sourceId: "tools/sleep.mjs",
+        sourceKind: "module",
+      }),
     );
   });
 
@@ -586,20 +619,19 @@ describe("compileAgent", () => {
           "",
         ].join("\n"),
         "agent/instructions.md": "You are a precise assistant.\n",
-        "agent/instrumentation.ts": [
-          'import { defineInstrumentation, isChannel } from "eve/instrumentation";',
-          'import supportChannel from "./channels/support.js";',
+        "agent/instrumentation/support.ts": [
+          'import { isChannel } from "eve/instrumentation";',
+          'import { otelIntegration } from "eve/instrumentation/otel";',
+          'import supportChannel from "../channels/support.js";',
           "",
-          "export default defineInstrumentation({",
-          "  events: {",
-          '    "step.started"(input) {',
+          "export default otelIntegration({",
+          "  runtimeContext(input) {",
           "      if (!isChannel(input.channel, supportChannel)) return undefined;",
           "      const queueId: string | null = input.channel.metadata.queueId;",
           '      const priority: "high" = input.channel.metadata.priority;',
           "      // @ts-expect-error channel metadata contains no arbitrary fallback keys.",
           "      input.channel.metadata.missing;",
-          '      return { runtimeContext: { "support.has_queue": String(queueId !== null), "support.priority": priority } };',
-          "    },",
+          '      return { "support.has_queue": String(queueId !== null), "support.priority": priority };',
           "  },",
           "});",
           "",

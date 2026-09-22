@@ -46,7 +46,7 @@ describe("renderOptionRow", () => {
 
   test("highlights the cursor row in inverse blue and keeps its hint outside", () => {
     expect(row({ label: "Yes", hint: "Create a project", isCursor: true })).toBe(
-      "<inverse><blue> ▶ Yes </blue></inverse><dim>· Create a project</dim>",
+      " › Yes<dim> · Create a project</dim>",
     );
   });
 
@@ -67,12 +67,12 @@ describe("renderOptionRow", () => {
       "   <yellow>Configure provider</yellow>",
     );
     expect(row({ label: "Configure provider", isCursor: true, accent: "warning" })).toBe(
-      "<inverse><yellow> ▶ Configure provider </yellow></inverse>",
+      "<yellow> › Configure provider</yellow>",
     );
   });
 
   test("an un-hovered available row shows the placeholder dot when asked", () => {
-    expect(row({ label: "Slack", placeholder: true })).toBe(" <dim>◦</dim> Slack");
+    expect(row({ label: "Slack", placeholder: true })).toBe(" <dim> </dim> Slack");
   });
 
   test("a checked row off the cursor shows a green check (single column, no checkbox)", () => {
@@ -89,7 +89,7 @@ describe("renderOptionRow", () => {
         isCursor: true,
         state: { kind: "available", checked: true },
       }),
-    ).toBe("<inverse><blue> ✓ Web Chat </blue></inverse>");
+    ).toBe(" ✓ Web Chat");
   });
 
   test("a completed row under the cursor reads as inert: a dim pointer and dim label", () => {
@@ -100,7 +100,7 @@ describe("renderOptionRow", () => {
         state: { kind: "completed" },
         focusHint: "Already installed",
       }),
-    ).toBe(" <dim>▷</dim> <dim>Web Chat</dim><dim> · Already installed</dim>");
+    ).toBe(" <dim>›</dim> <dim>Web Chat</dim><dim> · Already installed</dim>");
   });
 
   test("a completed row off the cursor keeps its green check", () => {
@@ -134,7 +134,7 @@ describe("renderOptionRow", () => {
         state: { kind: "disabled", reason: "needs a Vercel project" },
         placeholder: true,
       }),
-    ).toBe(" <dim>◦</dim> <dim>Slack (needs a Vercel project)</dim>");
+    ).toBe(" <dim> </dim> <dim>Slack (needs a Vercel project)</dim>");
   });
 
   test("a disabled row under the cursor reads as inert: a dim pointer, not the placeholder", () => {
@@ -145,7 +145,7 @@ describe("renderOptionRow", () => {
         state: { kind: "disabled" },
         placeholder: true,
       }),
-    ).toBe(" <dim>▷</dim> <dim>Waiting</dim>");
+    ).toBe(" <dim>›</dim> <dim>Waiting</dim>");
   });
 
   test("warning-toned disabled rows keep the label dim and show a yellow alert annotation", () => {
@@ -164,14 +164,14 @@ describe("renderOptionRow", () => {
   test("a hint tab-aligns behind a padded label column", () => {
     expect(
       row({ label: "Slack", hint: "creates a slackbot", placeholder: true, hintPadding: 6 }),
-    ).toBe(" <dim>◦</dim> Slack<dim>       · creates a slackbot</dim>");
+    ).toBe(" <dim> </dim> Slack<dim>       · creates a slackbot</dim>");
   });
 
   test("a persistent hint shows on any row; a focus hint only under the cursor", () => {
     expect(row({ label: "Slack", hint: "persistent" })).toBe("   Slack<dim> · persistent</dim>");
     expect(row({ label: "Slack", focusHint: "only on hover" })).toBe("   Slack");
     expect(row({ label: "Slack", isCursor: true, focusHint: "only on hover" })).toBe(
-      "<inverse><blue> ▶ Slack </blue></inverse><dim>· only on hover</dim>",
+      " › Slack<dim> · only on hover</dim>",
     );
   });
 

@@ -3,6 +3,8 @@ import type { ScheduleSourceRef } from "#discover/manifest.js";
 import { normalizeScheduleDefinition } from "#internal/authored-definition/core.js";
 import type { ScheduleDefinition } from "#public/definitions/schedule.js";
 import type { CompiledScheduleDefinition } from "#compiler/manifest.js";
+import { readWorkflowFunctionId } from "#internal/workflow/reference.js";
+import { workflowCallbackErrorMessage } from "#shared/workflow-tool-context.js";
 import {
   loadModuleBackedDefinition,
   requireModuleBackedDefinitionLoadOptions,
@@ -39,6 +41,10 @@ export async function compileScheduleDefinition(
           }),
           `Expected the schedule export "${source.exportName ?? "default"}" from "${source.logicalPath}" to match the public eve shape.`,
         );
+
+  if (readWorkflowFunctionId(definition.run) !== undefined) {
+    throw new Error(`${source.logicalPath}: ${workflowCallbackErrorMessage("schedule")}`);
+  }
 
   const compiled = {
     cron: definition.cron,

@@ -22,7 +22,7 @@ import {
 } from "#internal/invocation/metadata.js";
 import type { RouteSessionCreator } from "#internal/nitro/routes/channel-route-context.js";
 import { getRun, getWorld } from "#internal/workflow/runtime.js";
-import type { HandleMessageStreamEvent } from "#protocol/message.js";
+import type { HandleMessageStreamEvent, InputResolution } from "#protocol/message.js";
 import type { InputRequest, InputResponse } from "#shared/input.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
 import { parseJsonValue } from "#shared/json.js";
@@ -73,7 +73,9 @@ export class WorkflowAgentInvocationExecution {
     if (run === undefined) return undefined;
 
     if (isTerminalRunStatus(run.status)) {
-      return await terminalInvocation(run);
+      const events =
+        run.status === "failed" ? await readRecentPersistedEvents(input.invocationId) : [];
+      return await terminalInvocation(run, events);
     }
     const events = await readRecentPersistedEvents(input.invocationId);
     return projectNonterminal(
@@ -92,6 +94,12 @@ export class WorkflowAgentInvocationExecution {
     const current = await this.read(input);
     if (current === undefined) return { type: "not_found" };
     if (current.status !== "input_required") {
+      // A retry after a lost response is the common case here: the answer
+      // already landed, so acknowledge it instead of demanding a new one.
+      const events = await readRecentPersistedEvents(input.invocationId);
+      if (replaysResolvedBatch(events, input.responses)) {
+        return { invocation: current, type: "success" };
+      }
       return conflict("Invocation is not waiting for input.");
     }
     const run = await this.#readInvocationRun(input.invocationId, input.auth);
@@ -216,15 +224,90 @@ function pendingInputBatch(
   return { id: event.meta.id, rawRequestIds, requests };
 }
 
+/**
+ * Removes resolved requests from a batch. The harness resolves a batch as a
+ * whole today, but request-level bookkeeping keeps this correct if it ever
+ * resolves them separately.
+ */
+function withoutResolved(
+  batch: PendingInputBatch,
+  resolutions: readonly InputResolution[],
+): PendingInputBatch | undefined {
+  const resolvedRawIds = new Set(resolutions.map((resolution) => resolution.requestId));
+  const rawRequestIds: Record<string, string> = {};
+  const requests: Record<string, InputRequest> = {};
+  for (const [requestId, rawRequestId] of Object.entries(batch.rawRequestIds)) {
+    if (resolvedRawIds.has(rawRequestId)) continue;
+    rawRequestIds[requestId] = rawRequestId;
+    const request = batch.requests[requestId];
+    if (request !== undefined) requests[requestId] = request;
+  }
+  return Object.keys(rawRequestIds).length === 0
+    ? undefined
+    : { id: batch.id, rawRequestIds, requests };
+}
+
+interface ResolvedInputBatch {
+  readonly batch: PendingInputBatch;
+  readonly responses: ReadonlyMap<string, InputResponse | undefined>;
+}
+
+/**
+ * Folds the event window into the currently pending batch and the most
+ * recently resolved batch. Both are needed: the first to accept an answer,
+ * the second to recognize a client re-sending an answer that already landed.
+ */
+function foldInputBatches(events: readonly HandleMessageStreamEvent[]): {
+  readonly pending: PendingInputBatch | undefined;
+  readonly resolved: ResolvedInputBatch | undefined;
+} {
+  let pending: PendingInputBatch | undefined;
+  let requested: PendingInputBatch | undefined;
+  let resolved: ResolvedInputBatch | undefined;
+  for (const event of events) {
+    if (event.type === "input.requested") {
+      requested = pendingInputBatch(event);
+      pending = requested;
+    } else if (event.type === "input.resolved") {
+      if (requested === undefined) continue;
+      const responses = new Map<string, InputResponse | undefined>();
+      for (const resolution of event.data.resolutions) {
+        responses.set(resolution.requestId, resolution.response);
+      }
+      resolved = { batch: requested, responses };
+      if (pending !== undefined) pending = withoutResolved(pending, event.data.resolutions);
+    } else if (event.type === "turn.started") {
+      pending = undefined;
+    }
+  }
+  return { pending, resolved };
+}
+
 function latestPendingInputBatch(
   events: readonly HandleMessageStreamEvent[],
 ): PendingInputBatch | undefined {
-  let batch: PendingInputBatch | undefined;
-  for (const event of events) {
-    if (event.type === "input.requested") batch = pendingInputBatch(event);
-    else if (event.type === "turn.started") batch = undefined;
+  return foldInputBatches(events).pending;
+}
+
+/** True when `responses` exactly repeats the answers eve already accepted for the last batch. */
+function replaysResolvedBatch(
+  events: readonly HandleMessageStreamEvent[],
+  responses: readonly InputResponse[],
+): boolean {
+  const resolved = foldInputBatches(events).resolved;
+  if (resolved === undefined || responses.length !== resolved.responses.size) return false;
+  const seen = new Set<string>();
+  for (const response of responses) {
+    const rawRequestId = resolved.batch.rawRequestIds[response.requestId];
+    if (rawRequestId === undefined || seen.has(rawRequestId)) return false;
+    seen.add(rawRequestId);
+    if (!resolved.responses.has(rawRequestId)) return false;
+    const accepted = resolved.responses.get(rawRequestId);
+    if (accepted?.optionId !== response.optionId || accepted?.text !== response.text) {
+      return false;
+    }
   }
-  return batch;
+  return true;
 }
 
 function projectNonterminal(
@@ -239,6 +322,10 @@ function projectNonterminal(
   for (const event of events) {
     if (event.type === "input.requested") {
       inputBatch = pendingInputBatch(event);
+    } else if (event.type === "input.resolved") {
+      if (inputBatch !== undefined) {
+        inputBatch = withoutResolved(inputBatch, event.data.resolutions);
+      }
     } else if (event.type === "turn.started") {
       authorizations.clear();
       inputBatch = undefined;
@@ -289,13 +376,16 @@ function projectNonterminal(
   return { ...base, pollAfterMs: 1_000, status: "working" };
 }
 
-async function terminalInvocation(run: {
-  readonly createdAt: Date;
-  readonly error?: unknown;
-  readonly expiredAt?: Date;
-  readonly runId: string;
-  readonly status: string;
-}): Promise<AgentInvocation> {
+async function terminalInvocation(
+  run: {
+    readonly createdAt: Date;
+    readonly error?: unknown;
+    readonly expiredAt?: Date;
+    readonly runId: string;
+    readonly status: string;
+  },
+  events: readonly HandleMessageStreamEvent[],
+): Promise<AgentInvocation> {
   const base = {
     createdAt: run.createdAt.toISOString(),
     expiresAt: run.expiredAt?.toISOString(),
@@ -305,7 +395,7 @@ async function terminalInvocation(run: {
   if (run.status === "failed") {
     return {
       ...base,
-      error: { code: -32603, data: safeJson(run.error), message: errorMessage(run.error) },
+      error: publicInvocationFailure(run.runId, events),
       status: "failed",
     };
   }
@@ -329,8 +419,99 @@ function safeJson(value: unknown): JsonValue {
   }
 }
 
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : "Session failed.";
+function publicInvocationFailure(
+  runId: string,
+  events: readonly HandleMessageStreamEvent[],
+): Extract<AgentInvocation, { readonly status: "failed" }>["error"] {
+  const event = [...events].reverse().find((candidate) => candidate.type === "session.failed");
+  const data: Record<string, string> = { runId };
+  if (event !== undefined) data.eveCode = event.data.code;
+
+  const deploymentId = vercelDeploymentId();
+  if (deploymentId !== undefined) data.vercelDeploymentId = deploymentId;
+  if (typeof event?.data.details?.errorId === "string") data.errorId = event.data.details.errorId;
+
+  const semantic = event === undefined ? null : semanticFailure(event.data);
+  if (semantic === null) {
+    const fallback = event === undefined ? null : fallbackFailure(event.data);
+    if (fallback === null) return { code: -32603, data, message: "Invocation failed." };
+    if (fallback.name !== undefined) data.name = fallback.name;
+    return { code: -32603, data, message: fallback.message };
+  }
+
+  data.semanticErrorId = semantic.id;
+  data.name = semantic.name;
+  if (semantic.hint !== undefined) data.hint = semantic.hint;
+  return { code: -32603, data, message: semantic.message };
+}
+
+function semanticFailure(
+  event: Extract<HandleMessageStreamEvent, { type: "session.failed" }>["data"],
+): {
+  readonly hint?: string;
+  readonly id: string;
+  readonly message: string;
+  readonly name: string;
+} | null {
+  const details = event.details;
+  if (
+    typeof details?.semanticErrorId !== "string" ||
+    details.semanticErrorId.trim().length === 0 ||
+    typeof details.name !== "string" ||
+    details.name.trim().length === 0
+  ) {
+    return null;
+  }
+
+  const message =
+    typeof details.message === "string" && details.message.trim().length > 0
+      ? details.message.trim()
+      : event.message.trim();
+  if (message.length === 0) return null;
+
+  const hint =
+    typeof details.hint === "string" && details.hint.trim().length > 0
+      ? details.hint.trim()
+      : undefined;
+  const summary: {
+    hint?: string;
+    id: string;
+    message: string;
+    name: string;
+  } = {
+    id: details.semanticErrorId,
+    message,
+    name: details.name,
+  };
+  if (hint !== undefined) summary.hint = hint;
+  return summary;
+}
+
+function fallbackFailure(
+  event: Extract<HandleMessageStreamEvent, { type: "session.failed" }>["data"],
+): {
+  readonly message: string;
+  readonly name?: string;
+} | null {
+  const message = event.message.trim();
+  const name = typeof event.details?.name === "string" ? event.details.name.trim() : "";
+  if (message.length === 0 && name.length === 0) return null;
+  const fallback: { message: string; name?: string } = {
+    message: message.length === 0 ? name : truncateForDisplay(message),
+  };
+  if (name.length > 0) fallback.name = name;
+  return fallback;
+}
+
+function truncateForDisplay(value: string, maxChars = 160): string {
+  if (value.length <= maxChars) return value;
+  return `${value.slice(0, maxChars - 1).trimEnd()}…`;
+}
+
+function vercelDeploymentId(): string | undefined {
+  if (process.env.VERCEL !== "1") return undefined;
+  const deploymentId = process.env.VERCEL_DEPLOYMENT_ID?.trim();
+  return deploymentId && deploymentId.length > 0 ? deploymentId : undefined;
 }
 
 function conflict(message: string): AgentInvocationMutationResult {

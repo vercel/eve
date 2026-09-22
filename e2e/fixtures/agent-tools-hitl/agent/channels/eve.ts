@@ -5,7 +5,10 @@ export default eveChannel({
   auth: (request) => {
     const principalId = request.headers.get("x-eve-fixture-user") ?? "e2e-approval-responder";
     return {
-      attributes: { fixture: "authorized-response" },
+      attributes: {
+        fixture: "authorized-response",
+        model: request.headers.get("x-eve-fixture-model") ?? "default",
+      },
       authenticator: "e2e-fixture",
       issuer: "e2e",
       principalId,

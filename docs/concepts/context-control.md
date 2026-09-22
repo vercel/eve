@@ -14,7 +14,7 @@ Control context by putting information in the narrowest surface that needs it. K
 | A procedure needed only for some tasks               | A [skill](../skills)                                   | Its description until the model loads the full skill                             |
 | A typed action or external operation                 | A [tool](../tools) or [connection](../connections)     | The callable schema and the result of each call                                  |
 | Files or command execution                           | The [sandbox workspace](../sandbox)                    | A workspace hint, then files and command output the model requests through tools |
-| A specialist with a separate prompt and capabilities | A [subagent](../subagents)                             | Only the subagent's final result in the parent context                           |
+| A specialist with a separate prompt and capabilities | A [subagent](../subagents)                             | A receipt followed by background task notifications                              |
 | Instructions or capabilities that vary by caller     | A [dynamic capability](../guides/dynamic-capabilities) | The values resolved for the active session                                       |
 | Scoped context retrieved from cross-session storage  | [Memory](../memory)                                    | Attributed user-role messages recalled before the current delivery               |
 
@@ -46,7 +46,7 @@ See [Sandbox](../sandbox) for workspace seeding, runtime access, backends, and l
 
 ## Delegate to a specialist with a subagent
 
-Use a subagent when work needs its own instructions, tools, skills, state, or sandbox. The child runs in a separate context instead of adding its working history to the parent. The parent receives the result of the delegation.
+Use a subagent when work needs its own instructions, tools, skills, state, or sandbox. The child runs in a separate context instead of adding its working history to the parent. The call returns a task receipt, and later task notifications deliver its outcome.
 
 See [Subagents](../subagents) for the distinction between root-agent copies and declared specialists, including their isolation boundaries.
 
@@ -57,6 +57,10 @@ Use `defineDynamic` when instructions, skills, tools, subagents, or the model de
 See [Dynamic capabilities](../guides/dynamic-capabilities) for the resolver API, supported slots, and execution order.
 
 ## Compaction and clear
+
+Before a model call, eve checks the projected history together with the effective system instructions and advertised tool schemas. The check runs after `step.started` resolves dynamic capabilities. When the provider reports input usage, eve adds estimates for new messages and growth in the instructions and tool catalog to that count; unchanged schemas are not counted again.
+
+Compaction reserves space for those instructions and tools while reducing conversation history. It cannot shrink the instructions or tool catalog themselves, so keep them within the selected model's context window.
 
 User-role instructions follow the normal history lifecycle. Compaction can summarize them, and clear removes them without rerunning their static definitions or dynamic resolvers. System-role instructions remain outside history and continue to apply after either operation.
 

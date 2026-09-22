@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { registerOtelPipeline } from "#tracing/otel-registration.js";
 
@@ -7,6 +7,10 @@ const { registerOTel } = vi.hoisted(() => ({ registerOTel: vi.fn() }));
 vi.mock("#compiled/@vercel/otel/index.js", () => ({ registerOTel }));
 
 describe("registerOtelPipeline", () => {
+  beforeEach(() => {
+    delete (globalThis as Record<symbol, unknown>)[Symbol.for("eve.otel.replay-deduplication")];
+  });
+
   it("maps eve's option names onto the ones @vercel/otel accepts", () => {
     registerOTel.mockImplementation(() => undefined);
 
@@ -92,8 +96,14 @@ describe("registerOtelPipeline", () => {
     expect(configuration.spanProcessors[0]).toBe("auto");
   });
 
-  it("exports only the first terminal for a replay-stable span", () => {
-    const downstream = {
+  it("exports a unique span to every concrete destination", () => {
+    const first = {
+      forceFlush: vi.fn(async () => {}),
+      onEnd: vi.fn(),
+      onStart: vi.fn(),
+      shutdown: vi.fn(async () => {}),
+    };
+    const second = {
       forceFlush: vi.fn(async () => {}),
       onEnd: vi.fn(),
       onStart: vi.fn(),
@@ -103,22 +113,34 @@ describe("registerOtelPipeline", () => {
 
     expect(() =>
       registerOtelPipeline({
-        pipeline: { spanProcessors: [downstream] },
+        pipeline: { spanProcessors: [first, second] },
         serviceName: "weather",
       }),
     ).toThrow();
 
-    const processor = (
-      registerOTel.mock.calls.at(-1)![0] as {
-        spanProcessors: { onEnd(span: unknown): void }[];
-      }
-    ).spanProcessors[0]!;
-    const first = replaySpan("first");
-    const losingReplay = replaySpan("losing replay");
-    processor.onEnd(first);
-    processor.onEnd(losingReplay);
+    const configuration = registerOTel.mock.calls.at(-1)![0] as {
+      spanProcessors: { onEnd(span: unknown): void }[];
+    };
+    const processor = configuration.spanProcessors[0]!;
+    const span = replaySpan("first");
+    processor.onEnd(span);
 
-    expect(downstream.onEnd).toHaveBeenCalledExactlyOnceWith(first);
+    expect(configuration.spanProcessors).toHaveLength(1);
+    expect(first.onEnd).toHaveBeenCalledExactlyOnceWith(span);
+    expect(second.onEnd).toHaveBeenCalledExactlyOnceWith(span);
+  });
+
+  it("exports only the first terminal across replayed runtime registrations", () => {
+    const first = filteringProcessor();
+    const second = filteringProcessor();
+    const winner = replaySpan("first");
+    const losingReplay = replaySpan("losing replay");
+
+    first.processor.onEnd(winner);
+    second.processor.onEnd(losingReplay);
+
+    expect(first.downstream.onEnd).toHaveBeenCalledExactlyOnceWith(winner);
+    expect(second.downstream.onEnd).not.toHaveBeenCalled();
   });
 
   it("holds a physical child until its started parent completes", () => {
@@ -161,7 +183,100 @@ describe("registerOtelPipeline", () => {
       registerOtelPipeline({ pipeline: { spanProcessors: [] }, serviceName: "weather" }),
     ).toThrow(/another runtime already owns/u);
   });
+
+  it("drains held children on flush when their parent never ends", async () => {
+    const { downstream, processor } = filteringProcessor();
+    const parent = physicalSpan("2");
+    const child = physicalSpan("3", "2");
+    processor.onStart(parent, {});
+    processor.onStart(child, {});
+    processor.onEnd(child);
+    expect(downstream.onEnd).not.toHaveBeenCalled();
+
+    await processor.forceFlush();
+
+    expect(downstream.onEnd).toHaveBeenCalledExactlyOnceWith(child);
+    expect(downstream.forceFlush).toHaveBeenCalledOnce();
+    expect(downstream.onEnd.mock.invocationCallOrder[0]).toBeLessThan(
+      downstream.forceFlush.mock.invocationCallOrder[0]!,
+    );
+  });
+
+  it("drains held children at shutdown", async () => {
+    const { downstream, processor } = filteringProcessor();
+    const parent = physicalSpan("2");
+    const child = physicalSpan("3", "2");
+    processor.onStart(parent, {});
+    processor.onStart(child, {});
+    processor.onEnd(child);
+
+    await processor.shutdown();
+
+    expect(downstream.onEnd).toHaveBeenCalledExactlyOnceWith(child);
+    expect(downstream.shutdown).toHaveBeenCalledOnce();
+  });
+
+  it("does not re-forward drained children when the parent ends later", async () => {
+    const { downstream, processor } = filteringProcessor();
+    const parent = physicalSpan("2");
+    const child = physicalSpan("3", "2");
+    processor.onStart(parent, {});
+    processor.onStart(child, {});
+    processor.onEnd(child);
+    await processor.forceFlush();
+
+    processor.onEnd(parent);
+
+    expect(downstream.onEnd.mock.calls).toEqual([[child], [parent]]);
+  });
+
+  it("releases held children once one stuck parent exceeds the pending cap", () => {
+    const { downstream, processor } = filteringProcessor();
+    const parent = physicalSpan("2");
+    processor.onStart(parent, {});
+    const overflow = 10_001;
+    for (let index = 0; index < overflow; index += 1) {
+      const child = {
+        parentSpanContext: { spanId: "2".repeat(16), traceId: "1".repeat(32) },
+        spanContext: () => ({
+          spanId: index.toString(16).padStart(16, "0"),
+          traceId: "1".repeat(32),
+        }),
+      };
+      processor.onStart(child, {});
+      processor.onEnd(child);
+    }
+
+    expect(downstream.onEnd).toHaveBeenCalledTimes(overflow);
+  });
 });
+
+function filteringProcessor() {
+  const downstream = {
+    forceFlush: vi.fn(async () => {}),
+    onEnd: vi.fn(),
+    onStart: vi.fn(),
+    shutdown: vi.fn(async () => {}),
+  };
+  registerOTel.mockImplementation(() => undefined);
+  expect(() =>
+    registerOtelPipeline({
+      pipeline: { spanProcessors: [downstream] },
+      serviceName: "weather",
+    }),
+  ).toThrow();
+  const processor = (
+    registerOTel.mock.calls.at(-1)![0] as {
+      spanProcessors: {
+        forceFlush(): Promise<void>;
+        onEnd(span: unknown): void;
+        onStart(span: unknown, parentContext: unknown): void;
+        shutdown(): Promise<void>;
+      }[];
+    }
+  ).spanProcessors[0]!;
+  return { downstream, processor };
+}
 
 function replaySpan(marker: string) {
   return {

@@ -5,8 +5,9 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import {
   providerSettingsPath,
+  providerSettingsMatch,
   readProviderSelection,
-  readProviderSelectionSync,
+  readProviderSettingsSync,
   resolveAvailableProviders,
   writeProviderSelection,
 } from "./provider-settings.js";
@@ -47,7 +48,7 @@ describe("provider settings", () => {
     await writeProviderSelection(root, "ai-gateway-project");
 
     await expect(readProviderSelection(root)).resolves.toBe("ai-gateway-project");
-    expect(readProviderSelectionSync(root)).toBe("ai-gateway-project");
+    expect(readProviderSettingsSync(root)?.selected).toBe("ai-gateway-project");
     expect(providerSettingsPath(root)).toBe(join(root, ".eve", "provider.json"));
   });
 
@@ -56,6 +57,26 @@ describe("provider settings", () => {
     roots.push(root);
 
     await expect(readProviderSelection(root)).resolves.toBeUndefined();
-    expect(readProviderSelectionSync(root)).toBeUndefined();
+    expect(readProviderSettingsSync(root)?.selected).toBeUndefined();
   });
+});
+
+it("compares connection, team, and key source before deciding whether activation is needed", async () => {
+  const root = await mkdtemp(join(tmpdir(), "eve-provider-settings-"));
+  roots.push(root);
+  const team = { teamId: "team_a", teamName: "Alice" };
+  expect(await providerSettingsMatch(root, { selected: "vercel", ...team })).toBe(false);
+  await writeProviderSelection(root, "vercel", team);
+  expect(await providerSettingsMatch(root, { selected: "vercel", ...team })).toBe(true);
+  expect(await providerSettingsMatch(root, { selected: "vercel", ...team, teamId: "team_b" })).toBe(
+    false,
+  );
+  expect(await providerSettingsMatch(root, { selected: "vercel-cli", ...team })).toBe(false);
+  await writeProviderSelection(root, "openai", undefined, "environment");
+  expect(await providerSettingsMatch(root, { selected: "openai", keySource: "environment" })).toBe(
+    true,
+  );
+  expect(await providerSettingsMatch(root, { selected: "openai", keySource: "secret" })).toBe(
+    false,
+  );
 });

@@ -108,18 +108,27 @@ export interface SendTurnInput<TOutput = unknown> extends SendTurnOptions<TOutpu
   readonly message: string | UserContent;
 }
 
+/** Request options for creating a conversation session before its first turn. */
+export interface CreateSessionOptions {
+  /** Abort signal for cancelling the creation request. */
+  readonly signal?: AbortSignal;
+  /** Additional headers for this request only. */
+  readonly headers?: Readonly<Record<string, string>>;
+}
+
 /** Options shared by message sends and HITL responses on a client session. */
 export interface SendTurnOptions<TOutput = unknown> {
   /** Policy for a message sent while the fixed session has an active turn. */
   readonly turnPolicy?: TurnPolicy;
 
   /**
-   * Ephemeral client/page context for the next model call only.
+   * Ephemeral client/page context for the current turn.
    *
    * Strings are rendered as user-role model context messages. Objects are
    * JSON-serialized into one user-role model context message. Client context
    * rides along with a message or HITL response; it does not dispatch a turn by
-   * itself and is never persisted to durable session history.
+   * itself, remains available to every model call in the turn, and is never
+   * persisted to durable session history or exposed to later turns.
    */
   readonly clientContext?: string | readonly string[] | JsonObject;
 

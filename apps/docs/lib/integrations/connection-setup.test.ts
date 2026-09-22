@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  buildConnectionConfigure,
   buildConnectionInstall,
   buildConnectionSetup,
+  renderConnectionVariants,
 } from "./connection-setup";
 import { getIntegration } from "./data";
 
@@ -16,7 +16,9 @@ describe("Browser Use connection setup", () => {
     expect(quickStart).toContain('"x-browser-use-api-key": process.env.BROWSER_USE_API_KEY!');
     expect(quickStart).not.toContain("@vercel/connect");
     expect(buildConnectionInstall(integration)).toContain("eve add connection/browser-use");
-    expect(buildConnectionConfigure(integration)).toContain("BROWSER_USE_API_KEY=your_api_key");
+    expect(renderConnectionVariants(setup, setup.configureVariants)).toContain(
+      "BROWSER_USE_API_KEY=your_api_key",
+    );
   });
 
   it("keeps Connect setup for OAuth connections", () => {
@@ -39,6 +41,32 @@ describe("Agentcard connection setup", () => {
     expect(quickStart).not.toContain("AGENTCARD_CONNECTOR");
     expect(setup.configureVariants["mcp:user"]).toContain("vercel connect create agentcard");
     expect(setup.configureVariants["mcp:user"]).not.toContain("--name");
+  });
+});
+
+describe("Context connection setup", () => {
+  it("keeps the connector UID separate from its creation arguments", () => {
+    const integration = getIntegration("context")!;
+    const setup = buildConnectionSetup(integration);
+
+    expect(setup.variants["mcp:user"]).toContain('auth: connect("context")');
+    expect(setup.configureVariants["mcp:user"]).toContain(
+      "vercel connect create mcp.context.dev --name context",
+    );
+  });
+});
+
+describe("Neon connection setup", () => {
+  it("generates the registry install and Vercel Connect configuration", () => {
+    const integration = getIntegration("neon")!;
+    const setup = buildConnectionSetup(integration);
+    const quickStart = setup.variants["mcp:app"];
+
+    expect(buildConnectionInstall(integration)).toContain("eve add connection/neon");
+    expect(quickStart).toContain('url: "https://mcp.neon.tech/mcp"');
+    expect(quickStart).toContain('auth: connect({ connector: "neon/neon", principalType: "app" })');
+    expect(setup.configureVariants["mcp:app"]).toContain("vercel connect create neon");
+    expect(setup.configureVariants["mcp:app"]).not.toContain("--name");
   });
 });
 
@@ -65,10 +93,12 @@ describe("Kernel extension setup", () => {
 
     expect(integration.type).toBe("extension");
     expect(integration.install).toContain("eve add extension/kernel");
-    expect(integration.quickStart).toContain(
-      'kernel({ connect: "mcp.onkernel.com/eve-extension" })',
-    );
+    expect(integration.quickStart).toContain('kernel({ connect: "kernel/kernel-mcp" })');
     expect(integration.configure).toContain("KERNEL_API_KEY");
+    expect(integration.relatedResources?.map((resource) => resource.href)).toEqual([
+      "https://vercel.com/kb/guide/build-a-browser-agent",
+      "https://vercel.com/kb/guide/software-factory-browser",
+    ]);
   });
 });
 
@@ -99,7 +129,7 @@ describe("Vercel MCP connection setup", () => {
     expect(appConfigure).toContain("copy the returned connector UID into the App example");
     expect(appConfigure).toContain("token still belongs to the user who created it");
 
-    const configure = buildConnectionConfigure(integration);
+    const configure = renderConnectionVariants(setup, setup.configureVariants);
     expect(configure).toContain("### MCP · User");
     expect(configure).toContain("### MCP · App");
     expect(configure).not.toContain("vercel connect attach");

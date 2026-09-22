@@ -12,7 +12,8 @@ Documentation links below point directly to Markdown. Remove the \`.md\` suffix 
 
 ## Introduction
 
-- [Getting Started](${EVE_ORIGIN}/docs/getting-started.md): Create a project, configure a model, understand its layout, and run it locally.
+- [Getting Started](${EVE_ORIGIN}/docs/getting-started.md): Create a project, configure model credentials, and run your first agent.
+- [Project Structure](${EVE_ORIGIN}/docs/concepts/project-structure.md): Choose a layout for agents and application code, add specialist subagents, and grow into an agent workspace.
 
 ## Core Concepts
 
@@ -28,6 +29,9 @@ Documentation links below point directly to Markdown. Remove the \`.md\` suffix 
 - [Agents](${EVE_ORIGIN}/docs/agent-config.md): Configure the model, reasoning effort, compaction, and runtime behavior.
 - [Instructions](${EVE_ORIGIN}/docs/instructions.md): Write the agent's always-on system prompt.
 - [Tools](${EVE_ORIGIN}/docs/tools.md): Define typed actions and gate sensitive calls on human approval.
+- [Memory](${EVE_ORIGIN}/docs/memory.md): Give an agent cross-session context through eve-managed slots backed by Supermemory, the built-in file provider, or your own provider.
+- [File Memory](${EVE_ORIGIN}/docs/memory/file.md): Configure the built-in bounded document provider and its storage backends.
+- [Build a Memory Provider](${EVE_ORIGIN}/docs/memory/custom-provider.md): Implement the recall, capture, and tools contract for any store or memory service.
 - [Connections](${EVE_ORIGIN}/docs/connections.md): Connect external MCP and OpenAPI servers without exposing credentials to the model.
 - [Channels](${EVE_ORIGIN}/docs/channels/overview.md): Expose the agent through HTTP, Slack, Discord, and other messaging surfaces.
 - [Base eve Channel](${EVE_ORIGIN}/docs/channels/eve.md): Understand the HTTP API exposed by each running eve app.
@@ -60,7 +64,7 @@ Documentation links below point directly to Markdown. Remove the \`.md\` suffix 
 - [Deploy to Vercel](${EVE_ORIGIN}/docs/guides/deployment/vercel.md): Build and deploy with Vercel Workflow and Vercel Sandbox.
 - [Self-Hosting](${EVE_ORIGIN}/docs/guides/deployment/self-hosting.md): Run eve as a Node service or container.
 - [Authentication](${EVE_ORIGIN}/docs/guides/auth-and-route-protection.md): Secure an agent's HTTP routes and establish caller identity.
-- [Observability](${EVE_ORIGIN}/docs/guides/instrumentation.md): Trace agents with OpenTelemetry and inspect workflow metadata.
+- [Instrumentation](${EVE_ORIGIN}/docs/observability/instrumentation.md): Configure lifecycle instrumentation and OpenTelemetry destinations.
 - [Terminal UI](${EVE_ORIGIN}/docs/guides/dev-tui.md): Work with a local or deployed agent from the interactive terminal UI.
 
 ## Tutorial
@@ -69,13 +73,14 @@ Documentation links below point directly to Markdown. Remove the \`.md\` suffix 
 
 ## Patterns
 
-- [Multi-Tenant Memory](${EVE_ORIGIN}/docs/patterns/multi-tenant-memory.md): Compose tenant-scoped long-term memory from dynamic instructions and tools.
+- [Multi-Tenant Memory](${EVE_ORIGIN}/docs/patterns/multi-tenant-memory.md): Scope any memory provider to an authenticated tenant and caller.
 - [Dynamic Scheduling](${EVE_ORIGIN}/docs/patterns/dynamic-scheduling.md): Build application-managed schedules from an eve schedule and authored tools.
 - [Multi-Tenant Outbound Auth](${EVE_ORIGIN}/docs/patterns/multi-tenant-auth.md): Select tenant-scoped credentials for tools and connections.
 - [Multi-Tenant Approvals](${EVE_ORIGIN}/docs/patterns/multi-tenant-approvals.md): Apply tenant policy to authored and connection tools.
 
 ## API Reference and Discovery
 
+- [Agent Files](${EVE_ORIGIN}/docs/reference/agent-files.md): Look up filesystem slots, path-derived names, and discovery rules.
 - [TypeScript API Reference](${EVE_ORIGIN}/docs/reference/typescript-api.md): Find public \`define*\` helpers, runtime context, and import paths.
 - [CLI Reference](${EVE_ORIGIN}/docs/reference/cli.md): Find every eve command and option.
 - [Responsible Use](${EVE_ORIGIN}/docs/responsible-use.md): Review deployer responsibilities and safeguards.
@@ -85,7 +90,8 @@ Documentation links below point directly to Markdown. Remove the \`.md\` suffix 
 
 ## Optional
 
-- [Integrations](${EVE_ORIGIN}/integrations): Browse official channels, connections, extensions, and instrumentation providers.
+- [Changelog](${EVE_ORIGIN}/changelog.md): Read eve release notes, including breaking changes and fixes. Follow the next-page links for older releases.
+- [Integrations](${EVE_ORIGIN}/integrations): Browse official channels, connections, extensions, and observability integrations.
 - [Templates](${EVE_ORIGIN}/templates): Browse complete example projects and their source.
 - [Official eve Skill](https://github.com/vercel/eve/blob/main/skills/eve/SKILL.md): Install or inspect the coding-agent skill; its guidance defers to version-matched bundled docs.
 - [Source Repository](https://github.com/vercel/eve): Read source, releases, issues, and contribution guidance.

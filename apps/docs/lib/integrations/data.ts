@@ -6,6 +6,7 @@ import {
   connectionProtocols as protocolsForIdentity,
   extensionEntries,
   instrumentationEntries,
+  memoryEntries,
 } from "@eve/catalog";
 import type { LogoKey } from "./logos";
 
@@ -18,7 +19,7 @@ import type { LogoKey } from "./logos";
  * keyed by slug.
  */
 
-export type IntegrationType = "channel" | "connection" | "extension" | "instrumentation";
+export type IntegrationType = "channel" | "connection" | "extension" | "instrumentation" | "memory";
 
 /** Wire protocol and transport identity types are owned by the shared catalog. */
 export type { ConnectionProtocol, McpTransport, OpenApiTransport } from "@eve/catalog";
@@ -37,33 +38,46 @@ export interface ApiKeySpec {
   header: string;
 }
 
+interface ConnectorSpec {
+  /** Vercel Connect connector UID; defaults to the integration slug. */
+  uid?: string;
+  /** Service passed to `vercel connect create`; defaults to the connector UID. */
+  service?: string;
+  /** Optional `--name` value passed to `vercel connect create`. */
+  name?: string;
+}
+
+interface ConnectionSetupSpec {
+  /** Supported auth modes in display order; the first is the default. */
+  authModes: AuthMode[];
+  /** API-key wiring when `authModes` includes `apiKey`. */
+  apiKey?: ApiKeySpec;
+  /** Auth-mode-specific connector references and creation arguments. */
+  connectors?: Partial<Record<Exclude<AuthMode, "apiKey">, ConnectorSpec>>;
+  /** Optional provider-specific configure guidance, rendered as markdown. */
+  configureNote?: string;
+  /** Auth-mode-specific configure guidance, rendered as markdown. */
+  configureNotes?: Partial<Record<AuthMode, string>>;
+}
+
 /**
  * Structured description of a connection consumed by the detail page to
  * generate Install, Quick start, and Configure content. Transport (`mcp`,
  * `openapi`) and `description` are filled from the shared catalog identity;
  * Auth modes, connectors, and configure notes are the docs-only overlay.
  */
-export interface ConnectionSpec {
-  /** Vercel Connect connector UID; defaults to the integration slug. */
-  connector?: string;
-  /** Auth-mode-specific connector UIDs when one service needs separate connectors. */
-  connectors?: Partial<Record<AuthMode, string>>;
-  /** Service passed to `vercel connect create` when it differs from the connector UID. */
-  connectorService?: string;
-  /** Auth-mode-specific services passed to `vercel connect create`. */
-  connectorServices?: Partial<Record<AuthMode, string>>;
-  /** Supported auth modes in display order; the first is the default. */
-  authModes: AuthMode[];
-  /** API-key wiring when `authModes` includes `apiKey`. */
-  apiKey?: ApiKeySpec;
+export interface ConnectionSpec extends ConnectionSetupSpec {
   /** Model-facing description; defaults to the integration tagline. */
   description?: string;
   mcp?: ConnectionIdentity["mcp"];
   openapi?: ConnectionIdentity["openapi"];
-  /** Optional provider-specific configure guidance, rendered as markdown. */
-  configureNote?: string;
-  /** Auth-mode-specific configure guidance, rendered as markdown. */
-  configureNotes?: Partial<Record<AuthMode, string>>;
+}
+
+/** A guide, package, or reference linked from an integration's Related resources section. */
+export interface RelatedResource {
+  title: string;
+  description: string;
+  href: string;
 }
 
 export interface Integration {
@@ -92,7 +106,33 @@ export interface Integration {
   configure?: string;
   /** Structured connection spec; present only for `type: "connection"`. */
   connection?: ConnectionSpec;
+  /** Guides and references shown after Configure; omitted when empty. */
+  relatedResources?: RelatedResource[];
 }
+
+/** Shared by the GitHub, Linear, and GitHub Tools integrations Foreman builds on. */
+const softwareFactoryGuide: RelatedResource = {
+  title: "Build a software factory with eve",
+  description:
+    "Deploy Foreman, an eve agent system that turns GitHub issues or Linear tickets into reviewed draft pull requests while leaving merge decisions to humans.",
+  href: "https://vercel.com/kb/guide/eve-software-factory",
+};
+
+/** Shared by the Slack, GitHub, Datadog, and Vercel integrations the incident response agent uses. */
+const incidentResponseGuide: RelatedResource = {
+  title: "Build an incident response SRE agent with eve",
+  description:
+    "Deploy a Slack-based investigation agent that connects to Datadog, GitHub, and Vercel, tests root-cause hypotheses, and posts evidence-linked findings in threads.",
+  href: "https://vercel.com/kb/guide/eve-incident-sre-agent",
+};
+
+/** Shared by the Slack and Notion integrations the marketing team template publishes through. */
+const marketingTeamGuide: RelatedResource = {
+  title: "Run a marketing team from Slack with eve",
+  description:
+    "Deploy a Slack-facing lead agent that routes requests to marketing specialists who publish to Notion, Typefully, and Resend, with approval gates on irreversible actions.",
+  href: "https://vercel.com/kb/guide/marketing-team-eve",
+};
 
 /** Docs presentation overlay shared by every integration kind. */
 interface Presentation {
@@ -101,6 +141,8 @@ interface Presentation {
   keywords?: string[];
   /** Optional gallery pill (e.g. "Chat SDK") shown next to the type label. */
   badge?: string;
+  /** Guides and references shown after Configure. */
+  relatedResources?: RelatedResource[];
 }
 
 /** Channel overlay: presentation plus hand-authored setup markdown. */
@@ -110,25 +152,20 @@ interface ChannelPresentation extends Presentation {
   configure: string;
 }
 
-/** Extension overlay with hand-authored package setup. */
-interface ExtensionPresentation extends Presentation {
+/** Extension and memory overlays with hand-authored package setup. */
+interface PackagePresentation extends Presentation {
   install: string;
   quickStart: string;
   configure: string;
 }
 
+type ExtensionPresentation = PackagePresentation;
+type MemoryPresentation = PackagePresentation;
+
 /** Connection overlay: presentation plus Connect auth/config details. */
-interface ConnectionPresentation extends Presentation {
-  authModes: AuthMode[];
+interface ConnectionPresentation extends Omit<Presentation, "badge">, ConnectionSetupSpec {
   quickStart?: string;
   configure?: string;
-  apiKey?: ApiKeySpec;
-  connector?: string;
-  connectors?: Partial<Record<AuthMode, string>>;
-  connectorService?: string;
-  connectorServices?: Partial<Record<AuthMode, string>>;
-  configureNote?: string;
-  configureNotes?: Partial<Record<AuthMode, string>>;
 }
 
 const channelPresentations: Record<string, ChannelPresentation> = {
@@ -172,6 +209,7 @@ vercel connect create slack --triggers
 \`\`\`
 
 The channel handles mentions, DMs, typing indicators, delivery, and human-in-the-loop consent with sensible defaults. See the [Slack channel docs](/docs/channels/slack) for customizing each behavior.`,
+    relatedResources: [marketingTeamGuide, incidentResponseGuide],
   },
   discord: {
     logo: "discord",
@@ -331,6 +369,7 @@ export default githubChannel({
 });
 \`\`\``,
     configure: `Sign in to Vercel, then let the guided flow create or link a project, provision the GitHub App, and attach its verified webhook trigger to \`/eve/v1/github\`. Deploy, install the app from Vercel Connect, then add its \`@handle\` invocation token to a new issue, pull request, or review comment. GitHub may not autocomplete or render the token as a linked mention. See the [GitHub channel docs](/docs/channels/github) for permissions and events.`,
+    relatedResources: [softwareFactoryGuide, incidentResponseGuide],
   },
   "linear-agent": {
     logo: "linear",
@@ -339,7 +378,7 @@ export default githubChannel({
     install: `Add this channel from eve's registry to create a Vercel Connect client, route verified Agent Session events, and write \`agent/channels/linear.ts\`:
 
 \`\`\`bash
-eve add channel/linear-agent
+eve add channel/linear
 \`\`\``,
     quickStart: `The guided setup writes \`agent/channels/linear.ts\`:
 
@@ -353,6 +392,7 @@ export default linearChannel({
 });
 \`\`\``,
     configure: `Sign in to Vercel, then let the guided flow create or link a project, provision the Linear app, and attach its verified AgentSessionEvent trigger to \`/eve/v1/linear\`. Deploy, install the app in your Linear workspace from Vercel Connect, then delegate an issue or mention the agent. See the [Linear channel docs](/docs/channels/linear) for Agent Activity behavior.`,
+    relatedResources: [softwareFactoryGuide],
   },
   eve: {
     logo: "eve",
@@ -1181,9 +1221,82 @@ export default channel;
 
 See the [Email (Resend) adapter documentation](https://chat-sdk.dev/adapters/vendor-official/resend) for all supported events and credentials.`,
     configure: `Verify a sending domain in Resend, set \`RESEND_API_KEY\`, \`RESEND_WEBHOOK_SECRET\`, and \`RESEND_FROM_ADDRESS\`, then point the Resend inbound webhook at \`/eve/v1/resend\`. This is a vendor-official Chat SDK adapter. See the [Chat SDK channel docs](/docs/channels/chat-sdk) for eve session dispatch, state, streaming, and human-in-the-loop behavior.`,
+    relatedResources: [
+      {
+        title: "Give your eve agent an email inbox with Resend",
+        description:
+          "Wire an eve agent to email through the Chat SDK channel and Resend adapter so it can hold threaded, multi-turn conversations, send proactive messages, and process attachments.",
+        href: "https://vercel.com/kb/guide/eve-agent-with-resend",
+      },
+    ],
+  },
+  "chat-sdk-gmail": {
+    logo: "gmail",
+    docsHref: "/docs/channels/chat-sdk",
+    badge: "Chat SDK",
+    keywords: ["chat sdk", "gmail", "email", "google workspace", "pubsub", "oauth"],
+    install: `Add this Chat SDK channel from eve's registry. This writes \`agent/channels/gmail.ts\` and installs Chat SDK and its adapter dependencies:
+
+\`\`\`bash
+eve add channel/chat-sdk-gmail
+\`\`\``,
+    quickStart: `Create \`agent/channels/gmail.ts\`:
+
+\`\`\`ts
+// agent/channels/gmail.ts
+import { createGmailAdapter } from "@chat-adapter/gmail";
+import { createRedisState } from "@chat-adapter/state-redis";
+import type { Message, Thread } from "chat";
+import { chatSdkChannel } from "eve/channels/chat-sdk";
+
+export const gmail = createGmailAdapter();
+
+export const { bot, channel, send } = chatSdkChannel({
+  userName: "My Agent",
+  adapters: { gmail },
+  state: createRedisState({ keyPrefix: "gmail-agent" }),
+  // Gmail sends email once and cannot edit an in-progress response.
+  streaming: false,
+});
+
+bot.onNewMention(async (thread: Thread, message: Message) => {
+  await thread.subscribe();
+  await send(message.text, { thread });
+});
+
+bot.onSubscribedMessage(async (thread: Thread, message: Message) => {
+  await send(message.text, { thread });
+});
+
+await bot.initialize();
+
+export default channel;
+\`\`\`
+
+**Installing or deploying this channel does not start Gmail listening.** After configuring credentials and Pub/Sub, run the maintenance job once as described under [Configure](#configure). Otherwise, registration waits until the first successful daily job.
+
+Gmail receives only messages with the configured handoff label. Responses are sent after the turn completes because email cannot edit an in-progress response. The registry installs Redis-backed state so Gmail's cursor, delivery receipts, and lock survive serverless invocations. See the [Gmail adapter documentation](https://chat-sdk.dev/adapters/official/gmail) for credentials, label selection, and delivery semantics.`,
+    configure: `Enable the Gmail API and Pub/Sub, then configure user-context OAuth for the mailbox, an authenticated wrapped Pub/Sub push subscription, and a Gmail handoff-label ID. Set \`GMAIL_MAILBOX\`, \`GMAIL_LABEL_ID\`, \`GMAIL_CLIENT_ID\`, \`GMAIL_CLIENT_SECRET\`, \`GMAIL_REFRESH_TOKEN\`, \`GMAIL_PUBSUB_AUDIENCE\`, \`GMAIL_PUBSUB_SERVICE_ACCOUNT_EMAIL\`, \`GMAIL_SUBSCRIPTION\`, and \`GMAIL_TOPIC_NAME\`. Set \`REDIS_URL\` to a durable Redis connection URL; Upstash REST credentials are not compatible with this adapter. The adapter mounts its authenticated Pub/Sub webhook at \`/eve/v1/gmail\`.
+
+The registry also writes \`agent/schedules/gmail-maintenance.ts\`, which calls \`gmail.watch()\` on a daily \`0 9 * * *\` schedule (09:00 UTC on Vercel) to register or renew Gmail's watch. Adjust the cadence for your host and plan. Incoming Pub/Sub webhooks run synchronization from the saved cursor; the schedule does not process messages. Do not call \`gmail.sync()\` from this schedule or at startup: the generated message handlers use \`send()\`, which requires an active Chat SDK webhook context. Missed changes can be picked up by a later successful webhook, but this scaffold does not provide an independent recovery sync.
+
+### Start listening — required after deployment
+
+**Run the maintenance job once after configuring credentials, deploying, and setting up Pub/Sub.** Installing the channel or deploying the app does not register Gmail's watch. Without this step, registration waits until the first successful daily job.
+
+From your linked Vercel project:
+
+\`\`\`bash
+vercel crons list
+vercel crons run <maintenance-job-path>
+\`\`\`
+
+Replace \`<maintenance-job-path>\` with the Gmail maintenance route listed by the first command. Confirm the job succeeds in Vercel runtime logs before testing email. The job calls \`gmail.watch()\` using the deployed credentials and Redis state; the daily schedule then renews it. You do not need a faster cron schedule to start listening immediately.
+
+**Existing labelled mail is not imported on first setup.** The first successful \`watch()\` initializes the cursor at registration time. Send a new message from another account and apply the handoff label after initialization. Later watch renewals preserve the existing cursor. See the [Gmail adapter setup guide](https://chat-sdk.dev/adapters/official/gmail#setup) for Google Cloud, Pub/Sub, OAuth scopes, and watch-renewal requirements.`,
   },
 };
-const extensionPresentations: Record<string, ExtensionPresentation> = {
+const baseExtensionPresentations: Record<string, ExtensionPresentation> = {
   blitzreels: {
     logo: "blitzreels",
     docsHref: "https://www.npmjs.com/package/@blitzreels/eve",
@@ -1226,6 +1339,55 @@ The filename supplies the \`blitzreels\` namespace. The extension adds project, 
 Source imports, clipping, generation, and exports call the configured BlitzReels API. Credit-spending, download, and render tools require eve approval by default, and durable retries reuse the original call receipt instead of spending twice. Override an individual tool from a directory mount when it needs stricter \`always()\` approval, or use \`disableTool()\` to remove it.
 
 See the [BlitzReels extension package](https://www.npmjs.com/package/@blitzreels/eve) for the complete tool list, configuration, approval defaults, error contract, and OAuth-backed MCP alternative.`,
+  },
+  "mux-video": {
+    logo: "mux",
+    docsHref: "https://github.com/muxinc/mux-video-agent/tree/main/packages/eve-video",
+    keywords: [
+      "video",
+      "video assets",
+      "clips",
+      "captions",
+      "subtitles",
+      "Mux Robots",
+      "summarization",
+      "moderation",
+      "translation",
+      "chapters",
+    ],
+    install: `The Mux Video extension currently ships from source with the Mux Video Agent template. Clone the repository and install its workspace dependencies:
+
+\`\`\`bash
+git clone https://github.com/muxinc/mux-video-agent.git
+cd mux-video-agent
+pnpm install
+\`\`\`
+
+The extension requires Node.js 24 or later. The reusable package lives at \`packages/eve-video\` and is mounted by the root agent.`,
+    quickStart: `Add your Mux access token to the template's environment:
+
+\`\`\`bash title=".env.local"
+MUX_TOKEN_ID=mux_token_id_here
+MUX_TOKEN_SECRET=mux_token_secret_here
+\`\`\`
+
+The template mounts the extension under \`agent/extensions/\`:
+
+\`\`\`ts title="agent/extensions/mux_video.ts"
+import muxVideo from "@mux/eve-video";
+
+export default muxVideo({
+  tokenId: process.env.MUX_TOKEN_ID,
+  tokenSecret: process.env.MUX_TOKEN_SECRET,
+});
+\`\`\`
+
+The filename supplies the \`mux_video\` namespace. The extension adds tools such as \`mux_video__get_asset\`, \`mux_video__create_asset\`, \`mux_video__create_clip\`, \`mux_video__run_workflow\`, and \`mux_video__get_workflow_job\`.`,
+    configure: `Use a Mux access token with Video access and access to the Mux Robots workflows you plan to run. Keep the token ID and secret in the environment rather than prompts, tool arguments, or source control.
+
+Asset creation, clip creation, and Mux Robots workflow creation require explicit human approval by default. Robots jobs are asynchronous, so start a workflow with \`mux_video__run_workflow\`, retain the returned job ID, and check it with \`mux_video__get_workflow_job\`.
+
+The extension supports creating and inspecting assets, exact-range clips, subtitles, captions, summaries, questions, chapters, scenes, key moments, thumbnails, moderation, and caption translation or editing. It intentionally excludes multimodal embeddings and semantic video search. See the [Mux Video Agent repository](https://github.com/muxinc/mux-video-agent) for the source, full capability list, deployment steps, and eval suite.`,
   },
   browserbase: {
     logo: "browserbase",
@@ -1302,8 +1464,8 @@ The extension requires Node.js 24 or later and eve 0.25 or later. It mounts Kern
     quickStart: `Create and attach a Kernel connector with [Vercel Connect](https://vercel.com/connect):
 
 \`\`\`bash
-vercel connect create mcp.onkernel.com --name eve-extension
-vercel connect attach mcp.onkernel.com/eve-extension
+vercel connect create kernel --name kernel-mcp --connection-method mcp
+vercel connect attach kernel/kernel-mcp
 \`\`\`
 
 Then mount the extension under \`agent/extensions/\`:
@@ -1311,7 +1473,7 @@ Then mount the extension under \`agent/extensions/\`:
 \`\`\`ts title="agent/extensions/kernel.ts"
 import kernel from "@onkernel/eve-extension";
 
-export default kernel({ connect: "mcp.onkernel.com/eve-extension" });
+export default kernel({ connect: "kernel/kernel-mcp" });
 \`\`\`
 
 The filename supplies the \`kernel\` namespace. The extension adds browser management, Playwright, computer control, managed auth, profiles, proxies, and replay tools under \`kernel__browser__*\`, along with the \`browse\` skill.`,
@@ -1322,72 +1484,20 @@ export { default } from "@onkernel/eve-extension";
 \`\`\`
 
 The default mount can execute JavaScript in the browser VM and reuse authenticated browser sessions. For team or multi-tenant agents, prefer Vercel Connect so each user authenticates separately, and add an approval gate by overriding the extension's \`browser\` connection. See the [Kernel eve extension guide](https://www.kernel.sh/docs/integrations/vercel/eve-extension) for API-key configuration, connection overrides, the complete tool list, and security guidance.`,
-  },
-  "upstash-agentkit": {
-    logo: "upstash",
-    docsHref: "https://upstash.com/docs/redis/sdks/agentkit/eve",
-    keywords: [
-      "upstash",
-      "agentkit",
-      "redis",
-      "memory",
-      "long-term memory",
-      "chat history",
-      "search",
-      "rag",
-      "full-text search",
+    relatedResources: [
+      {
+        title: "How to build a browser agent that works behind a login",
+        description:
+          "Combine eve, Vercel Connect, and Kernel managed auth so a user signs in once and the agent drives the authenticated browser without handling credentials.",
+        href: "https://vercel.com/kb/guide/build-a-browser-agent",
+      },
+      {
+        title: "Give your software factory a browser",
+        description:
+          "Attach Kernel's cloud browser to the eve software factory so Foreman can reproduce flow bugs, verify fixes on preview deployments, and save what it learns.",
+        href: "https://vercel.com/kb/guide/software-factory-browser",
+      },
     ],
-    install: `Install the Upstash AgentKit extension for eve:
-
-\`\`\`bash
-eve add extension/upstash-agentkit
-\`\`\`
-
-The extension requires eve 0.25.2 or later. Add an Upstash Redis database's REST credentials to the agent's environment; the default Redis client reads them automatically:
-
-\`\`\`bash title=".env.local"
-UPSTASH_REDIS_REST_URL=https://...
-UPSTASH_REDIS_REST_TOKEN=...
-\`\`\``,
-    quickStart: `Mount the extension under \`agent/extensions/\`:
-
-\`\`\`ts title="agent/extensions/agentkit.ts"
-import agentkit from "@upstash/agentkit-eve-extension";
-
-export default agentkit({});
-\`\`\`
-
-The filename supplies the \`agentkit\` namespace. This minimal mount adds \`agentkit__recall_memory\` and \`agentkit__save_memory\`, plus instructions that teach the model when to use them. By default, memory is isolated by the authenticated principal when available and otherwise by the eve session ID.`,
-    configure: `Two further capabilities are opt-in, and they are independent of each other: chat history covers the agent's own past conversations, while search is retrieval over documents you seed into your own Redis Search index.
-
-Enable durable transcript capture with \`chatHistory: true\`. A hook writes every user and assistant message to Redis as the session streams, and the model gains \`agentkit__search_chat_history\` to find earlier conversations by what was said and \`agentkit__read_chat_history\` to read one back — so a user can ask about something settled in a previous session. Both tools take \`userId\` from the session rather than from model input, so they only ever reach the current user's own transcripts.
-
-To add RAG over your own data, install \`@upstash/redis\` and provide a Redis Search schema:
-
-\`\`\`bash
-pnpm add @upstash/redis
-\`\`\`
-
-\`\`\`ts title="agent/extensions/agentkit.ts"
-import { s } from "@upstash/redis";
-import agentkit from "@upstash/agentkit-eve-extension";
-
-export default agentkit({
-  chatHistory: true,
-  search: {
-    schema: s.object({
-      title: s.string(),
-      author: s.string().noTokenize(),
-      year: s.number(),
-    }),
-    indexName: "books",
-  },
-});
-\`\`\`
-
-Search configuration adds the dynamic \`agentkit__search\`, \`agentkit__search_aggregate\`, and \`agentkit__search_count\` tools over that index, whose documents you write yourself; it is separate from chat history, which keeps its own keyspace and index. Both tool groups resolve at session start, so an unconfigured capability contributes no tools at all.
-
-For multi-tenant agents, set \`userId\` to a stable tenant-scoped value or derive it from the request context, and never use a shared constant across tenants. You can also tune memory recall, search limits, chat-history keys and TTL, or supply an explicit Redis client. See the [Upstash AgentKit eve extension guide](https://upstash.com/docs/redis/sdks/agentkit/eve) for the complete configuration and override reference.`,
   },
   jetty: {
     logo: "jetty",
@@ -1509,64 +1619,7 @@ export default githubExtension({
 \`\`\`
 
 For local or non-Vercel deployments, omit \`connector\` and set \`GITHUB_TOKEN\`; the extension also accepts an explicit \`token\`. Prefer fine-grained credentials, expose only the presets the agent needs, and keep approval enabled for writes. See the [GitHub Tools eve documentation](https://github-tools.com/frameworks/eve#eve-extension) for token authentication, per-tool overrides, commit attribution, and the complete tool catalog.`,
-  },
-  arcana: {
-    logo: "arcana",
-    docsHref: "https://github.com/KybernesisAI/platform/tree/master/packages/arcana#readme",
-    keywords: [
-      "memory",
-      "long-term memory",
-      "mcp",
-      "semantic search",
-      "entity graph",
-      "timeline",
-      "brain notes",
-      "Kybernesis",
-    ],
-    install: `Install Kybernesis Arcana for eve:
-
-\`\`\`bash
-eve add extension/arcana
-\`\`\`
-
-This installs \`@kybernesis/arcana\` and writes an extension mount. The package requires Node.js 24 or later.`,
-    quickStart: `Create an Arcana workspace and workspace-scoped API key, then add both values to the agent's environment:
-
-\`\`\`bash title=".env.local"
-ARCANA_API_KEY=kb_your_api_key_here
-ARCANA_WORKSPACE=your-workspace
-\`\`\`
-
-The registry creates this mount:
-
-\`\`\`ts title="agent/extensions/arcana.ts"
-import arcana from "@kybernesis/arcana";
-
-export default arcana({
-  apiKey: process.env.ARCANA_API_KEY!,
-  workspace: process.env.ARCANA_WORKSPACE!,
-});
-\`\`\`
-
-The filename supplies the \`arcana\` namespace. The extension adds an MCP memory connection, recall, remember, and brain-note skills, and instructions that tell the model to search the workspace before it claims not to know something.`,
-    configure: `An Arcana key is scoped to a workspace. Keep the key in a sensitive environment variable and use a separate workspace and key when people or tenants must not share memory. The model can choose what to store and retrieve, but it cannot choose the configured key or default workspace.
-
-You can select a workspace per session with \`resolveWorkspace\`. Derive it only from verified session context, and only return workspaces that the configured key can access:
-
-\`\`\`ts title="agent/extensions/arcana.ts"
-import arcana from "@kybernesis/arcana";
-
-export default arcana({
-  apiKey: process.env.ARCANA_API_KEY!,
-  workspace: process.env.ARCANA_WORKSPACE!,
-  resolveWorkspace: (ctx) =>
-    ctx.session.auth.current?.attributes.surface === "dm"
-      ? process.env.ARCANA_DM_WORKSPACE
-      : undefined,
-});
-\`\`\`
-
-Arcana stores memories, embeddings, timeline entries, and brain notes in the selected workspace. The shipped instructions tell the model not to store passwords, access tokens, payment data, private keys, or one-time codes; add approval rules to memory-write tools when you need an enforced control. See the [Arcana package documentation](https://github.com/KybernesisAI/platform/tree/master/packages/arcana#readme) for the full configuration and tool reference.`,
+    relatedResources: [softwareFactoryGuide, incidentResponseGuide],
   },
   hindsight: {
     logo: "hindsight",
@@ -1627,6 +1680,190 @@ For a self-hosted server, set \`HINDSIGHT_API_URL\` and pass \`apiKey: null\` to
 
 A bank is one isolated memory store, and both files must use the same bank. Do not share the default bank across untrusted users; use separate agent deployments with distinct \`HINDSIGHT_BANK_ID\` values for separate users or tenants. See the [Hindsight eve integration guide](https://hindsight.vectorize.io/sdks/integrations/eve) for Cloud, self-hosted, and factory configuration.`,
   },
+};
+
+const memoryPresentations: Record<string, MemoryPresentation> = {
+  file: {
+    logo: "vercel",
+    docsHref: "/docs/memory/file",
+    keywords: [
+      "memory",
+      "file memory",
+      "Vercel Blob",
+      "private storage",
+      "long-term memory",
+      "per-principal memory",
+      "OIDC",
+    ],
+    install: `Install and provision file memory for eve:
+
+\`\`\`bash
+eve add memory/file
+\`\`\`
+
+After you approve setup, eve creates or reuses a dedicated private Vercel Blob store, connects it to production, preview, and development, and pulls the resulting environment variables. Vercel Blob usage may incur charges.`,
+    quickStart: `The registry writes this memory slot:
+
+\`\`\`ts title="agent/memory/file.ts"
+import { fileMemory } from "eve/memory/file";
+import { defineMemory } from "eve/memory";
+import { byPrincipal } from "eve/memory/scope";
+
+export default defineMemory({
+  description: "Remember stable facts and preferences about the caller.",
+  provider: fileMemory(),
+  scope: byPrincipal,
+});
+\`\`\`
+
+During \`eve dev\`, file memory stays in the local process. On Vercel, the default backend uses the private Blob store provisioned by setup.`,
+    configure: `Run \`eve integration setup file-memory\` to repair or re-run provisioning without reinstalling the registry item. Setup uses the first configured function region, preserves an existing eve-owned store if the project region later changes, and never adopts or changes an application store connected with \`BLOB_*\`.
+
+Provisioned bindings use the \`EVE_MEMORY_BLOB_*\` namespace. \`fileMemory()\` prefers \`EVE_MEMORY_BLOB_READ_WRITE_TOKEN\`, then \`EVE_MEMORY_BLOB_STORE_ID\` with Vercel OIDC from the environment or request context. Generic \`BLOB_*\` credentials remain a fallback for manually connected stores. See [File memory](/docs/memory/file) for backend behavior and manual configuration.`,
+  },
+  "upstash-agentkit": {
+    logo: "upstash",
+    docsHref: "https://upstash.com/docs/redis/sdks/agentkit/eve",
+    keywords: [
+      "upstash",
+      "agentkit",
+      "redis",
+      "memory",
+      "memory slots",
+      "file memory",
+      "long-term memory",
+      "ranked recall",
+      "conversation history",
+    ],
+    install: `Install the Upstash AgentKit memory provider for eve:
+
+\`\`\`bash
+eve add memory/upstash-agentkit
+\`\`\`
+
+This installs \`@upstash/agentkit-eve\` and \`@upstash/redis\`, then writes a memory slot. The \`@upstash/agentkit-eve/memory\` entry point requires eve 0.45.2 or later.`,
+    quickStart: `Add an Upstash Redis database's REST credentials to the agent's environment:
+
+\`\`\`bash title=".env.local"
+UPSTASH_REDIS_REST_URL=https://...
+UPSTASH_REDIS_REST_TOKEN=...
+\`\`\`
+
+The registry creates this memory slot:
+
+\`\`\`ts title="agent/memory/upstash-agentkit.ts"
+import { redisMemory } from "@upstash/agentkit-eve/memory";
+import { defineMemory } from "eve/memory";
+import { byPrincipal } from "eve/memory/scope";
+
+export default defineMemory({
+  description: "Recall and manage durable context for the current user.",
+  provider: redisMemory({ topK: 5 }),
+  scope: byPrincipal,
+});
+\`\`\`
+
+The filename creates the \`upstash-agentkit\` slot. It recalls matching curated facts before each turn, captures user messages after completed turns by default, and gives the model \`upstash-agentkit__save_memory\`, \`upstash-agentkit__search_memory\`, \`upstash-agentkit__read_session\`, and \`upstash-agentkit__forget_memory\` tools.`,
+    configure: `\`byPrincipal\` keeps memory disabled for anonymous and runtime principals, and shares the local-development scope while you run \`eve dev\`. For a multi-tenant agent, replace it with a scope resolver that derives both tenant and caller identity from verified session context. See [Multi-tenant memory](/docs/patterns/multi-tenant-memory).
+
+Use \`redisDocuments()\` with \`fileMemory({ backend: redisDocuments() })\` when you want eve's bounded, model-curated document and its \`save_memory\` and \`remove_memory\` tools, but want Redis rather than the default local or Vercel Blob backend. Use \`redisMemory()\` for relevance-ranked recall and automatic capture. Both partition Redis with eve's locked scope key.
+
+The provider stores memory content in your Upstash Redis database. Review its retention before enabling it for sensitive data. See the [Upstash AgentKit eve guide](https://upstash.com/docs/redis/sdks/agentkit/eve) for options including retention, recall limits, and automatic capture.
+
+AgentKit also ships \`@upstash/agentkit-eve-extension\`, an eve extension that adds Redis Search tools over your own documents and searchable chat history. Mount it separately under \`agent/extensions/\` when you need those capabilities; the memory slot does not depend on it.`,
+  },
+  arcana: {
+    logo: "arcana",
+    docsHref: "https://github.com/KybernesisAI/platform/tree/master/packages/arcana#readme",
+    keywords: ["memory", "long-term memory", "semantic search", "brain notes", "Kybernesis"],
+    install: `Install the Kybernesis Arcana provider for eve:
+
+\`\`\`bash
+eve add memory/arcana
+\`\`\`
+
+This installs \`@kybernesis/arcana\` and writes a memory slot. The provider requires Node.js 24 or later and eve 0.49 or later.`,
+    quickStart: `Create an Arcana workspace and workspace-scoped API key, then add both values to the agent's environment:
+
+\`\`\`bash title=".env.local"
+ARCANA_API_KEY=kb_your_api_key_here
+ARCANA_WORKSPACE=your-workspace
+\`\`\`
+
+The registry creates this memory slot:
+
+\`\`\`ts title="agent/memory/arcana.ts"
+import { arcanaMemory } from "@kybernesis/arcana/memory";
+import { defineMemory } from "eve/memory";
+import { byPrincipal } from "eve/memory/scope";
+
+export default defineMemory({
+  description: "Recall and manage durable context for the current user.",
+  provider: arcanaMemory({
+    apiKey: process.env.ARCANA_API_KEY!,
+    workspace: process.env.ARCANA_WORKSPACE!,
+  }),
+  scope: byPrincipal,
+});
+\`\`\`
+
+The filename creates the \`arcana\` memory slot. Before each turn with at least four words, Arcana searches memories and queries brain notes, then injects the result as one context message. The provider also gives the model \`arcana__remember\`, \`arcana__recall\`, and \`arcana__search\` tools.`,
+    configure: `Arcana does not capture turns automatically by default. The model stores memories deliberately with \`arcana__remember\`; set \`capture: { enabled: true }\` when you want it to capture completed turns automatically.
+
+An Arcana key is scoped to a workspace. Keep the key in a sensitive environment variable and use a separate workspace and key when people or tenants must not share memory. The provider records eve's scope as a tag, but Arcana isolates data by workspace rather than by eve scope. See the [Arcana package documentation](https://github.com/KybernesisAI/platform/tree/master/packages/arcana#readme) for the full configuration and tool reference.`,
+  },
+  supermemory: {
+    logo: "supermemory",
+    docsHref: "https://github.com/supermemoryai/eve-supermemory#readme",
+    keywords: [
+      "memory",
+      "long-term memory",
+      "semantic search",
+      "rag",
+      "conversation history",
+      "retrieval",
+      "Supermemory",
+    ],
+    install: `Install the Supermemory provider for eve:
+
+\`\`\`bash
+eve add memory/supermemory
+\`\`\`
+
+This installs \`@supermemory/eve\` and writes a memory slot. The provider requires Node.js 24 or later and eve 0.47.3 or later.`,
+    quickStart: `Create a Supermemory API key and add it to the agent's environment:
+
+\`\`\`bash title=".env.local"
+SUPERMEMORY_API_KEY=...
+\`\`\`
+
+The registry creates this memory slot:
+
+\`\`\`ts title="agent/memory/supermemory.ts"
+import supermemory from "@supermemory/eve";
+import { defineMemory } from "eve/memory";
+import { byPrincipal } from "eve/memory/scope";
+
+export default defineMemory({
+  description: "Recall and manage durable context for the current user.",
+  provider: supermemory({
+    apiKey: process.env.SUPERMEMORY_API_KEY!,
+  }),
+  scope: byPrincipal,
+});
+\`\`\`
+
+The filename creates the \`supermemory\` memory slot, so the provider's tools are named \`supermemory__search\`, \`supermemory__remember\`, and \`supermemory__forget\`. The provider uses eve's locked scope key to partition all reads and writes.`,
+    configure: `\`byPrincipal\` keeps memory disabled for anonymous and runtime principals, and shares the local-development scope while you run \`eve dev\`. For a multi-tenant agent, replace it with a scope resolver that derives both tenant and caller identity from verified session context. See [Multi-tenant memory](/docs/patterns/multi-tenant-memory).
+
+Supermemory automatically recalls relevant context before a turn and captures completed turns. It also provides tools to search, read sessions and documents, remember context, extract files, URLs, or text, and forget memories. The provider sends stored conversations and extracted sources to Supermemory; configure its retention and data handling for your application before enabling it for sensitive data.
+
+Keep \`SUPERMEMORY_API_KEY\` in the environment rather than prompts or source control. You can change the container-tag prefix, automatic search, capture policy, and profile-context time zone through \`supermemory(...)\`. See the [Supermemory eve provider documentation](https://supermemory.ai/docs/integrations/eve) for all options and tool behavior.`,
+  },
+};
+
+const extensionPresentations: Record<string, ExtensionPresentation> = {
+  ...baseExtensionPresentations,
   "agent-browser": {
     logo: "agent-browser",
     docsHref:
@@ -1674,6 +1911,14 @@ export default browser({
 Also configure the [sandbox network policy](/docs/sandbox#network-policy) for defense in depth. Treat saved browser state, cookies, screenshots, downloads, and recordings as sensitive data. Do not place passwords or session tokens in prompts. Use the extension's per-tool overrides to gate or disable actions your agent should not take unattended.
 
 The extension also supports inline screenshots, session naming, proxies, and production pre-installation. See the [agent-browser eve extension documentation](https://github.com/vercel-labs/agent-browser/tree/main/packages/%40agent-browser/eve) for the complete options and example app.`,
+    relatedResources: [
+      {
+        title: "Give your eve agent a browser",
+        description:
+          "Changelog introducing the agent-browser extension, which gives eve agents sandboxed tools to navigate, read, click, fill forms, take screenshots, and inspect network activity.",
+        href: "https://vercel.com/changelog/give-your-eve-agent-a-browser",
+      },
+    ],
   },
 };
 
@@ -1707,20 +1952,31 @@ const connectionPresentations: Record<string, ConnectionPresentation> = {
     docsHref: "https://vercel.com/docs/agent-resources/vercel-mcp",
     keywords: ["mcp", "projects", "deployments", "logs", "oauth", "connect"],
     authModes: ["user", "app"],
-    connector: "vercel",
-    connectors: { app: "vercel/your-connector" },
-    connectorService: "vercel",
-    connectorServices: { app: "api-key" },
+    connectors: {
+      user: { name: "vercel" },
+      app: { uid: "vercel/your-connector", service: "api-key", name: "vercel" },
+    },
     configureNotes: {
       user: "Select None when prompted for a token authentication method. Each user completes OAuth when needed.",
       app: "Enter a team-scoped [Vercel token](https://vercel.com/kb/guide/how-do-i-use-a-vercel-api-access-token) when prompted, then copy the returned connector UID into the App example. This avoids per-user OAuth, though the Vercel token still belongs to the user who created it.",
     },
+    relatedResources: [
+      incidentResponseGuide,
+      softwareFactoryGuide,
+      {
+        title: "Manage Vercel projects with a software factory",
+        description:
+          "Add Vercel's hosted MCP server to the eve software factory so Foreman can read build logs, runtime errors, and deployment history through app-scoped Vercel Connect auth and a read-only tool allowlist.",
+        href: "https://vercel.com/kb/guide/software-factory-vercel-mcp",
+      },
+    ],
   },
   linear: {
     logo: "linear",
     docsHref: "/docs/connections/mcp",
     keywords: ["mcp", "issues", "project management", "oauth", "connect"],
     authModes: ["user", "app"],
+    relatedResources: [softwareFactoryGuide],
   },
   notion: {
     logo: "notion",
@@ -1729,6 +1985,7 @@ const connectionPresentations: Record<string, ConnectionPresentation> = {
     authModes: ["user", "app", "jwtBearer"],
     configureNote:
       "The OpenAPI setup sends the required `Notion-Version` header; bump it as Notion ships new API versions.",
+    relatedResources: [marketingTeamGuide],
   },
   datadog: {
     logo: "datadog",
@@ -1737,6 +1994,7 @@ const connectionPresentations: Record<string, ConnectionPresentation> = {
     authModes: ["jwtBearer"],
     configureNote:
       "Match the MCP `url` to your Datadog site (`datadoghq.com`, `datadoghq.eu`, and so on).",
+    relatedResources: [incidentResponseGuide],
   },
   honeycomb: {
     logo: "honeycomb",
@@ -1789,7 +2047,7 @@ const connectionPresentations: Record<string, ConnectionPresentation> = {
   context: {
     logo: "context",
     docsHref: "https://docs.context.dev/install-mcp",
-    connectorService: "mcp.context.dev",
+    connectors: { user: { service: "mcp.context.dev", name: "context" } },
     keywords: [
       "mcp",
       "web search",
@@ -1866,6 +2124,15 @@ const connectionPresentations: Record<string, ConnectionPresentation> = {
     authModes: ["user"],
     configureNote:
       "Natural moves real money. Add an approval gate or tool filters before allowing unattended payment actions.",
+  },
+  neon: {
+    logo: "neon",
+    docsHref: "https://neon.com/docs/ai/neon-mcp-server",
+    keywords: ["mcp", "postgres", "databases", "branches", "sql", "oauth", "connect"],
+    authModes: ["app"],
+    connectors: { app: { uid: "neon/neon", service: "neon" } },
+    configureNote:
+      "Neon's MCP server can modify projects and databases. Use a development or test project, review tool calls, and append `?readonly=true` or `?projectId=<project-id>` to scope access.",
   },
   netlify: {
     logo: "netlify",
@@ -2030,7 +2297,7 @@ See Shopify's [agent profile documentation](https://shopify.dev/docs/agents/prof
 
 /**
  * Instrumentation overlay: presentation plus hand-authored setup markdown.
- * Instrumentation providers use hand-authored setup files, so they follow the
+ * Instrumentation entries use hand-authored setup files, so they follow the
  * channel shape (markdown) rather than the generated connection shape.
  */
 type InstrumentationPresentation = ChannelPresentation;
@@ -2038,7 +2305,7 @@ type InstrumentationPresentation = ChannelPresentation;
 const instrumentationPresentations: Record<string, InstrumentationPresentation> = {
   braintrust: {
     logo: "braintrust",
-    docsHref: "/docs/guides/instrumentation",
+    docsHref: "/docs/observability/instrumentation",
     keywords: ["otel", "opentelemetry", "tracing", "observability", "evals", "monitoring"],
     install: `Add the Braintrust integration from eve's registry:
 
@@ -2046,47 +2313,29 @@ const instrumentationPresentations: Record<string, InstrumentationPresentation> 
 eve add instrumentation/braintrust
 \`\`\``,
 
-    quickStart: `eve installs a hook that traces agent activity and an instrumentation file that initializes the Braintrust logger:
+    quickStart: `eve installs Braintrust instrumentation:
 
 \`\`\`ts
-// agent/hooks/braintrust.ts
-import { braintrustEveHook } from "braintrust";
-import { defineState } from "eve/context";
-import { defineHook } from "eve/hooks";
-
-export default defineHook(
-  braintrustEveHook({
-    defineState,
-    metadata: {
-      app: "my-eve-agent", // Replace with your app name
-    },
-  }) as Parameters<typeof defineHook>[0],
-);
-\`\`\`
-
-\`\`\`ts
-// agent/instrumentation.ts
+// agent/instrumentation/braintrust.ts
 import { braintrustEveInstrumentation, initLogger } from "braintrust";
-import { defineState } from "eve/context";
-import { defineInstrumentation } from "eve/instrumentation";
 
-export default defineInstrumentation(
-  braintrustEveInstrumentation({
-    defineState,
-    setup: ({ agentName }) => {
-      initLogger({
-        projectName: agentName,
-        apiKey: process.env.BRAINTRUST_API_KEY,
-      });
-    },
-  }) as Parameters<typeof defineInstrumentation>[0],
-);
+export default braintrustEveInstrumentation({
+  metadata: {
+    app: "my-eve-agent", // Replace with your app name
+  },
+  setup: ({ agentName }) => {
+    initLogger({
+      projectName: agentName,
+      apiKey: process.env.BRAINTRUST_API_KEY,
+    });
+  },
+});
 \`\`\``,
-    configure: `Create an API key in the Braintrust dashboard and expose it as \`BRAINTRUST_API_KEY\`. Replace the hook's \`app\` metadata with your app name. Spans land in the Braintrust project named after your agent. See the [instrumentation guide](/docs/guides/instrumentation) for the trace hierarchy and the \`recordInputs\`/\`recordOutputs\` controls.`,
+    configure: `Create an API key in the Braintrust dashboard and expose it as \`BRAINTRUST_API_KEY\`. Replace the \`app\` metadata with your app name. Do not wrap the result in \`defineInstrumentation\`, pass \`defineState\`, or add \`braintrustEveHook\`; the instrumentation handles eve lifecycle events directly. See [Instrumentation](/docs/observability/instrumentation) for content policy and event handling.`,
   },
   "posthog-instrumentation": {
     logo: "posthog",
-    docsHref: "/docs/guides/instrumentation",
+    docsHref: "/docs/observability/otel",
     keywords: ["otel", "opentelemetry", "tracing", "observability", "generations", "analytics"],
     install: `Add PostHog AI Observability from eve's registry:
 
@@ -2094,48 +2343,37 @@ export default defineInstrumentation(
 eve add instrumentation/posthog
 \`\`\``,
 
-    quickStart: `eve installs \`agent/instrumentation.ts\` with PostHog's trace exporter. It also links spans to the user who initiated the session when an authenticated principal is available:
+    quickStart: `eve installs \`agent/instrumentation/posthog.ts\` with PostHog's trace exporter. It also links spans to the user who initiated the session when an authenticated principal is available:
 
 \`\`\`ts
-// agent/instrumentation.ts
-import { trace } from "@opentelemetry/api";
+// agent/instrumentation/posthog.ts
 import { SimpleSpanProcessor } from "@opentelemetry/sdk-trace-base";
 import { PostHogTraceExporter } from "@posthog/ai/otel";
-import { registerOTel } from "@vercel/otel";
-import { defineInstrumentation } from "eve/instrumentation";
+import { otelIntegration } from "eve/instrumentation/otel";
 
-export default defineInstrumentation({
-  setup: ({ agentName }) =>
-    registerOTel({
-      serviceName: agentName,
-      spanProcessors: [
-        new SimpleSpanProcessor(
-          new PostHogTraceExporter({
-            projectToken: process.env.POSTHOG_PROJECT_TOKEN!,
-            host: process.env.POSTHOG_HOST,
-          }),
-        ),
-      ],
-    }),
-  events: {
-    "step.started"(input) {
-      const distinctId =
-        input.session.auth.initiator?.principalId ??
-        input.session.auth.current?.principalId;
+export default otelIntegration({
+  spanProcessors: [
+    new SimpleSpanProcessor(
+      new PostHogTraceExporter({
+        projectToken: process.env.POSTHOG_PROJECT_TOKEN!,
+        host: process.env.POSTHOG_HOST,
+      }),
+    ),
+  ],
+  runtimeContext(input) {
+    const distinctId =
+      input.session.auth.initiator?.principalId ??
+      input.session.auth.current?.principalId;
 
-      if (!distinctId) return undefined;
-
-      trace.getActiveSpan()?.setAttribute("posthog.distinct_id", distinctId);
-      return { runtimeContext: { posthog_distinct_id: distinctId } };
-    },
+    return distinctId ? { "posthog.distinct_id": distinctId } : undefined;
   },
 });
 \`\`\``,
-    configure: `Copy your project token and client API host from PostHog's project settings and expose them as \`POSTHOG_PROJECT_TOKEN\` and \`POSTHOG_HOST\`. Remove the \`events\` handler to capture generations anonymously. PostHog groups turns using \`eve.session.id\` and preserves eve's trace hierarchy. See [PostHog's eve installation guide](https://posthog.com/docs/ai-observability/installation/eve) for verification steps and the [instrumentation guide](/docs/guides/instrumentation) for input and output capture controls.`,
+    configure: `Copy your project token and client API host from PostHog's project settings and expose them as \`POSTHOG_PROJECT_TOKEN\` and \`POSTHOG_HOST\`. Remove \`runtimeContext\` to capture generations anonymously. PostHog groups turns using \`eve.session.id\` and preserves eve's trace hierarchy. See [PostHog's eve installation guide](https://posthog.com/docs/ai-observability/installation/eve) for verification steps and the [OpenTelemetry guide](/docs/observability/otel) for content policy.`,
   },
   "sentry-instrumentation": {
     logo: "sentry",
-    docsHref: "/docs/guides/instrumentation",
+    docsHref: "/docs/observability/otel",
     keywords: ["otel", "opentelemetry", "tracing", "observability", "otlp", "errors"],
     install: `Add Sentry instrumentation from eve's registry. Sentry ingests OTLP directly, so no Sentry SDK is required:
 
@@ -2143,60 +2381,53 @@ export default defineInstrumentation({
 eve add instrumentation/sentry
 \`\`\``,
 
-    quickStart: `Create \`agent/instrumentation.ts\` and point the OTLP exporter at your project's Sentry traces endpoint:
+    quickStart: `Create \`agent/instrumentation/sentry.ts\` and point the OTLP exporter at your project's Sentry traces endpoint:
 
 \`\`\`ts
-// agent/instrumentation.ts
-import { defineInstrumentation } from "eve/instrumentation";
-import { OTLPHttpProtoTraceExporter, registerOTel } from "@vercel/otel";
+// agent/instrumentation/sentry.ts
+import { OTLPHttpProtoTraceExporter } from "@vercel/otel";
+import { otelIntegration } from "eve/instrumentation/otel";
 
-export default defineInstrumentation({
-  setup: ({ agentName }) =>
-    registerOTel({
-      serviceName: agentName,
-      traceExporter: new OTLPHttpProtoTraceExporter({
-        url: process.env.SENTRY_OTLP_TRACES_ENDPOINT!,
-        headers: {
-          "x-sentry-auth": \`sentry sentry_key=\${process.env.SENTRY_PUBLIC_KEY}\`,
-        },
-      }),
-    }),
+export default otelIntegration({
+  traceExporter: new OTLPHttpProtoTraceExporter({
+    url: process.env.SENTRY_OTLP_TRACES_ENDPOINT!,
+    headers: {
+      "x-sentry-auth": \`sentry sentry_key=\${process.env.SENTRY_PUBLIC_KEY}\`,
+    },
+  }),
 });
 \`\`\``,
-    configure: `Copy the OTLP traces endpoint and public key from your Sentry project under **Settings → Client Keys (DSN)** and expose them as environment variables. Sentry's OTLP intake accepts traces only, and span events are dropped at ingestion. See the [instrumentation guide](/docs/guides/instrumentation) for the trace hierarchy and the \`recordInputs\`/\`recordOutputs\` controls.`,
+    configure: `Copy the OTLP traces endpoint and public key from your Sentry project under **Settings → Client Keys (DSN)** and expose them as environment variables. Sentry's OTLP intake accepts traces only, and span events are dropped at ingestion. See the [OpenTelemetry guide](/docs/observability/otel) for trace topology and content policy.`,
   },
   "datadog-instrumentation": {
     logo: "datadog",
-    docsHref: "/docs/guides/instrumentation",
+    docsHref: "/docs/observability/otel",
     keywords: ["otel", "opentelemetry", "tracing", "observability", "apm", "otlp"],
     install: `Add Datadog instrumentation from eve's registry:
 
 \`\`\`bash
 eve add instrumentation/datadog
 \`\`\``,
-    quickStart: `Create \`agent/instrumentation.ts\` and point the OTLP exporter at Datadog's intake for your site, authenticated with your API key:
+    quickStart: `Create \`agent/instrumentation/datadog.ts\` and point the OTLP exporter at Datadog's intake for your site, authenticated with your API key:
 
 \`\`\`ts
-// agent/instrumentation.ts
-import { defineInstrumentation } from "eve/instrumentation";
-import { OTLPHttpProtoTraceExporter, registerOTel } from "@vercel/otel";
+// agent/instrumentation/datadog.ts
+import { OTLPHttpProtoTraceExporter } from "@vercel/otel";
+import { otelIntegration } from "eve/instrumentation/otel";
 
-export default defineInstrumentation({
-  setup: ({ agentName }) =>
-    registerOTel({
-      serviceName: agentName,
-      traceExporter: new OTLPHttpProtoTraceExporter({
-        url: process.env.DATADOG_OTLP_TRACES_ENDPOINT!,
-        headers: { "dd-api-key": process.env.DD_API_KEY! },
-      }),
-    }),
+export default otelIntegration({
+  traceExporter: new OTLPHttpProtoTraceExporter({
+    url: process.env.DATADOG_OTLP_TRACES_ENDPOINT!,
+    headers: { "dd-api-key": process.env.DD_API_KEY! },
+  }),
 });
 \`\`\``,
-    configure: `Datadog's direct OTLP trace intake is site-specific (for example \`datadoghq.com\` vs \`datadoghq.eu\`) and currently in Preview; look up the endpoint for your site in Datadog's OTLP intake docs. For production, Datadog recommends routing through an OpenTelemetry Collector with the Datadog exporter instead. See the [instrumentation guide](/docs/guides/instrumentation) for the trace hierarchy and the \`recordInputs\`/\`recordOutputs\` controls.`,
+    configure: `Datadog's direct OTLP trace intake is site-specific (for example \`datadoghq.com\` vs \`datadoghq.eu\`) and currently in Preview; look up the endpoint for your site in Datadog's OTLP intake docs. For production, Datadog recommends routing through an OpenTelemetry Collector with the Datadog exporter instead. See the [OpenTelemetry guide](/docs/observability/otel) for trace topology and content policy.`,
+    relatedResources: [incidentResponseGuide],
   },
   "honeycomb-instrumentation": {
     logo: "honeycomb",
-    docsHref: "/docs/guides/instrumentation",
+    docsHref: "/docs/observability/otel",
     keywords: ["otel", "opentelemetry", "tracing", "observability", "queries", "otlp"],
     install: `Add Honeycomb instrumentation from eve's registry. Honeycomb ingests OTLP directly:
 
@@ -2204,29 +2435,25 @@ export default defineInstrumentation({
 eve add instrumentation/honeycomb
 \`\`\``,
 
-    quickStart: `Create \`agent/instrumentation.ts\` and send traces to Honeycomb's OTLP endpoint with your ingest key:
+    quickStart: `Create \`agent/instrumentation/honeycomb.ts\` and send traces to Honeycomb's OTLP endpoint with your ingest key:
 
 \`\`\`ts
-// agent/instrumentation.ts
-import { defineInstrumentation } from "eve/instrumentation";
-import { OTLPHttpProtoTraceExporter, registerOTel } from "@vercel/otel";
+// agent/instrumentation/honeycomb.ts
+import { OTLPHttpProtoTraceExporter } from "@vercel/otel";
+import { otelIntegration } from "eve/instrumentation/otel";
 
-export default defineInstrumentation({
-  setup: ({ agentName }) =>
-    registerOTel({
-      serviceName: agentName,
-      traceExporter: new OTLPHttpProtoTraceExporter({
-        url: "https://api.honeycomb.io/v1/traces",
-        headers: { "x-honeycomb-team": process.env.HONEYCOMB_API_KEY! },
-      }),
-    }),
+export default otelIntegration({
+  traceExporter: new OTLPHttpProtoTraceExporter({
+    url: "https://api.honeycomb.io/v1/traces",
+    headers: { "x-honeycomb-team": process.env.HONEYCOMB_API_KEY! },
+  }),
 });
 \`\`\``,
-    configure: `Create an ingest key under your Honeycomb environment settings and expose it as \`HONEYCOMB_API_KEY\`. Spans arrive in a dataset named after your agent (the OTel service name). EU teams use \`https://api.eu1.honeycomb.io/v1/traces\`. See the [instrumentation guide](/docs/guides/instrumentation) for the trace hierarchy and the \`recordInputs\`/\`recordOutputs\` controls.`,
+    configure: `Create an ingest key under your Honeycomb environment settings and expose it as \`HONEYCOMB_API_KEY\`. Spans arrive in a dataset named after your agent (the OTel service name). EU teams use \`https://api.eu1.honeycomb.io/v1/traces\`. See the [OpenTelemetry guide](/docs/observability/otel) for trace topology and content policy.`,
   },
   arize: {
     logo: "arize",
-    docsHref: "/docs/guides/instrumentation",
+    docsHref: "/docs/observability/otel",
     keywords: ["otel", "opentelemetry", "tracing", "llm observability", "evaluation", "otlp"],
     install: `Add Arize instrumentation from eve's registry. Arize AX ingests OTLP directly:
 
@@ -2234,33 +2461,28 @@ export default defineInstrumentation({
 eve add instrumentation/arize
 \`\`\``,
 
-    quickStart: `Create \`agent/instrumentation.ts\` and send traces to Arize's OTLP endpoint with your space ID and API key:
+    quickStart: `Create \`agent/instrumentation/arize.ts\` and send traces to Arize's OTLP endpoint with your space ID and API key:
 
 \`\`\`ts
-// agent/instrumentation.ts
-import { defineInstrumentation } from "eve/instrumentation";
-import { OTLPHttpProtoTraceExporter, registerOTel } from "@vercel/otel";
+// agent/instrumentation/arize.ts
+import { OTLPHttpProtoTraceExporter } from "@vercel/otel";
+import { otelIntegration } from "eve/instrumentation/otel";
 
-export default defineInstrumentation({
-  setup: ({ agentName }) =>
-    registerOTel({
-      serviceName: agentName,
-      attributes: { "openinference.project.name": agentName },
-      traceExporter: new OTLPHttpProtoTraceExporter({
-        url: "https://otlp.arize.com/v1/traces",
-        headers: {
-          space_id: process.env.ARIZE_SPACE_ID!,
-          api_key: process.env.ARIZE_API_KEY!,
-        },
-      }),
-    }),
+export default otelIntegration({
+  traceExporter: new OTLPHttpProtoTraceExporter({
+    url: "https://otlp.arize.com/v1/traces",
+    headers: {
+      space_id: process.env.ARIZE_SPACE_ID!,
+      api_key: process.env.ARIZE_API_KEY!,
+    },
+  }),
 });
 \`\`\``,
-    configure: `Copy the space ID and API key from your Arize AX space settings and expose them as \`ARIZE_SPACE_ID\` and \`ARIZE_API_KEY\`. The \`openinference.project.name\` resource attribute routes spans to a project named after your agent. See the [instrumentation guide](/docs/guides/instrumentation) for the trace hierarchy and the \`recordInputs\`/\`recordOutputs\` controls.`,
+    configure: `Copy the space ID and API key from your Arize AX space settings and expose them as \`ARIZE_SPACE_ID\` and \`ARIZE_API_KEY\`. See the [OpenTelemetry guide](/docs/observability/otel) for trace topology, resource attributes, and content policy.`,
   },
   raindrop: {
     logo: "raindrop",
-    docsHref: "/docs/guides/instrumentation",
+    docsHref: "/docs/observability/otel",
     keywords: ["otel", "opentelemetry", "tracing", "observability", "ai issues", "otlp"],
     install: `Add Raindrop instrumentation from eve's registry. Raindrop ingests OTLP directly:
 
@@ -2268,52 +2490,44 @@ export default defineInstrumentation({
 eve add instrumentation/raindrop
 \`\`\``,
 
-    quickStart: `Create \`agent/instrumentation.ts\` and send traces to Raindrop's OTLP endpoint with your write key:
+    quickStart: `Create \`agent/instrumentation/raindrop.ts\` and send traces to Raindrop's OTLP endpoint with your write key:
 
 \`\`\`ts
-// agent/instrumentation.ts
-import { defineInstrumentation } from "eve/instrumentation";
-import { OTLPHttpProtoTraceExporter, registerOTel } from "@vercel/otel";
+// agent/instrumentation/raindrop.ts
+import { OTLPHttpProtoTraceExporter } from "@vercel/otel";
+import { otelIntegration } from "eve/instrumentation/otel";
 
-export default defineInstrumentation({
-  setup: ({ agentName }) =>
-    registerOTel({
-      serviceName: agentName,
-      traceExporter: new OTLPHttpProtoTraceExporter({
-        url: "https://api.raindrop.ai/v1/traces",
-        headers: {
-          Authorization: \`Bearer \${process.env.RAINDROP_WRITE_KEY}\`,
-        },
-      }),
-    }),
+export default otelIntegration({
+  traceExporter: new OTLPHttpProtoTraceExporter({
+    url: "https://api.raindrop.ai/v1/traces",
+    headers: {
+      Authorization: \`Bearer \${process.env.RAINDROP_WRITE_KEY}\`,
+    },
+  }),
 });
 \`\`\``,
-    configure: `Create a write key in the Raindrop dashboard and expose it as \`RAINDROP_WRITE_KEY\`. Raindrop's Vercel AI SDK integration picks up the AI SDK spans eve emits on every turn. See the [instrumentation guide](/docs/guides/instrumentation) for the trace hierarchy and the \`recordInputs\`/\`recordOutputs\` controls.`,
+    configure: `Create a write key in the Raindrop dashboard and expose it as \`RAINDROP_WRITE_KEY\`. Raindrop's Vercel AI SDK integration picks up the AI SDK spans eve emits on every turn. See the [OpenTelemetry guide](/docs/observability/otel) for trace topology and content policy.`,
   },
   jaeger: {
     logo: "jaeger",
-    docsHref: "/docs/guides/instrumentation",
+    docsHref: "/docs/observability/otel",
     keywords: ["otel", "opentelemetry", "tracing", "observability", "local", "self-hosted"],
     install: `Add Jaeger instrumentation from eve's registry:
 
 \`\`\`bash
 eve add instrumentation/jaeger
 \`\`\``,
-    quickStart: `Create \`agent/instrumentation.ts\` and point the OTLP exporter at your Jaeger collector:
+    quickStart: `Create \`agent/instrumentation/jaeger.ts\` and point the OTLP exporter at your Jaeger collector:
 
 \`\`\`ts
-// agent/instrumentation.ts
-import { defineInstrumentation } from "eve/instrumentation";
-import { OTLPHttpProtoTraceExporter, registerOTel } from "@vercel/otel";
+// agent/instrumentation/jaeger.ts
+import { OTLPHttpProtoTraceExporter } from "@vercel/otel";
+import { otelIntegration } from "eve/instrumentation/otel";
 
-export default defineInstrumentation({
-  setup: ({ agentName }) =>
-    registerOTel({
-      serviceName: agentName,
-      traceExporter: new OTLPHttpProtoTraceExporter({
-        url: "http://localhost:4318/v1/traces",
-      }),
-    }),
+export default otelIntegration({
+  traceExporter: new OTLPHttpProtoTraceExporter({
+    url: "http://localhost:4318/v1/traces",
+  }),
 });
 \`\`\``,
     configure: `Run Jaeger locally with Docker and open the UI at \`http://localhost:16686\`:
@@ -2322,7 +2536,7 @@ export default defineInstrumentation({
 docker run --rm -p 16686:16686 -p 4318:4318 jaegertracing/jaeger:latest
 \`\`\`
 
-Point the exporter at your collector's OTLP HTTP endpoint when self-hosting. See the [instrumentation guide](/docs/guides/instrumentation) for the trace hierarchy and the \`recordInputs\`/\`recordOutputs\` controls.`,
+Point the exporter at your collector's OTLP HTTP endpoint when self-hosting. See the [OpenTelemetry guide](/docs/observability/otel) for trace topology and content policy.`,
   },
 };
 
@@ -2345,6 +2559,7 @@ function buildChannel(entry: IntegrationEntry): Integration {
     install: presentation.install,
     quickStart: presentation.quickStart,
     configure: presentation.configure,
+    relatedResources: presentation.relatedResources,
   };
 }
 
@@ -2359,35 +2574,27 @@ function buildConnection(entry: IntegrationEntry): Integration {
     throw new Error(`Catalog connection "${entry.slug}" is missing its connection identity.`);
   }
   const identity: ConnectionIdentity = entry.connection;
+  const { logo, docsHref, keywords, quickStart, configure, relatedResources, ...setup } =
+    presentation;
   const spec: ConnectionSpec = {
-    authModes: presentation.authModes,
+    ...setup,
     description: identity.description,
   };
-  if (presentation.apiKey !== undefined) spec.apiKey = presentation.apiKey;
-  if (presentation.connector !== undefined) spec.connector = presentation.connector;
-  if (presentation.connectors !== undefined) spec.connectors = presentation.connectors;
-  if (presentation.connectorService !== undefined) {
-    spec.connectorService = presentation.connectorService;
-  }
-  if (presentation.connectorServices !== undefined) {
-    spec.connectorServices = presentation.connectorServices;
-  }
   if (identity.mcp !== undefined) spec.mcp = identity.mcp;
   if (identity.openapi !== undefined) spec.openapi = identity.openapi;
-  if (presentation.configureNote !== undefined) spec.configureNote = presentation.configureNote;
-  if (presentation.configureNotes !== undefined) spec.configureNotes = presentation.configureNotes;
   return {
     slug: entry.slug,
     name: entry.name,
     type: "connection",
     tagline: entry.tagline,
     protocols: protocolsForIdentity(identity),
-    logo: presentation.logo,
-    docsHref: presentation.docsHref,
-    keywords: presentation.keywords,
-    quickStart: presentation.quickStart,
-    configure: presentation.configure,
+    logo,
+    docsHref,
+    keywords,
+    quickStart,
+    configure,
     connection: spec,
+    relatedResources,
   };
 }
 
@@ -2409,6 +2616,29 @@ function buildExtension(entry: IntegrationEntry): Integration {
     install: presentation.install,
     quickStart: presentation.quickStart,
     configure: presentation.configure,
+    relatedResources: presentation.relatedResources,
+  };
+}
+
+function buildMemory(entry: IntegrationEntry): Integration {
+  const presentation = memoryPresentations[entry.slug];
+  if (presentation === undefined) {
+    throw new Error(
+      `Memory provider "${entry.slug}" is in the catalog gallery but has no docs presentation.`,
+    );
+  }
+  return {
+    slug: entry.slug,
+    name: entry.name,
+    type: "memory",
+    tagline: entry.tagline,
+    logo: presentation.logo,
+    docsHref: presentation.docsHref,
+    keywords: presentation.keywords,
+    install: presentation.install,
+    quickStart: presentation.quickStart,
+    configure: presentation.configure,
+    relatedResources: presentation.relatedResources,
   };
 }
 
@@ -2416,7 +2646,7 @@ function buildInstrumentation(entry: IntegrationEntry): Integration {
   const presentation = instrumentationPresentations[entry.slug];
   if (presentation === undefined) {
     throw new Error(
-      `Instrumentation provider "${entry.slug}" is in the catalog gallery but has no docs presentation.`,
+      `Instrumentation entry "${entry.slug}" is in the catalog gallery but has no docs presentation.`,
     );
   }
   return {
@@ -2430,6 +2660,7 @@ function buildInstrumentation(entry: IntegrationEntry): Integration {
     install: presentation.install,
     quickStart: presentation.quickStart,
     configure: presentation.configure,
+    relatedResources: presentation.relatedResources,
   };
 }
 
@@ -2444,6 +2675,10 @@ const connections: Integration[] = connectionEntries()
 const extensions: Integration[] = extensionEntries()
   .filter((entry) => entry.surfaces.gallery)
   .map(buildExtension);
+
+const memory: Integration[] = memoryEntries()
+  .filter((entry) => entry.surfaces.gallery)
+  .map(buildMemory);
 
 const instrumentation: Integration[] = instrumentationEntries()
   .filter((entry) => entry.surfaces.gallery)
@@ -2472,6 +2707,7 @@ export const authModeLabel: Record<AuthMode, string> = {
 export const integrations: Integration[] = [
   ...channels,
   ...extensions,
+  ...memory,
   ...connections,
   ...instrumentation,
 ];

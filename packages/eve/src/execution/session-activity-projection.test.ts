@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { ActivityObserverKey } from "#context/keys.js";
+import { ActivityObserverKey, TurnTaskDeliveryKey } from "#context/keys.js";
 import { ContextContainer } from "#context/container.js";
 import {
   observeSessionActivity,
@@ -72,6 +72,37 @@ describe("projectSessionActivity", () => {
     ]);
   });
 
+  it("groups a resumed turn with its originating root work", () => {
+    const sessionId = "session-1";
+    const started = projectSessionActivity({
+      event: turnEvent("turn.started", "turn-2"),
+      rootTurnId: "turn-1",
+      sessionId,
+    });
+    expect(started).toEqual([
+      expect.objectContaining({
+        kind: "work.started",
+        work: expect.objectContaining({
+          id: deriveRootTurnActivityWorkId({ sessionId, turnId: "turn-1" }),
+          rootTurnId: "turn-1",
+          turnId: "turn-2",
+        }),
+      }),
+    ]);
+  });
+
+  it("keeps an originating root open while HITL or background work is pending", () => {
+    const event = turnEvent("turn.completed", "turn-1");
+    expect(
+      projectSessionActivity({
+        event,
+        rootTurnId: "turn-1",
+        sessionId: "session-1",
+        suppressRootSettlement: true,
+      }),
+    ).toEqual([]);
+  });
+
   it("reduces replayed root events to one completed work summary", () => {
     const sequence = [turnEvent("turn.started"), turnEvent("turn.completed")];
     const snapshot = reduceProjection({
@@ -84,6 +115,38 @@ describe("projectSessionActivity", () => {
       [workId]: expect.objectContaining({ id: workId, phase: "completed" }),
     });
     expect(snapshot.pendingSettlements).toEqual({});
+  });
+
+  it("uses the durable partial event id for activity updates", () => {
+    const event: MessageStreamEvent = {
+      data: {
+        presentation: { "tool-1": { label: "Collecting sources" } },
+        result: {
+          callId: "tool-1",
+          kind: "tool-result",
+          output: { phase: "Collecting" },
+          toolName: "build_report",
+        },
+        sequence: 0,
+        stepIndex: 0,
+        turnId: "turn-1",
+      },
+      meta: { at, id: "partial-1" },
+      type: "action.partial",
+    };
+
+    expect(
+      projectSessionActivity({
+        event,
+        sessionId: "session-1",
+      }),
+    ).toEqual([
+      expect.objectContaining({
+        eventId: expect.stringContaining(":update:partial-1"),
+        kind: "action.label.updated",
+        label: "Collecting sources",
+      }),
+    ]);
   });
 
   it("maps session and later turn starts to the active delegated work", () => {
@@ -174,7 +237,7 @@ describe("projectSessionActivity", () => {
 describe("observeSessionActivity", () => {
   afterEach(() => vi.unstubAllGlobals());
 
-  function context(): ContextContainer {
+  function context(taskDelivery?: "none" | "initiating" | "pending" | "settled"): ContextContainer {
     const ctx = new ContextContainer();
     ctx.set(ActivityObserverKey, {
       sink: {
@@ -182,6 +245,7 @@ describe("observeSessionActivity", () => {
         version: 1,
       },
     });
+    if (taskDelivery !== undefined) ctx.set(TurnTaskDeliveryKey, taskDelivery);
     return ctx;
   }
 
@@ -191,7 +255,6 @@ describe("observeSessionActivity", () => {
     const event: MessageStreamEvent = {
       data: {
         messageDelta: "hello",
-        messageSoFar: "hello",
         sequence: 0,
         stepIndex: 0,
         turnId: "turn-1",
@@ -203,6 +266,34 @@ describe("observeSessionActivity", () => {
     await observeSessionActivity({ ctx: context(), event, sessionId: "session-1" });
 
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("does not project internal background-task delivery turns as new root work", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    for (const taskDelivery of ["pending", "settled"] as const) {
+      await observeSessionActivity({
+        ctx: context(taskDelivery),
+        event: turnEvent("turn.started", `turn-${taskDelivery}`),
+        sessionId: "session-1",
+      });
+    }
+
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("keeps projecting the turn that initiates background tasks", async () => {
+    const fetchMock = vi.fn(async () => new Response(null, { status: 202 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await observeSessionActivity({
+      ctx: context("initiating"),
+      event: turnEvent("turn.started"),
+      sessionId: "session-1",
+    });
+
+    expect(fetchMock).toHaveBeenCalledOnce();
   });
 
   it("submits projected activity and swallows transport failure", async () => {

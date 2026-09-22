@@ -3,6 +3,9 @@ import { join } from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { defineEvalConfig } from "../../src/evals/define-eval-config.js";
+import { defineEval } from "../../src/evals/define-eval.js";
+
 import { runCli } from "../../src/cli/run.js";
 import {
   clearActiveSandboxHandlesForTest,
@@ -27,7 +30,8 @@ vi.mock("../../src/evals/runner/execute-eval.js", () => ({
   executeEval: mockedEvalDependencies.executeEval,
 }));
 
-vi.mock("../../src/evals/target.js", () => ({
+vi.mock("../../src/evals/target.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../src/evals/target.js")>()),
   resolveEvalTargetHandle: mockedEvalDependencies.resolveEvalTargetHandle,
 }));
 
@@ -54,7 +58,7 @@ async function createEnvironmentFixture(): Promise<string> {
   await mkdir(join(fixtureRoot, "agent"), { recursive: true });
   await writeFile(
     join(fixtureRoot, "package.json"),
-    `${JSON.stringify({ name: "eve-eval-env-test", private: true, type: "module" })}\n`,
+    `${JSON.stringify({ dependencies: { eve: "*" }, name: "eve-eval-env-test", private: true, type: "module" })}\n`,
   );
   await writeFile(
     join(fixtureRoot, "agent", "agent.mjs"),
@@ -110,6 +114,199 @@ const TEST_CONFIG = {
 };
 
 describe("eve eval environment loading", () => {
+  it("shares live setup resources with every eval and teardown", async () => {
+    const fixture = await createEvalSetupFixture();
+    class Database {
+      #queries = 0;
+      readonly marker = 1n;
+      closed = false;
+      query() {
+        if (this.closed) throw new Error("Database is closed");
+        return ++this.#queries;
+      }
+      close() {
+        this.closed = true;
+      }
+    }
+    const database = new Database();
+    const config = defineEvalConfig({
+      async setup() {
+        await fixture.setup();
+        return database;
+      },
+      teardown(context) {
+        expect(context).toBe(database);
+        expect(database.query()).toBe(3);
+        context?.close();
+      },
+    });
+    const evaluation = defineEval<typeof config>({
+      test(t) {
+        expect(t.context).toBe(database);
+        expect(t.context.query()).toBeGreaterThan(0);
+      },
+    });
+    mockedEvalDependencies.discoverEvalConfig.mockResolvedValue(config);
+    mockedEvalDependencies.discoverAndImportEvals.mockResolvedValue([
+      { ...evaluation, id: "first" },
+      { ...evaluation, id: "second" },
+    ]);
+    const { executeEval } = await vi.importActual<
+      typeof import("../../src/evals/runner/execute-eval.js")
+    >("../../src/evals/runner/execute-eval.js");
+    mockedEvalDependencies.executeEval.mockImplementation(executeEval);
+
+    await fixture.run();
+
+    expect(database.closed).toBe(true);
+    expect(fixture.exit).toHaveBeenCalledWith(0);
+    expect(fixture.close.mock.invocationCallOrder[0]).toBeLessThan(
+      fixture.exit.mock.invocationCallOrder[0]!,
+    );
+  });
+
+  it("runs setup once before local startup and tears down after server shutdown", async () => {
+    const fixture = await createEvalSetupFixture();
+
+    await fixture.run();
+
+    expect(fixture.setup).toHaveBeenCalledTimes(1);
+    expect(mockedEvalDependencies.executeEval).toHaveBeenCalledTimes(2);
+    expect(fixture.close).toHaveBeenCalledTimes(1);
+    expect(fixture.teardown).toHaveBeenCalledTimes(1);
+    expect(fixture.setup.mock.invocationCallOrder[0]).toBeLessThan(
+      fixture.start.mock.invocationCallOrder[0]!,
+    );
+    expect(fixture.close.mock.invocationCallOrder[0]).toBeLessThan(
+      fixture.teardown.mock.invocationCallOrder[0]!,
+    );
+    expect(fixture.exit).toHaveBeenCalledWith(0);
+  });
+
+  it("runs setup and teardown locally for a remote target", async () => {
+    const fixture = await createEvalSetupFixture();
+    mockedEvalDependencies.resolveEvalTargetHandle.mockResolvedValue({
+      kind: "remote",
+      url: "https://example.com",
+    });
+
+    await fixture.run(["--url", "https://example.com"]);
+
+    expect(fixture.setup).toHaveBeenCalledTimes(1);
+    expect(fixture.setup.mock.invocationCallOrder[0]).toBeLessThan(
+      mockedEvalDependencies.resolveEvalTargetHandle.mock.invocationCallOrder[0]!,
+    );
+    expect(mockedEvalDependencies.createDevelopmentServer).not.toHaveBeenCalled();
+    expect(fixture.teardown).toHaveBeenCalledTimes(1);
+    expect(fixture.exit).toHaveBeenCalledWith(0);
+  });
+
+  it("tears down resources when local startup fails", async () => {
+    const fixture = await createEvalSetupFixture();
+    fixture.start.mockRejectedValueOnce(new Error("fixture startup failed"));
+
+    await expect(fixture.run()).rejects.toThrow("fixture startup failed");
+
+    expect(mockedEvalDependencies.executeEval).not.toHaveBeenCalled();
+    expect(fixture.close).toHaveBeenCalledTimes(1);
+    expect(fixture.teardown).toHaveBeenCalledTimes(1);
+    expect(fixture.close.mock.invocationCallOrder[0]).toBeLessThan(
+      fixture.teardown.mock.invocationCallOrder[0]!,
+    );
+  });
+
+  it("tears down resources and fails the command when an eval fails", async () => {
+    const fixture = await createEvalSetupFixture();
+    mockedEvalDependencies.executeEval.mockResolvedValueOnce(makeEvalResult("beta"));
+
+    await fixture.run();
+
+    expect(fixture.close).toHaveBeenCalledTimes(1);
+    expect(fixture.teardown).toHaveBeenCalledTimes(1);
+    expect(fixture.exit).toHaveBeenCalledWith(1);
+  });
+
+  it("still tears down resources when server shutdown fails", async () => {
+    const fixture = await createEvalSetupFixture();
+    fixture.close.mockRejectedValueOnce(new Error("fixture close failed"));
+
+    await fixture.run();
+
+    expect(fixture.teardown).toHaveBeenCalledTimes(1);
+    expect(fixture.logger.error).toHaveBeenCalledWith("Eval cleanup failed: fixture close failed");
+    expect(fixture.exit).toHaveBeenCalledWith(1);
+  });
+
+  it("fails the command when teardown fails", async () => {
+    const fixture = await createEvalSetupFixture();
+    fixture.teardown.mockRejectedValueOnce(new Error("fixture teardown failed"));
+
+    await fixture.run();
+
+    expect(fixture.close).toHaveBeenCalledTimes(1);
+    expect(fixture.logger.error).toHaveBeenCalledWith(
+      "Eval cleanup failed: fixture teardown failed",
+    );
+    expect(fixture.exit).toHaveBeenCalledWith(1);
+  });
+
+  it("runs teardown without starting a target when setup fails", async () => {
+    const fixture = await createEvalSetupFixture();
+    fixture.setup.mockRejectedValueOnce(new Error("fixture setup failed"));
+    fixture.teardown.mockResolvedValueOnce(undefined);
+
+    await expect(fixture.run()).rejects.toThrow("fixture setup failed");
+
+    expect(mockedEvalDependencies.createDevelopmentServer).not.toHaveBeenCalled();
+    expect(mockedEvalDependencies.resolveEvalTargetHandle).not.toHaveBeenCalled();
+    expect(fixture.teardown).toHaveBeenCalledTimes(1);
+    expect(fixture.teardown).toHaveBeenCalledWith(undefined);
+  });
+
+  it("preserves the setup error when teardown also fails", async () => {
+    const fixture = await createEvalSetupFixture();
+    fixture.setup.mockRejectedValueOnce(new Error("fixture setup failed"));
+    fixture.teardown.mockRejectedValueOnce(new Error("fixture teardown failed"));
+
+    await expect(fixture.run()).rejects.toThrow("fixture setup failed");
+
+    expect(fixture.teardown).toHaveBeenCalledTimes(1);
+    expect(fixture.logger.error).toHaveBeenCalledWith(
+      "Eval cleanup failed: fixture teardown failed",
+    );
+  });
+
+  it("runs teardown without a setup callback", async () => {
+    const fixture = await createEvalSetupFixture();
+    fixture.teardown.mockResolvedValueOnce(undefined);
+    mockedEvalDependencies.discoverEvalConfig.mockResolvedValue({
+      ...TEST_CONFIG,
+      teardown: fixture.teardown,
+    });
+    mockedEvalDependencies.executeEval.mockResolvedValue(makeEvalResult("first"));
+
+    await fixture.run(["--url", "https://example.com"]);
+
+    expect(fixture.setup).not.toHaveBeenCalled();
+    expect(mockedEvalDependencies.executeEval).toHaveBeenCalledTimes(2);
+    expect(fixture.teardown).toHaveBeenCalledTimes(1);
+    expect(fixture.exit).toHaveBeenCalledWith(0);
+  });
+
+  it.each([
+    { name: "listing evals", args: ["--list"] },
+    { name: "excluding all evals", args: ["--exclude-tag", "setup"] },
+  ])("skips setup when $name", async ({ args }) => {
+    const fixture = await createEvalSetupFixture();
+
+    await fixture.run(args);
+
+    expect(fixture.setup).not.toHaveBeenCalled();
+    expect(mockedEvalDependencies.createDevelopmentServer).not.toHaveBeenCalled();
+    expect(mockedEvalDependencies.resolveEvalTargetHandle).not.toHaveBeenCalled();
+    expect(fixture.teardown).not.toHaveBeenCalled();
+  });
+
   it("loads local env files before resolving a remote target", async () => {
     const fixtureRoot = await createEnvironmentFixture();
     const resolvedFixtureRoot = await realpath(fixtureRoot);
@@ -262,6 +459,51 @@ describe("eve eval environment loading", () => {
     expect(exit).toHaveBeenCalledWith(1);
   });
 });
+
+async function createEvalSetupFixture() {
+  const appRoot = await realpath(await createEnvironmentFixture());
+  const logger = { error: vi.fn(), log: vi.fn() };
+  const exit = vi.spyOn(process, "exit").mockImplementation(() => undefined as never);
+  const teardown = vi.fn(async () => {});
+  const setup = vi.fn(async () => {});
+  const start = vi.fn(async () => ({ url: "http://127.0.0.1:43123" }));
+  const close = vi.fn(async () => {});
+  process.env.EVE_DEV_SHELL_ONLY = "from-shell";
+  mockedEvalDependencies.discoverAndImportEvals.mockResolvedValue(
+    [makeEvaluation("first"), makeEvaluation("second")].map((evaluation) => ({
+      ...evaluation,
+      tags: ["setup"],
+    })),
+  );
+  mockedEvalDependencies.discoverEvalConfig.mockResolvedValue({ ...TEST_CONFIG, setup, teardown });
+  mockedEvalDependencies.createDevelopmentServer.mockReturnValue({ start, close });
+  mockedEvalDependencies.resolveEvalTargetHandle.mockResolvedValue({
+    kind: "local",
+    url: "http://127.0.0.1:43123",
+  });
+  mockedEvalDependencies.executeEval.mockImplementation(async ({ evaluation }) => {
+    return makeEvalResult(evaluation.id);
+  });
+
+  return {
+    appRoot,
+    logger,
+    exit,
+    setup,
+    start,
+    close,
+    teardown,
+    async run(args: string[] = []) {
+      const previousCwd = process.cwd();
+      process.chdir(appRoot);
+      try {
+        await runCli(["eval", "--skip-report", ...args], logger);
+      } finally {
+        process.chdir(previousCwd);
+      }
+    },
+  };
+}
 
 function makeEvaluation(id: string) {
   return {

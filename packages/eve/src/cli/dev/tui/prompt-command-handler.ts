@@ -7,7 +7,6 @@ import type {
   PromptCommandOutcome,
 } from "./runner.js";
 import { isPromptCommandAvailableFor, type PromptCommand } from "./prompt-commands.js";
-import type { RemoteAuthFlow } from "./remote-auth.js";
 import type { TuiSetupCommandInput, TuiSetupFlows } from "./setup-commands.js";
 import type { DevelopmentTuiTarget } from "./target.js";
 
@@ -21,8 +20,6 @@ export interface PromptCommandHandlerOptions {
   readonly modelChangeRefusal?: (appRoot: string) => Promise<string | null>;
   /** Test seam; forwarded to runTuiSetupCommand's injectable flows. */
   readonly flows?: Partial<TuiSetupFlows>;
-  /** Test seam for remote authentication. */
-  readonly remoteAuthFlow?: RemoteAuthFlow;
 }
 
 export function createPromptCommandHandler(
@@ -52,7 +49,7 @@ export function createPromptCommandHandler(
               "/model needs eve dev running the local server (it is not available with --url).",
           };
         }
-        const appRoot = target.workspaceRoot;
+        const appRoot = target.agentRoot ?? target.workspaceRoot;
         // Package-loading failures are command outcomes at this CLI boundary.
         try {
           const { modelChangeRefusalForUneditableModel } = await import("#setup/flows/model.js");
@@ -81,26 +78,6 @@ export function createPromptCommandHandler(
         return { message: `/${command.name} is not supported by this renderer.` };
       }
 
-      if (command.name === "vc:login" && target.kind === "remote") {
-        if (context.remoteConnection === undefined) {
-          return { message: "/vc:login is not available in this session." };
-        }
-        let runRemoteAuthCommand: (typeof import("./remote-auth-command.js"))["runRemoteAuthCommand"];
-        try {
-          ({ runRemoteAuthCommand } = await import("./remote-auth-command.js"));
-        } catch (error) {
-          return { message: `/vc:login failed: ${toErrorMessage(error)}` };
-        }
-        const message = await runRemoteAuthCommand({
-          connection: context.remoteConnection,
-          flow: options.remoteAuthFlow,
-          renderer: flow,
-        });
-        return { message };
-      }
-
-      // The remaining setup commands run against the local workspace, except
-      // `/vc:install`, which needs only a working directory on a remote session.
       let setupCommands: typeof import("./setup-commands.js");
       try {
         setupCommands = await import("./setup-commands.js");
@@ -119,24 +96,25 @@ export function createPromptCommandHandler(
           withExclusiveTerminal: context.withExclusiveTerminal,
           chatGptAccountLabel: context.chatGptAccountLabel,
         };
+        if (target.agentRoot !== undefined) commandInput.agentRoot = target.agentRoot;
         if (context.initialModelStep !== undefined) {
           commandInput.initialModelStep = context.initialModelStep;
         }
-        // `/add <item>` opens that registry item directly; bare `/add` browses.
+        if (context.onOnboardingScreen !== undefined) {
+          commandInput.onOnboardingScreen = context.onOnboardingScreen;
+        }
+        // `/add <item>` confirms and installs that address; bare `/add` opens the planner.
         if (command.name === "add" && command.argument.length > 0) {
           commandInput.initialRegistryAddress = command.argument;
         }
         if (options.flows !== undefined) commandInput.flows = options.flows;
         const result = await runTuiSetupCommand(commandInput);
         preserveFlowDiagnostics = result.preserveFlowDiagnostics;
-        const outcome: PromptCommandOutcome = { message: result.message };
-        if (result.tone !== undefined) outcome.tone = result.tone;
-        if (result.effect !== undefined) outcome.effect = result.effect;
+        const { preserveFlowDiagnostics: _preserve, partial: _partial, ...outcome } = result;
+        if (context.settleOutcome !== undefined) return await context.settleOutcome(outcome);
         return outcome;
       } finally {
-        if (context.keepSetupFlowOpen !== true) {
-          flow.end({ preserveDiagnostics: preserveFlowDiagnostics });
-        }
+        flow.end({ preserveDiagnostics: preserveFlowDiagnostics });
       }
     },
   };

@@ -1,8 +1,14 @@
 import type { MessageStreamEvent } from "#protocol/message.js";
-import { EVE_STREAM_TAIL_INDEX_HEADER } from "#protocol/message.js";
+import {
+  EVE_STREAM_CONTROL_VERSION,
+  EVE_STREAM_CONTROL_VERSION_QUERY,
+  EVE_STREAM_TAIL_INDEX_HEADER,
+} from "#protocol/message.js";
+import type { MessageStreamVersion } from "#protocol/message-version.js";
 import { createEveSessionStreamRoutePath } from "#protocol/routes.js";
 import { ClientError } from "#client/client-error.js";
 import { isStreamDisconnectError, readNdjsonStream } from "#client/ndjson.js";
+import { readMessageStreamVersion } from "#client/stream-version.js";
 import type {
   ClientRedirectPolicy,
   ResolvedStreamReconnectPolicy as StreamReconnectPolicyOptions,
@@ -52,6 +58,7 @@ function resolveRetryPolicy(
 
 function resolveStreamReconnectPolicy(
   policy: StreamReconnectPolicy | undefined,
+  keepAlive = false,
 ): ResolvedStreamReconnectPolicy {
   if (policy && "reconnect" in policy && policy.reconnect === false) {
     return NO_STREAM_RECONNECT_POLICY;
@@ -62,10 +69,12 @@ function resolveStreamReconnectPolicy(
     retryableErrorStatuses: configured?.retryableErrorStatuses
       ? new Set(configured.retryableErrorStatuses)
       : DEFAULT_STREAM_RECONNECT_POLICY.retryableErrorStatuses,
-    streamIdleReconnectPolicy: resolveRetryPolicy(
-      configured?.streamIdleReconnectPolicy,
-      DEFAULT_STREAM_RECONNECT_POLICY.streamIdleReconnectPolicy,
-    ),
+    streamIdleReconnectPolicy: resolveRetryPolicy(configured?.streamIdleReconnectPolicy, {
+      ...DEFAULT_STREAM_RECONNECT_POLICY.streamIdleReconnectPolicy,
+      maxAttempts: keepAlive
+        ? Infinity
+        : DEFAULT_STREAM_RECONNECT_POLICY.streamIdleReconnectPolicy.maxAttempts,
+    }),
     streamOpenReconnectPolicy: resolveRetryPolicy(
       configured?.streamOpenReconnectPolicy,
       DEFAULT_STREAM_RECONNECT_POLICY.streamOpenReconnectPolicy,
@@ -77,9 +86,12 @@ function resolveStreamReconnectPolicy(
  * Internal configuration for following a durable event stream.
  */
 interface FollowStreamInput {
+  /** Called once after consuming the durable tail captured when the connection opens. */
+  readonly onCaughtUp?: () => void;
   readonly host: string;
-  /** Keep reconnecting after empty streams until the consumer aborts or stops iteration. */
+  /** Keep following empty streams unless the caller configures an idle retry limit. */
   readonly keepAlive?: boolean;
+  readonly resolveReconnectPolicy?: () => StreamReconnectPolicy | undefined;
   readonly streamReconnectPolicy?: StreamReconnectPolicy;
   /** @internal Test override for reconnecting an open stream that stops producing bytes. */
   readonly streamReadIdleTimeoutMs?: number;
@@ -119,22 +131,33 @@ export async function* followStreamIterable(
     );
   }
 
-  const retryPolicy = resolveStreamReconnectPolicy(input.streamReconnectPolicy);
-  const idleRetryPolicy = retryPolicy.streamIdleReconnectPolicy;
+  const resolvePolicy = () =>
+    resolveStreamReconnectPolicy(
+      input.resolveReconnectPolicy === undefined
+        ? input.streamReconnectPolicy
+        : input.resolveReconnectPolicy(),
+      input.keepAlive,
+    );
+  let retryPolicy = resolvePolicy();
+  let idleRetryPolicy = retryPolicy.streamIdleReconnectPolicy;
   let startIndex = input.startIndex;
   let reconnectDelayMs = idleRetryPolicy.baseDelayMs;
   let idleReconnects = 0;
   let initialConnection = true;
   let tailIndex: number | undefined;
+  let caughtUp = false;
 
   while (true) {
+    retryPolicy = resolvePolicy();
+    idleRetryPolicy = retryPolicy.streamIdleReconnectPolicy;
     let connection: OpenedStream;
     try {
       connection = await openStreamBody({
         ...input,
         retryPolicy,
         startIndex,
-        requestTailIndex: input.follow === false && tailIndex === undefined,
+        requestTailIndex:
+          (input.follow === false || input.onCaughtUp !== undefined) && tailIndex === undefined,
       });
     } catch (error) {
       if (input.signal?.aborted) {
@@ -143,7 +166,7 @@ export async function* followStreamIterable(
       throw error;
     }
 
-    if (input.follow === false && tailIndex === undefined) {
+    if ((input.follow === false || input.onCaughtUp !== undefined) && tailIndex === undefined) {
       tailIndex = connection.tailIndex;
       if (tailIndex === undefined) {
         connection.close();
@@ -154,15 +177,26 @@ export async function* followStreamIterable(
       }
     }
 
-    if (tailIndex !== undefined && startIndex > tailIndex) {
+    if (!caughtUp && tailIndex !== undefined && startIndex > tailIndex) {
+      caughtUp = true;
+      input.onCaughtUp?.();
+    }
+    if (input.follow === false && tailIndex !== undefined && startIndex > tailIndex) {
       connection.close();
       return;
     }
 
     let deliveredEvent = false;
+    let leaseEnded = false;
     try {
       for await (const event of readNdjsonStream(connection.body, {
+        signal: input.signal,
+        controlVersion: connection.controlVersion,
         idleTimeoutMs: input.streamReadIdleTimeoutMs ?? DEFAULT_STREAM_READ_IDLE_TIMEOUT_MS,
+        onLeaseEnded: () => {
+          leaseEnded = true;
+        },
+        streamVersion: connection.streamVersion,
       })) {
         startIndex += 1;
         deliveredEvent = true;
@@ -170,7 +204,11 @@ export async function* followStreamIterable(
         idleReconnects = 0;
         yield event;
 
-        if (tailIndex !== undefined && startIndex > tailIndex) {
+        if (!caughtUp && tailIndex !== undefined && startIndex > tailIndex) {
+          caughtUp = true;
+          input.onCaughtUp?.();
+        }
+        if (input.follow === false && tailIndex !== undefined && startIndex > tailIndex) {
           return;
         }
       }
@@ -180,12 +218,16 @@ export async function* followStreamIterable(
       connection.close();
     }
 
+    idleRetryPolicy = resolvePolicy().streamIdleReconnectPolicy;
     if (input.signal?.aborted || input.startIndex < 0 || idleRetryPolicy.maxAttempts === 0) {
       return;
     }
 
+    if (leaseEnded) {
+      continue;
+    }
+
     if (
-      input.keepAlive !== true &&
       !deliveredEvent &&
       !initialConnection &&
       (idleReconnects += 1) >= idleRetryPolicy.maxAttempts
@@ -206,6 +248,8 @@ export async function* followStreamIterable(
 interface OpenedStream {
   readonly body: ReadableStream<Uint8Array>;
   close(): void;
+  readonly controlVersion: "1" | undefined;
+  readonly streamVersion: MessageStreamVersion;
   readonly tailIndex: number | undefined;
 }
 
@@ -218,14 +262,22 @@ interface OpenedStream {
 export async function openStreamBody(
   input: OpenStreamInput & { readonly retryPolicy?: ResolvedStreamReconnectPolicy },
 ): Promise<OpenedStream> {
-  const retryPolicy = input.retryPolicy ?? DEFAULT_STREAM_RECONNECT_POLICY;
+  const retryPolicy =
+    input.retryPolicy ?? resolveStreamReconnectPolicy(input.streamReconnectPolicy, input.keepAlive);
   const openRetryPolicy = retryPolicy.streamOpenReconnectPolicy;
   let lastStatus: number | undefined;
   let lastBody: string | undefined;
   let lastHeaders: Headers | undefined;
   let retryDelayMs = openRetryPolicy.baseDelayMs;
 
+  const controlVersion =
+    input.startIndex >= 0 && retryPolicy.streamIdleReconnectPolicy.maxAttempts > 0
+      ? EVE_STREAM_CONTROL_VERSION
+      : undefined;
   const searchParams: Record<string, string> = {};
+  if (controlVersion !== undefined) {
+    searchParams[EVE_STREAM_CONTROL_VERSION_QUERY] = controlVersion;
+  }
   if (input.startIndex !== 0) {
     searchParams.startIndex = String(input.startIndex);
   }
@@ -234,6 +286,7 @@ export async function openStreamBody(
   }
 
   for (let attempt = 0; attempt < openRetryPolicy.maxAttempts; attempt += 1) {
+    input.signal?.throwIfAborted();
     const url = createClientUrl(
       input.host,
       createEveSessionStreamRoutePath(input.sessionId),
@@ -241,6 +294,7 @@ export async function openStreamBody(
     );
 
     const headers = await input.resolveHeaders();
+    input.signal?.throwIfAborted();
     const connectionController = new AbortController();
     const signal = input.signal
       ? AbortSignal.any([input.signal, connectionController.signal])
@@ -270,9 +324,21 @@ export async function openStreamBody(
       if (!response.body) {
         throw new ClientError(response.status, "Response body is null.", response.headers);
       }
+      let closed = false;
       return {
         body: response.body,
-        close: () => connectionController.abort(),
+        close: () => {
+          if (closed) return;
+          closed = true;
+          // Aborting a fetch after its response has resolved does not reliably
+          // propagate cancellation through every local HTTP transport. Cancel
+          // the body as well so its server-side Workflow stream releases its
+          // live chunk and close listeners before a reconnect opens another.
+          response.body?.cancel().catch(() => {});
+          connectionController.abort();
+        },
+        controlVersion,
+        streamVersion: readMessageStreamVersion(response.headers),
         tailIndex: parseTailIndexHeader(response.headers),
       };
     }
@@ -303,7 +369,7 @@ function parseTailIndexHeader(headers: Headers): number | undefined {
   return Number.isSafeInteger(parsed) ? parsed : undefined;
 }
 
-async function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+export async function sleep(ms: number, signal?: AbortSignal): Promise<void> {
   if (signal?.aborted) {
     return;
   }

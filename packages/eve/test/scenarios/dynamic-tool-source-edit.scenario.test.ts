@@ -91,11 +91,10 @@ async function readExecuteMarker(appRoot: string, key: string): Promise<ExecuteM
 
 describe("dynamic tool source edits across a restart", () => {
   it(
-    "replays parked approvals against the latest code under the same tool identity",
+    "keeps parked approvals on their owning generation under the same tool identity",
     async () => {
       const app = await scenarioApp(EDITABLE_DYNAMIC_DESCRIPTOR);
       const pinnedEnv = {
-        VERCEL_DEPLOYMENT_ID: "dynamic-tool-source-edit",
         WORKFLOW_INLINE_OWNERSHIP_LEASE_SECONDS: "1",
       };
       let server = await startEveDev(app.appRoot, { env: pinnedEnv });
@@ -150,12 +149,13 @@ describe("dynamic tool source edits across a restart", () => {
         ).result();
         expect(resumed.status).toBe("waiting");
 
-        // Each parked call must run its own tool — never the other one — and
-        // both must run the edited body from the latest code.
+        // Pending approvals make the session ineligible for deployment
+        // handoff. Each parked call must run its own tool — never the other
+        // one — using the generation that created the approval.
         const alpha = await readExecuteMarker(app.appRoot, "alpha");
         const beta = await readExecuteMarker(app.appRoot, "beta");
-        expect(alpha).toMatchObject({ build: 2, key: "alpha", version: "v1" });
-        expect(beta).toMatchObject({ build: 2, key: "beta", version: "v1" });
+        expect(alpha).toMatchObject({ build: 1, key: "alpha", version: "v1" });
+        expect(beta).toMatchObject({ build: 1, key: "beta", version: "v1" });
         expect(alpha.pid).toBe(beta.pid);
       } finally {
         await server.stop();

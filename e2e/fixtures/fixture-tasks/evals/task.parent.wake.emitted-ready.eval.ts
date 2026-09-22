@@ -1,3 +1,4 @@
+import { taskReceipts } from "@eve-e2e/config/task-receipts";
 import { type EveEvalContext, type EveEvalTurn, type InputRequest } from "eve/evals";
 import { satisfies } from "eve/evals/expect";
 
@@ -7,10 +8,10 @@ import { requireSessionStreamIndex, type TaskEvalSessionDriver } from "./shared.
 const FANOUT_SIZE = 3;
 const COMPLETED_NOTIFICATION = /Background task (task_[a-z0-9]+) \([^)]+\) is completed\./giu;
 
-/** Every completed child emits one task-addressed ready notification to its parent. */
+/** The final child releases every sibling's result in one parent turn. */
 export default defineTaskEval({
   description:
-    "Three completed children emit exactly one parent notification each, with no duplicate or unknown task ids.",
+    "Three completed children wake their parent once with all task notifications and no duplicate or unknown task ids.",
   transition: {
     primary: "task.parent.wake.emitted-ready",
     setup: [
@@ -25,7 +26,7 @@ export default defineTaskEval({
     const started = await t.send("TASK-PARENT-WAKE-UPDATES");
     started.expectOk();
     started.messageIncludes("TASK-FANOUT-STARTED");
-    started.calledSubagent("fanout-worker", { count: FANOUT_SIZE });
+    started.calledSubagent("fanout-worker", { status: "working", count: FANOUT_SIZE });
 
     const taskIds = backgroundTaskIds(started);
     await t.require(
@@ -36,7 +37,7 @@ export default defineTaskEval({
       ),
     );
 
-    const blocked = await waitForReleaseRequests(t, t, started);
+    const blocked = await waitForReleaseRequests(t, started.session, started);
     const released = await blocked.session.respond(
       blocked.requests.map((request) => ({
         optionId: "approve",
@@ -45,11 +46,10 @@ export default defineTaskEval({
     );
     released.expectOk();
 
-    const notifiedTaskIds = [
-      ...completedNotificationTaskIds(started),
-      ...blocked.observedTurns.flatMap(completedNotificationTaskIds),
-      ...completedNotificationTaskIds(released),
-    ];
+    const completionTurns = [...blocked.observedTurns, released].filter(
+      (turn) => completedNotificationTaskIds(turn).length > 0,
+    );
+    const notifiedTaskIds = completionTurns.flatMap(completedNotificationTaskIds);
     const observedKnownTaskIds = new Set(
       notifiedTaskIds.filter((taskId) => taskIds.includes(taskId)),
     );
@@ -65,6 +65,7 @@ export default defineTaskEval({
         startIndex: requireSessionStreamIndex(session, "Task fanout notification wait"),
       });
       const turn = await live.result();
+      if (completedNotificationTaskIds(turn).length > 0) completionTurns.push(turn);
       for (const taskId of completedNotificationTaskIds(turn)) {
         notifiedTaskIds.push(taskId);
         if (taskIds.includes(taskId)) observedKnownTaskIds.add(taskId);
@@ -81,6 +82,11 @@ export default defineTaskEval({
         "exactly one completed notification for every known task and none for unknown task ids",
       ),
     );
+    await t.require(
+      completionTurns.length,
+      satisfies((count) => count === 1, "only the last sibling triggers a completion turn"),
+    );
+    completionTurns[0]!.event("step.started", { count: 1 });
     t.noFailedActions();
   },
 });
@@ -124,11 +130,7 @@ function collectReleaseRequests(turn: EveEvalTurn, requests: Map<string, InputRe
 }
 
 function backgroundTaskIds(turn: EveEvalTurn): readonly string[] {
-  return turn.events.flatMap((event) =>
-    event.type === "subagent.completed" && event.data.backgroundTask !== undefined
-      ? [event.data.backgroundTask.taskId]
-      : [],
-  );
+  return taskReceipts(turn.events).map(({ taskId }) => taskId);
 }
 
 function completedNotificationTaskIds(turn: EveEvalTurn): readonly string[] {

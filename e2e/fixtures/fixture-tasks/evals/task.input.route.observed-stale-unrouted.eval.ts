@@ -22,7 +22,7 @@ export default defineTaskEval({
     started.expectOk();
     const taskId = requireBackgroundTaskId(started);
 
-    const first = await waitForTaskInput(t, t, "first_gate");
+    const first = await waitForTaskInput(t, started.session, "first_gate");
     const firstAnswer = await first.session.respond([
       {
         optionId: "approve",

@@ -1,5 +1,6 @@
 import { type Command, InvalidArgumentError } from "#compiled/commander/index.js";
-import { applicationCommand, type CliApplicationContext } from "#cli/application-command.js";
+import type { CliApplicationContext } from "#cli/application-command.js";
+import { agentCommand } from "#cli/agent-command.js";
 import {
   parseDevelopmentHeaderOption,
   resolveDevelopmentUrlTarget,
@@ -47,7 +48,7 @@ export function registerRuntimeInvokeCommand(input: {
     ...input,
     deps: {
       loadEnvironment: async (root) =>
-        (await import("#cli/dev/environment.js")).loadDevelopmentEnvironmentFiles(root),
+        await (await import("#cli/dev/environment.js")).loadDevelopmentEnvironmentFiles(root),
       runInvoke: async (invokeInput) =>
         await (input.runtime.runInvoke ?? (await import("./invoke.js")).runInvoke)(invokeInput),
       startHost: async (root) =>
@@ -66,7 +67,7 @@ export function registerInvokeCommand(input: {
   readonly logger: InvokeCommandLogger;
   readonly program: Command;
 }): void {
-  applicationCommand(input.program.command("invoke"), input.applicationContext, (command) => {
+  agentCommand(input.program.command("invoke"), input.applicationContext, (command) => {
     const options = command.opts<InvokeCliOptions>();
     return options.url === undefined && options.jsonSchema !== true;
   })

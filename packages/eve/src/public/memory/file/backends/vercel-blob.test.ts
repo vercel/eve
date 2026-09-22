@@ -64,6 +64,7 @@ describe("Vercel Blob file-memory backend", () => {
     expect(get).toHaveBeenCalledWith("custom/memory/mem_scope/MEMORY.md", {
       abortSignal: signal,
       access: "private",
+      headers: { "accept-encoding": "identity" },
       oidcToken: "oidc",
       storeId: "store",
       token: "rw",

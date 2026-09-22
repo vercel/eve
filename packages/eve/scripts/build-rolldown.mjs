@@ -103,6 +103,28 @@ function createDynamicToolTransformPlugin() {
   };
 }
 
+/**
+ * Keeps framework workflow bodies available to the downstream driver builder
+ * while stamping the same callback metadata that application modules receive
+ * from their client transform.
+ */
+function createWorkflowMetadataTransformPlugin() {
+  let transformPromise;
+  return {
+    name: "eve:workflow-metadata-transform",
+    async transform(code, id) {
+      if (!code.includes("use workflow")) return null;
+      transformPromise ??= import("../src/internal/workflow-bundle/workflow-builders.ts").then(
+        (mod) => mod.applyWorkflowTransform,
+      );
+      const transformFn = await transformPromise;
+      const filename = relative(process.cwd(), id).replaceAll("\\", "/");
+      const result = await transformFn(filename, code, "metadata", id, process.cwd());
+      return result.code === code ? null : { code: result.code, map: null };
+    },
+  };
+}
+
 const SRC_ROOT = "src";
 const OUTPUT_DIR = "dist/src";
 
@@ -155,6 +177,13 @@ const EXTERNAL_PACKAGES = new Set([
 ]);
 
 function isExternalPackageSpecifier(source) {
+  // Public self-imports must remain bare in the published package. Resolving
+  // them during a clean build would target output that does not exist yet;
+  // resolving them during an incremental build could consume stale output.
+  if (source === "eve" || source.startsWith("eve/")) {
+    return true;
+  }
+
   // All `#*` subpath imports stay external so the published dist keeps
   // the bare-specifier shape the runtime resolves at load time. Source
   // files routinely depend on a 1:1 mapping (workflow
@@ -233,7 +262,11 @@ await buildWithNitroRolldown({
   input,
   external: isExternalPackageSpecifier,
   platform: "node",
-  plugins: [createStripUnusedRolldownRuntimeImportPlugin(), createDynamicToolTransformPlugin()],
+  plugins: [
+    createStripUnusedRolldownRuntimeImportPlugin(),
+    createDynamicToolTransformPlugin(),
+    createWorkflowMetadataTransformPlugin(),
+  ],
   resolve: {
     // `eve-source` makes `#*.js` resolve to `./src/*.ts` at build time so
     // sibling source files become part of the graph instead of bare

@@ -24,7 +24,7 @@ The default eve channel inspects the agent, creates sessions, accepts callbacks 
 
 - `GET /eve/v1/health` (check whether the application is reachable)
 - `GET /eve/v1/info` (inspect the agent)
-- `POST /eve/v1/session` (start a session and send its first message)
+- `POST /eve/v1/session` (create a session, optionally sending its first message)
 - `POST /eve/v1/session/:sessionId` (send a follow-up)
 - `POST /eve/v1/session/:sessionId/cancel` (cancel the in-flight turn)
 - `POST /eve/v1/session/:sessionId/clear` (clear the session's model history)
@@ -38,7 +38,21 @@ The session routes use only durable session IDs. Create a session explicitly, th
 
 ### Start and continue a session
 
-Start a session with an initial message, then use the returned `sessionId` for every follow-up and control operation:
+Create a conversation session before its first message with a bodyless request:
+
+```bash
+curl -X POST https://<deployment>/eve/v1/session
+# {"ok":true,"sessionId":"wrun_A","status":"accepted"}
+```
+
+See [Start a session](../concepts/sessions-runs-and-streaming#start-a-session) for the
+initialization boundary, first-turn identity, readiness response, and retry behavior.
+
+The create request still requires route auth. Session audience and the timeout are selected
+at creation; they do not change when the first message arrives. Task mode and turn-scoped
+fields such as `clientContext` and `outputSchema` require a message on the create request.
+
+Include an initial message to create the session and start its first turn in one request:
 
 ```bash
 curl -X POST https://<deployment>/eve/v1/session \
@@ -48,20 +62,23 @@ curl -X POST https://<deployment>/eve/v1/session \
 ```
 
 Authenticated callers that may retry a create request can pass their own `operationId` for
-create-once semantics. The same operation under the same authenticated principal returns the
-active session it already created instead of dispatching the input again. The first accepted
-payload wins; retries with different input still return that first session. Anonymous callers
-cannot use `operationId`, and operation ownership expires when the session is no longer resumable.
+create-once semantics. Once the operation owner is active, the same operation under the same
+authenticated principal returns that session instead of dispatching the input again. The create
+route does not wait for a concurrently starting request to publish ownership: simultaneous
+requests can receive different accepted candidate IDs, while only the candidate that claims the
+operation runs its first turn. Retry the operation after startup when you need its canonical
+session ID. Anonymous callers cannot use `operationId`, and operation ownership expires when the
+session is no longer resumable.
 
 ```bash
 curl -X POST https://<deployment>/eve/v1/session \
   -H "Authorization: Bearer <token>" \
   -H "Content-Type: application/json" \
   -d '{"message":"What is the weather in Paris?","operationId":"order-4213-research"}'
-# {"ok":true,"sessionId":"wrun_A","status":"accepted"} — retries return the same sessionId
+# {"ok":true,"sessionId":"wrun_A","status":"accepted"}
 ```
 
-The first request requires `message`. A follow-up request accepts exactly one of
+When the create request includes a message, a follow-up request accepts exactly one of
 `message` or `inputResponses`; use the latter to answer a pending HITL request:
 
 ```bash
@@ -70,10 +87,13 @@ curl -X POST https://<deployment>/eve/v1/session/wrun_A \
   -d '{"inputResponses":[{"requestId":"req_A","optionId":"approve"}]}'
 ```
 
-Follow-up messages use `turnPolicy: "steer"` by default. If a turn is active, eve buffers the message before cooperatively cancelling that turn, then starts the follow-up as a replacement turn with a new turn ID. Set `turnPolicy: "queue"` on `eveChannel(...)` when follow-ups should wait for active turns to finish. `inputResponses` never steer.
+Follow-up messages use `turnPolicy: "steer"` by default. Before assistant answer output or local tool execution begins, steering interrupts pending model generation and applies the correction in the same turn. Executing tools finish and checkpoint their results first. After answer output starts, steering waits for the next committed workflow boundary. Reasoning and search progress do not count as answer output; interrupted provider-managed search may run again. The turn ID stays the same.
+
+Set `turnPolicy: "queue"` on `eveChannel(...)` when follow-ups should wait for active turns to finish. `inputResponses` answer their addressed requests.
 
 Sending a message to an unknown or terminal session ID returns `409` with
 `{"code":"session_not_active","error":"The session is no longer active.","ok":false}`.
+An existing workflow whose inbox is not yet available returns `409 session_not_ready` instead.
 TypeScript clients expose the stable code as `ClientError.code`. The route never
 creates or follows a replacement session.
 
@@ -83,7 +103,7 @@ Stream a session as newline-delimited JSON from `GET /eve/v1/session/:sessionId/
 
 ### Cancel a turn
 
-Post to `/eve/v1/session/:sessionId/cancel` to request cancellation of the active turn. You can include the observed `turnId` to keep a late request from cancelling a newer turn. Cancellation is asynchronous; confirm it on the stream as `turn.cancelled` followed by `session.waiting`.
+Post to `/eve/v1/session/:sessionId/cancel` to request cancellation of the active turn. You can include the observed `turnId` to keep a late request from cancelling a newer turn. Include `tasks: true` to also cancel every background task owned by the session, including while the session is parked. Cancellation is asynchronous; confirm the turn boundary on the stream as `turn.cancelled` followed by `session.waiting`, and inspect task state in a later turn to confirm task cancellation.
 
 See [Cancel the in-flight turn](../concepts/sessions-runs-and-streaming#cancel-the-in-flight-turn) for response statuses, HTTP status codes, subagent cancellation, and race behavior.
 
@@ -149,6 +169,45 @@ Neither admits browser users or external clients in production. For a public app
 
 For the full auth model and helper list, see [Auth & route protection](../guides/auth-and-route-protection).
 
+## Audience
+
+The eve channel assigns an observability audience when it creates a session. The
+audience controls whether instrumentation may capture session content:
+
+| Session creator                           | Default audience |
+| ----------------------------------------- | ---------------- |
+| Anonymous caller                          | `unknown`        |
+| `user`, `service`, or `runtime` principal | `private`        |
+| Any other principal type                  | `unknown`        |
+
+Anonymous HTTP surfaces are `unknown` by default because reachability does not establish that their content is safe to record. Authenticated `user`, `service`, and `runtime` sessions are private because they belong to one identified party. Other authenticated principal types also remain `unknown`: trace consumers record metadata but omit content by default in preview and production. Set an explicit `audience: "public"` only for intentionally public traffic.
+
+For a production endpoint whose conversations are all intentionally public,
+set a constant audience:
+
+```ts title="agent/channels/eve.ts"
+import { vercelOidc } from "eve/channels/auth";
+import { eveChannel } from "eve/channels/eve";
+
+export default eveChannel({
+  auth: [vercelOidc()],
+  audience: "public",
+});
+```
+
+`audience` controls observability content capture; it does not change who may
+call the endpoint. `auth` still controls access. For a classification that
+depends on channel state or application-specific verified data, use a [custom
+channel audience](./custom#conversation-audience).
+
+You can also pass a function that receives `caller`, channel, run mode, and
+deployment environment. Classification is fixed at session creation, so a later
+turn from a different caller does not reclassify the session.
+
+For a remote agent, a trusted dispatch can forward the original audience and
+its trace-content ceiling. See [Preserving trace
+content](../guides/remote-agents#preserving-trace-content).
+
 ## Customization
 
 Use `onMessage` to add request-specific context before the agent sees the user message, and `events` to observe stream events from sessions this channel created:
@@ -176,7 +235,7 @@ export default eveChannel({
 });
 ```
 
-`onMessage` must return an auth result. Return `title` alongside `auth` to set the title when the dispatch starts a run. A successful canonical eve HTTP message always dispatches and therefore always produces or continues a session.
+`onMessage` must return an auth result. Return `title` alongside `auth` to set the title when the dispatch creates a session or sends the first message to a prewarmed session. A successful canonical eve HTTP message always dispatches and therefore always produces or continues a session.
 
 ## Clients
 

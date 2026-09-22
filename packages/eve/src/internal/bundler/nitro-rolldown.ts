@@ -5,6 +5,8 @@ type RolldownOutputChunk = {
   readonly type: "chunk";
   readonly code: string;
   readonly fileName: string;
+  readonly imports: readonly string[];
+  readonly dynamicImports: readonly string[];
 };
 
 type RolldownOutputAsset = {
@@ -103,7 +105,7 @@ export async function buildWithNitroRolldown(
   return await build(options);
 }
 
-const ROLLDOWN_STANDARD_CONDITION_NAMES = new Set([
+export const ROLLDOWN_STANDARD_CONDITION_NAMES: ReadonlySet<string> = new Set([
   "browser",
   "default",
   "import",

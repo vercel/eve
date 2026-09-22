@@ -1,13 +1,14 @@
+import { WORKFLOW_REGISTRY_GLOBAL } from "#execution/workflow-registry.js";
 import { builtinModules } from "node:module";
 import { existsSync } from "node:fs";
 import { mkdir, readFile, readdir } from "node:fs/promises";
-import { dirname, join, relative, resolve } from "node:path";
+import { dirname, extname, join, relative, resolve } from "node:path";
 
 import { atomicWriteFile } from "#shared/atomic-write-file.js";
 
 import { buildSingleRolldownChunk } from "#internal/bundler/nitro-rolldown.js";
 import { normalizeEsmImportSpecifier } from "#internal/application/import-specifier.js";
-import { resolveWorkflowModulePath } from "#internal/application/package.js";
+import { resolvePackageRoot, resolveWorkflowModulePath } from "#internal/application/package.js";
 import {
   applyWorkflowTransform,
   getImportPath,
@@ -17,7 +18,13 @@ import { WORKFLOW_STEP_EXTERNAL_PACKAGES } from "#internal/workflow-bundle/verce
 
 export const WORKFLOW_VIRTUAL_ENTRY_ID = "\0eve-workflow-entry";
 
+export interface AuthoredWorkflowModules {
+  readonly directiveModules: readonly string[];
+  readonly workflowModules: readonly string[];
+}
+
 export interface WorkflowBundleBuilderOptions {
+  readonly authoredWorkflowModules?: AuthoredWorkflowModules;
   agentName: string;
   appRoot: string;
   compiledArtifactsBootstrapPath: string;
@@ -37,7 +44,7 @@ const NODE_BUILTIN_MODULES = new Set([
   ...builtinModules,
   ...builtinModules.map((moduleName) => `node:${moduleName}`),
 ]);
-const WORKFLOW_INPUT_EXTENSIONS = new Set([
+export const WORKFLOW_SOURCE_EXTENSIONS: readonly string[] = [
   ".ts",
   ".tsx",
   ".mts",
@@ -46,7 +53,11 @@ const WORKFLOW_INPUT_EXTENSIONS = new Set([
   ".jsx",
   ".mjs",
   ".cjs",
-]);
+];
+
+export function isWorkflowSourceFile(fileName: string): boolean {
+  return WORKFLOW_SOURCE_EXTENSIONS.includes(extname(fileName));
+}
 const IGNORED_INPUT_DIRECTORIES = new Set([
   "node_modules",
   ".git",
@@ -80,8 +91,9 @@ export interface WorkflowBundleDiscoveredEntries {
 
 export interface WorkflowBundleCreateWorkflowsBundleOptions {
   readonly additionalOutputs?: readonly WorkflowBundleOutput[];
-  readonly discoveredEntries?: WorkflowBundleDiscoveredEntries;
-  readonly inputFiles: readonly string[];
+  readonly appWorkflowFiles: readonly string[];
+  readonly frameworkSerdeFiles: readonly string[];
+  readonly frameworkWorkflowFiles: readonly string[];
   readonly outfile: string;
   readonly stepRegistrationsPath: string;
   readonly tsconfigPath?: string;
@@ -140,9 +152,7 @@ export async function collectWorkflowInputFiles(root: string): Promise<string[]>
         continue;
       }
 
-      const extension = entry.name.match(/\.[^.]+$/)?.[0];
-
-      if (extension !== undefined && WORKFLOW_INPUT_EXTENSIONS.has(extension)) {
+      if (isWorkflowSourceFile(entry.name)) {
         files.push(join(directory, entry.name));
       }
     }
@@ -222,10 +232,46 @@ export function createWorkflowRuntimeAliasPlugin(): WorkflowRolldownPlugin {
   };
 }
 
+/**
+ * `workflow` resolves to the body-side shim. A `workflow/api` import still live
+ * after step bodies were stubbed means a body calls the runtime API; fail the
+ * build here rather than the driver later.
+ */
+export function createWorkflowDriverAliasPlugin(workingDir: string): WorkflowRolldownPlugin {
+  return {
+    name: "eve-workflow-driver-aliases",
+    resolveId(source: string, importer?: string) {
+      if (source === "workflow/errors") {
+        return resolveWorkflowModulePath(source);
+      }
+
+      if (source === "workflow/api" || source === "workflow/runtime") {
+        const via = importer ? ` (imported by "${importer}")` : "";
+        throw new Error(
+          `Workflow bundle cannot import "${source}"${via}: the runtime API is not available ` +
+            `inside a workflow body. Call it from a "use step" function and await that step from the body.`,
+        );
+      }
+
+      if (source !== "workflow") {
+        return undefined;
+      }
+
+      return resolveFirstExistingPath([
+        join(workingDir, "src", "internal", "workflow-bundle", "workflow-core-shim.ts"),
+        join(workingDir, "dist", "src", "internal", "workflow-bundle", "workflow-core-shim.js"),
+      ]);
+    },
+  };
+}
+
 export function createEvePackageImportsPlugin(
   workingDir: string,
   options: { workflowCondition?: boolean } = {},
 ): WorkflowRolldownPlugin {
+  // Production builds from eve's package root. Fixtures that build from another
+  // directory still need eve's own modules, e.g. the step wrapper the transform injects.
+  const roots = [...new Set([workingDir, resolvePackageRoot()])];
   return {
     name: "eve-package-imports",
     resolveId(source: string) {
@@ -233,16 +279,20 @@ export function createEvePackageImportsPlugin(
 
       if (compiledSubpath !== undefined) {
         if (options.workflowCondition === true && compiledSubpath === "@workflow/core/index.js") {
-          return resolveFirstExistingPath([
-            join(workingDir, "src", "internal", "workflow-bundle", "workflow-core-shim.ts"),
-            join(workingDir, "dist", "src", "internal", "workflow-bundle", "workflow-core-shim.js"),
-          ]);
+          return resolveFirstExistingPath(
+            roots.flatMap((root) => [
+              join(root, "src", "internal", "workflow-bundle", "workflow-core-shim.ts"),
+              join(root, "dist", "src", "internal", "workflow-bundle", "workflow-core-shim.js"),
+            ]),
+          );
         }
 
-        return resolveFirstExistingPath([
-          join(workingDir, ".generated", "compiled", compiledSubpath),
-          join(workingDir, "dist", "src", "compiled", compiledSubpath),
-        ]);
+        return resolveFirstExistingPath(
+          roots.flatMap((root) => [
+            join(root, ".generated", "compiled", compiledSubpath),
+            join(root, "dist", "src", "compiled", compiledSubpath),
+          ]),
+        );
       }
 
       const sourceSubpath = source.match(/^#(.+)\.js$/)?.[1];
@@ -252,10 +302,12 @@ export function createEvePackageImportsPlugin(
       }
 
       return resolveFirstExistingPath(
-        [".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs"].flatMap((extension) => [
-          join(workingDir, "src", `${sourceSubpath}${extension}`),
-          join(workingDir, "dist", "src", `${sourceSubpath}${extension}`),
-        ]),
+        roots.flatMap((root) =>
+          WORKFLOW_SOURCE_EXTENSIONS.flatMap((extension) => [
+            join(root, "src", `${sourceSubpath}${extension}`),
+            join(root, "dist", "src", `${sourceSubpath}${extension}`),
+          ]),
+        ),
       );
     },
   };
@@ -346,7 +398,7 @@ export async function bundleWorkflowStepRegistrations(input: {
     ],
     resolve: {
       conditionNames: ["eve-source"],
-      extensions: [".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs"],
+      extensions: WORKFLOW_SOURCE_EXTENSIONS,
       mainFields: ["module", "main"],
     },
     tsconfig: input.tsconfigPath ?? false,
@@ -403,6 +455,22 @@ export async function bundleFinalWorkflowOutput(input: {
   });
 
   await writeWorkflowBundleAtomically(input.outfile, workflowFunctionCode);
+}
+
+// The transform emits bare `.set(...)` calls, so the Map must exist before any chunk runs.
+const WORKFLOW_REGISTRY_BANNER = `globalThis.${WORKFLOW_REGISTRY_GLOBAL} = new Map();`;
+
+/**
+ * Chunks share state only through globals (the workflow registry, the serde
+ * class registry, `Symbol.for` keys), so each runs in its own IIFE and their
+ * top-level declarations never collide.
+ */
+export function composeWorkflowDriverCode(chunks: readonly string[]): string {
+  const bodies = chunks
+    .map((chunk) => chunk.trim())
+    .filter((chunk) => chunk.length > 0)
+    .map((chunk) => `(function () {\n${chunk}\n})();`);
+  return [WORKFLOW_REGISTRY_BANNER, ...bodies].join("\n");
 }
 
 export function createWorkflowEntrypointSource(input: {
@@ -508,7 +576,7 @@ async function writeWorkflowBundleAtomically(outfile: string, source: string): P
   await atomicWriteFile(outfile, source);
 }
 
-function mergeWorkflowManifest(target: WorkflowManifest, source: WorkflowManifest): void {
+export function mergeWorkflowManifest(target: WorkflowManifest, source: WorkflowManifest): void {
   target.steps = mergeWorkflowManifestSection(target.steps, source.steps);
   target.workflows = mergeWorkflowManifestSection(target.workflows, source.workflows);
   target.classes = mergeWorkflowManifestSection(target.classes, source.classes);

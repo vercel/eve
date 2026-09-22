@@ -5,6 +5,8 @@ export interface TraceState {
   unset(key: string): TraceState;
 }
 
+export declare function createTraceState(rawTraceState?: string): TraceState;
+
 export interface SpanContext {
   isRemote?: boolean;
   spanId: string;
@@ -44,6 +46,7 @@ export interface Tracer {
 }
 
 export interface Context {
+  getValue(key: symbol): unknown;
   setValue(key: symbol, value: unknown): Context;
 }
 
@@ -130,6 +133,12 @@ export interface Meter {
 
 export declare const metrics: {
   getMeter(name: string, version?: string): Meter;
+  /**
+   * The globally registered meter provider, shared across API copies. The
+   * instance comes from whichever metrics SDK registered it, so callers must
+   * feature-detect lifecycle methods before invoking them.
+   */
+  getMeterProvider(): unknown;
 };
 
 export declare enum SpanKind {

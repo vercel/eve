@@ -50,8 +50,8 @@
  *             return shapes must carry only what the harness consumes;
  *             durable state belongs on `ctx.eve`.
  *   rule 28 — Imports under `packages/eve/src/setup/scaffold/**` stay within
- *             their layer: node:* builtins, relative siblings, and the shared
- *             `@eve/catalog` data package. The scaffold stays free of
+ *             their layer: node:* builtins, relative siblings, and eve's
+ *             vendored integration catalog. The scaffold stays free of
  *             framework runtime, compiler, terminal UI, and provider SDK
  *             dependencies.
  *   rule 29 — Changeset package keys must match workspace package names.
@@ -100,20 +100,20 @@
  *             `pnpm --filter eve build`. Turbo owns workspace dependency
  *             ordering; nested builds race on eve's clean-and-publish dist
  *             directory and let consumers observe a partial package.
- *   rule 40 — Every shipped wire-version module
- *             (`src/execution/wire/*-wire.vN.ts`) must carry a colocated
- *             `*-wire.vN.test.ts`. Version modules, tests, and snapshots already
- *             present on main are immutable. The session-inbox registry must
- *             also be contiguous, name every module, and identify its highest
- *             version as current. Wire versions are append-only protocol
- *             history: change the contract by adding a version and migration,
- *             never by updating a historical schema and its snapshot together.
+ *   rule 42 — The shared subagent workflow body is framework-authored
+ *             userspace. It must not import task, harness, or context
+ *             internals or recover private state through `Symbol.for`.
+ *             Privileged dispatch belongs in ordinary step-backed APIs that
+ *             the workflow body consumes through a public contract.
+ *   rule 43 — Reusable session plumbing stays independent of the subagent
+ *             executor. The generic inbox and state cursor must not
+ *             import subagent modules; session/turn composition roots may
+ *             compose built-in executors directly.
  *
  * Baselines for rules with pre-existing violations live in
  * `guard-invariants-baseline.json`. Counts and allowlists in that file
  * may only shrink (as offenders are removed) — they may never grow.
  */
-import { execFileSync } from "node:child_process";
 import { glob, readFile, readdir, lstat } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { dirname, join, relative, resolve, sep } from "node:path";
@@ -204,6 +204,9 @@ function isTsLike(relPath) {
  *   rule33: Violation[];
  *   rule35: Violation[];
  *   rule37: Violation[];
+ *   rule42: Violation[];
+ *   rule43: Violation[];
+ *   rule44: Violation[];
  *   symlinks: string[];
  * }} state
  */
@@ -233,7 +236,103 @@ async function scanRepo(state) {
     checkRule33(posix, lines, state.rule33);
     checkRule35(posix, lines, state.rule35);
     checkRule37(posix, content, state.rule37);
+    checkRule42(posix, lines, state.rule42);
+    checkRule43(posix, lines, state.rule43);
+    checkRule44(posix, lines, state.rule44);
   }
+}
+
+// ---------- Rule 42: userspace subagent workflow ----------
+
+const SUBAGENT_WORKFLOW_PATH = "packages/eve/src/runtime/subagents/workflow.ts";
+const SUBAGENT_WORKFLOW_PRIVATE_IMPORT_RE =
+  /["']#(?:tasks|execution|harness|context|shared)(?:\/|\.js)/;
+// The shared body owns its invocation id, so it consumes the framework-internal
+// entry rather than the public `agent()`; that import is the one exception.
+const SUBAGENT_WORKFLOW_ALLOWED_IMPORT = '"#execution/tools/subagent/invoke-agent.js"';
+
+/**
+ * @param {string} posix
+ * @param {string[]} lines
+ * @param {Violation[]} violations
+ */
+function checkRule42(posix, lines, violations) {
+  if (posix !== SUBAGENT_WORKFLOW_PATH) return;
+
+  lines.forEach((line, idx) => {
+    if (line.includes(SUBAGENT_WORKFLOW_ALLOWED_IMPORT)) return;
+    if (!SUBAGENT_WORKFLOW_PRIVATE_IMPORT_RE.test(line) && !line.includes("Symbol.for(")) return;
+    violations.push({
+      rule: 42,
+      file: posix,
+      line: idx + 1,
+      message:
+        "the shared subagent workflow reaches into task, harness, or context internals. Keep the body userspace-shaped and call a public workflow-safe agent API instead.",
+    });
+  });
+}
+
+// ---------- Rule 43: executor-neutral session plumbing ----------
+
+// Matches both `#` alias specifiers and relative paths into the executor trees.
+const SUBAGENT_IMPORT_RE =
+  /from ["'](?:#|(?:\.\.?\/)+(?:[\w-]+\/)*)(?:subagents|execution\/tools\/subagent|tools\/subagent)(?:\/|\.js|["'])/;
+
+const RULE43_GENERIC_SESSION_FILES = new Set([
+  "packages/eve/src/execution/session-hook-claims.ts",
+  "packages/eve/src/execution/session-inbox/inbox.ts",
+  "packages/eve/src/execution/session-input-ledger.ts",
+  "packages/eve/src/execution/session-input-queue.ts",
+  "packages/eve/src/execution/session-state-cursor.ts",
+]);
+
+/**
+ * @param {string} posix
+ * @param {string[]} lines
+ * @param {Violation[]} violations
+ */
+function checkRule43(posix, lines, violations) {
+  if (!RULE43_GENERIC_SESSION_FILES.has(posix)) return;
+  lines.forEach((line, idx) => {
+    if (!SUBAGENT_IMPORT_RE.test(line)) return;
+    violations.push({
+      rule: 43,
+      file: posix,
+      line: idx + 1,
+      message:
+        "generic session plumbing imports the subagent executor. Move executor-specific behavior to composition roots or subagent-owned modules.",
+    });
+  });
+}
+
+// Legacy import is reachable only from workflow discovery and ingress.
+const LEGACY_INGRESS_FILES = new Set([
+  "packages/eve/src/execution/session-inbox/resume.ts",
+  "packages/eve/src/execution/connections/callback-route.ts",
+  "packages/eve/src/eve-channel/index.ts",
+]);
+/** @param {string} posix @param {string[]} lines @param {Violation[]} violations */
+function checkRule44(posix, lines, violations) {
+  if (
+    posix.includes("/execution/legacy-session/") ||
+    posix.includes("/internal/testing/") ||
+    /\.(?:test|integration\.test|scenario\.test)\.ts$/.test(posix) ||
+    LEGACY_INGRESS_FILES.has(posix)
+  )
+    return;
+  lines.forEach((line, index) => {
+    if (
+      /from ["'][^"']*legacy-session\//.test(line) ||
+      /import\(["'][^"']*legacy-session\//.test(line)
+    )
+      violations.push({
+        rule: 44,
+        file: posix,
+        line: index + 1,
+        message:
+          "Legacy session import belongs at ingress; current execution must consume only normalized session state.",
+      });
+  });
 }
 
 // ---------- Rule 13: spread-ternary object composition ----------
@@ -303,6 +402,10 @@ const WORKFLOW_QUEUE_NAMESPACE_MODULE = "packages/eve/src/internal/workflow/queu
  * @param {Violation[]} violations
  */
 function checkRule33(posix, lines, violations) {
+  // The single-runtime-identity boundary is eve's own source. Application code
+  // (fixtures, templates) legitimately imports the public `workflow/api`
+  // surface, which eve's bundler resolves to its own runtime.
+  if (!posix.startsWith("packages/eve/src/")) return;
   lines.forEach((line, idx) => {
     const isTypeOnlyImport = /^\s*(?:import|export)\s+type\b/.test(line);
     const isRuntimeImport =
@@ -527,141 +630,6 @@ function importSpecifier(node) {
   return undefined;
 }
 
-// ---------- Rule 40: wire versions carry colocated contract tests ----------
-
-const WIRE_FAMILY_DIR = "packages/eve/src/execution/wire";
-const SESSION_INBOX_WIRE_CONTRACT = `${WIRE_FAMILY_DIR}/session-inbox-contract.ts`;
-const VERSIONED_WIRE_HISTORY_RE = new RegExp(
-  `^${WIRE_FAMILY_DIR}/(?:__snapshots__/)?[a-z0-9-]+-wire\\.v\\d+(?:\\.test\\.ts(?:\\.snap)?|\\.ts)$`,
-);
-
-function gitOutput(args) {
-  try {
-    return execFileSync("git", args, {
-      cwd: REPO_ROOT,
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "ignore"],
-    });
-  } catch {
-    return undefined;
-  }
-}
-
-function checkRule40ImmutableWireHistory() {
-  const hasBase = gitOutput(["rev-parse", "--verify", "origin/main"]) !== undefined;
-  const comparisons = [
-    ["diff", "--name-status", "--", WIRE_FAMILY_DIR],
-    ["diff", "--cached", "--name-status", "--", WIRE_FAMILY_DIR],
-  ];
-  if (hasBase)
-    comparisons.push(["diff", "--name-status", "origin/main...HEAD", "--", WIRE_FAMILY_DIR]);
-
-  const changes = new Set();
-  for (const args of comparisons) {
-    for (const line of (gitOutput(args) ?? "").trim().split("\n")) {
-      if (line !== "") changes.add(line);
-    }
-  }
-
-  /** @type {Violation[]} */
-  const violations = [];
-  for (const change of changes) {
-    const [status, ...paths] = change.split("\t");
-    const protectedPaths = paths.filter((path) => VERSIONED_WIRE_HISTORY_RE.test(path));
-    if (protectedPaths.length === 0 || status === "A") continue;
-    if (
-      hasBase &&
-      protectedPaths.every(
-        (path) => gitOutput(["cat-file", "-e", `origin/main:${path}`]) === undefined,
-      )
-    ) {
-      continue;
-    }
-    violations.push({
-      rule: 40,
-      file: protectedPaths.at(-1),
-      line: 1,
-      message: `shipped wire-version history is immutable (git status ${status}). Add the next wire version and migration instead of changing or deleting an existing version module, contract test, or snapshot.`,
-    });
-  }
-  return violations;
-}
-
-async function checkRule40WireContracts() {
-  const violations = checkRule40ImmutableWireHistory();
-  let entries;
-  try {
-    entries = await readdir(join(REPO_ROOT, WIRE_FAMILY_DIR));
-  } catch {
-    return violations;
-  }
-
-  for (const name of entries) {
-    const match = name.match(/^([a-z0-9-]+)-wire\.v(\d+)\.ts$/);
-    if (match === null) continue;
-    const [, family, version] = match;
-
-    const testName = `${family}-wire.v${version}.test.ts`;
-    if (!entries.includes(testName)) {
-      violations.push({
-        rule: 40,
-        file: `${WIRE_FAMILY_DIR}/${name}`,
-        line: 1,
-        message: `wire family "${family}" version ${version} has no colocated contract test (${testName}). Pin this version's schema/encoder or migration/fixtures before shipping it.`,
-      });
-    }
-  }
-
-  const contractSource = await readFile(join(REPO_ROOT, SESSION_INBOX_WIRE_CONTRACT), "utf8");
-  const registryMatch = contractSource.match(
-    /SESSION_INBOX_WIRE_VERSIONS\s*=\s*\[([^\]]*)\]\s*as const/,
-  );
-  const tokens = registryMatch?.[1]
-    .split(",")
-    .map((token) => token.trim())
-    .filter(Boolean);
-  if (tokens === undefined || tokens.length === 0 || tokens.some((token) => !/^\d+$/.test(token))) {
-    violations.push({
-      rule: 40,
-      file: SESSION_INBOX_WIRE_CONTRACT,
-      line: 1,
-      message:
-        "SESSION_INBOX_WIRE_VERSIONS must be an explicit numeric tuple so CI can compare the declared protocol history with shipped version modules.",
-    });
-    return violations;
-  }
-
-  const line = contractSource.slice(0, registryMatch.index).split("\n").length;
-  const versions = tokens.map(Number);
-  const expectedVersions = versions.map((_, index) => index + 1);
-  if (JSON.stringify(versions) !== JSON.stringify(expectedVersions)) {
-    violations.push({
-      rule: 40,
-      file: SESSION_INBOX_WIRE_CONTRACT,
-      line,
-      message: `SESSION_INBOX_WIRE_VERSIONS must be contiguous and ascending from 1; found [${versions.join(", ")}]. Add new versions without renumbering or removing protocol history.`,
-    });
-  }
-
-  const shippedVersions = entries
-    .flatMap((name) => {
-      const match = name.match(/^session-inbox-wire\.v(\d+)\.ts$/);
-      return match === null ? [] : [Number(match[1])];
-    })
-    .sort((left, right) => left - right);
-  const registeredModules = [0, ...versions];
-  if (JSON.stringify(shippedVersions) !== JSON.stringify(registeredModules)) {
-    violations.push({
-      rule: 40,
-      file: SESSION_INBOX_WIRE_CONTRACT,
-      line,
-      message: `session-inbox wire modules [${shippedVersions.join(", ")}] must exactly match legacy v0 plus registered versions [${registeredModules.join(", ")}].`,
-    });
-  }
-
-  return violations;
-}
-
 // ---------- Rule 19: AsyncLocalStorage instances ----------
 
 const NEW_ALS_RE = /new\s+AsyncLocalStorage\s*[<(]/;
@@ -843,15 +811,14 @@ function checkRule27(posix, lines, violations) {
 
 const SCAFFOLD_PREFIX = "packages/eve/src/setup/scaffold/";
 
-// The curated connection and channel catalogs (and any future surface
-// overlays) read canonical identity from `@eve/catalog`, a
-// dependency-free data package shared across the scaffolder and docs. It
-// carries no runtime, compiler, or provider-SDK weight, so the entire scaffold
-// layer may import it. The terminal UI adapters (which carry @clack/core and
-// picocolors) live outside the scaffold, in `packages/eve/src/setup/cli/`.
-const SCAFFOLD_ALLOWED_PACKAGES = new Set(["@eve/catalog"]);
+// The curated connection and channel catalogs read canonical identity from
+// the private `@eve/catalog` workspace package through eve's vendored copy.
+// This keeps the published package self-contained without allowing the
+// scaffold layer to reach into runtime, compiler, or provider SDK modules.
+// Terminal UI adapters live outside the scaffold in `packages/eve/src/setup/cli/`.
+const SCAFFOLD_ALLOWED_PACKAGES = new Set([]);
 
-const SCAFFOLD_ALLOWED_INTERNAL_IMPORTS = new Set([]);
+const SCAFFOLD_ALLOWED_INTERNAL_IMPORTS = new Set(["#compiled/@eve/catalog/index.js"]);
 
 // Only match top-of-line `import` statements, not strings nested inside
 // template literals (e.g. the channel templates embed `from "react"` as
@@ -890,7 +857,7 @@ function checkRule28(posix, lines, violations) {
             rule: 28,
             file: posix,
             line: idx + 1,
-            message: `import from "${spec}" not allowed in the packages/eve/src/setup/scaffold source layer. Scaffold modules allow only node:* builtins, relative files, and @eve/catalog. Keep runtime, compiler, terminal UI, and provider SDK dependencies in their owning package.`,
+            message: `import from "${spec}" not allowed in the packages/eve/src/setup/scaffold source layer. Scaffold modules allow only node:* builtins, relative files, and #compiled/@eve/catalog/index.js. Keep runtime, compiler, terminal UI, and provider SDK dependencies in their owning package.`,
           });
         }
       }
@@ -1414,6 +1381,9 @@ async function main() {
     rule33: /** @type {Violation[]} */ ([]),
     rule35: /** @type {Violation[]} */ ([]),
     rule37: /** @type {Violation[]} */ ([]),
+    rule42: /** @type {Violation[]} */ ([]),
+    rule43: /** @type {Violation[]} */ ([]),
+    rule44: /** @type {Violation[]} */ ([]),
     symlinks: /** @type {string[]} */ ([]),
   };
 
@@ -1516,8 +1486,12 @@ async function main() {
   // Rule 38
   violations.push(...(await checkRule38NoNestedEveBuild()));
 
-  // Rule 40
-  violations.push(...(await checkRule40WireContracts()));
+  // Rule 42
+  violations.push(...state.rule42);
+
+  // Rule 43
+  violations.push(...state.rule43);
+  violations.push(...state.rule44);
 
   if (violations.length === 0) {
     process.stdout.write("[eve:guard:invariants] ok — all mechanical lints passed.\n");

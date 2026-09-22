@@ -220,17 +220,24 @@ describe("run assertions", () => {
     const result = makeResult({
       derived: {
         subagentCalls: [
-          subagentCall("child", "pending"),
+          subagentCall("child", "working"),
           subagentCall("child", "completed"),
           subagentCall("child", "failed"),
-          subagentCall("child", "rejected"),
+          subagentCall("child", "cancelled"),
+          subagentCall("child", "input_required"),
         ],
-        subagentCallCount: 4,
+        subagentCallCount: 5,
       },
     });
 
     expect((await Run.calledSubagent("child").evaluate(result)).score).toBe(1);
-    for (const status of ["pending", "completed", "failed", "rejected"] as const) {
+    for (const status of [
+      "working",
+      "input_required",
+      "completed",
+      "failed",
+      "cancelled",
+    ] as const) {
       expect((await Run.calledSubagent("child", { status, count: 1 }).evaluate(result)).score).toBe(
         1,
       );
@@ -242,7 +249,7 @@ describe("run assertions", () => {
       (
         await Run.calledSubagent("child", {
           count: (count) => count >= 4,
-          status: "pending",
+          status: "working",
         }).evaluate(result)
       ).score,
     ).toBe(0);

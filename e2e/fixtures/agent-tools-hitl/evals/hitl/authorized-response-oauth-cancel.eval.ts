@@ -7,9 +7,14 @@ export default defineEval({
   tags: ["real-model"],
   description: "Cancel beats a candidate parked on OAuth and a late callback cannot execute.",
   async test(t) {
-    await t.send(`Call the \`${TOOL_NAME}\` tool with marker "${MARKER}".`);
-    const approval = t.requireInputRequest({ display: "confirmation", toolName: TOOL_NAME });
-    const approvalTurn = await t.startRespond(
+    const { session: conversation } = await t.send(
+      `Call the \`${TOOL_NAME}\` tool with marker "${MARKER}".`,
+    );
+    const approval = conversation.requireInputRequest({
+      display: "confirmation",
+      toolName: TOOL_NAME,
+    });
+    const approvalTurn = await conversation.startRespond(
       [{ optionId: "approve", requestId: approval.requestId }],
       { headers: { "x-eve-fixture-user": "oauth-cancel-responder" } },
     );

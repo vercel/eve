@@ -10,6 +10,21 @@ function named(name: string, message: string, extra?: Record<string, unknown>): 
   return Object.assign(error, extra);
 }
 
+function gatewayUpstreamBillingError(type: string | undefined, message: string): Error {
+  const body = { error: { message, type } };
+  const upstream = Object.assign(new Error("[object Object]"), {
+    data: body,
+    name: "AI_APICallError",
+    responseBody: JSON.stringify(body),
+    statusCode: 402,
+  });
+  return Object.assign(new Error(message, { cause: upstream }), {
+    name: "GatewayInternalServerError",
+    statusCode: 402,
+    type: "internal_server_error",
+  });
+}
+
 describe("summarizeKnownError (catalog table)", () => {
   const cases: readonly {
     readonly title: string;
@@ -23,6 +38,38 @@ describe("summarizeKnownError (catalog table)", () => {
         "AI Gateway requires a valid credit card on file to service requests.",
       ),
       id: "gateway-billing-required",
+    },
+    {
+      title: "gateway credit balance exhausted by upstream type",
+      error: gatewayUpstreamBillingError(
+        "insufficient_funds",
+        "A positive credit balance is required for all requests, including BYOK, so fallback providers remain available.",
+      ),
+      id: "gateway-credit-exhausted",
+    },
+    {
+      title: "gateway project budget exhausted by upstream type",
+      error: gatewayUpstreamBillingError(
+        "quota_for_entity_exceeded",
+        "Project budget exceeded. Current spend: $1.01, limit: $1.00. Please contact your administrator to increase the budget.",
+      ),
+      id: "gateway-budget-exhausted",
+    },
+    {
+      title: "gateway credit balance exhausted by message fallback",
+      error: gatewayUpstreamBillingError(
+        undefined,
+        "A positive credit balance is required for all requests, including BYOK, so fallback providers remain available.",
+      ),
+      id: "gateway-credit-exhausted",
+    },
+    {
+      title: "gateway project budget exhausted by message fallback",
+      error: gatewayUpstreamBillingError(
+        undefined,
+        "Project budget exceeded. Current spend: $1.01, limit: $1.00. Please contact your administrator to increase the budget.",
+      ),
+      id: "gateway-budget-exhausted",
     },
     {
       title: "gateway free-tier model restriction",
@@ -101,6 +148,14 @@ describe("summarizeKnownError (catalog table)", () => {
         "The model did not return a response. Please try again.",
       ),
       id: "empty-model-response",
+    },
+    {
+      title: "content-filtered model response",
+      error: named(
+        "ContentFilteredModelResponseError",
+        "The model provider filtered this response.",
+      ),
+      id: "model-response-content-filtered",
     },
     {
       title: "unsupported model capability",

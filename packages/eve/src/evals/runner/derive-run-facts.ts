@@ -1,3 +1,4 @@
+import { isJsonObjectValue } from "#shared/json.js";
 import type { MessageStreamEvent } from "#protocol/message.js";
 import { LOAD_SKILL_TOOL_NAME } from "#runtime/skills/fragment-context.js";
 import type { InputRequest } from "#shared/input.js";
@@ -90,7 +91,7 @@ export function deriveRunFacts(
     const call: MutableSubagentCall = {
       callId,
       name,
-      status: "pending",
+      status: "working",
       turnIndex: Math.max(turnIndex, 0),
       sessionId,
     };
@@ -123,10 +124,26 @@ export function deriveRunFacts(
           const call = ensureToolCall(result.callId, result.toolName, {});
           call.output = result.output;
           call.status = status;
+          const output = result.output;
+          if (
+            status === "completed" &&
+            isJsonObjectValue(output) &&
+            output.status === "working" &&
+            typeof output.taskId === "string" &&
+            typeof output.agentId === "string"
+          ) {
+            ensureSubagentCall(result.callId, result.toolName);
+          }
         } else if (result.kind === "subagent-result") {
           const call = ensureSubagentCall(result.callId, result.subagentName);
+          // A working receipt settles dispatch, not the delegated work.
+          if (result.origin === "child" && result.backgroundTask !== undefined) break;
           call.output = call.output ?? result.output;
-          call.status = status;
+          if (result.origin === "child" && result.outcome.result.kind === "cancelled") {
+            call.status = "cancelled";
+          } else {
+            call.status = status === "rejected" ? "failed" : status;
+          }
         }
         break;
       }
@@ -147,8 +164,9 @@ export function deriveRunFacts(
 
       case "subagent.completed": {
         const call = ensureSubagentCall(event.data.callId, event.data.subagentName);
+        if (event.data.backgroundTask !== undefined || call.status !== "working") break;
         call.output = event.data.output;
-        if (call.status === "pending") call.status = "completed";
+        call.status = "completed";
         break;
       }
 

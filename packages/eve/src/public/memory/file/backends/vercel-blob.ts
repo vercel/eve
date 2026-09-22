@@ -34,6 +34,7 @@ export function vercelBlob(options: VercelBlobBackendOptions = {}): MemoryDocume
       ...credentials,
       abortSignal: input.signal,
       access: "private",
+      headers: { "accept-encoding": "identity" },
       useCache: false,
     });
     if (result === null) return null;

@@ -58,6 +58,40 @@ describe("memory namespaces and scopes", () => {
     expect(preview).not.toBe(production);
   });
 
+  it("separates workspace agents mounted within the same Vercel project", () => {
+    vi.stubEnv("VERCEL_PROJECT_ID", "prj_123");
+    vi.stubEnv("VERCEL_ENV", "production");
+    vi.stubEnv("EVE_INTERNAL_AGENT_WORKSPACE_MEMBER", "1");
+    vi.stubEnv("EVE_PUBLIC_ROUTE_PREFIX", "/support/");
+    const support = defaultNamespace({ appRoot: "/app", node: "__root__", slot: "profile" });
+
+    vi.stubEnv("EVE_PUBLIC_ROUTE_PREFIX", "/research");
+    const research = defaultNamespace({ appRoot: "/app", node: "__root__", slot: "profile" });
+
+    expect(JSON.parse(support)).toEqual([
+      "eve-memory-default-namespace-v1",
+      "vercel",
+      "prj_123",
+      "production",
+      null,
+      "/support",
+      "__root__",
+      "profile",
+    ]);
+    expect(support).not.toBe(research);
+  });
+
+  it("preserves standalone Vercel namespaces when a public route prefix is configured", () => {
+    vi.stubEnv("VERCEL_PROJECT_ID", "prj_123");
+    vi.stubEnv("VERCEL_ENV", "production");
+    const input = { appRoot: "/app", node: "__root__", slot: "profile" };
+    const unprefixed = defaultNamespace(input);
+
+    vi.stubEnv("EVE_PUBLIC_ROUTE_PREFIX", "/support");
+
+    expect(defaultNamespace(input)).toBe(unprefixed);
+  });
+
   it("disables anonymous and runtime principals and normalizes local development", () => {
     const context = (principalType: string, principalId = "principal") => ({
       ...baseContext,

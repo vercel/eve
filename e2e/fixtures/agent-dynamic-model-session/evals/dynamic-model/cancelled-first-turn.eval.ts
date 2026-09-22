@@ -14,7 +14,8 @@ export default defineEval({
   timeoutMs: 240_000,
 
   async test(t) {
-    const live = await t.start(
+    const session = await t.session();
+    const live = await session.start(
       "Call the wait-for-cancellation tool and wait until this turn is cancelled.",
     );
     await live.waitForEvent("actions.requested", {
@@ -40,7 +41,7 @@ export default defineEval({
     cancelledTurn.notEvent("turn.failed");
     cancelledTurn.notEvent("session.failed");
 
-    const resumed = await t.send(
+    const resumed = await session.send(
       'Reply with exactly the text "session model after cancellation" and nothing else.',
     );
     resumed.expectOk();

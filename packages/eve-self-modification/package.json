@@ -1,7 +1,8 @@
 {
   "name": "@eve/self-modification",
-  "version": "0.0.3",
-  "description": "Development-only source editing subagent for eve applications.",
+  "version": "0.0.13",
+  "private": true,
+  "description": "Compatibility entrypoints for eve self-modification.",
   "keywords": [
     "agents",
     "eve",
@@ -31,6 +32,10 @@
       "types": "./dist/index.d.ts",
       "default": "./dist/index.mjs"
     },
+    "./extension": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.mjs"
+    },
     "./agent": {
       "eve-source": "./src/agent.ts",
       "types": "./scaffold/agent.d.ts",
@@ -43,10 +48,6 @@
       "import": "./scaffold/sandbox.js",
       "default": "./scaffold/sandbox.js"
     },
-    "./extension": {
-      "types": "./dist/index.d.ts",
-      "default": "./dist/index.mjs"
-    },
     "./tools": {
       "types": "./dist/tools/index.d.ts",
       "default": "./dist/tools/index.mjs"
@@ -58,19 +59,14 @@
   "scripts": {
     "build": "eve extension build && pnpm run build:scaffold",
     "build:scaffold": "node -e \"require('node:fs').rmSync('scaffold', { force: true, recursive: true })\" && tsc -p tsconfig.scaffold.json",
-    "prepare": "pnpm run build",
-    "test:scenario": "vitest run src/*.scenario.test.ts",
-    "test:unit": "vitest run src --exclude src/**/*.scenario.test.ts",
+    "prepack": "pnpm run build",
     "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.scaffold.json --noEmit"
   },
   "dependencies": {
-    "eve": "workspace:^",
-    "just-bash": "3.1.0"
+    "eve": "workspace:*"
   },
   "devDependencies": {
-    "@types/node": "catalog:",
-    "typescript": "catalog:",
-    "vitest": "catalog:"
+    "typescript": "catalog:"
   },
   "engines": {
     "node": ">=24"
@@ -78,10 +74,7 @@
   "eve": {
     "extension": {
       "source": "./extension",
-      "dist": "./dist/extension",
-      "externalDependencies": [
-        "just-bash"
-      ]
+      "dist": "./dist/extension"
     }
   }
 }

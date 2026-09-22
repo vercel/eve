@@ -241,6 +241,9 @@ export function validateCompiledAgentResources(
 }
 
 function validateSubagentRecord(subagent: CompiledSubagentNode): void {
+  if (subagent.name === "agent") {
+    fail('subagent name "agent" is reserved for the built-in root-copy target');
+  }
   if (subagent.backing.kind !== "resource" || subagent.backing.sourcePath.length === 0) {
     fail(`subagent "${subagent.nodeId}" has no physical resource backing`);
   }
@@ -345,8 +348,6 @@ function collectReferencedModuleSources(
   for (const value of node.hooks) add(value);
   for (const value of node.memories) add(value);
   for (const value of node.instructions) if (value.sourceKind === "module") add(value);
-  if (node.instrumentation !== undefined) add(node.instrumentation);
-  if (node.workflowTool !== undefined) add(node.workflowTool);
   for (const value of node.skills) if (value.sourceKind === "module") add(value);
   for (const value of node.schedules) if (value.sourceKind === "module") add(value);
   add(node.sandbox);

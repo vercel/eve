@@ -5,16 +5,18 @@ import type { EveEvalConfig, EveEvalConfigInput } from "#evals/types.js";
  * default export of `evals.config.ts` at the root of the `evals/` directory.
  *
  * Exactly one `evals.config.ts` is required. It supplies the optional default
- * `judge` model for `t.judge.*` assertions (so individual evals need not
- * repeat it), optional run-level `reporters`, a default `maxConcurrency`, and a
- * default `timeoutMs`. CLI flags (`--max-concurrency`, `--timeout`) and
- * per-eval values take precedence over the config defaults.
+ * `judge` model for `t.judge(...)` assertions (so individual evals need not
+ * repeat it), run-level `reporters`, `maxConcurrency` and `timeoutMs` defaults,
+ * and optional run-wide `setup` and `teardown`. CLI flags (`--max-concurrency`,
+ * `--timeout`) and per-eval values take precedence over the config defaults.
  *
- * Throws on invalid input: a `judge` without a `model`, a non-positive or
- * non-integer `maxConcurrency`, a negative or non-finite `timeoutMs`, or a
- * non-array `reporters`.
+ * Throws on invalid input: a non-positive or non-integer `maxConcurrency`,
+ * a negative or non-finite `timeoutMs`, non-array `reporters`, or a
+ * non-function `setup` or `teardown`.
  */
-export function defineEvalConfig(input: EveEvalConfigInput): EveEvalConfig {
+export function defineEvalConfig<TContext = undefined>(
+  input: EveEvalConfigInput<TContext>,
+): EveEvalConfig<TContext> {
   validateEvalConfigInput(input);
 
   return {
@@ -24,14 +26,12 @@ export function defineEvalConfig(input: EveEvalConfigInput): EveEvalConfig {
 }
 
 function validateEvalConfigInput(input: EveEvalConfigInput): void {
-  if (
-    input.judge !== undefined &&
-    (input.judge.model === undefined || input.judge.model === null)
-  ) {
-    throw new Error(
-      "Eval config `judge` requires a `model`. It is the default judge model for `t.judge.*` " +
-        "assertions across every eval.",
-    );
+  if (input.setup !== undefined && typeof input.setup !== "function") {
+    throw new Error("Eval config `setup` must be a function.");
+  }
+
+  if (input.teardown !== undefined && typeof input.teardown !== "function") {
+    throw new Error("Eval config `teardown` must be a function.");
   }
 
   if (

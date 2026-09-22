@@ -8,7 +8,6 @@ import type { PreparedDevelopmentApplicationHost } from "#internal/nitro/host/ty
 import type { DevelopmentWorkspaceExtension } from "#internal/nitro/host/dev-workspace-extensions.js";
 import type { DevelopmentAuthoredRebuildCoordinator } from "#internal/nitro/host/dev-authored-rebuild-coordinator.js";
 import { getDevelopmentEnvironmentFilePaths } from "#cli/dev/environment.js";
-import { providerSettingsPath } from "#setup/provider-settings.js";
 import {
   AUTHORED_ARTIFACTS_UPDATED_LOG_LINE,
   STRUCTURAL_RELOAD_LOG_LINE,
@@ -46,8 +45,8 @@ export interface AuthoredSourceWatcherHandle {
   close(): Promise<void>;
   flush(): Promise<void>;
   rebuild(): Promise<void>;
-  suspend(): Promise<void>;
-  resume(options?: { silent?: boolean }): Promise<void>;
+  suspend(leaseId: string): Promise<void>;
+  resume(leaseId: string, options?: { silent?: boolean }): Promise<void>;
 }
 
 /**
@@ -65,7 +64,7 @@ export async function startAuthoredSourceWatcher(input: {
   let queue: Promise<void> = Promise.resolve();
   let debounceTimer: NodeJS.Timeout | undefined;
   let isWatcherReady = false;
-  let suspensionCount = 0;
+  const suspensionLeases = new Set<string>();
   const pendingEvents = new Map<string, WatcherChangeEvent>();
   const pendingChangedPaths = new Set<string>();
   const initialWatchPaths = await resolveAuthoredWatchPaths(currentHost);
@@ -77,13 +76,12 @@ export async function startAuthoredSourceWatcher(input: {
     },
     followSymlinks: false,
     ignoreInitial: true,
-    ignored: (path) =>
-      shouldIgnoreWatcherPath(path, currentHost.appRoot, currentHost.workspaceExtensions),
+    ignored: (path) => shouldIgnoreWatcherPath(path, currentHost.workspaceExtensions),
   });
   const watcherReady = waitForWatcherReady(watcher);
 
   const rebuild = async (force: boolean, silent = false) => {
-    if (closed || suspensionCount > 0) {
+    if (closed || suspensionLeases.size > 0) {
       return;
     }
 
@@ -180,18 +178,18 @@ export async function startAuthoredSourceWatcher(input: {
     },
     flush,
     rebuild: forceRebuild,
-    async suspend() {
-      suspensionCount += 1;
+    async suspend(leaseId) {
+      if (suspensionLeases.has(leaseId)) return;
+      suspensionLeases.add(leaseId);
       if (debounceTimer !== undefined) {
         clearTimeout(debounceTimer);
         debounceTimer = undefined;
       }
       await queue;
     },
-    async resume(options) {
-      if (suspensionCount === 0) return;
-      suspensionCount -= 1;
-      if (suspensionCount === 0) await forceRebuild(options?.silent);
+    async resume(leaseId, options) {
+      if (!suspensionLeases.delete(leaseId)) return;
+      if (suspensionLeases.size === 0) await forceRebuild(options?.silent);
     },
   };
 }
@@ -219,10 +217,11 @@ async function resolveAuthoredWatchPaths(
     join(host.appRoot, "jsconfig.json"),
     join(host.appRoot, "tsconfig.json"),
     join(host.appRoot, TS_CONFIG_GLOB_NAME),
-    providerSettingsPath(host.appRoot),
   ]);
   const tsconfigPaths = await resolveTsConfigWatchPaths(host.appRoot);
-  const sourceSnapshotWatchPaths = await resolveDevelopmentSourceSnapshotWatchPaths(host.appRoot);
+  const sourceSnapshotWatchPaths =
+    host.generation.sourceWatchPaths ??
+    (await resolveDevelopmentSourceSnapshotWatchPaths(host.appRoot));
 
   for (const extension of host.workspaceExtensions) {
     watchPaths.add(extension.config.sourceRoot);
@@ -332,15 +331,13 @@ async function resolveTsConfigWatchPaths(appRoot: string): Promise<string[]> {
 
 function shouldIgnoreWatcherPath(
   path: string,
-  appRoot: string,
   workspaceExtensions: readonly DevelopmentWorkspaceExtension[],
 ): boolean {
   const normalizedPath = normalize(path);
   const pathParts = normalizedPath.split(sep).filter(Boolean);
-  const isProviderSettings = normalizedPath === normalize(providerSettingsPath(appRoot));
 
   return (
-    (!isProviderSettings && pathParts.some((part) => WATCHER_IGNORED_DIRECTORY_NAMES.has(part))) ||
+    pathParts.some((part) => WATCHER_IGNORED_DIRECTORY_NAMES.has(part)) ||
     workspaceExtensions.some((extension) => isPathInsideOrEqual(path, extension.config.outDir))
   );
 }

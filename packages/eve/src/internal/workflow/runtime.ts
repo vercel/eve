@@ -11,3 +11,5 @@ export type {
 export function setWorld(world: unknown): void {
   workflowRuntime.setWorld(world as Parameters<typeof workflowRuntime.setWorld>[0]);
 }
+
+export { resolveRunEncryptionKey } from "#compiled/@workflow/core/runtime/helpers.js";

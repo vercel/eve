@@ -20,6 +20,9 @@ const authenticateA: AuthFn<Request> = (request) =>
   request.headers.get("authorization") === PRINCIPAL_A ? principal("issuer-a") : null;
 const authenticateB: AuthFn<Request> = (request) =>
   request.headers.get("authorization") === PRINCIPAL_B ? principal("issuer-b") : null;
-const authenticateEvalDriver: AuthFn<Request> = () => principal("eval-driver");
+const authenticateEvalDriver: AuthFn<Request> = (request) => ({
+  ...principal("eval-driver"),
+  attributes: { denyBoundary: request.headers.get("x-e2e-deny-boundary") ?? "" },
+});
 
 export default eveChannel({ auth: [authenticateA, authenticateB, authenticateEvalDriver] });

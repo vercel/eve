@@ -1,3 +1,4 @@
+import { handleDevelopmentModelCredentialRequest } from "#internal/model-auth/development-broker-server.js";
 import { EVE_DEV_ENV_FLAG } from "#internal/application/optional-package-install.js";
 
 import type { Nitro } from "nitro/types";
@@ -44,6 +45,7 @@ import {
   DEFAULT_DEVELOPMENT_SERVER_PORT,
   MAX_DEVELOPMENT_SERVER_PORT_ATTEMPTS,
 } from "#internal/nitro/host/ports.js";
+import { installLocalDevCapabilityEnvironment } from "#runtime/local-dev-capability.js";
 import { detectPackageManager, type PackageManagerKind } from "#setup/package-manager.js";
 import { eveDevArguments } from "#setup/primitives/index.js";
 import { devBootPhase } from "#internal/dev-boot-progress.js";
@@ -208,8 +210,14 @@ function addDevelopmentControlHandler(input: {
   readonly devServer: DrainedNitroDevServer;
   readonly getWatcher: () => AuthoredSourceWatcherHandle | undefined;
   readonly workflowWorld: ParentDevelopmentWorkflowWorld | undefined;
+  readonly transportSecret: string;
 }): void {
   input.devServer.setControlHandler(async (request) => {
+    const credentialResponse = await handleDevelopmentModelCredentialRequest(request, {
+      appRoot: input.appRoot,
+      secret: input.transportSecret,
+    });
+    if (credentialResponse !== undefined) return credentialResponse;
     const worldResponse = await input.workflowWorld?.handleRequest(request);
     if (worldResponse !== undefined) {
       return worldResponse;
@@ -232,12 +240,16 @@ function addDevelopmentControlHandler(input: {
     if (watcher === undefined) {
       return Response.json({ error: "The development server is still starting." }, { status: 503 });
     }
+    const leaseId = url.searchParams.get("lease");
+    if ((isSuspendRequest || isResumeRequest) && (leaseId === null || leaseId.length === 0)) {
+      return Response.json({ error: "A suspension lease is required." }, { status: 400 });
+    }
     if (isSuspendRequest) {
-      await watcher.suspend();
+      await watcher.suspend(leaseId!);
       return Response.json({ suspended: true });
     }
     if (isResumeRequest) {
-      await watcher.resume({ silent: url.searchParams.get("silent") === "1" });
+      await watcher.resume(leaseId!, { silent: url.searchParams.get("silent") === "1" });
       return handleDevRuntimeArtifactsRequest({ appRoot: input.appRoot });
     }
     if (url.searchParams.get("force") === "1") {
@@ -380,7 +392,7 @@ async function startNitroDevelopmentServer(
   process.env[EVE_DEV_ENV_FLAG] ??= "1";
 
   const project = await resolveDiscoveryProject(rootDir);
-  loadDevelopmentEnvironmentFiles(project.appRoot);
+  await loadDevelopmentEnvironmentFiles(project.appRoot);
 
   const environmentPort = readEnvironmentPort();
   const requestedPort = options.port ?? environmentPort;
@@ -408,6 +420,7 @@ async function startNitroDevelopmentServer(
   process.env[EVE_DEVELOPMENT_SANDBOX_RUN_ID_ENV] = developmentSandboxRunId;
   let nitro: Nitro | undefined;
   let devServer: NitroDevelopmentServer | undefined;
+  let restoreLocalDevCapabilityEnvironment: (() => void) | undefined;
   let restoreWorkflowLocalQueueEnvironment: (() => void) | undefined;
   let restoreWorkflowTransportEnvironment: (() => void) | undefined;
   let workflowWorld: ParentDevelopmentWorkflowWorld | undefined;
@@ -457,6 +470,7 @@ async function startNitroDevelopmentServer(
       devServer: activeDevServer,
       getWatcher: () => authoredSourceWatcher,
       workflowWorld,
+      transportSecret: workflowTransportSecret,
     });
     const hostname =
       options.host ?? activeNitro.options.devServer.hostname ?? DEFAULT_DEVELOPMENT_SERVER_HOST;
@@ -479,6 +493,12 @@ async function startNitroDevelopmentServer(
 
     const serverUrl = normalizeDevelopmentServerClientUrl(server.url);
     restoreWorkflowLocalQueueEnvironment = installWorkflowLocalQueueEnvironment(serverUrl);
+    // Published before the first worker is created, so every runtime generation
+    // inherits it: workers copy `process.env` at construction.
+    restoreLocalDevCapabilityEnvironment = installLocalDevCapabilityEnvironment({
+      appRoot: project.appRoot,
+      serverUrl,
+    });
     await devBootPhase(
       "building dev bundle",
       async () => {
@@ -535,6 +555,7 @@ async function startNitroDevelopmentServer(
     const devServerOnClose = devServer;
     const workflowWorldOnClose = workflowWorld;
     const restoreWorkflowTransportEnvironmentOnClose = restoreWorkflowTransportEnvironment;
+    const restoreLocalDevCapabilityEnvironmentOnClose = restoreLocalDevCapabilityEnvironment;
     let closePromise: Promise<void> | undefined;
     const close = (): Promise<void> => {
       closePromise ??= (async () => {
@@ -558,6 +579,7 @@ async function startNitroDevelopmentServer(
         } finally {
           restoreWorkflowLocalQueueEnvironmentOnClose();
           restoreWorkflowTransportEnvironmentOnClose?.();
+          restoreLocalDevCapabilityEnvironmentOnClose?.();
           restoreDevelopmentSandboxRunId(previousDevelopmentSandboxRunId);
         }
       })();
@@ -593,6 +615,7 @@ async function startNitroDevelopmentServer(
     }
     restoreWorkflowLocalQueueEnvironment?.();
     restoreWorkflowTransportEnvironment?.();
+    restoreLocalDevCapabilityEnvironment?.();
     if (cleanup.listenerClosed) {
       await state.remove().catch(() => {});
     }

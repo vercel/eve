@@ -44,27 +44,21 @@ describe("formatAttributeContent", () => {
 
   it("renders prompt messages as role-prefixed blocks", () => {
     const messages = JSON.stringify([
-      { role: "user", content: "test" },
+      { role: "user", parts: [{ type: "text", content: "test" }] },
       {
         role: "assistant",
-        content: [
-          { type: "reasoning", text: "" },
-          { type: "text", text: "Hi! What city?" },
-          { type: "tool-call", toolName: "get_weather", input: { city: "nyc" } },
+        parts: [
+          { type: "reasoning", content: "" },
+          { type: "text", content: "Hi! What city?" },
+          { type: "tool_call", id: "call-1", name: "get_weather", arguments: { city: "nyc" } },
         ],
       },
       {
         role: "tool",
-        content: [
-          {
-            type: "tool-result",
-            toolName: "get_weather",
-            output: { type: "text", value: "sunny, 72F" },
-          },
-        ],
+        parts: [{ type: "tool_call_response", id: "call-1", response: "sunny, 72F" }],
       },
     ]);
-    expect(format("ai.prompt.messages", messages)).toEqual([
+    expect(format("gen_ai.input.messages", messages)).toEqual([
       "user: test",
       "assistant: ⟨reasoning⟩",
       "  Hi! What city?",
@@ -75,8 +69,10 @@ describe("formatAttributeContent", () => {
 
   it("keeps wrapped continuations indented under their block", () => {
     const longText = "word ".repeat(30).trim();
-    const messages = JSON.stringify([{ role: "assistant", content: longText }]);
-    const lines = format("ai.prompt.messages", messages, 40);
+    const messages = JSON.stringify([
+      { role: "assistant", parts: [{ type: "text", content: longText }] },
+    ]);
+    const lines = format("gen_ai.input.messages", messages, 40);
     expect(lines[0]).toMatch(/^assistant: /);
     for (const line of lines.slice(1)) expect(line).toMatch(/^ {2}\S/);
     for (const line of lines) expect(visibleLength(line)).toBeLessThanOrEqual(40);
@@ -84,27 +80,27 @@ describe("formatAttributeContent", () => {
     expect(lines.join(" ").match(/word/g)).toHaveLength(30);
   });
 
-  it("unwraps typed tool output envelopes", () => {
+  it("renders structured tool responses", () => {
     const messages = JSON.stringify([
       {
         role: "tool",
-        content: [
+        parts: [
           {
-            type: "tool-result",
-            toolName: "get_weather",
-            output: { type: "json", value: { city: "nyc", temperatureF: 72 } },
+            type: "tool_call_response",
+            id: "call-1",
+            response: { city: "nyc", temperatureF: 72 },
           },
         ],
       },
     ]);
-    expect(format("ai.prompt.messages", messages)).toEqual([
-      'tool get_weather: {"city":"nyc","temperatureF":72}',
+    expect(format("gen_ai.input.messages", messages)).toEqual([
+      'tool: {"city":"nyc","temperatureF":72}',
     ]);
   });
 
   it("falls back to pretty JSON for non-message payloads", () => {
     const notMessages = JSON.stringify([{ notARole: true }]);
-    expect(format("ai.prompt.messages", notMessages)).toEqual([
+    expect(format("gen_ai.input.messages", notMessages)).toEqual([
       "[",
       "  {",
       '    "notARole": true',
@@ -114,35 +110,24 @@ describe("formatAttributeContent", () => {
   });
 
   it("keeps unparseable strings raw", () => {
-    expect(format("ai.prompt.messages", "not json at all")).toEqual(["not json at all"]);
-  });
-
-  it("renders the truncation marker as a notice before the kept messages", () => {
-    const messages = JSON.stringify([
-      { "eve.truncated": { omittedMessages: 47 } },
-      { role: "user", content: "latest question" },
-    ]);
-    expect(format("ai.prompt.messages", messages)).toEqual([
-      "… 47 earlier messages omitted (long context)",
-      "user: latest question",
-    ]);
+    expect(format("gen_ai.input.messages", "not json at all")).toEqual(["not json at all"]);
   });
 
   it("splits embedded newlines in payload text into separate lines", () => {
     const messages = JSON.stringify([
       {
         role: "tool",
-        content: [
+        parts: [
           {
-            type: "tool-result",
-            toolName: "load_skill",
-            output: { type: "text", value: "line one.\nline two.\n" },
+            type: "tool_call_response",
+            id: "call-1",
+            response: "line one.\nline two.\n",
           },
         ],
       },
     ]);
-    const lines = format("ai.prompt.messages", messages);
-    expect(lines).toEqual(["tool load_skill: line one.", "  line two."]);
+    const lines = format("gen_ai.input.messages", messages);
+    expect(lines).toEqual(["tool: line one.", "  line two."]);
     for (const line of lines) expect(line).not.toContain("\n");
   });
 
@@ -156,26 +141,29 @@ describe("formatAttributeContent", () => {
 
   it("strips terminal escape sequences from roles, content, and tool names", () => {
     const messages = JSON.stringify([
-      { role: "user", content: "hello\x1b[31mred\x1b[0m world" },
+      {
+        role: "user",
+        parts: [{ type: "text", content: "hello\x1b[31mred\x1b[0m world" }],
+      },
       {
         role: "assistant",
-        content: [
-          { type: "text", text: "safe\x1b[2Jtext" },
-          { type: "tool-call", toolName: "evil\x1b[?1000h", input: {} },
+        parts: [
+          { type: "text", content: "safe\x1b[2Jtext" },
+          { type: "tool_call", id: "call-1", name: "evil\x1b[?1000h", arguments: {} },
         ],
       },
       {
         role: "tool",
-        content: [
+        parts: [
           {
-            type: "tool-result",
-            toolName: "evil\x1b[?1000h",
-            output: { type: "text", value: "r\x1besult" },
+            type: "tool_call_response",
+            id: "call-1",
+            response: "r\x1besult",
           },
         ],
       },
     ]);
-    const lines = format("ai.prompt.messages", messages);
+    const lines = format("gen_ai.input.messages", messages);
     const joined = lines.join("\n");
     expect(joined).not.toContain("\x1b");
     expect(joined).toContain("hello");

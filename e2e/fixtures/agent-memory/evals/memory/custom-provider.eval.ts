@@ -6,11 +6,12 @@ export default defineEval({
     const update = await t.send(
       "Update the profile memory to NEW_PROFILE_VALUE, then confirm the update.",
     );
+    const session = update.session;
     update.expectOk();
     update.calledTool("profile__save", { count: 1 });
     update.messageIncludes("MEMORY_TOOL_UPDATED");
 
-    const recalled = await t.send(
+    const recalled = await session.send(
       "Report the current profile memory exactly as instructed, without calling a tool.",
     );
     recalled.expectOk();

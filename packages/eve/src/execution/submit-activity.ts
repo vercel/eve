@@ -18,6 +18,7 @@ export async function submitActivity(input: {
     if (batch === undefined) return;
     const response = await postSessionCallbackRequest({
       body: batch,
+      logFailures: false,
       timeoutMs: ACTIVITY_SUBMIT_TIMEOUT_MS,
       url: input.sink.url,
     });

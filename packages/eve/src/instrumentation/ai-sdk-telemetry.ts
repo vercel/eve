@@ -35,9 +35,14 @@ export function ensureOtelIntegration(): void {
  * these forward or they stop receiving events.
  */
 export function getRegisteredTelemetryIntegrations(options?: {
+  readonly excludeEveOtelIntegration?: boolean;
   readonly sanitizeEveOtelErrors?: boolean;
 }): readonly Telemetry[] {
-  const integrations = globalThis.AI_SDK_TELEMETRY_INTEGRATIONS ?? [];
+  const registered = globalThis.AI_SDK_TELEMETRY_INTEGRATIONS ?? [];
+  const integrations =
+    options?.excludeEveOtelIntegration === true
+      ? registered.filter((integration) => integration !== eveOtelIntegration)
+      : registered;
   if (options?.sanitizeEveOtelErrors !== true) return integrations;
   let matched = false;
   const sanitized = integrations.map((integration) => {
@@ -47,7 +52,7 @@ export function getRegisteredTelemetryIntegrations(options?: {
     matched = true;
     return errorSafeEveOtelIntegration;
   });
-  if (!matched && !warnedMissingEveOtelIntegration) {
+  if (!matched && options.excludeEveOtelIntegration !== true && !warnedMissingEveOtelIntegration) {
     warnedMissingEveOtelIntegration = true;
     log.warn("could not sanitize eve's AI SDK OpenTelemetry integration", {
       reason:

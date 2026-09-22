@@ -149,14 +149,8 @@ export function renderCommandSuggestions(
     const name = `/${spec.name}`;
     const content = isCursor ? `${theme.glyph.selectedPointer} ${name}` : `  ${name}`;
     const selection = renderCursorRow(content, isCursor, c);
-    let detail = invocation(spec).slice(`/${spec.name}`.length);
-    let pad = " ".repeat(column - invocation(spec).length);
-    // The selected label's trailing inverse cell replaces the first suffix
-    // space so aliases and descriptions stay in the same columns.
-    if (isCursor) {
-      if (detail.startsWith(" ")) detail = detail.slice(1);
-      else pad = pad.slice(1);
-    }
+    const detail = invocation(spec).slice(`/${spec.name}`.length);
+    const pad = " ".repeat(column - invocation(spec).length);
     return `${selection}${c.dim(detail)}${pad}${c.dim(spec.description)}`;
   });
 

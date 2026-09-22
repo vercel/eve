@@ -32,6 +32,57 @@ test("extracts usage from authoring harness transcripts", () => {
   });
 });
 
+test("extracts OpenCode step usage", () => {
+  const usage = extractRunUsage(
+    JSON.stringify({
+      type: "step_finish",
+      part: {
+        tokens: { input: 100, output: 20, reasoning: 5, cache: { read: 50, write: 10 } },
+      },
+    }),
+    "OpenCode",
+  );
+
+  assert.deepEqual(usage, { input: 100, output: 20, reasoning: 5, cacheRead: 50, cacheWrite: 10 });
+});
+
+test("extracts Claude Code message usage", () => {
+  const usage = extractRunUsage(
+    JSON.stringify({
+      type: "assistant",
+      message: {
+        usage: {
+          input_tokens: 100,
+          output_tokens: 20,
+          cache_read_input_tokens: 50,
+          cache_creation_input_tokens: 10,
+        },
+      },
+    }),
+    "Claude Code",
+  );
+
+  assert.deepEqual(usage, { input: 100, output: 20, reasoning: 0, cacheRead: 50, cacheWrite: 10 });
+});
+
+test("extracts Codex completion usage without double-counting cached input", () => {
+  const usage = extractRunUsage(
+    JSON.stringify({
+      type: "turn.completed",
+      usage: {
+        input_tokens: 150,
+        cached_input_tokens: 50,
+        cache_write_input_tokens: 10,
+        output_tokens: 20,
+        reasoning_output_tokens: 5,
+      },
+    }),
+    "Codex",
+  );
+
+  assert.deepEqual(usage, { input: 100, output: 20, reasoning: 5, cacheRead: 50, cacheWrite: 10 });
+});
+
 test("calculates token consumption without double-counting cache details", () => {
   assert.equal(
     tokenConsumption({
@@ -43,6 +94,15 @@ test("calculates token consumption without double-counting cache details", () =>
     }),
     125,
   );
+});
+
+test("counts native OpenCode and Codex tool invocations", () => {
+  const raw = [
+    JSON.stringify({ type: "tool_use", part: { tool: "bash" } }),
+    JSON.stringify({ type: "item.started", item: { type: "command_execution" } }),
+  ].join("\n");
+
+  assert.equal(countToolInvocations(raw), 2);
 });
 
 test("counts tool invocations in authoring harness transcripts", () => {

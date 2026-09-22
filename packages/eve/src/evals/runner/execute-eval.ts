@@ -21,6 +21,8 @@ export interface ExecuteEvalOptions {
   readonly onLog?: (message: string) => void;
   /** Receives the first trace context observed for each session. */
   readonly onSessionStart?: (event: EvalSessionStartedEvent) => void;
+  /** Shared setup context; stays in the runner process. */
+  readonly setupContext?: unknown;
   readonly target: EveEvalTargetHandle;
   /** Overrides the eval's own `timeoutMs` when set (CLI `--timeout`). */
   readonly timeoutMs?: number;
@@ -51,6 +53,7 @@ export async function executeEval(options: ExecuteEvalOptions): Promise<EveEvalR
     const outcome = await executeTask({
       client,
       evaluation,
+      setupContext: options.setupContext,
       onLog: options.onLog,
       onSessionStart: options.onSessionStart,
       target,

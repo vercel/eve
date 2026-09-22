@@ -2,7 +2,12 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { Client, type MessageStreamEvent } from "#client/index.js";
 import { stampTestEvent } from "#internal/testing/events.js";
-import type { UnstampedMessageStreamEvent, SubagentCalledStreamEvent } from "#protocol/message.js";
+import {
+  EVE_MESSAGE_STREAM_VERSION,
+  EVE_STREAM_VERSION_HEADER,
+  type SubagentCalledStreamEvent,
+  type UnstampedMessageStreamEvent,
+} from "#protocol/message.js";
 
 import { SubagentPump, type SubagentView } from "./subagent-pump.js";
 
@@ -45,12 +50,15 @@ function pushableChildStream() {
               "abort",
               () => {
                 aborted = true;
-                nextController.close();
+                nextController.error(signal.reason);
               },
               { once: true },
             );
           },
         }),
+        {
+          headers: { [EVE_STREAM_VERSION_HEADER]: EVE_MESSAGE_STREAM_VERSION },
+        },
       );
     },
     get aborted() {
@@ -83,6 +91,9 @@ function responseOf(events: readonly MessageStreamEvent[]): Response {
         controller.close();
       },
     }),
+    {
+      headers: { [EVE_STREAM_VERSION_HEADER]: EVE_MESSAGE_STREAM_VERSION },
+    },
   );
 }
 
@@ -92,7 +103,6 @@ function reasoningEvent(delta: string, index = 0): MessageStreamEvent {
       type: "reasoning.appended",
       data: {
         reasoningDelta: delta,
-        reasoningSoFar: delta,
         sequence: 2,
         stepIndex: 0,
         turnId: "child-turn",
@@ -202,6 +212,16 @@ describe("SubagentPump.settleCancelledTurn", () => {
 });
 
 describe("SubagentPump background receipts", () => {
+  it("retains a receipt that arrives before child dispatch", () => {
+    const view = fakeView();
+    const pump = new SubagentPump({ view, formatActionResultError: () => "failed" });
+    pump.background("call-1");
+    pump.begin(subagentCalled("call-1"));
+    pump.settleCancelledTurn("turn-1");
+    expect(view.background).toHaveBeenCalledWith({ callId: "call-1" });
+    expect(view.complete).not.toHaveBeenCalled();
+  });
+
   it("keeps the section open until the child stream reaches its own boundary", async () => {
     const child = pushableChildStream();
     const client = new Client({ host: "http://localhost:3000" });
@@ -272,6 +292,174 @@ describe("SubagentPump background receipts", () => {
 });
 
 describe("SubagentPump child stream transport", () => {
+  it.each([
+    boundaryEvent(0),
+    stampTestEvent({ type: "session.completed" } as UnstampedMessageStreamEvent, 0),
+    failedBoundaryEvent(0),
+  ])("aborts a cloned open child stream at $type", async (boundary) => {
+    const client = new Client({ host: "http://localhost:3000" });
+    const view = fakeView();
+    const tracingError = vi.fn();
+    let signal: AbortSignal | undefined;
+    let closeStream = () => {};
+    let tracingDone: Promise<unknown> | undefined;
+    const fetch = vi.spyOn(client, "fetch").mockImplementation(async (_path, init) => {
+      signal = init?.signal ?? undefined;
+      const response = new Response(
+        new ReadableStream<Uint8Array>({
+          start(controller) {
+            closeStream = () => controller.error(new DOMException("Aborted", "AbortError"));
+            signal?.addEventListener("abort", closeStream, { once: true });
+            controller.enqueue(new TextEncoder().encode(`${JSON.stringify(boundary)}\n`));
+          },
+        }),
+        { headers: { [EVE_STREAM_VERSION_HEADER]: EVE_MESSAGE_STREAM_VERSION } },
+      );
+      tracingDone = response.clone().text().catch(tracingError);
+      return response;
+    });
+    const pump = new SubagentPump({ client, view, formatActionResultError: () => "failed" });
+
+    try {
+      pump.begin(subagentCalled("call-1"));
+      await vi.waitFor(() =>
+        expect(view.complete).toHaveBeenCalledWith({ authoritative: true, callId: "call-1" }),
+      );
+      await vi.waitFor(() => expect(signal?.aborted).toBe(true));
+      await tracingDone;
+
+      expect(tracingError).toHaveBeenCalledWith(expect.objectContaining({ name: "AbortError" }));
+      expect(fetch).toHaveBeenCalledOnce();
+    } finally {
+      closeStream();
+      pump.abortAll();
+      await tracingDone;
+    }
+  });
+
+  it("resumes from the prior cursor when a conversation subagent is called again", async () => {
+    const client = new Client({ host: "http://localhost:3000" });
+    const fetch = vi
+      .spyOn(client, "fetch")
+      .mockResolvedValueOnce(responseOf([boundaryEvent(0)]))
+      .mockResolvedValueOnce(
+        responseOf([
+          stampTestEvent(
+            {
+              type: "actions.requested",
+              data: {
+                actions: [
+                  {
+                    callId: "registry-add",
+                    input: { address: "channel/slack" },
+                    kind: "tool-call",
+                    toolName: "registry_add",
+                  },
+                ],
+                sequence: 1,
+                stepIndex: 0,
+                turnId: "child-turn-2",
+              },
+            } as UnstampedMessageStreamEvent,
+            1,
+          ),
+          stampTestEvent(
+            {
+              type: "action.result",
+              data: {
+                result: {
+                  callId: "registry-add",
+                  kind: "tool-result",
+                  output: { status: "needs-terminal", address: "channel/slack" },
+                  toolName: "registry_add",
+                },
+                sequence: 2,
+                status: "completed",
+                stepIndex: 0,
+                turnId: "child-turn-2",
+              },
+            } as UnstampedMessageStreamEvent,
+            2,
+          ),
+          stampTestEvent({ type: "session.completed" } as UnstampedMessageStreamEvent, 3),
+        ]),
+      );
+    const onToolCompleted = vi.fn(async () => {});
+    const view = fakeView();
+    const pump = new SubagentPump({
+      client,
+      view,
+      formatActionResultError: () => "failed",
+      onToolCompleted,
+    });
+    const first = subagentCalled("call-1");
+    first.data.childSessionId = "conversation-child";
+    first.data.name = "self-modification__agent";
+    const second = subagentCalled("call-2", "turn-2");
+    second.data.childSessionId = "conversation-child";
+    second.data.name = "self-modification__agent";
+
+    pump.begin(first);
+    await vi.waitFor(() =>
+      expect(view.complete).toHaveBeenCalledWith({ authoritative: true, callId: "call-1" }),
+    );
+    pump.begin(second);
+    await vi.waitFor(() => expect(onToolCompleted).toHaveBeenCalledOnce());
+
+    expect(fetch).toHaveBeenNthCalledWith(
+      2,
+      "/eve/v1/children/call-2/stream?startIndex=1",
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
+    expect(onToolCompleted).toHaveBeenCalledWith("self-modification__agent", "registry_add", {
+      status: "needs-terminal",
+      address: "channel/slack",
+    });
+  });
+
+  it("does not let a repeated call consume the previous call's trailing boundary", async () => {
+    const firstStream = pushableChildStream();
+    const client = new Client({ host: "http://localhost:3000" });
+    const fetch = vi
+      .spyOn(client, "fetch")
+      .mockImplementationOnce(async (_path, init) =>
+        firstStream.response(init?.signal ?? undefined),
+      )
+      .mockResolvedValueOnce(
+        responseOf([
+          reasoningEvent("second turn", 1),
+          stampTestEvent({ type: "session.completed" } as UnstampedMessageStreamEvent, 2),
+        ]),
+      );
+    const view = fakeView();
+    const pump = new SubagentPump({ client, view, formatActionResultError: () => "failed" });
+    const first = subagentCalled("call-1");
+    first.data.childSessionId = "conversation-child";
+    const second = subagentCalled("call-2", "turn-2");
+    second.data.childSessionId = "conversation-child";
+
+    pump.begin(first);
+    await settleAsyncWork();
+    pump.settle("call-1");
+    pump.begin(second);
+    await settleAsyncWork();
+
+    expect(fetch).toHaveBeenCalledOnce();
+
+    firstStream.push(boundaryEvent(0));
+    await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() =>
+      expect(view.upsertStep).toHaveBeenCalledWith(
+        expect.objectContaining({ callId: "call-2", reasoning: "second turn" }),
+      ),
+    );
+    expect(fetch).toHaveBeenNthCalledWith(
+      2,
+      "/eve/v1/children/call-2/stream?startIndex=1",
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
+  });
+
   it("leaves connection authorization events to the parent runner", async () => {
     const client = new Client({ host: "http://localhost:3000" });
     vi.spyOn(client, "fetch").mockResolvedValue(

@@ -1,332 +1,424 @@
-import { generateText } from "ai";
-import { MockLanguageModelV4 } from "ai/test";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { ContextContainer } from "#context/container.js";
+import type { ActivityObserverConfig } from "#channel/types.js";
+import { ContextContainer, contextStorage } from "#context/container.js";
+import { ActivityObserverKey, SessionKey, type SessionAuth } from "#context/keys.js";
 import {
-  AuthKey,
-  ContinuationTokenKey,
-  HandleEventKey,
-  InitiatorAuthKey,
-  SessionIdKey,
-} from "#context/keys.js";
-import { runStep } from "#context/run-step.js";
-import { createBackgroundSubagentHarnessDefinition } from "#execution/delegation-tool.js";
-import { acknowledgeDelegatedTasksStep } from "#execution/tasks/parent/delegate.js";
-import { readLatestTaskView } from "#execution/tasks/parent/run-parent.js";
-import { backgroundToolExecutionProvider } from "#execution/tasks/parent/tool-execution.js";
-import { CallbackBaseUrlKey } from "#harness/authorization.js";
-import { setHarnessEmissionState } from "#harness/emission.js";
-import { getAgentHandleStore } from "#harness/handles/store.js";
-import { buildToolSet } from "#harness/tools.js";
+  sendTaskCommand,
+  startTaskRun,
+  waitForTaskCommandOwner,
+} from "#execution/tasks/parent/run-parent.js";
+import {
+  backgroundToolExecutionProvider,
+  readRetainedBackgroundToolResult,
+} from "#execution/tasks/parent/tool-execution.js";
+import { steerBackgroundAgent } from "#execution/tools/subagent/steer.js";
+import {
+  BackgroundToolExecutorKey,
+  createBackgroundToolCallBatch,
+} from "#harness/background-tools.js";
+import { setHarnessEmissionState } from "#harness/emission-state.js";
+import { TurnCancelledError } from "#harness/turn-cancellation.js";
 import type { HarnessSession } from "#harness/types.js";
-import { createTestRuntime } from "#internal/testing/app-harness.js";
-import { mockSandbox } from "#internal/testing/mocks/mock-sandbox.js";
-import { getRun } from "#internal/workflow/runtime.js";
-import type {
-  SandboxBackend,
-  SandboxBackendCreateInput,
-} from "#public/definitions/sandbox-backend.js";
-import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
-import { ROOT_COMPILED_AGENT_NODE_ID } from "#compiler/manifest.js";
-import { ROOT_RUNTIME_AGENT_NODE_ID } from "#runtime/graph.js";
-import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
-import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
-import { readSubagentTaskMetadata } from "#tasks/types.js";
+import { getAgentHandleStore, setAgentHandleStore } from "#subagents/handles/store.js";
+import {
+  getBackgroundWorkflowToolRuns,
+  registerWorkflowToolRun,
+} from "#harness/workflow-tool-runs.js";
+vi.mock("#execution/tools/subagent/steer.js", () => ({ steerBackgroundAgent: vi.fn() }));
+vi.mock("#execution/tasks/parent/run-parent.js", () => ({
+  sendTaskCommand: vi.fn(async () => "delivered"),
+  startTaskRun: vi.fn(),
+  waitForTaskCommandOwner: vi.fn(),
+}));
 
-const usage = {
-  inputTokens: { cacheRead: undefined, cacheWrite: undefined, noCache: 1, total: 1 },
-  outputTokens: { reasoning: undefined, text: 1, total: 1 },
+const identity = { id: "agent-1", name: "research", nodeId: "subagents/research" };
+const address = {
+  continuationToken: "child-token",
+  kind: "agent/local" as const,
+  sessionId: "child-session",
+};
+const handle = {
+  address,
+  callId: "original-call",
+  identity,
+  operationId: "original-operation",
+  ownerId: "original-task",
+  phase: "claimed" as const,
+};
+const entry = {
+  callId: handle.ownerId,
+  toolName: { agentId: identity.id, kind: "subagent", name: identity.name }.name,
+  lifetime: "session" as const,
+  origin: { turnId: "turn-1", stepIndex: 0 },
+  address: { runId: "original-task-run", hookToken: "original-task-inbox" },
+  task: {
+    dispatchContext: { auth: { current: null, initiator: null } },
+    metadata: { agentId: identity.id, kind: "subagent", name: identity.name },
+    taskId: handle.ownerId,
+  },
 };
 
-describe("background subagent tool execution", () => {
-  afterEach(() => {
-    vi.unstubAllGlobals();
+function createSession(owned = true): HarnessSession {
+  const session = setHarnessEmissionState(
+    {
+      agent: { dynamicModel: true, system: "", tools: [] },
+      compaction: { recentWindowSize: 5, threshold: 10_000 },
+      continuationToken: "parent-token",
+      history: [],
+      sessionId: "parent",
+      state: setAgentHandleStore(undefined, { handles: [handle] }),
+    },
+    { sessionStarted: true, sequence: 2, stepIndex: 0, turnId: "turn-2" },
+  );
+  return owned ? registerWorkflowToolRun(session, entry) : session;
+}
+
+async function createScope(
+  session = createSession(),
+  activityObserver?: ActivityObserverConfig,
+  auth: SessionAuth = { current: null, initiator: null },
+) {
+  const ctx = new ContextContainer();
+  ctx.setVirtualContext(SessionKey, {
+    auth,
+    sessionId: session.sessionId,
+    turn: { id: "turn-2", sequence: 2 },
+  });
+  if (activityObserver !== undefined) {
+    ctx.setVirtualContext(ActivityObserverKey, activityObserver);
+  }
+  const created = await backgroundToolExecutionProvider.create(ctx, session);
+  if (created === undefined) throw new Error("Expected background executor");
+  const executor = created.value;
+  ctx.setVirtualContext(BackgroundToolExecutorKey, executor);
+  const batch = createBackgroundToolCallBatch();
+  return {
+    execute(
+      callId = "steering-call",
+      agentId: string | undefined = identity.id,
+      name = identity.name,
+      kind: "subagent" | "tool" = "subagent",
+
+      label?: (input: unknown) => string,
+    ) {
+      const definition = {
+        execute: vi.fn(),
+        label: label === undefined ? undefined : { start: label },
+        name,
+        nodeId: kind === "subagent" ? identity.nodeId : undefined,
+        workflowId: "research-workflow",
+      };
+      const toolInput = { agentId, message: "Use the updated instruction" };
+      batch.setTool(name, definition);
+      batch.register({ callId, input: toolInput, toolName: name });
+      return contextStorage.run(ctx, () =>
+        executor.execute({
+          batch,
+          definition,
+          options: { messages: [], toolCallId: callId },
+          toolInput,
+        }),
+      );
+    },
+    commit: () => backgroundToolExecutionProvider.commit!(executor, session),
+    rollback: (cause: unknown) => backgroundToolExecutionProvider.rollback!(executor, cause),
+    retained: () => readRetainedBackgroundToolResult(ctx),
+  };
+}
+
+describe("background subagent steering", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(steerBackgroundAgent).mockResolvedValue(undefined);
+    vi.mocked(startTaskRun).mockResolvedValue(undefined as never);
+    vi.mocked(waitForTaskCommandOwner).mockResolvedValue({ runId: "steering-task-run" } as never);
   });
 
-  it("runs concurrent local and remote defineTool calls as independent durable tasks", async () => {
-    const runtime = await createTestRuntime({ agent: { name: "background-subagent" } });
+  it("steers the existing child without replacing its task, claim, or receipt", async () => {
+    const scope = await createScope();
+    const receipt = await scope.execute();
+    expect(steerBackgroundAgent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        handle,
+        callId: "steering-call",
+        input: { agentId: identity.id, message: "Use the updated instruction" },
+      }),
+    );
+    expect(receipt).toEqual({ agentId: identity.id, status: "working", taskId: entry.task.taskId });
+    const session = await scope.commit();
+    expect(getAgentHandleStore(session.state)?.handles).toEqual([handle]);
+    expect(getBackgroundWorkflowToolRuns(session.state)).toEqual([entry]);
+    expect(startTaskRun).not.toHaveBeenCalled();
+    expect(waitForTaskCommandOwner).not.toHaveBeenCalled();
+    expect(sendTaskCommand).not.toHaveBeenCalled();
+  });
 
-    await runtime.run(async () => {
-      const remoteNode = {
-        backing: {
-          kind: "resource",
-          sourcePath: "/virtual/eve-memory-app/agent/subagents/reviewer.ts",
-        },
-        binding: runtime.manifest.bindings["subagents/reviewer.ts"] ?? {
-          backing: {
-            kind: "programmatic",
-            moduleId: "subagents/reviewer.ts",
-            registryId: "memory:background-subagent",
-            revision: "memory:background-subagent",
-          },
-          logicalPath: "subagents/reviewer.ts",
-          owner: { kind: "application" },
-          usage: { compile: true, runtimeEntry: true },
-        },
-        description: "Remote reviewer",
-        entryPath: "/virtual/eve-memory-app/agent/subagents/reviewer.ts",
-        logicalPath: "subagents/reviewer.ts",
-        name: "reviewer",
-        nodeId: "remote/reviewer",
-        owner: { kind: "application" },
-        parentNodeId: ROOT_COMPILED_AGENT_NODE_ID,
-        path: "/eve/v1/session",
-        rootPath: "/virtual/eve-memory-app/agent",
-        sourceId: "subagents/reviewer.ts",
-        sourceKind: "module",
-        url: "https://remote.example.com",
-      } as const;
-      runtime.session.compiledArtifacts = {
-        manifest: { ...runtime.manifest, remoteAgents: [remoteNode] },
-        moduleMap: {
-          nodes: {
-            ...runtime.moduleMap.nodes,
-            [ROOT_COMPILED_AGENT_NODE_ID]: {
-              modules: {
-                ...runtime.moduleMap.nodes[ROOT_COMPILED_AGENT_NODE_ID]?.modules,
-                [remoteNode.sourceId]: { default: { url: remoteNode.url } },
-              },
-            },
-          },
-        },
-      };
-      const bundle = await getCompiledRuntimeAgentBundle({
-        compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
-      });
-      const sandbox = mockSandbox({ id: "background-subagent-sandbox" });
-      const backend: SandboxBackend = {
-        create: async (input: SandboxBackendCreateInput) => ({
-          captureState: async () => ({
-            backendName: "test",
-            metadata: {},
-            sessionKey: input.sessionKey,
-          }),
-          delete: async () => {},
-          session: sandbox.session,
-          shutdown: async () => {},
-          stop: async () => {},
-          useSessionFn: async () => sandbox.session,
-        }),
-        name: "test",
-        prewarm: async () => ({ reused: false }),
-      };
-      (
-        bundle.graph.root.sandboxRegistry.sandbox.definition as {
-          backend: SandboxBackend;
-        }
-      ).backend = backend;
-      const fetchMock = vi
-        .fn()
-        .mockResolvedValue(
-          Response.json(
-            { ok: true, sessionId: "remote-child", status: "accepted" },
-            { headers: { "x-eve-session-id": "remote-child" }, status: 202 },
-          ),
-        );
-      vi.stubGlobal("fetch", fetchMock);
-      const ctx = new ContextContainer();
-      ctx.set(AuthKey, null);
-      ctx.set(BundleKey, bundle);
-      ctx.set(CallbackBaseUrlKey, "https://caller.example.com");
-      ctx.set(ChannelKey, { kind: "http", state: {} });
-      ctx.set(ContinuationTokenKey, "http:background-subagent");
-      ctx.set(InitiatorAuthKey, null);
-      ctx.set(SessionIdKey, "parent-background-subagent");
+  it("keeps the original claim and starts no replacement when delivery fails", async () => {
+    const scope = await createScope();
+    vi.mocked(steerBackgroundAgent).mockRejectedValueOnce(new Error("Delivery failed"));
+    await expect(scope.execute()).rejects.toThrow("Delivery failed");
+    expect(startTaskRun).not.toHaveBeenCalled();
+    expect(getAgentHandleStore((await scope.commit()).state)?.handles).toEqual([handle]);
+  });
 
-      const session: HarnessSession = setHarnessEmissionState(
-        {
-          agent: { modelReference: { id: "openai/gpt-5.4" }, system: "", tools: [] },
-          compaction: { recentWindowSize: 10, threshold: 100_000 },
-          continuationToken: "http:background-subagent",
-          history: [],
-          sessionId: "parent-background-subagent",
-        },
-        { sequence: 1, sessionStarted: true, stepIndex: 0, turnId: "turn-background" },
-      );
-      const localTool = createBackgroundSubagentHarnessDefinition({
-        description: "General-purpose agent",
-        kind: "subagent",
-        name: "agent",
-        nodeId: ROOT_RUNTIME_AGENT_NODE_ID,
-      });
-      const remoteTool = createBackgroundSubagentHarnessDefinition({
-        description: remoteNode.description,
-        kind: "remote",
-        name: remoteNode.name,
-        nodeId: remoteNode.nodeId,
-      });
-      const model = new MockLanguageModelV4({
-        doGenerate: {
-          content: [
-            {
-              input: JSON.stringify({ message: "Reply with exactly `background-child-a`." }),
-              toolCallId: "call-background-child-a",
-              toolName: "agent",
-              type: "tool-call",
-            },
-            {
-              input: JSON.stringify({ message: "Reply with exactly `background-child-b`." }),
-              toolCallId: "call-background-child-b",
-              toolName: "agent",
-              type: "tool-call",
-            },
-            {
-              input: JSON.stringify({ message: "Review the result." }),
-              toolCallId: "call-background-remote",
-              toolName: "reviewer",
-              type: "tool-call",
-            },
-          ],
-          finishReason: { raw: undefined, unified: "tool-calls" },
-          usage,
-          warnings: [],
-        },
-      });
-
-      let generated: Awaited<ReturnType<typeof generateText>> | undefined;
-      const calledEvents: unknown[] = [];
-      const result = await runStep(
-        ctx,
-        session,
-        async (current) => {
-          ctx.setVirtualContext(HandleEventKey, async (event) => {
-            calledEvents.push(event);
-          });
-          generated = await generateText({
-            model,
-            prompt: "Delegate the work.",
-            tools: buildToolSet({
-              tools: new Map([
-                [localTool.name, localTool],
-                [remoteTool.name, remoteTool],
-              ]),
-            }),
-          });
-          return { next: null, session: current };
-        },
-        [backgroundToolExecutionProvider],
-      );
-
-      const pendingTasks = result.backgroundTasks ?? [];
-      const handles = getAgentHandleStore(result.session.state)?.handles ?? [];
-      if (pendingTasks.length !== 3) throw new Error("Three durable tasks were not committed.");
-      if (handles.some((handle) => handle.phase !== "addressed") || handles.length !== 3) {
-        throw new Error("Three child addresses were not committed.");
-      }
-
-      try {
-        expect(generated?.toolResults).toHaveLength(3);
-        expect(generated?.toolResults.map((toolResult) => toolResult.output)).toEqual(
-          expect.arrayContaining(
-            pendingTasks.map((task) =>
-              expect.objectContaining({ status: "working", taskId: task.taskId }),
-            ),
-          ),
-        );
-        expect(new Set(handles.map((handle) => handle.identity.id)).size).toBe(3);
-        expect(calledEvents).toEqual(
-          expect.arrayContaining([
-            expect.objectContaining({
-              data: expect.objectContaining({ name: "agent" }),
-              type: "subagent.called",
-            }),
-            expect.objectContaining({
-              data: expect.objectContaining({
-                childSessionId: "remote-child",
-                name: "reviewer",
-                remote: {
-                  resolverId: remoteNode.nodeId,
-                  url: remoteNode.url,
-                },
-              }),
-              type: "subagent.called",
-            }),
-            ...pendingTasks.map((task) =>
-              expect.objectContaining({
-                data: expect.objectContaining({
-                  backgroundTask: { status: "working", taskId: task.taskId },
-                }),
-                type: "subagent.completed",
-              }),
-            ),
-          ]),
-        );
-        expect(calledEvents).toHaveLength(6);
-        expect(handles).toContainEqual(
-          expect.objectContaining({
-            address: expect.objectContaining({ kind: "agent/remote", sessionId: "remote-child" }),
-          }),
-        );
-        const remoteReceipt = generated?.toolResults.find(
-          (toolResult) => toolResult.toolName === "reviewer",
-        )?.output;
-        const remoteTaskId =
-          typeof remoteReceipt === "object" &&
-          remoteReceipt !== null &&
-          "taskId" in remoteReceipt &&
-          typeof remoteReceipt.taskId === "string"
-            ? remoteReceipt.taskId
-            : undefined;
-        const remoteTaskIndex = pendingTasks.findIndex((task) => task.taskId === remoteTaskId);
-        expect(remoteTaskIndex).toBeGreaterThanOrEqual(0);
-
-        await acknowledgeDelegatedTasksStep({ tasks: pendingTasks });
-        const localTasks = pendingTasks.filter((_task, index) => index !== remoteTaskIndex);
-        await Promise.all(localTasks.map((task) => getRun(task.taskRunId).returnValue));
-        const views = await Promise.all(
-          pendingTasks.map((task) => readLatestTaskView({ taskRunId: task.taskRunId })),
-        );
-        expect(views).toEqual(
-          expect.arrayContaining([
-            expect.objectContaining({
-              lastOutput: {
-                data: expect.stringContaining("background-child-a"),
-                type: "result",
-              },
-              status: "completed",
-            }),
-            expect.objectContaining({
-              lastOutput: {
-                data: expect.stringContaining("background-child-b"),
-                type: "result",
-              },
-              status: "completed",
-            }),
-            expect.objectContaining({
-              status: "working",
-            }),
-          ]),
-        );
-        const remoteTask = pendingTasks[remoteTaskIndex];
-        const remoteView = views[remoteTaskIndex];
-        expect(remoteTask).toBeDefined();
-        expect(
-          remoteView === undefined ? undefined : readSubagentTaskMetadata(remoteView),
-        ).toMatchObject({ mode: "remote", name: "reviewer" });
-        expect(JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string)).toMatchObject({
-          callback: { token: remoteTask?.taskInboxToken },
-        });
-      } finally {
-        await Promise.all(
-          handles.flatMap((handle) =>
-            handle.phase === "addressed"
-              ? [
-                  getRun(handle.address.sessionId)
-                    .cancel()
-                    .catch(() => {}),
-                ]
-              : [],
-          ),
-        );
-        await Promise.all(
-          pendingTasks.map((task) =>
-            getRun(task.taskRunId)
-              .cancel()
-              .catch(() => {}),
-          ),
-        );
-      }
+  it("persists the creating turn's auth on the background task", async () => {
+    const creatorCurrent = {
+      attributes: {},
+      authenticator: "test-idp",
+      issuer: "test-idp",
+      principalId: "creator-current",
+      principalType: "user" as const,
+    };
+    const creatorInitiator = { ...creatorCurrent, principalId: "creator-initiator" };
+    const scope = await createScope(createSession(), undefined, {
+      current: creatorCurrent,
+      initiator: creatorInitiator,
     });
-  }, 60_000);
+
+    await scope.execute("new-call", "");
+    const committed = await scope.commit();
+    const task = getBackgroundWorkflowToolRuns(committed.state).find(
+      (candidate) => candidate.task.taskId !== entry.task.taskId,
+    );
+
+    expect(task?.task.dispatchContext).toEqual({
+      auth: { current: creatorCurrent, initiator: creatorInitiator },
+    });
+    if (task === undefined) throw new Error("Expected created task");
+    const replayed = registerWorkflowToolRun(committed, {
+      ...task,
+      task: {
+        ...task.task,
+        dispatchContext: {
+          auth: {
+            current: { ...creatorCurrent, principalId: "later-current" },
+            initiator: { ...creatorInitiator, principalId: "later-initiator" },
+          },
+        },
+      },
+    });
+    expect(
+      getBackgroundWorkflowToolRuns(replayed.state).find(
+        (candidate) => candidate.task.taskId === task.task.taskId,
+      )?.task.dispatchContext,
+    ).toEqual({ auth: { current: creatorCurrent, initiator: creatorInitiator } });
+  });
+
+  it("persists schedule-shaped auth with no current principal and one session initiator", async () => {
+    const sessionInitiator = {
+      attributes: {},
+      authenticator: "test-idp",
+      issuer: "test-idp",
+      principalId: "session-initiator",
+      principalType: "user" as const,
+    };
+    const scope = await createScope(createSession(), undefined, {
+      current: null,
+      initiator: sessionInitiator,
+    });
+
+    await scope.execute("new-call", "");
+    const committed = await scope.commit();
+    const task = getBackgroundWorkflowToolRuns(committed.state).find(
+      (candidate) => candidate.task.taskId !== entry.task.taskId,
+    );
+
+    expect(task?.task.dispatchContext).toEqual({
+      auth: { current: null, initiator: sessionInitiator },
+    });
+  });
+
+  it.each(["subagent", "tool"] as const)(
+    "retains activity identity for parent-owned settlement (%s)",
+    async (kind) => {
+      const activityObserver = {
+        sink: { url: "https://parent.example/activity", version: 1 as const },
+        workIdentity: {
+          id: "work:root",
+          kind: "root-turn" as const,
+          rootSessionId: "parent",
+          rootTurnId: "turn-2",
+        },
+      };
+      const scope = await createScope(createSession(), activityObserver);
+
+      await scope.execute("new-call", "", identity.name, kind);
+      const committed = await scope.commit();
+      const task = getBackgroundWorkflowToolRuns(committed.state).find(
+        (candidate) => candidate.task.taskId !== entry.task.taskId,
+      );
+
+      expect(task).toBeDefined();
+      expect(task?.task.activityWorkIdentity).toMatchObject({
+        callId: "new-call",
+        kind: "task",
+        name: "research",
+        parentId: "work:root",
+        rootSessionId: "parent",
+        rootTurnId: "turn-2",
+      });
+    },
+  );
+
+  it("persists a tool-derived task label without changing its subagent identity", async () => {
+    const activityObserver = {
+      sink: { url: "https://parent.example/activity", version: 1 as const },
+      workIdentity: {
+        id: "work:root",
+        kind: "root-turn" as const,
+        rootSessionId: "parent",
+        rootTurnId: "turn-2",
+      },
+    };
+    const scope = await createScope(createSession(), activityObserver);
+
+    await scope.execute("new-call", "", identity.name, "subagent", (input) => {
+      (input as { message: string }).message = "Mutated";
+      return "Investigator";
+    });
+    expect(startTaskRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        workflow: expect.objectContaining({
+          input: { agentId: "", message: "Use the updated instruction" },
+        }),
+      }),
+    );
+    const committed = await scope.commit();
+    const task = getBackgroundWorkflowToolRuns(committed.state).find(
+      (candidate) => candidate.task.taskId !== entry.task.taskId,
+    );
+
+    expect(task).toMatchObject({
+      task: {
+        activityWorkIdentity: { label: "Investigator", name: "research" },
+        metadata: { name: "research" },
+      },
+    });
+  });
+
+  it("does not steer a task outside the parent task index", async () => {
+    const scope = await createScope(createSession(false));
+    await expect(scope.execute()).rejects.toThrow("AGENT_BUSY");
+    expect(steerBackgroundAgent).not.toHaveBeenCalled();
+  });
+
+  it("does not steer a task associated with another child", async () => {
+    const scope = await createScope(
+      registerWorkflowToolRun(createSession(), {
+        ...entry,
+        task: { ...entry.task, metadata: { ...entry.task.metadata, agentId: "another-child" } },
+      }),
+    );
+    await expect(scope.execute()).rejects.toThrow("AGENT_BUSY");
+    expect(steerBackgroundAgent).not.toHaveBeenCalled();
+  });
+
+  it("rejects a different subagent tool before delivery", async () => {
+    const scope = await createScope();
+    await expect(scope.execute("call-1", identity.id, "another-tool")).rejects.toThrow(
+      "AGENT_MISMATCH",
+    );
+    expect(steerBackgroundAgent).not.toHaveBeenCalled();
+  });
+
+  it("rejects a different local/remote target before delivery", async () => {
+    const session = createSession();
+    const scope = await createScope({
+      ...session,
+      state: setAgentHandleStore(session.state, {
+        handles: [
+          {
+            ...handle,
+            address: {
+              kind: "agent/remote",
+              sessionId: address.sessionId,
+              url: "https://child.example",
+              callbackBaseUrl: "https://parent.example",
+            },
+          },
+        ],
+      }),
+    });
+    await expect(scope.execute()).rejects.toThrow("AGENT_MISMATCH");
+    expect(steerBackgroundAgent).not.toHaveBeenCalled();
+  });
+
+  it("does not steer a reservation before the child has an address", async () => {
+    const { address: _address, ...reservation } = handle;
+    const session = createSession();
+    const scope = await createScope({
+      ...session,
+      state: setAgentHandleStore(session.state, {
+        handles: [{ ...reservation, phase: "reserved" }],
+      }),
+    });
+    await expect(scope.execute()).rejects.toThrow("AGENT_BUSY");
+    expect(steerBackgroundAgent).not.toHaveBeenCalled();
+  });
+
+  it("preserves a different child's claim made while steering was pending", async () => {
+    const second = {
+      address: { ...address, sessionId: "second-session" },
+      identity: { ...identity, id: "agent-2" },
+      phase: "available" as const,
+    };
+    const session = createSession();
+    const scope = await createScope({
+      ...session,
+      state: setAgentHandleStore(session.state, { handles: [handle, second] }),
+    });
+    const delivery = Promise.withResolvers<void>();
+    vi.mocked(steerBackgroundAgent).mockReturnValueOnce(delivery.promise);
+    const first = scope.execute();
+    await scope.execute("second-call", second.identity.id);
+    delivery.resolve();
+    await first;
+    expect(getAgentHandleStore((await scope.commit()).state)?.handles).toEqual([
+      handle,
+      expect.objectContaining({
+        identity: second.identity,
+        phase: "claimed",
+        callId: "second-call",
+      }),
+    ]);
+  });
+
+  it("accepts concurrent steering without transferring ownership", async () => {
+    const scope = await createScope();
+    const receipts = await Promise.all([scope.execute("first-call"), scope.execute("second-call")]);
+    expect(receipts).toEqual([
+      { agentId: identity.id, status: "working", taskId: entry.task.taskId },
+      { agentId: identity.id, status: "working", taskId: entry.task.taskId },
+    ]);
+    expect(steerBackgroundAgent).toHaveBeenCalledTimes(2);
+    expect(startTaskRun).not.toHaveBeenCalled();
+    expect(getAgentHandleStore((await scope.commit()).state)?.handles).toEqual([handle]);
+  });
+
+  it("allows another steering attempt after delivery fails", async () => {
+    const scope = await createScope();
+    vi.mocked(steerBackgroundAgent).mockRejectedValueOnce(new Error("Delivery failed"));
+    await expect(scope.execute("first-call")).rejects.toThrow("Delivery failed");
+
+    await expect(scope.execute("retry-call")).resolves.toMatchObject({
+      agentId: identity.id,
+      status: "working",
+    });
+    expect(steerBackgroundAgent).toHaveBeenCalledTimes(2);
+    expect(startTaskRun).not.toHaveBeenCalled();
+    expect(getAgentHandleStore((await scope.commit()).state)?.handles).toEqual([handle]);
+  });
+
+  it.each([new Error("Parent step failed"), new TurnCancelledError()])(
+    "does not compensate the pre-existing task on rollback: %s",
+    async (cause) => {
+      const scope = await createScope();
+      await scope.execute();
+      await scope.rollback(cause);
+      expect(sendTaskCommand).not.toHaveBeenCalled();
+      expect(getAgentHandleStore((await scope.commit()).state)?.handles).toEqual([handle]);
+      expect(scope.retained()).toBeUndefined();
+    },
+  );
 });

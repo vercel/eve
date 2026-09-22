@@ -130,31 +130,39 @@ describe("createSession", () => {
   });
 
   it("copies static user instructions only when creating a fresh session", () => {
-    const initialMessages = [{ content: "Pinned tenant policy.", role: "user" as const }];
+    const initialMessages = [
+      { content: "Pinned tenant policy.", kind: "user" as const, role: "user" as const },
+    ];
     const session = createSession({
       continuationToken: "root-token",
       sessionId: "sess-root",
       turnAgent: createTestTurnAgent({ initialMessages }),
     });
-    initialMessages[0] = { content: "mutated", role: "user" };
+    initialMessages[0] = { content: "mutated", kind: "user" as const, role: "user" };
 
-    expect(session.history).toEqual([{ content: "Pinned tenant policy.", role: "user" }]);
+    expect(session.history).toEqual([
+      { content: "Pinned tenant policy.", kind: "user", role: "user" },
+    ]);
 
     const refreshed = refreshSessionFromTurnAgent({
       session,
       turnAgent: createTestTurnAgent({
-        initialMessages: [{ content: "New deployment policy.", role: "user" }],
+        initialMessages: [{ content: "New deployment policy.", kind: "user", role: "user" }],
       }),
     });
-    expect(refreshed.history).toEqual([{ content: "Pinned tenant policy.", role: "user" }]);
+    expect(refreshed.history).toEqual([
+      { content: "Pinned tenant policy.", kind: "user", role: "user" },
+    ]);
 
     const hydrated = hydrateDurableSession({
       durable: projectToDurableSession(refreshed),
       turnAgent: createTestTurnAgent({
-        initialMessages: [{ content: "Another deployment policy.", role: "user" }],
+        initialMessages: [{ content: "Another deployment policy.", kind: "user", role: "user" }],
       }),
     });
-    expect(hydrated.history).toEqual([{ content: "Pinned tenant policy.", role: "user" }]);
+    expect(hydrated.history).toEqual([
+      { content: "Pinned tenant policy.", kind: "user", role: "user" },
+    ]);
   });
 
   it("defaults description and inputSchema when null", () => {
@@ -247,15 +255,17 @@ describe("createSession", () => {
     );
   });
 
-  it("leaves delegated subagent sessions uncapped by default", () => {
+  it("keeps the default cap when remote lineage has no inherited budget", () => {
     const session = createSession({
       continuationToken: "subagent-token",
+      rootSessionId: "sess-root",
       sessionId: "sess-child",
-      subagentDepth: 1,
       turnAgent: createTestTurnAgent(),
     });
 
-    expect(session.limits).toEqual({});
+    expect(session.limits?.maxInputTokensPerSession).toBe(
+      DEFAULT_ROOT_MAX_INPUT_TOKENS_PER_SESSION,
+    );
   });
 
   it("uncaps a root session when the authored limit is false", () => {
@@ -273,8 +283,8 @@ describe("createSession", () => {
     const session = createSession({
       continuationToken: "subagent-token",
       limits: { maxInputTokensPerSession: false },
+      rootSessionId: "sess-root",
       sessionId: "sess-child",
-      subagentDepth: 1,
       turnAgent: createTestTurnAgent(),
     });
 
@@ -302,8 +312,8 @@ describe("createSession", () => {
         continuationToken: "subagent-token",
         history: [],
         limits: {},
+        rootSessionId: "sess-root",
         sessionId: "sess-child",
-        subagentDepth: 1,
       },
       turnAgent: createTestTurnAgent(),
     });
@@ -341,11 +351,11 @@ describe("createSession", () => {
     expect(hydrated.outputSchema).toEqual(runOutputSchema);
   });
 
-  it("persists subagent depth through durable session projection and hydration", () => {
+  it("persists delegated root lineage through durable session projection and hydration", () => {
     const session = createSession({
-      continuationToken: "root-token",
-      sessionId: "sess-root",
-      subagentDepth: 2,
+      continuationToken: "subagent-token",
+      rootSessionId: "sess-root",
+      sessionId: "sess-child",
       turnAgent: createTestTurnAgent(),
     });
 
@@ -355,8 +365,8 @@ describe("createSession", () => {
       turnAgent: createTestTurnAgent(),
     });
 
-    expect(durable.subagentDepth).toBe(2);
-    expect(hydrated.subagentDepth).toBe(2);
+    expect(durable.rootSessionId).toBe("sess-root");
+    expect(hydrated.rootSessionId).toBe("sess-root");
   });
 
   it("persists session token limits through durable session projection and hydration", () => {
@@ -365,6 +375,7 @@ describe("createSession", () => {
       limits: {
         maxInputTokensPerSession: 200_000,
         maxOutputTokensPerSession: 20_000,
+        maxTokenCostUsdPerSession: 1.5,
       },
       sessionId: "sess-root",
       turnAgent: createTestTurnAgent(),
@@ -379,10 +390,12 @@ describe("createSession", () => {
     expect(durable.limits).toEqual({
       maxInputTokensPerSession: 200_000,
       maxOutputTokensPerSession: 20_000,
+      maxTokenCostUsdPerSession: 1.5,
     });
     expect(hydrated.limits).toEqual({
       maxInputTokensPerSession: 200_000,
       maxOutputTokensPerSession: 20_000,
+      maxTokenCostUsdPerSession: 1.5,
     });
   });
 
@@ -417,25 +430,6 @@ describe("mintSubagentContinuationToken", () => {
 });
 
 describe("refreshSessionFromTurnAgent", () => {
-  it("keeps session-specific system additions alongside refreshed authored instructions", () => {
-    const session = createSession({
-      continuationToken: "child-token",
-      sessionId: "child-session",
-      systemPromptAdditions: ["Background task updates"],
-      turnAgent: createTestTurnAgent({ instructions: ["Original instructions."] }),
-    });
-    expect(session.agent.system).toBe("Original instructions.\n\nBackground task updates");
-
-    const refreshed = refreshSessionFromTurnAgent({
-      session,
-      systemPromptAdditions: ["Background task updates"],
-      turnAgent: createTestTurnAgent({ instructions: ["Updated instructions."] }),
-    });
-
-    expect(refreshed.agent.system).toBe("Updated instructions.\n\nBackground task updates");
-    expect(refreshed.state).toBeUndefined();
-  });
-
   it("refreshes the current agent configuration while preserving history", () => {
     const session = createSession({
       continuationToken: "root-token",
@@ -445,7 +439,7 @@ describe("refreshSessionFromTurnAgent", () => {
     const refreshed = refreshSessionFromTurnAgent({
       session: {
         ...session,
-        history: [{ content: "previous message", role: "user" }],
+        history: [{ content: "previous message", kind: "user", role: "user" }],
       },
       turnAgent: createTestTurnAgent({
         instructions: ["Completely different system prompt."],
@@ -467,7 +461,9 @@ describe("refreshSessionFromTurnAgent", () => {
       }),
     });
 
-    expect(refreshed.history).toEqual([{ content: "previous message", role: "user" }]);
+    expect(refreshed.history).toEqual([
+      { content: "previous message", kind: "user", role: "user" },
+    ]);
     expect(refreshed.agent.compactionModelReference).toEqual({
       id: "summary-model",
     });

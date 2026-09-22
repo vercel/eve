@@ -29,6 +29,12 @@ export interface McpClientConnectionDefinition {
    */
   readonly url: string;
   /**
+   * Whether to discover the server's protocol before initialization.
+   * Defaults to enabled. Set to false for servers that require the older
+   * initialize handshake; that handshake still negotiates a supported version.
+   */
+  readonly protocolVersionDiscovery?: boolean;
+  /**
    * Human-readable summary of the connection and its tools.
    *
    * The system prompt layer uses it to describe the connection to
@@ -42,7 +48,7 @@ export interface McpClientConnectionDefinition {
    *
    * - `getToken`-only: covers static API keys, pre-provisioned
    *   JWTs, and out-of-band OAuth. Defaults to
-   *   `principalType: "app"` when omitted.
+   *   `credentialOwner: "app"` when omitted.
    * - Three-method form: provide `startAuthorization` and
    *   `completeAuthorization` together to opt into
    *   interactive OAuth authorization.
@@ -67,6 +73,7 @@ export interface McpClientConnectionDefinition {
    * - `never()`: allow all tool calls without approval
    * - `once()`: require approval only the first time per session
    * - `always()`: require approval for every tool call
+   * - `auto()`: use an evaluation model to ask about dangerous or unclear effects
    *
    * When omitted, tool calls execute without approval, consistent
    * with authored tools.

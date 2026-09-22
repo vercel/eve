@@ -37,7 +37,7 @@ const expectedSlugs = instrumentationEntries()
 const actualSlugs = items.map((item) => item.name.slice("instrumentation/".length));
 
 if (expectedSlugs.some((slug) => slug === undefined)) {
-  throw new Error("Every catalog instrumentation provider needs a registry slug mapping.");
+  throw new Error("Every catalog instrumentation entry needs a registry slug mapping.");
 }
 if (JSON.stringify(actualSlugs) !== JSON.stringify(expectedSlugs)) {
   throw new Error(
@@ -51,16 +51,8 @@ for (const item of items) {
   const expectedFiles: RegistryFile[] = [
     {
       path: expectedPath,
-      target: "agent/instrumentation.ts",
+      target: `agent/instrumentation/${slug}.ts`,
     },
-    ...(slug === "braintrust"
-      ? [
-          {
-            path: "registry/instrumentation/braintrust-hook.ts",
-            target: "agent/hooks/braintrust.ts",
-          },
-        ]
-      : []),
   ];
   const actualFiles = item.files?.map(({ path, target }) => ({ path, target }));
   if (JSON.stringify(actualFiles) !== JSON.stringify(expectedFiles)) {
@@ -68,5 +60,17 @@ for (const item of items) {
   }
   for (const file of expectedFiles) {
     await access(join(docsRoot, file.path));
+  }
+  if (slug !== "braintrust") {
+    const source = await readFile(join(docsRoot, expectedPath), "utf8");
+    if (
+      !source.includes("redact: true") ||
+      !source.includes("inputs: true") ||
+      !source.includes("outputs: true")
+    ) {
+      throw new Error(
+        `Registry item "${item.name}" must preserve metadata-only export with an explicit redaction policy.`,
+      );
+    }
   }
 }

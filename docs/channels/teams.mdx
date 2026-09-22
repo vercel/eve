@@ -14,6 +14,35 @@ import { teamsChannel } from "eve/channels/teams";
 export default teamsChannel();
 ```
 
+### Vercel Connect
+
+For a managed Teams bot on Vercel, run:
+
+```bash
+eve add channel/teams
+```
+
+The guided flow runs the Vercel Connect CLI, which takes you through managed
+Microsoft Teams app creation and installation. It routes verified Activities to
+`/eve/v1/teams` and writes:
+
+```ts title="agent/channels/teams.ts"
+import { connectTeamsCredentials } from "@vercel/connect/eve";
+import { teamsChannel } from "eve/channels/teams";
+
+export default teamsChannel({
+  credentials: connectTeamsCredentials("microsoft-teams/my-agent"),
+});
+```
+
+Vercel Connect owns the Microsoft administrator consent and app installation
+flow. After deployment, mention the bot in a channel or send it a personal
+message.
+
+### Portable credentials
+
+To manage the bot registration and credentials yourself, configure:
+
 ```bash
 MICROSOFT_APP_ID=...
 MICROSOFT_APP_PASSWORD=...
@@ -70,9 +99,14 @@ Inbound files are off by default. Opt in to allow personal-scope downloads and p
 
 ```ts
 export default teamsChannel({
-  files: { enabled: true, allowedHosts: ["contoso.sharepoint.com"] },
+  files: {
+    enabled: true,
+    allowedHosts: ["smba.trafficmanager.net", "contoso.sharepoint.com"],
+  },
 });
 ```
+
+eve authenticates downloads from Microsoft Bot Connector hosts with your bot credentials. Downloads from other allowlisted hosts remain unauthenticated.
 
 ## What to read next
 

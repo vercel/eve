@@ -118,11 +118,6 @@ export async function resolveAgent(input: ResolveAgentInput): Promise<ResolvedAg
     channels: resolvedChannels,
     connections: resolvedConnections,
     dynamicConnectionResolvers: resolvedDynamicConnectionResolvers,
-    workflowTool:
-      input.manifest.workflowTool === undefined
-        ? undefined
-        : { maxSubagents: input.manifest.workflowTool.maxSubagents },
-    webSearchProvider: input.manifest.webSearchProvider,
     dynamicInstructionsResolvers: resolvedDynamicInstructionsResolvers,
     dynamicSkillResolvers: resolvedDynamicSkillResolvers,
     dynamicToolResolvers: resolvedDynamicToolResolvers,
@@ -189,15 +184,25 @@ function createResolvedAgentConfig(
 ): NonNullable<ResolvedAgent["config"]> {
   const config: {
     compaction?: NonNullable<ResolvedAgent["config"]>["compaction"];
+    defaultTools?: boolean;
+    description?: string;
     experimental?: NonNullable<ResolvedAgent["config"]>["experimental"];
     name: string;
     outputSchema?: NonNullable<ResolvedAgent["config"]>["outputSchema"];
     reasoning?: NonNullable<ResolvedAgent["config"]>["reasoning"];
     source?: NonNullable<ResolvedAgent["config"]>["source"];
+    tool?: boolean;
     limits?: NonNullable<ResolvedAgent["config"]>["limits"];
   } = {
     name: manifest.config.name,
   };
+
+  if (manifest.config.defaultTools !== undefined) {
+    config.defaultTools = manifest.config.defaultTools;
+  }
+  if (manifest.config.description !== undefined) {
+    config.description = manifest.config.description;
+  }
 
   if (manifest.config.compaction !== undefined) {
     const compaction: {
@@ -237,12 +242,14 @@ function createResolvedAgentConfig(
 
   if (manifest.config.experimental !== undefined) {
     config.experimental = {
-      instrumentationProviders: manifest.config.experimental.instrumentationProviders,
-      tasks: manifest.config.experimental.tasks,
       workflow:
         manifest.config.experimental.workflow === undefined
           ? undefined
-          : { world: manifest.config.experimental.workflow.world },
+          : {
+              modelCallsPerStep: manifest.config.experimental.workflow.modelCallsPerStep,
+              retention: manifest.config.experimental.workflow.retention,
+              world: manifest.config.experimental.workflow.world,
+            },
     };
   }
 
@@ -258,10 +265,15 @@ function createResolvedAgentConfig(
     config.source = createResolvedModuleSourceRef(manifest.config.source);
   }
 
+  if (manifest.config.tool !== undefined) {
+    config.tool = manifest.config.tool;
+  }
+
   if (manifest.config.limits !== undefined) {
     config.limits = {
       maxInputTokensPerSession: manifest.config.limits.maxInputTokensPerSession,
       maxOutputTokensPerSession: manifest.config.limits.maxOutputTokensPerSession,
+      maxTokenCostUsdPerSession: manifest.config.limits.maxTokenCostUsdPerSession,
       sessionTimeoutMs: manifest.config.limits.sessionTimeoutMs,
     };
   }

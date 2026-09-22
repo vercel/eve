@@ -21,7 +21,7 @@ import type {
 import type { OpenAPISpecSource } from "#public/definitions/connections/openapi.js";
 import type { CompiledWorkspaceResourceRoot } from "#compiler/manifest.js";
 import type { WorkspaceRuntimeSpec } from "#runtime/workspace/types.js";
-import type { JsonObject } from "#shared/json.js";
+import type { JsonObject, JsonValue } from "#shared/json.js";
 import type { Optional } from "#shared/optional.js";
 import type { Node } from "#shared/node.js";
 import type {
@@ -34,7 +34,7 @@ import type { NamedSkillDefinition } from "#shared/skill-definition.js";
 import type { InternalAgentDefinition } from "#shared/agent-definition.js";
 import type { RuntimeDynamicModelReference } from "#runtime/agent/bootstrap.js";
 import type { InternalToolDefinitionWithExecuteFn } from "#tools/definition.js";
-import type { WebSearchProvider } from "#shared/web-search.js";
+import type { CompiledToolBehavior } from "#tools/behavior.js";
 import type { SandboxBackend } from "#shared/sandbox-backend.js";
 import type { SandboxBootstrapContext, SandboxSessionContext } from "#shared/sandbox-definition.js";
 import type { ToolSchema } from "#tools/schema.js";
@@ -101,6 +101,7 @@ export type ResolvedScheduleDefinition = Readonly<
  * server that requires no authentication (e.g. localhost) may omit both.
  */
 export interface ResolvedConnectionDefinition extends ResolvedModuleSourceRef {
+  readonly protocolVersionDiscovery?: boolean;
   readonly approval?: Approval;
   readonly authorization?: Readonly<AuthorizationDefinition> | ConnectionAuthResolver;
   readonly connectionName: string;
@@ -165,12 +166,17 @@ export type ResolvedToolDefinition = Readonly<
   >
 > &
   ResolvedModuleSourceRef & {
+    readonly behavior?: CompiledToolBehavior;
     readonly owner: AgentSourceOwner;
     /**
      * Validated runtime input schema. Compiled and durable JSON Schemas are
      * rehydrated before entering this runtime-owned definition.
      */
     readonly inputSchema: ToolSchema | null;
+    /** Framework-owned input projected before a workflow tool executor starts. */
+    readonly executeInput?: (input: unknown) => JsonValue;
+    /** Presentation projected from tool lifecycle values. */
+    readonly label?: import("#tools/definition.js").InternalToolLabelDefinition;
     /**
      * Optional validated runtime output schema.
      */
@@ -281,6 +287,7 @@ export type ResolvedRuntimeSubagentNode = Readonly<
     Node & {
       kind: "subagent";
       name: string;
+      tool?: boolean;
     } & (
       | {
           description: string;
@@ -308,6 +315,7 @@ export type ResolvedRuntimeRemoteAgentNode = Readonly<
       name: string;
       outputSchema?: JsonObject;
       path: string;
+      tool?: boolean;
       url: string;
     }
 >;
@@ -432,16 +440,7 @@ export interface ResolvedAgent {
   readonly config?: ResolvedAgentDefinition;
   readonly connections: readonly ResolvedConnectionDefinition[];
   readonly dynamicConnectionResolvers?: readonly ResolvedDynamicConnectionResolver[];
-  /**
-   * Configuration for the experimental framework `Workflow` orchestration
-   * tool. Present when an authored tool module exports
-   * `experimental_workflow(...)`.
-   */
-  readonly workflowTool?: {
-    readonly maxSubagents?: number;
-  };
   /** AI Gateway provider selected for the framework `web_search` tool. */
-  readonly webSearchProvider?: WebSearchProvider;
   readonly dynamicInstructionsResolvers: readonly ResolvedDynamicInstructionsResolver[];
   readonly dynamicSkillResolvers: readonly ResolvedDynamicSkillResolver[];
   readonly dynamicToolResolvers: readonly ResolvedDynamicToolResolver[];

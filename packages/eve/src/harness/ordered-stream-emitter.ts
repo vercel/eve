@@ -187,16 +187,7 @@ function mergeAdjacentEmissions(
     }
     left.deltaParts ??= [appendDelta(left.event)];
     left.deltaParts.push(appendDelta(right));
-    left.event =
-      left.event.type === "action.input.appended" && right.type === "action.input.appended"
-        ? {
-            ...right,
-            data: {
-              ...right.data,
-              inputTextOffset: left.event.data.inputTextOffset,
-            },
-          }
-        : right;
+    left.event = right;
     left.messages = messages;
     return true;
   }

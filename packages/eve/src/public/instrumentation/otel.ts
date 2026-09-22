@@ -5,11 +5,13 @@
  * can only hold one of, and an integration is a destination, of which there may
  * be as many as there are files.
  *
- * Reachable only with `experimental.instrumentationProviders` on. With the flag
- * off nothing discovers that directory, so these compile but never run.
+ * Each destination is declared in its own path-named provider file.
  */
 
-import { createLocalTracesProcessor, resolveLocalTracesContent } from "#tracing/local-traces.js";
+import {
+  createLocalTracesProcessor,
+  resolveLocalTracesExportPolicy,
+} from "#tracing/local-traces.js";
 import {
   agentRunsIntegration,
   managedOtelIntegration,
@@ -22,10 +24,6 @@ export {
   isOtelIntegration,
   otel,
   otelIntegration,
-  composeSpanExportPolicies,
-  redactSpanInputs,
-  redactSpanOutputs,
-  type ContentOptions,
   type OtelDeclaration,
   type OtelIntegration,
   type OtelIntegrationOptions,
@@ -34,8 +32,8 @@ export {
   type SpanAttributeDecision,
   type SpanExportAttributeValue,
   type SpanExportContext,
+  type SpanExportDecision,
   type SpanExportPolicy,
-  type SpanExportPredicate,
   type TraceCaptureContext,
   type TraceCapturePolicy,
   type TracePolicyDecision,
@@ -44,7 +42,7 @@ export {
 export type { SpanExporter, SpanProcessor } from "#compiled/@vercel/otel/index.js";
 
 /**
- * Vercel Agent Runs, enabled by default in production.
+ * Vercel Agent Runs, enabled by default in preview and production deployments.
  *
  * Export it from `agent/instrumentation/agent-runs.ts` to configure export, or
  * export `disableInstrumentation()` from that file to turn it off.
@@ -63,7 +61,7 @@ export function agentRuns(options: ManagedTraceOptions = {}): OtelIntegration {
 export function localTraces(options: ManagedTraceOptions = {}): OtelIntegration {
   return managedOtelIntegration({
     ...options,
-    ...resolveLocalTracesContent(options),
+    exportPolicy: resolveLocalTracesExportPolicy(options.exportPolicy),
     spanProcessors: [createLocalTracesProcessor()],
   });
 }

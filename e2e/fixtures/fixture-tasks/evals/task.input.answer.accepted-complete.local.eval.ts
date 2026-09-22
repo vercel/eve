@@ -15,13 +15,15 @@ export default defineTaskEval({
   async test(t) {
     const started = await t.send("TASK-HITL-ROUTING");
     started.expectOk();
-    started.event("subagent.completed", {
+    started.event("action.result", {
       count: 1,
-      data: { backgroundTask: { status: "working" }, subagentName: "approval-worker" },
+      data: {
+        result: { kind: "tool-result", output: { status: "working" }, toolName: "approval-worker" },
+      },
     });
     const taskId = requireBackgroundTaskId(started);
 
-    const first = await waitForTaskInput(t, t, "first_gate");
+    const first = await waitForTaskInput(t, started.session, "first_gate");
     const answered = await first.session.respond([
       {
         optionId: "approve",

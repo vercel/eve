@@ -1,6 +1,4 @@
 import type { AgentSourceManifest } from "#discover/manifest.js";
-import type { ModuleSourceRef } from "#shared/source-ref.js";
-import type { WebSearchProvider } from "#shared/web-search.js";
 import {
   type CompiledAgentDefinition,
   type CompiledAgentManifest,
@@ -21,7 +19,6 @@ import {
   type CompiledSandboxDefinition,
   type CompiledSubagentNode,
   type CompiledToolDefinition,
-  type CompiledWorkflowToolDefinition,
   createCompiledAgentManifest,
   createCompiledAgentNodeManifest,
   createCompiledAgentResources,
@@ -33,14 +30,21 @@ import {
   markConfigRuntimeEntries,
   NodeModuleEvaluationContext,
 } from "#compiler/module-lifecycle.js";
-import { assertInstrumentationLayoutConfig } from "#compiler/instrumentation-layout-config.js";
 import { compileAgentConfig } from "#compiler/normalize-agent-config.js";
 import { compileChannelDefinition } from "#compiler/normalize-channel.js";
 import { compileConnectionDefinition } from "#compiler/normalize-connection.js";
 import {
+  applyAgentToolPolicy,
+  applyDefaultToolPolicy,
+  assertFrameworkToolPolicy,
+  canDisableToolWithoutSelectedSource,
+} from "#compiler/default-tool-policy.js";
+import {
   loadModuleBackedDefinition,
   type ManifestCompileContext,
 } from "#compiler/normalize-helpers.js";
+import { resolveWorkspaceSubagentDefinition } from "#compiler/resolve-workspace-subagent.js";
+import { workspaceSubagentName } from "#public/definitions/workspace-agent.js";
 import { compileHookEntry } from "#compiler/normalize-hook.js";
 import { compileInstructionsEntry } from "#compiler/normalize-instructions.js";
 import { compileMemoryDefinition, deriveMemorySlot } from "#compiler/normalize-memory.js";
@@ -64,7 +68,6 @@ import {
   assertApplicationOverlayCanApplyToAllNodes,
   assertNonExtensionSpecialTool,
   assertRootOnlyConfig,
-  assertRootOwnedSpecialTool,
   assertUniqueBy,
   assertUniqueRegistryIds,
   compileExtensionMounts,
@@ -72,6 +75,7 @@ import {
   expectSubagentDescription,
   mergeExternalDependencies,
   collectSelectedSourceIds,
+  withDiagnosticsSummary,
   withExtensionNamespace,
 } from "#compiler/normalize-manifest-helpers.js";
 import { summarizeCompilerDiagnostics, type CompilerDiagnostic } from "#compiler/diagnostics.js";
@@ -139,28 +143,8 @@ export async function compileAgentManifest(
     owner: { kind: "application" },
   });
 
-  const allNodeManifests = [root.manifest, ...root.descendants.map((node) => node.agent)];
-  const backgroundTool = allNodeManifests
-    .flatMap((node) => node.tools)
-    .find((tool) => tool.execution === "background");
-  if (backgroundTool !== undefined && root.manifest.config.experimental?.tasks !== true) {
-    throw new Error(
-      `Background tool "${backgroundTool.name}" requires experimental.tasks: true in the root agent config.`,
-    );
-  }
-
   const diagnosticsSummary = summarizeCompilerDiagnostics(diagnostics);
-  const subagents: CompiledSubagentNode[] = root.descendants.map((subagent) =>
-    subagent.configResolver === undefined
-      ? {
-          ...subagent,
-          agent: { ...subagent.agent, diagnosticsSummary },
-        }
-      : {
-          ...subagent,
-          agent: { ...subagent.agent, diagnosticsSummary },
-        },
-  );
+  const subagents = withDiagnosticsSummary(root.descendants, diagnosticsSummary);
   return createCompiledAgentManifest({
     ...root.manifest,
     diagnosticsSummary,
@@ -194,6 +178,8 @@ class AgentGraphCompiler {
       source: phaseOne.selectedConfig.source,
     });
     assertRootOnlyConfig(config, input.isRoot, input.manifest.agentId);
+    applyAgentToolPolicy(phaseOne, config);
+    applyDefaultToolPolicy(phaseOne, config);
 
     const externalDependencies = mergeExternalDependencies(
       input.inheritedExternalDependencies,
@@ -208,7 +194,6 @@ class AgentGraphCompiler {
     }
     const state = finalizeNodeSourceState(phaseOne, externalDependencies);
     markConfigRuntimeEntries(config, state.evaluation);
-    assertInstrumentationLayoutConfig(config, state);
     const resources = await this.compileResources(input, state);
     const children = await this.compileChildren(input, state, externalDependencies);
     const manifest = createCompiledAgentNodeManifest({
@@ -260,6 +245,16 @@ class AgentGraphCompiler {
       );
 
       if (normalized.kind === "remote") {
+        const workspaceName = workspaceSubagentName(phaseOne.selectedConfig.definition);
+        const remoteDefinition =
+          workspaceName === undefined
+            ? normalized
+            : await resolveWorkspaceSubagentDefinition({
+                definition: normalized,
+                name: workspaceName,
+                registries: this.registries,
+                source,
+              });
         assertRemoteAgentDefinitionHasNoLocalPackageEntries(source);
         const sourceId = phaseOne.selectedConfig.source.sourceId;
         phaseOne.evaluation.setBindings({ [sourceId]: phaseOne.selectedConfig.binding });
@@ -271,7 +266,7 @@ class AgentGraphCompiler {
         remoteAgents.push(
           createCompiledRemoteAgent({
             binding,
-            definition: normalized,
+            definition: remoteDefinition,
             nodeId,
             owner: projected.owner,
             parentNodeId: input.nodeId,
@@ -291,6 +286,8 @@ class AgentGraphCompiler {
           source: phaseOne.selectedConfig.source,
         });
         assertRootOnlyConfig(config, false, source.manifest.agentId);
+        applyAgentToolPolicy(phaseOne, config);
+        applyDefaultToolPolicy(phaseOne, config);
       } else {
         dynamicBuildDependencies = normalized.build?.externalDependencies;
       }
@@ -309,7 +306,6 @@ class AgentGraphCompiler {
       } else {
         markConfigRuntimeEntries(config, finalState.evaluation);
       }
-      if (config !== undefined) assertInstrumentationLayoutConfig(config, finalState);
       const resources = await this.compileResources(childInput, finalState);
       const children = await this.compileChildren(childInput, finalState, externalDependencies);
       const base = {
@@ -500,9 +496,6 @@ class AgentGraphCompiler {
     const schedules: CompiledScheduleDefinition[] = [];
     const channels: CompiledChannelDefinition[] = [];
     let sandbox: CompiledSandboxDefinition | undefined;
-    let instrumentation: ModuleSourceRef | undefined;
-    let workflowTool: CompiledWorkflowToolDefinition | undefined;
-    let webSearchProvider: WebSearchProvider | undefined;
     const selectedSourceIds = collectSelectedSourceIds(state.composed);
     const loadNamespace = state.evaluation.loadNamespace;
 
@@ -566,10 +559,6 @@ class AgentGraphCompiler {
           }
           break;
         }
-        case "instrumentation":
-          instrumentation = entry.source;
-          state.evaluation.requireRuntimeEntry(candidate.sourceId);
-          break;
         case "memory":
           memories.push(
             await compileMemoryDefinition(entry.source, {
@@ -614,23 +603,26 @@ class AgentGraphCompiler {
             binding: binding!,
             loadNamespace,
           });
+          assertFrameworkToolPolicy(candidate, result);
           if (result.kind === "disabled") {
-            state.composed = disableComposedCandidate({ candidate, composed: state.composed });
+            state.composed = disableComposedCandidate({
+              allowUnmatched: canDisableToolWithoutSelectedSource(state, result.name),
+              candidate,
+              composed: state.composed,
+            });
             delete state.bindings[candidate.sourceId];
             selectedSourceIds.delete(candidate.sourceId);
           } else if (result.kind === "tool") {
             tools.push(result.definition);
-            state.evaluation.requireRuntimeEntry(candidate.sourceId);
+            if (result.definition.hasExecute) {
+              state.evaluation.requireRuntimeEntry(candidate.sourceId);
+            }
           } else if (result.kind === "dynamic-tool") {
             dynamicTools.push(withExtensionNamespace(result.definition, candidate.owner));
             state.evaluation.requireRuntimeEntry(candidate.sourceId);
-          } else if (result.kind === "workflow-tool") {
-            assertRootOwnedSpecialTool(candidate as AgentModuleCandidate, "Workflow");
-            workflowTool = { ...entry.source, maxSubagents: result.maxSubagents };
           } else {
             assertNonExtensionSpecialTool(candidate as AgentModuleCandidate, "Web search");
             tools.push(result.definition);
-            webSearchProvider = result.provider;
           }
           break;
         }
@@ -681,7 +673,6 @@ class AgentGraphCompiler {
       hooks,
       memories,
       instructions,
-      instrumentation,
       sandbox,
       sandboxWorkspaces: input.manifest.sandboxWorkspaces.map((workspace) => ({
         logicalPath: workspace.logicalPath,
@@ -693,8 +684,6 @@ class AgentGraphCompiler {
       skills,
       sourceComposition: state.composed.composition,
       tools,
-      webSearchProvider,
-      workflowTool,
     });
   }
 }

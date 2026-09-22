@@ -1,5 +1,5 @@
 import { defineEval, type EveEvalTargetHandle } from "eve/evals";
-import { equals, satisfies } from "eve/evals/expect";
+import { satisfies } from "eve/evals/expect";
 
 interface CreateSessionResponse {
   readonly ok: true;
@@ -12,7 +12,7 @@ const PRINCIPAL_B = "Bearer e2e-create-once-b";
 
 export default defineEval({
   description:
-    "Concurrent and serial create retries dispatch once and remain isolated across issuers.",
+    "Concurrent create candidates converge on one owner, serial retries resolve it, and issuers remain isolated.",
   async test(t) {
     const operationId = `session-create-idempotency-${crypto.randomUUID()}`;
     const message = `CREATE-ONCE-INITIAL-${crypto.randomUUID()}`;
@@ -20,22 +20,33 @@ export default defineEval({
       createSession(t.target, PRINCIPAL_A, operationId, message),
       createSession(t.target, PRINCIPAL_A, operationId, message),
     ]);
-    const replay = await createSession(t.target, PRINCIPAL_A, operationId, message);
-    const otherIssuer = await createSession(t.target, PRINCIPAL_B, operationId, message);
 
-    for (const retry of [concurrent, replay]) {
-      await t.require(retry.sessionId, equals(first.sessionId));
+    const acceptedCandidates = new Set([first.sessionId, concurrent.sessionId]);
+    let replay: CreateSessionResponse | undefined;
+    for (const delayMs of [100, 200, 400, 800, 1_600]) {
+      await t.sleep(delayMs);
+      const retry = await createSession(t.target, PRINCIPAL_A, operationId, message);
+      if (acceptedCandidates.has(retry.sessionId)) {
+        replay = retry;
+        break;
+      }
+      acceptedCandidates.add(retry.sessionId);
     }
+    if (replay === undefined) {
+      throw new Error("The operation owner was not resolvable after startup.");
+    }
+
+    const otherIssuer = await createSession(t.target, PRINCIPAL_B, operationId, message);
     await t.require(
       otherIssuer,
       satisfies(
-        (value: CreateSessionResponse) => value.sessionId !== first.sessionId,
+        (value: CreateSessionResponse) => value.sessionId !== replay.sessionId,
         "the same operation under another issuer owns a distinct session",
       ),
     );
 
     const [firstTurn, issuerTurn] = await Promise.all([
-      t.target.watchTurn(first.sessionId).result(),
+      t.target.watchTurn(replay.sessionId).result(),
       t.target.watchTurn(otherIssuer.sessionId).result(),
     ]);
     firstTurn.expectOk();
@@ -46,8 +57,10 @@ export default defineEval({
     issuerTurn.event("step.started", { count: 1 });
 
     const probe = `CREATE-ONCE-PROBE-${crypto.randomUUID()}`;
-    const liveProbe = t.target.watchTurn(first.sessionId, { startIndex: firstTurn.events.length });
-    await continueSession(t.target, PRINCIPAL_A, first.sessionId, probe);
+    const liveProbe = t.target.watchTurn(firstTurn.sessionId, {
+      startIndex: firstTurn.events.length,
+    });
+    await continueSession(t.target, PRINCIPAL_A, firstTurn.sessionId, probe);
     const probeTurn = await liveProbe.result();
     probeTurn.expectOk();
     probeTurn.event("message.received", { count: 1, data: { message: probe } });

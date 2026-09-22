@@ -92,8 +92,6 @@ async function deriveRuntimeSandboxKeyParts(input: {
     input.templatePlan.kind === "none"
       ? null
       : resolveRuntimeSandboxVersionHash({
-          compiledArtifactsSource: input.compiledArtifactsSource,
-          metadata,
           nodeId: input.nodeId,
           sourceId: input.sourceId,
           templatePlan: input.templatePlan,
@@ -206,15 +204,12 @@ async function resolveRuntimeSandboxScope(input: {
 }
 
 function resolveRuntimeSandboxVersionHash(input: {
-  readonly compiledArtifactsSource: RuntimeCompiledArtifactsSource;
-  readonly metadata: CompileMetadata | null;
   readonly nodeId: string;
   readonly sourceId: string;
   readonly templatePlan: Exclude<RuntimeSandboxTemplatePlan, { readonly kind: "none" }>;
 }): string {
-  const contentHash =
-    input.templatePlan.contentHash ??
-    resolveSourceGraphHash(input.metadata, input.compiledArtifactsSource);
+  // No seed files means empty content, independent of unrelated application source.
+  const contentHash = input.templatePlan.contentHash ?? "";
 
   if (input.templatePlan.kind === "bootstrap") {
     const revalidationKey = input.templatePlan.revalidationKey ?? "";
@@ -224,16 +219,6 @@ function resolveRuntimeSandboxVersionHash(input: {
   }
 
   return createStableHash(`workspace-content:${contentHash}:${input.nodeId}:${input.sourceId}`);
-}
-
-function resolveSourceGraphHash(
-  metadata: CompileMetadata | null,
-  compiledArtifactsSource: RuntimeCompiledArtifactsSource,
-): string {
-  return (
-    metadata?.discovery.sourceGraphHash ??
-    getRuntimeCompiledArtifactsCacheKey(compiledArtifactsSource)
-  );
 }
 
 function createStableHash(value: string): string {

@@ -10,6 +10,7 @@ import {
 import { isApprovalRequest } from "#harness/input-request-class.js";
 import type { PendingInputBatch } from "#harness/pending-input-batches.js";
 import {
+  getPendingInputBatches,
   queueDeferredStepInput,
   removePendingInputBatches,
 } from "#harness/pending-input-batches.js";
@@ -39,12 +40,12 @@ type ToolApprovalInputRequest = InputRequest & { readonly kind: "tool-approval" 
 
 export type RejectedActionBatch = ResolvedInputActionBatch;
 
-export function hasAnsweredApprovalBatch(
+export function findAnsweredApprovalBatches(
   batches: readonly PendingInputBatch[],
   responses: readonly InputResponse[],
-): boolean {
+): PendingInputBatch[] {
   const responseIds = new Set(responses.map((response) => response.requestId));
-  return batches.some((batch) =>
+  return batches.filter((batch) =>
     batch.requests.every(
       (request) => !isApprovalRequest(request) || responseIds.has(request.requestId),
     ),
@@ -58,13 +59,8 @@ export function resolveApprovalInputBatches(
     readonly resolveApprovalKey?: (request: InputRequest) => string | undefined;
   },
 ): ResolvePendingInputResult {
-  const responseIds = new Set(input.responses.map((response) => response.requestId));
   const answeredApprovalBatches = new Set(
-    input.approvalBatches.filter((batch) =>
-      batch.requests.every(
-        (request) => !isApprovalRequest(request) || responseIds.has(request.requestId),
-      ),
-    ),
+    findAnsweredApprovalBatches(input.approvalBatches, input.responses),
   );
   const answeredQuestionBatches = new Set(
     findAnsweredQuestionBatches(input.questionBatches, input.responses),
@@ -139,8 +135,22 @@ export function resolveApprovalInputBatches(
   });
 }
 
-/** Returns tool approval keys recorded during this session. */
-export function getApprovedTools(session: HarnessSession): ReadonlySet<string> {
+/** Returns recorded approval keys that have no matching request still pending. */
+export function getApprovedTools(
+  session: HarnessSession,
+  resolveApprovalKey?: (request: InputRequest) => string | undefined,
+): ReadonlySet<string> {
+  const approvedTools = readRecordedApprovedTools(session);
+  for (const batch of getPendingInputBatches(session.state)) {
+    for (const request of batch.requests) {
+      if (!isApprovalRequest(request)) continue;
+      approvedTools.delete(resolveApprovalKey?.(request) ?? request.action.toolName);
+    }
+  }
+  return approvedTools;
+}
+
+function readRecordedApprovedTools(session: HarnessSession): Set<string> {
   const value = session.state?.[APPROVED_TOOLS_KEY];
   return Array.isArray(value) ? new Set(value as string[]) : new Set();
 }
@@ -191,7 +201,9 @@ function recordApprovedTools(input: {
   if (newKeys.length === 0) return input.session;
 
   const state = { ...input.session.state };
-  state[APPROVED_TOOLS_KEY] = [...new Set([...getApprovedTools(input.session), ...newKeys])];
+  state[APPROVED_TOOLS_KEY] = [
+    ...new Set([...readRecordedApprovedTools(input.session), ...newKeys]),
+  ];
   return { ...input.session, state };
 }
 

@@ -21,13 +21,13 @@ import {
   toMessageInputRequest,
 } from "#client/message-action-parts.js";
 import {
-  appendToolInputDelta,
   optimisticUserMessageId,
   partKey,
   projectReceivedParts,
   removeStreamingToolPartsForTurn,
   upsertMessage,
 } from "#client/message-reducer-primitives.js";
+import { messageRun } from "#client/message-run-parts.js";
 import type { InputResponse } from "#shared/input.js";
 import type { AuthorizationCompletedStreamEvent, InputResolution } from "#protocol/message.js";
 
@@ -45,6 +45,12 @@ export type {
 } from "#client/message-reducer-types.js";
 
 type EveAssistantMessage = EveMessage & { readonly role: "assistant" };
+type MessageReceivedEvent = Extract<EveAgentReducerEvent, { readonly type: "message.received" }>;
+
+function receivedMessageEventId(event: MessageReceivedEvent): string {
+  const eventId: string | undefined = event.meta.id;
+  return eventId ?? `${event.data.turnId}:${event.data.sequence}`;
+}
 
 /**
  * Creates a UIMessage-compatible eve reducer for chat and agent UIs.
@@ -106,8 +112,9 @@ function reduceMessageData(data: EveMessageData, event: EveAgentReducerEvent): E
     }
 
     case "message.received":
+      if (event.data.kind === "execution.background_task") return data;
       return upsertMessage(data, {
-        id: `${event.data.turnId}:user`,
+        id: `${receivedMessageEventId(event)}:user`,
         metadata: {
           status: "complete",
           turnId: event.data.turnId,
@@ -123,17 +130,16 @@ function reduceMessageData(data: EveMessageData, event: EveAgentReducerEvent): E
 
     case "reasoning.appended":
       return updateAssistantMessage(data, event.data.turnId, (message) =>
-        upsertRun(ensureStepStartPart(message, event.data.stepIndex), {
-          state: "streaming",
+        messageRun.append(ensureStepStartPart(message, event.data.stepIndex), {
+          delta: event.data.reasoningDelta,
           stepIndex: event.data.stepIndex,
-          text: event.data.reasoningSoFar,
           type: "reasoning",
         }),
       );
 
     case "reasoning.completed":
       return updateAssistantMessage(data, event.data.turnId, (message) =>
-        upsertRun(ensureStepStartPart(message, event.data.stepIndex), {
+        messageRun.upsert(ensureStepStartPart(message, event.data.stepIndex), {
           state: "done",
           stepIndex: event.data.stepIndex,
           text: event.data.reasoning,
@@ -145,12 +151,9 @@ function reduceMessageData(data: EveMessageData, event: EveAgentReducerEvent): E
       const existing = findToolPart(data, event.data.callId);
       if (existing !== undefined && existing.state !== "input-streaming") return data;
 
-      const inputText = appendToolInputDelta(
-        existing?.state === "input-streaming" ? existing.inputText : undefined,
-        event.data.inputTextOffset,
-        event.data.inputTextDelta,
-      );
-      if (inputText === undefined) return data;
+      const inputText =
+        (existing?.state === "input-streaming" ? existing.inputText : "") +
+        event.data.inputTextDelta;
 
       const nextPart: EveDynamicToolPart = {
         input: undefined,
@@ -355,10 +358,9 @@ function reduceMessageData(data: EveMessageData, event: EveAgentReducerEvent): E
 
     case "message.appended":
       return updateAssistantMessage(data, event.data.turnId, (message) =>
-        upsertRun(ensureStepStartPart(message, event.data.stepIndex), {
-          state: "streaming",
+        messageRun.append(ensureStepStartPart(message, event.data.stepIndex), {
+          delta: event.data.messageDelta,
           stepIndex: event.data.stepIndex,
-          text: event.data.messageSoFar,
           type: "text",
         }),
       );
@@ -369,7 +371,7 @@ function reduceMessageData(data: EveMessageData, event: EveAgentReducerEvent): E
           return removeTextPart(message, event.data.stepIndex);
         }
 
-        return upsertRun(ensureStepStartPart(message, event.data.stepIndex), {
+        return messageRun.upsert(ensureStepStartPart(message, event.data.stepIndex), {
           state: "done",
           stepIndex: event.data.stepIndex,
           text: event.data.message,
@@ -528,41 +530,6 @@ function upsertPart(message: EveAssistantMessage, next: EveMessagePart): EveAssi
     index === -1
       ? [...message.parts, next]
       : [...message.parts.slice(0, index), next, ...message.parts.slice(index + 1)];
-
-  return {
-    ...message,
-    metadata: {
-      ...message.metadata,
-      status: next.type === "text" && next.state === "done" ? "complete" : "streaming",
-    },
-    parts,
-  };
-}
-
-type EveRunPart = Extract<EveMessagePart, { readonly type: "text" | "reasoning" }>;
-
-// Upserts a text/reasoning part, keeping multiple runs per step distinct: one
-// step can produce text, call tools, then produce more text (see
-// `MessageCompletedStreamEvent`), so a step-only key would collapse them.
-//
-// We find the latest same-step run of this type: while it is still streaming,
-// its snapshots replace it in place; once it is done (or there is none), `next`
-// begins a new run appended in arrival order.
-function upsertRun(message: EveAssistantMessage, next: EveRunPart): EveAssistantMessage {
-  let lastIndex = -1;
-  for (let index = message.parts.length - 1; index >= 0; index -= 1) {
-    const part = message.parts[index];
-    if (part?.type === next.type && part.stepIndex === next.stepIndex) {
-      lastIndex = index;
-      break;
-    }
-  }
-
-  const openRun =
-    lastIndex !== -1 && (message.parts[lastIndex] as EveRunPart).state === "streaming";
-  const parts = openRun
-    ? [...message.parts.slice(0, lastIndex), next, ...message.parts.slice(lastIndex + 1)]
-    : [...message.parts, next];
 
   return {
     ...message,

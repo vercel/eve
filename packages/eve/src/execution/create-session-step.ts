@@ -13,13 +13,11 @@ import type { RunSessionLimits } from "#channel/types.js";
 import type { JsonObject } from "#shared/json.js";
 import { resolveEffectiveAgentRuntimeFromConfig } from "#execution/effective-agent-config.js";
 import type { DynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agent-config.js";
-import { TASK_UPDATE_SESSION_INSTRUCTION } from "#execution/tasks/child/instructions.js";
-import { TASK_UPDATE_TOOL_NAME } from "#tools/framework/task-contract.js";
 
 /**
  * Result returned by {@link createSessionStep}.
  *
- * Exposes the projected {@link DurableSessionState} the driver needs to
+ * Exposes the projected {@link DurableSessionState} the owner needs to
  * drive the turn loop.
  */
 export interface CreateSessionStepResult {
@@ -41,8 +39,7 @@ export async function createSessionStep(input: {
   readonly nodeId?: string;
   readonly rootSessionId?: string;
   readonly sessionId: string;
-  readonly subagentDepth?: number;
-  readonly taskOwned?: boolean;
+  readonly taskId?: string;
 }): Promise<CreateSessionStepResult> {
   "use step";
 
@@ -54,15 +51,6 @@ export async function createSessionStep(input: {
     bundle,
     input.dynamicSubagentAgentConfig,
   );
-  const taskUpdatesEnabled =
-    input.taskOwned === true &&
-    bundle.resolvedAgent.config?.experimental?.tasks === true &&
-    effectiveAgent.turnAgent.tools.some(
-      (tool) =>
-        tool.kind === "authored-tool" &&
-        tool.owner.kind === "framework" &&
-        tool.name === TASK_UPDATE_TOOL_NAME,
-    );
 
   // Both token axes resolve tighter-wins against the cap inherited from the
   // delegating parent: a child may narrow what its parent granted, never widen
@@ -84,14 +72,16 @@ export async function createSessionStep(input: {
         configured: effectiveAgent.limits?.maxOutputTokensPerSession,
         inherited: input.inheritedLimits?.maxOutputTokensPerSession,
       }),
+      maxTokenCostUsdPerSession: resolveInheritedTokenLimit({
+        configured: effectiveAgent.limits?.maxTokenCostUsdPerSession,
+        inherited: input.inheritedLimits?.maxTokenCostUsdPerSession,
+      }),
     },
     outputSchema: input.outputSchema,
     rootSessionId: input.rootSessionId,
     sessionId: input.sessionId,
-    subagentDepth: input.subagentDepth,
-    systemPromptAdditions: taskUpdatesEnabled ? [TASK_UPDATE_SESSION_INSTRUCTION] : undefined,
+    taskId: input.taskId,
     turnAgent: effectiveAgent.turnAgent,
-    workflowMaxSubagents: bundle.resolvedAgent.workflowTool?.maxSubagents,
   });
 
   return { state: createDurableSessionState({ session }) };

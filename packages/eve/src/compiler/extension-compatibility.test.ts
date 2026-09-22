@@ -104,6 +104,58 @@ describe("extension compatibility manifest", () => {
     ]);
   });
 
+  it.each([
+    { capability: "tool", firstDelegatedEpoch: 14 },
+    { capability: "dynamicTool", firstDelegatedEpoch: 23 },
+  ])(
+    "rejects $capability extensions requiring task.delegated",
+    ({ capability, firstDelegatedEpoch }) => {
+      for (let requiredVersion = firstDelegatedEpoch; requiredVersion <= 27; requiredVersion++) {
+        expect(
+          findUnsupportedExtensionCapabilities({
+            kind: EXTENSION_COMPATIBILITY_MANIFEST_KIND,
+            formatVersion: EXTENSION_COMPATIBILITY_MANIFEST_FORMAT_VERSION,
+            builtWithEve: "0.40.0",
+            requires: { [capability]: requiredVersion },
+          }),
+        ).toEqual([
+          {
+            capability,
+            requiredVersion,
+            supportedVersions: EXTENSION_CAPABILITY_SUPPORT[capability as ExtensionCapability],
+          },
+        ]);
+      }
+    },
+  );
+
+  it.each([
+    { capability: "tool", epoch: 36 },
+    { capability: "tool", epoch: 37 },
+    { capability: "tool", epoch: 38 },
+    { capability: "tool", epoch: 39 },
+    { capability: "tool", epoch: 40 },
+    { capability: "tool", epoch: 41 },
+    { capability: "dynamicTool", epoch: 35 },
+    { capability: "dynamicTool", epoch: 36 },
+    { capability: "dynamicTool", epoch: 37 },
+    { capability: "dynamicTool", epoch: 38 },
+  ] as const)(
+    "rejects removed workflow surfaces in $capability epoch $epoch",
+    ({ capability, epoch }) => {
+      const supportedVersions = EXTENSION_CAPABILITY_SUPPORT[capability];
+      expect(supportedVersions).not.toContain(epoch);
+      expect(
+        findUnsupportedExtensionCapabilities({
+          kind: EXTENSION_COMPATIBILITY_MANIFEST_KIND,
+          formatVersion: EXTENSION_COMPATIBILITY_MANIFEST_FORMAT_VERSION,
+          builtWithEve: "0.54.5",
+          requires: { [capability]: epoch },
+        }),
+      ).toEqual([{ capability, requiredVersion: epoch, supportedVersions }]);
+    },
+  );
+
   it("publishes valid support history for every capability version it stamps", () => {
     for (const [capability, version] of Object.entries(EXTENSION_CAPABILITY_VERSIONS)) {
       const supportedVersions = EXTENSION_CAPABILITY_SUPPORT[capability as ExtensionCapability];

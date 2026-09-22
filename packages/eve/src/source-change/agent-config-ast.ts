@@ -10,6 +10,11 @@ import { parseWithNitroRolldownAst } from "#internal/bundler/nitro-rolldown.js";
 export type Program = { readonly body?: readonly AstNode[] };
 
 export type AstNode = {
+  readonly source?: AstNode;
+  readonly specifiers?: readonly AstNode[];
+  readonly local?: AstNode;
+  readonly imported?: AstNode;
+  readonly importKind?: string;
   readonly arguments?: readonly AstNode[];
   readonly callee?: AstNode;
   readonly computed?: boolean;
@@ -45,7 +50,7 @@ type ParseError = {
 };
 
 export type ParsedAgentObject =
-  | { readonly kind: "ok"; readonly object: ObjectExpression }
+  | { readonly kind: "ok"; readonly object: ObjectExpression; readonly program: Program }
   | { readonly kind: "bail"; readonly reason: string; readonly line: number };
 
 /** Parses a source and locates the `export default defineAgent({ ... })` object. */
@@ -74,7 +79,7 @@ export async function parseAgentObject(sourceText: string): Promise<ParsedAgentO
   const object = findDefineAgentObject(parsed.program ?? parsed);
   return object === undefined
     ? { kind: "bail", reason: "no `export default defineAgent({ ... })` call found", line: 1 }
-    : { kind: "ok", object };
+    : { kind: "ok", object, program: parsed.program ?? parsed };
 }
 
 /**

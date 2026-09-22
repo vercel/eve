@@ -12,6 +12,8 @@ export interface GatewayCredentialPresence {
   readonly apiKey: boolean;
   /** A Vercel OIDC token is available (`VERCEL_OIDC_TOKEN` or a linked project). */
   readonly oidc: boolean;
+  readonly account?: boolean;
+  readonly team?: string;
 }
 
 /** True when an environment value is present and non-blank. */
@@ -90,6 +92,13 @@ export function resolveModelEndpointStatus(
     }
     return { kind: "external", provider: routing.provider };
   }
+  if (credentials.account)
+    return {
+      kind: "gateway",
+      connected: true,
+      credential: "oauth",
+      team: credentials.team,
+    };
   const resolution = resolveGatewayCredential({
     apiKeyInEnv: credentials.apiKey,
     oidcAvailable: credentials.oidc,

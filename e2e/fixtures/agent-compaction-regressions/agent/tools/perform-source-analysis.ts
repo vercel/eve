@@ -3,33 +3,30 @@ import { defineTool } from "eve/tools";
 import { todo } from "eve/tools/todo";
 import { z } from "zod";
 
-const completionMarker = "SOURCE_ANALYSIS_COMPLETE";
-const invocationCount = defineState("compaction-regression.perform-source-analysis", () => 0);
+import { checkoutFindings } from "../../release-findings";
+import { reviewReferences, saveReleaseRecord } from "../../release-reports";
+
+const invocationCount = defineState("storefront.perform-source-analysis", () => 0);
 
 export default defineTool({
-  description:
-    "Compaction regression tool. Complete source analysis exactly once when the user requests the stale-todo-work case.",
-  inputSchema: z.object({
-    approach: z.string().min(1),
-  }),
-  async execute(input, ctx) {
+  description: "Review the checkout implementation and save a completed review record.",
+  inputSchema: z.object({ scope: z.literal("checkout") }),
+  async execute(_input, ctx) {
     const attempt = invocationCount.get() + 1;
     invocationCount.update(() => attempt);
     await todo.execute(
       {
-        todos: [{ content: "Complete source analysis", priority: "high", status: "pending" }],
+        todos: [{ content: "Review checkout implementation", priority: "high", status: "pending" }],
       },
       ctx,
     );
-
-    return {
-      completed: true,
-      completionMarker,
-      workUnit: "source-analysis",
-      hardStop: attempt >= 10,
-      attempt,
-      approach: input.approach,
-      evidencePadding: "source analysis evidence ".repeat(100),
+    const report = {
+      reportId: reviewReferences.checkout,
+      subject: "checkout" as const,
+      status: "completed" as const,
+      findings: checkoutFindings,
     };
+    saveReleaseRecord(report);
+    return { completed: true, ...report, attempt, hardStop: attempt >= 10 };
   },
 });

@@ -46,13 +46,37 @@ export function extractErrorSignals(error: unknown): ErrorSignals {
     if (typeof candidate.statusCode === "number") {
       link.statusCode = candidate.statusCode;
     }
-    if (typeof candidate.type === "string" && candidate.type.length > 0) {
-      link.type = candidate.type;
-    }
+    const type = readGatewayType(candidate);
+    if (type !== undefined) link.type = type;
     if (typeof candidate.hint === "string" && candidate.hint.length > 0) {
       link.hint = candidate.hint;
     }
     chain.push(link);
   }
   return { chain };
+}
+
+function readGatewayType(candidate: Record<string, unknown>): string | undefined {
+  if (typeof candidate.type === "string" && candidate.type.length > 0) {
+    return candidate.type;
+  }
+
+  const dataType = readGatewayTypeFromBody(candidate.data);
+  if (dataType !== undefined) return dataType;
+
+  if (typeof candidate.responseBody !== "string") return undefined;
+  try {
+    return readGatewayTypeFromBody(JSON.parse(candidate.responseBody));
+  } catch {
+    return undefined;
+  }
+}
+
+function readGatewayTypeFromBody(value: unknown): string | undefined {
+  if (!isObject(value)) return undefined;
+  const nestedError = value.error;
+  if (isObject(nestedError) && typeof nestedError.type === "string") {
+    return nestedError.type.length > 0 ? nestedError.type : undefined;
+  }
+  return typeof value.type === "string" && value.type.length > 0 ? value.type : undefined;
 }

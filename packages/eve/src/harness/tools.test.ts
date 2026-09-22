@@ -16,6 +16,7 @@ import {
 } from "#harness/provider-tool-schemas.js";
 import type { JsonObject } from "#shared/json.js";
 import { isAsyncIterable } from "#shared/async-iterable.js";
+import { BackgroundToolExecutorKey } from "#harness/background-tools.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import { buildToolApproval, buildToolSet, buildToolSetWithProviderTools } from "#harness/tools.js";
 import type { HarnessToolMap } from "#harness/types.js";
@@ -36,16 +37,18 @@ async function resolveApproval(
   tools: ReturnType<typeof buildToolSet>,
   toolName: string,
   input: unknown,
-  session: Session = {
+  session?: Session,
+  options: { readonly abortSignal?: AbortSignal } = {},
+): Promise<unknown> {
+  const approval = buildToolApproval(tools, options.abortSignal);
+  const activeSession = session ?? {
     auth: { current: null, initiator: null },
     sessionId: "session-1",
     turn: { id: "turn-1", sequence: 0 },
-  },
-): Promise<unknown> {
-  const approval = buildToolApproval(tools);
+  };
   if (typeof approval !== "function") throw new TypeError("Expected generic approval function.");
   const ctx = new ContextContainer();
-  ctx.set(SessionKey, session);
+  ctx.set(SessionKey, activeSession);
   return contextStorage.run(ctx, () =>
     approval({
       messages: [],
@@ -129,6 +132,57 @@ describe("buildToolSet", () => {
 
     expect(receivedOptions?.abortSignal).toBe(abortController.signal);
     expect(receivedOptions?.toolCallId).toBe("call_observe");
+  });
+
+  it("registers background calls at execution when input callbacks are skipped or repeated", async () => {
+    const observedBatches: string[][] = [];
+    const ctx = new ContextContainer();
+    ctx.set(BackgroundToolExecutorKey, {
+      async execute({ batch }) {
+        observedBatches.push(batch.calls.map((call) => call.callId));
+        return { status: "working" };
+      },
+    });
+    const tools: HarnessToolMap = new Map([
+      [
+        "background_work",
+        {
+          description: "Start background work.",
+          execute: async () => ({ status: "working" }),
+          execution: "background",
+          inputSchema: jsonSchema({ type: "object" }),
+          name: "background_work",
+          workflowId: "workflow//test//background_work",
+        },
+      ],
+    ]);
+
+    const result = buildToolSet({ tools });
+    const backgroundTool = result.background_work as typeof result.background_work & {
+      readonly onInputAvailable: (input: {
+        readonly input: unknown;
+        readonly toolCallId: string;
+      }) => void;
+    };
+    await contextStorage.run(ctx, async () => {
+      await executeSdkTool({
+        tool: backgroundTool,
+        toolCallId: "approved-call",
+        toolInput: { task: "resume" },
+      });
+
+      backgroundTool.onInputAvailable({
+        input: { task: "new" },
+        toolCallId: "new-call",
+      });
+      await executeSdkTool({
+        tool: backgroundTool,
+        toolCallId: "new-call",
+        toolInput: { task: "new" },
+      });
+    });
+
+    expect(observedBatches).toEqual([["approved-call"], ["approved-call", "new-call"]]);
   });
 
   it("passes the AI SDK abort signal to the authored tool context", async () => {
@@ -361,6 +415,10 @@ describe("buildToolSet", () => {
       [
         "web_search",
         {
+          behavior: {
+            availability: [],
+            handling: { kind: "provider-tool", provider: "parallel" },
+          },
           description: "Web search.",
           inputSchema: jsonSchema({}),
           name: "web_search",
@@ -433,6 +491,10 @@ describe("buildToolSet", () => {
         [
           "web_search",
           {
+            behavior: {
+              availability: [],
+              handling: { kind: "provider-tool", provider: "exa" },
+            },
             description: "Web search.",
             inputSchema: jsonSchema({}),
             name: "web_search",
@@ -454,6 +516,10 @@ describe("buildToolSet", () => {
       [
         "web_search",
         {
+          behavior: {
+            availability: [],
+            handling: { kind: "provider-tool", provider: "parallel" },
+          },
           description: "Web search.",
           inputSchema: jsonSchema({}),
           name: "web_search",
@@ -464,7 +530,6 @@ describe("buildToolSet", () => {
     const result = await buildToolSetWithProviderTools({
       modelReference: { id: "openai/gpt-5.4" },
       tools,
-      webSearchProvider: "parallel",
     });
 
     expect(getOutputJsonSchema(result.web_search)).toEqual(WEB_SEARCH_PARALLEL_OUTPUT_SCHEMA);
@@ -475,6 +540,10 @@ describe("buildToolSet", () => {
       [
         "web_search",
         {
+          behavior: {
+            availability: [],
+            handling: { kind: "provider-tool", provider: "exa" },
+          },
           description: "Web search.",
           inputSchema: jsonSchema({}),
           name: "web_search",
@@ -503,6 +572,10 @@ describe("buildToolSet", () => {
       [
         "ask_question",
         {
+          behavior: {
+            availability: ["requires-request-input"],
+            handling: { kind: "request-input", request: "question" },
+          },
           description: "Ask the user a question.",
           inputSchema: jsonSchema({}),
           name: "ask_question",
@@ -989,6 +1062,31 @@ describe("buildToolSet", () => {
       await resolveApproval(result, "vercel__list_projects", {});
 
       expect(capturedCallId).toBe("call_1");
+    });
+
+    it("passes cancellation into approval", async () => {
+      let capturedSignal: AbortSignal | undefined;
+      const tools: HarnessToolMap = new Map([
+        [
+          "deploy",
+          {
+            approval: (ctx: ApprovalContext) => {
+              capturedSignal = ctx.abortSignal;
+              return "user-approval";
+            },
+            description: "Deploy the application.",
+            execute: async () => "ok",
+            inputSchema: jsonSchema({}),
+            name: "deploy",
+          },
+        ],
+      ]);
+      const abortSignal = new AbortController().signal;
+
+      const result = buildToolSet({ tools });
+      await resolveApproval(result, "deploy", {}, undefined, { abortSignal });
+
+      expect(capturedSignal).toBe(abortSignal);
     });
 
     it("passes the active caller and session context into approval", async () => {

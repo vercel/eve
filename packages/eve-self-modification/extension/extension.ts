@@ -1,3 +1,1 @@
-import { defineExtension } from "eve/extension";
-
-export default defineExtension();
+export { default } from "eve/self-modification";

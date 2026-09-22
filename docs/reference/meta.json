@@ -1,4 +1,4 @@
 {
   "title": "Reference",
-  "pages": ["typescript-api", "cli"]
+  "pages": ["cli", "typescript-api", "../guides/session-context", "agent-files", "telemetry"]
 }

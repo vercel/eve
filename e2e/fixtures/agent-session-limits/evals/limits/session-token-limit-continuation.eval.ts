@@ -16,23 +16,24 @@ export default defineEval({
     // The 1-token budget lets this first call finish (limits are checked
     // before the next call) but leaves the session over its input limit.
     const first = await t.send('Reply with exactly the text "first ping" and nothing else.');
+    const session = first.session;
     first.expectOk();
 
     // The next turn must park on the harness-authored prompt before any
     // model call happens.
-    await t.send('Reply with exactly the text "limit pong" and nothing else.');
-    const request = t.requireInputRequest({
+    await session.send('Reply with exactly the text "limit pong" and nothing else.');
+    const request = session.requireInputRequest({
       display: "confirmation",
       optionIds: ["continue", "stop"],
       toolName: "session_limit_continuation",
     });
 
-    const resumed = await t.respond([{ optionId: "continue", requestId: request.requestId }]);
+    const resumed = await session.respond([{ optionId: "continue", requestId: request.requestId }]);
     resumed.expectOk();
     t.succeeded();
     t.messageIncludes("limit pong");
 
-    const stopSession = t.newSession();
+    const stopSession = await t.session();
     const stopFirst = await stopSession.send(
       'Reply with exactly the text "stop ping" and nothing else.',
     );

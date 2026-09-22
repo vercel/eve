@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -85,8 +85,9 @@ describe("application host preparation", () => {
       packageName: "stable-dev-host-artifacts",
     });
     const agentModulePath = join(agentRoot, "agent.mjs");
-    const instrumentationModulePath = join(agentRoot, "instrumentation.mjs");
+    const instrumentationModulePath = join(agentRoot, "instrumentation", "audit.mjs");
     await writeFile(agentModulePath, 'export default { model: "openai/gpt-5.4" };\n');
+    await mkdir(join(agentRoot, "instrumentation"), { recursive: true });
     await writeFile(instrumentationModulePath, "export default {};\n");
 
     const firstHost = await prepareDevelopmentApplicationHost(appRoot);
@@ -109,7 +110,7 @@ describe("application host preparation", () => {
     );
     expect(firstHost.compiledArtifacts.bootstrapPath).not.toContain("/.eve/dev-runtime/snapshots/");
     expect(firstHost.compiledArtifacts.instrumentationSourcePaths).toEqual([
-      join(firstHostDirectory, "compiled-artifacts-instrumentation-source.mjs"),
+      join(firstHostDirectory, "compiled-artifacts-instrumentation-audit.mjs"),
     ]);
     expect(await readFile(firstBootstrapPath, "utf8")).not.toContain(
       normalizeEsmImportSpecifier(agentModulePath),

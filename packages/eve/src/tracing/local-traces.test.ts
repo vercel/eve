@@ -1,7 +1,13 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { createLocalTracesProcessor, resolveLocalTracesContent } from "#tracing/local-traces.js";
+import { defaultEveAudience } from "#eve-channel/audience.js";
+import { contentFilteringProcessor } from "#tracing/content-span-processor.js";
 import { localTracePolicy } from "#tracing/local-instrumentation-runtime.js";
+import {
+  createLocalTracesProcessor,
+  resolveLocalTracesExportPolicy,
+} from "#tracing/local-traces.js";
+import { resolveTracePolicy } from "#tracing/sampled-trace.js";
 import { localTraces } from "#public/instrumentation/otel.js";
 
 vi.mock("#tracing/local-trace-span-processor.js", () => ({
@@ -25,10 +31,19 @@ vi.mock("#tracing/local-trace-retention.js", () => ({
 
 function agentSpan(sessionId: string, traceId: string): unknown {
   return {
-    attributes: { "agent.session.id": sessionId },
+    attributes: { "gen_ai.conversation.id": sessionId },
     spanContext: () => ({ traceId }),
   };
 }
+
+const traceContext = (audience: "public" | "private" | "unknown") => ({
+  agentName: "weather",
+  audience,
+  channel: { kind: "http" as const },
+  environment: "development" as const,
+  mode: "conversation" as const,
+  principalType: "user",
+});
 
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -40,10 +55,10 @@ describe("createLocalTracesProcessor", () => {
     spool.onStart(agentSpan("session-one", "a".repeat(32)), undefined);
 
     // A subagent child owns none, so releasing it leaves the trace pinned.
-    await expect(spool.releaseSession("child-one")).resolves.toBe(false);
-    await expect(spool.releaseSession("session-one")).resolves.toBe(true);
+    await expect(spool.releaseConversation("child-one")).resolves.toBe(false);
+    await expect(spool.releaseConversation("session-one")).resolves.toBe(true);
     // Releasing twice is not an error, it just owns nothing the second time.
-    await expect(spool.releaseSession("session-one")).resolves.toBe(false);
+    await expect(spool.releaseConversation("session-one")).resolves.toBe(false);
   });
 
   it("is a span processor, so it composes wherever one goes", () => {
@@ -65,51 +80,76 @@ describe("createLocalTracesProcessor", () => {
   });
 });
 
-describe("resolveLocalTracesContent", () => {
-  it("retains content by default", () => {
-    expect(resolveLocalTracesContent()).toEqual({
-      recordInputs: true,
-      recordOutputs: true,
-    });
+describe("resolveLocalTracesExportPolicy", () => {
+  it("preserves the authored policy by default", () => {
+    const exportPolicy = { span: () => ({ emit: true }) } as const;
+
+    expect(resolveLocalTracesExportPolicy(exportPolicy)).toBe(exportPolicy);
   });
 
-  it("preserves explicit legacy redaction", () => {
-    expect(resolveLocalTracesContent({ recordInputs: false })).toEqual({
-      recordInputs: false,
-      recordOutputs: true,
-    });
-  });
-
-  it("keeps EVE_TRACES_CONTENT=on compatible with the new default", () => {
+  it("preserves the authored policy when EVE_TRACES_CONTENT=on", () => {
     vi.stubEnv("EVE_TRACES_CONTENT", "on");
+    const exportPolicy = { span: () => ({ emit: true }) } as const;
 
-    expect(resolveLocalTracesContent()).toEqual({
-      recordInputs: true,
-      recordOutputs: true,
-    });
+    expect(resolveLocalTracesExportPolicy(exportPolicy)).toBe(exportPolicy);
   });
 
-  it("maps EVE_TRACES_CONTENT=off to full local redaction", () => {
+  it("prepends full redaction when EVE_TRACES_CONTENT=off", () => {
     vi.stubEnv("EVE_TRACES_CONTENT", "off");
-
-    expect(resolveLocalTracesContent({ recordInputs: true, recordOutputs: true })).toEqual({
-      recordInputs: false,
-      recordOutputs: false,
+    let visibleAttributes: Readonly<Record<string, unknown>> | undefined;
+    const exportPolicy = resolveLocalTracesExportPolicy({
+      span: ({ attributes }) => {
+        visibleAttributes = attributes;
+        return { emit: true };
+      },
     });
+
+    contentFilteringProcessor(
+      {
+        forceFlush: async () => undefined,
+        onEnd: () => undefined,
+        onStart: () => undefined,
+        shutdown: async () => undefined,
+      },
+      exportPolicy,
+    ).onEnd({
+      attributes: {
+        "ai.response.text": "private output",
+        "gen_ai.input.messages": "private input",
+      },
+      spanContext: () => ({ spanId: "span", traceId: "trace" }),
+    } as never);
+
+    expect(visibleAttributes).toEqual({});
   });
 });
 
 describe("localTracePolicy", () => {
-  it.each([
-    ["public", true],
-    ["unknown", true],
-    ["private", false],
-  ] as const)("accepts the %s audience: %s", (audience, accepted) => {
-    expect(
-      localTracePolicy({
-        agentName: "weather",
-        audience,
-      }),
-    ).toBe(accepted);
+  it("records an authenticated development session classified as private", () => {
+    const audience = defaultEveAudience({
+      auth: {
+        attributes: {},
+        authenticator: "vercel-oidc",
+        principalType: "user",
+      },
+      caller: {
+        type: "principal",
+        principal: {
+          attributes: {},
+          authenticator: "vercel-oidc",
+          kind: "user",
+        },
+      },
+      channel: { kind: "http" },
+      environment: "development",
+      mode: "conversation",
+    });
+
+    expect(audience).toBe("private");
+    expect(resolveTracePolicy(localTracePolicy, traceContext(audience))).toEqual({
+      action: "record",
+      recordInputs: true,
+      recordOutputs: true,
+    });
   });
 });

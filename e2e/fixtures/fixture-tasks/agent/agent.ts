@@ -7,30 +7,61 @@ import {
   type MockModelToolResult,
 } from "eve/evals";
 
+import { AUTH_SNAPSHOT_MARKER } from "./lib/lifecycle-control.js";
+import { lifecycleModel } from "./lib/lifecycle-model.js";
+
 const TASK_ID_PATTERN = /task_[a-z0-9]+/iu;
-const EMPTY_DELIVERY_SENTINEL = "<eve-empty-delivery/>";
-const REDUNDANT_REVIEW_SCENARIO = "TASK-WAKE-REDUNDANT-REVIEW";
-const REDUNDANT_REVIEW_FINDING = "blocker: task admission can discard deferred user input.";
 const TASK_STATE_LABEL = "[Task state]\n";
+const CHILD_TOOL_SURFACE_SCENARIO =
+  "Alice asks Bob to summarize the available tools for a background task.";
 
 function respond(request: MockModelRequest): MockModelResponse | string {
-  if (request.userMessages.includes(REDUNDANT_REVIEW_SCENARIO)) {
-    const taskState = latestTaskState(request.userMessages);
-    if (taskState !== undefined) return handleRedundantReviewWake(taskState);
+  const lifecycle = lifecycleModel(request);
+  if (lifecycle !== undefined) return lifecycle;
+  if (request.userMessages.includes(CHILD_TOOL_SURFACE_SCENARIO)) {
+    return childToolSurfaceReport(request);
+  }
+  if (request.userMessages.includes("TASK-BATCHING-BENCHMARK")) {
+    return batchingBenchmark(request);
   }
 
-  // Framework agent-list notes are model context, not scenario turns.
+  // Framework announcements are model context, not scenario turns.
   const message = [...request.userMessages].reverse().find(isScenarioMessage) ?? "";
-  if (request.userMessages.some((entry) => entry.includes("TASK-UPDATE-PROGRESS"))) {
-    return "TASK-UPDATE-RECEIVED";
+  if (message === "TUI-HANG-IN-PROCESS") {
+    return startHangLabTool(request, "hold-in-process", "hold_in_process", { durationMs: 45_000 });
   }
-  if (message.includes("TASK-UPDATE-CHILD")) return sendTaskUpdate(request);
+  if (message === "TUI-HANG-WORKFLOW") {
+    return startHangLabTool(request, "hold-workflow", "hold_workflow", { duration: "45s" });
+  }
+  if (message === "TUI-HANG-COMMAND") {
+    return startHangLabTool(request, "hold-command", "hold_command", { durationSeconds: 45 });
+  }
+  if (message === "TUI-HANG-SUBAGENT") {
+    return startHangLabTool(request, "hold-subagent", "hang-worker", {
+      message: "Hold for 45 seconds.",
+    });
+  }
   if (message.includes("TASK-FANOUT-INTERACTIVE-CHECK")) return "TASK-FANOUT-INTERACTIVE-OK";
   if (message.includes("TASK-CANCEL-NOW")) return cancelWorkerTask(request);
   if (message.includes("CHILD-TASK-EXCLUSIVITY-RACE")) return raceBusyWorker(request);
   if (message.startsWith("CHILD-TASK-EXCLUSIVITY-LATER ")) {
     return laterBusyWorker(request, message);
   }
+  if (message === "TASK-AUTH-SNAPSHOT-ROOT") {
+    return reportAuthSnapshotTurn(
+      request,
+      "task-auth-snapshot-root",
+      "TASK-AUTH-SNAPSHOT-ROOT-ACK",
+    );
+  }
+  if (message === "TASK-AUTH-SNAPSHOT-LATER") {
+    return reportAuthSnapshotTurn(
+      request,
+      "task-auth-snapshot-later",
+      "TASK-AUTH-SNAPSHOT-LATER-ACK",
+    );
+  }
+  if (message.startsWith("TASK-AUTH-SNAPSHOT ")) return startAuthSnapshotTask(request, message);
   if (message.startsWith("TASK-A2-CHILD-FAILURE-VERIFY ")) {
     return inspectTerminalTask(
       request,
@@ -41,7 +72,13 @@ function respond(request: MockModelRequest): MockModelResponse | string {
     );
   }
   if (message.startsWith("TASK-A3-UNKNOWN-VERIFY ")) {
-    return inspectTerminalTask(request, "task-a3-unknown-verify", "TASK-A3-UNKNOWN", message);
+    return inspectTerminalTask(
+      request,
+      "task-a3-unknown-verify",
+      "TASK-A3-UNKNOWN",
+      message,
+      "failed",
+    );
   }
   if (message.startsWith("TASK-D6-PARTIAL-FANOUT-VERIFY ")) {
     return inspectTerminalTask(
@@ -93,9 +130,8 @@ function respond(request: MockModelRequest): MockModelResponse | string {
 
   if (message === "TASK-FANOUT-PARENT-UPDATES") return fanoutTasks(request, 10);
   if (message === "TASK-PARENT-WAKE-UPDATES") return fanoutTasks(request, 3);
-  if (message === REDUNDANT_REVIEW_SCENARIO) return startRedundantReviewers(request);
   if (message === "TASK-FAN-IN") return fanInTasks(request);
-  if (message === "TASK-UPDATE-SETUP") return startTaskUpdateChild(request);
+  if (message === "TASK-FAN-IN-STATUS") return fanInNotification(request);
   if (message === "TASK-CANCEL-SETUP") return setupCancelWorker(request);
   if (message.startsWith("TASK-CANCEL-VERIFY ")) {
     return inspectTerminalTask(
@@ -137,6 +173,14 @@ function respond(request: MockModelRequest): MockModelResponse | string {
   if (message === "TASK-HITL-ROUTING") {
     return startApprovalWorker(request, "task-hitl-worker", "TASK-HITL-STARTED");
   }
+  if (message === "TUI-IDLE-WORK-REPRO") {
+    return startApprovalWorker(
+      request,
+      `tui-idle-work-repro-${scenarioUserMessageCount(request)}`,
+      "TUI-IDLE-WORK-STARTED",
+      { delayed: true },
+    );
+  }
   if (message === "TASK-C7-AUTHORIZATION") {
     return startApprovalWorker(request, "task-c7-authorization-worker", "TASK-C7-STARTED");
   }
@@ -162,61 +206,80 @@ function respond(request: MockModelRequest): MockModelResponse | string {
   return `Mock reply: ${message}`;
 }
 
-function startTaskUpdateChild(request: MockModelRequest): MockModelResponse | string {
-  if (resultById(request, "task-update-child") === undefined) {
+function startHangLabTool(
+  request: MockModelRequest,
+  callIdPrefix: string,
+  name: string,
+  input: unknown,
+): MockModelResponse | string {
+  const callId = `${callIdPrefix}-${scenarioUserMessageCount(request)}`;
+  if (resultById(request, callId) === undefined) {
+    return { toolCalls: [{ id: callId, input, name }] };
+  }
+  return `TUI-HANG-LAB-COMPLETE:${callIdPrefix}`;
+}
+
+function startAuthSnapshotTask(
+  request: MockModelRequest,
+  message: string,
+): MockModelResponse | string {
+  const authCallId = "task-auth-snapshot-creator";
+  if (resultById(request, authCallId) === undefined) {
+    return authSnapshotToolCall(authCallId);
+  }
+  const callId = "task-auth-snapshot";
+  if (resultById(request, callId) !== undefined) return "TASK-AUTH-SNAPSHOT-STARTED";
+  const key = message.split(" ").at(-1);
+  if (key === undefined) throw new Error("Auth snapshot scenario has no lifecycle key.");
+  return {
+    toolCalls: [
+      {
+        id: callId,
+        input: { child: false, delayedAuthChild: true, key, marker: AUTH_SNAPSHOT_MARKER },
+        name: "lifecycle_task",
+      },
+    ],
+  };
+}
+
+function reportAuthSnapshotTurn(
+  request: MockModelRequest,
+  callId: string,
+  acknowledgement: string,
+): MockModelResponse | string {
+  return resultById(request, callId) === undefined ? authSnapshotToolCall(callId) : acknowledgement;
+}
+
+function authSnapshotToolCall(callId: string): MockModelResponse {
+  return {
+    toolCalls: [{ id: callId, input: {}, name: "snapshot_whoami" }],
+  };
+}
+
+function childToolSurfaceReport(request: MockModelRequest): MockModelResponse | string {
+  const task = latestTaskState(request.userMessages)?.tasks.find(
+    (entry) => entry.status === "completed",
+  );
+  if (task !== undefined) {
+    if (task.output?.type !== "result" || typeof task.output.data !== "string") {
+      throw new Error("The completed child did not return a tool report.");
+    }
+    return task.output.data;
+  }
+  if (resultById(request, "task-child-tool-surface") === undefined) {
     return {
       toolCalls: [
         {
-          id: "task-update-child",
-          input: { message: "TASK-UPDATE-CHILD" },
-          name: "agent",
+          id: "task-child-tool-surface",
+          input: {
+            message: "Bob, list your available tool names and return your final report to Alice.",
+          },
+          name: "tool-surface-worker",
         },
       ],
     };
   }
-  return "TASK-UPDATE-STARTED";
-}
-
-function startRedundantReviewers(request: MockModelRequest): MockModelResponse | string {
-  const reviewers = [
-    {
-      id: "task-redundant-review-fast",
-      message: `Review PR #2277. Return this finding: ${REDUNDANT_REVIEW_FINDING}`,
-    },
-    {
-      id: "task-redundant-review-late",
-      message: `BUSY-WORKER-A Review PR #2277. Return this finding: ${REDUNDANT_REVIEW_FINDING}`,
-    },
-  ] as const;
-  const pending = reviewers.filter(({ id }) => resultById(request, id) === undefined);
-  if (pending.length > 0) {
-    return {
-      toolCalls: pending.map(({ id, message }) => ({
-        id,
-        input: { message },
-        name: "busy-worker",
-      })),
-    };
-  }
-  return "TASK-REDUNDANT-REVIEWERS-STARTED";
-}
-
-function handleRedundantReviewWake(taskState: TaskState): string {
-  if (taskState.tasks.some((task) => task.status === "pending")) {
-    return EMPTY_DELIVERY_SENTINEL;
-  }
-  const outputs = taskState.tasks.flatMap((task) =>
-    task.output?.type === "result" && typeof task.output.data === "string"
-      ? [task.output.data]
-      : [],
-  );
-  if (
-    outputs.length !== taskState.tasks.length ||
-    !outputs.every((output) => output.includes(REDUNDANT_REVIEW_FINDING))
-  ) {
-    throw new Error("The settled reviewer cohort did not contain every expected finding.");
-  }
-  return `request changes on PR #2277.\n\n- ${REDUNDANT_REVIEW_FINDING}`;
+  return "TASK-CHILD-TOOL-SURFACE-STARTED";
 }
 
 interface TaskState {
@@ -240,29 +303,6 @@ function latestTaskState(messages: readonly string[]): TaskState | undefined {
   return parsed as TaskState;
 }
 
-function sendTaskUpdate(request: MockModelRequest): MockModelResponse | string {
-  const result = resultById(request, "task-update-progress");
-  if (result === undefined) {
-    return {
-      toolCalls: [
-        {
-          id: "task-update-progress",
-          input: { message: "TASK-UPDATE-PROGRESS" },
-          name: "task_update",
-        },
-      ],
-    };
-  }
-  if (
-    result.output === null ||
-    typeof result.output !== "object" ||
-    Reflect.get(result.output, "status") !== "sent"
-  ) {
-    throw new Error("task_update did not confirm delivery.");
-  }
-  return "TASK-UPDATE-CHILD-DONE";
-}
-
 function fanoutTasks(request: MockModelRequest, size: number): MockModelResponse | string {
   const pending = Array.from({ length: size }, (_, index) => index + 1).filter(
     (index) => resultById(request, `task-fanout-${index}`) === undefined,
@@ -277,6 +317,29 @@ function fanoutTasks(request: MockModelRequest, size: number): MockModelResponse
     };
   }
   return "TASK-FANOUT-STARTED";
+}
+
+function batchingBenchmark(request: MockModelRequest): MockModelResponse | string {
+  const message = [...request.userMessages]
+    .reverse()
+    .find(
+      (entry) => entry.startsWith("TASK-BATCHING-") || entry.startsWith("Background task task_"),
+    );
+  if (message === "TASK-BATCHING-QUESTION") return "56";
+  if (message === "TASK-BATCHING-BENCHMARK") return fanoutTasks(request, 10);
+  if (message?.endsWith("needs input.")) return "TASK-NOTIFICATION-ACK";
+
+  const state = latestTaskState(request.userMessages);
+  if (state === undefined) return "TASK-FANOUT-STARTED";
+  if (state.tasks.some((task) => task.status === "pending")) {
+    throw new Error("A completion invoked the parent model before its cohort settled.");
+  }
+  const results = state.tasks.flatMap((task) =>
+    task.output?.type === "result" && typeof task.output.data === "string"
+      ? [task.output.data]
+      : [],
+  );
+  return JSON.stringify({ report: "TASK-BATCHING-REPORT", results: results.sort() });
 }
 
 const FAN_IN_CALL_IDS = ["task-fan-in-1", "task-fan-in-2"] as const;
@@ -337,6 +400,7 @@ function startApprovalWorker(
   request: MockModelRequest,
   callId: string,
   completedText: string,
+  options?: { delayed?: boolean },
 ): MockModelResponse | string {
   if (resultById(request, callId) === undefined) {
     return {
@@ -347,9 +411,11 @@ function startApprovalWorker(
             message:
               callId === "task-c7-authorization-worker"
                 ? "Run the C7 authorization mode, then return C7-AUTHORIZATION-COMPLETE."
-                : callId === "task-hitl-worker"
-                  ? "Run three approval gates in order, then return CHILD-GATES-COMPLETE."
-                  : "Run both approval gates in order, then return CHILD-GATES-COMPLETE.",
+                : options?.delayed === true
+                  ? "Wait twenty seconds before the approval gates, then run three approval gates in order and return CHILD-GATES-COMPLETE."
+                  : callId === "task-hitl-worker"
+                    ? "Run three approval gates in order, then return CHILD-GATES-COMPLETE."
+                    : "Run both approval gates in order, then return CHILD-GATES-COMPLETE.",
           },
           name: "approval-worker",
         },
@@ -428,7 +494,7 @@ function hasTaskNotification(
 }
 
 function isScenarioMessage(message: string): boolean {
-  return !message.startsWith("[Agents]");
+  return !/^(?:\[Agents\]|\[Task state\]|Background task (?:reporting|control))/u.test(message);
 }
 
 function scenarioUserMessageCount(request: MockModelRequest): number {
@@ -527,12 +593,12 @@ function raceBusyWorker(request: MockModelRequest): MockModelResponse | string {
       toolCalls: [
         {
           id: "child-task-exclusivity-send-a",
-          input: { agentId, message: "Return BUSY-WORKER-A." },
+          input: { agentId, message: "EXCLUSIVITY-GATE: Return BUSY-WORKER-A." },
           name: "busy-worker",
         },
         {
           id: "child-task-exclusivity-send-b",
-          input: { agentId, message: "Return BUSY-WORKER-B." },
+          input: { agentId, message: "EXCLUSIVITY-GATE: Return BUSY-WORKER-B." },
           name: "busy-worker",
         },
       ],
@@ -647,13 +713,11 @@ function findString(value: unknown, prefix: string): string | undefined {
   return undefined;
 }
 
-const base = e2eAgentConfig();
-
 export default defineAgent({
-  ...base,
-  experimental: { ...base.experimental, tasks: true },
-  // These evals target orchestration, not model planning. Keep every suite
-  // deterministic while retaining the workflow-world override from `base`.
+  ...e2eAgentConfig(),
+  // Script orchestration checks here; real-model coverage lives in agent-task-reporting.
   model: mockModel(respond),
-  modelContextWindowTokens: 1_000_000,
+  // The lifecycle eval checks child usage through the runtime's budget gate.
+  limits: { maxInputTokensPerSession: 1_000_000 },
+  modelContextWindowTokens: 10_000_000,
 });

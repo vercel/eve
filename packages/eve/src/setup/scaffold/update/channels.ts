@@ -6,7 +6,7 @@ import { appendEnv } from "../../append-env.js";
 import type { PackageManagerKind } from "../../package-manager.js";
 import { pinnedNodeEngineMajor, type NodeEngineOverride } from "../../node-engine.js";
 import { pathExists, writeTextFile } from "../files.js";
-import { resolveVersionToken } from "../version-tokens.js";
+import { DEFAULT_CONNECT_PACKAGE_VERSION, resolveVersionToken } from "../version-tokens.js";
 import {
   applyPackageManagerWorkspaceConfiguration,
   isPackageManagerWorkspaceMember,
@@ -32,7 +32,6 @@ export type { WebAuthentication, WebPackageVersions } from "./web-options.js";
 export const SLACK_CHANNEL_DEFAULT_ROUTE = "/eve/v1/slack";
 export const DEFAULT_SLACK_CONNECTOR_SLUG = "my-agent";
 
-const DEFAULT_CONNECT_PACKAGE_VERSION = "__VERCEL_CONNECT_VERSION__";
 const NEXT_TYPESCRIPT_PACKAGE_VERSION = "6.0.3";
 const CONNECT_PACKAGE_NAME = "@vercel/connect";
 const NEXT_PACKAGE_NAME = "next";
@@ -165,22 +164,8 @@ async function hasPackageDependency(
 }
 
 /**
- * Whether the project already carries a Next.js app: `package.json` declares a
- * `next` dependency in the same dependency fields Vercel framework detection
- * checks. This is the exact predicate the
- * web scaffold skips on (`skipReason: "nextjs-project"`), so pickers can mark
- * Web Chat as already present precisely when scaffolding would be a no-op.
- * A missing `package.json` reads as "no app".
- */
-export async function isNextJsProject(projectRoot: string): Promise<boolean> {
-  return hasPackageDependency(join(projectRoot, "package.json"), NEXT_PACKAGE_NAME);
-}
-
-/**
  * Host-framework dependency → the Vercel Framework Preset slug it must deploy
  * under (so the framework owns the top-level build and eve runs as a sibling).
- * Single source of truth for which dependencies mark a host framework;
- * {@link hasVercelHostFramework} derives from it.
  */
 const VERCEL_HOST_FRAMEWORK_PRESETS: Readonly<Record<string, string>> = {
   "@sveltejs/kit": "sveltekit",
@@ -191,10 +176,7 @@ const VERCEL_HOST_FRAMEWORK_PRESETS: Readonly<Record<string, string>> = {
   "nuxt-nightly": "nuxtjs",
 };
 
-/**
- * The Vercel Framework Preset slug for the host framework a project declares, or
- * `undefined` when it declares none (a missing `package.json` reads as none).
- */
+/** The Vercel Framework Preset slug for the host framework a project declares. */
 export async function resolveVercelHostFrameworkPreset(
   projectRoot: string,
 ): Promise<string | undefined> {
@@ -207,14 +189,21 @@ export async function resolveVercelHostFrameworkPreset(
   return undefined;
 }
 
-/**
- * Whether the root app declares a Vercel framework that should own the
- * top-level deployment while eve runs as a sibling service. These match Eve's
- * current framework integrations: Next.js, Nuxt, and SvelteKit. Derived from
- * {@link resolveVercelHostFrameworkPreset} so the two share one dependency list.
- */
+/** Whether the root app declares a Vercel framework that owns its top-level deployment. */
 export async function hasVercelHostFramework(projectRoot: string): Promise<boolean> {
   return (await resolveVercelHostFrameworkPreset(projectRoot)) !== undefined;
+}
+
+/**
+ * Whether the project already carries a Next.js app: `package.json` declares a
+ * `next` dependency in the same dependency fields Vercel framework detection
+ * checks. This is the exact predicate the
+ * web scaffold skips on (`skipReason: "nextjs-project"`), so pickers can mark
+ * Web Chat as already present precisely when scaffolding would be a no-op.
+ * A missing `package.json` reads as "no app".
+ */
+export async function isNextJsProject(projectRoot: string): Promise<boolean> {
+  return hasPackageDependency(join(projectRoot, "package.json"), NEXT_PACKAGE_NAME);
 }
 
 async function ensurePackageDependency(
@@ -437,6 +426,8 @@ async function findCompetingNextConfigFiles(projectRoot: string): Promise<string
 
 export interface EnsureChannelOptions {
   projectRoot: string;
+  /** Root for environment files shared by workspace agents. */
+  environmentRoot?: string;
   kind: ChannelKind;
   /** Manager that owns generated project configuration. Defaults to pnpm. */
   packageManager?: PackageManagerKind;
@@ -623,7 +614,7 @@ async function ensureSlackChannel(
     template = buildSlackConnectTemplate(connectorUid);
   } else {
     template = SLACK_ENV_TEMPLATE;
-    const envExamplePath = join(options.projectRoot, ".env.example");
+    const envExamplePath = join(options.environmentRoot ?? options.projectRoot, ".env.example");
     const envExampleExisted = await pathExists(envExamplePath);
     envExampleRollback = {
       path: envExamplePath,

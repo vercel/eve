@@ -1,17 +1,11 @@
 /**
- * Instrumentation authoring helpers for `agent/instrumentation.ts` and, with
- * `experimental.instrumentationProviders` on, `agent/instrumentation/`.
+ * Instrumentation authoring helpers for `agent/instrumentation/`.
  */
 
 import type { ModelMessage, SystemModelMessage } from "ai";
 
 import type { SessionAuthContext, SessionParent } from "#channel/types.js";
 import type { InstrumentationChannel } from "#public/channels/index.js";
-import {
-  PROVIDER,
-  type ProviderDefinition,
-  type ProviderSetupContext,
-} from "#public/instrumentation/provider.js";
 import type { JsonObject } from "#shared/json.js";
 
 export * from "#public/instrumentation/provider.js";
@@ -26,16 +20,6 @@ export {
   type InstrumentationChannelKind,
   type InstrumentationChannelMetadata,
 } from "#public/channels/index.js";
-
-/**
- * Context passed to the {@link InstrumentationDefinition.setup} callback.
- *
- * The same context both layouts receive. Keeping one type is what gives
- * {@link defineInstrumentation}'s union a contextual signature for `setup`;
- * two divergent ones would leave every authored `setup(context)` parameter an
- * implicit `any`.
- */
-export interface InstrumentationSetupContext extends ProviderSetupContext {}
 
 /**
  * User-authored runtime context values attached to AI SDK telemetry spans.
@@ -92,9 +76,9 @@ export interface InstrumentationModelInput {
 }
 
 /**
- * Input passed to `events["step.started"]` and to a provider's
- * `runtimeContext` resolver. eve builds it after assembling the final model
- * input for this attempt and before constructing the AI SDK model call.
+ * Input passed to a provider's `runtimeContext` resolver. eve builds it after
+ * assembling the final model input for this attempt and before constructing
+ * the AI SDK model call.
  */
 export interface InstrumentationStepStartedEventInput {
   readonly channel: InstrumentationChannel;
@@ -110,103 +94,3 @@ export interface InstrumentationStepStartedEventInput {
  * step, and turn coordinates.
  */
 export type InstrumentationRuntimeContextInput = InstrumentationStepStartedEventInput;
-
-/**
- * Result of a `step.started` callback. eve merges `runtimeContext` into the
- * AI SDK telemetry span; child spans inherit the values. Keys beginning with
- * `eve.` and non-JSON-serializable values are dropped. Return `undefined` to
- * contribute no context.
- */
-export interface InstrumentationStepStartedEventResult {
-  /**
-   * Additional runtime context merged into AI SDK telemetry spans.
-   */
-  readonly runtimeContext: InstrumentationRuntimeContext;
-}
-
-/**
- * Event hooks accepted by {@link defineInstrumentation}.
- */
-export interface InstrumentationEvents {
-  /**
-   * Resolve per-attempt runtime context before the model call. The AI SDK
-   * child spans inherit the returned values.
-   */
-  readonly "step.started"?: (
-    input: InstrumentationStepStartedEventInput,
-  ) => InstrumentationStepStartedEventResult | undefined;
-}
-
-/**
- * Authored instrumentation settings accepted by `defineInstrumentation`.
- *
- * The presence of a `defineInstrumentation` export implicitly enables
- * telemetry. There is no separate `isEnabled` toggle.
- */
-export interface InstrumentationDefinition {
-  /**
-   * Override the function identifier attached to telemetry spans
-   * (`ai.telemetry.functionId`). Defaults to the agent name; omitted when
-   * neither is set.
-   */
-  readonly functionId?: string;
-  /**
-   * Instrumentation event hooks.
-   */
-  readonly events?: InstrumentationEvents;
-  /**
-   * Whether to record full model inputs in telemetry spans. Defaults to
-   * `false`. Set `true` only when the destination is approved to receive
-   * input content.
-   */
-  readonly recordInputs?: boolean;
-  /**
-   * Whether to record full model outputs in telemetry spans. Defaults to
-   * `false`. Set `true` only when the destination is approved to receive
-   * output content.
-   */
-  readonly recordOutputs?: boolean;
-  /**
-   * Whether to emit the inbound HTTP `SERVER` span that wraps each channel
-   * request (the parent of the turn trace and any `hook.resume`/outgoing
-   * HTTP spans). Defaults to `false`. Set `true` to emit these request spans
-   * alongside the rest of the trace.
-   */
-  readonly traceChannelRequests?: boolean;
-  /**
-   * Setup callback invoked at server startup, before the first request. Use it
-   * to call `registerOTel` or other OTel provider setup; `context.agentName`
-   * comes from `defineAgent`. A returned promise is awaited.
-   */
-  readonly setup?: (context: InstrumentationSetupContext) => void | PromiseLike<void>;
-}
-
-/**
- * Declares instrumentation, in either of eve's two layouts.
- *
- * Export the result as the default export of `agent/instrumentation.ts`, or —
- * with `experimental.instrumentationProviders` on — of one file under
- * `agent/instrumentation/`. The layout decides how eve reads the value; the two
- * are mutually exclusive builds, so only one can apply. `setup` runs at server
- * startup, not during this call.
- *
- * The parameter is a union because a provider and a legacy config overlap on
- * `events` and `setup`, so no value-level check separates them. One consequence
- * is that excess-property checking is weaker here than it was against the
- * config shape alone, and a misspelled key can reach `eve build` rather than
- * failing at `tsc`.
- */
-export function defineInstrumentation<
-  const TDefinition extends InstrumentationDefinition | ProviderDefinition,
->(definition: TDefinition): InstrumentationDeclaration<TDefinition> {
-  return { ...definition, [PROVIDER]: true };
-}
-
-/** The branded result of {@link defineInstrumentation}. */
-export type InstrumentationDeclaration<
-  TDefinition extends InstrumentationDefinition | ProviderDefinition =
-    | InstrumentationDefinition
-    | ProviderDefinition,
-> = TDefinition & {
-  readonly [PROVIDER]: true;
-};

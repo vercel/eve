@@ -7,7 +7,9 @@ import {
   ChannelInstrumentationKey,
   ChannelDeliveryKey,
   ChannelRequestIdKey,
+  ContinuationHookTokensKey,
   ContinuationTokenKey,
+  ConversationIdKey,
   DynamicSubagentAgentConfigKey,
   InitiatorAuthKey,
   ModeKey,
@@ -16,10 +18,15 @@ import {
   ActivityObserverKey,
   ScheduleIdKey,
   SessionCallbackKey,
-  SubagentDepthKey,
+  SessionTitleKey,
 } from "#context/keys.js";
+import { deriveSessionTitle } from "#execution/eve-workflow-attributes.js";
 import { BundleKey, type CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
 import type { DynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agent-config.js";
+import { readConversationId } from "#tracing/conversation-context.js";
+import { buildConversationContext } from "#channel/conversation-context.js";
+import { ConversationContextKey } from "#shared/conversation-context.js";
+import { resolveInstrumentationEnvironment } from "#internal/application/dev-environment.js";
 
 /**
  * Builds the bootstrap {@link ContextContainer} for one run.
@@ -32,9 +39,19 @@ export function buildRunContext(input: {
   const { bundle, run } = input;
   const ctx = new ContextContainer();
   const auth: SessionAuthContext | null = run.auth;
+  const conversationId = readConversationId(run.conversationId);
+  if (conversationId !== undefined) ctx.set(ConversationIdKey, conversationId);
 
   ctx.set(BundleKey, bundle);
   setChannelContext(ctx, run.adapter, { channelName: run.channelName });
+  ctx.set(
+    ConversationContextKey,
+    buildConversationContext(run, resolveInstrumentationEnvironment()),
+  );
+  if (run.parent === undefined) {
+    const title = deriveSessionTitle(run.title ?? run.input.message);
+    if (title !== undefined) ctx.set(SessionTitleKey, title);
+  }
 
   if (run.channelMetadata !== undefined) {
     const existing = ctx.get(ChannelInstrumentationKey);
@@ -47,10 +64,13 @@ export function buildRunContext(input: {
 
   if (run.continuationToken !== undefined) {
     ctx.set(ContinuationTokenKey, run.continuationToken);
+    ctx.set(ContinuationHookTokensKey, [run.continuationToken]);
   }
   ctx.set(ModeKey, run.mode);
   ctx.set(AuthKey, auth);
-  ctx.set(InitiatorAuthKey, run.initiatorAuth ?? auth);
+  if (run.initiatorAuth !== undefined || run.input.message !== undefined) {
+    ctx.set(InitiatorAuthKey, run.initiatorAuth ?? auth);
+  }
 
   if (input.dynamicSubagentAgentConfig !== undefined) {
     ctx.set(DynamicSubagentAgentConfigKey, input.dynamicSubagentAgentConfig);
@@ -86,10 +106,6 @@ export function buildRunContext(input: {
 
   if (run.parentTraceContext !== undefined) {
     ctx.set(ParentTraceContextKey, run.parentTraceContext);
-  }
-
-  if (run.subagentDepth !== undefined) {
-    ctx.set(SubagentDepthKey, run.subagentDepth);
   }
 
   // `run.limits` deliberately never enters the context: inherited limits ride

@@ -5,9 +5,9 @@ import { describe, expect, it } from "vitest";
 import { mockSkill } from "#internal/testing/mocks/mock-skill.js";
 
 describe("mockSkill", () => {
-  let materializedRootPath: string | undefined;
-
-  it("materializes skill package files", async () => {
+  it("materializes skill package files and cleans them after the test", async ({
+    onTestFinished,
+  }) => {
     const skill = await mockSkill({
       description: "Weather guidance.",
       name: "weather",
@@ -23,7 +23,9 @@ describe("mockSkill", () => {
       throw new Error("Expected mock skill source to be a skill package.");
     }
 
-    materializedRootPath = source.rootPath;
+    onTestFinished(async () => {
+      await expect(access(source.rootPath)).rejects.toMatchObject({ code: "ENOENT" });
+    });
     const referencesPath = source.referencesPath;
     expect(referencesPath).toBeDefined();
 
@@ -36,13 +38,14 @@ describe("mockSkill", () => {
     await expect(access(referencesPath)).resolves.toBeUndefined();
   });
 
-  it("cleans materialized tmpdirs after each test", async () => {
-    expect(materializedRootPath).toBeDefined();
-
-    if (materializedRootPath === undefined) {
-      throw new Error("Expected previous test to create a mock skill root.");
+  it("allows explicit cleanup to run more than once", async () => {
+    const skill = await mockSkill({ name: "weather", description: "Weather guidance." });
+    if (skill.source.sourceKind !== "skill-package") {
+      throw new Error("Expected mock skill source to be a skill package.");
     }
-
-    await expect(access(materializedRootPath)).rejects.toThrow();
+    await expect(access(skill.source.rootPath)).resolves.toBeUndefined();
+    await skill.cleanup();
+    await skill.cleanup();
+    await expect(access(skill.source.rootPath)).rejects.toMatchObject({ code: "ENOENT" });
   });
 });

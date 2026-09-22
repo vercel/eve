@@ -207,14 +207,14 @@ vi.mock("#execution/sandbox/development-prewarm.js", () => ({
   startDevelopmentSandboxPrewarmInBackground: mocks.startDevelopmentSandboxPrewarmInBackground,
 }));
 
-vi.mock("#execution/sandbox/bindings/local.js", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("#execution/sandbox/bindings/local.js")>();
+vi.mock("#execution/sandbox/bindings/local.js", () => ({
+  pruneLocalSandboxTemplatesInBackground: mocks.pruneLocalSandboxTemplatesInBackground,
+  stopDevelopmentSandboxResources: mocks.stopDevelopmentSandboxResources,
+}));
 
-  return {
-    ...actual,
-    pruneLocalSandboxTemplatesInBackground: mocks.pruneLocalSandboxTemplatesInBackground,
-    stopDevelopmentSandboxResources: mocks.stopDevelopmentSandboxResources,
-  };
+beforeEach(() => {
+  mocks.fsControl.stateReadError = undefined;
+  mocks.fsControl.stateWriteError = undefined;
 });
 
 const developmentServerStatePath = join("/tmp/eve-test", ".eve", "dev-server-state.v1.json");
@@ -348,8 +348,6 @@ describe("createDevelopmentServer", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.fetch.mockImplementation(async () => Response.json({ revision: "test" }));
-    mocks.fsControl.stateReadError = undefined;
-    mocks.fsControl.stateWriteError = undefined;
     mocks.authoredSourceWatcher.close.mockResolvedValue(undefined);
     mocks.authoredSourceWatcher.flush.mockResolvedValue(undefined);
     mocks.authoredSourceWatcher.rebuild.mockResolvedValue(undefined);
@@ -600,6 +598,33 @@ describe("createDevelopmentServer", () => {
     const server = await startDevelopmentServer("/tmp/eve-test");
 
     expect(deliveryResponse).toBeUndefined();
+    await server.close();
+  });
+
+  it("passes an acquisition lease through suspend and resume control requests", async () => {
+    const startDevelopmentServer = await loadStartDevelopmentServer();
+    const server = await startDevelopmentServer("/tmp/eve-test");
+
+    await callControlHandler(
+      "http://localhost/eve/v1/dev/runtime-artifacts/suspend?lease=install-1",
+      { method: "POST" },
+    );
+    await callControlHandler(
+      "http://localhost/eve/v1/dev/runtime-artifacts/resume?lease=install-1",
+      { method: "POST" },
+    );
+
+    expect(mocks.authoredSourceWatcher.suspend).toHaveBeenCalledWith("install-1");
+    expect(mocks.authoredSourceWatcher.resume).toHaveBeenCalledWith("install-1", {
+      silent: false,
+    });
+
+    const missingLease = await callControlHandler(
+      "http://localhost/eve/v1/dev/runtime-artifacts/suspend",
+      { method: "POST" },
+    );
+    expect(missingLease?.status).toBe(400);
+
     await server.close();
   });
 

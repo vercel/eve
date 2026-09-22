@@ -258,7 +258,7 @@ function createParallelAuthoredToolCallsResult(
 /**
  * Emits one built-in `agent` tool call when the current user message uses
  * the explicit directive `Delegate to a subagent: <message>`, letting
- * tests exercise a real runtime-action wait. Fires only before the
+ * tests exercise a real coordination wait. Fires only before the
  * delegated call resolves; then the reply path takes over.
  */
 function createSubagentDelegationResult(
@@ -277,22 +277,22 @@ function createSubagentDelegationResult(
     return null;
   }
 
-  const tool = getAvailableTools(options).find((entry) => entry.name === SUBAGENT_TOOL_NAME);
+  const toolName = SUBAGENT_TOOL_NAME;
+  const tool = getAvailableTools(options).find((entry) => entry.name === toolName);
 
   if (tool === undefined) {
     return null;
   }
 
   const message = directive[1].trim();
-  const toolInput = { message };
 
   return createToolCallGenerateResult({
-    input: toolInput,
+    input: { message },
     inputTokens: estimateTokenCount(getPromptText(options.prompt)),
     modelId,
-    outputTokens: estimateTokenCount(toolInput.message),
-    toolCallId: createToolCallId(SUBAGENT_TOOL_NAME),
-    toolName: SUBAGENT_TOOL_NAME,
+    outputTokens: estimateTokenCount(message),
+    toolCallId: createToolCallId(toolName),
+    toolName,
   });
 }
 
@@ -302,7 +302,7 @@ function createAuthoredToolCallResult(
 ): BootstrapGenerateResult | null {
   const lastUserMessage = getLastUserPromptText(options.prompt);
 
-  if (lastUserMessage === null) {
+  if (lastUserMessage === null || /^Background task task_[a-z0-9]+\b/iu.test(lastUserMessage)) {
     return null;
   }
 
@@ -686,7 +686,7 @@ function isWeatherPayload(value: unknown): value is {
   readonly summary: string;
   readonly temperatureF: number;
 } {
-  return bootstrapWeatherPayloadSchema.safeParse(value).success;
+  return z.validate(bootstrapWeatherPayloadSchema, value);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

@@ -1,6 +1,6 @@
 import { z } from "#compiled/zod/index.js";
-import { defineTool } from "#tools/definition.js";
 import { inputRequestSchema } from "#shared/input.js";
+import { defineNativeTool } from "#tools/native-definition.js";
 
 export const ASK_QUESTION_INPUT_SCHEMA = inputRequestSchema.omit({
   action: true,
@@ -16,15 +16,17 @@ export const ASK_QUESTION_OUTPUT_SCHEMA = z
   })
   .strict();
 
-/** The harness intercepts this tool before its durable input step executes. */
-export const askQuestion = defineTool({
-  description:
-    "Ask the user a question and wait for their response before continuing. Use this when you need clarification or a choice from the user.",
-  inputSchema: ASK_QUESTION_INPUT_SCHEMA,
-  outputSchema: ASK_QUESTION_OUTPUT_SCHEMA,
-  execute() {
-    throw new Error("ask_question is handled by eve's durable input dispatcher.");
+export const askQuestion = defineNativeTool(
+  {
+    description:
+      "Ask the user a question and wait for their response before continuing. Use this when you need clarification or a choice from the user.",
+    inputSchema: ASK_QUESTION_INPUT_SCHEMA,
+    outputSchema: ASK_QUESTION_OUTPUT_SCHEMA,
   },
-});
+  {
+    availability: ["requires-request-input"],
+    handling: { kind: "request-input", request: "question" },
+  },
+);
 
 export default askQuestion;

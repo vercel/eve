@@ -19,10 +19,9 @@ import {
  * Process-global registry of the providers authored under
  * `agent/instrumentation/`.
  *
- * Rooted on `globalThis` for the same reason the single-config store is: the
- * generated Nitro plugin stays external by `file://` URL while the harness
- * chunk is inlined, so the two resolve to distinct ESM module instances and
- * need one shared source of truth.
+ * Rooted on `globalThis` because the generated Nitro plugin stays external by
+ * `file://` URL while the harness chunk is inlined, so the two resolve to
+ * distinct ESM module instances and need one shared source of truth.
  */
 const INSTRUMENTATION_PROVIDERS_GLOBAL_KEY = Symbol.for("eve.harness-instrumentation-providers");
 
@@ -52,7 +51,9 @@ function providerRegistry(): Map<string, InstrumentationProvider> {
 /** Fills reserved slots before authored files may reconfigure or disable them. */
 export function seedInstrumentationProviders(): void {
   const registry = providerRegistry();
-  if (process.env.VERCEL_ENV === "production") registry.set("agent-runs", agentRuns());
+  if (process.env.VERCEL_ENV === "preview" || process.env.VERCEL_ENV === "production") {
+    registry.set("agent-runs", agentRuns());
+  }
   if (process.env[DEVELOPMENT_WORKER_APP_ROOT_ENV] !== undefined) {
     registry.set("local", localTraces());
   }
@@ -82,6 +83,12 @@ export async function registerInstrumentationProvider(input: {
   if (!isInstrumentationProvider(input.value)) {
     throw new Error(
       `The default export of "instrumentation/${input.slot}" is not an instrumentation provider. Return the result of \`defineInstrumentation\` or \`disableInstrumentation\` from it.`,
+    );
+  }
+
+  if (Object.hasOwn(input.value, "capture")) {
+    throw new Error(
+      `The instrumentation provider "instrumentation/${input.slot}" no longer supports \`capture\`. Use \`tracePolicy\` to configure content capture.`,
     );
   }
 
@@ -120,7 +127,6 @@ export function finalizeInstrumentationProviders(input: {
   return installInstrumentationRuntime({
     collected,
     frameworkVersion: resolveInstalledPackageInfo().version,
-    instrumentationProviders: true,
     providers: providerDefinitions,
     runtimeContextResolvers: collected.runtimeContextResolvers,
     serviceName: input.serviceName,
@@ -146,7 +152,6 @@ function toProviderDefinition(
   entry: RegisteredInstrumentationProvider,
 ): InstrumentationProviderDefinition {
   return {
-    capture: entry.provider.capture,
     events: entry.provider.events as InstrumentationProviderDefinition["events"],
     flush: entry.provider.flush,
     // The file the provider came from, which is the only name an author can

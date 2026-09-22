@@ -56,9 +56,13 @@ describe("getRegisteredTelemetryIntegrations", () => {
 
     const registered = getRegisteredTelemetryIntegrations();
     const errorSafe = getRegisteredTelemetryIntegrations({ sanitizeEveOtelErrors: true });
+    const authoredOnly = getRegisteredTelemetryIntegrations({
+      excludeEveOtelIntegration: true,
+    });
     expect(errorSafe).toHaveLength(2);
     expect(errorSafe[0]).not.toBe(registered[0]);
     expect(errorSafe[1]).toBe(authored);
+    expect(authoredOnly).toEqual([authored]);
   });
 });
 

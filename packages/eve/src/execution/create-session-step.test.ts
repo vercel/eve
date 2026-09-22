@@ -3,7 +3,6 @@ import { describe, expect, it, vi } from "vitest";
 import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
 import { DEFAULT_ROOT_MAX_INPUT_TOKENS_PER_SESSION } from "#execution/session.js";
 import { createSessionStep } from "#execution/create-session-step.js";
-import { TASK_UPDATE_TOOL_NAME } from "#tools/framework/task-contract.js";
 import type { RuntimeTurnAgent } from "#runtime/agent/bootstrap.js";
 
 vi.mock("#runtime/sessions/compiled-agent-cache.js", () => ({
@@ -19,40 +18,7 @@ const TestTurnAgent: RuntimeTurnAgent = {
 };
 
 describe("createSessionStep", () => {
-  it("adds task_update guidance to a task-owned session system prompt", async () => {
-    vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue({
-      resolvedAgent: {
-        config: { experimental: { tasks: true } },
-      },
-      turnAgent: {
-        ...TestTurnAgent,
-        tools: [
-          {
-            description: "Report task progress.",
-            inputSchema: null,
-            kind: "authored-tool",
-            logicalPath: `tools/${TASK_UPDATE_TOOL_NAME}.ts`,
-            name: TASK_UPDATE_TOOL_NAME,
-            owner: { feature: "tasks", kind: "framework" },
-            sourceId: `framework:tools/${TASK_UPDATE_TOOL_NAME}.ts`,
-          },
-        ],
-      },
-    } as never);
-
-    const { state } = await createSessionStep({
-      compiledArtifactsSource: { kind: "bundled" },
-      continuationToken: "subagent:test",
-      sessionId: "sess-child",
-      taskOwned: true,
-    });
-
-    expect(state.snapshot?.session.agent.system).toContain("Background task updates");
-    expect(state.snapshot?.session.agent.system).toContain("what you are currently doing");
-    expect(state.snapshot?.session.state).toBeUndefined();
-  });
-
-  it("does not add task_update guidance to a task-owned node without the tool", async () => {
+  it("preserves task ownership without injecting progress-reporting instructions", async () => {
     vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue({
       resolvedAgent: {
         config: {},
@@ -64,10 +30,13 @@ describe("createSessionStep", () => {
       compiledArtifactsSource: { kind: "bundled" },
       continuationToken: "subagent:test",
       sessionId: "sess-child",
-      taskOwned: true,
+      taskId: "task-1",
     });
 
-    expect(state.snapshot?.session.agent.system).not.toContain("Background task updates");
+    expect(state.snapshot.session.agent.system).not.toContain("Background task updates");
+    expect(state.snapshot.session.agent.system).not.toContain("task_update");
+    expect(state.snapshot.session.taskId).toBe("task-1");
+    expect(state.snapshot.session.state).toBeUndefined();
   });
 
   it("defaults root sessions to the root input token budget", async () => {
@@ -84,7 +53,7 @@ describe("createSessionStep", () => {
       sessionId: "sess-root",
     });
 
-    expect(state.snapshot?.session.limits?.maxInputTokensPerSession).toBe(
+    expect(state.snapshot.session.limits?.maxInputTokensPerSession).toBe(
       DEFAULT_ROOT_MAX_INPUT_TOKENS_PER_SESSION,
     );
   });
@@ -101,11 +70,11 @@ describe("createSessionStep", () => {
       compiledArtifactsSource: { kind: "bundled" },
       continuationToken: "subagent:test",
       inheritedLimits: { maxInputTokensPerSession: 3_000_000, maxOutputTokensPerSession: false },
+      rootSessionId: "sess-root",
       sessionId: "sess-child",
-      subagentDepth: 1,
     });
 
-    expect(state.snapshot?.session.limits).toEqual({
+    expect(state.snapshot.session.limits).toEqual({
       maxInputTokensPerSession: 3_000_000,
     });
   });
@@ -122,11 +91,11 @@ describe("createSessionStep", () => {
       compiledArtifactsSource: { kind: "bundled" },
       continuationToken: "subagent:test",
       inheritedLimits: { maxInputTokensPerSession: false, maxOutputTokensPerSession: false },
+      rootSessionId: "sess-root",
       sessionId: "sess-child",
-      subagentDepth: 1,
     });
 
-    expect(state.snapshot?.session.limits).toEqual({});
+    expect(state.snapshot.session.limits).toEqual({});
   });
 
   it("caps configured child token limits at the inherited token budget", async () => {
@@ -143,11 +112,30 @@ describe("createSessionStep", () => {
       compiledArtifactsSource: { kind: "bundled" },
       continuationToken: "subagent:test",
       inheritedLimits: { maxInputTokensPerSession: 2_000_000, maxOutputTokensPerSession: false },
+      rootSessionId: "sess-root",
       sessionId: "sess-child",
-      subagentDepth: 1,
     });
 
-    expect(state.snapshot?.session.limits?.maxInputTokensPerSession).toBe(2_000_000);
+    expect(state.snapshot.session.limits?.maxInputTokensPerSession).toBe(2_000_000);
+  });
+
+  it("caps a configured child token-cost limit at the inherited budget", async () => {
+    vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue({
+      resolvedAgent: {
+        config: { limits: { maxTokenCostUsdPerSession: 2 } },
+      },
+      turnAgent: TestTurnAgent,
+    } as never);
+
+    const { state } = await createSessionStep({
+      compiledArtifactsSource: { kind: "bundled" },
+      continuationToken: "subagent:test",
+      inheritedLimits: { maxTokenCostUsdPerSession: 0.75 },
+      rootSessionId: "sess-root",
+      sessionId: "sess-child",
+    });
+
+    expect(state.snapshot.session.limits?.maxTokenCostUsdPerSession).toBe(0.75);
   });
 
   it("keeps tighter configured child token limits under inherited token budget", async () => {
@@ -164,11 +152,11 @@ describe("createSessionStep", () => {
       compiledArtifactsSource: { kind: "bundled" },
       continuationToken: "subagent:test",
       inheritedLimits: { maxInputTokensPerSession: 2_000_000, maxOutputTokensPerSession: false },
+      rootSessionId: "sess-root",
       sessionId: "sess-child",
-      subagentDepth: 1,
     });
 
-    expect(state.snapshot?.session.limits?.maxInputTokensPerSession).toBe(1_000_000);
+    expect(state.snapshot.session.limits?.maxInputTokensPerSession).toBe(1_000_000);
   });
 
   it("still applies inherited token budget when configured child limit is false", async () => {
@@ -185,11 +173,11 @@ describe("createSessionStep", () => {
       compiledArtifactsSource: { kind: "bundled" },
       continuationToken: "subagent:test",
       inheritedLimits: { maxInputTokensPerSession: 500_000, maxOutputTokensPerSession: false },
+      rootSessionId: "sess-root",
       sessionId: "sess-child",
-      subagentDepth: 1,
     });
 
-    expect(state.snapshot?.session.limits?.maxInputTokensPerSession).toBe(500_000);
+    expect(state.snapshot.session.limits?.maxInputTokensPerSession).toBe(500_000);
   });
 
   it("seeds session token limits from resolved agent config", async () => {
@@ -199,6 +187,7 @@ describe("createSessionStep", () => {
           limits: {
             maxInputTokensPerSession: 200_000,
             maxOutputTokensPerSession: 20_000,
+            maxTokenCostUsdPerSession: 1.5,
           },
         },
       },
@@ -211,27 +200,10 @@ describe("createSessionStep", () => {
       sessionId: "sess-root",
     });
 
-    expect(state.snapshot?.session.limits).toMatchObject({
+    expect(state.snapshot.session.limits).toMatchObject({
       maxInputTokensPerSession: 200_000,
       maxOutputTokensPerSession: 20_000,
+      maxTokenCostUsdPerSession: 1.5,
     });
-  });
-
-  it("seeds workflow max subagents from the authored Workflow tool", async () => {
-    vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue({
-      resolvedAgent: {
-        config: {},
-        workflowTool: { maxSubagents: 5 },
-      },
-      turnAgent: TestTurnAgent,
-    } as never);
-
-    const { state } = await createSessionStep({
-      compiledArtifactsSource: { kind: "bundled" },
-      continuationToken: "http:test",
-      sessionId: "sess-root",
-    });
-
-    expect(state.snapshot?.session.workflowMaxSubagents).toBe(5);
   });
 });

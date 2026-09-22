@@ -1,4 +1,4 @@
-import { EvalSessionManager } from "#evals/session.js";
+import { EvalSessionManager } from "#evals/session-manager.js";
 import { AssertionCollector } from "#evals/assertions/collector.js";
 import { createScopedAssertions } from "#evals/assertions/scoped.js";
 import { buildJudgeContext } from "#evals/judge.js";
@@ -19,6 +19,7 @@ import type {
  * AssertionCollector.finalize} it against the completed task result.
  */
 export function createEvalContext(deps: {
+  readonly setupContext?: unknown;
   readonly manager: EvalSessionManager;
   readonly collector: AssertionCollector;
   readonly target: EveEvalTargetHandle;
@@ -27,62 +28,24 @@ export function createEvalContext(deps: {
   readonly log: (message: string) => void;
 }): { readonly context: EveEvalContext; readonly collector: AssertionCollector } {
   const collector = deps.collector;
-  let lastPrompt = "";
-
-  const primary = () => deps.manager.primary;
-  const replyMessage = () => deps.manager.lastTurnSession()?.lastTurn?.message ?? null;
-
   const judge = buildJudgeContext({
     collector,
-    getReply: replyMessage,
-    getInput: () => lastPrompt,
+    getReply: () => deps.manager.lastTurnSession()?.lastTurn?.message ?? null,
+    getInput: () => deps.manager.lastTurnSession()?.lastInput ?? "",
     judge: deps.judge,
+    signal: deps.signal,
   });
 
   const context: EveEvalContext = {
-    // EveEvalSession — drive the primary session.
-    get events() {
-      return primary().events;
-    },
-    get transcript() {
-      return primary().transcript;
-    },
-    get pendingInputRequests() {
-      return primary().pendingInputRequests;
-    },
-    get state() {
-      return primary().state;
-    },
-    get sessionId() {
-      return primary().sessionId;
-    },
-    cancel: () => primary().cancel(),
-    requireInputRequest: (filter) => primary().requireInputRequest(filter),
-    respond: (responses, options) => primary().respond(responses, options),
-    startRespond: (responses, options) => primary().startRespond(responses, options),
-    respondAll: (optionId) => primary().respondAll(optionId),
-    send: (message, options) => {
-      lastPrompt = typeof message === "string" ? message : "";
-      return primary().send(message, options);
-    },
-    start: (message, options) => {
-      lastPrompt = message;
-      return primary().start(message, options);
-    },
-    sendFile: (text, filePath, mediaType) => {
-      lastPrompt = text;
-      return primary().sendFile(text, filePath, mediaType);
-    },
+    session: (options) => deps.manager.session(options),
+    send: (message, options) => deps.manager.send(message, options),
 
     // Run context.
+    context: deps.setupContext,
     signal: deps.signal,
     target: deps.target,
-    get reply() {
-      return replyMessage();
-    },
     log: deps.log,
     sleep: (ms) => sleep(ms, deps.signal),
-    newSession: () => deps.manager.newSession(),
     ...createScopedAssertions(collector, { timing: "final", select: (result) => result }),
 
     // Value-level assertion over an explicit value.
@@ -91,7 +54,9 @@ export function createEvalContext(deps: {
     skip: (reason) => {
       if (reason.trim().length === 0) throw new Error("skip() requires a non-empty reason.");
       if (collector.hasEntries || deps.manager.hasActivity()) {
-        throw new Error("skip() must be called before sending messages or recording assertions.");
+        throw new Error(
+          "skip() must be called before creating sessions, sending messages, or recording assertions.",
+        );
       }
       throw new EvalSkipped(reason);
     },

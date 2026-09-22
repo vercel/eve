@@ -21,9 +21,24 @@ import {
   findInstrumentationActionScopeForCall,
   instrumentationStateSlot,
   rememberInstrumentationActionScope,
+  rememberInstrumentationBackgroundTask,
+  takeInstrumentationActionScopeForTask,
 } from "#instrumentation/state.js";
 
 const { logDebug, logWarn } = vi.hoisted(() => ({ logDebug: vi.fn(), logWarn: vi.fn() }));
+
+const traceContext = (
+  agentName = "test-agent",
+  audience: "public" | "private" | "unknown" = "unknown",
+) => ({
+  agentName,
+  audience,
+  channel: { kind: "http" as const },
+  environment: "production" as const,
+  mode: "conversation" as const,
+  principalType: "anonymous",
+});
+
 vi.mock("#internal/logging.js", () => ({
   createLogger: () => ({ debug: logDebug, warn: logWarn }),
   formatError: (error: unknown) => error,
@@ -32,10 +47,7 @@ vi.mock("#internal/logging.js", () => ({
 function createInstrumentationHooks(
   ...args: Parameters<typeof createUnboundInstrumentationHooks>
 ): ReturnType<typeof createUnboundInstrumentationHooks> {
-  return createUnboundInstrumentationHooks(...args).forTrace!({
-    agentName: "test-agent",
-    audience: "unknown",
-  });
+  return createUnboundInstrumentationHooks(...args).forTrace!(traceContext());
 }
 
 const scope: InstrumentationAttemptScope = {
@@ -311,6 +323,55 @@ describe("provider state lifecycle", () => {
       outcome: "cancelled",
       type: "action.failed",
     });
+  });
+
+  it("keeps an admitted background action open when its initiating turn is cancelled", async () => {
+    const actionKey = actionIdempotencyKey(scope.sessionId, scope.turnId, "call-1");
+    const completed = vi.fn();
+    const failed = vi.fn();
+    const hooks = createInstrumentationHooks([
+      {
+        events: {
+          "action.completed": completed,
+          "action.failed": failed,
+          "action.started": (_event, ctx) => ctx.state.set("open"),
+        },
+        name: "sink",
+      },
+    ]);
+    await contextStorage.run(new ContextContainer(), async () => {
+      rememberInstrumentationActionScope(actionKey, scope);
+      await hooks.publish({
+        callId: "call-1",
+        idempotencyKey: actionKey,
+        input: {},
+        kind: "tool-call",
+        name: "tool",
+        scope,
+        type: "action.started",
+      });
+      rememberInstrumentationBackgroundTask("task-1", { idempotencyKey: actionKey, scope });
+      await hooks.publish({
+        idempotencyKey: turnIdempotencyKey(scope.sessionId, scope.turnId),
+        sessionId: scope.sessionId,
+        turnId: scope.turnId,
+        type: "turn.cancelled",
+      });
+
+      expect(failed).not.toHaveBeenCalled();
+      expect(instrumentationStateSlot("sink", actionKey).get()).toBe("open");
+      const correlation = takeInstrumentationActionScopeForTask("task-1");
+      expect(correlation).toEqual({ idempotencyKey: actionKey, scope });
+      await hooks.publish({
+        idempotencyKey: correlation!.idempotencyKey,
+        outcome: "completed",
+        output: { output: "done", type: "result" },
+        scope: correlation!.scope,
+        type: "action.completed",
+      });
+      expect(instrumentationStateSlot("sink", actionKey).get()).toBeUndefined();
+    });
+    expect(completed).toHaveBeenCalledOnce();
   });
 });
 
@@ -835,12 +896,8 @@ describe("trace policies", () => {
   it("defaults provider content to the audience-aware policy", () => {
     const hooks = createInstrumentationHooks([{ name: "provider" }]);
 
-    expect(hooks.forTrace?.({ agentName: "weather", audience: "public" }).capturesContent).toBe(
-      true,
-    );
-    expect(hooks.forTrace?.({ agentName: "weather", audience: "private" }).capturesContent).toBe(
-      false,
-    );
+    expect(hooks.forTrace?.(traceContext("weather", "public")).capturesContent).toBe(true);
+    expect(hooks.forTrace?.(traceContext("weather", "private")).capturesContent).toBe(false);
   });
 
   it("passes trace context to each provider policy", () => {
@@ -850,11 +907,7 @@ describe("trace policies", () => {
       recordOutputs: false,
     }));
     const hooks = createInstrumentationHooks([{ name: "provider", tracePolicy }]);
-    const trace = {
-      agentName: "weather",
-      audience: "private" as const,
-      channelType: "slack",
-    };
+    const trace = traceContext("weather", "private");
 
     tracePolicy.mockClear();
     expect(hooks.forTrace?.(trace).capturesContent).toBe(true);
@@ -892,7 +945,7 @@ describe("trace policies", () => {
         name: "private-audit",
         tracePolicy: () => ({ emit: true, recordInputs: true, recordOutputs: false }),
       },
-    ]).forTrace!({ agentName: "weather", audience: "private" });
+    ]).forTrace!(traceContext("weather", "private"));
 
     await hooks.publish({
       callId: "call-1",
@@ -925,7 +978,7 @@ describe("trace policies", () => {
         name: "outputs",
         tracePolicy: () => ({ emit: true, recordInputs: false, recordOutputs: true }),
       },
-    ]).forTrace!({ agentName: "weather", audience: "public" });
+    ]).forTrace!(traceContext("weather", "public"));
 
     await hooks.publish({
       idempotencyKey: "model-1",
@@ -967,7 +1020,7 @@ describe("trace policies", () => {
         name: "inputs-only",
         tracePolicy: () => ({ emit: true, recordInputs: true, recordOutputs: false }),
       },
-    ]).forTrace!({ agentName: "weather", audience: "public" });
+    ]).forTrace!(traceContext("weather", "public"));
 
     await hooks.publish({
       error,
@@ -990,22 +1043,8 @@ describe("trace policies", () => {
       ]).capturesContent,
     ).toBe(false);
     expect(
-      createUnboundInstrumentationHooks([{ capture: "content", name: "legacy" }]).capturesContent,
-    ).toBe(false);
-    expect(
-      createUnboundInstrumentationHooks([
-        {
-          capture: "content",
-          name: "explicit-policy",
-          tracePolicy: () => ({ emit: true, recordInputs: false, recordOutputs: false }),
-        },
-      ]).capturesContent,
-    ).toBe(false);
-    expect(
-      createInstrumentationHooks([{ name: "quiet" }]).forTrace!({
-        agentName: "weather",
-        audience: "private",
-      }).capturesContent,
+      createInstrumentationHooks([{ name: "quiet" }]).forTrace!(traceContext("weather", "private"))
+        .capturesContent,
     ).toBe(false);
     expect(
       createInstrumentationHooks([
@@ -1017,7 +1056,7 @@ describe("trace policies", () => {
           name: "also-quiet",
           tracePolicy: () => ({ emit: true, recordInputs: false, recordOutputs: false }),
         },
-      ]).forTrace!({ agentName: "weather", audience: "public" }).capturesContent,
+      ]).forTrace!(traceContext("weather", "public")).capturesContent,
     ).toBe(false);
     expect(
       createInstrumentationHooks([
@@ -1026,7 +1065,7 @@ describe("trace policies", () => {
           name: "loud",
           tracePolicy: () => ({ emit: true, recordInputs: true, recordOutputs: true }),
         },
-      ]).forTrace!({ agentName: "weather", audience: "public" }).capturesContent,
+      ]).forTrace!(traceContext("weather", "public")).capturesContent,
     ).toBe(true);
     expect(
       createInstrumentationHooks({
@@ -1036,7 +1075,7 @@ describe("trace policies", () => {
             tracePolicy: () => ({ emit: true, recordInputs: true, recordOutputs: true }),
           },
         ],
-      }).forTrace!({ agentName: "weather", audience: "public" }).capturesContent,
+      }).forTrace!(traceContext("weather", "public")).capturesContent,
     ).toBe(true);
   });
 
@@ -1048,7 +1087,7 @@ describe("trace policies", () => {
         name: "dropped",
         tracePolicy: () => false,
       },
-    ]).forTrace!({ agentName: "weather", audience: "public" });
+    ]).forTrace!(traceContext("weather", "public"));
 
     await hooks.publish({
       idempotencyKey: turnIdempotencyKey("session-1", "turn-1"),
@@ -1079,8 +1118,8 @@ describe("trace policies", () => {
         tracePolicy: () => ({ emit: true, recordInputs: false, recordOutputs: false }),
       },
     ]);
-    const hooks = unboundHooks.forTrace!({ agentName: "weather", audience: "public" });
-    unboundHooks.forTrace!({ agentName: "weather", audience: "private" });
+    const hooks = unboundHooks.forTrace!(traceContext("weather", "public"));
+    unboundHooks.forTrace!(traceContext("weather", "private"));
 
     await hooks.publish({
       idempotencyKey: turnIdempotencyKey("session-1", "turn-1"),
@@ -1114,7 +1153,7 @@ describe("trace policies", () => {
         events: { "step.attempt.metadata": wantsContent },
         name: "content",
       },
-    ]).forTrace!({ agentName: "weather", audience: "private" });
+    ]).forTrace!(traceContext("weather", "private"));
     const providerMetadata = {
       gateway: {
         cost: "0.01",
@@ -1153,7 +1192,7 @@ describe("trace policies", () => {
         name: "content",
         tracePolicy: () => ({ emit: true, recordInputs: true, recordOutputs: true }),
       },
-    ]).forTrace!({ agentName: "weather", audience: "private" });
+    ]).forTrace!(traceContext("weather", "private"));
     const error = { output: "private tool output", requestBody: "private request" };
     const actionScope = { ...scope };
 
@@ -1220,7 +1259,7 @@ describe("trace policies", () => {
         },
         name: "content",
       },
-    ]).forTrace!({ agentName: "weather", audience: "private" });
+    ]).forTrace!(traceContext("weather", "private"));
     const idempotencyKey = inputIdempotencyKey(scope.sessionId, scope.turnId, "request-1");
 
     await hooks.publish({
@@ -1272,7 +1311,7 @@ describe("trace policies", () => {
           name: "content",
         },
       ],
-    }).forTrace!({ agentName: "weather", audience: "private" });
+    }).forTrace!(traceContext("weather", "private"));
 
     const event = {
       idempotencyKey: toolCallIdempotencyKey(scope, "call-1", 0),

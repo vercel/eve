@@ -92,6 +92,7 @@ jobs:
       # The world package comes from this world's e2e/matrix.json entry.
       EVE_E2E_WORKFLOW_WORLD: ${{ matrix.world_package }}
       EVE_EVAL_JUNIT_DIR: ${{ github.workspace }}/.junit
+      EVE_SANDBOX_IMAGE_TAG: latest
       WORKFLOW_POSTGRES_MAX_POOL_SIZE: "52"
       WORKFLOW_POSTGRES_URL: postgres://world:world@127.0.0.1:5432/world
       WORKFLOW_POSTGRES_WORKER_CONCURRENCY: "50"

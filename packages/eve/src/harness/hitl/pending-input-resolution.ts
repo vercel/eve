@@ -6,6 +6,7 @@ import type { ResolvedInputBatch } from "#harness/input-request-resolution.js";
 import type { PendingInputBatch, PendingInputBatchEvent } from "#harness/pending-input-batches.js";
 import { queueDeferredStepInput } from "#harness/pending-input-batches.js";
 import type { HarnessSession, StepInput } from "#harness/types.js";
+import { attachClientContext, readClientContext } from "#internal/client-context.js";
 
 export type ToolResponsePart = Extract<ModelMessage, { role: "tool" }>["content"][number];
 
@@ -78,6 +79,7 @@ export function finishResolvedInput(input: {
     inputResponses?: StepInput["inputResponses"];
     message?: StepInput["message"];
   } = {};
+  let clientContext: readonly string[] | undefined;
   if (input.leftoverResponses.length > 0) {
     deferredInput.inputResponses = input.leftoverResponses;
   }
@@ -85,15 +87,23 @@ export function finishResolvedInput(input: {
     if ((input.resolvedStepInput?.context?.length ?? 0) > 0) {
       deferredInput.context = input.resolvedStepInput?.context;
     }
+    const resolvedClientContext = readClientContext(input.resolvedStepInput);
+    if ((resolvedClientContext?.length ?? 0) > 0) {
+      clientContext = resolvedClientContext;
+    }
     if (input.resolvedStepInput?.message !== undefined) {
       deferredInput.message = input.resolvedStepInput.message;
     }
   }
+  attachClientContext(deferredInput, clientContext);
 
   if (Object.keys(deferredInput).length > 0) {
     return {
       consumedMessage: input.resolvedStepInput?.messageConsumed,
-      deferredContext: deferredInput.context === undefined ? undefined : true,
+      deferredContext:
+        deferredInput.context === undefined && readClientContext(deferredInput) === undefined
+          ? undefined
+          : true,
       deferredMessage: deferredInput.message === undefined ? undefined : true,
       limitContinuation: input.limitContinuation,
       outcome: "resolved",
@@ -134,5 +144,5 @@ export function compactStepInput(input: ResolvedStepInput | undefined): Resolved
   if (input.messageConsumed === true) result.messageConsumed = true;
   if (input.outputSchema !== undefined) result.outputSchema = input.outputSchema;
 
-  return result;
+  return attachClientContext(result, readClientContext(input));
 }

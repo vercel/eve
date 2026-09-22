@@ -5,6 +5,21 @@ import {
   extractToolApprovalInputRequests,
 } from "#harness/input-extraction.js";
 
+const QUESTION_TOOLS = new Map([
+  [
+    "ask_question",
+    {
+      behavior: {
+        availability: ["requires-request-input" as const],
+        handling: { kind: "request-input" as const, request: "question" as const },
+      },
+      description: "Ask a question.",
+      inputSchema: {} as never,
+      name: "ask_question",
+    },
+  ],
+]);
+
 describe("extractQuestionInputRequests", () => {
   it("extracts a question request from an ask_question tool call", () => {
     const result = extractQuestionInputRequests({
@@ -20,6 +35,7 @@ describe("extractQuestionInputRequests", () => {
           type: "tool-call",
         },
       ],
+      tools: QUESTION_TOOLS,
     });
 
     expect(result).toEqual([
@@ -53,6 +69,7 @@ describe("extractQuestionInputRequests", () => {
           type: "tool-call",
         },
       ],
+      tools: QUESTION_TOOLS,
     });
 
     expect(result[0]?.allowFreeform).toBe(true);
@@ -69,6 +86,7 @@ describe("extractQuestionInputRequests", () => {
           type: "tool-call",
         },
       ],
+      tools: QUESTION_TOOLS,
     });
 
     expect(result).toEqual([]);
@@ -85,6 +103,7 @@ describe("extractQuestionInputRequests", () => {
           type: "tool-call",
         },
       ],
+      tools: QUESTION_TOOLS,
     });
 
     expect(result).toEqual([]);

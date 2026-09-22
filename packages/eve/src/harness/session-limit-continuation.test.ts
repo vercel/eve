@@ -54,6 +54,25 @@ describe("createSessionLimitContinuationRequest", () => {
     });
   });
 
+  it("creates a token-cost continuation prompt", () => {
+    const request = createSessionLimitContinuationRequest({
+      sessionId: "sess-test",
+      violation: { kind: "token-cost", limitUsd: 1.5, usedCostUsd: 1.5123 },
+    });
+
+    expect(request).toMatchObject({
+      action: {
+        callId: "sess-test:limit:token-cost:1.5123",
+        input: { kind: "token-cost", limitUsd: 1.5, usedCostUsd: 1.5123 },
+      },
+      prompt:
+        "This session has hit the $1.5 model token-cost limit per session. This is a guardrail " +
+        "against defective long-running sessions. If session activity looks fine, just " +
+        "approve to keep going.",
+      requestId: "sess-test:limit:token-cost:1.5123",
+    });
+  });
+
   it("formats the limit compactly in the prompt copy", () => {
     const promptFor = (limit: number): string =>
       createSessionLimitContinuationRequest({
@@ -66,6 +85,13 @@ describe("createSessionLimitContinuationRequest", () => {
     expect(promptFor(200_000)).toContain("(200K)");
     expect(promptFor(1_500)).toContain("(1.5K)");
     expect(promptFor(999)).toContain("(999)");
+
+    const tinyCost = createSessionLimitContinuationRequest({
+      sessionId: "sess-test",
+      violation: { kind: "token-cost", limitUsd: 5e-7, usedCostUsd: 6e-7 },
+    });
+    expect(tinyCost.prompt).toContain("$5e-7 model token-cost limit");
+    expect(isSessionLimitContinuationRequestId(tinyCost.requestId)).toBe(true);
   });
 
   it("gives each violation instance its own id as the session total grows", () => {
@@ -86,6 +112,7 @@ describe("createSessionLimitContinuationRequest", () => {
   it("mints ids recognized by isSessionLimitContinuationRequestId", () => {
     expect(isSessionLimitContinuationRequestId(createTestRequest().requestId)).toBe(true);
     expect(isSessionLimitContinuationRequestId("sess-test:limit:output:12")).toBe(true);
+    expect(isSessionLimitContinuationRequestId("sess-test:limit:token-cost:1.5123")).toBe(true);
     expect(isSessionLimitContinuationRequestId("approval-1")).toBe(false);
     expect(isSessionLimitContinuationRequestId("sess-test:limit:input:")).toBe(false);
   });

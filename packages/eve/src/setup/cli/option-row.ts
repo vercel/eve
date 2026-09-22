@@ -14,6 +14,7 @@
 /** The color primitives the row painter needs; satisfied by both the TUI theme and the CLI palette. */
 export interface RowColors {
   blue(text: string): string;
+  bold?(text: string): string;
   dim(text: string): string;
   green(text: string): string;
   inverse(text: string): string;
@@ -38,10 +39,10 @@ export interface RowGlyphs {
 
 /** Canonical unicode glyphs; the CLI prompts render with these. */
 export const UNICODE_ROW_GLYPHS: RowGlyphs = {
-  pointer: "▷",
-  selectedPointer: "▶",
+  pointer: "›",
+  selectedPointer: "›",
   success: "✓",
-  placeholder: "◦",
+  placeholder: " ",
   dot: "·",
   warning: "⚠",
 };
@@ -181,12 +182,12 @@ function optionRowPresentation(input: OptionRowInput): OptionRowPresentation {
 export function renderCursorRow(
   text: string,
   selected: boolean,
-  colors: Pick<RowColors, "blue" | "inverse" | "yellow">,
+  colors: Pick<RowColors, "blue" | "inverse" | "yellow" | "bold">,
   accent?: "warning",
 ): string {
   if (!selected) return ` ${text}`;
-  const color = accent === "warning" ? colors.yellow : colors.blue;
-  return colors.inverse(color(` ${text} `));
+  const color = accent === "warning" ? colors.yellow : (colors.bold ?? ((value: string) => value));
+  return color(` ${text}`);
 }
 
 /** Prefixes a continuation line so its text starts in the option label column. */
@@ -210,7 +211,7 @@ export function renderOptionRow(input: OptionRowInput): string {
   if (input.isCursor && input.focusHint !== undefined) hintText = input.focusHint;
   let hint = "";
   if (hintText !== undefined) {
-    const separatorWidth = Math.max(0, (input.hintPadding ?? 0) + 1 - Number(selected));
+    const separatorWidth = Math.max(0, (input.hintPadding ?? 0) + 1);
     hint = c.dim(`${" ".repeat(separatorWidth)}${glyphs.dot} ${hintText}`);
   }
   const content = `${glyph} ${label}`;

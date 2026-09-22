@@ -16,14 +16,15 @@ export default defineEval({
   description: "One pending approval stays singular across many follow-up questions.",
   async test(t) {
     const parked = await t.send(`Call the ${TOOL_NAME} tool exactly once with marker "${MARKER}".`);
+    const session = parked.session;
     parked.calledTool(TOOL_NAME, { status: "pending", count: 1 });
-    const approval = t.requireInputRequest({
+    const approval = session.requireInputRequest({
       display: "confirmation",
       toolName: TOOL_NAME,
     });
 
     for (const question of FOLLOW_UP_QUESTIONS) {
-      const followup = await t.send(question);
+      const followup = await session.send(question);
 
       followup.expectOk();
       followup.usedNoTools();
@@ -31,7 +32,7 @@ export default defineEval({
       followup.event("session.waiting", { count: 1 });
     }
 
-    const approved = await t.respond([
+    const approved = await session.respond([
       {
         optionId: "approve",
         requestId: approval.requestId,

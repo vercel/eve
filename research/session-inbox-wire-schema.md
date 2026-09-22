@@ -1,10 +1,14 @@
 ---
 issue: https://github.com/vercel/eve/issues/1765
-status: proposed
-last_updated: "2026-08-18"
+status: superseded
+last_updated: "2026-09-11"
 ---
 
 # Versioned wire schema for the session inbox
+
+Superseded by [single-workflow sessions](./single-workflow-session-upgrades.md).
+The implementation uses one inbox protocol with no negotiation or migration chain.
+The proposal below records the previous deployment model, not current guidance.
 
 ## Purpose
 
@@ -79,6 +83,12 @@ Normative rules:
   `VersionMigration`, freeze the new shape. Historic versions live on as
   executable migrations plus frozen payload fixtures (the turn-workflow
   precedent), not as retained schemas.
+- **Protocol data and migration policy stay separate.** A `*.vN.ts` module
+  owns the immutable schema and version-bound encoder. A
+  `*.vN.migration.ts` module is a pure data transform with no normalization or
+  version-selection dependencies. The encoder and decoder facades own mutable
+  policy: selecting a target, assembling the chain, and normalizing values
+  received from another Workflow VM realm.
 - **The complete transported value is validated once, at encode.** The
   schema owns the envelope and every eve-owned `DeliverPayload` field,
   composing the existing strict `inputResponseSchema` and
@@ -141,11 +151,22 @@ consumer ──decode──────────▶ known version → typed p
   consumers. A markerless continuation without the stable inbox identifies eve
   ≤0.30.4 and receives legacy `deliver`. This tests a concrete historical
   capability rather than guessing from deployment or package metadata.
-- **Cost boundary.** Every producer performs one target `getHookByToken`
-  before `resumeHook`. Markerless continuation hooks require one additional
-  lookup for the stable-inbox capability. `resumeHook` receives the inspected
-  hook object, preventing the encoding decision from being applied to a
-  different hook that later reused the same token.
+- **Saved receiver addresses.** The pinned driver advertises its canonical
+  session ID and wire version in serialized context. Local subagent input
+  requests save that address with their reply route. A later producer can
+  encode for the original receiver without reading hook metadata, even if a
+  newer deployment handles the reply or the continuation alias changes.
+  Workflow-tool relays carry the stable inbox token in their existing reply
+  field because input answers fit the unversioned `send` contract.
+- **Cost boundary.** Saved receiver addresses and compatible commands to
+  stable inbox tokens skip metadata negotiation and use token-based
+  `resumeHook`, retaining Workflow's backend resume deduplication. Other
+  producers read the target with `getHookByToken`. Markerless continuation
+  hooks require one additional raw ownership lookup for the stable-inbox
+  capability. For these negotiated sends, `resumeHook` receives the inspected
+  hook object so the encoding decision cannot apply to a different hook that
+  later reused the same token. Ownership-only reads use the raw world API;
+  they do not need metadata hydration or an encryption-key lookup.
 
 ## Compatibility and payoff timeline
 
@@ -194,6 +215,10 @@ mechanical guard in the existing CI lint job (`pnpm guard:invariants`):
   TypeScript requires an encoder for every registered stamped version. The
   required unit tier then encodes and decodes every registry entry, while each
   version's frozen contract pins its exact shape and backwards migration.
+- Rule 40 also freezes pure `*.vN.migration.ts` modules with their tests and
+  rejects policy imports from those transforms. A one-time historical rewrite
+  is represented by exact old/new Git blob hashes, so the exception expires as
+  soon as the approved rewrite reaches `main`.
 - Exact current-version bytes stay in the unit contract, where the encoded
   object can be asserted without decoding workflow-owned serde. The
   deterministic registry checks cover future stamped-version changes. The

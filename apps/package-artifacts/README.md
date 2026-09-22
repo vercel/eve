@@ -1,28 +1,69 @@
 # eve package artifacts
 
-Git-linked Vercel project that builds an eve tarball from each `vercel/eve` `main` commit and uploads immutable SHA-addressed package and manifest artifacts to private Vercel Blob using deployment OIDC.
+The `eve-pkg` Vercel project builds and publishes eve tarballs to private Vercel Blob using deployment OIDC. Its production domain, `pkg.eve.dev`, serves both `main` and same-repository pull-request packages.
 
 ```text
 /main/eve.tgz
 /main/latest.json
+/pr/<number>/eve.tgz
+/pr/<number>/latest.json
 /<full-sha>/eve.tgz
 ```
 
-The publisher uses Vercel's `VERCEL_PROJECT_PRODUCTION_URL` system environment variable as the public package domain. For example, if the production domain is `packages.example.com`, initialize an agent from the current `main` build with:
+Initialize an agent from the current `main` build with:
 
 ```bash
-npm exec --yes --package=https://packages.example.com/main/eve.tgz -- eve init my-agent
+npm exec --yes --package=https://pkg.eve.dev/main/eve.tgz -- eve init my-agent
 ```
 
-The production deployment resolves `main` to its checked-out commit. Its `latest.json` exposes metadata for that package, including the source SHA, immutable package URL, and checksum. The packaged CLI stamps its immutable commit URL into generated projects, so a project created through the moving `main` URL remains pinned to the package used to create it. The package route reads private Blob objects with deployment OIDC and streams them through the public project domain.
+A same-repository pull-request build is available after its **Vercel – eve-pkg** deployment succeeds, including when the pull request targets another branch in a stack. Fork pull requests and direct branch deployments never build or publish package artifacts. For example:
 
-The Vercel project must:
+```bash
+npm exec --yes --package=https://pkg.eve.dev/pr/123/eve.tgz -- eve init my-agent
+```
+
+Both moving routes redirect to an immutable `/<sha>/eve.tgz` artifact. The packaged CLI also stamps that immutable URL into generated projects.
+
+## Publishing
+
+Vercel deploys `main` to Production and same-repository pull requests to Preview. The build derives the source SHA and PR number from Vercel system environment variables, packages eve, verifies that the source still represents the current branch or pull-request head, and writes the following objects:
+
+```text
+packages/<sha>/eve.tgz
+packages/<sha>/manifest.json
+packages/refs/main.json
+packages/refs/pr/<number>.json
+```
+
+SHA objects are immutable. Main and PR pointer objects are mutable and short-cached.
+
+The build requires `VERCEL_OIDC_TOKEN` and `BLOB_STORE_ID` and passes them explicitly to the Blob SDK. It does not accept or use a static Blob write token.
+
+## Project setup
+
+The `eve-pkg` Vercel project must:
 
 - use this directory as its project root;
-- enable access to Vercel system environment variables;
+- enable Vercel system environment variables and OIDC;
+- connect the private package Blob store to Production and Preview;
 - deploy `main` to Production;
-- connect a private Blob store to Production;
-- omit `BLOB_READ_WRITE_TOKEN` so Blob writes use Vercel OIDC; and
-- disable Deployment Protection so npm can reach the production origin anonymously.
+- omit `BLOB_READ_WRITE_TOKEN` from Production and Preview;
+- disable Deployment Protection so package managers can reach the production proxy; and
+- use the following trusted Ignored Build Step:
 
-Only production builds of `main` publish artifacts. Other builds produce a placeholder deployment; configure the project's Ignored Build Step as `test "$VERCEL_GIT_COMMIT_REF" != "main"` to skip non-`main` deployments before install and build. The smoke check verifies public access and the downloaded artifact's gzip signature.
+```sh
+if [ "$VERCEL_ENV" = "production" ]; then
+  test "$VERCEL_GIT_COMMIT_REF" != "main"
+else
+  test "$VERCEL_ENV" != "preview" ||
+    test "$VERCEL_GIT_REPO_OWNER" != "vercel" ||
+    test "$VERCEL_GIT_REPO_SLUG" != "eve" ||
+    test -z "$VERCEL_GIT_PULL_REQUEST_ID"
+fi
+```
+
+Vercel interprets exit code `0` as “skip this build.” The command therefore permits only production `main` and same-repository PR Preview deployments, rejecting forks before dependency installation. The build repeats the repository and deployment checks as defense in depth.
+
+Same-repository PR code runs with package-store OIDC access during its Preview build. This is acceptable only while write access to `vercel/eve` is restricted to trusted employees. The Blob store must remain package-only and must not contain unrelated application data.
+
+The smoke check verifies public access and the downloaded main artifact's gzip signature.

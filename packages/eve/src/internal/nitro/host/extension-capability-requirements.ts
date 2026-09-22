@@ -21,6 +21,7 @@ export async function deriveExtensionCapabilityRequirements(input: {
   readonly manifest: AgentSourceManifest;
   readonly packageName: string;
   readonly runtimeDependencies: readonly string[];
+  readonly runtimeImports: readonly string[];
   readonly shortName: string;
   readonly sourceRoot: string;
 }): Promise<ExtensionCapabilityRequirements> {
@@ -89,6 +90,9 @@ export async function deriveExtensionCapabilityRequirements(input: {
     required.add("config");
   }
   if (usesState) required.add("state");
+  // Runtime imports can use these capabilities outside manifest-declared tools.
+  if (input.runtimeImports.includes("eve/ai")) required.add("tool");
+  if (input.runtimeImports.includes("eve/models")) required.add("dynamicTool");
 
   return Object.fromEntries(
     (Object.keys(EXTENSION_CAPABILITY_VERSIONS) as ExtensionCapability[])

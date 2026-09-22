@@ -1,6 +1,7 @@
 import { z } from "#compiled/zod/index.js";
 
 import { type GrepInput, executeGrepOnSandbox } from "#execution/sandbox/grep-tool.js";
+import { toolLabel } from "#tools/tool-label.js";
 import { defineTool, type ToolDefinition } from "#tools/definition.js";
 
 /**
@@ -64,6 +65,7 @@ export type GrepToolOutput = z.infer<typeof GREP_OUTPUT_SCHEMA>;
  * Framework-owned executor that delegates to the default sandbox.
  */
 export const grep: ToolDefinition<GrepToolInput, GrepToolOutput> = defineTool({
+  label: { start: (input) => toolLabel("Search", input.pattern) },
   description: [
     "Fast content search tool that works with any codebase size.",
     "",

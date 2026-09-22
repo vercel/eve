@@ -61,6 +61,12 @@ export {
   type OpenApiEndpoint,
 } from "./connections/catalog.js";
 
+export {
+  ensurePackageDependencies,
+  type EnsurePackageDependenciesOptions,
+  type PackageDependencyMutation,
+} from "./update/dependencies.js";
+
 export { WriteFileExistsError } from "./files.js";
 
 export { HumanActionRequiredError, type HumanAction } from "../human-action.js";

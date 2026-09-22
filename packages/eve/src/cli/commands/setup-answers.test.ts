@@ -35,6 +35,31 @@ describe("setup answers", () => {
     });
   });
 
+  it("preserves accumulated answers in a resume command", () => {
+    expect(
+      headlessSetupContinuation({
+        item: "channel/github",
+        installed: true,
+        answers: { mode: "portable", events: ["issues", "pull_request"] },
+        question: { key: "team", kind: "text", message: "Team?", required: true },
+      }),
+    ).toEqual({
+      command: "eve",
+      args: [
+        "add",
+        "channel/github",
+        "--non-interactive",
+        "--skip-install",
+        "--answer",
+        'mode="portable"',
+        "--answer",
+        'events=["issues","pull_request"]',
+        "--answer",
+        "team=<JSON value>",
+      ],
+    });
+  });
+
   it("does not put a secret answer placeholder on the command line", () => {
     expect(
       headlessSetupContinuation({

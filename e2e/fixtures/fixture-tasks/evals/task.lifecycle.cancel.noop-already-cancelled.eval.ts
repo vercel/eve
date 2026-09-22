@@ -25,13 +25,15 @@ export default defineTaskEval({
     const started = await t.send("TASK-CANCEL-SETUP");
     started.expectOk();
     started.messageIncludes("TASK-CANCEL-READY");
-    started.event("subagent.completed", {
+    started.event("action.result", {
       count: 1,
-      data: { backgroundTask: { status: "working" }, subagentName: "fanout-worker" },
+      data: {
+        result: { kind: "tool-result", output: { status: "working" }, toolName: "fanout-worker" },
+      },
     });
     const taskId = requireBackgroundTaskId(started);
 
-    const blocked = await waitForTaskInput(t, t, "release");
+    const blocked = await waitForTaskInput(t, started.session, "release");
     const cancelled = await sendAndFollowQueuedTurn(t, "TASK-CANCEL-NOW", blocked.session);
     cancelled.turn.expectOk();
     cancelled.turn.calledTool("task_cancel", { input: { taskIds: [taskId] } });

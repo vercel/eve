@@ -9,6 +9,7 @@ import { headlessSetupContinuation, serializeHeadlessSetupEvent } from "./setup-
 
 export interface DeclaredSetupOptions {
   yes?: boolean;
+  force?: boolean;
   nonInteractive?: boolean;
   answers?: Record<string, unknown>;
   silent?: boolean;
@@ -42,6 +43,13 @@ export async function runDeclaredSetups(input: {
           args: [
             ...setup.args,
             ...(input.options.yes ? ["--yes"] : []),
+            ...(input.options.force &&
+            setup.package === "eve" &&
+            setup.bin === "eve" &&
+            setup.args[0] === "integration" &&
+            setup.args[1] === "setup"
+              ? ["--force"]
+              : []),
             ...(input.options.nonInteractive ? ["--non-interactive"] : []),
             ...Object.entries(input.options.answers ?? {}).flatMap(([key, value]) => [
               "--answer",
@@ -69,6 +77,7 @@ export async function runDeclaredSetups(input: {
             next: headlessSetupContinuation({
               item: input.item,
               installed: true,
+              answers: input.options.answers,
               question:
                 result.blocker.status === "input_required" ? result.blocker.question : undefined,
             }),
@@ -92,7 +101,11 @@ export async function runDeclaredSetups(input: {
           item: input.item,
           completedItems: [],
           message,
-          next: headlessSetupContinuation({ item: input.item, installed: true }),
+          next: headlessSetupContinuation({
+            item: input.item,
+            installed: true,
+            answers: input.options.answers,
+          }),
         }),
       );
       process.exitCode = 1;

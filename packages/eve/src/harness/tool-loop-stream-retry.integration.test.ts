@@ -24,7 +24,7 @@ function createSession(): HarnessSession {
     compaction: { recentWindowSize: 10, threshold: 100_000 },
     continuationToken: "http:retry-integration-session",
     history: [
-      { content: "Complete the long task.", role: "user" },
+      { content: "Complete the long task.", kind: "user", role: "user" },
       { content: "Prior work is complete.", role: "assistant" },
     ],
     sessionId: "retry-integration-session",
@@ -128,6 +128,16 @@ describe("tool loop streamed provider retries", () => {
     });
     expect(JSON.stringify(result.session.history)).toContain("Recovered answer.");
     expect(JSON.stringify(result.session.history)).not.toContain("Discard this partial response.");
+    expect(
+      events
+        .filter((event) => event.type === "message.appended")
+        .map((event) => event.data.messageDelta),
+    ).toEqual(["Discard this partial response.", "Recovered answer."]);
+    expect(
+      events
+        .filter((event) => event.type === "message.completed")
+        .map((event) => event.data.message),
+    ).toEqual(["Recovered answer."]);
     expect(events.filter((event) => event.type === "step.started")).toHaveLength(1);
     expect(events.filter((event) => event.type === "step.completed")).toHaveLength(1);
     expect(events.filter((event) => event.type === "step.failed")).toHaveLength(0);

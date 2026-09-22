@@ -7,6 +7,7 @@ import {
   withPolicy,
 } from "#setup/ask.js";
 import { ensureVercelProject } from "#setup/flows/ensure-vercel-project.js";
+import { resolveEveProjectContext } from "#internal/project-context.js";
 import { createHeadlessPrompter } from "#setup/headless.js";
 import { SetupPrerequisiteRequired } from "#setup/integrations/shared/prerequisite.js";
 import { createPrompter, type Prompter } from "#setup/prompter.js";
@@ -22,6 +23,7 @@ import { serializeHeadlessSetupEvent } from "./setup-headless.js";
 
 export interface IntegrationSetupOptions {
   yes?: boolean;
+  force?: boolean;
   nonInteractive?: boolean;
   answers?: Record<string, unknown>;
   signal?: AbortSignal;
@@ -49,6 +51,7 @@ export async function runIntegrationSetupCommand(
   });
   try {
     const nonInteractive = options.nonInteractive === true;
+    const projectRoot = (await resolveEveProjectContext(appRoot)).environmentRoot;
     const prompter =
       client?.prompter ??
       dependencies.createPrompter?.() ??
@@ -60,13 +63,15 @@ export async function runIntegrationSetupCommand(
       kind,
       {
         appRoot,
+        projectRoot,
         prompter,
         asker,
+        force: options.force,
         resolveVercelProject: nonInteractive
           ? undefined
           : () =>
               ensureVercelProject({
-                appRoot,
+                appRoot: projectRoot,
                 prompter,
                 signal: client?.signal ?? options.signal,
               }),

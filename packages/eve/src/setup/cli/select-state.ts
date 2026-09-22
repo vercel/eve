@@ -35,6 +35,7 @@ export function searchActionQuery(value: string): string | undefined {
 export type SelectEvent =
   | { type: "char"; char: string }
   | { type: "backspace" }
+  | { type: "delete-word-backward" }
   | { type: "clear" }
   | { type: "up" }
   | { type: "down" }
@@ -61,7 +62,7 @@ export function submitRowIndex(visible: readonly PromptOption<string>[]): number
 }
 
 /**
- * Case-insensitive substring match across an option's label, value, and hints.
+ * Case-insensitive substring match across an option's label, value, hints, and keywords.
  * An empty query returns every option, so the cursor can always scroll the
  * full list; `featured` only shapes the searchable picker's default viewport,
  * not which rows exist.
@@ -80,7 +81,9 @@ export function filterOptions(
       (option.label.toLowerCase().includes(normalizedQuery) ||
         option.value.toLowerCase().includes(normalizedQuery) ||
         (option.hint?.toLowerCase().includes(normalizedQuery) ?? false) ||
-        (option.focusHint?.toLowerCase().includes(normalizedQuery) ?? false)),
+        (option.focusHint?.toLowerCase().includes(normalizedQuery) ?? false) ||
+        (option.keywords?.some((keyword) => keyword.toLowerCase().includes(normalizedQuery)) ??
+          false)),
   );
   if (searchAction !== undefined) {
     matches.push({ value: searchActionValue(query), label: searchAction.label(query) });
@@ -96,6 +99,25 @@ function isFocusable(option: PromptOption<string>): boolean {
 /** A focused row the user can select or toggle. */
 function isActionable(option: PromptOption<string>): boolean {
   return isFocusable(option) && !option.completed;
+}
+
+function previousWordBoundary(text: string): number {
+  let cursor = text.length;
+  while (cursor > 0) {
+    const previous = previousGraphemeBoundary(text, cursor);
+    if (isWordCharacter(text.slice(previous, cursor))) break;
+    cursor = previous;
+  }
+  while (cursor > 0) {
+    const previous = previousGraphemeBoundary(text, cursor);
+    if (!isWordCharacter(text.slice(previous, cursor))) break;
+    cursor = previous;
+  }
+  return cursor;
+}
+
+function isWordCharacter(text: string): boolean {
+  return /^[\p{L}\p{M}\p{N}_]/u.test(text);
 }
 
 /**
@@ -133,8 +155,8 @@ function stepCursor(
 /**
  * Advances the interaction state for a single keypress.
  *
- * Editing the query (`char`/`backspace`) re-homes the cursor onto the first
- * selectable match but leaves marked values intact, so a multi-select keeps its
+ * Editing the query re-homes the cursor onto the first selectable match but
+ * leaves marked values intact, so a multi-select keeps its
  * picks while the list is filtered. `toggle` (space) marks or unmarks the
  * highlighted entry; navigation skips disabled rows.
  */
@@ -162,6 +184,18 @@ export function reduceSelect(
         0,
         previousGraphemeBoundary(state.filter, state.filter.length),
       );
+      return {
+        ...state,
+        filter,
+        cursor: firstFocusableIndex(
+          filterOptions(context.options, filter, context.searchAction),
+          submitRow,
+        ),
+      };
+    }
+    case "delete-word-backward": {
+      if (state.filter.length === 0) return state;
+      const filter = state.filter.slice(0, previousWordBoundary(state.filter));
       return {
         ...state,
         filter,

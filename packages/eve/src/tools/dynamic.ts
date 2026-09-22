@@ -3,6 +3,7 @@ import type { DynamicResolveContext, DynamicToolEventName } from "#dynamic/defin
 import type {
   PublicToolInputSchema,
   PublicToolOutputSchema,
+  ToolLabelDefinition,
   ToolContext,
 } from "#tools/definition.js";
 import type { ToolModelOutput } from "#tools/model-output.js";
@@ -21,6 +22,8 @@ import type { ToolModelOutput } from "#tools/model-output.js";
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export interface DynamicToolEntry<TInput = Record<string, unknown>, TOutput = any> {
+  readonly availableInSubagents?: boolean;
+  readonly label?: ToolLabelDefinition<TInput, TOutput>;
   readonly description: string;
   readonly inputSchema: PublicToolInputSchema<TInput>;
   readonly outputSchema?: PublicToolOutputSchema<TOutput>;
@@ -33,6 +36,8 @@ export interface DynamicToolEntry<TInput = Record<string, unknown>, TOutput = an
    * use the same durable descriptor boundary as `execute` and `toModelOutput`.
    */
   readonly approval?: Approval;
+  /** Derives the input-scoped key recorded when this tool is approved. */
+  readonly approvalKey?: (toolInput: Readonly<Record<string, unknown>>) => string;
 }
 
 /**
