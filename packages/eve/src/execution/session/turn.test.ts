@@ -509,26 +509,29 @@ describe("SessionExecution background task checkpoints", () => {
         hasPendingInputBatch: false,
         serializedContext: input.serializedContext,
         sessionState: input.sessionState,
-        completion: { kind: "settled", output: "Done." },
+        completion: { notifyCaller: true, result: { output: "Done." } },
       }));
 
     await expect(
       execution.runTurn({
         delivery: { kind: "deliver", payloads: [{ message: "Start the work." }] },
       }),
-    ).resolves.toMatchObject({ kind: "park", completion: { kind: "settled", output: "Done." } });
+    ).resolves.toMatchObject({
+      kind: "park",
+      completion: { notifyCaller: true, result: { output: "Done." } },
+    });
 
     expect(turnStep).toHaveBeenCalledTimes(1);
     expect(queue.pendingCount).toBe(1);
   });
 
   it.each([
-    { backgroundTasks: false, completion: { kind: "settled", output: "Done." } },
-    { backgroundTasks: true, completion: { kind: "settled", output: "Done." } },
-    { backgroundTasks: false, completion: { kind: "yielded" } },
-    { backgroundTasks: true, completion: { kind: "yielded" } },
+    { backgroundTasks: false, completion: { notifyCaller: true, result: { output: "Done." } } },
+    { backgroundTasks: true, completion: { notifyCaller: true, result: { output: "Done." } } },
+    { backgroundTasks: false, completion: { notifyCaller: false } },
+    { backgroundTasks: true, completion: { notifyCaller: false } },
   ] as const)(
-    "keeps a $completion.kind turn when cancellation races its checkpoint (background tasks: $backgroundTasks)",
+    "preserves the completed turn when cancellation races its checkpoint (notify caller: $completion.notifyCaller, background tasks: $backgroundTasks)",
     async ({ backgroundTasks, completion }) => {
       const followUp: DeliverHookPayload = {
         kind: "deliver",

@@ -40,10 +40,10 @@ interface DurableStepResultFields {
   readonly sessionState: DurableSessionState;
 }
 
-/** A model turn ended; only a settled result may complete its delegated caller. */
+/** Marks an ended model turn and whether its result should notify the caller. */
 export type TurnCompletion =
-  | { readonly kind: "yielded" }
-  | (SettledTurn & { readonly kind: "settled" });
+  | { readonly notifyCaller: false }
+  | { readonly notifyCaller: true; readonly result: SettledTurn };
 
 /** Result returned by a session-mutating turn step. */
 export type DurableStepResult = (

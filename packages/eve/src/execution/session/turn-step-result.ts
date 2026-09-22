@@ -72,7 +72,7 @@ export function resolveSessionStepResult(
           action: "park",
           ...backgroundTransition,
           ...pending,
-          completion: { kind: "yielded" },
+          completion: { notifyCaller: false },
           serializedContext: nextSerializedContext,
           sessionState: nextState,
         };
@@ -85,10 +85,12 @@ export function resolveSessionStepResult(
         serializedContext: nextSerializedContext,
         sessionState: createDurableSessionState({ session: reportedSession }),
         completion: {
-          kind: "settled",
-          output: stepResult.settledTurn.output,
-          isError: stepResult.settledTurn.isError,
-          usage: delta,
+          notifyCaller: true,
+          result: {
+            output: stepResult.settledTurn.output,
+            isError: stepResult.settledTurn.isError,
+            usage: delta,
+          },
         },
       };
     }

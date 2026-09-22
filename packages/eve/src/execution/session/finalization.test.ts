@@ -33,7 +33,7 @@ function withUsage(session: HarnessSession, inputTokens: number): HarnessSession
   return setTurnUsageState(session, { ...totals, session: totals, turnId: "current" });
 }
 
-function yieldedSession() {
+function sessionAwaitingCallerNotification() {
   const session: HarnessSession = {
     agent: { modelReference: { id: "unused" }, system: "", tools: [] },
     compaction: { recentWindowSize: 10, threshold: 100_000 },
@@ -54,14 +54,14 @@ function yieldedSession() {
       dispatchContext: { auth: { current: null, initiator: null } },
     },
   });
-  const yielded = resolveSessionStepResult(
+  const parked = resolveSessionStepResult(
     { next: null, session: pending, settledTurn: { output: "Verification is running." } },
     {},
     "conversation",
     {},
   );
-  expect(yielded).toMatchObject({ action: "park", completion: { kind: "yielded" } });
-  return yielded.sessionState;
+  expect(parked).toMatchObject({ action: "park", completion: { notifyCaller: false } });
+  return parked.sessionState;
 }
 
 beforeEach(() => vi.clearAllMocks());
@@ -80,7 +80,7 @@ describe("session finalization with an unsettled caller", () => {
       };
       const result = await finalizeSession(outcome, {
         caller,
-        cursor: { serializedContext: {}, sessionState: yieldedSession() },
+        cursor: { serializedContext: {}, sessionState: sessionAwaitingCallerNotification() },
         mode: "conversation",
         sessionWritable: new WritableStream(),
       });
@@ -108,7 +108,7 @@ describe("session finalization with an unsettled caller", () => {
       { kind: "expired" },
       {
         caller: undefined,
-        cursor: { serializedContext: {}, sessionState: yieldedSession() },
+        cursor: { serializedContext: {}, sessionState: sessionAwaitingCallerNotification() },
         mode: "conversation",
         sessionWritable: new WritableStream(),
       },

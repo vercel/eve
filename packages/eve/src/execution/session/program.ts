@@ -316,13 +316,13 @@ async function runSessionLoop(
             ? cancelledCaller
             : { ...cancelledCaller, usage: settled.usage },
         );
-      } else if (action.completion?.kind === "settled") {
+      } else if (action.completion?.notifyCaller === true) {
         if (progress.caller !== undefined) {
           await notifyTurnCallerStep({
             caller: progress.caller,
             lifecycle: "parked",
             sessionId: boot.sessionId,
-            settled: action.completion,
+            settled: action.completion.result,
           });
         }
         progress.caller = undefined;

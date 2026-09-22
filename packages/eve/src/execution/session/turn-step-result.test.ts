@@ -42,16 +42,16 @@ function withUsage(session: HarnessSession, inputTokens: number): HarnessSession
 }
 
 describe("delegated turn completion", () => {
-  it("yields while an earlier task is pending and reports all unreported usage with the final result", () => {
+  it("defers caller notification while a task is working and reports accumulated usage with the final result", () => {
     const pending = startWorker(withUsage(session(), 100), "worker-1");
-    const yielded = resolveSessionStepResult(
+    const parked = resolveSessionStepResult(
       { next: null, session: pending, settledTurn: { output: "Verification is running." } },
       {},
       "conversation",
       {},
     );
-    expect(yielded).toMatchObject({ action: "park", completion: { kind: "yielded" } });
-    const checkpoint = { ...pending, state: yielded.sessionState.snapshot.session.state };
+    expect(parked).toMatchObject({ action: "park", completion: { notifyCaller: false } });
+    const checkpoint = { ...pending, state: parked.sessionState.snapshot.session.state };
     expect(takeSessionUsageDelta(checkpoint).delta.inputTokens).toBe(100);
 
     const completed = withUsage(
@@ -74,7 +74,10 @@ describe("delegated turn completion", () => {
     );
     expect(settled).toMatchObject({
       action: "park",
-      completion: { kind: "settled", output: "VERIFIED", usage: { inputTokens: 150 } },
+      completion: {
+        notifyCaller: true,
+        result: { output: "VERIFIED", usage: { inputTokens: 150 } },
+      },
     });
     expect(
       takeSessionUsageDelta({ ...completed, state: settled.sessionState.snapshot.session.state })
@@ -82,7 +85,7 @@ describe("delegated turn completion", () => {
     ).toBe(0);
   });
 
-  it("keeps yielding after one worker finishes while another remains pending", () => {
+  it("does not notify the caller after one worker finishes while another is working", () => {
     const pending = startWorker(startWorker(session(), "worker-1"), "worker-2");
     const partiallyCompleted = {
       ...pending,
@@ -100,7 +103,7 @@ describe("delegated turn completion", () => {
         "conversation",
         {},
       ),
-    ).toMatchObject({ action: "park", completion: { kind: "yielded" } });
+    ).toMatchObject({ action: "park", completion: { notifyCaller: false } });
   });
 
   it.each(["failed", "cancelled"] as const)(
@@ -126,7 +129,7 @@ describe("delegated turn completion", () => {
         ),
       ).toMatchObject({
         action: "park",
-        completion: { kind: "settled", output: "Unable to verify." },
+        completion: { notifyCaller: true, result: { output: "Unable to verify." } },
       });
     },
   );
@@ -145,7 +148,7 @@ describe("delegated turn completion", () => {
       ),
     ).toMatchObject({
       action: "park",
-      completion: { kind: "settled", isError: true, output: "Model failed" },
+      completion: { notifyCaller: true, result: { isError: true, output: "Model failed" } },
     });
   });
 });
