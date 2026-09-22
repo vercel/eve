@@ -3114,13 +3114,14 @@ describe("TerminalRenderer (inline scrollback)", () => {
     renderer.shutdown();
   });
 
-  it("paints a fully typed known command blue in the input line", async () => {
+  it("paints a fully typed known command bold in the input line", async () => {
     const { screen, input, renderer } = makeRenderer();
 
     const prompt = renderer.readPrompt();
     input.type("/add");
-    // The ANSI blue open (34) wraps the typed command in the painted row.
-    expect(screen.rawOutput()).toContain("[34m/add");
+    // Bold confirms command dispatch without competing with status color.
+    expect(screen.rawOutput()).toContain("[1m/add");
+    expect(screen.rawOutput()).not.toContain("[34m/add");
     input.enter();
     await prompt;
     renderer.shutdown();
@@ -3133,7 +3134,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
     // Never passes through a known command, even if painted per keystroke
     // ("/li…" is not a known command).
     input.type("/lin is not a command");
-    expect(screen.rawOutput()).not.toContain("[34m");
+    expect(screen.rawOutput()).not.toContain("[1m/lin is not a command");
     input.enter();
     await prompt;
     renderer.shutdown();

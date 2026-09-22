@@ -1,7 +1,7 @@
 import { sliceVisible, visibleLength } from "#cli/ui/terminal-text.js";
-import { renderCursorRow } from "#setup/cli/option-row.js";
 
-const COMPOSER_ARGUMENT_INDENT = "         ";
+// `❯ /model ` and `❯ /add ` both put their argument at column eight.
+const COMPOSER_ARGUMENT_INDENT = "        ";
 
 import type { Theme } from "./theme.js";
 
@@ -77,7 +77,7 @@ export function argumentTypeaheadCompletion(
   return `/${state.command} ${suggestion.value}`;
 }
 
-/** Paints compact catalog rows using the slash-menu selection grammar. */
+/** Paints canonical catalog values under the command's argument column. */
 export function renderArgumentSuggestions(
   state: ArgumentTypeaheadState,
   theme: Theme,
@@ -85,11 +85,9 @@ export function renderArgumentSuggestions(
 ): string[] {
   const c = theme.colors;
   return state.suggestions.slice(0, 8).map((suggestion, index) => {
-    const selected = index === state.selectedIndex;
-    const content = selected
-      ? `${theme.glyph.selectedPointer} ${suggestion.value}`
-      : `  ${suggestion.value}`;
-    const row = `${COMPOSER_ARGUMENT_INDENT}${renderCursorRow(content, selected, c)}`;
+    const value =
+      index === state.selectedIndex ? c.bold(suggestion.value) : c.dim(suggestion.value);
+    const row = `${COMPOSER_ARGUMENT_INDENT}${value}`;
     return visibleLength(row) > width ? sliceVisible(row, width) : row;
   });
 }

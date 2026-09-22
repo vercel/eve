@@ -4498,6 +4498,9 @@ export class TerminalRenderer implements AgentTUIRenderer {
       rows.push(...promptInputRows(promptRows));
       // Keep menus beneath the composer so opening them never moves the caret.
       rows.push(...typeaheadRows);
+      if (typeaheadRows.length > 0 && statusRows.length > 0) {
+        rows.push(c.dim(this.#theme.glyph.dash.repeat(width)));
+      }
       rows.push(...statusRows);
       return rows;
     }
@@ -5058,7 +5061,7 @@ interface PromptInputRowsInput {
   readonly width: number;
   readonly theme: Theme;
   readonly caretVisible: boolean;
-  /** A fully typed known command paints blue, confirming it will dispatch as a command. */
+  /** A fully typed known command is bold, confirming it will dispatch as a command. */
   readonly isCommand: boolean;
   readonly ghost: string;
   readonly maxRows: number;
@@ -5110,7 +5113,7 @@ function promptInputRows({
 
   const style = (segment: string): string => {
     const rendered = renderInputText(segment);
-    return isCommand && rendered.length > 0 ? c.blue(rendered) : rendered;
+    return isCommand && rendered.length > 0 ? c.bold(rendered) : rendered;
   };
 
   const layout = layoutPromptInput({ text, cursor });
