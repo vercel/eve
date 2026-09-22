@@ -13,7 +13,14 @@ import {
   resumeWorkflowToolRunAnswers,
   resumeWorkflowToolRunDismissal,
 } from "#execution/tools/workflow/answer.js";
+import { getPendingCoordinationBatch } from "#harness/coordination.js";
 import type { AnswerHookRoute } from "#harness/proxy-input-requests.js";
+import {
+  createInputResolvedEvent,
+  encodeMessageStreamEvent,
+  type InputResolution,
+  stampMessageStreamEvent,
+} from "#protocol/message.js";
 import type { InputResponse } from "#shared/input.js";
 import { findBackgroundWorkflowToolRun } from "#harness/workflow-tool-runs.js";
 import {
@@ -145,12 +152,18 @@ export async function routeProxiedDeliverStep(input: {
     }
 
     if (child.answerHook !== undefined) {
-      await resumeWorkflowToolRunAnswers(
-        child.childContinuationToken,
-        coalesceDeliverPayloads(child.payloads).inputResponses,
-      );
+      const responses = coalesceDeliverPayloads(child.payloads).inputResponses ?? [];
+      await resumeWorkflowToolRunAnswers(child.childContinuationToken, responses);
       if (child.dismissedRequestIds.length > 0) {
         await resumeWorkflowToolRunDismissal(child.childContinuationToken);
+      }
+      if (child.answerHook.question !== undefined) {
+        await emitQuestionResolutions({
+          dismissedRequestIds: child.dismissedRequestIds,
+          responses,
+          sessionState: durableSession.state,
+          sessionWritable: input.sessionWritable,
+        });
       }
       durableSession = retireProxyInputRequests(durableSession, child.retireRequestIds);
       retired = true;
@@ -194,6 +207,43 @@ export async function routeProxiedDeliverStep(input: {
           payloads: orderedParentPayloads.map(([, payload]) => payload),
         };
   return { ...context, kind: "continue", remainder };
+}
+
+// A `ctx.ask()` question is resolved by its workflow, not the harness, so the
+// parent announces the resolution. A blocking run starts from the pending
+// coordination batch, which carries the coordinates of its request.
+async function emitQuestionResolutions(input: {
+  readonly dismissedRequestIds: readonly string[];
+  readonly responses: readonly InputResponse[];
+  readonly sessionState: Parameters<typeof getPendingCoordinationBatch>[0];
+  readonly sessionWritable: WritableStream<Uint8Array>;
+}): Promise<void> {
+  const event = getPendingCoordinationBatch(input.sessionState)?.event;
+  if (event === undefined) return;
+  const resolutions: InputResolution[] = [
+    ...input.responses.map((response) => ({
+      kind: "question" as const,
+      outcome: "answered" as const,
+      requestId: response.requestId,
+      response,
+    })),
+    ...input.dismissedRequestIds.map((requestId) => ({
+      kind: "question" as const,
+      outcome: "ignored" as const,
+      requestId,
+    })),
+  ];
+  if (resolutions.length === 0) return;
+  const writer = input.sessionWritable.getWriter();
+  try {
+    await writer.write(
+      encodeMessageStreamEvent(
+        stampMessageStreamEvent(createInputResolvedEvent({ resolutions, ...event })),
+      ),
+    );
+  } finally {
+    writer.releaseLock();
+  }
 }
 
 // Answers to a task that finished mid-flight rejoin the parent-local
