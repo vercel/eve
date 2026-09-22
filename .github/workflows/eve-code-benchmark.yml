@@ -86,8 +86,9 @@ jobs:
           attempts: "1"
           concurrency: "4"
           native-build: "false"
-          baseline-artifact-id: ${{ needs.request.outputs.harness == 'eve-code' && vars.EVE_BENCH_BASELINE_ARTIFACT_ID || '' }}
-          reference-artifact-ids: ${{ needs.request.outputs.harness == 'eve-code' && vars.EVE_CODE_BENCH_REFERENCE_ARTIFACT_IDS || '' }}
+          # Baselines and cross-harness references resolve automatically from the
+          # durable result store; only dispatch/push/schedule runs publish to it.
+          blob-token: ${{ secrets.EVE_BENCH_BLOB_READ_WRITE_TOKEN }}
           artifact-name: swe-lean-${{ needs.request.outputs.harness }}
           gateway-key: ${{ secrets.AI_GATEWAY_API_KEY }}
           github-token: ${{ github.token }}
