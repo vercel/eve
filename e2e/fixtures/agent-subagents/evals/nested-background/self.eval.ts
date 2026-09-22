@@ -17,8 +17,9 @@ export default defineEval({
       sessions.push(caller.sessionId);
       const callerTurn = (
         await caller.send(`Help Alice prepare her project status update.
-Use the built-in agent tool to create a detector, passing the request below in its message.
-After delegation, acknowledge that it is underway and finish your turn.
+Call the tool named "agent" exactly once, with the request below as its message argument.
+Your delegation tool for this request is "agent". Let that copy delegate the worker.
+After "agent" returns its working receipt, acknowledge that it is underway and finish your turn.
 When the delegated task completes, forward its receipt unchanged.
 
 Request to delegate:
