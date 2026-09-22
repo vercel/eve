@@ -4,7 +4,12 @@ import { viewerFromVerifiedSession } from "../lib/session-identity.ts";
 
 test("history ownership survives new sign-ins and profile changes", () => {
   const first = viewerFromVerifiedSession({
-    user: { vercelSubject: "vercel-alice", name: "Alice", email: "old@example.com" },
+    user: {
+      vercelSubject: "vercel-alice",
+      name: "Alice",
+      email: "old@example.com",
+      image: "https://example.com/alice.png",
+    },
   })!;
   const second = viewerFromVerifiedSession({
     user: { vercelSubject: "vercel-alice", name: "Alice Updated", email: "new@example.com" },
@@ -12,6 +17,8 @@ test("history ownership survives new sign-ins and profile changes", () => {
   assert.equal(first.key, second.key);
   assert.equal(first.principal.principalId, "vercel-alice");
   assert.equal(first.principal.attributes.webSessionOwner, first.key);
+  assert.equal(first.principal.attributes.picture, "https://example.com/alice.png");
+  assert.equal(second.principal.attributes.picture, undefined);
   const other = viewerFromVerifiedSession({
     user: { vercelSubject: "vercel-bob", name: "Alice", email: "old@example.com" },
   })!;

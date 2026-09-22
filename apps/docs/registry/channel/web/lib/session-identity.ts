@@ -9,9 +9,10 @@ export interface SessionViewer extends SessionOwner {
 // Call only with the result of the server-side authentication adapter.
 export function viewerFromVerifiedSession(
   session: {
-    user: { vercelSubject?: string | null; name: string; email: string };
+    user: { vercelSubject?: string | null; name: string; email: string; image?: string | null };
   } | null,
 ): SessionViewer | null {
+  // Use the provider subject so ownership survives new sign-ins; older cookies need a new sign-in.
   const subject = session?.user.vercelSubject;
   if (!subject || !session) return null;
   const key = createHash("sha256")
@@ -24,7 +25,12 @@ export function viewerFromVerifiedSession(
       principalId: subject,
       principalType: "user",
       authenticator: "better-auth:vercel",
-      attributes: { email: session.user.email, name: session.user.name, webSessionOwner: key },
+      attributes: {
+        email: session.user.email,
+        name: session.user.name,
+        ...(session.user.image ? { picture: session.user.image } : {}),
+        webSessionOwner: key,
+      },
     },
   };
 }
