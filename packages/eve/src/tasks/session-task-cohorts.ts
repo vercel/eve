@@ -13,6 +13,8 @@ export function getSessionTaskCohorts(
   state: SessionStateMap | undefined,
 ): ReadonlyMap<string, string> {
   return new Map(
-    getBackgroundWorkflowToolRuns(state).map(({ task }) => [task.taskId, getTaskCohortId(task)]),
+    getBackgroundWorkflowToolRuns(state)
+      .filter(({ task }) => task.notifications !== "suppressed")
+      .map(({ task }) => [task.taskId, getTaskCohortId(task)]),
   );
 }

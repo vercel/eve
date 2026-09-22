@@ -6,6 +6,7 @@ import {
   findBackgroundWorkflowToolRun,
   getBackgroundWorkflowToolRuns,
   getBackgroundTasks,
+  suppressesTaskNotification,
   registerWorkflowToolRun,
 } from "#harness/workflow-tool-runs.js";
 import { getTaskCohortId, getSessionTaskCohorts } from "#tasks/session-task-cohorts.js";
@@ -67,6 +68,43 @@ describe("session task index", () => {
       terminal("cancelled", "cancelled"),
     ]);
     expect(getBackgroundTasks(undefined).query({ state: "working" })).toEqual([]);
+  });
+
+  it("retains cancellation and notification disposition across restore and late outcomes", () => {
+    const session = registerWorkflowToolRun(createSession(), task("task_a", "turn-1"));
+    const state = recordWorkflowTaskView(session.state, terminal("task_a", "cancelled"), {
+      notifications: "suppressed",
+    });
+    const restored = JSON.parse(JSON.stringify(state));
+    const replay = registerWorkflowToolRun(createSession(restored), {
+      ...task("task_a", "turn-1"),
+      task: { ...task("task_a", "turn-1").task, notifications: undefined },
+    });
+    const late = recordWorkflowTaskView(replay.state, terminal("task_a", "completed"));
+    expect(getBackgroundTasks(late).query({ state: "cancelled" })).toEqual([
+      terminal("task_a", "cancelled"),
+    ]);
+    expect(suppressesTaskNotification(late, "task_a:ready:completed")).toBe(true);
+    expect(suppressesTaskNotification(late, "task_a:update:1")).toBe(true);
+    expect(getSessionTaskCohorts(late).size).toBe(0);
+
+    const next = registerWorkflowToolRun(createSession(late), task("task_b", "turn-2"));
+    expect(suppressesTaskNotification(next.state, "task_b:ready:completed")).toBe(false);
+    expect(getSessionTaskCohorts(next.state).has("task_b")).toBe(true);
+  });
+
+  it("preserves ordinary task cancellation notifications and the first terminal outcome", () => {
+    const session = registerWorkflowToolRun(createSession(), task("task_a", "turn-1"));
+    const cancelled = recordWorkflowTaskView(session.state, terminal("task_a", "cancelled"));
+    expect(suppressesTaskNotification(cancelled, "task_a:ready:cancelled")).toBe(false);
+    const completed = recordWorkflowTaskView(session.state, terminal("task_a", "completed"));
+    const suppressed = recordWorkflowTaskView(completed, terminal("task_a", "cancelled"), {
+      notifications: "suppressed",
+    });
+    expect(getBackgroundTasks(suppressed).query({ state: "completed" })).toEqual([
+      terminal("task_a", "completed"),
+    ]);
+    expect(suppressesTaskNotification(suppressed, "task_a:ready:completed")).toBe(true);
   });
 
   it("rejects a corrupt task outcome when querying background state", () => {

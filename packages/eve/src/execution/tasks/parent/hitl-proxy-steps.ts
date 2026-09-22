@@ -106,6 +106,7 @@ export async function recordTerminalTaskViewsStep(input: {
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
   readonly views: readonly TaskView[];
+  readonly notifications?: "suppressed";
 }): Promise<{
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
@@ -120,10 +121,18 @@ export async function recordTerminalTaskViewsStep(input: {
   for (const view of input.views) {
     const entry = findBackgroundWorkflowToolRun(session.state, view.taskId);
     if (entry === undefined) continue;
-    const state = recordWorkflowTaskView(session.state, view);
+    const state = recordWorkflowTaskView(
+      session.state,
+      view,
+      input.notifications === undefined ? undefined : { notifications: input.notifications },
+    );
     if (state !== session.state) {
       session = { ...session, state };
-      if (entry.task.metadata.kind === "subagent" && view.status === "completed") {
+      if (
+        entry.task.metadata.kind === "subagent" &&
+        view.status === "completed" &&
+        readWorkflowTaskView(entry.task) === undefined
+      ) {
         subagentCompletions.push({
           type: "subagent.completed",
           data: {

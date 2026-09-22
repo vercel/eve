@@ -70,10 +70,13 @@ export async function cancelAllIndexedSessionTasksStep(input: {
     }
   }
   // Session finalization closes the inbox before cancellation, so it cannot
-  // rely on child notifications to record outcomes or settle activity.
+  // rely on child notifications to record outcomes or settle activity. Retain
+  // their suppressed disposition here so replay and late reports cannot wake
+  // the cancelled session invocation.
   return await recordTerminalTaskViewsStep({
     serializedContext: input.serializedContext,
     sessionState: input.sessionState,
     views,
+    notifications: "suppressed",
   });
 }

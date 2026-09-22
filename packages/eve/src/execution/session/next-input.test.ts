@@ -8,7 +8,6 @@ import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
 import type { SessionInbox, SessionInboxPayload } from "#execution/session-inbox/inbox.js";
 import { SessionStateCursor } from "#execution/session/state-cursor.js";
 import type { TaskView } from "#tasks/types.js";
-import { registerWorkflowToolRun } from "#harness/workflow-tool-runs.js";
 
 vi.mock("#compiled/@workflow/core/index.js", () => ({
   getWorkflowMetadata: () => ({ workflowRunId: "owner-1" }),
@@ -270,60 +269,6 @@ describe("nextTurnDelivery", () => {
       serializedContext: input.cursor.serializedContext,
       sessionState: input.cursor.sessionState,
     });
-  });
-
-  it("suppresses nested task notifications after session-wide cancellation", async () => {
-    const cancelled = terminalDelivery("nested-task", "cancelled");
-    const inbox = createMockInbox([
-      cancelRead({ tasks: true }),
-      {
-        result: {
-          done: false,
-          value: {
-            kind: "send",
-            payload: cancelled.payloads[0]!,
-            taskDeliveryId: cancelled.taskDeliveryId,
-          },
-        },
-      },
-      messageRead("new request"),
-    ]);
-    const input = waitInput(inbox);
-    const session = registerWorkflowToolRun(sessionState.snapshot.session, {
-      callId: "nested-call",
-      toolName: "worker",
-      lifetime: "session",
-      origin: { turnId: "turn-1", stepIndex: 0 },
-      address: { runId: "nested-run", hookToken: "nested-inbox" },
-      task: {
-        taskId: "nested-task",
-        metadata: { kind: "subagent", name: "worker" },
-        dispatchContext: { auth: { current: null, initiator: null } },
-      },
-    });
-    input.cursor = createCursor(inbox, { ...sessionState, snapshot: { session } });
-    vi.mocked(cancelAllIndexedSessionTasksStep).mockImplementation(async ({ sessionState }) => {
-      // A notification can arrive while the cancellation step is in flight.
-      input.queue.enqueueDelivery(completion("nested-task"));
-      return { sessionState };
-    });
-    vi.mocked(routeDeliverToChildren).mockImplementation(
-      async ({ delivery, sessionState, serializedContext }) => ({
-        kind: "continue",
-        remainder: delivery,
-        sessionState,
-        serializedContext,
-      }),
-    );
-
-    const next = await nextTurnDelivery(input);
-
-    expect(next).toMatchObject({
-      kind: "turn",
-      delivery: { payloads: [{ message: "new request" }] },
-    });
-    expect(input.queue.pendingCount).toBe(0);
-    expect(input.queue.isTaskCancelled("nested-task")).toBe(true);
   });
 
   it("resumes authorization after a consumed no-op cancel", async () => {

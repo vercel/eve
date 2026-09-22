@@ -1,3 +1,4 @@
+import { registerWorkflowToolRun, recordWorkflowTaskView } from "#harness/workflow-tool-runs.js";
 import { createTestSessionState } from "#internal/testing/session-state.js";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -13,7 +14,10 @@ import {
 import { acceptTaskAuthorizationEventStep } from "#execution/tools/subagent/accept-event-step.js";
 import { routeProxiedDeliverStep } from "#execution/proxied-deliver-step.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
-import { dispatchTaskAgentInvocationStep } from "#execution/tools/subagent/invoke-step.js";
+import {
+  dispatchTaskAgentInvocationStep,
+  settleTaskAgentInvocationStep,
+} from "#execution/tools/subagent/invoke-step.js";
 import { resumeHookStep } from "#execution/tools/workflow/resume-hook-step.js";
 
 vi.mock("#subagents/event-proxy-step.js", () => ({
@@ -32,6 +36,7 @@ vi.mock("#execution/proxied-deliver-step.js", () => ({
 }));
 vi.mock("#execution/tools/subagent/invoke-step.js", () => ({
   dispatchTaskAgentInvocationStep: vi.fn(),
+  settleTaskAgentInvocationStep: vi.fn(),
 }));
 vi.mock("#execution/tools/workflow/resume-hook-step.js", () => ({
   resumeHookStep: vi.fn(),
@@ -61,6 +66,129 @@ const taskRequest = {
 };
 describe("task HITL delivery routing", () => {
   beforeEach(() => vi.resetAllMocks());
+
+  it("consumes late task reports from restored cancellation state without suppressing user input", async () => {
+    const session = registerWorkflowToolRun(state(false).snapshot.session, {
+      callId: "call-1",
+      toolName: "worker",
+      lifetime: "session",
+      origin: { turnId: "turn-1", stepIndex: 0 },
+      address: { runId: "task-run", hookToken: "task-inbox" },
+      task: {
+        taskId: "task-1",
+        metadata: { kind: "subagent", name: "worker" },
+        dispatchContext: { auth: { current: null, initiator: null } },
+      },
+    });
+    const cancelled = {
+      taskId: "task-1",
+      metadata: { kind: "subagent", name: "worker" },
+      status: "cancelled" as const,
+    };
+    const sessionState = createTestSessionState({
+      snapshot: {
+        session: {
+          ...session,
+          state: JSON.parse(
+            JSON.stringify(
+              recordWorkflowTaskView(session.state, cancelled, { notifications: "suppressed" }),
+            ),
+          ),
+        },
+      },
+    });
+    vi.mocked(recordTerminalTaskViewsStep).mockResolvedValue({
+      views: [cancelled],
+      subagentCompletions: [],
+      sessionState,
+      serializedContext: {},
+    });
+    const context = {
+      sessionState,
+      serializedContext: {},
+      sessionWritable: new WritableStream<Uint8Array>(),
+    };
+    const outcome = await routeDeliverToChildren({
+      ...context,
+      delivery: {
+        kind: "deliver",
+        taskDeliveryId: "task-1:ready:completed",
+        payloads: [{ message: "Late completion", task: { views: [cancelled] } }],
+      },
+    });
+    expect(recordTerminalTaskViewsStep).toHaveBeenCalledOnce();
+    expect(outcome).toMatchObject({ kind: "continue", remainder: undefined });
+    vi.mocked(settleTaskAgentInvocationStep).mockResolvedValue({
+      settled: false,
+      sessionState,
+      serializedContext: {},
+    });
+    const settlement = await routeDeliverToChildren({
+      ...context,
+      delivery: {
+        kind: "deliver",
+        taskDeliveryId: "task-1:agent:run-1:settled",
+        payloads: [
+          {
+            task: {
+              agentRequests: [
+                {
+                  taskId: "task-1",
+                  replyTo: "settlement-reply",
+                  request: {
+                    kind: "agent-settled",
+                    result: {
+                      callId: "child-call",
+                      kind: "subagent-result",
+                      origin: "child",
+                      subagentName: "worker",
+                      output: "",
+                      outcome: {
+                        kind: "parked",
+                        result: { kind: "cancelled" },
+                        usageDelta: {
+                          inputTokens: 0,
+                          outputTokens: 0,
+                          cacheReadTokens: 0,
+                          cacheWriteTokens: 0,
+                        },
+                      },
+                    },
+                  },
+                },
+              ],
+            },
+          },
+        ],
+      },
+    });
+    expect(settlement).toMatchObject({ kind: "continue", remainder: undefined });
+    expect(resumeHookStep).toHaveBeenCalledWith(
+      "settlement-reply",
+      { kind: "agent-settled", callId: "child-call" },
+      { ifPresent: true },
+    );
+    const update = await routeDeliverToChildren({
+      ...context,
+      delivery: {
+        kind: "deliver",
+        taskDeliveryId: "task-1:update:1",
+        payloads: [{ message: "Still working" }],
+      },
+    });
+    expect(update).toMatchObject({ kind: "continue", remainder: undefined });
+    const user = await routeDeliverToChildren({
+      ...context,
+      delivery: {
+        kind: "deliver",
+        payloads: [{ message: "New request" }],
+      },
+    });
+    expect(user).toMatchObject({
+      kind: "continue",
+      remainder: { payloads: [{ message: "New request" }] },
+    });
+  });
 
   it("commits the task route before emitting and consumes the framework-only delivery", async () => {
     const recordedState = state(true);

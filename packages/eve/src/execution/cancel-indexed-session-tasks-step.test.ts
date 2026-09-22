@@ -5,6 +5,7 @@ import { cancelAllIndexedSessionTasksStep } from "#execution/cancel-indexed-sess
 import {
   getBackgroundWorkflowToolRuns,
   readWorkflowTaskView,
+  suppressesTaskNotification,
   type BackgroundWorkflowToolRun,
 } from "#harness/workflow-tool-runs.js";
 
@@ -48,6 +49,15 @@ describe("cancelAllIndexedSessionTasksStep", () => {
         readWorkflowTaskView(entry.task),
       ),
     ).toEqual([cancelledView(task1), cancelledView(task2)]);
+    expect(
+      suppressesTaskNotification(
+        result.sessionState?.snapshot.session.state,
+        "task-1:ready:cancelled",
+      ),
+    ).toBe(true);
+    expect(
+      suppressesTaskNotification(result.sessionState?.snapshot.session.state, "task-2:update:1"),
+    ).toBe(true);
     expect(cancelOwnedTaskMock).toHaveBeenCalledTimes(2);
     expect(cancelOwnedTaskMock).toHaveBeenNthCalledWith(1, {
       cancelOwnedWork: expect.any(Function),
@@ -61,6 +71,17 @@ describe("cancelAllIndexedSessionTasksStep", () => {
       serializedContext: { context: "latest" },
       session: "runtime-session",
     });
+  });
+
+  it("does not suppress notifications for a task whose cancellation failed", async () => {
+    cancelOwnedTaskMock.mockRejectedValueOnce(new Error("Cancellation unavailable"));
+    const result = await cancelAllIndexedSessionTasksStep({
+      serializedContext: {},
+      sessionState: makeSessionState([indexedTask("failed-cancel"), indexedTask("cancelled")]),
+    });
+    const state = result.sessionState?.snapshot.session.state;
+    expect(suppressesTaskNotification(state, "failed-cancel:ready:failed")).toBe(false);
+    expect(suppressesTaskNotification(state, "cancelled:ready:cancelled")).toBe(true);
   });
 
   it("does not require runtime context when no tasks are indexed", async () => {
