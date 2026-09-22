@@ -13,8 +13,9 @@ import {
   withoutInstrumentationContent,
 } from "#instrumentation/content.js";
 import { createLogger, formatError } from "#internal/logging.js";
+import { parseJsonValue, type JsonValue } from "#shared/json.js";
 import { resolveTracePolicy } from "#shared/trace-policy.js";
-import type { TraceCaptureContext } from "#shared/trace-policy.js";
+import type { TraceCaptureContext, UnclassifiedTraceCaptureContext } from "#shared/trace-policy.js";
 
 import type {
   CreateInstrumentationHooksOptions,
@@ -33,6 +34,7 @@ import type {
 
 const log = createLogger("harness.instrumentation-dispatch");
 const DEFAULT_HANDLER_TIMEOUT_MS = 5_000;
+const CLASSIFICATION_FAILED = Symbol("classification-failed");
 
 export function createInstrumentationDispatcher(
   input: InstrumentationHooksInput,
@@ -41,21 +43,38 @@ export function createInstrumentationDispatcher(
   const handlerTimeoutMs = options.handlerTimeoutMs ?? DEFAULT_HANDLER_TIMEOUT_MS;
   const groups = normalizeDispatchGroups(input);
   const providers = [...groups.serialBefore, ...groups.parallel, ...groups.serialAfter];
+  const classifiers = providers.filter((provider) => provider.classificationPolicy !== undefined);
+  if (classifiers.length > 1) {
+    throw new Error(
+      `Instrumentation declares classificationPolicy more than once: ${classifiers.map((provider) => provider.name).join(", ")}.`,
+    );
+  }
+  const classifier = classifiers[0];
   const warnedPolicyFailures = new Set<InstrumentationProviderDefinition>();
 
-  function forTrace(trace: TraceCaptureContext): InstrumentationHooks {
+  function bindTrace(
+    trace: UnclassifiedTraceCaptureContext,
+    traceClassification: JsonValue | undefined,
+    classificationPrepared: boolean,
+  ): InstrumentationHooks {
     const snapshots = new WeakMap<object, unknown>();
     const decisions = new Map(
       providers.map((provider) => [
         provider,
-        resolveTracePolicy(provider.tracePolicy, trace, (error) => {
-          if (warnedPolicyFailures.has(provider)) return;
-          warnedPolicyFailures.add(provider);
-          log.warn("instrumentation provider trace policy failed", {
-            error: formatError(error),
-            provider: provider.name,
-          });
-        }),
+        classifier !== undefined && !classificationPrepared
+          ? { action: "drop" as const }
+          : resolveTracePolicy(
+              provider.tracePolicy,
+              classifiedTrace(trace, traceClassification),
+              (error) => {
+                if (warnedPolicyFailures.has(provider)) return;
+                warnedPolicyFailures.add(provider);
+                log.warn("instrumentation provider trace policy failed", {
+                  error: formatError(error),
+                  provider: provider.name,
+                });
+              },
+            ),
       ]),
     );
     const capturesInputs = [...decisions.values()].some(
@@ -112,27 +131,75 @@ export function createInstrumentationDispatcher(
       };
       const admitted = (provider: InstrumentationProviderDefinition): boolean =>
         decisions.get(provider)?.action === "record";
+      let recordClassification = traceClassification;
+      let classificationFailed = classifier !== undefined && !classificationPrepared;
+      if (classifier !== undefined && classificationPrepared) {
+        let classificationRecord: InstrumentationEvent;
+        try {
+          classificationRecord = visibleEvent(classifier);
+          for (const provider of providers) {
+            if (provider.projectEvent === undefined) continue;
+            classificationRecord = await provider.projectEvent(classificationRecord);
+          }
+        } catch (error) {
+          log.warn("instrumentation classification projection failed", {
+            error: formatError(error),
+          });
+          classificationFailed = true;
+          classificationRecord = withoutInstrumentationContent(snapshot);
+        }
+        if (!classificationFailed) {
+          const classification = await classify(
+            classifier,
+            {
+              boundary: "record",
+              record: classificationRecord,
+              trace,
+              traceClassification: traceClassification!,
+            },
+            handlerTimeoutMs,
+          );
+          if (classification === CLASSIFICATION_FAILED) {
+            classificationFailed = true;
+          } else {
+            recordClassification = classification;
+          }
+        }
+      }
 
       try {
         try {
+          if (classificationFailed) return;
           for (const provider of groups.serialBefore) {
             if (!admitted(provider)) continue;
-            await dispatchToProvider(provider, snapshot, handlerTimeoutMs, () =>
-              visibleEvent(provider),
+            await dispatchToProvider(
+              provider,
+              snapshot,
+              handlerTimeoutMs,
+              () => visibleEvent(provider),
+              recordClassification,
             );
           }
 
           const parallel = groups.parallel.filter(admitted);
           if (parallel.length === 1) {
             const provider = parallel[0]!;
-            await dispatchToProvider(provider, snapshot, handlerTimeoutMs, () =>
-              visibleEvent(provider),
+            await dispatchToProvider(
+              provider,
+              snapshot,
+              handlerTimeoutMs,
+              () => visibleEvent(provider),
+              recordClassification,
             );
           } else if (parallel.length > 1) {
             const results = await Promise.allSettled(
               parallel.map((provider) =>
-                dispatchToProvider(provider, snapshot, handlerTimeoutMs, () =>
-                  visibleEvent(provider),
+                dispatchToProvider(
+                  provider,
+                  snapshot,
+                  handlerTimeoutMs,
+                  () => visibleEvent(provider),
+                  recordClassification,
                 ),
               ),
             );
@@ -143,9 +210,16 @@ export function createInstrumentationDispatcher(
           }
         } finally {
           for (const provider of groups.serialAfter) {
-            if (!admitted(provider)) continue;
-            await dispatchToProvider(provider, snapshot, handlerTimeoutMs, () =>
-              visibleEvent(provider),
+            if (!classificationFailed && !admitted(provider)) continue;
+            await dispatchToProvider(
+              provider,
+              snapshot,
+              handlerTimeoutMs,
+              () =>
+                classificationFailed
+                  ? withoutInstrumentationContent(snapshot)
+                  : visibleEvent(provider),
+              classificationFailed ? undefined : recordClassification,
             );
           }
         }
@@ -154,13 +228,39 @@ export function createInstrumentationDispatcher(
       }
     };
 
-    return { capturesContent, capturesInputs, capturesOutputs, forTrace, publish };
+    return {
+      capturesContent,
+      capturesInputs,
+      capturesOutputs,
+      classification: traceClassification,
+      forTrace,
+      publish,
+    };
+  }
+
+  function forTrace(trace: TraceCaptureContext): InstrumentationHooks {
+    return bindTrace(trace, undefined, classifier === undefined);
+  }
+
+  async function prepareTrace(trace: TraceCaptureContext): Promise<InstrumentationHooks> {
+    if (classifier === undefined) return bindTrace(trace, undefined, true);
+    const classification = await classify(
+      classifier,
+      { boundary: "trace", trace },
+      handlerTimeoutMs,
+    );
+    return bindTrace(
+      trace,
+      classification === CLASSIFICATION_FAILED ? undefined : classification,
+      classification !== CLASSIFICATION_FAILED,
+    );
   }
 
   let loggedUnboundPublish = false;
   return {
     capturesContent: false,
     forTrace,
+    prepareTrace,
     async publish(event) {
       if (!loggedUnboundPublish) {
         loggedUnboundPublish = true;
@@ -240,6 +340,7 @@ async function dispatchToProvider(
   event: InstrumentationEvent,
   handlerTimeoutMs: number,
   visibleEvent: () => InstrumentationEvent,
+  classification: JsonValue | undefined,
 ): Promise<void> {
   const startedBoundary = event.type.endsWith(".started") || event.type === "input.requested";
   const owner = stateOwner(event);
@@ -249,19 +350,27 @@ async function dispatchToProvider(
   const handler = provider.events?.[event.type];
   if (handler === undefined) return;
   const state = instrumentationStateSlot(stateNamespace, event.idempotencyKey, owner);
+  const controller = new AbortController();
   try {
     const settled = await withTimeout(
       async () => {
-        const eventForProvider = visibleEvent();
-        await (handler as InstrumentationEventHandler<InstrumentationEvent>)(
-          provider.projectEvent === undefined
-            ? eventForProvider
-            : await provider.projectEvent(eventForProvider),
-          { state },
-        );
+        const visible = visibleEvent();
+        const eventForProvider =
+          provider.projectEvent === undefined ? visible : await provider.projectEvent(visible);
+        const execute = () =>
+          (handler as InstrumentationEventHandler<InstrumentationEvent>)(
+            eventForProvider,
+            classification === undefined ? { state } : { classification, state },
+          );
+        if (provider.runWithClassification === undefined) {
+          await execute();
+        } else {
+          await provider.runWithClassification(classification, execute);
+        }
       },
       handlerTimeoutMs,
       () => {
+        controller.abort(new Error("Instrumentation provider timed out."));
         state.revoke();
         if (startedBoundary) {
           abandonInstrumentationState(stateNamespace, event.idempotencyKey, owner);
@@ -283,6 +392,46 @@ async function dispatchToProvider(
     });
   } finally {
     state.revoke();
+  }
+}
+
+function classifiedTrace(
+  trace: UnclassifiedTraceCaptureContext,
+  classification: JsonValue | undefined,
+): TraceCaptureContext<JsonValue> | UnclassifiedTraceCaptureContext {
+  return classification === undefined ? trace : { ...trace, classification };
+}
+
+async function classify(
+  provider: InstrumentationProviderDefinition,
+  input: Parameters<NonNullable<InstrumentationProviderDefinition["classificationPolicy"]>>[0],
+  timeoutMs: number,
+  inheritedSignal?: AbortSignal,
+): Promise<JsonValue | typeof CLASSIFICATION_FAILED> {
+  const policy = provider.classificationPolicy;
+  if (policy === undefined) return CLASSIFICATION_FAILED;
+  const timeoutSignal = AbortSignal.timeout(timeoutMs);
+  const abortSignal =
+    inheritedSignal === undefined
+      ? timeoutSignal
+      : AbortSignal.any([inheritedSignal, timeoutSignal]);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      Promise.resolve(policy(input, { abortSignal })).then(parseJsonValue),
+      new Promise<typeof CLASSIFICATION_FAILED>((resolve) => {
+        timer = setTimeout(() => resolve(CLASSIFICATION_FAILED), timeoutMs);
+      }),
+    ]);
+  } catch (error) {
+    log.warn("instrumentation provider classification failed", {
+      boundary: input.boundary,
+      error: formatError(error),
+      provider: provider.name,
+    });
+    return CLASSIFICATION_FAILED;
+  } finally {
+    clearTimeout(timer);
   }
 }
 

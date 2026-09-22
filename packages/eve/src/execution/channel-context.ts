@@ -24,5 +24,9 @@ export function setChannelContext(
       adapter.instrumentation?.metadata === undefined && existing !== undefined
         ? existing.metadata
         : projection.metadata,
+    state:
+      adapter.instrumentation?.classificationState === undefined && existing !== undefined
+        ? (existing.state ?? {})
+        : projection.state,
   });
 }

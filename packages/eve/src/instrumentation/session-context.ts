@@ -22,6 +22,8 @@ import {
   readForwardedTraceAssertion,
   resolveForwardedTraceSeed,
 } from "#shared/forwarded-trace-policy.js";
+import type { UnclassifiedTraceCaptureContext } from "#shared/trace-policy.js";
+import { parseJsonObject } from "#shared/json.js";
 
 export function readInstrumentationSessionContext(context: AlsContext) {
   const storedTraceSeed = context.get(SessionTraceSeedKey);
@@ -56,4 +58,33 @@ export function readInstrumentationSessionContext(context: AlsContext) {
     title: context.get(SessionTitleKey),
     traceSeed,
   };
+}
+
+export function buildTraceCaptureContext(
+  agentName: string,
+  session: ReturnType<typeof readInstrumentationSessionContext>,
+): UnclassifiedTraceCaptureContext {
+  const metadata = safePropertyBag(session.instrumentation?.metadata);
+  const state = safePropertyBag(session.instrumentation?.state);
+  const channel = {
+    ...session.conversation.channel,
+    ...(Object.keys(metadata).length > 0 ? { metadata } : undefined),
+    ...(Object.keys(state).length > 0 ? { state } : undefined),
+  };
+  return {
+    agentName,
+    audience: session.conversation.audience,
+    channel,
+    environment: session.conversation.environment,
+    mode: session.conversation.mode,
+    principalType: session.conversation.principalType,
+  };
+}
+
+function safePropertyBag(value: unknown) {
+  try {
+    return parseJsonObject(value ?? {});
+  } catch {
+    return {};
+  }
 }

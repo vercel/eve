@@ -232,6 +232,8 @@ export function isOtelIntegration(value: unknown): value is OtelIntegration {
 
 /** The one pipeline a process can register. @internal */
 export interface OtelPipeline {
+  /** @internal Carry framework classification to destination span policies. */
+  readonly classifySpans?: boolean;
   readonly instrumentations?: readonly unknown[];
   readonly metricReaders?: readonly MetricReader[];
   readonly propagators?: readonly PropagatorOrName[];

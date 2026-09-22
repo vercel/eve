@@ -59,6 +59,7 @@ export function buildRunContext(input: {
       channelType: existing?.channelType ?? run.channelMetadata.channelType,
       kind: existing?.kind ?? run.channelMetadata.kind,
       metadata: run.channelMetadata.metadata,
+      state: existing?.state ?? {},
     });
   }
 

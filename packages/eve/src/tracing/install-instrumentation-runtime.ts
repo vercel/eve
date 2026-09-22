@@ -39,6 +39,14 @@ export function installInstrumentationRuntime(input: {
   readonly runtimeContextResolvers?: readonly RuntimeContextResolver[];
   readonly serviceName: string;
 }): InstrumentationRuntime {
+  const classifiers = input.providers.filter(
+    (provider) => provider.classificationPolicy !== undefined,
+  );
+  if (classifiers.length > 1) {
+    throw new Error(
+      `Instrumentation declares classificationPolicy more than once: ${classifiers.map((provider) => provider.name).join(", ")}.`,
+    );
+  }
   const serialBefore: InstrumentationProviderDefinition[] = [];
   const serialAfter: InstrumentationProviderDefinition[] = [];
   let otelRuntime: RegisteredOtelPipeline | undefined;
@@ -48,8 +56,12 @@ export function installInstrumentationRuntime(input: {
   let runInContext: InstrumentationRuntime["runInContext"] = (_operation, execute) => execute();
 
   if (input.collected.declared) {
+    const pipeline =
+      classifiers.length === 1
+        ? { ...input.collected.pipeline, classifySpans: true }
+        : input.collected.pipeline;
     otelRuntime = registerOtelPipeline({
-      pipeline: input.collected.pipeline,
+      pipeline,
       serviceName: input.serviceName,
     });
     const agentOtel = createAgentOtelInstrumentation({
@@ -72,7 +84,7 @@ export function installInstrumentationRuntime(input: {
     prepareTurnTrace = agentOtel.prepareTurnTrace;
     runInContext = agentOtel.runInContext;
 
-    const releasable = input.collected.pipeline.spanProcessors
+    const releasable = pipeline.spanProcessors
       .filter(isSpanProcessor)
       .filter(hasConversationRelease);
     if (releasable.length > 0) serialAfter.push(sessionReleaseProvider(releasable));

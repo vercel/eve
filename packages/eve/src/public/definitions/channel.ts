@@ -338,8 +338,10 @@ function buildAdapter<TState, TCtx, TReceiveTarget, TMetadata extends Record<str
   const hasFetchFile = definition.fetchFile !== undefined;
   const metadata = definition.metadata;
   const hasMetadata = metadata !== undefined;
+  const classificationState = definition.classificationState;
+  const hasClassificationState = classificationState !== undefined;
   const audience = definition.audience;
-  const hasBehavior = hasState || hasContext || hasMetadata;
+  const hasBehavior = hasState || hasContext || hasMetadata || hasClassificationState;
 
   const eventHandlers: Record<string, unknown> = {};
   let hasEventHandlers = false;
@@ -396,9 +398,16 @@ function buildAdapter<TState, TCtx, TReceiveTarget, TMetadata extends Record<str
     state: hasState ? { ...(definition.state as Record<string, unknown>) } : {},
     fetchFile: definition.fetchFile,
     instrumentation:
-      metadata === undefined && audience === undefined
+      metadata === undefined && audience === undefined && classificationState === undefined
         ? undefined
         : {
+            ...(classificationState === undefined
+              ? undefined
+              : {
+                  classificationState(state) {
+                    return classificationState(state as NonNullable<TState>);
+                  },
+                }),
             ...(metadata === undefined
               ? undefined
               : {

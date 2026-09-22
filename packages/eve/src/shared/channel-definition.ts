@@ -112,6 +112,12 @@ export interface GenericChannelDefinition<
   readonly metadata?: (state: NonNullable<TState>) => TMetadata;
 
   /**
+   * Projects channel-owned JSON state that instrumentation classifiers may
+   * inspect. The projection defaults to an empty object.
+   */
+  readonly classificationState?: (state: NonNullable<TState>) => Readonly<Record<string, unknown>>;
+
+  /**
    * Classifies who can observe the originating conversation. The hook runs
    * after route auth with channel state, the authenticated principal, run mode,
    * and deployment environment. Return `"unknown"` when classification is not

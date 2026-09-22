@@ -240,13 +240,20 @@ function spanExportContext(
       ? (spanContext as Readonly<Record<string, unknown>>)
       : {};
   const name = (span as { readonly name?: unknown }).name;
-  return {
+  const classification = Reflect.get(span, "classification") as unknown;
+  const result: SpanExportContext = {
     attributes: record,
     audience,
     name: typeof name === "string" ? name : "",
     spanId: typeof ids["spanId"] === "string" ? ids["spanId"] : "",
     traceId: typeof ids["traceId"] === "string" ? ids["traceId"] : "",
   };
+  if (classification !== undefined) {
+    Object.assign(result, {
+      classification: classification as SpanExportContext["classification"],
+    });
+  }
+  return result;
 }
 
 function spanExportDecision(

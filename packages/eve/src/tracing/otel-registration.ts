@@ -16,6 +16,10 @@ import {
 } from "#compiled/@vercel/otel/index.js";
 
 import { AgentSpanIdGenerator } from "#tracing/agent-span-id-generator.js";
+import {
+  classificationCaptureProcessor,
+  classificationProjectionProcessor,
+} from "#tracing/classification-span-processor.js";
 import type { OtelPipeline } from "#tracing/otel-declaration.js";
 import {
   agentInvocationSpanName,
@@ -160,7 +164,10 @@ export function registerOtelPipeline(input: {
   const optionalPeerTracerProxy = captureOptionalPeerTracerProxy();
   const idGenerator = new AgentSpanIdGenerator();
   const markerPropagator = new RegistrationMarkerPropagator();
-  const spanProcessors = privateSpanProcessors(pipeline.spanProcessors);
+  const spanProcessors = privateSpanProcessors(
+    pipeline.spanProcessors,
+    pipeline.classifySpans === true,
+  );
   const configuration: Configuration = {
     attributes: pipeline.resource,
     autoDetectResources: false,
@@ -220,8 +227,13 @@ export function registerOtelPipeline(input: {
   };
 }
 
-function privateSpanProcessors(processors: readonly SpanProcessorOrName[]): SpanProcessorOrName[] {
-  const concrete = processors.filter(isSpanProcessor);
+function privateSpanProcessors(
+  processors: readonly SpanProcessorOrName[],
+  classifySpans: boolean,
+): SpanProcessorOrName[] {
+  const concrete = processors
+    .filter(isSpanProcessor)
+    .map((processor) => (classifySpans ? classificationProjectionProcessor(processor) : processor));
   if (concrete.length === 0) return [...processors];
   const filtering = new PrivateSpanFilteringProcessor(concrete, replayDeduplicationRegistry());
   const result: SpanProcessorOrName[] = [];
@@ -233,7 +245,7 @@ function privateSpanProcessors(processors: readonly SpanProcessorOrName[]): Span
     }
     if (inserted) continue;
     inserted = true;
-    result.push(filtering);
+    result.push(classifySpans ? classificationCaptureProcessor(filtering) : filtering);
   }
   return result;
 }

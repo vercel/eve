@@ -103,6 +103,79 @@ The channel assigns the audience once when it creates the session. It controls
 content capture, not access. See [Audience](../channels/overview#audience) for
 how the channel derives `public`, `private`, and `unknown`.
 
+## Classify traces and events
+
+Use `classificationPolicy` when instrumentation needs one shared
+classification before applying trace policies or writing lifecycle events.
+Declare it in one `defineInstrumentation()` file. A second declaration is a
+startup error. The classifier can use any model, external service, or
+deterministic local logic.
+
+```ts title="agent/instrumentation/audit.ts"
+import { defineInstrumentation } from "eve/instrumentation";
+
+import { classifySensitivity } from "../lib/sensitivity";
+
+type Sensitivity = "ordinary" | "sensitive";
+
+export default defineInstrumentation<Sensitivity>({
+  classificationPolicy: (input, { abortSignal }) => classifySensitivity(input, { abortSignal }),
+
+  tracePolicy: ({ classification }) => ({
+    emit: true,
+    recordInputs: classification === "ordinary",
+    recordOutputs: classification === "ordinary",
+  }),
+
+  events: {
+    "turn.failed": (event, { classification }) => {
+      sendFailure(event, { classification });
+    },
+  },
+});
+```
+
+eve calls the policy when it binds instrumentation to a trace, then once for
+each lifecycle event. Every provider's `tracePolicy` receives the trace result,
+and every admitted event handler receives the record result as
+`ctx.classification`. The internal OTel adapter carries the same result to
+destination export policies. A durable resume may bind the trace again, so
+classifiers should return deterministic results for the same state.
+
+Event classification sees only content admitted by the combined trace capture
+ceilings. eve applies the classifier-owning provider's trace decision, then
+internal adapter projections such as OpenTelemetry, before invoking the
+classifier. This does not narrow the independently projected event delivered
+to another lifecycle provider. Error details count as outputs. The trace result
+is available to record classification as `traceClassification`. A thrown
+error, timeout, or non-JSON result drops classified instrumentation for that
+trace or event without failing the agent.
+
+The trace input includes `channel.metadata` and `channel.state`. Channels
+populate `channel.metadata` with their existing `metadata(state)` hook and can
+add classifier-only JSON with `classificationState(state)`:
+
+```ts title="agent/channels/support.ts"
+import { defineChannel } from "eve/channels";
+
+export default defineChannel({
+  state: {
+    visibility: "private" as "private" | "public",
+    internalDeliveryId: "",
+  },
+  classificationState: (state) => ({
+    visibility: state.visibility,
+  }),
+  // ...
+});
+```
+
+eve never passes the channel's runtime `context()` value or its complete
+adapter state to the classifier.
+
+See [OpenTelemetry](./otel#use-classification-in-an-export-policy) for
+destination filtering with the same classification.
+
 ## Redact fields
 
 Lifecycle events are immutable snapshots. Copy the fields you need into a

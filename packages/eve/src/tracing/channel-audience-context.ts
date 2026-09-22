@@ -1,5 +1,6 @@
 import { createContextKey, type Context } from "#compiled/@opentelemetry/api/index.js";
 import { normalizeChannelAudience, type ChannelAudience } from "#shared/channel-audience.js";
+import { withActiveInstrumentationClassification } from "#tracing/instrumentation-classification-context.js";
 
 const CHANNEL_AUDIENCE_KEY = createContextKey("eve.channel.audience");
 
@@ -12,5 +13,8 @@ export function channelAudienceFromContext(context: unknown): ChannelAudience {
 }
 
 export function withChannelAudience(context: Context, audience: unknown): Context {
-  return context.setValue(CHANNEL_AUDIENCE_KEY, normalizeChannelAudience(audience));
+  return withActiveInstrumentationClassification(context).setValue(
+    CHANNEL_AUDIENCE_KEY,
+    normalizeChannelAudience(audience),
+  );
 }

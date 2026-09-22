@@ -75,6 +75,7 @@ import {
   type AgentSamplingOperation,
 } from "#tracing/agent-span-contract.js";
 import { withErrorContent } from "#tracing/error-content-context.js";
+import { runWithInstrumentationClassification } from "#tracing/instrumentation-classification-context.js";
 import { recordAgentSpanError as recordError } from "#tracing/agent-span-error.js";
 import { resolveInstrumentationEnvironment } from "#internal/application/dev-environment.js";
 import type { ConversationEnvironment } from "#shared/conversation-context.js";
@@ -83,9 +84,7 @@ type SpanState = { readonly context: Context; readonly span: Span };
 
 export interface AgentOtelInstrumentationInput {
   readonly environment?: ConversationEnvironment;
-  /** Whether any destination records model and tool inputs. */
   readonly recordInputs?: boolean;
-  /** Whether any destination records model and tool outputs. */
   readonly recordOutputs?: boolean;
   readonly frameworkVersion: string;
   readonly idGenerator: AgentSpanIdGenerator;
@@ -563,6 +562,7 @@ export function createAgentOtelInstrumentation(
       },
       name: "eve.otel",
       projectEvent,
+      runWithClassification: runWithInstrumentationClassification,
       tracePolicy: () => ({ emit: true, recordInputs, recordOutputs }),
     },
     prepareSessionTrace,

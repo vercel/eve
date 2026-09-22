@@ -93,10 +93,10 @@ export async function emitTerminalSessionEvent(input: {
   }
 
   const emit =
-    instrumentation?.createHandleEvent({
+    (await instrumentation?.createHandleEvent({
       handleEvent,
       turnId: input.turnId,
-    }) ?? handleEvent;
+    })) ?? handleEvent;
   try {
     if (ctx === undefined) {
       await emit(input.event);

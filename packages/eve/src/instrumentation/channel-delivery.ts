@@ -50,14 +50,7 @@ export async function instrumentChannelDelivery(
     for (const item of active) {
       const policyAgentName = item.policyAgentName ?? item.agentName;
       if (policyAgentName === undefined) continue;
-      const conversation = input.ctx.get(ConversationContextKey) ?? UNKNOWN_CONVERSATION_CONTEXT;
-      const hooks =
-        input.hooks.forTrace?.({
-          agentName: policyAgentName,
-          ...conversation,
-          audience: item.delivery.channelAudience ?? conversation.audience,
-        }) ?? input.hooks;
-      await hooks.publish({
+      await input.hooks.publish({
         agentName: item.agentName,
         delivery: item.delivery,
         error: input.error,
@@ -80,11 +73,7 @@ export async function instrumentChannelDelivery(
   const active: ActiveChannelDelivery[] = [...(input.ctx.get(ActiveChannelDeliveriesKey) ?? [])];
   const conversation = input.ctx.get(ConversationContextKey) ?? UNKNOWN_CONVERSATION_CONTEXT;
   const channelAudience = conversation.audience;
-  const hooks =
-    input.hooks.forTrace?.({
-      agentName: input.policyAgentName,
-      ...conversation,
-    }) ?? input.hooks;
+  const hooks = input.hooks;
   for (const metadata of input.delivery.deliveryMetadata) {
     const payload = input.delivery.payloads[metadata.payloadIndex];
     const delivery = {

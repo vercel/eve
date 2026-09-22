@@ -1,10 +1,15 @@
-import type { ChannelAdapter, ChannelInstrumentationMetadata } from "#channel/adapter.js";
+import type {
+  ChannelAdapter,
+  ChannelClassificationState,
+  ChannelInstrumentationMetadata,
+} from "#channel/adapter.js";
 import { getAdapterKind } from "#channel/adapter.js";
 import {
   isInstrumentationChannelKind,
   resolveInstrumentationProjection,
 } from "#internal/instrumentation.js";
 import { createLogger } from "#internal/logging.js";
+import { parseJsonObject } from "#shared/json.js";
 
 const log = createLogger("channel.instrumentation");
 
@@ -12,6 +17,7 @@ export interface ChannelInstrumentationProjection {
   readonly channelType?: string;
   readonly kind: string;
   readonly metadata: ChannelInstrumentationMetadata;
+  readonly state?: ChannelClassificationState;
 }
 
 export function buildChannelInstrumentationProjection(input: {
@@ -20,12 +26,14 @@ export function buildChannelInstrumentationProjection(input: {
   readonly existingKind?: string;
 }): ChannelInstrumentationProjection {
   const { adapter, channelName, existingKind } = input;
-
-  return {
+  const projection = {
     channelType: getAdapterKind(adapter),
     kind: resolveKind({ adapter, channelName, existingKind }),
     metadata: resolveMetadata(adapter),
   };
+  return adapter.instrumentation?.classificationState === undefined
+    ? projection
+    : { ...projection, state: resolveClassificationState(adapter) };
 }
 
 function resolveKind(input: {
@@ -61,4 +69,21 @@ function resolveMetadata(adapter: ChannelAdapter): ChannelInstrumentationMetadat
 
   const { audience: _ignoredAudience, ...metadata } = projection ?? {};
   return metadata;
+}
+
+function resolveClassificationState(adapter: ChannelAdapter): ChannelClassificationState {
+  const project = adapter.instrumentation?.classificationState;
+  if (project === undefined) return {};
+
+  const projection = resolveInstrumentationProjection({
+    invoke: () => project(adapter.state),
+    log,
+    source: getAdapterKind(adapter),
+  });
+  if (projection === undefined) return {};
+  try {
+    return parseJsonObject(projection);
+  } catch {
+    return {};
+  }
 }

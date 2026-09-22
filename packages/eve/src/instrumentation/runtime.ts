@@ -55,13 +55,17 @@ import {
 import { ConversationIdKey, ParentSessionKey } from "#context/keys.js";
 import type { ConversationContext } from "#shared/conversation-context.js";
 import { withErrorContent } from "#tracing/error-content-context.js";
+import { withInstrumentationClassification } from "#tracing/instrumentation-classification-context.js";
 import type { AgentSamplingOperation } from "#tracing/agent-span-contract.js";
 import {
   isSampledTrace,
   resolveTracePolicy,
   resolveTracePolicyDecision,
 } from "#tracing/sampled-trace.js";
-import { readInstrumentationSessionContext } from "#instrumentation/session-context.js";
+import {
+  buildTraceCaptureContext,
+  readInstrumentationSessionContext,
+} from "#instrumentation/session-context.js";
 import { readSessionTraceDecision } from "#tracing/agent-trace-context-store.js";
 import { readInstrumentationDecision } from "#shared/instrumentation-decision.js";
 import { applyLiveDeliveryAudienceCeiling } from "#shared/forwarded-trace-policy.js";
@@ -177,7 +181,7 @@ export interface ExecutionInstrumentation extends BackgroundTaskInstrumentation 
   readonly createHandleEvent: (input: {
     readonly handleEvent?: HandleEventFn;
     readonly turnId?: string;
-  }) => HandleEventFn | undefined;
+  }) => Promise<HandleEventFn | undefined>;
   readonly flush: () => Promise<void>;
   readonly instrumentChannelDelivery: (
     input:
@@ -204,13 +208,15 @@ export function bindInstrumentationRuntime(
   const baseHooks = runtime.hooks;
   const readSessionContext = () =>
     readInstrumentationSessionContext(contextStorage.getStore() ?? ctx);
+  let preparedHooks: Promise<InstrumentationHooks> | undefined;
   const bindHooks = (sessionContext: ReturnType<typeof readSessionContext>) => {
-    return (
-      baseHooks.forTrace?.({
-        agentName: boundSession.agentName,
-        ...sessionContext.conversation,
-      }) ?? baseHooks
-    );
+    preparedHooks ??=
+      baseHooks.prepareTrace?.(buildTraceCaptureContext(boundSession.agentName, sessionContext)) ??
+      Promise.resolve(
+        baseHooks.forTrace?.(buildTraceCaptureContext(boundSession.agentName, sessionContext)) ??
+          baseHooks,
+      );
+    return preparedHooks;
   };
   const captureExecutionRuntime = () => {
     const otelSettings = runtime.otelSettings;
@@ -223,39 +229,44 @@ export function bindInstrumentationRuntime(
       tracer: otelSettings === undefined ? undefined : trace.getTracer("eve"),
     };
   };
-  const preparePreamble = (
+  const preparePreamble = async (
     input: Parameters<ExecutionInstrumentation["preparePreamble"]>[0],
     sessionContext: ReturnType<typeof readSessionContext>,
   ) => {
-    return prepareTurnTraceContext({
-      ...input,
-      instrumentation: runtime,
-      principals: sessionContext.principals,
-      session: {
-        agentName: boundSession.agentName,
-        channelAudience: sessionContext.conversation.audience,
-        // OTel stores the normalized conversation kind; `$eve.trigger` retains the raw adapter kind.
-        channelKind: sessionContext.conversation.channel.kind,
-        channelType: sessionContext.instrumentation?.channelType,
-        parentLineage: sessionContext.parentLineage,
-        parentTraceContext: sessionContext.parentTraceContext,
-        rootSessionId: sessionContext.parent?.rootSessionId ?? boundSession.rootSessionId,
-        scheduleId: sessionContext.scheduleId,
-        sessionId: boundSession.sessionId,
-        title: sessionContext.title,
-        traceSeed: sessionContext.traceSeed,
-      },
-    });
+    const hooks = await bindHooks(sessionContext);
+    return await otelContext.with(
+      withInstrumentationClassification(otelContext.active(), hooks.classification),
+      () =>
+        prepareTurnTraceContext({
+          ...input,
+          instrumentation: runtime,
+          principals: sessionContext.principals,
+          session: {
+            agentName: boundSession.agentName,
+            channelAudience: sessionContext.conversation.audience,
+            // OTel stores the normalized conversation kind; `$eve.trigger` retains the raw adapter kind.
+            channelKind: sessionContext.conversation.channel.kind,
+            channelType: sessionContext.instrumentation?.channelType,
+            parentLineage: sessionContext.parentLineage,
+            parentTraceContext: sessionContext.parentTraceContext,
+            rootSessionId: sessionContext.parent?.rootSessionId ?? boundSession.rootSessionId,
+            scheduleId: sessionContext.scheduleId,
+            sessionId: boundSession.sessionId,
+            title: sessionContext.title,
+            traceSeed: sessionContext.traceSeed,
+          },
+        }),
+    );
   };
   const memory: MemoryInstrumentation | undefined =
     runtime.memoryOperations === true
       ? createMemoryInstrumentation({
           resolveContext: () => {
             const sessionContext = readSessionContext();
-            return {
-              hooks: bindHooks(sessionContext),
+            return bindHooks(sessionContext).then((hooks) => ({
+              hooks,
               rootSessionId: sessionContext.parent?.rootSessionId ?? boundSession.rootSessionId,
-            };
+            }));
           },
           runInContext: runtime.runInContext,
           sessionId: boundSession.sessionId,
@@ -266,7 +277,7 @@ export function bindInstrumentationRuntime(
     return {
       runStep: async (input, execute) => {
         const policyContext = readSessionContext();
-        const hooks = bindHooks(policyContext);
+        const hooks = await bindHooks(policyContext);
         const settings = executionRuntime.otelSettings;
         const decision = resolveStepInstrumentationDecision(
           settings,
@@ -276,6 +287,10 @@ export function bindInstrumentationRuntime(
           readSessionTraceDecision(policyContext.context, boundSession.sessionId),
         );
         const tracer = executionRuntime.tracer;
+        const classificationContext = withInstrumentationClassification(
+          otelContext.active(),
+          hooks.classification,
+        );
         const attributes: Record<string, string> = {
           "eve.environment": input.environment,
           "eve.session.id": input.session.sessionId,
@@ -288,7 +303,7 @@ export function bindInstrumentationRuntime(
           !executionRuntime.ownsAgentSpans &&
           decision?.action !== "drop" &&
           input.hasInput
-            ? tracer.startSpan("ai.eve.turn", { attributes })
+            ? tracer.startSpan("ai.eve.turn", { attributes }, classificationContext)
             : undefined;
         const spanContext = turnSpan?.spanContext();
         const session =
@@ -306,7 +321,7 @@ export function bindInstrumentationRuntime(
                 },
               } as typeof input.session);
         let parentContext =
-          turnSpan === undefined ? undefined : trace.setSpan(otelContext.active(), turnSpan);
+          turnSpan === undefined ? undefined : trace.setSpan(classificationContext, turnSpan);
         if (parentContext === undefined && tracer !== undefined) {
           const stored = input.session.state?.[TURN_TRACE_STATE_KEY] as
             | { readonly spanId: string; readonly traceFlags: number; readonly traceId: string }
@@ -486,13 +501,13 @@ export function bindInstrumentationRuntime(
       hooks: () => bindHooks(readSessionContext()),
       sessionId: boundSession.sessionId,
     }),
-    createHandleEvent: (input) => {
+    createHandleEvent: async (input) => {
       const sessionContext = readSessionContext();
       return createInstrumentationHandleEvent({
         agentName: boundSession.agentName,
         channelKind: sessionContext.conversation.channel.kind,
         handleEvent: input.handleEvent,
-        hooks: bindHooks(sessionContext),
+        hooks: await bindHooks(sessionContext),
         scheduleId: sessionContext.scheduleId,
         sessionId: boundSession.sessionId,
         title: sessionContext.title,
@@ -500,10 +515,10 @@ export function bindInstrumentationRuntime(
       });
     },
     flush: runtime.forceFlush,
-    instrumentChannelDelivery: (input) =>
+    instrumentChannelDelivery: async (input) =>
       instrumentChannelDelivery({
         ...input,
-        hooks: baseHooks,
+        hooks: await bindHooks(readSessionContext()),
         policyAgentName: boundSession.agentName,
       }),
     memory,

@@ -16,14 +16,14 @@ export interface BackgroundTaskInstrumentation {
 
 export function createBackgroundTaskInstrumentation(input: {
   readonly ctx: ContextContainer;
-  readonly hooks: () => InstrumentationHooks;
+  readonly hooks: () => Promise<InstrumentationHooks>;
   readonly sessionId: string;
 }): BackgroundTaskInstrumentation {
   return {
-    publishBackgroundTaskSettlements: (settlements) =>
+    publishBackgroundTaskSettlements: async (settlements) =>
       publishBackgroundTaskSettlements({
         ...settlements,
-        hooks: input.hooks(),
+        hooks: await input.hooks(),
       }),
     rememberBackgroundTasks: (tasks) => {
       contextStorage.run(input.ctx, () => {

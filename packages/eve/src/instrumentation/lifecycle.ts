@@ -1,10 +1,10 @@
-import { createInstrumentationDispatcher } from "#instrumentation/dispatch.js";
 import type * as memory from "#instrumentation/memory.js";
 import type { InstrumentationStateSlot } from "#instrumentation/state.js";
 import type { RuntimeTraceContext } from "#protocol/message.js";
 import type { ChannelAudience } from "#shared/channel-audience.js";
 import type { InstrumentationDecision } from "#shared/instrumentation-decision.js";
-import type { TraceCaptureContext, TraceCapturePolicy } from "#shared/trace-policy.js";
+import type { JsonValue } from "#shared/json.js";
+import type { ClassificationPolicy, TraceCapturePolicy } from "#shared/trace-policy.js";
 
 /**
  * Stable eve identity for one model attempt. Retries share `stepIndex` and
@@ -536,6 +536,7 @@ export type InstrumentationActionTerminalEvent =
 
 /** The second argument to every handler. */
 export interface InstrumentationHandlerContext {
+  readonly classification?: JsonValue;
   /** Durable state scoped to this provider and this operation. */
   readonly state: InstrumentationStateSlot;
 }
@@ -553,6 +554,7 @@ export type InstrumentationEventHandler<TEvent> = (
 
 /** Internal normalized provider shape consumed by the instrumentation bus. */
 export interface InstrumentationProviderDefinition {
+  readonly classificationPolicy?: ClassificationPolicy<InstrumentationEvent, JsonValue>;
   readonly name: string;
   /** Durable state identity, separate from the human-readable log name. */
   readonly stateNamespace?: string;
@@ -560,6 +562,11 @@ export interface InstrumentationProviderDefinition {
   readonly projectEvent?: (
     event: InstrumentationEvent,
   ) => InstrumentationEvent | PromiseLike<InstrumentationEvent>;
+  /** Internal adapter context around one classified provider handler. */
+  readonly runWithClassification?: (
+    classification: JsonValue | undefined,
+    execute: () => void | PromiseLike<void>,
+  ) => void | PromiseLike<void>;
   /** Provider-specific event admission and directional content policy. */
   readonly tracePolicy?: TraceCapturePolicy;
   readonly events?: {
@@ -660,32 +667,8 @@ export type InstrumentationExecutionOperation =
     }
   | memory.InstrumentationMemoryExecutionOperation;
 
-/** Provider-neutral hook operations consumed by the AI SDK bridge. */
-export interface InstrumentationHooks {
-  /**
-   * Whether any provider admitted by this bound trace requests content.
-   *
-   * False means nothing downstream can read what was said, so the publisher
-   * should not serialize it in the first place. This is the only way the
-   * projection is skipped rather than merely withheld.
-   */
-  readonly capturesContent: boolean;
-  /** Input-content demand for publishers that can project directions separately. */
-  readonly capturesInputs?: boolean;
-  /** Output-content demand for publishers that can project directions separately. */
-  readonly capturesOutputs?: boolean;
-  readonly forTrace?: (trace: TraceCaptureContext) => InstrumentationHooks;
-  publish(event: InstrumentationEvent): Promise<void>;
-}
-
-export interface CreateInstrumentationHooksOptions {
-  readonly handlerTimeoutMs?: number;
-}
-
-/** Creates failure-isolated hooks backed by normalized dispatch groups. */
-export function createInstrumentationHooks(
-  input: InstrumentationHooksInput,
-  options: CreateInstrumentationHooksOptions = {},
-): InstrumentationHooks {
-  return createInstrumentationDispatcher(input, options);
-}
+export {
+  createInstrumentationHooks,
+  type CreateInstrumentationHooksOptions,
+  type InstrumentationHooks,
+} from "#instrumentation/hooks.js";

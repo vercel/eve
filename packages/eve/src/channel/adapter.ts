@@ -109,6 +109,12 @@ export type ChannelInstrumentationMetadataProjector = (
   state: Record<string, unknown> | undefined,
 ) => ChannelInstrumentationMetadata;
 
+export type ChannelClassificationState = Readonly<Record<string, unknown>>;
+
+export type ChannelClassificationStateProjector = (
+  state: Record<string, unknown> | undefined,
+) => ChannelClassificationState;
+
 // ---------------------------------------------------------------------------
 // Channel adapter
 // ---------------------------------------------------------------------------
@@ -174,6 +180,7 @@ export type ChannelAdapter<TCtx extends ChannelAdapterContext<any> = ChannelAdap
    * inspecting adapter state directly.
    */
   readonly instrumentation?: {
+    readonly classificationState?: ChannelClassificationStateProjector;
     readonly metadata?: ChannelInstrumentationMetadataProjector;
     readonly audience?: ChannelAudienceProjector;
   };

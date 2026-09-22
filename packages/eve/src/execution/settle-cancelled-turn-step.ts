@@ -118,10 +118,10 @@ export async function settleCancelledTurnStep(input: {
           });
         };
         const emit =
-          instrumentation?.createHandleEvent({
+          (await instrumentation?.createHandleEvent({
             handleEvent: baseEmit,
             turnId: activeTurnId(emissionState),
-          }) ?? baseEmit;
+          })) ?? baseEmit;
         return {
           result: await emitCancelledTurn(emit, emissionState),
           session: enrichedSession,

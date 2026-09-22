@@ -10,7 +10,11 @@
 // from the bus that feeds it.
 import type { InstrumentationEvent } from "#instrumentation/lifecycle.js";
 import type { JsonValue } from "#shared/json.js";
-import type { TraceCapturePolicy } from "#shared/trace-policy.js";
+import type {
+  ClassificationField,
+  ClassificationPolicy,
+  TraceCapturePolicy,
+} from "#shared/trace-policy.js";
 
 export type { JsonValue } from "#shared/json.js";
 
@@ -73,9 +77,15 @@ export type {
   InstrumentationMemoryRecord,
 } from "#instrumentation/memory.js";
 export type {
+  ClassificationPolicy,
+  ClassificationPolicyContext,
+  InstrumentationPropertyBag,
+  RecordClassificationInput,
   TraceCaptureContext,
   TraceCapturePolicy,
+  TraceClassificationInput,
   TracePolicyDecision,
+  UnclassifiedTraceCaptureContext,
 } from "#shared/trace-policy.js";
 
 /**
@@ -117,9 +127,9 @@ export interface ProviderState {
   set(value: JsonValue | undefined): void;
 }
 
-export interface ProviderContext {
+export type ProviderContext<TClassification extends JsonValue | never = never> = {
   readonly state: ProviderState;
-}
+} & ClassificationField<TClassification>;
 
 /**
  * One event handler.
@@ -127,7 +137,10 @@ export interface ProviderContext {
  * A handler can carry durable JSON state from a start to its terminal through
  * `ctx.state`. eve scopes and releases that state by provider and operation.
  */
-export type Handler<TEvent> = (event: TEvent, ctx: ProviderContext) => void | PromiseLike<void>;
+export type Handler<TEvent, TClassification extends JsonValue | never = never> = (
+  event: TEvent,
+  ctx: ProviderContext<TClassification>,
+) => void | PromiseLike<void>;
 
 type EventForType<TEvent, TType> = TEvent extends { readonly type: infer TEventType }
   ? TType extends TEventType
@@ -141,9 +154,10 @@ type EventForType<TEvent, TType> = TEvent extends { readonly type: infer TEventT
  * Derived from the event union rather than written out, so a new event reaches
  * providers the moment the bus can publish it.
  */
-export type ProviderEvents = {
+export type ProviderEvents<TClassification extends JsonValue | never = never> = {
   readonly [TType in InstrumentationEvent["type"]]?: Handler<
-    EventForType<InstrumentationEvent, TType>
+    EventForType<InstrumentationEvent, TType>,
+    TClassification
   >;
 };
 
@@ -154,7 +168,14 @@ export type ProviderEvents = {
  * concurrently and are failure-isolated. Do not coordinate providers through
  * completion order.
  */
-export interface ProviderDefinition {
+export interface ProviderDefinition<TClassification extends JsonValue | never = never> {
+  /**
+   * Declares the instrumentation graph's classifier. Only one provider may
+   * declare it. The trace result is supplied to every provider's `tracePolicy`;
+   * each record result is supplied to every admitted handler and OTel
+   * destination policy.
+   */
+  readonly classificationPolicy?: ClassificationPolicy<InstrumentationEvent, TClassification>;
   /**
    * Whether this provider receives events and which content directions they
    * include. Defaults to emitting every audience, with content only for public
@@ -163,8 +184,8 @@ export interface ProviderDefinition {
    * A thrown error disables this provider for the trace. The policy can run
    * again across durable steps, so it must be deterministic.
    */
-  readonly tracePolicy?: TraceCapturePolicy;
-  readonly events?: ProviderEvents;
+  readonly tracePolicy?: TraceCapturePolicy<TClassification>;
+  readonly events?: ProviderEvents<TClassification>;
   /** Runs once at server startup, before any event is published. */
   readonly setup?: (context: ProviderSetupContext) => void | PromiseLike<void>;
   /** Drains anything buffered. eve calls this before a session goes idle. */
@@ -174,14 +195,17 @@ export interface ProviderDefinition {
 }
 
 /** Declares one instrumentation provider. */
-export function defineInstrumentation(definition: ProviderDefinition): InstrumentationProvider {
+export function defineInstrumentation<const TClassification extends JsonValue | never = never>(
+  definition: ProviderDefinition<TClassification>,
+): InstrumentationProvider<TClassification> {
   return { ...definition, [PROVIDER]: true };
 }
 
 /** A {@link ProviderDefinition} that has been through `defineInstrumentation`. */
-export type InstrumentationProvider = ProviderDefinition & {
-  readonly [PROVIDER]: true;
-};
+export type InstrumentationProvider<TClassification extends JsonValue | never = never> =
+  ProviderDefinition<TClassification> & {
+    readonly [PROVIDER]: true;
+  };
 
 /** A slot the author turned off. eve registers nothing for it. */
 export interface InstrumentationDisabled {

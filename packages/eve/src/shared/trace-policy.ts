@@ -4,8 +4,49 @@ import {
   DROP_INSTRUMENTATION,
   type InstrumentationDecision,
 } from "#shared/instrumentation-decision.js";
+import type { JsonValue } from "#shared/json.js";
 
-export type TraceCaptureContext = { readonly agentName: string } & ConversationContext;
+export interface InstrumentationPropertyBag {
+  readonly [key: string]: JsonValue;
+}
+
+export interface UnclassifiedTraceCaptureContext extends Omit<ConversationContext, "channel"> {
+  readonly agentName: string;
+  readonly channel: ConversationContext["channel"] & {
+    readonly metadata?: InstrumentationPropertyBag;
+    readonly state?: InstrumentationPropertyBag;
+  };
+}
+
+export type ClassificationField<TClassification extends JsonValue | never> = [
+  TClassification,
+] extends [never]
+  ? { readonly classification?: JsonValue }
+  : { readonly classification: TClassification };
+
+export type TraceCaptureContext<TClassification extends JsonValue | never = never> =
+  UnclassifiedTraceCaptureContext & ClassificationField<TClassification>;
+
+export interface ClassificationPolicyContext {
+  readonly abortSignal: AbortSignal;
+}
+
+export interface TraceClassificationInput {
+  readonly boundary: "trace";
+  readonly trace: UnclassifiedTraceCaptureContext;
+}
+
+export interface RecordClassificationInput<TRecord, TClassification extends JsonValue> {
+  readonly boundary: "record";
+  readonly record: TRecord;
+  readonly trace: UnclassifiedTraceCaptureContext;
+  readonly traceClassification: TClassification;
+}
+
+export type ClassificationPolicy<TRecord, TClassification extends JsonValue> = (
+  input: TraceClassificationInput | RecordClassificationInput<TRecord, TClassification>,
+  context: ClassificationPolicyContext,
+) => TClassification | PromiseLike<TClassification>;
 
 export type TracePolicyDecision =
   | { readonly emit: false }
@@ -15,11 +56,13 @@ export type TracePolicyDecision =
       readonly recordOutputs: boolean;
     };
 
-export type TraceCapturePolicy = (trace: TraceCaptureContext) => TracePolicyDecision | boolean;
+export type TraceCapturePolicy<TClassification extends JsonValue | never = never> = (
+  trace: TraceCaptureContext<TClassification>,
+) => TracePolicyDecision | boolean;
 
-export function resolveTracePolicy(
-  policy: TraceCapturePolicy | undefined,
-  trace: TraceCaptureContext,
+export function resolveTracePolicy<TClassification extends JsonValue | never = never>(
+  policy: TraceCapturePolicy<TClassification> | undefined,
+  trace: TraceCaptureContext<TClassification>,
   onError?: (error: unknown) => void,
 ): InstrumentationDecision {
   try {

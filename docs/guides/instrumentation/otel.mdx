@@ -188,6 +188,39 @@ A throwing `span` callback drops the span from this destination. Return
 `{ replace: true, value }` from `attribute` to retain, remove, or change
 one attribute.
 
+### Use classification in an export policy
+
+When one `defineInstrumentation()` file declares `classificationPolicy`, eve
+projects its trace and event results into OpenTelemetry context. Both
+`exportPolicy` callbacks receive the active classification:
+
+```ts title="agent/instrumentation/agent-runs.ts"
+import { agentRuns } from "eve/instrumentation/otel";
+
+export default agentRuns({
+  exportPolicy: {
+    span: ({ classification }) =>
+      classification === "restricted"
+        ? { redact: true, inputs: true, outputs: true }
+        : { emit: true },
+    attribute: ({ key, span }) =>
+      span.classification === "sensitive" && key === "customer.id"
+        ? { replace: true, value: "[redacted]" }
+        : { emit: true },
+  },
+});
+```
+
+`span` reads `classification` directly. `attribute` reads the same value
+through `span.classification`. Spans mapped from a lifecycle event use that
+event's classification; child model and tool spans inherit the active
+classification; structural spans fall back to the trace classification.
+
+The destination helpers do not accept `classificationPolicy` or another
+`tracePolicy`. They consume the result prepared by the instrumentation
+runtime, and the process-wide `otel({ tracePolicy })` remains the earlier
+capture ceiling.
+
 ### Further narrow a built-in destination
 
 Return a redaction decision to further narrow what a built-in destination

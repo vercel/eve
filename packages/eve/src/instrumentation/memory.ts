@@ -81,16 +81,16 @@ export interface MemoryInstrumentation {
 }
 
 export function createMemoryInstrumentation(input: {
-  readonly resolveContext: () => {
+  readonly resolveContext: () => Promise<{
     readonly hooks: InstrumentationHooks;
     readonly rootSessionId: string;
-  };
+  }>;
   readonly runInContext: InstrumentationContextRunner;
   readonly sessionId: string;
 }): MemoryInstrumentation {
   return {
     async execute(operation, execute) {
-      const { hooks, rootSessionId } = input.resolveContext();
+      const { hooks, rootSessionId } = await input.resolveContext();
       const event = { ...operation, rootSessionId, sessionId: input.sessionId };
       await hooks.publish({ ...event, type: "memory.operation.started" });
       try {

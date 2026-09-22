@@ -6,25 +6,30 @@ import { sessionIdempotencyKey, turnIdempotencyKey } from "#instrumentation/life
 import { installInstrumentationRuntime } from "#tracing/install-instrumentation-runtime.js";
 import { otelIntegration, collectOtelPipeline } from "#tracing/otel-declaration.js";
 
-const { forceFlush, invocationFlush, internalTerminalState, shutdown } = vi.hoisted(() => ({
-  forceFlush: vi.fn(async () => undefined),
-  invocationFlush: vi.fn(async () => undefined),
-  internalTerminalState: vi.fn(),
-  shutdown: vi.fn(async () => undefined),
-}));
+const { forceFlush, invocationFlush, internalTerminalState, registeredPipeline, shutdown } =
+  vi.hoisted(() => ({
+    forceFlush: vi.fn(async () => undefined),
+    invocationFlush: vi.fn(async () => undefined),
+    internalTerminalState: vi.fn(),
+    registeredPipeline: vi.fn(),
+    shutdown: vi.fn(async () => undefined),
+  }));
 
 vi.mock("#tracing/otel-registration.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("#tracing/otel-registration.js")>();
   return {
     ...actual,
-    registerOtelPipeline: () => ({
-      forceFlush,
-      idGenerator: {
-        allocateSpanId: () => "1".repeat(16),
-        withSpanId: (_spanId: string, run: () => unknown) => run(),
-      },
-      shutdown,
-    }),
+    registerOtelPipeline: (input: { pipeline: unknown }) => {
+      registeredPipeline(input.pipeline);
+      return {
+        forceFlush,
+        idGenerator: {
+          allocateSpanId: () => "1".repeat(16),
+          withSpanId: (_spanId: string, run: () => unknown) => run(),
+        },
+        shutdown,
+      };
+    },
   };
 });
 
@@ -53,6 +58,7 @@ describe("installInstrumentationRuntime", () => {
     forceFlush.mockClear();
     invocationFlush.mockClear();
     internalTerminalState.mockClear();
+    registeredPipeline.mockClear();
     shutdown.mockClear();
     delete (globalThis as Record<symbol, unknown>)[RUNTIME_GLOBAL_KEY];
   });
@@ -118,6 +124,19 @@ describe("installInstrumentationRuntime", () => {
 
     expect(withoutMemory.memoryOperations).toBe(false);
     expect(withMemory.memoryOperations).toBe(true);
+  });
+
+  it("enables span classification only when one provider declares the policy", () => {
+    installInstrumentationRuntime({
+      collected: collectOtelPipeline([otelIntegration()]),
+      frameworkVersion: "test",
+      providers: [{ classificationPolicy: () => "private", name: "classifier" }],
+      serviceName: "weather",
+    });
+
+    expect(registeredPipeline).toHaveBeenCalledWith(
+      expect.objectContaining({ classifySpans: true }),
+    );
   });
 
   it.each([
