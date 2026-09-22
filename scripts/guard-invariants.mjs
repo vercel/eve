@@ -109,6 +109,10 @@
  *             executor. The generic inbox and state cursor must not
  *             import subagent modules; session/turn composition roots may
  *             compose built-in executors directly.
+ *   rule 44 — Every concrete built-in sandbox provider is defined through
+ *             `defineSandboxProvider()` and does not import sandbox runtime
+ *             orchestration, registries, key derivation, or session state.
+ *             Built-ins and authored providers must share one contract.
  *
  * Baselines for rules with pre-existing violations live in
  * `guard-invariants-baseline.json`. Counts and allowlists in that file
@@ -1354,6 +1358,43 @@ function diffCounts(current, baseline) {
 
 // ---------- Entry point ----------
 
+async function checkRule44SandboxProviders() {
+  const providerNames = ["docker", "just-bash", "microsandbox", "vercel"];
+  const forbidden = [
+    "#execution/sandbox/ensure.js",
+    "#execution/sandbox/prewarm.js",
+    "#runtime/sandbox/registry.js",
+    "#sandbox/state.js",
+  ];
+  const issues = [];
+  for (const name of providerNames) {
+    const file = `packages/eve/src/sandbox/providers/${name}.ts`;
+    const source = await readFile(join(REPO_ROOT, file), "utf8");
+    if (!source.includes("defineSandboxProvider")) {
+      issues.push({
+        file,
+        message: "Built-in sandbox providers must use defineSandboxProvider().",
+      });
+    }
+    if (source.includes("createSandboxEnvironment")) {
+      issues.push({
+        file,
+        message:
+          "Built-in sandbox providers must not bypass defineSandboxProvider() through createSandboxEnvironment().",
+      });
+    }
+    for (const specifier of forbidden) {
+      if (source.includes(specifier)) {
+        issues.push({
+          file,
+          message: `Built-in sandbox providers may not bypass the provider contract through ${specifier}.`,
+        });
+      }
+    }
+  }
+  return issues;
+}
+
 async function main() {
   const baselineRaw = await readFile(BASELINE_PATH, "utf8");
   const baseline = JSON.parse(baselineRaw);
@@ -1492,6 +1533,11 @@ async function main() {
   // Rule 43
   violations.push(...state.rule43);
   violations.push(...state.rule44);
+
+  // Rule 44
+  for (const issue of await checkRule44SandboxProviders()) {
+    violations.push({ rule: 44, ...issue });
+  }
 
   if (violations.length === 0) {
     process.stdout.write("[eve:guard:invariants] ok — all mechanical lints passed.\n");

@@ -130,8 +130,11 @@ export async function runEvalCommand(
   let devServer: DevelopmentServer | undefined;
   let target: EveEvalTargetHandle;
   let client: Awaited<ReturnType<typeof createEvalClient>>;
+  let setupContext: unknown;
 
   try {
+    setupContext = await config.setup?.();
+
     if (options.url) {
       client = await createEvalClient(
         { kind: "remote", url: options.url },
@@ -167,6 +170,7 @@ export async function runEvalCommand(
     const summary = await runEvals({
       evaluations,
       config,
+      setupContext,
       target,
       client,
       appRoot,
@@ -193,11 +197,19 @@ export async function runEvalCommand(
       process.exitCode = 1;
     }
   } finally {
-    if (devServer) {
-      await devServer.close();
-      await shutdownActiveSandboxHandles({
-        log: (message) => logger.error(message),
-      });
+    for (const cleanup of [
+      () => devServer?.close(),
+      () => devServer && shutdownActiveSandboxHandles({ log: (message) => logger.error(message) }),
+      () => config.teardown?.(setupContext),
+    ]) {
+      try {
+        await cleanup();
+      } catch (error) {
+        logger.error(
+          `Eval cleanup failed: ${error instanceof Error ? error.message : String(error)}`,
+        );
+        process.exitCode = 1;
+      }
     }
   }
 

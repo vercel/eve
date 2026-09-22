@@ -195,6 +195,9 @@ export interface DeliverPayload {
   readonly [key: string]: unknown;
 }
 
+/** Controls background task wake timing and whether partial results require a report. */
+export type TaskDeliveryPolicy = "cohort" | "auto";
+
 /** Controls how a channel message interacts with an active turn. */
 export type TurnPolicy = "steer" | "queue";
 
@@ -219,6 +222,7 @@ export type SessionCommand =
        */
       readonly taskDeliveryId?: string;
       readonly turnPolicy?: TurnPolicy;
+      readonly taskDeliveryPolicy?: TaskDeliveryPolicy;
     }
   | {
       readonly kind: "cancel";
@@ -291,9 +295,12 @@ export interface DeliverHookPayload {
    * `resumeHook` already succeeded.
    */
   readonly taskDeliveryId?: string;
+  /** All source notifications when the session queue combines task results. */
+  readonly taskDeliveryIds?: readonly string[];
   readonly kind: "deliver";
   readonly payloads: readonly DeliverPayload[];
   readonly turnPolicy?: TurnPolicy;
+  readonly taskDeliveryPolicy?: TaskDeliveryPolicy;
 }
 
 /** Internal deadline signal sent through the stable session command inbox. */
@@ -464,6 +471,7 @@ export interface SessionCapabilities {
  * subagent tool wrapper).
  */
 export interface RunInput {
+  readonly taskDeliveryPolicy?: TaskDeliveryPolicy;
   readonly adapter: ChannelAdapter<any>;
   /** Framework task that owns this run, when the run is a task executor. */
   readonly taskId?: string;

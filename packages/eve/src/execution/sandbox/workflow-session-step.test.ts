@@ -16,7 +16,7 @@ const reference: WorkflowSandboxReferenceData = {
   compiledArtifactsSource: { kind: "bundled" },
   nodeId: "root",
   sessionId: "parent-session",
-  state: { initialized: true, session: null },
+  state: { session: null },
 };
 const run = {
   owner: { inbox: "owner-inbox" },

@@ -1,4 +1,4 @@
-import { copyFile, mkdir, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import type { AuthoredWorkflowModules } from "#internal/workflow-bundle/builder-support.js";
@@ -11,6 +11,10 @@ import {
 } from "#internal/application/package.js";
 import { buildPackageUserAgent } from "#internal/user-agent.js";
 import type { AgentWorkflowWorldDefinition } from "#shared/agent-definition.js";
+import {
+  sandboxPreparedArtifactsManifestSchema,
+  type SandboxPreparedArtifactsManifest,
+} from "#shared/sandbox-prepared-artifacts.js";
 import {
   prepareAuthoredRuntimeModules,
   type PreparedAuthoredRuntimeModules,
@@ -73,6 +77,9 @@ export async function writeCompiledArtifactsFiles(input: {
   const moduleMapPath = join(input.outDir, "compiled-artifacts-module-map.mjs");
   const instrumentationPluginPath = join(input.outDir, "compiled-artifacts-instrumentation.mjs");
   const workflowWorldPluginPath = join(input.outDir, "compiled-artifacts-workflow-world.mjs");
+  const sandboxPreparedArtifacts = sandboxPreparedArtifactsManifestSchema.parse(
+    JSON.parse(await readFile(input.compileResult.paths.sandboxPreparedArtifactsPath, "utf8")),
+  );
   const prepared = await prepareAuthoredRuntimeModules({
     manifest: input.compileResult.manifest,
     moduleMapPath: input.compileResult.paths.moduleMapPath,
@@ -87,6 +94,7 @@ export async function writeCompiledArtifactsFiles(input: {
       installModulePath: resolvePackageSourceFilePath("src/runtime/loaders/bundled-artifacts.ts"),
       metadata: input.compileResult.metadata,
       moduleMapImportPath: moduleMapPath,
+      sandboxPreparedArtifacts,
     }),
   );
   await writeFile(
@@ -251,6 +259,7 @@ export function createCompiledArtifactsBootstrapSource(input: {
   installModulePath: string;
   metadata: CompileMetadata;
   moduleMapImportPath: string;
+  sandboxPreparedArtifacts: SandboxPreparedArtifactsManifest;
 }): string {
   const agentName = input.compileResult.manifest.config.name;
 
@@ -266,6 +275,8 @@ export function createCompiledArtifactsBootstrapSource(input: {
     "",
     `const manifest = ${JSON.stringify(input.compileResult.manifest, null, 2)};`,
     "",
+    `const sandboxPreparedArtifacts = ${JSON.stringify(input.sandboxPreparedArtifacts, null, 2)};`,
+    "",
     "export { moduleMap };",
     "",
     "export function installCompiledArtifactsBootstrap() {",
@@ -273,6 +284,7 @@ export function createCompiledArtifactsBootstrapSource(input: {
     "    manifest,",
     "    metadata,",
     "    moduleMap,",
+    "    sandboxPreparedArtifacts,",
     "  });",
     "}",
     "",

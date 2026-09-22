@@ -59,7 +59,7 @@ function createBundle(input: {
 describe("sandboxProvider", () => {
   beforeEach(() => {
     vi.mocked(ensureSandboxAccess).mockResolvedValue({
-      captureState: vi.fn().mockResolvedValue({ initialized: false, session: null }),
+      captureState: vi.fn().mockResolvedValue({ session: null }),
       get: vi.fn().mockResolvedValue(null),
       stop: vi.fn().mockResolvedValue(undefined),
     });
@@ -68,7 +68,7 @@ describe("sandboxProvider", () => {
   it("uses explicit sharing metadata for self-delegation even without inheritsParent", async () => {
     const ctx = new ContextContainer();
     const registry: RuntimeSandboxRegistry = createStubSandboxRegistry();
-    const parentSandboxState = { initialized: true, session: null };
+    const parentSandboxState = { session: null };
 
     ctx.set(BundleKey, createBundle({ agentName: "weather-agent", registry }));
     ctx.set(ChannelKey, {
@@ -88,7 +88,7 @@ describe("sandboxProvider", () => {
     );
   });
 
-  it("uses the same reconnect identity and tags for workflow steps", async () => {
+  it("uses the same reconnect identity for workflow steps", async () => {
     const ctx = new ContextContainer();
     const registry = createStubSandboxRegistry();
     const bundle = createBundle({ agentName: "child", registry });
@@ -105,15 +105,14 @@ describe("sandboxProvider", () => {
       compiledArtifactsSource: bundle.compiledArtifactsSource,
       nodeId: "child-node",
       sessionId: "parent-sandbox",
-      state: { initialized: false, session: null },
-      tags: { agent: "child", channel: "subagent", sessionId: "child-session" },
+      state: { session: null },
     });
     expect(ensureSandboxAccess).toHaveBeenLastCalledWith(
       expect.objectContaining({ ...reference, state: null }),
     );
   });
 
-  it("tags sandbox backend resources with agent, channel, and session id", async () => {
+  it("passes the owning session identity to sandbox access", async () => {
     const ctx = new ContextContainer();
     const registry: RuntimeSandboxRegistry = createStubSandboxRegistry();
 
@@ -126,11 +125,7 @@ describe("sandboxProvider", () => {
     expect(ensureSandboxAccess).toHaveBeenCalledWith(
       expect.objectContaining({
         ownsSandbox: true,
-        tags: {
-          agent: "weather-agent",
-          channel: "slack",
-          sessionId: "session_1",
-        },
+        sessionId: "session_1",
       }),
     );
   });

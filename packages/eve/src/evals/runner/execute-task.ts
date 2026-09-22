@@ -32,6 +32,8 @@ interface ExecuteTaskOptions {
   readonly onLog?: (message: string) => void;
   /** Receives the first trace context observed for each session. */
   readonly onSessionStart?: (event: EvalSessionStartedEvent) => void;
+  /** Shared setup context; stays in the runner process. */
+  readonly setupContext?: unknown;
   readonly target: EveEvalTargetHandle;
   readonly timeoutMs?: number;
 }
@@ -69,6 +71,7 @@ export async function executeTask(options: ExecuteTaskOptions): Promise<ExecuteT
 
   const logs: string[] = [];
   const { context } = createEvalContext({
+    setupContext: options.setupContext,
     collector,
     manager,
     target: targetForRun,

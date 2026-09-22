@@ -415,7 +415,11 @@ export async function configureProductionNitroRoutes(
   await registerWorkflowArtifactBuildHook(nitro, syncWorkflowArtifacts);
 
   const routeRegistry = createApplicationRouteRegistry(preparedHost);
-  registerApplicationRoutes(nitro, createProductionNitroArtifactsConfig(), routeRegistry);
+  registerApplicationRoutes(
+    nitro,
+    createProductionNitroArtifactsConfig(preparedHost.appRoot),
+    routeRegistry,
+  );
 
   const workflowBundlePath = join(preparedHost.workflowBuildDir, "workflows.mjs");
   const hasConfiguredWorkflowWorld =

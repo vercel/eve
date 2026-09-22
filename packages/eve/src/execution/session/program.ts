@@ -102,8 +102,8 @@ export async function runPreparedSession(
     sessionId: boot.sessionId,
   });
   let result: WorkflowEntryResult = { output: "", isError: true };
+  let loop: SessionLoopOutcome | undefined;
   try {
-    let loop: SessionLoopOutcome;
     try {
       loop = await runSessionLoop(boot, { cursor, handoff, inbox, progress });
     } finally {
@@ -131,7 +131,7 @@ export async function runPreparedSession(
     }
     throw createSafeOuterWorkflowError();
   } finally {
-    await reportResultToAnchor(boot, result, handoff);
+    await reportResultToAnchor(boot, result, handoff, loop);
   }
 }
 
@@ -172,6 +172,7 @@ async function reportResultToAnchor(
   boot: SessionBoot,
   result: WorkflowEntryResult,
   handoff: SessionHandoff,
+  loop: SessionLoopOutcome | undefined,
 ): Promise<void> {
   switch (boot.anchor.kind) {
     case "self":
@@ -179,6 +180,7 @@ async function reportResultToAnchor(
       await boot.anchor.notify?.(result);
       return;
     case "successor":
+      if (loop?.kind === "transferred") return;
       await signalSessionAnchorStep({ result, token: sessionAnchorToken(boot.sessionId) });
       return;
   }

@@ -17,7 +17,8 @@ import { resolveRuntimeAgentGraph } from "#runtime/resolve-agent-graph.js";
 import { createNodeHarnessTools } from "#execution/node-step.js";
 import { serializeInputSchema, serializeOutputSchema } from "#tools/schema.js";
 import { defineSandbox } from "#public/definitions/sandbox.js";
-import type { SandboxBackend } from "#public/definitions/sandbox-backend.js";
+import { createSandboxPreparedArtifactsManifest } from "#shared/sandbox-prepared-artifacts.js";
+import { defineSandboxProvider } from "#shared/sandbox-provider.js";
 import {
   buildActiveSessionContext,
   type ActiveSessionInit,
@@ -144,17 +145,50 @@ const DEFAULT_AGENT_NAME = "test-agent";
  */
 export const TEST_DEFAULT_MODEL_ID = "openai/gpt-5.4";
 
+function createTestSandboxProvider() {
+  const sandboxes = new Map<string, MockSandbox>();
+  function createHandle(sessionId: string) {
+    const sandbox = sandboxes.get(sessionId);
+    if (sandbox === undefined) throw new Error(`Missing test sandbox for ${sessionId}`);
+    return {
+      sandbox: sandbox.session,
+      async onSessionDelete(options?: import("#shared/sandbox-provider.js").SandboxDeleteOptions) {
+        await sandbox.access.delete?.(options);
+        sandboxes.delete(sessionId);
+      },
+      async onSessionStop() {},
+      async onRuntimeShutdown() {},
+    };
+  }
+  return defineSandboxProvider({
+    name: "eve-test-memory",
+    environment: () => ({
+      async prepare() {
+        return null;
+      },
+      async resume(context) {
+        return createHandle(context.session.id);
+      },
+      async start(context) {
+        sandboxes.set(context.session.id, mockSandbox({ id: context.session.id }));
+        return { handle: createHandle(context.session.id), state: null };
+      },
+    }),
+  });
+}
+
 export async function createTestRuntime(descriptor: TestAppDescriptor = {}): Promise<TestRuntime> {
-  const sandboxBackend = createTestSandboxBackend();
+  const sandboxProvider = createTestSandboxProvider();
   const compileInput: CompileFromMemoryInput = {
     name: descriptor.agent?.name ?? DEFAULT_AGENT_NAME,
     model: descriptor.agent?.model ?? TEST_DEFAULT_MODEL_ID,
     limits: descriptor.agent?.limits,
     modules: [
       {
-        loadNamespace: async () => ({
-          default: defineSandbox({ backend: sandboxBackend }),
-        }),
+        loadNamespace: async () => {
+          const environment = sandboxProvider.environment();
+          return { environment, default: defineSandbox(() => environment.open()) };
+        },
         logicalPath: "sandbox.ts",
       },
       ...(descriptor.modules ?? []),
@@ -201,7 +235,13 @@ export async function createTestRuntime(descriptor: TestAppDescriptor = {}): Pro
   const skills = descriptor.skills ?? [];
 
   function install(): void {
-    installBundledCompiledArtifacts({ manifest, moduleMap });
+    installBundledCompiledArtifacts({
+      manifest,
+      moduleMap,
+      sandboxPreparedArtifacts: createSandboxPreparedArtifactsManifest([
+        { nodeId: "__root__", providerName: "eve-test-memory", artifact: null },
+      ]),
+    });
   }
 
   async function run<T>(fn: () => Promise<T> | T): Promise<T> {
@@ -259,34 +299,6 @@ export async function createTestRuntime(descriptor: TestAppDescriptor = {}): Pro
     skills,
     tools,
   };
-}
-
-function createTestSandboxBackend(): SandboxBackend {
-  const sandboxes = new Map<string, MockSandbox>();
-  const backend: SandboxBackend = {
-    name: "eve-test-memory",
-    async create(input) {
-      const sandbox = sandboxes.get(input.sessionKey) ?? mockSandbox({ id: input.sessionKey });
-      sandboxes.set(input.sessionKey, sandbox);
-      return {
-        session: sandbox.session,
-        useSessionFn: async () => sandbox.session,
-        captureState: async () => ({
-          backendName: backend.name,
-          metadata: {},
-          sessionKey: input.sessionKey,
-        }),
-        delete: async (options) => {
-          await sandbox.access.delete?.(options);
-          sandboxes.delete(input.sessionKey);
-        },
-        shutdown: async () => undefined,
-        stop: async () => undefined,
-      };
-    },
-    prewarm: async () => ({ reused: true }),
-  };
-  return backend;
 }
 
 // Exported for the internal active-session-context helper.

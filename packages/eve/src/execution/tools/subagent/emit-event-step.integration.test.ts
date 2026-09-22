@@ -1,10 +1,12 @@
 import { beforeEach, expect, it, vi } from "vitest";
 
 import { ContextContainer, loadContext } from "#context/container.js";
-import { SessionIdKey, SessionKey, SessionTitleKey } from "#context/keys.js";
+import { AuthKey, SessionIdKey, SessionKey, SessionTitleKey } from "#context/keys.js";
 import { deserializeContext, serializeContext } from "#context/serialize.js";
 import { emitSubagentEventStep } from "#execution/tools/subagent/emit-event-step.js";
 import { createTestSessionState } from "#internal/testing/session-state.js";
+import type { MessageStreamEvent, UnstampedMessageStreamEvent } from "#protocol/message.js";
+import type { HookContext, HookEvent, StreamEventHook } from "#public/definitions/hook.js";
 import { createRuntimeHookRegistry } from "#runtime/hooks/registry.js";
 import {
   BundleKey,
@@ -19,46 +21,71 @@ vi.mock("#context/serialize.js", () => ({
 
 beforeEach(() => vi.resetAllMocks());
 
-it.each([false, true])(
-  "delivers completion to typed and wildcard hooks and releases the writer (hook fails: %s)",
-  async (fails) => {
+const events: UnstampedMessageStreamEvent[] = [
+  {
+    type: "subagent.called",
+    data: {
+      callId: "call",
+      name: "research",
+      toolName: "research",
+      sessionId: "parent",
+      childSessionId: "child",
+      childStreamPath: "/child",
+      workflowId: "workflow",
+      turnId: "turn",
+      sequence: 0,
+    },
+  },
+  {
+    type: "subagent.completed",
+    data: { callId: "call", subagentName: "research", output: "done" },
+  },
+];
+
+it.each(
+  events.flatMap((event) =>
+    (["typed", "wildcard", "both"] as const).flatMap((subscription) =>
+      [false, true].map((fails) => ({ event, subscription, fails })),
+    ),
+  ),
+)(
+  "restores parent context for $event.type ($subscription, hook fails: $fails)",
+  async ({ event, subscription, fails }) => {
     const calls: string[] = [];
     const ctx = new ContextContainer();
     ctx.set(SessionIdKey, "parent");
-    ctx.set(SessionKey, {
-      sessionId: "parent",
-      auth: { current: null, initiator: null },
-      turn: { id: "turn", sequence: 0 },
-    });
+    ctx.set(AuthKey, null);
+    // SessionKey is virtual: a production deserializer cannot restore it.
+    expect(ctx.has(SessionKey)).toBe(false);
     ctx.set(ChannelKey, {
       kind: "test",
       state: {},
-      "subagent.completed"(_data, adapterCtx) {
+      [event.type](_data: unknown, adapterCtx: { state: unknown }) {
         calls.push("adapter");
-        adapterCtx.state = { completed: true };
+        adapterCtx.state = { delivered: true };
       },
     });
+    const handler = (kind: string) => async (received: HookEvent, hookCtx: HookContext) => {
+      expect(hookCtx.session.id).toBe("parent");
+      expect(hookCtx.session.auth).toEqual({ current: null, initiator: null });
+      expect(received.type).toBe(event.type);
+      if (received.type === "subagent.completed") expect(received.data.output).toBe("done");
+      expect(loadContext()).toBe(ctx);
+      calls.push(kind);
+      if (fails) throw new Error("subagent subscriber failed");
+      ctx.set(SessionTitleKey, "Research event received");
+    };
+    const handlers: Record<string, StreamEventHook<MessageStreamEvent>> = {};
+    if (subscription !== "wildcard") handlers[event.type] = handler("typed");
+    if (subscription !== "typed") handlers["*"] = handler("wildcard");
     const hookRegistry = createRuntimeHookRegistry([
       {
-        slug: "completion",
-        logicalPath: "hooks/completion.ts",
-        sourceId: "hooks/completion.ts",
+        slug: "subagent-events",
+        logicalPath: "hooks/subagent-events.ts",
+        sourceId: "hooks/subagent-events.ts",
         sourceKind: "module",
         exportName: undefined,
-        events: {
-          "subagent.completed": async (event, hookCtx) => {
-            expect(hookCtx.session.id).toBe("parent");
-            if (event.type !== "subagent.completed") throw new Error("Unexpected event type");
-            expect(event.data.output).toBe("done");
-            expect(loadContext()).toBe(ctx);
-            calls.push("typed");
-            if (fails) throw new Error("completion subscriber failed");
-            ctx.set(SessionTitleKey, "Completed research");
-          },
-          "*": async (event) => {
-            calls.push(`wildcard:${event.type}`);
-          },
-        },
+        events: handlers,
       },
     ]);
     ctx.set(BundleKey, {
@@ -69,10 +96,9 @@ it.each([false, true])(
       hookRegistry,
     } as CompiledBundle);
     vi.mocked(deserializeContext).mockResolvedValue(ctx);
-    vi.mocked(serializeContext).mockImplementation((context) => ({
-      title: context.get(SessionTitleKey),
-      channelState: context.get(ChannelKey)?.state,
-    }));
+    vi.mocked(serializeContext).mockImplementation((context) =>
+      Object.fromEntries([...context.entries()].map(([key, value]) => [key.name, value])),
+    );
     const chunks: Uint8Array[] = [];
     const stream = new WritableStream<Uint8Array>({
       write(chunk) {
@@ -81,25 +107,29 @@ it.each([false, true])(
       },
     });
     const emitted = emitSubagentEventStep({
-      event: {
-        type: "subagent.completed",
-        data: { callId: "call", subagentName: "research", output: "done" },
-      },
+      event,
       sessionWritable: stream,
       serializedContext: {},
       sessionState: createTestSessionState({ sessionId: "parent" }),
     });
+    const firstHandler = subscription === "wildcard" ? "wildcard" : "typed";
     if (fails) {
-      await expect(emitted).rejects.toThrow("completion subscriber failed");
-      expect(calls).toEqual(["adapter", "stream", "typed"]);
+      await expect(emitted).rejects.toThrow("subagent subscriber failed");
+      expect(calls).toEqual(["adapter", "stream", firstHandler]);
     } else {
-      await expect(emitted).resolves.toEqual({
-        serializedContext: { title: "Completed research", channelState: { completed: true } },
-      });
-      expect(calls).toEqual(["adapter", "stream", "typed", "wildcard:subagent.completed"]);
+      const result = await emitted;
+      expect(result.serializedContext[SessionTitleKey.name]).toBe("Research event received");
+      expect(result.serializedContext[SessionKey.name]).toBeUndefined();
+      expect(ctx.require(ChannelKey).state).toEqual({ delivered: true });
+      expect(calls).toEqual([
+        "adapter",
+        "stream",
+        firstHandler,
+        ...(subscription === "both" ? ["wildcard"] : []),
+      ]);
     }
     expect(chunks).toHaveLength(1);
-    expect(new TextDecoder().decode(chunks[0])).toContain('"type":"subagent.completed"');
+    expect(new TextDecoder().decode(chunks[0])).toContain(`"type":"${event.type}"`);
     expect(stream.locked).toBe(false);
   },
 );

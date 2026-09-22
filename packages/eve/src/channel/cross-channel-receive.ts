@@ -9,7 +9,12 @@ import {
 } from "#channel/compiled-channel.js";
 import type { InferReceiveTarget } from "#channel/receive-target.js";
 import type { Session } from "#channel/session.js";
-import type { Runtime, SessionAuthContext, TurnPolicy } from "#channel/types.js";
+import type {
+  Runtime,
+  SessionAuthContext,
+  TurnPolicy,
+  TaskDeliveryPolicy,
+} from "#channel/types.js";
 import type { ResolvedChannelDefinition } from "#runtime/types.js";
 
 /**
@@ -18,6 +23,8 @@ import type { ResolvedChannelDefinition } from "#runtime/types.js";
 export interface CrossChannelSendOptions {
   readonly auth: SessionAuthContext | null;
   readonly turnPolicy?: TurnPolicy;
+  /** Updates the session policy; omission preserves it. New sessions default to auto, schedules to cohort. */
+  readonly taskDeliveryPolicy?: TaskDeliveryPolicy;
 }
 
 /** Message delivery bound to one channel-specific proactive target. */
@@ -89,6 +96,7 @@ export function createCrossChannelToFn(
             auth: options.auth,
           },
           turnPolicy: options.turnPolicy,
+          taskDeliveryPolicy: options.taskDeliveryPolicy,
           describeMissingReceive: () =>
             `ctx.to(): channel "${targetChannel.name}" does not implement receive(). ` +
             `Declare a receive hook on the channel to accept cross-channel sessions.`,
@@ -109,6 +117,7 @@ interface InvokeChannelReceiveInput {
     readonly auth: SessionAuthContext | null;
   };
   readonly turnPolicy?: TurnPolicy;
+  readonly taskDeliveryPolicy?: TaskDeliveryPolicy;
   readonly describeMissingReceive: () => string;
   readonly describeMissingAdapter: () => string;
 }
@@ -128,6 +137,7 @@ export async function invokeChannelReceive(args: InvokeChannelReceiveInput): Pro
     channelName: args.target.name,
     runtime: args.runtime,
     turnPolicy: args.turnPolicy ?? args.target.turnPolicy,
+    taskDeliveryPolicy: args.taskDeliveryPolicy,
   });
   return await args.target.receive(args.input, channelOperations);
 }

@@ -4,7 +4,7 @@ An [eve](https://eve.dev) and Next.js demo that sends one prompt to four models 
 
 The council uses:
 
-- xAI Grok 4.5
+- SpaceXAI Grok 4.7
 - Anthropic Claude Opus 5
 - OpenAI GPT-5.6 Sol
 - Moonshot AI Kimi K3

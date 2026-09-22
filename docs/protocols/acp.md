@@ -1,5 +1,5 @@
 ---
-title: "Agent Client Protocol (ACP)"
+title: "Editor Integration (ACP)"
 description: "Use local or deployed eve agents from Agent Client Protocol clients."
 ---
 

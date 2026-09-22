@@ -10,6 +10,7 @@ describe("session inbox payloads", () => {
     expect(
       decodeSessionInboxPayload({
         delivery: { deliveryId: "delivery-1" },
+        taskDeliveryPolicy: "cohort",
         kind: "send",
         payload: { message: "hello" },
       }),
@@ -22,6 +23,7 @@ describe("session inbox payloads", () => {
       requestId: undefined,
       taskDeliveryId: undefined,
       turnPolicy: undefined,
+      taskDeliveryPolicy: "cohort",
     });
   });
 

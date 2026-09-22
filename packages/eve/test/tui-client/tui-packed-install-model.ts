@@ -105,7 +105,7 @@ void (async () => {
     await Promise.all([
       writeFile(
         join(agentRoot, "agent.ts"),
-        'import { defineAgent } from "eve";\n\nexport default defineAgent({\n  model: "openai/gpt-5.6-luna-fast",\n});\n',
+        'import { defineAgent } from "eve";\n\nexport default defineAgent({\n  model: "spacexai/grok-4.7",\n});\n',
       ),
       writeFile(join(agentRoot, "instructions.md"), "Help Alice with her questions.\n"),
     ]);

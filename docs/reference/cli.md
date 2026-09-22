@@ -42,7 +42,7 @@ eve collects CLI telemetry by default to improve the command-line interface. Run
 ## `eve init`
 
 ```bash
-eve init [target] [--model <provider/model-id>] [--reasoning <effort>] [--channel-web-nextjs]
+eve init [target] [--model <provider/model-id>] [--reasoning <effort>] [--channel-web-nextjs] [--non-interactive]
 ```
 
 Creates a new agent app or adds an agent to an existing app. Always installs dependencies. New directories also initialize Git.
@@ -57,13 +57,14 @@ Creates a new agent app or adds an agent to an existing app. Always installs dep
 
 Existing packages do not need a target-selection prompt: run `eve init` from the project directory or `eve init path/to/app`. New projects in non-interactive environments need a new directory name, such as `eve init my-agent`.
 
-After scaffolding in an interactive human terminal, eve opens the TUI directly. Noninteractive and coding-agent invocations return without starting an interactive session. Fresh projects use the parent workspace's package manager when there is one; otherwise they use the manager that launched `eve init`.
+After scaffolding in an interactive human terminal, eve opens the TUI directly. Pass `-n` or `--non-interactive` to return after scaffolding instead. It still installs dependencies and follows the normal Git setup behavior. Noninteractive and coding-agent invocations return without starting an interactive session. Fresh projects use the parent workspace's package manager when there is one; otherwise they use the manager that launched `eve init`.
 
-| Flag                   | Type   | Default                    | Description                                                                                                              |
-| ---------------------- | ------ | -------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| `--model <model>`      | string | `openai/gpt-5.6-luna-fast` | Set the root agent's AI Gateway model ID.                                                                                |
-| `--reasoning <effort>` | enum   | provider default           | Set reasoning to `none`, `minimal`, `low`, `medium`, `high`, or `xhigh`. `provider-default` leaves the field unauthored. |
-| `--channel-web-nextjs` | flag   | off                        | Add the Web Chat app (Next.js). Not for existing projects — run `eve add channel/web` there instead.                     |
+| Flag                    | Type   | Default                    | Description                                                                                                              |
+| ----------------------- | ------ | -------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `--model <model>`       | string | `openai/gpt-5.6-luna-fast` | Set the root agent's AI Gateway model ID.                                                                                |
+| `--reasoning <effort>`  | enum   | provider default           | Set reasoning to `none`, `minimal`, `low`, `medium`, `high`, or `xhigh`. `provider-default` leaves the field unauthored. |
+| `--channel-web-nextjs`  | flag   | off                        | Add the Web Chat app (Next.js). Not for existing projects — run `eve add channel/web` there instead.                     |
+| `-n, --non-interactive` | flag   | off                        | Scaffold and install dependencies without starting development.                                                          |
 
 ## `eve extension`
 

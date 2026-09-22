@@ -1,0 +1,5 @@
+{
+  "title": "Sandbox",
+  "defaultOpen": false,
+  "pages": ["index", "default", "vercel", "docker", "microsandbox", "just-bash"]
+}

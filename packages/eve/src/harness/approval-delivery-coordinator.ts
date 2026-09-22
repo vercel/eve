@@ -165,9 +165,16 @@ export async function coordinateApprovalDelivery(input: {
     pendingRequestIds.has(settlement.requestId),
   );
   const settledRequestIds = new Set(audit.settlements.map((settlement) => settlement.requestId));
-  const discardedDuplicate = hasResponseForRequest(input.stepInput, settledRequestIds);
+  // A direct response settles its individual request before the whole batch
+  // resolves. Keep that response while its request is still pending so a
+  // later response can complete the batch; only discard responses for requests
+  // that have left pending input entirely.
+  const deduplicableSettledRequestIds = new Set(
+    [...settledRequestIds].filter((requestId) => !pendingRequestIds.has(requestId)),
+  );
+  const discardedDuplicate = hasResponseForRequest(input.stepInput, deduplicableSettledRequestIds);
   const deduplicatedInput = discardedDuplicate
-    ? removeConsumedResponses(input.stepInput, settledRequestIds)
+    ? removeConsumedResponses(input.stepInput, deduplicableSettledRequestIds)
     : input.stepInput;
   if (
     discardedDuplicate &&
@@ -506,11 +513,19 @@ function appendSettledResponses(
   settlements: readonly ApprovalSettlementAuditRecord[],
 ): StepInput | undefined {
   if (settlements.length === 0) return stepInput;
+  const existingRequestIds = new Set([
+    ...(stepInput?.inputResponses ?? []).map((response) => response.requestId),
+    ...(stepInput?.attributedInputResponses ?? []).map(({ response }) => response.requestId),
+  ]);
+  const missingSettlements = settlements.filter(
+    (settlement) => !existingRequestIds.has(settlement.requestId),
+  );
+  if (missingSettlements.length === 0) return stepInput;
   return {
     ...stepInput,
     inputResponses: [
       ...(stepInput?.inputResponses ?? []),
-      ...settlements.map((settlement) => ({
+      ...missingSettlements.map((settlement) => ({
         optionId: settlement.outcome === "allowed" ? "approve" : "cancel",
         requestId: settlement.requestId,
       })),

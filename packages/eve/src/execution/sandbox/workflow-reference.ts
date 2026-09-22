@@ -6,7 +6,7 @@ import type { HarnessSession } from "#harness/types.js";
 
 export type WorkflowSandboxReferenceData = Pick<
   EnsureSandboxAccessInput,
-  "compiledArtifactsSource" | "nodeId" | "sessionId" | "state" | "tags"
+  "compiledArtifactsSource" | "nodeId" | "sessionId" | "state"
 >;
 
 export async function captureWorkflowSandboxReference(input: {
@@ -17,6 +17,6 @@ export async function captureWorkflowSandboxReference(input: {
   if (resolved === undefined) throw new Error("The session has no sandbox runtime bundle.");
   const access = input.ctx.require(SandboxKey);
   await access.get();
-  const { compiledArtifactsSource, nodeId, sessionId, tags } = resolved;
-  return { compiledArtifactsSource, nodeId, sessionId, tags, state: await access.captureState() };
+  const { compiledArtifactsSource, nodeId, sessionId } = resolved;
+  return { compiledArtifactsSource, nodeId, sessionId, state: await access.captureState() };
 }

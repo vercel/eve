@@ -101,7 +101,7 @@ describe("stopDevelopmentSandboxResources", () => {
     expect(state.dockerCli.run).toHaveBeenCalledWith(["stop", "-t", "0", "docker-container"]);
     expect(state.microsandboxModule.Sandbox.listWith).toHaveBeenCalledWith({
       labels: {
-        "eve.backend": "microsandbox",
+        "eve.provider": "microsandbox",
         devRunId: "run-123",
       },
     });
@@ -144,7 +144,7 @@ describe("stopDevelopmentSandboxResources", () => {
     expect(state.loadMicrosandboxWithoutInstall).toHaveBeenCalledWith("/tmp/eve-test");
     expect(state.microsandboxModule.Sandbox.listWith).toHaveBeenCalledWith({
       labels: {
-        "eve.backend": "microsandbox",
+        "eve.provider": "microsandbox",
         devRunId: "run-123",
       },
     });

@@ -1,0 +1,17 @@
+export {
+  defineSandboxProvider,
+  type SandboxDeleteOptions,
+  type SandboxPreparedArtifact,
+  type SandboxProvider,
+  type SandboxProviderDefinition,
+  type SandboxProviderFiles,
+  type SandboxProviderHandle,
+  type SandboxProviderImplementation,
+  type SandboxProviderPrepareContext,
+  type SandboxProviderResourceFile,
+  type SandboxProviderResources,
+  type SandboxProviderResourceSource,
+  type SandboxProviderResourceTree,
+  type SandboxProviderSessionContext,
+  type SandboxProviderTargetFile,
+} from "#shared/sandbox-provider.js";

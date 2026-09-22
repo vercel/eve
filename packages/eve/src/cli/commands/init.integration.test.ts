@@ -360,6 +360,17 @@ describe("runInitCommand", () => {
     expect(deps.runPackageManagerInstall).toHaveBeenCalled();
   });
 
+  it("scaffolds without starting development when non-interactive", async () => {
+    const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-non-interactive-"));
+    const output = logger();
+    const deps = dependencies();
+
+    await runInitCommand(output, parentDirectory, "agent", { nonInteractive: true }, deps);
+
+    expect(deps.spawnPackageManager).not.toHaveBeenCalled();
+    expect(output.messages.join("\n")).toContain("pnpm exec eve dev --no-ui");
+  });
+
   it("creates an agent workspace from comma-separated names", async () => {
     const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-agents-"));
     const output = logger();
@@ -841,7 +852,7 @@ describe("runInitCommand", () => {
     const projectPath = join(appsDirectory, "my-agent");
     await expect(pathExists(join(projectPath, "pnpm-workspace.yaml"))).resolves.toBe(false);
     await expect(readFile(join(workspaceRoot, "pnpm-workspace.yaml"), "utf8")).resolves.toBe(
-      "minimumReleaseAgeStrict: false\npackages:\n  - apps/*\n\nallowBuilds:\n  sharp: false\n",
+      "minimumReleaseAgeStrict: false\npackages:\n  - apps/*\n\nallowBuilds:\n  esbuild: true\n  sharp: false\n",
     );
     const projectPackageJson = JSON.parse(
       await readFile(join(projectPath, "package.json"), "utf8"),
@@ -890,7 +901,7 @@ describe("runInitCommand", () => {
     const projectPath = join(agentsDirectory, "my-agent");
     await expect(pathExists(join(projectPath, "pnpm-workspace.yaml"))).resolves.toBe(false);
     await expect(readFile(join(workspaceRoot, "pnpm-workspace.yaml"), "utf8")).resolves.toBe(
-      "packages:\n  - apps/*\n  - agents/*\n\nallowBuilds:\n  sharp: false\n",
+      "packages:\n  - apps/*\n  - agents/*\n\nallowBuilds:\n  esbuild: true\n  sharp: false\n",
     );
     const projectPackageJson = JSON.parse(
       await readFile(join(projectPath, "package.json"), "utf8"),
@@ -932,7 +943,7 @@ describe("runInitCommand", () => {
     await expect(pathExists(join(projectPath, "app/page.tsx"))).resolves.toBe(true);
     await expect(pathExists(join(projectPath, "pnpm-workspace.yaml"))).resolves.toBe(false);
     await expect(readFile(join(workspaceRoot, "pnpm-workspace.yaml"), "utf8")).resolves.toBe(
-      "packages:\n  - apps/*\n  - agents/*\n\nallowBuilds:\n  sharp: false\n",
+      "packages:\n  - apps/*\n  - agents/*\n\nallowBuilds:\n  esbuild: true\n  sharp: false\n",
     );
     const projectPackageJson = JSON.parse(
       await readFile(join(projectPath, "package.json"), "utf8"),

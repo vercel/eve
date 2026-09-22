@@ -423,7 +423,9 @@ export interface JudgeContext {
  * Scoped assertions (`succeeded`, `calledTool`, …) record an entry evaluated
  * after the test body; `check`, `require`, and `judge` evaluate explicit values.
  */
-export interface EveEvalContext extends EveEvalAssertions {
+export interface EveEvalContext<TContext = unknown> extends EveEvalAssertions {
+  /** Run-wide setup context, shared by reference across evals and teardown. */
+  readonly context: TContext;
   /** Eval timeout signal. */
   readonly signal: AbortSignal;
   /** Current target under test. */
@@ -543,9 +545,9 @@ export interface EveEvalInputFields extends EveEvalBase {
  * drives the agent and asserts on what it produced. Eval identity is derived
  * from the file path, so authors do not specify an `id` or `name`.
  */
-export interface EveEvalInput extends EveEvalBase {
+export interface EveEvalInput<TContext = unknown> extends EveEvalBase {
   /** Imperative interaction-and-assertion script. */
-  test(t: EveEvalContext): void | Promise<void>;
+  test(t: EveEvalContext<TContext>): void | Promise<void>;
 }
 
 /**
@@ -554,7 +556,7 @@ export interface EveEvalInput extends EveEvalBase {
  * `_tag` literal (`"EveEval"`) brands the value so discovery and the runner
  * can recognize a defined eval.
  */
-export type EveEvalDefinition = EveEvalInput & {
+export type EveEvalDefinition<TContext = unknown> = EveEvalInput<TContext> & {
   readonly _tag: "EveEval";
 };
 
@@ -629,7 +631,19 @@ export interface EveEvalRunSummary {
  * Exactly one `evals.config.ts` is required at the root of the `evals/`
  * directory; it supplies the defaults every eval in the run shares.
  */
-export interface EveEvalConfigInput {
+export interface EveEvalConfigInput<TContext = unknown> {
+  /**
+   * Runs once before target startup, except for `--list` or an empty selection.
+   * The return value is shared with evals and teardown by reference in the runner process.
+   */
+  readonly setup?: () => TContext | Promise<TContext>;
+  /**
+   * Runs once after server and sandbox shutdown, even if setup or eval execution fails.
+   * Receives undefined if setup returns no context or throws before returning.
+   * Can be used without setup.
+   * Does not run for `--list` or an empty selection.
+   */
+  teardown?(context: TContext | undefined): void | Promise<void>;
   /**
    * Default judge model for `t.judge(...)` assertions across every eval.
    * Optional: omission uses the shared evaluation default. Individual evals
@@ -658,6 +672,11 @@ export interface EveEvalConfigInput {
  * Validated eval run configuration returned by `defineEvalConfig()`. The
  * `_tag` literal brands the value so discovery can recognize it.
  */
-export type EveEvalConfig = EveEvalConfigInput & {
+export type EveEvalConfig<TContext = unknown> = EveEvalConfigInput<TContext> & {
   readonly _tag: "EveEvalConfig";
 };
+
+/** Setup context type associated with an authored eval config. */
+export type EveEvalConfigContext<TConfig extends EveEvalConfig> = Awaited<
+  ReturnType<NonNullable<TConfig["setup"]>>
+>;

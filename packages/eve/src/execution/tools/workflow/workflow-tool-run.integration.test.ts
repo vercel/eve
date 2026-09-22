@@ -542,7 +542,6 @@ describe("workflow tools", () => {
                     await sandbox.writeTextFile({ path: "shared.txt", content: "regular" });
                   }
                   return {
-                    id: sandbox.id,
                     content: await sandbox.readTextFile({ path: "shared.txt" }),
                   };
                 },
@@ -566,10 +565,15 @@ describe("workflow tools", () => {
         const bundle = await getCompiledRuntimeAgentBundle({
           compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
         });
-        const initialized = vi.fn(async () => {});
-        Object.assign(bundle.graph.root.sandboxRegistry.sandbox!.definition, {
-          onSession: initialized,
+        const definition = bundle.graph.root.sandboxRegistry.sandbox!.definition;
+        if (definition.kind !== "independent") throw new Error("Expected independent sandbox");
+        const selector = definition.selector;
+        const initialized = vi.fn(async (context: Parameters<typeof selector>[0]) => {
+          const sandbox = await selector(context);
+          await sandbox.writeTextFile({ path: "initialization.txt", content: context.session.id });
+          return sandbox;
         });
+        Object.assign(definition, { selector: initialized });
         const run = await start(workflowEntry, [
           {
             kind: "initial",
@@ -650,10 +654,15 @@ describe("workflow tools", () => {
         const bundle = await getCompiledRuntimeAgentBundle({
           compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
         });
-        const initialized = vi.fn(async () => {});
-        Object.assign(bundle.graph.root.sandboxRegistry.sandbox!.definition, {
-          onSession: initialized,
+        const definition = bundle.graph.root.sandboxRegistry.sandbox!.definition;
+        if (definition.kind !== "independent") throw new Error("Expected independent sandbox");
+        const selector = definition.selector;
+        const initialized = vi.fn(async (context: Parameters<typeof selector>[0]) => {
+          const sandbox = await selector(context);
+          await sandbox.writeTextFile({ path: "initialization.txt", content: context.session.id });
+          return sandbox;
         });
+        Object.assign(definition, { selector: initialized });
         const run = await start(workflowEntry, [
           {
             kind: "initial",
@@ -694,7 +703,7 @@ describe("workflow tools", () => {
         compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
       });
       Object.assign(bundle.graph.root.sandboxRegistry.sandbox!.definition, {
-        onSession: async () => {
+        selector: async () => {
           throw new Error("initialization failed");
         },
       });

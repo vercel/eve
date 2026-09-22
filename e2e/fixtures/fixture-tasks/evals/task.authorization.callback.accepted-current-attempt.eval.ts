@@ -27,7 +27,7 @@ export default defineTaskEval({
     dimensions: { transport: "local" },
   },
   async test(t) {
-    const started = await t.send("TASK-C7-AUTHORIZATION");
+    const started = await t.send("TASK-C7-AUTHORIZATION", { taskDeliveryPolicy: "cohort" });
     started.expectOk();
     started.messageIncludes("TASK-C7-STARTED");
     started.event("action.result", {

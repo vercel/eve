@@ -226,7 +226,7 @@ async function appendSharedSandboxStep(ctx: WorkflowToolContext) {
   const previous = await sandbox.readTextFile({ path: "shared.txt" });
   const content = `${previous}|workflow`;
   await sandbox.writeTextFile({ path: "shared.txt", content });
-  return { id: sandbox.id, content };
+  return { content };
 }
 
 export async function recoverSandboxFailureWorkflow(_input: DeployInput, ctx: WorkflowToolContext) {
@@ -249,7 +249,7 @@ export async function concurrentSandboxWorkflow(input: DeployInput, ctx: Workflo
   const identities = await Promise.all([sandboxIdentityStep(ctx), sandboxIdentityStep(ctx)]);
   const retried = await retrySandboxStep(ctx);
   return {
-    sameSandbox: identities.every((id) => id === retried.id),
+    sameSandbox: retried.marker !== null && identities.every((marker) => marker === retried.marker),
     attempt: retried.attempt,
     service: input.service,
   };
@@ -257,7 +257,7 @@ export async function concurrentSandboxWorkflow(input: DeployInput, ctx: Workflo
 
 async function sandboxIdentityStep(ctx: WorkflowToolContext) {
   "use step";
-  return (await ctx.getSandbox()).id;
+  return (await ctx.getSandbox()).readTextFile({ path: "initialization.txt" });
 }
 
 async function retrySandboxStep(ctx: WorkflowToolContext) {
@@ -265,7 +265,7 @@ async function retrySandboxStep(ctx: WorkflowToolContext) {
   const sandbox = await ctx.getSandbox();
   const { attempt } = getStepMetadata();
   if (attempt === 1) throw new Error("Retry after accessing the sandbox.");
-  return { id: sandbox.id, attempt };
+  return { marker: await sandbox.readTextFile({ path: "initialization.txt" }), attempt };
 }
 
 export async function sandboxFromWorkflowBodyWorkflow(

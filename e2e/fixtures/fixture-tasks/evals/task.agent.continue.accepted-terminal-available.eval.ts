@@ -19,7 +19,7 @@ export default defineTaskEval({
   },
   async test(t) {
     t.log("starting first task");
-    const setup = await t.send("TASK-CONTINUATION-HITL-SETUP");
+    const setup = await t.send("TASK-CONTINUATION-HITL-SETUP", { taskDeliveryPolicy: "cohort" });
     setup.expectOk();
     const firstTaskId = requireBackgroundTaskId(setup);
 

@@ -85,6 +85,7 @@ const buildNitroMock = vi.fn(async (nitro: Nitro) => {
 const copyPublicAssetsMock = vi.fn(async () => undefined);
 const createProductionApplicationNitroMock = vi.fn();
 const prepareProductionApplicationHostMock = vi.fn();
+const refreshProductionCompiledArtifactsMock = vi.fn(async () => undefined);
 const prepareMock = vi.fn(async () => undefined);
 const prerenderMock = vi.fn(async () => undefined);
 const resolveDiscoveryProjectMock = vi.fn(async (appRoot: string) => ({
@@ -92,6 +93,7 @@ const resolveDiscoveryProjectMock = vi.fn(async (appRoot: string) => ({
   appRoot,
   layout: "nested" as const,
 }));
+const prewarmAppSandboxesMock = vi.fn(async () => undefined);
 const runVercelBuildPrewarmMock = vi.fn(async () => undefined);
 
 vi.mock("nitro/builder", () => ({
@@ -107,6 +109,7 @@ vi.mock("./create-application-nitro.js", () => ({
 
 vi.mock("./prepare-application-host.js", () => ({
   prepareProductionApplicationHost: prepareProductionApplicationHostMock,
+  refreshProductionCompiledArtifacts: refreshProductionCompiledArtifactsMock,
 }));
 
 vi.mock("#discover/project.js", () => ({
@@ -115,6 +118,10 @@ vi.mock("#discover/project.js", () => ({
 
 vi.mock("./vercel-build-prewarm.js", () => ({
   runVercelBuildPrewarm: runVercelBuildPrewarmMock,
+}));
+
+vi.mock("#execution/sandbox/prewarm.js", () => ({
+  prewarmAppSandboxes: prewarmAppSandboxesMock,
 }));
 
 const createScratchDirectory = useTemporaryDirectories();
@@ -232,6 +239,21 @@ describe("buildApplication", () => {
       )}\n`,
     );
     expect(runVercelBuildPrewarmMock).not.toHaveBeenCalled();
+    expect(prewarmAppSandboxesMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        appRoot,
+        compiledArtifactsSource: expect.objectContaining({
+          kind: "disk",
+          sandboxAppRoot: appRoot,
+        }),
+      }),
+    );
+    expect(prewarmAppSandboxesMock.mock.invocationCallOrder[0]).toBeLessThan(
+      refreshProductionCompiledArtifactsMock.mock.invocationCallOrder[0]!,
+    );
+    expect(refreshProductionCompiledArtifactsMock.mock.invocationCallOrder[0]).toBeLessThan(
+      buildNitroMock.mock.invocationCallOrder[0]!,
+    );
     await expect(
       readFile(join(appRoot, ".eve", "compile", "compiled-agent-manifest.json"), "utf8"),
     ).rejects.toThrow();
@@ -545,6 +567,7 @@ describe("buildApplication", () => {
 
     expect(outputDir).toBe(join(appRoot, ".vercel", "output"));
     expect(runVercelBuildPrewarmMock).not.toHaveBeenCalled();
+    expect(prewarmAppSandboxesMock).not.toHaveBeenCalled();
     expect(buildNitroMock).toHaveBeenCalledTimes(1);
   });
 

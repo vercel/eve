@@ -52,7 +52,7 @@ export interface SubagentSandboxGraph {
     {
       readonly sandboxRegistry: {
         readonly sandbox: {
-          readonly definition: { readonly inheritsParent?: boolean };
+          readonly definition: { readonly kind: "independent" | "parent" };
         } | null;
       };
     }
@@ -123,10 +123,10 @@ export function buildSubagentRunInput(input: {
     subagentName: action.subagentName,
   };
   if (input.taskId !== undefined) adapterState.taskId = input.taskId;
-  const sharesSandbox =
-    input.graph?.nodesByNodeId.get(action.nodeId)?.sandboxRegistry.sandbox?.definition
-      .inheritsParent === true || input.selfAgent;
-  if (sharesSandbox) {
+  const reusesOwnerSandbox =
+    input.graph?.nodesByNodeId.get(action.nodeId)?.sandboxRegistry.sandbox?.definition.kind ===
+      "parent" || input.selfAgent;
+  if (reusesOwnerSandbox) {
     if (session.sandboxState !== undefined) {
       adapterState.parentSandboxState = session.sandboxState;
     }

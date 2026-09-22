@@ -1,7 +1,7 @@
 ---
 issue: https://github.com/vercel/eve/issues/3201
 status: implemented
-last_updated: "2026-09-21"
+last_updated: "2026-09-22"
 ---
 
 # Sandbox access in workflow steps
@@ -21,7 +21,7 @@ Use `defineWorkflowTool({ execute })` and pass `ctx` directly to a `"use step"` 
 - A durable response stream keyed by the requesting step lets retries reuse the response. Concurrent steps are initialized through the owning session so they share its initialization state. This adds an owner round trip on first access in each step.
 - Each workflow step binds a lazy `SandboxAccess` under `SandboxKey` and uses the existing tool getter and cancellation wrapper. Calls in one step share access; later steps reconstruct it from the session's saved state.
 - Steps cannot stop or delete the shared sandbox. They consume or kill spawned processes before returning and return serializable results, never live handles or streams.
-- Sandbox expiration and backend failures retain the backend's existing recovery behavior; this change adds no new persistence guarantees.
+- After the sandbox provider redesign in #3271, steps resume immutable provider session state. Missing native state and provider resume failures propagate; this change adds no new persistence guarantees.
 
 ## Validation
 

@@ -19,6 +19,8 @@ export interface RunEvalsOptions {
   readonly evaluations: readonly EveEval[];
   /** Run-wide configuration from `evals.config.ts` (defaults shared by every eval). */
   readonly config: EveEvalConfig;
+  /** Shared setup context; stays in the runner process. */
+  readonly setupContext?: unknown;
   readonly target: EveEvalTargetHandle;
   readonly client: Client;
   readonly appRoot: string;
@@ -118,6 +120,7 @@ export async function runEvals(options: RunEvalsOptions): Promise<EveEvalRunSumm
         const result = await executeEval({
           client,
           evaluation,
+          setupContext: options.setupContext,
           onLog:
             options.onEvalLog === undefined
               ? undefined

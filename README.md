@@ -93,7 +93,7 @@ Choose the model in `agent/agent.ts`:
 import { defineAgent } from "eve";
 
 export default defineAgent({
-  model: "openai/gpt-5.6-luna-fast",
+  model: "spacexai/grok-4.7",
 });
 ```
 

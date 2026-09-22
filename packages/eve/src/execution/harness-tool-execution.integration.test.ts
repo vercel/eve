@@ -184,17 +184,16 @@ describe("authored tool execution", () => {
         const live = await ctx.getSandbox();
         await live.writeTextFile({ content: "sandbox-note", path: "note.txt" });
         const content = await live.readTextFile({ path: "note.txt" });
-        return { content, id: live.id };
+        return { content };
       },
     });
     const runtime = await createTestRuntime({ tools: [sandboxTool] });
 
     const result = (await runtime.runAsSession({ sandbox }, async () =>
       runtime.executeTool(sandboxTool, {}),
-    )) as { content: string; id: string };
+    )) as { content: string };
 
     expect(result.content).toBe("sandbox-note");
-    expect(result.id).toBe("sbx_tool");
     expect(sandbox.files.get("/workspace/note.txt")).toBe("sandbox-note");
   });
 

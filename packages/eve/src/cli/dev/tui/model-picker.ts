@@ -37,6 +37,7 @@ export type ModelPickerEvent =
   | { type: "cancel" }
   | { type: "submit" }
   | { type: "backspace" }
+  | { type: "delete-word-backward" }
   | { type: "char"; char: string };
 
 export type ModelPickerTransition =
@@ -221,7 +222,7 @@ export function transitionModelPicker(
   if (event.type !== "submit") {
     if (
       (state.step !== "model" || request.model.kind !== "pick") &&
-      (event.type === "char" || event.type === "backspace")
+      (event.type === "char" || event.type === "backspace" || event.type === "delete-word-backward")
     ) {
       return { kind: "render", state };
     }

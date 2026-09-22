@@ -86,6 +86,10 @@ handle can also automatically resume on later I/O. A hook failure, including a
 failed stop, follows the normal
 [hook failure behavior](#what-happens-when-a-hook-throws).
 
+For `subagent.called` and `subagent.completed`, `ctx.session.id` identifies the
+parent session. Typed handlers and `*` handlers receive this context even when
+the subagent event arrives between parent turns.
+
 ### Narrowing tool results
 
 `toolResultFrom` narrows an `action.result` event to a specific authored tool or MCP connection and returns typed output. Import it from `eve/tools`:

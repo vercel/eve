@@ -104,7 +104,7 @@ function collectNavReferences(rootDir) {
           : entry.startsWith("...")
             ? entry.slice(3)
             : entry;
-        const key = relDir ? `${relDir}/${slug}` : slug;
+        const key = relative(rootDir, resolve(dir, slug)).split("\\").join("/");
         result.explicit.add(key);
       }
     } else if (dir !== rootDir) {

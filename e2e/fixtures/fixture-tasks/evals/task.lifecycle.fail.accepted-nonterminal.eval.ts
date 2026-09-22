@@ -15,7 +15,7 @@ export default defineTaskEval({
     dimensions: { transport: "local" },
   },
   async test(t) {
-    const started = await t.send("TASK-A2-CHILD-FAILURE");
+    const started = await t.send("TASK-A2-CHILD-FAILURE", { taskDeliveryPolicy: "cohort" });
     started.expectOk();
     started.messageIncludes("TASK-A2-CHILD-FAILURE-STARTED");
     started.event("action.result", {

@@ -126,6 +126,10 @@ function editSetupSelect(input: SetupSelectInputState): SetupSelectInputResult {
       return isSearchableSelect(input)
         ? updatedSelect(input, { type: "backspace" })
         : { kind: "ignore" };
+    case "alt-backspace":
+      return isSearchableSelect(input)
+        ? updatedSelect(input, { type: "delete-word-backward" })
+        : { kind: "ignore" };
     case "text": {
       if (input.key.framing === "unframed" && isMultiSelect(input) && input.key.value === " ") {
         return updatedSelect(input, { type: "toggle" });

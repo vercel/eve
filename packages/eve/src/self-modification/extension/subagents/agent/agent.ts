@@ -9,6 +9,7 @@ import {
 } from "eve";
 
 import { DEFAULT_AGENT_MODEL_ID } from "#shared/default-agent-model.js";
+import { getLocalDevCapability } from "eve/local-dev";
 
 import selfModification from "../../extension.js";
 import { resolveSelfModificationConfig, type SelfModificationConfig } from "../../../config.js";
@@ -90,7 +91,10 @@ export function defineSelfModificationAgent(
       repairDelegation,
       mode === "local" ? localEffectiveEdits : deployedEffectiveEdits,
     ]);
-    if (mode === "local") return defineAgent({ description, model, reasoning });
+    if (mode === "local") {
+      if (getLocalDevCapability() === undefined) return null;
+      return defineAgent({ description, model, reasoning });
+    }
     if (mode !== "deployed" || config.deployed === undefined) return null;
     if (config.deployed.credentials.kind === "pat" && !hasGitHubCredential()) return null;
     try {

@@ -35,9 +35,7 @@ export function createWorkflowSandboxAccess(input: {
       return (await (access ??= open())).get();
     },
     async captureState() {
-      return access === undefined
-        ? { initialized: false, session: null }
-        : (await access).captureState();
+      return access === undefined ? { session: null } : (await access).captureState();
     },
     async delete() {
       throw new Error("sandbox.delete() is not available inside a defineWorkflowTool() step.");

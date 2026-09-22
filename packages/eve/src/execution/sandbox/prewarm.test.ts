@@ -1,19 +1,19 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { prewarmAppSandboxes } from "#execution/sandbox/prewarm.js";
-import type {
-  SandboxBackend,
-  SandboxBackendPrewarmInput,
-  SandboxBackendPrewarmResult,
-} from "#public/definitions/sandbox-backend.js";
+import {
+  prewarmAppSandboxes,
+  type SandboxPreparedArtifactStore,
+} from "#execution/sandbox/prewarm.js";
+import {
+  defineSandboxProvider,
+  type SandboxProviderPrepareContext,
+} from "#shared/sandbox-provider.js";
 import { createDiskRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { ROOT_RUNTIME_AGENT_NODE_ID, type ResolvedAgentGraphBundle } from "#runtime/graph.js";
 import type { ResolvedSandboxDefinition } from "#runtime/types.js";
+import { defineSandbox } from "#public/definitions/sandbox.js";
+import { resolveSandboxCacheDirectory } from "#internal/application/paths.js";
 
-vi.mock("#execution/sandbox/template-prewarm-lock.js", () => ({
-  withSandboxTemplatePrewarmLock: async (_input: unknown, callback: () => Promise<unknown>) =>
-    await callback(),
-}));
 const mocks = vi.hoisted(() => ({
   materializeWorkspaceDirectory: vi.fn<
     (path: string) => Promise<readonly { readonly content: Buffer; readonly path: string }[]>
@@ -35,8 +35,8 @@ describe("prewarmAppSandboxes", () => {
     const appRoot = process.cwd();
     const firstSnapshotRoot = `${appRoot}/.eve/dev-runtime/snapshots/one/app`;
     const secondSnapshotRoot = `${appRoot}/.eve/dev-runtime/snapshots/two/app`;
-    const firstInputs: SandboxBackendPrewarmInput[] = [];
-    const secondInputs: SandboxBackendPrewarmInput[] = [];
+    const firstInputs: SandboxProviderPrepareContext[] = [];
+    const secondInputs: SandboxProviderPrepareContext[] = [];
     const workspaceResourceRoot = {
       contentHash: "workspace-content-hash",
       logicalPath: "empty-resource-root",
@@ -51,6 +51,7 @@ describe("prewarmAppSandboxes", () => {
       }),
       dispatch: recordPrewarmInputs(firstInputs),
       loadAgentGraph: async () => createGraph({ workspaceResourceRoot }),
+      preparedArtifactStore: createMemoryArtifactStore(),
     });
     await prewarmAppSandboxes({
       appRoot,
@@ -60,42 +61,24 @@ describe("prewarmAppSandboxes", () => {
       }),
       dispatch: recordPrewarmInputs(secondInputs),
       loadAgentGraph: async () => createGraph({ workspaceResourceRoot }),
+      preparedArtifactStore: createMemoryArtifactStore(),
     });
 
     expect(firstInputs).toHaveLength(1);
     expect(secondInputs).toHaveLength(1);
-    expect(firstInputs[0]?.runtimeContext.appRoot).toBe(appRoot);
-    expect(secondInputs[0]?.runtimeContext.appRoot).toBe(appRoot);
-    expect(firstInputs[0]?.templateKey).toBe(secondInputs[0]?.templateKey);
-  });
-
-  it("skips backend prewarm when the sandbox signature is already warm", async () => {
-    const appRoot = process.cwd();
-    const inputs: SandboxBackendPrewarmInput[] = [];
-    const signatures: string[] = [];
-
-    await prewarmAppSandboxes({
-      appRoot,
-      compiledArtifactsSource: createDiskRuntimeCompiledArtifactsSource(appRoot),
-      dispatch: recordPrewarmInputs(inputs),
-      loadAgentGraph: async () => createGraph(),
-      shouldPrewarmSignature: (signature) => {
-        signatures.push(signature);
-        return false;
-      },
-    });
-
-    expect(inputs).toHaveLength(0);
-    expect(signatures).toHaveLength(1);
+    expect(firstInputs[0]?.storagePath).toBe(resolveSandboxCacheDirectory(appRoot));
+    expect(secondInputs[0]?.storagePath).toBe(resolveSandboxCacheDirectory(appRoot));
+    expect(firstInputs[0]?.sourceRevision).toBe("sandbox-source-hash");
+    expect(secondInputs[0]?.sourceRevision).toBe("sandbox-source-hash");
   });
 
   it.each(["docker", "microsandbox"])(
     "explains that %s is unavailable during Vercel prewarm",
-    async (backendName) => {
+    async (providerName) => {
       vi.stubEnv("VERCEL", "1");
 
       const appRoot = process.cwd();
-      const cause = new Error("backend host check failed");
+      const cause = new Error("provider host check failed");
       const log = vi.fn();
 
       await expect(
@@ -105,13 +88,13 @@ describe("prewarmAppSandboxes", () => {
           dispatch: async () => {
             throw cause;
           },
-          loadAgentGraph: async () => createGraph({ backendName }),
+          loadAgentGraph: async () => createGraph({ providerName }),
           log,
         }),
       ).rejects.toMatchObject({
         cause,
         message: expect.stringContaining(
-          `The ${backendName} sandbox backend is not available when deploying on Vercel.`,
+          `The ${providerName} sandbox provider is not available when deploying on Vercel.`,
         ),
       });
 
@@ -119,32 +102,31 @@ describe("prewarmAppSandboxes", () => {
       expect(messages).toEqual([
         "eve: initializing 1 sandbox template...",
         expect.stringContaining(
-          `The ${backendName} sandbox backend is not available when deploying on Vercel.`,
+          `The ${providerName} sandbox provider is not available when deploying on Vercel.`,
         ),
       ]);
-      expect(messages[1]).toContain("Use defaultBackend()");
-      expect(messages[1]).toContain("Vercel-compatible backend explicitly, such as vercel()");
+      expect(messages[1]).toContain("Use DefaultSandbox.environment()");
+      expect(messages[1]).toContain("VercelSandbox.environment() explicitly");
       expect(messages[1]).toContain("Original");
       expect(messages[1]).toContain(cause.message);
     },
   );
 });
 
-function recordPrewarmInputs(inputs: SandboxBackendPrewarmInput[]) {
-  return async ({
-    input,
-  }: {
-    backend: SandboxBackend;
-    input: SandboxBackendPrewarmInput;
-  }): Promise<SandboxBackendPrewarmResult> => {
-    inputs.push(input);
-    return { reused: true };
+function createMemoryArtifactStore(): SandboxPreparedArtifactStore {
+  return { async write() {} };
+}
+
+function recordPrewarmInputs(inputs: SandboxProviderPrepareContext[]) {
+  return async ({ context }: { context: SandboxProviderPrepareContext }) => {
+    inputs.push(context);
+    return null;
   };
 }
 
 function createGraph(
   input: {
-    readonly backendName?: string;
+    readonly providerName?: string;
     readonly workspaceResourceRoot?: {
       readonly contentHash?: string;
       readonly logicalPath: string;
@@ -152,25 +134,32 @@ function createGraph(
     };
   } = {},
 ): ResolvedAgentGraphBundle {
-  const backend: SandboxBackend = {
-    async create() {
-      throw new Error("Unexpected create call.");
-    },
-    name: input.backendName ?? "test",
-    async prewarm() {
-      return { reused: true };
-    },
-  };
+  const provider = defineSandboxProvider({
+    name: input.providerName ?? "test",
+    environment: () => ({
+      async prepare() {
+        return null;
+      },
+      async resume() {
+        throw new Error("Unexpected resume call.");
+      },
+      async start() {
+        throw new Error("Unexpected start call.");
+      },
+    }),
+  });
+  const environment = provider.environment();
   const definition: ResolvedSandboxDefinition = {
-    async bootstrap() {},
-    backend,
+    environment,
+    kind: "independent",
     logicalPath: "agent/sandbox/sandbox.ts",
-    revalidationKey: "stable-bootstrap",
-    sourceHash: "sandbox-source-hash",
+    selector: defineSandbox(() => environment.open()),
+    revisionHash: "sandbox-source-hash",
     sourceId: "agent/sandbox/sandbox",
     sourceKind: "module",
   };
   const root = {
+    agent: { metadata: { agentRoot: process.cwd(), appRoot: process.cwd() } },
     nodeId: ROOT_RUNTIME_AGENT_NODE_ID,
     sandboxRegistry: {
       sandbox: {

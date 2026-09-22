@@ -13,7 +13,7 @@ import {
 } from "#compiler/source-graph.js";
 import type { CompiledBindingNamespaceLoader } from "#compiler/load-binding-namespace.js";
 
-const SANDBOX_PARENT_DEFINITION_MARKER = Symbol.for("eve.sandbox-parent-definition");
+const SANDBOX_SELECTOR_MARKER = Symbol.for("eve.sandbox-selector");
 
 /**
  * Shared compile-time context threaded through every per-primitive
@@ -74,12 +74,12 @@ export async function loadModuleBackedDefinition(input: {
   const moduleNamespace = await input.loadNamespace(input.source.sourceId);
   const exportValue = getAuthoredModuleExport(moduleNamespace, input.source);
 
-  // defineSandbox marks parent selectors so they remain distinguishable from
-  // zero-argument module factories without relying on JavaScript function arity.
+  // Sandbox selectors execute only when a runtime session opens its environment.
+  // Keep them distinguishable from zero-argument definition factories at compile time.
   if (
     input.kind === "sandbox" &&
     typeof exportValue === "function" &&
-    Reflect.get(exportValue, SANDBOX_PARENT_DEFINITION_MARKER) === true
+    Reflect.get(exportValue, SANDBOX_SELECTOR_MARKER) === true
   ) {
     return exportValue;
   }
@@ -89,7 +89,7 @@ export async function loadModuleBackedDefinition(input: {
   } catch (error) {
     if (input.kind === "sandbox" && typeof exportValue === "function") {
       throw new Error(
-        `Failed to execute the sandbox export "${input.source.exportName ?? "default"}" from "${input.displayPath ?? input.source.logicalPath}" as a zero-argument definition factory. Parent-sharing callbacks must be passed to defineSandbox(...): ${toErrorMessage(error)}`,
+        `Failed to execute the sandbox export "${input.source.exportName ?? "default"}" from "${input.displayPath ?? input.source.logicalPath}" as a zero-argument definition factory. Runtime selectors must be passed to defineSandbox(...): ${toErrorMessage(error)}`,
       );
     }
     throw new Error(

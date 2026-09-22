@@ -2,13 +2,6 @@ import type { CompiledWorkspaceResourceRoot } from "#compiler/manifest.js";
 import type { ResolvedSandboxDefinition } from "#runtime/types.js";
 
 /**
- * Stable internal source id for the framework-owned default sandbox.
- *
- * Used by the runtime template/session key derivation and by prewarm
- * to distinguish the shared framework sandbox from per-node authored
- * overrides.
- */
-/**
  * Resolved sandbox tracked by the runtime-owned registry.
  *
  * The sandbox does not generate model-visible tools automatically. The
@@ -18,8 +11,8 @@ import type { ResolvedSandboxDefinition } from "#runtime/types.js";
  * compiled workspace resource tree owned by this graph node. The
  * prewarm orchestrator resolves the descriptor's logical path against
  * the active compiled artifacts source and writes the contents into
- * the sandbox template snapshot. Runtime `backend.create(...)` never
- * reads these files.
+ * the sandbox template artifact. Runtime provider `open(...)` never reads these
+ * files.
  */
 export interface RuntimeRegisteredSandbox {
   readonly definition: ResolvedSandboxDefinition;
@@ -54,7 +47,7 @@ export function createRuntimeSandboxRegistry(input: {
 }): RuntimeSandboxRegistry {
   const definition = input.sandbox;
   if (
-    definition.inheritsParent === true &&
+    definition.kind === "parent" &&
     (input.workspaceResourceRoot.contentHash !== undefined ||
       input.workspaceResourceRoot.rootEntries.length > 0)
   ) {

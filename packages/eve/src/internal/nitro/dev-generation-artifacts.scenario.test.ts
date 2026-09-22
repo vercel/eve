@@ -292,13 +292,11 @@ describe("development generation artifacts", () => {
       }
 
       const sandbox = modules[child.agent.sandbox.sourceId] as {
-        defineSelfModificationSandbox(options: { backend: { name: string } }): {
-          backend(): { name: string };
-        };
+        defineSelfModificationSandbox(): Function;
       };
-      const backend = { name: "disabled-local-test" };
-      // Local mode ignores this backend and installs the writable host filesystem instead.
-      expect(sandbox.defineSelfModificationSandbox({ backend }).backend()).toBe(backend);
+      const selector = await sandbox.defineSelfModificationSandbox();
+      expect(selector).toBeTypeOf("function");
+      expect("backend" in selector).toBe(false);
     } finally {
       if (previousDev === undefined) delete process.env.EVE_DEV;
       else process.env.EVE_DEV = previousDev;

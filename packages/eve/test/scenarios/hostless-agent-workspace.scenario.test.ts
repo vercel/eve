@@ -25,7 +25,7 @@ describe("hostless agent workspace", () => {
             projectId: "prj_eve_collection_scenario",
             projectName: "hostless-agent-workspace",
             settings: {
-              buildCommand: "pnpm exec eve build",
+              buildCommand: "pnpm exec eve build --skip-sandbox-prewarm",
               framework: null,
               outputDirectory: null,
               rootDirectory: null,
@@ -40,7 +40,15 @@ describe("hostless agent workspace", () => {
       installDependencies: true,
       name: "hostless-agent-workspace",
     });
-    await runPnpmCommand({ args: ["exec", "vercel", "build", "--yes"], cwd: app.appRoot });
+    await runPnpmCommand({
+      args: [
+        "exec",
+        "vercel",
+        "build",
+        "--yes",
+      ],
+      cwd: app.appRoot,
+    });
 
     const outputRoot = join(app.appRoot, ".vercel", "output");
     const config = JSON.parse(await readFile(join(outputRoot, "config.json"), "utf8"));

@@ -107,11 +107,12 @@ describe("workflow step authorization", () => {
       contextStorage.getStore()!.setVirtualContext(SandboxKey, sandbox.access);
       const first = await ctx.getSandbox();
       const second = await ctx.getSandbox();
-      expect(second.id).toBe(first.id);
+      await first.writeTextFile({ path: "shared.txt", content: "ready" });
+      expect(await second.readTextFile({ path: "shared.txt" })).toBe("ready");
       await first.run({ command: "echo ready" });
-      return first.id;
+      return "ready";
     }, input);
-    expect(result).toMatchObject({ kind: "result", output: sandbox.session.id });
+    expect(result).toMatchObject({ kind: "result", output: "ready" });
     const signal = run.mock.calls[0]?.[0].abortSignal;
     expect(signal?.aborted).toBe(false);
     controller.abort();

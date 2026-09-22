@@ -1,4 +1,9 @@
-import type { EveEvalDefinition, EveEvalInput } from "#evals/types.js";
+import type {
+  EveEvalConfig,
+  EveEvalConfigContext,
+  EveEvalDefinition,
+  EveEvalInput,
+} from "#evals/types.js";
 
 /**
  * Defines one eve eval. Each eval file is exactly one case: an imperative
@@ -7,6 +12,9 @@ import type { EveEvalDefinition, EveEvalInput } from "#evals/types.js";
  * `t.judge(...)`). Organize related evals with directory nesting under
  * `evals/`, or default-export an array of evals to fan one file out over a
  * dataset.
+ *
+ * Pass `defineEval<typeof config>(...)` with a type-only config import to
+ * infer the setup context available as `t.context`.
  *
  * A `judge` is optional: `t.judge(...)` assertions fall back to the `judge`
  * declared in `evals.config.ts`, then the shared evaluation default. The judge model
@@ -18,7 +26,9 @@ import type { EveEvalDefinition, EveEvalInput } from "#evals/types.js";
  * (`input`/`run`/`checks`/`scores`/`expected`/`thresholds`/`parseOutput`/
  * `model`/`requires`), or a negative or non-finite `timeoutMs`.
  */
-export function defineEval(input: EveEvalInput): EveEvalDefinition {
+export function defineEval<TConfig extends EveEvalConfig = EveEvalConfig>(
+  input: EveEvalInput<EveEvalConfigContext<TConfig>>,
+): EveEvalDefinition<EveEvalConfigContext<TConfig>> {
   validateEvalInput(input);
 
   return {
