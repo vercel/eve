@@ -509,22 +509,27 @@ describe("SessionExecution background task checkpoints", () => {
         hasPendingInputBatch: false,
         serializedContext: input.serializedContext,
         sessionState: input.sessionState,
-        settled: { output: "Done." },
+        completion: { kind: "settled", output: "Done." },
       }));
 
     await expect(
       execution.runTurn({
         delivery: { kind: "deliver", payloads: [{ message: "Start the work." }] },
       }),
-    ).resolves.toMatchObject({ kind: "park", settled: { output: "Done." } });
+    ).resolves.toMatchObject({ kind: "park", completion: { kind: "settled", output: "Done." } });
 
     expect(turnStep).toHaveBeenCalledTimes(1);
     expect(queue.pendingCount).toBe(1);
   });
 
-  it.each([false, true])(
-    "keeps a settled turn when a late cancellation races its checkpoint (background tasks: %s)",
-    async (backgroundTasks) => {
+  it.each([
+    { backgroundTasks: false, completion: { kind: "settled", output: "Done." } },
+    { backgroundTasks: true, completion: { kind: "settled", output: "Done." } },
+    { backgroundTasks: false, completion: { kind: "yielded" } },
+    { backgroundTasks: true, completion: { kind: "yielded" } },
+  ] as const)(
+    "keeps a $completion.kind turn when cancellation races its checkpoint (background tasks: $backgroundTasks)",
+    async ({ backgroundTasks, completion }) => {
       const followUp: DeliverHookPayload = {
         kind: "deliver",
         payloads: [{ message: "Follow up after completion." }],
@@ -561,7 +566,7 @@ describe("SessionExecution background task checkpoints", () => {
             hasPendingInputBatch: false,
             serializedContext: input.serializedContext,
             sessionState: completedState,
-            settled: { output: "Done." },
+            completion,
             ...(backgroundTasks
               ? {
                   backgroundTaskState: state("http:background"),
@@ -579,7 +584,7 @@ describe("SessionExecution background task checkpoints", () => {
         });
       await expect(execution.runTurn(undefined)).resolves.toMatchObject({
         kind: "park",
-        settled: { output: "Done." },
+        completion,
       });
       expect(execution.cursor.sessionState).toBe(completedState);
       expect(cancelDescendantTurnsStep).not.toHaveBeenCalled();

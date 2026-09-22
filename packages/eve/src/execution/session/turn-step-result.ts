@@ -1,6 +1,10 @@
 import { createDurableSessionState } from "#execution/durable-session-store.js";
 import { derivePendingState } from "#execution/session/pending-turn-state.js";
 import type { DurableStepResult } from "#execution/session/turn-step-types.js";
+import {
+  getBackgroundWorkflowToolRuns,
+  readWorkflowTaskView,
+} from "#harness/workflow-tool-runs.js";
 import { hasPendingInputBatch } from "#harness/input-requests.js";
 import { getTurnUsageState, takeSessionUsageDelta, toUsage } from "#harness/turn-tag-state.js";
 import type { StepResult } from "#harness/types.js";
@@ -59,11 +63,22 @@ export function resolveSessionStepResult(
   if (stepResult.next === null) {
     const pending = derivePendingState(stepResult.session);
 
-    // `settledTurn` is the harness's explicit settlement verdict. Pending
-    // state may predate this turn, while newly created parks omit the verdict.
-    // `usage` carries only this turn's delta: the take marks the totals
-    // reported, so a persistent child never re-reports earlier spend.
+    // Ending a model turn does not settle its caller while nested tasks remain open.
+    // Leave usage unreported across yields so the final result includes every turn.
     if (stepResult.settledTurn !== undefined) {
+      const hasPendingTasks = getBackgroundWorkflowToolRuns(stepResult.session.state).some(
+        (run) => readWorkflowTaskView(run.task) === undefined,
+      );
+      if (hasPendingTasks && stepResult.settledTurn.isError !== true) {
+        return {
+          action: "park",
+          ...backgroundTransition,
+          ...pending,
+          completion: { kind: "yielded" },
+          serializedContext: nextSerializedContext,
+          sessionState: nextState,
+        };
+      }
       const { delta, session: reportedSession } = takeSessionUsageDelta(stepResult.session);
       return {
         action: "park",
@@ -71,7 +86,8 @@ export function resolveSessionStepResult(
         ...pending,
         serializedContext: nextSerializedContext,
         sessionState: createDurableSessionState({ session: reportedSession }),
-        settled: {
+        completion: {
+          kind: "settled",
           output: stepResult.settledTurn.output,
           isError: stepResult.settledTurn.isError,
           usage: delta,

@@ -9,6 +9,12 @@ Use a subagent to run independent work in parallel, narrow the available tools, 
 - Use a [declared local subagent](#declared-subagents) for a specialist with its own directory and authored capabilities, rather than inheriting the root's.
 - Use a [remote agent](./guides/remote-agents) to delegate to a separately deployed eve agent, with its own configuration and authentication.
 
+A subagent can finish a model turn while its own background tasks are still running.
+That turn yields; its interim reply does not complete the caller's delegated task.
+After the nested tasks finish, the subagent resumes and returns its final result to
+the caller. This applies to root-agent copies, declared local subagents, and remote
+subagents. The subagent session remains available for later calls.
+
 ## Completion batching
 
 Overlapping background work owned by a session forms a cohort. Tasks launched in

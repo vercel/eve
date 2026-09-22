@@ -316,13 +316,13 @@ async function runSessionLoop(
             ? cancelledCaller
             : { ...cancelledCaller, usage: settled.usage },
         );
-      } else if (action.settled !== undefined) {
+      } else if (action.completion?.kind === "settled") {
         if (progress.caller !== undefined) {
           await notifyTurnCallerStep({
             caller: progress.caller,
             lifecycle: "parked",
             sessionId: boot.sessionId,
-            settled: action.settled,
+            settled: action.completion,
           });
         }
         progress.caller = undefined;
@@ -353,9 +353,8 @@ async function runSessionLoop(
             sessionState: cursor.sessionState,
           });
           await settleCancelledTurn();
-          // Re-enter with `settled` cleared: the parked answer was already
-          // delivered to its caller before this wait.
-          action = { ...action, settled: undefined };
+          // Cancellation consumes any outstanding caller; do not report the prior turn.
+          action = { ...action, completion: undefined };
           continue;
         case "turn": {
           const result = await runDeliveredTurn(next);

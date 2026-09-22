@@ -40,6 +40,11 @@ interface DurableStepResultFields {
   readonly sessionState: DurableSessionState;
 }
 
+/** A model turn ended; only a settled result may complete its delegated caller. */
+export type TurnCompletion =
+  | { readonly kind: "yielded" }
+  | (SettledTurn & { readonly kind: "settled" });
+
 /** Result returned by a session-mutating turn step. */
 export type DurableStepResult = (
   | {
@@ -56,7 +61,7 @@ export type DurableStepResult = (
       readonly hasPendingAuthorization: boolean;
       readonly hasPendingInputBatch: boolean;
       readonly pendingCoordinationCallIds?: readonly string[];
-      readonly settled?: SettledTurn;
+      readonly completion?: TurnCompletion;
     }
 ) &
   DurableStepResultFields;
@@ -74,5 +79,5 @@ export type TurnOutcome =
       readonly authorizationAttemptIds?: readonly string[];
       readonly cancelled?: true;
       readonly kind: "park";
-      readonly settled?: SettledTurn;
+      readonly completion?: TurnCompletion;
     };
