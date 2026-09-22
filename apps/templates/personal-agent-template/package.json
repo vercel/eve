@@ -16,12 +16,17 @@
     "#*": "./agent/*"
   },
   "scripts": {
-    "build": "nuxt build",
-    "dev": "nuxt dev",
-    "start": "nuxt preview",
-    "typecheck": "nuxt typecheck",
-    "db:generate": "nuxt db generate",
-    "db:migrate": "nuxt db migrate"
+    "build": "pnpm build:eve && pnpm build:web",
+    "build:eve": "eve build",
+    "build:web": "nuxt build --cwd apps/web",
+    "dev": "nuxt dev --cwd apps/web",
+    "dev:eve": "eve dev",
+    "dev:services": "vercel dev",
+    "dev:web": "nuxt dev --cwd apps/web",
+    "start": "nuxt preview --cwd apps/web",
+    "typecheck": "nuxt typecheck --cwd apps/web",
+    "db:generate": "nuxt db generate --cwd apps/web",
+    "db:migrate": "nuxt db migrate --cwd apps/web"
   },
   "dependencies": {
     "@comark/nuxt": "^0.6.2",
@@ -32,13 +37,13 @@
     "@shikijs/langs": "^4.4.3",
     "@vercel/analytics": "^2.0.1",
     "@vercel/connect": "0.8.0",
-    "ai": "^7.0.105",
+    "ai": "7.0.105",
     "better-auth": "^1.7.1",
     "chat": "^4.38.1",
     "chat-adapter-sendblue": "^0.2.0",
     "drizzle-kit": "^0.31.10",
     "drizzle-orm": "^0.45.2",
-    "eve": "^0.54.2",
+    "eve": "^0.66.3",
     "maska": "^3.2.0",
     "nuxt": "4.5.2",
     "shiki": "^4.4.3",
@@ -58,5 +63,5 @@
   "engines": {
     "node": ">=24"
   },
-  "packageManager": "pnpm@12.4.2"
+  "packageManager": "pnpm@11.25.0"
 }

@@ -7,18 +7,20 @@
     "#evals/*": "./evals/*"
   },
   "scripts": {
-    "build": "next build",
-    "db:generate": "drizzle-kit generate",
-    "db:migrate": "drizzle-kit migrate",
-    "db:migrate:production": "vercel env run -e production -- pnpm db:migrate",
-    "db:push": "drizzle-kit push",
-    "db:studio": "drizzle-kit studio",
-    "dev": "next dev",
-    "start": "next start",
-    "typecheck": "next typegen && tsgo --noEmit -p tsconfig.json",
+    "build": "pnpm build:eve && pnpm build:web",
     "build:eve": "eve build",
+    "build:web": "next build --turbopack apps/web",
+    "db:generate": "drizzle-kit generate --config apps/web/drizzle.config.ts",
+    "db:migrate": "drizzle-kit migrate --config apps/web/drizzle.config.ts",
+    "db:migrate:production": "vercel env run -e production -- pnpm db:migrate",
+    "db:push": "drizzle-kit push --config apps/web/drizzle.config.ts",
+    "db:studio": "drizzle-kit studio --config apps/web/drizzle.config.ts",
+    "dev": "next dev apps/web",
     "dev:eve": "eve dev",
-    "start:eve": "eve start"
+    "dev:services": "vercel dev",
+    "dev:web": "next dev apps/web",
+    "start:eve": "eve start",
+    "typecheck": "next typegen apps/web && tsgo --noEmit -p apps/web/tsconfig.json"
   },
   "dependencies": {
     "@neondatabase/serverless": "1.1.0",
@@ -40,7 +42,7 @@
     "clsx": "2.1.1",
     "cmdk": "1.1.1",
     "drizzle-orm": "0.45.2",
-    "eve": "^0.54.2",
+    "eve": "^0.66.3",
     "lucide-react": "1.33.0",
     "next": "16.3.4",
     "radix-ui": "1.6.7",
@@ -62,5 +64,5 @@
     "microsandbox": "^0.5.10",
     "typescript": "7.0.2"
   },
-  "packageManager": "pnpm@12.4.2"
+  "packageManager": "pnpm@11.25.0"
 }

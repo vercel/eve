@@ -34,7 +34,7 @@ Set real values in `.env`. Never commit secrets or `.data/`.
 ```
 personal-agent-template/
 ├── agent/          # Eve agent: channels, tools, skills, connections
-├── app/            # Nuxt 4 UI: chat, settings, profile
+├── apps/web/       # Nuxt 4 UI: chat, settings, profile
 ├── server/         # Nitro API, Drizzle schema, auth, memory
 ├── shared/         # Types and helpers used by app + agent
 └── docs/           # Documentation (architecture, env, customization)

@@ -37,10 +37,16 @@ Install dependencies with pnpm:
 pnpm install
 ```
 
-Run locally without additional services:
+Run the web app locally without additional services:
 
 ```bash
 pnpm dev
+```
+
+To run the web app and eve as the Vercel service graph, use:
+
+```bash
+pnpm dev:services
 ```
 
 To require the same password locally, put this in `.env.local`:
@@ -118,11 +124,13 @@ For production, run migrations with Vercel production env vars:
 vercel env run -e production -- pnpm db:migrate
 ```
 
-Start the development server:
+Start the web app development server:
 
 ```bash
 pnpm dev
 ```
+
+Use `pnpm dev:services` to run the full Vercel service graph locally.
 
 ## What Is Included
 
@@ -132,7 +140,7 @@ pnpm dev
 - Optional Neon-backed cross-device chat history
 - Optional Upstash Redis rate limiting in production mode
 - Optional long-term memory in a private Vercel Blob document (per user in production mode)
-- Drizzle schema and migrations for production mode under `lib/db`
+- Drizzle schema and migrations for production mode under `apps/web/lib/db`
 - Saved eve session cursors and event snapshots in either storage mode
 - Sidebar history with delete and new-chat actions
 - Vercel Connect-backed Notion, Linear, and Sentry MCP connections

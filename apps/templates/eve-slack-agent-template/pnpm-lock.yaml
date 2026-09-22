@@ -10,13 +10,13 @@ importers:
     dependencies:
       '@vercel/connect':
         specifier: 0.8.0
-        version: 0.8.0(ai@7.0.105(zod@4.4.3))(eve@0.54.2(ai@7.0.105(zod@4.4.3)))
+        version: 0.8.0(ai@7.0.105(zod@4.4.3))(eve@0.66.3(ai@7.0.105(zod@4.4.3)))
       ai:
         specifier: 7.0.105
         version: 7.0.105(zod@4.4.3)
       eve:
-        specifier: ^0.54.2
-        version: 0.54.2(ai@7.0.105(zod@4.4.3))
+        specifier: ^0.66.3
+        version: 0.66.3(ai@7.0.105(zod@4.4.3))
       zod:
         specifier: 4.4.3
         version: 4.4.3
@@ -344,14 +344,15 @@ packages:
     resolution: {integrity: sha512-2iDP2DfheAMMAKeXBggEuFmpSq+1Xs6wQoHba1g65pZFXlC3VHD1O6/tgVzS6GQLv+P2koPKZPKgKhXkigNBdg==}
     hasBin: true
 
-  eve@0.54.2:
-    resolution: {integrity: sha512-LqiWleXbsA4upBsl5bkZ9O+qZ6h+WOMzNy/IL79Tz5LLkIjpk4koJq1gdBON80V+butfy/A5fwnOcL8isK+DfQ==}
+  eve@0.66.3:
+    resolution: {integrity: sha512-oJkQdVrlmb1GFeaSUNY6IF71ttXjQdFnkKQP+84Qlvs/M+fUqMjGTqnwevQ+qFvc8KCswo3cbBohKOCGdgZPFg==}
     engines: {node: '>=24'}
     hasBin: true
     peerDependencies:
       '@opentelemetry/api': ^1.0.0
-      ai: ^7.0.93
+      ai: ^7.0.105
       braintrust: ^3.0.0
+      chat: ^4.41.0
       dd-trace: ^6.13.0
       just-bash: ^3.1.0
       microsandbox: ^0.5.0
@@ -359,6 +360,8 @@ packages:
       '@opentelemetry/api':
         optional: true
       braintrust:
+        optional: true
+      chat:
         optional: true
       dd-trace:
         optional: true
@@ -670,12 +673,12 @@ snapshots:
     dependencies:
       execa: 5.1.1
 
-  '@vercel/connect@0.8.0(ai@7.0.105(zod@4.4.3))(eve@0.54.2(ai@7.0.105(zod@4.4.3)))':
+  '@vercel/connect@0.8.0(ai@7.0.105(zod@4.4.3))(eve@0.66.3(ai@7.0.105(zod@4.4.3)))':
     dependencies:
       '@vercel/oidc': 3.8.4
     optionalDependencies:
       ai: 7.0.105(zod@4.4.3)
-      eve: 0.54.2(ai@7.0.105(zod@4.4.3))
+      eve: 0.66.3(ai@7.0.105(zod@4.4.3))
 
   '@vercel/oidc@3.2.0': {}
 
@@ -715,7 +718,7 @@ snapshots:
       httpxy: 0.5.5
       srvx: 1.0.4
 
-  eve@0.54.2(ai@7.0.105(zod@4.4.3)):
+  eve@0.66.3(ai@7.0.105(zod@4.4.3)):
     dependencies:
       ai: 7.0.105(zod@4.4.3)
       nitro: 3.0.260903-beta

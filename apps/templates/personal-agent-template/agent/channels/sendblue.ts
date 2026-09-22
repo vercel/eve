@@ -1,8 +1,8 @@
 import type { ChannelFrom, ChannelSendOptions, ChannelSource } from "eve/channels";
 import { defineChannel, POST } from "eve/channels";
 import type { SendblueMessagePayload } from "chat-adapter-sendblue";
-import { agent } from "../../shared/agent.js";
-import { buildAppSessionAuth } from "../../shared/slack-auth.js";
+import { agent } from "../../lib/agent.js";
+import { buildAppSessionAuth } from "../../lib/slack-auth.js";
 import { fetchPhoneLinkForNumber } from "../lib/phone-internal.js";
 import {
   contactNumberFromPayload,

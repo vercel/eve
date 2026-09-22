@@ -22,7 +22,7 @@ flowchart TB
     skills[Skills and connections: Linear MCP]
   end
 
-  subgraph nuxt [Nuxt app — app/ + server/]
+  subgraph nuxt [Nuxt app — apps/web/]
     api["/api/* — public API"]
     internal["/api/internal — agent-only"]
     auth[Better Auth]
@@ -44,7 +44,7 @@ flowchart TB
 | `web`          | `/`                  | Nuxt UI + Nitro API |
 | `eve`          | `/_eve_internal/eve` | Eve agent runtime   |
 
-The [`eve/nuxt`](https://eve.dev/docs/guides/frontend/nuxt) module generates this service configuration during the Vercel build; [`vercel.json`](../vercel.json) contains only the schema declaration.
+[`vercel.ts`](../vercel.ts) composes the peer Nuxt and eve services during the Vercel build.
 
 ## Project structure
 
@@ -58,17 +58,11 @@ personal-agent-template/
 │   ├── connections/          # Linear MCP
 │   ├── lib/                  # base-instructions, memory-internal, slack-internal
 │   └── instructions.ts       # session.started hooks (memory injection)
-├── app/                      # Nuxt frontend
-│   ├── pages/                # chat, settings, login
-│   ├── components/           # chat UI, profile, integrations
-│   └── composables/          # useMemory, useProfile, chat providers
-├── server/                   # Nitro API
-│   ├── api/                  # Public + internal routes
-│   ├── db/                   # Drizzle schema + migrations
-│   └── utils/                # memory, profile, auth, connectors
-├── shared/                   # Cross-layer types and helpers
-│   ├── agent.ts              # Branding metadata
-│   └── types/                # memory, profile, thread, connector
+├── apps/web/                 # Nuxt frontend, Nitro API, and shared code
+│   ├── app/                  # pages, components, composables
+│   ├── server/               # API, database, and server utilities
+│   └── shared/               # cross-layer types and helpers
+├── vercel.ts                 # Peer Vercel service composition
 └── docs/                     # Documentation
 ```
 
@@ -77,9 +71,9 @@ personal-agent-template/
 ### Web chat
 
 1. User opens `/chat/[id]` — Nuxt loads thread via `/api/threads`
-2. Chat streams through Eve's Nuxt module (`eve/nuxt`)
-3. Tool calls render in [`MessageContentEve.vue`](../app/components/chat/message/MessageContentEve.vue)
-4. `save_memory` shows approval UI ([`ToolSaveMemory.vue`](../app/components/chat/tool/ToolSaveMemory.vue))
+2. Chat streams through the peer eve service routed by Vercel
+3. Tool calls render in [`MessageContentEve.vue`](../apps/web/app/components/chat/message/MessageContentEve.vue)
+4. `save_memory` shows approval UI ([`ToolSaveMemory.vue`](../apps/web/app/components/chat/tool/ToolSaveMemory.vue))
 
 ### Session memory injection
 
@@ -118,7 +112,7 @@ Routes under `/api/internal/*` require:
 Authorization: Bearer <INTERNAL_API_SECRET>
 ```
 
-Validated in [`server/utils/internal-api.ts`](../server/utils/internal-api.ts).
+Validated in [`server/utils/internal-api.ts`](../apps/web/server/utils/internal-api.ts).
 
 | Route                                   | Purpose                                 |
 | --------------------------------------- | --------------------------------------- |
@@ -132,7 +126,7 @@ Agent-side clients live in `agent/lib/*-internal.ts`.
 
 ## Database
 
-SQLite via [NuxtHub](https://hub.nuxt.com). Schema in [`server/db/schema/`](../server/db/schema/).
+SQLite via [NuxtHub](https://hub.nuxt.com). Schema in [`server/db/schema/`](../apps/web/server/db/schema/).
 
 Key tables:
 
@@ -150,16 +144,16 @@ Migrations: `pnpm db:generate` → `pnpm db:migrate`.
 
 ## Memory model
 
-- **Categories** — fixed set in [`shared/types/memory.ts`](../shared/types/memory.ts)
+- **Categories** — fixed set in [`lib/types/memory.ts`](../lib/types/memory.ts)
 - **One block per category** — `setMemoryForCategory` replaces all rows for a category
 - **Sources** — `import`, `agent`, `manual`
-- **Import** — Raycast-style paste parser ([`server/utils/memory-import.ts`](../server/utils/memory-import.ts))
+- **Import** — Raycast-style paste parser ([`server/utils/memory-import.ts`](../apps/web/server/utils/memory-import.ts))
 
 ## Auth
 
-[Better Auth](https://www.better-auth.com) with email/password. Config: [`server/utils/auth.ts`](../server/utils/auth.ts), route: [`server/api/auth/[...all].ts`](../server/api/auth/[...all].ts).
+[Better Auth](https://www.better-auth.com) with email/password. Config: [`server/utils/auth.ts`](../apps/web/server/utils/auth.ts), route: [`server/api/auth/[...all].ts`](../apps/web/server/api/auth/[...all].ts).
 
-Global middleware: [`app/middleware/auth.global.ts`](../app/middleware/auth.global.ts).
+Global middleware: [`apps/web/app/middleware/auth.global.ts`](../apps/web/app/middleware/auth.global.ts).
 
 ## Eve docs
 

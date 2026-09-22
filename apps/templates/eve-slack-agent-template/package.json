@@ -15,12 +15,12 @@
   "dependencies": {
     "@vercel/connect": "0.8.0",
     "ai": "7.0.105",
-    "eve": "^0.54.2",
+    "eve": "^0.66.3",
     "zod": "4.4.3"
   },
   "devDependencies": {
     "@types/node": "^25.9.3",
     "typescript": "7.0.2"
   },
-  "packageManager": "pnpm@12.4.2"
+  "packageManager": "pnpm@11.25.0"
 }

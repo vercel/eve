@@ -1,10 +1,8 @@
-enableGlobalVirtualStore: false
-
 packages:
   - "."
 
 minimumReleaseAgeExclude:
-  - "@ai-sdk/*"
+  - eve
   - "@vercel/connect"
   - ai
   - eve

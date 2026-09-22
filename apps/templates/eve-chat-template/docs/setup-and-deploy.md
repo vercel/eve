@@ -233,7 +233,7 @@ See the [Vercel env run docs](https://vercel.com/docs/cli/env) for more examples
 
 ## Run Locally
 
-Start the app:
+Start the web app:
 
 ```bash
 pnpm dev
@@ -242,7 +242,13 @@ pnpm dev
 Or run it on port 3001:
 
 ```bash
-PORT=3001 pnpm dev -p 3001
+PORT=3001 pnpm dev
+```
+
+To run the web app and eve as Vercel peer services, use:
+
+```bash
+pnpm dev:services
 ```
 
 Open the matching local URL and make sure the Vercel App contains the same callback URL.

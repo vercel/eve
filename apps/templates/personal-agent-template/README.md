@@ -1,4 +1,4 @@
-<img src="./public/banner.png" width="100%" alt="Personal Agent Template" />
+<img src="./apps/web/public/banner.png" width="100%" alt="Personal Agent Template" />
 
 # Personal Agent Template
 
@@ -61,7 +61,7 @@ Morning briefing skill: active focus from memory, assigned Linear issues, and a 
                       Vercel Connect (Linear, Slack)
 ```
 
-On Vercel, the [`eve/nuxt`](https://eve.dev/docs/guides/frontend/nuxt) module generates `web` (Nuxt) and `eve` (agent runtime) services during the build.
+On Vercel, [`vercel.ts`](./vercel.ts) composes the peer `web` (Nuxt) and `eve` (agent runtime) services during the build.
 
 ## Quick Start
 
@@ -136,7 +136,8 @@ V can also propose facts via **`save_memory`** — approve or skip in chat. Edit
 ## Development
 
 ```bash
-pnpm dev          # Nuxt + Eve (eve/nuxt module — see Eve docs)
+pnpm dev          # Nuxt web app
+pnpm dev:services # Vercel dev runs the peer Nuxt and eve services
 pnpm typecheck    # TypeScript check
 pnpm build        # Production build
 pnpm db:generate  # Generate Drizzle migrations
