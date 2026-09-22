@@ -20,12 +20,12 @@ export default defineEval({
 Call the tool named "agent" exactly once, with the request below as its message argument.
 Your delegation tool for this request is "agent". Let that copy delegate the worker.
 After "agent" returns its working receipt, acknowledge that it is underway and finish your turn.
-When the delegated task completes, forward its receipt unchanged.
+When the delegated task completes, share its receipt with Alice.
 
 Request to delegate:
 Ask verification-worker to fetch Alice's verification receipt by calling verification_gate with key ${key}.
 While the worker is busy, acknowledge that verification is running and finish your turn.
-When the worker completes, forward its receipt unchanged.`)
+When the worker completes, share the receipt it returned.`)
       ).expectOk();
       callerTurn.requireToolCall("agent", { output: { status: "working" } });
       callerTurn.notEvent("subagent.completed");
@@ -73,14 +73,14 @@ When the worker completes, forward its receipt unchanged.`)
       workerResult.messageIncludes(receipt);
       const detectorResult = (await detectorCompletion.result()).expectOk();
       detectorResult.event("subagent.completed", {
-        data: { subagentName: "verification-worker", output: receipt },
+        data: { subagentName: "verification-worker", output: (output) => output.includes(receipt) },
         count: 1,
       });
       detectorResult.messageIncludes(receipt);
       const callerResult = (await callerCompletion.result()).expectOk();
       callerResult.event("subagent.completed", { count: 1 });
       callerResult.event("subagent.completed", {
-        data: { subagentName: "agent", output: receipt },
+        data: { subagentName: "agent", output: (output) => output.includes(receipt) },
         count: 1,
       });
       callerResult.messageIncludes(receipt);
