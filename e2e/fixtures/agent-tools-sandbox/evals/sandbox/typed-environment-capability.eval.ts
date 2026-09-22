@@ -19,7 +19,7 @@ export default defineEval({
 
     t.succeeded();
     t.calledSubagent("deny-all", { count: 1, status: "completed" });
-    t.check(completed.message, includes('"blocked":true'));
+    t.check(completed.message, includes(/blocked[^\n]*true/iu));
   },
 });
 
