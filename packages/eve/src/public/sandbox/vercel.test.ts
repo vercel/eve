@@ -1,5 +1,10 @@
 import { describe, expect, expectTypeOf, it } from "vitest";
-import { Drive, ExperimentalVercelDockerfile, VercelSandbox } from "#public/sandbox/vercel.js";
+import {
+  Drive,
+  ExperimentalVercelDockerfile,
+  ExperimentalVercelReusedDockerfile,
+  VercelSandbox,
+} from "#public/sandbox/vercel.js";
 describe("VercelSandbox", () => {
   it("creates environments", () => {
     const environment = VercelSandbox.environment({ resources: { vcpus: 4 } });
@@ -12,5 +17,14 @@ describe("VercelSandbox", () => {
     const environment = ExperimentalVercelDockerfile.environment({ region: "iad1" });
     expect(environment.provider).toBe("vercel-image");
     expectTypeOf(environment.open).toBeFunction();
+  });
+
+  it("creates experimental reused Dockerfile environments", () => {
+    const environment = ExperimentalVercelReusedDockerfile.environment({
+      networkPolicy: "deny-all",
+      region: "iad1",
+    });
+    expect(environment.provider).toBe("vercel-reused-image");
+    expectTypeOf(environment.open).parameters.toEqualTypeOf<[]>();
   });
 });
