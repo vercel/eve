@@ -5,9 +5,10 @@ export const NESTED_INTERIM = "Verification is running.";
 export const NESTED_FINAL = "VERIFIED: harbor records are current.";
 
 type Role = "parent" | "detector" | "worker";
+export type Detector = "agent" | "local-detector" | "remote-loopback";
 
-export function nestedMessage(role: Role, key: string): string {
-  return `${NESTED_BACKGROUND} ${JSON.stringify({ role, key })}`;
+export function nestedMessage(role: Role, key: string, detector?: Detector): string {
+  return `${NESTED_BACKGROUND} ${JSON.stringify({ role, key, detector })}`;
 }
 
 export const nestedBackgroundModel = mockModel({
@@ -18,9 +19,10 @@ export const nestedBackgroundModel = mockModel({
       .flatMap((text) => text.split("\n"))
       .find((text) => text.startsWith(NESTED_BACKGROUND));
     if (message === undefined) throw new Error("Missing nested verification scenario.");
-    const { role, key } = JSON.parse(message.slice(NESTED_BACKGROUND.length)) as {
+    const { role, key, detector } = JSON.parse(message.slice(NESTED_BACKGROUND.length)) as {
       role: Role;
       key: string;
+      detector?: Detector;
     };
     if (role === "worker") {
       return request.toolResults.some((result) => result.name === "verification_gate")
@@ -28,7 +30,8 @@ export const nestedBackgroundModel = mockModel({
         : { toolCalls: [{ name: "verification_gate", input: { key } }] };
     }
 
-    const tool = role === "parent" ? "remote-loopback" : "verification-worker";
+    const tool = role === "parent" ? detector : "verification-worker";
+    if (tool === undefined) throw new Error("Parent has no detector selection.");
     const state = [...request.userMessages]
       .reverse()
       .find((text) => text.startsWith("[Task state]\n"));
