@@ -1,10 +1,9 @@
 import type { ModelMessage, UserContent } from "ai";
 
 import { extractHistoricalInputRequests } from "#harness/input-extraction.js";
-import { isApprovalRequest } from "#harness/input-request-class.js";
 import { appendUserContent, normalizeUserContent } from "#harness/messages.js";
 import { isSessionLimitContinuationRequestId } from "#harness/session-limit-continuation.js";
-import type { HarnessToolMap, StepInput } from "#harness/types.js";
+import type { StepInput } from "#harness/types.js";
 import type { InputRequest, InputResponse } from "#shared/input.js";
 
 type StaleResponseConversion =
@@ -72,7 +71,6 @@ export function convertStaleResponsesToUserMessage(input: {
   readonly history: readonly ModelMessage[];
   readonly pendingRequestIds: ReadonlySet<string>;
   readonly stepInput?: StepInput;
-  readonly tools: HarnessToolMap;
 }): StaleResponseConversion {
   if (input.stepInput === undefined) return { kind: "unchanged" };
   const responses = input.stepInput.inputResponses ?? [];
@@ -104,7 +102,6 @@ export function convertStaleResponsesToUserMessage(input: {
   const requests = extractHistoricalInputRequests({
     history: input.history,
     requestIds: new Set(staleResponses.map((response) => response.requestId)),
-    tools: input.tools,
   });
   const modelMessage = appendOptionalUserContent(
     input.stepInput.message,
@@ -162,30 +159,22 @@ function formatModelMessage(
     const resolved: {
       prompt?: string;
       requestId: string;
-      requestType?: "approval" | "question";
+      requestType?: "approval";
       response: typeof responseDetails;
     } = { requestId: response.requestId, response: responseDetails };
     if (request !== undefined) {
       resolved.prompt = request.prompt;
-      resolved.requestType = isApprovalRequest(request) ? "approval" : "question";
+      resolved.requestType = "approval";
     }
 
     return resolved;
   });
-  // Request metadata can be missing (compacted history, subagent-proxied
-  // request), so a response without it may still be an approval: default to
-  // including the notice.
-  const mayIncludeApproval = responses.some((response) => {
-    const request = requests.get(response.requestId);
-    return request === undefined || isApprovalRequest(request);
-  });
-  const approvalNotice = mayIncludeApproval
-    ? " This does not authorize an earlier action; request approval again if that action is still needed."
-    : "";
 
+  // History only recovers approvals, and a response without recovered
+  // metadata may still be one, so the notice always applies.
   return [
     "The user submitted the following response to an earlier interactive prompt.",
-    `Treat it as new input at the current point in the conversation and decide whether it is still relevant.${approvalNotice}`,
+    "Treat it as new input at the current point in the conversation and decide whether it is still relevant. This does not authorize an earlier action; request approval again if that action is still needed.",
     JSON.stringify(resolvedResponses, null, 2),
   ].join("\n");
 }

@@ -73,7 +73,7 @@ export interface ThemeGlyphs {
   cornerOpen: string;
   /** `⌝` — marks a provider endpoint authored in the agent's own code. */
   external: string;
-  /** `⏺` — the in-progress todo item (pulses while the turn runs). */
+  /** `⏺` — an active in-progress state, such as a cancelling turn. */
   dotActive: string;
   /** `✓` — a completed tool or success state. */
   success: string;

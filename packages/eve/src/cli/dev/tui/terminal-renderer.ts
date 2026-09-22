@@ -147,13 +147,6 @@ import { FileContentCache } from "./file-content-cache.js";
 import { groupToolBlocksForDisplay } from "./tool-block-groups.js";
 import { renderQuestionPanel } from "./question-panel.js";
 import { TurnClock } from "./turn-clock.js";
-import {
-  allTodoItemsSettled,
-  readTodoToolItems,
-  renderFinishedTodoRows,
-  renderTodoPanelRows,
-  type TodoPanelItem,
-} from "./todo-panel.js";
 import { MessageQueue, renderMessageQueueRows } from "./message-queue.js";
 import { formatStoredDiagnostic, presentDiagnostic } from "./diagnostic-presentation.js";
 import { reduceSetupSelectInput, setupSelectionIntent } from "./setup-selection-input.js";
@@ -583,18 +576,6 @@ export class TerminalRenderer implements AgentTUIRenderer {
   #setupAttention?: string;
   #resolvedModelId?: string;
   #modelTurnId?: string;
-  /**
-   * The pinned todo panel above the input, replaced wholesale by each `todo`
-   * tool-call input. Cleared (and committed to the transcript) once every
-   * item settles.
-   */
-  #todoItems?: readonly TodoPanelItem[];
-  /**
-   * Signature of the last todo list committed as a finished transcript block.
-   * The result event re-plays the same call through {@link #upsertNativeTool},
-   * so committing must be idempotent per list content.
-   */
-  #todoCommittedSignature?: string;
   /**
    * Messages submitted while a turn streams, pinned in a panel directly
    * above the input when steering is unavailable. `/cancel` cancels directly, and Esc or
@@ -1804,8 +1785,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
    * THE one authority for state scoped to a server-side conversation
    * context. Called by both context cuts — `/reset` and the
    * mid-conversation session replacement (`renderSessionBoundary`) — so the
-   * two can never drift on what dies with the old context: the pinned todo
-   * list (its tasks were not finished — dismiss, don't commit), write-diff
+   * two can never drift on what dies with the old context: write-diff
    * bases (a fresh session may run a fresh sandbox, where stale bases
    * render confidently wrong diffs), subagent call identity (ordinals must
    * not count across a cut), tool-call ownership maps, and the turn clock.
@@ -1819,8 +1799,6 @@ export class TerminalRenderer implements AgentTUIRenderer {
     this.#backgroundSubagentCallIds.clear();
     this.#provisionalSubagentCallIds.clear();
     this.#subagentCallsByName.clear();
-    this.#todoItems = undefined;
-    this.#todoCommittedSignature = undefined;
     this.#messageQueue.reset();
     this.#nextSubmittedPromptOrigin = undefined;
     this.#fileContents.clear();
@@ -3746,8 +3724,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
 
       case "tool-call-preparing":
         if (displayModes.tools === "hidden") break;
-        // Panel-routed tools need the real input; their placeholder would
-        // misread an input-less call (e.g. as a todo read).
+        // Panel-routed tools render from the real input, never a placeholder.
         if (isPanelRoutedTool(event.toolName)) break;
         this.#upsertNativeTool(
           {
@@ -3892,13 +3869,10 @@ export class TerminalRenderer implements AgentTUIRenderer {
   ): void {
     turnState.tools.set(tool.toolCallId, tool);
     if (this.#childToolCallIds.has(tool.toolCallId)) return;
-    if (this.#applyTodoToolCall(tool)) return;
     // The question surface — overlay while open, `? … ⎿ …` once answered —
     // is the whole story of an ask_question call; a tool block beside it
-    // would narrate the same thing twice. Together with #applyTodoToolCall
-    // this is the full-call half of isPanelRoutedTool (read-only todo calls
-    // deliberately fall through to an ordinary block).
-    if (toolBaseName(tool.toolName) === "ask_question") return;
+    // would narrate the same thing twice.
+    if (isPanelRoutedTool(tool.toolName)) return;
 
     const id = toolSectionId(tool.toolCallId);
     this.#parentToolBlockIds.set(tool.toolCallId, id);
@@ -3978,38 +3952,6 @@ export class TerminalRenderer implements AgentTUIRenderer {
       this.#removeBlock(id);
       this.#parentToolBlockIds.delete(toolCallId);
     }
-  }
-
-  /**
-   * Routes a `todo` replacement write into the pinned panel instead of a
-   * transcript tool block. The whole list arrives with every call, so the
-   * panel is replaced wholesale; once every item settles the finished list
-   * commits to the transcript and the panel clears. Returns `false` for
-   * non-todo calls and read-only todo calls, which keep their ordinary block.
-   */
-  #applyTodoToolCall(tool: NativeToolState): boolean {
-    const items = readTodoToolItems(tool.toolName, tool.input);
-    if (items === undefined) return false;
-
-    if (items.length > 0 && allTodoItemsSettled(items)) {
-      // The call's result event re-plays through here; commit only once per
-      // list content.
-      const signature = JSON.stringify(items);
-      if (this.#todoCommittedSignature !== signature) {
-        this.#todoCommittedSignature = signature;
-        this.#pushBlock({
-          kind: "todo-list",
-          body: renderFinishedTodoRows(items, this.#width(), this.#theme).join("\n"),
-          live: false,
-        });
-      }
-      this.#todoItems = undefined;
-    } else {
-      this.#todoItems = items.length > 0 ? items : undefined;
-      this.#todoCommittedSignature = undefined;
-    }
-    this.#paint();
-    return true;
   }
 
   /** Keeps one parallel tool cohort mutable until every independent call settles. */
@@ -4402,27 +4344,9 @@ export class TerminalRenderer implements AgentTUIRenderer {
       rows.push(...renderAttentionRows(this.#setupAttention, width, this.#theme), "");
     }
 
-    // The pinned todo panel holds its place above the prompt, updated in
-    // place by each `todo` tool call rather than scrolling with the stream.
-    if (this.#todoItems !== undefined) {
-      rows.push(
-        ...renderTodoPanelRows({
-          items: this.#todoItems,
-          width,
-          theme: this.#theme,
-          working: this.#streamDraftActive || this.#turnIndicator.kind === "waiting",
-          pulse: this.#progressPulseGlyph(
-            this.#activityPulseStartedAtMs,
-            this.#theme.unicode ? PROGRESS_PULSE_GLYPH : PROGRESS_PULSE_ASCII_GLYPH,
-          ),
-        }),
-        "",
-      );
-    }
-
-    // The message-queue panel takes the slot directly above the input —
-    // ahead of the todo panel — because it holds the user's own undelivered
-    // words and carries the steering/cancel affordance.
+    // The message-queue panel takes the slot directly above the input
+    // because it holds the user's own undelivered words and carries the
+    // steering/cancel affordance.
     const queueRows = renderMessageQueueRows({
       view: this.#messageQueue.view(),
       width,
@@ -5210,7 +5134,6 @@ function leadsWithGap(block: Block, previous: PreviousBlock | undefined): boolea
     case "flow":
     case "turn-stats":
     case "session-boundary":
-    case "todo-list":
     case "agent-header":
       return true;
     // The elbow result hangs tight under its invocation — never a gap.

@@ -68,18 +68,7 @@ function fixture(
                     type: "tool-call" as const,
                     toolCallId: `call-${call}-${index}`,
                     toolName: tool.toolName,
-                    input: JSON.stringify(
-                      tool.input ??
-                        (tool.toolName === "question"
-                          ? {
-                              prompt: "Choose a color",
-                              options: [
-                                { id: "red", label: "Red" },
-                                { id: "blue", label: "Blue" },
-                              ],
-                            }
-                          : { n: 1 }),
-                    ),
+                    input: JSON.stringify(tool.input ?? { n: 1 }),
                     providerExecuted: tool.providerExecuted,
                   },
                   ...(tool.providerExecuted
@@ -130,15 +119,6 @@ function fixture(
       },
     });
   }
-  tools.set("question", {
-    name: "question",
-    description: "Ask a question",
-    inputSchema: jsonSchema({ type: "object" }),
-    behavior: {
-      availability: ["requires-request-input"],
-      handling: { kind: "request-input", request: "question" },
-    },
-  });
   tools.set("workflow", {
     name: "workflow",
     description: "Deferred workflow",
@@ -305,18 +285,6 @@ for (const variant of ["approve", "cancel"] as const) {
   });
 }
 
-it("finishes tool work after answering a question while an earlier approval remains", async () => {
-  const f = fixture("question-answer");
-  await f.gate("gateA");
-  f.script.push(calls("question"));
-  await f.drive({ message: "Ask me for a color." });
-  expect(f.pending()).toHaveLength(2);
-  f.script.push(calls("read"), "FINAL");
-  const result = await f.drive(f.respond("question", "red"));
-  expect(f.pending().map((r) => r.action.toolName)).toEqual(["gateA"]);
-  expect(result.settledTurn?.output).toBe("FINAL");
-});
-
 for (const tool of ["workflow", "control"]) {
   it(`interprets a completed ${tool} result while an earlier approval remains`, async () => {
     const f = fixture(tool);
@@ -329,21 +297,6 @@ for (const tool of ["workflow", "control"]) {
     expect(result.settledTurn?.output).toBe("FINAL");
   });
 }
-
-it("allows a tool turn while only multiple question batches remain", async () => {
-  const f = fixture("multiple-questions");
-  await f.gate("gateA");
-  for (let i = 0; i < 2; i++) {
-    f.script.push(calls("question"));
-    await f.drive({ message: `Ask question ${i}.` });
-  }
-  f.script.push("Cancelled.");
-  await f.drive(f.respond("gateA", "cancel"));
-  expect(f.pending().map((r) => r.kind)).toEqual(["question", "question"]);
-  f.script.push(calls("read"), "FINAL");
-  const result = await f.drive({ message: "Read the status first." });
-  expect(result.settledTurn?.output).toBe("FINAL");
-});
 
 it("completes a plain tool turn without any pending input [control]", async () => {
   const f = fixture("control-no-pending");
@@ -365,17 +318,6 @@ it("finishes after resolving the only approval [control]", async () => {
   f.script.push(calls("read"), "FINAL");
   expect((await f.drive(f.respond("gateA"))).settledTurn?.output).toBe("FINAL");
   expect(f.executions.filter((x) => x === "gateA")).toHaveLength(1);
-  expect(f.pending()).toHaveLength(0);
-});
-
-it("dismisses a sole question and completes the follow-up tool turn [control]", async () => {
-  const f = fixture("control-sole-question");
-  f.script.push(calls("question"));
-  await f.drive({ message: "Ask a question." });
-  f.script.push(calls("read"), "FINAL");
-  expect((await f.drive({ message: "Never mind. Read the status." })).settledTurn?.output).toBe(
-    "FINAL",
-  );
   expect(f.pending()).toHaveLength(0);
 });
 
@@ -592,30 +534,6 @@ it("continues after responder-authorized approval of the older batch", async () 
   expect(result.settledTurn?.output).toBe("FINAL");
 });
 
-it("parks on a new question while retaining a partial approval [control]", async () => {
-  const f = fixture("partial-approval-new-question");
-  // Given A and B need approval together, and only A has been answered.
-  await f.gate("gateA", "gateB");
-  await f.drive(f.respond("gateA"));
-
-  // When the next user message causes the model to ask a question.
-  f.script.push(calls("question"));
-  const result = await f.step({ message: "Ask which color to use." });
-
-  // Then the new question parks immediately, and A's answer is still remembered.
-  expect(result.next).toBeNull();
-  expect(f.pending().map((request) => request.kind)).toEqual([
-    "tool-approval",
-    "tool-approval",
-    "question",
-  ]);
-  expect(f.executions).toHaveLength(0);
-  f.script.push("Approved.");
-  await f.drive(f.respond("gateB"));
-  expect(f.executions).toEqual(["gateA", "gateB"]);
-  expect(f.pending().map((request) => request.kind)).toEqual(["question"]);
-});
-
 it("resumes a complete batch while another batch has only a partial approval [control]", async () => {
   const f = fixture("complete-and-partial-approvals");
   // Given A and B need approval together, and a second independent B is pending.
@@ -643,28 +561,4 @@ it("resumes a complete batch while another batch has only a partial approval [co
   await f.drive(approvalB);
   expect(f.executions).toEqual(["gateB", "gateA", "gateB"]);
   expect(f.pending()).toHaveLength(0);
-});
-
-it("answers a queued question after an approval while another approval stays pending", async () => {
-  const f = fixture("approval-then-question-with-sibling");
-  // Given independent approvals A and B, followed by a question.
-  await f.gate("gateA");
-  f.script.push(calls("gateB"));
-  await f.drive({ message: "Prepare B." });
-  f.script.push(calls("question"));
-  await f.drive({ message: "Ask which color." });
-
-  // When one delivery answers A and the question, leaving B unanswered.
-  f.script.push("A approved.", "Color answered.");
-  const result = await f.drive({
-    inputResponses: [
-      ...f.respond("gateA").inputResponses!,
-      ...f.respond("question", "red").inputResponses!,
-    ],
-  });
-
-  // Then both answers are processed and B alone stays pending.
-  expect(result.settledTurn?.output).toBe("Color answered.");
-  expect(f.executions).toEqual(["gateA"]);
-  expect(f.pending().map((request) => request.action.toolName)).toEqual(["gateB"]);
 });

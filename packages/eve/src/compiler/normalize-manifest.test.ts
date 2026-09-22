@@ -275,6 +275,12 @@ describe("compileAgentManifest source graph", () => {
     );
   });
 
+  it("does not install ask_question from the framework registry", async () => {
+    const compiled = await compileAgentManifest(manifest());
+
+    expect(compiled.tools.map((tool) => tool.name)).not.toContain("ask_question");
+  });
+
   it("allows an authored tool in the agent slot", async () => {
     const sourceRegistry = registry([
       {
@@ -372,13 +378,6 @@ describe("compileAgentManifest source graph", () => {
 
     expect(serialized.tools.find((tool) => tool.name === "agent")).toMatchObject({
       hasExecute: true,
-    });
-    expect(serialized.tools.find((tool) => tool.name === "ask_question")).toMatchObject({
-      behavior: {
-        availability: ["requires-request-input"],
-        handling: { kind: "request-input", request: "question" },
-      },
-      hasExecute: false,
     });
     expect(serialized.tools.find((tool) => tool.name === "web_search")).toMatchObject({
       behavior: {

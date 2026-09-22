@@ -9,7 +9,10 @@ import {
 import { routeDeliverPayload } from "#subagents/hitl-proxy.js";
 import { sendTaskInboundPayload } from "#execution/tasks/parent/run-parent.js";
 import { resumeSessionInbox } from "#execution/session-inbox/resume.js";
-import { resumeWorkflowToolRunAnswers } from "#execution/tools/workflow/answer.js";
+import {
+  resumeWorkflowToolRunAnswers,
+  resumeWorkflowToolRunDismissal,
+} from "#execution/tools/workflow/answer.js";
 import type { AnswerHookRoute } from "#harness/proxy-input-requests.js";
 import type { InputResponse } from "#shared/input.js";
 import { findBackgroundWorkflowToolRun } from "#harness/workflow-tool-runs.js";
@@ -36,6 +39,7 @@ interface ChildBucket {
   readonly childContinuationToken: string;
   readonly childSessionInbox?: SessionInboxAddress;
   readonly childResponseUrl?: string;
+  readonly dismissedRequestIds: string[];
   readonly metadata: NonNullable<DeliverHookPayload["deliveryMetadata"]>[number][];
   readonly payloads: DeliverPayload[];
   readonly retireRequestIds: string[];
@@ -56,6 +60,9 @@ export async function routeProxiedDeliverStep(input: {
   const parentPayloads = new Map<number, DeliverPayload>();
   const children = new Map<string, ChildBucket>();
   let parentAction: { readonly kind: "cancel-turn" } | undefined;
+  // Only a person's own message may answer or skip a pending question.
+  const resolveMessage =
+    sourceDelivery.caller === undefined && sourceDelivery.taskDeliveryId === undefined;
 
   for (const [sourcePayloadIndex, payload] of sourceDelivery.payloads.entries()) {
     const routed = routeDeliverPayload({
@@ -63,6 +70,7 @@ export async function routeProxiedDeliverStep(input: {
         route.taskId === undefined ||
         findBackgroundWorkflowToolRun(durableSession.state, route.taskId) !== undefined,
       payload,
+      resolveMessage,
       state: durableSession.state,
     });
     parentAction ??= routed.parentAction;
@@ -80,6 +88,7 @@ export async function routeProxiedDeliverStep(input: {
         childContinuationToken: forChild.childContinuationToken,
         childSessionInbox: forChild.childSessionInbox,
         childResponseUrl: forChild.childResponseUrl,
+        dismissedRequestIds: [],
         metadata: [],
         payloads: [],
         retireRequestIds: [],
@@ -88,6 +97,7 @@ export async function routeProxiedDeliverStep(input: {
       };
       const childPayloadIndex = child.payloads.length;
       child.payloads.push(forChild.payload);
+      child.dismissedRequestIds.push(...(forChild.dismissedRequestIds ?? []));
       child.retireRequestIds.push(...forChild.retireRequestIds);
       child.sourcePayloadIndexes.push(sourcePayloadIndex);
       if (routed.forSelf === undefined && childIndex === 0) {
@@ -139,6 +149,9 @@ export async function routeProxiedDeliverStep(input: {
         child.childContinuationToken,
         coalesceDeliverPayloads(child.payloads).inputResponses,
       );
+      if (child.dismissedRequestIds.length > 0) {
+        await resumeWorkflowToolRunDismissal(child.childContinuationToken);
+      }
       durableSession = retireProxyInputRequests(durableSession, child.retireRequestIds);
       retired = true;
       continue;

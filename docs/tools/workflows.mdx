@@ -44,7 +44,7 @@ export default defineWorkflowTool({
       ],
     });
 
-    if (answer.optionId !== "approve") {
+    if (answer.status !== "answered" || answer.optionId !== "approve") {
       return { deployed: false, reason: "rejected" };
     }
     return { deployed: true, url: await applyDeploy(plan) };
@@ -277,12 +277,29 @@ const answer = await ctx.ask({
   display?: "confirmation" | "select" | "text",
   options?: { id: string; label: string; description?: string; style?: "primary" | "danger" | "default" }[],
   allowFreeform?: boolean,
-}); // { optionId?: string; text?: string }
+  dismissible?: boolean,
+});
+// | { status: "answered"; optionId?: string; text?: string }
+// | { status: "dismissed" }
+// | { status: "unavailable" }
 ```
 
 `ctx.ask` publishes an `input.requested` event on the session — rendered the way channels render
-`ask_question` and tool approvals — and returns an awaitable answer. Awaiting it suspends the run until a response arrives.
-It composes with the SDK's own constructs; race it against a deadline:
+tool approvals — and returns an awaitable answer. Awaiting it suspends the run until a response arrives.
+The `ask_question` tool is a workflow tool built on `ctx.ask`.
+
+The answer's `status` tells the body what happened:
+
+- `answered`: the person picked an option (`optionId`) or typed a reply (`text`).
+- `dismissed`: the request set `dismissible: true` and the person sent a message that did not answer
+  it. The message reaches the agent as a normal turn.
+- `unavailable`: the session cannot request input, such as a scheduled run. `ctx.ask` returns this
+  immediately instead of waiting for an answer no one can give.
+
+A plain follow-up message answers the request when it is the only pending question and the message
+matches an option or the request allows free text.
+
+`ctx.ask` composes with the SDK's own constructs; race it against a deadline:
 
 ```ts
 const pending = ctx.ask({ prompt: `Deploy ${service}?`, options: APPROVE_OR_CANCEL });
@@ -295,8 +312,8 @@ if (answer === undefined) return { deployed: false, reason: "timed out" };
 - A request is answered once. Ask again for the next answer.
 - Ending the run, by returning, throwing, or cancellation, withdraws its pending requests.
 - Several requests may be outstanding at once.
-- A response never steers. A new human message while a request is pending follows the session's
-  normal `turnPolicy`.
+- A response never steers. A new human message that does not answer a pending request follows the
+  session's normal `turnPolicy`.
 
 Compare the [`approval`](/docs/human-in-the-loop) policy, which gates the call before `execute` runs
 and can only show the model's input. Both compose: `approval` before the run, `ctx.ask` inside it.
@@ -515,7 +532,9 @@ async execute({ service }, ctx) {
   }
 
   if (answer === undefined) return { deployed: false, reason: "timed out" };
-  if (answer.optionId !== "approve") return { deployed: false, reason: "rejected" };
+  if (answer.status !== "answered" || answer.optionId !== "approve") {
+    return { deployed: false, reason: "rejected" };
+  }
   return { deployed: true, url: await applyDeploy(plan) };
 }
 ```
@@ -574,7 +593,9 @@ export default defineWorkflowTool({
       ],
     });
 
-    if (decision.optionId !== "approve") return { refunded: false };
+    if (decision.status !== "answered" || decision.optionId !== "approve") {
+      return { refunded: false };
+    }
     return { refunded: true, receipt: await issueRefund(orderId, amount) };
   },
 });

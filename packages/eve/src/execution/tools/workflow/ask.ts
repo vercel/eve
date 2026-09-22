@@ -13,6 +13,7 @@ import { workflowToolContextErrorMessage } from "#shared/workflow-tool-context.j
 const WORKFLOW_TOOL_RUN_CONTEXT = Symbol.for("eve.workflow-tool-run.context");
 
 export interface WorkflowToolRunContext {
+  readonly canRequestInput?: boolean;
   readonly from: WorkflowToolRunRef;
   readonly owner: WorkflowToolRunOwner;
 }
@@ -56,9 +57,13 @@ export function readWorkflowToolRunOwner(ctx: ToolContext): WorkflowToolRunOwner
   return readWorkflowToolRunContext(ctx, "agent").owner;
 }
 
-/** Returns an answer hook which may be awaited or raced with another workflow operation. */
-export function ask(ctx: ToolContext, request: ToolInputRequest): Hook<ToolInputResponse> {
+/** Returns an answer which may be awaited or raced with another workflow operation. */
+export function ask(
+  ctx: ToolContext,
+  request: ToolInputRequest,
+): Hook<ToolInputResponse> | Promise<ToolInputResponse> {
   const context = readWorkflowToolRunContext(ctx, "ask");
+  if (context.canRequestInput === false) return Promise.resolve({ status: "unavailable" });
   const answer = createHook<ToolInputResponse>();
   void resumeHookStep(context.owner.inbox, {
     kind: "request",

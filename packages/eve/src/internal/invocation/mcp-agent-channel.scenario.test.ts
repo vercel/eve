@@ -27,8 +27,11 @@ const model = mockModel((request) => {
       toolCalls: [{
         id: "question-1",
         input: {
-          options: [{ id: "yes", label: "Yes" }, { id: "no", label: "No" }],
-          prompt: "Proceed with the delegated work?",
+          options: [
+            { description: "Continue the delegated work.", label: "Yes" },
+            { description: "Stop before the delegated work.", label: "No" },
+          ],
+          question: "Proceed with the delegated work?",
         },
         name: "ask_question",
       }],
@@ -55,6 +58,10 @@ export default mcpChannel({
 });
 `,
     "agent/instructions.md": "Follow the deterministic mock-model lifecycle.\n",
+    "agent/tools/ask_question.ts": `import { askQuestion } from "eve/tools/ask_question";
+
+export default askQuestion();
+`,
   },
   installDependencies: true,
   name: "mcp-agent-channel",
@@ -85,7 +92,7 @@ describe("MCP agent channel", () => {
         });
         expect(hidden.isError).toBe(true);
 
-        const responses = [{ optionId: "yes", requestId }];
+        const responses = [{ optionId: "1", requestId }];
         await expect(
           callTool(server.url, "alice", "modern", "agent_update", {
             invocationId,

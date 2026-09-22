@@ -3,7 +3,7 @@ import { defineTool } from "eve/tools";
 import { z } from "zod";
 
 import { repositoryFindings } from "../../release-findings";
-import { reviewReferences, saveReleaseRecord } from "../../release-reports";
+import { REVIEW_REFERENCE, saveReleaseRecord } from "../../release-reports";
 
 const invocationCount = defineState("storefront.inspect-repository", () => 0);
 
@@ -14,8 +14,7 @@ export default defineTool({
     const attempt = invocationCount.get() + 1;
     invocationCount.update(() => attempt);
     const report = {
-      reportId: reviewReferences.repository,
-      subject: "repository" as const,
+      reportId: REVIEW_REFERENCE,
       status: "completed" as const,
       findings: repositoryFindings,
     };

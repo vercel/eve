@@ -37,11 +37,6 @@ export function respond(request: MockModelRequest): MockModelResponse {
         case "authorized-read":
         case "authorized":
           return instruction.startsWith("Prepare an authorized change");
-        case "color-read":
-        case "color":
-          return instruction.startsWith("Ask which color");
-        case "size":
-          return instruction.startsWith("Ask which size");
         default:
           return false;
       }
@@ -168,37 +163,6 @@ export function respond(request: MockModelRequest): MockModelResponse {
         () => `Provider draft status: ${status("provider-lookup")}.`,
       );
       break;
-    case "Ask which color to use, then read the draft status.":
-    case "Ask which size to use.": {
-      const color = message.includes("color");
-      const id = color ? "color" : "size";
-      response =
-        result(id) === undefined
-          ? {
-              toolCalls: [
-                {
-                  id,
-                  name: "ask_question",
-                  input: {
-                    prompt: color ? "Which color?" : "Which size?",
-                    options: color
-                      ? [
-                          { id: "red", label: "Red" },
-                          { id: "blue", label: "Blue" },
-                        ]
-                      : [
-                          { id: "small", label: "Small" },
-                          { id: "large", label: "Large" },
-                        ],
-                  },
-                },
-              ],
-            }
-          : color
-            ? readStatus("color-read")
-            : { text: "Size resolved." };
-      break;
-    }
     case "Explain what is waiting, without calling any tools.":
       response = { text: "Your changes are waiting for approval." };
       break;

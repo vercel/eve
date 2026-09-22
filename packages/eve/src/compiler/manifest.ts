@@ -804,9 +804,7 @@ const compiledDynamicConnectionDefinitionSchema: z.ZodType<CompiledDynamicConnec
 
 const compiledToolBehaviorSchema: z.ZodType<CompiledToolBehavior> = z
   .object({
-    availability: z
-      .array(z.enum(["delegated-task-child", "requires-request-input", "root-session"]))
-      .readonly(),
+    availability: z.array(z.enum(["delegated-task-child", "root-session"])).readonly(),
     handling: z
       .discriminatedUnion("kind", [
         z
@@ -819,12 +817,6 @@ const compiledToolBehaviorSchema: z.ZodType<CompiledToolBehavior> = z
           .object({
             kind: z.literal("provider-tool"),
             provider: z.enum(["exa", "parallel"]),
-          })
-          .strict(),
-        z
-          .object({
-            kind: z.literal("request-input"),
-            request: z.literal("question"),
           })
           .strict(),
         z

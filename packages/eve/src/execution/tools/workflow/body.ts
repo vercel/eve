@@ -20,6 +20,11 @@ export interface WorkflowBodyDefinition {
   /** Snapshot added for new runs; absent only when resuming an older durable payload. */
   readonly agents?: WorkflowToolContext["agents"];
   readonly callId: string;
+  /**
+   * Whether the owning session can reach a human. `false` makes `ctx.ask()`
+   * resolve as `unavailable` instead of waiting for an answer no one can give.
+   */
+  readonly canRequestInput?: boolean;
   readonly executeInput?: JsonValue;
   readonly input: JsonObject;
 
@@ -54,6 +59,7 @@ export async function executeWorkflowBody(
   const from = createWorkflowBodyRef(input);
   const ctx = createWorkflowBodyContext(input, signal);
   attachWorkflowToolRunContext(ctx, {
+    canRequestInput: input.canRequestInput,
     from,
     owner: input.owner,
   });

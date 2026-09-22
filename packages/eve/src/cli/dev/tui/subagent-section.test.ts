@@ -51,7 +51,7 @@ describe("subagent section rendering", () => {
       fetchTool(2),
       fetchTool(3),
       fetchTool(99, { status: "error", result: "Response too large (exceeds 5 MB limit)." }),
-      tool({ title: "Update todo list", subtitle: "3 tasks", toolName: "todo" }),
+      tool({ title: "Run pnpm lint", subtitle: "", toolName: "bash" }),
       {
         kind: "subagent-step",
         subagentCallId: call,

@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { posix } from "node:path";
 
-import { type AlsContext, loadContext } from "#context/container.js";
+import type { AlsContext } from "#context/container.js";
 import { ContextKey } from "#context/key.js";
 
 // Read-file stamps track the last-known content for stale-write detection.
@@ -86,17 +86,4 @@ export function setReadFileStamp(ctx: AlsContext, targetKey: string, stamp: Read
   ctx.set(ReadFileStateKey, {
     byTarget: { ...state.byTarget, [targetKey]: stamp },
   });
-}
-
-// ---------------------------------------------------------------------------
-// Compaction reset
-// ---------------------------------------------------------------------------
-
-/**
- * Clears all read-file stamps from the context. The framework calls this on
- * context compaction so a write afterward must re-read the file whose read
- * evidence was summarized out of history.
- */
-export function clearReadFileState(): void {
-  loadContext().set(ReadFileStateKey, { byTarget: {} });
 }

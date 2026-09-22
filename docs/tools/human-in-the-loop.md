@@ -150,27 +150,38 @@ export default defineTool({
 
 ## Questions
 
-The built-in `ask_question` tool lets the model pause and ask the user, rather than guessing. It has no `execute` — the model calls it with `{ prompt, options?, allowFreeform? }`:
+The `ask_question` tool lets the model pause and ask the user one question, rather than guessing. The model calls it with `{ question, options? }`:
 
-- `prompt`: the question to put to the user.
-- `options`: an optional list of choices to offer. Channels render these as buttons or a select menu.
-- `allowFreeform`: whether the user may answer with free text instead of picking an option.
+- `question`: the question to put to the user, with the context needed to answer it.
+- `options`: two or three mutually exclusive choices, each with a `label` and a one-sentence `description`. Channels render these as buttons or a select menu. Omit `options` for an open-ended question.
 
-`ask_question` is part of the [default tool set](/docs/concepts/built-in-tools), so it is available without you defining anything. It produces the same `input.requested` pause as an approval, and resumes the same way.
+The user can always type their own answer instead of picking an option, so the model never needs an "Other" option. The tool returns `{ status: "answered", answer }` with the chosen option's label or the user's words, `{ status: "dismissed" }` when the user moved on without answering, or `{ status: "unavailable" }` when the session cannot request input.
+
+`ask_question` is an [opt-in framework tool](/docs/concepts/built-in-tools#ask_question). Add it with `eve add tool/ask_question`, which creates this file:
+
+```ts title="agent/tools/ask_question.ts"
+import { askQuestion } from "eve/tools/ask_question";
+
+export default askQuestion();
+```
+
+`ask_question` is an ordinary [workflow tool](/docs/tools/workflows) built on `ctx.ask()`. Write your own workflow tool with `ctx.ask()` when you need a different schema or want to act on the answer in the same call. Without any asking tool, the model asks in its reply text and the user's next message carries the answer.
 
 ## How pause and resume works
 
 Approvals and questions share one protocol:
 
-1. The model requests input (an approval, or an `ask_question`).
+1. A tool call needs approval, or a workflow tool such as `ask_question` calls `ctx.ask()`.
 2. eve emits an `input.requested` stream event carrying the pending requests.
 3. The turn parks at `session.waiting`, durably, for as long as it takes.
 4. The client answers with `inputResponses` (structured, keyed by `requestId`) or a normal follow-up `message`. A follow-up whose text matches an option ID, option label, or numeric option index resolves automatically, including approval options such as `approve` and `cancel`.
 
+For `ctx.ask()` questions, a follow-up message answers the question only when exactly one question is pending. The message must match an option, or the question must allow free text. Otherwise the message reaches the model as a normal turn, and each pending question created with `dismissible: true` resolves as `dismissed`.
+
 Each request includes a `kind` discriminator: `tool-approval`, `question`, or
-`session-limit`. Clients should use `kind` to choose behavior and presentation;
-`toolName` and `requestId` identify the action and request but do not encode its
-semantics.
+`session-limit`. Clients should use `kind` to choose behavior and presentation.
+`requestId` identifies the request to answer, and `action.callId` identifies the
+tool call that raised it; neither encodes the request's semantics.
 
 The run picks back up exactly where it parked. Because the pause is durable, nothing is held in memory while it waits — the process can restart and the parked turn survives.
 
@@ -189,7 +200,7 @@ From your own frontend, scan all messages for pending requests and answer throug
 ## What to read next
 
 - [Tools](/docs/tools): define the typed actions an approval gates
-- [Built-in tools](/docs/concepts/built-in-tools): the default tools, including `ask_question`
+- [Built-in tools](/docs/concepts/built-in-tools): the default tools and opt-in tools such as `ask_question`
 - [Sessions, runs & streaming](/docs/concepts/sessions-runs-and-streaming): the event and resume contract behind the pause
 - [Building a frontend](/docs/guides/frontend/overview): render and answer requests from your own UI
 - [Multi-tenant approvals](/docs/patterns/multi-tenant-approvals): resolve per-tenant approval policy for authored and connection tools

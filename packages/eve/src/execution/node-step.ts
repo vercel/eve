@@ -24,9 +24,7 @@ import type { HistoryViewProjector, PreparedHistoryView } from "#shared/history-
 import type { PreparedRuntimeTool, PreparedRuntimeWorkflowTask } from "#runtime/sessions/turn.js";
 import { findRegisteredRuntimeTool } from "#runtime/tools/registry.js";
 import type { ResolvedToolDefinition } from "#runtime/types.js";
-import { preserveFrameworkStateOnCompaction } from "#execution/compaction.js";
 import { createToolExecuteWithAuth } from "#execution/tool-auth.js";
-import { ASK_QUESTION_TOOL_NAME } from "#harness/request-input-tool.js";
 import {
   createPreparedWorkflowToolHarnessDefinition,
   createWorkflowToolHarnessDefinition,
@@ -57,10 +55,8 @@ export interface CreateExecutionNodeStepInput {
   /** Cancellation signal forwarded to the tool-loop harness. */
   readonly abortSignal?: AbortSignal;
   /**
-   * Session-level capabilities propagated from the runtime. The
-   * harness passes this through to `buildToolSet` so `ask_question`
-   * registration and any other capability-gated behavior tracks the
-   * current run.
+   * Session-level capabilities propagated from the runtime, so
+   * capability-gated behavior tracks the current run.
    */
   readonly capabilities?: SessionCapabilities;
   /** Runs only a context clear and returns to the parked session. */
@@ -109,7 +105,6 @@ export function createExecutionNodeStep(input: CreateExecutionNodeStepInput): St
     historyView: input.historyView,
     instrumentation: sessionInstrumentation,
     mode: input.mode,
-    onCompaction: preserveFrameworkStateOnCompaction,
     resolveStepDynamicTools: (resolveInput) =>
       preparePersistedStepDynamicToolMetadata({
         ...resolveInput,
@@ -272,8 +267,6 @@ function createRegisteredHarnessToolDefinition(input: {
     }
   }
   const rawExecute = def.execute;
-  const isFrameworkRequestInput =
-    def.owner.kind === "framework" && def.name === ASK_QUESTION_TOOL_NAME;
 
   const definition: HarnessToolDefinition = {
     availableInSubagents: def.availableInSubagents,
@@ -287,12 +280,10 @@ function createRegisteredHarnessToolDefinition(input: {
     description: def.description,
     execution: def.execution,
     executeInput: def.executeInput,
-    execute: isFrameworkRequestInput
-      ? undefined
-      : resolveAuthoredExecute({
-          rawExecute,
-          scope: def.name,
-        }),
+    execute: resolveAuthoredExecute({
+      rawExecute,
+      scope: def.name,
+    }),
     frameworkAction:
       def.owner.kind === "framework" && def.name === LOAD_SKILL_TOOL_NAME
         ? "load-skill"

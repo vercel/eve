@@ -139,23 +139,8 @@ describe("presentTool", () => {
     ).toBe("Search pricing");
   });
 
-  it("renders todo maintenance without dumping the list", () => {
-    const update = presentTool("todo", {
-      todos: [
-        { content: "a", status: "completed", priority: "high" },
-        { content: "b", status: "in_progress", priority: "low" },
-      ],
-    });
-    expect(update.title).toBe("Update todo list");
-    expect(update.subtitle).toBe("2 tasks");
-    expect(update.summarizeResult({ counts: { total: 2 } })).toBeUndefined();
-
-    expect(presentTool("todo", {}).title).toBe("Read todo list");
-    expect(presentTool("todo", undefined).title).toBe("Read todo list");
-  });
-
   it("renders the remaining structured builtins semantically", () => {
-    expect(presentTool("ask_question", { prompt: "Which environment?" }).title).toBe(
+    expect(presentTool("ask_question", { question: "Which environment?" }).title).toBe(
       "Ask Which environment?",
     );
     expect(presentTool("agent", { message: "Audit the auth flow.\nDetails…" }).title).toBe(
@@ -170,14 +155,13 @@ describe("presentTool", () => {
   it("covers the builtin presentation table with semantic copy", () => {
     const representativeInputs: Record<string, unknown> = {
       agent: { message: "audit the auth flow" },
-      ask_question: { prompt: "Which environment?" },
+      ask_question: { question: "Which environment?" },
       bash: { command: "ls" },
       glob: { pattern: "**/*.ts" },
       grep: { pattern: "useEve" },
       load_skill: { skill: "commit" },
       read_file: { filePath: "/workspace/a.ts" },
       task_cancel: { taskIds: ["task_abc"] },
-      todo: { todos: [] },
       web_fetch: { url: "https://example.com" },
       web_search: { query: "eve framework" },
       write_file: { filePath: "/workspace/a.ts", content: "x" },

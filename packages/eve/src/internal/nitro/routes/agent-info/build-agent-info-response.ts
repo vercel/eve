@@ -440,13 +440,6 @@ function projectPreparedKernelEffects(
           sourceId: tool.sourceId,
         });
         break;
-      case "request-input":
-        effects.push({
-          audience: [...behavior.availability],
-          kind: "request-input",
-          sourceId: tool.sourceId,
-        });
-        break;
       case "workflow-tool":
         effects.push({
           action: "workflow-tool-call",

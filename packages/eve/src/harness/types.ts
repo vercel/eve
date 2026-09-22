@@ -279,8 +279,8 @@ export interface ToolLoopHarnessConfig {
   readonly abortSignal?: AbortSignal;
   /**
    * Session-level capabilities. The harness reads
-   * {@link SessionCapabilities.requestInput} when assembling the
-   * per-step toolset to decide whether `ask_question` is available.
+   * {@link SessionCapabilities.requestInput} to decide whether a session-limit
+   * continuation prompt may park a task-mode session.
    */
   readonly capabilities?: SessionCapabilities;
   /** Clears model-message history without running a model turn. */
@@ -307,13 +307,6 @@ export interface ToolLoopHarnessConfig {
   readonly mode: RunMode;
   /** Whether this node enables framework background-task behavior. */
   readonly tasksEnabled?: boolean;
-  /**
-   * Called after compaction to let the execution layer re-apply
-   * framework-owned state preservation (read-before-write reset, todo
-   * re-injection). The harness appends the returned messages to the
-   * compacted history.
-   */
-  readonly onCompaction?: () => readonly HarnessModelMessage[];
   /** Resolves persisted step-scoped tools before an approval policy reads them. */
   readonly resolveStepDynamicTools?: (input: {
     readonly ctx: AlsContext;

@@ -26,6 +26,7 @@ export default defineWorkflowTool({
 
     const answer = await Promise.race([pending, sleep("10m")]);
     if (answer === undefined) return { decided: "timed out", service };
-    return { decided: answer.optionId === "approve" ? "approved" : "rejected", service };
+    const approved = answer.status === "answered" && answer.optionId === "approve";
+    return { decided: approved ? "approved" : "rejected", service };
   },
 });

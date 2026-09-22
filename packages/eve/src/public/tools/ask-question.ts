@@ -1,1 +1,5 @@
-export { askQuestion, askQuestion as default } from "#tools/framework/ask-question.js";
+export {
+  type AskQuestionInput,
+  type AskQuestionOutput,
+  askQuestion,
+} from "#tools/provided/ask-question.js";

@@ -393,18 +393,18 @@ describe("buildToolSet", () => {
     } satisfies JSONSchema7;
     const tools: HarnessToolMap = new Map<string, HarnessToolDefinition>([
       [
-        "ask_question",
+        "pick_color",
         {
-          description: "Ask the user a question.",
+          description: "Let the client pick a color.",
           inputSchema: jsonSchema(schema),
-          name: "ask_question",
+          name: "pick_color",
         },
       ],
     ]);
 
-    const result = buildToolSet({ capabilities: { requestInput: true }, tools });
+    const result = buildToolSet({ tools });
 
-    expect(getJsonSchema(result.ask_question)).toEqual(schema);
+    expect(getJsonSchema(result.pick_color)).toEqual(schema);
   });
 
   it("omits tools whose name is in disabledProviderTools", () => {
@@ -565,32 +565,6 @@ describe("buildToolSet", () => {
     });
 
     expect(result.web_search).toBeUndefined();
-  });
-
-  it("omits ask_question when the session cannot request input", () => {
-    const tools: HarnessToolMap = new Map<string, HarnessToolDefinition>([
-      [
-        "ask_question",
-        {
-          behavior: {
-            availability: ["requires-request-input"],
-            handling: { kind: "request-input", request: "question" },
-          },
-          description: "Ask the user a question.",
-          inputSchema: jsonSchema({}),
-          name: "ask_question",
-        },
-      ],
-    ]);
-
-    const withoutCapability = buildToolSet({ tools });
-    const withCapability = buildToolSet({
-      capabilities: { requestInput: true },
-      tools,
-    });
-
-    expect(withoutCapability.ask_question).toBeUndefined();
-    expect(withCapability.ask_question).toBeDefined();
   });
 
   it("defaults to no approval when no approval function is set", async () => {

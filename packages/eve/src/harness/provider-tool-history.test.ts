@@ -162,9 +162,9 @@ describe("normalizeProviderToolHistory", () => {
           },
           {
             type: "tool-call",
-            toolCallId: "todo-1",
-            toolName: "todo",
-            input: { todos: [] },
+            toolCallId: "read-1",
+            toolName: "read_file",
+            input: { filePath: "/workspace/a.ts" },
           },
         ],
       },
@@ -173,9 +173,9 @@ describe("normalizeProviderToolHistory", () => {
         content: [
           {
             type: "tool-result",
-            toolCallId: "todo-1",
-            toolName: "todo",
-            output: { type: "json", value: { todos: [] } },
+            toolCallId: "read-1",
+            toolName: "read_file",
+            output: { type: "json", value: { content: "" } },
           },
         ],
       },
@@ -215,9 +215,9 @@ describe("normalizeProviderToolHistory", () => {
         content: [
           {
             type: "tool-call",
-            toolCallId: "todo-1",
-            toolName: "todo",
-            input: { todos: [] },
+            toolCallId: "read-1",
+            toolName: "read_file",
+            input: { filePath: "/workspace/a.ts" },
           },
         ],
       },
@@ -226,9 +226,9 @@ describe("normalizeProviderToolHistory", () => {
         content: [
           {
             type: "tool-result",
-            toolCallId: "todo-1",
-            toolName: "todo",
-            output: { type: "json", value: { todos: [] } },
+            toolCallId: "read-1",
+            toolName: "read_file",
+            output: { type: "json", value: { content: "" } },
           },
         ],
       },

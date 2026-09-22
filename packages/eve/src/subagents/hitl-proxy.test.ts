@@ -257,3 +257,118 @@ describe("routeDeliverPayload", () => {
     expect(routed.parentAction).toEqual({ kind: "cancel-turn" });
   });
 });
+
+describe("routeDeliverPayload message resolution", () => {
+  function askSession(
+    questions: ReadonlyArray<
+      readonly [requestId: string, question: { allowFreeform?: boolean; dismissible?: boolean }]
+    >,
+  ): HarnessSession {
+    let session = createSession();
+    for (const [requestId, question] of questions) {
+      session = upsertProxyInputRequests({
+        entries: [
+          [
+            requestId,
+            {
+              answerHook: {
+                question: {
+                  ...question,
+                  options: [
+                    { id: "1", label: "Staging" },
+                    { id: "2", label: "Production" },
+                  ],
+                },
+                runId: `run-${requestId}`,
+              },
+              childContinuationToken: `hook-${requestId}`,
+              kind: "question",
+            },
+          ],
+        ],
+        forChildContinuationToken: `hook-${requestId}`,
+        session,
+      });
+    }
+    return session;
+  }
+
+  it("answers the only pending question with a matching option label", () => {
+    const routed = routeDeliverPayload({
+      payload: { message: "production" },
+      resolveMessage: true,
+      state: askSession([["ask-1", { dismissible: true }]]).state,
+    });
+
+    expect(routed.forSelf).toBeUndefined();
+    expect(routed.forChildren).toMatchObject([
+      {
+        childContinuationToken: "hook-ask-1",
+        payload: { inputResponses: [{ optionId: "2", requestId: "ask-1" }] },
+        retireRequestIds: ["ask-1"],
+      },
+    ]);
+    expect(routed.forChildren[0]?.dismissedRequestIds).toBeUndefined();
+  });
+
+  it("answers the only pending question with free text when it allows it", () => {
+    const routed = routeDeliverPayload({
+      payload: { message: "Use the canary pool" },
+      resolveMessage: true,
+      state: askSession([["ask-1", { allowFreeform: true, dismissible: true }]]).state,
+    });
+
+    expect(routed.forSelf).toBeUndefined();
+    expect(routed.forChildren[0]?.payload.inputResponses).toEqual([
+      { requestId: "ask-1", text: "Use the canary pool" },
+    ]);
+  });
+
+  it("dismisses dismissible questions and keeps an unrelated message for the turn", () => {
+    const routed = routeDeliverPayload({
+      payload: { message: "Actually, check the logs first." },
+      resolveMessage: true,
+      state: askSession([
+        ["ask-1", { dismissible: true }],
+        ["ask-2", {}],
+      ]).state,
+    });
+
+    expect(routed.forSelf).toEqual({ message: "Actually, check the logs first." });
+    expect(routed.forChildren).toEqual([
+      {
+        answerHook: expect.objectContaining({ runId: "run-ask-1" }),
+        childContinuationToken: "hook-ask-1",
+        dismissedRequestIds: ["ask-1"],
+        payload: { inputResponses: [] },
+        retireRequestIds: ["ask-1"],
+      },
+    ]);
+  });
+
+  it("leaves questions alone unless a person's message may resolve them", () => {
+    const routed = routeDeliverPayload({
+      payload: { message: "production" },
+      state: askSession([["ask-1", { dismissible: true }]]).state,
+    });
+
+    expect(routed.forSelf).toEqual({ message: "production" });
+    expect(routed.forChildren).toEqual([]);
+  });
+
+  it("prefers explicit input responses over resolving the message", () => {
+    const routed = routeDeliverPayload({
+      payload: {
+        inputResponses: [{ optionId: "1", requestId: "ask-1" }],
+        message: "production",
+      },
+      resolveMessage: true,
+      state: askSession([["ask-1", { dismissible: true }]]).state,
+    });
+
+    expect(routed.forSelf).toEqual({ message: "production" });
+    expect(routed.forChildren[0]?.payload.inputResponses).toEqual([
+      { optionId: "1", requestId: "ask-1" },
+    ]);
+  });
+});
