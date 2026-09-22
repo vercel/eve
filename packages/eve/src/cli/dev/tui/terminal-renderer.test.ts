@@ -123,6 +123,21 @@ function agentInfoWithModel(
   };
 }
 
+function agentInfoWithHarness(harnessId: string): AgentInfoResult {
+  const info = createTestAgentInfoResult({ name: "Weather Agent" });
+  const { model: _model, ...agent } = info.agent;
+  return {
+    ...info,
+    agent: {
+      ...agent,
+      harness: {
+        id: harnessId,
+        source: info.agent.config,
+      },
+    },
+  };
+}
+
 describe("TerminalRenderer (inline scrollback)", () => {
   it("prints the dim wordmark tag as the parting line after a Ctrl-C exit", async () => {
     const { screen, input, renderer } = makeRenderer();
@@ -5389,6 +5404,55 @@ describe("TerminalRenderer status line", () => {
   const vercelStatus = {
     identity: { projectName: "my-agent", teamName: "acme" },
   };
+
+  it("renders the harness id without model metadata", async () => {
+    const { screen, input, renderer } = makeRenderer();
+    renderer.renderAgentHeader({
+      name: "Weather Agent",
+      serverUrl: "http://localhost:3000",
+      info: agentInfoWithHarness("claude-code"),
+    });
+
+    const prompt = renderer.readPrompt();
+    renderer.setVercelStatus(vercelStatus);
+    const lines = screen.snapshot().split("\n");
+    const promptRow = lines.findIndex((line) => line.includes("❯"));
+    expect(promptRow).toBeGreaterThan(-1);
+    const statusRow = lines.slice(promptRow + 1).join("\n");
+    expect(statusRow).toContain("claude-code");
+    expect(statusRow).not.toContain("openai/gpt-5.5");
+    expect(statusRow).not.toContain("ai-gateway");
+    expect(screen.rawOutput()).toContain("\x1b[2mclaude-code\x1b[22m");
+
+    input.type("done");
+    input.enter();
+    await prompt;
+    renderer.shutdown();
+  });
+
+  it("renders a harness AI Gateway endpoint with the linked project", async () => {
+    const { screen, input, renderer } = makeRenderer();
+    renderer.renderAgentHeader({
+      name: "Weather Agent",
+      serverUrl: "http://localhost:3000",
+      info: agentInfoWithHarness("claude-code"),
+      harnessEndpoint: { kind: "gateway", connected: true, credential: "oidc" },
+    });
+
+    const prompt = renderer.readPrompt();
+    renderer.setVercelStatus(vercelStatus);
+
+    const lines = screen.snapshot().split("\n");
+    const promptRow = lines.findIndex((line) => line.includes("❯"));
+    expect(promptRow).toBeGreaterThan(-1);
+    const statusRow = lines.slice(promptRow + 1).join("\n");
+    expect(statusRow).toContain("claude-code · ai-gateway(oidc:my-agent)");
+
+    input.type("done");
+    input.enter();
+    await prompt;
+    renderer.shutdown();
+  });
 
   it("renders the model and Vercel link without the local port under the prompt row", async () => {
     const { screen, input, renderer } = makeRenderer();

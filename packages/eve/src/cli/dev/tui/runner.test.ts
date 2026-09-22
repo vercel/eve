@@ -492,6 +492,17 @@ const AGENT_INFO: AgentInfoResult = createTestAgentInfoResult({
   name: "Weather Agent",
 });
 
+function harnessAgentInfo(harnessId: string): AgentInfoResult {
+  const { model: _model, ...agent } = AGENT_INFO.agent;
+  return {
+    ...AGENT_INFO,
+    agent: {
+      ...agent,
+      harness: { id: harnessId, source: AGENT_INFO.agent.config },
+    },
+  };
+}
+
 beforeEach(() => {
   // The runner normalizes header endpoints from the real process.env; a
   // developer shell exporting gateway credentials must not leak into these
@@ -662,6 +673,36 @@ describe("EveTUIRunner agent header", () => {
       info: AGENT_INFO,
     });
     expect(renderer.readPrompt).toHaveBeenCalled();
+  });
+
+  it("adds the local harness Gateway endpoint to the startup header", async () => {
+    vi.stubEnv("VERCEL_OIDC_TOKEN", "token");
+    const headers: AgentTUIAgentHeader[] = [];
+    const renderer = fakeRenderer({
+      renderAgentHeader: (header) => headers.push(header),
+    });
+    const client = stubClient();
+    vi.spyOn(client, "info").mockResolvedValue(harnessAgentInfo("claude-code"));
+
+    const runner = new EveTUIRunner({
+      appRoot: "/tmp/weather-agent",
+      bootDetections: [],
+      client,
+      detectProjectIdentity: vi.fn(async () => undefined),
+      name: "Weather Agent",
+      renderer,
+      serverUrl: "http://localhost:3000",
+      session: stubSession(),
+    });
+
+    await runner.run();
+
+    expect(headers).toHaveLength(1);
+    expect(headers[0]?.harnessEndpoint).toEqual({
+      kind: "gateway",
+      connected: true,
+      credential: "oidc",
+    });
   });
 
   it("still renders a header when info cannot be fetched", async () => {

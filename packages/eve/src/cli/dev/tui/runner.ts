@@ -35,6 +35,7 @@ import {
 } from "#services/dev-client.js";
 import { inspectApplication } from "#services/inspect-application.js";
 import { toErrorMessage } from "#shared/errors.js";
+import type { ModelEndpointStatus } from "#shared/model-endpoint-status.js";
 import { SubagentPump, type SubagentPumpOptions, type SubagentView } from "./subagent-pump.js";
 export type {
   SubagentRun,
@@ -81,6 +82,7 @@ import {
   LOGIN_SETUP_ISSUE,
   orderedSetupIssues,
   normalizeLocalModelEndpoint,
+  resolveLocalHarnessEndpoint,
   type BootDetection,
   type BootDetectionContext,
   type SetupIssue,
@@ -253,6 +255,7 @@ export type AgentTUIAgentHeader = {
   name: string;
   serverUrl: string;
   info?: AgentInfoResult;
+  harnessEndpoint?: ModelEndpointStatus;
 };
 
 export type AgentTUIRenderer = {
@@ -737,6 +740,10 @@ export class EveTUIRunner {
   #replaceAgentInfo(info: AgentInfoResult | undefined): AgentInfoResult | undefined {
     const headerInfo =
       this.#appRoot === undefined ? info : normalizeLocalModelEndpoint(info, process.env);
+    const harnessEndpoint =
+      this.#appRoot !== undefined && headerInfo?.agent.harness !== undefined
+        ? resolveLocalHarnessEndpoint(process.env)
+        : undefined;
     this.#agentInfo = headerInfo;
     const serverUrl = this.#serverUrl;
     if (serverUrl === undefined || this.#startupActive) return headerInfo;
@@ -746,6 +753,7 @@ export class EveTUIRunner {
       serverUrl,
     };
     if (headerInfo !== undefined) header.info = headerInfo;
+    if (harnessEndpoint !== undefined) header.harnessEndpoint = harnessEndpoint;
     this.#renderer.renderAgentHeader?.(header);
     return headerInfo;
   }

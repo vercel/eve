@@ -8,6 +8,7 @@ import {
   LOGIN_SETUP_ISSUE,
   orderedSetupIssues,
   normalizeLocalModelEndpoint,
+  resolveLocalHarnessEndpoint,
   type BootDetectionContext,
 } from "./setup-issues.js";
 import { createTestAgentInfoResult } from "#internal/testing/agent-info-fixture.js";
@@ -36,6 +37,21 @@ function infoWithRouting(
 }
 
 describe("BOOT_DETECTIONS", () => {
+  it("resolves local AI Gateway credentials for harness status", () => {
+    expect(
+      resolveLocalHarnessEndpoint({
+        AI_GATEWAY_API_KEY: "key",
+        VERCEL_OIDC_TOKEN: "token",
+      }),
+    ).toEqual({ kind: "gateway", connected: true, credential: "api-key" });
+    expect(resolveLocalHarnessEndpoint({ VERCEL_OIDC_TOKEN: "token" })).toEqual({
+      kind: "gateway",
+      connected: true,
+      credential: "oidc",
+    });
+    expect(resolveLocalHarnessEndpoint({})).toBeUndefined();
+  });
+
   it("skips model-provider setup for harness-backed agents", async () => {
     const info = createTestAgentInfoResult();
     const harnessInfo: AgentInfo = {
