@@ -2434,6 +2434,11 @@
           "target": "apps/web/postcss.config.mjs"
         },
         {
+          "path": "registry/channel/web/proxy.ts",
+          "type": "registry:file",
+          "target": "apps/web/proxy.ts"
+        },
+        {
           "path": "registry/channel/web/tsconfig.json",
           "type": "registry:file",
           "target": "apps/web/tsconfig.json"

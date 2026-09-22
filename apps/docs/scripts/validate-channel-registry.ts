@@ -146,6 +146,12 @@ for (const [index, item] of items.entries()) {
         `Registry item "${item.name}" must not overwrite the agent's root tsconfig.json.`,
       );
     }
+    const webProxy = item.files?.find((file) => file.target === "apps/web/proxy.ts");
+    if (webProxy?.path !== "registry/channel/web/proxy.ts") {
+      throw new Error(
+        `Registry item "${item.name}" must install the Web Chat proxy at apps/web/proxy.ts.`,
+      );
+    }
     const webTsconfig = item.files?.find((file) => file.target === "apps/web/tsconfig.json");
     if (webTsconfig?.path !== "registry/channel/web/tsconfig.json") {
       throw new Error(
