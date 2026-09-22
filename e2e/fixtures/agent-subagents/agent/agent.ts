@@ -155,7 +155,7 @@ export default defineAgent({
               : message.content.map((part) => (part.type === "text" ? part.text : "")).join(""),
           ];
         });
-        if (messages.some((message) => message.startsWith(NESTED_BACKGROUND))) {
+        if (messages.some((message) => message.includes(NESTED_BACKGROUND))) {
           return { model: nestedBackgroundModel, modelContextWindowTokens: 1_000_000 };
         }
         if (

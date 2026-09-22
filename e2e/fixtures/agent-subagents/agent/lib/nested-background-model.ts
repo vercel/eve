@@ -13,7 +13,10 @@ export function nestedMessage(role: Role, key: string): string {
 export const nestedBackgroundModel = mockModel({
   modelId: "nested-background-completion",
   respond(request) {
-    const message = request.userMessages.find((text) => text.startsWith(NESTED_BACKGROUND));
+    // Remote delegation wraps the caller message in a subagent introduction.
+    const message = request.userMessages
+      .flatMap((text) => text.split("\n"))
+      .find((text) => text.startsWith(NESTED_BACKGROUND));
     if (message === undefined) throw new Error("Missing nested verification scenario.");
     const { role, key } = JSON.parse(message.slice(NESTED_BACKGROUND.length)) as {
       role: Role;

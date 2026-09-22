@@ -9,11 +9,11 @@ export default defineEval({
   async test(t) {
     const key = crypto.randomUUID();
     const launch = (await t.send(nestedMessage("parent", key))).expectOk();
-    launch.calledTool("remote-loopback", { output: { status: "working" }, count: 1 });
+    launch.requireToolCall("remote-loopback", { output: { status: "working" } });
     const detectorId = await childSession(t, launch.sessionId, "remote-loopback");
     const detector = await t.target.attachSession(detectorId);
     detector.succeeded();
-    detector.calledTool("agent", { output: { status: "working" }, count: 1 });
+    detector.requireToolCall("agent", { output: { status: "working" } });
     detector.notEvent("subagent.completed");
     const workerId = await childSession(t, detectorId, "agent");
     const gatePath = `/test/verification/${encodeURIComponent(workerId)}/${key}`;
