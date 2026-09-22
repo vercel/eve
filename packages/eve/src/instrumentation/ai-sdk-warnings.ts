@@ -27,11 +27,12 @@ const logAiSdkWarnings: LogWarningsFunction = ({ warnings, provider, model }) =>
       provider,
       warning,
     };
+    const message = "message" in warning ? warning.message : (warning.details ?? warning.feature);
 
     if (warning.type === "compatibility") {
-      log.info("AI SDK warning", fields);
+      log.info(message, fields);
     } else {
-      log.warn("AI SDK warning", fields);
+      log.warn(message, fields);
     }
   }
 };

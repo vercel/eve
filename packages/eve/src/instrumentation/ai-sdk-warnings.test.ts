@@ -87,7 +87,7 @@ describe("ensureAiSdkWarningLogger", () => {
       {
         level: "info",
         namespace: "harness.ai-sdk-warnings",
-        message: "AI SDK warning",
+        message: "The provider removed it before sending the request.",
         fields: {
           model: "openai/gpt-5",
           provider: "gateway",
@@ -105,20 +105,23 @@ describe("ensureAiSdkWarningLogger", () => {
 
   it.each([
     {
+      expectedMessage: "The provider ignored it.",
       type: "unsupported" as const,
       feature: "temperature",
       details: "The provider ignored it.",
     },
     {
+      expectedMessage: "Use providerOptions.current instead.",
       type: "deprecated" as const,
       setting: "providerOptions.legacy",
       message: "Use providerOptions.current instead.",
     },
     {
+      expectedMessage: "The provider returned an actionable warning.",
       type: "other" as const,
       message: "The provider returned an actionable warning.",
     },
-  ])("records $type warnings at warning level", (warning) => {
+  ])("records $type warnings at warning level", ({ expectedMessage, ...warning }) => {
     const records: LogRecord[] = [];
     globalThis.AI_SDK_LOG_WARNINGS = undefined;
     vi.stubEnv("AI_SDK_LOG_WARNINGS", "true");
@@ -139,7 +142,7 @@ describe("ensureAiSdkWarningLogger", () => {
       {
         level: "warn",
         namespace: "harness.ai-sdk-warnings",
-        message: "AI SDK warning",
+        message: expectedMessage,
         fields: {
           model: "openai/gpt-5",
           provider: "gateway",
