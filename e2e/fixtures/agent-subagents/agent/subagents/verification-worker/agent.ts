@@ -1,13 +1,7 @@
-import { defineAgent, defineDynamic } from "eve";
-import { nestedBackgroundModel } from "../../lib/nested-background-model.js";
+import { e2eSubagentConfig } from "@eve-e2e/config";
+import { defineAgent } from "eve";
 
 export default defineAgent({
   description: "Complete Alice's nested verification after she releases the worker.",
-  // Return the authored instance so the world suite's generic static-model
-  // adapter cannot replace the gate-driving responder.
-  model: defineDynamic({
-    events: {
-      "step.started": () => ({ model: nestedBackgroundModel, modelContextWindowTokens: 1_000_000 }),
-    },
-  }),
+  ...e2eSubagentConfig(),
 });

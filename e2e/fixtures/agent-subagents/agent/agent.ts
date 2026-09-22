@@ -1,7 +1,6 @@
 import { e2eAgentConfig } from "@eve-e2e/config";
 import { defineAgent, defineDynamic } from "eve";
 import { mockModel } from "eve/evals";
-import { NESTED_BACKGROUND, nestedBackgroundModel } from "./lib/nested-background-model.js";
 
 import {
   SCHEDULED_REMOTE_CHILD_SCENARIO,
@@ -155,9 +154,6 @@ export default defineAgent({
               : message.content.map((part) => (part.type === "text" ? part.text : "")).join(""),
           ];
         });
-        if (messages.some((message) => message.includes(NESTED_BACKGROUND))) {
-          return { model: nestedBackgroundModel, modelContextWindowTokens: 1_000_000 };
-        }
         if (
           messages.some(
             (message) =>
