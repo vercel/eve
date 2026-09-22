@@ -58,7 +58,7 @@ interface SearchInput {
 
 const searchTracesTool = defineTool({
   description:
-    "Search structural summaries for traces in the invoking conversation. Filter by session, agent, tool, or failures; then inspect a returned trace with selfmod__inspect_trace. Prompts and tool payloads are never searched.",
+    "Search structural summaries for traces in the invoking conversation. Filter by session, agent, tool, or failures; then inspect a returned trace with inspect_trace. Prompts and tool payloads are never searched.",
   inputSchema,
   outputSchema: { type: "object", additionalProperties: true },
   async execute(input, ctx) {

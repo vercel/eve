@@ -60,7 +60,7 @@ const localGuidance = `## Local environment
 
 The registry_add tool will complete installation for items that need no setup. In the local dev TUI, a \`needs-terminal\` result from the tool call automatically opens the existing setup panel for the user to complete setup there. In headless development, if a \`needs-terminal\` result includes \`nextCommand\`, present that exact value as the only shell command in your response. Never infer, construct, or rewrite a command: installing an item uses \`eve add <item>\`; \`eve registry add\` configures registry namespace mappings and does not install items.
 
-Local eve dev logs are mounted read-only at /logs. Local trace segments are mounted read-only at /traces when available. For latency, failure, token, or behavior analysis, load and follow the trace-analysis skill. Trace searches are scoped to the invoking conversation and exclude the current investigation by default.
+Local eve dev logs are mounted read-only at /logs. Local trace segments are mounted read-only at /traces when available. For latency, failure, token, or behavior analysis, load and follow the \`trace_analysis\` skill. Trace searches are scoped to the invoking conversation and exclude the current investigation by default.
 
 The application package.json is not mounted. Do not search outside /source for application files. You cannot run host binaries such as git, node, pnpm, or tsc. Use existing imports and registry_add for supported registry installations.`;
 

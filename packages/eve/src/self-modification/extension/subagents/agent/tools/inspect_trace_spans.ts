@@ -33,7 +33,7 @@ const inputSchema = {
 
 const inspectTraceSpansTool = defineTool({
   description:
-    "Return bounded arguments, results, or errors for selected spans in one trace. First use selfmod__inspect_trace to choose spanIds and see availableFields.",
+    "Return bounded arguments, results, or errors for selected spans in one trace. First use inspect_trace to choose spanIds and see availableFields.",
   inputSchema,
   outputSchema: { type: "object", additionalProperties: true },
   async execute(input, ctx) {

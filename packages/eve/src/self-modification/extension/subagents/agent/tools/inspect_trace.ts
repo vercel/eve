@@ -4,7 +4,12 @@ import { analyzeLocalTrace } from "#tracing/local-trace-analysis.js";
 
 import type { ResolvedSelfModificationConfig } from "../../../../config.js";
 import { defineLocalOnlyDynamic, resolveLocalOnly } from "../../../local-only.js";
-import { boundedText, detailFields, readTraceSources, TRACE_ID } from "../../../trace-inspection.js";
+import {
+  boundedText,
+  detailFields,
+  readTraceSources,
+  TRACE_ID,
+} from "../../../trace-inspection.js";
 
 const MAX_RECORDS = 200;
 const MAX_OFFSET = 100_000;
@@ -29,7 +34,7 @@ const inputSchema = {
 
 const inspectTraceTool = defineTool({
   description:
-    "Inspect one trace as a bounded structural timeline. Use offset to page through larger traces. Tool records include a short argument preview and availableFields; use selfmod__inspect_trace_spans only for selected raw tool payloads.",
+    "Inspect one trace as a bounded structural timeline. Use offset to page through larger traces. Tool records include a short argument preview and availableFields; use inspect_trace_spans only for selected raw tool payloads.",
   inputSchema,
   outputSchema: { type: "object", additionalProperties: true },
   async execute(input, ctx) {

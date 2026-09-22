@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { resolveInspectTraceTool } from "./extension/tools/inspect_trace.js";
-import { resolveInspectTraceSpansTool } from "./extension/tools/inspect_trace_spans.js";
-import { resolveSearchTracesTool } from "./extension/tools/search_traces.js";
-import { resolveTraceAnalysisSkill } from "./extension/skills/trace_analysis.js";
+import { resolveTraceAnalysisSkill } from "./extension/subagents/agent/skills/trace_analysis.js";
+import { resolveInspectTraceTool } from "./extension/subagents/agent/tools/inspect_trace.js";
+import { resolveInspectTraceSpansTool } from "./extension/subagents/agent/tools/inspect_trace_spans.js";
+import { resolveSearchTracesTool } from "./extension/subagents/agent/tools/search_traces.js";
 
 const traceId = "1".repeat(32);
 const otherTraceId = "2".repeat(32);
@@ -109,7 +109,7 @@ function traceContext(contents: Record<string, string>) {
   } as never;
 }
 
-describe("selfmod trace inspection tools", () => {
+describe("self-modification trace inspection tools", () => {
   it("ranks summed step usage and returns the same summary from search and paged inspection", async () => {
     const ctx = traceContext({
       [traceId]: segment({ stepInputTokens: [100, 100], toolName: "read", status: { code: 2 } }),
