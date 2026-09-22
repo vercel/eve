@@ -25,7 +25,7 @@ import { auto } from "eve/models";
 export default defineAgent({
   model: auto({
     options: {
-      "openai/gpt-5.6-sol": "Difficult reasoning and engineering tasks",
+      "openai/gpt-6-sol": "Difficult reasoning and engineering tasks",
       "openai/gpt-5.6-luna": "Routine tasks where fast completion matters",
     },
   }),
@@ -58,7 +58,7 @@ export default defineAgent({
   model: auto({
     model: typeSafeAi.evaluationModel("jev-latest"),
     options: {
-      "openai/gpt-5.6-sol": "Difficult reasoning and engineering tasks",
+      "openai/gpt-6-sol": "Difficult reasoning and engineering tasks",
       "openai/gpt-5.6-luna": "Routine tasks where fast completion matters",
     },
   }),
@@ -83,7 +83,7 @@ export default defineAgent({
   reasoning: "medium",
   model: auto({
     options: {
-      "openai/gpt-5.6-sol": "Hard problems",
+      "openai/gpt-6-sol": "Hard problems",
       my_secret_model: {
         model: anthropic("sonnet-5"),
         description: "Routine work that can use the direct Anthropic provider",

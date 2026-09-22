@@ -11,7 +11,7 @@ The harness keeps a long session from overflowing the model's context window. Be
 
 ```ts title="agent/agent.ts"
 export default defineAgent({
-  model: "anthropic/claude-opus-4.8",
+  model: "anthropic/claude-opus-5.5",
   compaction: {
     thresholdPercent: 0.75,
   },

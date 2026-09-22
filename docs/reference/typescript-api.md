@@ -12,7 +12,7 @@ Most files look the same: import a helper, default-export the result.
 ```ts title="agent/agent.ts"
 import { defineAgent } from "eve";
 
-export default defineAgent({ model: "anthropic/claude-opus-4.8" });
+export default defineAgent({ model: "anthropic/claude-opus-5.5" });
 ```
 
 ```ts title="agent/tools/get_weather.ts"

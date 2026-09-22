@@ -102,7 +102,7 @@ Change the root agent's AI Gateway model and reasoning effort without opening th
 
 ```bash
 eve set \
-  --model openai/gpt-5.6-sol \
+  --model openai/gpt-6-sol \
   --reasoning high
 ```
 
