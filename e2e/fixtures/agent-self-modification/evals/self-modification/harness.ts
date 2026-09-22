@@ -11,7 +11,7 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 
 import type { EveEvalContext, EveEvalLiveTurn, EveEvalSession, EveEvalTurn } from "eve/evals";
 
@@ -93,12 +93,19 @@ export class SelfModificationHarness {
   readonly #t: EveEvalContext;
   readonly #sourceRoot: string;
   readonly #backupRoot: string;
+  readonly #projectFiles: ReadonlyMap<string, Buffer | undefined>;
   readonly #turns = new Set<EveEvalLiveTurn>();
 
-  private constructor(t: EveEvalContext, sourceRoot: string, backupRoot: string) {
+  private constructor(
+    t: EveEvalContext,
+    sourceRoot: string,
+    backupRoot: string,
+    projectFiles: ReadonlyMap<string, Buffer | undefined>,
+  ) {
     this.#t = t;
     this.#sourceRoot = sourceRoot;
     this.#backupRoot = backupRoot;
+    this.#projectFiles = projectFiles;
   }
 
   static async create(
@@ -119,7 +126,23 @@ export class SelfModificationHarness {
     try {
       await options.onBackupCreated?.(backupRoot);
       await cp(sourceRoot, join(backupRoot, "agent"), { recursive: true, verbatimSymlinks: true });
-      return new SelfModificationHarness(t, sourceRoot, backupRoot);
+      const projectRoot = dirname(sourceRoot);
+      const projectFiles = new Map<string, Buffer | undefined>();
+      for (const path of [
+        join(projectRoot, ".env.local"),
+        join(projectRoot, ".env.example"),
+        join(projectRoot, "package.json"),
+        resolve(projectRoot, "../../../pnpm-lock.yaml"),
+      ]) {
+        projectFiles.set(
+          path,
+          await readFile(path).catch((error: NodeJS.ErrnoException) => {
+            if (error.code === "ENOENT") return undefined;
+            throw error;
+          }),
+        );
+      }
+      return new SelfModificationHarness(t, sourceRoot, backupRoot, projectFiles);
     } catch (error) {
       await rm(backupRoot, { recursive: true, force: true });
       throw error;
@@ -170,6 +193,42 @@ export class SelfModificationHarness {
     ]);
     this.#t.calledSubagent(SELF_MODIFICATION_AGENT);
     return { child, parent, session: liveParent.session };
+  }
+
+  /** Approves the registry install on the parent and observes the resumed child turn. */
+  async approveRegistry(run: SelfModificationRun): Promise<EveEvalTurn> {
+    const toolName = "selfmod__registry_add";
+    let session = run.session;
+    for (let attempt = 0; attempt < 5; attempt++) {
+      if (session.pendingInputRequests.some((request) => request.action.toolName === toolName))
+        break;
+      const live = this.#t.target.watchTurn(session.sessionId, {
+        startIndex: session.state.streamIndex,
+      });
+      this.#turns.add(live);
+      (await live.result()).expectOk();
+      session = live.session;
+    }
+    session.requireInputRequest({ toolName });
+    const childSessionId = run.child.sessionId;
+    const previousChild = [...this.#turns]
+      .reverse()
+      .find((turn) => turn.sessionId === childSessionId);
+    if (previousChild === undefined) throw new Error("Missing registry child session cursor.");
+    const child = this.#t.target.watchTurn(childSessionId, {
+      startIndex: previousChild.session.state.streamIndex,
+    });
+    this.#turns.add(child);
+    const responses = session.pendingInputRequests.map((request) => ({
+      optionId: "approve",
+      requestId: request.requestId,
+    }));
+    const parent = await session.startRespond(responses);
+    this.#turns.add(parent);
+    const [childTurn, parentTurn] = await Promise.all([child.result(), parent.result()]);
+    childTurn.expectOk();
+    parentTurn.expectOk();
+    return childTurn;
   }
 
   followUp(session: EveEvalSession, prompt: string): Promise<EveEvalTurn> {
@@ -257,6 +316,10 @@ export class SelfModificationHarness {
         recursive: true,
         verbatimSymlinks: true,
       });
+      for (const [path, content] of this.#projectFiles) {
+        if (content === undefined) await rm(path, { force: true });
+        else await writeFile(path, content);
+      }
     } finally {
       await this.#post(`resume?lease=${lease}`, signal);
     }

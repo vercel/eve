@@ -35,6 +35,13 @@
         ]
       },
       {
+        "name": "registry",
+        "evals": [
+          "self-modification/add-agent-browser",
+          "self-modification/add-slack-channel"
+        ]
+      },
+      {
         "name": "create",
         "evals": [
           "self-modification/create-background-replication-check",

@@ -108,6 +108,25 @@ async function assertTreeRestored(root) {
   await assert.rejects(readFile(join(root, "unexpected.txt")));
 }
 
+test("close restores registry installer project files", async () => {
+  const root = await mkdtemp(join(tmpdir(), "eve-selfmod-project-"));
+  await mkdir(join(root, "agent"));
+  await writeFile(join(root, ".env.example"), "EXISTING=original\n");
+  await writeFile(join(root, "package.json"), '{"name":"original"}\n');
+  const harness = await SelfModificationHarness.create(context(targetFor()), join(root, "agent"));
+  try {
+    await writeFile(join(root, ".env.example"), "EXISTING=changed\n");
+    await writeFile(join(root, ".env.local"), "BROWSER_USE_API_KEY=\n");
+    await writeFile(join(root, "package.json"), '{"name":"changed"}\n');
+    await harness.close();
+    assert.equal(await readFile(join(root, ".env.example"), "utf8"), "EXISTING=original\n");
+    assert.equal(await readFile(join(root, "package.json"), "utf8"), '{"name":"original"}\n');
+    await assert.rejects(readFile(join(root, ".env.local")), { code: "ENOENT" });
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("close retires every session before restoring the complete source tree", async () => {
   const child = liveTurn("child");
   const verification = liveTurn("verification");
