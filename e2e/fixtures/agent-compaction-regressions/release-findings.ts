@@ -29,5 +29,5 @@ export const handoffNotes = [
   "During failure testing, record the customer-visible message and the corresponding internal error reference separately. Confirm that the customer can choose a recovery action without receiving private addresses, credentials, or server implementation details.",
   "The release owner should collect results for the purchase, cancellation, and notification journeys before approval. A failed journey needs its own reproduction and recovery check; a passed repository review does not replace that behavioral evidence.",
   "Keep unresolved release checks distinct from completed review work in the handoff. If validation exposes a new defect, record the new observation and affected journey rather than reopening the repository inspection without additional evidence.",
-  "After the release checks are recorded, publish the concise handoff with the completed review result and checkpoint status.",
+  "After the release checks are recorded, publish the concise handoff with the completed review result and checkpoint status. Link each recorded release check to the journey it covers so later reviewers can trace every result back to this plan.",
 ];

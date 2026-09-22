@@ -16,9 +16,9 @@ import { assistantHasReport } from "../report-evidence";
 import { HANDOFF_REFERENCE, REVIEW_REFERENCE } from "../release-reports";
 
 const TEST_CONTEXT_WINDOW_TOKENS = 32_000;
-// The compiled fixture's instructions and advertised tools occupy at most
-// ~2,823 tokens. Reserve them in addition to the summarizer's history budget.
-const TEST_REQUEST_ENVELOPE_TOKENS = 2_823;
+// The compiled fixture's instructions and 11 advertised tools occupy ~2,371
+// tokens. Reserve them in addition to the summarizer's history budget.
+const TEST_REQUEST_ENVELOPE_TOKENS = 2_371;
 // Fit the capped file-output exchange, while forcing the larger review and
 // handoff reports into the assistant checkpoint consumed by the script.
 const TEST_HISTORY_BUDGET_TOKENS = 900;
