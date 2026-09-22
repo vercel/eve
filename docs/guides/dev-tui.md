@@ -71,7 +71,7 @@ Changes apply together after the final choice, then the picker returns to chat. 
 
 A successful login or model change takes effect on the next prompt.
 
-Gateway connections default to `spacexai/grok-4.7`; OpenAI and ChatGPT default to `gpt-5.6-luna-fast`; Anthropic defaults to `claude-sonnet-5`. An explicitly authored compatible model stays selected. If a new default is unavailable, eve offers the connection's available models. Dynamic or custom model expressions must be edited in `agent.ts`.
+Gateway connections default to `spacexai/grok-4.7`; OpenAI and ChatGPT default to `gpt-6-luna-fast`; Anthropic defaults to `claude-sonnet-5`. An explicitly authored compatible model stays selected. If a new default is unavailable, eve offers the connection's available models. Dynamic or custom model expressions must be edited in `agent.ts`.
 
 ## Add an integration
 

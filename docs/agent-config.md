@@ -39,9 +39,9 @@ export default defineAgent({
 });
 ```
 
-`openai()` from `eve/models/openai` defaults to `gpt-5.6-luna-fast`. Both helpers accept an optional native provider model ID and use `OPENAI_API_KEY` or `ANTHROPIC_API_KEY`. During local development they can also use credentials saved through `/login`. Deployments require their API key in the server environment.
+`openai()` from `eve/models/openai` defaults to `gpt-6-luna-fast`. Both helpers accept an optional native provider model ID and use `OPENAI_API_KEY` or `ANTHROPIC_API_KEY`. During local development they can also use credentials saved through `/login`. Deployments require their API key in the server environment.
 
-For a local ChatGPT subscription, use `chatgpt()` from `eve/models/openai` and sign in with `/login`. It defaults to `gpt-5.6-luna-fast` and cannot run in a deployment.
+For a local ChatGPT subscription, use `chatgpt()` from `eve/models/openai` and sign in with `/login`. It defaults to `gpt-6-luna-fast` and cannot run in a deployment.
 
 `/login` can switch a static Gateway string to an eve helper and manage its import. `/model` changes the selected model and settings immediately. Custom provider SDK calls and dynamic expressions retain their authored behavior and require manual source edits. You can still install an AI SDK provider package and pass its `LanguageModel` when you need provider-specific configuration.
 

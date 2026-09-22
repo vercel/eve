@@ -138,7 +138,7 @@ String IDs resolve through the AI SDK default provider, or Vercel AI Gateway whe
 import { openai } from "@ai-sdk/openai";
 
 t.judge("The response addresses the request.", {
-  model: openai.evaluationModel("gpt-5.6-luna"),
+  model: openai.evaluationModel("gpt-6-luna"),
   modelOptions: { providerOptions: { openai: { reasoningEffort: "high" } } },
 });
 ```
