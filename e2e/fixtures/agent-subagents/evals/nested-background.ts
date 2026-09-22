@@ -5,9 +5,11 @@ type Detector = "agent" | "local-detector" | "remote-loopback";
 
 export async function nestedBackgroundCompletion(t: EveEvalContext, target: Detector) {
   const key = crypto.randomUUID();
-  const workerTask = `Alice needs a verification receipt. Call verification_gate once with key ${key}. When it returns, reply with its returned text verbatim and nothing else. The tool performs the verification; do not delegate it or invent a result.`;
-  const detectorTask = `Coordinate Alice's verification by calling verification-worker once with this task: ${JSON.stringify(workerTask)}. While that background task is working, say "Verification is running." and finish your turn. When its completion arrives, reply with the worker's result verbatim and nothing else. Do not do the worker's task yourself or delegate to another agent.`;
-  const parentTask = `Alice needs you to coordinate a verification through ${target}. Call ${target} once with this task: ${JSON.stringify(detectorTask)}. Use ordinary text output, without an output schema. While that background task is working, acknowledge that it is underway and finish your turn. When its completion arrives, reply with the detector's result verbatim and nothing else. Do not perform or redelegate the detector's task yourself.`;
+  const detectorTask = `Alice is preparing a project status update. Ask verification-worker to fetch her verification receipt by calling verification_gate with key ${key}. While the worker is busy, acknowledge that verification is running and finish your turn. When the worker completes, forward its receipt unchanged.`;
+  const parentTask = `Help Alice prepare her project status update. Delegate the following request to ${target}, then acknowledge that it is underway and finish your turn. When the delegated task completes, forward its receipt unchanged.
+
+Request to delegate:
+${detectorTask}`;
   const sessions = new Set<string>();
 
   try {
@@ -22,7 +24,6 @@ export async function nestedBackgroundCompletion(t: EveEvalContext, target: Dete
     sessions.add(detectorId);
     const detector = (await t.target.watchTurn(detectorId).result()).expectOk();
     detector.requireToolCall("verification-worker", { output: { status: "working" } });
-    detector.messageIncludes("Verification is running.");
     detector.notEvent("subagent.completed");
     const detectorNext = t.target.watchTurn(detectorId, {
       startIndex: detector.session.state.streamIndex,
