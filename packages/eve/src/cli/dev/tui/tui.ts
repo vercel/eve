@@ -59,7 +59,7 @@ function inlineArgumentSuggestions(appRoot: string) {
       return modelOptionsFromCatalog(await fetchGatewayCatalog().catch(() => undefined)).map(
         (option) => ({
           value: option.value,
-          label: option.label,
+          label: option.value,
           hint: option.hint,
         }),
       );

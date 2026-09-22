@@ -5,8 +5,11 @@ import {
   argumentTypeaheadFor,
   argumentTypeaheadQuery,
   moveArgumentTypeaheadSelection,
+  renderArgumentSuggestions,
   selectedArgumentSuggestion,
 } from "./argument-typeahead.js";
+import { stripAnsi } from "#cli/ui/terminal-text.js";
+import { createTheme } from "./theme.js";
 
 const models = [
   { value: "anthropic/claude-sonnet", label: "Claude Sonnet", hint: "Anthropic" },
@@ -36,5 +39,15 @@ describe("argumentTypeaheadFor", () => {
     state = argumentTypeaheadFor("model", "", models);
     state = moveArgumentTypeaheadSelection(state, 1);
     expect(selectedArgumentSuggestion(state)).toEqual(models[1]);
+  });
+
+  it("uses a fixed value column for hints", () => {
+    const rows = renderArgumentSuggestions(
+      argumentTypeaheadFor("model", "", models),
+      createTheme({ color: false, unicode: true }),
+      80,
+    ).map(stripAnsi);
+    expect(rows[0]?.indexOf("Anthropic")).toBe(rows[1]?.indexOf("OpenAI"));
+    expect(rows[0]).toContain("anthropic/claude-sonnet");
   });
 });

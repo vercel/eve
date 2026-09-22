@@ -4442,18 +4442,23 @@ export class TerminalRenderer implements AgentTUIRenderer {
       // still open the list above the input.
       const inlineHint =
         this.#typeahead !== undefined ? inlineCommandHint(this.#typeahead) : undefined;
-      if (this.#argumentSuggestionsLoading !== undefined) {
-        const noun = this.#argumentSuggestionsLoading === "model" ? "models" : "registry";
-        rows.push(clip(c.dim(`Loading ${noun}…`), width));
-      } else if (this.#argumentTypeahead !== undefined) {
-        rows.push(...renderArgumentSuggestions(this.#argumentTypeahead, this.#theme, width));
-      } else if (
-        inlineHint === undefined &&
-        this.#typeahead !== undefined &&
-        isTypeaheadOpen(this.#typeahead)
-      ) {
-        rows.push(...renderCommandSuggestions(this.#typeahead, this.#theme, width));
-      }
+      const typeaheadRows =
+        this.#argumentSuggestionsLoading !== undefined
+          ? [
+              clip(
+                c.dim(
+                  `Loading ${this.#argumentSuggestionsLoading === "model" ? "models" : "registry"}…`,
+                ),
+                width,
+              ),
+            ]
+          : this.#argumentTypeahead !== undefined
+            ? renderArgumentSuggestions(this.#argumentTypeahead, this.#theme, width)
+            : inlineHint === undefined &&
+                this.#typeahead !== undefined &&
+                isTypeaheadOpen(this.#typeahead)
+              ? renderCommandSuggestions(this.#typeahead, this.#theme, width)
+              : [];
       if (this.#exitArmed) {
         rows.push(clip(c.dim("Press Ctrl+C again to exit"), width), "");
       }
@@ -4466,7 +4471,10 @@ export class TerminalRenderer implements AgentTUIRenderer {
       // Keep one transcript row above the footer and one separator below the
       // prompt. Everything already in `rows` has higher-level footer ownership
       // (attention or typeahead), so the prompt receives only what remains.
-      const maxPromptRows = Math.max(1, this.#height() - 1 - rows.length - 1 - statusRows.length);
+      const maxPromptRows = Math.max(
+        1,
+        this.#height() - 1 - rows.length - 1 - typeaheadRows.length - statusRows.length,
+      );
       const promptRows: Parameters<typeof promptInputRows>[0] = {
         text: this.#inputText,
         cursor: this.#inputCursor,
@@ -4488,6 +4496,8 @@ export class TerminalRenderer implements AgentTUIRenderer {
               : "Send a message…";
       }
       rows.push(...promptInputRows(promptRows));
+      // Keep menus beneath the composer so opening them never moves the caret.
+      rows.push(...typeaheadRows);
       rows.push(...statusRows);
       return rows;
     }

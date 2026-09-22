@@ -5263,7 +5263,7 @@ describe("TerminalRenderer command typeahead", () => {
     input.type("/model ");
     expect(screen.snapshot()).toContain("Loading models…");
     suggestions.resolve([{ value: "openai/gpt-5", label: "GPT-5" }]);
-    await vi.waitFor(() => expect(screen.snapshot()).toContain("GPT-5"));
+    await vi.waitFor(() => expect(screen.snapshot()).toContain("openai/gpt-5"));
     input.enter();
     await prompt;
     renderer.shutdown();
@@ -5291,7 +5291,7 @@ describe("TerminalRenderer command typeahead", () => {
 
     const prompt = renderer.readPrompt();
     input.type("/model claude");
-    await vi.waitFor(() => expect(screen.snapshot()).toContain("Claude Sonnet 5"));
+    await vi.waitFor(() => expect(screen.snapshot()).toContain("anthropic/claude-sonnet-5"));
     input.enter();
 
     expect(await prompt).toBe("/model anthropic/claude-sonnet-5");
