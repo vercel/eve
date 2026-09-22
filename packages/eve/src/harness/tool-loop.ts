@@ -17,6 +17,7 @@ import {
   type TypedToolResult,
 } from "ai";
 import type { SessionAuthContext } from "#channel/types.js";
+import { ensureAiSdkWarningLogger } from "#instrumentation/ai-sdk-warnings.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import { readClientContext } from "#internal/client-context.js";
 import { resolveProviderHeaders } from "#internal/gateway.js";
@@ -448,6 +449,7 @@ function buildHarnessToolsWithDynamicSubagents(
 }
 
 export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
+  ensureAiSdkWarningLogger();
   const baseEmit = config.handleEvent;
 
   async function runStep(
