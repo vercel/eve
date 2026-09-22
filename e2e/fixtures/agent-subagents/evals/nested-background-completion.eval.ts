@@ -110,14 +110,15 @@ async function childSession(t: EveEvalContext, sessionId: string, name: string) 
 async function* sessionEvents(t: EveEvalContext, sessionId: string, follow: boolean) {
   const controller = new AbortController();
   const response = await t.target.fetch(
-    `/eve/v1/session/${encodeURIComponent(sessionId)}/stream?includeTailIndex=1`,
+    `/eve/v1/session/${encodeURIComponent(sessionId)}/stream${follow ? "" : "?includeTailIndex=1"}`,
     { signal: AbortSignal.any([t.signal, controller.signal]) },
   );
   if (!response.ok || response.body === null) throw new Error(`Stream HTTP ${response.status}`);
   const header = response.headers.get("x-eve-stream-tail-index");
-  if (header === null) throw new Error("Session stream has no durable tail index.");
-  const tail = Number(header);
-  if (!Number.isInteger(tail) || tail < -1) throw new Error("Invalid stream tail index.");
+  if (!follow && header === null) throw new Error("Session stream has no durable tail index.");
+  const tail = follow ? Infinity : Number(header);
+  if (!follow && (!Number.isInteger(tail) || tail < -1))
+    throw new Error("Invalid stream tail index.");
   const reader = response.body.pipeThrough(new TextDecoderStream()).getReader();
   let buffer = "";
   let index = 0;
