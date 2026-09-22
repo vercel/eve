@@ -682,6 +682,54 @@ describe("createVercelSandbox", () => {
     await expect(handle.onSessionStop()).rejects.toThrow("provider unreachable");
   });
 
+  it("applies the open-time policy after template-less base setup", async () => {
+    const sessionSandbox = createMockSandbox({ name: "session" });
+    const create = vi.fn().mockResolvedValue(sessionSandbox);
+    const provider = createSandboxProviderHarness(
+      createVercelImplementation({
+        createSandbox: async ({ createOptions }) => {
+          await create(createOptions);
+          return sessionSandbox as never;
+        },
+        loadSandboxModule: async () =>
+          ({ Sandbox: { create, get: vi.fn().mockResolvedValue(null) } }) as never,
+      }),
+      { networkPolicy: "deny-all" },
+      { preparedArtifact: () => ({}) },
+    );
+
+    await provider.start({ appRoot: "/tmp/test-app-root", sandboxName: "session-key" });
+
+    expect(create).toHaveBeenCalledWith(expect.objectContaining({ networkPolicy: "allow-all" }));
+    expect(sessionSandbox.update).toHaveBeenCalledWith({ networkPolicy: "deny-all" });
+    expect(sessionSandbox.runCommand.mock.invocationCallOrder[0]).toBeLessThan(
+      sessionSandbox.update.mock.invocationCallOrder[0]!,
+    );
+  });
+
+  it("discards a fresh template-less session when applying its policy fails", async () => {
+    const sessionSandbox = createMockSandbox({ name: "session" });
+    sessionSandbox.update.mockRejectedValueOnce(new Error("policy rejected"));
+    const stableDelete = vi.fn().mockResolvedValue(undefined);
+    const provider = createSandboxProviderHarness(
+      createVercelImplementation({
+        createSandbox: async () => sessionSandbox as never,
+        loadDeleteSandboxModule: async () =>
+          ({ Sandbox: { get: vi.fn().mockResolvedValue({ delete: stableDelete }) } }) as never,
+        loadSandboxModule: async () =>
+          ({ Sandbox: { get: vi.fn().mockResolvedValue(null) } }) as never,
+      }),
+      { networkPolicy: "deny-all" },
+      { preparedArtifact: () => ({}) },
+    );
+
+    await expect(
+      provider.start({ appRoot: "/tmp/test-app-root", sandboxName: "session-key" }),
+    ).rejects.toThrow("policy rejected");
+    expect(sessionSandbox.stop).toHaveBeenCalledTimes(1);
+    expect(stableDelete).toHaveBeenCalledTimes(1);
+  });
+
   it("brokers credentials through the session's setNetworkPolicy to sandbox.update", async () => {
     const templateSandbox = createMockSandbox({ name: "template" });
     const sessionSandbox = createMockSandbox({ name: "session" });

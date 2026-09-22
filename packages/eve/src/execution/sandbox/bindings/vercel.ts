@@ -146,6 +146,30 @@ export function createVercelSandbox(
         loadDeleteSandboxModule,
         session,
       });
+      if (
+        session.created &&
+        artifact.snapshotId === undefined &&
+        runtimeOptions.networkPolicy !== undefined
+      ) {
+        try {
+          await applyInitialVercelNetworkPolicy(session.sandbox, runtimeOptions.networkPolicy);
+        } catch (error) {
+          try {
+            await deleteVercelSandbox({
+              createOptions: sessionCreateOptions,
+              loadDeleteSandboxModule,
+              sandbox: session.sandbox,
+            });
+          } catch (cleanupError) {
+            throw new AggregateError(
+              [error, cleanupError],
+              `Failed to apply network policy and discard Vercel sandbox session "${context.session.id}".`,
+              { cause: error },
+            );
+          }
+          throw error;
+        }
+      }
     } catch (error) {
       if (isVercelSnapshotUnavailableError(error) && artifact.snapshotId !== undefined) {
         throw new SandboxTemplateNotProvisionedError({
