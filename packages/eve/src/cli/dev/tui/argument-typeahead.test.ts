@@ -49,6 +49,12 @@ describe("argumentTypeaheadFor", () => {
     ).map(stripAnsi);
     expect(rows[0]).toMatch(/^ {9}anthropic\/claude-sonnet$/u);
     expect(rows[1]).toMatch(/^ {9}openai\/gpt-5$/u);
+    const addRows = renderArgumentSuggestions(
+      argumentTypeaheadFor("add", "", models),
+      createTheme({ color: false, unicode: true }),
+      80,
+    ).map(stripAnsi);
+    expect(addRows[0]).toMatch(/^ {7}anthropic\/claude-sonnet$/u);
     expect(rows.join("\n")).not.toContain("Anthropic");
   });
 });

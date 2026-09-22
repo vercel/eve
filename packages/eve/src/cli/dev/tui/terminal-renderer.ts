@@ -4501,7 +4501,10 @@ export class TerminalRenderer implements AgentTUIRenderer {
               ? ""
               : "Send a message…";
       }
-      rows.push(...promptInputRows(promptRows));
+      const renderedPromptRows = promptInputRows(promptRows);
+      // The prompt helper ends with a footer spacer; a drawer owns that gap.
+      if (typeaheadRows.length > 0 && renderedPromptRows.at(-1) === "") renderedPromptRows.pop();
+      rows.push(...renderedPromptRows);
       // Keep menus beneath the composer so opening them never moves the caret.
       if (typeaheadRows.length > 0) rows.push(c.dim(this.#theme.glyph.dash.repeat(width)));
       rows.push(...typeaheadRows);

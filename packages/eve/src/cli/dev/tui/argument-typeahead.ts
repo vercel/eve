@@ -1,8 +1,5 @@
 import { sliceVisible, visibleLength } from "#cli/ui/terminal-text.js";
 
-// The command argument begins after the `❯ ` prompt gutter and command token.
-const COMPOSER_ARGUMENT_INDENT = "         ";
-
 import type { Theme } from "./theme.js";
 
 export interface PromptArgumentSuggestion {
@@ -87,7 +84,8 @@ export function renderArgumentSuggestions(
   return state.suggestions.slice(0, 8).map((suggestion, index) => {
     const value =
       index === state.selectedIndex ? c.bold(suggestion.value) : c.dim(suggestion.value);
-    const row = `${COMPOSER_ARGUMENT_INDENT}${value}`;
+    const indent = " ".repeat(state.command.length + 4);
+    const row = `${indent}${value}`;
     return visibleLength(row) > width ? sliceVisible(row, width) : row;
   });
 }
