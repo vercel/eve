@@ -98,6 +98,7 @@ export interface SandboxProviderHost {
   loadOptionalPackage<T>(input: {
     readonly autoInstall: boolean;
     readonly importModule: () => Promise<T>;
+    readonly installPackageName?: string;
     readonly missingMessage: string;
     readonly packageName: string;
   }): Promise<T>;

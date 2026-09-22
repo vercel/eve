@@ -56,6 +56,7 @@ export {
 export type MicrosandboxModule = typeof import("microsandbox");
 
 const MICROSANDBOX_PACKAGE_NAME = "microsandbox";
+const MICROSANDBOX_PACKAGE_VERSION = "0.5.5";
 const MICROSANDBOX_CONNECT_TIMEOUT_MS = 10_000;
 const MICROSANDBOX_STOP_TIMEOUT_MS = 10_000;
 
@@ -490,6 +491,7 @@ export async function loadMicrosandboxModule(input: {
     input.host.loadOptionalPackage<MicrosandboxModule>({
       autoInstall: input.options.setup.autoInstall,
       importModule: async () => await import("microsandbox"),
+      installPackageName: `${MICROSANDBOX_PACKAGE_NAME}@${MICROSANDBOX_PACKAGE_VERSION}`,
       missingMessage: MICROSANDBOX_MISSING_PACKAGE_MESSAGE,
       packageName: MICROSANDBOX_PACKAGE_NAME,
     }),

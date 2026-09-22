@@ -109,6 +109,7 @@ export async function loadOptionalEnginePackage<T>(input: {
   readonly autoInstall: boolean;
   readonly importInstalledModule?: () => Promise<T>;
   readonly importModule: () => Promise<T>;
+  readonly installPackageName?: string;
   readonly missingMessage: string;
   readonly packageName: string;
 }): Promise<T> {
@@ -146,7 +147,7 @@ export async function loadOptionalEnginePackage<T>(input: {
 
         await installPackageIntoProject({
           appRoot: input.appRoot,
-          packageName: input.packageName,
+          packageName: input.installPackageName ?? input.packageName,
         });
       });
     } catch (installError) {

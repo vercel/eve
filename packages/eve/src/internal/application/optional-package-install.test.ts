@@ -159,6 +159,44 @@ describe("loadOptionalEnginePackage", () => {
     expect(importInstalledModule).toHaveBeenCalledTimes(2);
   });
 
+  it("installs a versioned specifier while loading by package name", async () => {
+    vi.stubEnv(EVE_DEV_ENV_FLAG, "1");
+    const importModule = vi.fn(async () => {
+      throw new Error("Cannot find module 'microsandbox'");
+    });
+    const installedModule = { ok: true };
+    let installed = false;
+    mockedSpawn.mockImplementationOnce(() => {
+      const child = createMockChildProcess();
+      queueMicrotask(() => {
+        installed = true;
+        child.emit("close", 0);
+      });
+      return child;
+    });
+
+    await expect(
+      loadOptionalEnginePackage({
+        appRoot: "/repo/versioned-app",
+        autoInstall: true,
+        importInstalledModule: vi.fn(async () => {
+          if (!installed) throw new Error("Cannot find module 'microsandbox'");
+          return installedModule;
+        }),
+        importModule,
+        installPackageName: "microsandbox@0.5.5",
+        missingMessage: "missing microsandbox",
+        packageName: "microsandbox",
+      }),
+    ).resolves.toBe(installedModule);
+
+    expect(mockedSpawn).toHaveBeenCalledWith(
+      "npm",
+      ["install", "--save-dev", "microsandbox@0.5.5"],
+      expect.objectContaining({ cwd: "/repo/versioned-app" }),
+    );
+  });
+
   it("coalesces concurrent auto-installs for the same project package", async () => {
     const appRoot = "/repo/concurrent-app";
     vi.stubEnv(EVE_DEV_ENV_FLAG, "1");
