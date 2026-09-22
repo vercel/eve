@@ -142,10 +142,9 @@ export interface SelectCommonOptions<T extends PrompterValue> {
    */
   required?: boolean;
   /**
-   * How option hints are laid out in the dev TUI panel (the CLI prompter ignores
-   * it and keeps its default inline, unnumbered rendering). "stacked" renders
-   * each hint on its own line below the label with a blank line between options;
-   * it works for both action menus and checklists. "inline" keeps hints on the
+   * How option hints are laid out. "stacked" renders each hint on its own line
+   * below the label with a blank line between options; it works in both the CLI
+   * and dev TUI for action menus and checklists. "inline" keeps hints on the
    * label row, suppresses numeric shortcuts, and separates a trailing completion
    * action.
    */
@@ -511,6 +510,7 @@ export function createPrompter(): Prompter {
           search: opts.search ?? false,
           searchAction: opts.multiple === true ? undefined : opts.searchAction,
           required: opts.required ?? false,
+          hintLayout: opts.hintLayout,
           placeholder: opts.placeholder,
           defaultValue: opts.multiple === true ? undefined : opts.initialValue,
           initialValues: opts.multiple === true ? opts.initialValues : undefined,

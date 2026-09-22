@@ -75,18 +75,18 @@ export async function prepareWebSetup(
   const hosting = await context.asker.ask(
     select({
       key: "web-hosting",
-      message: "How should Web Chat and agent requests be routed?",
+      message: "How should Web Chat reach your agents?",
       options: [
         {
           id: "vercel",
-          label: "Vercel peer services (Recommended for Vercel)",
-          hint: "Route Web Chat and each agent directly as separate services.",
+          label: "Separate services",
+          hint: "Recommended for Vercel. Web Chat routes directly to each agent.",
           value: "vercel" as const,
         },
         {
           id: "next",
           label: "Through Next.js",
-          hint: "Route Web Chat and all agent requests through one Next.js app.",
+          hint: "Next.js proxies Web Chat requests to your agents.",
           value: "next" as const,
         },
       ],

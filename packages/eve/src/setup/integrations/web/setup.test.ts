@@ -41,20 +41,20 @@ describe("Web setup", () => {
 
     expect(select).toHaveBeenCalledWith(
       expect.objectContaining({
-        message: "How should Web Chat and agent requests be routed?",
+        message: "How should Web Chat reach your agents?",
         hintLayout: "stacked",
         initialValue: "vercel",
         options: [
           {
             value: "vercel",
-            label: "Vercel peer services (Recommended for Vercel)",
-            hint: "Route Web Chat and each agent directly as separate services.",
+            label: "Separate services",
+            hint: "Recommended for Vercel. Web Chat routes directly to each agent.",
             featured: undefined,
           },
           {
             value: "next",
             label: "Through Next.js",
-            hint: "Route Web Chat and all agent requests through one Next.js app.",
+            hint: "Next.js proxies Web Chat requests to your agents.",
             featured: undefined,
           },
         ],
