@@ -125,7 +125,7 @@ describe("recordTaskInputRequestStep", () => {
         metadata: { kind: "tool", name: "export" },
         status: "completed",
         taskId: "task-1",
-      }),
+      }).state,
     });
 
     await expect(recordTaskInputRequestStep({ request, sessionState })).resolves.toEqual({
@@ -291,6 +291,21 @@ describe("recordTerminalTaskViewsStep", () => {
       expect.objectContaining({ phase: "available" }),
     ]);
     expect(result.serializedContext).toEqual({});
+    expect(result.subagentCompletions).toHaveLength(1);
+
+    vi.mocked(readDurableSession).mockReturnValue(result.sessionState.snapshot.session);
+    const suppressed = await recordTerminalTaskViewsStep({
+      serializedContext: {},
+      sessionState: result.sessionState,
+      views: [view],
+      notifications: "suppressed",
+    });
+    expect(suppressed.subagentCompletions).toEqual([]);
+    expect(suppressed.views).toEqual([view]);
+    expect(
+      getBackgroundWorkflowToolRuns(suppressed.sessionState.snapshot.session.state)[0]?.task
+        .notifications,
+    ).toBe("suppressed");
   });
 
   it("settles instrumentation from an accepted terminal task view", async () => {

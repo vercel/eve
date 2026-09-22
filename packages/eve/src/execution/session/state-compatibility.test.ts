@@ -129,7 +129,7 @@ describe("additive durable state", () => {
       status: "completed",
       lastOutput: { type: "result", data: "updated" },
       usage: { inputTokens: 3, outputTokens: 4, cacheReadTokens: 0, cacheWriteTokens: 0 },
-    });
+    }).state;
     expect(restored(saved)).toMatchObject({
       authored: { opaque: true },
       "eve.workflowTool": {
@@ -159,7 +159,7 @@ describe("additive durable state", () => {
       taskId: "task",
       metadata,
       status: "cancelled",
-    });
+    }).state;
     expect(getBackgroundWorkflowToolRuns(restored(cancelled))[0]?.task.outcome).toMatchObject({
       futureView: true,
       status: "completed",

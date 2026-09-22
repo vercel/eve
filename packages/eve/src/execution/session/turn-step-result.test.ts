@@ -62,7 +62,7 @@ describe("delegated turn completion", () => {
           metadata: { kind: "subagent", name: "worker" },
           status: "completed",
           lastOutput: { type: "result", data: "VERIFIED" },
-        }),
+        }).state,
       },
       150,
     );
@@ -91,7 +91,7 @@ describe("delegated turn completion", () => {
         metadata: { kind: "subagent", name: "worker" },
         status: "completed",
         lastOutput: { type: "result", data: "First result" },
-      }),
+      }).state,
     };
     expect(
       resolveSessionStepResult(
@@ -115,7 +115,7 @@ describe("delegated turn completion", () => {
           ...(status === "failed"
             ? { status, lastOutput: { type: "error" as const, data: "Failed" } }
             : { status }),
-        }),
+        }).state,
       };
       expect(
         resolveSessionStepResult(

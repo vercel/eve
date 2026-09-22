@@ -4,7 +4,7 @@ import {
   requireBackgroundTaskId,
   requireTaskView,
   waitForTaskInput,
-  waitForTaskStatus,
+  sendAndFollowQueuedTurn,
 } from "./shared.js";
 import { defineTaskEval } from "./task-transition.js";
 
@@ -42,13 +42,27 @@ export default defineTaskEval({
       ),
     );
 
-    const verified = await waitForTaskStatus(
+    // Before task_cancel can affect the outcome, prove session cancellation
+    // retired the approval route: its old answer must reach the parent model.
+    // If the task were still live, this answer would instead release the child.
+    const staleAnswer = await blocked.session.respond([
+      { optionId: "approve", requestId: blocked.request.requestId },
+    ]);
+    staleAnswer.expectOk();
+    staleAnswer.event("step.started", { count: 1 });
+    staleAnswer.notCalledTool("task_cancel");
+    staleAnswer.notEvent("subagent.completed");
+    const inspected = await sendAndFollowQueuedTurn(
       t,
-      blocked.session,
-      "TASK-CANCEL-VERIFY",
-      taskId,
-      "cancelled",
+      `TASK-CANCEL-INSPECT ${taskId}`,
+      staleAnswer.session,
     );
+    const verified = inspected.turn;
+    for (const turn of [staleAnswer, ...inspected.observedTurns]) {
+      turn.notEvent("message.received", {
+        data: { message: (message) => message.startsWith("Background task ") },
+      });
+    }
     verified.expectOk();
     verified.messageIncludes("TASK-CANCEL-STATUS");
     await t.require(

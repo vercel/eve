@@ -56,7 +56,7 @@ describe("shared workflow invocation ownership", () => {
         metadata: task("task-a").task.metadata,
         status: "completed",
         lastOutput: { type: "result", data: "first" },
-      }),
+      }).state,
     };
     session = removeBlockingWorkflowToolRuns(session, "turn-a");
     const entries = getWorkflowToolRuns(session.state);
@@ -83,7 +83,7 @@ describe("shared workflow invocation ownership", () => {
         metadata: task("task-b").task.metadata,
         status: "failed",
         lastOutput: { type: "error", data: "second" },
-      }),
+      }).state,
     };
     const restored = JSON.parse(
       JSON.stringify(removeBlockingWorkflowToolRuns(session, "turn-b").state),
@@ -117,7 +117,7 @@ describe("shared workflow invocation ownership", () => {
         taskId: "live",
         metadata: old.task.metadata,
         status: "cancelled",
-      }),
+      }).state,
     };
     session = removeBlockingWorkflowToolRuns(session, "turn-b");
     const entries = getWorkflowToolRuns(session.state);

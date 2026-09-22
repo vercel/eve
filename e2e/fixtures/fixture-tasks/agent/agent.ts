@@ -133,6 +133,10 @@ function respond(request: MockModelRequest): MockModelResponse | string {
   if (message === "TASK-FAN-IN") return fanInTasks(request);
   if (message === "TASK-FAN-IN-STATUS") return fanInNotification(request);
   if (message === "TASK-CANCEL-SETUP") return setupCancelWorker(request);
+  if (message.startsWith("TASK-CANCEL-INSPECT ")) {
+    // The eval proves the approval route was retired before inspecting the receipt.
+    return inspectTerminalTask(request, "task-cancel-inspect", "TASK-CANCEL-STATUS", message);
+  }
   if (message.startsWith("TASK-CANCEL-VERIFY ")) {
     return inspectTerminalTask(
       request,

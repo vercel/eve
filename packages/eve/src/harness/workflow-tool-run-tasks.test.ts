@@ -45,7 +45,7 @@ describe("session task index", () => {
       session = registerWorkflowToolRun(session, task(status, "turn-2"));
       session = {
         ...session,
-        state: recordWorkflowTaskView(session.state, terminal(status, status)),
+        state: recordWorkflowTaskView(session.state, terminal(status, status)).state,
       };
     }
     session = registerWorkflowToolRun(session, {
@@ -70,17 +70,37 @@ describe("session task index", () => {
     expect(getBackgroundTasks(undefined).query({ state: "working" })).toEqual([]);
   });
 
+  it("distinguishes a first terminal settlement from notification-only updates and late results", () => {
+    const session = registerWorkflowToolRun(createSession(), task("task_a", "turn-1"));
+    const completed = terminal("task_a", "completed");
+    const first = recordWorkflowTaskView(session.state, completed);
+    expect(first.settled).toBe(true);
+    expect(first.view).toEqual(completed);
+
+    const suppressed = recordWorkflowTaskView(first.state, completed, {
+      notifications: "suppressed",
+    });
+    expect(suppressed.state).not.toBe(first.state);
+    expect(suppressed.settled).toBe(false);
+    expect(suppressed.view).toEqual(completed);
+
+    const late = recordWorkflowTaskView(suppressed.state, terminal("task_a", "cancelled"));
+    expect(late.state).toBe(suppressed.state);
+    expect(late.settled).toBe(false);
+    expect(late.view).toEqual(completed);
+  });
+
   it("retains cancellation and notification disposition across restore and late outcomes", () => {
     const session = registerWorkflowToolRun(createSession(), task("task_a", "turn-1"));
     const state = recordWorkflowTaskView(session.state, terminal("task_a", "cancelled"), {
       notifications: "suppressed",
-    });
+    }).state;
     const restored = JSON.parse(JSON.stringify(state));
     const replay = registerWorkflowToolRun(createSession(restored), {
       ...task("task_a", "turn-1"),
       task: { ...task("task_a", "turn-1").task, notifications: undefined },
     });
-    const late = recordWorkflowTaskView(replay.state, terminal("task_a", "completed"));
+    const late = recordWorkflowTaskView(replay.state, terminal("task_a", "completed")).state;
     expect(getBackgroundTasks(late).query({ state: "cancelled" })).toEqual([
       terminal("task_a", "cancelled"),
     ]);
@@ -95,12 +115,12 @@ describe("session task index", () => {
 
   it("preserves ordinary task cancellation notifications and the first terminal outcome", () => {
     const session = registerWorkflowToolRun(createSession(), task("task_a", "turn-1"));
-    const cancelled = recordWorkflowTaskView(session.state, terminal("task_a", "cancelled"));
+    const cancelled = recordWorkflowTaskView(session.state, terminal("task_a", "cancelled")).state;
     expect(suppressesTaskNotification(cancelled, "task_a:ready:cancelled")).toBe(false);
-    const completed = recordWorkflowTaskView(session.state, terminal("task_a", "completed"));
+    const completed = recordWorkflowTaskView(session.state, terminal("task_a", "completed")).state;
     const suppressed = recordWorkflowTaskView(completed, terminal("task_a", "cancelled"), {
       notifications: "suppressed",
-    });
+    }).state;
     expect(getBackgroundTasks(suppressed).query({ state: "completed" })).toEqual([
       terminal("task_a", "completed"),
     ]);
@@ -213,7 +233,7 @@ describe("session task index", () => {
     });
     session = {
       ...session,
-      state: recordWorkflowTaskView(session.state, terminal("task_a", "completed")),
+      state: recordWorkflowTaskView(session.state, terminal("task_a", "completed")).state,
     };
     session = registerWorkflowToolRun(session, {
       callId: "task_a",
@@ -309,7 +329,7 @@ describe("session task index", () => {
       session = registerWorkflowToolRun(session, task("task_b", "turn-1"));
       session = {
         ...session,
-        state: recordWorkflowTaskView(session.state, terminal("task_a", status)),
+        state: recordWorkflowTaskView(session.state, terminal("task_a", status)).state,
       };
       session = registerWorkflowToolRun(session, task("task_c", "turn-2"));
       expect(
@@ -323,7 +343,7 @@ describe("session task index", () => {
       for (const taskId of ["task_b", "task_c"]) {
         session = {
           ...session,
-          state: recordWorkflowTaskView(session.state, terminal(taskId, status)),
+          state: recordWorkflowTaskView(session.state, terminal(taskId, status)).state,
         };
       }
       // Even another creation in the same turn must not reopen a settled cohort.
@@ -340,7 +360,7 @@ describe("session task index", () => {
     for (const taskId of ["task_a", "task_b"]) {
       session = {
         ...session,
-        state: recordWorkflowTaskView(session.state, terminal(taskId, "completed")),
+        state: recordWorkflowTaskView(session.state, terminal(taskId, "completed")).state,
       };
     }
     session = registerWorkflowToolRun(session, task("task_c", "turn-3"));
@@ -449,9 +469,9 @@ describe("session task index", () => {
       const session = registerWorkflowToolRun(createSession(), task("task_a", "turn-1"));
       const usage = { inputTokens: 3, outputTokens: 5, cacheReadTokens: 0, cacheWriteTokens: 0 };
       const first = { ...terminal("task_a", status), usage };
-      const state = recordWorkflowTaskView(session.state, first);
+      const state = recordWorkflowTaskView(session.state, first).state;
       for (const late of ["completed", "failed", "cancelled"] as const) {
-        expect(recordWorkflowTaskView(state, terminal("task_a", late))).toBe(state);
+        expect(recordWorkflowTaskView(state, terminal("task_a", late)).state).toBe(state);
       }
       const entry = findBackgroundWorkflowToolRun(state, "task_a");
       assert(entry !== undefined);
@@ -466,11 +486,12 @@ describe("session task index", () => {
 
   it("rejects an incoming result with metadata belonging to a different task", () => {
     const session = registerWorkflowToolRun(createSession(), task("task_a", "turn-1"));
-    expect(() =>
-      recordWorkflowTaskView(session.state, {
-        ...terminal("task_a", "cancelled"),
-        metadata: { kind: "tool", name: "other" },
-      }),
+    expect(
+      () =>
+        recordWorkflowTaskView(session.state, {
+          ...terminal("task_a", "cancelled"),
+          metadata: { kind: "tool", name: "other" },
+        }).state,
     ).toThrow("Task view metadata does not match");
   });
 

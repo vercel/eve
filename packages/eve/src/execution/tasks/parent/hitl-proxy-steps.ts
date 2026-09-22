@@ -121,32 +121,28 @@ export async function recordTerminalTaskViewsStep(input: {
   for (const view of input.views) {
     const entry = findBackgroundWorkflowToolRun(session.state, view.taskId);
     if (entry === undefined) continue;
-    const state = recordWorkflowTaskView(
-      session.state,
-      view,
-      input.notifications === undefined ? undefined : { notifications: input.notifications },
-    );
-    if (state !== session.state) {
-      session = { ...session, state };
-      if (
-        entry.task.metadata.kind === "subagent" &&
-        view.status === "completed" &&
-        readWorkflowTaskView(entry.task) === undefined
-      ) {
-        subagentCompletions.push({
-          type: "subagent.completed",
-          data: {
-            callId: entry.callId,
-            subagentName: entry.toolName,
-            output:
-              typeof view.lastOutput.data === "string"
-                ? view.lastOutput.data
-                : JSON.stringify(view.lastOutput.data),
-          },
-        });
-      }
+    const recorded = recordWorkflowTaskView(session.state, view, {
+      notifications: input.notifications,
+    });
+    session = { ...session, state: recorded.state };
+    if (
+      recorded.settled &&
+      recorded.view.metadata.kind === "subagent" &&
+      recorded.view.status === "completed"
+    ) {
+      subagentCompletions.push({
+        type: "subagent.completed",
+        data: {
+          callId: entry.callId,
+          subagentName: entry.toolName,
+          output:
+            typeof recorded.view.lastOutput.data === "string"
+              ? recorded.view.lastOutput.data
+              : JSON.stringify(recorded.view.lastOutput.data),
+        },
+      });
     }
-    acceptedViews.push(readWorkflowTaskView(entry.task) ?? view);
+    acceptedViews.push(recorded.view);
     session = clearProxyInputRequestsForTask(session, view.taskId);
     session = applyTaskAgentHandleCommand(session, {
       kind: "release-owner",

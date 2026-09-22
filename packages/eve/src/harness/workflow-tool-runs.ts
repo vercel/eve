@@ -413,12 +413,16 @@ export function registerWorkflowToolRun<T extends { readonly state?: SessionStat
   return { ...session, state: writeRegistry(session.state, { ...registry, runs }) };
 }
 
-/** Task payloads remain available for the session lifetime, including after report delivery. */
+/** Records the first terminal outcome; notification-only changes are not new settlements. */
 export function recordWorkflowTaskView(
   state: SessionStateMap | undefined,
   view: TaskView,
-  options?: { readonly notifications: "suppressed" },
-): SessionStateMap | undefined {
+  options?: { readonly notifications?: "suppressed" },
+): {
+  readonly state: SessionStateMap | undefined;
+  readonly view: TaskView;
+  readonly settled: boolean;
+} {
   const { taskId, metadata, ...result } = view;
   const outcome = parseTaskOutcome(result);
   if (!isNonEmptyString(taskId) || !isTaskMetadata(metadata) || outcome === undefined)
@@ -429,13 +433,15 @@ export function recordWorkflowTaskView(
     (entry) => entry.lifetime === "session" && entry.task.taskId === taskId,
   );
   const entry = runs[index];
-  if (entry === undefined || entry.lifetime !== "session") return state;
+  if (entry === undefined || entry.lifetime !== "session") return { state, view, settled: false };
   if (!sameTaskMetadata(entry.task.metadata, metadata))
     throw new Error(`Task view metadata does not match invocation "${view.taskId}".`);
   const previous = readWorkflowTaskView(entry.task);
   // Parent delivery order decides settlement. Replays and late outcomes cannot replace it.
   const notifications = options?.notifications ?? entry.task.notifications;
-  if (previous !== undefined && notifications === entry.task.notifications) return state;
+  if (previous !== undefined && notifications === entry.task.notifications) {
+    return { state, view: previous, settled: false };
+  }
   runs[index] = {
     ...entry,
     task: {
@@ -444,7 +450,11 @@ export function recordWorkflowTaskView(
       notifications,
     },
   };
-  return writeRegistry(state, { ...registry, runs });
+  return {
+    state: writeRegistry(state, { ...registry, runs }),
+    view: previous ?? view,
+    settled: previous === undefined,
+  };
 }
 
 /** Removes only this turn's waiting calls. Session-owned task payloads are never pruned here. */

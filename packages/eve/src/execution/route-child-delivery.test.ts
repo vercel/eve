@@ -91,7 +91,8 @@ describe("task HITL delivery routing", () => {
           ...session,
           state: JSON.parse(
             JSON.stringify(
-              recordWorkflowTaskView(session.state, cancelled, { notifications: "suppressed" }),
+              recordWorkflowTaskView(session.state, cancelled, { notifications: "suppressed" })
+                .state,
             ),
           ),
         },
