@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { setTimeout } from "node:timers/promises";
 import type { EveEvalContext } from "eve/evals";
 
 export async function waitForVerification(t: EveEvalContext, workerId: string, key: string) {
@@ -21,6 +22,30 @@ export async function releaseVerification(t: EveEvalContext, workerId: string, k
   assert.equal(typeof result, "string");
   assert.match(result, /^VERIFIED: /);
   return result as string;
+}
+
+export async function waitForVerificationCancellation(
+  t: EveEvalContext,
+  workerId: string,
+  key: string,
+) {
+  const deadline = Date.now() + 30_000;
+  let status: unknown;
+  do {
+    const response = await t.target.fetch(`/test/verification/${workerId}/${key}/status`, {
+      method: "POST",
+      signal: AbortSignal.any([t.signal, AbortSignal.timeout(5_000)]),
+    });
+    assert.equal(response.status, 200);
+    ({ status } = await response.json());
+    if (status !== "running" && status !== "pending") break;
+    await setTimeout(250, undefined, { signal: t.signal });
+  } while (Date.now() < deadline);
+  assert.equal(
+    status,
+    "cancelled",
+    "the nested verification workflow must be cancelled before cleanup",
+  );
 }
 
 export async function resetSessions(t: EveEvalContext, sessionIds: readonly string[]) {

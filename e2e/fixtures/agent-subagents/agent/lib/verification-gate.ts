@@ -2,14 +2,23 @@ import { getRun } from "workflow/api";
 
 export const verificationNamespace = (key: string) => `nested-verification.${key}`;
 
-export async function publishVerificationGate(sessionId: string, key: string, token: string) {
+export interface VerificationGate {
+  readonly token: string;
+  readonly runId: string;
+}
+
+export async function publishVerificationGate(
+  sessionId: string,
+  key: string,
+  gate: VerificationGate,
+) {
   "use step";
   const ops: Promise<void>[] = [];
   const writer = getRun(sessionId)
-    .getWritable<string>({ namespace: verificationNamespace(key), ops })
+    .getWritable<VerificationGate>({ namespace: verificationNamespace(key), ops })
     .getWriter();
   try {
-    await writer.write(token);
+    await writer.write(gate);
   } finally {
     writer.releaseLock();
   }
