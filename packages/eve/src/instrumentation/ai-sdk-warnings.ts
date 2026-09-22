@@ -22,10 +22,16 @@ export function ensureAiSdkWarningLogger(): void {
 
 const logAiSdkWarnings: LogWarningsFunction = ({ warnings, provider, model }) => {
   for (const warning of warnings) {
-    log.info("AI SDK provider warning", {
+    const fields = {
       model,
       provider,
       warning,
-    });
+    };
+
+    if (warning.type === "compatibility") {
+      log.info("AI SDK compatibility warning", fields);
+    } else {
+      log.warn("AI SDK provider warning", fields);
+    }
   }
 };

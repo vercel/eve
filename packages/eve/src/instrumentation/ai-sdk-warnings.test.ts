@@ -87,7 +87,7 @@ describe("ensureAiSdkWarningLogger", () => {
       {
         level: "info",
         namespace: "harness.ai-sdk-warnings",
-        message: "AI SDK provider warning",
+        message: "AI SDK compatibility warning",
         fields: {
           model: "openai/gpt-5",
           provider: "gateway",
@@ -101,5 +101,51 @@ describe("ensureAiSdkWarningLogger", () => {
     ]);
     expect(warn).not.toHaveBeenCalled();
     expect(error).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    {
+      type: "unsupported" as const,
+      feature: "temperature",
+      details: "The provider ignored it.",
+    },
+    {
+      type: "deprecated" as const,
+      setting: "providerOptions.legacy",
+      message: "Use providerOptions.current instead.",
+    },
+    {
+      type: "other" as const,
+      message: "The provider returned an actionable warning.",
+    },
+  ])("records $type warnings at warning level", (warning) => {
+    const records: LogRecord[] = [];
+    globalThis.AI_SDK_LOG_WARNINGS = undefined;
+    vi.stubEnv("AI_SDK_LOG_WARNINGS", "true");
+    setLogRecordSubscriber((record) => records.push(record));
+
+    ensureAiSdkWarningLogger();
+    const logger = globalThis.AI_SDK_LOG_WARNINGS as LogWarningsFunction | false | undefined;
+    if (typeof logger !== "function") {
+      throw new Error("Expected eve to install an AI SDK warning logger");
+    }
+    logger({
+      model: "openai/gpt-5",
+      provider: "gateway",
+      warnings: [warning],
+    });
+
+    expect(records).toEqual([
+      {
+        level: "warn",
+        namespace: "harness.ai-sdk-warnings",
+        message: "AI SDK provider warning",
+        fields: {
+          model: "openai/gpt-5",
+          provider: "gateway",
+          warning,
+        },
+      },
+    ]);
   });
 });
