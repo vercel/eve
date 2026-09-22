@@ -84,6 +84,7 @@ import {
   hydrateSandboxAttachments,
   stageAttachmentsToSandbox,
 } from "#harness/attachment-staging.js";
+import { loadHarnessAgentSandboxSession } from "#harness/harness-agent-sandbox.js";
 import {
   compactMessages,
   getInputTokenCount,
@@ -1690,7 +1691,10 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
           telemetry: attempt?.telemetry,
         });
 
-        turnInput.session = await (agent as HarnessAgent).createSession();
+        turnInput.session = await (agent as HarnessAgent).createSession({
+          abortSignal: generation.signal,
+          sandboxSession: await loadHarnessAgentSandboxSession(),
+        });
       } else {
         const agentSettings = {
           headers: attributionHeaders,

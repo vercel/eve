@@ -6,6 +6,7 @@ import { SandboxTemplateNotProvisionedError } from "#public/definitions/sandbox-
 import { vercel } from "#public/sandbox/backends/vercel.js";
 import { VERCEL_EVE_SANDBOX_IMAGE } from "#execution/sandbox/bindings/eve-image.js";
 import { createVercelSandbox } from "#execution/sandbox/bindings/vercel.js";
+import { getVercelSandboxForSandboxSession } from "#execution/sandbox/bindings/vercel-session-registry.js";
 
 // The credential fallback consults the developer's Vercel CLI auth and the
 // repo's `.vercel` project link; on a linked, logged-in machine it would
@@ -155,6 +156,16 @@ afterEach(() => {
 });
 
 describe("createVercelSandbox", () => {
+  it("registers every public session with its native Vercel sandbox", async () => {
+    const { handle, sessionSandbox } = await createTestVercelSession();
+
+    expect(getVercelSandboxForSandboxSession({ session: handle.session })).toBe(sessionSandbox);
+
+    const usedSession = await handle.useSessionFn();
+    expect(usedSession).not.toBe(handle.session);
+    expect(getVercelSandboxForSandboxSession({ session: usedSession })).toBe(sessionSandbox);
+  });
+
   it("creates fresh Vercel sandboxes with eve's shared base image", async () => {
     const templateSandbox = createMockSandbox({ name: "template-key" });
     const fetch = vi.fn();

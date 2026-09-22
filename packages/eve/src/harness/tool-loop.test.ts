@@ -10,7 +10,7 @@ import {
   type UserContent,
 } from "ai";
 import { MockLanguageModelV3 } from "ai/test";
-import type { HarnessV1 } from "@ai-sdk/harness";
+import type { HarnessV1, HarnessV1NetworkSandboxSession } from "@ai-sdk/harness";
 import { HarnessAgent } from "@ai-sdk/harness/agent";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ContextContainer, contextStorage } from "#context/container.js";
@@ -135,6 +135,7 @@ vi.mock("@ai-sdk/harness/agent", () => ({
 const {
   mockCreateAiSdkHookBridge,
   mockGetRegisteredTelemetryIntegrations,
+  mockLoadHarnessAgentSandboxSession,
   registeredAuthorIntegration,
   registeredOtelIntegration,
 } = vi.hoisted(() => ({
@@ -142,8 +143,13 @@ const {
   mockGetRegisteredTelemetryIntegrations: vi.fn(
     (_options?: { readonly sanitizeEveOtelErrors?: boolean }): unknown[] => [],
   ),
+  mockLoadHarnessAgentSandboxSession: vi.fn<() => Promise<HarnessV1NetworkSandboxSession>>(),
   registeredAuthorIntegration: { onStart: vi.fn() },
   registeredOtelIntegration: { onStart: vi.fn() },
+}));
+
+vi.mock("#harness/harness-agent-sandbox.js", () => ({
+  loadHarnessAgentSandboxSession: mockLoadHarnessAgentSandboxSession,
 }));
 
 vi.mock("#instrumentation/ai-sdk-hook-bridge.js", () => ({
@@ -284,6 +290,7 @@ afterEach(() => {
   vi.mocked(HarnessAgent).mockReset();
   vi.mocked(shouldCompact).mockReset().mockReturnValue(false);
   vi.mocked(compactMessages).mockReset();
+  mockLoadHarnessAgentSandboxSession.mockReset();
   vi.unstubAllEnvs();
   declareTelemetry(undefined);
   mockGetRegisteredTelemetryIntegrations.mockReset().mockReturnValue([]);
@@ -633,13 +640,14 @@ type MockHarnessAgentSettings = Pick<MockAgentSettings, "onStepEnd" | "onStepSta
 
 type MockHarnessAgentConstructor = (settings: MockHarnessAgentSettings) => HarnessAgent;
 
-function setupMockHarnessAgent(result: Record<string, unknown>): void {
+function setupMockHarnessAgent(result: Record<string, unknown>) {
+  const createSession = vi.fn().mockResolvedValue({ sessionId: "harness-session" });
   vi.mocked(HarnessAgent).mockImplementation(function (
     this: Record<string, unknown>,
     settings: MockHarnessAgentSettings,
   ) {
     const { onStepEnd } = settings;
-    this.createSession = vi.fn().mockResolvedValue({ sessionId: "harness-session" });
+    this.createSession = createSession;
     this.generate = vi.fn().mockImplementation(async (options: { messages: unknown[] }) => {
       await invokeMockStepStart(settings, options);
       if (onStepEnd) await onStepEnd(result);
@@ -653,6 +661,7 @@ function setupMockHarnessAgent(result: Record<string, unknown>): void {
     });
     return this as unknown as HarnessAgent;
   } as unknown as MockHarnessAgentConstructor);
+  return createSession;
 }
 
 function setupMockAgent(result: Record<string, unknown>): void {
@@ -1629,13 +1638,15 @@ describe("createToolLoopHarness", () => {
   );
 
   it("runs a harness-backed step without model resolution", async () => {
-    setupMockHarnessAgent({
+    const createSession = setupMockHarnessAgent({
       finishReason: "stop",
       response: { messages: [{ content: "Hello!", role: "assistant" }] },
       text: "Hello!",
       toolCalls: [],
       toolResults: [],
     });
+    const harnessSandbox = {} as HarnessV1NetworkSandboxSession;
+    mockLoadHarnessAgentSandboxSession.mockResolvedValue(harnessSandbox);
     vi.mocked(shouldCompact).mockReturnValue(true);
 
     const harness = createTestHarness();
@@ -1669,6 +1680,12 @@ describe("createToolLoopHarness", () => {
     expect(HarnessAgent).toHaveBeenCalledOnce();
     expect(vi.mocked(HarnessAgent).mock.calls[0]?.[0]).not.toHaveProperty("model");
     expect(vi.mocked(HarnessAgent).mock.calls[0]?.[0]).not.toHaveProperty("headers");
+    expect(mockLoadHarnessAgentSandboxSession).toHaveBeenCalledOnce();
+    expect(createSession).toHaveBeenCalledOnce();
+    expect(createSession).toHaveBeenCalledWith({
+      abortSignal: expect.any(AbortSignal),
+      sandboxSession: harnessSandbox,
+    });
     expect(events.find((event) => event.type === "step.started")).toEqual({
       data: {
         harnessId: "test-harness",

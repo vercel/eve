@@ -40,6 +40,7 @@ import {
   type CreateVercelSandbox,
   type VercelSandboxCreateParams,
 } from "#execution/sandbox/bindings/vercel-create-sdk.js";
+import { registerVercelSandboxForSandboxSession } from "#execution/sandbox/bindings/vercel-session-registry.js";
 import {
   errorMessage,
   ensureVercelSandboxTags,
@@ -497,19 +498,24 @@ function createHandle(input: {
   readonly sessionKey: string;
 }): SandboxBackendHandle<VercelSandboxSessionUseOptions> {
   const { sandbox, sessionKey } = input;
+  const session = buildSandboxSession(
+    createVercelInternalSandboxSession(sandbox, sessionKey),
+    createVercelNetworkPolicySetter(sandbox),
+  );
+  registerVercelSandboxForSandboxSession({ sandbox, session });
+
   return {
-    session: buildSandboxSession(
-      createVercelInternalSandboxSession(sandbox, sessionKey),
-      createVercelNetworkPolicySetter(sandbox),
-    ),
+    session,
     useSessionFn: async (options?: VercelSandboxSessionUseOptions) => {
       if (options !== undefined) {
         await sandbox.update(options);
       }
-      return buildSandboxSession(
+      const usedSession = buildSandboxSession(
         createVercelInternalSandboxSession(sandbox, sessionKey),
         createVercelNetworkPolicySetter(sandbox),
       );
+      registerVercelSandboxForSandboxSession({ sandbox, session: usedSession });
+      return usedSession;
     },
     async captureState() {
       return {

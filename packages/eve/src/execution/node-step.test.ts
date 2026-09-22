@@ -50,6 +50,10 @@ vi.mock("@ai-sdk/harness/agent", () => ({
   HarnessAgent: vi.fn(),
 }));
 
+vi.mock("#harness/harness-agent-sandbox.js", () => ({
+  loadHarnessAgentSandboxSession: vi.fn().mockResolvedValue({}),
+}));
+
 vi.mock("../runtime/agent/resolve-model.js", () => ({
   resolveRuntimeModelReference: vi.fn().mockResolvedValue({}),
 }));
