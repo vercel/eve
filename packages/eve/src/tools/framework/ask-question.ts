@@ -1,13 +1,20 @@
 import { z } from "#compiled/zod/index.js";
-import { inputRequestSchema } from "#shared/input.js";
+import { inputOptionSchema, inputRequestSchema } from "#shared/input.js";
+import { jsonEncodedSchema } from "#shared/json-schemas.js";
 import { defineNativeTool } from "#tools/native-definition.js";
 
-export const ASK_QUESTION_INPUT_SCHEMA = inputRequestSchema.omit({
-  action: true,
-  display: true,
-  kind: true,
-  requestId: true,
-});
+export const ASK_QUESTION_INPUT_SCHEMA = inputRequestSchema
+  .omit({
+    action: true,
+    display: true,
+    kind: true,
+    requestId: true,
+  })
+  .extend({
+    options: jsonEncodedSchema(z.array(inputOptionSchema))
+      .describe("Selectable answer options to present to the user.")
+      .optional(),
+  });
 export const ASK_QUESTION_OUTPUT_SCHEMA = z
   .object({
     optionId: z.string().optional(),

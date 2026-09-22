@@ -1,7 +1,12 @@
 import type { StepInput } from "#harness/types.js";
 import type { SessionParent, SessionTraceContext } from "#channel/types.js";
 import type { ChannelAudience } from "#shared/channel-audience.js";
-import { isJsonObjectValue, type JsonObject, type JsonValue } from "#shared/json.js";
+import {
+  isJsonObjectValue,
+  parseJsonEncodedValue,
+  type JsonObject,
+  type JsonValue,
+} from "#shared/json.js";
 
 export interface SubagentParentContext {
   readonly conversationId?: string;
@@ -30,8 +35,9 @@ export interface FormattedSubagentInvocation extends StepInput {
 export function normalizeRequestedOutputSchema(
   outputSchema: JsonValue | undefined,
 ): JsonObject | undefined {
-  return isJsonObjectValue(outputSchema) && Object.keys(outputSchema).length > 0
-    ? outputSchema
+  const decodedOutputSchema = parseJsonEncodedValue(outputSchema);
+  return isJsonObjectValue(decodedOutputSchema) && Object.keys(decodedOutputSchema).length > 0
+    ? decodedOutputSchema
     : undefined;
 }
 

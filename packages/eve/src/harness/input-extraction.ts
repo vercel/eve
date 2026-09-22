@@ -2,7 +2,8 @@ import type { ContentPart, ModelMessage, ToolSet, TypedToolCall } from "ai";
 import { z } from "zod";
 
 import type { HarnessToolMap } from "#harness/types.js";
-import type { InputRequest } from "#shared/input.js";
+import { inputOptionSchema, type InputRequest } from "#shared/input.js";
+import { parseJsonEncodedValue } from "#shared/json.js";
 import { createRuntimeToolCallActionFromToolCall } from "#harness/tool-call-action.js";
 
 // Persisted history parts lose AI SDK typing on the storage round trip. The
@@ -63,7 +64,7 @@ function extractQuestionRequests(input: {
     const action = createRuntimeToolCallActionFromToolCall({ toolCall });
     const toolInput = action.input as {
       allowFreeform?: boolean;
-      options?: InputRequest["options"];
+      options?: unknown;
       prompt: string;
     };
     const request: {
@@ -86,8 +87,9 @@ function extractQuestionRequests(input: {
       request.allowFreeform = toolInput.allowFreeform;
     }
 
-    if (toolInput.options !== undefined) {
-      request.options = toolInput.options;
+    const options = inputOptionSchema.array().safeParse(parseJsonEncodedValue(toolInput.options));
+    if (options.success) {
+      request.options = options.data;
       request.display = "select";
     }
 

@@ -75,6 +75,27 @@ describe("extractQuestionInputRequests", () => {
     expect(result[0]?.allowFreeform).toBe(true);
   });
 
+  it("decodes JSON-encoded options", () => {
+    const result = extractQuestionInputRequests({
+      excludedCallIds: new Set(),
+      toolCalls: [
+        {
+          input: {
+            options: JSON.stringify([{ id: "yes", label: "Approve" }]),
+            prompt: "Continue?",
+          },
+          toolCallId: "call-1",
+          toolName: "ask_question",
+          type: "tool-call",
+        },
+      ],
+      tools: QUESTION_TOOLS,
+    });
+
+    expect(result[0]?.options).toEqual([{ id: "yes", label: "Approve" }]);
+    expect(result[0]?.display).toBe("select");
+  });
+
   it("skips non-ask_question tool calls", () => {
     const result = extractQuestionInputRequests({
       excludedCallIds: new Set(),

@@ -106,7 +106,17 @@ export async function cancelOwnedTask(input: {
 }
 
 function readTaskIds(input: Record<string, unknown>): readonly string[] | undefined {
-  const value = input.taskIds;
+  const value = decodeJsonString(input.taskIds);
   if (!Array.isArray(value)) return undefined;
   return value.filter((id): id is string => typeof id === "string" && id.trim() !== "");
+}
+
+function decodeJsonString(value: unknown): unknown {
+  if (typeof value !== "string") return value;
+
+  try {
+    return JSON.parse(value) as unknown;
+  } catch {
+    return value;
+  }
 }

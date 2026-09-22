@@ -1,4 +1,5 @@
 import { z } from "#compiled/zod/index.js";
+import { jsonEncodedSchema } from "#shared/json-schemas.js";
 
 export const AGENT_TOOL_NAME = "agent";
 
@@ -22,8 +23,7 @@ export const SUBAGENT_TOOL_INPUT_SCHEMA = z.strictObject({
     .describe(
       "The message to send to the subagent. Provide all context the subagent needs to complete the task; the subagent does not see the parent's history.",
     ),
-  outputSchema: z
-    .looseObject({})
+  outputSchema: jsonEncodedSchema(z.looseObject({}))
     .describe(
       "Only provide a non-empty JSON Schema when the caller explicitly requests structured output; otherwise omit this field. The subagent must match a provided schema, and that structured output becomes the tool result.",
     )

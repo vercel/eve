@@ -1,15 +1,17 @@
 import { z } from "#compiled/zod/index.js";
-import { jsonValueSchema } from "#shared/json-schemas.js";
+import { jsonEncodedSchema, jsonValueSchema } from "#shared/json-schemas.js";
 
 export const TASK_CANCEL_TOOL_NAME = "task_cancel";
 
 /** Framework task-control tool names lowered by the runtime. */
 export const TASK_TOOL_NAMES: ReadonlySet<string> = new Set([TASK_CANCEL_TOOL_NAME]);
 
-const TASK_IDS_SCHEMA = z
-  .array(z.string().min(1))
-  .min(1)
-  .describe("Task ids from earlier subagent task receipts.");
+const TASK_IDS_SCHEMA = jsonEncodedSchema(
+  z
+    .array(z.string().min(1))
+    .min(1)
+    .describe("Task ids from earlier subagent task receipts."),
+);
 
 export const TASK_CANCEL_INPUT_SCHEMA = z.strictObject({ taskIds: TASK_IDS_SCHEMA });
 

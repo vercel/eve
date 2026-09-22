@@ -20,6 +20,17 @@ export interface JsonObject {
  */
 export type JsonValue = JsonArray | JsonObject | JsonPrimitive;
 
+/** Decodes a JSON-encoded value while leaving malformed strings unchanged. */
+export function parseJsonEncodedValue(value: unknown): unknown {
+  if (typeof value !== "string") return value;
+
+  try {
+    return JSON.parse(value) as unknown;
+  } catch {
+    return value;
+  }
+}
+
 /** Compares two already-validated JSON structures by value. */
 export function jsonValuesEqual(left: unknown, right: unknown): boolean {
   if (left === right) return true;
@@ -148,7 +159,7 @@ function normalizeJsonValueCandidate(
 /**
  * Narrows an already-normalized {@link JsonValue} to a {@link JsonObject}.
  */
-export function isJsonObjectValue(value: JsonValue | undefined): value is JsonObject {
+export function isJsonObjectValue(value: unknown): value is JsonObject {
   return value !== null && !Array.isArray(value) && typeof value === "object";
 }
 
