@@ -1,6 +1,6 @@
 import { ChildProcess, spawn } from "node:child_process";
 import { existsSync } from "node:fs";
-import { readFile } from "node:fs/promises";
+import { mkdir, readFile } from "node:fs/promises";
 import { PassThrough } from "node:stream";
 import { Worker } from "node:worker_threads";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -248,6 +248,89 @@ describe("loadOptionalEnginePackage", () => {
     expect(mockedSpawn).toHaveBeenCalledTimes(1);
   });
 
+  it.each([false, true])(
+    "serializes different packages across a shared workspace (first fails: %s)",
+    async (firstFails) => {
+      vi.stubEnv(EVE_DEV_ENV_FLAG, "1");
+      mockedExistsSync.mockImplementation((path) => path === "/workspace/pnpm-lock.yaml");
+      const children: ReturnType<typeof createMockChildProcess>[] = [];
+      const installed = new Set<string>();
+      mockedSpawn.mockImplementation(() => {
+        const child = createMockChildProcess();
+        children.push(child);
+        return child;
+      });
+      const load = (appRoot: string, packageName: string) =>
+        loadOptionalEnginePackage({
+          appRoot,
+          packageName,
+          autoInstall: true,
+          ignoredOptionalDependencies: packageName === "just-bash" ? ["node-liblzma"] : undefined,
+          missingMessage: `missing ${packageName}`,
+          importModule: async () => {
+            throw new Error("missing");
+          },
+          importInstalledModule: async () => {
+            if (!installed.has(packageName)) throw new Error("missing");
+            return packageName;
+          },
+        });
+      const first = load("/workspace/apps/one", "microsandbox").catch((error: unknown) => error);
+      await vi.waitFor(() => expect(children).toHaveLength(1));
+      const second = load("/workspace/apps/two", "just-bash");
+      await flushMicrotasks();
+      expect(children).toHaveLength(1);
+      expect(ensurePnpmOptionalDependencyDefaults).not.toHaveBeenCalled();
+      installed.add("microsandbox");
+      children[0]!.emit("close", firstFails ? 1 : 0);
+      await vi.waitFor(() => expect(children).toHaveLength(2));
+      installed.add("just-bash");
+      children[1]!.emit("close", 0);
+      if (firstFails) expect(await first).toBeInstanceOf(Error);
+      else expect(await first).toBe("microsandbox");
+      await expect(second).resolves.toBe("just-bash");
+      expect(
+        vi
+          .mocked(mkdir)
+          .mock.calls.filter(([path]) => String(path).endsWith(".lock"))
+          .map(([path]) => path),
+      ).toEqual([
+        "/workspace/.eve/optional-package-install.lock",
+        "/workspace/.eve/optional-package-install.lock",
+      ]);
+    },
+  );
+
+  it("allows installations in independent projects to run concurrently", async () => {
+    vi.stubEnv(EVE_DEV_ENV_FLAG, "1");
+    const children: ReturnType<typeof createMockChildProcess>[] = [];
+    let installed = false;
+    mockedSpawn.mockImplementation(() => {
+      const child = createMockChildProcess();
+      children.push(child);
+      return child;
+    });
+    const loads = ["/independent-one", "/independent-two"].map((appRoot) =>
+      loadOptionalEnginePackage({
+        appRoot,
+        packageName: "just-bash",
+        autoInstall: true,
+        missingMessage: "missing",
+        importModule: async () => {
+          throw new Error("missing");
+        },
+        importInstalledModule: async () => {
+          if (!installed) throw new Error("missing");
+          return true;
+        },
+      }),
+    );
+    await vi.waitFor(() => expect(children).toHaveLength(2));
+    installed = true;
+    children.forEach((child) => child.emit("close", 0));
+    await expect(Promise.all(loads)).resolves.toEqual([true, true]);
+  });
+
   it("wraps a post-install load failure with an actionable diagnostic", async () => {
     const appRoot = "/repo/misconfigured-app";
     vi.stubEnv(EVE_DEV_ENV_FLAG, "1");
@@ -352,7 +435,7 @@ describe("loadOptionalEnginePackage", () => {
 });
 
 async function flushMicrotasks(): Promise<void> {
-  for (let i = 0; i < 5; i += 1) {
+  for (let i = 0; i < 20; i += 1) {
     await Promise.resolve();
   }
 }

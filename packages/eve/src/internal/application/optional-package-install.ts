@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, realpathSync } from "node:fs";
 import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { Worker } from "node:worker_threads";
 
@@ -19,27 +19,40 @@ export type ProjectPackageManager = "bun" | "npm" | "pnpm" | "yarn";
  * manager. Defaults to npm when no lockfile is found.
  */
 export function detectProjectPackageManager(appRoot: string): ProjectPackageManager {
-  let current = appRoot;
+  return resolveProjectInstallation(appRoot).packageManager;
+}
+
+function resolveProjectInstallation(appRoot: string): {
+  readonly root: string;
+  readonly packageManager: ProjectPackageManager;
+} {
+  let current = resolve(appRoot);
+  try {
+    current = realpathSync.native(current);
+  } catch {
+    // A not-yet-materialized project still needs a stable absolute lock identity.
+  }
+  const projectRoot = current;
   for (;;) {
     if (
       existsSync(join(current, "pnpm-lock.yaml")) ||
       existsSync(join(current, "pnpm-workspace.yaml"))
     ) {
-      return "pnpm";
+      return { root: current, packageManager: "pnpm" };
     }
     if (existsSync(join(current, "yarn.lock"))) {
-      return "yarn";
+      return { root: current, packageManager: "yarn" };
     }
     if (existsSync(join(current, "bun.lock")) || existsSync(join(current, "bun.lockb"))) {
-      return "bun";
+      return { root: current, packageManager: "bun" };
     }
     if (existsSync(join(current, "package-lock.json"))) {
-      return "npm";
+      return { root: current, packageManager: "npm" };
     }
 
     const parent = dirname(current);
     if (parent === current) {
-      return "npm";
+      return { root: projectRoot, packageManager: "npm" };
     }
     current = parent;
   }
@@ -360,30 +373,28 @@ async function withOptionalPackageInstallLock(
   input: { readonly appRoot: string; readonly packageName: string },
   callback: () => Promise<void>,
 ): Promise<void> {
-  const lockKey = `${input.appRoot}:${input.packageName}`;
-  const pending = pendingOptionalPackageInstalls.get(lockKey);
-  if (pending !== undefined) {
-    await pending;
-    return;
+  const lockRoot = resolveProjectInstallation(input.appRoot).root;
+  const pending = pendingOptionalPackageInstalls.get(lockRoot) ?? Promise.resolve();
+  // Different packages and workspace members mutate the same dependency tree.
+  // Queue every callback so each caller rechecks its own package under the lock.
+  const promise = pending
+    .catch(() => {})
+    .then(() => withOptionalPackageInstallFileLock(lockRoot, callback));
+  pendingOptionalPackageInstalls.set(lockRoot, promise);
+  try {
+    await promise;
+  } finally {
+    if (pendingOptionalPackageInstalls.get(lockRoot) === promise) {
+      pendingOptionalPackageInstalls.delete(lockRoot);
+    }
   }
-
-  const promise = withOptionalPackageInstallFileLock(input, callback).finally(() => {
-    pendingOptionalPackageInstalls.delete(lockKey);
-  });
-  pendingOptionalPackageInstalls.set(lockKey, promise);
-  await promise;
 }
 
 async function withOptionalPackageInstallFileLock(
-  input: { readonly appRoot: string; readonly packageName: string },
+  lockRoot: string,
   callback: () => Promise<void>,
 ): Promise<void> {
-  const lockPath = join(
-    input.appRoot,
-    ".eve",
-    "optional-package-locks",
-    `${sanitizeLockName(input.packageName)}.lock`,
-  );
+  const lockPath = join(lockRoot, ".eve", "optional-package-install.lock");
   await acquireLock(lockPath);
   try {
     await callback();
@@ -435,10 +446,6 @@ async function waitForExistingLock(lockPath: string, startedAt: number): Promise
   }
 
   await new Promise((resolve) => setTimeout(resolve, OPTIONAL_PACKAGE_LOCK_POLL_MS));
-}
-
-function sanitizeLockName(value: string): string {
-  return value.replaceAll(/[^a-zA-Z0-9._-]+/g, "-");
 }
 
 /**
