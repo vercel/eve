@@ -71,9 +71,6 @@ export function createDevelopmentCredentialGate(serverUrl: string): DevelopmentC
     const failure =
       typeof resolution === "string" || resolution.kind === "resolved" ? undefined : resolution;
     if (state === authorized) tokenFailure = failure;
-    if (failure !== undefined) {
-      console.error(`[eve:eval-auth-debug] token=${failure.kind}`);
-    }
     if (typeof resolution === "string") {
       return resolution.trim();
     }

@@ -51,9 +51,6 @@ export async function createEvalClient(
     workspaceRoot: options.workspaceRoot,
     deps: options.deps,
   });
-  console.error(
-    `[eve:eval-auth-debug] deployment=${verifiedClient.deploymentResolution?.kind ?? "not-attempted"}`,
-  );
   const { options: verified } = verifiedClient;
   return new Client({
     ...base,
