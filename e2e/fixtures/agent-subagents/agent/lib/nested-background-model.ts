@@ -28,7 +28,7 @@ export const nestedBackgroundModel = mockModel({
         : { toolCalls: [{ name: "verification_gate", input: { key } }] };
     }
 
-    const tool = role === "parent" ? "remote-loopback" : "agent";
+    const tool = role === "parent" ? "remote-loopback" : "verification-worker";
     const state = [...request.userMessages]
       .reverse()
       .find((text) => text.startsWith("[Task state]\n"));

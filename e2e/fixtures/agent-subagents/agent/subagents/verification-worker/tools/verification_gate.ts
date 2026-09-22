@@ -5,7 +5,7 @@ import {
 } from "eve/tools";
 import { createHook } from "workflow";
 import { z } from "zod";
-import { publishVerificationGate } from "../lib/verification-gate.js";
+import { publishVerificationGate } from "../../../lib/verification-gate.js";
 
 async function execute({ key }: { key: string }, ctx: WorkflowToolContext) {
   "use workflow";
