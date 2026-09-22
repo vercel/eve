@@ -533,6 +533,24 @@ describe("normalizeMcpClientConnectionDefinition", () => {
       });
     });
 
+    it("preserves per-operation model output projections", () => {
+      const listItems = async () => ({ type: "json" as const, value: { count: 1 } });
+      const result = normalizeMcpClientConnectionDefinition(
+        validInput({ toolCall: { toModelOutput: { list_items: listItems } } }),
+        "test",
+      );
+      expect(result.toolCall?.toModelOutput).toEqual({ list_items: listItems });
+    });
+
+    it("rejects a non-callable model output projection", () => {
+      expect(() =>
+        normalizeMcpClientConnectionDefinition(
+          validInput({ toolCall: { toModelOutput: { list_items: "summary" } } }),
+          MSG,
+        ),
+      ).toThrow(/toModelOutput\.list_items.*function/);
+    });
+
     it("rejects unknown toolCall fields", () => {
       expect(() =>
         normalizeMcpClientConnectionDefinition(

@@ -21,6 +21,8 @@ import {
 } from "#approval/definition.js";
 import type { JsonObject } from "#shared/json.js";
 import { stampDurableDynamicToolCallbacks } from "#tools/durable-callbacks.js";
+import type { ToolModelOutput } from "#tools/model-output.js";
+import type { ConnectionToolModelOutput } from "#public/definitions/connections/tool-call.js";
 import { resolveConnectionAuthorization } from "#runtime/connections/resolve-authorization.js";
 import {
   createAuthorizationExecution,
@@ -346,6 +348,58 @@ async function executeDiscoveredConnectionTool(
   }
 }
 
+async function projectDiscoveredConnectionToolOutput(
+  closure: JsonObject,
+  output: unknown,
+): Promise<ToolModelOutput> {
+  const { connectionName, toolName } = readDiscoveredToolClosure(closure);
+  const registry = loadContext().get(ConnectionRegistryKey);
+  const connection = registry
+    ?.getConnections()
+    .find((candidate) => candidate.connectionName === connectionName);
+  const project = connection?.toolCall?.toModelOutput?.[toolName];
+  if (connection === undefined || project === undefined) {
+    throw new Error(
+      `Connection "${connectionName}" no longer defines toolCall.toModelOutput for "${toolName}".`,
+    );
+  }
+  if (isConnectionToolError(connection.protocol, output)) {
+    return defaultToolModelOutput(output);
+  }
+  return await project(output);
+}
+
+function readConnectionToolModelOutput(
+  connectionName: string,
+  toolName: string,
+): ConnectionToolModelOutput | undefined {
+  return loadContext()
+    .get(ConnectionRegistryKey)
+    ?.getConnections()
+    .find((candidate) => candidate.connectionName === connectionName)?.toolCall?.toModelOutput?.[
+    toolName
+  ];
+}
+
+function isConnectionToolError(
+  protocol: ResolvedConnectionDefinition["protocol"],
+  output: unknown,
+): boolean {
+  if (typeof output !== "object" || output === null) return false;
+  if (protocol === "mcp") return "isError" in output && output.isError === true;
+  return (
+    "status" in output &&
+    typeof output.status === "number" &&
+    (output.status < 200 || output.status >= 300)
+  );
+}
+
+function defaultToolModelOutput(output: unknown): ToolModelOutput {
+  return typeof output === "string"
+    ? { type: "text", value: output }
+    : { type: "json", value: output ?? null };
+}
+
 function assertPendingConnectionAuthorizationInstances(registry: ConnectionRegistry): void {
   const connections = new Map(
     registry.getConnections().map((connection) => [connection.connectionName, connection]),
@@ -422,6 +476,8 @@ export async function resolveConnectionSearchDynamicTools() {
     const approval = registry.getConnectionApproval(connectionName);
 
     const closure = { connectionName, toolName };
+    const hasModelOutputProjection =
+      readConnectionToolModelOutput(connectionName, toolName) !== undefined;
     const discoveredTool = defineTool({
       description: result.description,
       inputSchema: (result.inputSchema ?? {
@@ -432,9 +488,23 @@ export async function resolveConnectionSearchDynamicTools() {
       async execute(input: Record<string, unknown>, executeCtx) {
         return await executeDiscoveredConnectionTool(closure, input, executeCtx);
       },
+      ...(hasModelOutputProjection
+        ? {
+            toModelOutput: async (output: unknown) =>
+              await projectDiscoveredConnectionToolOutput(closure, output),
+          }
+        : {}),
     });
     stampDurableDynamicToolCallbacks(discoveredTool, {
       execute: { callback: executeDiscoveredConnectionTool, closure },
+      ...(hasModelOutputProjection
+        ? {
+            toModelOutput: {
+              callback: projectDiscoveredConnectionToolOutput,
+              closure,
+            },
+          }
+        : {}),
       ...(approval === undefined
         ? {}
         : {

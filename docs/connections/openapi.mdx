@@ -170,3 +170,12 @@ Generated operations can mutate state like authored tools. Use the shared connec
 - [MCP connections](./mcp): connect to remote MCP servers.
 - [Authentication](../guides/auth-and-route-protection): establish the caller identity required by user-scoped auth.
 - [Security model](../concepts/security-model): how connection credentials stay out of the model's reach.
+
+## Control result size
+
+Use `toolCall.toModelOutput`, keyed by operation name, to project a smaller
+model-facing result for selected operations. It follows the same contract as
+[MCP result projection](./mcp#control-result-size): `action.result`, channel events,
+and hooks retain the full `{ status, statusText, body }` response. Operations without
+a matching entry keep the default serialization. Non-2xx responses and thrown errors
+bypass the projection.

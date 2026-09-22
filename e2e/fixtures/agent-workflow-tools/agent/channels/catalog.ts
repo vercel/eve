@@ -48,6 +48,14 @@ export default defineChannel({
         });
       }
 
+      if (method === "tools/call") {
+        return Response.json({
+          jsonrpc: "2.0",
+          id,
+          result: { content: [{ type: "text", text: "CATALOG_DETAIL_OUTSIDE_MODEL_CONTEXT" }] },
+        });
+      }
+
       return Response.json({
         jsonrpc: "2.0",
         id,

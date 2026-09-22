@@ -7,6 +7,25 @@ import { mockModel, type MockModelRequest, type MockModelResponse } from "eve/ev
  * service "api"; once the turn holds a tool result the reply echoes it.
  */
 function respond(request: MockModelRequest): MockModelResponse | string {
+  if (request.lastUserMessage?.includes("compact-catalog")) {
+    const result = request.toolResults.find(
+      (entry) => entry.name === "compact-catalog__list_items",
+    );
+    if (result) {
+      if (JSON.stringify(request.messages).includes("CATALOG_DETAIL_OUTSIDE_MODEL_CONTEXT")) {
+        throw new Error("The raw catalog payload reached model context.");
+      }
+      return JSON.stringify(result.output);
+    }
+    if (request.tools.some((tool) => tool.name === "compact-catalog__list_items")) {
+      return { toolCalls: [{ name: "compact-catalog__list_items", input: {} }] };
+    }
+    return {
+      toolCalls: [
+        { name: "connection_search", input: { connection: "compact-catalog", keywords: "items" } },
+      ],
+    };
+  }
   const hookScenario = request.userMessages.find((entry) => entry.includes("SUBAGENT-HOOKS:"));
   if (hookScenario !== undefined) {
     const mode = /SUBAGENT-HOOKS:(direct|waiting|background)/u.exec(hookScenario)?.[1];

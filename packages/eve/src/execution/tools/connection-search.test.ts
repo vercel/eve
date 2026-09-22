@@ -24,6 +24,7 @@ import type { ResolvedConnectionDefinition, ResolvedDynamicToolResolver } from "
 import { isBrandedToolEntry, type DynamicToolSet } from "#tools/dynamic.js";
 import type { DynamicResolveContext } from "#dynamic/definition.js";
 import { readDurableDynamicToolCallbacks } from "#tools/durable-callbacks.js";
+import { createRuntimeToolResultFromValue } from "#harness/action-result-helpers.js";
 import { resolveHeaders } from "#runtime/connections/mcp-client.js";
 
 function connection(name: string): ResolvedConnectionDefinition {
@@ -252,6 +253,167 @@ describe("connection dynamic tools", () => {
       "call-2",
       "call-1",
     ]);
+  });
+});
+
+describe("connection model output projection", () => {
+  async function run(options: {
+    project?: NonNullable<
+      NonNullable<ResolvedConnectionDefinition["toolCall"]>["toModelOutput"]
+    >[string];
+    projectedTool?: string;
+    result?: unknown;
+    error?: Error;
+    restored?: boolean;
+    protocol?: "mcp" | "openapi";
+  }) {
+    const definition = {
+      ...connection("catalog"),
+      protocol: options.protocol ?? "mcp",
+      toolCall:
+        options.project === undefined
+          ? undefined
+          : { toModelOutput: { [options.projectedTool ?? "list_items"]: options.project } },
+    };
+    const base = registry({
+      connections: [definition],
+      loadTools: {
+        catalog: async () => [
+          {
+            name: "list_items",
+            description: "List items",
+            inputSchema: { type: "object" },
+            outputSchema: { type: "object", required: ["items"] },
+          },
+        ],
+      },
+    });
+    const execute = vi.fn(async () => {
+      if (options.error) throw options.error;
+      return options.result;
+    });
+    const ctx = new ContextContainer();
+    ctx.set(ConnectionRegistryKey, {
+      ...base,
+      getClient: (name: string) => ({ ...base.getClient(name), executeTool: execute }),
+    });
+    return contextStorage.run(ctx, async () => {
+      const resolve = getConnectionSearchResolver().events["step.started"]!;
+      const resolveContext = {
+        channel: {},
+        model: null,
+        messages: [],
+        session: { auth: { current: null, initiator: null }, id: "result-session" },
+      } satisfies DynamicResolveContext;
+      const initial = (await resolve({}, resolveContext)) as DynamicToolSet;
+      const discovery = await initial.connection_search!.execute(
+        { keywords: "items" },
+        {} as ToolContext,
+      );
+      const tools = (await resolve({}, resolveContext)) as DynamicToolSet;
+      const tool = tools.catalog__list_items!;
+      const toolContext = {
+        abortSignal: new AbortController().signal,
+        callId: "result-call",
+        toolName: "catalog__list_items",
+        session: resolveContext.session,
+      } as ToolContext;
+      const reference = readDurableDynamicToolCallbacks(tool)!.execute!;
+      const output = options.restored
+        ? await reference.callback(reference.closure, {} as never, toolContext as never)
+        : await tool.execute({}, toolContext);
+      const projection = readDurableDynamicToolCallbacks(tool)?.toModelOutput;
+      const modelOutput =
+        tool.toModelOutput === undefined
+          ? undefined
+          : options.restored
+            ? await projection!.callback(projection!.closure, output as never)
+            : await tool.toModelOutput(output);
+      return { output, modelOutput, discovery, tool, execute };
+    });
+  }
+
+  it.each([false, true])(
+    "projects the model result through live and restored callbacks (restored=%s)",
+    async (restored) => {
+      const payload = { items: [{ id: "item-1", details: "large payload" }] };
+      const project = vi.fn(() => ({ type: "json" as const, value: { itemCount: 1 } }));
+      const result = await run({ result: payload, project, restored });
+      expect(result.output).toBe(payload);
+      expect(
+        createRuntimeToolResultFromValue({
+          callId: "result-call",
+          output: result.output,
+          toolName: "catalog__list_items",
+        }).output,
+      ).toEqual(payload);
+      expect(result.modelOutput).toEqual({ type: "json", value: { itemCount: 1 } });
+      expect(project).toHaveBeenCalledWith(payload);
+      expect(result.tool.outputSchema).toEqual({ type: "object", required: ["items"] });
+      expect(result.discovery).toEqual([
+        expect.objectContaining({ outputSchema: { type: "object", required: ["items"] } }),
+      ]);
+      expect(result.execute).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it("leaves an unconfigured operation unprojected", async () => {
+    const payload = { items: [1] };
+    const project = vi.fn(() => ({ type: "json" as const, value: {} }));
+    const result = await run({ result: payload, project, projectedTool: "create_item" });
+    expect(result.output).toBe(payload);
+    expect(result.modelOutput).toBeUndefined();
+    expect(result.tool.toModelOutput).toBeUndefined();
+    expect(readDurableDynamicToolCallbacks(result.tool)?.toModelOutput).toBeUndefined();
+    expect(result.tool.outputSchema).toEqual({ type: "object", required: ["items"] });
+    expect(project).not.toHaveBeenCalled();
+  });
+
+  it("preserves MCP tool errors for the model without invoking the projection", async () => {
+    const payload = { isError: true, content: [{ type: "text", text: "Unavailable" }] };
+    const project = vi.fn(() => ({ type: "json" as const, value: { ok: true } }));
+    const result = await run({ result: payload, project });
+    expect(result.output).toBe(payload);
+    expect(result.modelOutput).toEqual({ type: "json", value: payload });
+    expect(project).not.toHaveBeenCalled();
+  });
+
+  it("preserves failed OpenAPI responses for the model", async () => {
+    const payload = { status: 429, statusText: "Too Many Requests", body: { retryAfter: 60 } };
+    const project = vi.fn(() => ({ type: "json" as const, value: { ok: true } }));
+    const result = await run({ protocol: "openapi", result: payload, project });
+    expect(result.output).toBe(payload);
+    expect(result.modelOutput).toEqual({ type: "json", value: payload });
+    expect(project).not.toHaveBeenCalled();
+  });
+
+  it("projects successful OpenAPI responses", async () => {
+    const result = await run({
+      protocol: "openapi",
+      result: { status: 200, body: { items: [1] } },
+      project: () => ({ type: "json", value: { count: 1 } }),
+    });
+    expect(result.output).toEqual({ status: 200, body: { items: [1] } });
+    expect(result.modelOutput).toEqual({ type: "json", value: { count: 1 } });
+  });
+
+  it("does not project thrown transport errors", async () => {
+    const project = vi.fn(() => ({ type: "json" as const, value: { ok: true } }));
+    await expect(run({ error: new Error("transport failed"), project })).rejects.toThrow(
+      "transport failed",
+    );
+    expect(project).not.toHaveBeenCalled();
+  });
+
+  it("fails model output projection without replacing the execution result", async () => {
+    await expect(
+      run({
+        result: { private: "payload" },
+        project: async () => {
+          throw new Error("projection failed");
+        },
+      }),
+    ).rejects.toThrow("projection failed");
   });
 });
 

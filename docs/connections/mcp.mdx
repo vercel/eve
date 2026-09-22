@@ -150,9 +150,50 @@ Return `"user-approval"` (or `true`) to pause for a person and `"not-applicable"
 
 ## Control result size
 
-eve sends an MCP tool's returned content to the model as the tool result. MCP connections do not expose a per-result transform equivalent to an authored tool's [`toModelOutput`](/docs/tools#shape-what-the-model-sees-with-tomodeloutput).
+By default, eve sends the remote result to the model. Use
+`toolCall.toModelOutput`, keyed by remote tool name, to project a smaller result
+for tools that return more data than the model needs:
 
-When a remote tool returns more data than the model needs, narrow the result at the MCP server. Prefer a purpose-built search or summary tool, or return a stable handle that another call can use to fetch a smaller slice. If you do not control the server and an equivalent upstream API is available, replace only that operation with an authored tool that stores the full payload outside model context and projects the needed fields through `toModelOutput`. Block the original MCP operation through [`tools.block`](#tool-filters) so the model does not see duplicate tools.
+```ts title="agent/connections/traces.ts"
+import { defineMcpClientConnection } from "eve/connections";
+import { z } from "zod";
+
+const resultSchema = z.object({
+  content: z.array(z.object({ type: z.literal("text"), text: z.string() })),
+});
+
+export default defineMcpClientConnection({
+  url: "https://traces.example.com/mcp",
+  description: "Search traces.",
+  tools: { allow: ["get_trace"] },
+  auth: { getToken: async () => ({ token: process.env.TRACES_API_KEY! }) },
+  toolCall: {
+    toModelOutput: {
+      get_trace(result) {
+        const parsed = resultSchema.parse(result);
+        return {
+          type: "json",
+          value: { contentParts: parsed.content.length },
+        };
+      },
+    },
+  },
+});
+```
+
+Each callback receives the remote tool result. Validate its shape before extracting
+fields, and preserve pagination or other metadata needed to interpret a partial
+result. Return the same `text`, `json`, or `content` shape as an authored tool's
+[`toModelOutput`](/docs/tools#shape-what-the-model-sees-with-tomodeloutput).
+
+Only the model-facing representation changes. `action.result`, channel events, and
+hooks retain the full remote result, and tools without a matching entry keep the
+default serialization. MCP results marked `isError: true` and thrown remote errors
+bypass the projection.
+
+When you control the MCP server, prefer pagination or a purpose-built search or
+summary tool. A projection reduces predictable, well-structured output; it is not a
+general size limit for unexpected responses.
 
 ## Troubleshooting
 

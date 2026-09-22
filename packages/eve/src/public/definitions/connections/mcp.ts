@@ -94,6 +94,8 @@ export interface McpClientConnectionDefinition {
    * Use `providedArguments` for application-owned values that should not be
    * controlled by the model. eve removes configured keys from the model-facing
    * input schema and adds their resolved values immediately before execution.
+   * Use `toModelOutput`, keyed by remote tool name, to reduce what the model
+   * sees while preserving the full result for `action.result` consumers.
    */
   toolCall?: ConnectionToolCallDefinition;
   /**
