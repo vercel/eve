@@ -10,12 +10,12 @@ export async function verifyRegistryHandoff(input: {
 }): Promise<void> {
   const { address, run, selfMod } = input;
   assertDiscovered(run, address);
-  const pending = run.child.toolCalls.filter((call) => call.name === "selfmod__registry_add");
+  const pending = run.child.toolCalls.filter((call) => call.name === "registry_add");
   if (pending.length !== 1 || pending[0]?.input.address !== address) {
     throw new Error(`Self-modification did not request ${address} exactly once.`);
   }
   const handoff = await selfMod.approveRegistry(run);
-  const result = handoff.toolCalls.find((call) => call.name === "selfmod__registry_add");
+  const result = handoff.toolCalls.find((call) => call.name === "registry_add");
   if (
     result?.status !== "completed" ||
     (result.output as { nextCommand?: unknown; status?: unknown } | undefined)?.status !==
@@ -36,12 +36,12 @@ export async function verifyRegistryInstall(input: {
 }): Promise<void> {
   const { address, source, target, run, selfMod } = input;
   assertDiscovered(run, address);
-  const pending = run.child.toolCalls.filter((call) => call.name === "selfmod__registry_add");
+  const pending = run.child.toolCalls.filter((call) => call.name === "registry_add");
   if (pending.length !== 1 || pending[0]?.input.address !== address) {
     throw new Error(`Self-modification did not request ${address} exactly once.`);
   }
   const installed = await selfMod.approveRegistry(run);
-  const result = installed.toolCalls.find((call) => call.name === "selfmod__registry_add");
+  const result = installed.toolCalls.find((call) => call.name === "registry_add");
   if (
     result?.status !== "completed" ||
     (result.output as { status?: unknown } | undefined)?.status !== "installed"
@@ -55,7 +55,7 @@ export async function verifyRegistryInstall(input: {
 }
 
 function assertDiscovered(run: SelfModificationRun, address: string): void {
-  const search = run.child.requireToolCall("selfmod__search_registry");
+  const search = run.child.requireToolCall("search_registry");
   if (
     search.status !== "completed" ||
     !Array.isArray((search.output as { items?: unknown } | undefined)?.items) ||
