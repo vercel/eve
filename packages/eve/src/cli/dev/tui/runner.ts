@@ -2281,9 +2281,10 @@ async function* eveEventsToTUIStream(
             yield { type: "assistant-complete", id, text: message };
           }
         } else if (state.text.length > 0) {
+          state.text = "";
           state.completed = true;
           state.completedEpoch = stepEpoch;
-          yield { type: "assistant-complete", id };
+          yield { type: "assistant-complete", id, text: null };
         }
         break;
       }
