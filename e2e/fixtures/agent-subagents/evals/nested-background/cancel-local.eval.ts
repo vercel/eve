@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { defineEval } from "eve/evals";
 import { z } from "zod";
-import { resetSessions, waitForVerification, waitForVerificationCancellation } from "./fixture.js";
+import { resetSessions, waitForVerification, waitForVerificationStop } from "./fixture.js";
 
 export default defineEval({
   tags: ["real-model"],
@@ -68,11 +68,16 @@ When the worker completes, forward its receipt unchanged.`)
       });
 
       // A cancelled outer receipt is insufficient: its worker must actually stop.
-      await waitForVerificationCancellation(t, workerCall.data.childSessionId, key);
+      await waitForVerificationStop(t, workerCall.data.childSessionId, key);
       const workerResult = (await workerCompletion.result()).expectOk();
       workerResult.event("turn.cancelled", { count: 1 });
       workerResult.notEvent("turn.failed");
       workerResult.notEvent("session.failed");
+      assert.equal(
+        detectorCompletion.events.filter((event) => event.type === "turn.started").length,
+        0,
+        "cancelling nested work must not wake the cancelled detector",
+      );
       t.succeeded();
     } finally {
       await resetSessions(t, sessions);
