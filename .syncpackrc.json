@@ -11,6 +11,11 @@
   ],
   "versionGroups": [
     {
+      "label": "Chat SDK declarations and consumers must use matching versions",
+      "dependencies": ["chat", "@chat-adapter/*"],
+      "dependencyTypes": ["dev", "prod"]
+    },
+    {
       "label": "Extension fixtures declare a broad eve peer range like published extensions",
       "dependencies": ["eve"],
       "packages": ["gadget-extension", "gizmo-extension", "js-only-extension", "toolkit-extension"],

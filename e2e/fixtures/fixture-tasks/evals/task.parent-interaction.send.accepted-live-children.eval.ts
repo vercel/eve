@@ -20,7 +20,7 @@ export default defineTaskEval({
     dimensions: { transport: "local", parentPhase: "active" },
   },
   async test(t) {
-    const started = await t.send("TASK-FANOUT-PARENT-UPDATES");
+    const started = await t.send("TASK-FANOUT-PARENT-UPDATES", { taskDeliveryPolicy: "cohort" });
     started.expectOk();
     started.messageIncludes("TASK-FANOUT-STARTED");
     started.calledSubagent("fanout-worker", { status: "working", count: FANOUT_SIZE });

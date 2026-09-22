@@ -19,6 +19,34 @@ function createRuntime(): Runtime {
 }
 
 describe("createChannelAddress", () => {
+  it("carries each send's task policy through creation and continuation", async () => {
+    const runtime = createRuntime();
+    vi.mocked(runtime.dispatchContinuation).mockResolvedValueOnce({ status: "session_not_active" });
+    vi.mocked(runtime.createSession).mockResolvedValue({ sessionId: "sess_1" } as never);
+    const address = createChannelAddress({
+      adapter: { kind: "http" },
+      channelName: "reports",
+      continuationToken: "alice",
+      runtime,
+    });
+    await address.send("Prepare reports", { auth: null, taskDeliveryPolicy: "cohort" });
+    expect(runtime.createSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        taskDeliveryPolicy: "cohort",
+        continuationConflictCommand: expect.objectContaining({ taskDeliveryPolicy: "cohort" }),
+      }),
+    );
+    await address.send("Share useful results as they arrive", {
+      auth: null,
+      taskDeliveryPolicy: "auto",
+    });
+    expect(runtime.dispatchContinuation).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        command: expect.objectContaining({ taskDeliveryPolicy: "auto" }),
+      }),
+    );
+  });
+
   it("rejects channel addresses in the framework-reserved session namespace", () => {
     expect(() =>
       createChannelAddress({

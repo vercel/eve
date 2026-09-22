@@ -17,6 +17,7 @@ import {
   ParentTraceContextKey,
   ActivityObserverKey,
   ScheduleIdKey,
+  TaskDeliveryPolicyKey,
   SessionCallbackKey,
   SessionTitleKey,
 } from "#context/keys.js";
@@ -88,6 +89,12 @@ export function buildRunContext(input: {
   if (scheduleId !== undefined) {
     ctx.set(ScheduleIdKey, scheduleId);
   }
+
+  ctx.set(
+    TaskDeliveryPolicyKey,
+    run.taskDeliveryPolicy ??
+      (run.parent !== undefined || scheduleId !== undefined ? "cohort" : "auto"),
+  );
 
   if (run.delivery !== undefined) {
     ctx.set(ChannelDeliveryKey, run.delivery);

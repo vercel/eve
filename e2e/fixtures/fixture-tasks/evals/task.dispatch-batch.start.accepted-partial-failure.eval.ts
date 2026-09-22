@@ -18,7 +18,9 @@ export default defineTaskEval({
     dimensions: { transport: "mixed", parentPhase: "active" },
   },
   async test(t) {
-    const started = await t.send("TASK-D6-PARTIAL-FANOUT-FAILURE");
+    const started = await t.send("TASK-D6-PARTIAL-FANOUT-FAILURE", {
+      taskDeliveryPolicy: "cohort",
+    });
     started.expectOk();
     started.messageIncludes("TASK-D6-PARTIAL-FANOUT-STARTED");
     started.eventsSatisfy("dispatch results cover every sibling", (events) => {

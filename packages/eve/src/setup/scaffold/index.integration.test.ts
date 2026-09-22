@@ -667,7 +667,7 @@ describe("ensureChannel", () => {
     expect(result.filesWritten).toContain(pnpmWorkspacePath);
   });
 
-  test("preserves an existing release-age policy", async () => {
+  test("preserves an existing release-age and sharp policy", async () => {
     const projectRoot = await createTempDir();
     const pnpmWorkspacePath = join(projectRoot, "pnpm-workspace.yaml");
     const existingPolicy =
@@ -685,8 +685,10 @@ describe("ensureChannel", () => {
       webPackageVersions: TEST_WEB_PACKAGE_VERSIONS,
     });
 
-    await expect(readFile(pnpmWorkspacePath, "utf8")).resolves.toBe(existingPolicy);
-    expect(result.filesSkipped).toContain(pnpmWorkspacePath);
+    await expect(readFile(pnpmWorkspacePath, "utf8")).resolves.toBe(
+      'minimumReleaseAge: 2880\n"minimumReleaseAgeStrict": &strict false # Keep this comment\notherPolicy: *strict\nallowBuilds:\n  sharp: true\n  esbuild: true\n',
+    );
+    expect(result.filesWritten).toContain(pnpmWorkspacePath);
   });
 
   test("adds Web Chat pnpm policy and a missing package pattern at the ancestor workspace root", async () => {
@@ -718,7 +720,7 @@ describe("ensureChannel", () => {
     expect(result.filesWritten).not.toContain(join(projectRoot, "pnpm-workspace.yaml"));
     await expect(pathExists(join(projectRoot, "pnpm-workspace.yaml"))).resolves.toBe(false);
     await expect(readFile(join(workspaceRoot, "pnpm-workspace.yaml"), "utf8")).resolves.toBe(
-      "packages:\n  - apps/*\n  - agents/*\n\nallowBuilds:\n  sharp: false\n",
+      "packages:\n  - apps/*\n  - agents/*\n\nallowBuilds:\n  esbuild: true\n  sharp: false\n",
     );
     const projectPackageJson = JSON.parse(
       await readFile(join(projectRoot, "package.json"), "utf8"),
@@ -1198,7 +1200,7 @@ describe("scaffoldBaseProject", () => {
 
     await expect(pathExists(join(projectRoot, "pnpm-workspace.yaml"))).resolves.toBe(false);
     await expect(readFile(join(workspaceRoot, "pnpm-workspace.yaml"), "utf8")).resolves.toBe(
-      "minimumReleaseAge: 2880\nminimumReleaseAgeStrict: false\npackages:\n  - apps/*\n\nallowBuilds:\n  sharp: false\n",
+      "minimumReleaseAge: 2880\nminimumReleaseAgeStrict: false\npackages:\n  - apps/*\n\nallowBuilds:\n  esbuild: true\n  sharp: false\n",
     );
     const projectPackageJson = JSON.parse(
       await readFile(join(projectRoot, "package.json"), "utf8"),
@@ -1241,7 +1243,7 @@ describe("scaffoldBaseProject", () => {
 
     await expect(pathExists(join(projectRoot, "pnpm-workspace.yaml"))).resolves.toBe(false);
     await expect(readFile(join(workspaceRoot, "pnpm-workspace.yaml"), "utf8")).resolves.toBe(
-      "packages:\n  - apps/*\n  - agents/*\n\nallowBuilds:\n  sharp: false\n",
+      "packages:\n  - apps/*\n  - agents/*\n\nallowBuilds:\n  esbuild: true\n  sharp: false\n",
     );
     const projectPackageJson = JSON.parse(
       await readFile(join(projectRoot, "package.json"), "utf8"),

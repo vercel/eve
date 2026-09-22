@@ -43,7 +43,10 @@ describe("photonIMessageChannel", () => {
     if (handler === undefined) throw new Error("Expected an inbound direct-message handler.");
     const thread = { id: "thread-id" };
     const message = new Message({
-      author: { isBot: false, isMe: false, userId: "user", userName: "user" },
+      attachments: [],
+      formatted: { type: "root", children: [] },
+      metadata: { dateSent: new Date(0), edited: false },
+      author: { fullName: "User", isBot: false, isMe: false, userId: "user", userName: "user" },
       id: "message-id",
       raw: {},
       text: "Steer this response",
@@ -66,7 +69,10 @@ describe("photonIMessageChannel", () => {
     if (handler === undefined) throw new Error("Expected an inbound direct-message handler.");
     const thread = { id: "thread-id" };
     const message = new Message({
-      author: { isBot: false, isMe: false, userId: "user", userName: "user" },
+      attachments: [],
+      formatted: { type: "root", children: [] },
+      metadata: { dateSent: new Date(0), edited: false },
+      author: { fullName: "User", isBot: false, isMe: false, userId: "user", userName: "user" },
       id: "message-id",
       raw: {},
       text: "Hello Photon",
@@ -100,7 +106,10 @@ describe("photonIMessageChannel", () => {
     if (handler === undefined) throw new Error("Expected an inbound direct-message handler.");
     const thread = { id: "thread-id" };
     const message = new Message({
-      author: { isBot: false, isMe: false, userId: "user", userName: "user" },
+      attachments: [],
+      formatted: { type: "root", children: [] },
+      metadata: { dateSent: new Date(0), edited: false },
+      author: { fullName: "User", isBot: false, isMe: false, userId: "user", userName: "user" },
       id: "message-id",
       raw: {},
       text: "  \n",
@@ -122,7 +131,10 @@ describe("photonIMessageChannel", () => {
     }
     const thread = { id: "group-thread-id" };
     const message = new Message({
-      author: { isBot: false, isMe: false, userId: "user", userName: "user" },
+      attachments: [],
+      formatted: { type: "root", children: [] },
+      metadata: { dateSent: new Date(0), edited: false },
+      author: { fullName: "User", isBot: false, isMe: false, userId: "user", userName: "user" },
       id: "message-id",
       raw: {},
       text: "Hello group",

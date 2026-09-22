@@ -70,8 +70,11 @@ describe("shared workflow invocation ownership", () => {
       waiting("turn-b"),
     );
     expect(
-      resolveTaskDeliveryContext({ state: session.state, taskDeliveryId: "task-a:ready:completed" })
-        ?.phase,
+      resolveTaskDeliveryContext({
+        state: session.state,
+        taskDeliveryIds: ["task-a:ready:completed"],
+        taskDeliveryPolicy: "cohort",
+      })?.phase,
     ).toBe("pending");
     session = {
       ...session,
@@ -88,7 +91,8 @@ describe("shared workflow invocation ownership", () => {
     const beforeReport = JSON.stringify(restored);
     const report = resolveTaskDeliveryContext({
       state: restored,
-      taskDeliveryId: "task-b:ready:failed",
+      taskDeliveryIds: ["task-b:ready:failed"],
+      taskDeliveryPolicy: "cohort",
     });
     expect(report?.phase).toBe("settled");
     expect(report?.context).toContain("first");

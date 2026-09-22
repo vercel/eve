@@ -20,6 +20,7 @@ import type {
   SessionCallback,
   SessionCommand,
   TurnPolicy,
+  TaskDeliveryPolicy,
 } from "#channel/types.js";
 import { DEFAULT_TURN_POLICY } from "#channel/types.js";
 import { isReservedSessionCommandToken } from "#execution/session-inbox/address.js";
@@ -32,6 +33,7 @@ interface BaseChannelAddressDeliveryOptions {
   readonly mode?: RunMode;
   readonly title?: string;
   readonly turnPolicy?: TurnPolicy;
+  readonly taskDeliveryPolicy?: TaskDeliveryPolicy;
 }
 
 /** Delivery options for a channel address whose continuation token is already bound. */
@@ -74,6 +76,7 @@ export function createChannelAddress<TState = undefined>(input: {
   readonly metadata?: ChannelDeliverySource;
   readonly runtime: Runtime;
   readonly turnPolicy?: TurnPolicy;
+  readonly taskDeliveryPolicy?: TaskDeliveryPolicy;
 }): ChannelAddress<TState> {
   const metadata: Partial<ChannelDeliverySource> = input.metadata ?? {};
   const namespacedToken = `${input.channelName}:${input.continuationToken}`;
@@ -90,7 +93,9 @@ export function createChannelAddress<TState = undefined>(input: {
           : undefined;
       const payload = normalizeSendInput(sendInput);
       const caller = sessionCallbackToTurnCaller(options.callback);
+      const taskDeliveryPolicy = options.taskDeliveryPolicy ?? input.taskDeliveryPolicy;
       const commandWithoutCaller = {
+        taskDeliveryPolicy,
         auth: options.auth,
         delivery,
         kind: "send" as const,
@@ -139,6 +144,7 @@ export function createChannelAddress<TState = undefined>(input: {
       const capabilities: RunInput["capabilities"] =
         options.mode === "task" ? undefined : { requestInput: true };
       const runInput: RunInput = {
+        taskDeliveryPolicy,
         adapter,
         auth: options.auth,
         capabilities,
@@ -215,6 +221,7 @@ export function createChannelAddressFn<TState = undefined>(input: {
   readonly metadata?: ChannelDeliverySource;
   readonly runtime: Runtime;
   readonly turnPolicy?: TurnPolicy;
+  readonly taskDeliveryPolicy?: TaskDeliveryPolicy;
 }): ChannelAddressFn<TState> {
   return (continuationToken) => createChannelAddress({ ...input, continuationToken });
 }

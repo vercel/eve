@@ -43,14 +43,16 @@ export interface ReportingRun {
 export async function startWarehouseLookups(t: EveEvalContext): Promise<ReportingRun> {
   const modelId = e2eModel();
   if (typeof modelId !== "string") throw new Error("Warehouse reporting requires a real CI model.");
-  const started =
-    await t.send(`Alice is preparing an inventory checklist for Bob's warehouse handoff. Please delegate these three entries to three separate background assistants using the built-in agent tool, so the checks can proceed independently. Include the entry's check reference in each assistant's assignment. Keep this small checklist in the conversation rather than creating a separate todo list.
+  const started = await t.send(
+    `Alice is preparing an inventory checklist for Bob's warehouse handoff. Please delegate these three entries to three separate background assistants using the built-in agent tool, so the checks can proceed independently. Include the entry's check reference in each assistant's assignment. Keep this small checklist in the conversation rather than creating a separate todo list.
 
 1. check=first: Find the inventory item for the first entry using the inventory lookup tool (probe), and share the item it returns.
 2. check=second: Find the inventory item for the second entry using the inventory lookup tool (probe), and share the item it returns.
 3. check=third: Assign a third background assistant with agent, just like the first two entries. Ask that assistant to use warehouse_lookup; the workflow contacts the warehouse specialist and returns its item.
 
-Once all three assignments are accepted, let Alice know the checks are underway. When all three results are ready, reply directly from the returned items without further tool calls or task-list updates. Bob needs only three checklist entries, with each item listed once and no separate summary.`);
+Once all three assignments are accepted, let Alice know the checks are underway. When all three results are ready, reply directly from the returned items without further tool calls or task-list updates. Bob needs only three checklist entries, with each item listed once and no separate summary.`,
+    { taskDeliveryPolicy: "cohort" },
+  );
   started.expectOk();
   started.calledSubagent("agent", { status: "working", count: TASK_COUNT });
   started.notCalledTool("probe");

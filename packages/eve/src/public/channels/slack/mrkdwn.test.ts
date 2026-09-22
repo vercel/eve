@@ -41,8 +41,8 @@ describe("slackMrkdwnToGfm", () => {
     expect(slackMrkdwnToGfm("hi <@U123>")).toBe("hi @U123");
   });
 
-  it("decodes channel mentions", () => {
-    expect(slackMrkdwnToGfm("see <#C1|general> and <#C2>")).toBe("see #general and #C2");
+  it("decodes channel mentions while retaining channel IDs", () => {
+    expect(slackMrkdwnToGfm("see <#C1|general> and <#C2>")).toBe("see #general (C1) and #C2");
   });
 
   it("decodes broadcast mentions", () => {

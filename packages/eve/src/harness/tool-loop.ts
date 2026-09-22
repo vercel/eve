@@ -40,6 +40,7 @@ import {
   SessionCallbackKey,
   StaticModelReferenceKey,
   TurnTaskDeliveryKey,
+  TaskDeliveryPolicyKey,
 } from "#context/keys.js";
 import {
   buildDynamicInstructionMessages,
@@ -1314,6 +1315,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       isChild: ctx?.get(ParentSessionKey) !== undefined,
       isFirstTurn,
       taskDeliveryPhase: ctx?.get(TurnTaskDeliveryKey),
+      taskDeliveryPolicy: ctx?.get(TaskDeliveryPolicyKey),
     });
 
     // --- Execute via AI SDK agent -------------------------------------------
